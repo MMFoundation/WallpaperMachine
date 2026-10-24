@@ -17,7 +17,7 @@ use futures_util::future::{BoxFuture, FutureExt};
 use wallpaper_core::project::SceneTemplate;
 use wallpaper_core::{
     AudioSpectrum128, DisplaySelector, DisplaySnapshotEntry, EngineError, FirstFrameCallback,
-    PropertyPreview, RecoveryOutcome, RecoveryReason, SceneBackend, SceneDemandReasons,
+    PropertyPreview, RecoveryOutcome, RecoveryReason, SceneBackend, SceneDemandReasons, SceneWindowEntry,
     SceneResolution, SceneUpdateMode, WallpaperAssignment, WallpaperEngine,
     media::audio::{
         AudioCaptureBackend, AudioCaptureController, AudioVolume, PlatformAudioCaptureBackend,
@@ -62,6 +62,19 @@ pub trait EngineFacade: Send + Sync + 'static {
     fn reconcile_scenes(&self, scenes: Vec<SceneDesc>) -> EngineFuture<Vec<SceneResult>>;
     fn refresh_displays(&self) -> EngineFuture<()>;
     fn display_snapshot(&self) -> Vec<DisplaySnapshotEntry>;
+    /// Every open scene with its window, the parked ones included. A facade
+    /// that keeps nothing parked lists none.
+    fn scene_windows(&self) -> Vec<SceneWindowEntry> {
+        Vec::new()
+    }
+    /// Sets the scenes, by scene path, that `display_id` keeps loaded and
+    /// paused when it moves on to another wallpaper (see
+    /// [`wallpaper_core::WallpaperEngine::set_parked_scenes`]). A facade that
+    /// keeps nothing parked ignores it.
+    fn set_parked_scenes(&self, display_id: u32, scene_paths: Vec<String>) -> EngineFuture<()> {
+        let _ = (display_id, scene_paths);
+        async move { Ok(()) }.boxed()
+    }
     fn close_all_scenes(&self) -> EngineFuture<()>;
     /// Applies a global pause target to every open scene in one pass: a scene
     /// is paused when `paused` is set (the user's Play/Pause choice, power
@@ -343,10 +356,33 @@ impl RealEngineFacade {
 /// through here, and a scene that only gets new geometry keeps its renderer,
 /// which reports its first frame once. Waiting on such a display could only
 /// end in the 90-second timeout, which then rolled back a wallpaper that was
-/// playing.
-pub(crate) fn displays_awaiting_first_frame(live: &[DisplaySnapshotEntry], scenes: &[SceneDesc]) -> Vec<u32> {
+/// playing. A scene the display keeps parked (`windows`) for the same
+/// wallpaper runs again instead of loading, and it drew long ago, so it is
+/// not waited on either.
+pub(crate) fn displays_awaiting_first_frame(
+    live: &[DisplaySnapshotEntry],
+    windows: &[SceneWindowEntry],
+    scenes: &[SceneDesc],
+) -> Vec<u32> {
     scenes
         .iter()
+        .filter(|scene| {
+            !windows.iter().any(|window| {
+                window.parked
+                    && window.display_id == scene.display.display_id
+                    && {
+                        let mut kept = window.desc.clone();
+                        // Opening a scene consumes its shader refresh, and a parked scene takes
+                        // the frame rate and the sound it missed without a rebuild when it
+                        // runs again.
+                        kept.force_shader_refresh = false;
+                        kept.fps = scene.fps;
+                        kept.audio_volume = scene.audio_volume;
+                        kept.audio_muted = scene.audio_muted;
+                        kept.same_wallpaper(scene)
+                    }
+            })
+        })
         .filter(|scene| {
             !live.iter().any(|entry| {
                 entry.desc.display_id == scene.display.display_id
@@ -404,7 +440,7 @@ pub(crate) async fn reconcile_with_readiness<S, C, CF, P, PF>(
     prune: P,
 ) -> Result<Vec<SceneResult>, EngineError>
 where
-    S: FnOnce() -> Vec<DisplaySnapshotEntry>,
+    S: FnOnce() -> (Vec<DisplaySnapshotEntry>, Vec<SceneWindowEntry>),
     C: FnOnce(Vec<SceneDesc>) -> CF,
     CF: Future<Output = Result<Vec<SceneResult>, EngineError>>,
     P: FnOnce() -> PF,
@@ -412,7 +448,8 @@ where
 {
     let _turn = reconcile_turn.lock().await;
     let checkpoint = readiness.checkpoint();
-    let changed = displays_awaiting_first_frame(&snapshot(), &scenes);
+    let (live, windows) = snapshot();
+    let changed = displays_awaiting_first_frame(&live, &windows, &scenes);
     let results = mutate_scenes_and_prune(audio_mutation, || core(scenes), prune).await?;
     readiness
         .await_results(checkpoint, &changed, results, first_frame_timeout)
@@ -448,7 +485,7 @@ impl EngineFacade for RealEngineFacade {
                 &audio_mutation,
                 &readiness,
                 scenes,
-                || engine.display_snapshot(),
+                || (engine.display_snapshot(), engine.scene_windows()),
                 |scenes| engine.reconcile_scenes(scenes),
                 || audio_capture.mailbox().prune_scenes(),
             ).await
@@ -470,6 +507,24 @@ impl EngineFacade for RealEngineFacade {
 
     fn display_snapshot(&self) -> Vec<DisplaySnapshotEntry> {
         self.engine.display_snapshot()
+    }
+
+    fn scene_windows(&self) -> Vec<SceneWindowEntry> {
+        self.engine.scene_windows()
+    }
+
+    fn set_parked_scenes(&self, display_id: u32, scene_paths: Vec<String>) -> EngineFuture<()> {
+        let engine = self.engine.clone();
+        let audio_capture = self.audio_capture.clone();
+        let audio_mutation = self.audio_mutation.clone();
+        async move {
+            // Closing a parked scene drops its renderer like any other close.
+            mutate_scenes_and_prune(
+                &audio_mutation,
+                || engine.set_parked_scenes(display_id, scene_paths),
+                || audio_capture.mailbox().prune_scenes(),
+            ).await
+        }.boxed()
     }
 
     fn close_all_scenes(&self) -> EngineFuture<()> {
@@ -1089,6 +1144,10 @@ pub struct FakeEngineFacade {
     snapshot_after_refresh: Arc<ArcSwap<Option<Vec<DisplaySnapshotEntry>>>>,
     paused_calls: Observation<bool>,
     display_paused_calls: Observation<(u32, bool)>,
+    /// Every parking list the bridge handed over, by display.
+    parked_scene_calls: Observation<(u32, Vec<String>)>,
+    /// What `scene_windows` reports; a test scripts it.
+    scene_windows: Arc<ArcSwap<Vec<SceneWindowEntry>>>,
     /// Every pause value applied to a rendered scene, by its display, in the
     /// order the fake applied them. A global resume that briefly restarts a
     /// still-hidden display shows up here as a `false` for that display.
@@ -1295,6 +1354,8 @@ impl Default for FakeEngineFacade {
             snapshot_after_refresh: Default::default(),
             paused_calls: Observation::new(),
             display_paused_calls: Observation::new(),
+            parked_scene_calls: Observation::new(),
+            scene_windows: Default::default(),
             scene_pause_log: Observation::new(),
             audio_volume_calls: Observation::new(),
             audio_muted_calls: Observation::new(),
@@ -1632,6 +1693,16 @@ impl FakeEngineFacade {
     #[must_use]
     pub fn display_paused_calls(&self) -> Vec<(u32, bool)> {
         self.display_paused_calls.snapshot()
+    }
+
+    #[must_use]
+    pub fn parked_scene_calls(&self) -> Vec<(u32, Vec<String>)> {
+        self.parked_scene_calls.snapshot()
+    }
+
+    /// Makes `scene_windows` report `windows` from now on.
+    pub fn set_scene_windows(&self, windows: Vec<SceneWindowEntry>) {
+        self.scene_windows.store(Arc::new(windows));
     }
 
     #[must_use]
@@ -2030,6 +2101,18 @@ impl EngineFacade for FakeEngineFacade {
 
     fn display_snapshot(&self) -> Vec<DisplaySnapshotEntry> {
         self.display_snapshot_script.read().unwrap_or_else(|| self.snapshot.load_full().as_ref().clone())
+    }
+
+    fn scene_windows(&self) -> Vec<SceneWindowEntry> {
+        self.scene_windows.load_full().as_ref().clone()
+    }
+
+    fn set_parked_scenes(&self, display_id: u32, scene_paths: Vec<String>) -> EngineFuture<()> {
+        let fake = self.clone();
+        async move {
+            fake.parked_scene_calls.record((display_id, scene_paths));
+            Ok(())
+        }.boxed()
     }
 
     fn close_all_scenes(&self) -> EngineFuture<()> {
@@ -2556,12 +2639,12 @@ mod first_frame_tests {
         let resized = forest(DisplayDesc::new(3, 0, 0, 2560, 1440, 1.0));
         let faster = forest(DisplayDesc::new(3, 0, 0, 3840, 2160, 2.0).with_refresh_rate(120));
         for scene in [shown.clone(), moved, resized, faster] {
-            assert!(displays_awaiting_first_frame(&live, &[scene]).is_empty());
+            assert!(displays_awaiting_first_frame(&live, &[], &[scene]).is_empty());
         }
         // Pause is applied live and never reopens a scene.
         let mut paused = shown;
         paused.paused = true;
-        assert!(displays_awaiting_first_frame(&live, &[paused]).is_empty());
+        assert!(displays_awaiting_first_frame(&live, &[], &[paused]).is_empty());
     }
 
     #[test]
@@ -2576,13 +2659,57 @@ mod first_frame_tests {
         refreshed.force_shader_refresh = true;
         let elsewhere = forest(DisplayDesc::new(5, 3840, 0, 3840, 2160, 2.0));
         for scene in [other, fitted, refreshed] {
-            assert_eq!(displays_awaiting_first_frame(&live, &[scene]), vec![4]);
+            assert_eq!(displays_awaiting_first_frame(&live, &[], &[scene]), vec![4]);
         }
-        assert_eq!(displays_awaiting_first_frame(&live, &[elsewhere]), vec![5]);
+        assert_eq!(displays_awaiting_first_frame(&live, &[], &[elsewhere]), vec![5]);
 
         let mut closed = live[0].clone();
         closed.handle = None;
-        assert_eq!(displays_awaiting_first_frame(&[closed], &[shown]), vec![4]);
+        assert_eq!(displays_awaiting_first_frame(&[closed], &[], &[shown]), vec![4]);
+    }
+
+    fn kept(scene: &SceneDesc, parked: bool) -> wallpaper_core::SceneWindowEntry {
+        wallpaper_core::SceneWindowEntry {
+            display_id: scene.display.display_id,
+            handle: SceneHandle::new(90),
+            desc: scene.clone(),
+            window_number: Some(4_242),
+            parked,
+        }
+    }
+
+    // A desktop the person comes back to runs its kept scene again; that scene drew long ago,
+    // and waiting for a first frame it never reports again would end in the 90-second timeout.
+    #[test]
+    fn a_wallpaper_the_display_keeps_parked_is_not_awaited() {
+        let shown = forest(DisplayDesc::new(8, 0, 0, 3840, 2160, 2.0));
+        let mut city = shown.clone();
+        city.scene_path = "/library/city/project.json".into();
+        let live = [live(&shown)];
+        assert!(displays_awaiting_first_frame(&live, &[kept(&city, true)], &[city.clone()]).is_empty());
+
+        // Muted and capped while it waited: applied live, nothing reloads.
+        let mut quieter = city.clone();
+        quieter.audio_muted = true;
+        quieter.fps = 15;
+        assert!(displays_awaiting_first_frame(&live, &[kept(&city, true)], &[quieter]).is_empty());
+
+        let mut fitted = city.clone();
+        fitted.scaling_mode = ScalingMode::Fit;
+        assert_eq!(
+            displays_awaiting_first_frame(&live, &[kept(&city, true)], &[fitted]),
+            vec![8],
+            "a kept scene with other settings reloads and draws again"
+        );
+        assert_eq!(
+            displays_awaiting_first_frame(&live, &[kept(&city, false)], &[city.clone()]),
+            vec![8],
+            "only a parked scene counts"
+        );
+        let elsewhere = forest(DisplayDesc::new(9, 3840, 0, 3840, 2160, 2.0));
+        let mut elsewhere_city = elsewhere.clone();
+        elsewhere_city.scene_path = city.scene_path.clone();
+        assert_eq!(displays_awaiting_first_frame(&[], &[kept(&city, true)], &[elsewhere_city]), vec![9]);
     }
 
     #[test]
@@ -2591,6 +2718,6 @@ mod first_frame_tests {
         requested.force_shader_refresh = true;
         let mut settled = requested.clone();
         settled.force_shader_refresh = false;
-        assert!(displays_awaiting_first_frame(&[live(&requested)], &[settled]).is_empty());
+        assert!(displays_awaiting_first_frame(&[live(&requested)], &[], &[settled]).is_empty());
     }
 }

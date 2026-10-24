@@ -123,6 +123,19 @@ pub struct BridgeLockScreenScene {
     pub paused: bool,
 }
 
+/// The window of one open scene wallpaper: the live scene of a display, or
+/// one the display keeps loaded and paused for a desktop the person left
+/// ([`crate::WallpaperBridge::set_display_parked_wallpapers`]).
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeSceneWindow {
+    pub display_id: u32,
+    pub wallpaper_id: String,
+    /// The window server's number for the scene's window.
+    pub window_number: i64,
+    /// Kept paused rather than shown as the display's live scene.
+    pub parked: bool,
+}
+
 /// Committed inputs for a web wallpaper the host renders in a web view on one
 /// display. Mirrors of a web source display appear as separate entries.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]

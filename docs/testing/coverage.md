@@ -331,8 +331,11 @@ a desktop run).
 ### Spaces
 
 `WallpaperSpaceMonitorTests`, the Space scenarios in
-`WallpaperAutomationSchedulerTests`, `WallpaperSpacePinningTests` (windows kept on their
-desktop, hidden while loading), store and backup migration checks, and
+`WallpaperAutomationSchedulerTests`, `WallpaperSpacePinningTests` (windows kept on the desktops
+of their wallpaper, hidden while loading), `WallpaperSpaceParkingTests` (the wallpapers each
+display keeps, memory pressure), the renderer's `space_parking_tests` and the bridge's
+`tests::space_parking` (parked scenes), the kept clips and pages in `NativeVideoWallpaperHostTests`
+and `WebWallpaperHostLifecycleTests`, store and backup migration checks, and
 `PanelAutomationActionsTests` and `DisplaysSettingsModelTests` (Panel). `DesktopWallpaperTests` covers
 Space-scoped writes, saved posters for the other desktops, late frames and encodes, replacement
 gaps and restoration; `DesktopSpacePosterCacheTests` the saved posters themselves.

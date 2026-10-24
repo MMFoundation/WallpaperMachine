@@ -462,6 +462,11 @@ the choice is **Keep running**.
 **Stop** on display sleep frees renderer memory. The wallpaper is reloaded when the
 display wakes. **Pause** keeps it loaded.
 
+A display with a [different wallpaper for each desktop](spaces.md#keeping-each-desktops-wallpaper)
+keeps the wallpaper of each desktop the person visited loaded and paused, so coming back runs it
+on instead of loading it again. A kept wallpaper draws nothing and costs only the memory it
+holds; every **Stop (free memory)** choice and the Mac's memory pressure let go of them.
+
 **After the Mac wakes** the app checks that every scene wallpaper is drawing again
 (`SystemWakeRevalidator` asks, the bridge's `revalidate_scene_presentation` answers). It
 reads each scene's frame counter, waits three seconds, reads it again, and rebuilds the

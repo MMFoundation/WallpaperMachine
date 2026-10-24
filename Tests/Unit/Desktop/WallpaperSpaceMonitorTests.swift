@@ -15,6 +15,7 @@ final class WallpaperSpaceMonitorTests: XCTestCase {
         XCTAssertEqual(result["1"]?.current, "a")
         XCTAssertEqual(result["2"]?.current, "c")
         XCTAssertEqual(result["1"]?.currentManagedID, 1, "the window server's number for the current desktop")
+        XCTAssertEqual(result["1"]?.spaces.map(\.managedID), [1, 2], "and for every other desktop, to keep a window on")
         let reordered = try XCTUnwrap(WallpaperSpaceMonitor.decode(groups: [group(order: ["b", "a"])], displays: ["1": "uuid-screen"]))
         XCTAssertEqual(reordered["1"]?.current, "a")
         XCTAssertEqual(reordered["1"]?.spaces.first(where: { $0.id == "a" })?.number, 2)

@@ -21,7 +21,7 @@ use crate::{
     window::MouseButtonTracker,
 };
 
-fn screen(display_id: u32, uuid: &str, x: i32) -> DisplayDesc {
+pub(super) fn screen(display_id: u32, uuid: &str, x: i32) -> DisplayDesc {
     let identity = DisplayIdentity {
         uuid: Some(uuid.to_owned()),
         vendor_id: Some(1552),
@@ -33,22 +33,22 @@ fn screen(display_id: u32, uuid: &str, x: i32) -> DisplayDesc {
     DisplayDesc::with_identity(display_id, identity, x, 0, 3024, 1964, 2.0)
 }
 
-fn builtin() -> DisplayDesc {
+pub(super) fn builtin() -> DisplayDesc {
     screen(1, "builtin-panel", 0)
 }
 
-fn external() -> DisplayDesc {
+pub(super) fn external() -> DisplayDesc {
     screen(5, "external-panel", 1512)
 }
 
-fn scene(display: &DisplayDesc, wallpaper: &str) -> SceneDesc {
+pub(super) fn scene(display: &DisplayDesc, wallpaper: &str) -> SceneDesc {
     SceneDesc::builder(display.clone(), format!("/library/{wallpaper}/scene.json"))
         .fps(48)
         .build()
         .expect("a valid scene descriptor")
 }
 
-fn engine_for(model: DisplayStateModel) -> EngineActor {
+pub(super) fn engine_for(model: DisplayStateModel) -> EngineActor {
     let state = EngineState::with_display_model(model);
     let buttons = Arc::new(Mutex::new(MouseButtonTracker::with_press_test(Box::new(
         || true,
@@ -66,16 +66,16 @@ fn engine_for(model: DisplayStateModel) -> EngineActor {
 
 /// What the device-free runtime facade was asked to do.
 #[derive(Default)]
-struct RuntimeFacade {
-    jobs: RefCell<Vec<(DisplayKey, RuntimeRefreshMode)>>,
-    closes: Cell<usize>,
+pub(super) struct RuntimeFacade {
+    pub(super) jobs: RefCell<Vec<(DisplayKey, RuntimeRefreshMode)>>,
+    pub(super) closes: Cell<usize>,
 }
 
 impl RuntimeFacade {
     /// Runs one display-state update with this facade standing in for the
     /// renderer: a job opens a windowless scene (or keeps the one it was
     /// handed), a close is only counted.
-    fn update(
+    pub(super) fn update(
         &self,
         actor: &mut EngineActor,
         update: impl FnOnce(&mut DisplayStateModel) -> Result<(), EngineError>,
@@ -108,14 +108,14 @@ impl RuntimeFacade {
         actor.store_runtime(&job.key, job.handle, runtime)
     }
 
-    fn forget(&self) {
+    pub(super) fn forget(&self) {
         self.jobs.borrow_mut().clear();
         self.closes.set(0);
     }
 }
 
 /// The slot whose live scene runs on `display`, its handle and its wallpaper.
-fn running_on(actor: &EngineActor, display: &DisplayDesc) -> (DisplayKey, SceneHandle, String) {
+pub(super) fn running_on(actor: &EngineActor, display: &DisplayDesc) -> (DisplayKey, SceneHandle, String) {
     let record = actor
         .state
         .display_records

@@ -35,7 +35,7 @@ pub use api::{
     BridgePropertyDescriptor, BridgePropertyEdit, BridgePropertyKind, BridgePropertyValue,
     BridgeQualityThrottleCause,
     BridgeScalingMode,
-    BridgeSceneBackendReport, BridgeSceneUpdateModeReport, BridgeSettingsSnapshot,
+    BridgeSceneBackendReport, BridgeSceneUpdateModeReport, BridgeSceneWindow, BridgeSettingsSnapshot,
     BridgeSliderMetadata, BridgeSnapshotBundle, BridgeStorageStatus, BridgeSurfaceCheck,
     BridgeVideoBackendReport, BridgeWallpaperEntry, BridgeWallpaperKind,
     BridgeWallpaperMutationBundle,

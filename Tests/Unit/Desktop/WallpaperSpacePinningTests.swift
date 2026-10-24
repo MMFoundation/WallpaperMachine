@@ -7,16 +7,23 @@ import XCTest
 private final class FakeWindow: WallpaperPinnableWindow {
     let number: Int
     var displayID: UInt32?
+    var wallpaperID: String?
     var allSpaces = true
     var hidden = false
     var lastFade: TimeInterval?
     let log: Log
-    var space: UInt64
+    /// Sorted, as the window server's answer is read.
+    var spaces: [UInt64]
+    var space: UInt64 {
+        get { spaces[0] }
+        set { spaces = [newValue] }
+    }
 
-    init(_ number: Int, display: UInt32, space: UInt64, log: Log) {
+    init(_ number: Int, display: UInt32, space: UInt64, wallpaper: String?, log: Log) {
         self.number = number
         displayID = display
-        self.space = space
+        spaces = [space]
+        wallpaperID = wallpaper
         self.log = log
     }
 
@@ -38,10 +45,19 @@ private final class Log { var events: [String] = [] }
 @MainActor
 private final class FakeMover: WallpaperSpaceWindowMoving {
     var windows: [Int: FakeWindow] = [:]
+    /// Whether the calls that put a window on several Spaces exist.
+    var placesOnSeveralSpaces = true
     let log: Log
     init(log: Log) { self.log = log }
 
-    func spaces(ofWindow number: Int) -> [UInt64]? { windows[number].map { [$0.space] } }
+    func spaces(ofWindow number: Int) -> [UInt64]? { windows[number]?.spaces }
+
+    func place(window number: Int, onSpaces spaces: [UInt64]) -> Bool {
+        guard placesOnSeveralSpaces, let window = windows[number] else { return false }
+        window.spaces = spaces.sorted()
+        log.events.append("\(number) place \(spaces.sorted())")
+        return true
+    }
 
     func move(windows numbers: [Int], toSpace space: UInt64) {
         for number in numbers {
@@ -62,6 +78,8 @@ private final class PinRig {
     private(set) var clock = ContinuousClock.now
     private(set) var pinning: WallpaperSpacePinning!
     let center = NotificationCenter()
+    /// The window the next `wallpaperLayerInstalled` notification announces.
+    var opening: FakeWindow?
 
     init(available: Bool = true) {
         mover = FakeMover(log: log)
@@ -73,15 +91,24 @@ private final class PinRig {
             reduceMotion: { [unowned self] in self.reduceMotion },
             now: { [unowned self] in self.clock },
             sleep: { _ in try await Task.sleep(for: .seconds(3_600)) },
-            center: center)
+            center: center,
+            windowCenter: center,
+            openedWindow: { [unowned self] _ in self.opening })
     }
 
     @discardableResult
-    func window(_ number: Int, display: UInt32 = 1, space: UInt64 = 5) -> FakeWindow {
-        let window = FakeWindow(number, display: display, space: space, log: log)
+    func window(_ number: Int, display: UInt32 = 1, space: UInt64 = 5, wallpaper: String? = nil) -> FakeWindow {
+        let window = FakeWindow(number, display: display, space: space, wallpaper: wallpaper, log: log)
         windows.append(window)
         mover.windows[number] = window
         return window
+    }
+
+    /// Announces a window about to be ordered in on `display`, as the renderer does.
+    func announceOpening(_ window: FakeWindow, display: UInt32 = 1, reason: String = "open") {
+        opening = window
+        center.post(name: WallpaperSwitchHoldNotification.layerInstalled, object: nil,
+                    userInfo: ["displayID": NSNumber(value: display), "reason": reason])
     }
 
     func advance(_ duration: Duration) { clock = clock.advanced(by: duration) }
@@ -253,6 +280,115 @@ final class WallpaperSpacePinningTests: XCTestCase {
         XCTAssertTrue(window.allSpaces)
         XCTAssertFalse(window.hidden)
         XCTAssertFalse(rig.pinning.isConcealed(1))
+    }
+
+    func testAWindowStaysOnTheDesktopsChosenForItsWallpaper() {
+        let rig = PinRig()
+        let shared = rig.window(10, space: 5, wallpaper: "aurora")
+        let kept = rig.window(11, space: 5, wallpaper: "basalt")
+        rig.pins = [1: .init(space: 5, content: .ready, desktops: ["aurora": [5, 7], "basalt": [6]])]
+        rig.pinning.start()
+        defer { rig.pinning.stop() }
+
+        XCTAssertEqual(shared.spaces, [5, 7], "a wallpaper two desktops share stays still between them")
+        XCTAssertEqual(kept.space, 6, "a wallpaper kept for another desktop waits there")
+
+        rig.pins = [1: .init(space: 6, content: .ready, desktops: ["aurora": [5, 7], "basalt": [6]])]
+        rig.pinning.update()
+        XCTAssertEqual(shared.spaces, [5, 7], "neither follows the person")
+        XCTAssertEqual(kept.space, 6)
+        XCTAssertFalse(shared.hidden || kept.hidden)
+    }
+
+    func testOnlyAWindowThatBelongsOnTheLoadingDesktopIsHidden() {
+        let rig = PinRig()
+        let left = rig.window(10, space: 5, wallpaper: "aurora")
+        rig.pins = [1: .init(space: 5, content: .ready, desktops: ["aurora": [5], "basalt": [6]])]
+        rig.pinning.start()
+        defer { rig.pinning.stop() }
+
+        // The person arrives on desktop 6, whose wallpaper is not loaded yet.
+        rig.pins = [1: .init(space: 6, content: .loading, desktops: ["aurora": [5], "basalt": [6]], incoming: "basalt")]
+        rig.pinning.update()
+        XCTAssertFalse(left.hidden, "the wallpaper left behind waits on its own desktop")
+        XCTAssertEqual(left.space, 5)
+        XCTAssertTrue(rig.pinning.isConcealed(1))
+
+        let arriving = rig.window(11, space: 5)
+        rig.pinning.update()
+        XCTAssertTrue(arriving.hidden, "a window not known yet is the one that loads")
+        XCTAssertEqual(arriving.space, 6)
+
+        arriving.wallpaperID = "basalt"
+        rig.pins = [1: .init(space: 6, content: .ready, desktops: ["aurora": [5], "basalt": [6]])]
+        rig.pinning.update()
+        XCTAssertFalse(arriving.hidden)
+        XCTAssertEqual(arriving.space, 6)
+    }
+
+    func testAWallpaperNoDesktopIsChosenForStaysWhereItIsWhileAnotherIsOnItsWay() {
+        let rig = PinRig()
+        let playing = rig.window(10, space: 5, wallpaper: "from-a-playlist")
+        rig.pins = [1: .init(space: 5, content: .ready, desktops: ["basalt": [6]])]
+        rig.pinning.start()
+        defer { rig.pinning.stop() }
+
+        rig.pins = [1: .init(space: 6, content: .ready, desktops: ["basalt": [6]], incoming: "basalt")]
+        rig.pinning.update()
+        XCTAssertEqual(playing.space, 5, "it never reaches the desktop it is leaving for")
+        XCTAssertFalse(playing.hidden)
+
+        rig.pins = [1: .init(space: 6, content: .ready, desktops: ["basalt": [6]])]
+        rig.pinning.update()
+        XCTAssertEqual(playing.space, 6, "with nothing on its way it follows the person, as before")
+    }
+
+    func testWithoutTheCallsForSeveralSpacesAWindowGoesToOneOfItsDesktops() {
+        let rig = PinRig()
+        rig.mover.placesOnSeveralSpaces = false
+        let shared = rig.window(10, space: 3, wallpaper: "aurora")
+        rig.pins = [1: .init(space: 7, content: .ready, desktops: ["aurora": [5, 7]])]
+        rig.pinning.start()
+        defer { rig.pinning.stop() }
+        XCTAssertEqual(shared.space, 7, "the desktop the person is on, when it is one of them")
+
+        rig.pins = [1: .init(space: 6, content: .ready, desktops: ["aurora": [5, 7]])]
+        rig.pinning.update()
+        XCTAssertEqual(shared.space, 5, "else the first of them")
+    }
+
+    func testAWindowAboutToOpenWhileItsDesktopLoadsIsHiddenBeforeItIsOrderedIn() {
+        let rig = PinRig()
+        rig.window(10, space: 5, wallpaper: "aurora")
+        rig.pins = [1: .init(space: 6, content: .loading, desktops: ["aurora": [5]], incoming: "basalt")]
+        rig.pinning.start()
+        defer { rig.pinning.stop() }
+
+        let opening = FakeWindow(11, display: 1, space: 6, wallpaper: nil, log: rig.log)
+        rig.announceOpening(opening)
+        XCTAssertTrue(opening.hidden, "its first picture never reaches the screen")
+        XCTAssertFalse(opening.allSpaces, "and it does not join the other desktops")
+
+        let elsewhere = FakeWindow(12, display: 2, space: 6, wallpaper: nil, log: rig.log)
+        rig.announceOpening(elsewhere, display: 2)
+        XCTAssertTrue(elsewhere.allSpaces, "a display that does not follow Spaces is left alone")
+        XCTAssertFalse(elsewhere.hidden)
+
+        let replaced = FakeWindow(13, display: 1, space: 6, wallpaper: nil, log: rig.log)
+        rig.announceOpening(replaced, reason: "replace")
+        XCTAssertTrue(replaced.allSpaces, "only a window that opens is handled here")
+    }
+
+    func testAWindowOpeningOnAVisibleDesktopIsKeptOffTheOthersButShown() {
+        let rig = PinRig()
+        rig.pins = [1: .init(space: 5, content: .ready)]
+        rig.pinning.start()
+        defer { rig.pinning.stop() }
+
+        let opening = FakeWindow(11, display: 1, space: 5, wallpaper: nil, log: rig.log)
+        rig.announceOpening(opening)
+        XCTAssertFalse(opening.allSpaces)
+        XCTAssertFalse(opening.hidden, "a manual switch keeps its veil on a visible window")
     }
 
     func testADesktopChangeAnnouncedByTheSpaceMonitorUpdatesThePins() {

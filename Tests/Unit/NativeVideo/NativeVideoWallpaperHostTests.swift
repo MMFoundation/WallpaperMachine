@@ -100,6 +100,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         var volume: Float = 1
         var muted = false
         var posterLayer: CALayer? = CALayer()
+        var windowNumber: Int { Int(generation) + 1_000 }
         private(set) var frame = NSRect.zero
         func setScreenFrame(_ frame: NSRect) { self.frame = frame }
         /// Poster answer, and how long it takes. The delay is what lets a test
@@ -309,6 +310,91 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertEqual(states.count, afterReplacement)
         XCTAssertEqual(states.last?.wallpaperID, "replacement")
         XCTAssertEqual(states.last?.phase, .loading)
+    }
+
+    // MARK: Clips kept paused for another desktop
+
+    func testAClipTheDisplayKeepsIsPausedWhenItsDesktopIsLeftAndRunsOnWhenItComesBack() async throws {
+        let recorder = Recorder()
+        surfaceReadyAtBirth = true
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        host.setKeptWallpapers([7: ["300", "301"]])
+        await host.apply([wallpaper(id: "300", admissionKey: 1)])
+        let first = try XCTUnwrap(surfacesMade[7])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        let second = try XCTUnwrap(surfacesMade[7])
+
+        XCTAssertFalse(first === second, "the next desktop's clip has a window of its own")
+        XCTAssertFalse(first.isStopped, "the clip left behind is kept")
+        XCTAssertFalse(first.isPlaying, "and paused")
+        XCTAssertEqual(host.keptWallpapers(on: 7), ["300"])
+        XCTAssertEqual(host.keptWindowNumbers, [first.windowNumber])
+
+        let made = recorder.made.count
+        let probes = recorder.admissionProbes.count
+        await host.apply([wallpaper(id: "300", admissionKey: 1)])
+        XCTAssertEqual(recorder.made.count, made, "nothing opens again")
+        XCTAssertEqual(recorder.admissionProbes.count, probes, "and no file is read")
+        XCTAssertTrue(first.isPlaying, "the kept clip runs on from where it stopped")
+        XCTAssertFalse(second.isStopped)
+        XCTAssertFalse(second.isPlaying, "the one left now is kept in its turn")
+        XCTAssertEqual(host.windowWallpapers, [first.windowNumber: "300", second.windowNumber: "301"])
+        XCTAssertEqual(recorder.states.last?.wallpaperID, "300")
+        XCTAssertEqual(recorder.states.last?.phase, .ready)
+    }
+
+    func testAClipTheDisplayMayNotKeepOrThatHasNoPictureIsClosedAsBefore() async throws {
+        let recorder = Recorder()
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        host.setKeptWallpapers([7: ["300"]])
+        await host.apply([wallpaper(id: "300", admissionKey: 1)])
+        let loading = try XCTUnwrap(surfacesMade[7])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        XCTAssertTrue(loading.isStopped, "a clip with no picture yet would leave its desktop black")
+
+        surfaceReadyAtBirth = true
+        await host.apply([wallpaper(id: "302", admissionKey: 3)])
+        let unlisted = try XCTUnwrap(surfacesMade[7])
+        await host.apply([wallpaper(id: "300", admissionKey: 1)])
+        XCTAssertTrue(unlisted.isStopped, "a wallpaper the display may not keep is closed")
+        XCTAssertTrue(host.keptWindowNumbers.isEmpty)
+    }
+
+    func testKeptClipsCloseWhenThePlanDropsThemOrTheFileChanged() async throws {
+        let recorder = Recorder()
+        surfaceReadyAtBirth = true
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        defer { host.shutdown() }
+        host.setKeptWallpapers([7: ["300", "301"]])
+        await host.apply([wallpaper(id: "300", admissionKey: 1)])
+        let first = try XCTUnwrap(surfacesMade[7])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        let second = try XCTUnwrap(surfacesMade[7])
+        // The file behind the kept wallpaper was replaced meanwhile.
+        await host.apply([wallpaper(id: "300", admissionKey: 9)])
+        XCTAssertTrue(first.isStopped, "a kept clip of another file is not run")
+        XCTAssertFalse(try XCTUnwrap(surfacesMade[7]) === first)
+        XCTAssertFalse(second.isStopped)
+
+        host.setKeptWallpapers([:])
+        XCTAssertTrue(second.isStopped, "memory pressure or the mode turned off lets go of it")
+        XCTAssertTrue(host.keptWindowNumbers.isEmpty)
+    }
+
+    func testShutdownClosesKeptClips() async throws {
+        let recorder = Recorder()
+        surfaceReadyAtBirth = true
+        let host = makeHost(wallpapers: [], recorder: recorder)
+        host.setKeptWallpapers([7: ["300", "301"]])
+        await host.apply([wallpaper(id: "300", admissionKey: 1)])
+        let first = try XCTUnwrap(surfacesMade[7])
+        await host.apply([])
+        XCTAssertFalse(first.isStopped, "a display that moved to a scene keeps the clip too")
+
+        host.shutdown()
+        XCTAssertTrue(first.isStopped)
     }
 
     func testPreparationFailureEndsStartupWithoutReportingReady() async throws {

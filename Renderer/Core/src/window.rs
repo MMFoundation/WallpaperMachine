@@ -133,6 +133,9 @@ struct NativeWindow {
     layer: SendPtr,
     /// The display the window and the layer are currently shaped for.
     display: DisplayDesc,
+    /// The window server's number for the window, which the host uses to
+    /// find it and keep it on a desktop of its own.
+    number: isize,
 }
 
 impl WallpaperDesktopWindow {
@@ -331,12 +334,14 @@ fn open_native(display: &DisplayDesc, style: PlaceholderStyle) -> Result<NativeW
         LayerInstall::Open,
     );
     window.orderFrontRegardless();
+    let number = window.windowNumber();
 
     Ok(NativeWindow {
         window: SendPtr::from_retained(window),
         view: SendPtr::from_retained(view),
         layer: SendPtr::from_retained(layer),
         display: display.clone(),
+        number,
     })
 }
 
@@ -920,6 +925,12 @@ impl WallpaperWindow {
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.native.is_some()
+    }
+
+    /// The window server's number for the open window; `None` once closed.
+    #[must_use]
+    pub fn window_number(&self) -> Option<isize> {
+        self.native.as_ref().map(|native| native.number)
     }
 
     /// Replaces the layer under the existing view with a fresh one for

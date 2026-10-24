@@ -122,6 +122,7 @@ final class WallpaperWindowAuditor {
     private let canExpectVisible: @MainActor () -> Bool
     private let isDesktopSpace: @MainActor (UInt32?) -> Bool
     private let isConcealed: @MainActor (UInt32?) -> Bool
+    private let isAwayFromCurrentDesktop: @MainActor (Int) -> Bool
     private let repairsEnabled: @MainActor () -> Bool
     private let repair: @MainActor (Int, RepairStep) -> Void
     private let sleep: Sleep
@@ -165,6 +166,7 @@ final class WallpaperWindowAuditor {
         canExpectVisible: @escaping @MainActor () -> Bool,
         isDesktopSpace: @escaping @MainActor (UInt32?) -> Bool,
         isConcealed: (@MainActor (UInt32?) -> Bool)? = nil,
+        isAwayFromCurrentDesktop: (@MainActor (Int) -> Bool)? = nil,
         repairsEnabled: (@MainActor () -> Bool)? = nil,
         repair: (@MainActor (Int, RepairStep) -> Void)? = nil,
         sleep: Sleep? = nil,
@@ -182,6 +184,7 @@ final class WallpaperWindowAuditor {
         self.canExpectVisible = canExpectVisible
         self.isDesktopSpace = isDesktopSpace
         self.isConcealed = isConcealed ?? { _ in false }
+        self.isAwayFromCurrentDesktop = isAwayFromCurrentDesktop ?? { _ in false }
         let preferences = defaults ?? ClientPreferences.defaults
         self.repairsEnabled = repairsEnabled ?? { preferences.bool(forKey: Self.repairKey) }
         self.repair = repair ?? { Self.apply($1, toWindowNumbered: $0) }
@@ -314,10 +317,12 @@ final class WallpaperWindowAuditor {
     /// A window the system legitimately does not show. In a full-screen app's
     /// Space the desktop windows are on another Space and not composited, so
     /// neither fault means anything there. A display that follows desktop Spaces
-    /// hides its windows while the desktop's own wallpaper loads.
+    /// hides its windows while the desktop's own wallpaper loads, and keeps the
+    /// wallpaper of a desktop the person left paused on that desktop.
     private func isExcused(_ window: DesktopWindowObservation) -> Bool {
         switch window.state {
-        case .notOnActiveSpace, .offScreenInWindowServer: !isDesktopSpace(window.displayID)
+        case .notOnActiveSpace, .offScreenInWindowServer:
+            !isDesktopSpace(window.displayID) || isAwayFromCurrentDesktop(window.windowNumber)
         case .transparent: isConcealed(window.displayID)
         default: false
         }

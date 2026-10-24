@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::{
-    DisplaySnapshotEntry, PointerActivity, PointerActivityCallback, PointerConsumerCallback,
+    DisplaySnapshotEntry, PointerActivity, SceneWindowEntry, PointerActivityCallback, PointerConsumerCallback,
     UserShortcutObserverCallback,
 };
 use crate::window::MouseButtonTracker;
@@ -9,6 +9,8 @@ use crate::window::MouseButtonTracker;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EngineSnapshot {
     pub displays: Vec<DisplaySnapshotEntry>,
+    /// Every open scene with its window, the parked ones included.
+    pub scenes: Vec<SceneWindowEntry>,
 }
 
 impl EngineSnapshot {
@@ -188,7 +190,7 @@ mod tests {
             paused: false,
             window_active: true,
             assignment: None,
-        }] }
+        }], scenes: Vec::new() }
     }
 
     #[test]
@@ -440,6 +442,7 @@ mod tests {
 
         publisher.publish(EngineSnapshot {
             displays: vec![entry.clone()],
+            scenes: Vec::new(),
         });
 
         assert_eq!(publisher.load().displays, vec![entry]);

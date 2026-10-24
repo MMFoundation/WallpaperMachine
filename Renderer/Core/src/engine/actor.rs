@@ -18,7 +18,7 @@ use crate::{
         EngineSnapshotPublisher, FirstFrameCallback, PropertyPreview,
         messages::{self, Ping},
         runtime::{RuntimeRefreshJob, RuntimeRefreshMode, SceneRuntime},
-        state::EngineState,
+        state::{EngineState, ParkedRuntime},
         surface_recovery::{
             Decision, LADDER, RecoveryOutcome, RecoveryReason, RecoveryStep, SETTLE_INTERVAL,
             SETTLE_LIMIT, Settled, WINDOW, is_healthy, settle,
@@ -516,13 +516,16 @@ impl EngineActor {
         self.state.apply_display_model(&model)?;
         // A failure to close one scene must not keep the others from being
         // retired or the opening pass from running; the first error wins.
-        let retired = self.retire_scenes_not_needed(close);
+        let mut close = close;
+        let retired = self.retire_scenes_not_needed(&mut close);
+        self.release_parked_not_kept(&mut close);
         let opened = open(self);
         retired.and(opened)
     }
 
-    /// Closes the scene of every slot that no longer should have one. The
-    /// slot remembers the scene's state and keeps its handle reservation.
+    /// Closes the scene of every slot that no longer should have one, and
+    /// every scene it keeps parked. The slot remembers the live scene's state
+    /// and keeps its handle reservation.
     fn retire_scenes_not_needed(
         &mut self,
         mut close: impl FnMut(&mut SceneRuntime) -> Result<(), EngineError>,
@@ -541,13 +544,187 @@ impl EngineActor {
             }
             record.store_runtime_snapshot();
             record.model.runtime_open = false;
-            if let Some(mut runtime) = record.runtime.take()
-                && let Err(error) = close(&mut runtime)
-            {
-                first_error.get_or_insert(error);
+            let parked = std::mem::take(&mut record.parked).into_iter().map(|parked| parked.runtime);
+            for mut runtime in record.runtime.take().into_iter().chain(parked) {
+                if let Err(error) = close(&mut runtime) {
+                    first_error.get_or_insert(error);
+                }
             }
         }
         first_error.map_or(Ok(()), Err)
+    }
+
+    /// Closes every parked scene its display may no longer keep: the display's
+    /// list no longer names its wallpaper, or the display it was parked on is
+    /// gone or changed size or scale. A display that only moved takes its
+    /// parked windows along, as it does its live one, and one that cannot be
+    /// moved is closed. A parked scene is only ever a shortcut, so nothing
+    /// here fails the change that called it; failures are logged.
+    fn release_parked_not_kept(&mut self, mut close: impl FnMut(&mut SceneRuntime) -> Result<(), EngineError>) {
+        for index in 0..self.state.display_records.len() {
+            let parked = std::mem::take(&mut self.state.display_records[index].parked);
+            let live_display = self.state.display_records[index].model.live_display.clone();
+            let mut kept = Vec::with_capacity(parked.len());
+            for mut parked in parked {
+                let desc = &parked.runtime.desc;
+                let fits = live_display.as_ref().is_some_and(|live| {
+                    live.display_id == desc.display.display_id
+                        && (live == &desc.display || live.has_same_render_surface(&desc.display))
+                });
+                let wanted = fits && self.state.may_park(desc.display.display_id, &desc.scene_path);
+                let moved = match live_display.as_ref() {
+                    Some(live) if wanted && live != &parked.runtime.desc.display => {
+                        parked.runtime.update_window_display(live.clone())
+                    }
+                    _ => Ok(()),
+                };
+                if wanted && moved.is_ok() {
+                    kept.push(parked);
+                    continue;
+                }
+                if let Err(error) = moved {
+                    log::warn!(
+                        "[wallpaper-core display] the paused scene kept for {} could not follow its \
+                         display: {error}",
+                        parked.runtime.desc.scene_path
+                    );
+                }
+                log::info!(
+                    "[wallpaper-core display] closing the paused scene kept for {} on display {}",
+                    parked.runtime.desc.scene_path,
+                    parked.runtime.desc.display.display_id
+                );
+                if let Err(error) = close(&mut parked.runtime) {
+                    log::warn!("[wallpaper-core display] failed to close a paused scene: {error}");
+                }
+            }
+            self.state.display_records[index].parked = kept;
+        }
+    }
+
+    /// Sets the scenes `display_id` may keep parked and closes the parked
+    /// scenes the new list leaves out.
+    pub fn set_parked_scenes(&mut self, display_id: u32, scene_paths: Vec<String>) -> Result<(), EngineError> {
+        if scene_paths.is_empty() {
+            self.state.parking.remove(&display_id);
+        } else {
+            self.state.parking.insert(display_id, scene_paths);
+        }
+        self.release_parked_not_kept(SceneRuntime::close);
+        Ok(())
+    }
+
+    /// Before a slot's job is planned for `desc`: when the live scene leaves
+    /// for another wallpaper the display may keep, it is paused and parked with
+    /// its handle and window, and when `desc` is the wallpaper of a parked
+    /// scene, that scene becomes the live one again with its handle and with
+    /// the descriptor's pause. The job then finds the slot as if the scene had
+    /// never left, and only what `desc` changes beyond the wallpaper is done.
+    /// A live scene the display may not keep is replaced as it always was,
+    /// unless a parked one comes back, which closes it instead.
+    fn park_or_promote(&mut self, index: usize, desc: &SceneDesc) {
+        let display_id = desc.display.display_id;
+        let record = &self.state.display_records[index];
+        let key = record.model.key.clone();
+        let leaving = record
+            .runtime
+            .as_ref()
+            .is_some_and(|live| live.desc.scene_path != desc.scene_path);
+        let returning = record
+            .parked
+            .iter()
+            .position(|parked| parked.runtime.desc.scene_path == desc.scene_path);
+        if leaving {
+            let keep = record.runtime.as_ref().is_some_and(|live| {
+                self.state.may_park(display_id, &live.desc.scene_path) && live.has_presented()
+            });
+            if keep || returning.is_some() {
+                let record = &mut self.state.display_records[index];
+                record.store_runtime_snapshot();
+                record.model.runtime_open = false;
+                let handle = record.handle.take();
+                let runtime = record.runtime.take();
+                self.state.sync_handle_reservation(key.clone(), None);
+                if let Some(runtime) = runtime {
+                    self.park_or_close(index, handle.filter(|_| keep), runtime);
+                }
+            }
+        }
+        let Some(position) = returning else {
+            return;
+        };
+        let record = &mut self.state.display_records[index];
+        let ParkedRuntime { handle, mut runtime } = record.parked.remove(position);
+        if record.runtime.is_some() {
+            // The live scene already runs this wallpaper; a parked copy of it
+            // can only be left over, and two would cost twice the memory.
+            if let Err(error) = runtime.close() {
+                log::warn!("[wallpaper-core display] failed to close a duplicate paused scene: {error}");
+            }
+            return;
+        }
+        if let Err(error) = Self::catch_up_parked(&mut runtime, desc) {
+            log::warn!(
+                "[wallpaper-core display] the paused scene kept for {} could not run again, \
+                 loading it afresh: {error}",
+                desc.scene_path
+            );
+            if let Err(error) = runtime.close() {
+                log::warn!("[wallpaper-core display] failed to close a paused scene: {error}");
+            }
+            return;
+        }
+        log::info!(
+            "[wallpaper-core display] {} runs again on display {display_id} without a load",
+            desc.scene_path
+        );
+        record.runtime = Some(runtime);
+        record.handle = Some(handle);
+        self.state.sync_handle_reservation(key, Some(handle));
+        if let Err(error) = self.state.record_runtime_state(handle) {
+            log::warn!("[wallpaper-core display] failed to record a scene that runs again: {error}");
+        }
+    }
+
+    /// Gives a scene that comes back from being parked what a live scene takes without a
+    /// rebuild and it missed while it waited: the frame-rate ceiling and the sound the bridge set
+    /// on the live scenes meanwhile, then the descriptor's pause. Anything else that differs is
+    /// for the job to rebuild, as on a live scene.
+    fn catch_up_parked(runtime: &mut SceneRuntime, desc: &SceneDesc) -> Result<(), EngineError> {
+        if runtime.desc.fps != desc.fps {
+            runtime.set_fps(desc.fps)?;
+        }
+        if runtime.desc.audio_volume != desc.audio_volume {
+            runtime.set_audio_volume(desc.audio_volume)?;
+        }
+        if runtime.desc.audio_muted != desc.audio_muted {
+            runtime.set_audio_muted(desc.audio_muted)?;
+        }
+        runtime.set_paused(desc.paused)
+    }
+
+    /// Parks a live scene that left its slot (`handle` set) or closes it.
+    fn park_or_close(&mut self, index: usize, handle: Option<SceneHandle>, mut runtime: SceneRuntime) {
+        if let Some(handle) = handle {
+            match runtime.set_paused(true) {
+                Ok(()) => {
+                    log::info!(
+                        "[wallpaper-core display] keeping {} paused on display {}",
+                        runtime.desc.scene_path,
+                        runtime.desc.display.display_id
+                    );
+                    self.state.display_records[index].parked.push(ParkedRuntime { handle, runtime });
+                    return;
+                }
+                Err(error) => log::warn!(
+                    "[wallpaper-core display] could not pause {} to keep it, closing it: {error}",
+                    runtime.desc.scene_path
+                ),
+            }
+        }
+        if let Err(error) = runtime.close() {
+            log::warn!("[wallpaper-core display] failed to close a replaced scene: {error}");
+        }
     }
 
     /// The handle of the scene alive on the slot with this key, if any.
@@ -600,6 +777,8 @@ impl EngineActor {
                     continue;
                 }
             };
+            self.park_or_promote(index, &desc);
+            let record = &self.state.display_records[index];
             let mode =
                 RuntimeRefreshMode::from_transition(record.runtime.as_ref().map(|r| &r.desc), &desc);
             if !mode.is_required() && record.handle.is_some() {
@@ -1298,6 +1477,18 @@ impl Message<messages::SetAllPaused> for EngineActor {
     }
 }
 
+impl Message<messages::SetParkedScenes> for EngineActor {
+    type Reply = Result<(), EngineError>;
+
+    async fn handle(
+        &mut self,
+        msg: messages::SetParkedScenes,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.with_snapshot_update(|actor| actor.set_parked_scenes(msg.display_id, msg.scene_paths))
+    }
+}
+
 impl Message<messages::RendererCounters> for EngineActor {
     type Reply = Result<Vec<RendererSurfaceCounters>, EngineError>;
 
@@ -1715,6 +1906,9 @@ impl Message<messages::TakeRenderFailuresForTest> for EngineActor {
 
 #[cfg(test)]
 mod main_display_tests;
+
+#[cfg(test)]
+mod space_parking_tests;
 
 #[cfg(test)]
 mod tests {

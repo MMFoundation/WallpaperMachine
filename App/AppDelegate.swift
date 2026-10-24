@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var windowAuditor: WallpaperWindowAuditor?
     /// Keeps the windows of a display that follows desktop Spaces on its current desktop only.
     private var spacePinning: WallpaperSpacePinning?
+    private var spaceParking: WallpaperSpaceParking?
     /// The last poster of each wallpaper a desktop Space is set to, for the desktops not on screen.
     private let spacePosters = DesktopSpacePosterCache()
     private var retainedSpacePosters: Set<DesktopSpacePosterCache.Key>?
@@ -204,6 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     }
                     self.desktopWallpaperSync?.suspendForNativeProvider()
                     self.spacePinning?.update()
+                    self.spaceParking?.update()
                 }
                 lockScreen.afterDeactivation = { [weak self] in
                     guard let self, !self.shutdownInProgress else { return }
@@ -213,18 +215,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     self.desktopPictureRestoreSettled = false
                     self.applyDesktopPicturePreference()
                     self.spacePinning?.update()
+                    self.spaceParking?.update()
                 }
             }
             // Created before the hosts, which take over the picture it keeps on screen once their
             // window opens. Its policy is read when a switch starts, not now, so the policy that
             // is set up further down is still found.
             let hold = WallpaperSwitchHold(
-                layers: { Self.wallpaperLayers(on: $0) },
+                layers: { [weak self] in Self.wallpaperLayers(on: $0, excluding: self?.keptWallpaperWindows() ?? []) },
                 // The rule the poster sync's captures follow: a suspended display is not seen,
                 // and its surface may not answer a request for a frame.
                 shouldHold: { [weak self] display in
-                    guard let policy = self?.presentationPolicy else { return false }
+                    guard let self, let policy = self.presentationPolicy else { return false }
+                    // Bringing back a wallpaper kept paused on this desktop loads nothing, so
+                    // there is no gap to cover and no picture worth taking.
                     return !policy.isSuspended && !policy.suspendedDisplayIDs.contains(display)
+                        && !self.switchResumesKeptWallpaper(on: display)
                 },
                 reduceMotion: { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion },
                 // A display hidden while its desktop's wallpaper loads shows no veil to fade.
@@ -333,6 +339,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self.presentationPolicy?.evaluate()
                 self.windowAuditor?.windowsMayHaveChanged()
                 self.spacePinning?.update()
+                self.spaceParking?.update()
                 // Play, pause and a changed library or display set are when a waiting playlist
                 // change can happen.
                 self.automaticWallpapers?.scheduler.evaluate()
@@ -396,6 +403,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                         return
                     }
                     let hostsSuspended = presentation != .running
+                    // Unloading frees memory, which the wallpapers kept for other desktops hold too.
+                    if presentation == .unloaded { self.spaceParking?.setUnloaded(true) }
                     self.webWallpaperHost?.setPresentationSuspended(hostsSuspended)
                     self.nativeVideoHost?.setPresentationSuspended(hostsSuspended)
                     let leavingUnloaded = self.appliedGlobalPresentation == .unloaded
@@ -424,6 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                                 try await store.setPresentationUnloadedAsync(true)
                             }
                             self.appliedGlobalPresentation = presentation
+                            if presentation != .unloaded { self.spaceParking?.setUnloaded(false) }
                             if resuming {
                                 self.desktopWallpaperSync?.presentationResumed()
                                 self.windowAuditor?.presentationResumed()
@@ -540,7 +550,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let auditor = WallpaperWindowAuditor(
                 canExpectVisible: { [weak self] in self?.presentationPolicy?.globalPresentation == .running },
                 isDesktopSpace: { WallpaperWindowAuditor.spaceIsDesktop(displayID: $0, in: .shared) },
-                isConcealed: { [weak self] display in display.map { self?.spacePinning?.isConcealed($0) ?? false } ?? false })
+                isConcealed: { [weak self] display in display.map { self?.spacePinning?.isConcealed($0) ?? false } ?? false },
+                isAwayFromCurrentDesktop: { [weak self] in self?.spacePinning?.isAwayFromCurrentDesktop($0) ?? false })
             windowAuditor = auditor
             auditor.start()
             let revalidator = SystemWakeRevalidator(
@@ -571,6 +582,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 if report.isWarning { AppLog.warn(report.message) } else { AppLog.info(report.message) }
                 self?.telemetry?.recordPressure(report)
             })
+            // The wallpapers kept paused for other desktops are let go while pressure lasts.
+            pressure.onPressureChanged = { [weak self] in self?.spaceParking?.setUnderPressure($0) }
             memoryPressureMonitor = pressure
             pressure.start()
             // A plug or unplug during sleep may never be reported. On wake the bridge reads
@@ -738,6 +751,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self?.retainSpacePosters()
                 self?.schedulePosterRefresh()
                 self?.spacePinning?.update()
+                self?.spaceParking?.update()
             })
         automaticWallpapers = controller
         store.onUserWallpaperChoice = { [weak self, weak controller] wallpaper, display in
@@ -757,11 +771,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         controller.scheduler.start()
         let pinning = WallpaperSpacePinning(
+            windows: { [weak self] in SystemPinnableWindow.all(wallpaperIDs: self?.wallpaperIDsByWindow() ?? [:]) },
             pins: { [weak self] in self?.spacePins() ?? [:] },
             holding: { [weak self] display in self?.switchHold?.isHolding(display) ?? false },
             mover: SystemSpaceWindowMover())
         spacePinning = pinning
         pinning.start()
+        let parking = WallpaperSpaceParking(
+            plan: { [weak self] in self?.spaceParkingPlan() ?? [:] },
+            send: { [weak store] display, wallpapers in
+                try await store?.setDisplayParkedWallpapersAsync(displayID: display, wallpaperIDs: wallpapers)
+            },
+            hosts: { [weak self] plan in
+                self?.webWallpaperHost?.setKeptWallpapers(plan)
+                self?.nativeVideoHost?.setKeptWallpapers(plan)
+            })
+        spaceParking = parking
+        parking.setUnderPressure(memoryPressureMonitor?.underPressure ?? false)
+        parking.setUnloaded(appliedGlobalPresentation == .unloaded)
+        parking.start()
     }
 
     /// The panel's favorites, which a playlist can rotate through.
@@ -938,6 +966,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         memoryPressureMonitor = nil
         spacePinning?.stop()
         spacePinning = nil
+        spaceParking?.stop()
+        spaceParking = nil
         switchHold?.stop()
         switchHold = nil
         desktopWallpaperSync?.stop()
@@ -1123,6 +1153,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 memoryPressureMonitor = nil
                 spacePinning?.stop()
                 spacePinning = nil
+                spaceParking?.stop()
+                spaceParking = nil
                 switchHold?.stop()
                 switchHold = nil
                 desktopWallpaperSync = nil
@@ -1407,7 +1439,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let sync = try DesktopWallpaperSync(folder: ClientPaths.supportURL.appendingPathComponent("DesktopPosters"),
             scope: { [weak self] display in self?.desktopPosterScope(display) ?? .all },
             retainedDisplays: { [weak self] in self?.retainedSpacePosterDisplays() ?? [] },
-            beforeDesktopChange: { [weak self] in self?.desktopSpaces?.refresh() })
+            beforeDesktopChange: { [weak self] in self?.desktopSpaces?.refresh() },
+            excludedWindows: { [weak self] in self?.keptWallpaperWindows() ?? [] })
         desktopWallpaperSync = sync
         sync.canCapture = { [weak self] surface in
             guard let policy = self?.presentationPolicy else { return true }
@@ -1515,18 +1548,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
               store.lockScreenWallpaper?.isRequested != true,
               store.lockScreenWallpaper?.ownsDesktopProvider != true else { return [:] }
         var pins: [UInt32: WallpaperSpacePin] = [:]
-        for row in store.settingsSnapshot.displays where row.enabled && row.mode == .standalone
-            && WallpaperAutomationStore.shared.configuration(for: row.displayId).mode == .spaces {
-            guard let physical = ResolvedDisplayTitles.liveDisplayID(row.displayId, title: row.title),
+        for row in store.settingsSnapshot.displays where row.enabled && row.mode == .standalone {
+            let configuration = WallpaperAutomationStore.shared.configuration(for: row.displayId)
+            guard configuration.mode == .spaces,
+                  let physical = ResolvedDisplayTitles.liveDisplayID(row.displayId, title: row.title),
                   let topology = spaces.displays[String(physical)] else { continue }
             var content = WallpaperSpacePin.Content.ready
+            var incoming: String?
             if let target = scheduler.pendingTarget(on: row.displayId),
                !(target.kind == .wallpaper && target.id == store.shownWallpaperID(on: row.displayId)) {
-                content = scheduler.isApplying(on: row.displayId) ? .loading : .waiting
+                if target.kind == .wallpaper { incoming = target.id }
+                // A wallpaper kept paused on the desktop runs on as it is: nothing loads there.
+                if incoming == nil || !keptWallpapers(on: physical).contains(target.id) {
+                    content = scheduler.isApplying(on: row.displayId) ? .loading : .waiting
+                }
             }
-            pins[physical] = .init(space: topology.currentManagedID, content: content)
+            pins[physical] = .init(space: topology.currentManagedID, content: content,
+                                   desktops: Self.spaceDesktops(configuration, topology: topology), incoming: incoming)
         }
         return pins
+    }
+
+    /// The desktops (the window server's numbers) each wallpaper of a display is chosen for; a
+    /// desktop without a choice takes Desktop 1's, as it plays it. Playlists are left out.
+    private static func spaceDesktops(_ configuration: DisplayWallpaperAutomation,
+                                      topology: WallpaperDisplaySpaces) -> [String: Set<UInt64>] {
+        let first = topology.spaces.first?.id
+        var desktops: [String: Set<UInt64>] = [:]
+        for desktop in topology.spaces {
+            guard let space = desktop.managedID,
+                  let target = configuration.desktopTarget(desktop.id, firstDesktop: first),
+                  target.kind == .wallpaper else { continue }
+            desktops[target.id, default: []].insert(space)
+        }
+        return desktops
+    }
+
+    /// The wallpapers each display that follows Spaces may keep paused for its other desktops:
+    /// those its desktops are chosen for. None where windows cannot be kept on a desktop of their
+    /// own.
+    private func spaceParkingPlan() -> WallpaperSpaceParking.Plan {
+        guard spacePinning?.isActive == true else { return [:] }
+        return spacePins().mapValues { Set($0.desktops.keys) }
+    }
+
+    /// The windows of wallpapers kept paused for desktops the person is not on: the scene windows
+    /// the renderer reports as parked and the web and video hosts' own.
+    private func keptWallpaperWindows() -> Set<Int> {
+        var numbers = Set((store?.sceneWindows() ?? []).filter(\.parked).map { Int($0.windowNumber) })
+        numbers.formUnion(webWallpaperHost?.keptWindowNumbers ?? [])
+        numbers.formUnion(nativeVideoHost?.keptWindowNumbers ?? [])
+        return numbers
+    }
+
+    /// The wallpapers a display keeps paused, by id.
+    private func keptWallpapers(on display: UInt32) -> Set<String> {
+        var ids = Set((store?.sceneWindows() ?? []).filter { $0.parked && $0.displayId == display }.map(\.wallpaperId))
+        ids.formUnion(webWallpaperHost?.keptWallpapers(on: display) ?? [])
+        ids.formUnion(nativeVideoHost?.keptWallpapers(on: display) ?? [])
+        return ids
+    }
+
+    /// The wallpaper each wallpaper window shows, by window number.
+    private func wallpaperIDsByWindow() -> [Int: String] {
+        var ids: [Int: String] = [:]
+        for window in store?.sceneWindows() ?? [] { ids[Int(window.windowNumber)] = window.wallpaperId }
+        ids.merge(webWallpaperHost?.windowWallpapers ?? [:]) { $1 }
+        ids.merge(nativeVideoHost?.windowWallpapers ?? [:]) { $1 }
+        return ids
+    }
+
+    /// Whether a switch on `display` brings back a wallpaper kept paused on the desktop the person
+    /// is on: its window is there already.
+    private func switchResumesKeptWallpaper(on display: UInt32) -> Bool {
+        let kept = keptWallpaperWindows()
+        guard !kept.isEmpty else { return false }
+        return WallpaperPresentationPolicy.wallpaperWindows().contains { window in
+            kept.contains(window.windowNumber) && window.isOnActiveSpace
+                && window.screen.flatMap(SystemDesktopPictureWorkspace.id) == String(display)
+        }
     }
 
     /// The Space-mode row of a physical display, with its choices.
@@ -2382,10 +2482,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     /// The content layers of the wallpaper windows showing on a display, the front one first.
-    /// A window that was closed is no longer ordered in, so it is not listed.
-    private static func wallpaperLayers(on displayID: UInt32) -> [CALayer] {
+    /// A window that was closed is no longer ordered in, so it is not listed, and neither is one
+    /// kept paused for another desktop (`excluding`).
+    private static func wallpaperLayers(on displayID: UInt32, excluding kept: Set<Int>) -> [CALayer] {
         WallpaperPresentationPolicy.orderedWallpaperWindows().compactMap { window in
-            guard window.isVisible, let screen = window.screen,
+            guard window.isVisible, !kept.contains(window.windowNumber), let screen = window.screen,
                   SystemDesktopPictureWorkspace.id(screen) == String(displayID) else { return nil }
             return window.contentView?.layer
         }

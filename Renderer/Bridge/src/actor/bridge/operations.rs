@@ -108,7 +108,7 @@ impl<E: EngineFacade> ReconcileWork<E> {
                 )
             })
             .unzip();
-        let awaiting = displays_awaiting_first_frame(&displays, &scenes);
+        let awaiting = displays_awaiting_first_frame(&displays, &self.engine.scene_windows(), &scenes);
         let openings = owners
             .into_iter()
             .zip(&scenes)

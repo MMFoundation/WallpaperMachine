@@ -57,6 +57,7 @@ final class WallpaperWindowAuditorTests: XCTestCase {
         var canExpectVisible = true
         var desktopSpace = true
         var concealed = Set<UInt32>()
+        var away = Set<Int>()
         var displays = DisplayConfiguration(displays: [])
         var clock = ContinuousClock.now
         var holdSleeps = false
@@ -84,6 +85,7 @@ final class WallpaperWindowAuditorTests: XCTestCase {
                 canExpectVisible: { [unowned self] in self.canExpectVisible },
                 isDesktopSpace: { [unowned self] _ in self.desktopSpace },
                 isConcealed: { [unowned self] in $0.map(self.concealed.contains) ?? false },
+                isAwayFromCurrentDesktop: { [unowned self] in self.away.contains($0) },
                 repair: { [unowned self] window, step in
                     self.repairs.append((window, step))
                     self.onRepair?()
@@ -275,6 +277,17 @@ final class WallpaperWindowAuditorTests: XCTestCase {
 
         XCTAssertEqual(Set(h.reports.compactMap(\.window?.windowNumber)), [5678],
                        "only the display that follows Spaces hides its window on purpose")
+    }
+
+    func testAWallpaperKeptPausedForAnotherDesktopIsNotAFault() async throws {
+        let h = try harness([offSpace(), offSpace(number: 5678)])
+        h.away = [1234]
+
+        h.spaceChanged()
+        await h.settle()
+
+        XCTAssertEqual(Set(h.reports.compactMap(\.window?.windowNumber)), [5678],
+                       "only a window the pinning put on another desktop is off the active Space on purpose")
     }
 
     func testAFaultTheSpaceDoesNotExplainIsStillRecordedInAFullscreenSpace() async throws {

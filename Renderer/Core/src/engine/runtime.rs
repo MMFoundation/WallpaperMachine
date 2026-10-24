@@ -389,6 +389,10 @@ pub struct SceneRuntime {
     /// counters live and die with that object, so two wallpapers that reused
     /// one display and one handle must not have their counts merged.
     generation: u64,
+    /// Stands in for the renderer's own count of presented frames, which a
+    /// test scene's uninitialized renderer cannot give.
+    #[cfg(test)]
+    pub(crate) presented_for_test: bool,
 }
 
 #[derive(Clone)]
@@ -739,6 +743,8 @@ impl SceneRuntime {
             paused: state.paused,
             window,
             generation,
+            #[cfg(test)]
+            presented_for_test: false,
         }
     }
 
@@ -1100,6 +1106,23 @@ impl SceneRuntime {
     pub fn load_id(&self) -> u64 { self.renderer.load_id() }
 
     pub fn display_id(&self) -> u32 { self.desc.display.display_id }
+
+    /// The window server's number for this scene's window; `None` without one.
+    pub fn window_number(&self) -> Option<isize> {
+        self.window.as_ref().and_then(WallpaperWindow::window_number)
+    }
+
+    /// Whether the scene's current renderer has put a frame on screen and has
+    /// not stopped on a failure since: a scene kept paused for a desktop shows
+    /// that frame until it runs again, and one that has none would show black.
+    pub fn has_presented(&self) -> bool {
+        #[cfg(test)]
+        if self.presented_for_test {
+            return true;
+        }
+        self.surface_health()
+            .is_some_and(|health| health.frames_presented > 0 && health.stop.is_none())
+    }
 
     pub fn surface_recovery_mut(&mut self) -> &mut SurfaceRecovery { &mut self.surface_recovery }
 

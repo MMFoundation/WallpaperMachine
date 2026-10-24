@@ -91,7 +91,7 @@ async fn fm01_reconcile_four_way_precedence_and_failure_forwarding() {
                 &audio,
                 &readiness,
                 vec![scene(31, "matrix-wallpaper")],
-                Vec::new,
+                Default::default,
                 move |_| async move {
                     core_trace.lock().unwrap().push("core-enter");
                     core_rx.await.unwrap();
@@ -171,7 +171,7 @@ async fn fm02_partial_state_is_visible_to_prune_and_not_rolled_back() {
         &audio,
         &readiness,
         vec![scene(48, "after-partial")],
-        move || snapshot_state.lock().unwrap().clone(),
+        move || (snapshot_state.lock().unwrap().clone(), Vec::new()),
         move |_| async move {
             assert_eq!(*core_state.lock().unwrap(), vec![initial]);
             *core_state.lock().unwrap() = vec![changed];
@@ -220,7 +220,7 @@ async fn fm03_full_post_core_post_prune_grace_and_preparation_evidence() {
             &audio,
             &readiness,
             vec![scene(67, "long-preparation")],
-            Vec::new,
+            Default::default,
             move |_| async move {
                 core_rx.await.unwrap();
                 Ok(vec![expected])
@@ -270,7 +270,7 @@ async fn fm03_multiple_targets_share_original_deadline_and_preserve_results() {
             &audio,
             &readiness,
             vec![scene(79, "second-target"), scene(83, "first-target")],
-            Vec::new,
+            Default::default,
             move |_| async move { Ok(vec![first, second]) },
             || async { Ok(()) },
         ));
@@ -309,7 +309,7 @@ async fn fm04_shared_turn_excludes_snapshot_core_and_stale_handle_evidence() {
         vec![scene(91, "turn-a")],
         move || {
             a_trace.lock().unwrap().push("a-snapshot");
-            Vec::new()
+            Default::default()
         },
         move |_| async move { Ok(vec![a]) },
         || async { Ok(()) },
@@ -321,7 +321,7 @@ async fn fm04_shared_turn_excludes_snapshot_core_and_stale_handle_evidence() {
         vec![scene(92, "turn-b")],
         move || {
             b_snapshot.lock().unwrap().push("b-snapshot");
-            Vec::new()
+            Default::default()
         },
         move |_| async move {
             b_core.lock().unwrap().push("b-core");
@@ -361,7 +361,7 @@ async fn fm05_audio_blocked_through_core_and_prune_but_released_for_readiness() 
         &audio,
         &readiness,
         vec![scene(107, "audio-boundary")],
-        Vec::new,
+        Default::default,
         move |_| async move {
             core_rx.await.unwrap();
             Ok(vec![wanted])
@@ -553,7 +553,7 @@ async fn fm07_real_retained_predicate_and_mounted_readiness_agree() {
     for (label, baseline, requested, needs_frame) in cases {
         let expected_ids = if needs_frame { vec![126] } else { vec![] };
         assert_eq!(
-            displays_awaiting_first_frame(&baseline, &[requested.clone()]),
+            displays_awaiting_first_frame(&baseline, &[], &[requested.clone()]),
             expected_ids,
             "{label}"
         );
@@ -567,7 +567,7 @@ async fn fm07_real_retained_predicate_and_mounted_readiness_agree() {
             &audio,
             &readiness,
             vec![requested],
-            move || baseline,
+            move || (baseline, Vec::new()),
             move |scenes| async move {
                 assert_eq!(scenes, vec![expected_scene]);
                 Ok(vec![returned])
@@ -600,7 +600,7 @@ async fn fm08_dropping_owned_wait_releases_turn_without_erasing_progress() {
         &audio,
         &readiness,
         vec![scene(143, "cancel-owned")],
-        Vec::new,
+        Default::default,
         move |_| async move {
             core_progress.lock().unwrap().push(first_result);
             Ok(vec![first_result])
@@ -629,7 +629,7 @@ async fn fm08_dropping_owned_wait_releases_turn_without_erasing_progress() {
         &audio,
         &readiness,
         vec![scene(144, "after-cancel")],
-        Vec::new,
+        Default::default,
         move |_| async move {
             next_progress.lock().unwrap().push(next_result);
             Ok(vec![next_result])
@@ -663,7 +663,7 @@ async fn observer_records_before_forwarding_even_if_sink_unwinds() {
         &audio,
         &readiness,
         vec![scene(159, "before-forward")],
-        Vec::new,
+        Default::default,
         move |_| async move { Ok(vec![returned]) },
         || async { Ok(()) },
     ));

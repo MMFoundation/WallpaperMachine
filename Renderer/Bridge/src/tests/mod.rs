@@ -4,6 +4,7 @@ mod apply_options;
 mod bridge_waits;
 mod crash_loop_guard;
 mod display_presentation;
+mod space_parking;
 mod renderer_counters;
 mod display_failure_repair;
 mod display_identity;

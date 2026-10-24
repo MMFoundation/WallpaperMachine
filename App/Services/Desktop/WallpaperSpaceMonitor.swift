@@ -4,6 +4,9 @@ import Darwin
 struct WallpaperDesktopSpace: Equatable, Sendable {
     var id: String
     var number: Int
+    /// The window server's number for the desktop, which a window is put on; nil when the
+    /// topology does not give one.
+    var managedID: UInt64? = nil
 }
 
 struct WallpaperDisplaySpaces: Equatable, Sendable {
@@ -167,7 +170,9 @@ final class WallpaperSpaceMonitor {
                 return currentNumber != nil && item.number == currentNumber
             }
             guard active.count == 1 else { return nil }
-            let desktops = decoded.filter { $0.type == 0 }.enumerated().map { WallpaperDesktopSpace(id: $0.element.id!, number: $0.offset + 1) }
+            let desktops = decoded.filter { $0.type == 0 }.enumerated().map {
+                WallpaperDesktopSpace(id: $0.element.id!, number: $0.offset + 1, managedID: $0.element.number)
+            }
             for (display, uuid) in matching {
                 guard result[display] == nil else { return nil }
                 let desktop = active[0].type == 0

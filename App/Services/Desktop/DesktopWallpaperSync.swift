@@ -224,12 +224,16 @@ final class DesktopWallpaperSync {
     private var pendingRequest = CaptureRequest.none
     var isSuspended: Bool { stopped }
 
+    /// `excludedWindows` names windows that are not a desktop's picture now, such as the paused
+    /// wallpaper a display keeps for a desktop the person left: their frame belongs to that desktop.
     convenience init(folder: URL, scope: @escaping @MainActor (String) -> DesktopPosterScope = { _ in .all },
                      retainedDisplays: @escaping @MainActor () -> Set<String> = { [] },
-                     beforeDesktopChange: @escaping @MainActor () -> Void = {}) throws {
+                     beforeDesktopChange: @escaping @MainActor () -> Void = {},
+                     excludedWindows: @escaping @MainActor () -> Set<Int> = { [] }) throws {
         try self.init(folder: folder, workspace: SystemDesktopPictureWorkspace(), surfaces: {
-            WallpaperPresentationPolicy.wallpaperWindows().compactMap { window in
-                guard let layer = window.contentView?.layer,
+            let excluded = excludedWindows()
+            return WallpaperPresentationPolicy.wallpaperWindows().compactMap { window in
+                guard !excluded.contains(window.windowNumber), let layer = window.contentView?.layer,
                       let screen = window.screen, let id = SystemDesktopPictureWorkspace.id(screen) else { return nil }
                 return DesktopPosterSurface(layer: layer, display: id)
             }

@@ -956,6 +956,16 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func sceneMediaWallpaperIds() async throws  -> [String]
     
     /**
+     * The window of every open scene wallpaper, live and parked, so the host
+     * can keep each one on the desktops that show its wallpaper. Web and
+     * video windows are the host's own and are not listed.
+     *
+     * Synchronous on purpose: it reads the engine's last published state,
+     * which no actor owns, and the host asks whenever windows may have moved.
+     */
+    func sceneWindows()  -> [BridgeSceneWindow]
+    
+    /**
      * # Errors
      *
      * Returns an error when the wallpaper id is unknown or selection cannot be
@@ -1027,6 +1037,21 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * fails.
      */
     func setDisplayMode(displayId: String, mode: BridgeDisplayMode) async throws  -> BridgeDisplayMutationBundle
+    
+    /**
+     * Sets which wallpapers the display `display_id` keeps loaded and paused
+     * when it moves on to another one, so that one runs on from where it
+     * stopped when it comes back instead of loading again. Only a scene that
+     * has drawn is kept; its window stays where the host put it. A kept scene
+     * whose wallpaper is no longer listed is closed now, and an empty list
+     * frees every one the display keeps. Runtime state, never saved.
+     *
+     * # Errors
+     *
+     * Returns an error when the display id is not a number or the engine
+     * fails to close a scene.
+     */
+    func setDisplayParkedWallpapers(displayId: String, wallpaperIds: [String]) async throws 
     
     /**
      * Moves a wallpaper on one display: `pan_x` and `pan_y` are fractions from
@@ -2408,6 +2433,21 @@ open func sceneMediaWallpaperIds()async throws  -> [String] {
 }
     
     /**
+     * The window of every open scene wallpaper, live and parked, so the host
+     * can keep each one on the desktops that show its wallpaper. Web and
+     * video windows are the host's own and are not listed.
+     *
+     * Synchronous on purpose: it reads the engine's last published state,
+     * which no actor owns, and the host asks whenever windows may have moved.
+     */
+open func sceneWindows() -> [BridgeSceneWindow] {
+    return try!  FfiConverterSequenceTypeBridgeSceneWindow.lift(try! rustCall() {
+    uniffi_wallpaper_bridge_fn_method_wallpaperbridge_scene_windows(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
      * # Errors
      *
      * Returns an error when the wallpaper id is unknown or selection cannot be
@@ -2596,6 +2636,36 @@ open func setDisplayMode(displayId: String, mode: BridgeDisplayMode)async throws
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeDisplayMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Sets which wallpapers the display `display_id` keeps loaded and paused
+     * when it moves on to another one, so that one runs on from where it
+     * stopped when it comes back instead of loading again. Only a scene that
+     * has drawn is kept; its window stays where the host put it. A kept scene
+     * whose wallpaper is no longer listed is closed now, and an empty list
+     * frees every one the display keeps. Runtime state, never saved.
+     *
+     * # Errors
+     *
+     * Returns an error when the display id is not a number or the engine
+     * fails to close a scene.
+     */
+open func setDisplayParkedWallpapers(displayId: String, wallpaperIds: [String])async throws  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_display_parked_wallpapers(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(displayId),FfiConverterSequenceString.lower(wallpaperIds)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_void,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_void,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_void,
+            liftFunc: { $0 },
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -6645,6 +6715,105 @@ public func FfiConverterTypeBridgeSceneUpdateModeReport_lower(_ value: BridgeSce
 }
 
 
+/**
+ * The window of one open scene wallpaper: the live scene of a display, or
+ * one the display keeps loaded and paused for a desktop the person left
+ * ([`crate::WallpaperBridge::set_display_parked_wallpapers`]).
+ */
+public struct BridgeSceneWindow {
+    public var displayId: UInt32
+    public var wallpaperId: String
+    /**
+     * The window server's number for the scene's window.
+     */
+    public var windowNumber: Int64
+    /**
+     * Kept paused rather than shown as the display's live scene.
+     */
+    public var parked: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(displayId: UInt32, wallpaperId: String, 
+        /**
+         * The window server's number for the scene's window.
+         */windowNumber: Int64, 
+        /**
+         * Kept paused rather than shown as the display's live scene.
+         */parked: Bool) {
+        self.displayId = displayId
+        self.wallpaperId = wallpaperId
+        self.windowNumber = windowNumber
+        self.parked = parked
+    }
+}
+
+
+
+extension BridgeSceneWindow: Equatable, Hashable {
+    public static func ==(lhs: BridgeSceneWindow, rhs: BridgeSceneWindow) -> Bool {
+        if lhs.displayId != rhs.displayId {
+            return false
+        }
+        if lhs.wallpaperId != rhs.wallpaperId {
+            return false
+        }
+        if lhs.windowNumber != rhs.windowNumber {
+            return false
+        }
+        if lhs.parked != rhs.parked {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(displayId)
+        hasher.combine(wallpaperId)
+        hasher.combine(windowNumber)
+        hasher.combine(parked)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBridgeSceneWindow: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeSceneWindow {
+        return
+            try BridgeSceneWindow(
+                displayId: FfiConverterUInt32.read(from: &buf), 
+                wallpaperId: FfiConverterString.read(from: &buf), 
+                windowNumber: FfiConverterInt64.read(from: &buf), 
+                parked: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BridgeSceneWindow, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.displayId, into: &buf)
+        FfiConverterString.write(value.wallpaperId, into: &buf)
+        FfiConverterInt64.write(value.windowNumber, into: &buf)
+        FfiConverterBool.write(value.parked, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeSceneWindow_lift(_ buf: RustBuffer) throws -> BridgeSceneWindow {
+    return try FfiConverterTypeBridgeSceneWindow.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeSceneWindow_lower(_ value: BridgeSceneWindow) -> RustBuffer {
+    return FfiConverterTypeBridgeSceneWindow.lower(value)
+}
+
+
 public struct BridgeSettingsSnapshot {
     public var displays: [BridgeDisplaySettingsRow]
     public var launchAtLoginAvailable: Bool
@@ -10042,6 +10211,31 @@ fileprivate struct FfiConverterSequenceTypeBridgeSceneUpdateModeReport: FfiConve
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeBridgeSceneWindow: FfiConverterRustBuffer {
+    typealias SwiftType = [BridgeSceneWindow]
+
+    public static func write(_ value: [BridgeSceneWindow], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBridgeSceneWindow.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BridgeSceneWindow] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BridgeSceneWindow]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBridgeSceneWindow.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeBridgeSurfaceCheck: FfiConverterRustBuffer {
     typealias SwiftType = [BridgeSurfaceCheck]
 
@@ -10372,6 +10566,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_scene_media_wallpaper_ids() != 29687) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_scene_windows() != 63009) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_select_wallpaper() != 23020) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -10394,6 +10591,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_mode() != 57230) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_parked_wallpapers() != 21621) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_position() != 23700) {
