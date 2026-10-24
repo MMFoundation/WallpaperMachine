@@ -120,10 +120,14 @@ struct QuickTileView: View {
             Circle().fill(tile.isOn ? theme.accent.primary.color : theme.surface.badge.color)
           )
         VStack(alignment: .leading, spacing: 1) {
+          // A long name ("Wallpaper per Desktop" on the narrowest tile) shrinks a little before
+          // it truncates.
           Text(verbatim: title)
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(theme.surface.text.color)
             .lineLimit(1)
+            .allowsTightening(true)
+            .minimumScaleFactor(0.8)
           // The whole line when it fits; the state alone when the tile is too narrow for the badge.
           ViewThatFits(in: .horizontal) {
             stateText(tile.stateLine)
