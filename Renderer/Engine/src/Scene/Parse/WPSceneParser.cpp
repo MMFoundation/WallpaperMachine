@@ -2249,9 +2249,13 @@ std::string PingPongName(std::string_view prefix, std::string_view camera_name) 
 }
 
 /// The render target of the buffer `fbo_name` that the effect at `position` in layer `layer_id`'s
-/// chain declares: a target name whatever the effect calls it (`_coc`, `plain`).
+/// chain declares: a target name whatever the effect calls it. A target name (`_rt_half`) keeps
+/// its spelling; any other (`_coc`, `plain`) goes under `_rt_` and ends in a word rather than a
+/// number, so `plain` and `_rt_plain` stay two buffers.
 std::string EffectBufferName(const std::string& fbo_name, int32_t layer_id, std::size_t position) {
-    return EnsureSpecTexName(fbo_name) + "_" + std::to_string(layer_id) + "_" + std::to_string(position);
+    const auto owner = "_" + std::to_string(layer_id) + "_" + std::to_string(position);
+    if (IsSpecTex(fbo_name)) return fbo_name + owner;
+    return EnsureSpecTexName(fbo_name) + owner + "_named";
 }
 
 /// Registers the render target of one effect buffer (R55).

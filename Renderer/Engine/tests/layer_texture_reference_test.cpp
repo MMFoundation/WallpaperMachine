@@ -11,6 +11,7 @@
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneCamera.h"
+#include "Scene/SceneImageEffectLayer.h"
 #include "Scene/SceneLayerReference.hpp"
 #include "SpecTexs.hpp"
 #include "WPSceneParser.hpp"
@@ -26,6 +27,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
 #include <utility>
@@ -393,8 +395,9 @@ TEST(LayerTextureReference, ATextureNamedWithALeadingUnderscoreIsItsFile) {
 }
 
 // An effect's own buffers are render targets whatever the effect calls them: a
-// bokeh blur declares `_coc` and `_full1`, and a buffer may have no underscore at
-// all. Each pass that binds one reads what the pass before it drew there.
+// bokeh blur declares `_coc` and `_full1`, a buffer may have no underscore at all,
+// and `plain` and `_rt_plain` are two buffers. Each pass that binds one reads what
+// the pass before it drew there.
 TEST(LayerTextureReference, AnEffectsOwnBuffersAreTargetsWhateverTheyAreCalled) {
     fs::VFS vfs;
     auto    parsed = ParseScene(vfs, R"([
@@ -402,13 +405,33 @@ TEST(LayerTextureReference, AnEffectsOwnBuffersAreTargetsWhateverTheyAreCalled) 
          "effects":[{"file":"effects/buffers/effect.json","id":6,"visible":true}]}
       ])",
       {{ "/effects/buffers/effect.json",
-         R"({"name":"buffers","fbos":[{"name":"_half","scale":2},{"name":"plain","scale":1}],"passes":[)"
+         R"({"name":"buffers","fbos":[{"name":"_half","scale":2},{"name":"plain","scale":1},{"name":"_rt_plain","scale":1}],"passes":[)"
          R"({"material":"materials/copy.json","target":"_half","bind":[{"name":"previous","index":0}]},)"
          R"({"material":"materials/copy.json","target":"plain","bind":[{"name":"_half","index":0}]},)"
-         R"({"material":"materials/copy.json","bind":[{"name":"plain","index":0}]}]})" },
+         R"({"material":"materials/copy.json","target":"_rt_plain","bind":[{"name":"plain","index":0}]},)"
+         R"({"material":"materials/copy.json","bind":[{"name":"_rt_plain","index":0}]}]})" },
        { "/materials/copy.json",
          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null]}]} )" }});
     ASSERT_NE(parsed, nullptr);
+
+    // The buffers the first three passes draw into, in the effect's own order.
+    SceneNode* layer = nullptr;
+    for (auto& child : parsed->sceneGraph->GetChildren()) {
+        if (child->Name() == "blurred") layer = child.get();
+    }
+    ASSERT_NE(layer, nullptr);
+    const auto camera = parsed->cameras.find(layer->Camera());
+    ASSERT_NE(camera, parsed->cameras.end());
+    ASSERT_TRUE(camera->second->HasImgEffect());
+    const auto& effect = *camera->second->GetImgEffect()->GetEffect(0);
+    ASSERT_EQ(effect.nodes.size(), 4u);
+    std::vector<std::string> buffers;
+    for (const auto& node : effect.nodes) {
+        if (buffers.size() < 3) buffers.push_back(node.output);
+    }
+    EXPECT_EQ(std::set<std::string>(buffers.begin(), buffers.end()).size(), 3u)
+        << "two buffers of the effect were given one target";
+
     AddScreenTarget(*parsed);
     if (parsed->cameras.find("effect") == parsed->cameras.end()) {
         parsed->cameras["effect"] = std::make_shared<SceneCamera>(64, 32, 0.01f, 100.0f);
@@ -421,13 +444,9 @@ TEST(LayerTextureReference, AnEffectsOwnBuffersAreTargetsWhateverTheyAreCalled) 
     for (const auto id : graph->topologicalOrder()) {
         if (auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id))) passes.emplace_back(id, pass);
     }
-    for (const auto* buffer : { "_half", "plain" }) {
-        SCOPED_TRACE(buffer);
-        std::string key;
-        for (const auto& [name, target] : parsed->renderTargets) {
-            if (name.find(buffer) != std::string::npos) key = name;
-        }
-        ASSERT_FALSE(key.empty()) << "the effect's buffer was never registered";
+    for (const auto& key : buffers) {
+        SCOPED_TRACE(key);
+        EXPECT_NE(parsed->FindRenderTarget(key), nullptr) << "the effect's buffer was never registered";
         EXPECT_TRUE(IsSpecTex(key)) << key << " would be loaded as a texture file";
         const auto writer = std::find_if(passes.begin(), passes.end(),
                                          [&key](const auto& pass) { return pass.second->desc().output == key; });

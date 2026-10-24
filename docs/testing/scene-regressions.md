@@ -1478,7 +1478,8 @@ texture entrances are not decoded-image or native-rendering evidence.
     editor are often named like `_0022_Eyes`, their textures with them: read as a
     target nobody registered, the slot was left unbound and the layer never drew
     (issue #81: a portrait's eyes and lids). The buffers an effect declares are targets
-    under a `_rt_` key whatever the effect calls them, `_coc` or `plain`
+    under a `_rt_` key whatever the effect calls them, `_coc` or `plain`, and
+    `plain` and `_rt_plain` stay two buffers
     (`AnEffectsOwnBuffersAreTargetsWhateverTheyAreCalled`).
   - A composite is the source layer's card in its own texture space, whatever
     its placement, the scene camera or parallax do
