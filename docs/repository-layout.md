@@ -88,7 +88,7 @@ Shared/                            contracts compiled into both targets: lock-sc
                                    opening (WebMPlayer, WebMOpening), the recovery budget, and the lock-screen
                                    video planner and player
 Resources/StarterWallpaper/        bundled sample wallpaper (Aurora.mp4, preview.jpg, project.json)
-Resources/ReleaseBanners/          bundled release banners, x.y.z.jpg and x.y.z.zh-Hans.jpg (or .png), shown by What's New and the release page
+Resources/ReleaseBanners/          release banners, x.y.z.jpg, x.y.z.zh-Hans.jpg and x.y.z.ko.jpg (or .png), shown in CHANGELOG.md and on the release page
 Tests/Unit/<Domain>/               WallpaperMachineTests, one folder per App/Services domain plus Panel for
                                    Views/ControlPanel; hosted in the app binary
 Tests/UI/                          WallpaperMachineUITests; desktop-driving XCUITest suite

@@ -143,6 +143,70 @@ final class AppUpdateTests: XCTestCase {
         }
     }
 
+    func testReleaseNotesDropIssueAndCommitReferencesFromThePlainReading() throws {
+        let notes = try XCTUnwrap(ReleaseNotes(version: "1.6.2", body: """
+        #### Bug Fixes
+
+        - Names fit on narrow tiles (closes [#76](https://github.com/o/r/issues/76), closes [#77](https://github.com/o/r/issues/77)) ([bb75725](https://github.com/o/r/commit/bb75725aa))
+        - Stop a crash ([aaa1111](https://github.com/o/r/commit/aaa1111), [bbb2222](https://github.com/o/r/commit/bbb2222))
+        - Read the [guide](https://github.com/o/r/wiki) (see [notes](https://github.com/o/r/wiki/notes))
+        """))
+        XCTAssertEqual(notes.sections.first?.items, [
+            "Names fit on narrow tiles", "Stop a crash", "Read the guide (see notes)",
+        ])
+        XCTAssertEqual(
+            notes.sections.first?.markdown.first,
+            "Names fit on narrow tiles (closes [#76](https://github.com/o/r/issues/76), closes [#77](https://github.com/o/r/issues/77)) ([bb75725](https://github.com/o/r/commit/bb75725aa))",
+            "the update window keeps the links")
+    }
+
+    func testManifestCarriesTheChangelogForTheUpdateWindow() throws {
+        let changelog = "## [1.2.3](https://github.com/o/r/compare/v1.2.2...v1.2.3) (2026-10-24)\n"
+        let release = try GitHubReleaseParser.decode(Self.releaseJSON(tag: "v1.2.3", changelog: changelog))
+        XCTAssertEqual(release.changelog, changelog)
+        XCTAssertEqual(try GitHubReleaseParser.decode(Self.releaseJSON(tag: "v1.2.3")).changelog, "",
+                       "the API and older manifests have none")
+    }
+
+    func testCheckListsEveryReleaseSinceTheRunningVersion() async {
+        let fixture = Fixture()
+        let changelog = ["1.1.0", "1.0.5", "1.0.0"].map { version in
+            """
+            ## [\(version)](https://github.com/o/r/compare/v0.9.0...v\(version)) (2026-10-24)
+            ### English
+            #### Features
+            - Change in \(version)
+            ### 简体中文
+            #### 新功能
+            - \(version) 的变更
+            ### 한국어
+            #### 새로운 기능
+            - \(version) 변경
+
+            """
+        }.joined()
+        fixture.client.release = fixture.release(version: "1.1.0", changelog: changelog)
+        await fixture.store.checkForUpdates()
+        XCTAssertEqual(fixture.store.pendingReleases.map(\.version.display), ["1.1.0", "1.0.5"])
+        XCTAssertEqual(fixture.store.pendingReleases.first?.date, "2026-10-24")
+
+        fixture.client.release = fixture.release(version: "1.0.0", changelog: changelog)
+        await fixture.store.checkForUpdates()
+        XCTAssertEqual(fixture.store.pendingReleases, [], "nothing to show once up to date")
+    }
+
+    func testSkipAndAutomaticInstallsAreRememberedAcrossLaunches() {
+        let fixture = Fixture()
+        XCTAssertFalse(fixture.store.automaticallyInstallsUpdates, "asks before installing by default")
+        XCTAssertNil(fixture.store.skippedVersion)
+        fixture.store.automaticallyInstallsUpdates = true
+        fixture.store.skippedVersion = "1.1.0"
+        let relaunched = AppUpdateStore(
+            currentVersion: "1.0.0", client: FakeAppUpdateClient(), defaults: fixture.defaults)
+        XCTAssertTrue(relaunched.automaticallyInstallsUpdates)
+        XCTAssertEqual(relaunched.skippedVersion, "1.1.0")
+    }
+
     func testAReleaseWithNothingToSayHasNoNotes() {
         XCTAssertNil(ReleaseNotes(version: "1.2.3", body: ""))
         XCTAssertNil(ReleaseNotes(version: "1.2.3",
@@ -827,6 +891,8 @@ private final class Fixture {
     var opened: [URL] { recorder.opened }
     var terminateCalls: Int { recorder.terminateCalls }
     let destination: URL
+    /// The store's preferences (automatic installs, the skipped version), never the app's own.
+    let defaults = TemporaryDefaults.makeForCurrentTest().defaults
 
     init(installTimeout: Duration = .seconds(45)) {
         destination = FileManager.default.temporaryDirectory.appendingPathComponent("private/mwe-\(UUID().uuidString).dmg")
@@ -846,11 +912,13 @@ private final class Fixture {
                 recorder.terminateCalls += 1
                 recorder.onTerminate?()
             },
-            installTimeout: installTimeout
+            installTimeout: installTimeout,
+            defaults: defaults
         )
     }
 
-    func release(version: String, assets: [GitHubReleaseAsset]? = nil, notes: String = "") -> GitHubRelease {
+    func release(version: String, assets: [GitHubReleaseAsset]? = nil, notes: String = "",
+                 changelog: String = "") -> GitHubRelease {
         let defaultAssets = [
             GitHubReleaseAsset(
                 name: "WallpaperMachine-\(version)-arm64.dmg",
@@ -864,7 +932,8 @@ private final class Fixture {
             htmlURL: URL(string: "https://github.com/bobbyhuang-dev/WallpaperMachine/releases/tag/v\(version)")!,
             prerelease: false,
             assets: assets ?? defaultAssets,
-            notes: notes
+            notes: notes,
+            changelog: changelog
         )
     }
 }
@@ -1071,19 +1140,20 @@ private final class UpdateHTTPProtocol: URLProtocol, @unchecked Sendable {
 
 private extension AppUpdateTests {
     static func releaseJSON(tag: String, prerelease: Bool = false, body: String = "",
-                            assets: [(String, String, Int, String?)] = []) -> Data {
+                            assets: [(String, String, Int, String?)] = [], changelog: String? = nil) -> Data {
         let assetObjects: [[String: Any]] = assets.map { name, url, size, digest in
             var fields: [String: Any] = ["name": name, "browser_download_url": url, "size": size]
             if let digest { fields["digest"] = digest }
             return fields
         }
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "tag_name": tag,
             "html_url": "https://github.com/bobbyhuang-dev/WallpaperMachine/releases/tag/\(tag)",
             "prerelease": prerelease,
             "body": body,
             "assets": assetObjects,
         ]
+        if let changelog { payload["changelog"] = changelog }
         return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
     }
 

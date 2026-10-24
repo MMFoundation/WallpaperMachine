@@ -2,15 +2,15 @@
 
 The app window is a native SwiftUI interface in
 [`App/Views/ControlPanel/`](../../App/Views/ControlPanel), hosted in an AppKit window.
-Menus, the status item, file pickers, confirmation sheets and the sign-in, preview and
-What's New windows are AppKit, and renderer content is never drawn into the panel. How it
+Menus, the status item, file pickers, confirmation sheets and the sign-in and preview
+windows are AppKit (the update window is SwiftUI in its own window), and renderer content is never drawn into the panel. How it
 runs (controller, typed actions, observation, window hosting) is in
 [architecture](../architecture.md#control-panel-swiftui).
 
 Documented separately: the [first-run guide and support prompt](first-run.md),
 [live preview, properties, presets, image placement, the compatibility check and
 the black-bar check](wallpaper-properties.md), [local backup and restore](backup-restore.md), and
-[app updates and What's New](updates.md).
+[app updates and the update window](updates.md).
 
 ## Language
 
@@ -241,8 +241,8 @@ the rest opens in a popover from the ⓘ beside the title.
   links** disclosure (see [automation](automation.md)).
 - **About** opens with the app icon, name and version (`MARKETING_VERSION` in
   `project.yml`) and the Git revision. **Check for Updates** reads the latest GitHub
-  Release; download and restart-install happen only after confirmation (see
-  [updates](updates.md)). The application menu item **Check for Updates…** opens
+  Release; download and restart-install happen only after confirmation, unless
+  **Automatically download and install updates** is on (see [updates](updates.md)). The application menu item **Check for Updates…** opens
   this section. **Spread the word** has **Share WallpaperMachine…** and **Star on
   GitHub** ([one-time prompts](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer)).
 - **Storage** opens with **Wallpaper library location**: where the installed
@@ -283,7 +283,7 @@ fresh. Imports and Workshop downloads run in app-owned stores, so closing the wi
 never cancels them.
 
 The panel opens on the Space you are on rather than switching you to the Space it was
-last left on, and so do What's New, the wallpaper preview and the Steam and pixiv sign-in
+last left on, and so do the update window, the wallpaper preview and the Steam and pixiv sign-in
 windows. A minimized panel comes back from the Dock when it is opened from the status
 menu, the Dock icon or Command-comma, or when the app is activated; the green button still
 offers full screen. The app keeps its Dock icon while any of these windows is open, on screen

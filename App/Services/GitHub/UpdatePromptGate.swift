@@ -1,7 +1,7 @@
 import Foundation
 
-/// Decides whether the unattended update alert may appear right now. The alert is modal and
-/// brings the app to the front, so it must not interrupt someone watching a full-screen app,
+/// Decides whether the unattended update window may appear right now. It brings the app to
+/// the front, so it must not interrupt someone watching a full-screen app,
 /// a locked screen or a sleeping display: those are exactly the moments the wallpaper
 /// presentation is suspended. The decision is a pure function of the app's own signals, so
 /// the table is testable without a desktop.
@@ -13,13 +13,11 @@ enum UpdatePromptGate {
         var globalPresentation: GlobalPresentation
         /// A display whose wallpaper is fully hidden, which is what a full-screen app does.
         var hasSuspendedDisplay: Bool
-        var whatsNewOpen: Bool
         var shuttingDown: Bool
     }
 
     enum HoldReason: String, Equatable, Sendable {
         case shuttingDown
-        case whatsNewOpen
         case presentationSuspended
         case displayCovered
     }
@@ -31,8 +29,7 @@ enum UpdatePromptGate {
 
     static func decide(_ input: Input) -> Decision {
         if input.shuttingDown { return .hold(.shuttingDown) }
-        if input.whatsNewOpen { return .hold(.whatsNewOpen) }
-        // Someone already working in the panel is the one place an alert is welcome, even
+        // Someone already working in the panel is the one place the window is welcome, even
         // while wallpapers are paused by a rule.
         if input.panelVisibleAndActive { return .present }
         if input.globalPresentation != .running { return .hold(.presentationSuspended) }
@@ -41,14 +38,15 @@ enum UpdatePromptGate {
     }
 }
 
-/// Remembers which version the alert has been shown for and whether a prompt is waiting for
-/// the gate to open. A held prompt never counts as offered, so it appears once when the
-/// gate opens, and a version the person dismissed with Later stays dismissed for the launch.
+/// Remembers which version the update window has been shown for and whether a prompt is waiting
+/// for the gate to open. A held prompt never counts as offered, so it appears once when the
+/// gate opens, and a version the person dismissed with Remind Me Later stays dismissed for the
+/// launch.
 struct UpdatePromptLedger: Equatable, Sendable {
     enum Outcome: Equatable, Sendable {
         /// Nothing to do: no update, or this version was already offered.
         case none
-        /// Show the alert for this version; it is now recorded as offered.
+        /// Show the window for this version; it is now recorded as offered.
         case present(version: String)
         /// Not now. `isNew` is true when this is the first hold or its reason changed, so
         /// callers log a transition rather than every retry.
@@ -59,7 +57,7 @@ struct UpdatePromptLedger: Equatable, Sendable {
     /// Why a prompt is waiting, or nil when none is.
     private(set) var holdReason: UpdatePromptGate.HoldReason?
 
-    /// `version` is the update worth an alert (downloaded or available), nil when there is none.
+    /// `version` is the update worth the window (downloaded or available), nil when there is none.
     mutating func offer(version: String?, input: UpdatePromptGate.Input) -> Outcome {
         guard let version, version != offeredVersion else {
             holdReason = nil

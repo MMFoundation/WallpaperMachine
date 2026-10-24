@@ -1,8 +1,9 @@
-# App updates and What's New
+# App updates
 
 The app updates itself from the repository's latest GitHub Release: it checks on
-its own, downloads and restart-installs only after the user confirms, and after an
-update shows that version's release notes once in a separate window. This page is
+its own, opens a window with the notes of every version since the running one, and
+downloads and restart-installs only after the user confirms, unless they chose
+automatic updates. This page is
 what the app does; what the Build workflow publishes for it to read (manifest,
 notes marker, signing, assets) is in
 [release](../release.md#what-the-in-app-updater-expects).
@@ -10,36 +11,37 @@ notes marker, signing, assets) is in
 ## Checking for updates
 
 **Settings → About** is the update surface: an **Updates** group with the status,
-one action button, a progress bar while downloading and the latest release's notes
+one action button, a progress bar while downloading, the **Automatically download and
+install updates** switch ([automatic updates](#automatic-updates)) and the latest
+release's notes
 ([Pages and Settings](control-panel.md#pages-and-settings) lists the rest of About).
 **Check for Updates…** in the application menu opens About and starts the same check.
 
 The app checks at launch once the library has loaded (whether or not it loaded
 cleanly, since the update may be the fix), every six hours after, because a
 menu-bar app can run for weeks (a Mac that slept through the interval checks as
-soon as it wakes), and on **Check for Updates**. Unattended checks only discover
-updates: one alert offers **View Update**, which opens About, or **Later**; an
-update the user has already downloaded offers **Restart to Update** instead. Each
-version is offered once per launch. Downloading still requires **Download
-Update**. The status menu keeps an entry for an available update (**WallpaperMachine
-x.y.z Available…**, which opens About) or a downloaded one (**Restart to Update to
-x.y.z**), so **Later** only dismisses the alert.
+soon as it wakes), and on **Check for Updates**. An unattended check that finds an
+update opens [the update window](#the-update-window), once per version per launch;
+with [automatic updates](#automatic-updates) on it downloads the update instead and
+opens nothing. A version the user skipped is never offered by an unattended check.
+The status menu keeps an entry for an available update (**WallpaperMachine x.y.z
+Available…**, which opens the update window) or a downloaded one (**Restart to
+Update to x.y.z**), so **Remind Me Later** only closes the window.
 
-The alert is modal and brings the app forward, so it waits for a moment that it
-would not interrupt (`UpdatePromptGate`). It is held while wallpapers are
-suspended (display asleep, session locked, or an app rule or the Focus filter
-pausing them), while any display's wallpaper is paused because a full-screen app
-or other windows cover it, while the What's New window is open and while the app
-quits. The signals are the ones [Playback](performance.md#playback) describes:
+The window brings the app forward, so it waits for a moment that it would not
+interrupt (`UpdatePromptGate`). It is held while wallpapers are suspended (display
+asleep, session locked, or an app rule or the Focus filter pausing them), while any
+display's wallpaper is paused because a full-screen app or other windows cover it,
+and while the app quits. The signals are the ones [Playback](performance.md#playback) describes:
 with **When windows cover the desktop** on **Keep running**, only a display
 fully hidden by a full-screen app holds it, and with **Pause** a maximized window
 does too. A display paused only because **Only play on the display I’m using** is on
 and the pointer is elsewhere does not hold it; a full-screen app or covering windows on
 that display still do. When the control panel is the key
-window the alert is allowed even while wallpapers are paused, since the person is
-already in the app. A held alert does not count as offered: it appears once, with no
-new network check, when wallpapers present again, when What's New closes or when the
-control panel becomes key, and the log notes `update prompt deferred: <reason>` when
+window the update window is allowed even while wallpapers are paused, since the person
+is already in the app. A held window does not count as offered: it appears once, with
+no new network check, when wallpapers present again or when the control panel becomes
+key, and the log notes `update prompt deferred: <reason>` when
 it starts waiting. Nothing else changes while it waits: the status menu entry is already
 there, and **Check for Updates…** is never held.
 
@@ -52,7 +54,9 @@ device behind that address. The manifest is a release asset,
 (`AppUpdateConfiguration.latestManifestURL`). github.com redirects it to the file
 on the release marked Latest (drafts never resolve), and such a download does not
 count against the API limit. It is the release object in the API's shape, so
-`GitHubReleaseParser` reads both; what it carries and who writes it is in
+`GitHubReleaseParser` reads both. Unlike the API, the manifest also carries the
+newest `CHANGELOG.md` sections in every translation (`changelog`), which the update
+window reads; what it carries and who writes it is in
 [release](../release.md#what-the-in-app-updater-expects). The API is asked only
 when the Latest release has no manifest (404) or one the parser rejects; a manifest
 that is rate-limited, fails or redirects off the GitHub hosts listed under
@@ -96,15 +100,16 @@ body with nothing to say produces no disclosure rather than an empty one.
 `ReleaseNotes.parse` ignores everything from `<!-- release-notes-end -->` onwards,
 turns each heading into a section title and each bullet into a line, and keeps a
 plain paragraph after a list as an untitled section. Links keep their text,
-emphasis markers and inline-code backticks are removed, a trailing commit
-reference is dropped and the **Full changelog** compare link is skipped. The
+emphasis markers and inline-code backticks are removed, a bullet's trailing issue and
+commit references (`(closes #76) (bb75725)`) are dropped and the **Full changelog**
+compare link is skipped. The
 release body is English only, so the lines are English; section titles the panel
 knows (**New**, **Fixed**, and so on) are translated.
 
 ## Downloading
 
-Only **Download Update** in About starts a download; a check never fetches the
-image. The image is streamed under its asset name into `Updates/` in the app's
+Only **Download Update** in About, **Install Update** in the update window or an
+automatic update starts a download; a check never fetches the image. The image is streamed under its asset name into `Updates/` in the app's
 Application Support folder (`ClientPaths.supportURL`), and About shows percent and
 bytes. `GitHubReleaseDownload` enforces:
 
@@ -129,13 +134,14 @@ downloaded, so Finder shows its drag-to-Applications window for a manual install
 
 ## Installing
 
-Installing is a second confirmation: **Restart and Install** in About (which asks
-**Restart and install this update?** in a confirmation sheet first), **Restart to Update** in the
-alert, or **Restart to Update to x.y.z** in the status menu, which installs at
-once. The install runs the *running* version's code, so a change to the installer
-reaches users only after the update that carries it. A failed install started from
-the alert or the menu opens About, which explains it and offers **Retry
-installation** and **Open GitHub Releases**.
+Installing is confirmed by **Restart and Install** in About (which asks **Restart
+and install this update?** in a confirmation sheet first), **Install Update** or
+**Install and Relaunch** in the update window, or **Restart to Update to x.y.z** in the
+status menu, which installs at once; an automatic update installs on its own
+([below](#automatic-updates)). The install runs the *running* version's code, so a
+change to the installer reaches users only after the update that carries it. A failed
+install started from the update window or the menu closes the window and opens About,
+which explains it and offers **Retry installation** and **Open GitHub Releases**.
 
 **Where it can install.** The installed copy must live in `/Applications` or
 `~/Applications`, and this user must be able to write both the bundle and its
@@ -172,53 +178,69 @@ enabled only after cancellation confirms the old helper has stopped.
 `Tests/Unit/GitHub/AppUpdateTests.swift` covers checking, the manifest and API
 paths, rate limits, asset selection, digest verification, installing from a real
 disk image and the replacement helper's success, failure and locking.
-`UpdatePromptGateTests` covers when the unattended alert is held and that a held
-one is offered exactly once afterwards.
+`UpdatePromptGateTests` covers when the unattended update window is held and that a
+held one is offered exactly once afterwards.
 
-## After an update
+## The update window
 
-On the first launch of a newer version, a separate, nonmodal **What’s New** window
-shows the installed version and every release since the last announced version,
-newest first. It opens with a 760 × 800-point content area and resizes down to
-600 × 480. When the installed version has a bundled banner
-([release banners](../release.md#release-banners)), the banner sits above the
-header, at most as wide as the default window, and follows the selected
-translation; skipped versions' banners are not shown. List entries are bulleted
-with a hanging indent, and a feature release's **Highlights / 亮点 / 주요 변경 사항**
-stand out in the accent color with ✦ markers. **English / 简体中文 / 한국어** tabs
-display one translation at a time for every release; the initial tab follows the
-app’s effective language (Settings → General → Language, including **System**
-matching, not the bundle’s launch-time language): Simplified or Traditional Chinese
-uses Simplified Chinese notes, Korean uses Korean notes, and English or Japanese
-uses English notes. Older releases without Korean notes fall back to English
-individually, so an update spanning several versions can show Korean current notes
-and English history. A missing or unreadable Korean banner also falls back to
-English, then Chinese if needed. Switching tabs returns to the top of the notes and
-does not change the interface language. Notes come from the bundled
-`CHANGELOG.md`, so they work offline and cannot describe a newer remote release;
-generation and translation are owned by
-[the release pipeline](../release.md#release-notes-and-the-changelog).
+The window an available update opens (`UpdateWindow`, a SwiftUI view in its own
+nonmodal window) shows the app's Dock icon, **A new version of WallpaperMachine is
+available!** and **WallpaperMachine x.y.z is now available—you have a.b.c. Would you
+like to download it now?** Below that, a scrolling box lists every release above the
+running version up to the available one, newest first: each opens with its version
+as a linked badge (the comparison with the previous version on GitHub) and its date,
+then its sections (**Highlights**, **Breaking Changes**, **Features**,
+**Improvements**, **Bug Fixes**) and bullets, with each bullet's issue and commit
+references as links. Links open only through `ExternalLink`, so only GitHub's.
 
-**Don’t show this window after updates** saves immediately and suppresses all
-future automatic post-update windows; it does not disable update checks or hide
-the release notes in Settings → About. Closing the window, including Command-W,
-leaves WallpaperMachine running. Ordinary relaunches, fresh installs, downgrades
-and returning to an already announced version do not show the window.
+The notes come from the manifest's `changelog`. **English / 简体中文 / 한국어** at
+the right end of the title bar, level with the window buttons, picks the translation
+for this window only and returns the notes to the top; it never changes the app's
+language. The window opens on the app's effective language (Settings → General →
+Language): Simplified or Traditional Chinese opens on the Chinese notes, Korean on the
+Korean ones (English for releases before 1.5.7), and English or Japanese on the English
+ones; section headings the catalogs know are translated for Japanese and Traditional
+Chinese. When the manifest has no changelog (the API path,
+or a release published before it carried one), when it does not parse, or when it
+lacks the available version, the window shows the release body's English notes for
+the available version alone. `AppReleaseHistory` parses the changelog with the same
+strict rules publishing applies ([release](../release.md#release-notes-and-the-changelog)).
 
-`WhatsNewStore` persists the highest announced version
-(`WallpaperMachine.whatsNew.lastVersion`) and the opt-out in the app’s
-preferences. A Mac with no recorded version that has already completed or skipped
-the [welcome guide](first-run.md#first-run) is treated as an existing user and sees
-only the installed release’s notes, without an invented previous version; a fresh
-installation and the permanent opt-out record the version without a window. The
-version is recorded only once the window is on screen. When the bundled history
-has no section for the installed version, `announcement` returns nil *without*
-recording the version, so the next launch repeats the check: recording on a miss
-would consume the announcement and a later bundle containing the notes would never
-show them. The bundled history is strict: every `##` heading must be a semantic
-version, each release needs notes under ordered `### English` and `### 简体中文`
-headings, with `### 한국어` required from 1.5.7 onward, and no version may repeat.
-An explicitly present Korean block must have notes even in older releases. A
-`## Unreleased`, a `##` line inside notes, a missing translation, a duplicate
-version or an unknown, repeated or misordered language heading fails the whole
-file and the window does not appear (publishing rejects that file first).
+- **Install Update** downloads the update with a progress bar in place of the
+  checkbox, then quits and reopens on the new version (**Preparing update…** while
+  the image is copied out). It is consent to both steps: closing the window or
+  **Remind Me Later** during the download does not call the install off. When the
+  installed copy cannot be replaced in place, the download opens in Finder instead
+  and the window closes. A failed download closes the window and opens About.
+- A downloaded update reads **A new version of WallpaperMachine is ready to install!**
+  and offers **Install and Relaunch**. A release without a disk image offers **Open
+  GitHub Releases**.
+- **Skip This Version** records the version (`WallpaperMachine.updates.skippedVersion`);
+  unattended checks offer it no more, and a newer release is offered as usual. About
+  and the status menu still show it.
+- **Remind Me Later**, Escape and the close button close the window; the version is
+  offered again on the next launch.
+- **Automatically download and install updates in the future** turns on automatic
+  updates, the same setting as About's switch.
+
+There is no window after an update: the post-update What's New window and the bundled
+`CHANGELOG.md` and release banners were removed, so the notes are read before
+updating, and About keeps the latest release's notes.
+
+### Automatic updates
+
+**Automatically download and install updates** in Settings → About, or the checkbox
+in the update window, is off by default and saved at once
+(`WallpaperMachine.updates.automatic`). With it on, an unattended check that finds a
+downloadable update the user has not skipped downloads it without opening a window,
+and a downloaded update installs, quitting and reopening the app, the next time nobody
+is at the Mac: when the displays sleep or the session locks
+(`WallpaperPresentationPolicy.isUnattended`; an app rule or the Focus filter does not
+count). A release without a disk image still opens the update window, since it cannot
+install itself. Until it installs, the status menu offers **Restart to Update to
+x.y.z**.
+
+`AppReleaseHistoryTests` covers parsing the changelog (headings, translations, links)
+and which releases the window shows; `UpdateWindowTests` covers the language switch; `AppUpdateTests` covers the manifest's changelog,
+the plain reading About shows and that the skipped version and the automatic setting
+persist.

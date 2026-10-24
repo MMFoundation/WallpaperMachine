@@ -87,13 +87,18 @@ struct GitHubRelease: Equatable, Sendable {
     let assets: [GitHubReleaseAsset]
     /// The release body as GitHub published it, Markdown and all.
     let notes: String
+    /// The newest `CHANGELOG.md` sections in every translation, which only the update manifest
+    /// carries; empty from the API and from manifests written before it did.
+    let changelog: String
 
-    init(version: SemanticVersion, htmlURL: URL, prerelease: Bool, assets: [GitHubReleaseAsset], notes: String = "") {
+    init(version: SemanticVersion, htmlURL: URL, prerelease: Bool, assets: [GitHubReleaseAsset],
+         notes: String = "", changelog: String = "") {
         self.version = version
         self.htmlURL = htmlURL
         self.prerelease = prerelease
         self.assets = assets
         self.notes = notes
+        self.changelog = changelog
     }
 }
 
@@ -109,6 +114,9 @@ struct ReleaseNotes: Equatable, Sendable {
         let items: [String]
         /// Bullet items, as opposed to a paragraph such as a release's summary.
         var isList = false
+        /// The same items as inline Markdown, links and their issue and commit references kept,
+        /// for the update window; `items` is the plain reading About shows.
+        var markdown: [String] = []
 
         /// Feature-release highlights keep their emphasis in every notes translation.
         var isHighlights: Bool { title == "Highlights" || title == "亮点" || title == "주요 변경 사항" }
@@ -131,11 +139,15 @@ struct ReleaseNotes: Equatable, Sendable {
         var sections: [Section] = []
         var title = ""
         var items: [String] = []
+        var markdown: [String] = []
         var bullets = false
         func flush(into next: String) {
-            if !items.isEmpty { sections.append(Section(title: title, items: items, isList: bullets)) }
+            if !items.isEmpty {
+                sections.append(Section(title: title, items: items, isList: bullets, markdown: markdown))
+            }
             title = next
             items = []
+            markdown = []
         }
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -152,20 +164,31 @@ struct ReleaseNotes: Equatable, Sendable {
             // A paragraph after a list closes it; it is a remark, not another entry.
             if !items.isEmpty, isBullet != bullets { flush(into: "") }
             bullets = isBullet
-            let item = plain(isBullet ? trimmed.dropFirst(2) : trimmed[...])
-            if !item.isEmpty { items.append(item) }
+            let source = isBullet ? trimmed.dropFirst(2) : trimmed[...]
+            let item = plain(source)
+            if !item.isEmpty {
+                items.append(item)
+                markdown.append(source.trimmingCharacters(in: .whitespaces))
+            }
         }
         flush(into: "")
         return sections
     }
 
-    /// Markdown reduced to the words: the trailing commit reference goes, links keep
+    /// A trailing group of reference links, `(closes [#76](…))` or `([abc1234](…), [def5678](…))`.
+    private static let trailingReferences: String = {
+        let link = #"(?:closes )?\[(?:#[0-9]+|`?[0-9a-f]{7,40}`?)\]\([^)]*\)"#
+        return #"\s*\("# + link + #"(?:,\s*"# + link + #")*\)$"#
+    }()
+
+    /// Markdown reduced to the words: the trailing issue and commit references go, links keep
     /// their text, emphasis and code fences lose their markers.
     private static func plain(_ value: Substring) -> String {
         var text = String(value).trimmingCharacters(in: .whitespaces)
-        for pattern in [#"\s*\(\[`[0-9a-f]{7,40}`\]\([^)]*\)\)$"#, #"\s*\(`[0-9a-f]{7,40}`\)$"#] {
-            text = text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        while let range = text.range(of: trailingReferences, options: .regularExpression) {
+            text.removeSubrange(range)
         }
+        text = text.replacingOccurrences(of: #"\s*\(`[0-9a-f]{7,40}`\)$"#, with: "", options: .regularExpression)
         text = text.replacingOccurrences(of: #"\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
         text = text.replacingOccurrences(of: #"\*{1,2}([^*]+)\*{1,2}"#, with: "$1", options: .regularExpression)
         text = text.replacingOccurrences(of: "`", with: "")
@@ -286,7 +309,7 @@ enum GitHubReleaseParser {
             return GitHubReleaseAsset(name: asset.name, downloadURL: url, size: asset.size, digest: asset.digest)
         }
         return GitHubRelease(version: version, htmlURL: htmlURL, prerelease: payload.prerelease,
-                             assets: assets, notes: payload.body ?? "")
+                             assets: assets, notes: payload.body ?? "", changelog: payload.changelog ?? "")
     }
 
     /// The disk image to download: only product-named `.dmg` assets qualify, so the
@@ -308,11 +331,12 @@ enum GitHubReleaseParser {
         let prerelease: Bool
         let assets: [Asset]
         let body: String?
+        let changelog: String?
 
         enum CodingKeys: String, CodingKey {
             case tagName = "tag_name"
             case htmlURL = "html_url"
-            case prerelease, assets, body
+            case prerelease, assets, body, changelog
         }
 
         struct Asset: Decodable {

@@ -338,7 +338,7 @@ and says so:
 
 - poster synchronization restarts unless the native lock-screen provider has the desktop
   or the switch is off;
-- the control panel (and What's New) comes back if it was open, on the section it was on;
+- the control panel (and the update window) comes back if it was open, on the section it was on;
 - an alert gives the reason: the restoration error's own text (macOS is still restoring the
   desktop wallpaper, or the original could not be recovered and the user should select
   their wallpaper again in System Settings), or that restoring took too long, and that
