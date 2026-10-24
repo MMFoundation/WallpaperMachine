@@ -240,6 +240,28 @@ std::filesystem::path WriteRasterProbeScene(const std::filesystem::path& root)
     return project;
 }
 
+/// The static card grown to fill a 338 x 200 canvas in one flat colour, over a
+/// clear colour of its own. The canvas is about 1.69:1, between 16:10 and 16:9,
+/// so Fill crops it on a 16:10 surface and Fit leaves bars above and below.
+std::filesystem::path WriteFullCanvasScene(const std::filesystem::path& root)
+{
+    const auto project = WriteStaticScene(root);
+    WriteText(root / "models/card.json",
+              R"({"width":338,"height":200,"material":"materials/card.json"})");
+    WriteText(root / "shaders/card.frag",
+              "void main() {\n"
+              "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);\n"
+              "}\n");
+    WriteText(root / "layout.json",
+              R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+              R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],)"
+              R"("clearcolor":[0,0,1],"cameraparallax":false,)"
+              R"("orthogonalprojection":{"width":338,"height":200}},)"
+              R"("objects":[{"id":1,"name":"card","image":"models/card.json",)"
+              R"("origin":[169,100,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}]})");
+    return project;
+}
+
 /// The static card beside an echo card that shows the scene's previous frame
 /// through `_rt_MipMappedFrameBuffer`. The graph fills that buffer from the
 /// frame's output only after the echo has drawn, so every frame hands its
@@ -283,14 +305,15 @@ std::filesystem::path WriteHistoryScene(const std::filesystem::path& root)
 /// A running wallpaper on a layer no window owns.
 class RunningWallpaper {
 public:
-    RunningWallpaper(const std::filesystem::path& project, const std::filesystem::path& scratch)
+    RunningWallpaper(const std::filesystem::path& project, const std::filesystem::path& scratch,
+                     uint16_t width = kWidth, uint16_t height = kHeight, double scale = 1.0)
     {
         m_layer                 = [CAMetalLayer layer];
         m_layer.device          = MTLCreateSystemDefaultDevice();
         m_layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
-        m_layer.contentsScale   = 1.0;
-        m_layer.frame           = CGRectMake(0, 0, kWidth, kHeight);
-        m_layer.drawableSize    = CGSizeMake(kWidth, kHeight);
+        m_layer.contentsScale   = scale;
+        m_layer.frame           = CGRectMake(0, 0, width / scale, height / scale);
+        m_layer.drawableSize    = CGSizeMake(width, height);
 
         EXPECT_TRUE(m_wallpaper.init());
         m_wallpaper.setPropertyObject(PROPERTY_FIRST_FRAME_CALLBACK,
@@ -299,7 +322,7 @@ public:
                                           m_first_frame = true;
                                           m_changed.notify_all();
                                       }));
-        m_wallpaper.initSurface(MakeSurface());
+        m_wallpaper.initSurface(MakeSurface(width, height, scale));
 
         std::filesystem::create_directories(scratch / "assets");
         SceneWallpaperConfig config;
@@ -337,19 +360,21 @@ public:
 
     /// Rebuilds the surface and swapchain at a new size, the way the host
     /// does when the display it covers changes resolution.
-    bool Resize(uint16_t width, uint16_t height)
+    bool Resize(uint16_t width, uint16_t height, double scale = 1.0)
     {
         if (! m_wallpaper.beginSurfaceReconfigure()) return false;
-        m_layer.frame        = CGRectMake(0, 0, width, height);
-        m_layer.drawableSize = CGSizeMake(width, height);
-        return m_wallpaper.finishSurfaceReconfigure(MakeSurface(width, height));
+        m_layer.contentsScale = scale;
+        m_layer.frame         = CGRectMake(0, 0, width / scale, height / scale);
+        m_layer.drawableSize  = CGSizeMake(width, height);
+        return m_wallpaper.finishSurfaceReconfigure(MakeSurface(width, height, scale));
     }
 
 private:
     static constexpr uint16_t kWidth  = 1280;
     static constexpr uint16_t kHeight = 720;
 
-    RenderInitInfo MakeSurface(uint16_t width = kWidth, uint16_t height = kHeight)
+    RenderInitInfo MakeSurface(uint16_t width = kWidth, uint16_t height = kHeight,
+                               double scale = 1.0)
     {
         RenderInitInfo info;
         info.metal_layer      = (__bridge void*)m_layer;
@@ -357,6 +382,7 @@ private:
         info.height           = height;
         info.render_width     = width;
         info.render_height    = height;
+        info.display_scale_factor = scale;
         auto poster       = m_poster;
         info.bind_poster_wake = [poster](std::function<void()> wake) {
             std::scoped_lock lock(poster->mutex);
@@ -747,6 +773,68 @@ TEST_F(UnchangedPresent, ADrawFailureBeforeTheFirstFrameIsCountedButNotReported)
         << "the injected failure never ran";
     std::this_thread::sleep_for(400ms);
     EXPECT_EQ(probe.Reports(), 0) << "a scene that never presented called the host back";
+}
+
+// A scene moved to a display of another shape and scale (an external 16:9
+// display at 1x unplugged, its scene resized in place onto a 16:10 built-in
+// panel at 2x) is laid out for the new surface: it fills it exactly as a scene
+// opened there would, with no bars left over from the old shape.
+TEST_F(UnchangedPresent, ASceneResizedOntoADisplayOfAnotherShapeFillsItLikeAFreshOne)
+{
+    const auto project = WriteFullCanvasScene(root_ / "scene");
+    constexpr uint16_t kWidth  = 1280;
+    constexpr uint16_t kHeight = 800;
+
+    const auto poster = [](RunningWallpaper& running) {
+        running.poster().Request(true);
+        EXPECT_TRUE(running.poster().WaitDelivered(1));
+        std::scoped_lock lock(running.poster().mutex);
+        return running.poster().pixels;
+    };
+    // Red is the card, blue the clear colour and black the room outside the
+    // picture; in either byte order red and blue are the outer channels.
+    const auto is_card = [](const std::vector<uint8_t>& pixels, uint32_t x, uint32_t y) {
+        const auto* pixel = pixels.data() + (static_cast<std::size_t>(y) * kWidth + x) * 4u;
+        const bool  red   = (pixel[0] > 200 && pixel[2] < 50) || (pixel[2] > 200 && pixel[0] < 50);
+        return red && pixel[1] < 50;
+    };
+    const auto rows_of_card = [&](const std::vector<uint8_t>& pixels) {
+        std::vector<bool> rows;
+        for (uint32_t y : { 0u, 1u, 10u, 400u, 789u, 798u, 799u }) {
+            rows.push_back(is_card(pixels, 640, y) && is_card(pixels, 2, y) &&
+                           is_card(pixels, kWidth - 3, y));
+        }
+        return rows;
+    };
+
+    // Fill, the host's default, which covers the display and crops the canvas.
+    const auto fill = [](RunningWallpaper& running) {
+        running.wallpaper().setPropertyInt32(PROPERTY_SCALINGMODE,
+                                             static_cast<int32_t>(WallpaperScalingMode::FILL));
+    };
+
+    std::vector<uint8_t> fresh;
+    {
+        RunningWallpaper running(project, root_ / "fresh", kWidth, kHeight, 2.0);
+        fill(running);
+        ASSERT_TRUE(running.WaitForFirstFrame());
+        std::this_thread::sleep_for(300ms);
+        fresh = poster(running);
+    }
+    ASSERT_EQ(fresh.size(), std::size_t { kWidth } * kHeight * 4u);
+    ASSERT_EQ(rows_of_card(fresh), std::vector<bool>(7, true))
+        << "a scene opened on the 16:10 surface does not fill it";
+
+    RunningWallpaper running(project, root_ / "moved", 1920, 1080, 1.0);
+    fill(running);
+    ASSERT_TRUE(running.WaitForFirstFrame());
+    std::this_thread::sleep_for(300ms);
+    ASSERT_TRUE(running.Resize(kWidth, kHeight, 2.0));
+    std::this_thread::sleep_for(300ms);
+    const auto moved = poster(running);
+    ASSERT_EQ(moved.size(), fresh.size());
+    EXPECT_EQ(rows_of_card(moved), std::vector<bool>(7, true))
+        << "the resized scene left rows unfilled at the top or bottom";
 }
 
 namespace
