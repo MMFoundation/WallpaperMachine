@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 /// WallpaperMachine keeps imports separate from Steam's installation and never edits source wallpapers.
 enum ClientPaths {
@@ -11,7 +12,40 @@ enum ClientPaths {
             .appendingPathComponent("Library/Application Support/WallpaperMachine", isDirectory: true)
     }
 
-    static var libraryURL: URL { supportURL.appendingPathComponent("Library", isDirectory: true) }
+    /// The folder that holds the library and the downloads (`StorageLocation`): the app-support
+    /// folder unless they were moved. While a chosen folder is missing this is still that folder,
+    /// never the app-support one, so nothing fills a new library on this Mac meanwhile; `prepare`
+    /// refuses to start the library then.
+    static var storageURL: URL {
+        switch storageResolution {
+        case .support: return supportURL
+        case .chosen(let url): return url
+        case .unavailable(let location?): return location.url
+        // Nothing to name: a folder no one may write to, so nothing is created anywhere.
+        case .unavailable(nil): return URL(fileURLWithPath: "/var/empty/WallpaperMachine", isDirectory: true)
+        }
+    }
+
+    /// Read once per app-support folder (tests move it with `WALLPAPER_MACHINE_HOME`). The choice
+    /// changes only at launch, before anything reads it, and `reloadStorageLocation` follows it.
+    static var storageResolution: StorageLocation.Resolution {
+        let support = supportURL.path
+        return storageCache.withLock { cached in
+            if let cached, cached.support == support { return cached.resolution }
+            let resolution = StorageLocation.resolve(support: URL(fileURLWithPath: support, isDirectory: true))
+            cached = (support, resolution)
+            return resolution
+        }
+    }
+
+    static func reloadStorageLocation() {
+        storageCache.withLock { $0 = nil }
+    }
+
+    private static let storageCache = OSAllocatedUnfairLock<(support: String, resolution: StorageLocation.Resolution)?>(
+        initialState: nil)
+
+    static var libraryURL: URL { storageURL.appendingPathComponent("Library", isDirectory: true) }
     static var managedAssetsURL: URL { supportURL.appendingPathComponent("SceneAssets", isDirectory: true) }
     /// Where user-picked `file`/`directory` property assets are kept for good.
     ///
@@ -45,13 +79,15 @@ enum ClientPaths {
     static func steamSessionURL(in support: URL = supportURL) -> URL {
         support.appendingPathComponent("SteamSession", isDirectory: true)
     }
-    /// Partial downloads kept for later, with the queue that names them. Its sibling
-    /// `Downloads/workshop-requests.json` is tiny and stays backed up.
-    static func workshopDownloadsURL(in support: URL = supportURL) -> URL {
-        support.appendingPathComponent("Downloads/Workshop", isDirectory: true)
+    /// Partial downloads kept for later, with the queue that names them, beside the library so a
+    /// resumed download lands on its disk. `Downloads/workshop-requests.json` is tiny, stays in
+    /// app support and stays backed up.
+    static func workshopDownloadsURL(in storage: URL = storageURL) -> URL {
+        storage.appendingPathComponent("Downloads/Workshop", isDirectory: true)
     }
 
     static func prepare() throws {
+        if case .unavailable(let location) = storageResolution { throw StorageUnavailableError(location: location) }
         try FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: true)
         prepareExcludedFolders()
         installStarterWallpaper()
@@ -75,7 +111,7 @@ enum ClientPaths {
             return
         }
         guard let resource = bundle.url(forResource: "StarterWallpaper", withExtension: nil) else { return }
-        let pending = supportURL.appendingPathComponent(".starter-pending-\(UUID().uuidString)", isDirectory: true)
+        let pending = storageURL.appendingPathComponent(".starter-pending-\(UUID().uuidString)", isDirectory: true)
         defer { try? fileManager.removeItem(at: pending) }
         do {
             try fileManager.copyItem(at: resource, to: pending)

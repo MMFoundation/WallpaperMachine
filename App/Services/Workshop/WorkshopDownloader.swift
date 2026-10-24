@@ -311,8 +311,15 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         followUp: (@MainActor (URL) async throws -> String?)?,
         onDownloaded: @escaping @MainActor (URL) async throws -> Void
     ) async {
-        let staging = root.appendingPathComponent(Self.stagingPrefix + UUID().uuidString, isDirectory: true)
+        // SteamCMD's home (the restored sign-in), its private copy and its temporary files stay
+        // beside the saved sign-in, on this Mac. What it fetches goes to `root`, the disk that
+        // holds the library, so publishing it is a rename there. Usually both are one folder.
+        let name = Self.stagingPrefix + UUID().uuidString
+        let runRoot = sessionDirectory.deletingLastPathComponent()
+        let staging = runRoot.appendingPathComponent(name, isDirectory: true)
+        let content = Self.sameFolder(runRoot, root) ? staging : root.appendingPathComponent(name, isDirectory: true)
         var claim: Int32 = -1
+        var contentClaim: Int32 = -1
         var restoredRevision: UInt64?
         var finishedItem = false
         var failedRun = false
@@ -321,9 +328,15 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             // Out of backups before anything is downloaded into it.
             ClientPaths.excludeFromBackup(staging)
             claim = Self.claimStaging(staging)
+            if content != staging {
+                try FileManager.default.createDirectory(at: content, withIntermediateDirectories: false,
+                                                        attributes: [.posixPermissions: 0o700])
+                ClientPaths.excludeFromBackup(content)
+                contentClaim = Self.claimStaging(content)
+            }
             if let checkpoint = checkpointDirectory, !isSigningInOnly {
                 try await Task.detached(priority: .utility) {
-                    try WorkshopDownloadCheckpoint.restore(from: checkpoint, to: staging)
+                    try WorkshopDownloadCheckpoint.restore(from: checkpoint, to: content)
                 }.value
             }
             if rememberSession {
@@ -333,7 +346,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 }.value
             }
             try Task.checkCancellation()
-            try await ensureFreeSpace(under: root, staging: staging, label: label)
+            try await ensureFreeSpace(under: root, staging: content, label: label)
 
             var currentItem = itemID
             var followedUp = false
@@ -342,25 +355,26 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 try Task.checkCancellation()
                 // Checked again before every launch: a relaunch must not run what has changed.
                 try await runtimeProvider.validate(at: staging)
-                try launch(executable: binary, staging: staging, account: account, itemID: currentItem, claim: claim)
-                let exitStatus = try await supervise(staging: staging, account: account, rememberSession: rememberSession)
+                try launch(executable: binary, staging: staging, content: content, account: account, itemID: currentItem,
+                           claim: claim, contentClaim: contentClaim)
+                let exitStatus = try await supervise(staging: staging, content: content, account: account, rememberSession: rememberSession)
                 if let reason = failure {
                     if let delay = nextRetryDelay() {
                         prepareRetry(label: label, delay: delay)
                         if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
-                        try await ensureFreeSpace(under: root, staging: staging, label: label)
+                        try await ensureFreeSpace(under: root, staging: content, label: label)
                         continue
                     }
                     throw passFailure(reason, itemID: currentItem)
                 }
                 if exitStatus == Self.restartStatus, restarts < Self.maximumRestarts {
                     restarts += 1
-                    try await ensureFreeSpace(under: root, staging: staging, label: label)
+                    try await ensureFreeSpace(under: root, staging: content, label: label)
                     continue
                 }
                 try judgeExit(exitStatus, itemID: currentItem)
                 if let followUp, !followedUp, !fetchingPresetBase, itemID != nil,
-                   let base = try await followUp(staging) {
+                   let base = try await followUp(content) {
                     // One more item in the same session, never a chain of them.
                     followedUp = true
                     fetchingPresetBase = true
@@ -377,7 +391,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 break
             }
             try Task.checkCancellation()
-            try await onDownloaded(staging)
+            try await onDownloaded(content)
             finishedItem = true
             completedSuccessfully = true
         } catch is CancellationError {
@@ -416,8 +430,9 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             await settleSession(staging: staging, account: account, restoredRevision: restoredRevision)
         }
         let keepForLater = !finishedItem && !isSigningInOnly && (failedRun || (pauseRequested && !wasCancelled))
-        await retireStaging(staging, keepingPartialData: keepForLater && !discardPartialRequested)
+        await retireStaging(staging, content: content, keepingPartialData: keepForLater && !discardPartialRequested)
         if claim >= 0 { close(claim) }
+        if contentClaim >= 0 { close(contentClaim) }
 
         isRunning = false
         task = nil
@@ -450,7 +465,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
 
     /// Watches one SteamCMD pass every 200 ms until it ends or has to be stopped, and returns its
     /// exit status once the rest of its output has been read.
-    private func supervise(staging: URL, account: String, rememberSession: Bool) async throws -> Int32 {
+    private func supervise(staging: URL, content: URL, account: String, rememberSession: Bool) async throws -> Int32 {
         let passStarted = now()
         do {
             while true {
@@ -473,7 +488,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 if receivesNetwork, networkStarted {
                     noteTransfer(networkMonitor.bytesReceived(), on: .network)
                     bytesPerSecond = networkMonitor.rate(at: ProcessInfo.processInfo.systemUptime)
-                    sampleWorkshopDisk(in: staging)
+                    sampleWorkshopDisk(in: content)
                 }
                 if failure == nil { checkLimits(passStarted: passStarted) }
                 if failure != nil {
@@ -566,16 +581,17 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         savedAccount = Self.readSavedAccount(at: directory)
     }
 
-    /// Removes the staging folder, or first moves what a later resume needs into the checkpoint.
-    private func retireStaging(_ staging: URL, keepingPartialData: Bool) async {
+    /// Removes the staging folders, or first moves what a later resume needs into the checkpoint.
+    private func retireStaging(_ staging: URL, content: URL, keepingPartialData: Bool) async {
         let checkpoint = checkpointDirectory
         let keep = keepingPartialData ? checkpoint : nil
         let saveFailure = await Task.detached(priority: .utility) { () -> Error? in
             var failure: Error?
             if let keep {
-                do { try WorkshopDownloadCheckpoint.save(from: staging, to: keep) } catch { failure = error }
+                do { try WorkshopDownloadCheckpoint.save(from: content, to: keep) } catch { failure = error }
             }
             try? FileManager.default.removeItem(at: staging)
+            if content != staging { try? FileManager.default.removeItem(at: content) }
             return failure
         }.value
         if let saveFailure {
@@ -758,7 +774,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         await current.value
     }
 
-    private func launch(executable: URL, staging: URL, account: String, itemID: String?, claim: Int32) throws {
+    private func launch(executable: URL, staging: URL, content: URL, account: String, itemID: String?, claim: Int32,
+                        contentClaim: Int32) throws {
         var master: Int32 = -1
         var slave: Int32 = -1
         guard openpty(&master, &slave, nil, nil, nil) == 0 else {
@@ -791,7 +808,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         transferMarks = [:]
 
         let tmp = staging.appendingPathComponent("tmp", isDirectory: true)
-        let installDirectory = isInstallingAssets ? staging.appendingPathComponent("wallpaper-engine", isDirectory: true) : staging
+        let installDirectory = isInstallingAssets ? content.appendingPathComponent("wallpaper-engine", isDirectory: true) : content
         var arguments = ["-inhibitbootstrap", "+@ShutdownOnFailedCommand", "1"]
         if isInstallingAssets { arguments += ["+@sSteamCmdForcePlatformType", "windows"] }
         arguments += ["+force_install_dir", installDirectory.path, "+login", account]
@@ -817,7 +834,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             try Self.privateDirectory(tmp)
             process = try SteamCMDTerminalProcess(
                 executable: executable, arguments: arguments, workingDirectory: staging,
-                environment: environment, master: master, slave: slave, claim: claim)
+                environment: environment, master: master, slave: slave, claim: claim, contentClaim: contentClaim)
         } catch {
             close(master)
             close(slave)
@@ -1193,6 +1210,11 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// download inside it. The claim is a held lock rather than a recorded process identifier, and
     /// SteamCMD inherits it, so it stays held for as long as anything can still write here —
     /// including a child that outlived the app that started it.
+    /// Whether two paths name one folder, as a run decides if its download is kept apart.
+    nonisolated static func sameFolder(_ first: URL, _ second: URL) -> Bool {
+        first.resolvingSymlinksInPath().standardizedFileURL.path == second.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
     nonisolated private static func claimStaging(_ staging: URL) -> Int32 {
         let descriptor = open(staging.appendingPathComponent(ownerName).path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { return -1 }
@@ -1455,7 +1477,7 @@ private final class SteamCMDTerminalProcess {
     }
 
     init(executable: URL, arguments: [String], workingDirectory: URL, environment: [String: String],
-         master: Int32, slave: Int32, claim: Int32) throws {
+         master: Int32, slave: Int32, claim: Int32, contentClaim: Int32 = -1) throws {
         var actions: posix_spawn_file_actions_t?
         var attributes: posix_spawnattr_t?
         func check(_ result: Int32) throws {
@@ -1478,11 +1500,16 @@ private final class SteamCMDTerminalProcess {
         // SteamCMD keeps the staging claim alive if it outlives this process, which is what stops a
         // later launch from reclaiming a download still being written. The duplicate has to be a
         // different descriptor than the one it lands on, because dup2 onto itself does nothing and
-        // would leave the claim closing on exec; it also has to survive the closes above.
-        var inherited: Int32 = -1
-        if claim >= 0 { inherited = fcntl(claim, F_DUPFD, 20) }
-        defer { if inherited >= 0 { close(inherited) } }
-        if inherited >= 0 { try check(posix_spawn_file_actions_adddup2(&actions, inherited, 3)) }
+        // would leave the claim closing on exec; it also has to survive the closes above. A download
+        // kept beside a library on another disk has a second claim, on its content folder.
+        var inherited: [Int32] = []
+        defer { inherited.forEach { close($0) } }
+        for (descriptor, slot) in [(claim, Int32(3)), (contentClaim, Int32(4))] where descriptor >= 0 {
+            let copy = fcntl(descriptor, F_DUPFD, 20)
+            guard copy >= 0 else { continue }
+            inherited.append(copy)
+            try check(posix_spawn_file_actions_adddup2(&actions, copy, slot))
+        }
         let argv = ([executable.path] + arguments).map { strdup($0) } + [nil]
         let envp = environment.sorted(by: { $0.key < $1.key }).map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer {

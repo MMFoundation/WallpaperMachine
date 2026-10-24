@@ -326,8 +326,11 @@ The app never writes into the repository. Managed wallpapers live at
 there and leave the originals untouched. Sibling directories under
 `~/Library/Application Support/WallpaperMachine/` hold scene assets
 (`SceneAssets`), the private SteamCMD runtime (`SteamCMD`) and the optional saved
-Steam sign-in (`SteamSession`). Setting `WALLPAPER_MACHINE_HOME` relocates the
-whole tree, which is how tests stay isolated from your real library.
+Steam sign-in (`SteamSession`). Settings → Storage can move `Library` and the
+partial downloads to another folder, such as an external drive
+([library location](features/library-location.md)); everything else stays.
+Setting `WALLPAPER_MACHINE_HOME` relocates the whole tree, which is how tests stay
+isolated from your real library.
 
 ## Troubleshooting
 
