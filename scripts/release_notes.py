@@ -10,20 +10,28 @@ Two writers read the same input, the commits in the range:
 * Without it the commits are listed in English, grouped by the `type(scope): subject`
   convention the repository follows. That listing is a developer preview: it is not
   published. Documentation, test and tooling commits are counted rather than listed,
-  and an unrecognised commit lands under "Other changes", so none disappears silently.
+  and an unrecognised commit lands under "Other Changes", so none disappears silently.
+
+The layout is conventional-changelog's: `## [x.y.z](<compare link>) (YYYY-MM-DD)`, then
+`### English` / `### 简体中文` / `### 한국어` blocks with `####` categories (Features,
+Bug Fixes, ...). Every bullet ends with the issues its commits close and links to those
+commits, ` (closes [#N](...)) ([abc1234](...))`; the model names the commits, the
+script writes the links.
 
 A version's notes are written once, into its CHANGELOG.md section, when the version
-is cut. The app bundles all three languages from v1.5.7; older recorded English and
-Simplified Chinese sections remain valid. `--release-body` publishes only the English
-part and the compare link on GitHub, then adds the install footer. A hand-pushed
-tag with no section is written once, into the working tree, before the build.
-A recorded localized section is reused without another model request.
+is cut. Sections carry all three languages from v1.5.7; older recorded English and
+Simplified Chinese sections remain valid. The update manifest carries the newest
+sections, which the app's update window shows (scripts/update_manifest.py
+--changelog). `--release-body` publishes only the English part and the compare link
+on GitHub, then adds the install footer. A hand-pushed tag with no section is written
+once, into the working tree, before the build. A recorded localized section is reused
+without another model request.
 A version with a banner picture in Resources/ReleaseBanners/ (`x.y.z.jpg` or `.png`,
 and optionally Chinese `x.y.z.zh-Hans` and Korean `x.y.z.ko` pictures) gets an image
 line at the top of each language block; languages without a picture share English's.
-A `##` heading that is not `x.y.z` — `## Unreleased`, a prerelease token, or a
-heading inside the notes — stops publishing. The app rejects that whole file, so
-the heading is not kept and not dropped.
+A `##` heading that is not a version — `## Unreleased`, a prerelease token, or a
+heading inside the notes — stops publishing. The app rejects that whole changelog,
+so the heading is not kept and not dropped.
 
     python3 scripts/release_notes.py                              # English listing, not for publish
     python3 scripts/release_notes.py --ai --tag v0.6.0 --to HEAD  # trilingual notes, before the tag exists
@@ -55,7 +63,8 @@ from lib.paths import PROJECT_YML, ROOT
 
 MARK = markers()
 CHANGELOG = ROOT / "CHANGELOG.md"
-# A version's banner picture, bundled with the app and committed before the version is cut.
+# A version's banner picture, committed before the version is cut; GitHub shows it in
+# CHANGELOG.md and on the release page.
 BANNERS = Path("Resources") / "ReleaseBanners"
 BANNER_TYPES = (".png", ".jpg")
 # The file name each language block's banner takes after `x.y.z`; translations fall back to English's.
@@ -70,12 +79,20 @@ VERSION_TAG = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 BUMP_COMMIT = re.compile(r"^chore: bump version to \d+\.\d+\.\d+$")
 BREAKING_BODY = re.compile(r"^BREAKING[ -]CHANGE:", re.MULTILINE)
 MARKETING_VERSION = re.compile(r'MARKETING_VERSION:\s*"([^"]+)"')
+# GitHub's closing keywords followed by a same-repository issue: `Fixes #12`, `closes: #3`.
+CLOSING_REF = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+#(\d+)\b", re.IGNORECASE)
+# `## [x.y.z](<compare link>) (YYYY-MM-DD)`; the older `## x.y.z — YYYY-MM-DD` is still read.
+LINKED_HEADING = re.compile(r"^\[(?P<token>[^\]\n]*)\]\((?P<url>[^)\s]+)\)(?: \((?P<date>\d{4}-\d{2}-\d{2})\))?[ \t]*$")
+# Where version headings link when no repository is known (no GitHub origin remote).
+DEFAULT_REPOSITORY = "WallpaperMachine/WallpaperMachine"
 REMOTE_SLUG = re.compile(r"(?:https://github\.com/|git@github\.com:)(?P<slug>[^/]+/[^/\s]+?)(?:\.git)?/?$")
 DEPLOYMENT_TARGET = re.compile(r"MACOSX_DEPLOYMENT_TARGET:\s*\"?([\d.]+)")
 
 # One bullet, one line: past this a subject is cut at a word boundary and the linked
 # commit carries the rest.
 SUBJECT_LIMIT = 140
+# A commit's link text, conventional-changelog's short hash.
+SHORT_HASH = 7
 
 # Boundary between the notes the in-app updater shows and the download instructions
 # that belong only to the release page. App/Services/GitHub reads the same marker.
@@ -85,7 +102,7 @@ FIELD = "\x1f"
 RECORD = "\x1e"
 
 # Where a commit type is reported. A type that is absent is user-visible by
-# default: an unrecognised commit is listed under "Other changes", never hidden.
+# default: an unrecognised commit is listed under "Other Changes", never hidden.
 GROUPS = {
     "feat": "features",
     "fix": "fixes",
@@ -99,12 +116,13 @@ GROUPS = {
     "style": "internal",
     "refactor": "internal",
 }
+# Listed commit groups -> the category they share with the model's notes.
 SECTIONS = (
-    ("breaking", "Breaking changes"),
-    ("features", "New"),
-    ("fixes", "Fixed"),
-    ("performance", "Performance"),
-    ("other", "Other changes"),
+    ("breaking", "breaking"),
+    ("features", "new"),
+    ("fixes", "fixed"),
+    ("performance", "performance"),
+    ("other", "other"),
 )
 
 CHANGELOG_PREAMBLE = """\
@@ -113,12 +131,14 @@ CHANGELOG_PREAMBLE = """\
 Every published version, newest first. Each section is written when its version is
 cut, by [`scripts/release_notes.py`](scripts/release_notes.py) from the commits
 between two version tags: a language model writes them up for users, where older
-sections list the commits. From 1.5.7, each section states the same notes in English,
-Simplified Chinese and Korean; earlier sections keep their original translations.
-The app's What's New window offers all three languages, with English as the fallback
-for older releases without Korean notes. The GitHub Release body repeats only the
-English notes. See
-[docs/release.md](docs/release.md) for how a version is cut.
+sections list the commits. A section's heading links the version to its comparison
+with the previous one and gives the release date. Under it, the same notes in English,
+Simplified Chinese and Korean (from 1.5.7; earlier sections keep their original
+translations) are grouped into Features, Bug Fixes and the other categories, and
+newer bullets end with the issues they close and the commits they describe. The
+app's update window shows the sections of every version newer than the installed
+one, in the app's language; the GitHub Release body repeats only the English notes.
+See [docs/release.md](docs/release.md) for how a version is cut.
 
 """
 
@@ -150,32 +170,37 @@ TRAILER = re.compile(r"^(?:(?:co-authored-by|signed-off-by|reviewed-by|claude-se
                      re.IGNORECASE | re.MULTILINE)
 MODEL_SECTIONS = (
     ("highlights", "Highlights"),
-    ("breaking", "Breaking changes"),
-    ("new", "New"),
-    ("improved", "Improved"),
-    ("fixed", "Fixed"),
+    ("breaking", "Breaking Changes"),
+    ("new", "Features"),
+    ("improved", "Improvements"),
+    ("fixed", "Bug Fixes"),
 )
-# Category headings inside a language block. Chinese names match the panel's
-# existing translations where it has them; Improved has no panel key, so 改进.
+# Category headings inside a language block, conventional-changelog's names. The
+# model writes the first five; performance and other appear only in commit listings
+# and older sections.
 LANGUAGE_HEADINGS = {
-    "english": {key: heading for key, heading in MODEL_SECTIONS},
+    "english": {**dict(MODEL_SECTIONS), "performance": "Performance Improvements", "other": "Other Changes"},
     "chinese": {
         "highlights": "亮点",
         "breaking": "不兼容变更",
-        "new": "新增",
+        "new": "新功能",
         "improved": "改进",
-        "fixed": "修复",
+        "fixed": "问题修复",
+        "performance": "性能改进",
+        "other": "其他变更",
     },
     "korean": {
         "highlights": "주요 변경 사항",
         "breaking": "호환되지 않는 변경 사항",
         "new": "새로운 기능",
         "improved": "개선 사항",
-        "fixed": "수정됨",
+        "fixed": "버그 수정",
+        "performance": "성능 개선",
+        "other": "기타 변경 사항",
     },
 }
 LANGUAGE_BLOCKS = (("english", "English"), ("chinese", "简体中文"), ("korean", "한국어"))
-# Shared version boundary with the app's bundled release-history validation.
+# Shared version boundary with the app's release-history validation.
 KOREAN_NOTES_VERSION = (1, 5, 7)
 CJK = re.compile(r"[\u4e00-\u9fff]")
 HANGUL = re.compile(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]")
@@ -188,7 +213,7 @@ browses and downloads Steam Workshop items and holds the settings. The panel shi
 in English, Simplified Chinese (简体中文) and Korean (한국어).
 
 You turn the commits of one release into the notes users read on the GitHub release \
-page, in CHANGELOG.md and in the app's What's New window. Write each note three times: \
+page, in CHANGELOG.md and in the app's update window. Write each note three times: \
 once in English, once in Simplified Chinese, once in Korean. All three say the same thing.
 
 Rules:
@@ -242,11 +267,15 @@ only way a video wallpaper plays (a format they cannot play is refused with its 
 format named), not an option either. Every language keeps \
 the same qualifier: optional / 可选 / 선택 사항, experimental / 实验性 / 실험적, \
 off by default / 默认关闭 / 기본적으로 꺼짐.
+- commits: every bullet names the commits it describes, by the short hash each commit \
+line of the user turn starts with, at least one. A bullet that merges several commits \
+names all of them. Name only commits of this release. The summary names none.
 
 Reply with only a JSON object, no prose and no code fence, with exactly these keys:
-{"summary": {"english": string, "chinese": string, "korean": string}, "highlights": [{"english": string, "chinese": string, "korean": string}], "breaking": [{"english": string, "chinese": string, "korean": string}], "new": [{"english": string, "chinese": string, "korean": string}], "improved": [{"english": string, "chinese": string, "korean": string}], "fixed": [{"english": string, "chinese": string, "korean": string}]}
-Use an empty list for a section with nothing in it. Do not write headings; the \
-script adds them."""
+{"summary": {"english": string, "chinese": string, "korean": string}, "highlights": [BULLET], "breaking": [BULLET], "new": [BULLET], "improved": [BULLET], "fixed": [BULLET]}
+where each BULLET is {"english": string, "chinese": string, "korean": string, "commits": [string]}.
+Use an empty list for a section with nothing in it. Do not write headings, links, \
+issue numbers or hashes into the text; the script adds them from commits."""
 
 
 class NotesError(Exception):
@@ -254,12 +283,33 @@ class NotesError(Exception):
 
 
 class Change(NamedTuple):
-    """One commit, already classified for the section it belongs to."""
+    """One commit, already classified for the section it belongs to.
+
+    `sha` is the full hash when it comes from git; `closes` holds the issue numbers the
+    commit message closes.
+    """
 
     group: str
     scope: str
     subject: str
     sha: str
+    closes: tuple = ()
+
+
+class Commit(NamedTuple):
+    """One commit of the range: full and abbreviated hash, subject and body."""
+
+    sha: str
+    short: str
+    subject: str
+    body: str
+
+
+class Bullet(NamedTuple):
+    """One model-written change: its text per language and the commits it describes."""
+
+    texts: dict
+    commits: tuple
 
 
 def git(*args, cwd=ROOT):
@@ -325,15 +375,19 @@ def previous_tag(version, revision, cwd=ROOT, tags=None):
 
 
 def commits(previous, revision, cwd=ROOT):
-    """`(sha, subject, body)` for every non-merge commit in the range, newest first."""
+    """A `Commit` for every non-merge commit in the range, newest first."""
     span = f"{previous}..{revision}" if previous else revision
-    raw = git("log", "--no-merges", f"--format=%h{FIELD}%s{FIELD}%b{RECORD}", span, cwd=cwd)
+    raw = git("log", "--no-merges", f"--format=%H{FIELD}%h{FIELD}%s{FIELD}%b{RECORD}", span, cwd=cwd)
     for record in raw.split(RECORD):
         record = record.strip("\n")
         if not record:
             continue
-        sha, subject, body = record.split(FIELD, 2)
-        yield sha, subject, body
+        yield Commit(*record.split(FIELD, 3))
+
+
+def closing_refs(message):
+    """Issue numbers a commit message closes with GitHub's keywords, ascending."""
+    return tuple(sorted({int(number) for number in CLOSING_REF.findall(message or "")}))
 
 
 def sentence(text):
@@ -353,51 +407,82 @@ def classify(sha, subject, body=""):
     """The change a commit contributes, or None when it only records the release itself."""
     if BUMP_COMMIT.match(subject.strip()):
         return None
+    closes = closing_refs(f"{subject}\n{body or ''}")
     match = CONVENTIONAL.match(subject.strip())
     if not match:
-        return Change("other", "", sentence(subject), sha)
+        return Change("other", "", sentence(subject), sha, closes)
     breaking = bool(match.group("breaking")) or bool(BREAKING_BODY.search(body or ""))
     group = "breaking" if breaking else GROUPS.get(match.group("type"), "other")
-    return Change(group, (match.group("scope") or "").strip(), sentence(match.group("subject")), sha)
+    return Change(group, (match.group("scope") or "").strip(), sentence(match.group("subject")), sha, closes)
 
 
 def changes(previous, revision, cwd=ROOT):
     collected = []
-    for sha, subject, body in commits(previous, revision, cwd):
-        change = classify(sha, subject, body)
+    for entry in commits(previous, revision, cwd):
+        change = classify(entry.sha, entry.subject, entry.body)
         if change is not None:
             collected.append(change)
     return collected
 
 
 def group_changes(collected):
-    """Section key -> its changes, newest first, with repeated wording collapsed."""
+    """Section key -> its bullets, newest first, each a list of the changes it stands for.
+
+    Repeated wording collapses into one bullet that links every commit behind it.
+    """
     grouped = {}
-    seen = set()
+    bullets = {}
     for change in collected:
         key = (change.group, change.scope, change.subject.lower())
-        if key in seen:
+        if key in bullets:
+            bullets[key].append(change)
             continue
-        seen.add(key)
-        grouped.setdefault(change.group, []).append(change)
+        bullets[key] = [change]
+        grouped.setdefault(change.group, []).append(bullets[key])
     return grouped
 
 
+def issue_link(number, repo=None):
+    return f"[#{number}](https://github.com/{repo}/issues/{number})" if repo else f"#{number}"
+
+
 def commit_link(sha, repo=None):
-    return f"[`{sha}`](https://github.com/{repo}/commit/{sha})" if repo else f"`{sha}`"
+    short = sha[:SHORT_HASH]
+    return f"[{short}](https://github.com/{repo}/commit/{sha})" if repo else short
 
 
-def bullet(change, repo=None):
-    scope = f"**{change.scope}** — " if change.scope else ""
-    return f"- {scope}{change.subject} ({commit_link(change.sha, repo)})"
+def link_suffix(shas, closes, repo=None):
+    """What every bullet ends with, in every language: ` (closes [#N](…)) ([abc1234](…))`.
+
+    The issues part appears only when one of the commits closes an issue.
+    """
+    suffix = ""
+    issues = sorted(set(closes))
+    if issues:
+        suffix += " (" + ", ".join(f"closes {issue_link(number, repo)}" for number in issues) + ")"
+    shas = list(dict.fromkeys(shas))
+    if shas:
+        suffix += " (" + ", ".join(commit_link(sha, repo) for sha in shas) + ")"
+    return suffix
 
 
-def compare_link(previous, tag, repo):
+def bullet(changes_behind, repo=None):
+    """One listed bullet for the changes that share its wording; a single Change works too."""
+    if isinstance(changes_behind, Change):
+        changes_behind = [changes_behind]
+    first = changes_behind[0]
+    scope = f"**{first.scope}** — " if first.scope else ""
+    closes = [number for change in changes_behind for number in change.closes]
+    return f"- {scope}{first.subject}{link_suffix([change.sha for change in changes_behind], closes, repo)}"
+
+
+def compare_url(previous, tag, repo):
+    """The comparison with the previous version, or the commit list of a first release."""
     if not repo:
         return None
     if previous:
-        return f"**Full changelog**: https://github.com/{repo}/compare/{previous}...{tag}"
-    return f"**Full changelog**: https://github.com/{repo}/commits/{tag}"
+        return f"https://github.com/{repo}/compare/{previous}...{tag}"
+    return f"https://github.com/{repo}/commits/{tag}"
 
 
 def banner_path(version, root=ROOT, code="english"):
@@ -482,9 +567,11 @@ def install_footer(version, target=None, built_from=None):
     return "\n".join(lines)
 
 
-def release_body(notes, version, built_from=None, repo=None):
+def release_body(notes, version, built_from=None, repo=None, compare=None):
     """What GitHub shows: the banner, English notes, the compare link, then the install footer.
 
+    `compare` is the comparison the version's changelog heading links; notes recorded
+    in the older layout carry it as a `**Full changelog**` line instead.
     The banner is read from the version's tag, because the page is not served from the
     repository; without a repository there is no address for it, and it is left out.
     """
@@ -499,32 +586,33 @@ def release_body(notes, version, built_from=None, repo=None):
 
     english = BANNER.sub(published, english)
     parts = [f"### English\n\n{english.strip()}"]
-    parts.extend(line for line in validated.splitlines()
-                 if line.startswith("**Full changelog**:") and line not in english.splitlines())
+    if compare:
+        parts.append(f"**Full changelog**: {compare}")
+    else:
+        parts.extend(line for line in validated.splitlines()
+                     if line.startswith("**Full changelog**:") and line not in english.splitlines())
     parts.append(install_footer(version, deployment_target(), built_from))
     return "\n\n".join(parts) + "\n"
 
 
 def render(version, collected, previous=None, repo=None, internal_label=True):
-    """The listed notes for one version: sections, an internal-work count, a compare link."""
-    tag = f"v{display_version(version)}"
+    """The listed notes for one version: an English block of `####` categories and an
+    internal-work count. The section heading carries the compare link."""
     grouped = group_changes(collected)
     parts = []
-    for key, heading in SECTIONS:
+    for key, category in SECTIONS:
         entries = grouped.get(key)
         if not entries:
             continue
-        parts.append(f"### {heading}\n\n" + "\n".join(bullet(change, repo) for change in entries))
+        heading = LANGUAGE_HEADINGS["english"][category]
+        parts.append(f"#### {heading}\n\n" + "\n".join(bullet(entry, repo) for entry in entries))
     internal = len(grouped.get("internal", ()))
     if not parts:
         parts.append(nothing_to_say(previous))
     elif internal and internal_label:
         noun = "commit" if internal == 1 else "commits"
         parts.append(f"Plus {internal} documentation, test and tooling {noun}.")
-    link = compare_link(previous, tag, repo)
-    if link:
-        parts.append(link)
-    return "\n\n".join(parts).strip() + "\n"
+    return "### English\n\n" + "\n\n".join(parts).strip() + "\n"
 
 
 # --- Written by the release-notes model ---------------------------------------------
@@ -576,7 +664,8 @@ def is_feature_release(version, previous=None):
 def model_prompt(version, previous, entries):
     """The user turn: the release, then its commits newest first.
 
-    `entries` holds `(sha, subject, body, internal)`. Internal commits bring only their
+    `entries` holds `(short hash, subject, body, internal)`; the model cites the hash.
+    Internal commits bring only their
     subject, which is enough to leave them out; the others bring their body too, cut
     at BODY_LIMIT, until BODIES_BUDGET characters of bodies are spent. A squash merge
     brings every commit it lists the same way, so a long one loses none of them.
@@ -696,11 +785,15 @@ def require_translations(texts, label):
         raise NotesError(f"Release notes {label} repeat a language as another translation")
 
 
-def parse_translations(value, label):
-    """A language-keyed string object, or None when all three translations are empty."""
+def parse_translations(value, label, extra=()):
+    """A language-keyed string object, or None when all three translations are empty.
+
+    `extra` names the other keys the object must carry; they are not read here.
+    """
     codes = {code for code, _ in LANGUAGE_BLOCKS}
-    if not isinstance(value, dict) or set(value) != codes:
-        raise NotesError(f"The release-notes model's {label} must be english, chinese and korean text")
+    if not isinstance(value, dict) or set(value) != codes | set(extra):
+        fields = "english, chinese and korean text" + "".join(f" and {name}" for name in extra)
+        raise NotesError(f"The release-notes model's {label} must be {fields}")
     texts = {code: language_text(value[code], f"{label}.{code}").rstrip(".。") for code, _ in LANGUAGE_BLOCKS}
     if not any(texts.values()):
         return None
@@ -708,11 +801,34 @@ def parse_translations(value, label):
     return texts
 
 
-def parse_notes(text):
+def cited_commits(value, available, label):
+    """The commits a bullet names, resolved against the range, in the order given.
+
+    Each entry is a hash prefix of a commit in `available`; an empty or non-list value,
+    a hash that matches no commit or more than one stops the run.
+    """
+    if not isinstance(value, list) or not value:
+        raise NotesError(f"The release-notes model's {label}.commits must list the commits the bullet describes")
+    resolved = []
+    for cited in value:
+        prefix = cited.strip().lower() if isinstance(cited, str) else ""
+        if not re.fullmatch(r"[0-9a-f]{4,40}", prefix):
+            raise NotesError(f"The release-notes model's {label}.commits holds {cited!r}, not a commit hash")
+        matches = [entry for entry in available if entry.sha.lower().startswith(prefix)]
+        if len(matches) != 1:
+            problem = "matches no commit of this release" if not matches else "names more than one commit"
+            raise NotesError(f"The release-notes model's {label}.commits: {cited!r} {problem}")
+        if matches[0] not in resolved:
+            resolved.append(matches[0])
+    return tuple(resolved)
+
+
+def parse_notes(text, available=()):
     """The model's JSON reply as language-keyed summary and section bullets, checked.
 
     Missing sections are empty. Summary and every bullet require English, Simplified
     Chinese and Korean strings; a missing language or incorrect script stops the run.
+    Every bullet names the commits of `available` it describes.
     """
     reply = text.strip()
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", reply, re.DOTALL)
@@ -733,9 +849,11 @@ def parse_notes(text):
             raise NotesError(f"The release-notes model's {key!r} is not a list of translated bullets")
         bullets = []
         for index, item in enumerate(items):
-            translations = parse_translations(item, f"{key}[{index}]")
+            label = f"{key}[{index}]"
+            translations = parse_translations(item, label, extra=("commits",))
+            cited = cited_commits(item["commits"], available, label)
             if translations:
-                bullets.append(translations)
+                bullets.append(Bullet(translations, cited))
         notes[key] = bullets
     return notes
 
@@ -744,13 +862,19 @@ def empty_notes():
     return {"summary": {code: "" for code, _ in LANGUAGE_BLOCKS}, **{key: [] for key, _ in MODEL_SECTIONS}}
 
 
-def render_language(code, heading, notes, previous, banner=None):
+def bullet_suffix(item, repo=None):
+    """The issue and commit links a model-written bullet ends with."""
+    closes = [number for entry in item.commits for number in closing_refs(f"{entry.subject}\n{entry.body}")]
+    return link_suffix([entry.sha for entry in item.commits], closes, repo)
+
+
+def render_language(code, heading, notes, previous, banner=None, repo=None):
     """One language block: its banner, optional summary, then `####` categories, or the empty line."""
     parts = [banner] if banner else []
     if notes["summary"][code]:
         parts.append(notes["summary"][code])
     for key, _ in MODEL_SECTIONS:
-        items = [item[code] for item in notes[key] if item[code]]
+        items = [f"{item.texts[code]}{bullet_suffix(item, repo)}" for item in notes[key] if item.texts[code]]
         if items:
             parts.append(f"#### {LANGUAGE_HEADINGS[code][key]}\n\n" + "\n".join(f"- {item}" for item in items))
     if len(parts) == (1 if banner else 0):
@@ -762,21 +886,20 @@ def render_language(code, heading, notes, previous, banner=None):
 def render_model_notes(version, notes, previous=None, repo=None, banners=None):
     """Trilingual notes: English, 简体中文, then 한국어; categories at `####`.
 
-    `banners` maps a language to the image line its block opens with. The compare link
-    follows all blocks, outside each language's prose.
+    `banners` maps a language to the image line its block opens with. Every bullet
+    ends with the same issue and commit links in all three languages; the compare
+    link belongs to the section heading.
     """
     banners = banners or {}
-    parts = [render_language(code, heading, notes, previous, banners.get(code)) for code, heading in LANGUAGE_BLOCKS]
-    link = compare_link(previous, f"v{display_version(version)}", repo)
-    if link:
-        parts.append(link)
+    parts = [render_language(code, heading, notes, previous, banners.get(code), repo)
+             for code, heading in LANGUAGE_BLOCKS]
     return "\n\n".join(parts).strip() + "\n"
 
 
 def language_blocks(text):
     """Language-keyed spans in English / 简体中文 [/ 한국어] order, or None.
 
-    A trailing compare link stays in the final span; prose consumers ignore it.
+    A trailing compare link (older sections) stays in the final span; prose consumers ignore it.
     Duplicate, unknown or misordered `###` headings are never accepted.
     """
     body = text.split(NOTES_END, 1)[0]
@@ -832,13 +955,21 @@ def require_localized_notes(text, version):
 def bundled_heading_version(line):
     """The `x.y.z` `AppReleaseHistory` accepts for this `##` line, or None.
 
-    Swift takes the first token after `## ` and parses a semantic version:
-    optional `v`/`V`, three numeric components, no leading zeros. `## Unreleased`
-    and a `## ` line inside notes are not versions.
+    The heading is `## [x.y.z](<compare link>) (YYYY-MM-DD)`, or the older
+    `## x.y.z — YYYY-MM-DD`, whose first token is the version. Swift parses a
+    semantic version: optional `v`/`V`, three numeric components, no leading zeros.
+    `## Unreleased` and a `## ` line inside notes are not versions.
     """
     if not line.startswith("## "):
         return None
-    token = line[3:].lstrip(" ").split(" ", 1)[0].strip()
+    rest = line[3:].lstrip(" ")
+    if rest.startswith("["):
+        linked = LINKED_HEADING.match(rest.rstrip("\n"))
+        if not linked:
+            return None
+        token = linked.group("token")
+    else:
+        token = rest.split(" ", 1)[0].strip()
     token = token[1:] if token[:1] in "vV" else token
     numbers = token.split(".")
     if len(numbers) != 3 or any(
@@ -853,10 +984,11 @@ def bundled_heading_version(line):
 def require_bundled_history(text, root=ROOT):
     """Refuse a changelog `AppReleaseHistory` cannot parse.
 
-    Every `## ` line is a release heading. One that is not `x.y.z` fails the whole
-    file in the app, so publishing must fail here rather than keep or drop it.
+    The update manifest carries the newest sections to the app's update window. Every
+    `## ` line is a release heading; one that is not a version fails the whole
+    changelog in the app, so publishing must fail here rather than keep or drop it.
     Localized notes are validated against each section's version; every named banner
-    must also exist under `root` so the app can bundle it.
+    must also exist under `root`, where GitHub serves it from.
     """
     seen = set()
     for entry in split_sections(text or "")[1]:
@@ -880,12 +1012,15 @@ def require_bundled_history(text, root=ROOT):
 
 def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport=None, environ=None):
     """Notes the release-notes model writes from the commits in the range. A range with
-    no commits is reported in all three languages without a request."""
+    no commits is reported in all three languages without a request. The model names
+    each bullet's commits; their issue and commit links are added here."""
     entries = []
-    for sha, subject, body in commits(previous, revision, cwd):
-        change = classify(sha, subject, body)
+    available = []
+    for entry in commits(previous, revision, cwd):
+        change = classify(entry.sha, entry.subject, entry.body)
         if change is not None:
-            entries.append((sha, " ".join(subject.split()), body, change.group == "internal"))
+            available.append(entry)
+            entries.append((entry.short, " ".join(entry.subject.split()), entry.body, change.group == "internal"))
     banners = {code: banner_line(version, cwd, code) for code, _ in LANGUAGE_BLOCKS}
     if not entries:
         return render_model_notes(version, empty_notes(), previous, repo, banners)
@@ -898,7 +1033,7 @@ def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport
         "messages": [{"role": "user", "content": model_prompt(version, previous, entries)}],
     }
     text = streamed_text((transport or stream)(url, key, payload))
-    return render_model_notes(version, parse_notes(text), previous, repo, banners)
+    return render_model_notes(version, parse_notes(text, available), previous, repo, banners)
 
 
 def notes_for(version, previous, revision, repo=None, ai=False, cwd=ROOT, transport=None, environ=None):
@@ -908,7 +1043,7 @@ def notes_for(version, previous, revision, repo=None, ai=False, cwd=ROOT, transp
 
 
 def published_notes(version, previous, revision, repo, changelog_text, day, ai=False, cwd=ROOT, transport=None, environ=None):
-    """Localized source notes and the changelog text the build must bundle.
+    """Localized source notes and the changelog text the update manifest must carry.
 
     A recorded localized section is returned unchanged and the model is not called.
     A missing section is written once, with `--ai`, and inserted before the build.
@@ -928,7 +1063,8 @@ def published_notes(version, previous, revision, repo, changelog_text, day, ai=F
         )
     notes = notes_for(version, previous, revision, repo, ai=True, cwd=cwd, transport=transport, environ=environ)
     require_localized_notes(notes, version)
-    updated = insert_section(changelog_text or CHANGELOG_PREAMBLE, version, section(version, day, notes))
+    entry = section(version, day, notes, previous, repo)
+    updated = insert_section(changelog_text or CHANGELOG_PREAMBLE, version, entry)
     require_bundled_history(updated, root=cwd)
     stored = recorded_notes(updated, version)
     if stored is None or stored.strip() != notes.strip():
@@ -947,8 +1083,15 @@ def tag_date(tag, cwd=ROOT):
         return date.today().isoformat()
 
 
-def section(version, day, body):
-    return f"## {display_version(version)} — {day}\n\n{body.strip()}\n\n"
+def heading(version, day, previous=None, repo=None):
+    """`## [x.y.z](<compare link>) (YYYY-MM-DD)`, linking the comparison with `previous`."""
+    number = display_version(version)
+    url = compare_url(previous, f"v{number}", repo or DEFAULT_REPOSITORY)
+    return f"## [{number}]({url}) ({day})"
+
+
+def section(version, day, body, previous=None, repo=None):
+    return f"{heading(version, day, previous, repo)}\n\n{body.strip()}\n\n"
 
 
 def split_sections(text):
@@ -962,6 +1105,16 @@ def split_sections(text):
 
 def section_version(text):
     return bundled_heading_version(text.partition("\n")[0])
+
+
+def recorded_link(text, version):
+    """The compare link `version`'s section heading carries, or None (older headings carry none)."""
+    target = version_key(version)
+    for item in split_sections(text or "")[1]:
+        if section_version(item) == target:
+            linked = LINKED_HEADING.match(item.partition("\n")[0][3:].lstrip(" "))
+            return linked.group("url") if linked else None
+    return None
 
 
 def recorded_notes(text, version):
@@ -1010,7 +1163,8 @@ def rebuild_changelog(repo=None, cwd=ROOT, recorded=""):
     for position in range(len(tags) - 1, -1, -1):
         tag = tags[position]
         earlier = tags[position - 1] if position else None
-        body += kept.get(version_key(tag)) or section(tag, tag_date(tag, cwd), render(tag, changes(earlier, tag, cwd), earlier, repo))
+        body += kept.get(version_key(tag)) or section(
+            tag, tag_date(tag, cwd), render(tag, changes(earlier, tag, cwd), earlier, repo), earlier, repo)
     return body.rstrip("\n") + "\n"
 
 
@@ -1035,7 +1189,7 @@ def main(argv=None):
     parser.add_argument("--ai", action="store_true",
                         help=f"Have the release-notes model write English, Simplified Chinese and Korean (needs {API_KEY_VARIABLE}). Without it, commits are listed in English and are not published.")
     parser.add_argument("--release-body", action="store_true",
-                        help="The release page: only the English notes and compare link from the localized CHANGELOG.md section (generated once when missing), plus the install footer.")
+                        help="The release page: only the English notes from the localized CHANGELOG.md section (generated once when missing), its compare link and the install footer.")
     parser.add_argument("--built-from", help="Revision the disk image was built from; recorded in the footer.")
     parser.add_argument("--output", help="Write the notes here instead of stdout.")
     parser.add_argument("--changelog", action="store_true", help="Write this version's localized section into CHANGELOG.md.")
@@ -1072,13 +1226,14 @@ def main(argv=None):
             CHANGELOG.write_text(updated, encoding="utf-8")
             print(f"{MARK.ok} Wrote localized notes for {version} into {CHANGELOG.relative_to(ROOT)} before publish", file=sys.stderr)
         recorded = notes
-        body = release_body(notes, version, args.built_from, repo)
+        compare = recorded_link(updated, version) or compare_url(earlier, f"v{version}", repo)
+        body = release_body(notes, version, args.built_from, repo, compare)
     else:
         if args.changelog:
             require_bundled_history(existing)
         notes = notes_for(version, earlier, revision, repo, ai=args.ai)
-        body = notes
-        updated = insert_section(existing, version, section(version, day, notes))
+        body = section(version, day, notes, earlier, repo)
+        updated = insert_section(existing, version, body)
 
     if args.changelog and not args.release_body:
         require_localized_notes(notes, version)

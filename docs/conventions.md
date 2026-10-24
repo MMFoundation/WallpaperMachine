@@ -279,9 +279,13 @@ The rules that bind every change:
   `fix`, `perf` and breaking commits arrive with their body, `docs`, `test`,
   `chore`, `ci`, `build`, `style` and `refactor` with their subject only, as internal work to
   leave out. The subject and body are therefore what users end up reading on the
-  release page and in the app's What's new card, so write them for users. Without
+  release page and in the app's update window, so write them for users. Without
   `--ai` the same script lists the commits by type instead. See
   [release.md](release.md#release-notes-and-the-changelog).
+- A commit that resolves an issue says so in its body with one of GitHub's closing
+  keywords, `Closes #76` (or `Fixes #76`, `Resolves #76`): GitHub closes the issue
+  when it reaches `main`, and every changelog bullet built from that commit links the
+  issue as `(closes #76)`. Name only issues of this repository.
 - Pull request titles follow the same format. Squash-merging a PR with several
   commits makes its title the commit subject, so an untyped title such as
   `Discover fixes and new tabs` reaches the release notes without a type. When a squash body lists several
