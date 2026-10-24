@@ -137,9 +137,10 @@ development run with its own home) sends nothing, and hosted unit tests start no
 services at all.
 
 The website adds the counts up per day, version and build kind and keeps nothing
-else: each day's `ping`s only for two days, to recognise retries, and the totals for
-400 days. The maintainer's page shows yesterday, today so far, the average day, this
-and last month, a bar per day and the last 13 months. The version and Apple-chip
+else: each day's `ping`s only for two days, to recognise retries, and the totals with
+no age limit. The maintainer's page shows yesterday, today so far, the average day, this
+and last month, a bar per day and the last 13 months, or every month under All
+time. The version and Apple-chip
 filters do not apply to it, since the count carries neither a chip nor anything that
 ties a later report to it.
 
@@ -155,7 +156,7 @@ The Worker:
 - validates every field against the same contract and drops rows that fail;
 - stores the UTC day it received the report, never the time and never the IP;
 - keeps one report per install per day;
-- deletes rows older than 180 days.
+- keeps reports with no age limit, until the install asks for their deletion.
 
 The data is kept in its own D1 database, `wallpapermachine-telemetry`, separate from
 accounts so it can never be joined to them. A maintainer (the website's `OWNER_EMAIL`)
