@@ -54,13 +54,23 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
   without visiting it; the newer frame wins whatever order encodes finish in;
   late frames and encodes from another Space or an old layer are rejected; a
   frame identical to the poster is neither encoded nor written.
-- Capture timing: a Space change applies the existing poster at once and asks for
-  a fresh frame only when the poster is older than the freshness floor or was
-  taken before the wallpaper settled (displays judged separately; Space-scoped
-  posters, a backwards clock and a frame that failed to encode never count as
-  fresh); a resume retakes only such displays; settling captures after a new
-  wallpaper; periodic captures only while enabled and regardless of the floor;
-  later captures skip displays that are not presenting.
+- Capture timing: an animated wallpaper gets new poster files only as a new or
+  changed wallpaper settles, not through hours of Space changes, wakes, resumes,
+  `refresh(capture: .unsettled)` calls and renderers that start again; a snapshot
+  passed to `snapshotApplied` retakes every poster only when its `DesktopPosterLayout`
+  differs from the last one, and that layout stays equal when frame rates, volume,
+  mute or titles change and differs for a display's wallpaper, mirror target,
+  scaling, scaling factor, enabled state, mode, screen size or scale, and the
+  wallpapers' files; a frame dropped for another request's context still answers
+  its request; a Space change
+  applies the existing poster at once and asks for a fresh frame only when the
+  poster has not settled (displays judged separately; Space-scoped posters, a frame
+  a paused display answered with and a frame that failed to encode never settle it),
+  however long ago a settled one was taken; a Space change or snapshot during
+  settling leaves the capture to the settle sequence; a resume retakes only displays
+  without a settled poster; a frame nobody asked for never replaces a settled poster
+  and settles a new surface like a new wallpaper; periodic captures only while
+  enabled; later captures skip displays that are not presenting.
 - Unsaved looks: a display that draws property edits nobody applied is asked for
   nothing by a new wallpaper, a settle capture or a Space change, a frame already on
   its way is dropped, the poster stays the saved look, and it is retaken once the
@@ -99,7 +109,9 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
 
 Not covered: what Mission Control actually shows and its refresh latency, and
 macOS accepting or restoring native selections. Both are on
-[manual-smoke.md](manual-smoke.md). Behavior: [desktop picture](../features/desktop-picture.md).
+[manual-smoke.md](manual-smoke.md). Nor is `AppDelegate`'s wiring: that every engine
+snapshot reaches `snapshotApplied`, and that `desktopPosterLayout()` fills the layout
+from the store's snapshots and `NSScreen`. Behavior: [desktop picture](../features/desktop-picture.md).
 
 ### Wallpaper activation
 

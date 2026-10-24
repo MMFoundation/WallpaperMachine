@@ -282,7 +282,7 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 |---|---|---|
 | `Appearance/` | `AppThemePreferences`, `AppThemeStore` | Mode/accent/tone/icon preferences shared by AppKit and the panel |
 | `Automation/` | `AutomationCommand`, `AppAutomation`, `HotKeyPreferences`, `GlobalHotKeys`, `WallpaperFocusFilter`, `WallpaperAutomationStore/Planner/Scheduler/Controller`, `WallpaperSolarTimes`, App Intents in `WallpaperIntents.swift` and `WallpaperConfigurationIntents.swift` | Explicit commands through `AppDelegate.performAutomation`; per-display weekday/solar/appearance rules and temporary Focus choices through the shared command queue; see [features/automation.md](features/automation.md) |
-| `Desktop/` | `DesktopSpaceWallpaperAPI`, `DesktopWallpaperLedger`, `DesktopWallpaperSync`, `DesktopSpacePosterCache`, `WallpaperSpaceMonitor`, `WallpaperSpacePinning`, `WallpaperSpaceParking`, `WallpaperPresentationPolicy`, `WallpaperCoverageProbes`, `WallpaperWindowAuditor`, `DesktopWindowObservation`, `SystemWakeRevalidator`, `PlaybackPreferences`, `AppRuleMonitor`, `OtherAudioMonitor`, `ActiveDisplayTracker`, `SystemConditionMonitor`, `SystemBatteryLevel`, `PowerSourceMonitor`, `PowerSourceResampler`, `DisplayConfiguration`, `DisplayGeometry`, `WallpaperDisplayTransfer` | Per-Space desktop picture control, original-wallpaper journal, still-poster sync, saved posters, windows kept on their desktops and wallpapers kept paused for a wallpaper per desktop, playback rules, per-display renderer suspension, display refresh, the screen and shape of a renderer display id, and multi-display copy/swap |
+| `Desktop/` | `DesktopSpaceWallpaperAPI`, `DesktopWallpaperLedger`, `DesktopWallpaperStoreRestoration`, `DesktopWallpaperSync`, `DesktopSpacePosterCache`, `WallpaperSpaceMonitor`, `WallpaperSpacePinning`, `WallpaperSpaceParking`, `WallpaperPresentationPolicy`, `WallpaperCoverageProbes`, `WallpaperWindowAuditor`, `DesktopWindowObservation`, `SystemWakeRevalidator`, `PlaybackPreferences`, `AppRuleMonitor`, `OtherAudioMonitor`, `ActiveDisplayTracker`, `SystemConditionMonitor`, `SystemBatteryLevel`, `PowerSourceMonitor`, `PowerSourceResampler`, `DisplayConfiguration`, `DisplayGeometry`, `WallpaperDisplayTransfer` | Per-Space desktop picture control, original-wallpaper journal, still-poster sync, saved posters, windows kept on their desktops and wallpapers kept paused for a wallpaper per desktop, playback rules, per-display renderer suspension, display refresh, the screen and shape of a renderer display id, and multi-display copy/swap |
 | `Diagnostics/` | `RuntimeDiagnosticsSession`, `DiagnosticsBundle`, `SessionLedger`, `EnergyUsageMonitor`, `WallpaperEnergyRecorder`, `MemoryPressureMonitor`, `ProcessFootprint` | Runtime counters, the diagnostics report, how the previous session ended, energy readout, per-wallpaper ratings and memory-pressure logging; see [features/diagnostics.md](features/diagnostics.md) |
 | `GitHub/` | `GitHubReleaseClient`, `AppUpdateStore`, `AppUpdateInstaller`, `UpdatePromptGate`, `WhatsNewStore` | GitHub Releases update check, download, in-place install; when the unattended update alert may appear; which what's-new announcements were shown |
 | `Library/` | `ClientPaths`, `WallpaperImportService`, `LibraryImportStore`, `LibraryCoverStamps`, `WallpaperDeletionService`, `StillImageWallpaper`, `WallpaperBackupService`, `WallpaperCollectionStore`, `WallpaperPresetStore`, `WallpaperHistoryStore` | App-support layout, non-destructive import (run for the app, not the panel window, so Finder and Dock drops import too), still pictures packaged as `web` wallpapers, guarded deletion, collections, presets, history, backup and restore |
@@ -303,7 +303,9 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 
 `ClientPaths` fixes the on-disk contract: everything lives under
 `~/Library/Application Support/WallpaperMachine` (overridable with `WALLPAPER_MACHINE_HOME`),
-with `Library/`, `SceneAssets/`, `SteamCMD/`, `UserAssets/` and `Cache/` beneath it. It exports
+with `Library/`, `SceneAssets/`, `SteamCMD/`, `UserAssets/` and `Cache/` beneath it, except
+that `Library/` and the partial downloads live in `storageURL`, a folder the user may have
+moved them to ([library location](features/library-location.md)). It exports
 `WALLPAPER_MACHINE_SUPPORT_ROOT`, `_LIBRARY_ROOT`, `_ASSETS_ROOT` and `_USER_ASSETS_ROOT` so the
 Rust side resolves the same paths.
 
@@ -370,7 +372,9 @@ renderer output into JPEG posters and installs them as the static desktop pictur
 Control shows; `DesktopWallpaperLedger` journals the user's original per-Space wallpaper before the
 first write and restores it on quit, or at once when Settings turns poster writing off
 (`PlaybackPreferences.writesDesktopPicture`). An original whose file has since been deleted
-gives way to another desktop's original or macOS's default picture, so it cannot block a quit;
+gives way to another desktop's original or macOS's default picture, so it cannot block a quit,
+and `DesktopWallpaperStoreRestoration` puts back store selections the per-Space API cannot
+write, such as an aerial shown on all Spaces;
 `DesktopSpaceWallpaperAPI` reaches the
 per-Space getter and setter through optional private CoreGraphics and HIServices symbols, falling back to the public
 `NSWorkspace` API. Timing, refusals, macOS 27 behavior and the quit wait are in
@@ -392,6 +396,10 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   suppressed separately (`setAudioSuppressed`) for a mute rule, other-app audio set to mute or the
   user's own mute of every wallpaper (`PlaybackPreferences.wallpapersMuted`). The bridge ORs that one
   flag with each wallpaper's saved mute, so the user's mute never rewrites a saved sound setting.
+  A scene renderer receives its pause, volume and mute inside its configuration
+  (`owe_scene_wallpaper_apply_config`), not as settings sent after it: the scene can load the
+  moment it is configured, and its sounds play once mounted, so a later mute would let the start of
+  a muted wallpaper's music through on a switch.
   A third channel, beside presentation and audio, carries the conditions that chose Reduced quality
   (`SystemConditionMonitor.qualityReductions`) to the bridge as `setQualityThrottle`: wallpapers keep
   presenting under the reduced-quality profile's frame-rate ceiling and render scale for as long as

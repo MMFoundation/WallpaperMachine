@@ -166,12 +166,14 @@ By making a contribution to this project, I certify that:
 
 ## Automated review
 
-Same-repository PRs are reviewed by Claude Code
-(`.github/workflows/claude-code-review.yml`), which posts inline comments. A fork
-PR gets that review when a maintainer adds the `claude-review` label; the review
-never checks out or runs the PR's code, and the label is removed afterwards so a
-maintainer can add it again for new commits. Mentioning `@claude` in an issue or a
-comment runs `.github/workflows/claude.yml`.
+Claude Code runs on the Claude account of `fzlzjerry`, so only that account wakes
+it; events from anyone else, including re-runs, are skipped. A same-repository PR
+is reviewed (`.github/workflows/claude-code-review.yml`, inline comments) when
+`fzlzjerry` opens it or pushes to it. Any other PR, a fork PR included, gets that
+review when `fzlzjerry` adds the `claude-review` label; the review never checks
+out or runs the PR's code, and the label is removed afterwards so it can be added
+again for new commits. A `@claude` mention by `fzlzjerry` in an issue or a comment
+runs `.github/workflows/claude.yml`.
 
 ## Automated contributors
 

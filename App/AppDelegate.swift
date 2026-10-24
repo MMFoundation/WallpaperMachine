@@ -170,12 +170,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // requested only from an explicit action in the panel.
         SolarLocationTracker.shared.start()
         AppLog.info("startup: solar location tracker started")
-        // A crash during a download leaves its staging behind, holding the whole downloaded item.
-        let stagingRoot = ClientPaths.supportURL
+        // A crash during a download leaves its staging behind, holding the whole downloaded item:
+        // SteamCMD's half in app support, what it fetched beside the library. A moved library
+        // leaves its old copy to delete too.
+        let stagingRoots = WorkshopDownloader.sameFolder(ClientPaths.supportURL, ClientPaths.storageURL)
+            ? [ClientPaths.supportURL] : [ClientPaths.supportURL, ClientPaths.storageURL]
         let pixivStagingRoot = PixivWallpaperPackager.stagingRoot(forLibrary: ClientPaths.libraryURL)
         let importStagingRoot = WallpaperImportService.stagingRoot(forLibrary: ClientPaths.libraryURL)
+        let support = ClientPaths.supportURL
         Task.detached(priority: .utility) {
-            WorkshopDownloader.removeAbandonedStaging(in: stagingRoot)
+            for root in stagingRoots { WorkshopDownloader.removeAbandonedStaging(in: root) }
+            StorageMoveService.removeRetiredCopies(support: support)
             PixivWallpaperPackager.removeAbandonedStaging(in: pixivStagingRoot)
             WallpaperImportService.removeAbandonedStaging(in: importStagingRoot)
         }
@@ -351,7 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 // screen is on its way to taking it; a screen saver chosen on its own leaves it here.
                 if lockScreen?.claimsDesktopPicture != true {
                     // A suspended poster sync must never outlive the native provider.
-                    do { try self.startDesktopWallpaperSync() } catch {
+                    do { try self.startDesktopWallpaperSync(afterSnapshot: true) } catch {
                         self.lastError = error
                         AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
                     }
@@ -1424,7 +1429,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return nil
     }
 
-    private func startDesktopWallpaperSync() throws {
+    /// A sync that starts takes every poster. A running one takes every poster again, or after an
+    /// engine snapshot (`afterSnapshot`) only when it changed what the displays show.
+    private func startDesktopWallpaperSync(afterSnapshot: Bool = false) throws {
         guard !shutdownInProgress else { return }
         // Every start comes through here, so with the switch off no poster can be written.
         guard PlaybackPreferences.shared.writesDesktopPicture else { return }
@@ -1433,7 +1440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // The restore re-runs this through `applyDesktopPicturePreference` when it ends.
         guard restoringDesktopPicture == nil else { return }
         if let sync = desktopWallpaperSync, !sync.isSuspended {
-            sync.refresh()
+            if afterSnapshot { sync.snapshotApplied(desktopPosterLayout()) } else { sync.refresh() }
             return
         }
         let sync = try DesktopWallpaperSync(folder: ClientPaths.supportURL.appendingPathComponent("DesktopPosters"),
@@ -1459,7 +1466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         sync.refreshesPeriodically = PlaybackPreferences.shared.refreshesDesktopPicturePeriodically
         sync.start()
-        sync.refresh()
+        sync.snapshotApplied(desktopPosterLayout())
     }
 
     /// Makes the desktop picture follow Settings › General › Use the wallpaper as the macOS desktop
@@ -1679,6 +1686,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         guard keys != retainedSpacePosters else { return }
         retainedSpacePosters = keys
         spacePosters.retain(keys)
+    }
+
+    /// What the current snapshot shows on the displays, as far as desktop posters are concerned.
+    /// An animated wallpaper makes each poster a new image file, and macOS keeps a full-size copy
+    /// of every one (docs/features/desktop-picture.md), so only a change here retakes them all.
+    private func desktopPosterLayout() -> DesktopPosterLayout {
+        DesktopPosterLayout(
+            monitors: store?.monitorInformationSnapshot.rows ?? [], displays: store?.settingsSnapshot.displays ?? [],
+            screens: NSScreen.screens.map { .init(frame: $0.frame, scale: $0.backingScaleFactor) },
+            contentRevision: store?.wallpaperContentRevision ?? 0)
     }
 
     private func retainedSpacePosterDisplays() -> Set<String> {
@@ -2154,7 +2171,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 store: store, navigation: controlPanelNavigation, workshop: workshopStore,
                 pixiv: pixivStore, updater: appUpdater, imports: libraryImports))
         } else {
-            root = AnyView(BridgeUnavailableView(error: startupError ?? lastError))
+            let error = startupError ?? lastError
+            root = AnyView(BridgeUnavailableView(
+                error: error,
+                useThisMac: error is StorageUnavailableError ? { [weak self] in self?.keepLibraryOnThisMac() } : nil))
         }
         let hosting = NSHostingController(rootView: root)
         // The window keeps its own size floor, and the hosted toolbar and title belong to it.
@@ -2388,6 +2408,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NSApp.terminate(nil)
     }
 
+    /// The library's drive is gone for good: from the next launch the library is WallpaperMachine's
+    /// own folder on this Mac again. Nothing on the drive is touched. Quits, since the library a
+    /// running app was started without cannot be opened in place.
+    private func keepLibraryOnThisMac() {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Keep the wallpaper library on this Mac?")
+        alert.informativeText = String(localized: "From the next launch WallpaperMachine keeps its library in its own folder on this Mac, so the wallpapers on the drive are not shown. Nothing on the drive is deleted. WallpaperMachine quits now; open it again afterwards.")
+        alert.addButton(withTitle: String(localized: "Use This Mac and Quit"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try StorageLocation.write(nil, support: ClientPaths.supportURL)
+        } catch {
+            AppLog.error("storage: could not go back to this Mac: \(error.localizedDescription)")
+            NSAlert(error: error).runModal()
+            return
+        }
+        AppLog.info("storage: the library is in WallpaperMachine's folder on this Mac from the next launch")
+        NSApp.terminate(nil)
+    }
+
     private func bootstrapStore() {
         AppLog.info("startup: bootstrapAsync start")
         guard let store else {
@@ -2496,12 +2537,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
 private struct BridgeUnavailableView: View {
     let error: Error?
+    /// Offered when the library's drive is missing: forget the drive and start over on this Mac.
+    let useThisMac: (() -> Void)?
 
     var body: some View {
         ContentUnavailableView {
-            Label("Bridge Unavailable", systemImage: "exclamationmark.triangle")
+            if useThisMac != nil {
+                Label("Wallpaper Library Unavailable", systemImage: "externaldrive.badge.exclamationmark")
+            } else {
+                Label("Bridge Unavailable", systemImage: "exclamationmark.triangle")
+            }
         } description: {
             Text(verbatim: error?.localizedDescription ?? String(localized: "The rendering bridge could not be started."))
+        } actions: {
+            if let useThisMac {
+                Button("Use This Mac Instead…", action: useThisMac)
+            }
         }
         .frame(minWidth: 640, minHeight: 420)
     }

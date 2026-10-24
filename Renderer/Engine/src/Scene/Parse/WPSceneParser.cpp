@@ -2248,6 +2248,16 @@ std::string PingPongName(std::string_view prefix, std::string_view camera_name) 
     return std::string(prefix) + std::string(camera_name);
 }
 
+/// The render target of the buffer `fbo_name` that the effect at `position` in layer `layer_id`'s
+/// chain declares: a target the engine made, whatever the effect calls it. A `_rt_` name
+/// (`_rt_half`) keeps its spelling; any other (`_coc`, `plain`, `_alias_cookie`) goes under
+/// `_rt_` and ends in a word rather than a number, so `plain` and `_rt_plain` stay two buffers.
+std::string EffectBufferName(const std::string& fbo_name, int32_t layer_id, std::size_t position) {
+    const auto owner = "_" + std::to_string(layer_id) + "_" + std::to_string(position);
+    if (StartsWithText(fbo_name, WE_SPEC_PREFIX)) return fbo_name + owner;
+    return std::string(WE_SPEC_PREFIX) + fbo_name + owner + "_named";
+}
+
 /// Registers the render target of one effect buffer (R55).
 void RegisterEffectBuffer(ParseContext& context, const std::string& name,
                           const wpscene::WPEffectFbo& fbo, std::array<int32_t, 2> extent,
@@ -2368,7 +2378,7 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
     std::unordered_map<std::string, std::string> fbo_map;
     fbo_map["previous"] = previous_name;
     for (const auto& fbo : source.fbos) {
-        const auto name = fbo.name + "_" + std::to_string(image.id) + "_" + std::to_string(index);
+        const auto name = EffectBufferName(fbo.name, image.id, index);
         fbo_map[fbo.name] = name;
         RegisterEffectBuffer(context, name, fbo, extent, fullscreen,
                              EffectReadsBeforeWriting(source, fbo.name, 0));
@@ -4262,8 +4272,7 @@ bool LoadTextEntry(ParseContext& context, std::size_t at, const nlohmann::json& 
             std::size_t position = 0;
             for (const auto& source : chain_sources) {
                 for (const auto& fbo : source.fbos) {
-                    const auto found = scene.renderTargets.find(fbo.name + "_" + std::to_string(plan.id) +
-                                                                "_" + std::to_string(position));
+                    const auto found = scene.renderTargets.find(EffectBufferName(fbo.name, plan.id, position));
                     if (found == scene.renderTargets.end()) continue;
                     if (FixedEffectFboExtent(fbo, static_cast<float>(extent[0]),
                                              static_cast<float>(extent[1])).has_value()) {

@@ -74,6 +74,7 @@ file; pass `rg -u` to search them deliberately.
 | [features/control-panel.md](features/control-panel.md) | The native window: language, tabs, toolbar, grid and inspector, pages and Settings, selection versus apply, Now Playing, target display, filtering and local collections, recently used, deleting, downloads and import |
 | [features/first-run.md](features/first-run.md) | The first-run guide over the window, the one-time support prompt after the first downloaded wallpaper, the later star prompt and the performance data question |
 | [features/wallpaper-properties.md](features/wallpaper-properties.md) | Inspector properties, live preview, property presets, image placement, the compatibility check and the black-bar check |
+| [features/library-location.md](features/library-location.md) | Settings → Storage → Wallpaper library location: moving the library and downloads to another folder or an external drive and back, what moves, the copy now and the switch at the next launch, a drive that is not connected |
 | [features/backup-restore.md](features/backup-restore.md) | The Settings → Storage backup package (settings, allowlisted preferences, chosen user files) and restoring it |
 | [features/updates.md](features/updates.md) | In-app update checks, download and verification, installing, and the What's New window |
 | [features/workshop-downloads.md](features/workshop-downloads.md) | Discover, SteamCMD setup, download queue |

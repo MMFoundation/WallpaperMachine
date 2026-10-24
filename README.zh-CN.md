@@ -85,6 +85,7 @@
 | [**原生体验**](docs/features/appearance.md) | 和 macOS 的其他部分一样，支持浅色、深色和你的强调色，界面提供 [English、简体中文、繁體中文、日本語和한국어](docs/features/control-panel.md#language)。 |
 | [**导入**](docs/features/control-panel.md#downloads-and-import) | 带入你已有的 Wallpaper Engine 文件夹，或你自己的视频和图片。把它们拖到程序坞图标上，或使用“导入”；应用会复制它们，原文件保持不动。 |
 | [**备份你的设置**](docs/features/backup-restore.md#local-backup-and-restore) | 导出设置和保留的文件，还可以包含整个壁纸库；在下次启动时执行可撤回的恢复之前，先预览冲突。登录信息和密码只留在这台 Mac 上。 |
+| [**外置硬盘**](docs/features/library-location.md) | 把壁纸库和下载放在外置硬盘或其他文件夹中，随时都能移回这台 Mac。设置和 Steam 登录信息仍留在这台 Mac 上。 |
 | [**图片摆放**](docs/features/wallpaper-properties.md#image-placement) | 在每台显示器上分别拖动、定位和缩放导入的图片和保存的 pixiv 页面，不改动原图。 |
 | [**看不见就暂停**](docs/architecture.md#desktop-wallpaper-windows-and-private-api-handling) | 被遮住的显示器会停止播放自己的壁纸，睡眠或锁屏时所有壁纸都会暂停。[播放规则](docs/features/performance.md#playback)还能在其他应用播放声音时、你选择的应用正在运行或位于前台时、电池电量低时、低电量模式下、Mac 过热时或专注模式期间暂停或静音壁纸。有多台显示器时，还可以只让你正在使用的那台继续播放。你自己按下的暂停，始终由你决定。 |
 | [**自动化**](docs/features/automation.md) | 按星期和时间的计划、根据本地日出日落计算、按浅色或深色外观选择、[每个桌面使用不同壁纸](docs/features/spaces.md)，以及临时的专注模式壁纸或播放列表。键盘快捷键、“快捷指令”、Siri、“聚焦”和链接都能控制播放、让所有壁纸静音、随机选一张壁纸，并应用壁纸、已存播放列表或属性预设。 |
@@ -226,7 +227,7 @@ python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 
 
 <!-- supporters:start: written by scripts/update_sponsors.py from the website's sponsor wall; edits here are overwritten -->
 <p align="center">
-  <a href="https://www.wallpapermachine.app/#sponsors"><img src="https://www.wallpapermachine.app/sponsors/wall?v=64375c9e2c68" width="100%" alt="WallpaperMachine Supporters: xwei12, umitsurumi, ReinforceZwei, hahagei2580. 4 Supporters on the wall. 2 more support privately."></a>
+  <a href="https://www.wallpapermachine.app/#sponsors"><img src="https://www.wallpapermachine.app/sponsors/wall?v=f31d29c41b85" width="100%" alt="WallpaperMachine Supporters: xwei12, umitsurumi, ReinforceZwei, hahagei2580, 你识认我. 5 Supporters on the wall. 1 more supports privately."></a>
 </p>
 <!-- supporters:end -->
 
@@ -241,6 +242,16 @@ python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 
 ## 友情链接
 
 - [linux.do](https://linux.do) —— 一切可能，从这里开始
+
+## Star 历史
+
+<a href="https://www.star-history.com/?repos=wallpapermachine%2Fwallpapermachine&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=wallpapermachine/wallpapermachine&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=wallpapermachine/wallpapermachine&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=wallpapermachine/wallpapermachine&type=date&legend=top-left" />
+ </picture>
+</a>
 
 <br>
 

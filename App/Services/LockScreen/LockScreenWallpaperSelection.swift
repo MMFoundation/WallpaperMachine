@@ -638,7 +638,7 @@ final class LockScreenWallpaperSelection {
 
   /// Verify effective UID and the kernel-reported executable immediately before
   /// each signal. Never signal by name alone, restart Dock, or touch loginwindow.
-  private static func reloadWallpaperAgent() throws {
+  static func reloadWallpaperAgent() throws {
     let expected = "/System/Library/CoreServices/WallpaperAgent.app/Contents/MacOS/WallpaperAgent"
     let capacity = proc_listallpids(nil, 0)
     guard capacity > 0 else {

@@ -104,6 +104,7 @@ without opening the window.
 | [**Native**](docs/features/appearance.md) | Light, dark and your accent colour, like the rest of macOS, in English, [简体中文, 繁體中文, 日本語 or 한국어](docs/features/control-panel.md#language). |
 | [**Import**](docs/features/control-panel.md#downloads-and-import) | Bring the Wallpaper Engine folders you already have, or your own videos and pictures. Drop them on the Dock icon or use Import; the app copies them and leaves the originals alone. |
 | [**Keep your setup**](docs/features/backup-restore.md#local-backup-and-restore) | Export settings and retained files, optionally the whole wallpaper library; preview conflicts before a recoverable restore at the next launch. Sign-ins and passwords stay on this Mac. |
+| [**External drive**](docs/features/library-location.md) | Keep the wallpaper library and downloads on an external drive or in another folder, and move them back to this Mac at any time. Settings and Steam sign-ins stay on this Mac. |
 | [**Picture placement**](docs/features/wallpaper-properties.md#image-placement) | Drag, position and zoom imported pictures and saved pixiv pages separately for each display, without changing the original image. |
 | [**Out of sight, paused**](docs/architecture.md#desktop-wallpaper-windows-and-private-api-handling) | A covered display stops its own wallpaper, and sleep or lock pauses them all. [Playback rules](docs/features/performance.md#playback) can also pause or mute them while another app plays sound, while an app you choose is running or in front, when the battery is low, in Low Power Mode, when the Mac runs hot, or during a Focus. With several displays, you can also keep only the one you are using playing. Your own pause stays yours. |
 | [**Automation**](docs/features/automation.md) | Weekday and time schedules, local sunrise/sunset calculations, light/dark appearance choices, [a different wallpaper for each desktop](docs/features/spaces.md), and temporary Focus wallpapers or playlists. Keyboard shortcuts, Shortcuts, Siri, Spotlight and links can control playback, mute every wallpaper, pick a random wallpaper, and apply wallpapers, saved playlists or property presets. |
@@ -306,7 +307,7 @@ desktop, [become a Supporter](SPONSORS.md).
 
 <!-- supporters:start: written by scripts/update_sponsors.py from the website's sponsor wall; edits here are overwritten -->
 <p align="center">
-  <a href="https://www.wallpapermachine.app/#sponsors"><img src="https://www.wallpapermachine.app/sponsors/wall?v=64375c9e2c68" width="100%" alt="WallpaperMachine Supporters: xwei12, umitsurumi, ReinforceZwei, hahagei2580. 4 Supporters on the wall. 2 more support privately."></a>
+  <a href="https://www.wallpapermachine.app/#sponsors"><img src="https://www.wallpapermachine.app/sponsors/wall?v=f31d29c41b85" width="100%" alt="WallpaperMachine Supporters: xwei12, umitsurumi, ReinforceZwei, hahagei2580, 你识认我. 5 Supporters on the wall. 1 more supports privately."></a>
 </p>
 <!-- supporters:end -->
 
@@ -329,6 +330,16 @@ Engine you own; the app bundles neither.
 ## Friend Link
 
 - [linux.do](https://linux.do) —— Where possible begins
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=wallpapermachine%2Fwallpapermachine&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=wallpapermachine/wallpapermachine&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=wallpapermachine/wallpapermachine&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=wallpapermachine/wallpapermachine&type=date&legend=top-left" />
+ </picture>
+</a>
 
 <br>
 

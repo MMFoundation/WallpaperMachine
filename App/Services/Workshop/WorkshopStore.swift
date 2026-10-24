@@ -177,13 +177,16 @@ final class WorkshopStore {
 
   convenience init(service: WorkshopService = WorkshopService()) {
     self.init(
-      service: service, downloader: WorkshopDownloadManager(),
+      service: service, downloader: WorkshopDownloadManager(), storageDirectory: ClientPaths.storageURL,
       webSessions: KeychainSteamWebSessionStore())
   }
 
+  /// `storageDirectory` holds the partial downloads, beside the library (`ClientPaths.storageURL`);
+  /// nil keeps them in `supportDirectory`, as a test's single temporary folder wants.
   init(
     service: WorkshopService = WorkshopService(), downloader: WorkshopDownloadManager,
-    supportDirectory: URL = ClientPaths.supportURL, defaults: UserDefaults = ClientPreferences.defaults,
+    supportDirectory: URL = ClientPaths.supportURL, storageDirectory: URL? = nil,
+    defaults: UserDefaults = ClientPreferences.defaults,
     runtimeProvider: any SteamCMDRuntimeProviding = SteamCMDRuntimeService(),
     updates: WorkshopUpdateStore? = nil,
     sceneAssetsLocation: @escaping @MainActor () -> URL = { ClientPaths.assetsURL },
@@ -209,7 +212,7 @@ final class WorkshopStore {
     self.steamCMDSetup = SteamCMDSetupStore(
       downloader: downloader, supportDirectory: supportDirectory,
       defaults: defaults, runtimeProvider: runtimeProvider)
-    downloader.configurePersistence(at: ClientPaths.workshopDownloadsURL(in: supportDirectory))
+    downloader.configurePersistence(at: ClientPaths.workshopDownloadsURL(in: storageDirectory ?? supportDirectory))
     if let data = try? Data(contentsOf: requestFile),
       let saved = try? JSONDecoder().decode([WorkshopDownloadRequest].self, from: data)
     {
@@ -515,7 +518,8 @@ final class WorkshopStore {
     if request.id == Self.signInRequestID {
       downloader.signIn(
         username: request.account, executable: runtime.executableURL,
-        root: ClientPaths.libraryURL.deletingLastPathComponent(),
+        // A sign-in fetches nothing, so it stays beside the saved sign-in, not the library.
+        root: ClientPaths.supportURL,
         rememberSession: request.rememberSession)
     } else if let item = request.item {
       // Shared assets are queued first and only once: other scenes ride the same job.

@@ -12,13 +12,20 @@ struct WallpaperEngineApp {
             // and never overwrites the running copy's session record.
             SingleInstance.claim()
             recordSessionStart()
-            do {
-                if let report = try WallpaperBackupService.applyPendingRestore() {
-                    AppLog.info("startup: restored \(report.restoredPaths.count) backup resources")
-                    for warning in report.warnings { AppLog.warn("backup restore: \(warning)") }
+            // Before the backup restore, which writes into the library where it now is.
+            StorageMoveService.applyPending()
+            // A library on a drive that is not connected is not restored into: the restore waits.
+            if case .unavailable = ClientPaths.storageResolution {
+                AppLog.warn("startup: the wallpaper library is not available; a pending restore waits")
+            } else {
+                do {
+                    if let report = try WallpaperBackupService.applyPendingRestore(storageRoot: ClientPaths.storageURL) {
+                        AppLog.info("startup: restored \(report.restoredPaths.count) backup resources")
+                        for warning in report.warnings { AppLog.warn("backup restore: \(warning)") }
+                    }
+                } catch {
+                    AppLog.error("startup backup restore failed: \(error.localizedDescription)")
                 }
-            } catch {
-                AppLog.error("startup backup restore failed: \(error.localizedDescription)")
             }
         }
         // AppKit owns the control panel and the menu-bar item, so a SwiftUI scene here would only
