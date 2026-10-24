@@ -57,7 +57,8 @@ App/                               WallpaperMachine application target sources o
                                    the later star request and the performance data question
     SystemMedia/                   shared now-playing session (MediaRemote, Music/Spotify
                                    AppleScript fallback) and artwork for Web and Scene media integration
-    Telemetry/                     Send performance data: report schema, frame windows, local spool, upload
+    Telemetry/                     Send performance data: report schema, frame windows, local spool, upload;
+                                   the daily active count
     UserAssets/                    importing, watching and picking for file/directory wallpaper properties;
                                    owns the app's copies under <support>/UserAssets/ and the derived,
                                    regenerable <project>/.mwe-user-assets/ bridge a page can read

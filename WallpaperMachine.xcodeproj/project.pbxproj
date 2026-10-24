@@ -697,6 +697,7 @@
 		BC475695D204FFF9447E1BB6 /* WallpaperPlaylist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D5ECA1DC1057D28BB011999 /* WallpaperPlaylist.swift */; };
 		BD05658AE21B714CD6E1CCE5 /* LibrarySort.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77C6B1008AE4791F00C7443D /* LibrarySort.swift */; };
 		BDADDB497B067424D862AB3B /* DesktopActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 014984F199338E123F3F66F1 /* DesktopActionsTests.swift */; };
+		BDC2B49F1048DBC05ADA3F6B /* TelemetryActiveCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCCB2A74EA7A00F632D3B2C1 /* TelemetryActiveCount.swift */; };
 		BE59C037CAC96F0EA1D1DE92 /* ActivationPolicyRuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30529D5F1D55C9B44FA7D31A /* ActivationPolicyRuleTests.swift */; };
 		BE5EE4CAD276FC474A6140AA /* PanelAutomationActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44AC1CE6D55896F0DE18E15 /* PanelAutomationActionsTests.swift */; };
 		BE8B362E042A4DA28FEE593B /* PanelController+LibraryImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCF002659AFBB579676879B2 /* PanelController+LibraryImport.swift */; };
@@ -931,6 +932,7 @@
 		F616DE78C658B8607D14900A /* PanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18BF115F531E75AACEFCD83 /* PanelController.swift */; };
 		F6737CE42411BA12F9CD4621 /* WallpaperDisplayLayoutStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 458581908CBD73097E36CA8B /* WallpaperDisplayLayoutStore.swift */; };
 		F69C35262E531829E1CB1ED0 /* WebWallpaperLocalRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D8684C67CC5B1EC8B88E0FB /* WebWallpaperLocalRequestTests.swift */; };
+		F6A863A380082E6F43CB0482 /* TelemetryActiveCountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CF1D9D87ECB9FCB93CFC8A2 /* TelemetryActiveCountTests.swift */; };
 		F6A9A66AD336D6EB7748E0E1 /* TestBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 995DB56AF37EDD627FD006A5 /* TestBundle.swift */; };
 		F6E75261A1DD015DB9E3B5E6 /* DisplaysGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95DF7C46BADBCE5DCF2E18F3 /* DisplaysGroups.swift */; };
 		F73CF78193AFF9D3C339A797 /* WallpaperBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D910CA2D9662F6DE0E413529 /* WallpaperBridge.swift */; };
@@ -1336,6 +1338,7 @@
 		4C01D59589C108689544F556 /* AutomationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationState.swift; sourceTree = "<group>"; };
 		4C5A3E47EC5E105AE33D3E5C /* DisplayOptionsLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayOptionsLoaderTests.swift; sourceTree = "<group>"; };
 		4C79F4C2F6D23FFBD47E7739 /* PanelController+Downloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelController+Downloads.swift"; sourceTree = "<group>"; };
+		4CF1D9D87ECB9FCB93CFC8A2 /* TelemetryActiveCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryActiveCountTests.swift; sourceTree = "<group>"; };
 		4CF75497C2C65AB51E3C19DC /* mediaremote-adapter.pl */ = {isa = PBXFileReference; lastKnownFileType = text.script.perl; path = "mediaremote-adapter.pl"; sourceTree = "<group>"; };
 		4D3523D1D8EF338F3A8BE411 /* PanelLocale+Resource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelLocale+Resource.swift"; sourceTree = "<group>"; };
 		4D5246683D55B291CB61161D /* PanelStoreRevisions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelStoreRevisions.swift; sourceTree = "<group>"; };
@@ -1797,6 +1800,7 @@
 		CBAFF23AE9EFC9CB6ADF6D80 /* PanelController+Playlists.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelController+Playlists.swift"; sourceTree = "<group>"; };
 		CC4344BD6232FB44876EF7DB /* WallpaperSettingsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperSettingsProvider.swift; sourceTree = "<group>"; };
 		CC6681491A71C3D2B8106515 /* DiagnosticsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsBundle.swift; sourceTree = "<group>"; };
+		CCCB2A74EA7A00F632D3B2C1 /* TelemetryActiveCount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryActiveCount.swift; sourceTree = "<group>"; };
 		CCCBF2EF23CF381A6D8E0ABB /* WorkshopItemDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopItemDownload.swift; sourceTree = "<group>"; };
 		CCD3F04E279F8FF6B9983118 /* PanelShellTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelShellTests.swift; sourceTree = "<group>"; };
 		CCDCA96F1E6DB1AD49C23FA8 /* ActivationLogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivationLogTests.swift; sourceTree = "<group>"; };
@@ -2136,6 +2140,7 @@
 		1E8BC9AC0A4B4CFF4E7A8CDC /* Telemetry */ = {
 			isa = PBXGroup;
 			children = (
+				CCCB2A74EA7A00F632D3B2C1 /* TelemetryActiveCount.swift */,
 				8AB1904D7776F4DB511FA488 /* TelemetryClient.swift */,
 				3C8974F216D6D53EF2E8A833 /* TelemetryEnvironment.swift */,
 				AD4605658F48904A0C3B50A2 /* TelemetryPreferences.swift */,
@@ -2501,6 +2506,7 @@
 		5C9DE632FC3DEA16F10E3BE9 /* Telemetry */ = {
 			isa = PBXGroup;
 			children = (
+				4CF1D9D87ECB9FCB93CFC8A2 /* TelemetryActiveCountTests.swift */,
 				CCF9272BF9F3B7A8DD07065D /* TelemetryClientTests.swift */,
 				D1CB217212F15B65F813BB92 /* TelemetryEnvironmentTests.swift */,
 				06EA66AE32BD57C9D490D873 /* TelemetrySamplerTests.swift */,
@@ -4160,6 +4166,7 @@
 				309DA8C8E6CFB7F569A9C120 /* SystemMediaEventCodecTests.swift in Sources */,
 				F93EF90727E984D44A84DF86 /* SystemMediaTestSupport.swift in Sources */,
 				AFA9F426D330AA43EBEB3744 /* SystemWakeRevalidatorTests.swift in Sources */,
+				F6A863A380082E6F43CB0482 /* TelemetryActiveCountTests.swift in Sources */,
 				5F6DA091DF3FBB65CBDA6B5F /* TelemetryClientTests.swift in Sources */,
 				F84BEA6BC16D45FF4C617E7E /* TelemetryEnvironmentTests.swift in Sources */,
 				C5123C3526F807A83BAF6824 /* TelemetrySamplerTests.swift in Sources */,
@@ -4658,6 +4665,7 @@
 				DA73965717AB88156B9C96C9 /* TagChip.swift in Sources */,
 				35D8BBC498D437FE22FCA0A1 /* TargetDisplayOption.swift in Sources */,
 				69302D9A1A29C87568D23818 /* TargetDisplayPicker.swift in Sources */,
+				BDC2B49F1048DBC05ADA3F6B /* TelemetryActiveCount.swift in Sources */,
 				E58973793F4CEAD582C045C2 /* TelemetryClient.swift in Sources */,
 				0C4CC7446E3FA04F44D0069B /* TelemetryEnvironment.swift in Sources */,
 				DA1D8B718D6188C1511C9800 /* TelemetryPreferences.swift in Sources */,
