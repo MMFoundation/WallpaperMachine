@@ -187,7 +187,8 @@ The window an available update opens (`UpdateWindow`, a SwiftUI view in its own
 nonmodal window) shows the app's Dock icon, **A new version of WallpaperMachine is
 available!** and **WallpaperMachine x.y.z is now available—you have a.b.c. Would you
 like to download it now?** Below that, a scrolling box lists every release above the
-running version up to the available one, newest first: each opens with its version
+running version up to the available one that the manifest carries (its 20 newest
+changelog sections), newest first: each opens with its version
 as a linked badge (the comparison with the previous version on GitHub) and its date,
 then its sections (**Highlights**, **Breaking Changes**, **Features**,
 **Improvements**, **Bug Fixes**) and bullets, with each bullet's issue and commit
@@ -236,8 +237,10 @@ downloadable update the user has not skipped downloads it without opening a wind
 and a downloaded update installs, quitting and reopening the app, the next time nobody
 is at the Mac: when the displays sleep or the session locks
 (`WallpaperPresentationPolicy.isUnattended`; an app rule or the Focus filter does not
-count). A release without a disk image still opens the update window, since it cannot
-install itself. Until it installs, the status menu offers **Restart to Update to
+count). A release without a disk image, or a copy that cannot be replaced in place
+([Where it can install](#installing)), still opens the update window, since it cannot
+install itself. While the update window is open, the six-hourly check waits, so it
+never clears the release the window shows. Until it installs, the status menu offers **Restart to Update to
 x.y.z**.
 
 `AppReleaseHistoryTests` covers parsing the changelog (headings, translations, links)

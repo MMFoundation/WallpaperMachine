@@ -708,7 +708,8 @@ closed lid has not been seen on a desktop
       another app full-screen, no update window appears and the log has
       `update prompt deferred`; leaving full screen shows the window once, and
       opening the control panel while a display is covered shows it too. The window
-      lists every version since the running one in the app's language, with linked
+      lists the versions since the running one that the manifest carries (its 20
+      newest changelog sections), newest first, in the app's language, with linked
       issue and commit references; **Install Update** downloads with a progress bar,
       then quits and reopens; **Skip This Version** keeps the next launch quiet.
 - [ ] Opening the disk image shows one window without toolbar or sidebar: the

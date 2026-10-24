@@ -86,8 +86,12 @@ class UpdateManifestTests(unittest.TestCase):
 
     def test_a_changelog_without_the_release_is_refused(self):
         path, _ = self.changelog(2, newest=(1, 3, 9))
-        with self.assertRaisesRegex(update_manifest.ManifestError, "no section for v1.4.0"):
+        with self.assertRaisesRegex(update_manifest.ManifestError, "does not start with the section for v1.4.0"):
             update_manifest.manifest("v1.4.0", "owner/app", self.notes, self.image, path)
+        # A release whose section is not the newest: the app would drop the history.
+        newer, _ = self.changelog(3, newest=(1, 5, 0))
+        with self.assertRaisesRegex(update_manifest.ManifestError, "does not start with the section for v0.2.0"):
+            update_manifest.changelog_sections(newer, "v0.2.0")
         empty = self.root / "empty.md"
         empty.write_text("# Changelog\n", encoding="utf-8")
         with self.assertRaisesRegex(update_manifest.ManifestError, "no ## version sections"):

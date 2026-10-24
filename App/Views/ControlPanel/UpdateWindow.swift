@@ -14,6 +14,8 @@ enum UpdateWindow {
     let skip: () -> Void
     let later: () -> Void
     let install: () -> Void
+    /// The checkbox: automatic updates on or off.
+    let setAutomatic: (Bool) -> Void
   }
 
   /// - Parameter language: The notes translation the window opens with, the app's effective
@@ -70,7 +72,6 @@ struct UpdateWindowView: View {
   @Environment(\.panelTheme) private var theme
 
   var body: some View {
-    @Bindable var store = store
     let state = store.state
     VStack(alignment: .leading, spacing: 16) {
       header(state)
@@ -78,7 +79,10 @@ struct UpdateWindowView: View {
         notesBar
         UpdateNotesBox(releases: store.pendingReleases, language: notesLanguage.selection)
       }
-      footer(state, automatic: $store.automaticallyInstallsUpdates)
+      footer(
+        state,
+        automatic: Binding(
+          get: { store.automaticallyInstallsUpdates }, set: { actions.setAutomatic($0) }))
     }
     .padding(.horizontal, 24)
     // From the window's top edge: the title bar holds only the window buttons, then a gap.

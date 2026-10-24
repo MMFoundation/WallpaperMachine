@@ -64,16 +64,16 @@ def sha256(path):
 def changelog_sections(path, tag, limit=CHANGELOG_SECTIONS):
     """The newest `limit` version sections of a changelog, verbatim, without its preamble.
 
-    The release's own version must have a section in the file, so a manifest never
-    describes notes the window cannot show.
+    The release's own version must be the newest section, so a manifest never describes
+    notes the window cannot show: the app reads the history only when it starts there.
     """
     text = Path(path).read_text(encoding="utf-8")
     starts = [match.start() for match in re.finditer(r"^## ", text, re.MULTILINE)]
     if not starts:
         raise ManifestError(f"{path} has no ## version sections.")
     versions = SECTION_HEADING.findall(text)
-    if tag.removeprefix("v") not in versions:
-        raise ManifestError(f"{path} has no section for {tag}.")
+    if not versions or versions[0] != tag.removeprefix("v"):
+        raise ManifestError(f"{path} does not start with the section for {tag}.")
     end = starts[limit] if len(starts) > limit else len(text)
     return text[starts[0]:end].rstrip("\n") + "\n"
 

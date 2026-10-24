@@ -13,7 +13,7 @@ final class UpdateWindowTests: XCTestCase {
         let notesLanguage = UpdateNotesLanguage(.korean)
         let hosting = NSHostingController(
             rootView: UpdateWindowView(
-                store: store, actions: .init(skip: {}, later: {}, install: {}),
+                store: store, actions: .init(skip: {}, later: {}, install: {}, setAutomatic: { _ in }),
                 notesLanguage: notesLanguage))
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: UpdateWindow.defaultContentSize),

@@ -2030,8 +2030,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private func runAutomaticUpdate() async {
         checkWorkshopUpdatesIfDue()
+        // A check clears the release the open update window shows; it waits until it closes.
+        guard updateWindow == nil else { return }
         var state = await appUpdater.checkInBackground()
-        if appUpdater.automaticallyInstallsUpdates, case .available(_, let version) = state,
+        if installsAutomatically, case .available(_, let version) = state,
            version != appUpdater.skippedVersion {
             rebuildMenu()
             state = await appUpdater.downloadUpdate()
@@ -2041,10 +2043,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         installAutomaticUpdateIfUnattended()
     }
 
+    /// Automatic updates are on and this copy can be replaced where it is. One that cannot is
+    /// offered the window as usual, so a download never opens in Finder unasked.
+    private var installsAutomatically: Bool {
+        appUpdater.automaticallyInstallsUpdates && appUpdater.canInstallInPlace
+    }
+
     /// With automatic updates on, a downloaded update installs (WallpaperMachine quits and
     /// reopens) while nobody is at the Mac: the displays sleep or the session is locked.
     private func installAutomaticUpdateIfUnattended() {
-        guard appUpdater.automaticallyInstallsUpdates, case .ready(_, let version) = appUpdater.state,
+        guard installsAutomatically, case .ready(_, let version) = appUpdater.state,
               version != appUpdater.skippedVersion, !appUpdater.isInstallPending,
               !shutdownInProgress, !shutdownComplete,
               presentationPolicy?.isUnattended == true else { return }
@@ -2067,7 +2075,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // without a disk image cannot, so it is still offered.
         let installsItself: Bool
         switch state {
-        case .available, .ready: installsItself = appUpdater.automaticallyInstallsUpdates
+        case .available, .ready: installsItself = installsAutomatically
         default: installsItself = false
         }
         if version == appUpdater.skippedVersion || installsItself { version = nil }
@@ -2112,7 +2120,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self.rebuildMenu()
             },
             later: { [weak self] in self?.updateWindow?.performClose(nil) },
-            install: { [weak self] in self?.installFromUpdateWindow() }))
+            install: { [weak self] in self?.installFromUpdateWindow() },
+            setAutomatic: { [weak self] on in self?.appUpdater.automaticallyInstallsUpdates = on }))
         window.delegate = self
         window.center()
         ControlPanelWindow.moveToActiveSpace(window)
