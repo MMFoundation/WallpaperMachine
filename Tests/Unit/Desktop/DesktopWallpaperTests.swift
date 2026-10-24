@@ -22,7 +22,7 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
     /// applies them asynchronously.
     var lagging: Set<DesktopPictureTarget> = []
     private var inFlight: [DesktopPictureTarget: DesktopPicture] = [:]
-    var didWrite: (() -> Void)?
+    var didWrite: (() throws -> Void)?
     var didEnumerate: (() -> Void)?
 
     func targets() -> [DesktopPictureTarget] {
@@ -46,17 +46,37 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
         writes.append(target)
         if lagging.contains(target) {
             inFlight[target] = picture
-            didWrite?()
+            try didWrite?()
             throw DesktopPictureUnconfirmed()
         }
         pictures[target] = picture
-        didWrite?()
+        try didWrite?()
     }
     func land() {
         pictures.merge(inFlight) { $1 }
         inFlight.removeAll()
     }
     func referencedPictureURLs(targets: [DesktopPictureTarget]) -> Set<URL> { persistedPictures }
+
+    /// macOS's wallpaper store, which a per-Space write changes along with the picture.
+    var store: Data?
+    var storeReplacements = 0
+    var storeReloads = 0
+    /// Reloads that fail before one succeeds, as when WallpaperAgent is between a restart and its relaunch.
+    var failingReloads = 0
+    func storeContents() -> Data? { store }
+    func replaceStore(_ data: Data, expected: Data) throws {
+        guard store == expected else { throw DesktopPictureUnconfirmed() }
+        store = data
+        storeReplacements += 1
+    }
+    func reloadStore() throws {
+        if failingReloads > 0 {
+            failingReloads -= 1
+            throw CocoaError(.fileWriteUnknown)
+        }
+        storeReloads += 1
+    }
 }
 
 private actor ControlledPosterEncoder {
@@ -755,6 +775,175 @@ final class DesktopWallpaperTests: XCTestCase {
         }
         XCTAssertEqual(workspace.pictures[one], original("user-choice"))
         XCTAssertTrue(workspace.writes.isEmpty)
+    }
+
+    private func storeSelection(provider: String, configuration: [String: Any]) throws -> [String: Any] {
+        ["Content": ["Choices": [[
+            "Provider": provider, "Files": [String](),
+            "Configuration": try PropertyListSerialization.data(fromPropertyList: configuration, format: .binary, options: 0)
+        ]]]]
+    }
+    /// `set` is the `LastSet` WallpaperAgent records when it applies a selection.
+    private func storeImage(_ url: URL, set: Date? = nil) throws -> [String: Any] {
+        var selection = try storeSelection(provider: "com.apple.wallpaper.choice.image",
+                                           configuration: ["type": "imageFile", "url": ["relative": url.absoluteString]])
+        selection["LastSet"] = set
+        return selection
+    }
+    private func storeData(_ root: [String: Any]) throws -> Data {
+        try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
+    }
+    private func storeRoot(_ data: Data?) throws -> [String: Any] {
+        try XCTUnwrap(PropertyListSerialization.propertyList(from: XCTUnwrap(data), format: nil) as? [String: Any])
+    }
+
+    /// An aerial shown on all Spaces reads as an empty per-Space selection, and the public API
+    /// answers with a still stand-in. Writing that still back left an image choice on every
+    /// desktop, which macOS showed as a different wallpaper; quitting puts the aerial back.
+    @MainActor
+    func testWallpaperOnAllSpacesThatThePerSpaceAPICannotWriteIsPutBackOnQuit() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        let inherited = try DesktopSpaceWallpaperAPI.decodePicture([:])
+        workspace.pictures = [one: inherited, two: inherited]
+        let still = original("DefaultDesktop")
+        workspace.visiblePictures = ["1": still]
+        let aerial = try storeSelection(provider: "com.apple.wallpaper.choice.aerials",
+                                        configuration: ["assetID": "golden-gate"])
+        let idle = try storeSelection(provider: "default", configuration: [:])
+        let global: [String: Any] = ["Type": "individual", "Desktop": aerial, "Idle": idle]
+        let before: [String: Any] = ["AllSpacesAndDisplays": global, "SystemDefault": global,
+                                     "Displays": [String: Any](), "Spaces": [String: Any]()]
+        workspace.store = try storeData(before)
+        // WallpaperAgent records each per-Space write in its own nodes and copies it into the
+        // system default.
+        workspace.didWrite = {
+            var root = try self.storeRoot(workspace.store)
+            var spaces = root["Spaces"] as? [String: Any] ?? [:]
+            for target in [self.one, self.two] {
+                guard let url = workspace.pictures[target]?.url, url.isFileURL else { continue }
+                let node: [String: Any] = ["Type": "individual", "Desktop": try self.storeImage(url, set: Date()), "Idle": idle]
+                spaces[target.space!] = ["Default": node, "Displays": ["display-uuid": node]]
+                root["SystemDefault"] = node
+                root["Displays"] = ["display-uuid": node]
+            }
+            root["Spaces"] = spaces
+            workspace.store = try self.storeData(root)
+        }
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        XCTAssertNotEqual(try storeRoot(workspace.store)["SystemDefault"] as? NSDictionary, global as NSDictionary)
+
+        // A relaunch after a crash still has the store as it was before the first poster.
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [] }, frameCenter: NotificationCenter())
+        // The retry after a failed reload finds nothing left to change and still reloads.
+        workspace.failingReloads = 1
+        try await sync.restoreForTermination { }
+        let after = try storeRoot(workspace.store)
+        XCTAssertEqual(after["AllSpacesAndDisplays"] as? NSDictionary, global as NSDictionary)
+        XCTAssertEqual(after["SystemDefault"] as? NSDictionary, global as NSDictionary)
+        XCTAssertEqual((after["Spaces"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual((after["Displays"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(workspace.storeReplacements, 1)
+        XCTAssertEqual(workspace.storeReloads, 1)
+
+        // Nothing is left to put back or reload on the next quit.
+        workspace.pictures = [one: inherited, two: inherited]
+        workspace.didWrite = nil
+        let next = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try next.restoreAll()
+        XCTAssertEqual(workspace.storeReplacements, 1)
+        XCTAssertEqual(workspace.storeReloads, 1)
+    }
+
+    /// A poster whose file and journal entry survive from an earlier run is written again
+    /// under its old name; the store is still saved before that write.
+    @MainActor
+    func testStoreIsSavedBeforeAPosterJournaledInAnEarlierRun() throws {
+        let workspace = MemoryDesktopWorkspace()
+        let inherited = try DesktopSpaceWallpaperAPI.decodePicture([:])
+        workspace.pictures = [one: inherited]
+        workspace.visiblePictures = ["1": original("DefaultDesktop")]
+        let earlier = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try earlier.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        // That run kept no store copy; its desktop was put back but the entry stayed.
+        workspace.pictures = [one: inherited]
+
+        let aerial = try storeSelection(provider: "com.apple.wallpaper.choice.aerials",
+                                        configuration: ["assetID": "golden-gate"])
+        let global: [String: Any] = ["Type": "desktop", "Desktop": aerial]
+        workspace.store = try storeData(["AllSpacesAndDisplays": global, "SystemDefault": global,
+                                         "Displays": [String: Any](), "Spaces": [String: Any]()])
+        let saved = workspace.store
+        workspace.didWrite = {
+            guard let url = workspace.pictures[self.one]?.url else { return }
+            let node: [String: Any] = ["Type": "desktop", "Desktop": try self.storeImage(url, set: Date())]
+            workspace.store = try self.storeData(["AllSpacesAndDisplays": node, "SystemDefault": node,
+                                                   "Displays": [String: Any](), "Spaces": [String: Any]()])
+        }
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        // A crash before quitting leaves the store copy for the launch repair.
+        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        // A store that cannot be read keeps the copy for a later restoration.
+        let written = workspace.store
+        workspace.store = nil
+        workspace.didWrite = nil
+        try ledger.restoreAll()
+        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        workspace.store = written
+        try ledger.restoreAll()
+        XCTAssertEqual(try storeRoot(workspace.store) as NSDictionary, try storeRoot(saved) as NSDictionary)
+        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+    }
+
+    /// Only selections the app wrote are put back: a choice made in System Settings while the
+    /// app ran stays, even of the picture the app wrote back, and a snapshot that already named
+    /// a poster is never written back.
+    @MainActor
+    func testStoreRestorationKeepsTheUsersChoicesAndNeverPutsBackAPoster() throws {
+        let posters = root.appendingPathComponent("posters")
+        let written = original("DefaultDesktop").url
+        let aerial = try storeSelection(provider: "com.apple.wallpaper.choice.aerials",
+                                        configuration: ["assetID": "golden-gate"])
+        let idle = try storeSelection(provider: "default", configuration: [:])
+        let poster = try storeImage(posters.appendingPathComponent("poster-old.jpg"))
+        let original = try storeData([
+            "AllSpacesAndDisplays": ["Type": "individual", "Desktop": aerial, "Idle": idle],
+            "SystemDefault": ["Type": "individual", "Desktop": poster, "Idle": idle],
+            "Displays": [String: Any](), "Spaces": ["kept": ["Displays": [String: Any]()]]])
+        let user = try storeImage(self.original("user-choice").url)
+        let wroteAt = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        var ourImage = try storeImage(written)
+        ourImage["LastSet"] = wroteAt.addingTimeInterval(0.3)
+        let ours: [String: Any] = ["Type": "individual", "Desktop": ourImage, "Idle": idle]
+        // The user picked the same picture for this display long after the app wrote it.
+        var sameFile = try storeImage(written)
+        sameFile["LastSet"] = wroteAt.addingTimeInterval(600)
+        let usersSameFile: [String: Any] = ["Type": "individual", "Desktop": sameFile, "Idle": idle]
+        // A selection of that file with no time shows nothing of who set it.
+        let untimed: [String: Any] = ["Type": "individual", "Desktop": try storeImage(written), "Idle": idle]
+        let current = try storeData([
+            "AllSpacesAndDisplays": ["Type": "individual", "Desktop": aerial, "Idle": idle],
+            "SystemDefault": ours,
+            "Displays": ["d": ours, "e": usersSameFile, "f": untimed],
+            "Spaces": ["kept": ["Displays": [String: Any]()],
+                       "user": ["Default": ["Type": "individual", "Desktop": user, "Idle": idle],
+                                "Displays": ["d": ours]]]])
+        let writes = [DesktopWallpaperStoreRestoration.Write(url: written, at: wroteAt)]
+        let restored = try storeRoot(DesktopWallpaperStoreRestoration.restored(
+            current: current, original: original, written: writes, posters: posters))
+        XCTAssertEqual(restored["SystemDefault"] as? NSDictionary, ours as NSDictionary,
+                       "a poster in the snapshot is not an original")
+        XCTAssertEqual(restored["Displays"] as? NSDictionary, ["e": usersSameFile, "f": untimed] as NSDictionary)
+        let spaces = try XCTUnwrap(restored["Spaces"] as? [String: Any])
+        XCTAssertNotNil(spaces["kept"])
+        let space = try XCTUnwrap(spaces["user"] as? [String: Any])
+        XCTAssertEqual((space["Default"] as? [String: Any])?["Desktop"] as? NSDictionary, user as NSDictionary)
+        XCTAssertEqual((space["Displays"] as? [String: Any])?.isEmpty, true)
+
+        XCTAssertNil(try DesktopWallpaperStoreRestoration.restored(
+            current: original, original: original, written: writes, posters: posters))
     }
 
     @MainActor

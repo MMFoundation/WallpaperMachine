@@ -63,8 +63,8 @@ refresh, so a [settings backup](backup-restore.md) neither exports nor restores 
   while a restore runs waits for the restore to finish, then starts posters again.
 - **A poster left behind is found at launch.** With the switch off and no sync running,
   the launch (and the end of an animated lock screen) reads the journal
-  (`DesktopWallpaperLedger.hasRecordedOriginals`): if it still names an original, a
-  sync that never starts restores it, for a poster that a crash or an earlier run with
+  (`DesktopWallpaperLedger.hasRecordedOriginals`): if it still names an original or the
+  [store copy](#the-journal-of-originals) is still there, a sync that never starts restores it, for a poster that a crash or an earlier run with
   the switch on left on a desktop. A desktop showing anything but a poster keeps its
   choice, as on every restore.
 - **Animate lock screen decides.** While the lock screen is requested, or the native
@@ -174,7 +174,9 @@ symbol is optional: if one is missing the initializer fails and the caller falls
 to the public `NSWorkspace` API, which is scoped to the visible Space. That fallback
 is logged once, has no Space identity and so cannot accept a Space-scoped write.
 Switching Spaces, patching the wallpaper plist and restarting system processes are
-deliberately not used.
+deliberately not used to show posters. Only a full restoration edits the store and
+restarts WallpaperAgent, to put back choices this API cannot write (see [the journal of
+originals](#the-journal-of-originals)).
 
 A target is a display and the UUID of one of its regular desktops; fullscreen-app
 Spaces are not desktop thumbnails and are skipped.
@@ -216,6 +218,25 @@ to). `AppLog` records the missing file and what was put back instead. Only a def
 such file" counts. A file the app may not look at, such as one in a folder macOS's
 privacy protection covers, is written back as before. Files are looked at only while a
 desktop is being put back, never for each poster.
+
+The per-Space API speaks only image paths, so a choice that is not an image cannot be
+written back through it. An aerial, a dynamic or another extension wallpaper (macOS 27's
+default Golden Gate, for example) shown on all Spaces reads as an empty per-Space
+selection, and `NSWorkspace` answers with a still stand-in (`DefaultDesktop.heic`).
+Writing that still back alone would leave an image choice on every desktop, which macOS
+shows as a different wallpaper. So before the first poster the ledger also saves a copy
+of the system wallpaper store (`Index.plist`) in `<support>/DesktopPosters/store-original.json`,
+and journals each picture it writes back there with the time of the write: a store
+selection of that file counts as the app's only when its `LastSet` falls at one of those
+writes, so the same picture chosen in System Settings stays. A full restoration (quit, the switch
+turned off, the launch repair), once every desktop reads back without a poster, puts back
+`DesktopWallpaperStoreRestoration`'s result: every store desktop selection that names
+only posters or pictures the app wrote back gets its pre-poster value, a node the writes
+created goes, and WallpaperAgent is restarted to load it; a restart that fails is
+retried by the next pass or launch even though the store has nothing left to change. A selection chosen in System
+Settings meanwhile is kept, a snapshot entry that already named a poster is never put
+back, and the store is written only if it is still the version just read. The copy is
+deleted once restoration succeeds.
 
 A desktop showing anything but a poster was changed outside the app and keeps that
 choice on restoration. When a display stops showing a live wallpaper, its desktops are
@@ -270,7 +291,8 @@ then restores its own selections
 (without a lock-screen service, on macOS earlier than 26, restoration starts
 directly), and the poster service restores the originals: it puts each desktop's
 journaled original back (or, when that file is gone, [the next one that still
-exists](#the-journal-of-originals)), checks image references in the native store read-only, and
+exists](#the-journal-of-originals)), puts back [store selections the per-Space API cannot
+write](#the-journal-of-originals), checks image references in the native store, and
 retries asynchronous restoration for about five seconds (25 attempts, 200 ms apart)
 while WallpaperAgent reloads. Quit waits for every restored desktop to read back and for any poster write
 still in flight; one that lands late is restored again.

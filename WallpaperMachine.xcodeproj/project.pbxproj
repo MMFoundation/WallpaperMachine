@@ -628,6 +628,7 @@
 		A9F699F20CC57EAAB54BCFC9 /* LockScreenFirstFrameTiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C205FD9BDCF04601082706 /* LockScreenFirstFrameTiming.swift */; };
 		AAC9BD764B39DFEB037B5F36 /* NextWallpaperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1650F555C88F0A56AE5ACC0C /* NextWallpaperTests.swift */; };
 		AB30AD1E908F8FFAC2085A63 /* QualityPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6548F220EBEE20BFF6CEAE /* QualityPreset.swift */; };
+		AB6777B06ADD6A6F3C902E0F /* DesktopWallpaperStoreRestoration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D920EFE2EA61F27FF247A82 /* DesktopWallpaperStoreRestoration.swift */; };
 		ABE58EE84F1FB62B56D07914 /* keys.m in Sources */ = {isa = PBXBuildFile; fileRef = 5F7E1537050C9768FF3741BE /* keys.m */; };
 		AC4551F5EF4DD72017DC9C27 /* PanelDownloadQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 729A84DA5B761CB693D0609A /* PanelDownloadQueueTests.swift */; };
 		AC61ABE4368494ABDECC2619 /* TestAppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8D2EEA45A4176CB57075BE7 /* TestAppLanguage.swift */; };
@@ -1510,6 +1511,7 @@
 		7D20EEDDAF2B2DAED1B194F6 /* SettingsBRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsBRenderTests.swift; sourceTree = "<group>"; };
 		7D2FD60A51494C310AF1CF0F /* AppPermissionLocalizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPermissionLocalizationTests.swift; sourceTree = "<group>"; };
 		7D361A4337BE7B79AC734EFF /* InspectorOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorOptions.swift; sourceTree = "<group>"; };
+		7D920EFE2EA61F27FF247A82 /* DesktopWallpaperStoreRestoration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopWallpaperStoreRestoration.swift; sourceTree = "<group>"; };
 		7D9753908B8059E4B43D87AD /* EnergyUsageMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnergyUsageMonitorTests.swift; sourceTree = "<group>"; };
 		7DF3E64E828EE759271EE1A9 /* PanelStorageActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelStorageActionsTests.swift; sourceTree = "<group>"; };
 		7E00122A62EA15795BA15923 /* UserAssetWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserAssetWorker.swift; sourceTree = "<group>"; };
@@ -3007,6 +3009,7 @@
 				DA0A75C634AFC0EA2C95BCDD /* DesktopClickRevealPreference.swift */,
 				40FE110E98FAF4EF4380F4C5 /* DesktopSpaceWallpaperAPI.swift */,
 				3E46920A5931F497D7CACC13 /* DesktopWallpaperLedger.swift */,
+				7D920EFE2EA61F27FF247A82 /* DesktopWallpaperStoreRestoration.swift */,
 				675B1C664DC8AA8930389BA9 /* DesktopWallpaperSync.swift */,
 				3BA100B0B7872C61FD1923AD /* DesktopWindowObservation.swift */,
 				F99A08B5FFF247118CA021A0 /* DisplayConfiguration.swift */,
@@ -4276,6 +4279,7 @@
 				E0C0146DAE06748EC2CDE543 /* DesktopSettingsSection.swift in Sources */,
 				996B247AABAA68B8444D2CFE /* DesktopSpaceWallpaperAPI.swift in Sources */,
 				75B409BF1A2439F5819E5FBF /* DesktopWallpaperLedger.swift in Sources */,
+				AB6777B06ADD6A6F3C902E0F /* DesktopWallpaperStoreRestoration.swift in Sources */,
 				1AE3DED7691FD40CDCD94236 /* DesktopWallpaperSync.swift in Sources */,
 				FE4135DA0E13A0D9E194154B /* DesktopWindowDiagnostics.swift in Sources */,
 				8831B3FBE6E77A5A18F4E2B7 /* DesktopWindowObservation.swift in Sources */,
