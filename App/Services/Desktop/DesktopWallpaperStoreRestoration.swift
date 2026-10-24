@@ -42,9 +42,9 @@ enum DesktopWallpaperStoreRestoration {
             let set = selection["LastSet"] as? Date
             return urls.allSatisfy { url in
                 if url.deletingLastPathComponent().path == posters { return true }
-                guard let times = writes[url] else { return false }
-                // Without a time, the file is the only provenance there is.
-                guard let set else { return true }
+                // Without a time nothing shows the app set it, and the same file
+                // may be the user's own choice, so it is left alone.
+                guard let times = writes[url], let set else { return false }
                 return times.contains {
                     set >= $0 - writeTolerance.before && set <= $0 + writeTolerance.after
                 }

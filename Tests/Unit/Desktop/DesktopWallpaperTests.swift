@@ -783,9 +783,12 @@ final class DesktopWallpaperTests: XCTestCase {
             "Configuration": try PropertyListSerialization.data(fromPropertyList: configuration, format: .binary, options: 0)
         ]]]]
     }
-    private func storeImage(_ url: URL) throws -> [String: Any] {
-        try storeSelection(provider: "com.apple.wallpaper.choice.image",
-                           configuration: ["type": "imageFile", "url": ["relative": url.absoluteString]])
+    /// `set` is the `LastSet` WallpaperAgent records when it applies a selection.
+    private func storeImage(_ url: URL, set: Date? = nil) throws -> [String: Any] {
+        var selection = try storeSelection(provider: "com.apple.wallpaper.choice.image",
+                                           configuration: ["type": "imageFile", "url": ["relative": url.absoluteString]])
+        selection["LastSet"] = set
+        return selection
     }
     private func storeData(_ root: [String: Any]) throws -> Data {
         try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
@@ -818,7 +821,7 @@ final class DesktopWallpaperTests: XCTestCase {
             var spaces = root["Spaces"] as? [String: Any] ?? [:]
             for target in [self.one, self.two] {
                 guard let url = workspace.pictures[target]?.url, url.isFileURL else { continue }
-                let node: [String: Any] = ["Type": "individual", "Desktop": try self.storeImage(url), "Idle": idle]
+                let node: [String: Any] = ["Type": "individual", "Desktop": try self.storeImage(url, set: Date()), "Idle": idle]
                 spaces[target.space!] = ["Default": node, "Displays": ["display-uuid": node]]
                 root["SystemDefault"] = node
                 root["Displays"] = ["display-uuid": node]
@@ -874,7 +877,7 @@ final class DesktopWallpaperTests: XCTestCase {
         let saved = workspace.store
         workspace.didWrite = {
             guard let url = workspace.pictures[self.one]?.url else { return }
-            let node: [String: Any] = ["Type": "desktop", "Desktop": try self.storeImage(url)]
+            let node: [String: Any] = ["Type": "desktop", "Desktop": try self.storeImage(url, set: Date())]
             workspace.store = try self.storeData(["AllSpacesAndDisplays": node, "SystemDefault": node,
                                                    "Displays": [String: Any](), "Spaces": [String: Any]()])
         }
@@ -918,10 +921,12 @@ final class DesktopWallpaperTests: XCTestCase {
         var sameFile = try storeImage(written)
         sameFile["LastSet"] = wroteAt.addingTimeInterval(600)
         let usersSameFile: [String: Any] = ["Type": "individual", "Desktop": sameFile, "Idle": idle]
+        // A selection of that file with no time shows nothing of who set it.
+        let untimed: [String: Any] = ["Type": "individual", "Desktop": try storeImage(written), "Idle": idle]
         let current = try storeData([
             "AllSpacesAndDisplays": ["Type": "individual", "Desktop": aerial, "Idle": idle],
             "SystemDefault": ours,
-            "Displays": ["d": ours, "e": usersSameFile],
+            "Displays": ["d": ours, "e": usersSameFile, "f": untimed],
             "Spaces": ["kept": ["Displays": [String: Any]()],
                        "user": ["Default": ["Type": "individual", "Desktop": user, "Idle": idle],
                                 "Displays": ["d": ours]]]])
@@ -930,7 +935,7 @@ final class DesktopWallpaperTests: XCTestCase {
             current: current, original: original, written: writes, posters: posters))
         XCTAssertEqual(restored["SystemDefault"] as? NSDictionary, ours as NSDictionary,
                        "a poster in the snapshot is not an original")
-        XCTAssertEqual(restored["Displays"] as? NSDictionary, ["e": usersSameFile] as NSDictionary)
+        XCTAssertEqual(restored["Displays"] as? NSDictionary, ["e": usersSameFile, "f": untimed] as NSDictionary)
         let spaces = try XCTUnwrap(restored["Spaces"] as? [String: Any])
         XCTAssertNotNil(spaces["kept"])
         let space = try XCTUnwrap(spaces["user"] as? [String: Any])
