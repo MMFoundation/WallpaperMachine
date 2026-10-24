@@ -1509,6 +1509,85 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
+    func testAFrameDroppedForItsContextStillAnswersTheRequest() async throws {
+        let rig = try PosterRig(root: root, periodicInterval: .milliseconds(30))
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        rig.clock.advance(.seconds(1))
+        try await postFrame(Data([1]), on: rig)
+
+        // A periodic capture asks again, and the renderer answers the piled-up requests with
+        // one frame that carries a switch hold's context: it is dropped, but it answered.
+        rig.sync.refreshesPeriodically = true
+        try await waitUntil { rig.total >= 2 }
+        rig.sync.refreshesPeriodically = false
+        post(Data([2]), layer: rig.layers[0], center: rig.frames, context: "switch-hold:A")
+
+        // So the intro frame a restarted renderer sends next is still one nobody asked for.
+        let written = rig.workspace.writes.count
+        post(Data([0]), layer: rig.layers[0], center: rig.frames)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(rig.workspace.writes.count, written)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([1]))
+    }
+
+    @MainActor
+    func testASnapshotRetakesEveryPosterOnlyWhenItChangesTheLayout() async throws {
+        let rig = try PosterRig(root: root)
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        // The first snapshot a sync sees takes every poster.
+        rig.sync.snapshotApplied(posterLayout(wallpaper: "a"))
+        XCTAssertEqual(rig.total, 1)
+        try await postFrame(Data([1]), on: rig)
+
+        // Playback, audio or quality changed: the settled poster stays.
+        rig.sync.snapshotApplied(posterLayout(wallpaper: "a", fps: 60))
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(rig.total, 1)
+
+        // The display shows another wallpaper.
+        rig.sync.snapshotApplied(posterLayout(wallpaper: "b"))
+        try await waitUntil { rig.total == 2 }
+    }
+
+    func testThePosterLayoutFollowsWhatTheDisplaysShowAndNothingElse() {
+        let base = posterLayout(wallpaper: "a")
+        XCTAssertEqual(posterLayout(wallpaper: "a", fps: 60, volume: 0.2, muted: true, title: "Another title"), base,
+                       "frame rates, volume, mute and titles change no picture")
+        let changed: [(String, DesktopPosterLayout)] = [
+            ("wallpaper", posterLayout(wallpaper: "b")),
+            ("mirror target", posterLayout(wallpaper: "a", mirrorTarget: "2")),
+            ("scaling", posterLayout(wallpaper: "a", scaling: .match)),
+            ("scaling factor", posterLayout(wallpaper: "a", scalingFactor: 1.5)),
+            ("enabled", posterLayout(wallpaper: "a", enabled: false)),
+            ("mode", posterLayout(wallpaper: "a", mode: .mirror)),
+            ("screen size", posterLayout(wallpaper: "a", screen: CGRect(x: 0, y: 0, width: 2560, height: 1440))),
+            ("screen scale", posterLayout(wallpaper: "a", scale: 1)),
+            ("files", posterLayout(wallpaper: "a", contentRevision: 1)),
+        ]
+        for (name, layout) in changed { XCTAssertNotEqual(layout, base, name) }
+    }
+
+    private func posterLayout(wallpaper: String, mirrorTarget: String? = nil, scaling: BridgeScalingMode = .fill,
+                              scalingFactor: Double = 1, enabled: Bool = true, mode: BridgeDisplayMode = .standalone,
+                              fps: UInt32 = 30, volume: Float = 1, muted: Bool = false, title: String = "Built-in",
+                              screen: CGRect = CGRect(x: 0, y: 0, width: 1512, height: 982), scale: CGFloat = 2,
+                              contentRevision: UInt64 = 0) -> DesktopPosterLayout {
+        DesktopPosterLayout(
+            monitors: [BridgeMonitorInfoRow(
+                displayId: "1", title: title, wallpaperId: wallpaper, wallpaperTitle: wallpaper.uppercased(),
+                mirrorTargetDisplayId: mirrorTarget, mirrorTargetTitle: nil,
+                scalingMode: scaling == .fill ? "fill" : "match", targetFps: String(fps), audioResponse: false)],
+            displays: [BridgeDisplaySettingsRow(
+                displayId: "1", title: title, enabled: enabled, mode: mode, mirrorTargets: [],
+                selectedMirrorTarget: mirrorTarget, scalingMode: scaling, scalingFactor: scalingFactor,
+                targetFps: fps, maxFps: 120, muted: muted, volume: volume)],
+            screens: [.init(frame: screen, scale: scale)], contentRevision: contentRevision)
+    }
+
+    @MainActor
     func testADisplayDrawingAnUnsavedLookKeepsItsPosterUntilItDrawsTheSavedLookAgain() async throws {
         let rig = try PosterRig(root: root, displays: 2, settleDelays: [.milliseconds(20)])
         defer { rig.finish() }

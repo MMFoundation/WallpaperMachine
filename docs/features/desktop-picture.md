@@ -135,10 +135,12 @@ Neither path resumes a paused video.
   at all. A surface that a settle capture is still to ask is left to it. Each display
   is judged on its own, and a settled poster stays however long ago it was taken,
   because every new frame of an animated wallpaper is a new file macOS keeps
-  ([below](#a-new-file-for-every-new-frame)). A snapshot changes the displays when it
-  changes a display's wallpaper, mode, mirror target or scaling, the wallpapers' files
-  or a screen's size (`AppDelegate.desktopPosterLayout`); playback, audio, quality and
-  the panel's selection do not. A wallpaper that starts or changes, a move, an apply,
+  ([below](#a-new-file-for-every-new-frame)). A snapshot changes the displays when its
+  `DesktopPosterLayout` (each display's wallpaper, mode, mirror target and scaling, the
+  wallpapers' files and the screens' sizes) differs from the last snapshot that sync
+  saw (`DesktopWallpaperSync.snapshotApplied`), so a change made while the animated lock
+  screen held the desktop still counts; playback, audio, quality, frame rates, volumes
+  and the panel's selection do not. A wallpaper that starts or changes, a move, an apply,
   the end of shown edits, the periodic setting and a poster scoped to a Space
   ([spaces.md](spaces.md#poster-ownership-and-late-frames), which must confirm its
   context) are not affected. The resume's settle captures cover only the surfaces that
