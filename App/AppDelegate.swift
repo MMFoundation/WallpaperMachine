@@ -459,6 +459,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                             self.retryHeldUpdatePrompt()
                             completion(.success(()))
                         } catch {
+                            // An unload that did not happen frees nothing: the kept wallpapers
+                            // follow what was applied, not what was asked for.
+                            self.spaceParking?.setUnloaded(self.appliedGlobalPresentation == .unloaded)
                             AppLog.error("presentation suspend failed: \(error.localizedDescription)")
                             completion(.failure(error))
                         }
