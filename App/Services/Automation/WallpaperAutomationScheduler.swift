@@ -211,7 +211,10 @@ final class WallpaperAutomationScheduler {
             let visit = spaceVisit(display)
             resolved.baseAvailable = visit != nil
             if let visit, let target = configuration.desktopTarget(visit.spaceID, firstDesktop: visit.firstSpaceID) {
-                resolved.event = .init(key: "space:\(configuration.revision):\(visit.spaceID):\(visit.token)", date: time, target: target)
+                // The target is part of the event: a desktop that follows Desktop 1 changes target
+                // within one visit when the desktops are reordered and another one becomes first.
+                let key = "space:\(configuration.revision):\(visit.spaceID):\(visit.token):\(target.kind.rawValue):\(target.id)"
+                resolved.event = .init(key: key, date: time, target: target)
             }
         }
         if let selection = focus.selection {

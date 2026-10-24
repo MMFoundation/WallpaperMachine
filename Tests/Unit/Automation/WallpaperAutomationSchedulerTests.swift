@@ -112,6 +112,18 @@ final class WallpaperAutomationSchedulerTests: XCTestCase {
         XCTAssertEqual(states["primary"]?.wallpaperID, "forest", "with no choice on Desktop 1 either, the display keeps what it shows")
     }
 
+    func testADesktopFollowingDesktop1FollowsTheNewDesktop1WhenTheDesktopsAreReordered() async throws {
+        try rules.update("primary") { $0.mode = .spaces; $0.spaces = ["a": target("ocean"), "b": target("forest")] }
+        spaceVisits["primary"] = .init(spaceID: "new", token: "visit1", firstSpaceID: "a")
+        let scheduler = scheduler(); scheduler.start(); defer { scheduler.stop() }; await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "ocean")
+
+        // Desktop b is moved to the front while the person stays on the same desktop.
+        spaceVisits["primary"] = .init(spaceID: "new", token: "visit1", firstSpaceID: "b")
+        scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "forest", "the desktop shows the new Desktop 1's wallpaper")
+    }
+
     func testAWallpaperChosenByHandBecomesTheCurrentDesktopsOwn() async throws {
         try rules.update("primary") { $0.mode = .spaces; $0.spaces = ["a": target("ocean"), "b": target("forest")] }
         spaceVisits["primary"] = .init(spaceID: "a", token: "visit1")
