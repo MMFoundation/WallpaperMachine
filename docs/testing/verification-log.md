@@ -30,8 +30,8 @@ entry's recorded result is not allowed.
 - Post-update window: Don't Show Again button (sets the opt-out and closes) replaces the checkbox; Show/Hide Earlier Releases adds older bundled releases.
 - Settings › About: Show What's New after updates switch (undoes the opt-out, cleared by Reset all settings) and Release history › Show.
 - Release history opens the same window with every bundled release up to this version and records nothing.
-- python3 scripts/test.py --only WhatsNewTests/AboutSettingsTests/PanelSettingsResetTests/SettingsEditingModelTests/ClientPreferencesTests: 49 passed.
-- python3 scripts/test.py: 4114 passed, 0 failed, 47 skipped.
+- python3 scripts/test.py --only WhatsNewTests/AboutSettingsTests/PanelSettingsResetTests/SettingsEditingModelTests/ClientPreferencesTests: exit 0; 49 passed, 0 failed, 0 skipped.
+- python3 scripts/test.py: exit 0; 4114 passed, 0 failed, 47 skipped.
 - Not checked: the windows on screen (layout, scrolling to earlier releases); no Release build, no desktop run.
 
 ## 2026-10-24 — Keep each visited desktop's wallpaper loaded and paused
