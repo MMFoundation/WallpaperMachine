@@ -73,9 +73,10 @@ extension PanelController {
   /// `automationMode`. Different wallpaper for each desktop needs Space information for the display
   /// and no animated lock screen.
   func setAutomationMode(_ mode: DisplayWallpaperAutomation.Mode, display: String? = nil) async throws {
+    // Chosen from the mode menu, a wallpaper for each desktop starts as the switch starts it.
+    if mode == .spaces { return try await setDesktopWallpapers(true, display: display) }
     try await run(.immediate) {
       let display = try standaloneDisplayID(display)
-      if mode == .spaces { _ = try requireSpaceInformation(display) }
       try automations.update(display) { $0.mode = mode }
     }
   }

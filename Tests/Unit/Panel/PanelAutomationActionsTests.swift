@@ -290,6 +290,27 @@ final class PanelAutomationActionsTests: PanelTestCase {
                    "turning it off leaves another automatic selection alone")
   }
 
+  func testChoosingAWallpaperForEachDesktopFromTheModeMenuStartsLikeTheSwitch() async throws {
+    let topology: [String: WallpaperDisplaySpaces]? = [
+      "1": .init(
+        displayUUID: "screen", spaces: [.init(id: "space-a", number: 1), .init(id: "space-b", number: 2)],
+        current: "space-b")
+    ]
+    let spaces = WallpaperSpaceMonitor(provider: { topology })
+    spaces.refresh()
+    defer { spaces.stop() }
+    let panel = try makePanel(spaces: spaces)
+    defer { Task { await panel.shutdown() } }
+    panel.store.monitorInformationSnapshot.rows = [OrganizationFixtures.monitor("primary", wallpaper: "a")]
+
+    try await panel.controller.setAutomationMode(.spaces)
+
+    let configuration = panel.automations.configuration(for: "primary")
+    XCTAssertEqual(configuration.mode, .spaces)
+    XCTAssertEqual(configuration.spaces, ["space-a": wallpaper("a"), "space-b": wallpaper("a")],
+                   "the desktop the person is on and Desktop 1 keep the wallpaper shown")
+  }
+
   func testWithoutSpaceInformationSpaceModeCannotBeChosenAndNoDesktopCanBeInvented() async throws {
     let panel = try makePanel()
     defer { Task { await panel.shutdown() } }
