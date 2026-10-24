@@ -56,7 +56,13 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
   frame identical to the poster is neither encoded nor written.
 - Capture timing: an animated wallpaper gets new poster files only as a new or
   changed wallpaper settles, not through hours of Space changes, wakes, resumes,
-  snapshots that change no display and renderers that start again; a Space change
+  `refresh(capture: .unsettled)` calls and renderers that start again; a snapshot
+  passed to `snapshotApplied` retakes every poster only when its `DesktopPosterLayout`
+  differs from the last one, and that layout stays equal when frame rates, volume,
+  mute or titles change and differs for a display's wallpaper, mirror target,
+  scaling, scaling factor, enabled state, mode, screen size or scale, and the
+  wallpapers' files; a frame dropped for another request's context still answers
+  its request; a Space change
   applies the existing poster at once and asks for a fresh frame only when the
   poster has not settled (displays judged separately; Space-scoped posters, a frame
   a paused display answered with and a frame that failed to encode never settle it),
@@ -103,7 +109,9 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
 
 Not covered: what Mission Control actually shows and its refresh latency, and
 macOS accepting or restoring native selections. Both are on
-[manual-smoke.md](manual-smoke.md). Behavior: [desktop picture](../features/desktop-picture.md).
+[manual-smoke.md](manual-smoke.md). Nor is `AppDelegate`'s wiring: that every engine
+snapshot reaches `snapshotApplied`, and that `desktopPosterLayout()` fills the layout
+from the store's snapshots and `NSScreen`. Behavior: [desktop picture](../features/desktop-picture.md).
 
 ### Wallpaper activation
 
