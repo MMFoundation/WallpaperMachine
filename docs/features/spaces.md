@@ -14,9 +14,10 @@ Only the desktop the person is on plays. A desktop they have visited keeps its w
 and paused in a window on that desktop, so a swipe brings in the frame they left and arriving
 runs it on from there: no intro plays again and no still picture shows first. A desktop not
 visited yet shows a still picture of its own wallpaper until its first visit loads it. A paused
-wallpaper draws nothing, so the mode costs no more CPU, GPU or power than one wallpaper on the
-display; it costs memory, one loaded wallpaper for each different wallpaper the display's visited
-desktops show ([below](#keeping-each-desktops-wallpaper)).
+scene, clip or page draws nothing, so the mode costs about as much CPU, GPU and power as one
+wallpaper on the display; a kept web page that ignores the pause may still run timers under
+WebKit's inactive scheduling. Its real cost is memory, one loaded wallpaper for each different
+wallpaper the display's visited desktops show ([below](#keeping-each-desktops-wallpaper)).
 
 ## Choosing each desktop's wallpaper
 

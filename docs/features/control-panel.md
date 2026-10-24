@@ -288,7 +288,8 @@ windows. A minimized panel comes back from the Dock when it is opened from the s
 menu, the Dock icon or Command-comma, or when the app is activated; the green button still
 offers full screen. The app keeps its Dock icon while any of these windows is open, on screen
 or minimized, and leaves the Dock when the last one closes. The wallpaper itself keeps playing
-on every Space as before.
+on every Space as before, unless the display has a
+[different wallpaper for each desktop](spaces.md): then only the desktop you are on plays.
 
 ### Reopening the panel
 
