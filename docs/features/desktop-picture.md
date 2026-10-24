@@ -90,7 +90,9 @@ answers from the frame it kept when its view left the window tree, since WebKit 
 not promise a snapshot of a detached view (an edit made while it is paused draws in
 the window first, and the frame is kept again); a page not yet detached is
 snapshotted live. The first ready frame goes to every native desktop of the display
-at once, without visiting them.
+at once, without visiting them, except on a display with a
+[different wallpaper for each desktop](spaces.md), where it goes to the current desktop
+and every other desktop gets the saved poster of its own wallpaper.
 
 A native-backend clip stored rotated or mirrored (a portrait phone recording) is shown
 upright by the player layer, but the frames the playing item hands back are not, so its
@@ -422,9 +424,12 @@ active or an animated lock screen is on its way to taking it. A screen saver cho
 its own leaves poster sync running. For restoration order at quit with the provider active, see
 [lock-screen.md](lock-screen.md#turning-it-off).
 
-A display using the experimental Follow desktop Space mode scopes its posters to the
-visited desktop and holds writes while it has no current target. The context
-bookkeeping that rejects late frames is in
+A display with a different wallpaper for each desktop scopes its fresh posters to the
+visited desktop and holds them while it has no current target; the other desktops, and
+the current one until a fresh poster is taken, get the last poster of their own wallpaper
+([pictures of the other desktops](spaces.md#pictures-of-the-other-desktops)). Its windows
+stay on the current desktop, so Mission Control shows each desktop's picture rather than
+the live window. The context bookkeeping that rejects late frames is in
 [spaces.md](spaces.md#poster-ownership-and-late-frames), and the mode's conflict with
 the animated lock screen in
 [spaces.md](spaces.md#focus-mirroring-and-native-lock-screen-ownership).

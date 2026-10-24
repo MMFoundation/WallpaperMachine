@@ -343,11 +343,17 @@ a desktop run).
 ### Spaces
 
 `WallpaperSpaceMonitorTests`, the Space scenarios in
-`WallpaperAutomationSchedulerTests`, store and backup migration checks, and
+`WallpaperAutomationSchedulerTests`, `WallpaperSpacePinningTests` (windows kept on the desktops
+of their wallpaper, hidden while loading), `WallpaperSpaceParkingTests` (the wallpapers each
+display keeps, memory pressure), the renderer's `space_parking_tests` and the bridge's
+`tests::space_parking` (parked scenes), the kept clips and pages in `NativeVideoWallpaperHostTests`
+and `WebWallpaperHostLifecycleTests`, the Wallpaper per Desktop tile in `QuickSettingsTileTests`,
+store and backup migration checks, and
 `PanelAutomationActionsTests` and `DisplaysSettingsModelTests` (Panel). `DesktopWallpaperTests` covers
-Space-scoped writes, late frames and encodes, replacement gaps and restoration.
-Not covered: real Space transitions and installed desktop behavior; see
-[Spaces](../features/spaces.md).
+Space-scoped writes, saved posters for the other desktops, late frames and encodes, replacement
+gaps and restoration; `DesktopSpacePosterCacheTests` the saved posters themselves.
+Not covered by tests: real Space transitions and installed desktop behavior; what one desktop
+run checked is in [Spaces](../features/spaces.md#storage-and-verification).
 
 ### Display layouts and transfer
 

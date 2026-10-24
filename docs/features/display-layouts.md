@@ -153,11 +153,12 @@ of the manual smoke checklist are how it gets checked.
 
 ## Spaces boundary
 
-These are per-display layouts. [Follow desktop Space](spaces.md) separately keeps
-wallpaper/playlist choices by Space UUID and reloads the active display on a desktop
-change. Applying a layout is a manual override for the current visit. A layout does
-not save that Space map or switch Spaces, and inactive desktops do not retain
-separate live renderer instances. Actual OS transitions still need desktop verification.
+These are per-display layouts. [Different wallpaper for each desktop](spaces.md)
+separately keeps wallpaper/playlist choices by Space UUID and reloads the active
+display on a desktop change. Applying a layout sets the wallpaper of the desktop each
+display is on, as any manual choice does in that mode. A layout does not save that
+Space map or switch Spaces, and inactive desktops do not retain separate live
+renderer instances.
 
 ## Code and verification
 

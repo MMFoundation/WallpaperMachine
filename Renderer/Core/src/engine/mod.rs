@@ -54,6 +54,33 @@ pub struct DisplaySnapshotEntry {
     pub assignment: Option<WallpaperAssignment>,
 }
 
+/// One open scene and its window: the live scene of a display, or one kept
+/// loaded and paused for a desktop the person left, which runs again when its
+/// wallpaper comes back to that display ([`WallpaperEngine::set_parked_scenes`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SceneWindowEntry {
+    pub display_id: u32,
+    pub handle: SceneHandle,
+    /// The descriptor the scene runs.
+    pub desc: SceneDesc,
+    /// The window server's number for the scene's window; `None` without one.
+    pub window_number: Option<isize>,
+    /// Kept paused rather than shown as the display's live scene.
+    pub parked: bool,
+}
+
+impl SceneWindowEntry {
+    fn of(runtime: &runtime::SceneRuntime, handle: SceneHandle, parked: bool) -> Self {
+        Self {
+            display_id: runtime.display_id(),
+            handle,
+            desc: runtime.desc.clone(),
+            window_number: runtime.window_number(),
+            parked,
+        }
+    }
+}
+
 /// What came of showing a property document on a scene.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropertyPreview {
@@ -402,6 +429,30 @@ impl WallpaperEngine {
     #[must_use]
     pub fn display_snapshot(&self) -> Vec<DisplaySnapshotEntry> {
         self.snapshots.load().displays.clone()
+    }
+
+    /// Every open scene with its window, live and parked, as of the last
+    /// publication. Read without waiting for the engine thread.
+    #[must_use]
+    pub fn scene_windows(&self) -> Vec<SceneWindowEntry> {
+        self.snapshots.load().scenes.clone()
+    }
+
+    /// Sets which scenes the display `display_id` keeps loaded and paused
+    /// when its live scene changes to another wallpaper, by scene path.
+    ///
+    /// A scene whose path is listed is parked instead of replaced when its
+    /// display moves on, and it is the one that runs again when a reconcile
+    /// brings its wallpaper back: no load, no new window, the same handle. A
+    /// parked scene whose path is no longer listed is closed now. An empty
+    /// list keeps nothing and closes every parked scene of the display. The
+    /// list is runtime state, never saved.
+    pub async fn set_parked_scenes(
+        &self,
+        display_id: u32,
+        scene_paths: Vec<String>,
+    ) -> Result<(), EngineError> {
+        self.ask_actor(messages::SetParkedScenes { display_id, scene_paths }).await
     }
 
     #[cfg(test)]
@@ -1226,7 +1277,7 @@ mod tests {
             paused: false,
             window_active: true,
             assignment: None,
-        }] });
+        }], scenes: Vec::new() });
         engine.poll_mouse_position().await.unwrap();
         let edges = engine.mouse_buttons.lock().unwrap().consume_edges();
         assert_eq!(edges.transitions().map(|edge| (edge.button, edge.pressed)).collect::<Vec<_>>(), vec![(0, true)]);

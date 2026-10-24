@@ -267,10 +267,13 @@ The first is a `WARN` line, the second an `INFO` line.
 - **Rate**: the same level repeated within 5 seconds is one line, measured from the line
   that was written. A change of level is always a line.
 
-The app only records. It does not unload, pause or lower a wallpaper in response, and
-nothing reads a threshold: a limit would need footprints measured on real Macs and a way
-to tell which scene to give up, and stopping a wallpaper unprompted is more intrusive
-than the problem it guards against. The event source is cancelled when the app quits
+The app does not unload, pause or lower a wallpaper on screen in response, and nothing
+reads a threshold: a limit would need footprints measured on real Macs and a way to tell
+which scene to give up, and stopping a wallpaper unprompted is more intrusive than the
+problem it guards against. The one thing pressure frees is what is not on screen: the
+wallpapers a display keeps paused for its other desktops
+([different wallpaper for each desktop](spaces.md#keeping-each-desktops-wallpaper)) are
+let go while it lasts, which the log says in a `space parking:` line. The event source is cancelled when the app quits
 and nothing polls. The lock-screen extension is a separate process, and neither
 its footprint nor its pressure events are recorded.
 

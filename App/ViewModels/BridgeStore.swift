@@ -1285,6 +1285,20 @@ final class BridgeStore {
         }
     }
 
+    /// Sets which wallpapers a display keeps loaded and paused when it moves on to another one,
+    /// so one that comes back runs on from where it stopped. An empty list frees them all.
+    /// Waits for an Apply in flight, like every playback-environment change.
+    func setDisplayParkedWallpapersAsync(displayID: UInt32, wallpaperIDs: [String]) async throws {
+        try await updatePlaybackEnvironment {
+            try await bridge.setDisplayParkedWallpapers(displayId: String(displayID), wallpaperIds: wallpaperIDs)
+        }
+    }
+
+    /// The window of every open scene wallpaper, live and kept paused, read without a round trip.
+    func sceneWindows() -> [BridgeSceneWindow] {
+        bridge.sceneWindows()
+    }
+
     /// Turns renderer work counting on or off. Off by default; the renderer
     /// performs no bookkeeping until this is on, and nothing is pushed back —
     /// counters are only ever read by `rendererCountersAsync`.

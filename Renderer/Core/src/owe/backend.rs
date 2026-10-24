@@ -167,10 +167,13 @@ impl OweBackend {
             scene.set_render_failure_callback(render_failure_callback)?;
         }
 
-        scene.apply_scene_config(desc)?;
+        // The surface settings go before the configuration: the configuration loads the scene
+        // and queues its first frame behind it, so a setting sent after it would only reach the
+        // second frame, and the first would be drawn with the renderer's defaults (fit, centred).
         scene.set_scaling_mode(scaling_mode)?;
         scene.set_scaling_factor(scaling_factor)?;
         scene.set_framing(framing)?;
+        scene.apply_scene_config(desc)?;
         Ok(scene)
     }
 

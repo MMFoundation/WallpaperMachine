@@ -27,7 +27,7 @@ pub use engine::{
     AudioRequirementCallback, DisplayConfig, DisplaySelector, DisplaySnapshotEntry,
     FirstFrameCallback, PointerActivity,
     PointerActivityCallback, PointerConsumerCallback, PointerProbe, PropertyPreview, RecoveryOutcome,
-    RecoveryReason, RecoveryStep, UserShortcutObserverCallback, WallpaperAssignment,
+    RecoveryReason, RecoveryStep, SceneWindowEntry, UserShortcutObserverCallback, WallpaperAssignment,
     WallpaperEngine, WallpaperEngineConfig,
 };
 pub use error::EngineError;

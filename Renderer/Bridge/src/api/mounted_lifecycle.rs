@@ -835,7 +835,7 @@ impl EngineFacade for ControlledEngine {
                 &engine.inner.audio,
                 &engine.inner.readiness,
                 scenes,
-                move || snapshot_engine.display_rows(),
+                move || (snapshot_engine.display_rows(), Vec::new()),
                 move |scenes| async move {
                     core_engine.inner.data.lock().unwrap().observations.push(
                         EngineObservation::ReconcileCore { phase: OperationPhase::Started });

@@ -105,6 +105,17 @@ final class NativeVideoWallpaperHost {
     var onSurfacesChanged: (@MainActor () -> Void)?
     var onStateChanged: (@MainActor (HostWallpaperState) -> Void)?
     private var states: [UInt32: HostWallpaperState] = [:]
+    /// The wallpapers each display may keep paused for a desktop the person left
+    /// (`WallpaperSpaceParking`), by display.
+    private var keepPlan: [UInt32: Set<String>] = [:]
+    /// A clip a display keeps paused in its own window for a desktop the person left, so the
+    /// clip runs on from there when that desktop comes back instead of opening again.
+    private struct KeptClip {
+        let surface: NativeVideoSurface
+        let descriptor: BridgeNativeVideoWallpaper
+        let load: UInt64?
+    }
+    private var kept: [UInt32: [String: KeptClip]] = [:]
 
     init(
         fetch: @escaping @MainActor () async throws -> [BridgeNativeVideoWallpaper],
@@ -161,6 +172,31 @@ final class NativeVideoWallpaperHost {
 
     var activeDisplayIDs: Set<UInt32> { Set(surfaces.keys) }
     var isEmpty: Bool { surfaces.isEmpty }
+
+    /// The windows of the clips kept paused for other desktops.
+    var keptWindowNumbers: Set<Int> { Set(kept.values.flatMap(\.values).map(\.surface.windowNumber)) }
+
+    /// The wallpapers the display keeps paused for its other desktops.
+    func keptWallpapers(on displayID: UInt32) -> Set<String> { Set((kept[displayID] ?? [:]).keys) }
+
+    /// The wallpaper each of this host's windows shows, live and kept, by window number.
+    var windowWallpapers: [Int: String] {
+        var wallpapers: [Int: String] = [:]
+        for (displayID, surface) in surfaces {
+            if let wallpaper = descriptors[displayID]?.wallpaperId { wallpapers[surface.windowNumber] = wallpaper }
+        }
+        for clips in kept.values {
+            for (wallpaper, clip) in clips { wallpapers[clip.surface.windowNumber] = wallpaper }
+        }
+        return wallpapers
+    }
+
+    /// Sets which wallpapers each display may keep paused for a desktop the person left, and
+    /// closes the kept clips the plan no longer names.
+    func setKeptWallpapers(_ plan: [UInt32: Set<String>]) {
+        keepPlan = plan
+        releaseKeptClips()
+    }
     /// Displays the bridge offered a wallpaper for in the last pass that this
     /// host's screen list does not contain. The bridge reads the active displays
     /// from CoreGraphics and this host reads AppKit's screens, and the two can
@@ -312,11 +348,13 @@ final class NativeVideoWallpaperHost {
             states.removeValue(forKey: displayID)
         }
 
+        releaseKeptClips()
         // Close first. A wallpaper that moved to another backend, or to another
         // display, must stop playing here before anything else starts, so the
-        // clip is never decoded or heard twice.
+        // clip is never decoded or heard twice. One the display keeps for the
+        // desktop the person left is paused instead.
         for (displayID, surface) in surfaces where wanted[displayID] == nil {
-            closeVacated(displayID: displayID, surface: surface)
+            if !keep(displayID: displayID, surface: surface) { closeVacated(displayID: displayID, surface: surface) }
         }
         // A surface is bound to the admission key it was accepted under, not
         // just to a wallpaper id. When the key changes the decision that
@@ -343,6 +381,11 @@ final class NativeVideoWallpaperHost {
             if existing.wallpaperId != wallpaper.wallpaperId
                 || existing.admissionKey != wallpaper.admissionKey
             {
+                // A clip kept for this display was admitted when it opened.
+                if kept[displayID]?[wallpaper.wallpaperId]?.descriptor.admissionKey == wallpaper.admissionKey {
+                    replaced.append((displayID, surface))
+                    continue
+                }
                 _ = await admission(
                     for: URL(fileURLWithPath: wallpaper.mediaPath), wallpaper: wallpaper, load: nil)
                 // The read may have been long; a newer pass or a shutdown took over
@@ -352,7 +395,7 @@ final class NativeVideoWallpaperHost {
             }
         }
         for (displayID, surface) in replaced where surfaces[displayID] === surface {
-            close(displayID: displayID, surface: surface)
+            if !keep(displayID: displayID, surface: surface) { close(displayID: displayID, surface: surface) }
         }
 
         for (displayID, wallpaper) in wanted.sorted(by: { $0.key < $1.key }) {
@@ -375,6 +418,7 @@ final class NativeVideoWallpaperHost {
                 continue
             }
             guard currentFrame(of: displayID) != nil else { continue }
+            if resumeKept(wallpaper, displayID: displayID) { continue }
             // A file already found to fail is not opened again for every snapshot: the failure
             // stays what the display and the panel show, and is restated under this offer's
             // startup revision so the bridge's wait for it ends.
@@ -977,6 +1021,65 @@ final class NativeVideoWallpaperHost {
         switchHold?.windowClosed(layer, displayID: displayID)
     }
 
+    /// Pauses the clip of a display that moves on to another wallpaper and keeps it, when the
+    /// display may keep that wallpaper for the desktop the person left and the clip has a picture
+    /// to show there. False when it is to be closed instead.
+    private func keep(displayID: UInt32, surface: NativeVideoSurface) -> Bool {
+        guard let descriptor = descriptors[displayID], surface.isReadyForDisplay,
+              keepPlan[displayID]?.contains(descriptor.wallpaperId) == true else { return false }
+        let load = logLoads[displayID]
+        cancelFirstFrameWatch(displayID)
+        recordState(descriptor, phase: .closed)
+        states.removeValue(forKey: displayID)
+        surface.setUserPaused(true)
+        surfaces.removeValue(forKey: displayID)
+        descriptors.removeValue(forKey: displayID)
+        kept[displayID]?[descriptor.wallpaperId]?.surface.stop()
+        kept[displayID, default: [:]][descriptor.wallpaperId] = KeptClip(surface: surface, descriptor: descriptor, load: load)
+        AppLog.info("native video wallpaper \(descriptor.wallpaperId): kept paused on "
+            + "\(DiagnosticEnvironment.display(displayID)) for the desktop the person left", load: load)
+        return true
+    }
+
+    /// Makes the clip the display keeps for `wallpaper` its live one again, when it is the same
+    /// file: no admission, no new window, no wait for a first picture.
+    private func resumeKept(_ wallpaper: BridgeNativeVideoWallpaper, displayID: UInt32) -> Bool {
+        guard let clip = kept[displayID]?[wallpaper.wallpaperId] else { return false }
+        kept[displayID]?[wallpaper.wallpaperId] = nil
+        if kept[displayID]?.isEmpty == true { kept[displayID] = nil }
+        guard clip.descriptor.admissionKey == wallpaper.admissionKey else {
+            clip.surface.stop()
+            return false
+        }
+        surfaces[displayID] = clip.surface
+        descriptors[displayID] = clip.descriptor
+        logLoads[displayID] = clip.load
+        if let frame = currentFrame(of: displayID) { clip.surface.setScreenFrame(frame) }
+        update(surface: clip.surface, with: wallpaper, displayID: displayID)
+        AppLog.info("native video wallpaper \(wallpaper.wallpaperId): runs again on "
+            + "\(DiagnosticEnvironment.display(displayID)) without opening", load: clip.load)
+        return true
+    }
+
+    /// Closes the kept clips whose display may no longer keep them or is gone, and keeps the
+    /// others fitted to their display.
+    private func releaseKeptClips() {
+        for (displayID, clips) in kept {
+            let frame = currentFrame(of: displayID)
+            for (wallpaper, clip) in clips {
+                if let frame, keepPlan[displayID]?.contains(wallpaper) == true {
+                    clip.surface.setScreenFrame(frame)
+                    continue
+                }
+                clip.surface.stop()
+                kept[displayID]?[wallpaper] = nil
+                AppLog.info("native video wallpaper \(wallpaper): no longer kept on "
+                    + "\(DiagnosticEnvironment.display(displayID))", load: clip.load)
+            }
+            if kept[displayID]?.isEmpty == true { kept[displayID] = nil }
+        }
+    }
+
     private func close(displayID: UInt32, surface: NativeVideoSurface) {
         cancelFirstFrameWatch(displayID)
         if let wallpaper = descriptors[displayID] { recordState(wallpaper, phase: .closed) }
@@ -1025,6 +1128,9 @@ final class NativeVideoWallpaperHost {
         }
         surfaces.removeAll()
         descriptors.removeAll()
+        for clip in kept.values.flatMap(\.values) { clip.surface.stop() }
+        kept.removeAll()
+        keepPlan.removeAll()
         for watch in firstFrameWatches.values { watch.task?.cancel() }
         firstFrameWatches.removeAll()
         admissionCache.removeAll()

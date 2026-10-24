@@ -2100,6 +2100,73 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
+    func testOtherDesktopsOfASpaceDisplayGetTheirOwnPosterAndAreRestoredAtQuit() throws {
+        let workspace = MemoryDesktopWorkspace()
+        let three = DesktopPictureTarget(display: "1", space: "three")
+        workspace.pictures = [one: original("one"), two: original("two"), three: original("three"),
+                              external: original("external")]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+
+        try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1", "2"], targetSpaces: ["1": ["one"]],
+                               spacePosters: ["1": ["two": Data([2])], "2": ["external": Data([9])]])
+
+        XCTAssertEqual(Set(workspace.writes), [one, two])
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[two]?.url)), Data([2]))
+        XCTAssertEqual(workspace.pictures[three], original("three"), "a desktop without a poster of its own is left alone")
+        XCTAssertEqual(workspace.pictures[external], original("external"),
+                       "a display that does not follow Spaces takes nothing scoped")
+
+        workspace.writes.removeAll()
+        try ledger.synchronize(posters: [:], liveDisplays: ["1"], targetSpaces: ["1": []],
+                               spacePosters: ["1": ["two": Data([3])]])
+        XCTAssertEqual(workspace.writes, [two], "a held current desktop keeps its poster while the others still update")
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[two]?.url)), Data([3]))
+
+        workspace.writes.removeAll()
+        try ledger.synchronize(posters: [:], liveDisplays: ["1"], targetSpaces: ["1": ["one"]],
+                               spacePosters: ["1": ["one": Data([4])]])
+        XCTAssertEqual(workspace.writes, [one], "the current desktop has its saved picture until a fresh one is taken")
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[one]?.url)), Data([4]))
+
+        try ledger.restoreAll()
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+        XCTAssertEqual(workspace.pictures[two], original("two"))
+    }
+
+    @MainActor
+    func testAScopedPosterIsReportedAndOtherDesktopsAreWrittenFromTheirOwn() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("one"), two: original("two")]
+        let layer = CAMetalLayer(), center = NotificationCenter(), encoder = CountingPosterEncoder()
+        var scope = DesktopPosterScope.desktop(id: "one", context: "visit-a")
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+            surfaces: { [.init(layer: layer, display: "1")] }, frameCenter: center, scope: { _ in scope },
+            encode: { await encoder.encode($0) }, settleDelays: [])
+        var accepted: [(String, DesktopPosterScope, Data)] = []
+        sync.onPosterAccepted = { accepted.append(($0, $1, $2)) }
+        // The fresh poster wins on the current desktop.
+        sync.desktopPosters = { _ in ["one": Data([8]), "two": Data([9])] }
+        sync.start(); defer { sync.stop() }
+
+        post(Data([7]), layer: layer, center: center, context: "visit-a")
+        try await waitUntil { Set(workspace.writes) == [self.one, self.two] }
+
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[one]?.url)), Data([7]))
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[two]?.url)), Data([9]))
+        XCTAssertEqual(accepted.map(\.0), ["1"])
+        XCTAssertEqual(accepted.first?.1, scope)
+        XCTAssertEqual(accepted.first?.2, Data([7]))
+
+        scope = .all
+        sync.desktopPosters = { _ in ["two": Data([5])] }
+        workspace.writes.removeAll()
+        post(Data([6]), layer: layer, center: center)
+        try await waitUntil { Set(workspace.writes) == [self.one, self.two] }
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[two]?.url)), Data([6]),
+                       "a display that leaves Space selection shows its wallpaper everywhere again")
+    }
+
+    @MainActor
     func testLateFramesAndEncodesFromAnotherSpaceAreRejected() async throws {
         let workspace = MemoryDesktopWorkspace()
         workspace.pictures = [one: original("one"), two: original("two")]

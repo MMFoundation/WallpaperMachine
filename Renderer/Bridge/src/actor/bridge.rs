@@ -47,7 +47,7 @@ use crate::{
             SelectWallpaper,
             SetAudioResponseEnabled, SetBatteryQualityProfile,
             SetDisplayConfigEnabled, SetDisplayPosition,
-            SetDisplayPresentationSuspended,
+            SetDisplayParkedWallpapers, SetDisplayPresentationSuspended,
             FanOutSystemMediaArtwork, FanOutSystemMediaEvent, GetSystemMediaConsentHandles,
             GetSystemMediaSceneHandles, SetFilter,
             SetFrameRateCap, SetGlobalPlayback, SetQualityThrottle,
@@ -2191,6 +2191,36 @@ impl<E: EngineFacade + Clone> Message<SetDisplayPresentationSuspended> for Bridg
         log::info!(
             "display {display_id} presentation {}",
             if msg.suspended { "suspended" } else { "resumed" }
+        );
+        Ok(())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetDisplayParkedWallpapers> for BridgeActor<E> {
+    type Reply = messages::SetDisplayParkedWallpapersReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetDisplayParkedWallpapers,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let display_id: u32 = msg.display_id.parse().map_err(|_| {
+            BridgeError::invalid_input(format!("unknown display id {}", msg.display_id))
+        })?;
+        // The engine knows a scene by its project file, which is where every
+        // wallpaper id leads; one that is not a scene matches nothing.
+        let scene_paths = msg
+            .wallpaper_ids
+            .iter()
+            .map(|id| self.paths.project_json(id).to_string_lossy().into_owned())
+            .collect();
+        self.engine
+            .set_parked_scenes(display_id, scene_paths)
+            .await
+            .map_err(|error| BridgeError::engine(error.to_string()))?;
+        log::info!(
+            "display {display_id} keeps {} wallpaper(s) paused when it moves on",
+            msg.wallpaper_ids.len()
         );
         Ok(())
     }

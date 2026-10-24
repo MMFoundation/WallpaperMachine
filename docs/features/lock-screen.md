@@ -268,7 +268,7 @@ tree; it does not resume playback the user paused. Web projects remain unsupport
 
 ## Caveats
 
-- **Follow desktop Space** and animated lock-screen wallpaper require different
+- **Different wallpaper for each desktop** and animated lock-screen wallpaper require different
   Desktop ownership. Settings prevents enabling both for an active independent
   display; choose another automatic mode or turn animated lock-screen wallpaper off.
   Screen-saver-only mode can still use the currently applied content. See

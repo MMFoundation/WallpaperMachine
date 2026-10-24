@@ -674,6 +674,14 @@ engine to redo, and when.
   normalization, nested-array path errors and the retained empty-parent regression.
   The independent unpacked-cache, framing and recovery cases remain in place.
   These are owned-temporary-file and value tests, not native rendering or corpus proof.
+- **A kept desktop wallpaper runs on without a load** — core's
+  `engine::actor::space_parking_tests` (parking a scene that has drawn instead of replacing it,
+  running it again with its handle and no refresh job, replacing in place as before when nothing
+  is kept, closing on a shorter list, a new size, an unplugged display and `close_all`, and a
+  global resume leaving it paused) and the bridge's `tests::space_parking` and
+  `engine::facade::first_frame_tests::a_wallpaper_the_display_keeps_parked_is_not_awaited`. A parked scene
+  that came back is never waited on for a first frame it does not report again, which would end
+  in the 90-second rollback. Device-free; no window or desktop.
 - **Download-speed sampling** — `DownloadTelemetryTests` in `Tests/Unit/Workshop/`:
   real `nettop` streaming over a private PTY with local-socket traffic; CRLF and
   split line endings. LF-only fixtures do not verify live delivery.

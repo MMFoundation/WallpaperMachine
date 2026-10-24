@@ -256,6 +256,11 @@ pub struct SetPresentationUnloaded {
     pub unloaded: bool,
 }
 
+pub struct SetDisplayParkedWallpapers {
+    pub display_id: String,
+    pub wallpaper_ids: Vec<String>,
+}
+
 pub struct SetAudioSuppressed {
     pub suppressed: bool,
 }
@@ -449,6 +454,7 @@ pub type SetBatteryModeReply = AllSnapshotsReply;
 pub type SetVerboseLoggingReply = AllSnapshotsReply;
 pub type SetPresentationSuspendedReply = Result<(), BridgeError>;
 pub type SetDisplayPresentationSuspendedReply = Result<(), BridgeError>;
+pub type SetDisplayParkedWallpapersReply = Result<(), BridgeError>;
 pub type SetPresentationUnloadedReply = AllSnapshotsReply;
 pub type SetAudioSuppressedReply = AllSnapshotsReply;
 pub type SetLabelLanguagesReply = Result<(), BridgeError>;

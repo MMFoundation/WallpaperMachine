@@ -10,6 +10,8 @@ import AppKit
 /// desktop-level window onto the screen would be doing exactly that.
 @MainActor
 protocol NativeVideoSurface: AnyObject {
+    /// The window server's number for the surface's window.
+    var windowNumber: Int { get }
     var posterLayer: CALayer? { get }
     func setScreenFrame(_ frame: NSRect)
     func setVolume(_ volume: Float, muted: Bool)

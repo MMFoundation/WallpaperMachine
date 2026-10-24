@@ -43,6 +43,10 @@ Not held, because the old picture is not available or the successor is not a sce
   display that is suspended (display sleep, a covered desktop, a pause rule, a lock), and
   any display whose surface does not answer within 250 ms (a paused or stalled renderer
   may not).
+- A desktop whose wallpaper the display keeps paused for it
+  ([different wallpaper for each desktop](spaces.md#keeping-each-desktops-wallpaper)): that
+  wallpaper runs on in the window already on the desktop, so there is no gap to cover. A kept
+  window is never the picture held for another switch either.
 - **Reapply wallpaper**, Retry for a scene that stopped, and the reload after an update:
   all three take the wallpaper off the display first, so there is no picture left to hold.
 - A host window that does not come: a still that no host picks up is released 8 seconds after

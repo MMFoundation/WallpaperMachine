@@ -22,6 +22,7 @@ CHECKS = (
     ("core-integration", ("-p", "wallpaper-core", "--test", "core_audio_api",
                           "--test", "project_override_json",
                           "--test", "wallpaper_background",
+                          "--test", "first_frame_scaling",
                           "--test", "audio_response_capture_lifecycle",
                           "--test", "scene_audio_volume_validation"), RENDERER),
     ("shader", ("-p", "wm-shader", "--features", "ffi"), RENDERER),

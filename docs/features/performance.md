@@ -462,6 +462,12 @@ the choice is **Keep running**.
 **Stop** on display sleep frees renderer memory. The wallpaper is reloaded when the
 display wakes. **Pause** keeps it loaded.
 
+A display with a [different wallpaper for each desktop](spaces.md#keeping-each-desktops-wallpaper)
+keeps the wallpaper of each desktop the person visited loaded and paused, so coming back runs it
+on instead of loading it again. A kept wallpaper draws nothing; its cost is the memory it holds,
+plus whatever timers a kept web page that ignores the pause still runs under WebKit's inactive
+scheduling. Every **Stop (free memory)** choice and the Mac's memory pressure let go of them.
+
 **After the Mac wakes** the app checks that every scene wallpaper is drawing again
 (`SystemWakeRevalidator` asks, the bridge's `revalidate_scene_presentation` answers). It
 reads each scene's frame counter, waits three seconds, reads it again, and rebuilds the
@@ -637,9 +643,10 @@ decision itself is `LowBatteryGate`, fed by one `BatteryReading` of the internal
 battery. Web mute uses the same availability boundary as above.
 Wallpaper and playlist selections instead reach `WallpaperAutomationScheduler`;
 they never become pause/mute/stop actions or change the user's own Play/Pause. The
-experimental [desktop Space mode](spaces.md) uses the same eligibility gate,
-retains manual overrides for the current visit, and defers Focus exit while the
-current desktop cannot be identified. Animated lock-screen ownership
+[different wallpaper for each desktop](spaces.md) mode uses the same eligibility gate,
+keeps a wallpaper chosen by hand as the current desktop's own, and defers Focus exit
+while the current desktop cannot be identified. It runs one renderer per display, like
+any other mode: desktops that are not on screen show a still picture. Animated lock-screen ownership
 conflicts with that mode; screen-saver-only ownership does not.
 
 ### App rules

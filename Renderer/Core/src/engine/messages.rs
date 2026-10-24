@@ -179,6 +179,12 @@ pub struct SetAllPaused {
     pub suspended_displays: Vec<u32>,
 }
 
+/// Sets the scenes a display keeps loaded and paused when it moves on.
+pub struct SetParkedScenes {
+    pub display_id: u32,
+    pub scene_paths: Vec<String>,
+}
+
 /// Reads renderer work counters from every open scene.
 pub struct RendererCounters;
 

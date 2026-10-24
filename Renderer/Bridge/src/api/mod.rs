@@ -39,7 +39,7 @@ pub use types::{
     BridgeSliderMetadata, BridgeSnapshotBundle, BridgeStorageStatus, BridgeSurfaceCheck,
     BridgeVideoBackendReport, BridgeWallpaperEntry,
     BridgeWallpaperKind, BridgeWallpaperMutationBundle, BridgeWallpaperOptionsSnapshot,
-    BridgeWebWallpaper,
+    BridgeSceneWindow, BridgeWebWallpaper,
 };
 
 impl From<crate::config::BatteryModeCfg> for BridgeBatteryMode {
@@ -90,7 +90,7 @@ use crate::{
             SelectWallpaper,
             SetAudioResponseEnabled, SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
             PreviewDisplayPosition, PreviewWallpaperProperties, SetDisplayPosition,
-            SetDisplayPresentationSuspended,
+            SetDisplayParkedWallpapers, SetDisplayPresentationSuspended,
             SetFilter, SetGlobalPlayback, SetLaunchAtLogin, SetMirrorMuted, SetMirrorScalingFactor,
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
             SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile,
@@ -787,6 +787,18 @@ impl EngineFacade for ArcEngineFacade {
 
     fn display_snapshot(&self) -> Vec<wallpaper_core::DisplaySnapshotEntry> {
         self.0.display_snapshot()
+    }
+
+    fn scene_windows(&self) -> Vec<wallpaper_core::SceneWindowEntry> {
+        self.0.scene_windows()
+    }
+
+    fn set_parked_scenes(
+        &self,
+        display_id: u32,
+        scene_paths: Vec<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), wallpaper_core::EngineError>> + Send>> {
+        self.0.set_parked_scenes(display_id, scene_paths)
     }
 
     fn close_all_scenes(
@@ -1863,6 +1875,56 @@ impl WallpaperBridge {
                 suspended,
             })
             .await
+    }
+
+    /// Sets which wallpapers the display `display_id` keeps loaded and paused
+    /// when it moves on to another one, so that one runs on from where it
+    /// stopped when it comes back instead of loading again. Only a scene that
+    /// has drawn is kept; its window stays where the host put it. A kept scene
+    /// whose wallpaper is no longer listed is closed now, and an empty list
+    /// frees every one the display keeps. Runtime state, never saved.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the display id is not a number or the engine
+    /// fails to close a scene.
+    pub async fn set_display_parked_wallpapers(
+        &self,
+        display_id: String,
+        wallpaper_ids: Vec<String>,
+    ) -> Result<(), BridgeError> {
+        self.actor
+            .ask(SetDisplayParkedWallpapers {
+                display_id,
+                wallpaper_ids,
+            })
+            .await
+    }
+
+    /// The window of every open scene wallpaper, live and parked, so the host
+    /// can keep each one on the desktops that show its wallpaper. Web and
+    /// video windows are the host's own and are not listed.
+    ///
+    /// Synchronous on purpose: it reads the engine's last published state,
+    /// which no actor owns, and the host asks whenever windows may have moved.
+    pub fn scene_windows(&self) -> Vec<BridgeSceneWindow> {
+        self.engine
+            .scene_windows()
+            .into_iter()
+            .filter_map(|window| {
+                let wallpaper_id = std::path::Path::new(&window.desc.scene_path)
+                    .parent()?
+                    .file_name()?
+                    .to_string_lossy()
+                    .into_owned();
+                Some(BridgeSceneWindow {
+                    display_id: window.display_id,
+                    wallpaper_id,
+                    window_number: i64::try_from(window.window_number?).ok()?,
+                    parked: window.parked,
+                })
+            })
+            .collect()
     }
 
     /// Turns renderer work counting on or off for the whole process.

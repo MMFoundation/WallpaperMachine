@@ -338,10 +338,10 @@ shipped Wallpaper Engine shaders or assets skip with a printed reason.
 `python3 scripts/check_rust.py` is the release-CI entry point. It supplies the
 Homebrew Cargo environment, uses a temporary `WALLPAPER_MACHINE_HOME`, disables
 the desktop, media and network opt-ins, and runs, all with `--release --locked`:
-the `wallpaper-core` and `wallpaper-bridge` library tests, five device-free
+the `wallpaper-core` and `wallpaper-bridge` library tests, six device-free
 `wallpaper-core` integration targets (`core_audio_api`,
-`project_override_json`, `wallpaper_background`, `audio_response_capture_lifecycle`,
-`scene_audio_volume_validation`) and `wm-shader` with `ffi`: its unit,
+`project_override_json`, `wallpaper_background`, `first_frame_scaling`,
+`audio_response_capture_lifecycle`, `scene_audio_volume_validation`) and `wm-shader` with `ffi`: its unit,
 corpus, GPU-probe and C-ABI tests, warnings denied by the crate. It prints and records the five explicit
 desktop exclusions (`CORE_EXCLUSIONS` in the script) and any
 emitted skip reasons. A nonzero command or missing tool fails the check. Full
@@ -531,6 +531,12 @@ no assets prints `skipped: …` and is not a pass).
   pixel must be opaque black. Its harness runs on the process's main thread; no
   window, GPU drawable, or desktop access is needed. It does not establish
   physical sleep/wake compositor timing.
+- `first_frame_scaling`: opens a still scene through `OweBackend::open_scene` on an
+  unattached square layer, with Fill on a 3:2 canvas, unchanged frames skipped and
+  on-demand updating on, and requires exactly one present. A scaling mode, zoom or
+  framing sent after the configuration reaches only the second frame, so the first
+  is drawn fit and centred and a corrected one follows: the jump from fit to fill
+  right after a wallpaper appears. It uses the GPU offscreen; no window or desktop.
 - `wallpaper-bridge`: live audio toggle errors, rollback/persistence,
   nonblocking selection and mirror behavior; scene lifetime,
   presentation/manual pause precedence, failure rollback, disabled destruction,

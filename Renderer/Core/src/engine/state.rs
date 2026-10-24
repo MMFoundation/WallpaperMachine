@@ -5,7 +5,7 @@ use crate::{
     EngineError, WallpaperAssignment,
     display::state::{DisplayKey, DisplayRecord, DisplayStateModel},
     engine::{
-        DisplaySnapshotEntry,
+        DisplaySnapshotEntry, SceneWindowEntry,
         runtime::{SceneRuntime, SceneRuntimeState},
         snapshot::EngineSnapshot,
     },
@@ -19,6 +19,9 @@ pub struct EngineState {
     pub handles_by_display: HashMap<DisplayKey, SceneHandle>,
     pub displays_by_handle: HashMap<SceneHandle, DisplayKey>,
     pub next_handle: u64,
+    /// The scene paths each display (by id) may keep parked when its live
+    /// scene moves on to another wallpaper. Runtime state, never saved.
+    pub parking: HashMap<u32, Vec<String>>,
 }
 
 /// One slot: the display model's record plus what only the engine knows.
@@ -27,6 +30,17 @@ pub struct DisplayRuntimeRecord {
     pub handle: Option<SceneHandle>,
     pub runtime: Option<SceneRuntime>,
     pub last_runtime_state: Option<StoredSceneRuntimeState>,
+    /// Scenes this display showed before and keeps loaded and paused, each
+    /// with the handle it had while it was live. The indexes name only the
+    /// live handle, so a parked scene cannot be addressed until it runs again.
+    pub parked: Vec<ParkedRuntime>,
+}
+
+/// A scene kept loaded and paused on its display after the display moved on
+/// to another wallpaper, so that wallpaper can run again without a load.
+pub struct ParkedRuntime {
+    pub handle: SceneHandle,
+    pub runtime: SceneRuntime,
 }
 
 /// What a closed scene leaves behind so the next scene on the slot can pick
@@ -57,12 +71,15 @@ impl StoredSceneRuntimeState {
 
 impl DisplayRuntimeRecord {
     fn empty(model: DisplayRecord) -> Self {
-        Self { model, handle: None, runtime: None, last_runtime_state: None }
+        Self { model, handle: None, runtime: None, last_runtime_state: None, parked: Vec::new() }
     }
 
     /// Whether anything of this slot's state is worth carrying to another slot.
     fn holds_anything(&self) -> bool {
-        self.handle.is_some() || self.runtime.is_some() || self.last_runtime_state.is_some()
+        self.handle.is_some()
+            || self.runtime.is_some()
+            || self.last_runtime_state.is_some()
+            || !self.parked.is_empty()
     }
 
     pub fn should_have_runtime(&self) -> bool {
@@ -105,6 +122,7 @@ impl EngineState {
             handles_by_display: HashMap::new(),
             displays_by_handle: HashMap::new(),
             next_handle: 1,
+            parking: HashMap::new(),
         }
     }
 
@@ -129,7 +147,31 @@ impl EngineState {
                 })
             })
             .collect();
-        EngineSnapshot { displays }
+        let scenes = self
+            .display_records
+            .iter()
+            .flat_map(|record| {
+                let live = record
+                    .runtime
+                    .as_ref()
+                    .zip(record.handle)
+                    .map(|(runtime, handle)| SceneWindowEntry::of(runtime, handle, false));
+                let parked = record
+                    .parked
+                    .iter()
+                    .map(|parked| SceneWindowEntry::of(&parked.runtime, parked.handle, true));
+                live.into_iter().chain(parked)
+            })
+            .collect();
+        EngineSnapshot { displays, scenes }
+    }
+
+    /// Whether the display `display_id` may keep a scene of `scene_path`
+    /// parked when it moves on.
+    pub fn may_park(&self, display_id: u32, scene_path: &str) -> bool {
+        self.parking
+            .get(&display_id)
+            .is_some_and(|paths| paths.iter().any(|path| path == scene_path))
     }
 
     /// Handles of live scenes whose renderers report that they read system
@@ -219,6 +261,7 @@ impl EngineState {
                 record.handle = taken.handle;
                 record.runtime = taken.runtime;
                 record.last_runtime_state = taken.last_runtime_state;
+                record.parked = taken.parked;
             }
             next.push(record);
         }
@@ -317,8 +360,9 @@ impl EngineState {
         Ok(())
     }
 
-    /// Closes every scene and forgets every handle, keeping the slots, their
-    /// window flags, assignments and remembered state. The counter is not
+    /// Closes every scene, the parked ones included, and forgets every handle,
+    /// keeping the slots, their window flags, assignments and remembered state
+    /// (the live scene's, never a parked one's). The counter is not
     /// rewound. Every scene is released even when one fails to close; the
     /// first error comes back afterwards.
     pub fn close_all(&mut self) -> Result<(), EngineError> {
@@ -334,13 +378,14 @@ impl EngineState {
         let scenes: Vec<SceneRuntime> = self
             .display_records
             .iter_mut()
-            .filter_map(|record| {
+            .flat_map(|record| {
                 record.handle = None;
                 record.model.runtime_open = false;
                 // The snapshot reads the live scene, so it has to come before the
                 // runtime is taken out of the record.
                 record.store_runtime_snapshot();
-                record.runtime.take()
+                let parked = std::mem::take(&mut record.parked).into_iter().map(|parked| parked.runtime);
+                record.runtime.take().into_iter().chain(parked)
             })
             .collect();
         // Every scene is closed even after a failure; only the first error is kept.
