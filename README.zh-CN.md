@@ -242,6 +242,16 @@ python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 
 
 - [linux.do](https://linux.do) —— 一切可能，从这里开始
 
+## Star 历史
+
+<a href="https://www.star-history.com/?repos=wallpapermachine%2Fwallpapermachine&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=wallpapermachine/wallpapermachine&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=wallpapermachine/wallpapermachine&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=wallpapermachine/wallpapermachine&type=date&legend=top-left" />
+ </picture>
+</a>
+
 <br>
 
 <p align="center">
