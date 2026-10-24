@@ -396,8 +396,9 @@ TEST(LayerTextureReference, ATextureNamedWithALeadingUnderscoreIsItsFile) {
 
 // An effect's own buffers are render targets whatever the effect calls them: a
 // bokeh blur declares `_coc` and `_full1`, a buffer may have no underscore at all,
-// and `plain` and `_rt_plain` are two buffers. Each pass that binds one reads what
-// the pass before it drew there.
+// `plain` and `_rt_plain` are two buffers, and one named like an alias is still a
+// target the engine made. Each pass that binds one reads what the pass before it
+// drew there.
 TEST(LayerTextureReference, AnEffectsOwnBuffersAreTargetsWhateverTheyAreCalled) {
     fs::VFS vfs;
     auto    parsed = ParseScene(vfs, R"([
@@ -405,16 +406,17 @@ TEST(LayerTextureReference, AnEffectsOwnBuffersAreTargetsWhateverTheyAreCalled) 
          "effects":[{"file":"effects/buffers/effect.json","id":6,"visible":true}]}
       ])",
       {{ "/effects/buffers/effect.json",
-         R"({"name":"buffers","fbos":[{"name":"_half","scale":2},{"name":"plain","scale":1},{"name":"_rt_plain","scale":1}],"passes":[)"
+         R"({"name":"buffers","fbos":[{"name":"_half","scale":2},{"name":"plain","scale":1},{"name":"_rt_plain","scale":1},{"name":"_alias_cookie","scale":1}],"passes":[)"
          R"({"material":"materials/copy.json","target":"_half","bind":[{"name":"previous","index":0}]},)"
          R"({"material":"materials/copy.json","target":"plain","bind":[{"name":"_half","index":0}]},)"
          R"({"material":"materials/copy.json","target":"_rt_plain","bind":[{"name":"plain","index":0}]},)"
-         R"({"material":"materials/copy.json","bind":[{"name":"_rt_plain","index":0}]}]})" },
+         R"({"material":"materials/copy.json","target":"_alias_cookie","bind":[{"name":"_rt_plain","index":0}]},)"
+         R"({"material":"materials/copy.json","bind":[{"name":"_alias_cookie","index":0}]}]})" },
        { "/materials/copy.json",
          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null]}]} )" }});
     ASSERT_NE(parsed, nullptr);
 
-    // The buffers the first three passes draw into, in the effect's own order.
+    // The buffers the first four passes draw into, in the effect's own order.
     SceneNode* layer = nullptr;
     for (auto& child : parsed->sceneGraph->GetChildren()) {
         if (child->Name() == "blurred") layer = child.get();
@@ -424,12 +426,12 @@ TEST(LayerTextureReference, AnEffectsOwnBuffersAreTargetsWhateverTheyAreCalled) 
     ASSERT_NE(camera, parsed->cameras.end());
     ASSERT_TRUE(camera->second->HasImgEffect());
     const auto& effect = *camera->second->GetImgEffect()->GetEffect(0);
-    ASSERT_EQ(effect.nodes.size(), 4u);
+    ASSERT_EQ(effect.nodes.size(), 5u);
     std::vector<std::string> buffers;
     for (const auto& node : effect.nodes) {
-        if (buffers.size() < 3) buffers.push_back(node.output);
+        if (buffers.size() < 4) buffers.push_back(node.output);
     }
-    EXPECT_EQ(std::set<std::string>(buffers.begin(), buffers.end()).size(), 3u)
+    EXPECT_EQ(std::set<std::string>(buffers.begin(), buffers.end()).size(), 4u)
         << "two buffers of the effect were given one target";
 
     AddScreenTarget(*parsed);
@@ -447,7 +449,7 @@ TEST(LayerTextureReference, AnEffectsOwnBuffersAreTargetsWhateverTheyAreCalled) 
     for (const auto& key : buffers) {
         SCOPED_TRACE(key);
         EXPECT_NE(parsed->FindRenderTarget(key), nullptr) << "the effect's buffer was never registered";
-        EXPECT_TRUE(IsSpecTex(key)) << key << " would be loaded as a texture file";
+        EXPECT_TRUE(StartsWithText(key, WE_SPEC_PREFIX)) << key << " is not named as a target the engine made";
         const auto writer = std::find_if(passes.begin(), passes.end(),
                                          [&key](const auto& pass) { return pass.second->desc().output == key; });
         const auto reader = std::find_if(passes.begin(), passes.end(), [&key](const auto& pass) {

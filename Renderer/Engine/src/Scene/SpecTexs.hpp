@@ -126,7 +126,7 @@ inline bool StartsWithText(const std::string_view text, const std::string_view p
 }
 /// A render target or an alias of one. Any other name is a texture file, even one that
 /// starts with an underscore (`_0022_Eyes` is `materials/_0022_Eyes.tex`); the buffers an
-/// effect declares are registered under `EnsureSpecTexName` whatever the effect calls them.
+/// effect declares are registered under a `_rt_` name whatever the effect calls them.
 inline bool IsSpecTex(const std::string_view name) {
     return StartsWithText(name, WE_SPEC_PREFIX) || StartsWithText(name, WE_ALIAS_PREFIX);
 }
