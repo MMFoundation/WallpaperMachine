@@ -389,13 +389,53 @@ TEST(MdlSkeleton, AnimationBlockVersionSixParsesFully) {
     EXPECT_EQ(anims[0].fps, 30.0);
     EXPECT_EQ(anims[0].length, 1);
     EXPECT_EQ(anims[0].mode, WPPuppet::PlayMode::Loop);
-    EXPECT_TRUE(anims[0].trans.has_value());
+    ASSERT_EQ(anims[0].texture_channels.size(), 1u);
+    EXPECT_EQ(anims[0].texture_channels[0], (std::vector<float> { 0.0f, 1.0f }));
     EXPECT_EQ(anims[0].v4_events.size(), 1u);
     EXPECT_EQ(anims[0].blend_curves.size(), 1u);
     EXPECT_EQ(anims[0].scalar_curves.size(), 1u);
     EXPECT_TRUE(anims[0].has_aabb);
     p.mdl.puppet->prepared();
     EXPECT_NEAR(anims[0].max_time, 1.0 / 30.0, 1e-12);
+}
+
+TEST(MdlSkeleton, TextureChannelWeightsAreNumberedByRecordOrder) {
+    // Each record after the bone tracks is one texture channel's weight a frame. Wallpaper
+    // Engine numbers the channels by the records' order and ignores each record's leading
+    // word: records led by 1 and then 0 are channels 0 and 1 (probe, 2026-10-25).
+    const Bytes f = withAnimBlock(one(), [](Bytes& b) {
+        b.u32(1);
+        writeAnim6(b, { .id = 7, .name = "blink",
+                        .channels = { { 1, { 0.5f, 0.5f } }, { 0, { 0.0f, 0.25f, 1.0f } }, { 9, {} } } });
+    });
+    const auto p = parse(f);
+    ASSERT_TRUE(p.ok);
+    ASSERT_NE(p.mdl.puppet, nullptr);
+    ASSERT_EQ(p.mdl.puppet->anims.size(), 1u);
+    const auto& channels = p.mdl.puppet->anims[0].texture_channels;
+    ASSERT_EQ(channels.size(), 3u);
+    EXPECT_EQ(channels[0], (std::vector<float> { 0.5f, 0.5f }));
+    EXPECT_EQ(channels[1], (std::vector<float> { 0.0f, 0.25f, 1.0f }));
+    EXPECT_TRUE(channels[2].empty());
+    EXPECT_FALSE(p.logged(kError, "MDLA"));
+    EXPECT_FALSE(p.logged(kInfo, "do not end"));
+}
+
+TEST(MdlSkeleton, ATextureChannelWeightThatIsNotANumberPaintsNothing) {
+    // Kept as 0 rather than failing the block, which would drop the bones' animation too.
+    const Bytes f = withAnimBlock(one(), [](Bytes& b) {
+        b.u32(1);
+        writeAnim6(b, { .id = 7, .name = "blink",
+                        .channels = { { 0, { std::numeric_limits<float>::infinity(),
+                                             std::numeric_limits<float>::quiet_NaN(), 0.5f } } } });
+    });
+    const auto p = parse(f);
+    ASSERT_TRUE(p.ok);
+    ASSERT_NE(p.mdl.puppet, nullptr);
+    ASSERT_EQ(p.mdl.puppet->anims.size(), 1u);
+    ASSERT_EQ(p.mdl.puppet->anims[0].texture_channels.size(), 1u);
+    EXPECT_EQ(p.mdl.puppet->anims[0].texture_channels[0], (std::vector<float> { 0.0f, 0.0f, 0.5f }));
+    EXPECT_EQ(p.mdl.puppet->anims[0].bone_tracks.size(), 1u);
 }
 
 TEST(MdlSkeleton, UnparseableAnimationBlockDropsAnimationsButKeepsMeshAndBones) {

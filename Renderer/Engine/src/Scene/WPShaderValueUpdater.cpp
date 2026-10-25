@@ -202,6 +202,7 @@ uint64_t HashFloats(uint64_t hash, const float* values, std::size_t count) {
 
 void WPShaderValueUpdater::FrameBegin() {
     for (auto& group : m_puppetAttachments) UpdatePuppetAttachments(group);
+    for (auto& channels : m_textureChannels) UpdatePuppetTextureChannels(channels);
     if (const auto day_time = LocalTimeOfDay(m_wall_clock())) m_dayTime = *day_time;
     // Shaders see the cursor itself; only parallax eases towards it, as in
     // Wallpaper Engine: each frame it closes (1 - delay / 3) * 10 * frametime of
@@ -312,7 +313,8 @@ uint32_t WPShaderValueUpdater::FrameVaryingUniforms(SceneNode* node, uint32_t ma
         bits |= frame_varying_uniform::kPointer;
     }
     if (info->has_PARALLAXPOSITION) bits |= frame_varying_uniform::kParallax;
-    if (info->has_BONES) bits |= frame_varying_uniform::kBones;
+    // A puppet's animation moves its bones and weighs its texture channels alike.
+    if (info->has_BONES || info->has_BLENDMAP) bits |= frame_varying_uniform::kBones;
     if (info->has_AudioSpectrum16Left || info->has_AudioSpectrum16Right ||
         info->has_AudioSpectrum32Left || info->has_AudioSpectrum32Right ||
         info->has_AudioSpectrum64Left || info->has_AudioSpectrum64Right) {
@@ -346,6 +348,31 @@ void WPShaderValueUpdater::UpdatePuppetAttachments(PuppetAttachmentGroup& group)
     }
 }
 
+void WPShaderValueUpdater::RegisterPuppetTextureChannels(WPPuppetLayer layer, SceneNode* owner,
+                                                         SceneNode* painter, std::size_t channels) {
+    if (owner == nullptr || painter == nullptr) return;
+    const std::size_t rows = std::max<std::size_t>(1, (channels + 3) / 4);
+    auto& entry = m_textureChannels.emplace_back(
+        PuppetTextureChannels { std::move(layer), owner, painter, std::vector<float>(rows * 4, 0.0f) });
+    UpdatePuppetTextureChannels(entry);
+}
+
+void WPShaderValueUpdater::UpdatePuppetTextureChannels(PuppetTextureChannels& channels) {
+    channels.layer.textureChannelWeights(m_scene != nullptr ? m_scene->elapsingTime : 0.0, channels.weights);
+    // The shader discards every fragment at or below this weight: nothing would be painted.
+    constexpr float kNoWeight = 0.001f;
+    const bool weighs_in = std::any_of(channels.weights.begin(), channels.weights.end(),
+                                       [](float weight) { return weight > kNoWeight; });
+    channels.painter->SetVisible(weighs_in && channels.owner->EffectiveVisible());
+}
+
+std::span<const float> WPShaderValueUpdater::TextureChannelWeights(const SceneNode* painter) const {
+    for (const auto& channels : m_textureChannels) {
+        if (channels.painter == painter) return channels.weights;
+    }
+    return {};
+}
+
 void WPShaderValueUpdater::MouseInput(double x, double y) {
     // As given: the clamped copy parallax follows is made when the frame begins.
     m_mousePosInput = { static_cast<float>(x), static_cast<float>(y) };
@@ -373,6 +400,7 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* node, uint32_t material_slot,
     info.has_effect_mvp       = exists(G_EFFECTMVP);
     info.has_effect_mvpi      = exists(G_EFFECTMVPI);
     info.has_BONES            = exists(G_BONES);
+    info.has_BLENDMAP         = exists(G_BLENDMAP);
     info.has_TIME             = exists(G_TIME);
     info.has_FRAMETIME        = exists(G_FRAMETIME);
     info.has_DAYTIME          = exists(G_DAYTIME);
@@ -451,6 +479,11 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
                 std::memcpy(packed.data() + bone * 16, matrix.data(), 16 * sizeof(float));
             }
             write(G_BONES, ShaderValue(packed.data(), packed.size()));
+        }
+    }
+    if (info->has_BLENDMAP) {
+        if (const auto weights = TextureChannelWeights(node); ! weights.empty()) {
+            write(G_BLENDMAP, ShaderValue(weights.data(), weights.size()));
         }
     }
 
@@ -825,6 +858,9 @@ void WPShaderValueUpdater::ForgetNode(SceneNode* node) {
         std::remove_if(m_puppetAttachments.begin(), m_puppetAttachments.end(),
                        [](const PuppetAttachmentGroup& g) { return g.attachments.empty(); }),
         m_puppetAttachments.end());
+    std::erase_if(m_textureChannels, [node](const PuppetTextureChannels& channels) {
+        return channels.owner == node || channels.painter == node;
+    });
 }
 
 void WPShaderValueUpdater::SetTexelSize(float x, float y) {

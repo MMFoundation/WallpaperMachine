@@ -97,7 +97,14 @@ public:
 
     void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
 
+    /// Drawn into the first target right after the layer's card, before any effect: a
+    /// puppet's texture channels painting frames into its picture. Each draws only while
+    /// it is visible itself, which is decided frame by frame.
+    void AddCardOverlay(std::shared_ptr<SceneNode> node) { m_card_overlays.push_back(std::move(node)); }
+    const std::vector<std::shared_ptr<SceneNode>>& CardOverlays() const { return m_card_overlays; }
+
 private:
+    std::vector<std::shared_ptr<SceneNode>>        m_card_overlays;
     std::string                                    m_pingpong_a;
     std::string                                    m_pingpong_b;
     std::vector<std::shared_ptr<SceneImageEffect>> m_effects;

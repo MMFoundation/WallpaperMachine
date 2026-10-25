@@ -2628,6 +2628,33 @@ texture entrances are not decoded-image or native-rendering evidence.
   is neither multiplied twice nor baked into the separate cut-out pieces.
   Unskinned layers, effect-free puppets and unlit materials keep their lighting
   paths.
+- **Puppet texture channels** — `MaterialContracts.APuppetsTextureChannelMeshIsNotDrawnAsPartOfTheModel`
+  in `scene_schema_tests`. A puppet model whose second mesh draws with
+  `puppettexturechannels` is drawn as its picture's mesh alone, directly and by
+  the closing pass of an effect chain. That pass used to draw every mesh with the
+  layer's material, so the channel's quads (in picture pixels) showed small copies
+  of the whole picture beside the model (issue #88).
+- **Puppet texture channel painting** —
+  `MdlSkeleton.TextureChannelWeightsAreNumberedByRecordOrder` (`mdl_parse_tests`),
+  `MaterialContracts.APuppetsTextureChannelPaintsIntoItsPictureOnlyWhileItsAnimationWeighsItIn`
+  (`scene_schema_tests`) and
+  `MetalSceneDraw.APuppetsTextureChannelPaintsItsPictureWhileItsAnimationWeighsItIn`
+  (`metal_scene_draw_smoke`). The animation block's per-channel weight records are
+  read in file order, whatever word leads each (the parser used to read them as a
+  "translation track"). A puppet whose animation weighs a channel in gets a paint
+  pass in its effect chain, effects or none: the channel quad is moved from picture
+  pixels onto the card, the pass is shown only in frames whose weight is above
+  0.001 and the layer shows, and it reads the frame-interpolated weight as
+  `g_BlendMap` with the card's colour in `g_Color4`. `g_BlendMap` is uploaded as
+  exactly the rows the shader declares, enough for every channel the mesh names
+  and more when the material's `BLENDROWCOUNT` asks for more; a mesh naming a
+  channel past 255 is not painted, and a weight that is not a number counts as 0
+  (`MdlSkeleton.ATextureChannelWeightThatIsNotANumberPaintsNothing`). The Metal test checks the
+  painted pixel at rising, held and falling weights and that the picture is its
+  own again once the weight falls back. Wallpaper Engine's rules were read from
+  probe scenes built from Swimming Kirby's assets (2026-10-25): records are
+  numbered by order, weights mix linearly and interpolate between frames, a lone
+  layer paints in full at blend 0.5, and a hidden layer or none paints nothing.
 - **Colour blend modes** — `MetalSceneDraw.AColorBlendLayersColourAndAlphaApplyOnce`
   draws a tinted, half-transparent layer through a stand-in passthrough over a
   coloured background: the tint and alpha are taken once, by the layer's own

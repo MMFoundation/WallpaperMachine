@@ -76,23 +76,33 @@ std::string Tex(int nominal_w, int nominal_h, int visible_w, int visible_h,
 }
 
 // MDLV14 has a global layout word and no mesh extras. An optional MDLS1
-// supplies exactly one identity bone, or explicitly zero bones.
-std::string SquareModel(int bones) {
+// supplies exactly one identity bone, or explicitly zero bones. A texture
+// channel mesh, when asked for, follows the picture's mesh: a smaller square
+// (`channel_low` to `channel_high` on both axes) drawn with
+// `materials/channels.json`, its vertices naming `channel`. With `weights`, an
+// MDLA6 animation (id 1, one frame a second, looping) follows the bone and
+// weighs channel 0 by them.
+std::string SquareModel(int bones, bool texture_channel = false, std::vector<float> weights = {},
+                        float channel_low = 40, float channel_high = 56, uint32_t channel = 0) {
     Bytes b;
     constexpr uint32_t layout = 0x01800009;
-    b.text("MDLV0014"); b.u32(layout); b.u32(1); b.u32(1);
-    b.text("materials/mesh.json"); b.u32(0);
-    b.u32(4 * 52);
-    const float points[4][5] = {{-32,-32,0,0,1}, {-32,32,0,0,0},
-                                {32,-32,0,1,1}, {32,32,0,1,0}};
-    for (const auto& p : points) {
-        for (int k = 0; k != 3; ++k) b.f32(p[k]);
-        for (int k = 0; k != 4; ++k) b.u32(0);
-        for (int k = 0; k != 4; ++k) b.f32(k == 0 ? 1.0f : 0.0f);
-        b.f32(p[3]); b.f32(p[4]);
-    }
-    b.u32(12);
-    for (uint16_t i : {0, 1, 2, 2, 1, 3}) b.u16(i);
+    b.text("MDLV0014"); b.u32(layout); b.u32(1); b.u32(texture_channel ? 2 : 1);
+    const auto square = [&b](const char* material, float low, float high, uint32_t index) {
+        b.text(material); b.u32(0);
+        b.u32(4 * 52);
+        const float points[4][5] = {{low,low,0,0,1}, {low,high,0,0,0},
+                                    {high,low,0,1,1}, {high,high,0,1,0}};
+        for (const auto& p : points) {
+            for (int k = 0; k != 3; ++k) b.f32(p[k]);
+            for (int k = 0; k != 4; ++k) b.u32(k == 0 ? index : 0);
+            for (int k = 0; k != 4; ++k) b.f32(k == 0 ? 1.0f : 0.0f);
+            b.f32(p[3]); b.f32(p[4]);
+        }
+        b.u32(12);
+        for (uint16_t i : {0, 1, 2, 2, 1, 3}) b.u16(i);
+    };
+    square("materials/mesh.json", -32, 32, 0);
+    if (texture_channel) square("materials/channels.json", channel_low, channel_high, channel);
     if (bones >= 0) {
         b.text("MDLS0001"); b.u32(0); b.u16(bones); b.u16(0);
         if (bones) {
@@ -100,6 +110,27 @@ std::string SquareModel(int bones) {
             for (int i = 0; i != 16; ++i) b.f32(i % 5 == 0 ? 1.0f : 0.0f);
             b.text("");
         }
+    }
+    if (bones > 0 && ! weights.empty()) {
+        b.text("MDLA0006");
+        const std::size_t end = b.data.size(); b.u32(0);
+        b.u32(1);
+        b.u32(1); b.u32(0); b.text("blink"); b.text("loop");
+        b.f32(1.0f); b.u32(static_cast<uint32_t>(weights.size() - 1)); b.u32(0);
+        b.u32(bones);
+        for (int bone = 0; bone != bones; ++bone) {
+            b.u32(0); b.u32(static_cast<uint32_t>(36 * weights.size()));
+            for (std::size_t frame = 0; frame != weights.size(); ++frame)
+                for (float v : {0.f,0.f,0.f, 0.f,0.f,0.f, 1.f,1.f,1.f}) b.f32(v);
+        }
+        b.u32(1); b.u32(0); b.u32(static_cast<uint32_t>(4 * weights.size()));
+        for (float w : weights) b.f32(w);
+        b.u8(0); b.u8(0);
+        for (int i = 0; i != 6; ++i) b.f32(0);
+        b.u8(0); b.u32(0);
+        const auto at = static_cast<uint32_t>(b.data.size());
+        for (unsigned n = 0; n != 4; ++n) b.data[end + n] = static_cast<char>(at >> (8 * n));
+        b.u8(0);
     }
     return b.data;
 }
@@ -192,8 +223,10 @@ protected:
         image["effects"] = Json::array({{{"file","effects/tint.json"},
             {"passes",Json::array({{{"constantshadervalues",{{"tint",tint}}}}})}}});
     }
-    void Puppet(Json& image, int bones) {
-        Put("models/square.mdl", SquareModel(bones));
+    void Puppet(Json& image, int bones, bool texture_channel = false, std::vector<float> weights = {},
+                float channel_low = 40, float channel_high = 56, uint32_t channel = 0) {
+        Put("models/square.mdl", SquareModel(bones, texture_channel, std::move(weights), channel_low,
+                                             channel_high, channel));
         PutJson("models/puppet.json", {{"material","materials/base.json"},
             {"puppet","models/square.mdl"}, {"autosize",false}});
         image["image"] = "models/puppet.json";
@@ -434,6 +467,142 @@ TEST_F(MaterialContracts, DirectAndAdditivePuppetsRetainPerMeshMaterial) {
         EXPECT_EQ(material->blenmode,blend == 31 ? BlendMode::Additive : BlendMode::Translucent);
         EXPECT_NE(std::find(material->defines.begin(),material->defines.end(),"SKINNING"),material->defines.end());
         TickSamples(*scene->runtime);
+    }
+}
+
+TEST_F(MaterialContracts, APuppetsTextureChannelMeshIsNotDrawnAsPartOfTheModel) {
+    // A mesh drawn with `puppettexturechannels` paints frames into the puppet's picture;
+    // its positions are pixels of that picture. Drawn directly or by the closing pass of
+    // an effect chain, the model on the screen is the picture's mesh alone.
+    Shader("puppettexturechannels", kImageFragment);
+    Material("materials/channels.json", "puppettexturechannels", {"aux", "sheet"});
+    for (bool with_effect : {false,true}) {
+        SCOPED_TRACE(with_effect);
+        auto image = Image(); Puppet(image,1,true);
+        if (with_effect) Effect(image);
+        auto scene = Load(Json::array({image})); ASSERT_NE(scene,nullptr);
+        auto* node = Node(*scene,"owner"); ASSERT_NE(node,nullptr); ASSERT_NE(node->Mesh(),nullptr);
+        const SceneMesh* model = node->Mesh();
+        if (with_effect) {
+            auto* chain = Chain(*scene,*node); ASSERT_NE(chain,nullptr);
+            model = &chain->FinalMesh();
+        } else {
+            EXPECT_TRUE(node->Camera().empty());
+            ASSERT_NE(node->Mesh()->Material(),nullptr);
+            EXPECT_EQ(node->Mesh()->Material()->textures.at(0),"aux");
+        }
+        ASSERT_EQ(model->Submeshes().size(),1u);
+        EXPECT_EQ(model->Submeshes()[0].GetVertexArray(0).VertexCount(),4u);
+        TickSamples(*scene->runtime);
+    }
+}
+
+TEST_F(MaterialContracts, APuppetsTextureChannelPaintsIntoItsPictureOnlyWhileItsAnimationWeighsItIn) {
+    // The channel mesh's positions are pixels of the layer's picture (6x4 visible, y up); it
+    // paints into that picture where the chain's first target holds it, on the 64x64 card,
+    // before any effect. Its weight is the animation's, frame by frame (1 fps: 0, 1, 0.5,
+    // looping), in full from a layer alone whatever its blend, as Wallpaper Engine draws it
+    // (probe, 2026-10-25). While no channel weighs in, or the layer is hidden, nothing draws.
+    Shader("puppettexturechannels", kImageFragment);
+    Material("materials/channels.json", "puppettexturechannels", {"aux", "sheet"});
+    const auto layers = [](bool visible) {
+        return Json::array({{{"id",5},{"name","blink"},{"animation",1},{"rate",1},{"blend",0.5},
+                             {"visible",visible}}});
+    };
+    for (bool with_effect : {false,true}) {
+        SCOPED_TRACE(with_effect);
+        auto image = Image(); Puppet(image,1,true,{0.0f,1.0f,0.5f},1,3);
+        image["animationlayers"] = layers(true);
+        if (with_effect) Effect(image);
+        auto scene = Load(Json::array({image})); ASSERT_NE(scene,nullptr);
+        auto* node = Node(*scene,"owner"); ASSERT_NE(node,nullptr);
+        auto* chain = Chain(*scene,*node); ASSERT_NE(chain,nullptr);
+        ASSERT_EQ(chain->FinalMesh().Submeshes().size(),1u);
+        EXPECT_EQ(chain->FinalMesh().Submeshes()[0].GetVertexArray(0).VertexCount(),4u);
+        ASSERT_EQ(chain->CardOverlays().size(),1u);
+        SceneNode& painter = *chain->CardOverlays()[0];
+        EXPECT_EQ(painter.Camera(),node->Camera());
+        ASSERT_NE(painter.Mesh(),nullptr); ASSERT_NE(painter.Mesh()->Material(),nullptr);
+        EXPECT_EQ(painter.Mesh()->Material()->textures.at(0),"aux");
+
+        const auto& array = painter.Mesh()->GetVertexArray(0);
+        ASSERT_EQ(array.VertexCount(),4u);
+        const auto offsets = array.GetAttrOffsetMap();
+        ASSERT_TRUE(offsets.contains("a_Position")); ASSERT_TRUE(offsets.contains("a_TexCoordVec4"));
+        ASSERT_TRUE(offsets.contains("a_BlendIndices"));
+        const auto word = [&](const char* name, std::size_t vertex, std::size_t lane) {
+            return array.Data()[vertex * array.OneSize() + offsets.at(name).offset / sizeof(float) + lane];
+        };
+        // Pixel (1, 3) of the 6x4 picture on the 64-unit card, and where the picture's v runs down.
+        EXPECT_NEAR(word("a_Position",1,0),(1.0f/6.0f - 0.5f) * 64.0f,1e-4f);
+        EXPECT_NEAR(word("a_Position",1,1),(3.0f/4.0f - 0.5f) * 64.0f,1e-4f);
+        const float expected_uvs[4] = {0.0f, 0.0f, 1.0f/6.0f, 0.25f};
+        for (std::size_t lane = 0; lane != 4; ++lane)
+            EXPECT_NEAR(word("a_TexCoordVec4",1,lane),expected_uvs[lane],1e-5f) << lane;
+
+        auto& updater = static_cast<WPShaderValueUpdater&>(*scene->shaderValueUpdater);
+        const auto frame = [&](double time) {
+            scene->elapsingTime = time;
+            updater.FrameBegin();
+            const auto weights = updater.TextureChannelWeights(&painter);
+            EXPECT_EQ(weights.size(),4u);
+            return weights.empty() ? -1.0f : weights[0];
+        };
+        EXPECT_FLOAT_EQ(frame(0.0),0.0f); EXPECT_FALSE(painter.Visible());
+        EXPECT_FLOAT_EQ(frame(1.0),1.0f); EXPECT_TRUE(painter.Visible());
+        EXPECT_FLOAT_EQ(frame(1.5),0.75f); EXPECT_TRUE(painter.Visible());
+        EXPECT_FLOAT_EQ(frame(2.0),0.0f); EXPECT_FALSE(painter.Visible());
+        node->SetVisible(false);
+        EXPECT_FLOAT_EQ(frame(3.0),1.0f); EXPECT_FALSE(painter.Visible());
+        node->SetVisible(true);
+        EXPECT_FLOAT_EQ(frame(5.0),1.0f); EXPECT_TRUE(painter.Visible());
+    }
+    {
+        SCOPED_TRACE("hidden animation layer");
+        auto image = Image(); Puppet(image,1,true,{1.0f,1.0f,1.0f},1,3);
+        image["animationlayers"] = layers(false);
+        auto scene = Load(Json::array({image})); ASSERT_NE(scene,nullptr);
+        auto* node = Node(*scene,"owner"); ASSERT_NE(node,nullptr);
+        auto* chain = Chain(*scene,*node); ASSERT_NE(chain,nullptr);
+        ASSERT_EQ(chain->CardOverlays().size(),1u);
+        scene->elapsingTime = 1.0;
+        scene->shaderValueUpdater->FrameBegin();
+        EXPECT_FALSE(chain->CardOverlays()[0]->Visible());
+    }
+    for (const auto& [channel, authored_rows, rows] :
+         std::array<std::array<uint32_t, 3>, 3> {{ {5, 1, 2}, {0, 3, 3}, {300, 1, 0} }}) {
+        // The weights are uploaded as whole rows, as many as the shader declares: enough for
+        // every channel the mesh names (5 needs two), more when the material asks for more.
+        // A number no picture has as many channels as is not a channel; nothing is painted.
+        SCOPED_TRACE(::testing::Message() << "channel " << channel << ", rows " << authored_rows);
+        PutJson("materials/channels.json", {{"passes",Json::array({{{"shader","puppettexturechannels"},
+            {"textures",{"aux","sheet"}}, {"combos",{{"BLENDROWCOUNT",authored_rows}}},
+            {"blending","normal"}, {"cullmode","nocull"}, {"depthtest","disabled"},
+            {"depthwrite","disabled"}}})}});
+        auto image = Image(); Puppet(image,1,true,{1.0f,1.0f,1.0f},1,3,channel);
+        image["animationlayers"] = layers(true);
+        auto scene = Load(Json::array({image})); ASSERT_NE(scene,nullptr);
+        auto* node = Node(*scene,"owner"); ASSERT_NE(node,nullptr);
+        auto* chain = Chain(*scene,*node); ASSERT_NE(chain,nullptr);
+        ASSERT_EQ(chain->CardOverlays().size(), rows == 0 ? 0u : 1u);
+        if (rows == 0) continue;
+        const SceneNode& painter = *chain->CardOverlays()[0];
+        scene->elapsingTime = 1.0;
+        scene->shaderValueUpdater->FrameBegin();
+        const auto weights =
+            static_cast<WPShaderValueUpdater&>(*scene->shaderValueUpdater).TextureChannelWeights(&painter);
+        ASSERT_EQ(weights.size(), 4u * rows);
+        EXPECT_FLOAT_EQ(weights[0], 1.0f);
+        for (std::size_t lane = 1; lane < weights.size(); ++lane) EXPECT_FLOAT_EQ(weights[lane], 0.0f);
+    }
+    Material("materials/channels.json", "puppettexturechannels", {"aux", "sheet"});
+    {
+        SCOPED_TRACE("weights that never rise");
+        auto image = Image(); Puppet(image,1,true,{0.0f,0.0f,0.0f},1,3);
+        image["animationlayers"] = layers(true);
+        auto scene = Load(Json::array({image})); ASSERT_NE(scene,nullptr);
+        auto* node = Node(*scene,"owner"); ASSERT_NE(node,nullptr);
+        EXPECT_TRUE(node->Camera().empty()) << "a puppet that never paints keeps its direct draw";
     }
 }
 

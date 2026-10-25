@@ -39,6 +39,7 @@ struct WPUniformInfo {
     bool has_effect_mvpi { false };
 
     bool has_BONES { false };
+    bool has_BLENDMAP { false };
     bool has_TIME { false };
     bool has_DAYTIME { false };
     bool has_DAYTIME_ALIAS { false };
@@ -141,6 +142,15 @@ public:
         linalg::Affine3f bind_transform;
     };
     void RegisterPuppetAttachments(WPPuppetLayer layer, std::vector<PuppetAttachment> attachments);
+    /// A pass painting a puppet's texture channels into the picture of `owner`. Each frame it is
+    /// shown only while a channel weighs in (above the 0.001 the shader discards at) and the
+    /// layer itself shows, and it reads the weights as `g_BlendMap`: `channels` of them, padded
+    /// to whole rows of four.
+    void RegisterPuppetTextureChannels(WPPuppetLayer layer, SceneNode* owner, SceneNode* painter,
+                                       std::size_t channels);
+    /// The weights the painter of a puppet's texture channels reads this frame; empty for any
+    /// other node.
+    std::span<const float> TextureChannelWeights(const SceneNode* painter) const;
 
     void SetScreenSize(i32 w, i32 h) override {
         // A raster without area would divide by zero in `g_Screen`.
@@ -155,6 +165,14 @@ private:
         std::vector<PuppetAttachment> attachments;
     };
     void UpdatePuppetAttachments(PuppetAttachmentGroup& group);
+    struct PuppetTextureChannels {
+        WPPuppetLayer      layer;
+        SceneNode*         owner { nullptr };
+        SceneNode*         painter { nullptr };
+        std::vector<float> weights;
+    };
+    void UpdatePuppetTextureChannels(PuppetTextureChannels& channels);
+    std::vector<PuppetTextureChannels> m_textureChannels;
     /// The reflection record of a node and slot, falling back to slot 0; null when there is none.
     const WPUniformInfo* FindUniformInfo(const SceneNode* node, uint32_t slot) const;
     /// The same for the per-node data the parser registered.

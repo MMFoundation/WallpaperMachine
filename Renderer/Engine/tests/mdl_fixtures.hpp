@@ -270,6 +270,8 @@ struct AnimSpec {
     bool     badSecondCurve { false };
     uint32_t jsonEventCount { 1 };
     bool     headerOnly { false }; // stop right after the track count
+    // Texture channel records in file order: the leading word, then one weight a frame.
+    std::vector<std::pair<uint32_t, std::vector<float>>> channels { { 0, { 0.0f, 1.0f } } };
 };
 
 inline void writeCurveBlock(Bytes& b) {
@@ -286,9 +288,11 @@ inline void writeAnim6(Bytes& b, const AnimSpec& a) {
         b.f32(0).f32(0).f32(0);                        // angle
         b.f32(1).f32(1).f32(1);                        // scale
     }
-    b.u32(1);
-    b.u32(8).f32(0.0f).f32(1.0f).u32(0);
-    b.u32(8).f32(0.25f).f32(0.75f).u32(0);
+    b.u32(static_cast<uint32_t>(a.channels.size()));
+    for (const auto& [word, weights] : a.channels) {
+        b.u32(word).u32(static_cast<uint32_t>(weights.size() * 4));
+        for (float w : weights) b.f32(w);
+    }
     writeCurveBlock(b);
     b.u8(1).u32(1).f32(0.5f).u32(0).u32(8).f32(2.0f).f32(3.0f);
     b.f32(-1).f32(-1).f32(0).f32(1).f32(1).f32(0);

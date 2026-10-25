@@ -722,20 +722,20 @@ AnimationDecode DecodeAnimations(Cursor c, uint32_t count, int version, uint32_t
         }
         std::string error;
         if (version >= 3) {
-            const uint32_t has_trans = c.u32();
-            if (! c.ok) return fail("MDLA animation is cut short");
-            if (has_trans == 1) {
-                WPPuppet::Animation::AnimTrans trans;
-                const uint32_t first = c.u32();
-                if (! c.ok || first % 4 != 0 || first / 4 > kMaxFloatArray || ! c.need(first)) {
-                    return fail("MDLA translation track is malformed");
+            // The texture channels: a count, then per channel a word Wallpaper Engine does not
+            // use and the channel's weight a frame.
+            const uint32_t channels = c.u32();
+            if (! c.ok || static_cast<uint64_t>(channels) * 8 > c.left()) {
+                return fail("MDLA texture channel count cannot fit");
+            }
+            anim.texture_channels.resize(channels);
+            for (auto& weights : anim.texture_channels) {
+                c.u32();
+                if (! ReadFloatArray(c, weights, error)) return fail(error);
+                // A weight that is not a number paints nothing.
+                for (float& weight : weights) {
+                    if (! std::isfinite(weight)) weight = 0.0f;
                 }
-                trans.extra_track = c.floats(first / 4);
-                if (first > 0) c.u32();
-                if (! ReadFloatArray(c, trans.main_track, error)) return fail(error);
-                if (first > 0) c.u32();
-                if (! c.ok) return fail("MDLA translation track is cut short");
-                anim.trans = std::move(trans);
             }
             if (! ReadCurveBlock(c, bone_count, anim.blend_curves, error)) {
                 return fail(error.empty() ? "MDLA curve block is cut short" : error);
@@ -1158,7 +1158,51 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
         vertices.SetVertexs(begin, slice);
     }
     submesh.AddVertexArray(std::move(vertices));
+    AddMeshIndices(submesh, src);
+    if (! src.parts.empty()) submesh.SetDrawRanges(CollectRanges(src, [](usize) { return true; }));
+}
 
+void WPMdlParser::GenTextureChannelMesh(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
+                                        std::array<float, 2> picture, std::array<float, 2> card) {
+    if (src.positions.empty() || ! (picture[0] > 0.0f) || ! (picture[1] > 0.0f)) return;
+    const usize vertex_count = src.positions.size();
+    const std::vector<SceneVertexArray::SceneVertexAttribute> attrs {
+        { std::string(WE_IN_POSITION), VertexType::FLOAT3 },
+        { std::string(WE_IN_TEXCOORDVEC4), VertexType::FLOAT4 },
+        { std::string(WE_IN_BLENDINDICES), VertexType::UINT4 },
+    };
+    SceneVertexArray   vertices(attrs, vertex_count);
+    const auto         offsets = vertices.GetAttrOffsetMap();
+    const auto         word    = [&offsets](std::string_view name) {
+        return offsets.at(std::string(name)).offset / sizeof(float);
+    };
+    const usize        at_position = word(WE_IN_POSITION);
+    const usize        at_uv       = word(WE_IN_TEXCOORDVEC4);
+    const usize        at_channel  = word(WE_IN_BLENDINDICES);
+    std::vector<float> row(vertices.OneSize(), 0.0f);
+    for (usize v = 0; v < vertex_count; v++) {
+        const auto& position = src.positions[v];
+        const float across   = position[0] / picture[0];
+        const float up       = position[1] / picture[1];
+        row[at_position]     = (across - 0.5f) * card[0];
+        row[at_position + 1] = (up - 0.5f) * card[1];
+        const auto uv        = v < src.texcoords.size() ? src.texcoords[v] : std::array<float, 2> {};
+        // The picture's coordinate is stored; a file without it has it in the position.
+        const auto base = v < src.texcoord2.size() ? src.texcoord2[v] : std::array<float, 2> { across, 1.0f - up };
+        row[at_uv]      = uv[0];
+        row[at_uv + 1]  = uv[1];
+        row[at_uv + 2]  = base[0];
+        row[at_uv + 3]  = base[1];
+        // Channel numbers travel as integers: copied bit for bit, never as floats.
+        const auto channel = v < src.blend_indices.size() ? src.blend_indices[v] : std::array<uint32_t, 4> {};
+        std::memcpy(row.data() + at_channel, channel.data(), sizeof(channel));
+        vertices.SetVertexs(v, row);
+    }
+    submesh.AddVertexArray(std::move(vertices));
+    AddMeshIndices(submesh, src);
+}
+
+void WPMdlParser::AddMeshIndices(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src) {
     // Indices: 16 bits unless one of them cannot be named in 16.
     const usize triangles = src.indices.size();
     if (triangles == 0) {
@@ -1194,8 +1238,6 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
         }
         submesh.AddIndexArray(std::move(array));
     }
-
-    if (! src.parts.empty()) submesh.SetDrawRanges(CollectRanges(src, [](usize) { return true; }));
 }
 
 void WPMdlParser::GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,

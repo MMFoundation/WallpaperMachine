@@ -111,6 +111,15 @@ public:
     static void GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
                                       std::span<const uint32_t> part_indices);
     static void GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, bool include_masks = true);
+    /// A texture channel mesh as the `puppettexturechannels` shader reads it: the position, moved
+    /// from pixels of the `picture` (y up) onto a card of `card` size centred on the origin; the
+    /// frame's texture coordinate and the picture's (v down) in `a_TexCoordVec4`; and the
+    /// channel number in `a_BlendIndices`.
+    static void GenTextureChannelMesh(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
+                                      std::array<float, 2> picture, std::array<float, 2> card);
+
+private:
+    static void AddMeshIndices(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src);
 };
 
 } // namespace wallpaper
