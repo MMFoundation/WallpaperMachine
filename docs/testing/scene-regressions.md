@@ -2634,6 +2634,23 @@ texture entrances are not decoded-image or native-rendering evidence.
   the closing pass of an effect chain. That pass used to draw every mesh with the
   layer's material, so the channel's quads (in picture pixels) showed small copies
   of the whole picture beside the model (issue #88).
+- **Puppet texture channel painting** —
+  `MdlSkeleton.TextureChannelWeightsAreNumberedByRecordOrder` (`mdl_parse_tests`),
+  `MaterialContracts.APuppetsTextureChannelPaintsIntoItsPictureOnlyWhileItsAnimationWeighsItIn`
+  (`scene_schema_tests`) and
+  `MetalSceneDraw.APuppetsTextureChannelPaintsItsPictureWhileItsAnimationWeighsItIn`
+  (`metal_scene_draw_smoke`). The animation block's per-channel weight records are
+  read in file order, whatever word leads each (the parser used to read them as a
+  "translation track"). A puppet whose animation weighs a channel in gets a paint
+  pass in its effect chain, effects or none: the channel quad is moved from picture
+  pixels onto the card, the pass is shown only in frames whose weight is above
+  0.001 and the layer shows, and it reads the frame-interpolated weight as
+  `g_BlendMap` with the card's colour in `g_Color4`. The Metal test checks the
+  painted pixel at rising, held and falling weights and that the picture is its
+  own again once the weight falls back. Wallpaper Engine's rules were read from
+  probe scenes built from Swimming Kirby's assets (2026-10-25): records are
+  numbered by order, weights mix linearly and interpolate between frames, a lone
+  layer paints in full at blend 0.5, and a hidden layer or none paints nothing.
 - **Colour blend modes** — `MetalSceneDraw.AColorBlendLayersColourAndAlphaApplyOnce`
   draws a tinted, half-transparent layer through a stand-in passthrough over a
   coloured background: the tint and alpha are taken once, by the layer's own

@@ -555,6 +555,33 @@ std::span<const linalg::Affine3f> WPPuppetLayer::genFrame(double time) noexcept 
     return state.m_final_affines;
 }
 
+void WPPuppetLayer::textureChannelWeights(double time, std::span<float> out) noexcept {
+    std::fill(out.begin(), out.end(), 0.0f);
+    if (! m_puppet || ! m_state) return;
+    genFrame(time);
+    const auto& state = *m_state;
+    double      total = 0.0;
+    for (const auto& layer : state.m_layers) {
+        if (layer.anim != nullptr && layer.anim_layer.visible && layer.blend > 0.0) total += layer.blend;
+    }
+    if (! (total > 0.0) || ! std::isfinite(total)) return;
+    for (const auto& layer : state.m_layers) {
+        if (layer.anim == nullptr || ! layer.anim_layer.visible || ! (layer.blend > 0.0)) continue;
+        const double share    = layer.blend / total;
+        const auto&  channels = layer.anim->texture_channels;
+        const auto&  frames   = layer.interp_info;
+        for (usize channel = 0; channel < std::min(out.size(), channels.size()); channel++) {
+            const auto& weights = channels[channel];
+            if (weights.empty()) continue;
+            const auto at = [&weights](idx frame) {
+                return static_cast<double>(weights[std::min(static_cast<usize>(frame), weights.size() - 1)]);
+            };
+            const double sample = at(frames.frame_a) + (at(frames.frame_b) - at(frames.frame_a)) * frames.t;
+            if (std::isfinite(sample)) out[channel] += static_cast<float>(share * sample);
+        }
+    }
+}
+
 void WPPuppetLayer::invalidatePose() noexcept {
     if (m_state) m_state->m_pose_valid = false;
 }

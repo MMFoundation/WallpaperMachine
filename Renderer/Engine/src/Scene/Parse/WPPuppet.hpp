@@ -82,10 +82,6 @@ public:
         };
         std::vector<BoneTrack> bone_tracks;
 
-        struct AnimTrans {
-            std::vector<float> extra_track;
-            std::vector<float> main_track;
-        };
         struct BoneFrameCurve {
             std::vector<float> values;
         };
@@ -100,7 +96,8 @@ public:
         };
 
         uint32_t                 unk_after_id { 0 };  // a word of unknown use after the id
-        std::optional<AnimTrans> trans;               // present only when the clip stores it
+        // One weight a frame for each texture channel, numbered by the file's record order.
+        std::vector<std::vector<float>> texture_channels;
         // Keyframe curves and events, as the animation block of the file lists them.
         std::vector<BoneFrameCurve> blend_curves;
         std::vector<AnimV4Event>    v4_events;
@@ -165,6 +162,11 @@ public:
     void prepared(std::span<AnimationLayer>);
 
     std::span<const linalg::Affine3f> genFrame(double time) noexcept;
+    /// Each texture channel's weight at `time` (advancing the layers as `genFrame` does): the
+    /// visible layers' animations, each sampled between its two frames and weighed by its share
+    /// of the layers' blend. A layer alone counts in full whatever its blend, as in Wallpaper
+    /// Engine. Channels no animation names stay 0.
+    void textureChannelWeights(double time, std::span<float> out) noexcept;
 
     // SceneScript IAnimationLayer surface. Layers resolve by authored name
     // first, then by stack index; -1 means no such layer.

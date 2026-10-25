@@ -422,8 +422,17 @@ model parser cannot read is drawn in its bind pose on both, with a log line when
 loads. A puppet's texture channel (a mesh whose material draws with
 `puppettexturechannels`, such as an eye-blink frame) paints frames into the
 puppet's own picture, its positions being pixels of that picture: it is never drawn
-as part of the model on the screen, with or without effects. Painting those frames
-in is not supported, so a texture channel's animation (a blink) does not show. A text layer is an ordinary layer: it takes its place in the layer order and
+as part of the model on the screen. Each animation stores one weight a frame per
+channel (numbered by the order of its records, which the mesh's blend index names),
+sampled between frames like the bones. The weights of the visible animation layers
+are averaged by their blend, so a layer alone counts in full whatever its blend, and
+a hidden layer or none paints nothing. The frame is drawn into the layer's picture
+where the card puts it into the effect chain's first buffer, before any effect and
+with the card's colour, by the shipped shader, which mixes it into the picture by
+the weight (`g_BlendMap`). A puppet whose animations weigh a channel in at some frame
+is therefore drawn through its effect chain even without effects; the paint pass
+itself draws only in frames where a channel weighs more than the 0.001 the shader
+discards at, and costs nothing otherwise. A text layer is an ordinary layer: it takes its place in the layer order and
 carries its transform, opacity, blend, effect chain, camera and the final
 composition, appears in desktop posters, and uses the engine's one text system on
 both renderers. Text whose content has not changed is not laid out, rasterised or

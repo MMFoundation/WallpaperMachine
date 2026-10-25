@@ -2377,6 +2377,214 @@ void main() {
     }
 }
 
+TEST_F(MetalSceneDraw, APuppetsTextureChannelPaintsItsPictureWhileItsAnimationWeighsItIn)
+{
+    // A one-bone card over a 4x4 white picture, and a texture channel mesh whose quad covers
+    // pixels 1..2 across and 1..3 up of that picture. The animation (1 fps, looping over 3 s)
+    // weighs channel 0 by 0, 1, 1, 0. The channel shader paints (weight, 0, 1) times the
+    // layer's colour (white) and discards where nothing weighs in, so the card's left middle
+    // turns magenta only while the weight is up, and is white again once it falls back,
+    // effects or none.
+    for (bool effect : { false, true }) {
+        SCOPED_TRACE(effect);
+        const auto directory = root_ / (std::string("puppet-channels-") + (effect ? "effect" : "bare"));
+        const auto project   = WriteFixture(directory);
+        std::string model;
+        const auto put = [&model](auto value) {
+            model.append(reinterpret_cast<const char*>(&value), sizeof(value));
+        };
+        const auto str = [&model](const char* value) { model.append(value, std::strlen(value) + 1); };
+        const auto parts = [&](int vertices) {
+            put(uint8_t(1)); put(uint8_t(1)); put(uint16_t(0)); put(uint8_t(0));
+            put(uint32_t(vertices * 12));
+            for (int i = 0; i < vertices; ++i) { put(0.f); put(0.f); put(uint32_t(0)); }
+            put(uint8_t(1)); put(uint32_t(16));
+            for (uint32_t value : { 1u, 0u, 0u, 6u }) put(value);
+        };
+        const uint32_t skinned = 0x00800000u | 0x01000000u | 0x00000008u;
+        const uint32_t channel = 0x00800000u | 0x00000020u;
+        str("MDLV0021");
+        put(skinned); put(uint32_t(1)); put(uint32_t(2));
+        str("materials/tile.json"); put(uint32_t(0));
+        for (float v : { -128.f, -96.f, 0.f, 128.f, 96.f, 0.f }) put(v);
+        put(skinned); put(uint32_t(4 * 52));
+        for (const auto& vertex : std::array<std::array<float, 4>, 4> {{
+                 { -128, -96, 0, 1 }, { 128, -96, 1, 1 }, { 128, 96, 1, 0 }, { -128, 96, 0, 0 } }}) {
+            put(vertex[0]); put(vertex[1]); put(0.f);
+            for (int i = 0; i < 4; ++i) put(uint32_t(0));
+            for (float weight : { 1.f, 0.f, 0.f, 0.f }) put(weight);
+            put(vertex[2]); put(vertex[3]);
+        }
+        put(uint32_t(12));
+        for (uint16_t index : { 0, 1, 2, 0, 2, 3 }) put(index);
+        parts(4);
+        str("materials/channels.json"); put(uint32_t(0));
+        for (float v : { 1.f, 1.f, 0.f, 2.f, 3.f, 0.f }) put(v);
+        put(channel); put(uint32_t(4 * 44));
+        for (const auto& vertex : std::array<std::array<float, 4>, 4> {{
+                 { 1, 1, 0, 1 }, { 2, 1, 1, 1 }, { 2, 3, 1, 0 }, { 1, 3, 0, 0 } }}) {
+            put(vertex[0]); put(vertex[1]); put(0.f);
+            for (int i = 0; i < 4; ++i) put(uint32_t(0));
+            put(vertex[2]); put(vertex[3]);
+            put(vertex[0] / 4.f); put(1.f - vertex[1] / 4.f);
+        }
+        put(uint32_t(12));
+        for (uint16_t index : { 0, 1, 2, 0, 2, 3 }) put(index);
+        parts(4);
+        str("MDLS0001"); put(uint32_t(0)); put(uint16_t(1)); put(uint16_t(0));
+        str("root"); put(int32_t(0)); put(uint32_t(0xFFFFFFFFu)); put(uint32_t(64));
+        for (int col = 0; col < 4; ++col)
+            for (int row = 0; row < 4; ++row) put(row == col ? 1.f : 0.f);
+        str("{}");
+        const std::array<float, 4> weights { 0.f, 1.f, 1.f, 0.f };
+        str("MDLA0006");
+        const std::size_t end = model.size();
+        put(uint32_t(0));
+        put(uint32_t(1));
+        put(int32_t(1)); put(uint32_t(0)); str("blink"); str("loop");
+        put(1.f); put(int32_t(weights.size() - 1)); put(int32_t(0)); put(uint32_t(1));
+        put(int32_t(0)); put(uint32_t(36 * weights.size()));
+        for (std::size_t frame = 0; frame < weights.size(); ++frame)
+            for (float v : { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 1.f, 1.f, 1.f }) put(v);
+        put(uint32_t(1)); put(uint32_t(0)); put(uint32_t(4 * weights.size()));
+        for (float w : weights) put(w);
+        put(uint8_t(0)); put(uint8_t(0));
+        for (int i = 0; i < 6; ++i) put(0.f);
+        put(uint8_t(0)); put(uint32_t(0));
+        const auto block_end = static_cast<uint32_t>(model.size());
+        std::memcpy(model.data() + end, &block_end, sizeof(block_end));
+        put(uint8_t(0));
+        std::ofstream(directory / "models/card.mdl", std::ios::binary) << model;
+        std::ofstream(directory / "models/tile.json") <<
+            R"({"width":256,"height":192,"material":"materials/tile.json","puppet":"models/card.mdl"})";
+        {
+            std::ofstream texture(directory / "materials/white.tex", std::ios::binary);
+            const auto word = [&texture](uint32_t value) {
+                texture.write(reinterpret_cast<const char*>(&value), sizeof(value));
+            };
+            texture.write("TEXV0005", 9); texture.write("TEXI0001", 9);
+            for (uint32_t value : { 0u, 0u, 4u, 4u, 4u, 4u, 0u }) word(value);
+            texture.write("TEXB0001", 9);
+            for (uint32_t value : { 1u, 1u, 4u, 4u, 64u }) word(value);
+            for (int i = 0; i < 16; ++i) word(0xFFFFFFFFu);
+        }
+        std::ofstream(directory / "shaders/metal_probe.vert") << R"(
+uniform mat4 g_ModelViewProjectionMatrix;
+attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+#if SKINNING
+uniform mat4x3 g_Bones[BONECOUNT];
+attribute uvec4 a_BlendIndices;
+#endif
+void main() {
+    vec3 position = a_Position;
+#if SKINNING
+    position = g_Bones[a_BlendIndices.x] * vec4(position, 1.0);
+#endif
+    gl_Position = g_ModelViewProjectionMatrix * vec4(position, 1.0);
+    v_TexCoord = a_TexCoord;
+}
+)";
+        std::ofstream(directory / "shaders/metal_probe.frag") << R"(
+uniform sampler2D g_Texture0;
+varying vec2 v_TexCoord;
+void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }
+)";
+        std::ofstream(directory / "shaders/puppettexturechannels.vert") << R"(
+uniform mat4 g_ModelViewProjectionMatrix;
+uniform vec4 g_BlendMap[BLENDROWCOUNT];
+uniform vec4 g_Texture1Resolution;
+attribute vec3 a_Position;
+attribute vec4 a_TexCoordVec4;
+attribute uvec4 a_BlendIndices;
+varying float v_Weight;
+void main() {
+    gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);
+    // The picture's resolution (4) is read here, as the shipped shader scales by it.
+    v_Weight = g_BlendMap[0].x * g_Texture1Resolution.x / 4.0 +
+               0.0 * (a_TexCoordVec4.x + float(a_BlendIndices.x));
+}
+)";
+        std::ofstream(directory / "shaders/puppettexturechannels.frag") << R"(
+uniform vec4 g_Color4;
+uniform sampler2D g_Texture1;
+varying float v_Weight;
+void main() {
+    if (v_Weight <= 0.001) discard;
+    gl_FragColor = (vec4(v_Weight, 0.0, 1.0, 1.0) + 0.0 * texture(g_Texture1, vec2(0.5, 0.5))) * g_Color4;
+}
+)";
+        std::ofstream(directory / "materials/tile.json") <<
+            R"({"passes":[{"shader":"metal_probe","blending":"translucent","cullmode":"nocull",)"
+            R"("depthtest":"disabled","depthwrite":"disabled","textures":["white"]}]})";
+        std::ofstream(directory / "materials/channels.json") <<
+            R"({"passes":[{"shader":"puppettexturechannels","blending":"normal","cullmode":"nocull",)"
+            R"("depthtest":"disabled","depthwrite":"disabled","combos":{"BLENDROWCOUNT":1},)"
+            R"("textures":["white","white"]}]})";
+        auto layout = nlohmann::json::parse(std::ifstream(directory / "layout.json"));
+        layout["objects"][0]["image"]           = "models/tile.json";
+        layout["objects"][0]["animationlayers"] = nlohmann::json::array({
+            { { "id", 9 }, { "name", "blink" }, { "animation", 1 }, { "rate", 1 }, { "blend", 1 },
+              { "visible", true } } });
+        if (effect) {
+            std::filesystem::create_directories(directory / "effects");
+            std::ofstream(directory / "effects/identity.json") <<
+                R"({"name":"identity","passes":[{"material":"materials/identity.json"}]})";
+            std::ofstream(directory / "materials/identity.json") <<
+                R"({"passes":[{"shader":"metal_probe","blending":"translucent","cullmode":"nocull",)"
+                R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})";
+            layout["objects"][0]["effects"] = nlohmann::json::array({
+                { { "file", "effects/identity.json" }, { "visible", true } } });
+        }
+        std::ofstream(directory / "layout.json") << layout;
+
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, directory / "cache", loaded, error)) << error;
+        const auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        @autoreleasepool {
+            CAMetalLayer* layer = [CAMetalLayer layer];
+            layer.device = MTLCreateSystemDefaultDevice();
+            if (layer.device == nil) GTEST_SKIP() << "no Metal device; the native draw was not exercised";
+            layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize = CGSizeMake(384, 256);
+            MetalRender render;
+            ASSERT_TRUE(render.init(MetalRenderInitInfo {
+                .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+                .render_width = 384, .render_height = 256, .display_scale_factor = 1.0,
+            }));
+            ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+            // The weight rises over the first second, holds, falls over the third and loops.
+            for (const double time : { 0.0, 0.5, 1.0, 2.5, 3.0, 3.5 }) {
+                SCOPED_TRACE(time);
+                const double looped  = std::fmod(time, 3.0);
+                const double weight  = looped <= 1.0 ? looped : (looped <= 2.0 ? 1.0 : 3.0 - looped);
+                const bool   painted = weight > 0.001;
+                loaded.scene->elapsingTime = time;
+                loaded.scene->shaderValueUpdater->FrameBegin();
+                ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+                std::vector<uint8_t> pixels;
+                uint32_t width = 0, height = 0;
+                ASSERT_TRUE(render.ReadRenderTargetForTests(
+                    loaded.scene->ResolveRenderTargetName(SpecTex_Default), pixels, width, height));
+                ASSERT_EQ(width, 384u);
+                ASSERT_EQ(height, 256u);
+                // RGBA: the quad's middle, then a point of the card outside it.
+                const auto at = [&](uint32_t x, uint32_t y) { return &pixels[(y * width + x) * 4]; };
+                const uint8_t* inside  = at(160, 128);
+                const uint8_t* outside = at(240, 128);
+                EXPECT_NEAR(inside[0], painted ? 255.0 * weight : 255.0, 2.0);
+                EXPECT_NEAR(inside[1], painted ? 0.0 : 255.0, 2.0);
+                EXPECT_NEAR(inside[2], 255.0, 2.0);
+                for (int channel = 0; channel < 3; ++channel) EXPECT_NEAR(outside[channel], 255.0, 2.0);
+            }
+            render.destroy();
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, APerspectiveCameraDrawsThroughTheAuthoredShader)
 {
     // A scene that last round was refused only for a perspective camera: the

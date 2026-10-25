@@ -3256,6 +3256,83 @@ bool LoadPuppetSlots(ParseContext& context, const wpscene::WPImageObject& image,
     return ! slots.empty();
 }
 
+/// How many texture channels a puppet's animations weigh in at some frame; 0 when none ever
+/// does, and the channel meshes then never paint anything.
+std::size_t PaintedTextureChannels(const WPMdl& mdl) {
+    if (mdl.puppet == nullptr) return 0;
+    std::size_t count = 0;
+    for (const auto& anim : mdl.puppet->anims) {
+        for (std::size_t channel = 0; channel < anim.texture_channels.size(); ++channel) {
+            const auto& weights = anim.texture_channels[channel];
+            if (std::any_of(weights.begin(), weights.end(), [](float w) { return w > 0.001f; })) {
+                count = std::max(count, channel + 1);
+            }
+        }
+    }
+    return count;
+}
+
+/// A puppet's texture channels: each channel mesh paints its frames
+/// into the layer's picture where the card draws it into the chain's first target, before any
+/// effect. Its positions, pixels of the picture, are moved onto the card, and it takes the
+/// card's colour and alpha, as the card would have drawn the painted picture. The pass draws
+/// only while its animation weighs a channel in (`RegisterPuppetTextureChannels`).
+void AddTextureChannelPainters(ParseContext& context, const wpscene::WPImageObject& image,
+                               const std::vector<WPMdl::Mesh>& meshes, std::size_t channels,
+                               const std::string& picture, std::array<float, 2> card,
+                               const std::shared_ptr<SceneNode>& owner, SceneImageEffectLayer& chain,
+                               const std::string& camera_name, const WPPuppetLayer& puppet_layer,
+                               std::vector<std::shared_ptr<SceneMaterial>>& tinted,
+                               std::vector<std::shared_ptr<SceneMaterial>>& all_materials) {
+    if (picture.empty() || IsSpecTex(picture)) return;
+    const auto& header = TextureHeaderOf(context, picture);
+    const std::array<float, 2> pixels { static_cast<float>(header.mapWidth),
+                                        static_cast<float>(header.mapHeight) };
+    if (! (pixels[0] > 0.0f) || ! (pixels[1] > 0.0f)) return;
+    // The card is cut down to whole units (`MakeCardMesh`); the frames land on it as drawn.
+    for (float& side : card) side = std::isfinite(side) ? std::clamp(std::trunc(side), 0.0f, 65535.0f) : 0.0f;
+    const auto rows = static_cast<int32_t>(std::max<std::size_t>(1, (channels + 3) / 4));
+    for (const auto& source : meshes) {
+        nlohmann::json json;
+        wpscene::WPMaterial authored;
+        if (! wpscene::ParseBoundedJson(fs::GetFileContent(*context.vfs, "/assets/" + source.mat_json_file),
+                                        json) ||
+            ! authored.FromJson(json)) {
+            continue;
+        }
+        // The weights are uploaded four to a row; the shader must declare every row they fill.
+        auto& declared = authored.combos["BLENDROWCOUNT"];
+        declared       = std::max(declared, rows);
+        SceneMaterial  material;
+        LoadedMaterial loaded;
+        if (! LoadMaterial(context, authored, material, loaded)) {
+            LOG_ERROR("texture channel material '%s' cannot be loaded", source.mat_json_file.c_str());
+            continue;
+        }
+        SetLayerTint(context, material, image, false);
+        auto mesh = std::make_shared<SceneMesh>();
+        mesh->Submeshes().emplace_back();
+        WPMdlParser::GenTextureChannelMesh(mesh->Submeshes().back(), source, pixels, card);
+        mesh->AddMaterial(std::move(material));
+        tinted.push_back(mesh->MaterialSlotPtr(0));
+        all_materials.push_back(mesh->MaterialSlotPtr(0));
+        auto painter = std::make_shared<SceneNode>();
+        painter->SetName(owner->Name() + " texture channels");
+        painter->AddMesh(mesh);
+        painter->SetCamera(camera_name);
+        painter->SetRenderTransformOverride(Matrix4d::Identity());
+        painter->SetVisible(false);
+        if (context.shader_updater != nullptr) {
+            WPShaderValueData data;
+            data.renderTargets = std::move(loaded.render_targets);
+            context.shader_updater->SetNodeData(painter.get(), 0, data);
+            context.shader_updater->RegisterPuppetTextureChannels(puppet_layer, owner.get(), painter.get(),
+                                                                  channels);
+        }
+        chain.AddCardOverlay(std::move(painter));
+    }
+}
+
 /// Whether something the scene file says can move an object while the scene runs: an origin,
 /// scale or angles that a property, a script or a timeline drives (those are objects in the
 /// file, not plain values), on the object or on any of its ancestors.
@@ -3355,12 +3432,19 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     // A puppet (R66, R75): one that cannot be read leaves the layer an ordinary card.
     WPMdl mdl;
     bool  puppet_ok = false;
+    // A texture channel paints into the picture and is never part of the model.
+    std::vector<WPMdl::Mesh> channel_meshes;
     if (! image.puppet.empty()) {
         const bool parsed = WPMdlParser::Parse(image.puppet, *context.vfs, mdl);
         if (parsed) {
-            std::erase_if(mdl.meshes, [&context](const WPMdl::Mesh& mesh) {
-                return IsTextureChannelMesh(*context.vfs, mesh);
-            });
+            for (auto mesh = mdl.meshes.begin(); mesh != mdl.meshes.end();) {
+                if (! IsTextureChannelMesh(*context.vfs, *mesh)) {
+                    ++mesh;
+                    continue;
+                }
+                channel_meshes.push_back(std::move(*mesh));
+                mesh = mdl.meshes.erase(mesh);
+            }
         }
         puppet_ok = parsed && ! mdl.meshes.empty() &&
                     ((mdl.puppet != nullptr && ! mdl.puppet->bones.empty()) ||
@@ -3369,8 +3453,12 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         if (! puppet_ok) LOG_ERROR("layer %d: the puppet '%s' cannot be used", image.id, image.puppet.c_str());
     }
     const bool puppet_bones  = puppet_ok && mdl.puppet != nullptr && ! mdl.puppet->bones.empty();
+    // Painted texture channels need the flat picture in a target of the layer's own, which only
+    // the chain has: such a puppet is drawn through it, with or without effects.
+    const std::size_t painted_channels =
+        puppet_ok && ! channel_meshes.empty() ? PaintedTextureChannels(mdl) : 0;
     const bool puppet_direct = puppet_ok && built_effects == 0 && ! composition &&
-                               (image.colorBlendMode == 0 || additive_blend);
+                               (image.colorBlendMode == 0 || additive_blend) && painted_channels == 0;
     // Under effects the chain works on the flat sheet and closes with one pass that draws
     // the assembled model (R72); a model with bones takes the colour blend into that pass.
     const bool puppet_closing = puppet_ok && ! puppet_direct;
@@ -3669,6 +3757,11 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
                             mdl.puppet != nullptr ? &puppet_layer : nullptr, true)) {
                 any_fixed = true;
             }
+        }
+        if (painted_channels > 0 && ! own_material->textures.empty()) {
+            AddTextureChannelPainters(context, image, channel_meshes, painted_channels,
+                                      own_material->textures[0], card_size, node, *chain, camera_name,
+                                      puppet_layer, tinted, all_materials);
         }
 
         auto camera = std::make_shared<SceneCamera>(geometry.extent[0], geometry.extent[1], -1.0f, 1.0f);

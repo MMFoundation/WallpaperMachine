@@ -302,6 +302,17 @@ private:
             if (compose) source.camera = m_active_camera_key;
         }
         drawNode(source);
+        if (layer == nullptr || compose) return;
+        for (const auto& overlay : layer->CardOverlays()) {
+            if (overlay == nullptr) continue;
+            DrawSource paint;
+            paint.node            = overlay.get();
+            paint.visibility_node = overlay.get();
+            paint.image_id        = node->ID();
+            paint.redirect_from   = node->Parent();
+            paint.destination     = source.destination;
+            drawNode(paint);
+        }
     }
 
     void clearChainInput(SceneImageEffectLayer* layer) {
