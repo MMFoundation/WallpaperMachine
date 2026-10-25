@@ -79,29 +79,30 @@ std::string Tex(int nominal_w, int nominal_h, int visible_w, int visible_h,
 // supplies exactly one identity bone, or explicitly zero bones. A texture
 // channel mesh, when asked for, follows the picture's mesh: a smaller square
 // (`channel_low` to `channel_high` on both axes) drawn with
-// `materials/channels.json`. With `weights`, an MDLA6 animation (id 1, one
-// frame a second, looping) follows the bone and weighs channel 0 by them.
+// `materials/channels.json`, its vertices naming `channel`. With `weights`, an
+// MDLA6 animation (id 1, one frame a second, looping) follows the bone and
+// weighs channel 0 by them.
 std::string SquareModel(int bones, bool texture_channel = false, std::vector<float> weights = {},
-                        float channel_low = 40, float channel_high = 56) {
+                        float channel_low = 40, float channel_high = 56, uint32_t channel = 0) {
     Bytes b;
     constexpr uint32_t layout = 0x01800009;
     b.text("MDLV0014"); b.u32(layout); b.u32(1); b.u32(texture_channel ? 2 : 1);
-    const auto square = [&b](const char* material, float low, float high) {
+    const auto square = [&b](const char* material, float low, float high, uint32_t index) {
         b.text(material); b.u32(0);
         b.u32(4 * 52);
         const float points[4][5] = {{low,low,0,0,1}, {low,high,0,0,0},
                                     {high,low,0,1,1}, {high,high,0,1,0}};
         for (const auto& p : points) {
             for (int k = 0; k != 3; ++k) b.f32(p[k]);
-            for (int k = 0; k != 4; ++k) b.u32(0);
+            for (int k = 0; k != 4; ++k) b.u32(k == 0 ? index : 0);
             for (int k = 0; k != 4; ++k) b.f32(k == 0 ? 1.0f : 0.0f);
             b.f32(p[3]); b.f32(p[4]);
         }
         b.u32(12);
         for (uint16_t i : {0, 1, 2, 2, 1, 3}) b.u16(i);
     };
-    square("materials/mesh.json", -32, 32);
-    if (texture_channel) square("materials/channels.json", channel_low, channel_high);
+    square("materials/mesh.json", -32, 32, 0);
+    if (texture_channel) square("materials/channels.json", channel_low, channel_high, channel);
     if (bones >= 0) {
         b.text("MDLS0001"); b.u32(0); b.u16(bones); b.u16(0);
         if (bones) {
@@ -223,9 +224,9 @@ protected:
             {"passes",Json::array({{{"constantshadervalues",{{"tint",tint}}}}})}}});
     }
     void Puppet(Json& image, int bones, bool texture_channel = false, std::vector<float> weights = {},
-                float channel_low = 40, float channel_high = 56) {
+                float channel_low = 40, float channel_high = 56, uint32_t channel = 0) {
         Put("models/square.mdl", SquareModel(bones, texture_channel, std::move(weights), channel_low,
-                                             channel_high));
+                                             channel_high, channel));
         PutJson("models/puppet.json", {{"material","materials/base.json"},
             {"puppet","models/square.mdl"}, {"autosize",false}});
         image["image"] = "models/puppet.json";
@@ -568,6 +569,33 @@ TEST_F(MaterialContracts, APuppetsTextureChannelPaintsIntoItsPictureOnlyWhileIts
         scene->shaderValueUpdater->FrameBegin();
         EXPECT_FALSE(chain->CardOverlays()[0]->Visible());
     }
+    for (const auto& [channel, authored_rows, rows] :
+         std::array<std::array<uint32_t, 3>, 3> {{ {5, 1, 2}, {0, 3, 3}, {300, 1, 0} }}) {
+        // The weights are uploaded as whole rows, as many as the shader declares: enough for
+        // every channel the mesh names (5 needs two), more when the material asks for more.
+        // A number no picture has as many channels as is not a channel; nothing is painted.
+        SCOPED_TRACE(::testing::Message() << "channel " << channel << ", rows " << authored_rows);
+        PutJson("materials/channels.json", {{"passes",Json::array({{{"shader","puppettexturechannels"},
+            {"textures",{"aux","sheet"}}, {"combos",{{"BLENDROWCOUNT",authored_rows}}},
+            {"blending","normal"}, {"cullmode","nocull"}, {"depthtest","disabled"},
+            {"depthwrite","disabled"}}})}});
+        auto image = Image(); Puppet(image,1,true,{1.0f,1.0f,1.0f},1,3,channel);
+        image["animationlayers"] = layers(true);
+        auto scene = Load(Json::array({image})); ASSERT_NE(scene,nullptr);
+        auto* node = Node(*scene,"owner"); ASSERT_NE(node,nullptr);
+        auto* chain = Chain(*scene,*node); ASSERT_NE(chain,nullptr);
+        ASSERT_EQ(chain->CardOverlays().size(), rows == 0 ? 0u : 1u);
+        if (rows == 0) continue;
+        const SceneNode& painter = *chain->CardOverlays()[0];
+        scene->elapsingTime = 1.0;
+        scene->shaderValueUpdater->FrameBegin();
+        const auto weights =
+            static_cast<WPShaderValueUpdater&>(*scene->shaderValueUpdater).TextureChannelWeights(&painter);
+        ASSERT_EQ(weights.size(), 4u * rows);
+        EXPECT_FLOAT_EQ(weights[0], 1.0f);
+        for (std::size_t lane = 1; lane < weights.size(); ++lane) EXPECT_FLOAT_EQ(weights[lane], 0.0f);
+    }
+    Material("materials/channels.json", "puppettexturechannels", {"aux", "sheet"});
     {
         SCOPED_TRACE("weights that never rise");
         auto image = Image(); Puppet(image,1,true,{0.0f,0.0f,0.0f},1,3);

@@ -424,7 +424,7 @@ loads. A puppet's texture channel (a mesh whose material draws with
 puppet's own picture, its positions being pixels of that picture: it is never drawn
 as part of the model on the screen. Each animation stores one weight a frame per
 channel (numbered by the order of its records, which the mesh's blend index names),
-sampled between frames like the bones. The weights of the visible animation layers
+sampled between frames like the bones; a weight that is not a number counts as 0. The weights of the visible animation layers
 are averaged by their blend, so a layer alone counts in full whatever its blend, and
 a hidden layer or none paints nothing. The frame is drawn into the layer's picture
 where the card puts it into the effect chain's first buffer, before any effect and

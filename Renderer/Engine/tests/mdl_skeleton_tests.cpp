@@ -421,6 +421,23 @@ TEST(MdlSkeleton, TextureChannelWeightsAreNumberedByRecordOrder) {
     EXPECT_FALSE(p.logged(kInfo, "do not end"));
 }
 
+TEST(MdlSkeleton, ATextureChannelWeightThatIsNotANumberPaintsNothing) {
+    // Kept as 0 rather than failing the block, which would drop the bones' animation too.
+    const Bytes f = withAnimBlock(one(), [](Bytes& b) {
+        b.u32(1);
+        writeAnim6(b, { .id = 7, .name = "blink",
+                        .channels = { { 0, { std::numeric_limits<float>::infinity(),
+                                             std::numeric_limits<float>::quiet_NaN(), 0.5f } } } });
+    });
+    const auto p = parse(f);
+    ASSERT_TRUE(p.ok);
+    ASSERT_NE(p.mdl.puppet, nullptr);
+    ASSERT_EQ(p.mdl.puppet->anims.size(), 1u);
+    ASSERT_EQ(p.mdl.puppet->anims[0].texture_channels.size(), 1u);
+    EXPECT_EQ(p.mdl.puppet->anims[0].texture_channels[0], (std::vector<float> { 0.0f, 0.0f, 0.5f }));
+    EXPECT_EQ(p.mdl.puppet->anims[0].bone_tracks.size(), 1u);
+}
+
 TEST(MdlSkeleton, UnparseableAnimationBlockDropsAnimationsButKeepsMeshAndBones) {
     const Bytes f = withAnimBlock(one(), [](Bytes& b) {
         b.u32(1);

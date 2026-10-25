@@ -732,6 +732,10 @@ AnimationDecode DecodeAnimations(Cursor c, uint32_t count, int version, uint32_t
             for (auto& weights : anim.texture_channels) {
                 c.u32();
                 if (! ReadFloatArray(c, weights, error)) return fail(error);
+                // A weight that is not a number paints nothing.
+                for (float& weight : weights) {
+                    if (! std::isfinite(weight)) weight = 0.0f;
+                }
             }
             if (! ReadCurveBlock(c, bone_count, anim.blend_curves, error)) {
                 return fail(error.empty() ? "MDLA curve block is cut short" : error);

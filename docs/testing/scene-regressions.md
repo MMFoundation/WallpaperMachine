@@ -2645,7 +2645,11 @@ texture entrances are not decoded-image or native-rendering evidence.
   pass in its effect chain, effects or none: the channel quad is moved from picture
   pixels onto the card, the pass is shown only in frames whose weight is above
   0.001 and the layer shows, and it reads the frame-interpolated weight as
-  `g_BlendMap` with the card's colour in `g_Color4`. The Metal test checks the
+  `g_BlendMap` with the card's colour in `g_Color4`. `g_BlendMap` is uploaded as
+  exactly the rows the shader declares, enough for every channel the mesh names
+  and more when the material's `BLENDROWCOUNT` asks for more; a mesh naming a
+  channel past 255 is not painted, and a weight that is not a number counts as 0
+  (`MdlSkeleton.ATextureChannelWeightThatIsNotANumberPaintsNothing`). The Metal test checks the
   painted pixel at rising, held and falling weights and that the picture is its
   own again once the weight falls back. Wallpaper Engine's rules were read from
   probe scenes built from Swimming Kirby's assets (2026-10-25): records are

@@ -3291,8 +3291,21 @@ void AddTextureChannelPainters(ParseContext& context, const wpscene::WPImageObje
     if (! (pixels[0] > 0.0f) || ! (pixels[1] > 0.0f)) return;
     // The card is cut down to whole units (`MakeCardMesh`); the frames land on it as drawn.
     for (float& side : card) side = std::isfinite(side) ? std::clamp(std::trunc(side), 0.0f, 65535.0f) : 0.0f;
-    const auto rows = static_cast<int32_t>(std::max<std::size_t>(1, (channels + 3) / 4));
+    // Far more channels than any picture paints: a number past it is not a channel.
+    constexpr uint32_t kMaxTextureChannels = 256;
     for (const auto& source : meshes) {
+        // The shader reads a vertex's weight at `g_BlendMap[n / 4][n % 4]`, `n` its first blend
+        // index: the rows cover every channel the mesh names, and those no animation weighs
+        // in read 0 and are discarded.
+        uint32_t highest = 0;
+        for (const auto& indices : source.blend_indices) highest = std::max(highest, indices[0]);
+        if (highest >= kMaxTextureChannels) {
+            LOG_ERROR("texture channel mesh '%s' names channel %u; it is not painted",
+                      source.mat_json_file.c_str(), highest);
+            continue;
+        }
+        const auto rows = static_cast<int32_t>(
+            (std::max<std::size_t>(channels, std::size_t { highest } + 1) + 3) / 4);
         nlohmann::json json;
         wpscene::WPMaterial authored;
         if (! wpscene::ParseBoundedJson(fs::GetFileContent(*context.vfs, "/assets/" + source.mat_json_file),
@@ -3300,9 +3313,10 @@ void AddTextureChannelPainters(ParseContext& context, const wpscene::WPImageObje
             ! authored.FromJson(json)) {
             continue;
         }
-        // The weights are uploaded four to a row; the shader must declare every row they fill.
+        // The weights are uploaded four to a row, exactly as many rows as the shader declares.
         auto& declared = authored.combos["BLENDROWCOUNT"];
         declared       = std::max(declared, rows);
+        const auto uploaded = static_cast<std::size_t>(declared) * 4;
         SceneMaterial  material;
         LoadedMaterial loaded;
         if (! LoadMaterial(context, authored, material, loaded)) {
@@ -3327,7 +3341,7 @@ void AddTextureChannelPainters(ParseContext& context, const wpscene::WPImageObje
             data.renderTargets = std::move(loaded.render_targets);
             context.shader_updater->SetNodeData(painter.get(), 0, data);
             context.shader_updater->RegisterPuppetTextureChannels(puppet_layer, owner.get(), painter.get(),
-                                                                  channels);
+                                                                  uploaded);
         }
         chain.AddCardOverlay(std::move(painter));
     }
