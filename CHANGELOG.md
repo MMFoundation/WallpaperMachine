@@ -12,6 +12,68 @@ app's update window shows the sections of every version newer than the installed
 one, in the app's language; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.6.3](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.2...v1.6.3) (2026-10-25)
+
+### English
+
+This release adds an update window that shows what is new before you install, makes scene puppets more lifelike and fixes several scene wallpapers that did not draw correctly
+
+#### Breaking Changes
+
+- The What's New window no longer opens after an update, because the update window now shows the release notes before you install ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+
+#### Features
+
+- When an update is available, a window shows the new version and the notes of every release since yours, readable in English, Simplified Chinese or Korean ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+- From the update window you can install with a progress bar and restart into the new version, skip that version or be reminded on the next launch ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+- A new option in the update window and in Settings, About downloads updates in the background and installs them while the display sleeps or the Mac is locked, off by default ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+- Scene puppets now play texture animations such as eye blinks, so Swimming Kirby blinks just as it does in Wallpaper Engine (closes [#88](https://github.com/WallpaperMachine/WallpaperMachine/issues/88)) ([9684d3f](https://github.com/WallpaperMachine/WallpaperMachine/commit/9684d3f03e695ce69fbbf3bc1905c8af2ef9777b))
+
+#### Bug Fixes
+
+- Scene wallpapers whose layers use each other's images, or whose scripts switch layer effects, now draw correctly (closes [#89](https://github.com/WallpaperMachine/WallpaperMachine/issues/89)) ([417ce05](https://github.com/WallpaperMachine/WallpaperMachine/commit/417ce059837ac131063b59aa9da0025971251871))
+- Puppets with effects no longer show small, chopped copies of their own picture beside them (closes [#88](https://github.com/WallpaperMachine/WallpaperMachine/issues/88)) ([9684d3f](https://github.com/WallpaperMachine/WallpaperMachine/commit/9684d3f03e695ce69fbbf3bc1905c8af2ef9777b))
+
+### 简体中文
+
+本次更新带来全新的更新窗口，安装前即可查看更新内容，同时让场景中的人偶更加生动，并修复了部分场景壁纸的显示问题
+
+#### 不兼容变更
+
+- 更新后不再弹出“新功能”窗口，更新说明改为在安装前的更新窗口中显示 ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+
+#### 新功能
+
+- 有可用更新时，会弹出窗口显示新版本及自当前版本以来的全部更新说明，并可切换为英文、简体中文或韩文 ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+- 在更新窗口中可以直接安装并查看下载进度，完成后自动重启到新版本，也可以跳过此版本或在下次启动时再提醒 ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+- 更新窗口和设置的“关于”中新增自动更新选项，可在后台下载并在显示器睡眠或 Mac 锁定时安装，默认关闭 ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+- 场景中的人偶现在会播放眨眼等贴图动画，Swimming Kirby 会像在 Wallpaper Engine 中一样眨眼 (closes [#88](https://github.com/WallpaperMachine/WallpaperMachine/issues/88)) ([9684d3f](https://github.com/WallpaperMachine/WallpaperMachine/commit/9684d3f03e695ce69fbbf3bc1905c8af2ef9777b))
+
+#### 问题修复
+
+- 图层之间相互引用画面或由脚本切换图层效果的场景壁纸现在可以正确显示 (closes [#89](https://github.com/WallpaperMachine/WallpaperMachine/issues/89)) ([417ce05](https://github.com/WallpaperMachine/WallpaperMachine/commit/417ce059837ac131063b59aa9da0025971251871))
+- 带有效果的人偶旁边不再出现自身画面被切碎的小副本 (closes [#88](https://github.com/WallpaperMachine/WallpaperMachine/issues/88)) ([9684d3f](https://github.com/WallpaperMachine/WallpaperMachine/commit/9684d3f03e695ce69fbbf3bc1905c8af2ef9777b))
+
+### 한국어
+
+이번 릴리스에서는 설치 전에 변경 사항을 확인할 수 있는 새 업데이트 창이 추가되고, 장면 속 퍼펫이 더 생생해졌으며, 일부 장면 배경화면의 표시 문제가 수정되었습니다
+
+#### 호환되지 않는 변경 사항
+
+- 업데이트 후 새로운 기능 창이 더 이상 열리지 않으며, 릴리스 노트는 이제 설치 전에 업데이트 창에서 확인할 수 있습니다 ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+
+#### 새로운 기능
+
+- 업데이트가 있으면 새 버전과 현재 버전 이후의 모든 릴리스 노트를 보여 주는 창이 열리며, 영어, 간체 중국어, 한국어로 읽을 수 있습니다 ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+- 업데이트 창에서 진행률을 보며 설치하고 새 버전으로 다시 시작하거나, 이 버전을 건너뛰거나, 다음 실행 시 다시 알림을 받을 수 있습니다 ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+- 기본적으로 꺼짐 상태인 자동 업데이트 옵션이 업데이트 창과 설정의 정보에 추가되어, 백그라운드에서 내려받고 디스플레이가 잠자거나 Mac이 잠겨 있을 때 설치합니다 ([fd967f9](https://github.com/WallpaperMachine/WallpaperMachine/commit/fd967f9c7d15b5fbf4d8291b7213c7c9248bbae6))
+- 장면 속 퍼펫이 이제 눈 깜빡임 같은 텍스처 애니메이션을 재생하여, Swimming Kirby가 Wallpaper Engine에서처럼 눈을 깜빡입니다 (closes [#88](https://github.com/WallpaperMachine/WallpaperMachine/issues/88)) ([9684d3f](https://github.com/WallpaperMachine/WallpaperMachine/commit/9684d3f03e695ce69fbbf3bc1905c8af2ef9777b))
+
+#### 버그 수정
+
+- 레이어가 서로의 이미지를 사용하거나 스크립트로 레이어 효과를 전환하는 장면 배경화면이 이제 올바르게 표시됩니다 (closes [#89](https://github.com/WallpaperMachine/WallpaperMachine/issues/89)) ([417ce05](https://github.com/WallpaperMachine/WallpaperMachine/commit/417ce059837ac131063b59aa9da0025971251871))
+- 효과가 적용된 퍼펫 옆에 자기 그림의 작고 잘린 복사본이 더 이상 나타나지 않습니다 (closes [#88](https://github.com/WallpaperMachine/WallpaperMachine/issues/88)) ([9684d3f](https://github.com/WallpaperMachine/WallpaperMachine/commit/9684d3f03e695ce69fbbf3bc1905c8af2ef9777b))
+
 ## [1.6.2](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.1...v1.6.2) (2026-10-24)
 
 ### English
