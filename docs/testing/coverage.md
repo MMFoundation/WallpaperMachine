@@ -222,7 +222,7 @@ picture shows between a window closing and the web page's window opening.
   display the user is not using is one more hidden reason: suspended after the settle
   delay, resumed at once, joined to coverage, never darkening every display, playing
   while the display in use is covered or under a full-screen app, untouched
-  by a sleep and wake, and not counted as hidden for the update alert's gate.
+  by a sleep and wake, and not counted as hidden for the update window's gate.
 - `SystemWakeRevalidatorTests` — against a private notification center and
   injected delays, idle wait and bridge call: a wake's two notifications are one
   check, a check waits for the command queue, a wake at the lock screen is checked
@@ -456,14 +456,16 @@ running app.
   the downloaded image.
 - `UpdatePresentationTests` and `AboutSettingsTests` (Panel) walk the About card
   from no release through the download to an install that needs a yes.
-- `UpdatePromptGateTests`: when the unattended alert is held (suspended
-  presentation, a covered display, What's New open, quitting), that the control
-  panel in front overrides the presentation holds, and that a held prompt is
-  offered exactly once after the hold lifts. The alert itself, and leaving a
-  full-screen app, are on [manual-smoke.md](manual-smoke.md).
+- `UpdatePromptGateTests`: when the unattended update window is held (suspended
+  presentation, a covered display, quitting), that the control panel in front
+  overrides the presentation holds, and that a held prompt is offered exactly once
+  after the hold lifts. The window itself, and leaving a full-screen app, are on
+  [manual-smoke.md](manual-smoke.md).
 
-`WhatsNewTests` — what a launch announces across fresh installs, upgrades that
-skip versions, downgrades and language choice. Not covered: a live release
+`AppReleaseHistoryTests` — the manifest's changelog: linked headings, translations
+and their fallbacks, reference links kept for the window and dropped for About, and
+which releases the update window shows. `UpdateWindowTests` — the notes-language
+switch above the notes and the translation the window opens on. Not covered: a live release
 check, the published disk image and replacing the app in Applications; these are
 on [manual-smoke.md](manual-smoke.md).
 

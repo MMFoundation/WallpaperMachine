@@ -27,6 +27,12 @@ struct AboutSettingsSection: View {
       "Check Again", "Retry", "Download Update", "Restart and Install", "Retry installation",
       "Cancel", "Open GitHub Releases", "Show in Finder", "Update download progress",
     ])
+  static let updateAutomatic = SettingsItem(
+    id: "about.update-automatic", section: .about, group: updates,
+    title: "Automatically download and install updates",
+    note:
+      "Updates download in the background and install while the display sleeps or the Mac is locked; WallpaperMachine quits and reopens to finish."
+  )
   static let updateNotes = SettingsItem(
     id: "about.update-notes", section: .about, group: updates, title: "What’s new")
   static let updateFootnote = SettingsItem(
@@ -46,7 +52,8 @@ struct AboutSettingsSection: View {
   )
 
   static let items = [
-    appVersion, gitRevision, updateStatus, updateActions, updateNotes, updateFootnote, shareApp,
+    appVersion, gitRevision, updateStatus, updateActions, updateAutomatic, updateNotes,
+    updateFootnote, shareApp,
     creditsItem,
   ]
 
@@ -215,6 +222,17 @@ private struct AboutUpdatesRows: View {
       .padding(.vertical, 8)
     }
     actions(presentation, controls)
+    SettingsRow(AboutSettingsSection.updateAutomatic) {
+      Toggle(
+        noLabel,
+        isOn: controller.displaysSettings.binding(
+          PanelActionCoordinator.key("setting", detail: "automaticUpdates"),
+          current: controller.updater.automaticallyInstallsUpdates
+        ) { try await controller.setAutomaticallyInstallsUpdates($0) }
+      )
+      .toggleStyle(.switch)
+      .labelsHidden()
+    }
     if presentation.hasNotes { notes(presentation) }
     DisplaysItemNote(item: AboutSettingsSection.updateFootnote)
   }

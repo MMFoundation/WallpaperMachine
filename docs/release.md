@@ -61,65 +61,91 @@ omitted nothing is written, which makes it safe to inspect a planned bump.
 ## Release notes and the changelog
 
 A version's notes are written once, when it is cut, into its
-[`CHANGELOG.md`](../CHANGELOG.md) section. The app bundles that file. The
-release page uses only the English notes from the current section; the app keeps
-all translations. [`scripts/release_notes.py`](../scripts/release_notes.py)
-does both halves; GitHub's auto-generated notes are not used. Once a version's
-tag exists, its section is not extended: the tag's build already bundled it, so
-a change that lands later belongs in the next release's notes.
+[`CHANGELOG.md`](../CHANGELOG.md) section. The update manifest carries the newest
+sections, in every language, to the app's update window
+([below](#what-the-in-app-updater-expects)); the release page uses only the English
+notes from the current section. [`scripts/release_notes.py`](../scripts/release_notes.py)
+does both halves; GitHub's auto-generated notes are not used. Once a version's tag
+exists, its section is not extended: the tag's release already published it, so a
+change that lands later belongs in the next release's notes.
 
-From 1.5.7, a bundled changelog section has three languages, in this order, and
-nothing else at `###`; each language may open with its banner line. Earlier
-sections keep their original English and Simplified Chinese notes unchanged:
+The layout is conventional-changelog's, the one standard-version writes: a heading
+that links the version to its comparison with the previous one and gives the release
+date, then category headings, and bullets that end with their issue and commit
+links. From 1.5.7 a section has three languages, in this order, and nothing else at
+`###`; each language may open with its banner line. Earlier sections keep their
+original English and Simplified Chinese notes:
 
 ```markdown
+## [1.6.2](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.1...v1.6.2) (2026-10-24)
+
 ### English
 
-![WallpaperMachine 1.5.7](Resources/ReleaseBanners/1.5.7.jpg)
+![WallpaperMachine 1.6.2](Resources/ReleaseBanners/1.6.2.jpg)
 
 One or two sentences on what the release means, omitted when the lists say it.
 
-#### New
+#### Bug Fixes
 
-- One change, one line
+- Long names on narrow tiles now shrink to fit (closes [#76](https://github.com/WallpaperMachine/WallpaperMachine/issues/76)) ([bb75725](https://github.com/WallpaperMachine/WallpaperMachine/commit/bb75725338d4ab37a649973457c0357900b93355))
 
 ### 简体中文
 
-![WallpaperMachine 1.5.7](Resources/ReleaseBanners/1.5.7.zh-Hans.jpg)
+![WallpaperMachine 1.6.2](Resources/ReleaseBanners/1.6.2.zh-Hans.jpg)
 
 同样的一两句。
 
-#### 新增
+#### 问题修复
 
-- 同一变更的简体中文
+- 较窄磁贴上的长名称现在会缩小以完整显示 (closes [#76](https://github.com/WallpaperMachine/WallpaperMachine/issues/76)) ([bb75725](https://github.com/WallpaperMachine/WallpaperMachine/commit/bb75725338d4ab37a649973457c0357900b93355))
 
 ### 한국어
 
-![WallpaperMachine 1.5.7](Resources/ReleaseBanners/1.5.7.ko.jpg)
+![WallpaperMachine 1.6.2](Resources/ReleaseBanners/1.6.2.ko.jpg)
 
 같은 내용을 한두 문장으로 요약합니다.
 
-#### 새로운 기능
+#### 버그 수정
 
-- 같은 변경 사항을 한국어로 설명합니다
-
-**Full changelog**: https://github.com/owner/repo/compare/v1.5.6...v1.5.7
+- 좁은 타일의 긴 이름이 이제 줄어들어 전체가 표시됩니다 (closes [#76](https://github.com/WallpaperMachine/WallpaperMachine/issues/76)) ([bb75725](https://github.com/WallpaperMachine/WallpaperMachine/commit/bb75725338d4ab37a649973457c0357900b93355))
 ```
 
-Category headings inside a language are `####`. The compare link follows all
-blocks; the app ignores it. The headings are:
+The heading is `## [x.y.z](<compare link>) (YYYY-MM-DD)`; a first release, with no
+earlier tag, links `https://github.com/<repository>/commits/vx.y.z`. Sections no
+longer end in a `**Full changelog**` line: the heading carries that link. The
+sections written before this layout were converted with their own compare links,
+older `bobbyhuang-dev` addresses included. The script still reads the older
+`## x.y.z — YYYY-MM-DD` heading, but always writes the linked one.
+
+Category headings inside a language are `####`, in this order:
 
 | Section | `####` English | `####` 简体中文 | `####` 한국어 |
 |---|---|---|---|
 | highlights | Highlights | 亮点 | 주요 변경 사항 |
-| breaking | Breaking changes | 不兼容变更 | 호환되지 않는 변경 사항 |
-| new | New | 新增 | 새로운 기능 |
-| improved | Improved | 改进 | 개선 사항 |
-| fixed | Fixed | 修复 | 수정됨 |
+| breaking | Breaking Changes | 不兼容变更 | 호환되지 않는 변경 사항 |
+| new | Features | 新功能 | 새로운 기능 |
+| improved | Improvements | 改进 | 개선 사항 |
+| fixed | Bug Fixes | 问题修复 | 버그 수정 |
+| performance (listings and older sections only) | Performance Improvements | 性能改进 | 성능 개선 |
+| other (listings and older sections only) | Other Changes | 其他变更 | 기타 변경 사항 |
 
 Highlights appear only in feature releases: the three to five changes that define the
 release, which the other sections still list. A feature release is `x.y.0`, or a patch
 whose notes start below `x.y` because it replaces an `x.y.0` that was never published.
+
+Every bullet ends with the same links in all three languages, written by the script
+from the commits the bullet describes, never by the model:
+` (closes [#N](https://github.com/<repository>/issues/N), closes [#M](…))` when those
+commits close issues, then ` ([abc1234](https://github.com/<repository>/commit/<full sha>))`,
+several commits comma-separated inside one pair of parentheses. The link text is the
+7-character short hash, and the word `closes` stays English in every language: it is
+GitHub's keyword. Closing references come from the full messages of the bullet's
+commits: GitHub's keywords, case-insensitive (`close`, `closes`, `closed`, `fix`,
+`fixes`, `fixed`, `resolve`, `resolves`, `resolved`), followed by `#N`. References to
+other repositories are ignored, and numbers are deduplicated and sorted ascending.
+That is why a commit names the issue it resolves with `Closes #N`
+([conventions](conventions.md#commits-and-pull-requests)). Model-written bullets from
+before this layout have no recorded commits and carry no links.
 
 ### Release banners
 
@@ -133,9 +159,8 @@ is written, the script opens each language block with its image line:
 - `CHANGELOG.md` on GitHub shows the images from their repository paths.
 - The release page shows the English one from the version's tag on
   `raw.githubusercontent.com`, at the top of the English notes.
-- The app bundles the folder; the What's New window shows the banner of the version
-  it announces above its header, in the selected translation, not those of skipped
-  versions.
+- The app bundles neither the folder nor `CHANGELOG.md`; what its update window shows
+  of a section is in [The update window](features/updates.md#the-update-window).
 
 Publishing refuses a banner line that names another version's file, and a banner
 line is not translated prose: a language block holding only a picture is missing its
@@ -185,13 +210,20 @@ and ko catalogs' words (`Settings` / `设置` / `설정`); the prompt lists thos
 so renaming a tab or a Settings section changes the list in
 `scripts/release_notes.py` in the same commit.
 
+The prompt lists each commit as `* <short hash> <subject>`, so the model can cite it.
 The model answers with JSON. `summary` is `{"english", "chinese", "korean"}`. Each of
-`highlights`, `breaking`, `new`, `improved` and `fixed` is a list of the same
-three-language object, one per change, so translations cannot drift in length.
-The script renders that shape — `### English`, then `### 简体中文`, then
-`### 한국어`, categories at `####`, then the compare link — and stops the run on
-a reply that is not that JSON, omits a language, carries other fields or an HTML
-comment (the boundary marker below), or was cut off at the output-token limit.
+`highlights`, `breaking`, `new`, `improved` and `fixed` is a list of
+`{"english", "chinese", "korean", "commits"}` objects, one per change, so
+translations cannot drift in length; `commits` is a required, non-empty list of the
+short hashes of the commits the bullet describes. The summary names no commits. The
+script resolves every hash to a commit of the range and stops the run on one that is
+not a list, is empty, holds something other than a hash, or names a commit outside
+the range (the bump commit included) or more than one commit. It renders that shape —
+`### English`, then `### 简体中文`, then `### 한국어`, categories at `####`, each
+bullet followed by its [issue and commit links](#release-notes-and-the-changelog) —
+and stops the run on a reply that is not that JSON, omits a language, carries other
+fields or an HTML comment (the boundary marker below), or was cut off at the
+output-token limit. The compare link belongs to the section heading.
 A Chinese string must contain Chinese characters; a Korean string must contain
 Hangul; neither may copy the English or another translation. An English string
 must contain Latin text. Whitespace is collapsed and list or heading markers are
@@ -207,15 +239,19 @@ re-run.
 ### Listed from the commits
 
 Without `--ai` the commits are listed in English, read through the
-`type(scope): subject` convention in [conventions.md](conventions.md). It is
-offline and free, and it is a developer preview for inspecting a range and for
-tests. It is not published: `--release-body` and `--changelog --apply` refuse
-notes without the required ordered language blocks: `### English`, then
-`### 简体中文`, then `### 한국어` for versions 1.5.7 and later. Older bilingual
-sections remain valid.
+`type(scope): subject` convention in [conventions.md](conventions.md), as one
+`### English` block with the same heading, `####` category names and link suffix
+as the model's notes: `- **scope** — Subject (closes [#N](…)) ([abc1234](…))`. A
+subject that repeats an earlier one collapses into one bullet that links every
+commit behind it. It is offline and free, and it is a developer preview for
+inspecting a range and for tests. It is not published: `--release-body` and
+`--changelog --apply` refuse notes without the required ordered language blocks:
+`### English`, then `### 简体中文`, then `### 한국어` for versions 1.5.7 and later.
+Older bilingual sections remain valid.
 
-Publication validates the whole bundled history, not just the current release.
-Each `##` heading must be the `x.y.z` token `AppReleaseHistory` accepts
+Publication validates the whole changelog history, not just the current release.
+Each `##` heading must be `## [x.y.z](<link>) (YYYY-MM-DD)` (or the older
+`## x.y.z — YYYY-MM-DD`) with the version token `AppReleaseHistory` accepts
 (optional `v`/`V`, three 64-bit integer components, no leading zeros), and each
 section needs actual prose in every required language and matching bullet counts
 (headings and compare links do not count as translated content). An explicitly
@@ -230,12 +266,12 @@ would introduce an English-only section; translate missing history before applyi
 
 | Commit type | Section |
 |---|---|
-| `feat` | **New** |
-| `fix` | **Fixed** |
-| `perf` | **Performance** |
-| `!` suffix or a `BREAKING CHANGE:` trailer | **Breaking changes** |
+| `feat` | **Features** |
+| `fix` | **Bug Fixes** |
+| `perf` | **Performance Improvements** |
+| `!` suffix or a `BREAKING CHANGE:` trailer | **Breaking Changes** |
 | `docs`, `test`, `chore`, `ci`, `build`, `style`, `refactor` | counted in one closing line |
-| anything else, including non-conventional subjects | **Other changes** |
+| anything else, including non-conventional subjects | **Other Changes** |
 
 Nothing is dropped silently: a subject the convention does not recognise is
 listed rather than hidden, and the only commit removed outright is CI's own
@@ -245,7 +281,7 @@ word boundary; the linked commit still carries every word.
 ### Commands
 
 ```sh
-python3 scripts/release_notes.py                               # English listing, not for publish
+python3 scripts/release_notes.py                               # English listing with its heading, not for publish
 python3 scripts/release_notes.py --ai --tag v1.5.7 --to HEAD   # three languages, before the tag exists
 python3 scripts/release_notes.py --tag v1.5.7 --release-body --ai --output notes.md
 python3 scripts/release_notes.py --ai --changelog --apply      # write one translated section
@@ -258,18 +294,21 @@ newest released version below the target that the range's end descends from, so 
 gap in the numbering resolves correctly.
 
 `--release-body` is the English-only GitHub release page. It reuses the version's
-translated `CHANGELOG.md` section without calling the model again, keeps only the
-English prose and the **Full changelog** link, then adds
+translated `CHANGELOG.md` section without calling the model again and keeps only the
+English block, in the same category names and with each bullet's issue and commit
+links. It then adds `**Full changelog**: <compare link>`, the link the section heading
+carries (for an older heading, the comparison with the previous tag), then
 `<!-- release-notes-end -->` and the install, checksum and requirement footer
 (with a `Built from` line when `--built-from` is given). Raw commit messages are
-not appended; the **Full changelog** link leads to the commit history. A
+not appended; the **Full changelog** link leads to the commits of the comparison. A
 hand-pushed tag with no section is written once, by the model when `--ai` is
 set, into the working-tree `CHANGELOG.md` before anything is built. English-only
 or malformed source history fails the run instead of being published.
 
 The marker is a contract: the updater shows everything above it and nothing
-below. The What's New window reads the bundled changelog, not that footer; how the
-app announces an update is in [After an update](features/updates.md#after-an-update).
+below, and About skips the **Full changelog** line. The update window reads the
+manifest's `changelog` field, not that body, and falls back to the body only when the
+field is missing; see [The update window](features/updates.md#the-update-window).
 
 Writing a section is idempotent — rerunning replaces the section for that
 version instead of duplicating it. `--rebuild-changelog` writes a section for every
@@ -279,10 +318,12 @@ English, and that listing is not a publishable section. It never calls the model
 and refuses `--ai`. `CHANGELOG.md` is written with `--apply`, and also when
 `--release-body` has to generate the current section. With `--changelog`, nothing
 is generated unless `--apply` or `--output` is given, so that dry run never calls
-the model; a plain `--ai` run prints the model's notes and does make the request.
-`scripts/tests/test_release_notes.py` covers classification, rendering, the
-changelog, range resolution against a throwaway repository, the model path
-against a fake gateway and the publish path, and runs as part of
+the model; a plain `--ai` run prints the model's section, heading included, and does
+make the request. `scripts/tests/test_release_notes.py` covers classification,
+closing references, rendering and links, the changelog headings, range resolution
+against a throwaway repository, the model path and its commit citations against a
+fake gateway, the publish path and the committed `CHANGELOG.md` itself;
+`scripts/tests/test_update_manifest.py` covers the manifest. Both run as part of
 `python3 scripts/test.py`.
 
 ## Workflows
@@ -374,8 +415,9 @@ artifact.
    --built-from "$(git rev-parse HEAD)"` before anything is built. The current
    section must already have every required language and is reused without
    calling the model; a hand-pushed tag with no section gets one written once into
-   the working-tree `CHANGELOG.md`, so the app bundles all translations. Missing
-   translations or malformed source history fail here, in seconds,
+   the working-tree `CHANGELOG.md`. A copy of that `CHANGELOG.md` goes to `publish`
+   with the notes, so the update manifest carries every translation of the new
+   section. Missing translations or malformed source history fail here, in seconds,
    rather than after the macOS build;
 3. runs `prepare-build` (below) and downloads the `app-icon-<tag>` artifact;
 4. runs `python3 scripts/build.py --configuration Release --app-icon DIR`, which
@@ -401,8 +443,8 @@ artifact.
 6. matches the image to the tag: it must be named
    `WallpaperMachine-<tag without v>-arm64.dmg`, and its checksum is echoed into the
    job summary;
-7. hands the image, its sidecar and the notes to `publish` as the
-   `release-<tag>` artifact.
+7. hands the image, its sidecar, the notes and that `CHANGELOG.md` to `publish` as
+   the `release-<tag>` artifact.
 
 Step 6 is the guard that the bump actually reached the build:
 `scripts/package.py` names the image from the bundle's
@@ -419,8 +461,9 @@ summary.
 2. attests build provenance for the image with
    `actions/attest-build-provenance`;
 3. writes the update manifest `WallpaperMachine-update.json` from the tag, the
-   notes and the image with `scripts/update_manifest.py`
-   ([below](#what-the-in-app-updater-expects));
+   notes, the image and the build job's `CHANGELOG.md` with
+   `scripts/update_manifest.py --changelog` ([below](#what-the-in-app-updater-expects));
+   `publish`'s own checkout of the tag lacks a section generated for a hand-pushed tag;
 4. publishes the image, its sidecar and the manifest with
    `scripts/publish_release.py`.
 
@@ -577,16 +620,26 @@ the build; it is not rewritten.
 
 **Settings → About** installs updates from the repository's latest GitHub Release.
 What the app does with one (when it checks, how it avoids the API quota, download,
-verification, replacing the running app, the What's New window) is in
+verification, replacing the running app, the update window) is in
 [updates](features/updates.md). This section is the publish-side contract: what a
 release has to carry for that to work.
 
 The update manifest, `WallpaperMachine-update.json`, is an asset of every release.
 `scripts/update_manifest.py` writes it in Build's `publish` job from the tag, the
-notes file that becomes the release body and the image bytes, and
+notes file that becomes the release body, `CHANGELOG.md` and the image bytes, and
 `scripts/publish_release.py` attaches it. It is the release object in the REST
 API's shape: `tag_name`, `html_url`, `prerelease`, `body` and one asset with
-`name`, `browser_download_url`, `size` and a `sha256:` `digest`. The app reads it
+`name`, `browser_download_url`, `size` and a `sha256:` `digest`, plus one field the
+API does not have. `changelog` (written with `--changelog CHANGELOG.md`) is a string
+holding the newest 20 `## ` version sections of `CHANGELOG.md` verbatim, every
+language included, from the first `## ` heading on, without the file's preamble.
+The script refuses a changelog with no section for the tag. When an update is
+available, the app's update window shows from it each version newer than the
+installed one, in the app's language, and falls back to the release body when the
+field is missing, as in manifests from before it existed
+([The update window](features/updates.md#the-update-window)). The app no longer
+bundles `CHANGELOG.md` or `Resources/ReleaseBanners`, and there is no window after
+an update. The app reads the manifest
 from `https://github.com/WallpaperMachine/WallpaperMachine/releases/latest/download/WallpaperMachine-update.json`,
 which github.com redirects to the file on the release marked Latest. A draft never
 resolves, and `publish_release.py` makes the release public only after the image,
@@ -616,7 +669,10 @@ What a release must satisfy:
   requirement and macOS keeps the app's privacy permissions;
 - the release body is the English notes above `<!-- release-notes-end -->`
   ([Release notes and the changelog](#release-notes-and-the-changelog)); the app
-  shows what is above the marker as **What's new** in About and ignores the rest.
+  shows what is above the marker as **What's new** in About and ignores the rest;
+- the manifest's `changelog` starts with the new version's section in the
+  [layout above](#release-notes-and-the-changelog), so an install several versions
+  behind sees every change it is about to receive.
 
 Renaming the image, publishing a prerelease, or attaching only a zip silently
 breaks automatic updates; `Tests/Unit/GitHub/AppUpdateTests.swift` pins this
@@ -644,29 +700,34 @@ use the preceding tag. When the unpublished tag was a feature release, its notes
 below that minor version, so the patch gets highlights too; commit copies of its
 banners under the patch's number (`x.y.1.jpg`, `x.y.1.zh-Hans.jpg`,
 `x.y.1.ko.jpg`) before running the
-workflow, since a section names only its own version's banner. Once the patch is cut,
-remove the sections of the unpublished versions it replaces, and their banners, from
-`CHANGELOG.md`: its notes already cover them, and a section left there is shown again in
-What's New. The app it builds still carries them, so remove them before cutting it when
-possible.
+workflow, since a section names only its own version's banner. Remove the sections
+of the unpublished versions the patch replaces, and their banners, from
+`CHANGELOG.md`: its notes already cover them, and a section left there is shown again
+in the update window of every install that updates across it. Remove them before the
+patch is cut, in or before the push with the `release:` line: the patch's manifest
+carries `CHANGELOG.md` as it is at the patch's tag, and that copy is not rewritten.
 
 ## Checklist for a release
 
 1. Land the change on `main` with a `release:` spec line, or run the Version
    workflow with a spec.
 2. Confirm the Version run committed `chore: bump version to x.y.z` with the new
-   `CHANGELOG.md` section and pushed `vx.y.z`. Read the section: it is `### English`
-   then `### 简体中文`, then `### 한국어`, and the model wrote all three. The app
-   bundles all translations; the GitHub release page shows only the English notes.
+   `CHANGELOG.md` section and pushed `vx.y.z`. Read the section: its heading is
+   `## [x.y.z](<compare link>) (YYYY-MM-DD)`, then `### English`, `### 简体中文` and
+   `### 한국어`, the model wrote all three, and each bullet links the commits it
+   describes and any issue they close. The update window shows all translations;
+   the GitHub release page shows only the English notes.
 3. Confirm the called Build run verified the mounted
    image, and published `WallpaperMachine-x.y.z-arm64.dmg` with its `.sha256`
    sidecar, `WallpaperMachine-update.json` and a provenance attestation. The
-   manifest's `digest` must equal the sidecar's checksum:
+   manifest's `digest` must equal the sidecar's checksum, and its `changelog` must
+   start with the new version's heading:
    `curl -sL https://github.com/WallpaperMachine/WallpaperMachine/releases/latest/download/WallpaperMachine-update.json`.
 4. Read the release body on the page: it should contain only the English notes
    from the current `CHANGELOG.md` section, followed by the install footer,
-   without Chinese or Korean sections or a raw commit list. The **Full changelog** link
-   opens the commit history; the `Built from` line must match
+   with its issue and commit links, without Chinese or Korean sections or a raw
+   commit list. The **Full changelog** link opens the comparison with the previous
+   version; the `Built from` line must match
    `git rev-parse vx.y.z^{commit}`.
 5. Confirm Latest points at the highest published version. Re-running Build for a
    tag that is already published fails by design; if a published release is

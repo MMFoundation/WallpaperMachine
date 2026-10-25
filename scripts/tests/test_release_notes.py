@@ -2,8 +2,10 @@
 """Unit tests for scripts/release_notes.py."""
 from __future__ import annotations
 
+import contextlib
 import http.server
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -31,6 +33,18 @@ def commit(cwd, message, name="file.txt"):
     (Path(cwd) / name).write_text(message, encoding="utf-8")
     git("add", "-A", cwd=cwd)
     git("commit", "-m", message, cwd=cwd)
+
+
+def head(cwd, revision="HEAD"):
+    """The full hash of `revision`."""
+    return release_notes.git("rev-parse", revision, cwd=cwd).strip()
+
+
+def suffix(sha, *issues, repo=REPOSITORY):
+    """The links a bullet ends with for one commit closing `issues`."""
+    links = ", ".join(f"closes [#{number}](https://github.com/{repo}/issues/{number})" for number in issues)
+    closes = f" ({links})" if issues else ""
+    return f"{closes} ([{sha[:7]}](https://github.com/{repo}/commit/{sha}))"
 
 
 class ClassifyTests(unittest.TestCase):
@@ -65,6 +79,14 @@ class ClassifyTests(unittest.TestCase):
     def test_the_bump_commit_is_not_part_of_the_release(self):
         self.assertIsNone(release_notes.classify("a", "chore: bump version to 1.2.3"))
 
+    def test_closing_keywords_name_the_issues_a_commit_closes(self):
+        change = release_notes.classify("a", "fix(panel): keep long names (#86)",
+                                        "Fixes #76\nCLOSES #12, resolves: #76\nSee #3; fixed owner/other#9; prefix#4")
+        self.assertEqual(change.closes, (12, 76))
+        self.assertEqual(release_notes.classify("a", "fix(scene): stop a crash").closes, ())
+        for keyword in ("close", "closed", "fix", "fixed", "resolve", "Resolved"):
+            self.assertEqual(release_notes.closing_refs(f"{keyword} #5"), (5,), keyword)
+
     def test_a_paragraph_subject_is_cut_at_a_word_boundary(self):
         subject = "fix(media): " + "word " * 60
         change = release_notes.classify("a", subject)
@@ -84,9 +106,28 @@ class RenderTests(unittest.TestCase):
 
     def test_sections_are_ordered_and_linked(self):
         body = release_notes.render("0.6.0", self.changes, "v0.5.0", REPOSITORY)
-        self.assertLess(body.index("### New"), body.index("### Fixed"))
-        self.assertIn("- **panel** — Add a filter rail ([`aaa1111`](https://github.com/owner/repo/commit/aaa1111))", body)
-        self.assertIn("https://github.com/owner/repo/compare/v0.5.0...v0.6.0", body)
+        self.assertTrue(body.startswith("### English\n\n#### Features\n\n"))
+        self.assertLess(body.index("#### Features"), body.index("#### Bug Fixes"))
+        self.assertIn("- **panel** — Add a filter rail ([aaa1111](https://github.com/owner/repo/commit/aaa1111))", body)
+        self.assertNotIn("Full changelog", body, "The section heading carries the compare link")
+        entry = release_notes.section("0.6.0", "2026-01-01", body, "v0.5.0", REPOSITORY)
+        self.assertTrue(entry.startswith(
+            "## [0.6.0](https://github.com/owner/repo/compare/v0.5.0...v0.6.0) (2026-01-01)\n\n### English\n"))
+
+    def test_a_bullet_links_the_issues_and_every_commit_behind_it(self):
+        full = "f" * 40
+        changes = [
+            release_notes.Change("fixes", "panel", "Keep long names", full, (76,)),
+            release_notes.Change("fixes", "panel", "keep long names", "e" * 40, (12, 76)),
+            release_notes.Change("performance", "", "Skip a pass", "d" * 40),
+        ]
+        body = release_notes.render("0.6.0", changes, "v0.5.0", REPOSITORY)
+        self.assertIn(
+            "- **panel** — Keep long names (closes [#12](https://github.com/owner/repo/issues/12), "
+            "closes [#76](https://github.com/owner/repo/issues/76)) "
+            f"([fffffff](https://github.com/owner/repo/commit/{full}), "
+            f"[eeeeeee](https://github.com/owner/repo/commit/{'e' * 40}))\n", body)
+        self.assertIn("#### Performance Improvements\n\n- Skip a pass ([ddddddd]", body)
 
     def test_internal_work_is_counted_not_listed(self):
         body = release_notes.render("0.6.0", self.changes, "v0.5.0", REPOSITORY)
@@ -103,7 +144,9 @@ class RenderTests(unittest.TestCase):
 
     def test_a_first_release_links_the_commit_list(self):
         body = release_notes.render("0.1.0", self.changes, None, REPOSITORY)
-        self.assertIn("https://github.com/owner/repo/commits/v0.1.0", body)
+        self.assertEqual(release_notes.heading("0.1.0", "2026-01-01", None, REPOSITORY),
+                         "## [0.1.0](https://github.com/owner/repo/commits/v0.1.0) (2026-01-01)")
+        self.assertNotIn("Full changelog", body)
 
     def test_the_install_footer_names_the_image_the_updater_selects(self):
         footer = release_notes.install_footer("0.6.0", "26.0")
@@ -120,17 +163,41 @@ class ChangelogTests(unittest.TestCase):
     def test_newest_version_lands_first(self):
         text = release_notes.insert_section(release_notes.CHANGELOG_PREAMBLE, "0.5.0", self.section("0.5.0"))
         text = release_notes.insert_section(text, "0.6.0", self.section("0.6.0"))
-        self.assertLess(text.index("## 0.6.0"), text.index("## 0.5.0"))
+        self.assertLess(text.index("## [0.6.0]"), text.index("## [0.5.0]"))
 
     def test_an_older_version_lands_below_a_newer_one(self):
         text = release_notes.insert_section(release_notes.CHANGELOG_PREAMBLE, "0.6.0", self.section("0.6.0"))
         text = release_notes.insert_section(text, "0.5.0", self.section("0.5.0"))
-        self.assertLess(text.index("## 0.6.0"), text.index("## 0.5.0"))
+        self.assertLess(text.index("## [0.6.0]"), text.index("## [0.5.0]"))
+
+    def test_the_heading_links_the_comparison_and_dates_the_version(self):
+        self.assertEqual(release_notes.heading("1.6.2", "2026-10-24", "v1.6.1", REPOSITORY),
+                         "## [1.6.2](https://github.com/owner/repo/compare/v1.6.1...v1.6.2) (2026-10-24)")
+        self.assertEqual(release_notes.heading("v1.6.2", "2026-10-24"),
+                         "## [1.6.2](https://github.com/WallpaperMachine/WallpaperMachine/commits/v1.6.2) (2026-10-24)")
+        text = release_notes.insert_section(release_notes.CHANGELOG_PREAMBLE, "1.6.2", release_notes.section(
+            "1.6.2", "2026-10-24", "### Fixed\n\n- Something\n", "v1.6.1", REPOSITORY))
+        self.assertEqual(release_notes.recorded_link(text, "1.6.2"), "https://github.com/owner/repo/compare/v1.6.1...v1.6.2")
+        self.assertIsNone(release_notes.recorded_link("## 1.6.1 — 2026-10-24\n\n- Old\n", "1.6.1"))
+
+    def test_both_heading_forms_name_their_version(self):
+        for line, version in (
+            ("## [1.6.2](https://github.com/owner/repo/compare/v1.6.1...v1.6.2) (2026-10-24)", (1, 6, 2)),
+            ("## [0.1.0](https://github.com/owner/repo/commits/v0.1.0) (2026-09-15)", (0, 1, 0)),
+            ("## 1.6.1 — 2026-10-24", (1, 6, 1)),
+            ("## [1.6.2](https://example.com/x) (2026-10-24) trailing", None),
+            ("## [1.6.2] (2026-10-24)", None),
+            ("## [1.6.2](https://example.com/x with space) (2026-10-24)", None),
+            ("## [1.6.2-beta](https://example.com/x) (2026-10-24)", None),
+            ("## [Unreleased](https://example.com/x)", None),
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(release_notes.bundled_heading_version(line), version)
 
     def test_rerunning_replaces_rather_than_duplicates(self):
         text = release_notes.insert_section(release_notes.CHANGELOG_PREAMBLE, "0.6.0", self.section("0.6.0"))
         text = release_notes.insert_section(text, "0.6.0", self.section("0.6.0", "### New\n\n- Rewritten\n"))
-        self.assertEqual(text.count("## 0.6.0"), 1)
+        self.assertEqual(text.count("## [0.6.0]"), 1)
         self.assertIn("Rewritten", text)
         self.assertNotIn("Something", text)
 
@@ -147,6 +214,21 @@ class ChangelogTests(unittest.TestCase):
     def test_a_version_without_a_section_has_no_recorded_notes(self):
         text = release_notes.insert_section(release_notes.CHANGELOG_PREAMBLE, "0.5.0", self.section("0.5.0"))
         self.assertIsNone(release_notes.recorded_notes(text, "0.6.0"))
+
+    def test_an_older_heading_is_still_read_and_replaced_by_the_new_form(self):
+        text = release_notes.CHANGELOG_PREAMBLE + "## 0.5.0 — 2026-01-01\n\n### Fixed\n\n- Old\n"
+        self.assertEqual(release_notes.recorded_notes(text, "0.5.0"), "### Fixed\n\n- Old\n")
+        text = release_notes.insert_section(text, "0.5.0", self.section("0.5.0", "### Fixed\n\n- New\n"))
+        self.assertNotIn("## 0.5.0 —", text)
+        self.assertEqual(text.count("## [0.5.0]"), 1)
+
+    def test_the_committed_changelog_is_valid_history(self):
+        text = release_notes.CHANGELOG.read_text(encoding="utf-8")
+        self.assertEqual(release_notes.require_bundled_history(text), text)
+        self.assertTrue(text.startswith(release_notes.CHANGELOG_PREAMBLE))
+        for line in text.splitlines():
+            if line.startswith("## "):
+                self.assertRegex(line, release_notes.LINKED_HEADING.pattern.replace("^", "^## ", 1))
 
 
 def model_reply(text, stop="end_turn"):
@@ -191,11 +273,23 @@ def translations(english, chinese, korean):
     return {"english": english, "chinese": chinese, "korean": korean}
 
 
-def trilingual(**sections):
-    """A new model reply in the required shape. Omitted sections are empty."""
+# The commits the model replies below may cite: the first closes two issues.
+FIX_SHA = "a1b2c3d" + "4" * 33
+COMMITS = (
+    release_notes.Commit(FIX_SHA, "a1b2c3d", "fix(scene): keep layers in place (#20)", "Fixes #12\nCloses #3\n"),
+    release_notes.Commit("a1b2c99" + "5" * 33, "a1b2c99", "feat(panel): count downloads", ""),
+    release_notes.Commit("c0ffee1" + "6" * 33, "c0ffee1", "docs: record a run", ""),
+)
+
+
+def trilingual(commits=("a1b2c3d",), **sections):
+    """A new model reply in the required shape. Omitted sections are empty; a bullet
+    without its own `commits` cites `commits`."""
     notes = {"summary": sections.pop("summary", translations("", "", ""))}
     for key, _heading in release_notes.MODEL_SECTIONS:
-        notes[key] = sections.pop(key, [])
+        items = sections.pop(key, [])
+        notes[key] = [dict(item, commits=list(commits)) if isinstance(item, dict) and "commits" not in item else item
+                      for item in items]
     if sections:
         raise AssertionError(f"unknown sections {sorted(sections)}")
     return json.dumps(notes)
@@ -207,8 +301,8 @@ WAKE = translations("A crash on wake", "唤醒时不再崩溃", "잠자기에서
 
 class ModelReplyTests(unittest.TestCase):
     def notes(self, reply):
-        return release_notes.render_model_notes("0.6.0", release_notes.parse_notes(release_notes.streamed_text(reply)),
-                                                "v0.5.0", REPOSITORY)
+        return release_notes.render_model_notes(
+            "0.6.0", release_notes.parse_notes(release_notes.streamed_text(reply), COMMITS), "v0.5.0", REPOSITORY)
 
     def test_all_languages_keep_the_same_changes_in_order(self):
         body = self.notes(model_reply(trilingual(
@@ -219,22 +313,49 @@ class ModelReplyTests(unittest.TestCase):
         )))
         blocks = release_notes.language_blocks(body)
         english, chinese, korean = (blocks[code] for code in ("english", "chinese", "korean"))
+        links = suffix(FIX_SHA, 3, 12)
         self.assertTrue(body.startswith("### English\n\nMusic wallpapers work again\n"))
-        self.assertLess(english.index("#### Breaking changes"), english.index("#### New"))
-        self.assertLess(english.index("#### New"), english.index("#### Fixed"))
-        self.assertNotIn("#### Improved", body)
-        self.assertIn("- Choose how many downloads run at once\n", english)
-        self.assertIn("- Album covers show again\n", english)
-        self.assertLess(chinese.index("#### 不兼容变更"), chinese.index("#### 新增"))
-        self.assertLess(chinese.index("#### 新增"), chinese.index("#### 修复"))
-        self.assertIn("- 可以选择同时进行的下载数量\n", chinese)
-        self.assertIn("- 专辑封面重新显示\n", chinese)
+        self.assertLess(english.index("#### Breaking Changes"), english.index("#### Features"))
+        self.assertLess(english.index("#### Features"), english.index("#### Bug Fixes"))
+        self.assertNotIn("#### Improvements", body)
+        self.assertIn(f"- Choose how many downloads run at once{links}\n", english)
+        self.assertIn(f"- Album covers show again{links}\n", english)
+        self.assertLess(chinese.index("#### 不兼容变更"), chinese.index("#### 新功能"))
+        self.assertLess(chinese.index("#### 新功能"), chinese.index("#### 问题修复"))
+        self.assertIn(f"- 可以选择同时进行的下载数量{links}\n", chinese)
+        self.assertIn(f"- 专辑封面重新显示{links}\n", chinese)
         self.assertLess(korean.index("#### 호환되지 않는 변경 사항"), korean.index("#### 새로운 기능"))
-        self.assertLess(korean.index("#### 새로운 기능"), korean.index("#### 수정됨"))
-        self.assertIn("- 앨범 표지가 다시 표시됨\n", korean)
+        self.assertLess(korean.index("#### 새로운 기능"), korean.index("#### 버그 수정"))
+        self.assertIn(f"- 앨범 표지가 다시 표시됨{links}\n", korean)
         self.assertLess(body.index("### 简体中文"), body.index("### 한국어"))
-        self.assertLess(body.index("### 한국어"), body.index("https://github.com/owner/repo/compare/v0.5.0...v0.6.0"))
+        self.assertNotIn("Full changelog", body, "The section heading carries the compare link")
         release_notes.require_localized_notes(body, "0.6.0")
+
+    def test_a_bullet_links_every_commit_it_names(self):
+        body = self.notes(model_reply(trilingual(commits=("A1B2C9", "a1b2c3d4", "a1b2c3d"), fixed=[WAKE])))
+        links = (" (closes [#3](https://github.com/owner/repo/issues/3), closes [#12](https://github.com/owner/repo/issues/12))"
+                 f" ([a1b2c99](https://github.com/owner/repo/commit/{COMMITS[1].sha}),"
+                 f" [a1b2c3d](https://github.com/owner/repo/commit/{FIX_SHA}))")
+        for text in WAKE.values():
+            self.assertIn(f"- {text}{links}\n", body)
+        docs = self.notes(model_reply(trilingual(commits=("c0ffee1",), fixed=[WAKE])))
+        self.assertIn(f"- A crash on wake ([c0ffee1](https://github.com/owner/repo/commit/{COMMITS[2].sha}))\n", docs)
+
+    def test_every_bullet_must_name_commits_of_the_release(self):
+        for commits in ([], "a1b2c3d", None, {"sha": "a1b2c3d"}, [7], ["zzzzzzz"], ["a1b"], ["deadbee"],
+                        ["a1b2c3d", "ffff"]):
+            reply = trilingual(fixed=[dict(WAKE, commits=commits)])
+            with self.subTest(commits=commits), self.assertRaisesRegex(release_notes.NotesError, "commits"):
+                self.notes(model_reply(reply))
+        for section in ("highlights", "breaking", "new", "improved", "fixed"):
+            with self.subTest(section=section), self.assertRaisesRegex(release_notes.NotesError, "more than one commit"):
+                self.notes(model_reply(trilingual(commits=("a1b2c",), **{section: [WAKE]})))
+        data = json.loads(trilingual(fixed=[WAKE]))
+        del data["fixed"][0]["commits"]
+        with self.assertRaisesRegex(release_notes.NotesError, "commits"):
+            self.notes(model_reply(json.dumps(data)))
+        with self.assertRaises(release_notes.NotesError):
+            self.notes(model_reply(trilingual(summary=dict(WAKE, commits=["a1b2c3d"]))))
 
     def test_highlights_lead_all_languages(self):
         body = self.notes(model_reply(trilingual(
@@ -244,23 +365,26 @@ class ModelReplyTests(unittest.TestCase):
         )))
         blocks = release_notes.language_blocks(body)
         english, chinese, korean = (blocks[code] for code in ("english", "chinese", "korean"))
-        self.assertLess(english.index("#### Highlights\n\n- A rebuilt control panel\n"), english.index("#### New"))
-        self.assertLess(chinese.index("#### 亮点\n\n- 全新的控制面板\n"), chinese.index("#### 新增"))
-        self.assertLess(korean.index("#### 주요 변경 사항\n\n- 새롭게 설계된 제어 패널\n"), korean.index("#### 새로운 기능"))
+        links = suffix(FIX_SHA, 3, 12)
+        self.assertLess(english.index(f"#### Highlights\n\n- A rebuilt control panel{links}\n"), english.index("#### Features"))
+        self.assertLess(english.index("#### Features"), english.index("#### Improvements"))
+        self.assertLess(chinese.index(f"#### 亮点\n\n- 全新的控制面板{links}\n"), chinese.index("#### 新功能"))
+        self.assertLess(chinese.index("#### 新功能"), chinese.index("#### 改进"))
+        self.assertLess(korean.index(f"#### 주요 변경 사항\n\n- 새롭게 설계된 제어 패널{links}\n"), korean.index("#### 새로운 기능"))
         self.assertLess(korean.index("#### 새로운 기능"), korean.index("#### 개선 사항"))
         release_notes.require_localized_notes(body, "0.6.0")
 
     def test_a_reply_in_a_code_fence_is_still_read(self):
         body = self.notes(model_reply("```json\n" + trilingual(fixed=[WAKE]) + "\n```"))
-        self.assertIn("### English\n\n#### Fixed\n\n- A crash on wake\n", body)
-        self.assertIn("### 简体中文\n\n#### 修复\n\n- 唤醒时不再崩溃\n", body)
+        self.assertIn(f"### English\n\n#### Bug Fixes\n\n- A crash on wake{suffix(FIX_SHA, 3, 12)}\n", body)
+        self.assertIn(f"### 简体中文\n\n#### 问题修复\n\n- 唤醒时不再崩溃{suffix(FIX_SHA, 3, 12)}\n", body)
 
     def test_notes_with_nothing_in_them_say_so_in_all_languages(self):
         body = self.notes(model_reply(trilingual(fixed=[translations(" ", " ", " ")])))
         self.assertIn("### English\n\nNo user-visible changes since `v0.5.0`.", body)
         self.assertIn("### 简体中文\n\n自 `v0.5.0` 以来没有用户能察觉的变化。", body)
         self.assertIn("### 한국어\n\n`v0.5.0` 이후 사용자에게 표시되는 변경 사항이 없습니다.", body)
-        self.assertLess(body.index("### 한국어"), body.index("https://github.com/owner/repo/compare/v0.5.0...v0.6.0"))
+        self.assertNotIn("](https://", body)
 
     def test_empty_notes_without_a_previous_tag_are_translated(self):
         body = release_notes.render_model_notes("1.5.7", release_notes.empty_notes())
@@ -424,28 +548,40 @@ class ModelRangeTests(unittest.TestCase):
         git("config", "commit.gpgsign", "false", cwd=self.root)
         commit(self.root, "feat(panel): first feature")
         git("tag", "v0.1.0", cwd=self.root)
-        commit(self.root, "fix(scene): keep layers in place\n\nParallax no longer pushes the planet out of frame.")
+        commit(self.root, "fix(scene): keep layers in place\n\nParallax no longer pushes the planet out of frame.\n\n"
+                          "Fixes #41")
+        self.fix = head(self.root)
         commit(self.root, "docs(testing): record a run\n\nInternal verification notes nobody should read.")
         commit(self.root, "chore: bump version to 0.2.0")
-        self.reply = Transport(model_reply(trilingual(fixed=[LAYERS])))
+        self.bump = head(self.root)
+        self.short = release_notes.git("log", "-1", "--format=%h", self.fix, cwd=self.root).strip()
+        self.reply = Transport(model_reply(trilingual(commits=(self.short,), fixed=[LAYERS])))
+        self.links = suffix(self.fix, 41)
 
     def write(self, previous="v0.1.0", environ=KEY):
         return release_notes.write_with_model("0.2.0", previous, "HEAD", REPOSITORY, self.root, self.reply, environ)
 
     def test_the_model_reads_user_visible_bodies_and_writes_all_languages(self):
         body = self.write()
-        self.assertIn("### English\n\n#### Fixed\n\n- Layers stay in place\n", body)
-        self.assertIn("### 简体中文\n\n#### 修复\n\n- 图层保持原位\n", body)
-        self.assertIn("### 한국어\n\n#### 수정됨\n\n- 레이어가 제자리에 유지됨\n", body)
+        self.assertIn(f"### English\n\n#### Bug Fixes\n\n- Layers stay in place{self.links}\n", body)
+        self.assertIn(f"### 简体中文\n\n#### 问题修复\n\n- 图层保持原位{self.links}\n", body)
+        self.assertIn(f"### 한국어\n\n#### 버그 수정\n\n- 레이어가 제자리에 유지됨{self.links}\n", body)
         url, key, payload = self.reply.requests[0]
         prompt = payload["messages"][0]["content"]
         self.assertEqual((url, key, payload["model"], payload["stream"]),
                          ("https://sub2api.moraxcheng.me/v1/messages", "test-key", release_notes.MODEL, True))
         self.assertIn("2 commits since v0.1.0", prompt)
+        self.assertIn(f"* {self.short} fix(scene): keep layers in place\n", prompt, "The model cites the hash it is shown")
         self.assertIn("Parallax no longer pushes the planet out of frame.", prompt)
         self.assertIn("docs(testing): record a run", prompt)
         self.assertNotIn("Internal verification notes", prompt)
         self.assertNotIn("bump version", prompt)
+
+    def test_a_bullet_may_cite_only_commits_of_the_range(self):
+        for cited in (self.bump[:7], head(self.root, "v0.1.0")[:7]):
+            self.reply = Transport(model_reply(trilingual(commits=(cited,), fixed=[LAYERS])))
+            with self.subTest(cited=cited), self.assertRaisesRegex(release_notes.NotesError, "matches no commit"):
+                self.write()
 
     def test_only_a_feature_release_asks_for_highlights(self):
         self.write()
@@ -465,10 +601,10 @@ class ModelRangeTests(unittest.TestCase):
         banners.mkdir(parents=True)
         (banners / "0.2.0.jpg").write_bytes(b"jpeg")
         shared = self.write()
-        self.assertIn("### English\n\n![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.jpg)\n\n#### Fixed", shared)
-        self.assertIn("### 简体中文\n\n![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.jpg)\n\n#### 修复", shared,
+        self.assertIn("### English\n\n![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.jpg)\n\n#### Bug Fixes", shared)
+        self.assertIn("### 简体中文\n\n![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.jpg)\n\n#### 问题修复", shared,
                       "Without its own picture Chinese shares the English one")
-        self.assertIn("### 한국어\n\n![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.jpg)\n\n#### 수정됨", shared,
+        self.assertIn("### 한국어\n\n![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.jpg)\n\n#### 버그 수정", shared,
                       "Without its own picture Korean shares the English one")
         (banners / "0.2.0.zh-Hans.png").write_bytes(b"png")
         chinese_only = self.write()
@@ -479,10 +615,13 @@ class ModelRangeTests(unittest.TestCase):
         self.assertIn("### 简体中文\n\n![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.zh-Hans.png)\n", notes)
         self.assertIn("### 한국어\n\n![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.ko.jpg)\n", notes)
         release_notes.require_bundled_history(release_notes.section("0.2.0", "2026-01-01", notes), root=self.root)
-        page = release_notes.release_body(notes, "0.2.0", repo=REPOSITORY).split(release_notes.NOTES_END)[0]
+        compare = release_notes.compare_url("v0.1.0", "v0.2.0", REPOSITORY)
+        page = release_notes.release_body(notes, "0.2.0", repo=REPOSITORY, compare=compare).split(release_notes.NOTES_END)[0]
         self.assertTrue(page.startswith(
             f"### English\n\n![WallpaperMachine 0.2.0](https://raw.githubusercontent.com/{REPOSITORY}/v0.2.0/"
-            "Resources/ReleaseBanners/0.2.0.jpg)\n\n#### Fixed"))
+            "Resources/ReleaseBanners/0.2.0.jpg)\n\n#### Bug Fixes"))
+        self.assertIn(f"- Layers stay in place{self.links}\n", page, "The release page keeps the links")
+        self.assertTrue(page.rstrip().endswith(f"**Full changelog**: {compare}"))
         self.assertNotIn("zh-Hans", page)
         self.assertNotIn(".ko.", page)
         self.assertNotIn("한국어", page)
@@ -535,9 +674,10 @@ class ModelRangeTests(unittest.TestCase):
 
     def test_the_release_page_keeps_only_english_notes_and_links_without_raw_commit_messages(self):
         original = self.write()
-        body = release_notes.release_body(original, "0.2.0", "abc1234")
+        compare = release_notes.compare_url("v0.1.0", "v0.2.0", REPOSITORY)
+        body = release_notes.release_body(original, "0.2.0", "abc1234", compare=compare)
         notes, page = body.split(release_notes.NOTES_END)
-        self.assertIn("### English\n\n#### Fixed\n\n- Layers stay in place", notes)
+        self.assertIn(f"### English\n\n#### Bug Fixes\n\n- Layers stay in place{self.links}\n", notes)
         self.assertNotIn("### 简体中文", notes)
         self.assertNotIn("图层保持原位", notes)
         self.assertNotIn("### 한국어", notes)
@@ -577,36 +717,35 @@ TRILINGUAL_RECORDED = """\
 
 Layers stay in place.
 
-#### Fixed
+#### Bug Fixes
 
-- Layers stay in place
+- Layers stay in place (closes [#41](https://github.com/owner/repo/issues/41)) ([abcdef1](https://github.com/owner/repo/commit/abcdef1234))
 
 ### 简体中文
 
 图层保持原位。
 
-#### 修复
+#### 问题修复
 
-- 图层保持原位
+- 图层保持原位 (closes [#41](https://github.com/owner/repo/issues/41)) ([abcdef1](https://github.com/owner/repo/commit/abcdef1234))
 
 ### 한국어
 
 레이어가 제자리에 유지됨.
 
-#### 수정됨
+#### 버그 수정
 
-- 레이어가 제자리에 유지됨
-
-**Full changelog**: https://github.com/owner/repo/compare/v1.5.6...v1.5.7
+- 레이어가 제자리에 유지됨 (closes [#41](https://github.com/owner/repo/issues/41)) ([abcdef1](https://github.com/owner/repo/commit/abcdef1234))
 """
 
 
 class PublishTests(unittest.TestCase):
     """Localized source notes are stored once; GitHub shows only their English part."""
 
-    def changelog(self, body, version="0.2.0"):
+    def changelog(self, body, version="0.2.0", previous=None):
         return release_notes.insert_section(
-            release_notes.CHANGELOG_PREAMBLE, version, release_notes.section(version, "2026-01-01", body))
+            release_notes.CHANGELOG_PREAMBLE, version,
+            release_notes.section(version, "2026-01-01", body, previous, REPOSITORY))
 
     def test_recorded_bilingual_notes_are_reused_exactly(self):
         text = self.changelog(LEGACY_RECORDED)
@@ -629,14 +768,16 @@ class PublishTests(unittest.TestCase):
         git("config", "user.email", "test@example.com", cwd=root)
         git("config", "user.name", "Test", cwd=root)
         git("config", "commit.gpgsign", "false", cwd=root)
-        commit(root, "fix(scene): keep layers in place")
-        transport = Transport(model_reply(trilingual(fixed=[LAYERS])))
+        commit(root, "fix(scene): keep layers in place\n\nCloses #41")
+        transport = Transport(model_reply(trilingual(commits=(head(root)[:9],), fixed=[LAYERS])))
         notes, updated, generated = release_notes.published_notes(
             "1.5.7", None, "HEAD", REPOSITORY, self.changelog(LEGACY_RECORDED, "1.5.6"), "2026-01-01",
             ai=True, cwd=root, transport=transport, environ=KEY)
         self.assertTrue(generated)
         self.assertEqual(len(transport.requests), 1)
         self.assertEqual(notes, release_notes.recorded_notes(updated, "1.5.7"))
+        self.assertIn("\n## [1.5.7](https://github.com/owner/repo/commits/v1.5.7) (2026-01-01)\n\n### English\n", updated)
+        self.assertIn(f"- 레이어가 제자리에 유지됨{suffix(head(root), 41)}\n", notes)
         self.assertIn("### English", notes)
         self.assertIn("### 简体中文", notes)
         self.assertIn("### 한국어", notes)
@@ -678,16 +819,18 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(transport.requests, [])
 
     def test_recorded_trilingual_notes_are_reused_and_published_in_english(self):
-        text = self.changelog(TRILINGUAL_RECORDED, "1.5.7")
+        text = self.changelog(TRILINGUAL_RECORDED, "1.5.7", "v1.5.6")
         transport = Transport(model_reply(trilingual(fixed=[LAYERS])))
         notes, updated, generated = release_notes.published_notes(
             "1.5.7", "v1.5.6", "missing-revision", REPOSITORY, text, "2026-09-29",
             ai=True, transport=transport, environ={})
         self.assertEqual((notes, updated, generated), (TRILINGUAL_RECORDED, text, False))
         self.assertEqual(transport.requests, [])
-        page = release_notes.release_body(notes, "1.5.7").split(release_notes.NOTES_END, 1)[0]
+        page = release_notes.release_body(notes, "1.5.7", compare=release_notes.recorded_link(text, "1.5.7"))
+        page = page.split(release_notes.NOTES_END, 1)[0]
         self.assertIn("Layers stay in place.", page)
-        self.assertIn("compare/v1.5.6...v1.5.7", page)
+        self.assertIn("- Layers stay in place (closes [#41](https://github.com/owner/repo/issues/41)) ([abcdef1]", page)
+        self.assertIn("**Full changelog**: https://github.com/owner/repo/compare/v1.5.6...v1.5.7", page)
         self.assertEqual(page.count("**Full changelog**:"), 1)
         self.assertNotIn("图层", page)
         self.assertNotIn("레이어", page)
@@ -774,7 +917,6 @@ class PublishTests(unittest.TestCase):
             self.assertEqual(release_notes.require_bundled_history(text, root=root), text)
             page = release_notes.release_body(body, "1.5.7", repo=REPOSITORY)
             self.assertNotIn("![", page, "The Korean banner must never appear in English release notes")
-            self.assertIn("compare/v1.5.6...v1.5.7", page)
 
     def test_every_banner_the_changelog_names_is_committed(self):
         text = release_notes.CHANGELOG.read_text(encoding="utf-8")
@@ -805,6 +947,10 @@ class PublishTests(unittest.TestCase):
             ("integer overflow", "## 9223372036854775808.0.0\n\n" + LEGACY_RECORDED, "9223372036854775808"),
             ("tab before heading suffix", "## 0.2.0\t—\t2026-01-01\n\n" + LEGACY_RECORDED, "0.2.0"),
             ("duplicate version", self.changelog(LEGACY_RECORDED) + "\n## V0.2.0\n\n" + LEGACY_RECORDED, "0.2.0"),
+            ("duplicate across forms", self.changelog(LEGACY_RECORDED) + "\n## 0.2.0 — 2026-01-01\n\n" + LEGACY_RECORDED,
+             "0.2.0"),
+            ("linked prerelease", "## [1.0.0-beta](https://example.com/c) (2026-01-01)\n\n" + LEGACY_RECORDED, "1.0.0-beta"),
+            ("link without a target", "## [0.2.0] (2026-01-01)\n\n" + LEGACY_RECORDED, "[0.2.0]"),
         )
         for name, text, needle in cases:
             with self.subTest(heading=name):
@@ -829,6 +975,25 @@ class PublishTests(unittest.TestCase):
         with self.assertRaises(release_notes.NotesError) as raised:
             release_notes.rebuild_changelog(REPOSITORY, recorded=recorded)
         self.assertIn("Unreleased", str(raised.exception))
+
+    def test_cli_release_body_reuses_the_section_and_its_heading_link(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "CHANGELOG.md"
+        text = self.changelog(TRILINGUAL_RECORDED, "1.5.7", "v1.5.5")
+        path.write_text(text, encoding="utf-8")
+        output = Path(directory.name) / "notes.md"
+        original = release_notes.CHANGELOG
+        release_notes.CHANGELOG = path
+        self.addCleanup(setattr, release_notes, "CHANGELOG", original)
+        with contextlib.redirect_stdout(io.StringIO()):
+            release_notes.main(["--tag", "1.5.7", "--previous", "v1.5.6", "--repository", REPOSITORY,
+                                "--release-body", "--output", str(output)])
+        notes = output.read_text(encoding="utf-8").split(release_notes.NOTES_END, 1)[0]
+        self.assertTrue(notes.startswith("### English\n\nLayers stay in place.\n\n#### Bug Fixes\n\n- Layers stay in place (closes"))
+        self.assertTrue(notes.rstrip().endswith("**Full changelog**: https://github.com/owner/repo/compare/v1.5.5...v1.5.7"),
+                        "The recorded heading's link wins over the computed one")
+        self.assertEqual(path.read_text(encoding="utf-8"), text)
 
     def test_cli_publish_paths_do_not_write_a_malformed_changelog(self):
         directory = tempfile.TemporaryDirectory()
@@ -894,15 +1059,17 @@ class RepositoryRangeTests(unittest.TestCase):
 
     def test_a_rebuilt_changelog_covers_every_tag_newest_first(self):
         text = release_notes.rebuild_changelog(REPOSITORY, self.root)
-        self.assertLess(text.index("## 0.2.0"), text.index("## 0.1.0"))
-        self.assertIn("First feature", text)
-        self.assertIn("Second fix", text)
+        self.assertIn("\n## [0.2.0](https://github.com/owner/repo/compare/v0.1.0...v0.2.0) (", text)
+        self.assertIn("\n## [0.1.0](https://github.com/owner/repo/commits/v0.1.0) (", text)
+        self.assertLess(text.index("## [0.2.0]"), text.index("## [0.1.0]"))
+        self.assertIn("#### Features\n\n- **panel** — First feature ([", text)
+        self.assertIn("#### Bug Fixes\n\n- **scene** — Second fix ([", text)
 
     def test_a_rebuild_keeps_what_was_recorded_and_lists_only_the_rest(self):
         recorded = release_notes.insert_section(
             release_notes.CHANGELOG_PREAMBLE, "0.2.0", release_notes.section("0.2.0", "2026-01-01", "Written by the model.\n"))
         text = release_notes.rebuild_changelog(REPOSITORY, self.root, recorded)
-        self.assertIn("## 0.2.0 — 2026-01-01\n\nWritten by the model.\n\n## 0.1.0", text)
+        self.assertIn(release_notes.heading("0.2.0", "2026-01-01") + "\n\nWritten by the model.\n\n## [0.1.0]", text)
         self.assertNotIn("Second fix", text)
         self.assertIn("First feature", text)
 

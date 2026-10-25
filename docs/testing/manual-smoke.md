@@ -34,7 +34,7 @@ was run.
       choose Control Panel from the status menu: it appears on the Space you are on,
       and the green button still offers full screen. Minimize the panel, then choose
       Control Panel from the status menu, click the Dock icon, and Command-Tab to the
-      app: each brings it back from the Dock. Repeat the Space check with What's New,
+      app: each brings it back from the Dock. Repeat the Space check with the update window,
       a wallpaper preview and a Steam or pixiv sign-in window.
 - [ ] Close the window with its close button and with Command-W, and reopen it
       each time, without quitting or crashing.
@@ -705,9 +705,13 @@ closed lid has not been seen on a desktop
       replacement of the app in Applications. Update tests use fixture JSON, a
       fake client and locally made images, so this path is manual only.
 - [ ] With an update available (a build older than the latest release) and
-      another app full-screen, no update alert appears and the log has
-      `update prompt deferred`; leaving full screen shows the alert once, and
-      opening the control panel while a display is covered shows it too.
+      another app full-screen, no update window appears and the log has
+      `update prompt deferred`; leaving full screen shows the window once, and
+      opening the control panel while a display is covered shows it too. The window
+      lists the versions since the running one that the manifest carries (its 20
+      newest changelog sections), newest first, in the app's language, with linked
+      issue and commit references; **Install Update** downloads with a progress bar,
+      then quits and reopens; **Skip This Version** keeps the next launch quiet.
 - [ ] Opening the disk image shows one window without toolbar or sidebar: the
       app and Applications at their places over the background, labels readable,
       the volume icon. Dragging installs; the first launch is refused and opens

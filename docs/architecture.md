@@ -50,13 +50,13 @@ long-lived services (lock screen, desktop poster sync, presentation policy, play
 automation schedulers, the web and native-video wallpaper hosts, system media).
 
 - **Activation policy.** `.regular` while one of the four ordinary windows (control panel,
-  What's New, wallpaper preview, web sign-in) is on screen or minimized to the Dock,
+  update window, wallpaper preview, web sign-in) is on screen or minimized to the Dock,
   `.accessory` otherwise. Opening one raises the policy; every place that lowers it (a window
   closing, the status-item re-assert at launch, a quit) asks `ActivationPolicyRule`
   (`App/Services/Lifecycle/`) about `NSApp.windows`. Alerts, open and save panels and wallpaper
   windows never count, sign-in windows are matched through `WebSignInWindowController`'s own
-  list, and the panel and What's New a quit puts away stop counting even when minimized.
-- **Spaces and minimizing.** The four ordinary windows (control panel, What's New, wallpaper
+  list, and the panel and update window a quit puts away stop counting even when minimized.
+- **Spaces and minimizing.** The four ordinary windows (control panel, update window, wallpaper
   preview, web sign-in) call `ControlPanelWindow.moveToActiveSpace`, which inserts
   `.moveToActiveSpace` into their collection behavior, so opening one shows it on the Space the
   person is on instead of switching back to the Space it was left on. It inserts and removes
@@ -158,7 +158,7 @@ It has no web view, and renderer content is never drawn into it. Coding rules fo
 | `Library/`, `Inspector/`, `Discover/`, `Downloads/`, `Pixiv/`, `Settings/`, `Welcome/` | One area each: its views and its `@Observable` view model, which hangs off the controller as a lazy property (`library`, `inspector`, `workshopBrowser`, `downloads`, `pixivBrowser`, `settings`, `displaysSettings`, `welcome`, `supportPrompt`, and `shell`) |
 | `Components/`, `Theme/`, `Localization/`, `Images/` | Shared views (`TileGrid`, `WallpaperTile`, `ProgressRing`, `Equalizer`, `FilterPanel`, `InspectorCard`, `PanelEmptyState`, `SymbolTile`, the button styles), the palettes, `PanelLocale` and `L()`, the image pipeline |
 | `WebSignInWindow.swift` | Separate sign-in window for pixiv and Steam: a private website data store, of which the app reads only the session cookie |
-| `WallpaperPreviewWindow.swift`, `WhatsNewViewController.swift` | AppKit preview window and release-notes window |
+| `WallpaperPreviewWindow.swift`, `UpdateWindow.swift` | AppKit preview window; the update window (SwiftUI in its own `NSWindow`) with the notes of every version since the running one |
 
 - **Window hosting.** `AppDelegate.showControlPanel` wraps `ControlPanelView` (or
   `BridgeUnavailableView` when the bridge failed to start) in an `NSHostingController` with
@@ -284,7 +284,7 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 | `Automation/` | `AutomationCommand`, `AppAutomation`, `HotKeyPreferences`, `GlobalHotKeys`, `WallpaperFocusFilter`, `WallpaperAutomationStore/Planner/Scheduler/Controller`, `WallpaperSolarTimes`, App Intents in `WallpaperIntents.swift` and `WallpaperConfigurationIntents.swift` | Explicit commands through `AppDelegate.performAutomation`; per-display weekday/solar/appearance rules and temporary Focus choices through the shared command queue; see [features/automation.md](features/automation.md) |
 | `Desktop/` | `DesktopSpaceWallpaperAPI`, `DesktopWallpaperLedger`, `DesktopWallpaperStoreRestoration`, `DesktopWallpaperSync`, `DesktopSpacePosterCache`, `WallpaperSpaceMonitor`, `WallpaperSpacePinning`, `WallpaperSpaceParking`, `WallpaperPresentationPolicy`, `WallpaperCoverageProbes`, `WallpaperWindowAuditor`, `DesktopWindowObservation`, `SystemWakeRevalidator`, `PlaybackPreferences`, `AppRuleMonitor`, `OtherAudioMonitor`, `ActiveDisplayTracker`, `SystemConditionMonitor`, `SystemBatteryLevel`, `PowerSourceMonitor`, `PowerSourceResampler`, `DisplayConfiguration`, `DisplayGeometry`, `WallpaperDisplayTransfer` | Per-Space desktop picture control, original-wallpaper journal, still-poster sync, saved posters, windows kept on their desktops and wallpapers kept paused for a wallpaper per desktop, playback rules, per-display renderer suspension, display refresh, the screen and shape of a renderer display id, and multi-display copy/swap |
 | `Diagnostics/` | `RuntimeDiagnosticsSession`, `DiagnosticsBundle`, `SessionLedger`, `EnergyUsageMonitor`, `WallpaperEnergyRecorder`, `MemoryPressureMonitor`, `ProcessFootprint` | Runtime counters, the diagnostics report, how the previous session ended, energy readout, per-wallpaper ratings and memory-pressure logging; see [features/diagnostics.md](features/diagnostics.md) |
-| `GitHub/` | `GitHubReleaseClient`, `AppUpdateStore`, `AppUpdateInstaller`, `UpdatePromptGate`, `WhatsNewStore` | GitHub Releases update check, download, in-place install; when the unattended update alert may appear; which what's-new announcements were shown |
+| `GitHub/` | `GitHubReleaseClient`, `AppUpdateStore`, `AppUpdateInstaller`, `UpdatePromptGate`, `AppReleaseHistory` | GitHub Releases update check, download, in-place install; when the unattended update window may appear; the manifest's changelog the window shows |
 | `Library/` | `ClientPaths`, `WallpaperImportService`, `LibraryImportStore`, `LibraryCoverStamps`, `WallpaperDeletionService`, `StillImageWallpaper`, `WallpaperBackupService`, `WallpaperCollectionStore`, `WallpaperPresetStore`, `WallpaperHistoryStore` | App-support layout, non-destructive import (run for the app, not the panel window, so Finder and Dock drops import too), still pictures packaged as `web` wallpapers, guarded deletion, collections, presets, history, backup and restore |
 | `Lifecycle/` | `QuitReason`, `QuitSupervisor`, `QuitTimings`, `TerminationSignalRelay`, `ProcessSignals`, `InstanceLock`, `SingleInstance` | Why the app is quitting, the deadline each quit stage gets, SIGTERM and SIGHUP as a quit, broken pipes as write errors, and the one-copy-per-library lock taken before anything else starts with what a second launch does about the copy that owns it; see [features/crash-recovery.md](features/crash-recovery.md) |
 | `Localization/` | `AppLanguage`, `AppLanguageStore` | Shipped-language registry and the language preference; see [localization.md](localization.md) |
@@ -892,7 +892,7 @@ bundles is in [build.md](build.md#packaging-and-installing).
 
 | Target | Type | Sources | Notes |
 |---|---|---|---|
-| `WallpaperMachine` | application | `App/`, `Shared/`, `Resources/StarterWallpaper`, `Resources/ReleaseBanners` and `CHANGELOG.md` as resources, the MediaRemote adapter's Perl script and license | Embeds the extension and `MediaRemoteAdapter.framework`; uses `App/Resources/Info.plist` verbatim, including permission-purpose text |
+| `WallpaperMachine` | application | `App/`, `Shared/`, `Resources/StarterWallpaper` as a resource, the MediaRemote adapter's Perl script and license | Embeds the extension and `MediaRemoteAdapter.framework`; uses `App/Resources/Info.plist` verbatim, including permission-purpose text |
 | `MediaRemoteAdapter` | framework | `ThirdParty/mediaremote-adapter/src` and `include` | Embedded in the app but not linked; the app runs its Perl entry point only while a wallpaper has media integration on |
 | `WallpaperMachineExtension` | extensionkit-extension | `Extension/`, `Shared/`, the starter preview image | Sandboxed, `APPLICATION_EXTENSION_API_ONLY`, Objective-C bridging header |
 | `WallpaperMachineTests` | bundle.unit-test | `Tests/Unit/` | Hosted in the app binary (`TEST_HOST`/`BUNDLE_LOADER`) |

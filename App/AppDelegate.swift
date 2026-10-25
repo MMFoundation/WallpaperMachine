@@ -6,9 +6,8 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem?
     private var controlPanelWindow: NSWindow?
-    private var whatsNewWindow: NSWindow?
+    private var updateWindow: NSWindow?
     private var previewWindow: WallpaperPreviewWindowController?
-    private lazy var whatsNewStore = WhatsNewStore()
     private let controlPanelNavigation = ControlPanelNavigation()
     private lazy var workshopStore = WorkshopStore()
     private lazy var pixivStore = PixivStore()
@@ -18,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var finishedLaunching = false
     private lazy var appUpdater = AppUpdateStore()
     private var automaticUpdates: Task<Void, Never>?
-    /// The version the unattended check last prompted for ("Later" holds until the next launch)
+    /// The version the unattended check last offered (Remind Me Later holds until the next launch)
     /// and whether a prompt is waiting for wallpapers to present again.
     private var updatePrompts = UpdatePromptLedger()
     private var displayChangeObserver: NSObjectProtocol?
@@ -456,8 +455,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                             // some unrelated UI change happens to apply one.
                             self.sceneMediaSink?.reconcile()
                             // Wallpapers presenting again is the moment an update alert held
-                            // back by sleep, a lock or an app rule may appear.
+                            // back by sleep, a lock or an app rule may appear, and sleep or a
+                            // lock is the moment an automatic update installs.
                             self.retryHeldUpdatePrompt()
+                            self.installAutomaticUpdateIfUnattended()
                             completion(.success(()))
                         } catch {
                             // An unload that did not happen frees nothing: the kept wallpapers
@@ -659,7 +660,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if !opensPanel { AppLog.info("startup: launched at login; control panel stays closed") }
         DispatchQueue.main.async { [weak self] in
             if opensPanel { self?.showControlPanel(selection: .wallpaper) }
-            self?.showWhatsNewAfterUpdate()
             if !opened.isEmpty { self?.importOpenedFiles(opened) }
         }
     }
@@ -1061,7 +1061,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // A copy opened while this one quits waits for the library instead of handing over to it.
         InstanceLock.current?.setPhase(.quitting)
         let panelWasVisible = controlPanelWindow?.isVisible == true
-        let whatsNewWasVisible = whatsNewWindow?.isVisible == true
+        let updateWindowWasVisible = updateWindow?.isVisible == true
         previewWindow?.session.close()
         previewWindow?.close()
         previewWindow = nil
@@ -1071,7 +1071,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // Keep this restorer through native-provider callbacks and reloads.
         let wallpaperRestorer = desktopWallpaperSync
         controlPanelWindow?.orderOut(nil)
-        whatsNewWindow?.orderOut(nil)
+        updateWindow?.orderOut(nil)
         leaveDockUnlessAWindowIsOpen()
 
         Task {
@@ -1092,7 +1092,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 // the reply is out, by a new one. The reply never lands on a quit that has begun.
                 cancelQuit(
                     cancellation, restorationBudget: supervisor.budgets.restoration,
-                    restoringPanel: panelWasVisible, whatsNew: whatsNewWasVisible)
+                    restoringPanel: panelWasVisible, updateWindow: updateWindowWasVisible)
                 sender.reply(toApplicationShouldTerminate: false)
                 presentQuitFailure(cancellation)
                 // An installer waiting for this app to quit would replace it whenever it did. The
@@ -1211,7 +1211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// A pending update install is called off by the caller afterwards.
     private func cancelQuit(
         _ cancellation: QuitSupervisor.Cancellation, restorationBudget: Duration,
-        restoringPanel: Bool, whatsNew: Bool
+        restoringPanel: Bool, updateWindow restoringUpdateWindow: Bool
     ) {
         let failure = QuitFailure(cancellation)
         switch cancellation {
@@ -1241,9 +1241,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if restoringPanel {
             showControlPanel(selection: controlPanelNavigation.selection ?? .wallpaper)
         }
-        if whatsNew, let whatsNewWindow {
+        if restoringUpdateWindow, let updateWindow {
             NSApp.setActivationPolicy(.regular)
-            ControlPanelWindow.bringForward(whatsNewWindow)
+            ControlPanelWindow.bringForward(updateWindow)
         }
         rebuildMenu()
     }
@@ -1411,11 +1411,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// so opening it again builds a fresh view around them and resumes where it was.
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
-        if window === whatsNewWindow {
-            whatsNewWindow = nil
+        if window === updateWindow {
+            updateWindow = nil
             window.contentViewController = nil
             leaveDockUnlessAWindowIsOpen()
-            retryHeldUpdatePrompt()
             return
         }
         guard window === controlPanelWindow else { return }
@@ -1441,7 +1440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private func activationPolicyRole(of window: NSWindow) -> ActivationPolicyRule.Window.Role? {
         if window === controlPanelWindow { return .controlPanel }
-        if window === whatsNewWindow { return .whatsNew }
+        if window === updateWindow { return .update }
         if window === previewWindow?.window { return .preview }
         if WebSignInWindowController.isOpen(window) { return .signIn }
         return nil
@@ -2003,6 +2002,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc func checkForUpdates() {
+        // A check clears the release the open update window shows; that window is the answer.
+        if updateWindow != nil {
+            showUpdateWindow()
+            return
+        }
         controlPanelNavigation.revealSettingsSection(.about)
         showControlPanel(selection: .settings)
         Task { _ = await appUpdater.checkForUpdates() }
@@ -2031,41 +2035,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private func runAutomaticUpdate() async {
         checkWorkshopUpdatesIfDue()
-        let state = await appUpdater.checkInBackground()
+        // A check clears the release the open update window shows; it waits until it closes.
+        guard updateWindow == nil else { return }
+        var state = await appUpdater.checkInBackground()
+        if installsAutomatically, case .available(_, let version) = state,
+           version != appUpdater.skippedVersion {
+            rebuildMenu()
+            state = await appUpdater.downloadUpdate()
+        }
         rebuildMenu()
         offerUpdateIfNeeded(state)
+        installAutomaticUpdateIfUnattended()
     }
 
-    /// Offers the update in `state` once per version, but only when `UpdatePromptGate` says an
-    /// alert would not interrupt (not over a full-screen app, a locked screen or a sleeping
+    /// Automatic updates are on and this copy can be replaced where it is. One that cannot is
+    /// offered the window as usual, so a download never opens in Finder unasked.
+    private var installsAutomatically: Bool {
+        appUpdater.automaticallyInstallsUpdates && appUpdater.canInstallInPlace
+    }
+
+    /// With automatic updates on, a downloaded update installs (WallpaperMachine quits and
+    /// reopens) while nobody is at the Mac: the displays sleep or the session is locked.
+    private func installAutomaticUpdateIfUnattended() {
+        guard installsAutomatically, case .ready(_, let version) = appUpdater.state,
+              version != appUpdater.skippedVersion, !appUpdater.isInstallPending,
+              !shutdownInProgress, !shutdownComplete,
+              presentationPolicy?.isUnattended == true else { return }
+        AppLog.info("update: installing \(version) automatically while the Mac is unattended")
+        installDownloadedUpdate()
+    }
+
+    /// Opens the update window for `state` once per version, but only when `UpdatePromptGate`
+    /// says it would not interrupt (not over a full-screen app, a locked screen or a sleeping
     /// display). A held prompt is not marked offered; `retryHeldUpdatePrompt` asks again
     /// without a network check when one of the gate's inputs changes.
     private func offerUpdateIfNeeded(_ state: AppUpdateState) {
-        let version: String?
+        var version: String?
         switch state {
         case .ready(_, let ready): version = ready
         case .available(_, let available), .manual(_, let available): version = available
         default: version = nil
         }
+        // A skipped version stays quiet, and so does one that installs by itself; a release
+        // without a disk image cannot, so it is still offered.
+        let installsItself: Bool
+        switch state {
+        case .available, .ready: installsItself = installsAutomatically
+        default: installsItself = false
+        }
+        if version == appUpdater.skippedVersion || installsItself { version = nil }
         switch updatePrompts.offer(version: version, input: updatePromptInput()) {
         case .none:
             return
         case .held(let reason, let isNew):
             if isNew { AppLog.info("update prompt deferred: \(reason.rawValue)") }
-        case .present(let version):
-            if case .ready = state {
-                promptUpdate(
-                    title: String(localized: "WallpaperMachine \(version) is ready to install"),
-                    detail: String(localized: "It has been downloaded. WallpaperMachine quits and reopens to finish installing it."),
-                    confirm: String(localized: "Restart to Update"),
-                    confirmed: installDownloadedUpdate)
-            } else {
-                promptUpdate(
-                    title: String(localized: "WallpaperMachine \(version) is available"),
-                    detail: String(localized: "See what's new and download it in Settings."),
-                    confirm: String(localized: "View Update"),
-                    confirmed: showUpdate)
-            }
+        case .present:
+            showUpdateWindow()
         }
     }
 
@@ -2074,7 +2099,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             panelVisibleAndActive: controlPanelWindow.map { $0.isVisible && $0.isKeyWindow } ?? false,
             globalPresentation: presentationPolicy?.globalPresentation ?? .running,
             hasSuspendedDisplay: presentationPolicy?.hiddenDisplayIDs.isEmpty == false,
-            whatsNewOpen: whatsNewWindow != nil,
             shuttingDown: shutdownInProgress || shutdownComplete)
     }
 
@@ -2084,26 +2108,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         offerUpdateIfNeeded(appUpdater.state)
     }
 
-    /// Shown from the main run loop, not this task: a modal run inside a main-actor task would
-    /// stall every other main-actor task until the alert closes.
-    private func promptUpdate(title: String, detail: String, confirm: String, confirmed: @escaping () -> Void) {
-        AppUpdateStore.performOnMainRunLoop { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, !self.shutdownInProgress, !self.shutdownComplete else { return }
-                let alert = NSAlert()
-                alert.messageText = title
-                alert.informativeText = detail
-                alert.addButton(withTitle: confirm)
-                alert.addButton(withTitle: String(localized: "Later"))
-                NSApp.activate(ignoringOtherApps: true)
-                guard alert.runModal() == .alertFirstButtonReturn, !self.shutdownInProgress else { return }
-                confirmed()
+    /// The update window, brought forward: nonmodal, so it never stalls the main actor.
+    @objc private func showUpdateWindow() {
+        guard !shutdownInProgress, !shutdownComplete,
+              let version = appUpdater.state.availableVersion else { return }
+        // Opened from the status menu too: a prompt held for this version is answered by it.
+        updatePrompts.markOffered(version)
+        if let updateWindow {
+            NSApp.setActivationPolicy(.regular)
+            ControlPanelWindow.bringForward(updateWindow)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let window = UpdateWindow.make(store: appUpdater, actions: UpdateWindow.Actions(
+            skip: { [weak self] in
+                guard let self else { return }
+                self.appUpdater.skippedVersion = self.appUpdater.state.availableVersion
+                self.updateWindow?.performClose(nil)
+                self.rebuildMenu()
+            },
+            later: { [weak self] in self?.updateWindow?.performClose(nil) },
+            install: { [weak self] in self?.installFromUpdateWindow() },
+            setAutomatic: { [weak self] on in self?.appUpdater.automaticallyInstallsUpdates = on }))
+        window.delegate = self
+        window.center()
+        ControlPanelWindow.moveToActiveSpace(window)
+        updateWindow = window
+        NSApp.setActivationPolicy(.regular)
+        ControlPanelWindow.bringForward(window)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// **Install Update** is consent to both steps: the window shows the download, then the app
+    /// quits and reopens on the new version. Closing the window meanwhile does not call it off.
+    /// A failure closes the window and opens About, which explains it and offers a retry.
+    private func installFromUpdateWindow() {
+        switch appUpdater.state {
+        case .manual:
+            appUpdater.openReleases()
+            updateWindow?.performClose(nil)
+        case .ready:
+            installDownloadedUpdate()
+        case .available:
+            Task {
+                let state = await appUpdater.downloadUpdate()
+                rebuildMenu()
+                switch state {
+                case .ready where appUpdater.canInstallInPlace:
+                    installDownloadedUpdate()
+                case .ready:
+                    // The copy cannot be replaced in place; Finder shows the disk image instead.
+                    updateWindow?.performClose(nil)
+                case .error:
+                    updateWindow?.performClose(nil)
+                    showUpdate()
+                default:
+                    break
+                }
             }
+        default:
+            break
         }
     }
 
-    /// An error alert, shown from the main run loop for the reason `promptUpdate` gives; the
-    /// callers run inside main-actor tasks and main-queue jobs.
+    /// An error alert, shown from the main run loop: a modal run inside a main-actor task would
+    /// stall every other main-actor task until the alert closes. The callers run inside
+    /// main-actor tasks and main-queue jobs.
     private func presentErrorAlert(_ error: Error, bringForward: Bool = false) {
         AppUpdateStore.performOnMainRunLoop { [weak self] in
             MainActor.assumeIsolated {
@@ -2121,7 +2191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case .ready(_, let version):
             return menuItem("Restart to Update to \(version)", action: #selector(installDownloadedUpdate))
         case .available(_, let version), .manual(_, let version):
-            return menuItem("WallpaperMachine \(version) Available…", action: #selector(showUpdate))
+            return menuItem("WallpaperMachine \(version) Available…", action: #selector(showUpdateWindow))
         default:
             return nil
         }
@@ -2131,46 +2201,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         Task {
             await appUpdater.installUpdate()
             // A failed install explains itself, and offers GitHub Releases, in About.
-            if case .error = appUpdater.state { showUpdate() }
+            if case .error = appUpdater.state {
+                updateWindow?.performClose(nil)
+                showUpdate()
+            }
         }
     }
 
     @objc private func showUpdate() {
         controlPanelNavigation.revealSettingsSection(.about)
         showControlPanel(selection: .settings)
-    }
-
-    private func showWhatsNewAfterUpdate() {
-        guard !shutdownInProgress, whatsNewWindow == nil else { return }
-        do {
-            let history = try AppReleaseHistory()
-            guard let announcement = whatsNewStore.announcement(
-                history: history, existingUser: PanelPreferences.welcomeSeen()
-            ) else { return }
-            let window = NSWindow(
-                contentRect: NSRect(origin: .zero, size: WhatsNewViewController.defaultContentSize),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                backing: .buffered, defer: false)
-            window.title = String(localized: "What’s New")
-            window.isReleasedWhenClosed = false
-            window.delegate = self
-            window.contentViewController = WhatsNewViewController(
-                announcement: announcement, preferences: whatsNewStore,
-                initialLanguage: AppLanguageStore.shared.effective,
-                close: { [weak window] in window?.performClose(nil) })
-            window.contentMinSize = NSSize(width: 600, height: 480)
-            // Installing a controller can resize the window to its content view's fitting size.
-            window.setContentSize(WhatsNewViewController.defaultContentSize)
-            window.center()
-            ControlPanelWindow.moveToActiveSpace(window)
-            whatsNewWindow = window
-            NSApp.setActivationPolicy(.regular)
-            ControlPanelWindow.bringForward(window)
-            NSApp.activate(ignoringOtherApps: true)
-            whatsNewStore.didPresent(announcement)
-        } catch {
-            AppLog.error("Bundled release history could not load: \(error.localizedDescription)")
-        }
     }
 
     private func showControlPanel(selection: SidebarSelection) {

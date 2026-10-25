@@ -655,23 +655,8 @@
     "The link could not be opened. Please try again." : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "링크를 열 수 없습니다. 다시 시도하세요."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "The link could not be opened. Please try again."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "リンクを開けませんでした。もう一度お試しください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "无法打开链接，请重试。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法開啟連結，請重試。"}}}
     },
-    "What’s New" : {
-      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "새로운 기능"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "What’s New"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "新機能"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "更新内容"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "更新內容"}}}
-    },
-    "Changes since version %@" : {
-      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "%@ 버전 이후 변경 사항"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Changes since version %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "バージョン %@ 以降の変更点"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "自 %@ 版本以来的更新"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "自 %@ 版本以來的更新"}}}
-    },
-    "Changes in this version" : {
-      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 버전의 변경 사항"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Changes in this version"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このバージョンの変更点"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此版本的更新内容"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此版本的更新內容"}}}
-    },
     "Release notes" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "릴리스 노트"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Release notes"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "リリースノート"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "更新说明"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "更新說明"}}}
-    },
-    "Release notes language" : {
-      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "릴리스 노트 언어"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Release notes language"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "リリースノートの言語"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "更新说明语言"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "更新說明語言"}}}
-    },
-    "Don’t show this window after updates" : {
-      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 후 이 윈도우 표시 안 함"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Don’t show this window after updates"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アップデート後にこのウインドウを表示しない"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "以后更新时不再显示此窗口"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "以後更新時不再顯示此視窗"}}}
     },
     "macOS could not complete its SteamCMD security assessment. Retry after resolving the system security error; an explicit approval cannot bypass an assessment failure." : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "macOS에서 SteamCMD 보안 평가를 완료하지 못했습니다. 시스템 보안 오류를 해결한 후 다시 시도하세요. 명시적으로 승인해도 평가 실패를 우회할 수 없습니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "macOS could not complete its SteamCMD security assessment. Retry after resolving the system security error; an explicit approval cannot bypass an assessment failure."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "macOSはSteamCMDのセキュリティ評価を完了できませんでした。システムのセキュリティエラーを解決してから再試行してください。明示的に承認しても、評価の失敗を回避することはできません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "macOS 未能完成对 SteamCMD 的安全评估。请先解决系统安全错误再重试；手动批准无法跳过评估失败。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "macOS 無法完成 SteamCMD 的安全性評估。請先解決系統安全性錯誤再重試；即使手動核准，也無法略過評估失敗。"}}}
@@ -1675,96 +1660,6 @@
         }
       }
     },
-    "WallpaperMachine %@ is ready to install" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 설치 준비 완료"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WallpaperMachine %@ is ready to install"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WallpaperMachine %@のインストール準備ができました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WallpaperMachine %@ 已可安装"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WallpaperMachine %@ 已可安裝"
-          }
-        }
-      }
-    },
-    "It has been downloaded. WallpaperMachine quits and reopens to finish installing it." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "다운로드되었습니다. 설치를 완료하기 위해 WallpaperMachine이 종료된 후 다시 열립니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "It has been downloaded. WallpaperMachine quits and reopens to finish installing it."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ダウンロードが完了しました。インストールを完了するため、WallpaperMachineが終了して再度開きます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新版本已下载。WallpaperMachine 会退出并重新打开以完成安装。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新版本已下載完成。WallpaperMachine 將結束並重新打開以完成安裝。"
-          }
-        }
-      }
-    },
-    "Restart to Update" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "재시작하여 업데이트"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Restart to Update"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再起動してアップデート"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重启并更新"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新啟動以更新"
-          }
-        }
-      }
-    },
     "Restart to Update to %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1795,36 +1690,6 @@
         }
       }
     },
-    "WallpaperMachine %@ is available" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 사용 가능"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WallpaperMachine %@ is available"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WallpaperMachine %@が利用可能です"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WallpaperMachine %@ 已发布"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WallpaperMachine %@ 現已推出"
-          }
-        }
-      }
-    },
     "WallpaperMachine %@ Available…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1851,66 +1716,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "WallpaperMachine %@ 現已推出…"
-          }
-        }
-      }
-    },
-    "See what's new and download it in Settings." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "설정에서 새로운 기능을 확인하고 다운로드하세요."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "See what's new and download it in Settings."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "「設定」で新機能を確認してダウンロードできます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可在“设置”中查看新内容并下载。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可在「設定」中查看新功能並下載。"
-          }
-        }
-      }
-    },
-    "View Update" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 보기"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "View Update"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アップデートを表示"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "查看更新"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "檢視更新"
           }
         }
       }
@@ -7563,6 +7368,76 @@
     },
     "NSAudioCaptureUsageDescription" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine은 오디오 반응형 배경화면을 활성화할 때만 시스템 오디오를 캡처합니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine captures system audio only when you enable audio-reactive wallpapers."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineは、音声に反応する壁紙を有効にしたときだけシステムオーディオをキャプチャします。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 仅在你启用音频响应壁纸时捕获系统音频。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 只會在你啟用音訊反應桌布時擷取系統音訊。"}}}
+    },
+    "A new version of WallpaperMachine is available!" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine의 새 버전을 사용할 수 있습니다!"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "A new version of WallpaperMachine is available!"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine の新しいバージョンがあります！"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 有新版本可用！"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 有新版本可用！"}}}
+    },
+    "A new version of WallpaperMachine is ready to install!" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine의 새 버전을 설치할 준비가 되었습니다!"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "A new version of WallpaperMachine is ready to install!"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine の新しいバージョンをインストールできます！"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 新版本已可安装！"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 新版本已可安裝！"}}}
+    },
+    "WallpaperMachine %@ is now available—you have %@. Would you like to download it now?" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@을(를) 사용할 수 있습니다. 현재 버전은 %@입니다. 지금 다운로드하시겠습니까?"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ is now available—you have %@. Would you like to download it now?"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ が利用可能です（現在のバージョンは %@）。今すぐダウンロードしますか？"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 现已推出，你当前使用的是 %@。要立即下载吗？"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 現已推出，你目前使用的是 %@。要立即下載嗎？"}}}
+    },
+    "WallpaperMachine %@ is now available—you have %@. Download it from GitHub Releases." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@을(를) 사용할 수 있습니다. 현재 버전은 %@입니다. GitHub Releases에서 다운로드하세요."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ is now available—you have %@. Download it from GitHub Releases."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ が利用可能です（現在のバージョンは %@）。GitHub Releases からダウンロードしてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 现已推出，你当前使用的是 %@。请从 GitHub Releases 下载。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 現已推出，你目前使用的是 %@。請從 GitHub Releases 下載。"}}}
+    },
+    "WallpaperMachine %@ has been downloaded—you have %@. WallpaperMachine quits and reopens to install it." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@을(를) 다운로드했습니다. 현재 버전은 %@입니다. 설치를 위해 WallpaperMachine이 종료된 후 다시 열립니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ has been downloaded—you have %@. WallpaperMachine quits and reopens to install it."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ をダウンロードしました（現在のバージョンは %@）。インストールのため WallpaperMachine を終了して再度開きます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 已下载，你当前使用的是 %@。WallpaperMachine 将退出并重新打开以完成安装。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 已下載，你目前使用的是 %@。WallpaperMachine 將結束並重新開啟以完成安裝。"}}}
+    },
+    "Automatically download and install updates in the future" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "앞으로 업데이트를 자동으로 다운로드하고 설치"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Automatically download and install updates in the future"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "今後はアップデートを自動的にダウンロードしてインストール"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "以后自动下载并安装更新"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "以後自動下載並安裝更新"}}}
+    },
+    "Skip This Version" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 버전 건너뛰기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Skip This Version"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このバージョンをスキップ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "跳过此版本"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "略過此版本"}}}
+    },
+    "Remind Me Later" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "나중에 알림"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Remind Me Later"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "後で通知"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "稍后提醒我"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "稍後提醒我"}}}
+    },
+    "Install Update" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 설치"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Install Update"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アップデートをインストール"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "安装更新"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "安裝更新"}}}
+    },
+    "Install and Relaunch" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "설치 후 다시 열기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Install and Relaunch"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "インストールして再度開く"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "安装并重新打开"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "安裝並重新開啟"}}}
+    },
+    "Software Update" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "소프트웨어 업데이트"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Software Update"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ソフトウェア・アップデート"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "软件更新"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "軟體更新"}}}
+    },
+    "Automatically download and install updates" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 자동 다운로드 및 설치"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Automatically download and install updates"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アップデートを自動的にダウンロードしてインストール"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "自动下载并安装更新"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "自動下載並安裝更新"}}}
+    },
+    "Updates download in the background and install while the display sleeps or the Mac is locked; WallpaperMachine quits and reopens to finish." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트는 백그라운드에서 다운로드되고 디스플레이가 잠자기 상태이거나 Mac이 잠겨 있을 때 설치됩니다. 설치를 마치기 위해 WallpaperMachine이 종료된 후 다시 열립니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Updates download in the background and install while the display sleeps or the Mac is locked; WallpaperMachine quits and reopens to finish."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アップデートはバックグラウンドでダウンロードされ、ディスプレイがスリープ中または Mac がロック中にインストールされます。完了するため WallpaperMachine は終了して再度開きます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "更新会在后台下载，并在显示器睡眠或 Mac 锁定时安装；WallpaperMachine 会退出并重新打开以完成安装。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "更新會在背景下載，並在顯示器睡眠或 Mac 鎖定時安裝；WallpaperMachine 會結束並重新開啟以完成安裝。"}}}
+    },
+    "Features" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "새로운 기능"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Features"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "新機能"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "新功能"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "新功能"}}}
+    },
+    "Bug Fixes" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "버그 수정"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Bug Fixes"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "バグ修正"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "问题修复"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "問題修正"}}}
+    },
+    "Improvements" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "개선 사항"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Improvements"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "改善"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "改进"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "改進"}}}
+    },
+    "Breaking Changes" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "호환되지 않는 변경 사항"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Breaking Changes"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "互換性のない変更"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "不兼容变更"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "不相容變更"}}}
+    },
+    "Highlights" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "주요 변경 사항"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Highlights"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ハイライト"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "亮点"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "亮點"}}}
+    },
+    "Performance Improvements" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "성능 개선"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Performance Improvements"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "パフォーマンスの改善"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "性能改进"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "效能改進"}}}
+    },
+    "Other Changes" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "기타 변경 사항"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Other Changes"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "その他の変更"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "其他变更"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "其他變更"}}}
+    },
+    "Release notes language" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "릴리스 노트 언어"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Release notes language"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "リリースノートの言語"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "更新说明语言"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "更新說明語言"}}}
     }
   },
   "version" : "1.0"

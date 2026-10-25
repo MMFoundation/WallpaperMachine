@@ -15,8 +15,8 @@
 # the in-app updater never sees a "latest" release with nothing to download.
 # Everything published is derived from the build or recorded at the tag: the notes
 # from the tag's translated CHANGELOG.md section (generated once into that file when
-# the tag has none), the checksum and the update manifest from the image, the
-# provenance attestation from this run.
+# the tag has none), the checksum and the update manifest from the image and that
+# CHANGELOG.md, the provenance attestation from this run.
 name: Build
 
 on:
@@ -74,8 +74,9 @@ jobs:
       - name: Write the release notes
         # Before the long build, so a notes problem fails in seconds. A translated
         # CHANGELOG.md section is reused. A hand-pushed tag without one asks the model
-        # once and writes that exact section into the working tree before the build
-        # bundles all languages. GitHub uses only the English notes and compare link.
+        # once and writes that exact section into the working tree, and the copy handed
+        # to publish carries it into the update manifest, whose sections the app's
+        # update window shows. GitHub uses only the English notes and compare link.
         # Source history missing required translations fails.
         env:
           TAG: ${{ inputs.tag }}
@@ -85,6 +86,7 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/release"
           python3 scripts/release_notes.py --tag "$TAG" --release-body --ai \
             --built-from "$(git rev-parse HEAD)" --output "${RUNNER_TEMP}/release/notes.md"
+          cp CHANGELOG.md "${RUNNER_TEMP}/release/CHANGELOG.md"
           cat "${RUNNER_TEMP}/release/notes.md" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: ./.github/actions/prepare-build
@@ -239,7 +241,9 @@ jobs:
         # The updater reads this asset through github.com's releases/latest/download
         # redirect, which the 60-an-hour anonymous API limit does not count; releases
         # without it are read from the API. Derived from the tag, the notes that become
-        # the release body and the image bytes checked above.
+        # the release body, the image bytes checked above and the newest CHANGELOG.md
+        # sections the update window lists. The changelog is the build job's copy, which
+        # holds a section generated for a hand-pushed tag; this job's checkout does not.
         env:
           TAG: ${{ inputs.tag }}
           REPOSITORY: ${{ github.repository }}
@@ -247,7 +251,7 @@ jobs:
         run: |
           set -euo pipefail
           manifest="$(python3 scripts/update_manifest.py --tag "$TAG" --repository "$REPOSITORY" \
-            --notes "${RUNNER_TEMP}/release/notes.md" "$IMAGE")"
+            --notes "${RUNNER_TEMP}/release/notes.md" --changelog "${RUNNER_TEMP}/release/CHANGELOG.md" "$IMAGE")"
           echo "manifest=${manifest}" >> "$GITHUB_OUTPUT"
 
       - name: Publish the release

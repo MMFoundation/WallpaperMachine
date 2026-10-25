@@ -40,7 +40,7 @@ dialogs and menus change after quit/reopen.
 | Layer | Strings | Mechanism |
 | --- | --- | --- |
 | Control panel (`App/Views/ControlPanel/`) | `App/Resources/Localizable.xcstrings` | Follows the effective language live, without a relaunch ([below](#the-panels-live-language)) |
-| Native AppKit (menus, alerts, What's New, preview and sign-in windows) | `App/Resources/Localizable.xcstrings` | `String(localized:)`; the bundle resolves at launch from the `AppleLanguages` override above |
+| Native AppKit (menus, alerts, preview and sign-in windows); the update window is SwiftUI and follows the panel's live language | `App/Resources/Localizable.xcstrings` | `String(localized:)`; the bundle resolves at launch from the `AppleLanguages` override above |
 | Info.plist usage text | `App/Resources/InfoPlist.xcstrings` | Compiled into each language's `InfoPlist.strings`; macOS reads the localized permission explanation in the app's launch language, with `Info.plist` providing the English fallback |
 | Import file picker | `App/Resources/Localizable.xcstrings` plus macOS's native file-browser strings | Same-language sheet, or a short-lived helper whose launch language is the current effective app language |
 | Lock-screen extension (`Extension/`) | `Extension/Localizable.xcstrings` | `String(localized:)` against the extension's own bundle, which follows the macOS language list; literals reach it through `WallpaperRuntime.failure(_:)`, and text that is already final (the renderer's own errors) goes through `failure(detail:)` |
@@ -227,7 +227,7 @@ catalogs agree.
 4. **Release notes.** The changelog has its own translation contract, separate
    from the catalogs: English, Simplified Chinese and, from 1.5.7, Korean. To add
    another notes language, update the model schema and validation in
-   `scripts/release_notes.py`, the bundled parser and What's New selector, and
+   `scripts/release_notes.py`, `AppReleaseHistory` and the update window's language choice, and
    their tests together. Keep tagged historical sections unchanged and define an
    explicit English fallback for releases without that translation. See
    [release notes](release.md#release-notes-and-the-changelog).
