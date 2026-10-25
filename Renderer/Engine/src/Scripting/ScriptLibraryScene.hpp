@@ -53,6 +53,22 @@ class Layer {
     var parent = n.parent(this[KEY].key);
     return parent ? getLayer(parent) : null;
   }
+  getChildren() {
+    var self = this[KEY].key, out = [], count = n.layerCount();
+    for (var i = 0; i < count; ++i) {
+      var k = n.layerNameAt(i);
+      if (n.parent(k) === self) out.push(layerFor(k));
+    }
+    return out;
+  }
+  getEffectCount() { return n.effectCount(this[KEY].key); }
+  getEffect(x) {
+    var key = this[KEY].key;
+    var ref = typeof x === 'number'
+      ? (Number.isInteger(x) && x >= 0 ? n.effectAt(key, x) : '')
+      : n.effectByName(key, String(x));
+    return ref ? effectObjectOf(this, ref) : null;
+  }
   getTransformMatrix() { return new Mat4(n.matrix(this[KEY].key)); }
   // Turns the layer about its own axes: Euler angles in radians (the `angles` property is in degrees).
   rotateObjectSpace(v) {
@@ -193,15 +209,86 @@ accessor('muted',
     if (n.hasSound(st.key)) n.soundSetMuted(st.key, !!v); else st.muted = !!v;
   });
 
-// What a script that decides an effect's visibility has as `thisObject`: its layer, except that
-// `visible` is the effect's own, so writing it switches the effect and leaves the layer.
+// What a script that decides an effect's visibility (or calls `layer.getEffect`) has: its layer,
+// except that `name`, `visible` and `getMaterial` are the effect's own, so writing `visible`
+// switches the effect and leaves the layer.
+var effectCache = new Map();
+var materialCache = new Map();
+function materialConstantFloats(v) {
+  if (typeof v === 'number') return [finiteOr(v, 0)];
+  if (typeof v === 'boolean') return [v ? 1 : 0];
+  if (typeof v === 'string') return parseNumbers(v);
+  if (v instanceof Vec4) return [num(v.x), num(v.y), num(v.z), num(v.w)];
+  if (v instanceof Vec3) return [num(v.x), num(v.y), num(v.z)];
+  if (v instanceof Vec2) return [num(v.x), num(v.y)];
+  if (Array.isArray(v)) {
+    var out = [];
+    for (var i = 0; i < v.length; ++i) out.push(finiteOr(Number(v[i]), 0));
+    return out;
+  }
+  if (v !== null && typeof v === 'object') {
+    if ('w' in v) return [num(v.x), num(v.y), num(v.z), num(v.w)];
+    if ('z' in v) return [num(v.x), num(v.y), num(v.z)];
+    if ('x' in v || 'y' in v) return [num(v.x), num(v.y)];
+  }
+  return [];
+}
+function materialObjectOf(reference, index) {
+  var id = reference + '\u0001' + index;
+  var found = materialCache.get(id);
+  if (found !== undefined) return found;
+  var store = Object.create(null);
+  var target = {
+    getConstant: function (name) { return store[String(name)]; },
+    setConstant: function (name, value) {
+      var key = String(name);
+      store[key] = value;
+      var floats = materialConstantFloats(value);
+      if (floats.length > 0) n.setMaterialConstant(reference, index, key, floats);
+    }
+  };
+  found = new Proxy(target, {
+    get: function (obj, prop) {
+      if (typeof prop !== 'string' || prop in obj) return obj[prop];
+      return store[prop];
+    },
+    set: function (obj, prop, value) {
+      if (typeof prop === 'string' && !(prop in obj)) obj.setConstant(prop, value);
+      else obj[prop] = value;
+      return true;
+    }
+  });
+  materialCache.set(id, found);
+  return found;
+}
 function effectObjectOf(layer, reference) {
+  var found = effectCache.get(reference);
+  if (found !== undefined) return found;
+  var customName;
   var object = Object.create(layer);
+  Object.defineProperty(object, 'name', {
+    get: function () { return customName !== undefined ? customName : n.effectName(reference); },
+    set: function (v) { customName = v; },
+    enumerable: false, configurable: true
+  });
   Object.defineProperty(object, 'visible', {
     get: function () { return n.effectVisible(reference); },
     set: function (v) { n.setEffectVisible(reference, !!v); },
     enumerable: false, configurable: true
   });
+  Object.defineProperty(object, 'getMaterialCount', {
+    value: function () { return n.effectMaterialCount(reference); },
+    writable: true, enumerable: false, configurable: true
+  });
+  Object.defineProperty(object, 'getMaterial', {
+    value: function (index) {
+      var at = Number(index);
+      if (!(Number.isInteger(at) && at >= 0 && at < n.effectMaterialCount(reference))) return null;
+      return materialObjectOf(reference, at);
+    },
+    writable: true, enumerable: false, configurable: true
+  });
+  effectCache.set(reference, object);
   return object;
 }
 // What a script on a keyed setting has as `thisObject`: its layer, except that

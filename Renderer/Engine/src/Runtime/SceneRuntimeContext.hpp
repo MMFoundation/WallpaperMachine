@@ -266,17 +266,34 @@ public:
     /// effects that run and rebuilds the render graph before the next frame.
     void          RegisterEffectVisibility(std::shared_ptr<SceneImageEffect> effect,
                                            std::unique_ptr<DynamicValue> value);
+    struct EffectMaterialPass {
+        std::shared_ptr<SceneNode>                   node;
+        std::shared_ptr<SceneMaterial>               material;
+        std::unordered_map<std::string, std::string> aliases;
+    };
     /// Makes `effect`, an effect of layer `layer_key`, the `thisObject` of the script that decides
-    /// its visibility and returns the reference that script's program is made with. Called
-    /// before the script exists, so the effect is there when the script's top level runs;
-    /// `RegisterEffectVisibility` then ties the script's value to it.
+    /// its visibility (or an entry of `thisLayer.getEffect(...)`) and returns the reference
+    /// scripts reach it by. Called before the script exists, so the effect is there when the
+    /// script's top level runs; `RegisterEffectVisibility` then ties the script's value to it.
     std::string   RegisterEffectObject(std::string_view layer_key,
-                                       std::shared_ptr<SceneImageEffect> effect);
+                                       std::shared_ptr<SceneImageEffect> effect,
+                                       std::string_view effect_name = {},
+                                       std::vector<EffectMaterialPass> passes = {},
+                                       bool listed_on_layer = false);
+    std::string   EffectObjectName(std::string_view reference) const;
     /// What a script reads from, and writes to, `thisObject.visible` of an effect object. A write
     /// goes through the effect's visibility value when it has one, so the script's next run and
     /// the effect agree, and the scene graph is rebuilt; an unknown reference reads false.
     bool          EffectObjectVisible(std::string_view reference) const;
     bool          SetEffectObjectVisible(std::string_view reference, bool visible);
+    std::size_t   LayerEffectCount(std::string_view layer_key) const;
+    std::string   LayerEffectReference(std::string_view layer_key, std::size_t index) const;
+    std::string   LayerEffectReferenceByName(std::string_view layer_key,
+                                             std::string_view effect_name) const;
+    std::size_t   EffectMaterialCount(std::string_view reference) const;
+    bool          SetEffectMaterialConstant(std::string_view reference, std::size_t pass_index,
+                                            std::string_view name,
+                                            std::span<const float> values);
     /// A clock that belongs to one setting a script sits on (`thisObject.getAnimation()` with no
     /// name answers it), and the reference scripts reach it by.
     std::string   RegisterSettingAnimation(std::shared_ptr<ScalarAnimationPlayback> animation);
@@ -1112,11 +1129,16 @@ private:
     uint64_t                     m_passthrough_card_layouts { 0 };
     struct EffectObject {
         std::string                       layer;
+        std::string                       name;
         std::shared_ptr<SceneImageEffect> effect;
         DynamicValue*                     visibility { nullptr };
+        std::vector<EffectMaterialPass>   passes;
     };
-    /// The effects whose visibility a script decides, by the reference their script is made with.
+    /// The effects whose visibility or materials a script reaches, by their reference.
     std::unordered_map<std::string, EffectObject> m_effect_objects;
+    /// Layer key -> the references of the layer's authored effects, in declaration order.
+    std::unordered_map<std::string, std::vector<std::string>, StringHash, std::equal_to<>>
+        m_layer_effects;
     std::unordered_map<std::string, std::shared_ptr<ScalarAnimationPlayback>> m_setting_animations;
     uint64_t m_next_object_reference { 1 };
     std::unordered_map<std::string, LayerTemplate> m_layer_templates;

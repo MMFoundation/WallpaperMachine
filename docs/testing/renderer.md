@@ -1449,8 +1449,8 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   nothing plays through a `mediaPlaybackChanged` script stays visible here until the
   host delivers an idle playback state, so it now draws its art or placeholder in that
   state.
-- **Layer calls a script can make that this renderer lacks.** `getTransformMatrix()` is
-  there; `getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw` and
+- **Layer calls a script can make that this renderer lacks.** `getTransformMatrix()`,
+  `getChildren()` and `rotateObjectSpace()` are there; `setParent`, `lookAt`, `lookAtYaw` and
   `getAttachment*` (the layer binding Wallpaper Engine registers beside it) are not, so a
   script that calls one throws `not a function` at that line, and in `init()` skips the
   rest of it. Wallpaper Engine's order, filtering and frame for them were not read.

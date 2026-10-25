@@ -117,6 +117,7 @@ bool WPImageEffect::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     }
     if (const auto found = json.find("id"); found != json.end()) ReadNumberSetting(*found, id);
     ReadPlainString(json, "name", name);
+    instance_name = name;
     if (const auto found = json.find("visible"); found != json.end()) {
         ReadFlagSetting(*found, visible);
         // Only a binding is kept: a user property decides at load, a script

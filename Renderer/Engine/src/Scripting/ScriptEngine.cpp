@@ -1076,7 +1076,8 @@ constexpr const char* kLibFnNames[kLibFnCount] = {
     X(soundPause) X(soundStop) X(soundPlaying) X(soundVolume) X(soundSetVolume) X(soundMuted)     \
     X(soundSetMuted) X(puppet) X(puppetName) X(timeline) X(sheet) X(sheetInfo) X(video)           \
     X(audioMark) X(audioGeneration) X(audio) X(shortcutValue) X(requestShortcut) X(timeOfDay)       \
-    X(effectVisible) X(setEffectVisible) X(rotateObjectSpace)
+    X(effectVisible) X(setEffectVisible) X(effectCount) X(effectAt) X(effectByName)                 \
+    X(effectName) X(effectMaterialCount) X(setMaterialConstant) X(rotateObjectSpace)
 
 enum NativeId : int
 {
@@ -2091,6 +2092,44 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
     case kNative_setEffectVisible:
         if (rt_ != nullptr) rt_->SetEffectObjectVisible(str(0), flag(1));
         return JS_UNDEFINED;
+    case kNative_effectCount:
+        return number(rt_ != nullptr ? static_cast<double>(rt_->LayerEffectCount(str(0))) : 0.0);
+    case kNative_effectAt: {
+        const double index = num(1);
+        return text(rt_ != nullptr && index >= 0
+                        ? rt_->LayerEffectReference(str(0), static_cast<std::size_t>(index))
+                        : std::string());
+    }
+    case kNative_effectByName:
+        return text(rt_ != nullptr ? rt_->LayerEffectReferenceByName(str(0), str(1))
+                                   : std::string());
+    case kNative_effectName:
+        return text(rt_ != nullptr ? rt_->EffectObjectName(str(0)) : std::string());
+    case kNative_effectMaterialCount:
+        return number(rt_ != nullptr ? static_cast<double>(rt_->EffectMaterialCount(str(0))) : 0.0);
+    case kNative_setMaterialConstant: {
+        if (rt_ == nullptr || argc < 4 || ! JS_IsArray(argv[3])) return boolean(false);
+        JSValue  length_val = JS_GetPropertyStr(ctx, argv[3], "length");
+        uint32_t length     = 0;
+        JS_ToUint32(ctx, &length, length_val);
+        JS_FreeValue(ctx, length_val);
+        if (length == 0 || length > 16) return boolean(false);
+        std::vector<float> values(length, 0.0f);
+        for (uint32_t i = 0; i < length; ++i) {
+            JSValue item = JS_GetPropertyUint32(ctx, argv[3], i);
+            double  d    = 0.0;
+            if (JS_ToFloat64(ctx, &d, item) >= 0 && std::isfinite(d)) {
+                values[i] = static_cast<float>(d);
+            } else if (JS_HasException(ctx)) {
+                JS_FreeValue(ctx, JS_GetException(ctx));
+            }
+            JS_FreeValue(ctx, item);
+        }
+        const double index = num(1);
+        return boolean(index >= 0 &&
+                       rt_->SetEffectMaterialConstant(
+                           str(0), static_cast<std::size_t>(index), str(2), values));
+    }
     case kNative_timeOfDay: {
         const auto value = LocalTimeOfDay(std::chrono::system_clock::now());
         return number(value.value_or(0.0));

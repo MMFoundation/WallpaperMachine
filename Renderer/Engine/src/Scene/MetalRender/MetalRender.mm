@@ -1853,6 +1853,11 @@ struct MetalRender::Impl
     /// Fills `static_skip` for this frame. False means nothing may be skipped.
     bool planStaticSkips(Scene& scene);
     bool clearTargetsOnce();
+    void holdTargetsForRebuild();
+    /// Targets held across a graph rebuild of the same scene, keyed by target name.
+    std::unordered_map<std::string, id<MTLTexture>> held_targets;
+    /// Textures reused from `held_targets` that already hold the previous frame's pixels.
+    std::unordered_set<const void*> preserved_targets;
     /// Targets a resize made, to be cleared by the next frame's own command buffer
     /// ahead of every pass in it: nothing waits on the GPU for a resize.
     std::vector<id<MTLTexture>> pending_target_clears;
@@ -1970,7 +1975,9 @@ void MetalRender::Impl::releaseGraph()
     descriptions.clear();
     prepared.clear();
     pending_target_clears.clear();
+    preserved_targets.clear();
     targets.clear();
+    owned_targets.clear();
     depth_targets.clear();
     pass_targets.clear();
     pass_depths.clear();
@@ -2600,19 +2607,75 @@ id<MTLTexture> MetalRender::Impl::newSceneTarget(const std::string&       name,
     return texture;
 }
 
+void MetalRender::Impl::holdTargetsForRebuild()
+{
+    held_targets.clear();
+    if (! frame_drawn) return;
+    std::unordered_map<const void*, uint32_t> owned_per_texture;
+    for (const auto& name : owned_targets) {
+        const auto found = targets.find(name);
+        if (found != targets.end() && found->second != nil) {
+            ++owned_per_texture[(__bridge const void*)found->second];
+        }
+    }
+    for (const auto& name : owned_targets) {
+        const auto found = targets.find(name);
+        if (found == targets.end() || found->second == nil) continue;
+        if (owned_per_texture[(__bridge const void*)found->second] != 1) continue;
+        held_targets.emplace(name, found->second);
+    }
+}
+
 bool MetalRender::Impl::prepareTargets(Scene& scene)
 {
     targets.clear();
     owned_targets.clear();
+    preserved_targets.clear();
     const auto required = ReferencedRenderTargets(scene, descriptions);
+    const auto take_held = [&](const std::string& key, const SceneRenderTarget& spec) -> id<MTLTexture> {
+        const auto found = held_targets.find(key);
+        if (found == held_targets.end() || found->second == nil) return nil;
+        id<MTLTexture> texture = found->second;
+        held_targets.erase(found);
+        const NSUInteger levels = std::max<uint32_t>(1, spec.mipmap_level);
+        if (texture.width != static_cast<NSUInteger>(spec.width) ||
+            texture.height != static_cast<NSUInteger>(spec.height) ||
+            texture.pixelFormat != SceneTargetFormat(spec.format) ||
+            texture.mipmapLevelCount != levels) {
+            return nil;
+        }
+        return texture;
+    };
+
+    // Carried-over targets claim their held textures first: a link that just
+    // became carried over in this rebuild inherits the source layer's composite
+    // from the frame before the rebuild.
     for (const auto& [name, target] : scene.renderTargets) {
-        if (! required.contains(name)) continue;
+        if (! required.contains(name) || ! target.carriesPreviousFrame) continue;
+        if (target.width <= 0 || target.height <= 0 || target_aliases.count(name) != 0) continue;
+        id<MTLTexture> texture = take_held(name, target);
+        if (texture == nil && IsSpecLinkTex(name)) {
+            texture = take_held(LayerCompositeTargetKey(ParseLinkTex(name)), target);
+        }
+        if (texture == nil) continue;
+        targets.emplace(name, texture);
+        owned_targets.insert(name);
+        preserved_targets.insert((__bridge const void*)texture);
+    }
+
+    for (const auto& [name, target] : scene.renderTargets) {
+        if (! required.contains(name) || targets.count(name) != 0) continue;
         if (target.width <= 0 || target.height <= 0) continue;
         // An aliased destination shares its source's texture, so it must not
         // get one of its own. Resolved after the loop, because the source may
         // be allocated later than the destination is visited.
         if (target_aliases.count(name) != 0) continue;
-        id<MTLTexture> texture = newSceneTarget(name, target);
+        id<MTLTexture> texture = nil;
+        if (std::string_view(name).starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX)) {
+            texture = take_held(name, target);
+            if (texture != nil) preserved_targets.insert((__bridge const void*)texture);
+        }
+        if (texture == nil) texture = newSceneTarget(name, target);
         if (texture == nil) {
             return fail("a render target could not be allocated");
         }
@@ -2804,7 +2867,10 @@ void MetalRender::Impl::shareTargetImages(Scene& scene)
             continue;
         }
         const auto* target = scene.FindRenderTarget(key);
-        if (target == nullptr || target->carriesPreviousFrame) continue;
+        if (target == nullptr || target->carriesPreviousFrame ||
+            std::string_view(key).starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX)) {
+            continue;
+        }
         candidates.push_back({ key, span });
     }
     // Earliest first, so each target takes the first image of its shape that
@@ -3099,6 +3165,7 @@ bool MetalRender::Impl::clearTargetsOnce()
     std::unordered_set<const void*> cleared;
     for (const auto& [name, texture] : targets) {
         (void)name;
+        if (preserved_targets.count((__bridge const void*)texture) != 0) continue;
         // Two keys may now name one texture. Clearing it twice is harmless but
         // pointless, and skipping the duplicate keeps the count honest.
         if (! cleared.insert((__bridge const void*)texture).second) continue;
@@ -4516,9 +4583,12 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
 bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
 {
     releaseGraph();
-    // The videos a rebuild set aside and this graph does not take back are the
-    // ones it no longer uses: closed with the compile, however it ends.
-    AUTO_DELETER(held_videos, [this]() { video.closeHeld(); });
+    // The videos and carried targets a rebuild set aside and this graph does not
+    // take back are the ones it no longer uses: closed with the compile, however it ends.
+    AUTO_DELETER(held_videos, [this]() {
+        video.closeHeld();
+        held_targets.clear();
+    });
     // The image parser decides how many levels of a texture to keep from the size of the
     // surface it ends up on; a display-sized scene has no surface of its own, so no cap.
     if (scene.imageParser != nullptr) {
@@ -4863,6 +4933,7 @@ bool MetalRender::resetSurface(const MetalRenderInitInfo& info)
 bool MetalRender::clearLastRenderGraph()
 {
     @autoreleasepool {
+        pImpl->held_targets.clear();
         pImpl->releaseGraph();
         pImpl->video.closeHeld();
         return true;
@@ -4873,6 +4944,7 @@ bool MetalRender::clearLastRenderGraphForRebuild()
 {
     @autoreleasepool {
         pImpl->video.hold();
+        pImpl->holdTargetsForRebuild();
         pImpl->releaseGraph();
         return true;
     }
@@ -4884,6 +4956,7 @@ bool MetalRender::compileRenderGraph(Scene& scene, rg::RenderGraph& graph)
         // The compile a rebuild set its videos aside for is not going to happen, and
         // nothing else would close them.
         pImpl->video.closeHeld();
+        pImpl->held_targets.clear();
         return pImpl->fail("the native renderer is not initialised");
     }
     @autoreleasepool {

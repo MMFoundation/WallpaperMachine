@@ -1201,9 +1201,9 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     anchor, and the matrix follows a script that moves the anchor. A name with no
     node answers the identity, and a script that reassigns the global `Mat4` does
     not change what the host builds. Each call answers a matrix of its own.
-  - Not covered here: `localStorage` persistence, effects, bones, particles,
-    scene properties, the camera, `Intl`, and the other layer transform calls
-    (`getChildren`, `setParent`, `lookAt`, `lookAtYaw`,
+  - Not covered here: `localStorage` persistence, bones, particles,
+    scene properties, the camera, `Intl`, and the remaining layer transform calls
+    (`setParent`, `lookAt`, `lookAtYaw`,
     `getAttachment*`: a script that calls one still stops at `not a function`);
     host plumbing for `SetLanguage` (scripts are told `en-us` until the host calls
     it).
@@ -1547,8 +1547,15 @@ texture entrances are not decoded-image or native-rendering evidence.
     Taken as history, the name made native Metal refuse the scene, and an
     effect naming `_b` in its first slot without a `bind` (a wave after an
     audio-bar effect) had no image for the slot.
-  - A layer's own `_a` or `_b` outside its effects is its composite as the frame
-    before left it. The shared graph copies each composite into the layer's
+  - A layer's own `_a` or `_b` outside its effects, or a reference from an earlier
+    layer to a later layer in a mutual composite reference cycle, is the composite as
+    the frame before left it. References where the producer precedes the consumer in
+    scene order link in the same frame first; a reference in the reverse direction that
+    would form a cycle with an existing dependency then reads the later layer's
+    `_rt_link_<id>` from the previous frame (`MutualLayerReferencesCarryTheLaterLayerFromThePreviousFrame`
+    in `layer_texture_reference_test`, and across effect visibility switches and graph
+    rebuilds in `MetalSceneDraw.MutualLayerReferencesPreserveCanvasHistoryAcrossEffectSwitches`;
+    issue #89). The shared graph copies each composite into the layer's
     `_rt_link_<id>` after the layer draws, so a read of it ahead of that copy is
     history, and `sceneToRenderGraph` declares the link as a target that carries
     its previous frame, shaped like the composite it is copied from. Without the
@@ -1560,6 +1567,15 @@ texture entrances are not decoded-image or native-rendering evidence.
     with the material naming `_a` or `_b` and with the layer's object also naming
     `_b`, which no parser reads). Native Metal no longer refuses a scene for such a
     name (`ALayersOwnCompositeOutsideItsEffectsIsNotARefusal`).
+  - `LayerScriptsReachChildrenEffectsAndEffectMaterials` in
+    `layer_texture_reference_test`: `thisLayer.getChildren()`, `getEffectCount()`,
+    `getEffect(index | name)` (preserving the instance `name` from `scene.json` over
+    the effect file's), `effect.visible` and `effect.getMaterial(i)` constant writes
+    update the effect chain and its pass uniforms (issue #89).
+  - `AnEffectPassReadingTextureResolutionWithoutSamplingTheSlotGetsItsTargetSize` in
+    `layer_texture_reference_test`: an effect pass that reads `g_Texture0Resolution`
+    without sampling `g_Texture0` in the active combo branch still receives its effect
+    target's dimensions while leaving slot 0 unbound (issue #89).
   - Older editors also list the layer in its own `dependencies`, once for each
     self name its effects bind. A dependency names no slot, so it cannot ask
     for the last frame, and a layer waits on nothing of its own; whatever it

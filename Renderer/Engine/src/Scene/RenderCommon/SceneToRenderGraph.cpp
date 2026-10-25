@@ -56,6 +56,7 @@ struct LinkConsumer {
     rg::NodeID pass { 0 };
     uint32_t   slot { 0 };
     i32        layer { 0 };
+    i32        owner { 0 };
 };
 
 struct Route {
@@ -502,7 +503,8 @@ private:
                 written = b.createTexNode(texDesc(route.dest, true), true);
                 b.write(written);
             });
-        for (const auto& [index, layer] : links) m_consumers.push_back({ node->ID(), index, layer });
+        for (const auto& [index, layer] : links)
+            m_consumers.push_back({ node->ID(), index, layer, source.image_id });
         noteWrite(route.dest);
         recordPicture(source, route, first_route, written);
     }
@@ -560,43 +562,58 @@ private:
         return nullptr;
     }
 
-    // The newest version of the link that the consumer can read without having to run
-    // after the copy that follows it.
-    TexNode* historyVersion(TexNode* latest, rg::NodeID consumer) const {
-        TexNode* version = latest;
-        for (;;) {
-            bool safe = true;
-            if (const PassNode* writer = version->writer();
-                writer != nullptr && writer->type() != PassNode::Type::Virtual &&
-                (writer->ID() == consumer || m_graph->mustPrecede(consumer, writer->ID())))
-                safe = false;
-            if (const TexNode* next = version->nextVer(); next != nullptr && next->writer() != nullptr &&
-                m_graph->mustPrecede(next->writer()->ID(), consumer))
-                safe = false;
-            if (safe || version->preVer() == nullptr) return version;
-            version = version->preVer();
-        }
-    }
-
     void resolveLinks() {
+        // References where the producer was emitted before the consumer follow the
+        // scene's draw order and are linked first; a reference in the other direction
+        // then sees whether the later layer already depends on the earlier one and,
+        // when it does, reads the later layer's composite from the previous frame.
+        const auto in_scene_order = [&](const LinkConsumer& consumer) {
+            const TexNode* source = picture(consumer.layer);
+            return source != nullptr && source->writer() != nullptr &&
+                   source->writer()->ID() < consumer.pass;
+        };
+        std::vector<const LinkConsumer*> ordered;
+        ordered.reserve(m_consumers.size());
         for (const LinkConsumer& consumer : m_consumers) {
-            TexNode* source = picture(consumer.layer);
+            if (in_scene_order(consumer)) ordered.push_back(&consumer);
+        }
+        for (const LinkConsumer& consumer : m_consumers) {
+            if (! in_scene_order(consumer)) ordered.push_back(&consumer);
+        }
+
+        struct LinkTarget {
+            TexNode* history { nullptr };
+            TexNode* current { nullptr };
+        };
+        std::unordered_map<i32, LinkTarget> links;
+
+        for (const LinkConsumer* item : ordered) {
+            const LinkConsumer& consumer = *item;
+            TexNode*            source   = picture(consumer.layer);
             if (source == nullptr) {
                 logOnce("layer " + std::to_string(consumer.layer) + " produced no picture to link");
                 continue;
             }
-            const std::string link = GenLinkTex(consumer.layer);
-            rg::RenderGraphBuilder builder(*m_graph);
-            TexNode*               latest = builder.createTexNode(texDesc(link, true), false);
+            const std::string link   = GenLinkTex(consumer.layer);
+            LinkTarget&       target = links[consumer.layer];
+            if (target.history == nullptr) {
+                rg::RenderGraphBuilder builder(*m_graph);
+                target.history = builder.createTexNode(texDesc(link, true), false);
+                builder.markSelfWrite(target.history);
+            }
 
-            // Producer, copy, consumer would be a cycle when the consumer is (or has to
-            // run before) what the copy waits for: then the link is last frame's picture.
+            // Producer, copy, consumer would be a cycle when the consumer (or its layer's
+            // composite) is, or has to run before, what the copy waits for: then the link
+            // is last frame's picture.
             std::vector<rg::NodeID> after { consumer.pass };
+            if (const TexNode* own = picture(consumer.owner);
+                own != nullptr && own->writer() != nullptr)
+                after.push_back(own->writer()->ID());
             if (const TexNode* next = source->nextVer(); next != nullptr && next->writer() != nullptr)
                 after.push_back(next->writer()->ID());
             std::vector<rg::NodeID> before;
             if (source->writer() != nullptr) before.push_back(source->writer()->ID());
-            for (const PassNode* reader : latest->readers()) before.push_back(reader->ID());
+            for (const PassNode* reader : target.history->readers()) before.push_back(reader->ID());
             bool history = false;
             for (const rg::NodeID a : after) {
                 for (const rg::NodeID b : before) {
@@ -604,22 +621,14 @@ private:
                 }
             }
 
-            const std::string source_key(source->key());
-            TexNode*          read_version = nullptr;
-            if (history) {
-                read_version = historyVersion(latest, consumer.pass);
-                m_graph->afterBuild(consumer.pass, [&](rg::RenderGraphBuilder& b, rg::Pass&) {
-                    b.read(read_version);
-                    return true;
-                });
-                addCopy(source_key, link, source);
-            } else {
-                addCopy(source_key, link, source, &read_version);
-                m_graph->afterBuild(consumer.pass, [&](rg::RenderGraphBuilder& b, rg::Pass&) {
-                    b.read(read_version);
-                    return true;
-                });
+            if (target.current == nullptr) {
+                addCopy(std::string(source->key()), link, source, &target.current);
             }
+            TexNode* read_version = history ? target.history : target.current;
+            m_graph->afterBuild(consumer.pass, [&](rg::RenderGraphBuilder& b, rg::Pass&) {
+                b.read(read_version);
+                return true;
+            });
             if (auto* draw = dynamic_cast<DrawPass*>(m_graph->getPass(consumer.pass)))
                 draw->setDescTex(consumer.slot, link);
         }

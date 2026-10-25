@@ -126,9 +126,15 @@ layer's own matrix, not the one it is drawn with: a camera parallax and the iden
 a layer drawn through its effects renders from are not in it. A layer anchored to an
 edge or a corner (`alignment`) answers the centre of its quad, which its anchor
 places, while `layer.origin` still reads the anchor. A layer that ignores its parent's
-transform answers its own placement. The other layer transform calls
-(`getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw` and
-`getAttachment*`) do not exist yet: a script that calls one stops at that line.
+transform answers its own placement. `layer.getChildren()` answers the direct children
+of the layer in scene order, `layer.rotateObjectSpace(angles)` turns the layer about its
+own axes by Euler angles in radians, and `layer.getEffectCount()` and
+`layer.getEffect(indexOrName)` return the layer's authored effects (built even when
+authored hidden in scenes whose scripts call `getEffect`), each exposing `name`,
+`visible` and `getMaterial(passIndex)` (whose constants can be read and written through
+`getConstant`/`setConstant` or as properties on the material object). The remaining
+layer transform calls (`setParent`, `lookAt`, `lookAtYaw` and `getAttachment*`) do not
+exist yet: a script that calls one stops at that line.
 
 A layer's `origin`, `scale` and `angles`, and an image layer's `color`, can be keyed on
 a timeline (`animation`: curves `c0` to `c2` and `options`), and all four play the

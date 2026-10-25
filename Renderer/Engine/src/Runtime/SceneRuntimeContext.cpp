@@ -1142,6 +1142,7 @@ void SceneRuntimeContext::UnregisterNode(std::string_view view) {
     m_node_cursor_targets.erase(name);
     m_effect_card_links.erase(name);
     std::erase_if(m_effect_objects, [&name](const auto& entry) { return entry.second.layer == name; });
+    m_layer_effects.erase(name);
     m_node_template_paths.erase(name);
     m_sound_layers.erase(name);
     std::erase_if(m_text_values,
@@ -1334,6 +1335,17 @@ SceneRuntimeContext::CaptureNodeRegistration(std::string_view name) const {
     remember(&SceneRuntimeContext::m_node_template_paths);
     remember(&SceneRuntimeContext::m_node_video_textures);
     remember(&SceneRuntimeContext::m_sound_layers);
+    remember(&SceneRuntimeContext::m_layer_effects);
+
+    std::vector<std::pair<std::string, EffectObject>> effects;
+    for (const auto& entry : m_effect_objects) {
+        if (entry.second.layer == key) effects.push_back(entry);
+    }
+    if (! effects.empty()) {
+        memo->put_back.push_back([effects = std::move(effects)](SceneRuntimeContext& to) {
+            for (const auto& [ref, obj] : effects) to.m_effect_objects.insert_or_assign(ref, obj);
+        });
+    }
 
     // The text bindings are a list, not a table.
     std::vector<TextValueBinding> bindings;
@@ -1469,11 +1481,30 @@ void SceneRuntimeContext::RegisterNodeVisibility(std::string name, SceneNode* no
 }
 
 std::string SceneRuntimeContext::RegisterEffectObject(std::string_view layer_key,
-                                                      std::shared_ptr<SceneImageEffect> effect) {
+                                                      std::shared_ptr<SceneImageEffect> effect,
+                                                      std::string_view effect_name,
+                                                      std::vector<EffectMaterialPass> passes,
+                                                      bool listed_on_layer) {
     if (effect == nullptr) return {};
-    std::string reference = "effect:" + std::to_string(m_next_object_reference++);
-    m_effect_objects.emplace(reference, EffectObject { std::string(layer_key), std::move(effect), nullptr });
+    const std::string resolved  = ResolveLayerName(layer_key);
+    std::string       reference = "effect:" + std::to_string(m_next_object_reference++);
+    m_effect_objects.emplace(
+        reference,
+        EffectObject {
+            .layer  = resolved,
+            .name   = std::string(effect_name),
+            .effect = std::move(effect),
+            .passes = std::move(passes),
+        });
+    if (listed_on_layer && ! resolved.empty()) {
+        m_layer_effects[resolved].push_back(reference);
+    }
     return reference;
+}
+
+std::string SceneRuntimeContext::EffectObjectName(std::string_view reference) const {
+    const auto found = m_effect_objects.find(std::string(reference));
+    return found != m_effect_objects.end() ? found->second.name : std::string();
 }
 
 bool SceneRuntimeContext::EffectObjectVisible(std::string_view reference) const {
@@ -1488,8 +1519,96 @@ bool SceneRuntimeContext::SetEffectObjectVisible(std::string_view reference, boo
     if (found->second.visibility != nullptr) {
         // The value's listener switches the effect and asks for the new graph.
         found->second.visibility->update(visible);
+        return true;
+    }
+    const auto& effect = found->second.effect;
+    if (effect->visible == visible) return true;
+    effect->visible = visible;
+    MarkSceneGraphMutated("effect-visibility");
+    for (const auto& [name, gate] : m_text_effect_gates) {
+        if (std::find(gate.effects.begin(), gate.effects.end(), effect) != gate.effects.end()) {
+            RefreshTextEffectGate(name);
+        }
+    }
+    return true;
+}
+
+std::size_t SceneRuntimeContext::LayerEffectCount(std::string_view layer_key) const {
+    const auto found = m_layer_effects.find(ResolveLayerName(layer_key));
+    return found != m_layer_effects.end() ? found->second.size() : 0u;
+}
+
+std::string SceneRuntimeContext::LayerEffectReference(std::string_view layer_key,
+                                                      std::size_t index) const {
+    const auto found = m_layer_effects.find(ResolveLayerName(layer_key));
+    if (found == m_layer_effects.end() || index >= found->second.size()) return {};
+    return found->second[index];
+}
+
+std::string SceneRuntimeContext::LayerEffectReferenceByName(std::string_view layer_key,
+                                                            std::string_view effect_name) const {
+    const auto found = m_layer_effects.find(ResolveLayerName(layer_key));
+    if (found == m_layer_effects.end()) return {};
+    for (const auto& reference : found->second) {
+        const auto entry = m_effect_objects.find(reference);
+        if (entry != m_effect_objects.end() && entry->second.name == effect_name) return reference;
+    }
+    return {};
+}
+
+std::size_t SceneRuntimeContext::EffectMaterialCount(std::string_view reference) const {
+    const auto found = m_effect_objects.find(std::string(reference));
+    return found != m_effect_objects.end() ? found->second.passes.size() : 0u;
+}
+
+bool SceneRuntimeContext::SetEffectMaterialConstant(std::string_view reference,
+                                                    std::size_t pass_index,
+                                                    std::string_view name,
+                                                    std::span<const float> values) {
+    if (name.empty() || values.empty()) return false;
+    const auto found = m_effect_objects.find(std::string(reference));
+    if (found == m_effect_objects.end() || pass_index >= found->second.passes.size()) return false;
+    auto& pass = found->second.passes[pass_index];
+    if (pass.material == nullptr) return false;
+
+    std::string uniform;
+    if (const auto alias = pass.aliases.find(std::string(name)); alias != pass.aliases.end()) {
+        uniform = alias->second;
+    } else if (pass.material->customShader.constValues.contains(std::string(name))) {
+        uniform = std::string(name);
     } else {
-        found->second.effect->visible = visible;
+        return false;
+    }
+
+    std::size_t count = values.size();
+    if (pass.material->customShader.shader != nullptr) {
+        const auto& defaults = pass.material->customShader.shader->default_uniforms;
+        if (const auto def = defaults.find(uniform);
+            def != defaults.end() && def->second.size() > 0 && count > def->second.size()) {
+            count = def->second.size();
+        }
+    }
+    const auto apply = [&](SceneMaterial& material) {
+        auto& held = material.customShader.constValues[uniform];
+        if (count < held.size()) {
+            for (std::size_t i = 0; i < count; ++i) held[i] = values[i];
+        } else {
+            held = ShaderValue(values.data(), count);
+        }
+    };
+    apply(*pass.material);
+    if (pass.node != nullptr && pass.node->Mesh() != nullptr &&
+        pass.node->Mesh()->Material() != nullptr &&
+        pass.node->Mesh()->Material() != pass.material.get()) {
+        apply(*pass.node->Mesh()->Material());
+    }
+    for (auto& binding : m_material_constants) {
+        if (binding.material.lock() == pass.material && binding.name == uniform &&
+            binding.value != nullptr) {
+            binding.cached_value        = pass.material->customShader.constValues[uniform];
+            binding.cached_value_valid  = true;
+            binding.observed_generation = binding.value->Generation();
+        }
     }
     return true;
 }

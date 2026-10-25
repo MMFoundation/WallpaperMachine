@@ -380,6 +380,7 @@ struct ParseContext {
     std::unordered_map<int32_t, TextLayerRenderFrame>       text_cards;
 
     bool                       uses_models { false };
+    bool                       scripts_use_effects { false };
     // `orthogonalprojection` present and not null. The scene is then projected
     // by that canvas, which is the space every 2D layer's geometry, origin and
     // alignment is authored in.
@@ -861,8 +862,9 @@ std::optional<wpscene::WPImageEffect> MakeFogCompositeEffect(fs::VFS& vfs) {
 // Whether an effect is part of the chain a layer is built with: one that is
 // visible, or one a script may switch on later. Wallpaper Engine keeps every
 // effect of a layer and runs the ones its effect object says are visible.
-bool EffectIsBuilt(const wpscene::WPImageEffect& effect) {
-    return effect.visible || effect.scripted_visible;
+bool EffectIsBuilt(const wpscene::WPImageEffect& effect, bool scripts_use_effects = false) {
+    if (effect.visible || effect.scripted_visible) return true;
+    return scripts_use_effects && effect.visible_setting.is_null();
 }
 
 /// The padding a text object's file gives, on each axis: capped at 512 pixels from above and not
@@ -931,16 +933,21 @@ void ResolveUserEffectVisibility(ParseContext& context,
 }
 
 // Hands a built effect its visibility: fixed, or followed from the script that
-// decides it.
-void RegisterScriptedEffectVisibility(ParseContext& context,
-                                      const wpscene::WPImageEffect& source,
-                                      const std::shared_ptr<SceneImageEffect>& effect,
-                                      std::string_view runtime_name) {
+// decides it, and lists authored effects on the layer for `thisLayer.getEffect`.
+void RegisterScriptedEffectVisibility(
+    ParseContext& context, const wpscene::WPImageEffect& source,
+    const std::shared_ptr<SceneImageEffect>& effect, std::string_view runtime_name,
+    std::vector<SceneRuntimeContext::EffectMaterialPass> passes = {},
+    bool is_authored_effect = false) {
     effect->visible = source.visible;
-    if (! source.scripted_visible || context.scene->runtime == nullptr) return;
-    auto& runtime = *context.scene->runtime;
+    if (context.scene->runtime == nullptr) return;
+    if (! source.scripted_visible && ! is_authored_effect) return;
+    auto& runtime   = *context.scene->runtime;
+    const auto& effect_name = ! source.instance_name.empty() ? source.instance_name : source.name;
+    auto  reference = runtime.RegisterEffectObject(
+        runtime_name, effect, effect_name, std::move(passes), is_authored_effect);
+    if (! source.scripted_visible) return;
     // The script that decides the effect's visibility has the effect as its `thisObject`.
-    auto reference = runtime.RegisterEffectObject(runtime_name, effect);
     runtime.RegisterEffectVisibility(
         effect, ResolveBoolSetting(runtime, source.visible_setting, runtime_name, -1,
                                    std::move(reference)));
@@ -1681,12 +1688,49 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
         }
     }
 
-    // Slots the shader never samples hold nothing (R27).
+    // The scene's own constants first, then what each slot knows about its texture (R23),
+    // before unsampled slots are cleared: a pass may size its cells from `g_Texture0Resolution`
+    // without sampling `g_Texture0` in the active combo branch.
     std::unordered_set<uint> sampled;
     for (const auto& unit : units) {
         sampled.insert(unit.preprocess_info.active_tex_slots.begin(),
                        unit.preprocess_info.active_tex_slots.end());
     }
+    auto& constants = material.customShader.constValues;
+    for (const auto& [name, value] : context.global_base_uniforms) constants[name] = value;
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+        const auto& name = slots[slot];
+        if (name.empty()) continue;
+        const bool is_sampled = sampled.contains(static_cast<uint>(slot));
+        if (IsSpecLinkTex(name)) {
+            // Another layer's composite: its size is the value updater's to supply.
+            loaded.render_targets.emplace_back(slot, name);
+            continue;
+        }
+        std::array<float, 4> resolution {};
+        if (classified[slot].is_target) {
+            const auto* target = scene.FindRenderTarget(name);
+            if (target == nullptr) continue;
+            const float w = static_cast<float>(target->width);
+            const float h = static_cast<float>(target->height);
+            resolution    = { w, h, w, h };
+            loaded.render_targets.emplace_back(slot, scene.ResolveRenderTargetName(name));
+        } else {
+            if (! is_sampled) continue;
+            const auto& header = TextureHeaderOf(context, name);
+            resolution = TextureGeometryOf(header).resolution;
+            RegisterFileTexture(context, name, header);
+            if (header.isSprite && header.spriteAnim.numFrames() > 0) material.hasSprite = true;
+        }
+        constants[std::string(WE_GLTEX_RESOLUTION_NAMES[slot])] = ShaderValue(resolution.data(), 4);
+        if (resolution[2] != 0.0f && resolution[3] != 0.0f) {
+            const std::array<float, 4> texel { 1.0f / resolution[2], 1.0f / resolution[3],
+                                               resolution[2], resolution[3] };
+            constants[std::string(WE_GLTEX_TEXEL_NAMES[slot])] = ShaderValue(texel.data(), 4);
+        }
+    }
+
+    // Slots the shader never samples hold nothing (R27).
     for (std::size_t slot = 0; slot < slots.size(); ++slot) {
         if (! slots[slot].empty() && ! sampled.contains(static_cast<uint>(slot))) {
             slots[slot].clear();
@@ -1711,33 +1755,9 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
         slots[slot]           = kUnboundTextureName;
         classified[slot].name = kUnboundTextureName;
         classified[slot].is_file = true;
-    }
-
-    // The scene's own constants first, then what each slot knows about its texture (R23).
-    auto& constants = material.customShader.constValues;
-    for (const auto& [name, value] : context.global_base_uniforms) constants[name] = value;
-    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
-        const auto& name = slots[slot];
-        if (name.empty()) continue;
-        if (IsSpecLinkTex(name)) {
-            // Another layer's composite: its size is the value updater's to supply.
-            loaded.render_targets.emplace_back(slot, name);
-            continue;
-        }
-        std::array<float, 4> resolution {};
-        if (classified[slot].is_target) {
-            const auto* target = scene.FindRenderTarget(name);
-            if (target == nullptr) continue;
-            const float w = static_cast<float>(target->width);
-            const float h = static_cast<float>(target->height);
-            resolution    = { w, h, w, h };
-            loaded.render_targets.emplace_back(slot, scene.ResolveRenderTargetName(name));
-        } else {
-            const auto& header = TextureHeaderOf(context, name);
-            resolution = TextureGeometryOf(header).resolution;
-            RegisterFileTexture(context, name, header);
-            if (header.isSprite && header.spriteAnim.numFrames() > 0) material.hasSprite = true;
-        }
+        const auto& header = TextureHeaderOf(context, kUnboundTextureName);
+        const auto  resolution = TextureGeometryOf(header).resolution;
+        RegisterFileTexture(context, kUnboundTextureName, header);
         constants[std::string(WE_GLTEX_RESOLUTION_NAMES[slot])] = ShaderValue(resolution.data(), 4);
         if (resolution[2] != 0.0f && resolution[3] != 0.0f) {
             const std::array<float, 4> texel { 1.0f / resolution[2], 1.0f / resolution[3],
@@ -2370,7 +2390,8 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
                  std::vector<std::shared_ptr<SceneMaterial>>& all_materials,
                  std::shared_ptr<SceneImageEffect>*           built_out,
                  const WPPuppetLayer*                         puppet = nullptr,
-                 bool mandatory_previous_slot0 = false) {
+                 bool mandatory_previous_slot0 = false,
+                 bool is_authored_effect = false) {
     auto&      scene = *context.scene;
     const auto previous_name = PingPongName(WE_EFFECT_PPONG_PREFIX_A, camera_name);
     const auto output_name   = PingPongName(WE_EFFECT_PPONG_PREFIX_B, camera_name);
@@ -2434,6 +2455,8 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
     }
     if (built.empty()) return false;
 
+    std::vector<SceneRuntimeContext::EffectMaterialPass> effect_passes;
+    effect_passes.reserve(built.size());
     for (auto& entry : built) {
         effect->nodes.push_back(SceneImageEffectNode { .output = entry.output, .sceneNode = entry.node });
         RegisterDrivenMaterialConstants(context, entry.material, entry.authored, entry.info, key);
@@ -2443,9 +2466,15 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
             all_materials.push_back(entry.material);
             tinted.push_back(entry.material);
         }
+        effect_passes.push_back(SceneRuntimeContext::EffectMaterialPass {
+            .node     = entry.node,
+            .material = entry.material,
+            .aliases  = { entry.info.alias.begin(), entry.info.alias.end() },
+        });
     }
     LowerEffectCommands(source, fbo_map, scene, effect->commands);
-    RegisterScriptedEffectVisibility(context, source, effect, key);
+    RegisterScriptedEffectVisibility(
+        context, source, effect, key, std::move(effect_passes), is_authored_effect);
     chain.AddEffect(effect);
     if (built_out != nullptr) *built_out = effect;
     return true;
@@ -3288,7 +3317,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     std::vector<wpscene::WPImageEffect>        extras;
     extras.reserve(2);
     for (const auto& effect : image.effects) {
-        if (! EffectIsBuilt(effect) || effect.materials.empty()) continue;
+        if (! EffectIsBuilt(effect, context.scripts_use_effects) || effect.materials.empty()) continue;
         chain_sources.push_back(&effect);
     }
     // The colour blend (R52): mode 31 is additive blending, any other mode one more pass.
@@ -3579,8 +3608,16 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         for (const auto* source : chain_sources) {
             const bool is_blend_pass = blend_separate && source == chain_sources.back();
             if (BuildEffect(context, image, *source, index, node, *chain, geometry.extent, kind.fullscreen,
-                            is_blend_pass, defer, false, plan.key, camera_name, tinted, all_materials, nullptr)) {
-                if (! source->scripted_visible) any_fixed = true;
+                            is_blend_pass, defer, false, plan.key, camera_name, tinted, all_materials,
+                            nullptr, nullptr, false, ! is_blend_pass)) {
+                if (! source->scripted_visible && (! context.scripts_use_effects || is_blend_pass)) {
+                    any_fixed = true;
+                }
+            } else if (! is_blend_pass && context.scripts_use_effects && runtime != nullptr) {
+                const auto& effect_name =
+                    ! source->instance_name.empty() ? source->instance_name : source->name;
+                runtime->RegisterEffectObject(
+                    plan.key, std::make_shared<SceneImageEffect>(), effect_name, {}, true);
             }
             ++index;
         }
@@ -4059,7 +4096,7 @@ bool LoadTextEntry(ParseContext& context, std::size_t at, const nlohmann::json& 
     std::vector<wpscene::WPImageEffect> chain_sources;
     chain_sources.reserve(obj.effects.size() + 1);
     for (const auto& effect : obj.effects) {
-        if (! EffectIsBuilt(effect) || effect.materials.empty()) continue;
+        if (! EffectIsBuilt(effect, context.scripts_use_effects) || effect.materials.empty()) continue;
         chain_sources.push_back(effect);
         for (auto& fbo : chain_sources.back().fbos) fbo.scale = 1;
     }
@@ -4249,9 +4286,17 @@ bool LoadTextEntry(ParseContext& context, std::size_t at, const nlohmann::json& 
             const bool is_blend_pass = blend_pass && index + 1 == chain_sources.size();
             std::shared_ptr<SceneImageEffect> built;
             if (BuildEffect(context, proxy, source, index, node, *chain, extent, false, is_blend_pass,
-                            false, false, plan.key, camera_name, unused_tint, all_materials, &built)) {
-                if (! source.scripted_visible) any_fixed = true;
+                            false, false, plan.key, camera_name, unused_tint, all_materials, &built,
+                            nullptr, false, ! is_blend_pass)) {
+                if (! source.scripted_visible && (! context.scripts_use_effects || is_blend_pass)) {
+                    any_fixed = true;
+                }
                 if (index < real_effects && built != nullptr) counted_effects.push_back(built);
+            } else if (! is_blend_pass && context.scripts_use_effects && runtime != nullptr) {
+                const auto& effect_name =
+                    ! source.instance_name.empty() ? source.instance_name : source.name;
+                runtime->RegisterEffectObject(
+                    plan.key, std::make_shared<SceneImageEffect>(), effect_name, {}, true);
             }
             ++index;
         }
@@ -5962,6 +6007,14 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
     const auto early_refs = CollectLayerTextureRefs(scanned, index, &vfs);
     for (const auto& ref : early_refs) {
         if (ref.source_id != 0) context.referenced_layer_ids.insert(ref.source_id);
+    }
+    if (scene->runtime != nullptr) {
+        std::vector<const std::string*> sources;
+        CollectScriptSources(objects, sources);
+        context.scripts_use_effects = std::any_of(
+            sources.begin(), sources.end(), [](const std::string* source) {
+                return source->find("getEffect") != std::string::npos;
+            });
     }
 
     BuildLayers(context, general, objects, plans, sm);

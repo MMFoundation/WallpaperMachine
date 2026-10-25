@@ -301,7 +301,11 @@ TEST(LayerTextureReference, MissingTargetIsExplicit) {
     EXPECT_EQ(resolved.error, kLayerTextureMissingTarget);
 }
 
-TEST(LayerTextureReference, CycleIsExplicit) {
+// Two layers that sample each other's composites do not refuse the scene: the
+// layer declared earlier in the scene samples the later layer's composite from
+// the previous frame, while the later layer samples the earlier layer's
+// composite produced in the same frame.
+TEST(LayerTextureReference, MutualLayerReferencesCarryTheLaterLayerFromThePreviousFrame) {
     const auto objects = nlohmann::json::parse(R"([
       {"id":1,"name":"a","image":"image.json",
        "effects":[{"passes":[{"textures":["_rt_imageLayerComposite_2_a"]}]}]},
@@ -310,7 +314,183 @@ TEST(LayerTextureReference, CycleIsExplicit) {
     ])");
     const auto index = BuildLayerObjectIndex(objects);
     const auto refs  = CollectLayerTextureRefs(objects, index, nullptr);
-    EXPECT_EQ(ClassifyLayerTextureReferences(refs, index), kLayerTextureIllegalCycle);
+    EXPECT_TRUE(ClassifyLayerTextureReferences(refs, index).empty());
+
+    constexpr std::string_view kSampleFrag = R"(uniform sampler2D g_Texture0;
+uniform sampler2D g_Texture1;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord) + texture(g_Texture1, v_TexCoord);
+}
+)";
+    fs::VFS vfs;
+    auto    parsed = ParseScene(vfs, R"([
+        {"id":288,"name":"pattern","image":"image.json","dependencies":[16],
+         "effects":[{"file":"effects/sample/effect.json","visible":true,
+                     "passes":[{"textures":[null,"_rt_imageLayerComposite_16_a"]}]}]},
+        {"id":16,"name":"canvas","image":"image.json","dependencies":[288],
+         "effects":[{"file":"effects/sample/effect.json","visible":true,
+                     "passes":[{"textures":[null,"_rt_imageLayerComposite_288_a"]}]}]}
+      ])",
+      {{ "/effects/sample/effect.json",
+         R"({"name":"sample","passes":[{"material":"materials/sample.json"}]})" },
+       { "/materials/sample.json",
+         R"({"passes":[{"blending":"normal","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"sample","textures":[null,null]}]})" },
+       { "/shaders/sample.vert", std::string(kVert) },
+       { "/shaders/sample.frag", std::string(kSampleFrag) }});
+    ASSERT_NE(parsed, nullptr);
+    EXPECT_TRUE(parsed->layer_texture_error.empty()) << parsed->layer_texture_error;
+    AddScreenTarget(*parsed);
+    if (parsed->cameras.find("effect") == parsed->cameras.end()) {
+        parsed->cameras["effect"] = std::make_shared<SceneCamera>(64, 32, 0.01f, 100.0f);
+    }
+    parsed->activeCamera = nullptr;
+
+    const auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+
+    const auto order = graph->topologicalOrder();
+    const auto index_of = [&](const rg::Pass* wanted) -> std::size_t {
+        for (std::size_t i = 0; i < order.size(); ++i) {
+            if (graph->getPass(order[i]) == wanted) return i;
+        }
+        return static_cast<std::size_t>(-1);
+    };
+    const auto* pattern_composite = FindPassByOutput(*graph, LayerCompositeTargetKey(288));
+    const auto* canvas_composite  = FindPassByOutput(*graph, LayerCompositeTargetKey(16));
+    const auto* pattern_link      = FindLinkCopy(*graph, GenLinkTex(288));
+    const auto* canvas_link       = FindLinkCopy(*graph, GenLinkTex(16));
+    ASSERT_NE(pattern_composite, nullptr);
+    ASSERT_NE(canvas_composite, nullptr);
+    ASSERT_NE(pattern_link, nullptr);
+    ASSERT_NE(canvas_link, nullptr);
+
+    // The earlier layer (288) produces its composite first; the later layer (16)
+    // copies and samples it in the same frame, then writes its own composite and
+    // copies it into `_rt_link_16` for the next frame.
+    EXPECT_LT(index_of(pattern_composite), index_of(pattern_link));
+    EXPECT_LT(index_of(pattern_link), index_of(canvas_composite));
+    EXPECT_LT(index_of(canvas_composite), index_of(canvas_link));
+
+    EXPECT_EQ(parsed->FindRenderTarget(GenLinkTex(288)), nullptr)
+        << "the earlier layer's link is read after it is written and is not history";
+    const auto* carried = parsed->FindRenderTarget(GenLinkTex(16));
+    ASSERT_NE(carried, nullptr) << "the later layer's link was not declared as history";
+    EXPECT_TRUE(carried->carriesPreviousFrame);
+    EXPECT_FALSE(carried->allowReuse);
+}
+
+TEST(LayerTextureReference, LayerScriptsReachChildrenEffectsAndEffectMaterials) {
+    constexpr std::string_view kTintFrag = R"(uniform sampler2D g_Texture0;
+uniform vec3 g_Tint; // {"material":"color","default":"1 0 0"}
+uniform vec3 u_channelMask; // {"material":"channelMask","default":"1 1 1"}
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord) * vec4(g_Tint * u_channelMask, 1.0);
+}
+)";
+    const ProjectProperties properties {};
+    fs::VFS                 vfs;
+    auto parsed = ParseScene(vfs, R"([
+        {"id":10,"name":"options","origin":[0,0,0],
+         "visible":{"script":"'use strict';\nexport function init(value) {\n  var kids = thisLayer.getChildren();\n  if (kids.length === 2) {\n    kids[0].origin = new Vec3(12, 34, 0);\n    kids[1].visible = false;\n  }\n  return value;\n}\n","value":true}},
+        {"id":11,"name":"first","parent":10,"image":"image.json","origin":[1,2,0]},
+        {"id":12,"name":"second","parent":10,"image":"image.json","origin":[3,4,0]},
+        {"id":13,"name":"palette","image":"image.json",
+         "origin":{"script":"'use strict';\nvar byName = {};\nexport function init(value) {\n  for (var i = 0; i < thisLayer.getEffectCount(); ++i) {\n    var e = thisLayer.getEffect(i);\n    byName[e.name] = e;\n    e.visible = false;\n    e.getMaterial(0).channelMask = new Vec4(0, 0, 0, 0);\n  }\n  return value;\n}\nexport function update(value) {\n  var tint = thisLayer.getEffect(byName['Tint'] ? 1 : 0);\n  tint.visible = true;\n  tint.getMaterial(0).color = new Vec3(0.25, 0.5, 0.75);\n  byName['Tint'].getMaterial(0).channelMask = new Vec3(0, 1, 0);\n  return value;\n}\n","value":"32 16 0"},
+         "effects":[
+           {"file":"effects/tint/effect.json","id":90,"name":"Idle","visible":false},
+           {"file":"effects/tint/effect.json","id":91,"name":"Tint","visible":false}
+         ]}
+      ])",
+      {{ "/effects/tint/effect.json",
+         R"({"name":"tint","passes":[{"material":"materials/tint.json"}]})" },
+       { "/materials/tint.json",
+         R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"tint","textures":[null]}]})" },
+       { "/shaders/tint.vert", std::string(kVert) },
+       { "/shaders/tint.frag", std::string(kTintFrag) }},
+      &properties);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    AddScreenTarget(*parsed);
+    auto& runtime = *parsed->runtime;
+
+    auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+    EXPECT_TRUE(runtime.NodeTranslate("first").isApprox(linalg::Vector3f(12.0f, 34.0f, 0.0f)));
+    EXPECT_FALSE(runtime.NodeVisible("second"));
+    EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
+
+    graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+    SceneNode* palette = nullptr;
+    for (auto& child : parsed->sceneGraph->GetChildren()) {
+        if (child->Name() == "palette") palette = child.get();
+    }
+    ASSERT_NE(palette, nullptr);
+    const auto camera = parsed->cameras.find(palette->Camera());
+    ASSERT_NE(camera, parsed->cameras.end());
+    ASSERT_TRUE(camera->second->HasImgEffect());
+    auto& chain = *camera->second->GetImgEffect();
+    ASSERT_GE(chain.EffectCount(), 2u);
+    EXPECT_FALSE(chain.GetEffect(0)->included);
+    EXPECT_TRUE(chain.GetEffect(1)->included);
+    const auto* mat = chain.GetEffect(1)->nodes.front().sceneNode->Mesh()->Material();
+    ASSERT_NE(mat, nullptr);
+    ASSERT_TRUE(mat->customShader.constValues.contains("g_Tint"));
+    ASSERT_EQ(mat->customShader.constValues.at("g_Tint").size(), 3u);
+    EXPECT_FLOAT_EQ(mat->customShader.constValues.at("g_Tint")[0], 0.25f);
+    EXPECT_FLOAT_EQ(mat->customShader.constValues.at("g_Tint")[1], 0.5f);
+    EXPECT_FLOAT_EQ(mat->customShader.constValues.at("g_Tint")[2], 0.75f);
+    ASSERT_TRUE(mat->customShader.constValues.contains("u_channelMask"));
+    ASSERT_EQ(mat->customShader.constValues.at("u_channelMask").size(), 3u);
+    EXPECT_FLOAT_EQ(mat->customShader.constValues.at("u_channelMask")[0], 0.0f);
+    EXPECT_FLOAT_EQ(mat->customShader.constValues.at("u_channelMask")[1], 1.0f);
+    EXPECT_FLOAT_EQ(mat->customShader.constValues.at("u_channelMask")[2], 0.0f);
+}
+
+// An effect pass (such as a procedural grid with `USE_MASK == 0`) may declare
+// `g_Texture0` and size its cells from `g_Texture0Resolution` without sampling
+// `g_Texture0` in the active branch. The slot stays unbound on the pass, while
+// `g_Texture0Resolution` still receives the effect target's dimensions.
+TEST(LayerTextureReference, AnEffectPassReadingTextureResolutionWithoutSamplingTheSlotGetsItsTargetSize) {
+    constexpr std::string_view kGridFrag = R"(uniform sampler2D g_Texture0;
+uniform vec4 g_Texture0Resolution;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = vec4(g_Texture0Resolution.xy / vec2(64.0, 32.0), 0.0, 1.0);
+}
+)";
+    fs::VFS vfs;
+    auto    parsed = ParseScene(vfs, R"([
+        {"id":16,"name":"canvas","image":"image.json",
+         "effects":[{"file":"effects/grid/effect.json","id":618,"visible":true}]}
+      ])",
+      {{ "/effects/grid/effect.json",
+         R"({"name":"grid","passes":[{"material":"materials/grid.json"}]})" },
+       { "/materials/grid.json",
+         R"({"passes":[{"blending":"normal","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"grid","textures":[null]}]})" },
+       { "/shaders/grid.vert", std::string(kVert) },
+       { "/shaders/grid.frag", std::string(kGridFrag) }});
+    ASSERT_NE(parsed, nullptr);
+    AddScreenTarget(*parsed);
+    const auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+    const auto* pass = FindPassByOutput(*graph, SpecTex_Default);
+    ASSERT_NE(pass, nullptr);
+    const auto* material = pass->desc().node->Mesh()->MaterialForSlot(pass->desc().material_slot);
+    ASSERT_NE(material, nullptr);
+    EXPECT_TRUE(material->textures.empty() || material->textures[0].empty());
+
+    const auto live = PassUniforms(*parsed, *pass, { "g_Texture0Resolution" });
+    const auto size = live.find("g_Texture0Resolution");
+    ASSERT_NE(size, live.end());
+    ASSERT_EQ(size->second.size(), 4u);
+    EXPECT_FLOAT_EQ(size->second[0], 64.0f);
+    EXPECT_FLOAT_EQ(size->second[1], 32.0f);
 }
 
 TEST(LayerTextureReference, SelfBInItsOwnEffectsIsNotAReference) {

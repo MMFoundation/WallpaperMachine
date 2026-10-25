@@ -51,6 +51,7 @@ public:
     bool                         FromFileJson(const nlohmann::json&, fs::VFS& vfs);
     int32_t                      id { 0 };
     std::string                  name;
+    std::string                  instance_name;
     bool                         visible { true };
     /// `visible` as written when a user property or a script decides it:
     /// `visible` above is then only the editor's default. A property's current

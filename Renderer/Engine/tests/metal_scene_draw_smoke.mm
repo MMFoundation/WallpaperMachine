@@ -11018,6 +11018,125 @@ TEST_F(MetalSceneDraw, ALayerReadingItsOwnCompositeSeesTheFrameBefore)
     }
 }
 
+namespace
+{
+
+std::filesystem::path WriteMutualHistoryFixture(const std::filesystem::path& root)
+{
+    const auto project = WriteFixture(root);
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main(){ gl_Position=g_ModelViewProjectionMatrix*vec4(a_Position,1.0);"
+        "v_TexCoord=a_TexCoord; }\n";
+    const std::map<std::string, std::string> files {
+        { "models/util/solidlayer.json",
+          R"({"width":384,"height":256,"material":"materials/util/solidlayer.json"})" },
+        { "materials/util/solidlayer.json",
+          R"({"passes":[{"shader":"solid","blending":"normal","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled"}]})" },
+        { "materials/util/effectpassthrough.json",
+          R"({"passes":[{"shader":"passthrough","blending":"normal","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})" },
+        { "effects/pattern_swap/effect.json",
+          R"({"name":"Canvas Copy","passes":[{"material":"materials/pattern_swap.json"}]})" },
+        { "materials/pattern_swap.json",
+          R"({"passes":[{"shader":"pattern_swap","blending":"normal","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":[null,null]}]})" },
+        { "effects/canvas/effect.json",
+          R"({"name":"canvas","fbos":[{"name":"_u_memoryCanv","scale":1,"unique":true},)"
+          R"({"name":"_u_paintedCanv","scale":1}],)"
+          R"("passes":[{"material":"materials/canvas_paint.json","target":"_u_paintedCanv",)"
+          R"("bind":[{"name":"previous","index":0},{"name":"_u_memoryCanv","index":1}]},)"
+          R"({"material":"materials/passthrough.json","bind":[{"name":"_u_paintedCanv","index":0}]},)"
+          R"({"command":"copy","source":"_u_paintedCanv","target":"_u_memoryCanv"}]})" },
+        { "materials/canvas_paint.json",
+          R"({"passes":[{"shader":"canvas_paint","blending":"normal","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":[null,null,null]}]})" },
+        { "materials/passthrough.json",
+          R"({"passes":[{"shader":"passthrough","blending":"normal","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})" },
+        { "shaders/solid.vert", vertex },
+        { "shaders/solid.frag",
+          "varying vec2 v_TexCoord;\n"
+          "void main(){ gl_FragColor=vec4(0.0,0.0,0.0,1.0); }\n" },
+        { "shaders/passthrough.vert", vertex },
+        { "shaders/passthrough.frag",
+          "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+          "void main(){ gl_FragColor=texture(g_Texture0,v_TexCoord); }\n" },
+        { "shaders/pattern_swap.vert", vertex },
+        { "shaders/pattern_swap.frag",
+          "uniform sampler2D g_Texture0;\nuniform sampler2D g_Texture1;\n"
+          "varying vec2 v_TexCoord;\n"
+          "void main(){ vec4 c=texture(g_Texture1,v_TexCoord);"
+          "gl_FragColor=vec4(c.b,0.25,c.r,1.0); }\n" },
+        { "shaders/canvas_paint.vert", vertex },
+        { "shaders/canvas_paint.frag",
+          "uniform sampler2D g_Texture0;\nuniform sampler2D g_Texture1;\n"
+          "uniform sampler2D g_Texture2;\n"
+          "uniform float u_cmd; // {\"material\":\"cmd\",\"default\":0}\n"
+          "varying vec2 v_TexCoord;\n"
+          "void main(){\n"
+          "  vec4 next = texture(g_Texture1, v_TexCoord);\n"
+          "  if (u_cmd > 0.5 && u_cmd < 1.5) next = vec4(0.8, 0.0, 0.0, 1.0);\n"
+          "  if (u_cmd > 2.5) next = texture(g_Texture2, v_TexCoord);\n"
+          "  gl_FragColor = next;\n"
+          "}\n" },
+        { "layout.json",
+          R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+          R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+          R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+          R"("objects":[)"
+          R"({"id":288,"name":"Pattern Texture","image":"models/util/solidlayer.json",)"
+          R"("origin":[192,128,0],"size":[384,256],"dependencies":[16],)"
+          R"("visible":{"script":"'use strict';\nvar tick = 0;\nexport function init(value) {\n  for (var i = 0; i < thisLayer.getEffectCount(); ++i) thisLayer.getEffect(i).visible = false;\n  return value;\n}\nexport function update(value) {\n  ++tick;\n  thisLayer.getEffect('Canvas Copy').visible = (tick === 2);\n  return value;\n}\n","value":true},)"
+          R"("effects":[{"file":"effects/pattern_swap/effect.json","id":476,"name":"Canvas Copy",)"
+          R"("visible":false,"passes":[{"textures":[null,"_rt_imageLayerComposite_16_a"]}]}]},)"
+          R"({"id":16,"name":"Canvas","image":"models/util/solidlayer.json",)"
+          R"("origin":[192,128,0],"size":[384,256],"dependencies":[288],)"
+          R"("effects":[{"file":"effects/canvas/effect.json","id":160,"name":"Canvas Shader",)"
+          R"("visible":true,"passes":[{"constantshadervalues":{"cmd":{"script":"'use strict';\nvar tick = 0;\nexport function update(value) {\n  ++tick;\n  if (tick === 1) return 1.0;\n  if (tick === 2) return 3.0;\n  return 0.0;\n}\n","value":1}},)"
+          R"("textures":[null,null,"_rt_imageLayerComposite_288_a"]},{}]}]}]})" },
+    };
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    return project;
+}
+
+} // namespace
+
+// Two layers that sample each other's composites: the earlier pattern layer
+// switches its copy effect on in frame 2 (reading the canvas composite from
+// frame 1 and swapping red into blue), the canvas blends that pattern composite
+// in the same frame 2, and frame 3 switches the pattern effect off again while
+// keeping the canvas's accumulated buffer across both graph rebuilds.
+TEST_F(MetalSceneDraw, MutualLayerReferencesPreserveCanvasHistoryAcrossEffectSwitches)
+{
+    const auto  project = WriteMutualHistoryFixture(root_ / "mutual-history");
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "mutual-history-cache", loaded, error)) << error;
+    EXPECT_TRUE(loaded.scene->layer_texture_error.empty()) << loaded.scene->layer_texture_error;
+    const auto selection = SelectSceneBackend(*loaded.scene);
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+    RebuildWatch watch;
+    const auto   picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0,
+                                            {}, 1.0, nullptr, nullptr, &watch);
+    ASSERT_TRUE(picture.error.empty()) << picture.error;
+    ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+    EXPECT_GE(watch.rebuilds, 2);
+
+    const auto* centre = picture.rgb.data() + (128 * 384 + 192) * 3;
+    EXPECT_NEAR(centre[0], 0, 3);
+    EXPECT_NEAR(centre[1], 64, 3);
+    EXPECT_NEAR(centre[2], 204, 4);
+}
+
 TEST_F(MetalSceneDraw, TextThatHasNotChangedIsNeitherLaidOutNorUploadedAgain)
 {
     // The round's optimisation, stated as what must NOT happen: the scripts and
