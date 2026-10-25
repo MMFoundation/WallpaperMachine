@@ -2002,6 +2002,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc func checkForUpdates() {
+        // A check clears the release the open update window shows; that window is the answer.
+        if updateWindow != nil {
+            showUpdateWindow()
+            return
+        }
         controlPanelNavigation.revealSettingsSection(.about)
         showControlPanel(selection: .settings)
         Task { _ = await appUpdater.checkForUpdates() }
@@ -2105,7 +2110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     /// The update window, brought forward: nonmodal, so it never stalls the main actor.
     @objc private func showUpdateWindow() {
-        guard !shutdownInProgress, !shutdownComplete, appUpdater.state.availableVersion != nil else { return }
+        guard !shutdownInProgress, !shutdownComplete,
+              let version = appUpdater.state.availableVersion else { return }
+        // Opened from the status menu too: a prompt held for this version is answered by it.
+        updatePrompts.markOffered(version)
         if let updateWindow {
             NSApp.setActivationPolicy(.regular)
             ControlPanelWindow.bringForward(updateWindow)

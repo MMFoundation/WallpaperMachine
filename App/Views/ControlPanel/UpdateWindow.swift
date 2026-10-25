@@ -200,7 +200,8 @@ struct UpdateWindowView: View {
     }
     .buttonStyle(.panelPrimary)
     .keyboardShortcut(.defaultAction)
-    .disabled(state.isBusy)
+    // Nothing to install while a check runs or after one failed.
+    .disabled(state.isBusy || state.availableVersion == nil)
   }
 
   private func progress(value: Double?, @ViewBuilder label: () -> some View) -> some View {

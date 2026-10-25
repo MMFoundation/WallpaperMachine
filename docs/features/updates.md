@@ -220,7 +220,9 @@ strict rules publishing applies ([release](../release.md#release-notes-and-the-c
   unattended checks offer it no more, and a newer release is offered as usual. About
   and the status menu still show it.
 - **Remind Me Later**, Escape and the close button close the window; the version is
-  offered again on the next launch.
+  offered again on the next launch, also when the window was opened from the status menu.
+  **Check for Updates…** while the window is open brings it forward instead of checking,
+  and its main button is disabled whenever no version is available.
 - **Automatically download and install updates in the future** turns on automatic
   updates, the same setting as About's switch.
 

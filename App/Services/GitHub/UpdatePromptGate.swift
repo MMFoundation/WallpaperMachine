@@ -57,6 +57,13 @@ struct UpdatePromptLedger: Equatable, Sendable {
     /// Why a prompt is waiting, or nil when none is.
     private(set) var holdReason: UpdatePromptGate.HoldReason?
 
+    /// Records `version` as offered because its window opened another way (the status menu), so
+    /// a prompt held for it does not open the window again after Remind Me Later.
+    mutating func markOffered(_ version: String) {
+        offeredVersion = version
+        holdReason = nil
+    }
+
     /// `version` is the update worth the window (downloaded or available), nil when there is none.
     mutating func offer(version: String?, input: UpdatePromptGate.Input) -> Outcome {
         guard let version, version != offeredVersion else {

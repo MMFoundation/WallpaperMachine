@@ -115,6 +115,17 @@ final class UpdatePromptGateTests: XCTestCase {
             .present(version: "2.0.0"))
     }
 
+    func testAWindowOpenedFromTheMenuAnswersAHeldPrompt() {
+        var ledger = UpdatePromptLedger()
+        _ = ledger.offer(version: "2.0.0", input: input(coveredDisplay: true))
+        ledger.markOffered("2.0.0")
+        XCTAssertNil(ledger.holdReason)
+        XCTAssertEqual(
+            ledger.offer(version: "2.0.0", input: input()), .none,
+            "Remind Me Later in that window holds for the launch")
+        XCTAssertEqual(ledger.offer(version: "2.0.1", input: input()), .present(version: "2.0.1"))
+    }
+
     func testAnUpdateThatDisappearedWhileHeldIsForgotten() {
         var ledger = UpdatePromptLedger()
         _ = ledger.offer(version: "2.0.0", input: input(presentation: .suspended))
