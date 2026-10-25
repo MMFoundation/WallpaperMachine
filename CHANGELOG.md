@@ -3,55 +3,55 @@
 Every published version, newest first. Each section is written when its version is
 cut, by [`scripts/release_notes.py`](scripts/release_notes.py) from the commits
 between two version tags: a language model writes them up for users, where older
-sections list the commits. From 1.5.7, each section states the same notes in English,
-Simplified Chinese and Korean; earlier sections keep their original translations.
-The app's What's New window offers all three languages, with English as the fallback
-for older releases without Korean notes. The GitHub Release body repeats only the
-English notes. See
-[docs/release.md](docs/release.md) for how a version is cut.
+sections list the commits. A section's heading links the version to its comparison
+with the previous one and gives the release date. Under it, the same notes in English,
+Simplified Chinese and Korean (from 1.5.7; earlier sections keep their original
+translations) are grouped into Features, Bug Fixes and the other categories, and
+newer bullets end with the issues they close and the commits they describe. The
+app's update window shows the sections of every version newer than the installed
+one, in the app's language; the GitHub Release body repeats only the English notes.
+See [docs/release.md](docs/release.md) for how a version is cut.
 
-## 1.6.2 — 2026-10-24
+## [1.6.2](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.1...v1.6.2) (2026-10-24)
 
 ### English
 
-#### Fixed
+#### Bug Fixes
 
 - Long names on narrow Quick Settings tiles now shrink slightly to fit instead of being cut off with an ellipsis
 
 ### 简体中文
 
-#### 修复
+#### 问题修复
 
 - 快捷设置磁贴较窄时，较长的名称现在会略微缩小以完整显示，不再被省略号截断
 
 ### 한국어
 
-#### 수정됨
+#### 버그 수정
 
 - 빠른 설정 타일이 좁을 때 긴 이름이 말줄임표로 잘리지 않고 살짝 작아져 전체가 표시됩니다
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.1...v1.6.2
-
-## 1.6.1 — 2026-10-24
+## [1.6.1](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.0...v1.6.1) (2026-10-24)
 
 ### English
 
 Each desktop can now have its own wallpaper and the library can live on an external drive, and Mission Control pictures no longer fill the disk on macOS 26 and later
 
-#### Breaking changes
+#### Breaking Changes
 
 - The app now sends one daily count that it ran, with its version but no install ID, even when Send performance data is off
 
-#### New
+#### Features
 
 - Each desktop (Space) can now play a wallpaper or playlist of its own and resumes where you left it, off by default and turned on in Quick Settings
 - The wallpaper library and downloads can now live on an external drive, moved from Storage in Settings, with new downloads going straight there
 
-#### Improved
+#### Improvements
 
 - Report on GitHub now opens a bug report form with the wallpaper, app version and any error filled in, and asks what happened and what you expected
 
-#### Fixed
+#### Bug Fixes
 
 - Mission Control pictures no longer fill the disk on macOS 26 and later, since the app now retakes them only when a display's wallpaper changes
 - Aerial, dynamic and other moving macOS wallpapers come back as you left them when you quit, instead of a still picture on every desktop
@@ -70,7 +70,7 @@ Each desktop can now have its own wallpaper and the library can live on an exter
 
 - 即使关闭了“发送性能数据”，应用现在也会每天发送一次运行计数，包含版本信息但不含安装标识
 
-#### 新增
+#### 新功能
 
 - 每个桌面（空间）现在可以播放各自的壁纸或播放列表，切回时从离开处继续，此功能默认关闭，可在快速设置中开启
 - 壁纸库和下载内容现在可以存放在外置磁盘上，在设置的存储中即可移动，之后的新下载会直接保存到该磁盘
@@ -79,7 +79,7 @@ Each desktop can now have its own wallpaper and the library can live on an exter
 
 - “在 GitHub 上报告”现在会打开问题报告表单，自动填入壁纸、应用版本和错误信息，并请你描述发生了什么以及预期结果
 
-#### 修复
+#### 问题修复
 
 - 在 macOS 26 及更高版本上，调度中心的桌面图片不再反复生成副本占满磁盘，现在仅在显示器的壁纸变化时才会更新
 - 退出应用后，航拍、动态等会动的 macOS 壁纸会恢复原样，不再在每个桌面上留下一张静态图片
@@ -107,7 +107,7 @@ Each desktop can now have its own wallpaper and the library can live on an exter
 
 - GitHub에 보고하기가 이제 배경화면, 앱 버전, 오류가 미리 채워진 버그 보고 양식을 열고 무슨 일이 있었는지와 기대한 결과를 묻습니다
 
-#### 수정됨
+#### 버그 수정
 
 - macOS 26 이상에서 Mission Control용 데스크탑 사진의 사본이 디스크를 채우지 않으며, 이제 디스플레이의 배경화면이 바뀔 때만 다시 찍습니다
 - 앱을 종료하면 항공 영상, 다이내믹 등 움직이는 macOS 배경화면이 원래대로 돌아오며, 더 이상 모든 데스크탑에 정지 사진이 남지 않습니다
@@ -118,9 +118,7 @@ Each desktop can now have its own wallpaper and the library can live on an exter
 - 씬의 첫 프레임이 잠깐 화면에 맞춤으로 보였다가 채우기로 바뀌지 않고 처음부터 자체 크기 조정으로 표시됩니다
 - 업데이트 후 새로운 기능 창과 제어판이 다른 앱 뒤에 숨지 않고 앞에 열립니다
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.0...v1.6.1
-
-## 1.6.0 — 2026-10-23
+## [1.6.0](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.9...v1.6.0) (2026-10-23)
 
 ### English
 
@@ -136,21 +134,21 @@ WallpaperMachine 1.6 draws every scene with Native Metal, hands video wallpapers
 - Scene wallpapers and the control panel use much less memory, especially when one wallpaper runs on several displays
 - WallpaperMachine is now licensed under GPL-3.0-only, with the renderer it inherited rewritten from the ground up
 
-#### Breaking changes
+#### Breaking Changes
 
 - The Scene renderer and Video playback choices are gone from Settings › Performance › Advanced; settings saved by earlier versions still load
 - A scene Native Metal cannot draw is no longer handed to another renderer: it keeps its last picture, or shows its preview, and the reason appears under Drawn by
 - Videos macOS cannot play, such as AVI files or AV1 on a Mac without hardware AV1 decoding, are refused when you apply them, with a message that names the format and how to convert it
 - Fit with blurred backdrop shows black bars around plain video wallpapers; scene wallpapers keep their blurred backdrop
 
-#### New
+#### Features
 
 - Horizontal position and Vertical position now move video wallpapers that macOS plays, and Center puts them back
 - The preview window plays video wallpapers with the same players as the desktop, with sound when you unmute it
 - On the optional animated lock screen and in the screen saver, plain video wallpapers play through the macOS hardware video player, always without sound
 - When the lock screen cannot show a scene or video, it keeps its last frame and the lock screen status in the app says why
 
-#### Improved
+#### Improvements
 
 - Displays showing the same scene share its pictures, saving tens to hundreds of megabytes of GPU memory for each extra display
 - Videos inside scenes are read from disk instead of being copied into memory, so a 150 MB clip no longer briefly needs about 300 MB while the scene loads
@@ -159,7 +157,7 @@ WallpaperMachine 1.6 draws every scene with Native Metal, hands video wallpapers
 - Scenes with a clock or readout whose width keeps changing stay smooth instead of reloading the whole scene each time
 - Messages about scene rendering, Energy use and the lock screen now appear in Korean
 
-#### Fixed
+#### Bug Fixes
 
 - The optional animated lock screen recovers by itself when its renderer stops or a display sleeps while the Mac is locked, instead of falling back to a black or default picture
 - Particle effects whose colour a scene overrides take on the right tint, so fire that should burn red no longer turns pink and magenta
@@ -193,7 +191,7 @@ WallpaperMachine 1.6 用 Native Metal 绘制所有场景，把视频壁纸交给
 - macOS 无法播放的视频（例如 AVI 文件，或在不支持硬件 AV1 解码的 Mac 上的 AV1 视频）会在应用时被拒绝，提示信息会说明格式及转换方法
 - 适应（模糊背景）在普通视频壁纸周围显示黑边；场景壁纸仍保留模糊背景
 
-#### 新增
+#### 新功能
 
 - 水平位置和垂直位置现在也能移动由 macOS 播放的视频壁纸，居中可将其复位
 - 预览窗口使用与桌面相同的播放器播放视频壁纸，取消静音后可听到声音
@@ -209,7 +207,7 @@ WallpaperMachine 1.6 用 Native Metal 绘制所有场景，把视频壁纸交给
 - 带有宽度不断变化的时钟或读数的场景保持流畅，不再每次都重新载入整个场景
 - 有关场景渲染、能耗和锁定屏幕的提示现在提供韩语版本
 
-#### 修复
+#### 问题修复
 
 - 可选的动态锁定屏幕在渲染器停止或 Mac 锁定期间显示器休眠时会自行恢复，不再退回黑屏或默认图片
 - 场景覆盖了颜色的粒子效果现在会呈现正确的色调，本应燃烧成红色的火焰不再变成粉色和品红色
@@ -259,7 +257,7 @@ WallpaperMachine 1.6은 모든 장면을 Native Metal로 그리고, 비디오 �
 - 폭이 계속 바뀌는 시계나 수치 표시가 있는 장면이 매번 장면 전체를 다시 불러오지 않고 부드럽게 유지됩니다
 - 장면 렌더링, 에너지 사용량, 잠금 화면에 관한 메시지가 이제 한국어로 표시됩니다
 
-#### 수정됨
+#### 버그 수정
 
 - 선택 사항인 움직이는 잠금 화면이 렌더러가 멈추거나 Mac이 잠긴 동안 디스플레이가 잠자기에 들어가도 스스로 복구되며, 검은 화면이나 기본 그림으로 돌아가지 않습니다
 - 장면이 색상을 덮어쓴 파티클 효과가 올바른 색조를 띠므로, 붉게 타올라야 할 불꽃이 더 이상 분홍색과 자홍색으로 변하지 않습니다
@@ -272,19 +270,17 @@ WallpaperMachine 1.6은 모든 장면을 Native Metal로 그리고, 비디오 �
 - 더 많은 창작마당 배경화면의 셰이더가 이제 Native Metal용으로 컴파일됩니다
 - 폴더 별칭을 통해 배경화면에 접근하는 경우에도 잠금 화면이 제대로 동작합니다
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.9...v1.6.0
-
-## 1.5.9 — 2026-10-21
+## [1.5.9](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.8...v1.5.9) (2026-10-21)
 
 ### English
 
 This update lets fitted wallpapers fill empty screen space with a blurred backdrop and makes music-player scenes and multi-display setups behave more reliably
 
-#### New
+#### Features
 
 - Scene and video wallpapers can now fit the whole picture on screen and fill the space around it with a soft blurred copy instead of black bars
 
-#### Fixed
+#### Bug Fixes
 
 - Each display keeps its own wallpaper when macOS switches the main display, without reloading, flashing or jumping onto a monitor you switched off
 - Some scene wallpapers that showed only a grey background now draw their full picture
@@ -298,11 +294,11 @@ This update lets fitted wallpapers fill empty screen space with a blurred backdr
 
 本次更新让适应屏幕的壁纸可以用模糊背景填满空白区域，并让音乐播放器场景壁纸和多显示器设置更加稳定可靠
 
-#### 新增
+#### 新功能
 
 - 场景和视频壁纸现在可以完整显示画面，并用柔和的模糊副本填充周围空白，而不再显示黑边
 
-#### 修复
+#### 问题修复
 
 - macOS 切换主显示器时，每台显示器都会保留自己的壁纸，不再重新载入、闪烁或出现在已关闭壁纸的显示器上
 - 部分原本只显示灰色背景的场景壁纸现在可以完整显示画面
@@ -320,7 +316,7 @@ This update lets fitted wallpapers fill empty screen space with a blurred backdr
 
 - 이제 장면 및 비디오 배경화면을 화면에 전체로 맞추고 주변 공간을 검은 여백 대신 부드럽게 흐린 사본으로 채울 수 있습니다
 
-#### 수정됨
+#### 버그 수정
 
 - macOS에서 주 디스플레이가 바뀌어도 각 디스플레이가 자기 배경화면을 유지하며, 다시 불러오거나 깜박이거나 꺼 둔 모니터로 옮겨가지 않습니다
 - 회색 배경만 보이던 일부 장면 배경화면이 이제 전체 화면을 제대로 그립니다
@@ -330,15 +326,13 @@ This update lets fitted wallpapers fill empty screen space with a blurred backdr
 - 화면 비율별 배경이 있는 배경화면은 선택한 비율의 배경만 보여 주며, 새 곡마다 커버 전환 효과가 재생됩니다
 - 일부 음악 배경화면의 오디오 시각화 막대가 이제 멈춰 있지 않고 음악에 맞춰 움직입니다
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.8...v1.5.9
-
-## 1.5.8 — 2026-10-20
+## [1.5.8](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.7...v1.5.8) (2026-10-20)
 
 ### English
 
 This update brings scene wallpapers closer to how they look in Wallpaper Engine and makes the Steam Workshop clearer when Steam is busy
 
-#### Fixed
+#### Bug Fixes
 
 - Scene wallpapers show their lighting, height fog, rotating models and blur effects again, including wallpapers from older Workshop packages
 - Steam Workshop and Collections now retry on their own when Steam is busy and say so, instead of wrongly claiming Steam changed its page
@@ -348,7 +342,7 @@ This update brings scene wallpapers closer to how they look in Wallpaper Engine 
 
 本次更新让场景壁纸的效果更接近 Wallpaper Engine，并在 Steam 繁忙时给出更清楚的 Steam 创意工坊提示
 
-#### 修复
+#### 问题修复
 
 - 场景壁纸重新正确显示光照、高度雾、模型旋转和模糊效果，较旧的创意工坊壁纸包也同样适用
 - Steam 繁忙时，Steam 创意工坊和合集会自动重试并如实提示，不再误报 Steam 页面已更改
@@ -358,21 +352,19 @@ This update brings scene wallpapers closer to how they look in Wallpaper Engine 
 
 이번 업데이트로 장면 배경화면이 Wallpaper Engine에서 보이는 모습에 더 가까워지고, Steam이 혼잡할 때 Steam 창작마당 안내가 더 명확해집니다
 
-#### 수정됨
+#### 버그 수정
 
 - 장면 배경화면에서 조명, 높이 안개, 모델 회전, 흐림 효과가 다시 표시되며 오래된 창작마당 패키지의 배경화면도 마찬가지입니다
 - Steam이 혼잡하면 Steam 창작마당과 컬렉션이 자동으로 다시 시도하고 그 상황을 알려 주며, 더 이상 Steam 페이지가 바뀌었다고 잘못 안내하지 않습니다
 - 서리 낀 노이즈나 오디오 라인 효과를 쓰는 배경화면에서 해당 레이어가 빠지지 않고 다시 표시됩니다
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.7...v1.5.8
-
-## 1.5.7 — 2026-10-19
+## [1.5.7](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.6...v1.5.7) (2026-10-19)
 
 ### English
 
 WallpaperMachine now speaks Korean, and sunrise and sunset rules and Steam sign-in take less setup
 
-#### New
+#### Features
 
 - The control panel, settings, menus, dialogs and lock screen are now available in Korean, following your macOS language or chosen in the language setting
 - What's New shows release notes in Korean when the app uses Korean, with English shown for older releases
@@ -380,12 +372,12 @@ WallpaperMachine now speaks Korean, and sunrise and sunset rules and Steam sign-
 - Sunrise and sunset rules can now switch at two fixed clock times you choose, with rule offsets still applied
 - A new Automatic option lets sunrise and sunset follow your Mac's approximate location, with a link to System Settings if access is refused
 
-#### Improved
+#### Improvements
 
 - Your Steam Community sign-in now survives quitting the app and renews itself, so Your subscriptions should not ask you to sign in again for months
 - Scene and web wallpapers show the current track without an extra opt-in, while choices you already saved are kept
 
-#### Fixed
+#### Bug Fixes
 
 - A second display resumes its wallpaper after wake or unlock without needing a click or refresh
 - Applying a scene wallpaper before shared scene resources are installed opens their setup instead of failing with an error
@@ -396,7 +388,7 @@ WallpaperMachine now speaks Korean, and sunrise and sunset rules and Steam sign-
 
 WallpaperMachine 现已支持韩语，日出日落规则和 Steam 登录也更省心
 
-#### 新增
+#### 新功能
 
 - 控制面板、设置、菜单、对话框和锁定屏幕现已支持韩语，可跟随 macOS 语言，也可在语言设置中选择
 - 应用语言为韩语时，新功能窗口会显示韩语更新说明，较早的版本则显示英文
@@ -409,7 +401,7 @@ WallpaperMachine 现已支持韩语，日出日落规则和 Steam 登录也更�
 - Steam 社区的登录状态现在退出应用后仍会保留并自动续期，“我的订阅”数月内通常无需重新登录
 - 场景和网页壁纸无需额外开启即可显示当前播放的曲目，已保存的设置保持不变
 
-#### 修复
+#### 问题修复
 
 - 唤醒或解锁后，第二台显示器上的壁纸会自动继续播放，无需点击或刷新
 - 在共享场景资源安装前应用场景壁纸，现在会打开资源安装步骤，而不是报错失败
@@ -433,31 +425,29 @@ WallpaperMachine이 이제 한국어를 지원하며, 일출·일몰 규칙과 S
 - Steam 커뮤니티 로그인이 이제 앱을 종료해도 유지되고 자동으로 갱신되어, 내 구독을 보려고 몇 달 동안 다시 로그인하지 않아도 됩니다
 - 장면 및 웹 배경화면이 별도로 켜지 않아도 현재 재생 중인 곡을 표시하며, 이미 저장한 설정은 그대로 유지됩니다
 
-#### 수정됨
+#### 버그 수정
 
 - 잠자기나 잠금을 해제한 뒤 두 번째 디스플레이의 배경화면이 클릭이나 새로 고침 없이 다시 재생됩니다
 - 공유 장면 리소스를 설치하기 전에 장면 배경화면을 적용하면 오류 대신 리소스 설치 화면이 열립니다
 - 제어판이 최소화되어 있거나 Steam 또는 pixiv 로그인 창이 열려 있으면 Dock 아이콘이 유지되어 제어판을 다시 열 수 있습니다
 - 백업을 복원할 때 이전 버전에서 만든 백업을 포함해 일출·일몰 설정이 그대로 유지됩니다
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.6...v1.5.7
-
-## 1.5.6 — 2026-10-17
+## [1.5.6](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.5...v1.5.6) (2026-10-17)
 
 ### English
 
 This update makes more scene wallpapers look the way they do in Wallpaper Engine, fixes a problem that could stop the app from quitting, and adds a way to reset all settings
 
-#### New
+#### Features
 
 - Settings › General has a new Reset section that, after a confirmation, returns every setting to its default while keeping your library, playlists, collections and sign-ins
 
-#### Improved
+#### Improvements
 
 - A wide window now shows the target display's name in the toolbar, so you can see at a glance which screen gets wallpapers
 - Wallpaper details now slide in and out from the window's right edge, matching the Filters sidebar
 
-#### Fixed
+#### Bug Fixes
 
 - Quitting WallpaperMachine no longer fails with a missing-file error when the desktop picture you used before it has since been deleted
 - Scenes and Workshop presets with a chosen background picture now show that picture instead of turning the whole wallpaper black
@@ -472,7 +462,7 @@ This update makes more scene wallpapers look the way they do in Wallpaper Engine
 
 本次更新让更多场景壁纸的显示效果与 Wallpaper Engine 一致，修复了可能导致应用无法退出的问题，并新增了重置全部设置的功能
 
-#### 新增
+#### 新功能
 
 - 设置 › 通用新增“重置”部分，确认后可将所有设置恢复为默认值，同时保留你的壁纸库、播放列表、合集和登录信息
 
@@ -481,7 +471,7 @@ This update makes more scene wallpapers look the way they do in Wallpaper Engine
 - 窗口较宽时，工具栏会显示目标显示器的名称，一眼就能看出壁纸将应用到哪块屏幕
 - 壁纸详情栏现在会从窗口右侧滑入滑出，与筛选边栏的动画保持一致
 
-#### 修复
+#### 问题修复
 
 - 如果使用 WallpaperMachine 之前的桌面图片已被删除，退出应用时不再因找不到文件而失败
 - 选择了背景图片的场景或自带背景图片的创意工坊预设现在会正常显示该图片，不再整屏发黑
@@ -492,9 +482,7 @@ This update makes more scene wallpapers look the way they do in Wallpaper Engine
 - 调整过大小的动态图片图层现在按场景保存的尺寸显示，Makima is Listening 中的 CRT 显示器屏幕会填满边框，不再留有灰边
 - 使用兼容渲染器时，流体模拟等基于上一帧的效果在部分 Mac 上不再从全亮画面开始
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.5...v1.5.6
-
-## 1.5.5 — 2026-10-17
+## [1.5.5](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.4.1...v1.5.5) (2026-10-17)
 
 ### English
 
@@ -509,11 +497,11 @@ This release rebuilds the control panel as a native macOS window and brings scen
 - 2D scene wallpapers are drawn at your display's resolution by default, so edges and fine detail stay sharp
 - Text, particles, ripples and media widgets in scenes look and behave much closer to Wallpaper Engine
 
-#### Breaking changes
+#### Breaking Changes
 
 - Clicking a tag chip in Filters now shows only wallpapers with that tag; to hide a tag, Option-click it or choose Hide this tag
 
-#### New
+#### Features
 
 - Library, Steam Workshop, pixiv and Settings are tabs in the title bar, and what is playing sits in a bar along the bottom
 - Filters open in a sidebar that slides out beside the grid, and collections are created, renamed and deleted in its Collections group
@@ -529,7 +517,7 @@ This release rebuilds the control panel as a native macOS window and brings scen
 - You can choose to send a small daily performance report that helps find slow wallpapers and crashes; it stays off until you turn it on
 - The What's New window shows a banner and highlights for feature releases, in the language you read the notes in
 
-#### Improved
+#### Improvements
 
 - Scrolling the wallpaper grids stays smooth, even with animated previews playing or the details column open
 - Quick Settings now says which battery, Low Power Mode or heat rule is pausing wallpapers or lowering quality, and Performance shows the frame rate in force
@@ -542,7 +530,7 @@ This release rebuilds the control panel as a native macOS window and brings scen
 - More scenes now stay on the Native Metal renderer instead of switching to Compatibility
 - The title bar shows WallpaperMachine and its version again, each page has its search bar at the top, and filter groups fold smoothly
 
-#### Fixed
+#### Bug Fixes
 
 - Text layers in scenes now use the right fonts, size, alignment and spacing, with no dark edges, and stay visible under effects
 - Cursor ripple and fluid effects now move, getting one push per click instead of one every frame the button is held
@@ -578,7 +566,7 @@ This release rebuilds the control panel as a native macOS window and brings scen
 
 - 在筛选中点按标签现在只显示带有该标签的壁纸；如需隐藏某个标签，请按住 Option 点按或选择“隐藏此标签”
 
-#### 新增
+#### 新功能
 
 - 壁纸库、Steam 创意工坊、pixiv 和设置以标签页形式位于标题栏，正在播放的壁纸显示在窗口底部的栏中
 - 筛选条件显示在网格旁滑出的侧栏中，可在其中的“合集”分组里新建、重命名和删除合集
@@ -607,7 +595,7 @@ This release rebuilds the control panel as a native macOS window and brings scen
 - 更多场景现在会继续使用原生 Metal 渲染器，而不再切换到兼容渲染器
 - 标题栏重新显示 WallpaperMachine 及其版本号，每个页面顶部都有搜索栏，筛选分组的展开和收起也更顺滑
 
-#### 修复
+#### 问题修复
 
 - 场景中的文字图层现在使用正确的字体、大小、对齐和间距，边缘不再发黑，套用效果后也不会消失
 - 鼠标涟漪和流体效果现在会动起来，每次点按推动一次，而不是按住时每帧都推动
@@ -626,19 +614,17 @@ This release rebuilds the control panel as a native macOS window and brings scen
 - 在“下载”列表中暂停、继续或完成下载时状态会立即更新，简体中文下的下载进度也会显示百分号
 - 搜索设置时，已展开部分的内容不再在标题隐藏后仍然显示
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.4.1...v1.5.5
-
-## 1.4.1 — 2026-10-14
+## [1.4.1](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.3.3...v1.4.1) (2026-10-14)
 
 ### English
 
 Native Metal becomes the default scene renderer, live property previews and wallpaper positioning arrive, and many scene, video, experimental lock screen and Workshop download problems are fixed
 
-#### Breaking changes
+#### Breaking Changes
 
 - Scene wallpapers now play on the Native Metal renderer by default, switched once on first launch; choose Compatibility in Performance settings to keep the previous renderer
 
-#### New
+#### Features
 
 - The Wallpaper Preview window now follows property edits as you make them, including sliders and colors while you drag, without reloading or touching your desktop
 - An optional setting, off by default, shows a scene wallpaper's property edits on your desktop as you make them, before you apply changes
@@ -667,7 +653,7 @@ Native Metal becomes the default scene renderer, live property previews and wall
 - An optional switch, off by default, lets Safari's Web Inspector debug web wallpapers
 - The diagnostics report now includes macOS resource and hang reports, the wallpaper load history and memory use, and the log explains why wallpapers changed
 
-#### Improved
+#### Improvements
 
 - Switching to a scene, web page or video on the optional native video playback now keeps the previous picture until the new one appears, instead of flashing black
 - Native Metal now draws wallpapers with scene lights, motion trails, fluid and ripple effects and perspective effects instead of handing them to Compatibility
@@ -685,7 +671,7 @@ Native Metal becomes the default scene renderer, live property previews and wall
 - Backups no longer include the saved Steam sign-in, partial downloads or thumbnail caches, while your library is still backed up
 - The update available alert now waits until wallpapers are showing again instead of appearing over full-screen apps or the locked screen
 
-#### Fixed
+#### Bug Fixes
 
 - Many Workshop effects that were silently missing now appear, including water caustics, sine wave, pixelate, audio bars, color grading, halftone, procedural noise and progress bars
 - Image layer colors chosen by a preset or your settings, and effects your settings switch on or off, now take effect
@@ -729,7 +715,7 @@ Native Metal 成为默认场景渲染器，新增实时属性预览和壁纸位�
 
 - 场景壁纸现在默认使用 Native Metal 渲染器，首次启动时会自动切换一次；如需继续使用原渲染器，请在性能设置中选择兼容渲染器
 
-#### 新增
+#### 新功能
 
 - 壁纸预览窗口现在会随你编辑属性实时更新，拖动滑块和颜色时也会跟随，且不会重新载入或影响桌面
 - 新增可选设置（默认关闭），可在应用更改之前就把场景壁纸的属性编辑实时显示在桌面上
@@ -776,7 +762,7 @@ Native Metal 成为默认场景渲染器，新增实时属性预览和壁纸位�
 - 备份不再包含已保存的 Steam 登录信息、未完成的下载和缩略图缓存，壁纸库仍会照常备份
 - 有可用更新的提醒现在会等到壁纸重新显示时再出现，不再弹在全屏应用或锁定屏幕上方
 
-#### 修复
+#### 问题修复
 
 - 许多此前被悄悄略过的 Workshop 效果现在会显示，包括水面焦散、正弦波、像素化、音频条、调色、半色调、程序噪声和进度条
 - 由预设或你的设置选择的图层颜色，以及设置中开关的效果，现在都会生效
@@ -812,19 +798,17 @@ Native Metal 成为默认场景渲染器，新增实时属性预览和壁纸位�
 - 网页壁纸在首次更新后只接收已更改的属性，网页不再在每次编辑时重复初始化
 - 在运行 macOS 27 的 MacBook 上，性能设置中的能耗再次显示每小时电池占比
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.3.3...v1.4.1
-
-## 1.4.0 — 2026-10-13
+## [1.4.0](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.3.3...v1.4.0) (2026-10-13)
 
 ### English
 
 WallpaperMachine 1.4.0 makes Native Metal the default scene renderer, lets you see property edits and position wallpapers live, and adds menu bar, playlist and download controls
 
-#### Breaking changes
+#### Breaking Changes
 
 - Scene wallpapers now play on the Native Metal renderer by default, and you can choose Compatibility again in Settings > Performance
 
-#### New
+#### Features
 
 - An optional setting, off by default, shows a scene wallpaper's property edits on the desktop as you make them, before you apply them
 - The Wallpaper Preview window now follows property edits for scene and web wallpapers, including sliders and colors while you drag them
@@ -851,7 +835,7 @@ WallpaperMachine 1.4.0 makes Native Metal the default scene renderer, lets you s
 - On a MacBook, a wallpaper's energy rating in the inspector also shows the share of a full battery charge it uses per hour
 - An optional switch, off by default, lets Safari's Web Inspector debug web wallpapers
 
-#### Improved
+#### Improvements
 
 - Native Metal now draws wallpapers with scene lights, motion trails, fluid and ripple effects and perspective effects instead of switching them to Compatibility
 - Customizable scene wallpapers no longer hold memory for layers their settings hide, cutting one wallpaper's memory use from about 12.7 GB to 1.6 GB
@@ -870,7 +854,7 @@ WallpaperMachine 1.4.0 makes Native Metal the default scene renderer, lets you s
 - The update alert now waits until wallpapers are showing again instead of appearing over full-screen apps or the locked screen
 - Time Machine no longer backs up your Steam sign-in, partial downloads or thumbnail caches
 
-#### Fixed
+#### Bug Fixes
 
 - Many Workshop effects that were silently missing now draw, including water caustics, sine wave, pixelate, audio bars, color grading, halftone and procedural noise
 - Wallpapers that change with the time of day no longer show only a clock on a black screen
@@ -912,7 +896,7 @@ WallpaperMachine 1.4.0 将 Native Metal 设为默认场景渲染器，支持实�
 
 - 场景壁纸现默认使用 Native Metal 渲染器播放，你可以在“设置 > 性能”中重新选择兼容渲染器
 
-#### 新增
+#### 新功能
 
 - 新增可选设置（默认关闭），在你编辑场景壁纸属性时，桌面会在应用前即时显示改动
 - 壁纸预览窗口现会跟随场景和网页壁纸的属性编辑更新，拖动滑块和颜色时也会同步显示
@@ -958,7 +942,7 @@ WallpaperMachine 1.4.0 将 Native Metal 设为默认场景渲染器，支持实�
 - 更新提示现在会等到壁纸重新显示后再出现，不再弹出在全屏应用或锁定的屏幕上
 - Time Machine 不再备份你的 Steam 登录信息、未完成的下载和缩略图缓存
 
-#### 修复
+#### 问题修复
 
 - 许多此前悄然缺失的 Workshop 效果现可正常绘制，包括水面焦散、正弦波、像素化、音频条、调色、半色调和程序噪点
 - 随时间变化的壁纸不再只在黑屏上显示一个时钟
@@ -992,19 +976,17 @@ WallpaperMachine 1.4.0 将 Native Metal 设为默认场景渲染器，支持实�
 - 在 macOS 27 上，“设置 > 性能”重新显示应用每小时消耗的满电量比例
 - 导入文件选择器等辅助进程先行结束时，应用不再突然退出
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.3.3...v1.4.0
-
-## 1.3.3 — 2026-10-11
+## [1.3.3](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.3.2...v1.3.3) (2026-10-11)
 
 ### English
 
 This release lets playlists rotate at any interval you choose and makes many scene wallpapers, especially audio visualizers, look and move as they do in Wallpaper Engine
 
-#### New
+#### Features
 
 - Playlists can now rotate at any whole number of minutes from 1 to 10,080 by choosing Custom under How often
 
-#### Improved
+#### Improvements
 
 - On Macs with an XDR display, changes in HDR brightness no longer make the app refresh every display and redraw the control panel over and over
 - Dragging property sliders and other control panel updates respond more quickly
@@ -1013,7 +995,7 @@ This release lets playlists rotate at any interval you choose and makes many sce
 - The Energy use readout in Settings > Performance now notes that figures shown right after applying a wallpaper include loading it
 - Scene assets that Steam installs or removes while the app is running are now picked up when you return to the control panel
 
-#### Fixed
+#### Bug Fixes
 
 - Audio-reactive wallpapers now show thin, separate bars of varying length that move with the music, as in Wallpaper Engine
 - Audio visualizers built from imported Workshop assets show their bars again instead of nothing
@@ -1027,7 +1009,7 @@ This release lets playlists rotate at any interval you choose and makes many sce
 
 此版本允许播放列表按你设定的任意间隔轮换，并让许多场景壁纸（尤其是音频可视化壁纸）的外观和动态与 Wallpaper Engine 中一致
 
-#### 新增
+#### 新功能
 
 - 在播放列表的轮换频率中选择“自定义”，即可按 1 至 10,080 之间的任意整数分钟轮换壁纸
 
@@ -1040,7 +1022,7 @@ This release lets playlists rotate at any interval you choose and makes many sce
 - 设置 > 性能中的能耗读数现会注明，刚应用壁纸后的数值包含了加载壁纸的消耗
 - 应用运行期间由 Steam 安装或移除的场景资源，现会在你返回控制面板时被识别
 
-#### 修复
+#### 问题修复
 
 - 音频响应壁纸现会像在 Wallpaper Engine 中一样，显示随音乐跳动、长短不一且彼此分开的细条
 - 使用导入的 Workshop 资源制作的音频可视化效果重新显示音频条，不再一片空白
@@ -1050,15 +1032,13 @@ This release lets playlists rotate at any interval you choose and makes many sce
 - 通过“显示桌面”露出网页壁纸时移动指针，网页壁纸不再短暂卡住
 - 能耗读数不再将使用可选原生视频播放的视频显示为几乎没有消耗，也不再对其评级
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.3.2...v1.3.3
-
-## 1.3.2 — 2026-10-08
+## [1.3.2](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.6...v1.3.2) (2026-10-08)
 
 ### English
 
 This release adds playlists, per-display wallpaper history, automatic wallpaper choices and saved multi-display layouts, and keeps the Mission Control picture closer to your actual wallpaper
 
-#### New
+#### Features
 
 - Create reorderable playlists that automatically skip wallpapers that fail to play, within a set limit
 - Each display keeps a history of recent wallpapers, and Previous takes you back to the one before
@@ -1069,13 +1049,13 @@ This release adds playlists, per-display wallpaper history, automatic wallpaper 
 - Experimental: choose a different wallpaper for each desktop Space
 - Settings › General adds an option, off by default, to update the Mission Control picture every 5 minutes for wallpapers that change over time
 
-#### Improved
+#### Improvements
 
 - Mission Control shows a more current wallpaper picture, retaken shortly after a wallpaper starts, changes or resumes, and after Space changes and wake
 - Wallpapers you pick yourself now take priority over pending automatic changes
 - The app now explains which options cannot be used with the experimental animated lock screen
 
-#### Fixed
+#### Bug Fixes
 
 - Web wallpapers no longer pause their animation during desktop transitions
 - With the animated lock screen on, Mission Control no longer shows a black picture for wallpapers that fade in
@@ -1085,7 +1065,7 @@ This release adds playlists, per-display wallpaper history, automatic wallpaper 
 
 此版本新增播放列表、按显示器记录的壁纸历史、自动选择壁纸和多显示器布局保存，并让调度中心中的画面更贴近实际壁纸
 
-#### 新增
+#### 新功能
 
 - 可创建能调整顺序的播放列表，并在一定限度内自动跳过无法播放的壁纸
 - 每个显示器都会保留最近使用的壁纸记录，可通过“上一个”返回之前的壁纸
@@ -1102,21 +1082,19 @@ This release adds playlists, per-display wallpaper history, automatic wallpaper 
 - 你手动选择的壁纸现在会优先于待执行的自动切换
 - 应用现在会说明哪些选项无法与实验性的动态锁定屏幕同时使用
 
-#### 修复
+#### 问题修复
 
 - 网页壁纸在桌面切换过渡期间不再出现动画暂停
 - 开启动态锁定屏幕时，调度中心不再为淡入显示的壁纸显示黑色画面
 - 导入壁纸时的文件选择器在等待选择或取消时不再失去响应
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.6...v1.3.2
-
-## 1.3.1 — 2026-10-08
+## [1.3.1](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.6...v1.3.1) (2026-10-08)
 
 ### English
 
 This release adds reorderable playlists, a Previous button, scheduled wallpaper changes, saved multi-display layouts and Shortcuts actions, and keeps the Mission Control picture closer to what is playing
 
-#### New
+#### Features
 
 - Create playlists you can reorder, and a playlist now skips a limited number of wallpapers that fail to load instead of stopping
 - Each display keeps a history of recent wallpapers, and Previous takes you back to the one before
@@ -1127,13 +1105,13 @@ This release adds reorderable playlists, a Previous button, scheduled wallpaper 
 - Experimental option to choose a different wallpaper for each desktop Space
 - Settings › General adds an option, off by default, to update the Mission Control picture every 5 minutes for wallpapers that change over time
 
-#### Improved
+#### Improvements
 
 - The Mission Control picture is retaken shortly after a wallpaper starts, changes or resumes, and refreshed after switching Spaces or waking the Mac
 - Wallpapers you pick yourself now take priority over pending automatic changes
 - The app now explains when an option cannot be used with the experimental animated lock screen
 
-#### Fixed
+#### Bug Fixes
 
 - Web wallpapers no longer pause their animation during desktop transitions such as switching Spaces
 - With the experimental animated lock screen on, Mission Control no longer shows a black picture for wallpapers that fade in
@@ -1142,7 +1120,7 @@ This release adds reorderable playlists, a Previous button, scheduled wallpaper 
 
 此版本新增可重新排序的播放列表、上一张按钮、定时切换壁纸、多显示器布局保存和快捷指令操作，并让调度中心中的壁纸画面更贴近实际播放内容
 
-#### 新增
+#### 新功能
 
 - 可以创建能重新排序的播放列表，遇到无法加载的壁纸时会跳过有限数量的壁纸，而不是停止播放
 - 每个显示器都会保留最近使用的壁纸记录，可以用上一张返回之前的壁纸
@@ -1159,20 +1137,18 @@ This release adds reorderable playlists, a Previous button, scheduled wallpaper 
 - 你手动选择的壁纸现在优先于待执行的自动切换
 - 当某个选项无法与实验性的动态锁定屏幕同时使用时，应用现在会给出说明
 
-#### 修复
+#### 问题修复
 
 - 网页壁纸在切换空间等桌面过渡期间不再暂停动画
 - 开启实验性的动态锁定屏幕时，调度中心不再为淡入效果的壁纸显示黑色画面
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.6...v1.3.1
-
-## 1.3.0 — 2026-10-08
+## [1.3.0](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.6...v1.3.0) (2026-10-08)
 
 ### English
 
 This release adds playlists, wallpaper history, schedules, multi-display layouts and Shortcuts, keeps the Mission Control picture current and keeps web wallpapers animating during desktop transitions
 
-#### New
+#### Features
 
 - Create playlists you can reorder, and wallpapers that fail to load are skipped so playback keeps going
 - Each display keeps a recent wallpaper history, so you can go back to the previous wallpaper
@@ -1183,14 +1159,14 @@ This release adds playlists, wallpaper history, schedules, multi-display layouts
 - Experimental: choose a different wallpaper for each desktop Space
 - Scene, video and web wallpapers can each be previewed separately, with sound muted
 
-#### Improved
+#### Improvements
 
 - Mission Control now shows the wallpaper as it looks a few seconds after it starts, and refreshes the picture when you switch Spaces or wake your Mac
 - Wallpapers you choose yourself now take priority over scheduled or automatic changes
 - The Mission Control picture is now saved faster and takes about a third of the space
 - The app now explains when an option does not work with the experimental animated lock screen
 
-#### Fixed
+#### Bug Fixes
 
 - Web wallpapers no longer briefly pause their animation during desktop transitions
 - With the experimental animated lock screen on, Mission Control no longer shows a black picture for wallpapers that fade in
@@ -1199,7 +1175,7 @@ This release adds playlists, wallpaper history, schedules, multi-display layouts
 
 本版本新增播放列表、壁纸历史、自动切换条件、多显示器布局和快捷指令，让调度中心画面保持最新，并让网页壁纸在桌面过渡时持续播放动画
 
-#### 新增
+#### 新功能
 
 - 可创建能重新排序的播放列表，无法加载的壁纸会被跳过，播放可以继续进行
 - 每台显示器都会保留最近的壁纸历史，你可以返回上一张壁纸
@@ -1217,25 +1193,23 @@ This release adds playlists, wallpaper history, schedules, multi-display layouts
 - 调度中心画面的保存速度更快，占用空间约为原来的三分之一
 - 当某个选项与实验性的动态锁定屏幕不兼容时，应用现在会给出说明
 
-#### 修复
+#### 问题修复
 
 - 网页壁纸在桌面过渡期间不再短暂暂停动画
 - 开启实验性的动态锁定屏幕后，调度中心不再为淡入的壁纸显示黑色画面
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.6...v1.3.0
-
-## 1.2.6 — 2026-10-07
+## [1.2.6](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.5...v1.2.6) (2026-10-07)
 
 ### English
 
 This release gets Discover working again with Steam's current Workshop pages and makes your subscriptions easier to find. It also fixes many problems with playlists, identical monitors, large downloads and the experimental animated lock screen
 
-#### New
+#### Features
 
 - Discover now opens with Wallpapers, Collections and Your subscriptions tabs, and Your subscriptions shows your sign-in, subscription count and a prominent download button
 - Discover shows an Open on Steam button that opens the Steam page listing what is currently on show
 
-#### Improved
+#### Improvements
 
 - With Questionable or Mature hidden, as by default, Collections pages are now filled to 30 tiles instead of showing only a handful
 - Sound-reactive web wallpapers no longer keep the app reading audio while paused, and reading starts again with playback
@@ -1244,7 +1218,7 @@ This release gets Discover working again with Steam's current Workshop pages and
 - The Discover list tabs can now be switched with the arrow, Home and End keys, like the page tabs
 - The top tabs no longer all grey out while a page opens, and the Filter button is disabled while its change is saved
 
-#### Fixed
+#### Bug Fixes
 
 - Discover no longer shows Workshop unavailable for every search after Steam changed its browse page format
 - Your subscriptions lists your subscribed wallpapers again when signed in to Steam, instead of reporting an unreadable Workshop page
@@ -1271,7 +1245,7 @@ This release gets Discover working again with Steam's current Workshop pages and
 
 本版本让发现重新适配 Steam 当前的 Workshop 页面，并让你的订阅更容易找到。它还修复了播放列表、相同型号显示器、大型下载和实验性锁定屏幕动画的诸多问题
 
-#### 新增
+#### 新功能
 
 - 发现现在顶部提供壁纸、合集和你的订阅标签页，你的订阅会显示登录状态、订阅数量和醒目的下载按钮
 - 发现新增在 Steam 上打开按钮，可打开当前所示内容对应的 Steam 列表页面
@@ -1285,7 +1259,7 @@ This release gets Discover working again with Steam's current Workshop pages and
 - 发现中的列表标签页现在可以像页面标签页一样用方向键、Home 和 End 键切换
 - 页面打开时顶部标签页不再全部变灰，筛选按钮在其更改保存期间会被禁用
 
-#### 修复
+#### 问题修复
 
 - Steam 更改浏览页面格式后，发现中每次搜索都显示 Workshop 不可用的问题已修复
 - 登录 Steam 后，你的订阅会再次列出已订阅的壁纸，不再提示 Workshop 页面无法读取
@@ -1308,19 +1282,17 @@ This release gets Discover working again with Steam's current Workshop pages and
 - 被年龄分级筛选完全隐藏的页面现在会说明情况并提供下一页，不再显示你没有任何订阅
 - 在合集页面加载期间更改搜索，不再混入旧搜索的合集
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.5...v1.2.6
-
-## 1.2.5 — 2026-10-05
+## [1.2.5](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.4...v1.2.5) (2026-10-05)
 
 ### English
 
 This update fixes a control panel freeze, stalled wallpaper changes after display changes and an empty Your subscriptions list, along with several wallpaper playback problems
 
-#### Improved
+#### Improvements
 
 - When Steam returns a Workshop page the app cannot read, it now says so instead of showing an empty list
 
-#### Fixed
+#### Bug Fixes
 
 - The control panel no longer freezes after a failed redraw when you switch tabs, and instead shows the error in its banner and keeps responding
 - After a display is rearranged, changes resolution or wakes from sleep, applying a wallpaper no longer hangs for 90 seconds and wrongly restores the previous one
@@ -1339,7 +1311,7 @@ This update fixes a control panel freeze, stalled wallpaper changes after displa
 
 - 当 Steam 返回无法读取的 Workshop 页面时，应用现在会明确提示，而不是显示为空列表
 
-#### 修复
+#### 问题修复
 
 - 切换标签页时若重绘失败，控制面板不再整窗卡死，而是在错误横幅中显示问题并继续响应操作
 - 显示器重新排列、更改分辨率或从睡眠中唤醒后，应用壁纸不再卡住 90 秒并错误地恢复为之前的壁纸
@@ -1350,15 +1322,13 @@ This update fixes a control panel freeze, stalled wallpaper changes after displa
 - 对于 macOS 一直拒绝设置静态壁纸的桌面，WallpaperMachine 不再无休止地重试，而是在切换到该桌面或 Mac 唤醒时再试
 - Workshop 预设中的日夜切换开关现在会保持药丸形状并出现在预设指定的位置，且不再退出可选的原生 Metal 渲染器
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.4...v1.2.5
-
-## 1.2.4 — 2026-10-04
+## [1.2.4](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.3...v1.2.4) (2026-10-04)
 
 ### English
 
 This release fixes many scene rendering problems, stops the control panel from freezing in Discover and keeps paused downloads across restarts
 
-#### Improved
+#### Improvements
 
 - Paused Steam Workshop and pixiv downloads now resume after you restart the app
 - Wallpapers whose files change on disk now reload with the new content
@@ -1366,7 +1336,7 @@ This release fixes many scene rendering problems, stops the control panel from f
 - The Retry wallpaper button now appears only for web wallpapers whose page failed to load, while other errors stay visible
 - The library repeats less work when it updates, and JPEG images decode faster on Apple silicon
 
-#### Fixed
+#### Bug Fixes
 
 - The control panel no longer freezes repeatedly while animated previews play in Discover
 - Switching wallpapers no longer needs repeated Apply clicks when background updates arrive during loading
@@ -1400,7 +1370,7 @@ This release fixes many scene rendering problems, stops the control panel from f
 - “重试壁纸”按钮现在只在网页壁纸页面加载失败时显示，其他错误仍会保持可见
 - 壁纸库更新时减少了重复工作，JPEG 图片在 Apple 芯片上解码更快
 
-#### 修复
+#### 问题修复
 
 - 在“发现”中播放动态预览时，控制面板不再反复卡住
 - 载入期间收到后台更新时，切换壁纸不再需要反复点击“应用”
@@ -1422,29 +1392,27 @@ This release fixes many scene rendering problems, stops the control panel from f
 - 已取消的 pixiv 下载在崩溃后不再以暂停状态重新出现
 - 未登录 Steam 时在“发现”中打开“我的订阅”，现在会提供“登录 Steam”，而不是显示旧列表和一个永远无法成功的“重试”按钮
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.3...v1.2.4
-
-## 1.2.3 — 2026-10-02
+## [1.2.3](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.2...v1.2.3) (2026-10-02)
 
 ### English
 
 SteamCMD now runs natively on Apple silicon, Workshop presets arrive with their base wallpapers, and many scene, web, video and multi-display problems are fixed
 
-#### Breaking changes
+#### Breaking Changes
 
 - Existing Intel-only SteamCMD copies must be reinstalled from Settings → Library & Steam, and the app guides you through it
 
-#### New
+#### Features
 
 - Workshop presets can now be imported together with their base wallpaper, which downloads automatically if missing, as one self-contained library entry
 
-#### Improved
+#### Improvements
 
 - SteamCMD now installs and runs natively on Apple silicon without Rosetta, keeping your sign-in, saved sessions and Workshop downloads
 - Download errors now recognize connection problems and rate limits instead of blaming your Steam credentials for unknown failures
 - Pixiv downloads refused by the server now explain that access was denied instead of suggesting that a short wait will help
 
-#### Fixed
+#### Bug Fixes
 
 - A deleted wallpaper assigned to one display no longer stops wallpapers from applying on other displays, and reinstalling it restores the assignment
 - Web wallpapers that load WebAssembly from their own files, such as those built with Unity, now start correctly
@@ -1464,7 +1432,7 @@ SteamCMD 现可在 Apple 芯片上原生运行，Workshop 预设会连同其基�
 
 - 现有的仅限 Intel 的 SteamCMD 需要在设置 → 壁纸库与 Steam 中重新安装，应用会引导你完成
 
-#### 新增
+#### 新功能
 
 - 现在可以将 Workshop 预设连同其基础壁纸一起导入，缺少的基础壁纸会自动下载，并合成为一个独立的壁纸库条目
 
@@ -1474,7 +1442,7 @@ SteamCMD 现可在 Apple 芯片上原生运行，Workshop 预设会连同其基�
 - 下载错误现在能识别网络连接问题和频率限制，不再把未知故障归咎于你的 Steam 账号凭据
 - 被服务器拒绝的 pixiv 下载现在会说明访问被拒绝，而不是提示稍等片刻即可解决
 
-#### 修复
+#### 问题修复
 
 - 分配给某个显示器的壁纸被删除后不再导致其他显示器无法应用壁纸，重新安装该壁纸即可恢复分配
 - 从自身文件加载 WebAssembly 的网页壁纸（例如使用 Unity 制作的壁纸）现在可以正常启动
@@ -1486,19 +1454,17 @@ SteamCMD 现可在 Apple 芯片上原生运行，Workshop 预设会连同其基�
 - 实验性的动态锁定屏幕启动失败时，现在会保留你的屏幕保护程序设置，而不会将其更改
 - 性能中的帧率滑块现在可以限制在显示器的完整刷新率，“无限制”单独作为一个档位
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.2...v1.2.3
-
-## 1.2.2 — 2026-10-01
+## [1.2.2](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.1...v1.2.2) (2026-10-01)
 
 ### English
 
 This release adds wallpaper collections, playlists, presets and settings backups, and fixes several problems with restoring your original desktop and lock screen wallpapers
 
-#### Breaking changes
+#### Breaking Changes
 
 - Workshop downloads now require a Steam account that owns Wallpaper Engine, and you can check again after buying it
 
-#### New
+#### Features
 
 - Organize installed wallpapers into your own collections and reusable playlists
 - Save wallpaper properties as named presets, apply them anytime and exchange them with others
@@ -1508,7 +1474,7 @@ This release adds wallpaper collections, playlists, presets and settings backups
 - Choose which displays an action applies to in Shortcuts
 - Wallpapers now come with an explanation of their compatibility
 
-#### Fixed
+#### Bug Fixes
 
 - Quitting now restores your original wallpaper on each display and Space, even after a relaunch, and leaves the system wallpaper alone when no original can be recovered
 - Quitting now waits for your original wallpaper to be restored and is cancelled with an error if restoring fails, instead of leaving a still frame behind
@@ -1525,7 +1491,7 @@ This release adds wallpaper collections, playlists, presets and settings backups
 
 - Workshop 下载现在需要拥有 Wallpaper Engine 的 Steam 账户，购买后可重新检查
 
-#### 新增
+#### 新功能
 
 - 可将已安装的壁纸整理为自定义合集和可重复使用的播放列表
 - 可将壁纸属性保存为命名预设，随时应用，并可与他人交换
@@ -1535,7 +1501,7 @@ This release adds wallpaper collections, playlists, presets and settings backups
 - 可在快捷指令中选择操作要应用到的显示器
 - 壁纸现在附带兼容性说明
 
-#### 修复
+#### 问题修复
 
 - 退出时会在每台显示器和每个空间恢复原壁纸，重新启动后也是如此；无法找回原壁纸时不再改动系统壁纸
 - 退出时会等待原壁纸恢复完成；恢复失败时会取消退出并显示错误，不再留下静止画面
@@ -1544,21 +1510,19 @@ This release adds wallpaper collections, playlists, presets and settings backups
 - 当空间沿用继承的壁纸时，仅开启实验性锁定屏幕不再超时，屏幕保护程序的选择也会保留
 - 因保存的数据损坏导致锁定屏幕壁纸恢复失败时，现在会保留壁纸和恢复数据，以便重新尝试恢复
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.1...v1.2.2
-
-## 1.2.1 — 2026-09-30
+## [1.2.1](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.0...v1.2.1) (2026-09-30)
 
 ### English
 
 This release adds an experimental option to use applied wallpapers as macOS screen savers, restores glow and live updates in scene wallpapers, and gives Settings a clearer, roomier layout
 
-#### New
+#### Features
 
 - Try an experimental setting on macOS 26 and later that shows applied scene, video, web and still wallpapers as screen savers and restores your previous choice when turned off
 - What's New opens in a larger window with English and Simplified Chinese tabs and starts in the app's current language
 - After you first apply a downloaded wallpaper, the app asks once whether you would like to star it on GitHub or become a Supporter, and is easy to dismiss
 
-#### Improved
+#### Improvements
 
 - All Settings pages have roomier spacing, cleaner separators and controls that stack in narrow windows, with library and installation paths shown full width
 - Advanced performance controls are split into video, scene and experimental groups, with renderer choices first and running status in collapsible Live diagnostics sections
@@ -1568,7 +1532,7 @@ This release adds an experimental option to use applied wallpapers as macOS scre
 - Expand and collapse arrows in Settings are bolder and easier to read, turning accent-colored when open
 - The welcome guide's language picker has a balanced layout, with System (Auto) on its own row above equal language tiles
 
-#### Fixed
+#### Bug Fixes
 
 - Scene wallpapers show bright glows, bloom and emissive highlights correctly again, and bloom no longer grows out of bounds
 - Scene wallpapers with clocks, text, audio bars and interactive properties update live again
@@ -1582,7 +1546,7 @@ This release adds an experimental option to use applied wallpapers as macOS scre
 
 此版本新增实验性选项，可将已应用的壁纸用作 macOS 屏幕保护程序，恢复了场景壁纸的光晕效果与实时更新，并让设置页面布局更清晰、更宽松
 
-#### 新增
+#### 新功能
 
 - 在 macOS 26 及更高版本上可试用一项实验性设置，将已应用的场景、视频、网页和静态壁纸用作屏幕保护程序，关闭后恢复你之前的选择
 - 新功能窗口现在以更大的尺寸打开，提供英文和简体中文标签页，并默认显示应用当前的语言
@@ -1598,7 +1562,7 @@ This release adds an experimental option to use applied wallpapers as macOS scre
 - 设置中的展开和折叠箭头更粗、更易辨认，展开时会显示强调色
 - 欢迎向导中的语言选择器布局更均衡，“系统（自动）”单独占一行，下方为等宽的语言选项
 
-#### 修复
+#### 问题修复
 
 - 场景壁纸重新正确显示明亮光晕、泛光和自发光高光，泛光也不再过度扩散
 - 带有时钟、文字、音频条和交互属性的场景壁纸重新能够实时更新
@@ -1608,15 +1572,13 @@ This release adds an experimental option to use applied wallpapers as macOS scre
 - 更改应用语言后，导入文件选择器会立即使用新语言，且无需重启壁纸
 - 已安装中当前显示器筛选标签保持单行显示，不再被缩小或截断
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.2.0...v1.2.1
-
-## 1.2.0 — 2026-09-29
+## [1.2.0](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.1.0...v1.2.0) (2026-09-29)
 
 ### English
 
 This release adds pixiv, playlists, Workshop updates and subscriptions, picture import, keyboard shortcuts and Shortcuts actions, and Traditional Chinese and Japanese, and makes the experimental animated lock screen more dependable.
 
-#### New
+#### Features
 
 - A new pixiv tab browses rankings and tag search with filters, and saves any illustration page to Installed as a still wallpaper
 - Sign in to pixiv to see members-only works and, if your account allows it, choose to include R-18 works
@@ -1633,7 +1595,7 @@ This release adds pixiv, playlists, Workshop updates and subscriptions, picture 
 - WallpaperMachine is now also in Traditional Chinese and Japanese, chosen in Settings → General → Language or used automatically when your Mac is set to one of them
 - After an update, a What's New window lists the changes since your previous version in English and Simplified Chinese, and can be turned off
 
-#### Fixed
+#### Bug Fixes
 
 - The experimental animated lock screen now resumes where it left off after the display wakes, instead of reloading and restarting its animation
 - The experimental animated lock screen no longer briefly shows the background behind the wallpaper
@@ -1645,7 +1607,7 @@ This release adds pixiv, playlists, Workshop updates and subscriptions, picture 
 
 此版本新增 pixiv、播放列表、创意工坊更新与订阅、图片导入、键盘快捷键与快捷指令操作，以及繁体中文和日语，并让实验性的动态锁定屏幕更加可靠。
 
-#### 新增
+#### 新功能
 
 - 新增 pixiv 标签页，可按条件筛选浏览排行榜和标签搜索，并将任意插画页面保存到已安装，作为静态壁纸使用
 - 登录 pixiv 后可查看仅限会员的作品，若账户允许，还可选择显示 R-18 作品
@@ -1662,7 +1624,7 @@ This release adds pixiv, playlists, Workshop updates and subscriptions, picture 
 - WallpaperMachine 新增繁体中文和日语，可在 设置 → 通用 → 语言 中选择，Mac 使用这两种语言时也会自动采用
 - 更新后会显示“更新内容”窗口，用中英双语列出自上个版本以来的变化，也可以关闭
 
-#### 修复
+#### 问题修复
 
 - 实验性的动态锁定屏幕在显示器唤醒后会从中断处继续播放，不再重新加载并从头开始动画
 - 实验性的动态锁定屏幕不再短暂露出壁纸下方的背景
@@ -1670,19 +1632,17 @@ This release adds pixiv, playlists, Workshop updates and subscriptions, picture 
 - 显示器唤醒时，壁纸重新绘制之前显示黑色而不是白色
 - 显示器唤醒且 macOS 只是移动壁纸窗口时，壁纸不再被重置
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.1.0...v1.2.0
-
-## 1.1.0 — 2026-09-28
+## [1.1.0](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.0.3...v1.1.0) (2026-09-28)
 
 ### English
 
 Wallpapers now pause when windows cover the desktop and use less memory, and actions queue and run in order instead of showing an error.
 
-#### New
+#### Features
 
 - Wallpapers pause when windows cover the desktop and resume once any of it shows, set in Settings → Performance → Playback with Pause as default or Keep running
 
-#### Improved
+#### Improvements
 
 - Actions from the control panel and menu bar now queue and run in order, and clicking several wallpapers in a row applies the last one
 - The tile being applied shows a progress ring, and wallpapers queued behind it are marked
@@ -1692,7 +1652,7 @@ Wallpapers now pause when windows cover the desktop and use less memory, and act
 - Favorites, Show in Finder and the delete confirmation no longer wait for or hold up other actions
 - The default frame rate limit is now 60 fps
 
-#### Fixed
+#### Bug Fixes
 
 - Switching wallpapers while another action was running no longer shows a red "Wait for the current action to finish" banner
 - Frame rate limits now reach their target, where a 60 fps limit previously delivered about 50 frames a second
@@ -1703,7 +1663,7 @@ Wallpapers now pause when windows cover the desktop and use less memory, and act
 
 窗口盖住桌面时壁纸会暂停，并且占用更少内存；各项操作会排队按顺序执行，而不再显示错误。
 
-#### 新增
+#### 新功能
 
 - 窗口盖住桌面时壁纸会暂停，一旦桌面有任何部分露出就恢复。可在设置 → 性能 → 播放中设置，默认为“暂停”，也可选“继续运行”
 
@@ -1717,35 +1677,33 @@ Wallpapers now pause when windows cover the desktop and use less memory, and act
 - 收藏、“在访达中显示”和删除确认不再等待其他操作，也不再挡住它们
 - 默认帧率上限现在是 60 fps
 
-#### 修复
+#### 问题修复
 
 - 在另一项操作进行中切换壁纸时，不再显示红色的“请等待当前操作完成”横幅
 - 帧率上限现在能达到设定目标；以前设为 60 fps 时，大约只有每秒 50 帧
 - 正在应用壁纸时，下载和导入之后的壁纸库刷新不再失败
 - 设置 → 关于中的更新卡片和许可证卡片，最后一行下方现在留出与其他卡片相同的间距
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.0.3...v1.1.0
-
-## 1.0.3 — 2026-09-28
+## [1.0.3](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.0.2...v1.0.3) (2026-09-28)
 
 ### English
 
 This release stops wallpapers from flashing and restarting after unlocking, makes Restart to Update work again, and keeps the control panel open after you apply a wallpaper.
 
-#### Breaking changes
+#### Breaking Changes
 
 - Applying a wallpaper no longer hides the control panel by default; a choice already made in Settings → General → Hide window after applying a wallpaper is kept
 
-#### New
+#### Features
 
 - File → Close (Command-W) now closes the control panel, like its close button, while the app keeps running in the menu bar
 
-#### Improved
+#### Improvements
 
 - Apply and Quit respond promptly even while the app is handling a burst of updates, such as after unlocking the Mac
 - Update checks no longer use up GitHub's hourly limit on anonymous requests, which is shared by every device on the same network
 
-#### Fixed
+#### Bug Fixes
 
 - Wallpapers no longer flash white and restart their opening animation again and again after unlocking the Mac, a problem introduced in 1.0.2
 - Restart to Update now quits and reopens on the new version instead of closing the window and doing nothing
@@ -1763,7 +1721,7 @@ This release stops wallpapers from flashing and restarting after unlocking, make
 
 - 应用壁纸后默认不再隐藏控制面板；若已在设置 → 通用 → 应用壁纸后隐藏窗口中做过选择，该选择会保留
 
-#### 新增
+#### 新功能
 
 - 文件 → 关闭（Command-W）现在会关闭控制面板，与它的关闭按钮一样，应用仍在菜单栏中继续运行
 
@@ -1772,7 +1730,7 @@ This release stops wallpapers from flashing and restarting after unlocking, make
 - 即使应用正在处理一阵密集的更新，例如解锁 Mac 之后，“应用”和“退出”也会及时响应
 - 更新检查不再用尽 GitHub 对匿名请求的每小时限额；该限额由同一网络上的每台设备共享
 
-#### 修复
+#### 问题修复
 
 - 解锁 Mac 后，壁纸不再反复闪白并重新播放开场动画；这个问题是 1.0.2 引入的
 - “重启并更新”现在会退出并在新版本上重新打开，而不再只是关掉窗口、什么也不做
@@ -1782,20 +1740,18 @@ This release stops wallpapers from flashing and restarting after unlocking, make
 - 在帧率上限开启时应用的壁纸，现在会以该上限速率开始
 - GitHub 每小时的更新检查限额用尽时，“关于”不再报告连接失败；它会说明限额何时重置，并等到那时
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.0.2...v1.0.3
-
-## 1.0.2 — 2026-09-27
+## [1.0.2](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.0.1...v1.0.2) (2026-09-27)
 
 ### English
 
 WallpaperMachine 1.0.2 adds drag selection in Installed, makes in-app updates safer and keeps macOS privacy permissions across updates. Wallpapers and the control panel also do less repeated and background work.
 
-#### New
+#### Features
 
 - Hold a tile in Installed and drag across others to select a run of wallpapers, with auto-scroll at the edges
 - A tip in the selection row explains drag selection until you use it once or dismiss it
 
-#### Improved
+#### Improvements
 
 - Wallpapers skip redrawing frames that would repeat an unchanged picture, and scenes follow the Scene render optimisation setting for this
 - Sound output starts only while a wallpaper is playing unmuted, and system audio is captured only for scenes or web wallpapers that use it
@@ -1805,7 +1761,7 @@ WallpaperMachine 1.0.2 adds drag selection in Installed, makes in-app updates sa
 - Reselecting the same lock screen wallpaper no longer repeats the compatibility check
 - Tiles in Installed no longer enlarge on hover
 
-#### Fixed
+#### Bug Fixes
 
 - Restarting to install an update no longer removes the current version first, and reopens the previous version if the install fails
 - macOS privacy permissions granted to the app are no longer lost after an update
@@ -1815,7 +1771,7 @@ WallpaperMachine 1.0.2 adds drag selection in Installed, makes in-app updates sa
 
 WallpaperMachine 1.0.2 在“已安装”中增加拖拽选择，让应用内更新更安全，并在更新后保留 macOS 隐私权限。壁纸和控制面板也会减少重复的工作和后台工作。
 
-#### 新增
+#### 新功能
 
 - 在“已安装”中按住一张磁贴并拖过其他磁贴，即可选中连续的一段壁纸，拖到边缘时会自动滚动
 - 选择行里的提示会说明拖拽选择，直到你使用过一次或关掉它
@@ -1830,21 +1786,19 @@ WallpaperMachine 1.0.2 在“已安装”中增加拖拽选择，让应用内更
 - 再次选择同一张锁屏壁纸时，不再重复兼容性检查
 - “已安装”中的磁贴在悬停时不再放大
 
-#### 修复
+#### 问题修复
 
 - 为安装更新而重启时，不再先移除当前版本；如果安装失败，会重新打开先前的版本
 - 授予本应用的 macOS 隐私权限在更新后不再丢失
 - 启动时如果场景仍在加载、其显示表面被替换，场景壁纸不再因此可能失败
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.0.1...v1.0.2
-
-## 1.0.1 — 2026-09-27
+## [1.0.1](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.0.0...v1.0.1) (2026-09-27)
 
 ### English
 
 WallpaperMachine now checks for updates on its own, adds a rebuilt Performance page with an energy readout and battery options, and fixes a launch crash after changing the render scale.
 
-#### New
+#### Features
 
 - WallpaperMachine checks for updates after the library loads and every six hours, and where it can update in place it downloads them and offers Restart to Update
 - WallpaperMachine runs on macOS 15 Sequoia
@@ -1857,14 +1811,14 @@ WallpaperMachine now checks for updates on its own, adds a rebuilt Performance p
 - Settings can save a redacted diagnostics report to attach to a GitHub issue
 - The welcome guide gains a Performance step
 
-#### Improved
+#### Improvements
 
 - Settings → Performance is rebuilt as a single page covering energy use first, then quality, then playback
 - The frame-rate cap now follows the display's native refresh rate by default
 - A display that goes to sleep now stops its wallpaper
 - After choosing Later on an update, the menu bar item keeps offering it until the app restarts
 
-#### Fixed
+#### Bug Fixes
 
 - The app no longer crashes at launch right after applying a render scale
 - Reopening the app from the Dock now keeps you on the page you were viewing
@@ -1873,7 +1827,7 @@ WallpaperMachine now checks for updates on its own, adds a rebuilt Performance p
 
 WallpaperMachine 现在会自行检查更新，新增了重建后的“性能”页面，带有能耗读数和电池选项，并修复了更改渲染比例后启动崩溃的问题。
 
-#### 新增
+#### 新功能
 
 - WallpaperMachine 会在壁纸库加载后以及每隔六小时检查更新；在能够就地更新时会下载更新，并提供“重启并更新”
 - WallpaperMachine 可在 macOS 15 Sequoia 上运行
@@ -1893,20 +1847,18 @@ WallpaperMachine 现在会自行检查更新，新增了重建后的“性能”
 - 进入睡眠的显示器现在会停止它的壁纸
 - 在更新提示上选择“稍后”之后，菜单栏项目会一直提供该更新，直到应用重启
 
-#### 修复
+#### 问题修复
 
 - 刚应用渲染比例之后，应用在启动时不再崩溃
 - 从程序坞重新打开应用时，会留在你正在查看的页面
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.0.0...v1.0.1
-
-## 1.0.0 — 2026-09-26
+## [1.0.0](https://github.com/WallpaperMachine/WallpaperMachine/compare/v0.5.0...v1.0.0) (2026-09-26)
 
 ### English
 
 WallpaperMachine 1.0 ships as a drag-to-install disk image and adds a first-run guide with Steam sign-in, optional now-playing support for music wallpapers and many scene rendering fixes.
 
-#### New
+#### Features
 
 - Downloads and in-app updates now come as a drag-to-install disk image with first-launch steps under System Settings → Privacy & Security → Open Anyway
 - A first-run welcome guide sets language and appearance, signs in to Steam and shares tips, and can be reopened from Settings → Library & Steam
@@ -1923,7 +1875,7 @@ WallpaperMachine 1.0 ships as a drag-to-install disk image and adds a first-run 
 - Settings → About shows what changed in the newest release
 - The optional Native Metal renderer now draws effects, video, text layers, puppets, particle trails and sprite sheets
 
-#### Improved
+#### Improvements
 
 - Scenes with many large images open much faster because their images are decoded once and in parallel
 - Newly connected displays start enabled with the main display's wallpaper, and turning one off is remembered across reconnections
@@ -1936,7 +1888,7 @@ WallpaperMachine 1.0 ships as a drag-to-install disk image and adds a first-run 
 - Control panel text is rewritten in plain language and every message, menu and error is now translated into Simplified Chinese
 - Checking for updates no longer reports an error when no release has been published yet
 
-#### Fixed
+#### Bug Fixes
 
 - Wallpapers no longer disappear when you hide the app with Cmd-H or after activating a wallpaper
 - The app restores your own wallpapers at launch instead of posters or selections inherited from another display
@@ -1965,7 +1917,7 @@ WallpaperMachine 1.0 ships as a drag-to-install disk image and adds a first-run 
 
 WallpaperMachine 1.0 以拖拽安装的磁盘映像发布，并增加了带 Steam 登录的首次运行指南、音乐壁纸可选的“正在播放”支持，以及多项场景渲染修复。
 
-#### 新增
+#### 新功能
 
 - 下载和应用内更新现在以拖拽安装的磁盘映像提供，首次启动的步骤在系统设置 → 隐私与安全性 → 仍要打开
 - 首次运行的欢迎指南用于设置语言和外观、登录 Steam 并提供使用提示，可从设置 → 壁纸库与 Steam 重新打开
@@ -1995,7 +1947,7 @@ WallpaperMachine 1.0 以拖拽安装的磁盘映像发布，并增加了带 Stea
 - 控制面板文案改写成通俗语言，每条消息、菜单和错误现在都译成了简体中文
 - 尚未发布任何版本时，检查更新不再报告错误
 
-#### 修复
+#### 问题修复
 
 - 用 Cmd-H 隐藏应用后，或激活一张壁纸后，壁纸不再消失
 - 启动时应用会恢复你自己的壁纸，而不是海报或从另一台显示器继承的选择
@@ -2020,352 +1972,324 @@ WallpaperMachine 1.0 以拖拽安装的磁盘映像发布，并增加了带 Stea
 - 网页壁纸的选项保持其类型和作者设定的顺序
 - 面板为中文时，部分控制面板错误信息不再显示为英文
 
-**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v0.5.0...v1.0.0
-
-## 0.5.0 — 2026-09-18
+## [0.5.0](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.4.0...v0.5.0) (2026-09-18)
 
 ### English
 
-#### New
+#### Features
 
-- **panel** — Steam sign-in guides, logout wording, filter rail and top bar ([`bda404d`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/bda404d))
-- **scene,web** — Static subgraph reuse, web audio/media APIs, user file properties ([`dd01e58`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/dd01e58))
-- **quality** — Internal render scale, quality settings, shared video decode ([`48b8df2`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/48b8df2))
-- **native video** — Enhance rejectNativeVideo method with admission key and update related structures ([`47b12b1`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/47b12b1))
-- **native video** — Implement native video wallpaper support and diagnostics ([`c0461f7`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/c0461f7))
-- **presentation** — Enhance wallpaper suspension with per-display control ([`e39f0c4`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/e39f0c4))
+- **panel** — Steam sign-in guides, logout wording, filter rail and top bar ([bda404d](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/bda404d))
+- **scene,web** — Static subgraph reuse, web audio/media APIs, user file properties ([dd01e58](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/dd01e58))
+- **quality** — Internal render scale, quality settings, shared video decode ([48b8df2](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/48b8df2))
+- **native video** — Enhance rejectNativeVideo method with admission key and update related structures ([47b12b1](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/47b12b1))
+- **native video** — Implement native video wallpaper support and diagnostics ([c0461f7](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/c0461f7))
+- **presentation** — Enhance wallpaper suspension with per-display control ([e39f0c4](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/e39f0c4))
 
 Plus 2 documentation, test and tooling commits.
 
 ### 简体中文
 
-#### 新增
+#### 新功能
 
-- **panel** — Steam 登录引导、退出登录文案、筛选栏和顶栏 ([`bda404d`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/bda404d))
-- **scene,web** — 静态子图复用、网页音频/媒体 API、用户文件属性 ([`dd01e58`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/dd01e58))
-- **quality** — 内部渲染比例、画质设置、共享视频解码 ([`48b8df2`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/48b8df2))
-- **native video** — 增强 rejectNativeVideo 方法，为其加入 admission key，并更新相关结构 ([`47b12b1`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/47b12b1))
-- **native video** — 实现原生视频壁纸支持与诊断 ([`c0461f7`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/c0461f7))
-- **presentation** — 增强壁纸暂停，支持按显示器控制 ([`e39f0c4`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/e39f0c4))
+- **panel** — Steam 登录引导、退出登录文案、筛选栏和顶栏 ([bda404d](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/bda404d))
+- **scene,web** — 静态子图复用、网页音频/媒体 API、用户文件属性 ([dd01e58](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/dd01e58))
+- **quality** — 内部渲染比例、画质设置、共享视频解码 ([48b8df2](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/48b8df2))
+- **native video** — 增强 rejectNativeVideo 方法，为其加入 admission key，并更新相关结构 ([47b12b1](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/47b12b1))
+- **native video** — 实现原生视频壁纸支持与诊断 ([c0461f7](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/c0461f7))
+- **presentation** — 增强壁纸暂停，支持按显示器控制 ([e39f0c4](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/e39f0c4))
 
 另有 2 个文档、测试和工具相关的提交。
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.4.0...v0.5.0
-
-## 0.4.0 — 2026-09-18
+## [0.4.0](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.3.2...v0.4.0) (2026-09-18)
 
 ### English
 
-#### New
+#### Features
 
-- **workshop** — Concurrent downloads, tile download rings and grid-sized Discover pages ([`b0eaeed`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b0eaeed))
-- **panel** — Batch deletion, cached thumbnails, resizable layout and display names ([`6dc8c32`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/6dc8c32))
+- **workshop** — Concurrent downloads, tile download rings and grid-sized Discover pages ([b0eaeed](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b0eaeed))
+- **panel** — Batch deletion, cached thumbnails, resizable layout and display names ([6dc8c32](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/6dc8c32))
 
-#### Fixed
+#### Bug Fixes
 
-- **renderer** — Drive vector material timelines and their events ([`511f59d`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/511f59d))
+- **renderer** — Drive vector material timelines and their events ([511f59d](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/511f59d))
 
-#### Performance
+#### Performance Improvements
 
-- **playback** — Reduce steady-state rendering and input work ([`084c054`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/084c054))
+- **playback** — Reduce steady-state rendering and input work ([084c054](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/084c054))
 
 ### 简体中文
 
-#### 新增
+#### 新功能
 
-- **workshop** — 并发下载、磁贴下载环，以及按网格尺寸分页的“发现”页面 ([`b0eaeed`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b0eaeed))
-- **panel** — 批量删除、缓存的缩略图、可调整大小的布局和显示器名称 ([`6dc8c32`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/6dc8c32))
+- **workshop** — 并发下载、磁贴下载环，以及按网格尺寸分页的“发现”页面 ([b0eaeed](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b0eaeed))
+- **panel** — 批量删除、缓存的缩略图、可调整大小的布局和显示器名称 ([6dc8c32](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/6dc8c32))
 
-#### 修复
+#### 问题修复
 
-- **renderer** — 驱动矢量材质的时间线及其事件 ([`511f59d`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/511f59d))
+- **renderer** — 驱动矢量材质的时间线及其事件 ([511f59d](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/511f59d))
 
-#### 性能
+#### 性能改进
 
-- **playback** — 减少稳态下的渲染和输入工作 ([`084c054`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/084c054))
+- **playback** — 减少稳态下的渲染和输入工作 ([084c054](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/084c054))
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.3.2...v0.4.0
-
-## 0.3.2 — 2026-09-17
+## [0.3.2](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.3.1...v0.3.2) (2026-09-17)
 
 ### English
 
-#### New
+#### Features
 
-- **web** — Host web wallpapers in WKWebView with mouse input ([`42a8fd8`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/42a8fd8))
+- **web** — Host web wallpapers in WKWebView with mouse input ([42a8fd8](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/42a8fd8))
 
-#### Fixed
+#### Bug Fixes
 
-- **scene** — Map cursor input through the presented wallpaper ([`3bb8899`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3bb8899))
-- **renderer** — Script side-effect writes, puppet animation layers, cursor coverage ([`2385923`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/2385923))
+- **scene** — Map cursor input through the presented wallpaper ([3bb8899](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3bb8899))
+- **renderer** — Script side-effect writes, puppet animation layers, cursor coverage ([2385923](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/2385923))
 
 Plus 1 documentation, test and tooling commit.
 
 ### 简体中文
 
-#### 新增
+#### 新功能
 
-- **web** — 在 WKWebView 中承载网页壁纸，并支持鼠标输入 ([`42a8fd8`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/42a8fd8))
+- **web** — 在 WKWebView 中承载网页壁纸，并支持鼠标输入 ([42a8fd8](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/42a8fd8))
 
-#### 修复
+#### 问题修复
 
-- **scene** — 经当前呈现的壁纸映射光标输入 ([`3bb8899`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3bb8899))
-- **renderer** — 脚本副作用写入、木偶动画图层、光标覆盖范围 ([`2385923`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/2385923))
+- **scene** — 经当前呈现的壁纸映射光标输入 ([3bb8899](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3bb8899))
+- **renderer** — 脚本副作用写入、木偶动画图层、光标覆盖范围 ([2385923](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/2385923))
 
 另有 1 个文档、测试和工具相关的提交。
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.3.1...v0.3.2
-
-## 0.3.1 — 2026-09-16
+## [0.3.1](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.3.0...v0.3.1) (2026-09-16)
 
 ### English
 
-#### Fixed
+#### Bug Fixes
 
-- **updates** — Restore Settings About check-for-updates controls ([`3a653ec`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3a653ec))
+- **updates** — Restore Settings About check-for-updates controls ([3a653ec](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3a653ec))
 
-#### Other changes
+#### Other Changes
 
-- Update property-script evaluation to persist state across frames ([`169eba6`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/169eba6))
-- **workspace** — Reorganize the tree and build a documentation set ([`518ff23`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/518ff23))
+- Update property-script evaluation to persist state across frames ([169eba6](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/169eba6))
+- **workspace** — Reorganize the tree and build a documentation set ([518ff23](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/518ff23))
 
 Plus 1 documentation, test and tooling commit.
 
 ### 简体中文
 
-#### 修复
+#### 问题修复
 
-- **updates** — 恢复设置 → 关于中的检查更新控件 ([`3a653ec`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3a653ec))
+- **updates** — 恢复设置 → 关于中的检查更新控件 ([3a653ec](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3a653ec))
 
 #### 其他变更
 
-- 更新属性脚本的求值，使状态在帧与帧之间保持 ([`169eba6`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/169eba6))
-- **workspace** — 重组目录树并建立一套文档 ([`518ff23`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/518ff23))
+- 更新属性脚本的求值，使状态在帧与帧之间保持 ([169eba6](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/169eba6))
+- **workspace** — 重组目录树并建立一套文档 ([518ff23](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/518ff23))
 
 另有 1 个文档、测试和工具相关的提交。
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.3.0...v0.3.1
-
-## 0.3.0 — 2026-09-16
+## [0.3.0](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.2.1...v0.3.0) (2026-09-16)
 
 ### English
 
-#### New
+#### Features
 
-- **appearance** — Add light theme, system adaptation and customization ([`07ba75e`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/07ba75e))
-- **downloads** — Report real transfer speed and byte progress ([`d22b49b`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/d22b49b))
+- **appearance** — Add light theme, system adaptation and customization ([07ba75e](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/07ba75e))
+- **downloads** — Report real transfer speed and byte progress ([d22b49b](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/d22b49b))
 
-#### Fixed
+#### Bug Fixes
 
-- **downloads** — Expose NetworkReceiveMeter initializer ([`fca8f87`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/fca8f87))
-- **text** — Center each line inside the layer box ([`4cb3819`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/4cb3819))
-- **scene** — Leave callback-only property scripts on their base value ([`8a09bd9`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8a09bd9))
-- **scene** — Drive the global camera from the general.zoom animation ([`c0a9641`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/c0a9641))
-- **mdl** — Keep the authored MDLS3 skeleton and pivots ([`463b4c4`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/463b4c4))
+- **downloads** — Expose NetworkReceiveMeter initializer ([fca8f87](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/fca8f87))
+- **text** — Center each line inside the layer box ([4cb3819](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/4cb3819))
+- **scene** — Leave callback-only property scripts on their base value ([8a09bd9](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8a09bd9))
+- **scene** — Drive the global camera from the general.zoom animation ([c0a9641](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/c0a9641))
+- **mdl** — Keep the authored MDLS3 skeleton and pivots ([463b4c4](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/463b4c4))
 
-#### Other changes
+#### Other Changes
 
-- 0.3.0 ([`fadecdb`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/fadecdb))
-- Optimize continuous playback resource reuse ([`8f53466`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8f53466))
-- Reduce idle wallpaper background work ([`b03f6c4`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b03f6c4))
+- 0.3.0 ([fadecdb](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/fadecdb))
+- Optimize continuous playback resource reuse ([8f53466](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8f53466))
+- Reduce idle wallpaper background work ([b03f6c4](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b03f6c4))
 
 Plus 2 documentation, test and tooling commits.
 
 ### 简体中文
 
-#### 新增
+#### 新功能
 
-- **appearance** — 增加浅色主题、跟随系统以及自定义 ([`07ba75e`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/07ba75e))
-- **downloads** — 报告真实的传输速度和字节进度 ([`d22b49b`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/d22b49b))
+- **appearance** — 增加浅色主题、跟随系统以及自定义 ([07ba75e](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/07ba75e))
+- **downloads** — 报告真实的传输速度和字节进度 ([d22b49b](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/d22b49b))
 
-#### 修复
+#### 问题修复
 
-- **downloads** — 公开 NetworkReceiveMeter 的初始化器 ([`fca8f87`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/fca8f87))
-- **text** — 使每一行在图层框内居中 ([`4cb3819`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/4cb3819))
-- **scene** — 让仅含回调的属性脚本保持在其基础值上 ([`8a09bd9`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8a09bd9))
-- **scene** — 由 general.zoom 动画驱动全局摄像机 ([`c0a9641`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/c0a9641))
-- **mdl** — 保留作者设定的 MDLS3 骨架和枢轴 ([`463b4c4`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/463b4c4))
+- **downloads** — 公开 NetworkReceiveMeter 的初始化器 ([fca8f87](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/fca8f87))
+- **text** — 使每一行在图层框内居中 ([4cb3819](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/4cb3819))
+- **scene** — 让仅含回调的属性脚本保持在其基础值上 ([8a09bd9](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8a09bd9))
+- **scene** — 由 general.zoom 动画驱动全局摄像机 ([c0a9641](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/c0a9641))
+- **mdl** — 保留作者设定的 MDLS3 骨架和枢轴 ([463b4c4](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/463b4c4))
 
 #### 其他变更
 
-- 0.3.0 ([`fadecdb`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/fadecdb))
-- 优化连续播放时的资源复用 ([`8f53466`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8f53466))
-- 减少空闲壁纸的后台工作 ([`b03f6c4`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b03f6c4))
+- 0.3.0 ([fadecdb](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/fadecdb))
+- 优化连续播放时的资源复用 ([8f53466](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8f53466))
+- 减少空闲壁纸的后台工作 ([b03f6c4](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b03f6c4))
 
 另有 2 个文档、测试和工具相关的提交。
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.2.1...v0.3.0
-
-## 0.2.1 — 2026-09-16
+## [0.2.1](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.2.0...v0.2.1) (2026-09-16)
 
 ### English
 
-#### Fixed
+#### Bug Fixes
 
-- **lockscreen** — Always hand the desktop back to the poster provider ([`9e21b68`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/9e21b68))
-- Keep Workshop page turns off the main tab path ([`7525e25`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7525e25))
+- **lockscreen** — Always hand the desktop back to the poster provider ([9e21b68](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/9e21b68))
+- Keep Workshop page turns off the main tab path ([7525e25](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7525e25))
 
-#### Other changes
+#### Other Changes
 
-- 0.2.1 ([`7180677`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7180677))
-- Fix presentation suspension and frame timing regressions ([`f56e00d`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/f56e00d))
-- Add WallpaperPresentationPolicy to suspend rendering when occluded ([`7db2382`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7db2382))
+- 0.2.1 ([7180677](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7180677))
+- Fix presentation suspension and frame timing regressions ([f56e00d](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/f56e00d))
+- Add WallpaperPresentationPolicy to suspend rendering when occluded ([7db2382](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7db2382))
 
 Plus 1 documentation, test and tooling commit.
 
 ### 简体中文
 
-#### 修复
+#### 问题修复
 
-- **lockscreen** — 始终把桌面交还给海报提供方 ([`9e21b68`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/9e21b68))
-- 使创意工坊的翻页不经过主标签路径 ([`7525e25`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7525e25))
+- **lockscreen** — 始终把桌面交还给海报提供方 ([9e21b68](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/9e21b68))
+- 使创意工坊的翻页不经过主标签路径 ([7525e25](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7525e25))
 
 #### 其他变更
 
-- 0.2.1 ([`7180677`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7180677))
-- 修复呈现暂停和帧计时的回归 ([`f56e00d`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/f56e00d))
-- 增加 WallpaperPresentationPolicy，在被遮挡时暂停渲染 ([`7db2382`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7db2382))
+- 0.2.1 ([7180677](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7180677))
+- 修复呈现暂停和帧计时的回归 ([f56e00d](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/f56e00d))
+- 增加 WallpaperPresentationPolicy，在被遮挡时暂停渲染 ([7db2382](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7db2382))
 
 另有 1 个文档、测试和工具相关的提交。
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.2.0...v0.2.1
-
-## 0.2.0 — 2026-09-15
+## [0.2.0](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.8...v0.2.0) (2026-09-15)
 
 ### English
 
-#### Other changes
+#### Other Changes
 
-- 0.2.0 ([`ccda129`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/ccda129))
-- Replace native SwiftUI panels with the WebKit control panel ([`7b83b4e`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7b83b4e))
+- 0.2.0 ([ccda129](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/ccda129))
+- Replace native SwiftUI panels with the WebKit control panel ([7b83b4e](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7b83b4e))
 
 ### 简体中文
 
 #### 其他变更
 
-- 0.2.0 ([`ccda129`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/ccda129))
-- 用 WebKit 控制面板替换原生 SwiftUI 面板 ([`7b83b4e`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7b83b4e))
+- 0.2.0 ([ccda129](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/ccda129))
+- 用 WebKit 控制面板替换原生 SwiftUI 面板 ([7b83b4e](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/7b83b4e))
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.8...v0.2.0
-
-## 0.1.8 — 2026-09-15
+## [0.1.8](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.5...v0.1.8) (2026-09-15)
 
 ### English
 
-#### Other changes
+#### Other Changes
 
-- Hand the staging claim to SteamCMD and fail closed without it ([`180fc3c`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/180fc3c))
-- Require proof nothing is writing before reclaiming staging ([`8ac6f88`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8ac6f88))
-- Reclaim download staging stranded by a crash ([`eeb5e88`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/eeb5e88))
-- Pin the Download Details sheet environment with an offscreen test ([`57aa2eb`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/57aa2eb))
+- Hand the staging claim to SteamCMD and fail closed without it ([180fc3c](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/180fc3c))
+- Require proof nothing is writing before reclaiming staging ([8ac6f88](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8ac6f88))
+- Reclaim download staging stranded by a crash ([eeb5e88](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/eeb5e88))
+- Pin the Download Details sheet environment with an offscreen test ([57aa2eb](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/57aa2eb))
 
 ### 简体中文
 
 #### 其他变更
 
-- 把暂存认领交给 SteamCMD，没有它时按失败关闭处理 ([`180fc3c`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/180fc3c))
-- 在回收暂存区之前，要求证明没有任何写入 ([`8ac6f88`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8ac6f88))
-- 回收因崩溃而滞留的下载暂存区 ([`eeb5e88`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/eeb5e88))
-- 用离屏测试固定“下载详情”表单所读取的环境 ([`57aa2eb`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/57aa2eb))
+- 把暂存认领交给 SteamCMD，没有它时按失败关闭处理 ([180fc3c](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/180fc3c))
+- 在回收暂存区之前，要求证明没有任何写入 ([8ac6f88](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/8ac6f88))
+- 回收因崩溃而滞留的下载暂存区 ([eeb5e88](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/eeb5e88))
+- 用离屏测试固定“下载详情”表单所读取的环境 ([57aa2eb](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/57aa2eb))
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.5...v0.1.8
-
-## 0.1.5 — 2026-09-15
+## [0.1.5](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.4...v0.1.5) (2026-09-15)
 
 ### English
 
-#### Other changes
+#### Other Changes
 
-- Give sheet content the environment it reads ([`3987685`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3987685))
+- Give sheet content the environment it reads ([3987685](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3987685))
 
 ### 简体中文
 
 #### 其他变更
 
-- 向表单内容提供它所读取的环境 ([`3987685`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3987685))
+- 向表单内容提供它所读取的环境 ([3987685](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3987685))
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.4...v0.1.5
-
-## 0.1.4 — 2026-09-15
+## [0.1.4](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.3...v0.1.4) (2026-09-15)
 
 ### English
 
-#### Other changes
+#### Other Changes
 
-- Drop the download mark from the private SteamCMD copy ([`15cf07f`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/15cf07f))
+- Drop the download mark from the private SteamCMD copy ([15cf07f](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/15cf07f))
 
 ### 简体中文
 
 #### 其他变更
 
-- 从私有的 SteamCMD 副本中去掉下载标记 ([`15cf07f`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/15cf07f))
+- 从私有的 SteamCMD 副本中去掉下载标记 ([15cf07f](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/15cf07f))
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.3...v0.1.4
-
-## 0.1.3 — 2026-09-15
+## [0.1.3](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.1...v0.1.3) (2026-09-15)
 
 ### English
 
-#### Other changes
+#### Other Changes
 
-- Keep the library grid out of the type checker's limit ([`59857dd`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/59857dd))
-- Validate SteamCMD the way dyld does and build releases in CI ([`b0bc639`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b0bc639))
+- Keep the library grid out of the type checker's limit ([59857dd](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/59857dd))
+- Validate SteamCMD the way dyld does and build releases in CI ([b0bc639](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b0bc639))
 
 ### 简体中文
 
 #### 其他变更
 
-- 让壁纸库网格避开类型检查器的上限 ([`59857dd`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/59857dd))
-- 按 dyld 的方式校验 SteamCMD，并在 CI 中构建发布版本 ([`b0bc639`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b0bc639))
+- 让壁纸库网格避开类型检查器的上限 ([59857dd](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/59857dd))
+- 按 dyld 的方式校验 SteamCMD，并在 CI 中构建发布版本 ([b0bc639](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/b0bc639))
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.1...v0.1.3
-
-## 0.1.1 — 2026-09-15
+## [0.1.1](https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.0...v0.1.1) (2026-09-15)
 
 ### English
 
-#### Other changes
+#### Other Changes
 
-- Fix one-click SteamCMD install for signed CLI tools and updater links ([`3a4033b`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3a4033b))
+- Fix one-click SteamCMD install for signed CLI tools and updater links ([3a4033b](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3a4033b))
 
 ### 简体中文
 
 #### 其他变更
 
-- 修复已签名命令行工具和更新器链接的一键 SteamCMD 安装 ([`3a4033b`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3a4033b))
+- 修复已签名命令行工具和更新器链接的一键 SteamCMD 安装 ([3a4033b](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3a4033b))
 
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/compare/v0.1.0...v0.1.1
-
-## 0.1.0 — 2026-09-15
+## [0.1.0](https://github.com/bobbyhuang-dev/WallpaperMachine/commits/v0.1.0) (2026-09-15)
 
 ### English
 
-#### Other changes
+#### Other Changes
 
-- Remove unused updater leftovers and ignore local verification artifacts ([`eb72174`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/eb72174))
-- Add confirmed GitHub Release updates so installed builds can download and restart-install ([`3338eb8`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3338eb8))
-- Add version bump CI triggered by release: commits ([`d882916`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/d882916))
-- Improve native wallpaper workflows and SteamCMD installation ([`aa7c22c`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/aa7c22c))
-- Integrate native lock-screen wallpapers and harden audio capture lifecycle ([`ecfe88f`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/ecfe88f))
-- Document native verification, renderer probes, and desktop tooling ([`311ab7a`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/311ab7a))
-- Queue concurrent Workshop downloads and safely adopt completed imports ([`db27a08`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/db27a08))
-- Fix renderer compatibility and render-target lifetime regressions ([`e455b6b`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/e455b6b))
-- Publish complete project snapshot including completed agent changes ([`1fb3048`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/1fb3048))
-- Publish initial source snapshot excluding concurrent agent work ([`9f33787`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/9f33787))
+- Remove unused updater leftovers and ignore local verification artifacts ([eb72174](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/eb72174))
+- Add confirmed GitHub Release updates so installed builds can download and restart-install ([3338eb8](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3338eb8))
+- Add version bump CI triggered by release: commits ([d882916](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/d882916))
+- Improve native wallpaper workflows and SteamCMD installation ([aa7c22c](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/aa7c22c))
+- Integrate native lock-screen wallpapers and harden audio capture lifecycle ([ecfe88f](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/ecfe88f))
+- Document native verification, renderer probes, and desktop tooling ([311ab7a](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/311ab7a))
+- Queue concurrent Workshop downloads and safely adopt completed imports ([db27a08](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/db27a08))
+- Fix renderer compatibility and render-target lifetime regressions ([e455b6b](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/e455b6b))
+- Publish complete project snapshot including completed agent changes ([1fb3048](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/1fb3048))
+- Publish initial source snapshot excluding concurrent agent work ([9f33787](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/9f33787))
 
 ### 简体中文
 
 #### 其他变更
 
-- 移除未使用的更新器残留，并忽略本地验证产物 ([`eb72174`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/eb72174))
-- 增加已经确认的 GitHub Release 更新，使已安装的构建可以下载并重启安装 ([`3338eb8`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3338eb8))
-- 增加由 release: 提交触发的版本号提升 CI ([`d882916`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/d882916))
-- 改进原生壁纸流程和 SteamCMD 安装 ([`aa7c22c`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/aa7c22c))
-- 集成原生锁屏壁纸，并加固音频采集的生命周期 ([`ecfe88f`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/ecfe88f))
-- 为原生验证、渲染器探测和桌面工具编写文档 ([`311ab7a`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/311ab7a))
-- 为并发的创意工坊下载排队，并安全接纳已完成的导入 ([`db27a08`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/db27a08))
-- 修复渲染器兼容性和渲染目标生命周期的回归 ([`e455b6b`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/e455b6b))
-- 发布包含已完成代理更改的完整项目快照 ([`1fb3048`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/1fb3048))
-- 发布不包含并发代理工作的初始源码快照 ([`9f33787`](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/9f33787))
-
-**Full changelog**: https://github.com/bobbyhuang-dev/WallpaperMachine/commits/v0.1.0
+- 移除未使用的更新器残留，并忽略本地验证产物 ([eb72174](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/eb72174))
+- 增加已经确认的 GitHub Release 更新，使已安装的构建可以下载并重启安装 ([3338eb8](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/3338eb8))
+- 增加由 release: 提交触发的版本号提升 CI ([d882916](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/d882916))
+- 改进原生壁纸流程和 SteamCMD 安装 ([aa7c22c](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/aa7c22c))
+- 集成原生锁屏壁纸，并加固音频采集的生命周期 ([ecfe88f](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/ecfe88f))
+- 为原生验证、渲染器探测和桌面工具编写文档 ([311ab7a](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/311ab7a))
+- 为并发的创意工坊下载排队，并安全接纳已完成的导入 ([db27a08](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/db27a08))
+- 修复渲染器兼容性和渲染目标生命周期的回归 ([e455b6b](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/e455b6b))
+- 发布包含已完成代理更改的完整项目快照 ([1fb3048](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/1fb3048))
+- 发布不包含并发代理工作的初始源码快照 ([9f33787](https://github.com/bobbyhuang-dev/WallpaperMachine/commit/9f33787))

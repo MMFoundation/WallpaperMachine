@@ -9,10 +9,28 @@ final class AppUpdateStore {
     /// What the newest published release says it changed, for the About card. Present
     /// whether or not that release is newer than the running build.
     private(set) var releaseNotes: ReleaseNotes?
+    /// Every release newer than this build up to the available one, newest first, for the update
+    /// window. From the manifest's changelog in every translation; without one, the latest
+    /// release's own notes stand alone.
+    private(set) var pendingReleases: [AppReleaseHistory.Entry] = []
+    /// Downloads an update an unattended check finds and installs it at the next moment nobody
+    /// is at the Mac, instead of asking.
+    var automaticallyInstallsUpdates: Bool {
+        didSet { defaults.set(automaticallyInstallsUpdates, forKey: Self.automaticKey) }
+    }
+    /// The version the person chose **Skip This Version** for; unattended checks keep quiet about
+    /// it, and a newer release is offered as usual.
+    var skippedVersion: String? {
+        get { defaults.string(forKey: Self.skippedKey) }
+        set { defaults.set(newValue, forKey: Self.skippedKey) }
+    }
     /// When the last check was refused by GitHub's anonymous rate limit, the time it lifts.
     /// Checks before then fail locally, so retries can't keep the shared quota exhausted.
     private(set) var rateLimitedUntil: Date?
+    static let automaticKey = "WallpaperMachine.updates.automatic"
+    static let skippedKey = "WallpaperMachine.updates.skippedVersion"
     @ObservationIgnored private let currentVersion: String
+    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let client: any AppUpdateClient
     @ObservationIgnored private let installer: any AppUpdateInstalling
     @ObservationIgnored private let workspace: AppUpdateWorkspace
@@ -39,6 +57,10 @@ final class AppUpdateStore {
     /// then cancels the preparation and is the user's.
     var isInstallPending: Bool { installScheduled && installationTask != nil }
 
+    /// Whether the installed copy can be replaced where it is; otherwise a download opens in
+    /// Finder for a manual install.
+    var canInstallInPlace: Bool { installer.canInstallInPlace }
+
     init(currentVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
          client: any AppUpdateClient = GitHubReleaseClient(),
          installer: any AppUpdateInstalling = AppUpdateInstaller(),
@@ -46,8 +68,11 @@ final class AppUpdateStore {
          scheduleInstall: ((@escaping () -> Void) -> Void)? = nil,
          terminate: (() -> Void)? = nil,
          installTimeout: Duration = .seconds(45),
+         defaults: UserDefaults = ClientPreferences.defaults,
          now: @escaping () -> Date = Date.init) {
         self.currentVersion = currentVersion
+        self.defaults = defaults
+        automaticallyInstallsUpdates = defaults.bool(forKey: Self.automaticKey)
         self.client = client
         self.installer = installer
         self.workspace = workspace
@@ -197,6 +222,7 @@ final class AppUpdateStore {
         rateLimitedUntil = nil
         available = nil
         releaseNotes = nil
+        pendingReleases = []
         activeOperation = .check
         state = .checking(currentVersion: currentVersion)
         defer {
@@ -218,6 +244,7 @@ final class AppUpdateStore {
                 return state
             }
             available = release
+            pendingReleases = Self.releases(in: release, after: current)
             if GitHubReleaseParser.selectAsset(from: release) == nil {
                 state = .manual(currentVersion: currentVersion, availableVersion: release.version.display)
             } else {
@@ -227,6 +254,24 @@ final class AppUpdateStore {
         } catch {
             return fail(.check, error)
         }
+    }
+
+    /// The changelog's releases above `current` up to `release`, or `release`'s own notes (in
+    /// English, the only language a release body has) when the changelog is missing or unreadable.
+    static func releases(in release: GitHubRelease, after current: SemanticVersion) -> [AppReleaseHistory.Entry] {
+        if !release.changelog.isEmpty {
+            do {
+                let entries = try AppReleaseHistory(markdown: release.changelog).entries.filter {
+                    $0.version > current && $0.version <= release.version
+                }
+                if entries.first?.version == release.version { return entries }
+            } catch {
+                AppLog.warn("update changelog could not be read: \(error)")
+            }
+        }
+        guard let notes = ReleaseNotes(version: release.version.display, body: release.notes) else { return [] }
+        return [AppReleaseHistory.Entry(version: release.version, english: notes, chinese: notes,
+                                        url: release.htmlURL)]
     }
 
     private func performDownload(_ release: GitHubRelease) async -> AppUpdateState {

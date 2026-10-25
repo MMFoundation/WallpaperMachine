@@ -2,19 +2,18 @@ import XCTest
 
 @testable import WallpaperMachine
 
-/// When the unattended update alert may appear, and that a held alert is offered exactly once
+/// When the unattended update window may appear, and that a held one is offered exactly once
 /// after the hold lifts. Pure decisions: no window, display or network is involved.
 final class UpdatePromptGateTests: XCTestCase {
     private func input(
         panel: Bool = false,
         presentation: GlobalPresentation = .running,
         coveredDisplay: Bool = false,
-        whatsNew: Bool = false,
         shuttingDown: Bool = false
     ) -> UpdatePromptGate.Input {
         .init(
             panelVisibleAndActive: panel, globalPresentation: presentation,
-            hasSuspendedDisplay: coveredDisplay, whatsNewOpen: whatsNew, shuttingDown: shuttingDown)
+            hasSuspendedDisplay: coveredDisplay, shuttingDown: shuttingDown)
     }
 
     // MARK: Decision table
@@ -38,30 +37,27 @@ final class UpdatePromptGateTests: XCTestCase {
         XCTAssertEqual(UpdatePromptGate.decide(input(panel: true, coveredDisplay: true)), .present)
     }
 
-    func testWhatsNewOpenAndShuttingDownHoldEvenWithThePanelInFront() {
-        XCTAssertEqual(UpdatePromptGate.decide(input(panel: true, whatsNew: true)), .hold(.whatsNewOpen))
+    func testShuttingDownHoldsEvenWithThePanelInFront() {
         XCTAssertEqual(UpdatePromptGate.decide(input(panel: true, shuttingDown: true)), .hold(.shuttingDown))
         XCTAssertEqual(
-            UpdatePromptGate.decide(input(whatsNew: true, shuttingDown: true)), .hold(.shuttingDown),
+            UpdatePromptGate.decide(input(presentation: .suspended, shuttingDown: true)), .hold(.shuttingDown),
             "a quit outranks everything, so the reason logged is the one that can never lift")
     }
 
-    func testNoCombinationPresentsOverWhatsNewShutdownOrASuspendedScreen() {
+    func testNoCombinationPresentsOverShutdownOrASuspendedScreen() {
         let presentations: [GlobalPresentation] = [.running, .suspended, .unloaded]
         for panel in [false, true] {
             for presentation in presentations {
                 for covered in [false, true] {
-                    for whatsNew in [false, true] {
-                        for shuttingDown in [false, true] {
-                            let given = input(
-                                panel: panel, presentation: presentation, coveredDisplay: covered,
-                                whatsNew: whatsNew, shuttingDown: shuttingDown)
-                            guard UpdatePromptGate.decide(given) == .present else { continue }
-                            XCTAssertFalse(whatsNew || shuttingDown, "\(given)")
-                            XCTAssertTrue(
-                                panel || (presentation == .running && !covered),
-                                "an alert appeared with wallpapers suspended and the panel not in front: \(given)")
-                        }
+                    for shuttingDown in [false, true] {
+                        let given = input(
+                            panel: panel, presentation: presentation, coveredDisplay: covered,
+                            shuttingDown: shuttingDown)
+                        guard UpdatePromptGate.decide(given) == .present else { continue }
+                        XCTAssertFalse(shuttingDown, "\(given)")
+                        XCTAssertTrue(
+                            panel || (presentation == .running && !covered),
+                            "the window appeared with wallpapers suspended and the panel not in front: \(given)")
                     }
                 }
             }
@@ -82,7 +78,7 @@ final class UpdatePromptGateTests: XCTestCase {
         XCTAssertNil(ledger.holdReason)
         XCTAssertEqual(ledger.offeredVersion, "1.4.0")
 
-        // Later is a decision for the launch: neither another check nor a later resume asks again.
+        // Remind Me Later is a decision for the launch: neither another check nor a later resume asks again.
         XCTAssertEqual(ledger.offer(version: "1.4.0", input: input()), .none)
         XCTAssertEqual(ledger.offer(version: "1.4.0", input: asleep), .none)
         XCTAssertNil(ledger.holdReason)
@@ -119,11 +115,15 @@ final class UpdatePromptGateTests: XCTestCase {
             .present(version: "2.0.0"))
     }
 
-    func testWhatsNewClosingReleasesAHeldPrompt() {
+    func testAWindowOpenedFromTheMenuAnswersAHeldPrompt() {
         var ledger = UpdatePromptLedger()
+        _ = ledger.offer(version: "2.0.0", input: input(coveredDisplay: true))
+        ledger.markOffered("2.0.0")
+        XCTAssertNil(ledger.holdReason)
         XCTAssertEqual(
-            ledger.offer(version: "2.0.0", input: input(whatsNew: true)), .held(.whatsNewOpen, isNew: true))
-        XCTAssertEqual(ledger.offer(version: "2.0.0", input: input()), .present(version: "2.0.0"))
+            ledger.offer(version: "2.0.0", input: input()), .none,
+            "Remind Me Later in that window holds for the launch")
+        XCTAssertEqual(ledger.offer(version: "2.0.1", input: input()), .present(version: "2.0.1"))
     }
 
     func testAnUpdateThatDisappearedWhileHeldIsForgotten() {

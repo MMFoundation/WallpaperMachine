@@ -121,6 +121,10 @@ final class WallpaperPresentationPolicy {
     /// does not set this.
     var isSuspended: Bool { globalPresentation != .running }
 
+    /// Nobody is at the Mac: the displays sleep or the session is locked. An app rule or the
+    /// Focus filter suspends presentation too, but while someone works.
+    var isUnattended: Bool { displaysAsleep || sessionLocked }
+
     /// The suspended displays that something hides from the user (a full-screen app, a covered
     /// working area), leaving out the ones paused only because they chose to play where they work
     /// and are elsewhere. The unattended update alert waits for the first and not for the second.
