@@ -337,8 +337,8 @@ scanning, described [below](#codeql-codeqlyml).
 Version, Build and Release grant `contents: write`; Build's publish job also needs
 `id-token: write` and `attestations: write` for its provenance attestation, and
 both callers pass those through, together with the repository's secrets (`secrets:
-inherit`). Warm caches only reads. Supporters writes only `README.md` and
-`README.zh-CN.md`, with `contents: write`, and reads Version's runs with
+inherit`). Warm caches only reads. Supporters writes only `README.md`,
+`README.zh-CN.md` and `README.pt-BR.md`, with `contents: write`, and reads Version's runs with
 `actions: read`. The macOS setup Build and Warm caches share lives in one
 composite action,
 [`.github/actions/prepare-build`](../.github/actions/prepare-build/action.yml).
@@ -570,7 +570,7 @@ publishes nothing.
 ### Supporters (`supporters.yml`)
 
 Keeps the [README's Supporter list](../README.md#thank-you-to-every-supporter), and
-the same list in its translation `README.zh-CN.md`, in step with the website's
+the same list in its translations `README.zh-CN.md` and `README.pt-BR.md`, in step with the website's
 [sponsor wall](https://www.wallpapermachine.app/#sponsors). Every hour (and on
 demand from **Actions -> Supporters -> Run workflow**) it runs
 `python3 scripts/update_sponsors.py` on `main`, which reads the wall's JSON from
