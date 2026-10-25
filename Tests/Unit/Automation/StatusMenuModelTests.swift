@@ -97,6 +97,15 @@ final class StatusMenuModelTests: XCTestCase {
 
         let nothing = StatusMenuModel.wallpaperMenuEntries(for: input(displays: [display("primary")], active: false, canLock: false))
         XCTAssertTrue(nothing.isEmpty, "the panel is already open, so nothing is left to offer")
+
+        let several = StatusMenuModel.wallpaperMenuEntries(for: input(displays: [
+            display("primary", shows: "a", next: true), display("7"),
+        ], canLock: false))
+        XCTAssertEqual(shape(several), [
+            .command(.playPause, checked: false),
+            .command(.toggleMute, checked: false),
+            .submenu([.command(.next(display: "primary"), checked: false), .separator, .command(.remove(display: "primary"), checked: false)]),
+        ], "no Open in Control Panel, and a display with nothing left to offer has no submenu")
     }
 
     func testTheFlatMenuOffersOnlyWhatCanAct() {

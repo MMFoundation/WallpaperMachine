@@ -144,14 +144,31 @@ enum StatusMenuModel {
     }
 
     /// The same commands for the Wallpaper menu in the app's menu bar, shown while the panel is
-    /// in front: everything but the lines that open the panel, which is already open.
+    /// in front: everything but the lines that open the panel, which is already open, in a
+    /// display's submenu too.
     static func wallpaperMenuEntries(for input: Input) -> [Entry] {
-        Array(entries(for: input).drop { entry in
+        withoutPanelCommands(entries(for: input))
+    }
+
+    /// `entries` without the commands that open the panel, with no separator left at either end
+    /// or doubled, and no submenu left empty.
+    private static func withoutPanelCommands(_ entries: [Entry]) -> [Entry] {
+        var kept: [Entry] = []
+        for entry in entries {
             switch entry {
-            case .command(.openControlPanel, _, _), .command(.openDownloads, _, _), .separator: true
-            default: false
+            case .command(.openControlPanel, _, _), .command(.openDownloads, _, _), .command(.openInPanel, _, _):
+                continue
+            case .submenu(let title, let entries):
+                let inner = withoutPanelCommands(entries)
+                if !inner.isEmpty { kept.append(.submenu(title: title, entries: inner)) }
+            case .separator:
+                if let last = kept.last, last != .separator { kept.append(.separator) }
+            case .command:
+                kept.append(entry)
             }
-        })
+        }
+        if kept.last == .separator { kept.removeLast() }
+        return kept
     }
 
     /// The displays a command can act on: enabled, showing a wallpaper of their own rather
