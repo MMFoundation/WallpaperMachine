@@ -2628,6 +2628,12 @@ texture entrances are not decoded-image or native-rendering evidence.
   is neither multiplied twice nor baked into the separate cut-out pieces.
   Unskinned layers, effect-free puppets and unlit materials keep their lighting
   paths.
+- **Puppet texture channels** — `MaterialContracts.APuppetsTextureChannelMeshIsNotDrawnAsPartOfTheModel`
+  in `scene_schema_tests`. A puppet model whose second mesh draws with
+  `puppettexturechannels` is drawn as its picture's mesh alone, directly and by
+  the closing pass of an effect chain. That pass used to draw every mesh with the
+  layer's material, so the channel's quads (in picture pixels) showed small copies
+  of the whole picture beside the model (issue #88).
 - **Colour blend modes** — `MetalSceneDraw.AColorBlendLayersColourAndAlphaApplyOnce`
   draws a tinted, half-transparent layer through a stand-in passthrough over a
   coloured background: the tint and alpha are taken once, by the layer's own

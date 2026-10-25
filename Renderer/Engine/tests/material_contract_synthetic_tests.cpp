@@ -76,23 +76,29 @@ std::string Tex(int nominal_w, int nominal_h, int visible_w, int visible_h,
 }
 
 // MDLV14 has a global layout word and no mesh extras. An optional MDLS1
-// supplies exactly one identity bone, or explicitly zero bones.
-std::string SquareModel(int bones) {
+// supplies exactly one identity bone, or explicitly zero bones. A texture
+// channel mesh, when asked for, follows the picture's mesh: a smaller square
+// beside it, drawn with `materials/channels.json`.
+std::string SquareModel(int bones, bool texture_channel = false) {
     Bytes b;
     constexpr uint32_t layout = 0x01800009;
-    b.text("MDLV0014"); b.u32(layout); b.u32(1); b.u32(1);
-    b.text("materials/mesh.json"); b.u32(0);
-    b.u32(4 * 52);
-    const float points[4][5] = {{-32,-32,0,0,1}, {-32,32,0,0,0},
-                                {32,-32,0,1,1}, {32,32,0,1,0}};
-    for (const auto& p : points) {
-        for (int k = 0; k != 3; ++k) b.f32(p[k]);
-        for (int k = 0; k != 4; ++k) b.u32(0);
-        for (int k = 0; k != 4; ++k) b.f32(k == 0 ? 1.0f : 0.0f);
-        b.f32(p[3]); b.f32(p[4]);
-    }
-    b.u32(12);
-    for (uint16_t i : {0, 1, 2, 2, 1, 3}) b.u16(i);
+    b.text("MDLV0014"); b.u32(layout); b.u32(1); b.u32(texture_channel ? 2 : 1);
+    const auto square = [&b](const char* material, float low, float high) {
+        b.text(material); b.u32(0);
+        b.u32(4 * 52);
+        const float points[4][5] = {{low,low,0,0,1}, {low,high,0,0,0},
+                                    {high,low,0,1,1}, {high,high,0,1,0}};
+        for (const auto& p : points) {
+            for (int k = 0; k != 3; ++k) b.f32(p[k]);
+            for (int k = 0; k != 4; ++k) b.u32(0);
+            for (int k = 0; k != 4; ++k) b.f32(k == 0 ? 1.0f : 0.0f);
+            b.f32(p[3]); b.f32(p[4]);
+        }
+        b.u32(12);
+        for (uint16_t i : {0, 1, 2, 2, 1, 3}) b.u16(i);
+    };
+    square("materials/mesh.json", -32, 32);
+    if (texture_channel) square("materials/channels.json", 40, 56);
     if (bones >= 0) {
         b.text("MDLS0001"); b.u32(0); b.u16(bones); b.u16(0);
         if (bones) {
@@ -192,8 +198,8 @@ protected:
         image["effects"] = Json::array({{{"file","effects/tint.json"},
             {"passes",Json::array({{{"constantshadervalues",{{"tint",tint}}}}})}}});
     }
-    void Puppet(Json& image, int bones) {
-        Put("models/square.mdl", SquareModel(bones));
+    void Puppet(Json& image, int bones, bool texture_channel = false) {
+        Put("models/square.mdl", SquareModel(bones, texture_channel));
         PutJson("models/puppet.json", {{"material","materials/base.json"},
             {"puppet","models/square.mdl"}, {"autosize",false}});
         image["image"] = "models/puppet.json";
@@ -433,6 +439,33 @@ TEST_F(MaterialContracts, DirectAndAdditivePuppetsRetainPerMeshMaterial) {
         ASSERT_EQ(material->textures.size(),2u); EXPECT_EQ(material->textures[0],"aux");
         EXPECT_EQ(material->blenmode,blend == 31 ? BlendMode::Additive : BlendMode::Translucent);
         EXPECT_NE(std::find(material->defines.begin(),material->defines.end(),"SKINNING"),material->defines.end());
+        TickSamples(*scene->runtime);
+    }
+}
+
+TEST_F(MaterialContracts, APuppetsTextureChannelMeshIsNotDrawnAsPartOfTheModel) {
+    // A mesh drawn with `puppettexturechannels` paints frames into the puppet's picture;
+    // its positions are pixels of that picture. Drawn directly or by the closing pass of
+    // an effect chain, the model on the screen is the picture's mesh alone.
+    Shader("puppettexturechannels", kImageFragment);
+    Material("materials/channels.json", "puppettexturechannels", {"aux", "sheet"});
+    for (bool with_effect : {false,true}) {
+        SCOPED_TRACE(with_effect);
+        auto image = Image(); Puppet(image,1,true);
+        if (with_effect) Effect(image);
+        auto scene = Load(Json::array({image})); ASSERT_NE(scene,nullptr);
+        auto* node = Node(*scene,"owner"); ASSERT_NE(node,nullptr); ASSERT_NE(node->Mesh(),nullptr);
+        const SceneMesh* model = node->Mesh();
+        if (with_effect) {
+            auto* chain = Chain(*scene,*node); ASSERT_NE(chain,nullptr);
+            model = &chain->FinalMesh();
+        } else {
+            EXPECT_TRUE(node->Camera().empty());
+            ASSERT_NE(node->Mesh()->Material(),nullptr);
+            EXPECT_EQ(node->Mesh()->Material()->textures.at(0),"aux");
+        }
+        ASSERT_EQ(model->Submeshes().size(),1u);
+        EXPECT_EQ(model->Submeshes()[0].GetVertexArray(0).VertexCount(),4u);
         TickSamples(*scene->runtime);
     }
 }

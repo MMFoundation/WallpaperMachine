@@ -3165,6 +3165,19 @@ std::optional<wpscene::WPMaterial> ReadPuppetMaterial(fs::VFS& vfs, const std::s
     return material;
 }
 
+/// A texture channel: a mesh drawn with `puppettexturechannels` paints frames into the
+/// puppet's own picture, where its animation weighs them in. Its positions are pixels of that
+/// picture, not points of the model, so it is never drawn as part of the model on the screen.
+bool IsTextureChannelMesh(fs::VFS& vfs, const WPMdl::Mesh& mesh) {
+    nlohmann::json json;
+    if (mesh.mat_json_file.empty() ||
+        ! wpscene::ParseBoundedJson(fs::GetFileContent(vfs, "/assets/" + mesh.mat_json_file), json)) {
+        return false;
+    }
+    wpscene::WPMaterial material;
+    return material.FromJson(json) && material.shader == "puppettexturechannels";
+}
+
 /// The clipping-mask material of one mask (R69): the shipped `clippingmaskimage4`
 /// shader, translucent, never depth tested, written or culled, drawing the piece's
 /// picture with the mask's picture. Skinning combos apply to it as to any slot.
@@ -3343,7 +3356,13 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     WPMdl mdl;
     bool  puppet_ok = false;
     if (! image.puppet.empty()) {
-        puppet_ok = WPMdlParser::Parse(image.puppet, *context.vfs, mdl) &&
+        const bool parsed = WPMdlParser::Parse(image.puppet, *context.vfs, mdl);
+        if (parsed) {
+            std::erase_if(mdl.meshes, [&context](const WPMdl::Mesh& mesh) {
+                return IsTextureChannelMesh(*context.vfs, mesh);
+            });
+        }
+        puppet_ok = parsed && ! mdl.meshes.empty() &&
                     ((mdl.puppet != nullptr && ! mdl.puppet->bones.empty()) ||
                      std::any_of(mdl.meshes.begin(), mdl.meshes.end(),
                                  [](const WPMdl::Mesh& mesh) { return ! mesh.positions.empty(); }));

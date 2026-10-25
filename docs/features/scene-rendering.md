@@ -419,7 +419,11 @@ Under a `worldspace` parent, whose particles are in world units, a child hangs a
 its authored offset unscaled, and so does a static child whose own file is
 `worldspace`, which no reference settles. A puppet model whose animation block the
 model parser cannot read is drawn in its bind pose on both, with a log line when it
-loads. A text layer is an ordinary layer: it takes its place in the layer order and
+loads. A puppet's texture channel (a mesh whose material draws with
+`puppettexturechannels`, such as an eye-blink frame) paints frames into the
+puppet's own picture, its positions being pixels of that picture: it is never drawn
+as part of the model on the screen, with or without effects. Painting those frames
+in is not supported, so a texture channel's animation (a blink) does not show. A text layer is an ordinary layer: it takes its place in the layer order and
 carries its transform, opacity, blend, effect chain, camera and the final
 composition, appears in desktop posters, and uses the engine's one text system on
 both renderers. Text whose content has not changed is not laid out, rasterised or
