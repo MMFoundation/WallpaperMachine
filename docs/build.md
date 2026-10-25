@@ -13,8 +13,8 @@ Authoritative build document. Everything here is driven by `scripts/build.py` an
 | Xcode | A full Xcode selected with `xcode-select`. The build reads `xcode-select -p` for the toolchain and `xcrun --sdk macosx --show-sdk-path` for the SDK. Command Line Tools alone are not enough. |
 | Homebrew | Provides every renderer dependency; `brew --prefix` is queried at build time. |
 | XcodeGen | `xcodegen` must be on `PATH`. Every build runs `xcodegen generate --use-cache`, which regenerates the project when `project.yml` changed. |
-| Python | System `python3` runs all of `scripts/`. |
-| Rust | `cargo` must be on `PATH` for the renderer stage. |
+| Python | `python3` 3.11 or newer runs all of `scripts/` (`hashlib.file_digest` is the newest API they use). The `/usr/bin/python3` that macOS and Command Line Tools ship is 3.9, so install Homebrew's `python`, which puts a newer `python3` ahead of it on `PATH`. |
+| Rust | `cargo` must be on `PATH` for the renderer stage. Install it with rustup, which reads `Renderer/rust-toolchain.toml` and builds with the nightly toolchain pinned there, as CI does. Homebrew's `rust` formula ignores that file and builds with its own stable release. |
 
 Homebrew packages the renderer links against, exactly as listed in
 `build_environment()` in `scripts/build.py`:
@@ -26,7 +26,16 @@ brew install quickjs-ng freetype lz4 nlohmann-json argparse
 Plus the build tooling those packages are compiled and consumed with:
 
 ```sh
-brew install rust cmake ninja pkg-config xcodegen
+brew install rustup python cmake ninja pkg-config xcodegen
+```
+
+Homebrew's `rustup` is keg-only, so put it on `PATH` (in `~/.zprofile`, for
+example), then install the toolchain `Renderer/rust-toolchain.toml` pins from
+inside `Renderer/`:
+
+```sh
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+cd Renderer && rustup toolchain install
 ```
 
 Steam Workshop downloads additionally need SteamCMD, which the app installs and

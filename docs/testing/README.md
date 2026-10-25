@@ -64,10 +64,12 @@ scheme excludes UI tests.
 
 ## Test layers
 
-Use Python 3.10 or newer for the routine gate: `test_brand.py` uses
-`zip(strict=True)`, which the Python 3.9 shipped with some Xcode installations
-does not support. If `python3 --version` reports 3.9, run the commands below
-with an installed newer interpreter (for example, `python3.12`).
+Use Python 3.11 or newer for the routine gate: the scripts and their tests use
+`zip(strict=True)` and `hashlib.file_digest`, which the Python 3.9 shipped with
+macOS and Command Line Tools does not have. If `python3 --version` reports 3.9,
+install Homebrew's `python` ([build prerequisites](../build.md#prerequisites)) or
+run the commands below with an installed newer interpreter (for example,
+`python3.12`).
 
 | Layer | Location | Command |
 | --- | --- | --- |
