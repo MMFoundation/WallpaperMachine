@@ -575,13 +575,13 @@ the same list in its translations `README.zh-CN.md` and `README.pt-BR.md`, in st
 demand from **Actions -> Supporters -> Run workflow**) it runs
 `python3 scripts/update_sponsors.py` on `main`, which reads the wall's JSON from
 `https://www.wallpapermachine.app/api/sponsors` and rewrites the block between the
-`supporters:start` and `supporters:end` markers in both files; the script's
+`supporters:start` and `supporters:end` markers in all three files; the script's
 docstring describes the block, and edits between the markers are overwritten.
-When the block changed it commits both READMEs as
+When the block changed it commits the three READMEs as
 `docs(readme): update the Supporter list` and pushes to `main`, starting again from
 the new `main` if that moved. It skips the hour while a Version run is queued or
 running, because Version's push of its bump commit does not retry. A wall that
-can't be read, or a README without its block, fails the run and leaves both READMEs
+can't be read, or a README without its block, fails the run and leaves the READMEs
 as they were.
 
 ### CodeQL (`codeql.yml`)

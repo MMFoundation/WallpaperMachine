@@ -233,7 +233,7 @@ catalogs agree.
    [release notes](release.md#release-notes-and-the-changelog).
 5. **Document.** Add the language to
    [Control panel → Language](features/control-panel.md#language) and to the
-   language list in both READMEs, and record the run with
+   language list in every README, and record the run with
    `python3 scripts/log_verification.py`.
 
 Adding or changing a string in the app means adding it to every catalog in the
