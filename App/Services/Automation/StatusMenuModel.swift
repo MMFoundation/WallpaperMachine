@@ -143,6 +143,17 @@ enum StatusMenuModel {
         return entries
     }
 
+    /// The same commands for the Wallpaper menu in the app's menu bar, shown while the panel is
+    /// in front: everything but the lines that open the panel, which is already open.
+    static func wallpaperMenuEntries(for input: Input) -> [Entry] {
+        Array(entries(for: input).drop { entry in
+            switch entry {
+            case .command(.openControlPanel, _, _), .command(.openDownloads, _, _), .separator: true
+            default: false
+            }
+        })
+    }
+
     /// The displays a command can act on: enabled, showing a wallpaper of their own rather
     /// than mirroring another, and connected right now. A row's CoreGraphics id comes from the
     /// `(id - Role)` suffix of its renderer title.

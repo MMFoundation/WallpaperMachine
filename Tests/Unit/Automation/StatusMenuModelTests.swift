@@ -85,6 +85,20 @@ final class StatusMenuModelTests: XCTestCase {
         ])
     }
 
+    func testTheWallpaperMenuOffersTheCommandsWithoutOpeningThePanel() {
+        let entries = StatusMenuModel.wallpaperMenuEntries(for: input(
+            displays: [display("primary", next: true)], downloads: .init(count: 1, percent: 40)))
+        XCTAssertEqual(shape(entries), [
+            .command(.playPause, checked: false),
+            .command(.toggleMute, checked: false),
+            .command(.next(display: "primary"), checked: false),
+            .command(.lockScreen, checked: false),
+        ])
+
+        let nothing = StatusMenuModel.wallpaperMenuEntries(for: input(displays: [display("primary")], active: false, canLock: false))
+        XCTAssertTrue(nothing.isEmpty, "the panel is already open, so nothing is left to offer")
+    }
+
     func testTheFlatMenuOffersOnlyWhatCanAct() {
         let nothing = StatusMenuModel.entries(for: input(displays: [display("primary")], active: false, canLock: false))
         XCTAssertEqual(shape(nothing), [.command(.openControlPanel, checked: false)], "no switch, no history, no Play/Pause")

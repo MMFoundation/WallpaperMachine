@@ -1,6 +1,62 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "About WallpaperMachine" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine에 관하여"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "About WallpaperMachine"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineについて"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "关于 WallpaperMachine"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "關於 WallpaperMachine"}}}
+    },
+    "Services" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "서비스"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Services"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "サービス"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "服务"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "服務"}}}
+    },
+    "Hide WallpaperMachine" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 가리기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Hide WallpaperMachine"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineを非表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "隐藏 WallpaperMachine"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "隱藏 WallpaperMachine"}}}
+    },
+    "Hide Others" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "기타 가리기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Hide Others"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ほかを非表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "隐藏其他"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "隱藏其他"}}}
+    },
+    "Show All" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "모두 보기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Show All"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "すべてを表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "全部显示"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示全部"}}}
+    },
+    "View" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "보기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "View"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "显示"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示方式"}}}
+    },
+    "Enter Full Screen" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "전체 화면 시작"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Enter Full Screen"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "フルスクリーンにする"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "进入全屏幕"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "進入全螢幕"}}}
+    },
+    "Window" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "윈도우"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Window"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ウインドウ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "窗口"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "視窗"}}}
+    },
+    "Minimize" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "최소화"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Minimize"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "しまう"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "最小化"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "縮到最小"}}}
+    },
+    "Bring All to Front" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "모두 앞으로 가져오기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Bring All to Front"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "すべてを手前に移動"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "前置全部窗口"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "將此程式所有視窗移至最前"}}}
+    },
+    "WallpaperMachine on GitHub" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "GitHub의 WallpaperMachine"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine on GitHub"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "GitHubのWallpaperMachine"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "GitHub 上的 WallpaperMachine"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "GitHub 上的 WallpaperMachine"}}}
+    },
+    "Release Notes" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "릴리스 노트"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Release Notes"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "リリースノート"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "版本说明"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "版本說明"}}}
+    },
+    "Report an Issue…" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "문제 보고…"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Report an Issue…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "問題を報告…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "报告问题…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "回報問題…"}}}
+    },
+    "No wallpaper is playing" : {
+      "extractionState" : "manual",
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "재생 중인 배경화면 없음"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "No wallpaper is playing"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "再生中の壁紙はありません"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "没有正在播放的壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "沒有正在播放的桌布"}}}
+    },
     "Restore recovery could not find the copies it set aside. The restore folder has been kept and nothing has been deleted." : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "복원을 바로잡는 중에 따로 보관해 둔 사본을 찾을 수 없습니다. 복원 폴더는 그대로 유지되었으며 아무것도 삭제되지 않았습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "復元の修復で、取り置いたコピーが見つかりませんでした。復元用フォルダは保持されており、何も削除されていません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "修复恢复时找不到预先留存的副本。恢复文件夹已保留，没有任何内容被删除。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "修復回復時找不到預先留存的副本。回復檔案夾已保留，沒有任何內容被刪除。"}}}
     },

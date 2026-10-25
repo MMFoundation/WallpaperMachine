@@ -3,8 +3,10 @@ import Combine
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation, NSWindowDelegate {
     private var statusItem: NSStatusItem?
+    /// The menu bar's Wallpaper menu, filled from `StatusMenuModel` each time it opens.
+    private var wallpaperMenu: NSMenu?
     private var controlPanelWindow: NSWindow?
     private var updateWindow: NSWindow?
     private var previewWindow: WallpaperPreviewWindowController?
@@ -1394,7 +1396,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func menuWillOpen(_ menu: NSMenu) {
         refreshStoreSnapshot()
-        rebuildMenu(menu)
+        if menu === wallpaperMenu {
+            rebuildWallpaperMenu(menu)
+        } else {
+            rebuildMenu(menu)
+        }
     }
 
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
@@ -1803,10 +1809,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         let applicationItem = NSMenuItem()
         let applicationMenu = NSMenu(title: "WallpaperMachine")
+        applicationMenu.addItem(menuItem("About WallpaperMachine", action: #selector(openAbout)))
+        applicationMenu.addItem(.separator())
         let settings = menuItem("Settings…", action: #selector(openSettings))
         settings.keyEquivalent = ","
         applicationMenu.addItem(settings)
         applicationMenu.addItem(menuItem("Check for Updates…", action: #selector(checkForUpdates)))
+        applicationMenu.addItem(.separator())
+        let servicesItem = NSMenuItem(title: String(localized: "Services"), action: nil, keyEquivalent: "")
+        let servicesMenu = NSMenu(title: String(localized: "Services"))
+        servicesItem.submenu = servicesMenu
+        NSApp.servicesMenu = servicesMenu
+        applicationMenu.addItem(servicesItem)
+        applicationMenu.addItem(.separator())
+        applicationMenu.addItem(NSMenuItem(title: String(localized: "Hide WallpaperMachine"),
+                                           action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
+        let hideOthers = NSMenuItem(title: String(localized: "Hide Others"),
+                                    action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        applicationMenu.addItem(hideOthers)
+        applicationMenu.addItem(NSMenuItem(title: String(localized: "Show All"),
+                                           action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: ""))
         applicationMenu.addItem(.separator())
         // Through the app's own exit handler, so the quit sequence runs.
         let quit = menuItem("Quit WallpaperMachine", action: #selector(exitApplication))
@@ -1837,7 +1860,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         editItem.submenu = editMenu
         main.addItem(editItem)
 
+        // The panel's tabs, Command-1 to Command-3 in tab order; Settings keeps Command-comma.
+        let viewItem = NSMenuItem()
+        let viewMenu = NSMenu(title: String(localized: "View"))
+        for (index, page) in PanelTabs.pages.enumerated() {
+            let item = NSMenuItem(title: PanelTabs.name(of: page), action: #selector(showPage(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = page.rawValue
+            if page != .settings { item.keyEquivalent = String(index + 1) }
+            viewMenu.addItem(item)
+        }
+        viewMenu.addItem(.separator())
+        // The window titles this item Enter or Exit Full Screen itself.
+        let fullScreen = NSMenuItem(title: String(localized: "Enter Full Screen"),
+                                    action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        fullScreen.keyEquivalentModifierMask = [.command, .control]
+        viewMenu.addItem(fullScreen)
+        viewItem.submenu = viewMenu
+        main.addItem(viewItem)
+
+        // What the status item offers, for whoever works in the panel and not the menu bar icon.
+        let wallpaperItem = NSMenuItem()
+        let wallpaperMenu = NSMenu(title: String(localized: "Wallpaper"))
+        wallpaperMenu.delegate = self
+        self.wallpaperMenu = wallpaperMenu
+        rebuildWallpaperMenu(wallpaperMenu)
+        wallpaperItem.submenu = wallpaperMenu
+        main.addItem(wallpaperItem)
+
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: String(localized: "Window"))
+        windowMenu.addItem(NSMenuItem(title: String(localized: "Minimize"),
+                                      action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
+        windowMenu.addItem(NSMenuItem(title: String(localized: "Zoom"),
+                                      action: #selector(NSWindow.performZoom(_:)), keyEquivalent: ""))
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(NSMenuItem(title: String(localized: "Bring All to Front"),
+                                      action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: ""))
+        windowItem.submenu = windowMenu
+        main.addItem(windowItem)
+        NSApp.windowsMenu = windowMenu
+
+        let helpItem = NSMenuItem()
+        let helpMenu = NSMenu(title: String(localized: "Help"))
+        helpMenu.addItem(menuItem("WallpaperMachine on GitHub", action: #selector(openRepository)))
+        helpMenu.addItem(menuItem("Release Notes", action: #selector(openReleaseNotes)))
+        helpMenu.addItem(menuItem("Report an Issue…", action: #selector(openIssues)))
+        helpItem.submenu = helpMenu
+        main.addItem(helpItem)
+        NSApp.helpMenu = helpMenu
+
         NSApp.mainMenu = main
+    }
+
+    /// The status item's playback and navigation commands, without its lines that open the panel.
+    private func rebuildWallpaperMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let items = statusMenuItems(for: StatusMenuModel.wallpaperMenuEntries(for: statusMenuInput()))
+        if items.isEmpty {
+            menu.addItem(disabledMenuItem(String(localized: "No wallpaper is playing")))
+        } else {
+            items.forEach(menu.addItem)
+        }
     }
 
     private func rebuildMenu(_ menu: NSMenu? = nil) {
@@ -1989,6 +2073,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     @objc private func openControlPanel() {
         showControlPanel(selection: .wallpaper)
+    }
+
+    @objc private func showPage(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let page = SidebarSelection(rawValue: raw) else { return }
+        if page == .workshop { showDiscover() } else { showControlPanel(selection: page) }
+    }
+
+    @objc private func openAbout() {
+        controlPanelNavigation.revealSettingsSection(.about)
+        showControlPanel(selection: .settings)
+    }
+
+    @objc private func openRepository() {
+        ExternalLink.open(ExternalLink.repository)
+    }
+
+    @objc private func openReleaseNotes() {
+        ExternalLink.open(AppUpdateConfiguration.releasesURL)
+    }
+
+    @objc private func openIssues() {
+        ExternalLink.open(ExternalLink.repositoryIssues)
+    }
+
+    /// Ticks the View menu's page on show.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(showPage(_:)) {
+            let shown = controlPanelWindow?.isVisible == true
+                && controlPanelNavigation.selection?.rawValue == item.representedObject as? String
+            item.state = shown ? .on : .off
+        }
+        return true
     }
 
     /// Discover, which lists the downloads; a first visit starts its search, as the link to it does.
