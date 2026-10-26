@@ -73,7 +73,7 @@ run the commands below with an installed newer interpreter (for example,
 
 | Layer | Location | Command |
 | --- | --- | --- |
-| Python script tests | `scripts/tests/` | `python3 scripts/test.py` (runs first, before Xcode); `--python-only` alone, which the Checks workflow runs on Linux for every pull request |
+| Python script tests | `scripts/tests/` | `python3 scripts/test.py` (runs first, before Xcode); `--python-only` alone, which the Checks workflow runs on Linux for every pull request into `main` |
 | Swift unit/integration | `Tests/Unit/<Domain>/` | `python3 scripts/test.py` (`WallpaperMachineTests`); `--only <TestClass>` for a subset |
 | XCUITest (desktop) | `Tests/UI/` | `python3 scripts/test.py --ui` — opt-in only |
 | Media/device integration | `Tests/Unit/NativeVideo/`, `Tests/Unit/Library/VideoLetterboxProbeMediaTests.swift` | `WALLPAPER_MACHINE_MEDIA_TESTS=1 python3 scripts/test.py` — opt-in only |

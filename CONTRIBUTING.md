@@ -166,7 +166,7 @@ By making a contribution to this project, I certify that:
 
 ## Automated review
 
-Every pull request runs the Checks workflow (`.github/workflows/checks.yml`): the
+Every pull request into `main` runs the Checks workflow (`.github/workflows/checks.yml`): the
 Python script tests on Linux, a minute or two, the same as
 `python3 scripts/test.py --python-only` locally. CodeQL runs on pushes to `main`,
 weekly and on demand, not on pull requests. The native gate does not run on pull

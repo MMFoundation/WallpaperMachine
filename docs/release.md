@@ -362,8 +362,8 @@ Version, Build, Release, Warm caches and Supporters are the release workflows in
 `.github/workflows/`; Supporters shares only `main` with the others.
 `claude.yml` and `claude-code-review.yml` are pull-request automation, described
 in [CONTRIBUTING.md](../CONTRIBUTING.md#automated-review). `checks.yml` runs
-`python3 scripts/test.py --python-only` on Linux for every pull request and push to
-`main`, the fast check a pull request waits for. `codeql.yml` is code scanning,
+`python3 scripts/test.py --python-only` on Linux for every pull request into `main` and
+every push to it, the fast check a pull request waits for. `codeql.yml` is code scanning,
 described [below](#codeql-codeqlyml).
 
 Version, Build and Release grant `contents: write`; Build's publish job also needs

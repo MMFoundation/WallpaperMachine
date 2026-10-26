@@ -11,7 +11,7 @@ the raw stream. See docs/testing/README.md.
 (`--only LibraryStoreTests --only WorkshopSearchTests/testPagination`) for quick
 iteration on a small change; the full gate is still the default and the final word.
 `--python-only` runs just the script tests, which need no Xcode; the Checks workflow
-runs it on Linux for every pull request.
+runs it on Linux for every pull request into `main`.
 
 Opt-in layers are off by default and are requested through the environment:
 `WALLPAPER_MACHINE_MEDIA_TESTS=1` (real video decoding) and
