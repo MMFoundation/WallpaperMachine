@@ -344,11 +344,12 @@ final class WorkshopBrowserModel {
         try await controller.navigate(.workshop)
       }
     }
-    // Signed in, the tiles mark the account's subscriptions; they are read once a launch.
-    if workshop.steamWebSession != nil, !subscriptionsRead {
+    // Signed in, the tiles mark the account's subscriptions; they are read once a launch. The
+    // read waits for a saved sign-in still being restored; with none, the next visit asks again.
+    if !subscriptionsRead {
       subscriptionsRead = true
-      controller.launch(PanelActionCoordinator.key("workshop-subscriptions")) { [controller] in
-        try await controller.refreshWorkshopSubscriptions()
+      controller.launch(PanelActionCoordinator.key("workshop-subscriptions")) { [controller, weak self] in
+        if try await !controller.refreshWorkshopSubscriptions() { self?.subscriptionsRead = false }
       }
     }
   }

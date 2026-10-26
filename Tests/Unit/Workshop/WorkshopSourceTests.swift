@@ -304,6 +304,23 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(store.subscribedIDs, [], "signed out, nothing is marked as subscribed")
   }
 
+  /// The page can ask for the marks before the saved sign-in has come back from the keychain:
+  /// the read waits for it, and answers whether there was a session to read with, so a page
+  /// opened signed out can ask again later.
+  func testReadingSubscriptionsWaitsForTheSavedSignInAndSaysWhetherItRead() async throws {
+    let store = fixture.store
+    let readSignedOut = try await store.refreshSubscribedIDs()
+    XCTAssertFalse(readSignedOut, "signed out, nothing is read")
+
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    let relaunched = fixture.relaunchedStore()
+    relaunched.restoreSteamWebSession()
+    let readRestored = try await relaunched.refreshSubscribedIDs()
+    XCTAssertTrue(readRestored, "the read waited for the saved sign-in")
+    XCTAssertEqual(relaunched.subscribedIDs, ["1"])
+  }
+
   func testSubscribingWithoutASignInChangesNothing() async throws {
     do {
       try await fixture.store.setSubscribed(true, itemID: "2")

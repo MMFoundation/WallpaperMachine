@@ -188,8 +188,12 @@ extension PanelController {
 
   /// Reads what the signed-in account subscribes to, so the Workshop tiles mark it. Quiet: a read
   /// that fails leaves the marks as they were, and an ended session is forgotten as anywhere.
-  func refreshWorkshopSubscriptions() async throws {
-    try await run(.direct) { try? await workshop.refreshSubscribedIDs() }
+  /// Answers whether they were read: false signed out, or when Steam could not be read.
+  @discardableResult
+  func refreshWorkshopSubscriptions() async throws -> Bool {
+    var read = false
+    try await run(.direct) { read = (try? await workshop.refreshSubscribedIDs()) ?? false }
+    return read
   }
 
   /// **Subscribe** and **Unsubscribe** in the Workshop inspector: changes the signed-in account's

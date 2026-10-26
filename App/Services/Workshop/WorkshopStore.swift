@@ -832,14 +832,17 @@ final class WorkshopStore {
     isDegraded = false
   }
 
-  /// Reads every id the signed-in account subscribes to. Signed out it does nothing; Steam
-  /// ending the session forgets it and throws `SteamSignInRequired`.
-  func refreshSubscribedIDs() async throws {
+  /// Reads every id the signed-in account subscribes to, after a saved sign-in still being
+  /// restored, and answers whether there was a session to read with. Signed out it does nothing;
+  /// Steam ending the session forgets it and throws `SteamSignInRequired`.
+  @discardableResult
+  func refreshSubscribedIDs() async throws -> Bool {
     do {
-      guard let session = try await currentSteamWebSession() else { return }
+      guard let session = try await currentSteamWebSession() else { return false }
       let ids = try await service.subscribedIDs(account: session)
       // A sign-out or another account while Steam answered keeps what that set.
       if steamWebSession?.steamID == session.steamID { subscribedIDs = Set(ids) }
+      return true
     } catch is SteamSignInRequired {
       forgetSteamWebSession()
       throw SteamSignInRequired()
