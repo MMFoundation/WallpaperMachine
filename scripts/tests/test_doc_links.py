@@ -28,12 +28,14 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
 SETEXT_UNDERLINE = re.compile(r"^ {0,3}(=+|-+)\s*$")
 REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?")
+# A scheme (`https:`, `mailto:`) or a scheme-relative `//host` leads off the repository.
+EXTERNAL = re.compile(r"^(?:[a-z][a-z0-9+.-]*:|//)", re.I)
 COMMENT = re.compile(r"<!--.*?-->", re.S)
 INLINE_CODE = re.compile(r"(`+)(.+?)\1")
 # A code span may carry on to the next line of its paragraph, though not past a blank line.
 CODE_SPAN = re.compile(r"(`+)(?:.|\n(?![ \t]*\n))+?\1")
 # `[text](target)` and `![alt](target)`, the target without its optional title.
-MARKDOWN_LINK = re.compile(r"!?\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
+MARKDOWN_LINK = re.compile(r"(?<!\\)!?\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 HTML_LINK = re.compile(r"""<(?:a|img)\b[^>]*?\b(?:href|src)\s*=\s*["']([^"']+)["']""", re.I)
 EXPLICIT_ANCHOR = re.compile(r"""<a\b[^>]*?\b(?:id|name)\s*=\s*["']([^"']+)["']""", re.I)
 
@@ -86,10 +88,16 @@ _ANCHORS = {}
 
 
 def anchors(path):
-    """Every anchor a page defines: its headings' slugs, repeats numbered, and explicit ids.
-    A setext heading is a line of text underlined with `=` or `-` on the next line."""
+    """Every anchor a page defines: its headings' slugs, repeats numbered, and explicit ids."""
+    headings, ids = page_anchors(path)
+    return headings | ids
+
+
+def page_anchors(path):
+    """`(heading slugs, explicit ids)` of a page. A setext heading is a line of text
+    underlined with `=` or `-` on the next line."""
     if path not in _ANCHORS:
-        found, seen = set(), Counter()
+        found, ids, seen = set(), set(), Counter()
 
         def add(heading):
             base = slug(heading_text(heading))
@@ -108,9 +116,16 @@ def anchors(path):
                 previous = None
             else:
                 previous = (number, line.strip()) if line.strip() else None
-            found.update(EXPLICIT_ANCHOR.findall(line))
-        _ANCHORS[path] = found
+            ids.update(EXPLICIT_ANCHOR.findall(line))
+        _ANCHORS[path] = (found, ids)
     return _ANCHORS[path]
+
+
+def has_anchor(path, fragment):
+    """A heading's slug is lowercase, so a fragment matches it in any case; an explicit
+    id matches only as written, as a browser compares it."""
+    headings, ids = page_anchors(path)
+    return fragment in ids or fragment.lower() in headings
 
 
 def links(path):
@@ -121,7 +136,7 @@ def links(path):
     for number, line in enumerate(text.split("\n"), start=1):
         found = MARKDOWN_LINK.findall(line) + HTML_LINK.findall(line) + REFERENCE_DEFINITION.findall(line)
         for target in found:
-            if not re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I):
+            if not EXTERNAL.match(target):
                 yield number, target
 
 
@@ -136,7 +151,7 @@ def broken(path):
         where = f"{path.relative_to(ROOT)}:{number}: {target}"
         if not destination.exists():
             yield f"{where} (no such file)"
-        elif anchor and destination.suffix == ".md" and unquote(anchor).lower() not in anchors(destination):
+        elif anchor and destination.suffix == ".md" and not has_anchor(destination, unquote(anchor)):
             yield f"{where} (no such heading)"
 
 
@@ -179,6 +194,21 @@ class DocLinkTests(unittest.TestCase):
             page = Path(folder) / "page.md"
             page.write_text("[guide][install]\n\n[install]: missing.md#setup\n", encoding="utf-8")
             self.assertEqual(list(links(page)), [(3, "missing.md#setup")])
+
+    def test_escaped_and_scheme_relative_links_are_not_checked(self):
+        with tempfile.TemporaryDirectory() as folder:
+            page = Path(folder) / "page.md"
+            page.write_text(
+                "\\[guide](missing.md) and [site](//example.com/guide)\n\n[real](missing.md)\n", encoding="utf-8")
+            self.assertEqual([number for number, _ in links(page)], [3])
+
+    def test_an_explicit_id_matches_only_as_written(self):
+        with tempfile.TemporaryDirectory() as folder:
+            page = Path(folder) / "page.md"
+            page.write_text('<a id="FAQ"></a>\n\n# Setup\n', encoding="utf-8")
+            self.assertTrue(has_anchor(page, "FAQ"))
+            self.assertFalse(has_anchor(page, "faq"))
+            self.assertTrue(has_anchor(page, "Setup"))
 
     def test_a_code_span_over_two_lines_holds_no_link(self):
         with tempfile.TemporaryDirectory() as folder:
