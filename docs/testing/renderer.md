@@ -1319,9 +1319,10 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
 - **Cursor walk details.** Layers are walked in the scene's layer order, and the quad
   test keeps a coverage mask for layers whose scripts handle the cursor, which
   Wallpaper Engine's does not have. Wallpaper Engine lets no blocker stop the walk while
-  a button is held with a captured set, and fires a click on release over the layer
-  that took the press, where a script here gets enter, down and click together on
-  press.
+  a button is held with a captured set; here a blocker that comes in front of a pressed
+  layer before the release cancels its click. Both fire the click on release over the
+  layer that took the press, and the order of `cursorUp` and `cursorClick` here (up
+  first) was not read from Wallpaper Engine.
 - **Perspective cursor point.** `input.cursorWorldPosition` in a perspective scene is worked
   out when the cursor is sampled, through the camera as the last tick left it, before this
   tick's scripts and camera shake move it, so a camera moved in the same tick shows in the

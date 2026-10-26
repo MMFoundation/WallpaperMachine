@@ -1481,8 +1481,9 @@ TEST(ScriptRuntimeCompat, ScriptsLoadedByAnEventStartWithTheFollowingEvent) {
         const auto dispatch = [&] {
             if (event == 0) runtime->DispatchCursorClick(0);
             else if (event == 1) {
+                // A tap: the click comes with the release.
                 runtime->SetCursorEnter(true);
-                runtime->SetCursorButtons(1, 1, 0);
+                runtime->SetCursorButtons(0, 1, 1);
                 runtime->DispatchCursorFrameEvents(true);
             } else {
                 runtime->DispatchMediaEventJson(R"({"type":"mediaThumbnailChanged","hasThumbnail":false})");
@@ -3958,14 +3959,15 @@ function cursorLeave() { emit(6); }
     EXPECT_FLOAT_EQ(marker->Translate().y(), 0);
     point(10);
     runtime->DispatchCursorFrameEvents(true);
-    EXPECT_FLOAT_EQ(marker->Translate().x(), 12345);
+    // Enter, move, down; then the release's up and its click.
+    EXPECT_FLOAT_EQ(marker->Translate().x(), 12354);
     EXPECT_FLOAT_EQ(marker->Translate().y(), 1);
     runtime->BeginFrame();
     runtime->DispatchCursorFrameEvents(true);
-    EXPECT_FLOAT_EQ(marker->Translate().x(), 123452);
+    EXPECT_FLOAT_EQ(marker->Translate().x(), 123542);
     point(-10);
     runtime->DispatchCursorFrameEvents(true);
-    EXPECT_FLOAT_EQ(marker->Translate().x(), 1234526);
+    EXPECT_FLOAT_EQ(marker->Translate().x(), 1235426);
     runtime->SetNodeTranslate("marker", linalg::Vector3f::Zero());
     target->SetRotation(linalg::Vector3f::Zero());
     target->SetScale(linalg::Vector3f(-1, 1, 1));
@@ -3992,7 +3994,7 @@ TEST(ScriptRuntimeCompat, CursorCallbacksRecheckLaterTargetsWithoutAddingVisibil
     runtime->RegisterNodeVisibility("first", first.get(), ResolveBoolSetting(*runtime, {
         {"value", true}, {"script", R"JS(
 let calls = 0;
-function cursorClick() {
+function cursorDown() {
     const next = thisScene.getLayer('second');
     const origin = next.origin;
     origin.x = ++calls === 1 ? 100 : 0;

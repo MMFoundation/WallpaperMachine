@@ -429,7 +429,19 @@ Playback, backend, host and startup areas are in
   callback can hide or move a blocker, and costs nothing in a scene with no blocker.
   A cost has not been measured on a scene with many scripted layers and one blocker.
   Not modelled: Wallpaper Engine's walk skips blocking while a button is held and a
-  captured set is non-empty, and fires its click on release rather than on press.
+  captured set is non-empty.
+- **Click on release** — `MouseInput.TheClickComesOnReleaseOverTheLayerThatTookThePress`
+  in `mouse_input_test`, with the press-and-release taps of `sound_layer_cursor_behavior_test`,
+  `ClickScripts.OnlyTheHitOneOfThreeSameNamedLayersPlaysItsOwnSound` (`scene_schema_part05_test`),
+  `CursorInputState.SceneScriptStillGetsTheReleaseAfterThePointerLeftTheWindow` and
+  `ScriptRuntimeCompat.CursorCoveragePreservesAllPhasesThresholdsAndLiveTransforms`. As in
+  Wallpaper Engine, a press brings `cursorDown` to the layers the walk reaches, which hold
+  the button; the release brings each holder `cursorUp` wherever the pointer is, then
+  `cursorClick` only when the pointer is still over that layer (for a script of the scene
+  itself, anywhere on the wallpaper). A release elsewhere cancels the click, and a press
+  that began off a layer clicks nothing where it ends. A program with only a click handler
+  holds the button from the press. Up before click follows the browsers' order; Wallpaper
+  Engine's order between the two was not read from the binary.
 
 ## Scene scripts and property bindings
 

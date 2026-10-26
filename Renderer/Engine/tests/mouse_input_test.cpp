@@ -736,28 +736,99 @@ TEST(MouseInput, ALayerBehindABlockerHearsNeitherTheDownNorTheClickOfAPress) {
     listen("front");
     listen("beside");
 
-    // Where `front` covers `back`, only `front` is pressed.
+    const auto press = [&](bool pressed) {
+        stage.runtime->BeginFrame();
+        stage.runtime->SetCursorButton(0, pressed);
+        stage.was_in_window = stage.runtime->DispatchCursorFrameEvents(stage.was_in_window);
+        stage.runtime->Tick(1.0 / 60.0);
+    };
+
+    // Where `front` covers `back`, only `front` is pressed, and only it is clicked
+    // when the button comes up.
     stage.runtime->SetCursorInput(125.0f / 1920.0f, 1.0f - 500.0f / 1080.0f);
     stage.runtime->SetCursorEnter(true);
-    stage.runtime->SetCursorButton(0, true);
-    stage.was_in_window = stage.runtime->DispatchCursorFrameEvents(stage.was_in_window);
-    stage.runtime->Tick(1.0 / 60.0);
+    press(true);
     EXPECT_TRUE(stage.runtime->NodeVisible("front down"));
-    EXPECT_TRUE(stage.runtime->NodeVisible("front click"));
     EXPECT_FALSE(stage.runtime->NodeVisible("back down"));
-    EXPECT_FALSE(stage.runtime->NodeVisible("back click"));
     EXPECT_FALSE(stage.runtime->NodeVisible("beside down"));
-    stage.runtime->SetCursorButton(0, false);
-    stage.was_in_window = stage.runtime->DispatchCursorFrameEvents(stage.was_in_window);
+    press(false);
+    EXPECT_TRUE(stage.runtime->NodeVisible("front click"));
+    EXPECT_FALSE(stage.runtime->NodeVisible("back click"));
+    EXPECT_FALSE(stage.runtime->NodeVisible("beside click"));
 
     // Where only `back` is under the cursor, nothing stands in front of it.
     stage.runtime->SetCursorInput(75.0f / 1920.0f, 1.0f - 500.0f / 1080.0f);
-    stage.runtime->SetCursorButton(0, true);
-    stage.was_in_window = stage.runtime->DispatchCursorFrameEvents(stage.was_in_window);
-    stage.runtime->Tick(1.0 / 60.0);
+    press(true);
     EXPECT_TRUE(stage.runtime->NodeVisible("back down"));
+    press(false);
     EXPECT_TRUE(stage.runtime->NodeVisible("back click"));
     EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+}
+
+// Wallpaper Engine clicks a layer when the button comes up over the layer that took
+// the press: the press brings only `cursorDown`, the release `cursorUp` and then
+// `cursorClick`. A release elsewhere still brings the holder its `cursorUp`, but no
+// click, and a press that began off the layer clicks nothing where it ends.
+TEST(MouseInput, TheClickComesOnReleaseOverTheLayerThatTookThePress) {
+    // Each case gets a fresh stage, since a layer's script-written visibility holds.
+    struct ClickStage {
+        CursorStage stage;
+        ClickStage() {
+            stage.AddLayer("button", 100.0f, 100.0f, false);  // spans 50..150
+            for (const char* marker : { "down", "up", "click", "click before up" }) {
+                auto node = std::make_shared<SceneNode>();
+                node->SetVisible(false);
+                stage.runtime->RegisterNode(marker, node.get());
+                stage.nodes.push_back(node);
+            }
+            stage.runtime->RegisterSceneScript(
+                "let up = false;\n"
+                "function cursorDown() { up = false; scene.getObject('down').visible = true; }\n"
+                "function cursorUp() { up = true; scene.getObject('up').visible = true; }\n"
+                "function cursorClick() {\n"
+                "  scene.getObject('click').visible = true;\n"
+                "  if (!up) scene.getObject('click before up').visible = true;\n"
+                "}\n",
+                "button");
+        }
+        void At(float x, bool pressed) {
+            stage.runtime->BeginFrame();
+            stage.runtime->SetCursorInput(x / 1920.0f, 1.0f - 500.0f / 1080.0f);
+            stage.runtime->SetCursorEnter(true);
+            stage.runtime->SetCursorButton(0, pressed);
+            stage.was_in_window = stage.runtime->DispatchCursorFrameEvents(stage.was_in_window);
+            stage.runtime->Tick(1.0 / 60.0);
+        }
+        bool Seen(const char* marker) const { return stage.runtime->NodeVisible(marker); }
+    };
+
+    {
+        ClickStage click;
+        click.At(100.0f, true);
+        EXPECT_TRUE(click.Seen("down"));
+        EXPECT_FALSE(click.Seen("click")) << "the press alone is not a click";
+        click.At(110.0f, false);
+        EXPECT_TRUE(click.Seen("up"));
+        EXPECT_TRUE(click.Seen("click"));
+        EXPECT_FALSE(click.Seen("click before up"));
+        EXPECT_EQ(click.stage.runtime->scriptErrorCount(), 0u);
+    }
+    {
+        ClickStage away;
+        away.At(100.0f, true);
+        away.At(300.0f, true);
+        away.At(300.0f, false);
+        EXPECT_TRUE(away.Seen("up")) << "the layer that took the press hears its release anywhere";
+        EXPECT_FALSE(away.Seen("click")) << "a release off the layer cancels the click";
+    }
+    {
+        ClickStage onto;
+        onto.At(300.0f, true);
+        onto.At(100.0f, true);
+        onto.At(100.0f, false);
+        EXPECT_FALSE(onto.Seen("down"));
+        EXPECT_FALSE(onto.Seen("click")) << "a press that began elsewhere is no click on the layer";
+    }
 }
 
 // The blocker in front is found from the layers' order, which scripts and the

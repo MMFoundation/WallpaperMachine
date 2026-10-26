@@ -3774,12 +3774,15 @@ void SceneRuntimeContext::DispatchCursorUp(int button) {
 
 // One frame of cursor events for the programs that listen (a scene program carries no mask of
 // the handlers it defines, since it may register them as it runs, so each is asked): enter, leave and move by whether
-// the pointer is over their layer, then the press and release edges this frame brought.
+// the pointer is over their layer, then the press and release edges this frame brought. As in
+// Wallpaper Engine, a press brings `cursorDown` and its release `cursorUp`, then `cursorClick` when
+// the pointer is still over the layer that took the press.
 bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
     const bool in_window = m_host_context->cursor_in_window;
-    constexpr uint8_t kPress = static_cast<uint8_t>(ScriptCursorEvent::Down) |
-                               static_cast<uint8_t>(ScriptCursorEvent::Click);
-    constexpr uint8_t kRelease = static_cast<uint8_t>(ScriptCursorEvent::Up);
+    // Both go with the button: a program with only a click handler holds it from the press.
+    constexpr uint8_t kButton = static_cast<uint8_t>(ScriptCursorEvent::Down) |
+                                static_cast<uint8_t>(ScriptCursorEvent::Up) |
+                                static_cast<uint8_t>(ScriptCursorEvent::Click);
     // The walk's programs are the ones there are as it begins; what a callback adds joins at the
     // next frame, and one it removes leaves an empty slot.
     const auto value_count  = m_scripted_values.size();
@@ -3855,7 +3858,7 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
     }
 
     // Presses go to the programs under the pointer, which then hold the button; the release
-    // goes to the holders wherever the pointer has gone since.
+    // goes to the holders wherever the pointer has gone since, and clicks those it is still over.
     const uint32_t pressed  = m_host_context->mouse_buttons_pressed;
     const uint32_t released = m_host_context->mouse_buttons_released;
     for (uint32_t button = 0; button < 32; ++button) {
@@ -3867,13 +3870,10 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
             m_cursor_blocker_cached = false;
             for (std::size_t index = 0; index < value_count; ++index) {
                 auto* value = m_scripted_values[index];
-                if (value == nullptr || (value->CursorHandlerMask() & kPress) == 0) continue;
+                if (value == nullptr || (value->CursorHandlerMask() & kButton) == 0) continue;
                 if (VisitScriptLayer(*value) != CursorVisit::Inside) continue;
                 m_scripted_value_cursor_held[button].push_back(value);
                 value->DispatchCursorDown(*m_host_context);
-                if (m_scripted_values.size() > index && m_scripted_values[index] == value) {
-                    value->DispatchCursorClick(*m_host_context);
-                }
                 callback_ran();
             }
             for (std::size_t index = 0; index < script_count; ++index) {
@@ -3882,9 +3882,6 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
                 if (VisitScriptLayer(*script) != CursorVisit::Inside) continue;
                 m_scene_script_cursor_held[button].push_back(index);
                 script->DispatchCursorDown(*m_host_context);
-                if (index < m_scene_scripts.size() && m_scene_scripts[index].script.get() == script) {
-                    script->DispatchCursorClick(*m_host_context);
-                }
                 callback_ran();
             }
         }
@@ -3895,12 +3892,15 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
         m_cursor_blocker_cached = false;
         for (std::size_t index = 0; index < value_count; ++index) {
             auto* value = m_scripted_values[index];
-            if (value == nullptr || (value->CursorHandlerMask() & kRelease) == 0) continue;
+            if (value == nullptr || (value->CursorHandlerMask() & kButton) == 0) continue;
             const bool holder = std::find(held_values.begin(), held_values.end(), value) != held_values.end();
             const bool scene_wide = value->LayerName().empty();
-            if (holder || scene_wide ||
-                (in_window && VisitScriptLayer(*value) == CursorVisit::Inside)) {
-                value->DispatchCursorUp(*m_host_context);
+            const bool over = in_window && VisitScriptLayer(*value) == CursorVisit::Inside;
+            if (! holder && ! scene_wide && ! over) continue;
+            value->DispatchCursorUp(*m_host_context);
+            callback_ran();
+            if (holder && over && m_scripted_values.size() > index && m_scripted_values[index] == value) {
+                value->DispatchCursorClick(*m_host_context);
                 callback_ran();
             }
         }
@@ -3909,9 +3909,12 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
             auto* script = m_scene_scripts[index].script.get();
             const bool holder = std::find(held_scripts.begin(), held_scripts.end(), index) != held_scripts.end();
             const bool scene_wide = script->LayerName().empty();
-            if (holder || scene_wide ||
-                (in_window && VisitScriptLayer(*script) == CursorVisit::Inside)) {
-                script->DispatchCursorUp(*m_host_context);
+            const bool over = in_window && VisitScriptLayer(*script) == CursorVisit::Inside;
+            if (! holder && ! scene_wide && ! over) continue;
+            script->DispatchCursorUp(*m_host_context);
+            callback_ran();
+            if (holder && over && index < m_scene_scripts.size() && m_scene_scripts[index].script.get() == script) {
+                script->DispatchCursorClick(*m_host_context);
                 callback_ran();
             }
         }

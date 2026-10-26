@@ -231,7 +231,9 @@ this app's own windows is not a click on the wallpaper, so neither scripts
 (`cursorDown`, `cursorClick`, `cursorUp`) nor effects that react to a held button
 (cursor ripples, fluid simulations) see it, or its release, even when the pointer is
 dragged onto the desktop before the button is let go. A press the wallpaper did get is
-always released, wherever the pointer ends up.
+always released, wherever the pointer ends up. As in Wallpaper Engine, the press brings
+`cursorDown` and the release `cursorUp`, then `cursorClick` only when the pointer is still
+over the layer that was pressed: letting go elsewhere cancels the click.
 
 Both scene renderers share video decoder selection. On macOS, an eligible FFmpeg
 default is kept; a software-only default does not rule out another decoder for
