@@ -1087,8 +1087,13 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   and an image layer's `color` play their `animation` (loop, single, relative,
   start-paused with the first frame applied, named for `getAnimation`, keyed together
   through `options.parent` on one clock); the rest of the option set is not read. The
-  `mirror` play mode plays as `single`, for every timeline (the local scenes use it on
-  origin, alpha, light intensity, shader constants and bloom strength). A timeline on `alpha` keeps a clock of its own even when it is keyed
+  `mirror` play mode plays to the end, back to the start and over again
+  (`ScalarAnimationMode::Mirror`): the clock's position stays inside the timeline with a
+  direction beside it, so component curves, `getFrame` and markers see real frames on the
+  way back, and a marker is met on the way out and again on the way back (once at either
+  end). Whether Wallpaper Engine shows the end frame once or twice at the turn was not
+  compared with its frames (the local scenes use mirror on origin, alpha, light intensity,
+  shader constants and bloom strength). A timeline on `alpha` keeps a clock of its own even when it is keyed
   under another setting, so a paused parent does not hold it. A text layer's or a light's
   `color` timeline holds the authored colour, and a timeline on a setting that also has
   a script or a user property is dropped (the script or property is its only writer),
