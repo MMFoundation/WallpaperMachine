@@ -432,7 +432,8 @@ changed from the author's defaults pre-filled: each with its value and default, 
 change is not applied yet, at most 20 with the rest counted. Typed text and the paths of chosen
 files are not included, only that they were changed. When the inspector's
 [Compatibility check](wallpaper-properties.md#compatibility-check) of the wallpaper found files
-the scene names and lacks, the report lists them too, with the layer that asked for each. The fields the form requires (what the
+the scene refers to that are not installed, the report lists each one's path and the layer that
+asked for it. The fields the form requires (what the
 user did, what went wrong, what they expected and the diagnostics report) are
 left for the user to fill in. When the panel saw this wallpaper fail
 (its download, or the last attempt to apply it), an error notice takes the link's
