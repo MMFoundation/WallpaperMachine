@@ -1074,5 +1074,169 @@ class RepositoryRangeTests(unittest.TestCase):
         self.assertIn("First feature", text)
 
 
+def authored(address, sha="f" * 40, body=""):
+    """A commit of the range written from `address`."""
+    return release_notes.Commit(sha, sha[:7], "feat(panel): something", body, address)
+
+
+class ThanksTests(unittest.TestCase):
+    """Who a release thanks, and the line every language block ends with."""
+
+    def thanked(self, *entries, lookup=None):
+        return release_notes.outside_contributors(entries, REPOSITORY, {}, lookup)
+
+    def test_outside_authors_are_thanked_by_login_oldest_first(self):
+        newest_first = (
+            authored("7+Second@users.noreply.github.com"),
+            authored("first@users.noreply.github.com"),
+            authored("12+second@users.noreply.github.com"),
+        )
+        self.assertEqual(self.thanked(*newest_first), ("second", "first"),
+                         "One credit per login, in the order of its first commit")
+
+    def test_maintainers_agents_and_bots_are_not_thanked(self):
+        self.assertEqual(self.thanked(
+            authored("1+bobbyhuang-dev@users.noreply.github.com"),
+            authored("100508620+fzlzjerry@users.noreply.github.com"),
+            authored("t3code@users.noreply.github.com"),
+            authored("41898282+github-actions[bot]@users.noreply.github.com"),
+            authored("noreply@anthropic.com", body="Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"),
+        ), ())
+
+    def test_a_co_author_is_thanked_by_a_noreply_address_only(self):
+        body = ("Co-authored-by: Helper <9+helper@users.noreply.github.com>\n"
+                "Co-authored-by: Someone <someone@example.com>\n")
+        self.assertEqual(self.thanked(authored("1+bobbyhuang-dev@users.noreply.github.com", body=body)), ("helper",))
+
+    def test_any_other_address_needs_githubs_record_of_the_commit(self):
+        self.assertEqual(self.thanked(authored("person@example.com")), (),
+                         "Without a token nobody is asked and an address alone credits no one")
+        asked = []
+
+        def lookup(sha):
+            asked.append(sha)
+            return {"a" * 40: ("Person", "User"), "b" * 40: ("Maker[bot]", "Bot"), "c" * 40: ("bobbyhuang-dev", "User")}.get(sha)
+
+        self.assertEqual(self.thanked(
+            authored("person@example.com", "d" * 40), authored("PERSON@example.com", "a" * 40),
+            authored("maker@example.com", "b" * 40), authored("bobby@example.com", "c" * 40),
+            authored("unknown@example.com", "e" * 40), lookup=lookup), ("Person",))
+        self.assertEqual(sorted(asked), ["a" * 40, "b" * 40, "c" * 40, "e" * 40],
+                         "Asked once per address; GitHub's answer for the oldest commit stands for the rest")
+
+    def test_every_language_thanks_the_same_logins(self):
+        names = ("[@one](https://github.com/one)", "[@two](https://github.com/two)", "[@three](https://github.com/three)")
+        self.assertEqual(release_notes.thanks_line("english", ("one",)),
+                         f"Thanks to {names[0]} for contributing to this release.")
+        self.assertEqual(release_notes.thanks_line("english", ("one", "two", "three")),
+                         f"Thanks to {names[0]}, {names[1]} and {names[2]} for contributing to this release.")
+        self.assertEqual(release_notes.thanks_line("chinese", ("one", "two")), f"感谢 {names[0]} 和 {names[1]} 为本版本做出的贡献。")
+        self.assertEqual(release_notes.thanks_line("korean", ("one", "two")),
+                         f"이번 릴리스에 기여해 주신 {names[0]}, {names[1]} 님께 감사드립니다.")
+        self.assertIsNone(release_notes.thanks_line("english", ()))
+
+
+class GitHubCommits(http.server.BaseHTTPRequestHandler):
+    """A local stand-in for GitHub's commit API: `replies` maps a path to `(status, body)`."""
+
+    replies = {}
+    requests = []
+
+    def do_GET(self):
+        GitHubCommits.requests.append((self.path, {name.lower(): value for name, value in self.headers.items()}))
+        status, payload = GitHubCommits.replies.get(self.path, (404, {"message": "Not Found"}))
+        data = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *args):
+        pass
+
+
+class GitHubAuthorTests(unittest.TestCase):
+    """The request that names a commit's author when its address is not a noreply one."""
+
+    def setUp(self):
+        GitHubCommits.replies, GitHubCommits.requests = {}, []
+        urllib.request.install_opener(urllib.request.build_opener(urllib.request.ProxyHandler({})))
+        self.addCleanup(urllib.request.install_opener, None)
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), GitHubCommits)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        original = release_notes.GITHUB_API
+        release_notes.GITHUB_API = f"http://127.0.0.1:{server.server_address[1]}"
+        self.addCleanup(setattr, release_notes, "GITHUB_API", original)
+
+    def test_the_token_asks_github_who_wrote_the_commit(self):
+        sha = "a" * 40
+        GitHubCommits.replies[f"/repos/{REPOSITORY}/commits/{sha}"] = (200, {"author": {"login": "person", "type": "User"}})
+        thanked = release_notes.outside_contributors(
+            [authored("person@example.com", sha)], REPOSITORY, {release_notes.GITHUB_TOKEN_VARIABLE: "token"})
+        self.assertEqual(thanked, ("person",))
+        self.assertEqual(GitHubCommits.requests[0][1]["authorization"], "Bearer token")
+
+    def test_an_unknown_commit_or_unlinked_address_credits_nobody(self):
+        sha = "b" * 40
+        GitHubCommits.replies[f"/repos/{REPOSITORY}/commits/{sha}"] = (200, {"author": None})
+        self.assertIsNone(release_notes.github_author(REPOSITORY, sha, "token"))
+        self.assertIsNone(release_notes.github_author(REPOSITORY, "c" * 40, "token"), "A commit GitHub does not know")
+
+    def test_any_other_refusal_stops_the_run(self):
+        sha = "d" * 40
+        GitHubCommits.replies[f"/repos/{REPOSITORY}/commits/{sha}"] = (401, {"message": "Bad credentials"})
+        with self.assertRaisesRegex(release_notes.NotesError, "HTTP 401"):
+            release_notes.github_author(REPOSITORY, sha, "token")
+
+
+class ThanksRangeTests(unittest.TestCase):
+    """The thanks line in written notes, over a real history with an outside commit."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        self.addCleanup(self.directory.cleanup)
+        git("init", "-q", "-b", "main", cwd=self.root)
+        git("config", "user.email", "1+bobbyhuang-dev@users.noreply.github.com", cwd=self.root)
+        git("config", "user.name", "Maintainer", cwd=self.root)
+        git("config", "commit.gpgsign", "false", cwd=self.root)
+        commit(self.root, "feat(panel): first feature")
+        git("tag", "v0.1.0", cwd=self.root)
+        (self.root / "pt-BR.txt").write_text("olá", encoding="utf-8")
+        git("add", "-A", cwd=self.root)
+        git("commit", "-q", "-m", "feat(localization): add Brazilian Portuguese",
+            "--author", "Contributor <5+contributor@users.noreply.github.com>", cwd=self.root)
+        self.short = release_notes.git("log", "-1", "--format=%h", "HEAD", cwd=self.root).strip()
+        commit(self.root, "fix(scene): keep layers in place")
+        commit(self.root, "chore: bump version to 0.2.0")
+
+    def test_every_language_block_of_the_model_notes_ends_with_the_thanks(self):
+        reply = Transport(model_reply(trilingual(commits=(self.short,), new=[LAYERS])))
+        body = release_notes.write_with_model("0.2.0", "v0.1.0", "HEAD", REPOSITORY, self.root, reply, KEY)
+        blocks = release_notes.language_blocks(body)
+        mention = "[@contributor](https://github.com/contributor)"
+        self.assertTrue(blocks["english"].rstrip().endswith(f"Thanks to {mention} for contributing to this release."))
+        self.assertTrue(blocks["chinese"].rstrip().endswith(f"感谢 {mention} 为本版本做出的贡献。"))
+        self.assertTrue(blocks["korean"].rstrip().endswith(f"이번 릴리스에 기여해 주신 {mention} 님께 감사드립니다."))
+        self.assertNotIn("contributor", reply.requests[0][2]["messages"][0]["content"].lower(),
+                         "The script writes the thanks; the model is not asked to")
+        release_notes.require_localized_notes(body, "0.2.0")
+        page = release_notes.release_body(body, "0.2.0", repo=REPOSITORY)
+        self.assertIn(f"Thanks to {mention}", page)
+        self.assertNotIn("感谢", page)
+
+    def test_the_listing_thanks_them_too(self):
+        body = release_notes.notes_for("0.2.0", "v0.1.0", "HEAD", REPOSITORY, cwd=self.root, environ={})
+        self.assertTrue(body.rstrip().endswith("Thanks to [@contributor](https://github.com/contributor) "
+                                               "for contributing to this release."))
+
+    def test_a_range_of_maintainer_commits_thanks_nobody(self):
+        body = release_notes.notes_for("0.2.0", "HEAD~2", "HEAD", REPOSITORY, cwd=self.root, environ={})
+        self.assertNotIn("Thanks", body)
+
+
 if __name__ == "__main__":
     unittest.main()

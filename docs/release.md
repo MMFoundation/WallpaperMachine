@@ -182,6 +182,7 @@ The release pipeline always passes `--ai`.
 | `RELEASE_NOTES_API_KEY` | none; required | Key for the gateway. A secret: it lives in the environment of one command or in the repository secret of the same name, never in a file. |
 | `RELEASE_NOTES_API_BASE` | `https://sub2api.moraxcheng.me` | Anthropic Messages API gateway; a base that already ends in `/v1` is accepted |
 | `RELEASE_NOTES_MODEL` | `claude-opus-5-5` | The model that writes the notes |
+| `RELEASE_NOTES_GITHUB_TOKEN` | none | Lets the script ask GitHub which account wrote a commit, for the [thanks line](#thanking-contributors); CI passes the job's `github.token` |
 
 The model reads every non-merge commit in the range, newest first, except CI's own
 `chore: bump version to x.y.z`. `docs`, `test`, `chore`, `ci`, `build`, `style` and `refactor`
@@ -236,6 +237,32 @@ for 120 seconds, or a reply still running after 600, stops the run: the Version
 job holds its branch lock while it waits. Nothing is retried; a failed run is
 re-run.
 
+#### Thanking contributors
+
+Each language block of a new section ends with one line, written by the script and
+not the model, thanking the outside contributors whose commits are in the range:
+`Thanks to [@login](https://github.com/login) for contributing to this release.`,
+`感谢 [@login](…) 为本版本做出的贡献。` and `이번 릴리스에 기여해 주신 [@login](…) 님께
+감사드립니다.`, the same logins in the same order (oldest first contribution first)
+in all three. Every commit of the range counts, internal ones included, except CI's
+bump commit.
+
+A contributor is a GitHub login. A commit's author has one when the address is
+GitHub's noreply form (`<id>+login@users.noreply.github.com`); for any other address,
+with `RELEASE_NOTES_GITHUB_TOKEN` set, the script asks GitHub's commit API once per
+address (`GET /repos/<repo>/commits/<sha>`) and takes the author account GitHub links
+it to. A `Co-authored-by` trailer counts only with a noreply address. Nobody is
+credited by name or address alone: an address GitHub links to no account, a commit
+it does not know yet (404/422) and every address in a run without the token are
+left out, so a maintainer's new address is never thanked. Any other API failure
+stops the run. `MAINTAINERS` in `scripts/release_notes.py` (`bobbyhuang-dev`,
+`fzlzjerry` and the `t3code` agent account) and every bot (`[bot]` logins, GitHub's
+`Bot` type) are never thanked; add a new maintainer there. AI co-authors such as
+`noreply@anthropic.com` have no login and drop out on their own. The commit listing
+(no `--ai`) ends with the English line too; `--rebuild-changelog` adds none to the
+sections it lists, and a recorded section is never changed, so a version whose tag
+exists keeps the notes it was published with.
+
 ### Listed from the commits
 
 Without `--ai` the commits are listed in English, read through the
@@ -289,6 +316,8 @@ python3 scripts/release_notes.py --rebuild-changelog --apply   # a section for e
 ```
 
 A local `--ai` run needs `RELEASE_NOTES_API_KEY` exported for that command only.
+To see the thanks line for contributors without a noreply address, pass
+`RELEASE_NOTES_GITHUB_TOKEN="$(gh auth token)"` the same way.
 `--previous` overrides the tag the range starts after; by default it is the
 newest released version below the target that the range's end descends from, so a
 gap in the numbering resolves correctly.
@@ -322,7 +351,8 @@ the model; a plain `--ai` run prints the model's section, heading included, and 
 make the request. `scripts/tests/test_release_notes.py` covers classification,
 closing references, rendering and links, the changelog headings, range resolution
 against a throwaway repository, the model path and its commit citations against a
-fake gateway, the publish path and the committed `CHANGELOG.md` itself;
+fake gateway, who is thanked (noreply logins, GitHub's commit record against a fake
+API, maintainers and bots left out) and the thanks line in every language, the publish path and the committed `CHANGELOG.md` itself;
 `scripts/tests/test_update_manifest.py` covers the manifest. Both run as part of
 `python3 scripts/test.py`.
 
