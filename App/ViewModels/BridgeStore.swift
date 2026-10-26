@@ -86,6 +86,9 @@ final class BridgeStore {
     @ObservationIgnored var sceneMediaAvailability: (@MainActor () -> SystemMediaAvailability)?
     /// Per-wallpaper energy ratings, owned by the app delegate's background recorder.
     @ObservationIgnored var wallpaperEnergyRatings: WallpaperEnergyRatings?
+    /// What Native Metal last concluded about each scene. The app delegate records the running
+    /// scenes' reports into it; the panel's Compatibility check reads and adds to it.
+    @ObservationIgnored var sceneDrawVerdicts: SceneDrawVerdicts?
     let editorState = WallpaperEditorState()
     /// The user's commands, from the control panel and the menu bar, run through here.
     let commands = UserCommandQueue()

@@ -60,6 +60,12 @@ pub struct GetWallpaperOptionsSnapshot {
     pub wallpaper_id: String,
 }
 
+/// Asks what reading one installed scene without drawing it needs: its project file, the shared
+/// assets, the shader cache and its saved property choices (not the editor's draft).
+pub struct GetSceneProbeRequest {
+    pub wallpaper_id: String,
+}
+
 /// Test hook: adds a library entry of the given kind without scanning disk.
 /// Tests that need real project files put them under a temporary
 /// library root and scan it.
@@ -438,6 +444,7 @@ pub type LibrarySnapshotReply = Result<BridgeLibrarySnapshot, BridgeError>;
 pub type MonitorInformationSnapshotReply = Result<BridgeMonitorInformationSnapshot, BridgeError>;
 pub type SettingsSnapshotReply = Result<BridgeSettingsSnapshot, BridgeError>;
 pub type WallpaperOptionsSnapshotReply = Result<BridgeWallpaperOptionsSnapshot, BridgeError>;
+pub type SceneProbeRequestReply = Result<crate::engine::SceneProbeRequest, BridgeError>;
 
 // Replies for the lock screen and web wallpapers, which are listed apart from
 // the library because their hosts consume them through other channels.

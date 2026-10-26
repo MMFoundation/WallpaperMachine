@@ -540,8 +540,16 @@ on [manual-smoke.md](manual-smoke.md).
   `StorageSettingsModelTests` (Panel) turn the Storage page's choices into the
   requested pending restore and open no file panels.
 - `WallpaperCompatibilityTests` — target, content and configuration generations
-  and truthful unknown states. They do not establish complete scene or on-screen
-  compatibility.
+  and truthful unknown states; the scene row from a remembered verdict and read again
+  each check, a check that reads the scene through an injected renderer probe (a refusal
+  with its reason, the files its layers lack with their layer, a scene that cannot be read,
+  no read without the shared resources) and records what it found. They do not establish
+  complete scene or on-screen compatibility: the probe itself is the renderer's
+  (`scene_capability_probe_test`, `tests::scene_capability` in the bridge).
+- `SceneDrawVerdictsTests` — a drawn scene remembered across launches for the same build
+  and files, forgotten for another build or changed files; only content outcomes kept
+  (`unsupported`, `compile`), never preparing or a frame or surface failure; a clean check
+  never replaces a scene seen drawing; no verdict without a manifest.
 - `LetterboxDetectorTests` — the black-bar decision over synthetic luma frames:
   letterbox, pillarbox and windowbox edges within a row, hairline edges ignored,
   noisy black and a logo or subtitle inside a bar, fades and dark scenes skipped,
@@ -810,7 +818,9 @@ need an authorized runtime check
   snapshot, judged afresh when the file changes; a failure that is not a verdict on the file is
   restated for its own startup revision and tried again under a newer one), re-evaluation
   when the admission key (the file) changes, one surface per display, a mirror group
-  judged once under its source's key, hidden-display and user-pause handling, a clip stopped
+  judged once under its source's key and heard from one member (a covered source hands the
+  sound to a mirror in sight; the same clip on two independent displays is heard on both),
+  hidden-display and user-pause handling, a clip stopped
   by a reading taken while the desktop (or one display) was covered playing again
   once `WallpaperHosts.reconcile` has the host read the bridge again (that
   `AppDelegate` makes the call after each delivery is not run by any test),
@@ -1086,14 +1096,18 @@ never to `.shared`.
   `LivePreviewSchedulerTests`.
 - Installed and the library: `PanelLibraryActionsTests` (favorites, Show in Finder, selection
   slots, only Reapply restarting what the target shows, the target display taken when the user
-  asked, hiding after an apply, Apply to all displays and its rollback, previous and next,
+  asked, hiding after an apply, Apply to all displays and its rollback, the question before
+  applying a scene Native Metal refused (the scene read again first: a refusal that no longer
+  holds asks nothing, an unreadable scene asks with the remembered reason; Cancel keeps the
+  displays, Reapply and the shown scene ask nothing), previous and next,
   playback, refresh, the held-wallpaper sentence and **Try again**, per-display host states and
   their exact retry), `PanelLibraryImportTests`, `PanelLibraryRemovalTests` (confirmation, no
   window means no deletion, one question for a batch, partial failures named),
   `PanelLibraryRowsTests` (rows joined with measured facts, covers only once stamped, a rescan that
   replaced no preview leaves every row alone, 10,000 rows built once whatever else changes),
   `PanelLibraryStateTests` (Now Playing, the target menu, display names, history, library counts,
-  the update dot, the issue report's facts), `PanelCollectionActionsTests`, `LibrarySortTests`,
+  the update dot, the issue report's facts, the changed properties it lists without typed text
+  or paths and capped, and the files a check found missing), `PanelCollectionActionsTests`, `LibrarySortTests`,
   `LibraryFilterTests`, `LibrarySelectionTests` (ticks, ranges and the hold-and-sweep gesture),
   `LibraryGridGeometryTests`, `LibraryTileRulesTests`, `TileGridLayoutTests` (at least three
   columns, arrow keys held at the ends), `InstalledBrowserModelTests` (the reopen state and its
@@ -1394,7 +1408,7 @@ with no desktop window. It covers the page contract (`WebWallpaperPageTests`,
 (`WebWallpaperPropertyPayloadTests`), the author API (`WebWallpaperAuthorAPITests`:
 audio, media, random-file and directory listeners), audio delivery, output and
 single-owner rules (`WebWallpaperAudioMediaTests`, `WebWallpaperAudioOutputTests`,
-`WebWallpaperAudioOwnershipTests`), host lifecycle, crash budget and reload
+`MirrorAudioOwnershipTests`), host lifecycle, crash budget and reload
 recovery (`WebWallpaperHostLifecycleTests`, `WebWallpaperRecoveryTests`),
 suspension by presentation and by pause, with the first-frame grace (counted only
 while the view is in the window), edits drawn on a paused page, and a measured stop of

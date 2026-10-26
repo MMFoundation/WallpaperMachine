@@ -32,6 +32,7 @@ pub use engine::{
 };
 pub use error::EngineError;
 pub use owe::backend::AudioSpectrum128;
+pub use owe::capability::{SceneCapabilityProbe, SceneMissingFile, probe_scene_capability};
 pub use owe::scene_demand::{
     SceneBackend, SceneDemandReasons, SceneFailure, SceneFailureStage,
     SceneResolution, SceneRuntimeReport, SceneUpdateMode, SceneVideoPath, SurfaceHealth,

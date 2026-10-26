@@ -14,7 +14,7 @@ pub use activation_remaining::WallpaperAssignmentExt;
 #[cfg(test)]
 pub use facade::FakeEngineFacade;
 pub(crate) use facade::displays_awaiting_first_frame;
-pub use facade::{AudioCaptureDemand, EngineFacade, RealEngineFacade, SceneRuntimeReport};
+pub use facade::{AudioCaptureDemand, EngineFacade, RealEngineFacade, SceneProbeRequest, SceneRuntimeReport};
 #[cfg(test)]
 pub(crate) use facade::{
     AudioRestartState, OutputWatchGate, RestartAction, apply_audio_capture_demand,

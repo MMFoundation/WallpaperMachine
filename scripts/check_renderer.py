@@ -54,6 +54,7 @@ REGRESSION_BINARIES = {
     "scene_harness_selftest": True, "backdrop_scene_test": True, "horizontal_flip_pointer_test": True,
     "scene_placeholder_picture_test": True, "scene_passthrough_layout_test": True,
     "scene_fullscreen_parallax_test": True, "scene_layer_size_test": False,
+    "scene_capability_probe_test": False,
     "layer_composite_render_test": True, "cover_slot_composite_test": True, "perspective_image_layer_test": True, "model_parallax_test": True, "unbound_texture_slot_test": True, "scene_lighting_fog_test": True,
     "metal_memory_test": True, "scene_video_input_test": False,
     "audio_tests": False, "miniaudio_failure_paths_test": False, "sprite_animation_test": False,

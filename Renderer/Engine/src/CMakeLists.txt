@@ -88,6 +88,8 @@ add_library(
   Video/VideoTextureSourceFactory.cpp
   ${PLATFORM_APPLE_SOURCES}
   SceneSourceResolver.cpp
+  Scene/SceneProjectLoading.cpp
+  Scene/SceneCapabilityProbe.cpp
   Scene/SceneWallpaper.cpp)
 
 add_library(wescene::renderer ALIAS ${PROJECT_NAME})

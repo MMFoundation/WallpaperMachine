@@ -1,5 +1,6 @@
 use std::{
     future::Future,
+    path::PathBuf,
     sync::Arc,
     thread,
     time::Duration,
@@ -16,7 +17,7 @@ use futures_util::future::{BoxFuture, FutureExt};
 #[cfg(test)]
 use wallpaper_core::project::SceneTemplate;
 use wallpaper_core::{
-    AudioSpectrum128, DisplaySelector, DisplaySnapshotEntry, EngineError, FirstFrameCallback,
+    AudioSpectrum128, DisplaySelector, SceneCapabilityProbe, DisplaySnapshotEntry, EngineError, FirstFrameCallback,
     PropertyPreview, RecoveryOutcome, RecoveryReason, SceneBackend, SceneDemandReasons, SceneWindowEntry,
     SceneResolution, SceneUpdateMode, WallpaperAssignment, WallpaperEngine,
     media::audio::{
@@ -323,6 +324,31 @@ pub trait EngineFacade: Send + Sync + 'static {
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         Ok(None)
     }
+    /// Reads an installed scene without drawing it (see
+    /// [`wallpaper_core::probe_scene_capability`]). Blocks for as long as the parse takes, so it is
+    /// called on a thread that may wait, never on the actor. A facade without a scene engine
+    /// cannot read one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the engine refuses the call or its answer cannot be read.
+    fn probe_scene_capability(
+        &self,
+        request: SceneProbeRequest,
+    ) -> Result<SceneCapabilityProbe, EngineError> {
+        let _ = request;
+        Err(EngineError::UnsupportedPlatform("reading a scene without a scene engine"))
+    }
+}
+
+/// The scene a capability probe reads: the files and saved choices loading it would use.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SceneProbeRequest {
+    pub project_file: PathBuf,
+    pub assets: PathBuf,
+    pub shader_cache: PathBuf,
+    /// The saved property choices as a flat JSON object, or `None` for the project's defaults.
+    pub property_overrides: Option<String>,
 }
 
 #[derive(Clone)]
@@ -599,6 +625,18 @@ impl EngineFacade for RealEngineFacade {
 
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         self.engine.current_audio_spectrum()
+    }
+
+    fn probe_scene_capability(
+        &self,
+        request: SceneProbeRequest,
+    ) -> Result<SceneCapabilityProbe, EngineError> {
+        wallpaper_core::probe_scene_capability(
+            &request.project_file,
+            &request.assets,
+            Some(&request.shader_cache),
+            request.property_overrides.as_deref(),
+        )
     }
 
     fn set_renderer_counters_enabled(&self, enabled: bool) -> Result<(), EngineError> {
@@ -1186,6 +1224,9 @@ pub struct FakeEngineFacade {
     recover_calls: Observation<(u32, RecoveryReason)>,
     recover_result: Reading<Option<Result<RecoveryOutcome, String>>>,
     audio_spectrum: Reading<Option<AudioSpectrum128>>,
+    /// Every scene the bridge asked to read, and what reading one answers.
+    scene_probe_calls: Observation<SceneProbeRequest>,
+    scene_probe_answer: Reading<SceneCapabilityProbe>,
     mouse_poll_calls: Observation<()>,
     mouse_polls_seen: Arc<std::sync::atomic::AtomicUsize>,
     mouse_poll_count: Arc<std::sync::atomic::AtomicUsize>,
@@ -1384,6 +1425,8 @@ impl Default for FakeEngineFacade {
             recover_calls: Observation::new(),
             recover_result: Reading::new(Default::default()),
             audio_spectrum: Reading::new(Default::default()),
+            scene_probe_calls: Observation::new(),
+            scene_probe_answer: Reading::new(Default::default()),
             mouse_poll_calls: Observation::new(),
             mouse_polls_seen: Default::default(),
             pointer_activity: Default::default(),
@@ -1824,6 +1867,17 @@ impl FakeEngineFacade {
     /// Sets what the next spectrum read returns. `None` is "no analysis yet".
     pub fn set_audio_spectrum(&self, spectrum: Option<AudioSpectrum128>) {
         self.audio_spectrum.set(spectrum);
+    }
+
+    /// Sets what reading a scene answers from now on.
+    pub fn set_scene_probe_answer(&self, answer: SceneCapabilityProbe) {
+        self.scene_probe_answer.set(answer);
+    }
+
+    /// Every scene the bridge asked to read, in order.
+    #[must_use]
+    pub fn scene_probe_calls(&self) -> Vec<SceneProbeRequest> {
+        self.scene_probe_calls.snapshot()
     }
 
     #[must_use]
@@ -2458,6 +2512,14 @@ impl EngineFacade for FakeEngineFacade {
 
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         Ok(self.audio_spectrum.read())
+    }
+
+    fn probe_scene_capability(
+        &self,
+        request: SceneProbeRequest,
+    ) -> Result<SceneCapabilityProbe, EngineError> {
+        self.scene_probe_calls.record(request);
+        Ok(self.scene_probe_answer.read())
     }
 
     fn poll_mouse_position(&self) -> EngineFuture<()> {
