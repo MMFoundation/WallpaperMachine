@@ -275,13 +275,14 @@ final class PanelRootRenderTests: PanelTestCase {
     return nil
   }
 
-  /// Whether the text holds kana, Hangul or Han ideographs.
-  /// Latin-script languages must not fall back to CJK text; the others must show their own script.
+  /// Whether the text is in the language's script: Latin-script languages must not fall back to
+  /// CJK text; the others must show their own script.
   private static func isInScript(_ text: String, of language: String) -> Bool {
     let latin: Set<String> = ["pt-BR"]
     return latin.contains(language) ? !isCJK(text) && text.contains { $0.isLetter } : isCJK(text)
   }
 
+  /// Whether the text holds kana, Hangul or Han ideographs.
   private static func isCJK(_ text: String) -> Bool {
     text.unicodeScalars.contains { scalar in
       [

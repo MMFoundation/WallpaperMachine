@@ -40,7 +40,7 @@ from lib.glyphs import markers
 from lib.paths import ROOT
 
 MARK = markers()
-# Every README that carries the list: the English page and its translation.
+# Every README that carries the list: the English page and its translations.
 READMES = (ROOT / "README.md", ROOT / "README.zh-CN.md", ROOT / "README.pt-BR.md")
 SOURCE = "https://www.wallpapermachine.app/api/sponsors"
 # The picture and the wall it links to, on the same site as the list.

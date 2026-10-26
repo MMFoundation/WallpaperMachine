@@ -45,8 +45,8 @@
 </p>
 
 <!-- The screenshot is a GitHub attachment, hosted by issue #37 ("README app screenshot"). When it
-     changes, upload the new one there and update the alt text and caption below, here and in
-     README.zh-CN.md. -->
+     changes, upload the new one there and update the alt text and caption below, here, in
+     README.zh-CN.md and in README.pt-BR.md. -->
 <p align="center">
   <img src="https://github.com/user-attachments/assets/9526d41a-4764-4df9-a678-22d75982a7fd" width="100%" alt="WallpaperMachine’s window in the dark appearance: the Library, Steam Workshop, pixiv and Settings tabs across the top, a grid of installed wallpapers with the active one marked, the active wallpaper’s preview, compatibility check and options in the inspector on the right, and what is playing along the bottom.">
 </p>
