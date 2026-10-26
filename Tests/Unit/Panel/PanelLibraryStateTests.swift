@@ -371,6 +371,7 @@ final class PanelLibraryStateTests: PanelTestCase {
         wallpaperId: "ghost",
         properties: [
           Context.property("speed", .slider, .number(value: 0.25), defaultValue: .number(value: 1)),
+          Context.property("fine", .slider, .number(value: 0.123456789), defaultValue: .number(value: 0)),
           Context.property("rain", .bool, .bool(value: true), dirty: true, defaultValue: .bool(value: false)),
           Context.property(
             "tint", .color, .colorRgb(red: 1, green: 0.5, blue: 0),
@@ -388,6 +389,7 @@ final class PanelLibraryStateTests: PanelTestCase {
 
       let report = try details(panel.controller.issueReportURL(for: "ghost"))
       XCTAssertTrue(report.contains("`speed`: 0.25 (default: 1)"), report)
+      XCTAssertTrue(report.contains("`fine`: 0.123456789 (default: 0)"), "every digit, to reproduce it: \(report)")
       XCTAssertTrue(report.contains("`rain`: true (default: false) (not applied)"), report)
       XCTAssertTrue(report.contains("`tint`: 1 0.5 0 (default: 1 1 1)"), report)
       XCTAssertFalse(report.contains("`unchanged`"), "a property at its default is not listed: \(report)")

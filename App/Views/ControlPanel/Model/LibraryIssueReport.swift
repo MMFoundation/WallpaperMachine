@@ -62,16 +62,22 @@ enum LibraryIssueReport {
     return lines.prefix(changedPropertyLimit) + ["- and \(lines.count - changedPropertyLimit) more"]
   }
 
-  /// A value the way a project file writes it: numbers without a locale, a colour as three numbers.
+  /// A value the way a project file writes it: numbers without a locale and with every digit, so
+  /// the option can be set again exactly, a colour as three numbers.
   private static func text(_ value: BridgePropertyValue) -> String {
     switch value {
     case .bool(let value): return value ? "true" : "false"
-    case .number(let value): return String(format: "%g", value)
+    case .number(let value): return number(value)
     case .string(let value): return value
-    case .colorRgb(let red, let green, let blue):
-      return [red, green, blue].map { String(format: "%g", $0) }.joined(separator: " ")
+    case .colorRgb(let red, let green, let blue): return [red, green, blue].map(number).joined(separator: " ")
     case .empty: return "none"
     }
+  }
+
+  /// A whole number without a fraction ("1", not "1.0"); anything else in its shortest exact form.
+  private static func number(_ value: Double) -> String {
+    if value.isFinite, value == value.rounded(), abs(value) < 1e15 { return String(Int64(value)) }
+    return String(value)
   }
 
   /// The backends the engine reports for `wallpaperID`, each once, in the order the scene reports
