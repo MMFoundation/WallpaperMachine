@@ -353,7 +353,10 @@ screen. Activation is explicit.
   app version and these files, when it last ran or its
   [Compatibility check](wallpaper-properties.md#compatibility-check) read it, asks first
   (**Native Metal can’t draw this scene**, with the renderer's reason): applied, it would show
-  its preview picture instead of moving. **Apply Anyway** applies it; **Cancel** leaves the
+  its preview picture instead of moving. The scene is read again first, since a refusal can depend
+  on things its remembered verdict is not keyed to (the shared resources, loose files in the
+  project, the saved options): one that now reads clean is applied without a question and
+  remembered that way, and one that cannot be read again asks with the remembered reason. **Apply Anyway** applies it; **Cancel** leaves the
   display as it is. **Apply to all displays** asks the same; Reapply, choosing the scene a
   display already shows, playlists, schedules and shortcuts never ask.
 - **Apply to all displays** (the inspector's **More actions** menu of an installed

@@ -290,6 +290,9 @@ final class PanelLibraryActionsTests: PanelTestCase {
         file: panel.root.appendingPathComponent("SceneDrawVerdicts.json"), library: { library })
       panel.store.sceneDrawVerdicts = verdicts
       await verdicts.record("c", outcome: .notDrawn, stage: "unsupported", reason: "the scene uses a light probe")
+      bridge.sceneCapabilityAnswer = BridgeSceneCapability(
+        readError: nil, failureStage: "unsupported", failureReason: "the scene uses a light probe",
+        missingFiles: [])
       let before = bridge.assignments
 
       panel.dialogs.confirmAnswer = false
@@ -300,6 +303,7 @@ final class PanelLibraryActionsTests: PanelTestCase {
       XCTAssertTrue(
         panel.dialogs.confirmations.allSatisfy { $0.detail.contains("the scene uses a light probe") },
         "the question says why")
+      XCTAssertEqual(bridge.sceneCapabilityReads, ["c", "c"], "the scene is read again before each question")
 
       panel.dialogs.confirmAnswer = true
       try await controller.activate("c")
@@ -312,6 +316,56 @@ final class PanelLibraryActionsTests: PanelTestCase {
       try await controller.activate("a")
       XCTAssertEqual(bridge.assignments["primary"], "a")
       XCTAssertEqual(panel.dialogs.confirmations.count, 3)
+    }
+  }
+
+  func testARefusedSceneThatNowReadsCleanAppliesWithoutAQuestion() async throws {
+    try await withApplyingPanel { panel, bridge, _ in
+      let controller = panel.controller
+      panel.store.librarySnapshot.wallpapers = panel.store.librarySnapshot.wallpapers.map {
+        var entry = $0
+        if entry.id == "c" { entry.kind = .projectScene }
+        return entry
+      }
+      panel.sceneAssets.available = true
+      let library = panel.library
+      let verdicts = SceneDrawVerdicts(
+        file: panel.root.appendingPathComponent("SceneDrawVerdicts.json"), library: { library })
+      panel.store.sceneDrawVerdicts = verdicts
+      await verdicts.record("c", outcome: .notDrawn, stage: "unsupported", reason: "an effect the old assets lacked")
+      // The shared resources were updated since: the refusal no longer holds.
+      bridge.sceneCapabilityAnswer = BridgeSceneCapability(
+        readError: nil, failureStage: nil, failureReason: nil, missingFiles: [])
+
+      try await controller.activate("c")
+      XCTAssertEqual(bridge.assignments["primary"], "c")
+      XCTAssertTrue(panel.dialogs.confirmations.isEmpty, "a refusal that no longer holds asks nothing")
+      let refreshed = await verdicts.verdict(for: "c")
+      XCTAssertEqual(refreshed?.outcome, .passedCheck, "and what was read replaces it")
+    }
+  }
+
+  func testWhenTheSceneCannotBeReadAgainTheRememberedRefusalStillAsks() async throws {
+    try await withApplyingPanel { panel, bridge, _ in
+      let controller = panel.controller
+      panel.store.librarySnapshot.wallpapers = panel.store.librarySnapshot.wallpapers.map {
+        var entry = $0
+        if entry.id == "c" { entry.kind = .projectScene }
+        return entry
+      }
+      panel.sceneAssets.available = true
+      let library = panel.library
+      let verdicts = SceneDrawVerdicts(
+        file: panel.root.appendingPathComponent("SceneDrawVerdicts.json"), library: { library })
+      panel.store.sceneDrawVerdicts = verdicts
+      await verdicts.record("c", outcome: .notDrawn, stage: "unsupported", reason: "a light probe")
+      bridge.sceneCapabilityAnswer = nil
+      let before = bridge.assignments
+
+      try await controller.activate("c")
+      XCTAssertEqual(panel.dialogs.confirmations.count, 1)
+      XCTAssertTrue(panel.dialogs.confirmations.first?.detail.contains("a light probe") == true)
+      XCTAssertEqual(bridge.assignments, before)
     }
   }
 

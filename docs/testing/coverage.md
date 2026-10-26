@@ -1097,8 +1097,9 @@ never to `.shared`.
 - Installed and the library: `PanelLibraryActionsTests` (favorites, Show in Finder, selection
   slots, only Reapply restarting what the target shows, the target display taken when the user
   asked, hiding after an apply, Apply to all displays and its rollback, the question before
-  applying a scene Native Metal refused (Cancel keeps the displays, Reapply and the shown scene
-  ask nothing), previous and next,
+  applying a scene Native Metal refused (the scene read again first: a refusal that no longer
+  holds asks nothing, an unreadable scene asks with the remembered reason; Cancel keeps the
+  displays, Reapply and the shown scene ask nothing), previous and next,
   playback, refresh, the held-wallpaper sentence and **Try again**, per-display host states and
   their exact retry), `PanelLibraryImportTests`, `PanelLibraryRemovalTests` (confirmation, no
   window means no deletion, one question for a batch, partial failures named),

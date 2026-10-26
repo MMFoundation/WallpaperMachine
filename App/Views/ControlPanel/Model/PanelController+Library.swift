@@ -115,11 +115,24 @@ extension PanelController {
   /// it last ran or was checked) asks before it replaces what is on screen: applied, it shows its
   /// preview picture. True to go ahead, which is also the answer for anything else. Only the
   /// user's own Apply asks; a playlist, a schedule or a shortcut never waits on a question.
+  ///
+  /// The remembered refusal is only where the question starts. What the scene draws with also lies
+  /// outside the files that key it (the shared resources, loose files, the saved options), so the
+  /// scene is read again first and that answer is recorded: a refusal that no longer holds asks
+  /// nothing. When it cannot be read again, the remembered refusal asks.
   private func confirmsUndrawableScene(_ id: String) async -> Bool {
-    guard let row = libraryRow(id: id), row.kind == .scene,
-      let verdict = await store.sceneDrawVerdicts?.verdict(for: id), verdict.outcome == .notDrawn
+    guard let row = libraryRow(id: id), row.kind == .scene, let verdicts = store.sceneDrawVerdicts,
+      let verdict = await verdicts.verdict(for: id), verdict.outcome == .notDrawn
     else { return true }
-    let reason = verdict.reason.flatMap { $0.isEmpty ? nil : $0 } ?? L("no reason was given")
+    var refusal = verdict.reason
+    if let read = try? await store.bridge.sceneCapability(wallpaperId: id), read.readError == nil {
+      await verdicts.record(
+        id, outcome: read.failureStage == nil ? .passedCheck : .notDrawn, stage: read.failureStage,
+        reason: read.failureReason)
+      guard read.failureStage != nil else { return true }
+      refusal = read.failureReason
+    }
+    let reason = refusal.flatMap { $0.isEmpty ? nil : $0 } ?? L("no reason was given")
     return await dialogs.confirm(
       L("Native Metal can’t draw this scene"),
       detail: L("It was refused when it last ran or was checked with this version of the app: \(reason). Applied, it shows its preview picture instead of moving."),
