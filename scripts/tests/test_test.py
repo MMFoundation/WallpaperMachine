@@ -100,6 +100,30 @@ class PruneResultBundles(unittest.TestCase):
         })
 
 
+class ScriptTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        patcher = patch.object(runner, "ROOT", self.root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def module(self, name, exit_status):
+        path = self.root / name
+        path.write_text(f"import sys\nsys.exit({exit_status})\n")
+        return path
+
+    def test_passing_modules_report_success(self):
+        with patch("sys.stdout"):
+            status = runner.run_script_tests([self.module("test_a.py", 0), self.module("test_b.py", 0)])
+        self.assertEqual(status, 0)
+
+    def test_a_failing_module_fails_the_run_with_its_status(self):
+        with patch("sys.stdout"):
+            status = runner.run_script_tests([self.module("test_a.py", 0), self.module("test_b.py", 3)])
+        self.assertEqual(status, 3)
+
+
 class OptInVariables(unittest.TestCase):
     def test_both_opt_in_layers_are_forwarded(self):
         self.assertEqual(

@@ -10,6 +10,8 @@ the raw stream. See docs/testing/README.md.
 `--only` narrows the native run to test classes or methods
 (`--only LibraryStoreTests --only WorkshopSearchTests/testPagination`) for quick
 iteration on a small change; the full gate is still the default and the final word.
+`--python-only` runs just the script tests, which need no Xcode; the Checks workflow
+runs it on Linux for every pull request.
 
 Opt-in layers are off by default and are requested through the environment:
 `WALLPAPER_MACHINE_MEDIA_TESTS=1` (real video decoding) and
@@ -102,12 +104,40 @@ def prune_result_bundles(keep=KEPT_RESULT_BUNDLES, directory=TEST_ARTIFACTS):
     return bundles[keep:]
 
 
+def run_script_tests(modules=SCRIPT_TESTS, verbose=False):
+    """Run the Python script tests side by side; the first failing module's exit status, or 0."""
+    # Every module isolates itself in temporary directories, so they run side by
+    # side; the gate waits for the slowest one instead of their sum. unittest
+    # reports on stderr; the scripts under test chatter on stdout. Keep both
+    # unless something failed, and print one line per module in a fixed order.
+    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
+        runs = list(pool.map(lambda module: subprocess.run(
+            [sys.executable, str(module)], cwd=ROOT, capture_output=True, text=True, errors="replace"),
+            modules))
+    failed_modules = []
+    for module, script_tests in zip(modules, runs):
+        if script_tests.returncode != 0 or verbose:
+            sys.stdout.write(script_tests.stdout)
+            sys.stdout.write(script_tests.stderr)
+        if script_tests.returncode != 0:
+            print(f"{MARK.missing} {module.relative_to(ROOT)} failed", flush=True)
+            failed_modules.append(script_tests.returncode)
+            continue
+        ran = next((line for line in script_tests.stderr.splitlines() if line.startswith("Ran ")), "ran")
+        print(f"{MARK.ok} {module.relative_to(ROOT)}: {ran}", flush=True)
+    return failed_modules[0] if failed_modules else 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ui", action="store_true", help="Run desktop UI tests instead (takes over the desktop).")
     parser.add_argument(
         "--only", action="append", metavar="CLASS[/METHOD]",
         help="Run only this native test class or method (repeatable). Skips the Python script tests.",
+    )
+    parser.add_argument(
+        "--python-only", action="store_true",
+        help="Run only the Python script tests (no Xcode needed; the pull request check on Linux).",
     )
     parser.add_argument(
         "--serial", action="store_true",
@@ -118,6 +148,10 @@ def main():
         help="Echo the whole xcodebuild stream instead of only failures; the log gets it either way.",
     )
     args = parser.parse_args()
+    if args.python_only:
+        if args.ui or args.only:
+            parser.error("--python-only runs no native tests; drop --ui and --only")
+        return run_script_tests(verbose=args.verbose)
     scheme = "WallpaperMachineUI" if args.ui else "WallpaperMachine"
     target = UI_TARGET if args.ui else NATIVE_TARGET
     if args.ui:
@@ -125,27 +159,9 @@ def main():
     if args.only:
         print(f"{MARK.warn} Targeted run ({', '.join(args.only)}): not a substitute for the full gate.", flush=True)
     else:
-        # Every module isolates itself in temporary directories, so they run side by
-        # side; the gate waits for the slowest one instead of their sum. unittest
-        # reports on stderr; the scripts under test chatter on stdout. Keep both
-        # unless something failed, and print one line per module in a fixed order.
-        with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
-            runs = list(pool.map(lambda module: subprocess.run(
-                [sys.executable, str(module)], cwd=ROOT, capture_output=True, text=True, errors="replace"),
-                SCRIPT_TESTS))
-        failed_modules = []
-        for module, script_tests in zip(SCRIPT_TESTS, runs):
-            if script_tests.returncode != 0 or args.verbose:
-                sys.stdout.write(script_tests.stdout)
-                sys.stdout.write(script_tests.stderr)
-            if script_tests.returncode != 0:
-                print(f"{MARK.missing} {module.relative_to(ROOT)} failed", flush=True)
-                failed_modules.append(script_tests.returncode)
-                continue
-            ran = next((line for line in script_tests.stderr.splitlines() if line.startswith("Ran ")), "ran")
-            print(f"{MARK.ok} {module.relative_to(ROOT)}: {ran}", flush=True)
-        if failed_modules:
-            return failed_modules[0]
+        failed = run_script_tests(verbose=args.verbose)
+        if failed:
+            return failed
     # `--use-cache` leaves the project untouched when project.yml has not changed,
     # so Xcode's incremental build state survives between runs.
     subprocess.run(["xcodegen", "generate", "--use-cache", "--quiet"], cwd=ROOT, check=True)
