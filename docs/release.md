@@ -513,10 +513,9 @@ The `CMAKE_<LANG>_COMPILER_LAUNCHER=ccache` variables only take effect on a buil
 tree's first CMake configure, so change the renderer key's prefix whenever the
 launcher setup changes: no tree configured the old way may be restored. Each
 macOS job prints `ccache --show-stats` at the end; hits against misses there is
-the evidence the cache worked. The toolchain is an unpinned `nightly`
-(`Renderer/rust-toolchain.toml`), and a new nightly invalidates every
-compiled crate, so the Rust half of the renderer build is only reused between
-builds on the same nightly.
+the evidence the cache worked. The toolchain is a pinned stable release
+(`Renderer/rust-toolchain.toml`); raising the pin changes the renderer key's
+toolchain hash, so the next build compiles every crate once and starts a new entry.
 
 Only runs on `main` save either cache; every other ref (pull requests, branches,
 hand-pushed tags) restores and never saves. An entry saved under another ref is

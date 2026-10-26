@@ -80,11 +80,10 @@ archive's exported symbols).
 
 ## Toolchain
 
-`rust-toolchain.toml` pins `nightly` with the Apple target, which rustup
+`rust-toolchain.toml` pins a stable release with the Apple target, which rustup
 installs and uses ([build prerequisites](../../docs/build.md#prerequisites)).
-The crate uses no nightly feature: it also builds, tests and passes clippy
-(`cargo clippy --all-targets`, warnings denied) on a stable compiler such as
-Homebrew's `rust`, which ignores the toolchain file.
+The crate uses no nightly feature and builds, tests and passes clippy
+(`cargo clippy --all-targets`, warnings denied) on that release.
 
 ## Spec ambiguities and the choice made
 
