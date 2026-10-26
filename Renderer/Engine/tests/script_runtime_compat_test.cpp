@@ -746,6 +746,21 @@ function update() {
     for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
 }
 
+// Before the puppet has been posed, a bone answers its bind pose, not whatever memory held.
+TEST(ScriptRuntimeCompat, ABoneReadBeforeTheFirstPoseIsItsBindPose) {
+    const auto puppet = MakeArmPuppet();
+    std::vector<WPPuppetLayer::AnimationLayer> authored(1);
+    authored[0].id = 7;
+    WPPuppetLayer layer(puppet);
+    layer.prepared(authored);
+    for (i32 i = 0; i < 2; i++) {
+        const auto model = layer.boneModel(i);
+        ASSERT_TRUE(model.has_value());
+        EXPECT_TRUE(model->matrix().isApprox(puppet->bones[static_cast<usize>(i)].world_bind.matrix(), 1e-5f))
+            << "bone " << i;
+    }
+}
+
 // playSingleAnimation plays an animation once over the layers the puppet already has and then
 // leaves the pose to them; createAnimationLayer adds one that stays.
 TEST(ScriptRuntimeCompat, PlaySingleAnimationPlaysOnceAndCreatedLayersStay) {

@@ -480,8 +480,9 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> layers) {
         }
         state.m_layers.push_back(std::move(layer));
     }
+    // Unposed bones skin nothing: their pose is the bind until the first evaluation.
     if (state.m_final_affines.size() != m_puppet->bones.size()) {
-        state.m_final_affines.resize(m_puppet->bones.size());
+        state.m_final_affines.resize(m_puppet->bones.size(), linalg::Affine3f::Identity());
     }
     rebuildBlend();
     state.m_pose_valid = false;
@@ -912,7 +913,7 @@ bool WPPuppetLayer::visible(i32 index) const noexcept {
 
 WPPuppetLayer::WPPuppetLayer(std::shared_ptr<WPPuppet> pup)
     : m_state(pup ? std::make_shared<State>() : nullptr), m_puppet(std::move(pup)) {
-    if (m_state) m_state->m_final_affines.resize(m_puppet->bones.size());
+    if (m_state) m_state->m_final_affines.resize(m_puppet->bones.size(), linalg::Affine3f::Identity());
 }
 WPPuppetLayer::WPPuppetLayer()  = default;
 WPPuppetLayer::~WPPuppetLayer() = default;
