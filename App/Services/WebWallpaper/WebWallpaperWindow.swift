@@ -225,6 +225,8 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     /// a dropped removal leaves a deleted file in its list.
     private var deferredRandomFileReplies: [RandomFileReply] = []
     private var deferredDirectoryChanges: [DirectoryChange] = []
+    /// What this document's own errors and warnings have put in the log, and its cap.
+    private(set) var pageDiagnostics = WebWallpaperPageDiagnostics()
     /// A page cannot be allowed to grow host memory by asking without waiting,
     /// nor to bank an unbounded replay across a long suspension.
     private static let maximumPendingRandomFileRequests = 32
@@ -468,6 +470,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         pendingRandomFileRequests.removeAll()
         deferredRandomFileReplies.removeAll()
         deferredDirectoryChanges.removeAll()
+        pageDiagnostics = WebWallpaperPageDiagnostics()
         refreshDemand()
     }
 
@@ -915,6 +918,10 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         case "audioUnsubscribed": audioListenerRegistered = false
         case "mediaSubscribed": mediaListenerRegistered = true
         case "mediaUnsubscribed": mediaListenerRegistered = false
+        case "pageDiagnostic":
+            guard let line = pageDiagnostics.line(project: projectURL.lastPathComponent, payload: payload) else { return }
+            if line.level == .warn { AppLog.warn(line.text, load: logLoad) } else { AppLog.info(line.text, load: logLoad) }
+            return
         case "randomFileRequest":
             guard let requestId = payload["requestId"] as? String, !requestId.isEmpty,
                   let propertyId = payload["propertyId"] as? String, !propertyId.isEmpty,

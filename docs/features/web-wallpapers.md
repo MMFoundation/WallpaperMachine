@@ -256,8 +256,9 @@ media state is re-derived on resume, and directory additions and removals are he
 across the suspension and replayed in order.
 
 The wallpaper web view has exactly one `WKScriptMessageHandler`, named
-`mweWallpaper`, carrying listener registration and random-file requests; it is
-removed when the page stops.
+`mweWallpaper`, carrying listener registration, random-file requests and the page's
+own errors and warnings for the log ([diagnostics](diagnostics.md#inspecting-a-web-wallpaper));
+it is removed when the page stops.
 
 ## Runtime shape
 
