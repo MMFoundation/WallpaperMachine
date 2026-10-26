@@ -1136,6 +1136,7 @@ void SceneRuntimeContext::UnregisterNode(std::string_view view) {
     m_node_size.erase(name);
     m_node_hit_masks.erase(name);
     m_puppet_layers.erase(name);
+    m_particle_layers.erase(name);
     m_text_layers.erase(name);
     m_text_effect_gates.erase(name);
     m_node_alignment.erase(name);
@@ -1329,6 +1330,7 @@ SceneRuntimeContext::CaptureNodeRegistration(std::string_view name) const {
     remember(&SceneRuntimeContext::m_node_hit_masks);
     remember(&SceneRuntimeContext::m_node_cursor_targets);
     remember(&SceneRuntimeContext::m_puppet_layers);
+    remember(&SceneRuntimeContext::m_particle_layers);
     remember(&SceneRuntimeContext::m_text_layers);
     remember(&SceneRuntimeContext::m_text_effect_gates);
     remember(&SceneRuntimeContext::m_node_alignment);
@@ -1391,6 +1393,41 @@ void SceneRuntimeContext::RegisterPuppetLayer(std::string name, WPPuppetLayer la
 WPPuppetLayer* SceneRuntimeContext::FindPuppetLayer(std::string_view name) {
     const auto iterator = m_puppet_layers.find(std::string(name));
     return iterator == m_puppet_layers.end() ? nullptr : &iterator->second;
+}
+
+int SceneRuntimeContext::AddPuppetAnimationLayer(std::string_view layer_name, std::string_view animation,
+                                                 bool once) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    return puppet != nullptr ? puppet->addLayer(animation, once) : -1;
+}
+
+int SceneRuntimeContext::PuppetBoneCount(std::string_view layer_name) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    return puppet != nullptr ? static_cast<int>(puppet->boneCount()) : 0;
+}
+
+int SceneRuntimeContext::PuppetBoneIndex(std::string_view layer_name, std::string_view bone_name) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    return puppet != nullptr ? puppet->boneIndex(bone_name) : -1;
+}
+
+int SceneRuntimeContext::PuppetBoneParent(std::string_view layer_name, int bone) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    return puppet != nullptr ? puppet->boneParent(bone) : -1;
+}
+
+std::optional<linalg::Matrix4d> SceneRuntimeContext::PuppetBoneMatrix(std::string_view layer_name, int bone,
+                                                                     bool world) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    if (puppet == nullptr) return std::nullopt;
+    const auto pose = world ? puppet->boneModel(bone) : puppet->boneLocal(bone);
+    if (! pose) return std::nullopt;
+    const linalg::Matrix4d matrix = pose->matrix().cast<double>();
+    if (! world) return matrix;
+    const auto node = m_nodes.find(std::string(layer_name));
+    if (node == m_nodes.end() || node->second == nullptr) return matrix;
+    node->second->UpdateTrans();
+    return linalg::Matrix4d(node->second->ModelTrans() * matrix);
 }
 
 double SceneRuntimeContext::PuppetAnimationControl(std::string_view layer_name,
@@ -1994,11 +2031,34 @@ void SceneRuntimeContext::ApplySceneZoomAnimation() {
     ApplySceneZoom(m_scene_zoom_animation->Value());
 }
 
+void SceneRuntimeContext::RegisterSceneCamera(SceneCameraTransforms initial,
+                                              std::function<void(const SceneCameraTransforms&)> aim) {
+    m_camera_transforms = initial;
+    m_aim_camera        = std::move(aim);
+}
+
+SceneRuntimeContext::SceneCameraTransforms SceneRuntimeContext::CameraTransforms() const {
+    return m_camera_transforms;
+}
+
+void SceneRuntimeContext::SetCameraTransforms(const SceneCameraTransforms& transforms) {
+    const auto finite = [](const linalg::Vector3d& v) { return v.allFinite(); };
+    if (finite(transforms.eye)) m_camera_transforms.eye = transforms.eye;
+    if (finite(transforms.center)) m_camera_transforms.center = transforms.center;
+    if (finite(transforms.up)) m_camera_transforms.up = transforms.up;
+    if (m_aim_camera) {
+        m_aim_camera(m_camera_transforms);
+    } else if (std::isfinite(transforms.zoom) && transforms.zoom > 0.0) {
+        ApplySceneZoom(transforms.zoom);
+    }
+}
+
 void SceneRuntimeContext::ApplySceneZoom(double zoom) {
     if (m_scene == nullptr) return;
     const auto global = m_scene->cameras.find("global");
     if (global == m_scene->cameras.end() || global->second == nullptr) return;
     const double applied = std::isfinite(zoom) && zoom > 0.0 ? zoom : 1.0;
+    m_camera_transforms.zoom = applied;
     constexpr double kMostUnits = 2147483647.0;
     SceneCamera&     canvas     = *global->second;
     canvas.SetWidth(std::clamp(static_cast<double>(m_scene->ortho[0]) / applied, 1.0, kMostUnits));
@@ -2067,6 +2127,7 @@ void SceneRuntimeContext::ApplyCameraShots() {
         return;
     }
     m_framed_camera_shot = std::make_pair(zoom, offset);
+    m_camera_transforms.zoom = zoom;
     m_scene->FrameCanvas(zoom, offset);
 }
 
@@ -2315,6 +2376,69 @@ void SceneRuntimeContext::RegisterNodeVideoTexture(std::string name, std::string
     auto& keys = m_node_video_textures[name];
     if (std::find(keys.begin(), keys.end(), texture_key) == keys.end()) keys.push_back(texture_key);
     m_video_texture_playback.try_emplace(std::move(texture_key));
+}
+
+void SceneRuntimeContext::RegisterParticleLayer(std::string name, ParticleLayerControl control) {
+    m_particle_layers.insert_or_assign(std::move(name), std::move(control));
+}
+
+bool SceneRuntimeContext::HasParticleLayer(std::string_view layer_name) const {
+    return m_particle_layers.contains(ResolveLayerName(layer_name));
+}
+
+namespace
+{
+template<typename Layers>
+auto* FindParticleControl(Layers& layers, const std::string& name) {
+    const auto found = layers.find(name);
+    return found != layers.end() ? &found->second : nullptr;
+}
+} // namespace
+
+bool SceneRuntimeContext::PlayParticleLayer(std::string_view layer_name) {
+    auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    if (control == nullptr) return false;
+    if (control->play) control->play();
+    return true;
+}
+
+bool SceneRuntimeContext::PauseParticleLayer(std::string_view layer_name) {
+    auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    if (control == nullptr) return false;
+    if (control->pause) control->pause();
+    return true;
+}
+
+bool SceneRuntimeContext::StopParticleLayer(std::string_view layer_name) {
+    auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    if (control == nullptr) return false;
+    if (control->stop) control->stop();
+    return true;
+}
+
+bool SceneRuntimeContext::ParticleLayerPlaying(std::string_view layer_name) const {
+    const auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    return control != nullptr && control->playing && control->playing();
+}
+
+bool SceneRuntimeContext::EmitParticles(std::string_view layer_name, uint32_t count) {
+    auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    if (control == nullptr) return false;
+    if (control->emit && count > 0) control->emit(count);
+    return true;
+}
+
+std::vector<float> SceneRuntimeContext::ParticleInstanceValue(std::string_view layer_name,
+                                                              std::string_view field) const {
+    const auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    if (control == nullptr || ! control->get_instance) return {};
+    return control->get_instance(field);
+}
+
+bool SceneRuntimeContext::SetParticleInstanceValue(std::string_view layer_name, std::string_view field,
+                                                   std::span<const float> values) {
+    auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    return control != nullptr && control->set_instance && control->set_instance(field, values);
 }
 
 void SceneRuntimeContext::RegisterSoundLayer(std::string                    name,
@@ -4404,7 +4528,8 @@ bool SceneRuntimeContext::NameLayer(std::string_view runtime_name, std::string a
     return ResolveLayerName(authored_name) == key;
 }
 
-bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view parent_name) {
+bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view parent_name,
+                                        bool keep_place) {
     const auto found = m_nodes.find(std::string(name));
     if (found == m_nodes.end() || found->second == nullptr || m_scene == nullptr ||
         m_scene->sceneGraph == nullptr) {
@@ -4431,8 +4556,18 @@ bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view 
     });
     if (entry == siblings.end()) return false;
     auto owned = *entry;
+    linalg::Matrix4d world = linalg::Matrix4d::Identity();
+    if (keep_place) {
+        node->UpdateTrans();
+        world = node->ModelTrans();
+    }
     siblings.erase(entry);
     new_parent->AppendChild(std::move(owned));
+    if (keep_place && ! node->IgnoresParentTransform()) {
+        new_parent->UpdateTrans();
+        const linalg::Matrix4d inverse = new_parent->ModelTrans().inverse();
+        if (inverse.allFinite()) node->SetTransformFromMatrix(inverse * world);
+    }
     MarkSceneGraphMutated("reparent");
     return true;
 }

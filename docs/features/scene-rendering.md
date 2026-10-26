@@ -135,9 +135,49 @@ authored hidden in scenes whose scripts call `getEffect`), each exposing `name`,
 `getConstant`/`setConstant` or as properties on the material object, by material name or
 uniform; a read answers the value the material holds, which is the scene's authored value
 or the shader's default until something writes it, as a number or a `Vec2` to `Vec4` by
-the constant's width). The remaining
-layer transform calls (`setParent`, `lookAt`, `lookAtYaw` and `getAttachment*`) do not
-exist yet: a script that calls one stops at that line.
+the constant's width). `layer.setParent(parent, adjustTransforms)` hangs the layer from
+another (a layer, its name or its index; none puts it at the root): with
+`adjustTransforms` it stays where it is on screen, its local transform worked out under the
+new parent, and without it the layer keeps its local transform and moves with the parent.
+The form that names a puppet attachment hangs the layer from the parent layer itself; the
+attachment is not followed. `lookAt`, `lookAtYaw` and `getAttachment*` do not exist yet: a
+script that calls one stops at that line.
+
+A particle layer answers Wallpaper Engine's IParticleSystem calls. `pause()` stops new
+particles and lets the live ones run out, `stop()` also clears them, `play()` resumes and,
+after a stop or once every emitter's timetable has run out with nothing left alive, starts
+the timetables (delay, duration, first burst) over, and `isPlaying()` answers whether an
+emitter still emits or a particle is alive, in the layer's system or a child's. Pause and
+stop reach the child systems too. `emitParticles(count)` makes every emitter of the layer's
+own system place `count` more particles in the next frame (1 when no count is given), even
+while paused or stopped; how Wallpaper Engine shares a count among several emitters was not
+established. `instance` is the layer's instance override, as a scene property binds it:
+`alpha`, `size`, `count`, `speed`, `lifetime`, `rate`, `colorn` (a `Vec3`, or one number for
+all three) and `controlpoint0` to `controlpoint7` (`Vec3`) read what the layer holds and take
+a script's value, which turns the override on with its other fields neutral. A script's
+request reaches the particles on the next frame, since the particles step before the
+scripts do.
+
+`thisScene.getCameraTransforms()` answers the scene camera's `eye`, `center` and `up`
+(`Vec3`s) and `zoom`, as the scene file's camera block and zoom set them, and
+`setCameraTransforms(transforms)` replaces them (a field left out keeps its value): a
+scene with a perspective projection looks from the new eye at the new centre, and a 2D
+scene takes the zoom. A 2D scene's eye and centre are kept and read back but do not pan
+the view, which Wallpaper Engine's documentation does not describe. A camera path that
+plays moves the camera again on its next frame, as Wallpaper Engine warns.
+
+An image layer with a puppet answers the bone calls: `getBoneCount()`, `getBoneIndex(name)`
+(-1 for none), `getBoneParentIndex(bone)` (-1 for a root), `getBoneTransform(bone)` (the
+bone's transform in the scene, a `Mat4`: the layer's matrix over the bone's pose in the
+puppet), `getLocalBoneTransform(bone)`, `getLocalBoneOrigin(bone)` and
+`getLocalBoneAngles(bone)` (in its parent bone, angles in degrees as a layer's are), each as
+the last frame posed it, a bone named or numbered. The setters (`setBoneTransform`, the
+local ones and the physics impulses) do not exist yet. `playSingleAnimation(animation,
+config)` plays an animation of the puppet (by name or id) once over the layers it has,
+then hides that layer so the pose goes back to them (`config` may set `rate` and `blend`);
+a hidden layer that played once is reused for the next. `createAnimationLayer(animation)`
+adds one that stays, and `destroyAnimationLayer(layer)` stops and hides it: layers keep
+their index, so an animation-layer object a script holds stays valid.
 
 A layer's `origin`, `scale` and `angles`, and an image layer's `color`, can be keyed on
 a timeline (`animation`: curves `c0` to `c2` and `options`), and all four play the

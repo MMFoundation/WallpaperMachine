@@ -447,6 +447,24 @@ Playback, backend, host and startup areas are in
 
 All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 
+- **Particle layers from scripts** — `ParticleScripts.EmitParticlesEmitsAtOnceEvenWithNoRateOfItsOwn`,
+  `.PauseKeepsTheLiveParticlesStopClearsThemAndPlayResumes` and
+  `.TheInstanceReachesTheOverridesAPropertyWouldBind` (`scene_schema_part11_test`): a parsed
+  particle layer answers `emitParticles` (at once, once, also while paused), `pause`, `stop`,
+  `play` and `isPlaying`, and `instance.count`, `size` and `controlpointN` read and write the
+  layer's instance override, a count of 3 emitting three times the authored rate.
+- **Camera transforms from scripts** — `CameraScripts.APerspectiveSceneAnswersAndTakesItsCameraBlock`
+  and `.A2DSceneZoomsThroughItsCameraTransforms` (`scene_schema_part11_test`): the camera block
+  reads back, a new eye places the perspective camera there looking at the centre, and a 2D
+  scene's zoom of 2 shows half the canvas.
+- **Parenting and bones from scripts** — `ScriptRuntimeCompat.SetParentKeepsTheLayersPlaceOnlyWhenAskedTo`
+  (with `adjustTransforms` the layer stays in place under a moved, scaled parent; without it
+  it rides the parent; no parent puts it back at the root),
+  `.PuppetBonesAnswerTheirIndexParentAndPose` (count, index by name, parent, the posed
+  transform in the scene and in the parent bone) and
+  `.PlaySingleAnimationPlaysOnceAndCreatedLayersStay` (a single play of a looping animation
+  ends and gives the pose back, is reused, and a created layer stays until destroyed).
+
 - **Script values, objects, start-up and local rotation without a device** —
   `scenescript_behavior_test` loads synthetic scenes for their runtime only
   (`tests/support/script_scene.hpp`, no Metal device, surface or window) and ticks them:

@@ -53,6 +53,15 @@ class Layer {
     var parent = n.parent(this[KEY].key);
     return parent ? getLayer(parent) : null;
   }
+  // setParent(parent, adjustTransforms) or setParent(parent, attachment, adjustTransforms):
+  // no parent puts the layer at the root; with adjustTransforms it stays where it is. A puppet
+  // attachment to hang from is not followed: the layer hangs from the parent layer itself.
+  setParent(parent, second, third) {
+    var adjust = typeof second === 'boolean' || second === undefined ? !!second : !!third;
+    var key = parent === undefined || parent === null ? '' :
+      (typeof parent === 'number' ? n.layerNameAt(parent) : keyOf(parent));
+    n.setParent(this[KEY].key, key, adjust);
+  }
   getChildren() {
     var self = this[KEY].key, out = [], count = n.layerCount();
     for (var i = 0; i < count; ++i) {
@@ -86,6 +95,27 @@ class Layer {
   }
   getAnimationLayer(x) { return animationLayerOf(this[KEY].key, x); }
   getAnimationLayerCount() { return n.puppet(this[KEY].key, '', 'layerCount'); }
+  // A layer over the authored ones playing `animation` once (then it hides), or for good.
+  playSingleAnimation(animation, config) { return addAnimationLayer(this, animation, true, config); }
+  createAnimationLayer(animation) { return addAnimationLayer(this, animation, false, undefined); }
+  destroyAnimationLayer(x) {
+    var layer = x instanceof AnimationLayer ? x : this.getAnimationLayer(x);
+    if (layer[KEY].index < 0) return false;
+    layer.stop();
+    layer.visible = false;
+    return true;
+  }
+  // Bones, by name or index, as the last frame posed them.
+  getBoneCount() { return n.bone(this[KEY].key, 'count'); }
+  getBoneIndex(name) { return n.bone(this[KEY].key, 'index', String(name)); }
+  getBoneParentIndex(bone) { return n.bone(this[KEY].key, 'parent', bone); }
+  getBoneTransform(bone) { return boneMatrix(this, 'world', bone); }
+  getLocalBoneTransform(bone) { return boneMatrix(this, 'local', bone); }
+  getLocalBoneOrigin(bone) { var m = boneMatrix(this, 'local', bone); return m === undefined ? undefined : m.translation(); }
+  getLocalBoneAngles(bone) {
+    var m = boneMatrix(this, 'local', bone);
+    return m === undefined ? undefined : anglesOfMatrix(m.m);
+  }
   getTextureAnimation() {
     var st = this[KEY];
     if (st.sheet === null) st.sheet = new Sheet(st.key);
@@ -96,10 +126,17 @@ class Layer {
     if (st.video === null) st.video = new Video(st.key);
     return st.video;
   }
-  play() { var st = this[KEY]; if (!n.soundPlay(st.key)) st.playing = true; }
-  pause() { var st = this[KEY]; if (!n.soundPause(st.key)) st.playing = false; }
-  stop() { var st = this[KEY]; if (!n.soundStop(st.key)) st.playing = false; }
-  isPlaying() { var st = this[KEY]; return n.hasSound(st.key) ? n.soundPlaying(st.key) : st.playing; }
+  // A sound layer's stream, a particle layer's system, else a flag the script keeps.
+  play() { var st = this[KEY]; if (!n.soundPlay(st.key) && !n.particleControl(st.key, 'play')) st.playing = true; }
+  pause() { var st = this[KEY]; if (!n.soundPause(st.key) && !n.particleControl(st.key, 'pause')) st.playing = false; }
+  stop() { var st = this[KEY]; if (!n.soundStop(st.key) && !n.particleControl(st.key, 'stop')) st.playing = false; }
+  isPlaying() {
+    var st = this[KEY];
+    if (n.hasSound(st.key)) return n.soundPlaying(st.key);
+    if (n.hasParticles(st.key)) return n.particleControl(st.key, 'playing');
+    return st.playing;
+  }
+  emitParticles(count) { n.emitParticles(this[KEY].key, count === undefined ? 1 : Number(count)); }
   on(event, fn) {
     var st = this[KEY];
     if (typeof event !== 'string' || typeof fn !== 'function') return;
@@ -126,6 +163,43 @@ accessor('name',
 accessor('visible',
   function () { return n.visible(this[KEY].key); },
   function (v) { n.setVisible(this[KEY].key, !!v); });
+// A particle layer's instance overrides; undefined on any other layer.
+var PARTICLE_NUMBERS = ['alpha', 'size', 'count', 'speed', 'lifetime', 'rate'];
+function particleInstanceOf(key) {
+  var instance = {};
+  PARTICLE_NUMBERS.forEach(function (field) {
+    Object.defineProperty(instance, field, {
+      get: function () { var v = n.particleInstance(key, field); return v === undefined ? undefined : v[0]; },
+      set: function (value) { n.setParticleInstance(key, field, [Number(value)]); },
+      enumerable: true
+    });
+  });
+  Object.defineProperty(instance, 'colorn', {
+    get: function () { var v = n.particleInstance(key, 'colorn'); return v === undefined ? undefined : toVec3(v); },
+    set: function (value) {
+      n.setParticleInstance(key, 'colorn', typeof value === 'number' ? [value] : materialConstantFloats(value));
+    },
+    enumerable: true
+  });
+  for (var i = 0; i < 8; ++i) {
+    (function (field) {
+      Object.defineProperty(instance, field, {
+        get: function () { var v = n.particleInstance(key, field); return v === undefined ? undefined : toVec3(v); },
+        set: function (value) { n.setParticleInstance(key, field, materialConstantFloats(value)); },
+        enumerable: true
+      });
+    })('controlpoint' + i);
+  }
+  return instance;
+}
+accessor('instance',
+  function () {
+    var st = this[KEY];
+    if (!n.hasParticles(st.key)) return undefined;
+    if (st.particleInstance === undefined) st.particleInstance = particleInstanceOf(st.key);
+    return st.particleInstance;
+  },
+  function () {});
 accessor('origin',
   function () { return toVec3(n.origin(this[KEY].key)); },
   function (v) { var a = vec3Parts(v); n.setOrigin(this[KEY].key, a[0], a[1], a[2]); });
@@ -408,6 +482,35 @@ class AnimationLayer {
 }
 Object.defineProperty(AnimationLayer.prototype, 'op', { enumerable: false });
 
+function addAnimationLayer(layer, animation, once, config) {
+  var key = layer[KEY].key;
+  var name = animation !== null && typeof animation === 'object' ? animation.name : animation;
+  var index = n.puppetAddLayer(key, String(name), once);
+  if (index < 0) return undefined;
+  var made = animationLayerOf(key, index);
+  if (config !== null && typeof config === 'object') {
+    if (config.rate !== undefined) made.rate = Number(config.rate);
+    if (config.blend !== undefined) made.blend = Number(config.blend);
+  }
+  return made;
+}
+function boneMatrix(layer, space, bone) {
+  var m = n.bone(layer[KEY].key, space, bone);
+  return m === undefined ? undefined : new Mat4(m);
+}
+// The angles of a matrix in degrees, as a layer's `angles` reads them (R = Rz * Ry * Rx).
+function anglesOfMatrix(m) {
+  var col = function (c) {
+    var x = m[c * 4], y = m[c * 4 + 1], z = m[c * 4 + 2], l = Math.sqrt(x * x + y * y + z * z) || 1;
+    return [x / l, y / l, z / l];
+  };
+  var c0 = col(0), c1 = col(1), c2 = col(2);
+  var sinY = Math.max(-1, Math.min(1, -c0[2]));
+  var x = 0, y = Math.asin(sinY), z = 0;
+  if (Math.abs(sinY) < 1 - 1e-9) { x = Math.atan2(c1[2], c2[2]); z = Math.atan2(c0[1], c0[0]); }
+  else { x = Math.atan2(-c2[1], c1[1]); }
+  return new Vec3(x * DEG, y * DEG, z * DEG);
+}
 function animationLayerOf(layerKey, x) {
   var ref = String(x);
   var index = -1;
@@ -609,6 +712,22 @@ var sceneApi = {
     return json ? JSON.parse(json) : null;
   },
   getAnimation: sceneAnimation,
+  // The scene camera's static transforms (Wallpaper Engine's CameraTransforms).
+  getCameraTransforms: function () {
+    var a = n.cameraTransforms();
+    return { eye: toVec3(a.slice(0, 3)), center: toVec3(a.slice(3, 6)), up: toVec3(a.slice(6, 9)), zoom: a[9] };
+  },
+  setCameraTransforms: function (t) {
+    if (t === null || typeof t !== 'object') return;
+    var now = n.cameraTransforms();
+    // A field the object leaves out keeps what the camera has.
+    var lanes = function (v, at) {
+      var f = v === undefined ? [] : materialConstantFloats(v);
+      return f.length >= 3 ? f.slice(0, 3) : now.slice(at, at + 3);
+    };
+    var zoom = t.zoom === undefined ? NaN : Number(t.zoom);
+    n.setCameraTransforms(lanes(t.eye, 0).concat(lanes(t.center, 3), lanes(t.up, 6), [zoom]));
+  },
   createLayer: function (cfg) { return createLayer(cfg, '', ''); },
   destroyLayer: destroyLayer,
   on: addListener

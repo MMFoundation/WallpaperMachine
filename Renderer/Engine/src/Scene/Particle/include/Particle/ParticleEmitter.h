@@ -76,6 +76,18 @@ struct ParticleSpawnContext {
     /// `ParticleBoxEmitterArgs::spawn`).
     linalg::Matrix3d world_linear { linalg::Matrix3d::Identity() };
     bool            has_world_linear { false };
+    /// Whether the emitters keep to their rate and bursts. A script's `pause()` or `stop()`
+    /// clears it; their timetables then wait where they are.
+    bool emitting { true };
+    /// Particles each emitter places at once this step, besides its own (a script's
+    /// `emitParticles`), whether or not it is emitting.
+    u32 manual { 0 };
+    /// Bumped to send every emitter back to the start of its timetable (delay, duration and
+    /// first burst), as when a stopped or finished system plays again.
+    u64 restart { 0 };
+    /// Set by an emitter whose timetable has not run out, so the system can tell that it
+    /// is still emitting. The subsystem clears it before each step.
+    bool active { false };
 };
 
 using ParticleInitOp = std::function<void(Particle&, double)>;

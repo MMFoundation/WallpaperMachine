@@ -11,6 +11,7 @@
 #include "Utils/Logging.h"
 
 #include <algorithm>
+#include <utility>
 #include <cassert>
 #include <cmath>
 
@@ -181,6 +182,57 @@ void ParticleSubSystem::UpdateMouseControlpoints() {
     for (auto& point : m_controlpoints) {
         if (point.link_mouse) point.offset = point.base_offset + pointer;
     }
+}
+
+bool ParticleSubSystem::AnyAlive() const {
+    for (const auto& inst : m_instances) {
+        for (const auto& p : inst->Particles()) {
+            if (ParticleModify::LifetimeOk(p)) return true;
+        }
+    }
+    return std::any_of(m_children.begin(), m_children.end(),
+                       [](const auto& child) { return child->AnyAlive(); });
+}
+
+void ParticleSubSystem::ClearParticles() {
+    if (m_spawn_type == SpawnType::STATIC) {
+        for (auto& inst : m_instances) {
+            inst->ParticlesVec().clear();
+            inst->TrailsVec().clear();
+        }
+    } else {
+        m_instances.clear();
+    }
+    for (auto& child : m_children) child->ClearParticles();
+}
+
+void ParticleSubSystem::SetEmitting(bool emitting, bool restart) {
+    m_emitting = emitting;
+    if (restart) ++m_restart;
+    for (auto& child : m_children) child->SetEmitting(emitting, restart);
+}
+
+void ParticleSubSystem::Play() {
+    const bool restart = m_stopped || (! m_emission_active && ! AnyAlive());
+    m_stopped          = false;
+    if (restart) m_emission_active = true;
+    SetEmitting(true, restart);
+}
+
+void ParticleSubSystem::Pause() { SetEmitting(false, false); }
+
+void ParticleSubSystem::Stop() {
+    m_stopped = true;
+    SetEmitting(false, false);
+    ClearParticles();
+}
+
+bool ParticleSubSystem::IsPlaying() const {
+    return (m_emitting && m_emission_active) || AnyAlive();
+}
+
+void ParticleSubSystem::EmitNow(u32 count) {
+    m_manual_pending = static_cast<u32>(std::min<u64>(u64 { m_manual_pending } + count, 20000u));
 }
 
 void ParticleSubSystem::AddChild(std::unique_ptr<ParticleSubSystem>&& child) {
@@ -365,10 +417,19 @@ void ParticleSubSystem::Advance(double dt) {
     if (m_spawn_type == SpawnType::STATIC && m_instances.empty())
         m_instances.emplace_back(std::make_unique<ParticleInstance>());
 
+    m_spawn_ctx->emitting = m_emitting;
+    m_spawn_ctx->restart  = m_restart;
+    m_spawn_ctx->active   = false;
+    const u32 manual      = std::exchange(m_manual_pending, 0u);
     // Events create instances in the children only, but the count is read each
     // round so a growing list is never stepped past its end.
-    for (std::size_t next = 0; next != m_instances.size(); ++next)
+    for (std::size_t next = 0; next != m_instances.size(); ++next) {
+        // A script's request goes to the layer's own instance, not to event children's.
+        m_spawn_ctx->manual = m_spawn_type == SpawnType::STATIC ? manual : 0u;
         AdvanceInstance(*m_instances[next], dt, m_time, recording);
+    }
+    m_spawn_ctx->manual = 0;
+    m_emission_active   = m_spawn_ctx->active;
 
     for (auto& point : m_controlpoints) point.prev_offset = point.offset;
 }

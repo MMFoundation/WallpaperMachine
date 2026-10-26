@@ -157,6 +157,9 @@ public:
         // Authored layers start playing, matching the editor. A single-shot
         // animation stops at its last frame until play() restarts it.
         bool        playing { true };
+        /// Played once whatever the animation's own mode (a script's
+        /// `playSingleAnimation`): at its end the layer stops and hides.
+        bool        once { false };
     };
 
     void prepared(std::span<AnimationLayer>);
@@ -189,6 +192,20 @@ public:
     double blend(i32 index) const noexcept;
     bool setVisible(i32 index, bool visible) noexcept;
     bool visible(i32 index) const noexcept;
+    /// A layer a script adds over the authored ones, playing the animation named `animation`
+    /// (or with that id) from its start: once and then hidden (`playSingleAnimation`), or for
+    /// good (`createAnimationLayer`). A hidden layer that played once is reused for the next.
+    /// Its index, or -1 when the puppet has no such animation.
+    i32  addLayer(std::string_view animation, bool once) noexcept;
+
+    /// Bones, as the last frame posed them. Model space is the puppet's own; a bone's local
+    /// transform is relative to its animation parent.
+    usize boneCount() const noexcept;
+    i32   boneIndex(std::string_view name) const noexcept;
+    i32   boneParent(i32 index) const noexcept;
+    std::optional<linalg::Affine3f> boneModel(i32 index) const noexcept;
+    std::optional<linalg::Affine3f> boneLocal(i32 index) const noexcept;
+
     // The layers whose single-shot animation has played out since the last call,
     // oldest first. A script's `addEndedCallback` is answered from this. The
     // record is shared by every copy, so any one of them can take it.
