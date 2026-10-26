@@ -420,7 +420,7 @@ actor WorkshopService {
         case .collection(let id, _):
             return try await collectionPage(id: id, page: page, tags: query.tags, excludedTags: query.excludedTags)
         case .creator(let id, let name):
-            var listing = try await profilePage(steamID: id, subscriptions: false, account: nil, page: page)
+            var listing = try await profilePage(steamID: id, list: .items, account: nil, page: page)
             let author = listing.name ?? name
             listing.page = Self.matching(listing.page, tags: query.tags, excludedTags: query.excludedTags)
             listing.page.items = listing.page.items.map { item in
@@ -430,9 +430,11 @@ actor WorkshopService {
             }
             listing.page.title = author
             return listing.page
-        case .subscriptions:
+        case .subscriptions, .favorites:
             guard let account else { throw SteamSignInRequired() }
-            let listing = try await profilePage(steamID: account.steamID, subscriptions: true, account: account, page: page)
+            let list: WorkshopProfileList =
+                query.source == .favorites ? .favorites(query.favoritesOrder) : .subscriptions
+            let listing = try await profilePage(steamID: account.steamID, list: list, account: account, page: page)
             return Self.matching(listing.page, tags: query.tags, excludedTags: query.excludedTags)
         }
     }
@@ -521,7 +523,7 @@ actor WorkshopService {
             .compactMap { $0["publishedfileid"] as? String }
     }
 
-    static func profileURL(steamID: String, subscriptions: Bool, page: Int) -> URL {
+    static func profileURL(steamID: String, list: WorkshopProfileList, page: Int) -> URL {
         var url = URLComponents(string: "https://steamcommunity.com/profiles/\(steamID)/myworkshopfiles/")!
         url.queryItems = [
             URLQueryItem(name: "appid", value: String(WorkshopApp.id)),
@@ -529,7 +531,16 @@ actor WorkshopService {
             URLQueryItem(name: "numperpage", value: String(Self.pageSize)),
             URLQueryItem(name: "l", value: "english"),
         ]
-        if subscriptions { url.queryItems?.append(URLQueryItem(name: "browsefilter", value: "mysubscriptions")) }
+        switch list {
+        case .items: break
+        case .subscriptions:
+            url.queryItems?.append(URLQueryItem(name: "browsefilter", value: "mysubscriptions"))
+        case .favorites(let order):
+            url.queryItems? += [
+                URLQueryItem(name: "browsefilter", value: "myfavorites"),
+                URLQueryItem(name: "sortmethod", value: order.rawValue),
+            ]
+        }
         return url.url!
     }
 
@@ -652,15 +663,15 @@ actor WorkshopService {
         return result + text[last...]
     }
 
-    /// One page of an account's Workshop items, or of its subscriptions, with the account's name.
+    /// One page of an account's Workshop items, subscriptions or favorites, with the account's name.
     func profilePage(
-        steamID: String, subscriptions: Bool, account: SteamWebSession?, page: Int
+        steamID: String, list: WorkshopProfileList, account: SteamWebSession?, page: Int
     ) async throws -> (page: WorkshopPage, name: String?) {
         guard SteamWebSession.isSteamID(steamID) else {
             throw WorkshopFailure(message: String(localized: "This Steam account id is not one Steam uses."))
         }
         let html = try await communityPage(
-            Self.profileURL(steamID: steamID, subscriptions: subscriptions, page: page), account: account)
+            Self.profileURL(steamID: steamID, list: list, page: page), account: account)
         let listing = try Self.decodeProfileListing(html)
         let items = try await details(ids: listing.ids)
         let totalPages = max(1, (listing.total + Self.pageSize - 1) / Self.pageSize)
@@ -675,7 +686,7 @@ actor WorkshopService {
         repeat {
             try Task.checkCancellation()
             let html = try await communityPage(
-                Self.profileURL(steamID: account.steamID, subscriptions: true, page: page), account: account)
+                Self.profileURL(steamID: account.steamID, list: .subscriptions, page: page), account: account)
             let listing = try Self.decodeProfileListing(html)
             ids += listing.ids.filter { !ids.contains($0) }
             pages = min(Self.maxPages, max(1, (listing.total + Self.pageSize - 1) / Self.pageSize))

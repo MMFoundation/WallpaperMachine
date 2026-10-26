@@ -3718,19 +3718,18 @@ SceneRuntimeContext::NodeCursorTargetOf(std::string_view name) const {
     return target->second;
 }
 
-// Whether the cursor is over the layer's own rectangle. Wallpaper Engine tests
-// nothing but that quad; a layer a script handles the cursor for also answers
-// to its coverage mask, so a cut-out layer is only hit where it is drawn.
-bool SceneRuntimeContext::CursorHitsLayerGeometry(std::string_view name) const {
+// Where the cursor is in the layer's own plane, about its box centre, with the box it
+// answers to: its size across, a size of nothing on both axes counting as 100 by 100.
+// Empty when the layer is gone, has a negative size or the cursor meets no point of it.
+std::optional<SceneRuntimeContext::CursorOnLayer>
+SceneRuntimeContext::CursorOnLayerPlane(std::string_view name) const {
     const auto found = m_nodes.find(name);
-    if (found == m_nodes.end() || found->second == nullptr) return false;
+    if (found == m_nodes.end() || found->second == nullptr) return std::nullopt;
     SceneNode& node = *found->second;
 
-    // The box the layer answers to: its size across, about its box centre. A size of nothing on
-    // both axes counts as 100 by 100, and a negative one is never hit.
     linalg::Vector2f size = NodeSize(name);
     if (size.x() <= 0.0f && size.y() <= 0.0f) size = linalg::Vector2f(100.0f, 100.0f);
-    if (size.x() < 0.0f || size.y() < 0.0f) return false;
+    if (size.x() < 0.0f || size.y() < 0.0f) return std::nullopt;
     const linalg::Vector2f centre = NodeBoxCentre(name);
 
     // The camera the layer is drawn through: its own, else the scene's active one.
@@ -3751,22 +3750,41 @@ bool SceneRuntimeContext::CursorHitsLayerGeometry(std::string_view name) const {
     if (camera != nullptr && camera->IsPerspective()) {
         const linalg::Vector2d ndc = CursorWorldToNdc(m_cursor_viewport, m_cursor_plane_position);
         const auto hit = IntersectNdcWithNodePlane(*camera, node, ndc.x(), ndc.y());
-        if (! hit.has_value()) return false;
+        if (! hit.has_value()) return std::nullopt;
         plane_x = hit->x();
         plane_y = hit->y();
     } else {
         linalg::Matrix4d drawn = node.ModelTrans();
         drawn.block<3, 1>(0, 3) += node.DrawOffset().cast<double>();
-        if (! drawn.allFinite() || ! (std::abs(drawn.determinant()) >= 1.0e-12)) return false;
+        if (! drawn.allFinite() || ! (std::abs(drawn.determinant()) >= 1.0e-12)) return std::nullopt;
         const linalg::Vector4d local =
             drawn.inverse() * linalg::Vector4d(m_cursor_plane_position.x(), m_cursor_plane_position.y(), 0.0, 1.0);
-        if (! local.allFinite()) return false;
+        if (! local.allFinite()) return std::nullopt;
         plane_x = local.x();
         plane_y = local.y();
     }
+    return CursorOnLayer { .across = plane_x - centre.x(), .up = plane_y - centre.y(), .size = size };
+}
 
-    const double across = plane_x - centre.x();
-    const double down   = plane_y - centre.y();
+// Measured from the box's lower-left corner, as the layer's own axes run (y up, like the
+// world's); a held button's release can be off the box, so it is not clamped.
+std::optional<linalg::Vector2f> SceneRuntimeContext::CursorLocalPosition(std::string_view name) const {
+    if (name.empty()) return std::nullopt;
+    const auto on = CursorOnLayerPlane(name);
+    if (! on.has_value()) return std::nullopt;
+    return linalg::Vector2f(static_cast<float>(on->across + on->size.x() * 0.5),
+                            static_cast<float>(on->up + on->size.y() * 0.5));
+}
+
+// Whether the cursor is over the layer's own rectangle. Wallpaper Engine tests
+// nothing but that quad; a layer a script handles the cursor for also answers
+// to its coverage mask, so a cut-out layer is only hit where it is drawn.
+bool SceneRuntimeContext::CursorHitsLayerGeometry(std::string_view name) const {
+    const auto on = CursorOnLayerPlane(name);
+    if (! on.has_value()) return false;
+    const linalg::Vector2f size   = on->size;
+    const double           across = on->across;
+    const double           down   = on->up;
     const double half_x = static_cast<double>(size.x()) * 0.5;
     const double half_y = static_cast<double>(size.y()) * 0.5;
     if (std::abs(across) > half_x || std::abs(down) > half_y) return false;
@@ -3943,6 +3961,15 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
     const auto script_count = m_scene_scripts.size();
     m_cursor_blocker_cached = false;
     const auto callback_ran = [this] { m_cursor_blocker_cached = false; };
+    // Each program's event says where the cursor is on its own layer; nothing is left
+    // behind for the next dispatch that is not aimed at a layer.
+    const auto aim = [this](std::string_view layer) {
+        m_host_context->cursor_local_position = CursorLocalPosition(layer);
+    };
+    struct Unaim {
+        ScriptHostContext& host;
+        ~Unaim() { host.cursor_local_position.reset(); }
+    } unaim { *m_host_context };
 
     if (! in_window) {
         if (cursor_was_in_window) {
@@ -3952,6 +3979,7 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
                 const auto inside = m_scripted_value_cursor_inside.find(value);
                 if (inside == m_scripted_value_cursor_inside.end() || ! inside->second) continue;
                 inside->second = false;
+                aim(value->LayerName());
                 value->DispatchCursorLeave(*m_host_context);
                 callback_ran();
             }
@@ -3961,6 +3989,7 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
                     continue;
                 }
                 m_scene_scripts[index].cursor_inside = false;
+                aim(m_scene_scripts[index].script->LayerName());
                 m_scene_scripts[index].script->DispatchCursorLeave(*m_host_context);
                 callback_ran();
             }
@@ -3977,14 +4006,17 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
             if (now != inside->second) {
                 inside->second = now;
                 if (now) {
+                    aim(value->LayerName());
                     value->DispatchCursorEnter(*m_host_context);
                 } else {
+                    aim(value->LayerName());
                     value->DispatchCursorLeave(*m_host_context);
                 }
                 callback_ran();
             }
             // Over the layer, the pointer moves every frame, moved or not.
             if (now && m_scripted_values.size() > index && m_scripted_values[index] == value) {
+                aim(value->LayerName());
                 value->DispatchCursorMove(*m_host_context);
                 callback_ran();
             }
@@ -3998,13 +4030,16 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
             if (now != m_scene_scripts[index].cursor_inside) {
                 m_scene_scripts[index].cursor_inside = now;
                 if (now) {
+                    aim(script->LayerName());
                     script->DispatchCursorEnter(*m_host_context);
                 } else {
+                    aim(script->LayerName());
                     script->DispatchCursorLeave(*m_host_context);
                 }
                 callback_ran();
             }
             if (now && index < m_scene_scripts.size() && m_scene_scripts[index].script.get() == script) {
+                aim(script->LayerName());
                 script->DispatchCursorMove(*m_host_context);
                 callback_ran();
             }
@@ -4027,6 +4062,7 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
                 if (value == nullptr || (value->CursorHandlerMask() & kButton) == 0) continue;
                 if (VisitScriptLayer(*value) != CursorVisit::Inside) continue;
                 m_scripted_value_cursor_held[button].push_back(value);
+                aim(value->LayerName());
                 value->DispatchCursorDown(*m_host_context);
                 callback_ran();
             }
@@ -4035,6 +4071,7 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
                 auto* script = m_scene_scripts[index].script.get();
                 if (VisitScriptLayer(*script) != CursorVisit::Inside) continue;
                 m_scene_script_cursor_held[button].push_back(index);
+                aim(script->LayerName());
                 script->DispatchCursorDown(*m_host_context);
                 callback_ran();
             }
@@ -4051,9 +4088,11 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
             const bool scene_wide = value->LayerName().empty();
             const bool over = in_window && VisitScriptLayer(*value) == CursorVisit::Inside;
             if (! holder && ! scene_wide && ! over) continue;
+            aim(value->LayerName());
             value->DispatchCursorUp(*m_host_context);
             callback_ran();
             if (holder && over && m_scripted_values.size() > index && m_scripted_values[index] == value) {
+                aim(value->LayerName());
                 value->DispatchCursorClick(*m_host_context);
                 callback_ran();
             }
@@ -4065,9 +4104,11 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
             const bool scene_wide = script->LayerName().empty();
             const bool over = in_window && VisitScriptLayer(*script) == CursorVisit::Inside;
             if (! holder && ! scene_wide && ! over) continue;
+            aim(script->LayerName());
             script->DispatchCursorUp(*m_host_context);
             callback_ran();
             if (holder && over && index < m_scene_scripts.size() && m_scene_scripts[index].script.get() == script) {
+                aim(script->LayerName());
                 script->DispatchCursorClick(*m_host_context);
                 callback_ran();
             }

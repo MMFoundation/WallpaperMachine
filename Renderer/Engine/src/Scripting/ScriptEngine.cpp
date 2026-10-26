@@ -2383,8 +2383,11 @@ void DispatchCursor(ProgramCore& core, const ScriptProgramCapabilities& caps, Sc
     auto& e = *core.engine;
     CallScope scope(e, core.runtime, e.limits.call_budget_ms);
     e.RefreshHost(host);
+    const auto& local = host.cursor_local_position;
     e.Call(&core.guard, kCursorEntries[index], kLibCursorEvent,
-           { core.Prog(), JS_NewInt32(e.ctx, index), JS_NewInt32(e.ctx, host.cursor_button) },
+           { core.Prog(), JS_NewInt32(e.ctx, index), JS_NewInt32(e.ctx, host.cursor_button),
+             JS_NewBool(e.ctx, local.has_value()), JS_NewFloat64(e.ctx, local ? local->x() : 0.0),
+             JS_NewFloat64(e.ctx, local ? local->y() : 0.0) },
            e.limits.call_budget_ms);
 }
 

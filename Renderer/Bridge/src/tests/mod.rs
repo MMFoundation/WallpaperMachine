@@ -23,6 +23,7 @@ mod persistence_corruption;
 mod primary_switch_follow;
 mod playback;
 mod playback_reconciliation;
+mod saved_pause;
 mod power_settings;
 mod performance_settings;
 mod quality_settings;

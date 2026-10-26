@@ -57,6 +57,7 @@ extension PanelController {
       await attempt { try await store.setLaunchAtLoginAsync(enabled: false) }
     }
     defaults.removeObject(forKey: PanelPreferences.hideAfterActivatingKey)
+    setTileZoom(0)
     if appLanguage.preference != AppLanguageStore.systemChoice {
       await attempt { try await setLanguage(nil) }
     }

@@ -112,7 +112,8 @@ struct WallpaperBackupPreferences: Sendable {
         "WallpaperMachine.lowPowerModeAction", "WallpaperMachine.thermalAction",
         "WallpaperMachine.lowBatteryAction", "WallpaperMachine.lowBatteryThreshold",
         "WallpaperMachine.playOnlyOnActiveDisplay",
-        "WallpaperMachine.hideAfterActivating", "WallpaperMachine.concurrentDownloads",
+        "WallpaperMachine.hideAfterActivating", "WallpaperMachine.tileZoom",
+        "WallpaperMachine.concurrentDownloads",
         "WallpaperMachine.workshopUpdateChecks", "WallpaperMachineAssetsPath",
         // No longer read since filters became a popover; still accepted so that backups made
         // by earlier versions, which carry them, keep restoring.
@@ -261,6 +262,9 @@ struct WallpaperBackupPreferences: Sendable {
         case "WallpaperMachine.concurrentDownloads":
             guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue == Double(number.intValue),
                   WorkshopDownloadManager.concurrentDownloadRange.contains(number.intValue) else { throw invalid() }
+        case "WallpaperMachine.tileZoom":
+            guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue == Double(number.intValue),
+                  TileGridLayout.clampedZoom(number.intValue) == number.intValue else { throw invalid() }
         case "WallpaperMachineAssetsPath": guard let path = value as? String, !path.contains("\0"), path.utf8.count <= 1024 else { throw invalid() }
         default: guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { throw invalid() }
         }

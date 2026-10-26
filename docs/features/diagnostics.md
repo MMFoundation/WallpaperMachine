@@ -518,6 +518,18 @@ Advanced), then pick the page from the **Develop** menu's submenu for this Mac.
   JavaScript context, including data the page keeps in `localStorage`. Turn it off
   when the debugging is done.
 
+Without the inspector, the log already holds what a desktop or preview page reports
+about itself: what it writes with `console.error` (a `warn` line) and `console.warn` (an
+`info` line), its uncaught errors and unhandled promise rejections, and the images,
+scripts, media and stylesheets that failed to load, as
+`web wallpaper <folder>: page <error|warning|uncaught|rejection|resource>: <text>` in the
+page's load. The host script sends at most eight a second and drops a repeat of the last
+one; the host puts each on one line, cuts it to 300 characters and logs at most 40 per
+document (`WebWallpaperPageDiagnostics`), so a page that throws on every frame cannot
+fill the log. The project folder's own URL is cut from the text. The text is the page's
+own, and a diagnostics report redacts it like every other line. The screen saver does
+not log its page's messages.
+
 ## Verification
 
 - Rust:

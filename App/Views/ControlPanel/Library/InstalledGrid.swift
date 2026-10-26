@@ -11,6 +11,7 @@ struct InstalledGrid: View {
   let rows: [LibraryRow]
 
   @Environment(PanelController.self) private var controller
+  @Environment(\.panelTileWidth) private var preferredTileWidth
   @State private var position: ScrollPosition
   /// The offset to scroll back to once the grid has content to scroll, from the last time the
   /// page was on show or the last window. Nothing is reported while it waits, so the grid's first
@@ -68,6 +69,8 @@ struct InstalledGrid: View {
     .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) {
       model.geometry.viewport.width = $0
     }
+    // The sweep maps a point to a tile by the same column rule the grid draws with.
+    .onChange(of: preferredTileWidth, initial: true) { model.geometry.preferredTileWidth = preferredTileWidth }
     .simultaneousGesture(sweepGesture(model))
     .onKeyPress(keys: [.delete, .deleteForward]) { _ in
       model.deleteSelectionOrFocused() ? .handled : .ignored

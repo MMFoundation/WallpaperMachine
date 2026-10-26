@@ -270,6 +270,36 @@ extension PanelController {
     }
   }
 
+  /// **Download next**: moves a Steam download that waits for a slot to the front of the line.
+  func prioritizeDownload(id: String) async throws {
+    try await run(.immediate) {
+      guard let job = workshop.downloader.downloads.first(where: { $0.id == id }),
+        workshop.downloader.canPrioritize(job)
+      else { throw InvalidControlValue() }
+      workshop.downloader.prioritize(job)
+    }
+  }
+
+  /// **Retry failed**: tries every failed or cancelled download again, Steam's and pixiv's, in
+  /// the order the list shows them. Steam's are left out while SteamCMD is not ready, as their
+  /// own Try again is. The first that cannot start stops the batch and says why.
+  func retryFailedDownloads() async throws {
+    for row in retryableDownloads { try await retryDownload(row) }
+  }
+
+  /// Whether **Download next** would move this row's job: a Steam job waits behind another.
+  func canPrioritizeDownload(_ row: DownloadRow) -> Bool {
+    guard row.source == .steam, row.isQueued,
+      let job = workshop.downloader.downloads.first(where: { $0.id == row.id })
+    else { return false }
+    return workshop.downloader.canPrioritize(job)
+  }
+
+  /// The downloads **Retry failed** would try again.
+  var retryableDownloads: [DownloadRow] {
+    downloadQueue.unresolved.filter { $0.canRetry && ($0.source == .pixiv || steamSetup.isReady) }
+  }
+
   /// Answers the password or Steam Guard prompt of a running job.
   ///
   /// The secret goes straight to SteamCMD's terminal: it is never logged, never stored, never part

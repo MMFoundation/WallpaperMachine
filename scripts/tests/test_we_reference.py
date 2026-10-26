@@ -132,6 +132,7 @@ class FetchTests(unittest.TestCase):
         tool.write_text(FAKE_STEAMCMD % body)
         tool.chmod(0o755)
 
+    @unittest.skipUnless(sys.platform == "darwin", "fetch clears quarantine with xattr")
     def test_an_item_is_downloaded_with_the_saved_sign_in_and_no_copy_of_it_is_left(self):
         self.steamcmd('mkdir -p "$dir/steamapps/workshop/content/431960/$item" && '
                       'echo {} > "$dir/steamapps/workshop/content/431960/$item/project.json"')
@@ -141,6 +142,7 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.into.iterdir()), ["111", "args"])
         self.assertIn("+login someone +workshop_download_item 431960 111", (self.into / "args").read_text())
 
+    @unittest.skipUnless(sys.platform == "darwin", "fetch clears quarantine with xattr")
     def test_an_expired_sign_in_is_reported_and_never_answered(self):
         self.steamcmd('printf "Cached credentials not found.\\npassword: "; exit 5')
         with self.assertRaisesRegex(RuntimeError, "signs in again"):
@@ -252,6 +254,7 @@ class ImageTests(unittest.TestCase):
         rgb = bytes(range(5 * 3 * 3))
         self.assertEqual(we_reference.read_bmp(we_reference.bmp(5, 3, rgb)), (5, 3, rgb))
 
+    @unittest.skipUnless(sys.platform == "darwin", "frames are converted with sips")
     def test_the_work_area_leaves_the_taskbar_out(self):
         width, height = 64, 48
         # Grey wallpaper over the top 36 rows, a red taskbar under it.

@@ -109,6 +109,14 @@ extension PanelController {
     try await run(.immediate) { workshop.open(list.source) }
   }
 
+  /// Lists Your favorites in another of Steam's orders, from the first page.
+  func sortWorkshopFavorites(_ order: WorkshopFavoritesOrder) async throws {
+    try await run(.immediate) {
+      workshop.favoritesOrder = order
+      if workshop.source == .favorites { workshop.search() }
+    }
+  }
+
   /// Opens an author's wallpapers from a tile, so Back returns to the list it was opened from.
   /// `id` is the author's SteamID64.
   func openWorkshopAuthor(id: String, name: String) async throws {

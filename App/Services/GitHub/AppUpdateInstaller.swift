@@ -18,10 +18,14 @@ protocol AppUpdateInstalling: Sendable {
 struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
     let currentAppURL: URL
     let fileManager: FileManager
+    /// What a downloaded copy's signature must satisfy; tests pass one an ad-hoc copy meets.
+    let signingRequirement: String
 
-    init(currentAppURL: URL = Bundle.main.bundleURL, fileManager: FileManager = .default) {
+    init(currentAppURL: URL = Bundle.main.bundleURL, fileManager: FileManager = .default,
+         signingRequirement: String = AppUpdateConfiguration.signingRequirement) {
         self.currentAppURL = currentAppURL
         self.fileManager = fileManager
+        self.signingRequirement = signingRequirement
     }
 
     var canInstallInPlace: Bool {
@@ -47,11 +51,11 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
     }
 
     /// Copies the app out of the downloaded disk image into a private work directory and
-    /// validates the copy. The image is mounted invisibly and read-only, and is always
-    /// detached before this returns or throws.
+    /// validates the copy, its signature included. The image is mounted invisibly and
+    /// read-only, and is always detached before this returns or throws.
     func prepareInstallation(archive: URL) async throws -> URL {
         try await AppUpdatePreparationWorker().prepare(
-            archive: archive, root: fileManager.temporaryDirectory, replacing: currentAppURL)
+            archive: archive, root: fileManager.temporaryDirectory, signingRequirement: signingRequirement)
     }
 
     func discardPreparation(_ extractedApp: URL) async {
@@ -62,7 +66,7 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
         await AppUpdatePreparationWorker().discard(work)
     }
 
-    fileprivate static func prepare(archive: URL, root: URL, replacing currentApp: URL) throws -> URL {
+    fileprivate static func prepare(archive: URL, root: URL, signingRequirement: String) throws -> URL {
         try Task.checkCancellation()
         let fileManager = FileManager.default
         let work = root.appendingPathComponent("mwe-update-\(UUID().uuidString)", isDirectory: true)
@@ -70,7 +74,7 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
         do {
             let app = try Self.copyApplication(fromDiskImage: archive, into: work)
             try Self.validate(app)
-            try Self.verifySignature(of: app, satisfying: Self.signatureRequirement(replacing: currentApp))
+            try Self.verifySignature(of: app, requirement: signingRequirement)
             try Task.checkCancellation()
             return app
         } catch {
@@ -252,48 +256,24 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
             throw AppUpdateIssue(code: .verification, detail: String(localized: "The update couldn't be verified, so it wasn't installed."))
         }
     }
-}
 
-extension AppUpdateInstaller {
-    /// The release's designated requirement: the project certificate's SHA-1
-    /// ([build](../../../docs/build.md#release-signing)). Replacing the certificate changes it.
-    static let releaseRequirement =
-        #"identifier "app.wallpapermachine" and certificate root = H"2bdf4e2431b7edeb731de288726c896480a0fa82""#
-
-    /// What the update must meet to replace `currentApp`: the release requirement when
-    /// `currentApp` is the release, so only the holder of the release certificate can
-    /// replace it, and nothing for a build from source (signed ad hoc or with its builder's
-    /// own certificate), whose update needs only an intact signature.
-    static func signatureRequirement(replacing currentApp: URL, release: String = releaseRequirement) -> SecRequirement? {
-        var requirement: SecRequirement?
-        guard SecRequirementCreateWithString(release as CFString, [], &requirement) == errSecSuccess,
-              let requirement, let code = staticCode(at: currentApp)
-        else { return nil }
-        // Only the signature is compared; the installed copy's files are not hashed again.
-        let flags = SecCSFlags(rawValue: kSecCSDoNotValidateExecutable | kSecCSDoNotValidateResources)
-        return SecStaticCodeCheckValidity(code, flags, requirement) == errSecSuccess ? requirement : nil
-    }
-
-    /// The staged copy's signature must be intact in every architecture, nested code
-    /// included and checked strictly (`codesign --verify --deep --strict`), and meet
-    /// `requirement` when there is one.
-    static func verifySignature(of app: URL, satisfying requirement: SecRequirement?) throws {
-        let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate)
-        guard let code = staticCode(at: app),
-              SecStaticCodeCheckValidityWithErrors(code, flags, requirement, nil) == errSecSuccess
-        else { throw verificationIssue }
-    }
-
-    private static func staticCode(at app: URL) -> SecStaticCode? {
+    /// Refuses a copy whose signature is missing, broken anywhere in the bundle, or not made
+    /// with the release certificate. The digest proves the image is the one the release lists;
+    /// this proves who built it, so a release asset someone replaced cannot install itself.
+    static func verifySignature(of app: URL, requirement: String) throws {
         var code: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess else { return nil }
-        return code
+        var compiled: SecRequirement?
+        let flags = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSCheckNestedCode)
+        guard SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code,
+              SecRequirementCreateWithString(requirement as CFString, [], &compiled) == errSecSuccess, let compiled,
+              SecStaticCodeCheckValidity(code, flags, compiled) == errSecSuccess
+        else { throw verificationIssue }
     }
 }
 
 private actor AppUpdatePreparationWorker {
-    func prepare(archive: URL, root: URL, replacing currentApp: URL) throws -> URL {
-        try AppUpdateInstaller.prepare(archive: archive, root: root, replacing: currentApp)
+    func prepare(archive: URL, root: URL, signingRequirement: String) throws -> URL {
+        try AppUpdateInstaller.prepare(archive: archive, root: root, signingRequirement: signingRequirement)
     }
     func discard(_ work: URL) {
         try? FileManager.default.removeItem(at: work)

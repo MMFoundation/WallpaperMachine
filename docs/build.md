@@ -14,7 +14,7 @@ Authoritative build document. Everything here is driven by `scripts/build.py` an
 | Homebrew | Provides every renderer dependency; `brew --prefix` is queried at build time. |
 | XcodeGen | `xcodegen` must be on `PATH`. Every build runs `xcodegen generate --use-cache`, which regenerates the project when `project.yml` changed. |
 | Python | `python3` 3.11 or newer runs all of `scripts/` (`hashlib.file_digest` is the newest API they use). The `/usr/bin/python3` that macOS and Command Line Tools ship is 3.9, so install Homebrew's `python`, which puts a newer `python3` ahead of it on `PATH`. |
-| Rust | `cargo` must be on `PATH` for the renderer stage. Install it with rustup, which reads `Renderer/rust-toolchain.toml` and builds with the nightly toolchain pinned there, as CI does. Homebrew's `rust` formula ignores that file and builds with its own stable release. |
+| Rust | `cargo` must be on `PATH` for the renderer stage. Install it with rustup, which reads `Renderer/rust-toolchain.toml` and builds with the stable release pinned there, as CI does. Homebrew's `rust` formula ignores that file and builds with its own release. Raise the pin in a change of its own: it rebuilds every crate and starts CI's renderer cache afresh. |
 
 Homebrew packages the renderer links against, exactly as listed in
 `build_environment()` in `scripts/build.py`:
@@ -318,14 +318,11 @@ imports it from the `SIGNING_CERTIFICATE_P12` (base64 PKCS#12, legacy 3DES
 encryption so `security import` reads it) and `SIGNING_CERTIFICATE_PASSWORD`
 repository secrets into a temporary keychain and fails when either is missing,
 rather than shipping an ad-hoc build. The private key is kept only by the
-maintainer, outside the repository. The in-app updater of an installed release
-installs only an update that meets this requirement
-(`AppUpdateInstaller.releaseRequirement`, [installing](features/updates.md#installing)).
-Replacing the certificate changes the requirement, so every release before the
-replacement refuses the one after it in place: its users install it from the disk
-image by hand once, and it asks for permissions once more. The same change updates
-`AppUpdateInstaller.releaseRequirement` with the new certificate's SHA-1 and
-`TelemetryEnvironment.releaseCertificateSHA256` with the SHA-256
+maintainer, outside the repository. Replacing the certificate changes the
+requirement, so the release after a replacement asks for permissions once more, and
+the in-app updater refuses a copy that does not meet `AppUpdateConfiguration.signingRequirement`
+([updates](features/updates.md#installing)): a release whose requirement accepts both
+certificates has to ship first. The same change updates `TelemetryEnvironment.releaseCertificateSHA256` with the SHA-256
 of the new certificate's DER bytes, or every copy of the next release reports itself
 as a build from source ([telemetry](features/telemetry.md#what-a-report-holds)). This
 telemetry fingerprint is independent of the designated requirement's SHA-1; changing

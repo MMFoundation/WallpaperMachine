@@ -974,6 +974,15 @@ private:
     linalg::Vector3f ScriptCursorWorldPosition() const;
     bool CursorHitsLayer(std::string_view name) const;
     bool CursorHitsLayerGeometry(std::string_view name) const;
+    // Where the cursor is on a layer's box: from its centre, and the box's size.
+    struct CursorOnLayer {
+        double           across { 0.0 };
+        double           up { 0.0 };
+        linalg::Vector2f size { 0.0f, 0.0f };
+    };
+    std::optional<CursorOnLayer> CursorOnLayerPlane(std::string_view name) const;
+    // `CursorEvent.localPosition` for a program of the layer `name`; empty for the scene's own.
+    std::optional<linalg::Vector2f> CursorLocalPosition(std::string_view name) const;
     CursorVisit VisitCursorLayer(std::string_view name) const;
     bool CursorBlockedByLayerInFront(std::string_view name) const;
     std::optional<std::size_t> NodeRank(std::string_view name) const;

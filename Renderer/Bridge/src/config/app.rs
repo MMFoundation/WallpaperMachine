@@ -50,6 +50,11 @@ impl Default for AppConfig {
 pub struct GeneralCfg {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_selected_wallpaper: Option<String>,
+    /// The user's own Play/Pause: set when they pause every wallpaper, cleared when they
+    /// play again. Power rules and presentation never write it. The next launch pauses
+    /// again once its first frame is up (`pending_user_pause_after_initial_frame`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub paused: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -4981,6 +4981,78 @@ TEST(ScriptRuntimeCompat, ATimelineWithoutAFrameRateStandsStill) {
     EXPECT_FLOAT_EQ(loop.Evaluate(std::numeric_limits<double>::max()), 0.25f);
 }
 
+// A `mirror` timeline plays to its end, back to its start, and over again; the
+// position stays inside the timeline, so its curves, `getFrame` and its markers
+// see a real frame on the way back too.
+TEST(ScriptRuntimeCompat, AMirrorTimelinePlaysBackFromItsEndAndOverAgain) {
+    ScalarAnimation curve;
+    curve.fps           = 10.0;
+    curve.mode          = ScalarAnimationMode::Mirror;
+    curve.length_frames = 10.0;
+    curve.keyframes     = { { .frame = 0.0, .value = 0.0f }, { .frame = 10.0, .value = 1.0f } };
+    EXPECT_FLOAT_EQ(curve.Evaluate(0.5), 0.5f);
+    EXPECT_FLOAT_EQ(curve.Evaluate(1.0), 1.0f);
+    EXPECT_FLOAT_EQ(curve.Evaluate(1.5), 0.5f) << "on the way back";
+    EXPECT_FLOAT_EQ(curve.Evaluate(2.0), 0.0f);
+    EXPECT_FLOAT_EQ(curve.Evaluate(2.25), 0.25f) << "and out again";
+
+    ScalarAnimationPlayback clock;
+    clock.animation = curve;
+    clock.animation.events = { { .frame = 5.0, .name = "half" }, { .frame = 10.0, .name = "end" } };
+    clock.playing = true;
+    clock.Advance(0.7);
+    EXPECT_DOUBLE_EQ(clock.frame, 7.0);
+    EXPECT_FALSE(clock.reversing);
+    clock.Advance(0.6);
+    EXPECT_NEAR(clock.frame, 7.0, 1e-9) << "13 frames out is 7 on the way back";
+    EXPECT_TRUE(clock.reversing);
+    EXPECT_NEAR(clock.Value(), 0.7f, 1e-6);
+    clock.Advance(0.9);
+    EXPECT_NEAR(clock.frame, 2.0, 1e-9) << "past the start it heads out again";
+    EXPECT_FALSE(clock.reversing);
+    EXPECT_TRUE(clock.playing) << "a mirror never finishes";
+    std::vector<std::string> met;
+    for (const auto& event : clock.pending_events) met.push_back(event.name);
+    EXPECT_EQ(met, (std::vector<std::string> { "half", "end", "half" }))
+        << "a marker is met on the way out and on the way back, the end once";
+}
+
+TEST(ScriptRuntimeCompat, AMirrorTimelineNeverMeetsAMarkerPastItsEnds) {
+    ScalarAnimationPlayback clock;
+    clock.animation.fps           = 10.0;
+    clock.animation.mode          = ScalarAnimationMode::Mirror;
+    clock.animation.length_frames = 10.0;
+    clock.animation.keyframes     = { { .frame = 0.0, .value = 0.0f }, { .frame = 10.0, .value = 1.0f } };
+    clock.animation.events        = { { .frame = 15.0, .name = "past" }, { .frame = -2.0, .name = "before" },
+                                      { .frame = 4.0, .name = "inside" } };
+    clock.playing = true;
+    clock.Advance(1.8);
+    EXPECT_NEAR(clock.frame, 2.0, 1e-9);
+    EXPECT_TRUE(clock.reversing);
+    std::vector<std::string> met;
+    for (const auto& event : clock.pending_events) met.push_back(event.name);
+    EXPECT_EQ(met, (std::vector<std::string> { "inside", "inside" }))
+        << "out and most of the way back: only the marker within the timeline is met";
+}
+
+TEST(ScriptRuntimeCompat, AMirrorModeTimelineIsReadFromItsOptions) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    ASSERT_NE(runtime, nullptr);
+    auto subject = std::make_shared<SceneNode>();
+    runtime->RegisterNode("subject", subject.get());
+    const auto setting  = TimelineEventSetting(R"({"fps":30,"length":10,"mode":"mirror","name":"sway"})");
+    auto       timeline = BuildComponentTimeline(setting, 2);
+    ASSERT_NE(timeline, nullptr);
+    ASSERT_FALSE(timeline->components.empty());
+    timeline->playback = runtime->RegisterScalarAnimation("subject", timeline->components[0]);
+    ASSERT_NE(timeline->playback, nullptr);
+    EXPECT_EQ(timeline->playback->animation.mode, ScalarAnimationMode::Mirror);
+    runtime->Tick(14.0 / 30.0);
+    EXPECT_NEAR(timeline->playback->frame, 6.0, 1e-6) << "it turned at the end instead of holding there";
+    EXPECT_TRUE(timeline->playback->reversing);
+}
+
 // A setting resolved only for its first value leaves its scripted value
 // destroyed at once. The runtime must not keep a pointer to it: it would be
 // ticked, and told to end, after it was freed.
@@ -6580,6 +6652,31 @@ export function update(value) { return globalThis.seen; }
     const auto seen = reader->Evaluate(host, DynamicValue(0.0f));
     ASSERT_NE(seen, nullptr);
     EXPECT_FLOAT_EQ(seen->getFloat(), 5005.0f);
+}
+
+// A layer's program hears where on the layer the cursor is; a program of the scene itself,
+// which has no layer, gets no `localPosition`.
+TEST(ScriptHostLimits, ACursorEventCarriesTheLocalPositionOnlyWhenTheHostGivesOne) {
+    ScriptEngine engine;
+    DynamicValue initial(0.0f);
+    auto reader = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+export function cursorClick(event) {
+  globalThis.seen = event.localPosition === undefined ? -1 : event.localPosition.x * 1000 + event.localPosition.y;
+}
+export function update(value) { return globalThis.seen; }
+)JS", "", {}, initial, {});
+    ASSERT_NE(reader, nullptr);
+    ScriptHostContext host;
+    host.cursor_local_position = linalg::Vector2f(12, 34);
+    reader->DispatchCursorClick(host);
+    auto seen = reader->Evaluate(host, DynamicValue(0.0f));
+    ASSERT_NE(seen, nullptr);
+    EXPECT_FLOAT_EQ(seen->getFloat(), 12034.0f);
+    host.cursor_local_position.reset();
+    reader->DispatchCursorClick(host);
+    seen = reader->Evaluate(host, DynamicValue(0.0f));
+    ASSERT_NE(seen, nullptr);
+    EXPECT_FLOAT_EQ(seen->getFloat(), -1.0f);
 }
 
 TEST(ScriptHostLimits, AnEndedListenerRemovedByAnEarlierOneDoesNotFire) {
