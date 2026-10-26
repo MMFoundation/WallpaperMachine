@@ -603,8 +603,9 @@ document, subframes get it, an https document does not, and every surface's user
 `quality_settings.rs`, `web_audio_media.rs`); file and directory properties are
 covered under [user files](user-files.md#verification), and the domain inventory is in
 [coverage](../testing/coverage.md). The held picture over a replacement page is covered
-there with a fake window; whether 500 ms after `didFinish` is enough for a real project's
-first paint, and how long the system picture shows while a page's window is replaced, need
+there with a fake window, and the wait for its first committed frame in
+`WebWallpaperFrameConfirmationTests`; how much of a real project's picture that frame shows,
+and how long the system picture shows while a page's window is replaced, need
 an authorized desktop run, listed in [manual smoke](../testing/manual-smoke.md#wallpaper-switching).
 Show Desktop and Space transition smoothness,
 real hover and window-server routing on a desktop, how flicks and parallax pages feel

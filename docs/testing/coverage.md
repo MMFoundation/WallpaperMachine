@@ -179,8 +179,10 @@ unattached `CALayer`s, a manual clock and timers fired by hand; nothing opens a 
   that order), and a pass overtaken in the read stops nothing.
 - Web pages, in `WebWallpaperHostLifecycleTests` with real offscreen pages and a fake window
   that records whether the veil was on its content layer when it was presented: the
-  replacement is presented with the veil, which stays after the page reports it has loaded
-  until the 500 ms settle timer fires; a page that fails to load (a missing entry file)
+  replacement is presented with the veil, which stays until the page has loaded and
+  committed a frame, with no settle timer (`WebWallpaperFrameConfirmationTests` show the
+  confirmation waiting for a frame the page holds back, answering at its limit when none
+  comes, and dropping an answer for a reloaded document); a page that fails to load (a missing entry file)
   releases it with no settle; a window closed with no page to follow (the display lost its
   web wallpaper, an entry file outside the project) takes its own veil with it, while a veil
   that waits for another backend's window or sits on a scene is left for its successor; a
@@ -204,8 +206,8 @@ Not covered: whether a sublayer composites over a `CAMetalLayer`'s drawables, wh
 surfaces answer the request within 250 ms (a paused renderer included), how the still compares
 with the live frame, and the fade, Reduce Motion, multi-display and mirror behavior on a desktop
 ([manual-smoke.md](manual-smoke.md#wallpaper-switching)), nor whether `isReadyForDisplay`
-alone is late enough for a real clip that the veil does not come off a frame early, nor whether
-500 ms after a web page's `didFinish` is enough for its first paint, nor how long the system
+alone is late enough for a real clip that the veil does not come off a frame early, nor how
+much of a web page's picture its first committed frame shows, nor how long the system
 picture shows between a window closing and the web page's window opening.
 
 ### Playback policy

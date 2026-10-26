@@ -497,7 +497,8 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   new window, `contentReady` on `isReadyForDisplay`, `cancel` when the clip fails to play and
   `engineSettled` once a refusal is reported as a failed display (nothing takes the clip over, so no new picture replaces the held one and the hold ends after the host grace), and to `WebWallpaperHost`, which
   calls `adopt` after `page.load()` and before it presents a new page's window, `contentReady`
-  500 ms after the page finishes loading (or at once when it fails) and `windowClosed` when it
+  once the loaded page has committed a frame (`WebWallpaperPage.confirmFrame`, at most 3 s; at
+  once when it fails) and `windowClosed` when it
   closes a window that has no web successor, which ends a veil on that window and leaves one
   that waits for the native video host or sits on a scene. A 30 s ceiling and an 8 s grace for
   a host window release a veil nothing ends, and `AppDelegate` stops the hold before the hosts
