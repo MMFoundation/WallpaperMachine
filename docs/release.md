@@ -361,8 +361,10 @@ API, maintainers and bots left out) and the thanks line in every language, the p
 Version, Build, Release, Warm caches and Supporters are the release workflows in
 `.github/workflows/`; Supporters shares only `main` with the others.
 `claude.yml` and `claude-code-review.yml` are pull-request automation, described
-in [CONTRIBUTING.md](../CONTRIBUTING.md#automated-review). `codeql.yml` is code
-scanning, described [below](#codeql-codeqlyml).
+in [CONTRIBUTING.md](../CONTRIBUTING.md#automated-review). `checks.yml` runs
+`python3 scripts/test.py --python-only` on Linux for every pull request into `main` and
+every push to it, the fast check a pull request waits for. `codeql.yml` is code scanning,
+described [below](#codeql-codeqlyml).
 
 Version, Build and Release grant `contents: write`; Build's publish job also needs
 `id-token: write` and `attestations: write` for its provenance attestation, and
@@ -507,16 +509,23 @@ differ between releases; `build` and the Test workflow therefore keep separate e
 | Cache | Path | Key | What a hit saves |
 |---|---|---|---|
 | C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects. Test's three jobs share a run's key, so only `renderer`, which compiles the engine and its C++ tests, saves it; `rust` and `native` pass `save-object-cache: "false"` and only restore it |
-| Renderer | `~/.cargo/registry`, `~/.cargo/git`, `Renderer/target` | `renderer-ccache-<os>-<hash of Cargo.lock, rust-toolchain.toml, provenance.json>`, restored by prefix | crate downloads, and Rust compilation while the nightly toolchain is unchanged |
+| Renderer | `~/.cargo/registry`, `~/.cargo/git`, `Renderer/target` | `renderer-ccache-<os>-<hash of rust-toolchain.toml>-<hash of Cargo.lock, provenance.json>`, restored only from entries with the same toolchain hash | crate downloads, and Rust compilation |
 
 The `CMAKE_<LANG>_COMPILER_LAUNCHER=ccache` variables only take effect on a build
 tree's first CMake configure, so change the renderer key's prefix whenever the
 launcher setup changes: no tree configured the old way may be restored. Each
 macOS job prints `ccache --show-stats` at the end; hits against misses there is
-the evidence the cache worked. The toolchain is an unpinned `nightly`
-(`Renderer/rust-toolchain.toml`), and a new nightly invalidates every
-compiled crate, so the Rust half of the renderer build is only reused between
-builds on the same nightly.
+the evidence the cache worked. The toolchain is a pinned stable release
+(`Renderer/rust-toolchain.toml`); raising the pin changes the renderer key's
+toolchain hash, so the next build compiles every crate once and starts a new entry.
+
+Only runs on `main` save either cache; every other ref (pull requests, branches,
+hand-pushed tags) restores and never saves. An entry saved under another ref is
+readable by that ref alone, and those entries pushed the repository past GitHub's
+10 GB cache limit, which evicts the `main` entries releases need. Version calls Build
+directly for each tag it creates, so a release cut by a `release:` push to `main`
+still saves; a Version run dispatched by hand from another branch builds its tag
+without saving.
 
 **What the attestation does and does not say.** Its SLSA predicate is built from
 the run's OIDC claims: `resolvedDependencies[0]` is `git+<repo>@<claims.ref>` with
@@ -556,8 +565,8 @@ use the release workflow for the shared lock. The script's docstring and
 The test gate on hosted runners, run by hand from **Actions -> Test -> Run
 workflow** on the branch or tag chosen under "Use workflow from" (`--ref` below). It
 does not tag, build the Release app or publish, and no release waits for it
-([why](#build-buildyml)). It has no input naming another ref to test: its jobs save
-caches under the ref the run starts from, and a run started from `main` that built
+([why](#build-buildyml)). It has no input naming another ref to test: only a run started from `main` saves
+caches (other refs restore without saving), and a run started from `main` that built
 another ref's code would let that code write the caches every release restores. Its
 three jobs run in parallel on `macos-26` runners, each after `prepare-build` and
 `python3 scripts/build.py --renderer-only` for the renderer and the generated bridge,

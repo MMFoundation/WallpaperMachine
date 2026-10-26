@@ -3,20 +3,24 @@
 # Build's build job, the Test workflow's jobs and Warm caches, so all of them read and
 # write the same cache entries.
 #
-# Caches (docs/release.md, "Build (build.yml)"), all scoped to main, which every ref can read:
+# Caches (docs/release.md, "Build (build.yml)"), all scoped to main, which every ref can read.
+# Only runs on main save them: a cache saved under a pull request, branch or tag can be
+# read by no other ref, and those entries pushed the repository past GitHub's 10 GB
+# limit, evicting the main entries releases restore. Other refs restore and never save.
 # - ccache: the C++ scene engine's objects, hashed by content, so the fresh mtimes of a
 #   checkout (which force CMake to recompile everything) cost cache lookups, not builds.
 #   Saved under a new key every run and restored by prefix. Test's parallel jobs
 #   share a run's key, so only the one that compiles the most (`renderer`) saves it;
 #   the others pass `save-object-cache: "false"`.
-# - renderer: cargo's registry and target directory, keyed on the lock file, the
-#   vendored revision and the toolchain file.
+# - renderer: cargo's registry and target directory, keyed on the toolchain file, then
+#   the lock file and the vendored revision. It is restored only from entries built by
+#   the same toolchain, whose target directories are the only ones cargo can reuse.
 name: Prepare build
 description: Select Xcode 26, install the build dependencies and restore the build caches.
 
 inputs:
   save-object-cache:
-    description: "Save the C++ object cache when the job ends."
+    description: "Save the C++ object cache when the job ends (runs on main only)."
     required: false
     default: "true"
 
@@ -41,6 +45,23 @@ runs:
         # cache key carries the runner's (macos-15, macos-26).
         echo "os=macos-$(sw_vers -productVersion | cut -d. -f1)" >> "$GITHUB_OUTPUT"
 
+    - name: Decide which caches to save
+      id: save
+      shell: bash
+      env:
+        SAVE_OBJECT_CACHE: ${{ inputs.save-object-cache }}
+        REF: ${{ github.ref }}
+      run: |
+        set -euo pipefail
+        main=false
+        if [ "${REF}" = "refs/heads/main" ]; then main=true; fi
+        objects=false
+        if [ "${main}" = true ] && [ "${SAVE_OBJECT_CACHE}" = true ]; then objects=true; fi
+        {
+          echo "renderer=${main}"
+          echo "objects=${objects}"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Route the C++ compilers through ccache
       shell: bash
       # CMake reads these on the first configure of a build tree; the renderer cache
@@ -60,7 +81,7 @@ runs:
         } >> "$GITHUB_ENV"
 
     - name: Restore the C++ object cache
-      if: inputs.save-object-cache == 'true'
+      if: steps.save.outputs.objects == 'true'
       uses: actions/cache@v4
       with:
         path: ~/.ccache
@@ -68,7 +89,7 @@ runs:
         restore-keys: ccache-${{ steps.brew.outputs.os }}-
 
     - name: Restore the C++ object cache without saving it
-      if: inputs.save-object-cache != 'true'
+      if: steps.save.outputs.objects != 'true'
       uses: actions/cache/restore@v4
       with:
         path: ~/.ccache
@@ -80,11 +101,23 @@ runs:
       run: ccache --zero-stats
 
     - name: Restore the renderer build
+      if: steps.save.outputs.renderer == 'true'
       uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
           Renderer/target
-        key: renderer-ccache-${{ steps.brew.outputs.os }}-${{ hashFiles('Renderer/Cargo.lock', 'Renderer/rust-toolchain.toml', 'ThirdParty/provenance.json') }}
-        restore-keys: renderer-ccache-${{ steps.brew.outputs.os }}-
+        key: renderer-ccache-${{ steps.brew.outputs.os }}-${{ hashFiles('Renderer/rust-toolchain.toml') }}-${{ hashFiles('Renderer/Cargo.lock', 'ThirdParty/provenance.json') }}
+        restore-keys: renderer-ccache-${{ steps.brew.outputs.os }}-${{ hashFiles('Renderer/rust-toolchain.toml') }}-
+
+    - name: Restore the renderer build without saving it
+      if: steps.save.outputs.renderer != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          Renderer/target
+        key: renderer-ccache-${{ steps.brew.outputs.os }}-${{ hashFiles('Renderer/rust-toolchain.toml') }}-${{ hashFiles('Renderer/Cargo.lock', 'ThirdParty/provenance.json') }}
+        restore-keys: renderer-ccache-${{ steps.brew.outputs.os }}-${{ hashFiles('Renderer/rust-toolchain.toml') }}-

@@ -17,7 +17,7 @@ It assembles the Homebrew environment from `scripts/build.py`, then:
 
 1. builds `cargo build -p wm-shader --features ffi --release --locked` **from
    `Renderer/`** (the Rust workspace), because rustup resolves that
-   tree's `rust-toolchain.toml` (nightly) from the working directory, not from
+   tree's `rust-toolchain.toml` (a pinned stable release) from the working directory, not from
    `--manifest-path`; running it from the repository root picks the default
    stable toolchain instead,
 2. configures CMake over `Renderer/Engine` with
