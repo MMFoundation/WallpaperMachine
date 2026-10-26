@@ -865,6 +865,40 @@ TEST(TexLoose, PackagedBmpDecodesToItsPixels) {
     EXPECT_EQ(rig->ParseHeader("backdrop.bmp").type, ImageType::BMP);
 }
 
+// Pictures are decoded only in the formats a wallpaper's textures come in.
+TEST(TexLoose, APictureInAFormatNoTextureUsesIsNotDecoded) {
+    auto rig = rigFor({ { "/materials/backdrop.png", pnm1x1(1, 2, 3) } });
+    EXPECT_EQ(rig->Parse("backdrop.png"), nullptr);
+
+    // The same bytes as a container's declared picture are refused too.
+    Container c(3, { levelOf(1, 1, pnm1x1(1, 2, 3)) });
+    c.type = 13;
+    auto container = texRig(c);
+    EXPECT_EQ(container->Parse("sample"), nullptr);
+}
+
+TEST(TexLoose, APictureWiderThanAnyTextureIsNotDecoded) {
+    auto widest = rigFor({ { "/materials/wide.bmp", bmpRow(16384, 9, 8, 7) } });
+    const auto image = widest->Parse("wide.bmp");
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(image->slots[0].width, 16384);
+
+    auto wider = rigFor({ { "/materials/wide.bmp", bmpRow(16385, 9, 8, 7) } });
+    EXPECT_EQ(wider->Parse("wide.bmp"), nullptr);
+}
+
+TEST(TexLoose, ATgaShorterThanItsPixelsIsNotDecoded) {
+    auto whole = rigFor({ { "/materials/mark.tga", tga(1, 1, { 30, 60, 90 }) } });
+    const auto image = whole->Parse("mark.tga");
+    ASSERT_NE(image, nullptr);
+    const uint8_t want[4] = { 90, 60, 30, 255 };
+    for (int i = 0; i < 4; ++i) EXPECT_EQ(image->slots[0].mipmaps[0].data.get()[i], want[i]) << i;
+
+    // Four by four pixels promised, one given: the rest would be whatever the heap held.
+    auto cut = rigFor({ { "/materials/mark.tga", tga(4, 4, { 30, 60, 90 }) } });
+    EXPECT_EQ(cut->Parse("mark.tga"), nullptr);
+}
+
 TEST(TexLoose, HostLooseAssetReadability) {
     ScratchDir dir("tex-readable");
     const std::string chosen = dir.write("chosen.png", png1x1(1, 2, 3, 4));

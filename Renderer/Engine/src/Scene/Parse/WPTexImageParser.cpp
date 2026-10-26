@@ -20,6 +20,16 @@
 #if (defined(__aarch64__) || defined(__arm64__)) && !defined(STBI_NO_SIMD)
 #define STBI_NEON
 #endif
+// Only the formats a wallpaper's pictures come in are decoded: whatever else stb_image reads
+// (PSD, PIC, PNM, HDR) is code a crafted file could reach and no texture needs.
+#define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_BMP
+#define STBI_ONLY_GIF
+#define STBI_ONLY_TGA
+// No GPU texture is wider or taller than this, so a picture that is is refused before its
+// pixels are allocated.
+#define STBI_MAX_DIMENSIONS 16384
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
