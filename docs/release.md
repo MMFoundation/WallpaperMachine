@@ -586,8 +586,10 @@ as they were.
 
 ### CodeQL (`codeql.yml`)
 
-Code scanning on every push to `main`, every pull request into it, weekly, and on
-demand. It replaces GitHub's default setup, which can only autobuild Swift and
+Code scanning on every push to `main`, weekly, and on demand. Pull requests do not
+run it: the Swift job's full traced app build takes about half an hour, and its
+findings were mostly false positives, so new alerts surface after the merge instead.
+It replaces GitHub's default setup, which can only autobuild Swift and
 fails at the extension's link because the renderer library and the Homebrew
 libraries do not exist yet. Actions, Python and Rust are analyzed without a build
 on Linux. Swift runs on `macos-26`: `prepare-build` and
