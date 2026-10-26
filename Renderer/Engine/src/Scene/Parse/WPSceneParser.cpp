@@ -895,7 +895,9 @@ std::optional<wpscene::WPImageEffect> MakeFogCompositeEffect(fs::VFS& vfs) {
     wpscene::WPImageEffect effect;
     wpscene::WPMaterial    material;
     nlohmann::json         json;
-    if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough_4.json"), json))
+    // Looked for, not required: asking `Contains` first keeps its absence off the missing files.
+    constexpr const char* kMaterial = "/assets/materials/util/effectpassthrough_4.json";
+    if (! vfs.Contains(kMaterial) || ! PARSE_JSON(fs::GetFileContent(vfs, kMaterial), json))
         return std::nullopt;
     material.FromJson(json);
     material.combos["BONECOUNT"] = 1;
@@ -5406,8 +5408,11 @@ struct HdrBloomState {
 bool BuildHdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general,
                    ScenePostProcess& post, UndoList& undo) {
     auto&       scene = *context.scene;
+    // A lookup, so a material that is not there (the optional cubic upsample) is not reported as
+    // a file the scene lacks; a required one that is absent fails the scene below.
     const auto  exists = [&](const char* name) {
-        return ! fs::GetFileContent(*context.vfs, std::string("/assets/materials/util/") + name + ".json").empty();
+        const std::string path = std::string("/assets/materials/util/") + name + ".json";
+        return context.vfs->Contains(path) && ! fs::GetFileContent(*context.vfs, path).empty();
     };
     for (const char* required : { "hdr_downsample_bloom", "hdr_downsample", "hdr_upsample",
                                   "combine_hdr_upsample_linear" }) {

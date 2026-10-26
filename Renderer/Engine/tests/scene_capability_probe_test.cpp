@@ -115,6 +115,26 @@ TEST(SceneCapabilityProbe, AFileALayerNamesAndTheSceneLacksIsPutDownToThatLayer)
         << "a shader cache entry that is not there yet is not something the scene lacks";
 }
 
+TEST(SceneCapabilityProbe, AnOptionalSharedMaterialThatIsAbsentIsNotAMissingFile)
+{
+    // A fogged layer with an effect looks for the fog composite material, which older shared
+    // assets lack; the layer then keeps its fog where it was. That lookup is not a file the
+    // scene names.
+    ScenePackage package;
+    ImageLayer   layer;
+    layer.model   = package.AddImageModel("card");
+    layer.effects = { EffectUse(package.AddTintEffect("tint"), { { "tint", "1 1 1" } }) };
+    SceneGeneral general;
+    general.extra = { { "fogdistance", true }, { "fogdistancestart", 0.0 }, { "fogdistanceend", 10.0 } };
+    package.SetProject();
+    package.SetScene(SceneJson(general, { ImageLayerJson(layer) }));
+    ProbeFolders folders;
+
+    const auto result = ProbeSceneCapability(folders.Request(package));
+    ASSERT_TRUE(result.read_error.empty()) << result.read_error;
+    EXPECT_EQ(Missing(result, "materials/util/effectpassthrough_4.json"), nullptr);
+}
+
 TEST(SceneCapabilityProbe, AProjectThatCannotBeReadSaysWhy)
 {
     ScenePackage package;
