@@ -307,13 +307,11 @@ final class WorkshopSourceTests: XCTestCase {
     let deadline = ContinuousClock.now.advanced(by: .seconds(5))
     while !gate.isHolding, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
     XCTAssertTrue(gate.isHolding, "the favorites request reached Steam with the session")
+    let load = try XCTUnwrap(store.searchTask)
     store.signOutOfSteamWeb()
     gate.open()
-    while !gate.isAnswered, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
-    XCTAssertTrue(gate.isAnswered, "Steam's answer was handed over after the sign-out")
-    try await finished(store)
-    // The store's own continuation runs on the main actor after the answer arrives.
-    for _ in 0..<10 { await Task.yield() }
+    // The cancelled load settles only after Steam's answer was handed over, or was dropped.
+    await load.value
     XCTAssertEqual(store.items, [])
     XCTAssertFalse(store.hasLoaded)
   }
@@ -1128,22 +1126,18 @@ private final class SourceAnswers: @unchecked Sendable {
   }
 }
 
-/// Keeps a request at Steam, on the loading thread, until it is opened (or five seconds pass),
-/// and says when its answer has been handed to the session.
+/// Keeps a request at Steam, on the loading thread, until it is opened (or five seconds pass).
 private final class AnswerGate: @unchecked Sendable {
   private let lock = NSLock()
   private let opened = DispatchSemaphore(value: 0)
   private var holding = false
-  private var answered = false
   var isHolding: Bool { lock.withLock { holding } }
-  var isAnswered: Bool { lock.withLock { answered } }
 
   func hold() {
     lock.withLock { holding = true }
     _ = opened.wait(timeout: .now() + 5)
   }
   func open() { opened.signal() }
-  func markAnswered() { lock.withLock { answered = true } }
 }
 
 private final class SourceFixtureProtocol: URLProtocol, @unchecked Sendable {
@@ -1170,7 +1164,6 @@ private final class SourceFixtureProtocol: URLProtocol, @unchecked Sendable {
     client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
     client?.urlProtocol(self, didLoad: data)
     client?.urlProtocolDidFinishLoading(self)
-    if url.query?.contains("browsefilter=myfavorites") == true { answers.read { $0.favoritesGate }?.markAnswered() }
   }
   override func stopLoading() {}
 

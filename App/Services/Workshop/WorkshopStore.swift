@@ -692,7 +692,7 @@ final class WorkshopStore {
   static func normalizedAccount(_ account: String) -> String {
     account.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
   }
-  @ObservationIgnored private var searchTask: Task<Void, Never>?
+  @ObservationIgnored private(set) var searchTask: Task<Void, Never>?
   @ObservationIgnored private var generation = UUID()
   private(set) var committedQuery: WorkshopQuery?
   private(set) var failedRequest: WorkshopRequest?
