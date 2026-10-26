@@ -1096,14 +1096,17 @@ never to `.shared`.
   `LivePreviewSchedulerTests`.
 - Installed and the library: `PanelLibraryActionsTests` (favorites, Show in Finder, selection
   slots, only Reapply restarting what the target shows, the target display taken when the user
-  asked, hiding after an apply, Apply to all displays and its rollback, previous and next,
+  asked, hiding after an apply, Apply to all displays and its rollback, the question before
+  applying a scene Native Metal refused (Cancel keeps the displays, Reapply and the shown scene
+  ask nothing), previous and next,
   playback, refresh, the held-wallpaper sentence and **Try again**, per-display host states and
   their exact retry), `PanelLibraryImportTests`, `PanelLibraryRemovalTests` (confirmation, no
   window means no deletion, one question for a batch, partial failures named),
   `PanelLibraryRowsTests` (rows joined with measured facts, covers only once stamped, a rescan that
   replaced no preview leaves every row alone, 10,000 rows built once whatever else changes),
   `PanelLibraryStateTests` (Now Playing, the target menu, display names, history, library counts,
-  the update dot, the issue report's facts), `PanelCollectionActionsTests`, `LibrarySortTests`,
+  the update dot, the issue report's facts, the changed properties it lists without typed text
+  or paths and capped, and the files a check found missing), `PanelCollectionActionsTests`, `LibrarySortTests`,
   `LibraryFilterTests`, `LibrarySelectionTests` (ticks, ranges and the hold-and-sweep gesture),
   `LibraryGridGeometryTests`, `LibraryTileRulesTests`, `TileGridLayoutTests` (at least three
   columns, arrow keys held at the ends), `InstalledBrowserModelTests` (the reopen state and its

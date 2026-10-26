@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-25 — Scene capability probe, remembered Native Metal verdicts, mirror audio and issue-report details
+
+- `python3 scripts/test.py`: 4124 passed, 0 failed, 47 skipped (opt-in layers); includes `SceneDrawVerdictsTests`, the new `WallpaperCompatibilityTests`, `PanelLibraryActionsTests` (Apply question), `PanelLibraryStateTests` (changed properties, missing files), `NativeVideoWallpaperHostTests` and `MirrorAudioOwnershipTests`.
+- `python3 scripts/check_rust.py`: passed, with `tests::scene_capability` and the mirror audio-source assertion in `native_video_routing`; desktop/media/network opt-ins off.
+- `python3 scripts/check_renderer.py`: passed, with the new `scene_capability_probe_test` (4 tests) and the loader now on `Scene/SceneProjectLoading`; local-corpus cases skipped (no Wallpaper Engine assets or library on this Mac).
+- Gap: the probe's missing-file list was checked only on synthetic scenes, so false positives on real Workshop scenes are unmeasured.
+- Gap: no desktop run: the card, the Apply question, mirrored-video sound hand-off and real two-display behaviour are unverified on screen.
+- Not compared with Wallpaper Engine frames: no renderer output changed.
+- Not done: one shared player per mirror group (double decode remains), pending an authorized two-display measurement.
+
 ## 2026-10-25 — Puppet texture channels: weight rows and non-finite weights (PR #93 review)
 
 - Supplements the entry above. python3 scripts/build.py --renderer-only before that entry's test.py run: exit 0 (cargo release build and bindings; the regenerated App/Bridge/Generated matched the committed files).

@@ -425,8 +425,13 @@ stay visible in a footer while editing. Its texts can be selected and copied.
 Below the compatibility note, an installed wallpaper that can run (not
 Application) shows **Not working? Report on GitHub**. It opens the repository's
 bug report form in the browser with the wallpaper's title, Workshop link or id,
-type, app version and, while it is on screen, the backend drawing it (with the
-renderer's fallback reason) pre-filled. The fields the form requires (what the
+type, app version, while it is on screen the backend drawing it (with the
+renderer's fallback reason) and, when its options are loaded in the inspector, the properties
+changed from the author's defaults pre-filled: each with its value and default, marked when the
+change is not applied yet, at most 20 with the rest counted. Typed text and the paths of chosen
+files are not included, only that they were changed. When the inspector's
+[Compatibility check](wallpaper-properties.md#compatibility-check) of the wallpaper found files
+the scene names and lacks, the report lists them too, with the layer that asked for each. The fields the form requires (what the
 user did, what went wrong, what they expected and the diagnostics report) are
 left for the user to fill in. When the panel saw this wallpaper fail
 (its download, or the last attempt to apply it), an error notice takes the link's
