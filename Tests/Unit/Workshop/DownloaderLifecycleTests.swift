@@ -533,6 +533,28 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
     XCTAssertEqual(try invocations(in: root), ["123456"])
   }
 
+  /// The base's name stays on the job while its files arrive, not only before SteamCMD starts.
+  func testTheBasesTitleStaysWhileItsFilesTransfer() async throws {
+    let root = try makePresetRuntime(base: "sleep 2\n" + deliverBase)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let base = WorkshopItem(
+      id: "654321", title: "Big base", creator: "", summary: "", previewURL: nil,
+      tags: ["Video"], size: 1_048_576, subscriptions: 0)
+    let downloader = startDownload(in: root, presetBaseDetails: { _ in base })
+    var sawTransfer = false
+    for _ in 0..<400 where downloader.isRunning {
+      if downloader.phase == .transferring, (try? invocations(in: root).count) == 2 {
+        sawTransfer = true
+        XCTAssertTrue(downloader.status.contains("Big base"), downloader.status)
+        break
+      }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTAssertTrue(sawTransfer, "The base pass reached its transfer")
+    try await waitForStop(downloader)
+    XCTAssertNil(downloader.errorMessage)
+  }
+
   func testAPresetsBaseThatFitsIsFetchedAsBefore() async throws {
     let root = try makePresetRuntime(base: deliverBase)
     defer { try? FileManager.default.removeItem(at: root) }

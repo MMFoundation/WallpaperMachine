@@ -56,6 +56,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     @ObservationIgnored private var workshopDownloadCompleted = false
     /// The run's second pass, which fetches the wallpaper a downloaded preset is based on.
     @ObservationIgnored private var fetchingPresetBase = false
+    /// What the base pass says while it starts and transfers, naming the base when Steam lists it.
+    @ObservationIgnored private var presetBaseStatus: String?
     @ObservationIgnored private var process: SteamCMDTerminalProcess?
     @ObservationIgnored private var terminal: FileHandle?
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -281,6 +283,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         assetsDownloadCompleted = false
         workshopDownloadCompleted = false
         fetchingPresetBase = false
+        presetBaseStatus = nil
         endedBySessionConflict = false
         signInHandedOff = false
         signInAccepted = false
@@ -397,11 +400,12 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                     if let listing, !listing.title.isEmpty {
                         let size = listing.size > 0
                             ? ByteCountFormatter.string(fromByteCount: listing.size, countStyle: .file) : nil
-                        status = size.map { String(localized: "Downloading “\(listing.title)” (\($0)), the wallpaper this preset is based on…") }
+                        presetBaseStatus = size.map { String(localized: "Downloading “\(listing.title)” (\($0)), the wallpaper this preset is based on…") }
                             ?? String(localized: "Downloading “\(listing.title)”, the wallpaper this preset is based on…")
                     } else {
-                        status = String(localized: "Downloading the wallpaper this preset is based on…")
+                        presetBaseStatus = String(localized: "Downloading the wallpaper this preset is based on…")
                     }
+                    status = presetBaseStatus ?? status
                     try await ensureFreeSpace(under: root, staging: content, item: currentItem, label: label)
                     continue
                 }
@@ -867,7 +871,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         close(slave)
         terminal = FileHandle(fileDescriptor: master, closeOnDealloc: true)
         phase = .connecting
-        status = String(localized: "Starting SteamCMD and contacting Steam…")
+        status = presetBaseStatus ?? String(localized: "Starting SteamCMD and contacting Steam…")
     }
 
     private func readTerminalOutput() throws {
@@ -1054,7 +1058,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             phase = .transferring
             receivesNetwork = true
             estimator = TransferEstimator()
-            status = String(localized: "Downloading Workshop files…")
+            status = presetBaseStatus ?? String(localized: "Downloading Workshop files…")
             if let expected = expectedBytes, expected > 0, receivedFloor > 0 {
                 progress = min(0.99, Double(receivedFloor) / Double(expected))
             } else {
