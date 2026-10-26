@@ -57,8 +57,12 @@ for them.
 The page is loaded from `file://` with read access to its project folder, matching
 Wallpaper Engine's CEF host: ES modules, `fetch()` and media inside the project
 folder work, and `location.protocol` is `file:`. The top frame cannot navigate away
-from the entry page; subframes and network requests are unrestricted (macOS ATS
-applies, so plain `http://` requests fail).
+from the entry page; subframes and network requests are unrestricted, plain `http://`
+included, as in Chromium. The app and the lock-screen extension relax App Transport
+Security for web content only (`NSAllowsArbitraryLoadsInWebContent` in their
+`Info.plist`): the app's own requests to Steam, pixiv and GitHub still need HTTPS, and
+WebKit still blocks an `http://` subresource of an `https://` page as mixed content.
+The sign-in windows are web content too, and load only Steam's and pixiv's HTTPS pages.
 
 Four scripts are installed at document start, built in one place
 (`Shared/WebWallpaperUserScripts.swift`) for the desktop page, the preview and the
