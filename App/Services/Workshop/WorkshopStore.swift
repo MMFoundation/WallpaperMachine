@@ -788,7 +788,7 @@ final class WorkshopStore {
         !self.isSigningInToSteamWeb
       else { return }
       self.steamWebSession = saved
-      if (self.committedQuery?.source ?? self.source).isPersonal { self.search() }
+      if self.source.isPersonal { self.search() }
     }
   }
 
@@ -807,18 +807,18 @@ final class WorkshopStore {
     webSessionRenewal?.cancel()
     webSessionRenewal = nil
     steamWebSession = session
-    if (committedQuery?.source ?? source).isPersonal { search() }
+    if source.isPersonal { search() }
     persist(session)
   }
 
   /// Forgets the Steam Community session, here and on this Mac; Steam's own sign-in window keeps
-  /// no cookie either.
+  /// no cookie either. An account's own list that is loading is stopped, and one on show is
+  /// emptied, while another list already loading in its place goes on.
   func signOutOfSteamWeb() {
     forgetSteamWebSession()
-    if (committedQuery?.source ?? source).isPersonal {
-      cancelSearch()
-      clearResults()
-    }
+    let loadsPersonal = source.isPersonal
+    if loadsPersonal { cancelSearch() }
+    if loadsPersonal || committedQuery?.source.isPersonal == true { clearResults() }
   }
 
   /// Empties the grid, so nothing of an earlier list stays on show in place of one that

@@ -289,6 +289,31 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(store.items, [], "signing out empties the account's own list")
   }
 
+  /// Signing out while the account's favorites are on their way, opened from a public list,
+  /// leaves nothing of that account on show once Steam answers.
+  func testSigningOutWhileFavoritesLoadLeavesNothingOfTheAccountOnShow() async throws {
+    let store = fixture.store
+    fixture.profiles[Self.author] = profileHTML(ids: ["1"], name: "Fixture Author", total: "1")
+    fixture.favoritePages = ["subscriptiondate": profileHTML(ids: ["2"], name: "Me", total: "1")]
+    fixture.details = ["1": detailsRow("1", tags: ["Scene", "Everyone"]), "2": detailsRow("2", tags: ["Scene", "Everyone"])]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    store.open(.creator(id: Self.author, name: "Fixture Author"))
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["1"])
+
+    let gate = fixture.holdFavorites()
+    store.open(.favorites)
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while !gate.isHolding, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
+    XCTAssertTrue(gate.isHolding, "the favorites request reached Steam with the session")
+    store.signOutOfSteamWeb()
+    gate.open()
+    try await finished(store)
+    try await Task.sleep(for: .milliseconds(100))
+    XCTAssertEqual(store.items, [])
+    XCTAssertFalse(store.hasLoaded)
+  }
+
   func testSubscriptionsWaitForASignInAndAnEndedSessionIsForgotten() async throws {
     let store = fixture.store
     store.open(.subscriptions)
@@ -980,6 +1005,13 @@ private final class SourceFixture {
   /// The form of each renewal request.
   var renewalForms: [String] { answers.read { $0.renewalForms } }
 
+  /// Holds Steam's favorites answers until the gate returned is opened.
+  func holdFavorites() -> AnswerGate {
+    let gate = AnswerGate()
+    answers.write { $0.favoritesGate = gate }
+    return gate
+  }
+
   init() throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "WorkshopSourceTests-\(identifier)", isDirectory: true)
@@ -1033,6 +1065,7 @@ private final class SourceAnswers: @unchecked Sendable {
     var cookies: [String?] = []
     var renewal = Data(#"{"response":{}}"#.utf8)
     var renewalForms: [String] = []
+    var favoritesGate: AnswerGate?
   }
   private let lock = NSLock()
   private var state = State()
@@ -1046,6 +1079,7 @@ private final class SourceAnswers: @unchecked Sendable {
     let value = { (name: String) in query.first { $0.name == name }?.value }
     // `URL.path` drops a trailing slash.
     let path = url.path.hasSuffix("/") ? String(url.path.dropLast()) : url.path
+    if value("browsefilter") == "myfavorites", let gate = read({ $0.favoritesGate }) { gate.hold() }
     return lock.withLock {
       if host == "steamcommunity.com" { state.cookies.append(request.value(forHTTPHeaderField: "Cookie")) }
       switch (host, path) {
@@ -1084,6 +1118,20 @@ private final class SourceAnswers: @unchecked Sendable {
       }
     }
   }
+}
+
+/// Keeps a request at Steam, on the loading thread, until it is opened (or five seconds pass).
+private final class AnswerGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private let opened = DispatchSemaphore(value: 0)
+  private var holding = false
+  var isHolding: Bool { lock.withLock { holding } }
+
+  func hold() {
+    lock.withLock { holding = true }
+    _ = opened.wait(timeout: .now() + 5)
+  }
+  func open() { opened.signal() }
 }
 
 private final class SourceFixtureProtocol: URLProtocol, @unchecked Sendable {

@@ -112,7 +112,7 @@ extension PanelController {
   func sortWorkshopFavorites(_ order: WorkshopFavoritesOrder) async throws {
     try await run(.immediate) {
       workshop.favoritesOrder = order
-      if (workshop.committedQuery?.source ?? workshop.source) == .favorites { workshop.search() }
+      if workshop.source == .favorites { workshop.search() }
     }
   }
 
