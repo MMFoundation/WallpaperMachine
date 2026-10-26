@@ -12,6 +12,134 @@ app's update window shows the sections of every version newer than the installed
 one, in the app's language; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.6.4](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.3...v1.6.4) (2026-10-26)
+
+### English
+
+This update makes WallpaperMachine safer to update and use, and makes it easier to find, download and control your wallpapers
+
+#### A note from the developer
+
+This bug has had the biggest impact of any I have run into so far, so I want to say a few words about it as the developer.
+
+Recently many of you approved the sign-in on your phone and still could not download, with the message that SteamCMD exited before completing the download. After tracing it, the most likely cause is that Valve released a new SteamCMD on October 21, while WallpaperMachine kept using the copy it installed and never updated it. Our own code made things worse: the sign-in could call a mobile approval an emailed code, kept asking you to type a code below after you had submitted it, and then blamed the failure on whether you own Wallpaper Engine. Those wrong prompts are fixed in this version.
+
+If you still cannot sign in after updating, open Settings → Library & Steam, click Reinstall… to get the latest SteamCMD, and try again.
+
+The cause may lie with Valve, but not catching it sooner is on me. The app has been getting a lot of attention lately, and I need to hold its development and releases to a higher standard instead of slacking off. Once again, I am sorry for this bug.
+
+#### Features
+
+- Browse the wallpapers you marked as favorites on Steam in a new Your favorites list in Steam Workshop, sorted the way Steam sorts them ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- Check compatibility now tells you whether Native Metal can draw a scene and which files it lacks, and asks before applying a scene it would refuse ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+- In Downloads, move a waiting item to the front with Download next, or retry every failed or cancelled download at once with Retry failed ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- Wallpapers you paused before quitting stay paused when WallpaperMachine opens again, without leaving any display empty ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- While the control panel is open, new View, Wallpaper, Window and Help menus let you switch pages, control playback and open the WallpaperMachine guides ([0126f10](https://github.com/WallpaperMachine/WallpaperMachine/commit/0126f10d3e5d8685e08961b59995ec06caf3ba27), [0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- Make the tiles in Library, Steam Workshop and pixiv larger or smaller from the View menu, and the size is remembered ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- The control panel, menus, update window and lock screen are now available in Brazilian Portuguese, chosen automatically on a Mac set to Portuguese ([ac28368](https://github.com/WallpaperMachine/WallpaperMachine/commit/ac28368794434bbe825bb0b1080c5c367aa7fe22), [1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+
+#### Improvements
+
+- Updates are installed only when they carry the project's release signature, and any other download is refused ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- Older web wallpapers that load scripts, pictures or data over plain http now work as they do in Wallpaper Engine ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- Switching to a web wallpaper keeps the previous picture until the new page has actually drawn, so slow pages no longer flash empty ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- Bug reports now include the wallpaper options you changed and any files a scene is missing, making problems easier to reproduce ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+- Diagnostics reports now include the errors and warnings a web wallpaper reports itself, helping find out why it shows nothing ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+
+#### Bug Fixes
+
+- Wallpapers can no longer exploit memory bugs in image and sound decoding or gain access to a folder you did not choose ([49cba35](https://github.com/WallpaperMachine/WallpaperMachine/commit/49cba35d473cbd4b89a5653885afaaaa3454c8c4))
+- Signing in to Steam to download now shows the Steam Guard step Steam actually asked for, and an unfinished sign-in offers to try again (closes [#102](https://github.com/WallpaperMachine/WallpaperMachine/issues/102)) ([a3758a2](https://github.com/WallpaperMachine/WallpaperMachine/commit/a3758a2468b1761e35d5a3ac10e3d832fc5ffbc0))
+- Video wallpapers mirrored across displays no longer play their sound twice and out of step ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+- Scenes with back-and-forth animations or mouse-driven sliders and buttons now behave as their authors made them ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- Apply now always sets the wallpaper on the display selected when you pressed it, even when checking the scene takes a while ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+
+Thanks to [@opastorello](https://github.com/opastorello) for contributing to this release.
+
+### 简体中文
+
+本次更新让 WallpaperMachine 的更新与使用更加安全，查找、下载和控制壁纸也更加方便
+
+#### 开发者的话
+
+这个 bug 是我目前遇到过影响最大的一个，所以想以开发者的身份专门说几句。
+
+最近不少人在登录 Steam 下载壁纸时，手机令牌明明已经批准了，下载却失败，提示“SteamCMD 在下载完成前就退出了”。我追查后发现，最可能的原因是 Valve 在 10 月 21 日发布了新版 SteamCMD，而 WallpaperMachine 一直沿用安装时的那份 SteamCMD，从不自动更新。我们自己的代码也让情况更糟：登录时可能把令牌验证错标成“邮件验证码”，提交验证码后界面还在让你“在下方输入”，失败时又笼统地让你确认是否拥有 Wallpaper Engine。这些错误的提示在本版本中已经修复。
+
+如果更新后仍然无法登录，请到 设置 → 壁纸库与 Steam，点击“重新安装…”换上最新的 SteamCMD，然后再试一次。
+
+问题的源头也许在 Valve，但没能及早发现、没有把好关，责任在我。最近软件的热度确实有点高，我需要对开发和发布提出更高的要求，不能再摆烂了。再次为这个 bug 给大家带来的麻烦道歉。
+
+#### 新功能
+
+- Steam 创意工坊新增“你的收藏”列表，可浏览你在 Steam 上收藏的壁纸，并按与 Steam 相同的方式排序 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 兼容性检查现在会告诉你 Native Metal 能否绘制某个场景以及缺少哪些文件，并在应用无法绘制的场景前先询问你 ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+- 在“下载”中，可将等待中的项目移到队列最前面，也可一键重试所有失败或已取消的下载 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 退出前暂停的壁纸，下次打开 WallpaperMachine 时仍保持暂停，且不会让任何显示器出现空白 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 控制面板打开时，菜单栏新增“显示”“壁纸”“窗口”和“帮助”菜单，可切换页面、控制播放并打开 WallpaperMachine 使用指南 ([0126f10](https://github.com/WallpaperMachine/WallpaperMachine/commit/0126f10d3e5d8685e08961b59995ec06caf3ba27), [0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 可通过“显示”菜单放大或缩小壁纸库、Steam 创意工坊和 pixiv 中的缩略图，所选大小会被记住 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 控制面板、菜单、更新窗口和锁定屏幕现已支持巴西葡萄牙语，Mac 设为葡萄牙语时会自动启用 ([ac28368](https://github.com/WallpaperMachine/WallpaperMachine/commit/ac28368794434bbe825bb0b1080c5c367aa7fe22), [1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+
+#### 改进
+
+- 只有带有本项目发布签名的更新才会被安装，其他下载一律拒绝 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 通过普通 http 加载脚本、图片或数据的旧网页壁纸，现在能像在 Wallpaper Engine 中一样正常运行 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 切换到网页壁纸时，旧画面会保留到新页面真正绘制完成，加载较慢的页面不再闪现空白 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 错误报告现在会附上你修改过的壁纸选项和场景缺少的文件，问题更容易重现 ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+- 诊断报告现在会包含网页壁纸自身报告的错误和警告，便于查明它为何没有显示内容 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+
+#### 问题修复
+
+- 壁纸无法再利用图像和声音解码中的内存漏洞，也无法访问你未选择的文件夹 ([49cba35](https://github.com/WallpaperMachine/WallpaperMachine/commit/49cba35d473cbd4b89a5653885afaaaa3454c8c4))
+- 登录 Steam 进行下载时，现在会显示 Steam 实际要求的 Steam Guard 验证步骤，登录未完成时也会提示重新登录 (closes [#102](https://github.com/WallpaperMachine/WallpaperMachine/issues/102)) ([a3758a2](https://github.com/WallpaperMachine/WallpaperMachine/commit/a3758a2468b1761e35d5a3ac10e3d832fc5ffbc0))
+- 在多台显示器上镜像播放的视频壁纸，不再出现声音重复且不同步的问题 ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+- 带有往返动画或鼠标操控滑块、按钮的场景，现在会按作者的设计正常运行 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 即使检查场景耗时较长，“应用”现在也总会把壁纸设到按下时所选的显示器上 ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+
+感谢 [@opastorello](https://github.com/opastorello) 为本版本做出的贡献。
+
+### 한국어
+
+이번 업데이트로 WallpaperMachine을 더 안전하게 업데이트하고 사용할 수 있으며, 배경화면을 찾고 내려받고 제어하기도 더 편해졌습니다
+
+#### 개발자의 말
+
+이 버그는 지금까지 겪은 것 중 가장 영향이 컸기 때문에, 개발자로서 따로 몇 마디 남기고 싶습니다.
+
+최근 많은 분들이 휴대폰에서 로그인을 승인했는데도 다운로드에 실패하고, SteamCMD가 다운로드를 마치기 전에 종료되었다는 메시지를 보셨습니다. 원인을 추적해 보니, 가장 유력한 원인은 Valve가 10월 21일에 새 SteamCMD를 배포했는데 WallpaperMachine은 설치할 때의 SteamCMD를 그대로 쓰고 한 번도 업데이트하지 않았다는 점입니다. 저희 코드도 상황을 더 나쁘게 만들었습니다. 로그인 중 휴대폰 승인을 '이메일 인증 코드'로 잘못 표시하거나, 코드를 제출한 뒤에도 아래에 입력하라고 계속 안내하고, 실패하면 Wallpaper Engine을 소유하고 있는지 확인하라고만 했습니다. 이 잘못된 안내는 이번 버전에서 수정되었습니다.
+
+업데이트 후에도 로그인할 수 없다면 설정 → 보관함 및 Steam에서 '다시 설치…'를 눌러 최신 SteamCMD로 바꾼 뒤 다시 시도해 주세요.
+
+문제의 원인은 Valve 쪽에 있을지 모르지만, 더 일찍 발견하지 못한 책임은 저에게 있습니다. 최근 앱이 꽤 주목을 받고 있는 만큼, 대충 하지 않고 개발과 릴리스에 더 높은 기준을 세우겠습니다. 이 버그로 불편을 드린 점 다시 한번 사과드립니다.
+
+#### 새로운 기능
+
+- Steam 창작마당에 새 즐겨찾기 목록이 추가되어 Steam에서 즐겨찾기한 배경화면을 Steam과 같은 기준으로 정렬해 볼 수 있습니다 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 호환성 검사가 이제 Native Metal이 장면을 그릴 수 있는지와 빠진 파일을 알려 주고, 그릴 수 없는 장면을 적용하기 전에 먼저 묻습니다 ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+- 다운로드에서 대기 중인 항목을 맨 앞으로 옮기거나, 실패하거나 취소된 다운로드를 한 번에 모두 다시 시도할 수 있습니다 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 종료 전에 일시 정지한 배경화면은 WallpaperMachine을 다시 열어도 일시 정지 상태로 유지되며, 빈 화면으로 시작하는 디스플레이도 없습니다 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 제어판이 열려 있으면 새 보기, 배경화면, 윈도우, 도움말 메뉴에서 페이지를 전환하고 재생을 제어하며 WallpaperMachine 가이드를 열 수 있습니다 ([0126f10](https://github.com/WallpaperMachine/WallpaperMachine/commit/0126f10d3e5d8685e08961b59995ec06caf3ba27), [0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 보기 메뉴에서 보관함, Steam 창작마당, pixiv의 타일을 크게 하거나 작게 할 수 있으며 크기가 기억됩니다 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 제어판, 메뉴, 업데이트 창과 잠금 화면이 이제 브라질 포르투갈어를 지원하며, Mac이 포르투갈어로 설정되어 있으면 자동으로 적용됩니다 ([ac28368](https://github.com/WallpaperMachine/WallpaperMachine/commit/ac28368794434bbe825bb0b1080c5c367aa7fe22), [1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+
+#### 개선 사항
+
+- 프로젝트의 릴리스 서명이 있는 업데이트만 설치되며, 그 밖의 다운로드는 거부됩니다 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 일반 http로 스크립트, 이미지, 데이터를 불러오는 오래된 웹 배경화면이 이제 Wallpaper Engine에서처럼 작동합니다 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 웹 배경화면으로 전환할 때 새 페이지가 실제로 그려질 때까지 이전 화면이 유지되어 느린 페이지도 빈 화면으로 깜박이지 않습니다 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 버그 보고서에 변경한 배경화면 옵션과 장면에 빠진 파일이 포함되어 문제를 더 쉽게 재현할 수 있습니다 ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+- 진단 보고서에 웹 배경화면이 직접 보고한 오류와 경고가 포함되어 아무것도 표시되지 않는 원인을 찾기 쉬워졌습니다 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+
+#### 버그 수정
+
+- 배경화면이 더 이상 이미지와 소리 디코딩의 메모리 버그를 악용하거나 선택하지 않은 폴더에 접근할 수 없습니다 ([49cba35](https://github.com/WallpaperMachine/WallpaperMachine/commit/49cba35d473cbd4b89a5653885afaaaa3454c8c4))
+- 다운로드를 위해 Steam에 로그인할 때 Steam이 실제로 요청한 Steam Guard 단계가 표시되며, 로그인이 끝나지 않으면 다시 로그인하도록 안내합니다 (closes [#102](https://github.com/WallpaperMachine/WallpaperMachine/issues/102)) ([a3758a2](https://github.com/WallpaperMachine/WallpaperMachine/commit/a3758a2468b1761e35d5a3ac10e3d832fc5ffbc0))
+- 여러 디스플레이에 미러링된 비디오 배경화면의 소리가 더 이상 두 번씩 어긋나게 재생되지 않습니다 ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+- 왕복 애니메이션이나 마우스로 조작하는 슬라이더와 버튼이 있는 장면이 이제 제작자의 의도대로 작동합니다 ([0132969](https://github.com/WallpaperMachine/WallpaperMachine/commit/0132969c177ee7676eb8aef3a2deea52d99a74ab))
+- 장면 확인에 시간이 걸리더라도 적용을 누른 시점에 선택된 디스플레이에 항상 배경화면이 설정됩니다 ([1b03f98](https://github.com/WallpaperMachine/WallpaperMachine/commit/1b03f98f2fa1a2bc872b53ca43e0a94d035e7511))
+
+이번 릴리스에 기여해 주신 [@opastorello](https://github.com/opastorello) 님께 감사드립니다.
+
 ## [1.6.3](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.2...v1.6.3) (2026-10-25)
 
 ### English
