@@ -39,6 +39,20 @@ async fn the_users_pause_and_play_are_saved_for_the_next_launch() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_pause_that_could_not_be_saved_is_saved_when_chosen_again() {
+    let engine = FakeEngineFacade::default();
+    let fixture = bridge(&engine, installed(showing_scenic(false), vec![(SCENIC, None)]), true);
+    // A directory where the configuration file goes makes the save fail.
+    let config = fixture.home.path().join("support").join("config.toml");
+    std::fs::create_dir_all(&config).expect("block the configuration file");
+
+    fixture.bridge.pause_all().await.expect("pause");
+    std::fs::remove_dir_all(&config).expect("unblock the configuration file");
+    fixture.bridge.pause_all().await.expect("pause again");
+    assert!(saved_pause(&fixture.home));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_pause_on_battery_is_not_saved_as_the_users() {
     let engine = FakeEngineFacade::default();
     let mut app = showing_scenic(false);

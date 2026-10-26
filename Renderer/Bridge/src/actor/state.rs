@@ -109,6 +109,9 @@ pub struct BridgeActorState {
     /// battery pause does, so a launch never leaves a display without one.
     /// Cleared when it is applied or the user plays or pauses first.
     pub pending_user_pause_after_initial_frame: bool,
+    /// The user's latest Play/Pause failed to reach the saved configuration,
+    /// so the same choice made again writes it once more.
+    pub user_pause_unsaved: bool,
     /// The library filter: whether wallpapers of each kind are listed.
     /// They are saved with the app settings, and `filter_enabled`
     /// answers for a kind.
@@ -171,6 +174,7 @@ impl Default for BridgeActorState {
             pending_battery_pause_after_initial_frame: false,
             // `from_app_config` sets it from the saved pause.
             pending_user_pause_after_initial_frame: false,
+            user_pause_unsaved: false,
             // Every kind of wallpaper is listed until the saved filter, which
             // `from_app_config` applies, says otherwise.
             // A fresh state therefore hides nothing.

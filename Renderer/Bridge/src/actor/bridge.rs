@@ -658,17 +658,21 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     }
 
     /// Saves the user's own Play/Pause for the next launch. A failed save keeps the
-    /// pause in force for this session: it is logged, not reported as a failed pause.
+    /// pause in force for this session: it is logged, not reported as a failed pause,
+    /// and the same choice made again tries the save again.
     fn save_user_pause(&mut self, paused: bool) {
-        if self.state.app_config.general.paused == paused {
+        if self.state.app_config.general.paused == paused && !self.state.user_pause_unsaved {
             return;
         }
         self.state.app_config.general.paused = paused;
-        if let Some(store) = &self.config_store
-            && let Err(error) = store.save_app_config(&self.state.app_config)
-        {
-            log::warn!("could not save the playback choice for the next launch: {error}");
-        }
+        let Some(store) = &self.config_store else { return };
+        self.state.user_pause_unsaved = match store.save_app_config(&self.state.app_config) {
+            Ok(()) => false,
+            Err(error) => {
+                log::warn!("could not save the playback choice for the next launch: {error}");
+                true
+            }
+        };
     }
 
     /// Brings back the pause the previous session ended with, once the first
@@ -689,6 +693,10 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 log::warn!("could not bring back the saved pause, trying again at the next ready report: {error}");
                 return;
             }
+        } else {
+            // Paused already, by the battery rule on a report before this one: the
+            // pause is now the user's, so external power does not end it.
+            self.state.auto_paused_for_battery = false;
         }
         self.state.pending_user_pause_after_initial_frame = false;
     }
