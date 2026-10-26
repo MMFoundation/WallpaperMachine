@@ -4566,7 +4566,20 @@ bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view 
     if (keep_place && ! node->IgnoresParentTransform()) {
         new_parent->UpdateTrans();
         const linalg::Matrix4d inverse = new_parent->ModelTrans().inverse();
-        if (inverse.allFinite()) node->SetTransformFromMatrix(inverse * world);
+        if (inverse.allFinite()) {
+            node->SetTransformFromMatrix(inverse * world);
+            // The new local transform is also what later writes and bindings start from. A layer
+            // hung from an edge derives its place from its anchor, so only its turn and size are
+            // carried there.
+            const std::string key(name);
+            const linalg::Vector3f scale = node->Scale(), angles = node->Rotation(), place = node->Translate();
+            SetNodeScale(key, scale);
+            SetNodeRotation(key, angles);
+            const auto anchor = m_node_alignment.find(key);
+            const bool unanchored = anchor == m_node_alignment.end() ||
+                                    AnchorDirection(anchor->second.alignment).head<2>().isZero();
+            if (unanchored) SetNodeTranslate(key, place);
+        }
     }
     MarkSceneGraphMutated("reparent");
     return true;

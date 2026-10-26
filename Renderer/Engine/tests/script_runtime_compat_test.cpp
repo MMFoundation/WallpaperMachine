@@ -680,6 +680,33 @@ TEST(ScriptRuntimeCompat, SetParentKeepsTheLayersPlaceOnlyWhenAskedTo) {
     }
 }
 
+// A layer reparented in place keeps that place through later writes: turning it or scaling it
+// afterwards starts from its new local transform, not from the one it had under its old parent.
+TEST(ScriptRuntimeCompat, ALayerSetParentInPlaceStaysThereWhenItIsTurnedLater) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  holder  = std::make_shared<SceneNode>();
+    auto  child   = std::make_shared<SceneNode>();
+    holder->SetTranslate(linalg::Vector3f(100, 0, 0));
+    holder->SetScale(linalg::Vector3f(2, 2, 1));
+    child->SetTranslate(linalg::Vector3f(10, 0, 0));
+    scene.sceneGraph->AppendChild(holder);
+    scene.sceneGraph->AppendChild(child);
+    runtime->RegisterNode("holder", holder.get());
+    runtime->RegisterNode("child", child.get());
+    runtime->RegisterSceneScript("var step = 0; function update() { step++;\n"
+                                 "var c = thisScene.getLayer('child');\n"
+                                 "if (step === 1) c.setParent(thisScene.getLayer('holder'), true);\n"
+                                 "if (step === 2) { c.angles = new Vec3(0, 0, 0); c.scale = c.scale; }\n"
+                                 "}", "");
+    runtime->Tick(0.1);
+    runtime->Tick(0.1);
+    child->UpdateTrans();
+    EXPECT_NEAR(child->ModelTrans()(0, 3), 10.0, 1e-4) << "still where it was on screen";
+    EXPECT_NEAR(child->ModelTrans()(0, 0), 1.0, 1e-4) << "and its size";
+    for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
+}
+
 // The bone calls of an image layer with a puppet: the count, a bone's index by name and its
 // parent's, and its transform as the last frame posed it, in the scene and in its parent bone.
 TEST(ScriptRuntimeCompat, PuppetBonesAnswerTheirIndexParentAndPose) {
