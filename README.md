@@ -295,7 +295,7 @@ Working on the code: [CONTRIBUTING.md](CONTRIBUTING.md).
 | [docs/testing/README.md](docs/testing/README.md) | Test strategy, commands, evidence policy |
 | [docs/release.md](docs/release.md) | Versioning, release notes and the CI release pipeline |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each published version |
-| [LICENSING.md](LICENSING.md) | License policy, Supporter model and distribution status |
+| [LICENSING.md](LICENSING.md) | License, code origin, Supporter model and component licenses |
 | [SPONSORS.md](SPONSORS.md) | Supporter pricing, what it includes and other ways to help |
 | [AGENTS.md](AGENTS.md) | Rules for agents working in this repository |
 
@@ -321,8 +321,7 @@ recorded in [ThirdParty/provenance.json](ThirdParty/provenance.json). Every reci
 keeps every right the GPL grants, whether or not they are a Supporter.
 
 [LICENSING.md](LICENSING.md) is the account of where the code comes from, the license of
-each third-party component, the Supporter model, and what is still open before any
-distribution; this README claims no binary is cleared or legally reviewed. The
+each third-party component, the Supporter model, and where the source of each download is. The
 Apache-2.0 and GPL-3.0 components the build used to link (MoltenVK, the Vulkan loader,
 SPIRV-Tools, glslang, the vendored spirv_reflect, and the spirv Rust crate) were removed
 on 2026-10-17 under the earlier GPL-2.0-only policy and are GPLv3-compatible. Workshop

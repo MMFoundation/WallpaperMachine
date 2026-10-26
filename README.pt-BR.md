@@ -293,7 +293,7 @@ Os documentos abaixo estão em inglês.
 | [docs/testing/README.md](docs/testing/README.md) | Estratégia de testes, comandos e política de evidências |
 | [docs/release.md](docs/release.md) | Versionamento, notas da versão e o pipeline de lançamento no CI |
 | [CHANGELOG.md](CHANGELOG.md) | O que mudou em cada versão publicada |
-| [LICENSING.md](LICENSING.md) | Política de licenças, modelo de Apoiador e situação da distribuição |
+| [LICENSING.md](LICENSING.md) | Licença, origem do código, modelo de Apoiador e licenças dos componentes |
 | [SPONSORS.md](SPONSORS.md) | Preço do Apoiador, o que está incluído e outras formas de ajudar |
 | [AGENTS.md](AGENTS.md) | Regras para agentes que trabalham neste repositório |
 
@@ -321,8 +321,7 @@ registrados em [ThirdParty/provenance.json](ThirdParty/provenance.json). Todo de
 mantém todos os direitos que a GPL concede, seja ou não Apoiador.
 
 O [LICENSING.md](LICENSING.md) descreve de onde vem o código, a licença de
-cada componente de terceiros, o modelo de Apoiador e o que ainda está pendente antes de qualquer
-distribuição; este README não afirma que algum binário esteja liberado ou revisado juridicamente. Os
+cada componente de terceiros, o modelo de Apoiador e onde está o código-fonte de cada download. Os
 componentes Apache-2.0 e GPL-3.0 aos quais a compilação era vinculada (MoltenVK, o Vulkan loader,
 SPIRV-Tools, glslang, o spirv_reflect incluído e o crate Rust spirv) foram removidos
 em 2026-10-17 sob a política anterior GPL-2.0-only e são compatíveis com a GPLv3. Os papéis de parede

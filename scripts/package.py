@@ -6,8 +6,7 @@ Homebrew keg must carry license files to ship, and every notice the build places
 the bundle must match its repository original. The signed bundle then goes into
 `WallpaperMachine-<version>-arm64.dmg`, the drag-to-install image laid out by
 scripts/lib/dmg.py, which is mounted and verified before its `.sha256` sidecar is
-written. The image is for local use; LICENSING.md records why it is not cleared for
-distribution.
+written. LICENSING.md describes the license and the notices the bundle carries.
 
 The signed bundle, and again the copy inside the mounted image, must still carry what the
 lock screen extension and the permission prompts need: the extension's sandbox and
@@ -318,7 +317,7 @@ def package(args):
         shutil.copytree(app, destination)
         print(f"{MARK.ok} Installed {destination}")
     print(f"{MARK.ok} Verified bundle: {app}")
-    print(f"{MARK.ok} Verified disk image (not cleared for distribution, see LICENSING.md): {image}")
+    print(f"{MARK.ok} Verified disk image: {image}")
     print(f"{MARK.ok} Checksum: {checksum}")
 
 

@@ -12,7 +12,7 @@ CHANGELOG.md                       published versions, newest first; written by 
 CODE_OF_CONDUCT.md                 conduct expected in the project's spaces and how it is enforced
 CONTRIBUTING.md                    contributor working agreement
 LICENSE                            GNU GPL version 3 text; the license of this repository's source
-LICENSING.md                       GPL-3.0-only policy, Supporter model, component licenses and distribution blockers
+LICENSING.md                       GPL-3.0-only license, Supporter model, component licenses and notices
 README.md                          product overview after the website, build quickstart, FAQ, sponsor list (written by scripts/update_sponsors.py), documentation index
 README.zh-CN.md                    README.md in 简体中文; change it with README.md (same sponsor list block)
 README.pt-BR.md                    README.md in Português; change it with README.md (same sponsor list block)

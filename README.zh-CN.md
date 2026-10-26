@@ -217,7 +217,7 @@ python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 
 | [docs/testing/README.md](docs/testing/README.md) | 测试策略、命令与验证记录规范 |
 | [docs/release.md](docs/release.md) | 版本号、发布说明与 CI 发布流程 |
 | [CHANGELOG.md](CHANGELOG.md) | 每个已发布版本的变更，含简体中文 |
-| [LICENSING.md](LICENSING.md) | 许可证政策、支持者模式与分发状态 |
+| [LICENSING.md](LICENSING.md) | 许可证、代码来源、支持者模式与组件许可证 |
 | [SPONSORS.md](SPONSORS.md) | 支持者价格、包含内容及其他支持方式 |
 | [AGENTS.md](AGENTS.md) | 在本仓库中工作的 AI 代理须遵守的规则 |
 
@@ -237,7 +237,7 @@ python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 
 
 源代码以 GNU 通用公共许可证第 3 版（仅限该版本）提供（[LICENSE](LICENSE)）。内置的第三方代码保留其各自的版权和许可声明，记录在 [ThirdParty/provenance.json](ThirdParty/provenance.json) 中。无论是否为支持者，每位接收者都享有 GPL 授予的全部权利。
 
-[LICENSING.md](LICENSING.md) 说明了代码的来源、每个第三方组件的许可证、支持者模式，以及在任何分发之前仍待完成的事项；本 README 不声称任何二进制文件已获准分发或已通过法律审查。构建过去所链接的 Apache-2.0 与 GPL-3.0 组件（MoltenVK、Vulkan loader、SPIRV-Tools、glslang、内置的 spirv_reflect，以及 spirv Rust crate）已于 2026-10-17 在早先的 GPL-2.0-only 政策下移除，这些组件与 GPLv3 兼容。创意工坊壁纸归其创作者所有，场景资源来自你所拥有的 Wallpaper Engine；应用两者都不附带。
+[LICENSING.md](LICENSING.md) 说明了代码的来源、每个第三方组件的许可证、支持者模式，以及每个下载对应的源代码在哪里。构建过去所链接的 Apache-2.0 与 GPL-3.0 组件（MoltenVK、Vulkan loader、SPIRV-Tools、glslang、内置的 spirv_reflect，以及 spirv Rust crate）已于 2026-10-17 在早先的 GPL-2.0-only 政策下移除，这些组件与 GPLv3 兼容。创意工坊壁纸归其创作者所有，场景资源来自你所拥有的 Wallpaper Engine；应用两者都不附带。
 
 ## 友情链接
 
