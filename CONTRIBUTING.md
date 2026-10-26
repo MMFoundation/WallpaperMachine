@@ -168,9 +168,9 @@ By making a contribution to this project, I certify that:
 
 Every pull request runs the Checks workflow (`.github/workflows/checks.yml`): the
 Python script tests on Linux, a minute or two, the same as
-`python3 scripts/test.py --python-only` locally. CodeQL scans Actions, Python and
-Rust on every pull request and Swift weekly. The native gate does not run on pull
-requests: run `python3 scripts/test.py` locally, or the Test workflow by hand.
+`python3 scripts/test.py --python-only` locally. CodeQL runs on pushes to `main`,
+weekly and on demand, not on pull requests. The native gate does not run on pull
+requests either: run `python3 scripts/test.py` locally, or the Test workflow by hand.
 
 Claude Code runs on the Claude account of `fzlzjerry`, so only that account wakes
 it; events from anyone else, including re-runs, are skipped. A same-repository PR
