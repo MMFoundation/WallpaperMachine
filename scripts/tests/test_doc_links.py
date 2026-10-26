@@ -1,24 +1,25 @@
-"""Guard the repository's own Markdown links: every relative link names a file that exists, and
-every `#anchor` names a heading (or an explicit `<a id>`) of the page it points at.
-
-GitHub derives a heading's anchor from its rendered text: lowercased, punctuation and symbols
-removed, each space a hyphen, and `-1`, `-2` … appended to repeats. A link whose heading was
-renamed still opens the page, at the top, so nothing shows it is broken. Inline links, HTML
-links and reference definitions (`[label]: target`) are checked; `#` and setext headings both
-define anchors. External links, links inside code and anchors into files other than Markdown
-are out of scope. The archives are
-history and are not checked, though a current page may link into them.
-"""
+#!/usr/bin/env python3
+"""Check that every relative Markdown link names an existing file and, with `#anchor`, a heading or id there."""
+# GitHub derives a heading's anchor from its rendered text: lowercased, punctuation and symbols
+# removed, each space a hyphen, and `-1`, `-2` … appended to repeats. A link whose heading was
+# renamed still opens the page, at the top, so nothing shows it is broken. Inline links, HTML
+# links and reference definitions (`[label]: target`) are checked; `#` and setext headings both
+# define anchors. External links, links inside code and anchors into files other than Markdown
+# are out of scope. The archives are history and are not checked, though a current page may
+# link into them.
 from collections import Counter
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import unicodedata
 import unittest
 from urllib.parse import unquote
 
-ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.paths import ROOT  # noqa: E402
+
 UNCHECKED = ("docs/archive/", "docs/testing/archive/", "ThirdParty/")
 SHOWN = 12
 
@@ -27,7 +28,7 @@ SHOWN = 12
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
 SETEXT_UNDERLINE = re.compile(r"^ {0,3}(=+|-+)\s*$")
-REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?")
+REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:[ \t]*<?([^\s>]+)>?", re.M)
 # A scheme (`https:`, `mailto:`) or a scheme-relative `//host` leads off the repository.
 EXTERNAL = re.compile(r"^(?:[a-z][a-z0-9+.-]*:|//)", re.I)
 COMMENT = re.compile(r"<!--.*?-->", re.S)
@@ -133,11 +134,15 @@ def links(path):
     prose = dict(prose_lines(path.read_text(encoding="utf-8")))
     text = "\n".join(prose.get(number, "") for number in range(1, max(prose, default=0) + 1))
     text = CODE_SPAN.sub(lambda match: "\n" * match.group(0).count("\n"), text)
-    for number, line in enumerate(text.split("\n"), start=1):
-        found = MARKDOWN_LINK.findall(line) + HTML_LINK.findall(line) + REFERENCE_DEFINITION.findall(line)
-        for target in found:
-            if not EXTERNAL.match(target):
-                yield number, target
+    # Read from the whole page, so a link wrapped onto the next line is still one link.
+    found = [
+        match for pattern in (MARKDOWN_LINK, HTML_LINK, REFERENCE_DEFINITION)
+        for match in pattern.finditer(text)
+    ]
+    for match in sorted(found, key=lambda match: match.start()):
+        target = match.group(1)
+        if not EXTERNAL.match(target):
+            yield text.count("\n", 0, match.start()) + 1, target
 
 
 def broken(path):
@@ -209,6 +214,12 @@ class DocLinkTests(unittest.TestCase):
             self.assertTrue(has_anchor(page, "FAQ"))
             self.assertFalse(has_anchor(page, "faq"))
             self.assertTrue(has_anchor(page, "Setup"))
+
+    def test_a_link_wrapped_onto_the_next_line_is_checked(self):
+        with tempfile.TemporaryDirectory() as folder:
+            page = Path(folder) / "page.md"
+            page.write_text("See the [guide](\nmissing.md) first.\n", encoding="utf-8")
+            self.assertEqual(list(links(page)), [(1, "missing.md")])
 
     def test_a_code_span_over_two_lines_holds_no_link(self):
         with tempfile.TemporaryDirectory() as folder:
