@@ -27,6 +27,15 @@ class SceneRuntimeContext;
 /// renderer, and a shared pointer to an incomplete type is all this needs.
 struct SceneMetalProgram;
 
+/// A file the scene names that none of its file systems holds, found while it was parsed: the path
+/// below the scene's own space (`materials/rain.json`), and the layer being built when it was asked
+/// for (an empty name and id -1 when none was).
+struct SceneMissingFile {
+    std::string layer;
+    int32_t     object_id { -1 };
+    std::string path;
+};
+
 struct ScenePostProcessPass {
     std::shared_ptr<SceneNode> node;
     std::string                output;
@@ -101,6 +110,10 @@ public:
     /// one the author made. It names the shader and the compiler's reason, and
     /// leaves the scene undrawn (held), never drawn without the missing part.
     std::string                 shader_compile_error;
+    /// Files the scene names and does not have, at most 64, each once, in the order the parse
+    /// asked for them. A layer that names one draws without it or not at all; the scene is still
+    /// drawn, as Wallpaper Engine draws what it can.
+    std::vector<SceneMissingFile> missing_files;
     /// Layers the current render graph leaves out, each the top of a subtree:
     /// hidden by a settled visibility (`SceneNode::VisibilitySettled`) of their
     /// own or an ancestor's, and sampled by no other layer. Written by

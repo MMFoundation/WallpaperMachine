@@ -502,7 +502,8 @@ protocol.
 
 User mute and temporary app/Focus/other-audio mute compose in the existing bridge
 configuration; ending a rule does not clear user mute. Mirrored pages elect one
-presenting audible owner per actual source assignment (`WebWallpaperAudioOwnership`);
+presenting audible owner per actual source assignment (`MirrorAudioOwnership`, which native video
+follows too);
 independent assignments of the same project stay independent, and a hidden owner
 hands off to a visible mirror without duplicate sound.
 

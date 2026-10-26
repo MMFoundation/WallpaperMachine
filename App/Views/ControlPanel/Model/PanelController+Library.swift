@@ -30,6 +30,7 @@ extension PanelController {
   /// when one fails, and says so. A failure leaves the wallpaper selected, where its note is.
   func activateAll(_ id: String) async throws {
     if try await getsSceneResourcesInstead(of: id) { return }
+    guard await confirmsUndrawableScene(id) else { return }
     do {
       try await run(.direct) {
         let id = try installedWallpaperID(id)
@@ -77,12 +78,18 @@ extension PanelController {
   }
 
   /// Applies or restarts `id` on the display targeted *now*, which is the one the user means:
-  /// the command may wait behind others, and the target can change in the meantime.
+  /// the command may wait behind others, and the target can change in the meantime. It is read
+  /// before anything here waits (the shared resources, reading a refused scene again), so the
+  /// display that is checked and the one applied to are the one the user had chosen.
   private func applyToTarget(_ id: String, restarts: Bool) async throws {
+    let displayID = navigation.targetDisplayID
     if try await getsSceneResourcesInstead(of: id) { return }
+    // Restarting a scene, or choosing the one the display shows, puts up nothing new.
+    if !restarts, !store.isWallpaperActive(id: id, displayId: displayID) {
+      guard await confirmsUndrawableScene(id) else { return }
+    }
     do {
       let id = try installedWallpaperID(id)
-      let displayID = navigation.targetDisplayID
       let slot = BridgeStore.activationSlot(displayId: displayID)
       let ran = try await run(.queued, slot: slot, subject: id) {
         if restarts {
@@ -104,6 +111,34 @@ extension PanelController {
       recordActivationFailure(error, for: id)
       throw error
     }
+  }
+
+  /// A scene Native Metal is known not to draw with this build and these files (it was refused when
+  /// it last ran or was checked) asks before it replaces what is on screen: applied, it shows its
+  /// preview picture. True to go ahead, which is also the answer for anything else. Only the
+  /// user's own Apply asks; a playlist, a schedule or a shortcut never waits on a question.
+  ///
+  /// The remembered refusal is only where the question starts. What the scene draws with also lies
+  /// outside the files that key it (the shared resources, loose files, the saved options), so the
+  /// scene is read again first and that answer is recorded: a refusal that no longer holds asks
+  /// nothing. When it cannot be read again, the remembered refusal asks.
+  private func confirmsUndrawableScene(_ id: String) async -> Bool {
+    guard let row = libraryRow(id: id), row.kind == .scene, let verdicts = store.sceneDrawVerdicts,
+      let verdict = await verdicts.verdict(for: id), verdict.outcome == .notDrawn
+    else { return true }
+    var refusal = verdict.reason
+    if let read = try? await store.bridge.sceneCapability(wallpaperId: id), read.readError == nil {
+      await verdicts.record(
+        id, outcome: read.failureStage == nil ? .passedCheck : .notDrawn, stage: read.failureStage,
+        reason: read.failureReason)
+      guard read.failureStage != nil else { return true }
+      refusal = read.failureReason
+    }
+    let reason = refusal.flatMap { $0.isEmpty ? nil : $0 } ?? L("no reason was given")
+    return await dialogs.confirm(
+      L("Native Metal can’t draw this scene"),
+      detail: L("It was refused when it last ran or was checked with this version of the app: \(reason). Applied, it shows its preview picture instead of moving."),
+      button: L("Apply Anyway"))
   }
 
   /// A scene cannot play without Wallpaper Engine's shared resources, and while they are missing

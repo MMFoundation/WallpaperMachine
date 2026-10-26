@@ -35,7 +35,7 @@ pub use types::{
     BridgePropertyEdit, BridgePropertyKind, BridgePropertyValue, BridgeQualityThrottleCause,
     BridgeRendererCountersReport,
     BridgeRendererSurfaceCounters, BridgeScalingMode, BridgeSceneBackendReport,
-    BridgeSceneUpdateModeReport, BridgeSettingsSnapshot, BridgeUserShortcut,
+    BridgeSceneCapability, BridgeSceneMissingFile, BridgeSceneUpdateModeReport, BridgeSettingsSnapshot, BridgeUserShortcut,
     BridgeSliderMetadata, BridgeSnapshotBundle, BridgeStorageStatus, BridgeSurfaceCheck,
     BridgeVideoBackendReport, BridgeWallpaperEntry,
     BridgeWallpaperKind, BridgeWallpaperMutationBundle, BridgeWallpaperOptionsSnapshot,
@@ -83,7 +83,7 @@ use crate::{
             ApplyWallpaperOptions, Bootstrap, CancelWallpaperOptions, ClearShaderCache,
             EditProperty, EjectWallpaperFromDisplay, GetAllSnapshots, GetAppSnapshot,
             GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview, GetMonitorInformationSnapshot,
-            GetSettingsSnapshot, GetWallpaperOptionsSnapshot, GetWebWallpapers,
+            GetSceneProbeRequest, GetSettingsSnapshot, GetWallpaperOptionsSnapshot, GetWebWallpapers,
             GetNativeVideoWallpapers, PollMousePosition, RendererCounters,
             RefreshDisplays, RefreshLibrary, ReleaseHeldWallpaper, RestoreAllPropertyDefaults,
             RestorePropertyDefault,
@@ -875,6 +875,13 @@ impl EngineFacade for ArcEngineFacade {
         self.0.recover_surface(display_id, reason)
     }
 
+    fn probe_scene_capability(
+        &self,
+        request: crate::engine::SceneProbeRequest,
+    ) -> Result<wallpaper_core::SceneCapabilityProbe, wallpaper_core::EngineError> {
+        self.0.probe_scene_capability(request)
+    }
+
     fn current_audio_spectrum(
         &self,
     ) -> Result<Option<wallpaper_core::AudioSpectrum128>, wallpaper_core::EngineError> {
@@ -1308,6 +1315,34 @@ impl WallpaperBridge {
     /// Returns an error when any snapshot in the bundle cannot be produced.
     pub async fn all_snapshots(&self) -> Result<BridgeSnapshotBundle, BridgeError> {
         self.actor.ask(GetAllSnapshots).await
+    }
+
+    /// Reads an installed scene without drawing it, with its saved property choices: whether
+    /// Native Metal would refuse it, and which files its layers name and lack. Takes as long as
+    /// loading the scene's files and translating its shaders (seconds for a large scene), on a
+    /// thread of its own; nothing on screen changes and no other request waits for it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper is not an installed scene, or the probe itself failed.
+    /// A scene that cannot be read is not an error: `read_error` says why.
+    pub async fn scene_capability(
+        &self,
+        wallpaper_id: String,
+    ) -> Result<BridgeSceneCapability, BridgeError> {
+        let request = self.actor.ask(GetSceneProbeRequest { wallpaper_id }).await?;
+        let engine = self.engine.clone();
+        // The parse blocks, so it runs where blocking is allowed, on the bridge's own runtime:
+        // the future the host polls is not running on one.
+        let probe = self
+            .actor
+            .run_on_runtime(async move {
+                tokio::task::spawn_blocking(move || engine.probe_scene_capability(request)).await
+            })
+            .await?
+            .map_err(|error| BridgeError::engine(format!("the scene probe stopped: {error}")))?
+            .map_err(|error| BridgeError::engine(error.to_string()))?;
+        Ok(probe.into())
     }
 
     /// # Errors

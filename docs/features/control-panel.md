@@ -355,7 +355,16 @@ screen. Activation is explicit.
 - **Apply wallpaper** activates the selected wallpaper on the current target
   display; for the wallpaper already active there it reads **Reapply wallpaper**.
   An Installed tile shows an **Applying** spinner while its apply runs and a quiet
-  play mark while it waits behind another apply.
+  play mark while it waits behind another apply. A scene Native Metal refused with this
+  app version and these files, when it last ran or its
+  [Compatibility check](wallpaper-properties.md#compatibility-check) read it, asks first
+  (**Native Metal can’t draw this scene**, with the renderer's reason): applied, it would show
+  its preview picture instead of moving. The scene is read again first, since a refusal can depend
+  on things its remembered verdict is not keyed to (the shared resources, loose files in the
+  project, the saved options): one that now reads clean is applied without a question and
+  remembered that way, and one that cannot be read again asks with the remembered reason. **Apply Anyway** applies it; **Cancel** leaves the
+  display as it is. **Apply to all displays** asks the same; Reapply, choosing the scene a
+  display already shows, playlists, schedules and shortcuts never ask.
 - **Apply to all displays** (the inspector's **More actions** menu of an installed
   wallpaper, offered only when two or more enabled independent displays exist) puts the wallpaper on every one of
   them in a single step, whichever display is targeted, and is unavailable once they
@@ -426,8 +435,14 @@ stay visible in a footer while editing. Its texts can be selected and copied.
 Below the compatibility note, an installed wallpaper that can run (not
 Application) shows **Not working? Report on GitHub**. It opens the repository's
 bug report form in the browser with the wallpaper's title, Workshop link or id,
-type, app version and, while it is on screen, the backend drawing it (with the
-renderer's fallback reason) pre-filled. The fields the form requires (what the
+type, app version, while it is on screen the backend drawing it (with the
+renderer's fallback reason) and, when its options are loaded in the inspector, the properties
+changed from the author's defaults pre-filled: each with its value and default, marked when the
+change is not applied yet, at most 20 with the rest counted. Typed text and the paths of chosen
+files are not included, only that they were changed. When the inspector's
+[Compatibility check](wallpaper-properties.md#compatibility-check) of the wallpaper found files
+the scene refers to that are not installed, the report lists each one's path and the layer that
+asked for it. The fields the form requires (what the
 user did, what went wrong, what they expected and the diagnostics report) are
 left for the user to fill in. When the panel saw this wallpaper fail
 (its download, or the last attempt to apply it), an error notice takes the link's

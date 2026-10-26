@@ -747,7 +747,7 @@ final class WebWallpaperHost {
     }
 
     private func refreshAudioOutputs() {
-        let owners = WebWallpaperAudioOwnership.owners(in: descriptors) { displayID in
+        let owners = MirrorAudioOwnership.owners(in: descriptors) { displayID in
             windows[displayID]?.page.isLoaded == true && !isSuspended(displayID: displayID)
         }
         // Retire the old audible page before enabling its replacement.

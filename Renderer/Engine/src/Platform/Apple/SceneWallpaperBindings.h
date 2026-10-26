@@ -454,6 +454,25 @@ int owe_scene_wallpaper_counters(owe_scene_wallpaper* scene, uint64_t* out_value
 /* Process-wide counters, in `owe_renderer_shared_counter` order. */
 int owe_renderer_shared_counters(uint64_t* out_values, uintptr_t out_len, uintptr_t* out_written);
 
+/*
+ * Reads a scene the way loading it does -- the same file space, saved property choices and parser,
+ * shader translation included -- without a display, a GPU or audio output, and says whether Native
+ * Metal would refuse it and which files its layers name and lack. Blocks for as long as the parse
+ * takes (seconds for a large scene) and writes only to the shader cache, as a load does.
+ *
+ * `cache_dir` may be NULL or empty (every shader is translated afresh), as may
+ * `property_override_json` (the project's defaults). On success `*out_json` is a JSON document,
+ * allocated here, that the caller releases with `owe_free_string`:
+ *   {"read_error": "", "failure_stage": "" | "unsupported" | "compile",
+ *    "failure_reason": "", "missing_files": [{"layer": "", "object_id": -1, "path": ""}]}
+ * A scene that cannot be read is still a success, with `read_error` saying why. Returns nonzero,
+ * with `owe_last_error`, only when the call itself is invalid or the probe failed internally.
+ */
+int owe_scene_capability_probe(const char* project_file, const char* assets_dir, const char* cache_dir,
+                               const char* property_override_json, char** out_json);
+/* Releases a string this interface allocated for the caller. NULL is ignored. */
+void owe_free_string(char* value);
+
 const char* owe_last_error(void);
 
 #ifdef __cplusplus

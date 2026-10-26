@@ -967,7 +967,7 @@ final class NativeVideoWallpaperHost {
     ) {
         let priorDescriptor = descriptors[displayID]
         descriptors[displayID] = wallpaper
-        surface.setVolume(wallpaper.volume, muted: wallpaper.muted)
+        refreshAudioOutputs()
         // A scaling change moves the picture on a running surface; it neither
         // reopens it nor re-reads the file. Logged under the clip's load so a
         // report shows which choice the picture followed.
@@ -1034,6 +1034,7 @@ final class NativeVideoWallpaperHost {
         surface.setUserPaused(true)
         surfaces.removeValue(forKey: displayID)
         descriptors.removeValue(forKey: displayID)
+        refreshAudioOutputs()
         kept[displayID]?[descriptor.wallpaperId]?.surface.stop()
         kept[displayID, default: [:]][descriptor.wallpaperId] = KeptClip(surface: surface, descriptor: descriptor, load: load)
         AppLog.info("native video wallpaper \(descriptor.wallpaperId): kept paused on "
@@ -1087,6 +1088,28 @@ final class NativeVideoWallpaperHost {
         surface.stop()
         surfaces.removeValue(forKey: displayID)
         descriptors.removeValue(forKey: displayID)
+        refreshAudioOutputs()
+    }
+
+    /// Gives every surface its volume, with each mirror group heard from one member
+    /// (`MirrorAudioOwnership`): a mirror plays its own copy of the clip, and two copies of its
+    /// sound would never line up. A hidden member hands the sound to one that is still in sight.
+    /// Independent assignments of the same clip stay independent.
+    private func refreshAudioOutputs() {
+        let owners = MirrorAudioOwnership.owners(in: descriptors) { displayID in
+            surfaces[displayID] != nil && !suspended && !suspendedDisplays.contains(displayID)
+        }
+        // A member that is not its group's owner is silent, whether another member is heard or
+        // none can be. Those that lose the sound go first, so it never plays twice for a moment.
+        for (displayID, surface) in surfaces {
+            guard let wallpaper = descriptors[displayID],
+                  owners[wallpaper.audioSourceDisplayId] != displayID else { continue }
+            surface.setVolume(wallpaper.volume, muted: true)
+        }
+        for displayID in owners.values {
+            guard let wallpaper = descriptors[displayID], let surface = surfaces[displayID] else { continue }
+            surface.setVolume(wallpaper.volume, muted: wallpaper.muted)
+        }
     }
 
     /// Global suspension: no display can show a wallpaper pixel at all.
@@ -1095,6 +1118,7 @@ final class NativeVideoWallpaperHost {
         for (displayID, surface) in surfaces {
             surface.setPresentationSuspended(value || suspendedDisplays.contains(displayID))
         }
+        refreshAudioOutputs()
         if !value {
             for displayID in Array(firstFrameWatches.keys) { resumeParkedFirstFrameWatch(displayID) }
         }
@@ -1110,6 +1134,7 @@ final class NativeVideoWallpaperHost {
         }
         guard let surface = surfaces[displayID] else { return }
         surface.setPresentationSuspended(suspended || value)
+        refreshAudioOutputs()
         if !value { resumeParkedFirstFrameWatch(displayID) }
     }
 

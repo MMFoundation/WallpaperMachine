@@ -447,10 +447,31 @@ An installed wallpaper's **Compatibility check** reads entry/shared resources an
 for video, asynchronously checks native admission for the selected display: whether
 macOS can open the file, since a clip plays at its own frame rate. Checks are explicit
 and version/configuration-bound.
-Unknown scene shader/graph or Web runtime behavior remains **unknown**; readable
-files and video metadata are not proof of a displayed frame. The same card shows
-the actual running backend when the runtime reports it, and, for a scene Native Metal cannot draw,
-why it is held.
+
+For a scene, **Check compatibility** also reads the whole scene through the renderer, the
+way loading it does (its saved options, the shared resources, the parser and the Metal
+translation of its shaders) but without a display, a GPU or sound, so nothing on screen
+changes. It takes seconds for a large scene and runs only when the button is pressed,
+and only when the shared resources are installed. It answers two rows:
+
+- **Scene shader and graph support** says whether Native Metal would refuse the scene,
+  with the renderer's reason, or that it found nothing it cannot draw. Shader compilation
+  for the GPU and the render graph only happen when the scene is drawn, so a clean read is
+  not a promise.
+- **Files the scene names** lists, by layer, the files the scene asks for and does not
+  have (at most 64 are recorded and the row shows eight). Wallpaper Engine draws what it
+  can, and so does the app: a layer that needs a missing file is drawn without it or not at
+  all, and the scene is still applied.
+
+What Native Metal concluded about a scene, from such a check or from running it, is kept in
+`SceneDrawVerdicts.json` in the app's support folder for the app build and the scene's files
+it was reached with (`project.json` and `scene.pkg` or `scene.json`, by size and date). The
+scene row shows it before any check: drawn, nothing found by a check, or refused with the
+reason. A new app version, a Workshop update or a reinstall makes it unknown again; a
+failure a retry can clear (a frame, the surface) is never kept. Unknown Web runtime
+behavior remains **unknown**; readable files and video metadata are not proof of a
+displayed frame. The same card shows the actual running backend when the runtime reports
+it, and, for a scene Native Metal cannot draw, why it is held.
 When the installed project or its entry file is unavailable and the wallpaper is
 a Workshop item, the card also offers [Reinstall from Workshop…](workshop-downloads.md#reinstall-from-workshop).
 
