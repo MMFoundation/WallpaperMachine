@@ -505,6 +505,12 @@ presenting audible owner per actual source assignment (`WebWallpaperAudioOwnersh
 independent assignments of the same project stay independent, and a hidden owner
 hands off to a visible mirror without duplicate sound.
 
+Whenever the host suspends a page (a pause, or a display no pixel can reach), its
+WebAudio stops rendering as well as going quiet: suspending media playback moves every
+`AudioContext` of the page to WebKit's `interrupted` state, and lifting it gives each
+context back the state the page left it in, so one the page had suspended itself stays
+suspended (`WebWallpaperSuspensionTests`). The host does not track contexts itself.
+
 These are private WebKit interfaces and may be unavailable on another macOS version.
 **Audio and media status** in the inspector reports the observed availability and
 never substitutes Pause for an unavailable mute.
@@ -570,10 +576,6 @@ never substitutes Pause for an unavailable mute.
   them. Measured on offscreen snapshots; see [Verification](#verification) for what was not.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.
-- A paused wallpaper's WebAudio is muted (`WebWallpaperAudioOwnership` gives a paused
-  page no audible output) but not suspended: the host has no `AudioContext`
-  handling, and what WebKit's own throttling does to a detached page's audio graph
-  is unmeasured.
 
 ## Verification
 
