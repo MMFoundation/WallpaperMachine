@@ -507,7 +507,7 @@ differ between releases; `build` and the Test workflow therefore keep separate e
 | Cache | Path | Key | What a hit saves |
 |---|---|---|---|
 | C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects. Test's three jobs share a run's key, so only `renderer`, which compiles the engine and its C++ tests, saves it; `rust` and `native` pass `save-object-cache: "false"` and only restore it |
-| Renderer | `~/.cargo/registry`, `~/.cargo/git`, `Renderer/target` | `renderer-ccache-<os>-<hash of Cargo.lock, rust-toolchain.toml, provenance.json>`, restored by prefix | crate downloads, and Rust compilation while the nightly toolchain is unchanged |
+| Renderer | `~/.cargo/registry`, `~/.cargo/git`, `Renderer/target` | `renderer-ccache-<os>-<hash of rust-toolchain.toml>-<hash of Cargo.lock, provenance.json>`, restored only from entries with the same toolchain hash | crate downloads, and Rust compilation |
 
 The `CMAKE_<LANG>_COMPILER_LAUNCHER=ccache` variables only take effect on a build
 tree's first CMake configure, so change the renderer key's prefix whenever the
@@ -517,6 +517,12 @@ the evidence the cache worked. The toolchain is an unpinned `nightly`
 (`Renderer/rust-toolchain.toml`), and a new nightly invalidates every
 compiled crate, so the Rust half of the renderer build is only reused between
 builds on the same nightly.
+
+Only runs on `main` save either cache; every other ref (pull requests, branches,
+hand-pushed tags) restores and never saves. An entry saved under another ref is
+readable by that ref alone, and those entries pushed the repository past GitHub's
+10 GB cache limit, which evicts the `main` entries releases need. A tag Version
+produces is built by Version's run on `main`, so release builds still save.
 
 **What the attestation does and does not say.** Its SLSA predicate is built from
 the run's OIDC claims: `resolvedDependencies[0]` is `git+<repo>@<claims.ref>` with
