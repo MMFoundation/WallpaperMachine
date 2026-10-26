@@ -28,14 +28,16 @@ class DownloaderTestCase: XCTestCase {
     libraryName: String = "Library", rememberSession: Bool = true, item: WorkshopItem? = nil,
     networkMonitor: (any ProcessNetworkMonitoring)? = nil, checkpointDirectory: URL? = nil,
     freeSpace: (@Sendable (URL) -> Int64?)? = nil, retryDelays: [TimeInterval] = [0, 0, 0],
-    runtimeProvider: (any SteamCMDRuntimeProviding)? = nil
+    runtimeProvider: (any SteamCMDRuntimeProviding)? = nil,
+    presetBaseDetails: @escaping WorkshopDownloader.ItemDetails = { _ in nil }
   ) -> WorkshopDownloader {
     let downloader = WorkshopDownloader(
       sessionDirectory: root.appendingPathComponent("SteamSession"),
       runtimeProvider: runtimeProvider ?? ShellRuntimeProvider(),
       networkMonitor: networkMonitor ?? FixtureNetworkMonitor(),
       checkpointDirectory: checkpointDirectory,
-      freeSpace: freeSpace ?? WorkshopDownloader.systemFreeSpace, retryDelays: retryDelays)
+      freeSpace: freeSpace ?? WorkshopDownloader.systemFreeSpace, retryDelays: retryDelays,
+      itemDetails: presetBaseDetails)
     let requestedItem = item ?? WorkshopItem(
       id: itemID, title: "Session fixture", creator: "Test", summary: "", previewURL: nil,
       tags: ["Video"], size: 0, subscriptions: 0)

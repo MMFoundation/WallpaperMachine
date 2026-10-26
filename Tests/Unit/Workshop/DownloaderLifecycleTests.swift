@@ -482,6 +482,39 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
     }
   }
 
+  /// Steam lists the base's size once the preset names it, so the base pass is checked for
+  /// free space like any item, before SteamCMD is asked for it.
+  func testAPresetsBaseIsCheckedForFreeSpaceBeforeItIsFetched() async throws {
+    let root = try makePresetRuntime(base: deliverBase)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let base = WorkshopItem(
+      id: "654321", title: "Big base", creator: "", summary: "", previewURL: nil,
+      tags: ["Video"], size: 50 * 1_048_576, subscriptions: 0)
+    let disk = FreeSpaceProbe(10 * 1_048_576)
+    let downloader = startDownload(in: root, freeSpace: disk.measure, presetBaseDetails: { id in
+      id == "654321" ? base : nil
+    })
+    try await waitForStop(downloader)
+    let message = try XCTUnwrap(downloader.errorMessage)
+    XCTAssertTrue(message.contains("disk space"), "The base did not fit: \(message)")
+    XCTAssertEqual(try invocations(in: root), ["123456"], "SteamCMD is not asked for a base that cannot fit")
+    assertNothingInstalled(in: root)
+  }
+
+  func testAPresetsBaseThatFitsIsFetchedAsBefore() async throws {
+    let root = try makePresetRuntime(base: deliverBase)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let base = WorkshopItem(
+      id: "654321", title: "Big base", creator: "", summary: "", previewURL: nil,
+      tags: ["Video"], size: 50 * 1_048_576, subscriptions: 0)
+    let downloader = startDownload(in: root, freeSpace: FreeSpaceProbe(500 * 1_048_576).measure,
+                                   presetBaseDetails: { _ in base })
+    try await waitForStop(downloader)
+    XCTAssertNil(downloader.errorMessage)
+    XCTAssertEqual(downloader.downloadedID, "123456")
+    XCTAssertEqual(try invocations(in: root), ["123456", "654321"])
+  }
+
   func testFailedBasePassNamesTheBaseAndKeepsTheReason() async throws {
     let root = try makePresetRuntime(base: denyBase)
     defer { try? FileManager.default.removeItem(at: root) }

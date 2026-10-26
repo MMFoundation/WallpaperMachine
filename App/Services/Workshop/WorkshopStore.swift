@@ -81,6 +81,9 @@ final class WorkshopStore {
   /// The Steam Community session subscriptions are read with. `webSessions` keeps it between
   /// launches; it ends on Sign Out, or when Steam refuses to renew it.
   private(set) var steamWebSession: SteamWebSession?
+  /// What the signed-in account subscribes to on Steam, which the Workshop tiles mark: read
+  /// by `refreshSubscribedIDs`, then kept by what `setSubscribed` changed. Empty signed out.
+  private(set) var subscribedIDs: Set<String> = []
   /// Where the session is kept between launches; nil keeps it in memory only.
   @ObservationIgnored private let webSessions: (any SteamWebSessionStoring)?
   @ObservationIgnored private var webSessionRestore: Task<Void, Never>?
@@ -829,6 +832,41 @@ final class WorkshopStore {
     isDegraded = false
   }
 
+  /// Reads every id the signed-in account subscribes to. Signed out it does nothing; Steam
+  /// ending the session forgets it and throws `SteamSignInRequired`.
+  func refreshSubscribedIDs() async throws {
+    do {
+      guard let session = try await currentSteamWebSession() else { return }
+      let ids = try await service.subscribedIDs(account: session)
+      // A sign-out or another account while Steam answered keeps what that set.
+      if steamWebSession?.steamID == session.steamID { subscribedIDs = Set(ids) }
+    } catch is SteamSignInRequired {
+      forgetSteamWebSession()
+      throw SteamSignInRequired()
+    }
+  }
+
+  /// Subscribes the signed-in account to an item on Steam, or unsubscribes it, and marks what
+  /// Steam accepted. Without a session, or once Steam has ended it, throws `SteamSignInRequired`.
+  func setSubscribed(_ subscribed: Bool, itemID: String) async throws {
+    do {
+      guard let session = try await currentSteamWebSession() else { throw SteamSignInRequired() }
+      try await service.setSubscribed(subscribed, itemID: itemID, account: session)
+      if steamWebSession?.steamID == session.steamID {
+        if subscribed { subscribedIDs.insert(itemID) } else { subscribedIDs.remove(itemID) }
+      }
+    } catch is SteamSignInRequired {
+      forgetSteamWebSession()
+      throw SteamSignInRequired()
+    }
+  }
+
+  /// The newest comments on `item` from Steam's public thread; no sign-in is needed.
+  func comments(for item: WorkshopItem) async throws -> WorkshopComments {
+    guard let creator = item.creatorID else { return WorkshopComments(total: 0, comments: []) }
+    return try await service.comments(itemID: item.id, creatorID: creator)
+  }
+
   /// The ids of subscribed wallpapers not in `installed`, asking Steam for every page of
   /// subscriptions. Throws `SteamSignInRequired` when the session has ended.
   func missingSubscriptions(installed: Set<String>) async throws -> [WorkshopItem] {
@@ -879,6 +917,7 @@ final class WorkshopStore {
     webSessionRenewal?.cancel()
     webSessionRenewal = nil
     steamWebSession = nil
+    subscribedIDs = []
     webSessions?.remove()
   }
 

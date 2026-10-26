@@ -115,6 +115,10 @@ struct WorkshopTileCell: View {
     case approved
     /// The installed copy is one of the favorites.
     case favorite
+    /// The signed-in Steam account subscribes to it.
+    case subscribed
+    /// A Workshop preset: values for another wallpaper, which a download fetches with it.
+    case preset
 
     @MainActor
     var label: String {
@@ -122,6 +126,8 @@ struct WorkshopTileCell: View {
       case .installed: L("In your library")
       case .approved: L("Approved by Wallpaper Engine")
       case .favorite: L("Favorite")
+      case .subscribed: L("Subscribed on Steam")
+      case .preset: L("Preset")
       }
     }
   }
@@ -131,6 +137,8 @@ struct WorkshopTileCell: View {
     if tile.isInstalled { marks.append(.installed) }
     if tile.item.isApproved { marks.append(.approved) }
     if tile.isFavorite { marks.append(.favorite) }
+    if tile.isSubscribed { marks.append(.subscribed) }
+    if tile.item.isPreset { marks.append(.preset) }
     return marks
   }
 
@@ -171,6 +179,14 @@ private struct MarkStack: View {
       fill = .black.opacity(0.58)
       glyph = theme.surface.heart.color
       symbol = "heart.fill"
+    case .subscribed:
+      fill = .black.opacity(0.58)
+      glyph = .white
+      symbol = "bookmark.fill"
+    case .preset:
+      fill = .black.opacity(0.58)
+      glyph = .white
+      symbol = "slider.horizontal.3"
     }
     return Image(systemName: symbol)
       .font(.system(size: 9.5, weight: .bold))

@@ -37,6 +37,16 @@ final class WorkshopBrowserModel {
   /// Loads the stills and the animations of the tiles.
   let previews: WorkshopPreviewCoordinator
 
+  /// The selected item's comments, read from Steam's public thread when its inspector shows.
+  enum Comments: Equatable {
+    case loading
+    case loaded(WorkshopComments)
+    case failed(String)
+  }
+  /// Whose comments `comments` holds, and what is known of them.
+  private(set) var commentsItemID: String?
+  private(set) var comments: Comments = .loading
+
   /// How the timers wait; tests give them a clock they fire by hand.
   @ObservationIgnored var sleep: @Sendable (Duration) async throws -> Void = {
     try await Task.sleep(for: $0)
@@ -49,6 +59,8 @@ final class WorkshopBrowserModel {
   @ObservationIgnored private var lastScrollOffset: Double?
   /// The grid's offset was restored from the last window, once.
   @ObservationIgnored private(set) var restoredScroll = false
+  /// Whether this launch has read the signed-in account's subscriptions for the tiles' marks.
+  @ObservationIgnored private var subscriptionsRead = false
 
   init(controller: PanelController) {
     self.controller = controller
@@ -303,6 +315,24 @@ final class WorkshopBrowserModel {
 
   // MARK: Leaving and coming back
 
+  /// Reads `item`'s newest comments for its inspector, unless they are held already. A newer
+  /// selection while Steam answers wins.
+  func loadComments(for item: WorkshopItem) async {
+    if commentsItemID == item.id, case .loaded = comments { return }
+    commentsItemID = item.id
+    comments = .loading
+    do {
+      let thread = try await controller.workshop.comments(for: item)
+      guard commentsItemID == item.id else { return }
+      comments = .loaded(thread)
+    } catch is CancellationError {
+      if commentsItemID == item.id { commentsItemID = nil }
+    } catch {
+      guard commentsItemID == item.id else { return }
+      comments = .failed(error.localizedDescription)
+    }
+  }
+
   /// The page appeared: a Workshop that was never loaded starts its first search, whichever way the
   /// page was reached, and the jump field shows the page on show.
   func pageAppeared() {
@@ -312,6 +342,13 @@ final class WorkshopBrowserModel {
       controller.launch(PanelActionCoordinator.key("navigate"), policy: .latestWins) {
         [controller] in
         try await controller.navigate(.workshop)
+      }
+    }
+    // Signed in, the tiles mark the account's subscriptions; they are read once a launch.
+    if workshop.steamWebSession != nil, !subscriptionsRead {
+      subscriptionsRead = true
+      controller.launch(PanelActionCoordinator.key("workshop-subscriptions")) { [controller] in
+        try await controller.refreshWorkshopSubscriptions()
       }
     }
   }

@@ -128,9 +128,18 @@ final class WorkshopInspectorTests: MediaPanelTestCase {
     XCTAssertEqual(
       WorkshopTileCell.marks(of: tile(installed: true, favorite: true, tags: ["Approved"])),
       [.installed, .approved, .favorite], "the check, the trophy, then the heart")
+    XCTAssertEqual(WorkshopTileCell.marks(of: tile(tags: ["Scene", "Preset"])), [.preset])
+    var subscribed = tile()
+    subscribed.isSubscribed = true
+    XCTAssertEqual(WorkshopTileCell.marks(of: subscribed), [.subscribed])
+    XCTAssertEqual(
+      WorkshopTileCell.marks(of: tile(installed: true, tags: ["Preset", "Approved"])),
+      [.installed, .approved, .preset], "a preset is marked after what it shares with any wallpaper")
     XCTAssertEqual(WorkshopTileCell.Mark.installed.label, "In your library")
     XCTAssertEqual(WorkshopTileCell.Mark.approved.label, "Approved by Wallpaper Engine")
     XCTAssertEqual(WorkshopTileCell.Mark.favorite.label, "Favorite")
+    XCTAssertEqual(WorkshopTileCell.Mark.preset.label, "Preset")
+    XCTAssertEqual(WorkshopTileCell.Mark.subscribed.label, "Subscribed on Steam")
   }
 
   func testVoiceOversActionForATileIsNamedForWhatTheDoubleClickDoes() throws {

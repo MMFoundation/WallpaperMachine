@@ -505,8 +505,10 @@ on [manual-smoke.md](manual-smoke.md).
   reloading a replaced wallpaper. Fetching a preset's base in the same
   SteamCMD run is in `DownloaderLifecycleTests`, with a base that is denied, exits
   early or keeps dropping the connection reported as the base failing (naming it
-  and keeping Steam's reason), the preset's own failure left as it is, and Try again
-  resuming from the kept preset.
+  and keeping Steam's reason), the preset's own failure left as it is, Try again
+  resuming from the kept preset, and a base Steam lists as too large for the free space
+  stopping before SteamCMD is asked for it while one that fits is fetched (an injected
+  listing, not Steam).
 - `ImageImportTests` import real ImageIO pictures as the still `web` project with
   the original's bytes kept and the file name kept out of the page, the fit
   chosen from the picture's shape, a JPEG display copy for a TIFF, an undecodable
@@ -1443,7 +1445,11 @@ faces (`WebWallpaperFontAliasTests`) and the screen-saver surface
   (`WALLPAPER_MACHINE_NETWORK_TESTS=1`, see
   [README.md](README.md#opt-in-layers)); the page format stays covered offline
   through the real parser against fixture markup.
-- `WorkshopSourceTests` (fixture protocol, nothing reaches the network) — Steam's
+- `WorkshopSourceTests` (fixture protocol, nothing reaches the network) — subscribing and
+  unsubscribing (the form, the CSRF token matching its cookie, the subscribed set following
+  what Steam accepted, a refusal changing nothing, a sign-in page ending the session, none
+  without a session), the public comment thread read as plain text without the session,
+  Steam's
   session cookie read and never sent off Steam Community, author pages, a
   collection's order, collections marked on browse pages, the sidebar's rules on
   unfiltered pages, age-rating sampling of collections, every subscription page
@@ -1576,7 +1582,8 @@ and `WorkshopDownloadPersistenceTests`:
 `WorkshopUpdateStoreTests` — what counts as outdated, recorded downloads and
 imports against `project.json` dates, non-Workshop ids never sent, results kept
 across a relaunch, a download making an item current, the daily limit and its
-switch, a failed check keeping what was known, and forgetting deleted items;
+switch, a failed check keeping what was known, forgetting deleted items, and a preset
+offered when the base its manifest names changed after it was installed;
 `PanelWorkshopUpdateTests` — only an outdated wallpaper is marked and can be
 updated, and a reinstall needs an installed wallpaper and the user's yes before
 Steam is asked; `ImportTests` covers the swap that replaces an installed tree,

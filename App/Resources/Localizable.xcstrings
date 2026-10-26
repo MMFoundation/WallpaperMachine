@@ -2907,6 +2907,48 @@
     "Downloading the wallpaper this preset is based on…" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 프리셋의 기반이 되는 배경화면 다운로드 중…"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Downloading the wallpaper this preset is based on…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このプリセットの元になる壁紙をダウンロード中…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在下载此预设所基于的壁纸…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在下載此預設集所依據的桌布…"}}}
     },
+    "Downloading “%@” (%@), the wallpaper this preset is based on…" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 프리셋의 기반이 되는 배경화면 “%@”(%@) 다운로드 중…"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Downloading “%@” (%@), the wallpaper this preset is based on…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このプリセットの元になる壁紙「%@」（%@）をダウンロード中…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在下载此预设所基于的壁纸“%@”（%@）…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在下載此預設集所依據的桌布「%@」（%@）…"}}}
+    },
+    "Downloading “%@”, the wallpaper this preset is based on…" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 프리셋의 기반이 되는 배경화면 “%@” 다운로드 중…"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Downloading “%@”, the wallpaper this preset is based on…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このプリセットの元になる壁紙「%@」をダウンロード中…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在下载此预设所基于的壁纸“%@”…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在下載此預設集所依據的桌布「%@」…"}}}
+    },
+    "Subscribed on Steam" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam에서 구독함"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Subscribed on Steam"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamでサブスクライブ中"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已在 Steam 订阅"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已在 Steam 訂閱"}}}
+    },
+    "Subscribe on Steam" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam에서 구독"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Subscribe on Steam"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamでサブスクライブ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在 Steam 订阅"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在 Steam 訂閱"}}}
+    },
+    "Unsubscribe on Steam" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam에서 구독 취소"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Unsubscribe on Steam"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamでサブスクライブを解除"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在 Steam 取消订阅"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在 Steam 取消訂閱"}}}
+    },
+    "Comments" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "댓글"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Comments"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "コメント"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "评论"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "留言"}}}
+    },
+    "Loading comments…" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "댓글 불러오는 중…"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Loading comments…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "コメントを読み込み中…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在载入评论…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在載入留言…"}}}
+    },
+    "No comments yet" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "아직 댓글이 없습니다"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "No comments yet"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "まだコメントはありません"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "还没有评论"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "尚無留言"}}}
+    },
+    "Read all comments on Steam" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam에서 모든 댓글 보기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Read all comments on Steam"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamですべてのコメントを読む"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在 Steam 查看全部评论"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在 Steam 查看所有留言"}}}
+    },
+    "Steam did not subscribe you to this item. Try again, or subscribe on its Steam page." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam이 이 항목을 구독하지 않았습니다. 다시 시도하거나 Steam 페이지에서 구독하세요."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Steam did not subscribe you to this item. Try again, or subscribe on its Steam page."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamでこのアイテムをサブスクライブできませんでした。もう一度試すか、Steamのページでサブスクライブしてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Steam 没有为你订阅此项目。请重试，或在它的 Steam 页面上订阅。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Steam 沒有為你訂閱此項目。請再試一次，或在它的 Steam 頁面上訂閱。"}}}
+    },
+    "Steam did not unsubscribe you from this item. Try again, or unsubscribe on its Steam page." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam이 이 항목의 구독을 취소하지 않았습니다. 다시 시도하거나 Steam 페이지에서 구독을 취소하세요."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Steam did not unsubscribe you from this item. Try again, or unsubscribe on its Steam page."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamでこのアイテムのサブスクライブを解除できませんでした。もう一度試すか、Steamのページで解除してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Steam 没有取消你对此项目的订阅。请重试，或在它的 Steam 页面上取消订阅。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Steam 沒有取消你對此項目的訂閱。請再試一次，或在它的 Steam 頁面上取消訂閱。"}}}
+    },
+    "Steam could not be reached to change your subscription. Check your connection and try again." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "구독을 변경하려고 Steam에 연결하지 못했습니다. 연결을 확인하고 다시 시도하세요."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Steam could not be reached to change your subscription. Check your connection and try again."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "サブスクライブを変更するためにSteamに接続できませんでした。接続を確認してもう一度試してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "无法连接 Steam 来更改订阅。请检查网络连接后重试。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法連線 Steam 來變更訂閱。請檢查網路連線後再試一次。"}}}
+    },
+    "Steam has no comments to show for this item." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam에 이 항목에 대해 표시할 댓글이 없습니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Steam has no comments to show for this item."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamにはこのアイテムに表示できるコメントがありません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Steam 上没有此项目可显示的评论。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Steam 上沒有此項目可顯示的留言。"}}}
+    },
+    "Steam’s comments could not be read. Try again, or read them on the item’s Steam page." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam 댓글을 읽을 수 없습니다. 다시 시도하거나 항목의 Steam 페이지에서 읽어 보세요."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Steam’s comments could not be read. Try again, or read them on the item’s Steam page."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamのコメントを読み込めませんでした。もう一度試すか、アイテムのSteamページで読んでください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "无法读取 Steam 评论。请重试，或在此项目的 Steam 页面上查看。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法讀取 Steam 留言。請再試一次，或在此項目的 Steam 頁面上查看。"}}}
+    },
     "project.json must describe a scene, video, or web wallpaper." : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "project.json에는 장면, 비디오 또는 웹 배경화면이 정의되어 있어야 합니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "project.json must describe a scene, video, or web wallpaper."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "project.jsonはシーン、ビデオ、またはWeb壁紙を記述している必要があります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "project.json 必须描述场景、视频或网页壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "project.json 必須描述場景、影片或網頁桌布。"}}}
     },

@@ -84,6 +84,10 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     @ObservationIgnored private let now: () -> Date
     /// Free bytes on the volume that holds a folder, as the system would hand them to this app.
     @ObservationIgnored private let freeSpace: @Sendable (URL) -> Int64?
+    /// Steam's listing of one Workshop item (title and size), for a preset's base; nil when it
+    /// cannot be read. Tests pass their own.
+    typealias ItemDetails = @Sendable (String) async -> WorkshopItem?
+    @ObservationIgnored private let itemDetails: ItemDetails
     @ObservationIgnored private var failure: String?
     @ObservationIgnored private var receivesNetwork = false
     @ObservationIgnored private var networkStarted = false
@@ -146,13 +150,15 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
          inactivityTimeout: TimeInterval = 300, passTimeout: TimeInterval = 1800,
          now: @escaping () -> Date = Date.init,
          freeSpace: @escaping @Sendable (URL) -> Int64? = WorkshopDownloader.systemFreeSpace,
-         retryDelays: [TimeInterval] = [2, 8, 30], resumeGrace: TimeInterval = 45) {
+         retryDelays: [TimeInterval] = [2, 8, 30], resumeGrace: TimeInterval = 45,
+         itemDetails: @escaping ItemDetails = WorkshopDownloader.publicItemDetails) {
         self.sessionDirectory = sessionDirectory
         self.checkpointDirectory = checkpointDirectory
         self.inactivityTimeout = inactivityTimeout
         self.passTimeout = passTimeout
         self.now = now
         self.freeSpace = freeSpace
+        self.itemDetails = itemDetails
         self.retryDelays = retryDelays
         self.resumeGrace = resumeGrace
         self.runtimeProvider = runtimeProvider
@@ -380,12 +386,23 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                     fetchingPresetBase = true
                     currentItem = base
                     workshopDownloadCompleted = false
-                    self.expectedBytes = nil
                     receivedFloor = 0
                     receivedBaseline = 0
                     retryAttempt = 0
                     silentRetries = 0
-                    status = String(localized: "Downloading the wallpaper this preset is based on…")
+                    // Steam's listing names the base and gives its size, so its progress has a
+                    // total and the disk is checked for it as for any item.
+                    let listing = await itemDetails(base)
+                    self.expectedBytes = listing.flatMap { $0.size > 0 ? $0.size : nil }
+                    if let listing, !listing.title.isEmpty {
+                        let size = listing.size > 0
+                            ? ByteCountFormatter.string(fromByteCount: listing.size, countStyle: .file) : nil
+                        status = size.map { String(localized: "Downloading “\(listing.title)” (\($0)), the wallpaper this preset is based on…") }
+                            ?? String(localized: "Downloading “\(listing.title)”, the wallpaper this preset is based on…")
+                    } else {
+                        status = String(localized: "Downloading the wallpaper this preset is based on…")
+                    }
+                    try await ensureFreeSpace(under: root, staging: content, label: label)
                     continue
                 }
                 break
@@ -625,8 +642,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// Try again) after any checkpoint is restored, and again before each automatic relaunch
     /// of SteamCMD (a retry after a dropped connection or a wake, or Steam asking to be
     /// started again), so a retry only needs the space still missing. A preset's base is
-    /// fetched in a second pass of unknown size, which is not checked; concurrent jobs are
-    /// checked one by one, not summed.
+    /// checked before its pass at the size Steam lists for it (not at all when it lists none);
+    /// concurrent jobs are checked one by one, not summed.
     private func ensureFreeSpace(under root: URL, staging: URL, label: String) async throws {
         let installingAssets = isInstallingAssets
         let expected = expectedBytes
@@ -655,6 +672,11 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     nonisolated static func availableCapacity(at url: URL) -> Int64? {
         try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage
+    }
+
+    /// What a download asks Steam's public details endpoint by default; tests pass their own.
+    nonisolated static let publicItemDetails: ItemDetails = { id in
+        try? await WorkshopService().details(ids: [id]).first
     }
 
     /// What a download reads by default; tests pass their own disk instead.
