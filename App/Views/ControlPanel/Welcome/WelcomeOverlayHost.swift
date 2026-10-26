@@ -46,7 +46,7 @@ struct WelcomeOverlayHost: View {
         // for the guide, a popover or a sign-in is not, and never comes through here.
         set: { shown in if !shown && !presenter.isDismissed { presenter.dismiss() } })
     ) {
-      SupportPromptSheet(presenter: presenter)
+      SupportPromptSheet(presenter: presenter).panelPresentationLocale()
     }
   }
 }

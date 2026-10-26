@@ -69,7 +69,11 @@ choice is **System**, bumps an observable revision. From it `PanelLocale` gives
   The root's `.panelTheme(theme:locale:)` puts it in `\.locale`, and SwiftUI looks
   every `LocalizedStringKey` up in that language: `Text("…")`, `Button("…")`,
   `Toggle`, `Label`, `Section`, `Picker` and `Menu` literals re-render in place the
-  moment the language changes, the first-run guide included;
+  moment the language changes, the first-run guide included. A sheet or popover opens
+  in its own AppKit window, which carries the launch language instead of the root's
+  `\.locale`, so its content takes `.panelPresentationLocale()` (the download and
+  SteamCMD dialog, the support prompt, the Downloads, Import, Recently used, Now
+  Playing and desktop-chooser popovers); a new sheet or popover with literals needs it too;
 - `string(_:)`, which the global `L("…")` calls: the phrase from the language's own
   `<tag>.lproj` folder in the app bundle, for APIs that take a `String` (`.help`,
   `.navigationTitle`, `TextField` prompts, accessibility labels, alert text) and
