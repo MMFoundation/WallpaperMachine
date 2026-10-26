@@ -21,9 +21,13 @@ struct WebWallpaperPageDiagnostics {
               let raw = payload["text"] as? String
         else { return nil }
         logged += 1
-        var text = raw.components(separatedBy: .newlines).joined(separator: " ")
+        // Only what can reach the line is read, however long the page made its report.
+        let head = raw.prefix(Self.maximumLength + 1)
+        var text = head.components(separatedBy: .newlines).joined(separator: " ")
             .trimmingCharacters(in: .whitespaces)
-        if text.count > Self.maximumLength { text = String(text.prefix(Self.maximumLength)) + "…" }
+        if head.count > Self.maximumLength || text.count > Self.maximumLength {
+            text = String(text.prefix(Self.maximumLength)) + "…"
+        }
         let last = logged == Self.maximumLines ? "; later page messages of this document are not logged" : ""
         return (level, "web wallpaper \(project): page \(kind): \(text)\(last)")
     }
