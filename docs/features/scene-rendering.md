@@ -18,27 +18,24 @@ The three scene controls in **Advanced**:
 
 ### Scene renderer
 
-Which renderer scene wallpapers prefer. **Native Metal preferred**, the default,
-asks for the native Metal backend; a scene it cannot draw runs on Compatibility as a
-whole (an effect is never dropped to keep a scene native) and the status line says
-why. **Compatibility** is the Vulkan-through-MoltenVK path for every scene.
-Lock-screen playback always uses Compatibility.
+Native Metal is the only scene renderer, on the desktop and on the lock screen. A scene
+it cannot draw is not drawn by anything else and no effect is dropped to make it fit: it
+is held on what the display already shows, and **Drawn by** says why
+([when Native Metal cannot draw a scene](#when-native-metal-cannot-draw-a-scene)).
+Compatibility, the Vulkan-through-MoltenVK renderer, is gone; a `scene_renderer` key
+an older version wrote is read past.
 
-Native Metal became the default once it drew every scene of the local test library
-the way Compatibility does (drawn by both renderers in one harness, the pictures
-were the same) and cost less to run. Over 12 of those scenes at 3840×2160 and 60
-FPS it took about 21% less process CPU time and 14% less GPU time in its own command
-buffers (one per frame instead of three), about 3% less memory footprint, and held
-60 FPS where Compatibility dropped frames; the commands are in the
-[verification log](../testing/verification-log.md). A configuration saved before
-then holds `compatibility` whether or not anyone chose it, so it moves to Native
-Metal preferred once, when this version first loads it, and records that it did
-(`native_metal_default_applied`); choosing Compatibility afterwards is kept.
+Native Metal replaced it once it drew every scene of the local test library the way
+Compatibility did (drawn by both renderers in one harness, the pictures were the same)
+and cost less to run. Over 12 of those scenes at 3840×2160 and 60 FPS it took about
+21% less process CPU time and 14% less GPU time in its own command buffers (one per
+frame instead of three), about 3% less memory footprint, and held 60 FPS where
+Compatibility dropped frames; the commands are in the
+[verification log](../testing/verification-log.md).
 
-No GPU backend is created until the scene has been parsed and a backend chosen, so
-the row reports one of three states per scene: **preparing** (no backend yet), the
-backend actually in use, or Compatibility with the reason native was not used. It
-never shows the preference in place of the outcome.
+No GPU backend is created until the scene has been parsed, so the row reports one of
+three states per scene: **preparing** (no renderer yet), Native Metal drawing it, or
+held with the reason it could not be drawn.
 
 Native Metal draws image layers, text layers, sprite-sheet animation,
 two-dimensional puppets, two-dimensional sprite, sprite-trail, rope and rope-trail
@@ -49,11 +46,12 @@ trail, a fluid or ripple simulation), images the runtime replaces while the scen
 plays, and BGRA or 8-bit NV12 video textures — the latter either converted once per
 frame or, with
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) on,
-sampled by the layer's own shader. A scene falls back as a whole for HDR or 10-bit
-video, a plain video wallpaper, a shader that does not translate, particle geometry
-in a layout it does not recognise (lit particles among them), a multisampled target,
-an effect that samples a depth buffer, or a layer that reads its own previous frame (its `_b` composite, bound anywhere but its
-own effects).
+sampled by the layer's own shader. A 10-bit or HDR video texture is converted and tone
+mapped to SDR ([10-bit and HDR video textures](#10-bit-and-hdr-video-textures)). A
+scene is held instead of drawn when a shader does not translate for Metal, a video
+texture is an animated sprite sheet or names no media, a puppet shader is bound to a
+mesh without bone weights, or its render graph has a step the native renderer does not
+recognise.
 A scene with `camerashake` on shakes its camera as Wallpaper Engine does: the eye and
 what it looks at move together by `(cos t, sin 1.333t, sin t)` at
 `t = camerashakespeed² × time`, its length raised to `camerashakeroughness³`, scaled
@@ -959,6 +957,100 @@ compiles each wallpaper's shaders again the first time that copy loads it, once.
 Compiled pipelines are shared between copies. The native backend's binary archive
 stores pipelines, so it covers the smaller part. Method and what recompiles:
 [renderer testing](../testing/renderer.md#metal-compile-across-processes).
+
+### 10-bit and HDR video textures
+
+A 10-bit video texture (HEVC Main 10, 10-bit VP9 or AV1) stays in the scene and is shown
+as an SDR picture. The decoder is asked for 10-bit biplanar 4:2:0 (`x420`); the two planes
+are imported as 16-bit images without a copy, and one conversion per new frame turns them
+into the same BGRA image an 8-bit video produces, which every layer that samples the video
+then reads. What the conversion does depends on the transfer function the stream declares,
+which the decoder attaches to each frame:
+
+- **PQ (SMPTE ST 2084) and HLG (BT.2100)**, the two HDR curves, are tone mapped. The picture
+  is converted from YCbCr with the BT.2020 matrix (or whichever the stream states), brought
+  to light in nits (PQ directly, HLG through its inverse OETF and the OOTF of a 1000-nit
+  display), compressed with the BT.2390 EETF in linear light, rotated from the stream's
+  primaries (BT.2020, or P3-D65 when it says so) into BT.709, and encoded with the sRGB
+  curve. Linear light is scaled so that 203 nits, the reference white of BT.2408, is 1.0,
+  and the EETF maps the stream's peak to that SDR white: the peak is the stream's maximum
+  content light level, else its mastering display's maximum luminance, else 1000 nits, and
+  never more than the 10000 nits the curves can express. The compression acts on the
+  brightest channel of each pixel, so the ratio between channels survives it. A colour that
+  falls outside BT.709 is desaturated towards its own luminance just far enough that no
+  channel is negative, and scaled down if a channel exceeds one, rather than cut off per
+  channel.
+- **Anything else** (BT.709, BT.601, an unstated transfer) is display-referred 10-bit
+  video and is not tone mapped: the codes are converted with their matrix and written as
+  they decode, exactly as an 8-bit frame is. If such a stream names BT.2020 or P3-D65
+  primaries, its linear light (with a 2.4 power law standing for the display) is rotated
+  into BT.709 and encoded back with the same law, so mid-tones stay where they were.
+
+A stream that declares PQ or HLG without naming primaries or a matrix is taken to be
+BT.2020. The peak comes from the decoded frame's own attachments; the content light level
+and mastering display boxes of an MP4 are not forwarded to the decoder, so a stream that
+carries them only there is tone mapped from 1000 nits
+([container readers](../container-readers.md)).
+
+A 10-bit frame has no direct-plane path: its planes are 16-bit and belong to the
+conversion, so a material that could sample 8-bit planes reads the converted image
+instead, whatever [**Direct video plane sampling**](performance.md#direct-video-plane-sampling)
+says, and the scene reports its video path as `yuv10_converted`. The conversion kernel is
+compiled when a scene whose video is 10-bit is prepared, not before: an 8-bit video never
+compiles it. The constants are in `Renderer/Engine/src/Video/VideoColorConversion.hpp` and
+the kernel in `VideoConversionMetal.hpp`; `metal_video_texture_test` checks it against the
+CPU reference `Renderer/Testing/hdr_reference.hpp`.
+
+### When Native Metal cannot draw a scene
+
+A scene Native Metal cannot draw is not drawn by anything else, and no layer, effect or
+pass is dropped to make it fit. The scene is **held** instead, and the failure is said
+once, with its reason, in the log and in the panel. Five things can stop a scene, each a
+stage the host words in the user's language with the engine's own English explanation
+beside it:
+
+| Stage | What happened | Where the engine found out |
+|---|---|---|
+| `unsupported` | The admission check refused the scene (a shader that does not translate for Metal, a video texture it cannot import, an unrecognised render-graph step, ...) | `SelectSceneBackend`, before any renderer exists |
+| `prepare` | The renderer could not be created on the surface (also a surface with no Metal layer, such as an offscreen probe) | `createMetal` |
+| `compile` | The scene's shaders or pipelines did not compile for Metal | `compileRenderGraph` |
+| `frame` | A frame failed after the scene was running | `drawFrame` |
+| `surface` | The renderer could not take the replacement surface after a display change | `resetSurface` |
+
+What a held scene leaves on the display:
+
+- **A layer that has drawn keeps its last frame.** The engine stops the frame clock and
+  never touches the layer again: no drawable is acquired, nothing is cleared, nothing is
+  presented over it. A scene refused while another scene was drawing (a wallpaper switch)
+  also releases the outgoing scene's renderer, so a later surface rebuild cannot draw the
+  refused scene on it; the layer still holds the outgoing last frame. The host's
+  [recovery ladder](#recovery) still runs after a frame that fails once the scene had
+  shown one.
+- **A layer that has drawn nothing shows the project's preview picture.** The engine finds
+  it (the `preview` key of `project.json`, else `preview.jpg`, `preview.jpeg`,
+  `preview.png` or `preview.gif`, always inside the project's own folder and under 32 MB),
+  decodes it once with ImageIO and lays it over the layer as a plain Core Animation
+  sublayer, scaled to fill: no GPU pipeline, no per-frame work (`Renderer/Surface`,
+  `StillPreview`). The first real frame that is later presented takes it away. A project
+  with no preview picture shows nothing made up: the layer stays as it was, and the
+  failure is still reported.
+- **The host is told a first picture exists.** Its activation waits for one for up to 90
+  seconds and then puts the previous wallpaper back; a held scene settles that wait at
+  once, so the wallpaper stays assigned, failed and visible, instead of being rolled back
+  with a message that names no cause.
+
+The failure is published as the scene's `failure_stage` and `failure_reason` in the
+bridge's `scene_renderers` row, with `backend` `unknown` (nothing is drawing it). The
+engine's log line, at error level and once per failure, is
+`scene cannot be drawn with native Metal (<stage>): <reason>; holding the last frame|preview picture`.
+**Drawn by** words it as "not drawn — <stage in the user's language> (reason: …). Showing
+its last picture.", the scene is in **Updating now** as "stopped after a rendering
+failure" with **Retry**, and the diagnostics report and a library issue report name the
+stage and reason. The reason itself stays English. **Retry**, or the host's recovery,
+asks the native renderer again: the engine does not remember a failure against the scene.
+`scene_failure_policy_test` forces each fault on a layer no window owns and checks the
+failure is logged once, the frame loop stops without presenting again, and the last frame
+or the preview stays in place.
 
 ### Fit with blurred backdrop
 

@@ -990,7 +990,7 @@ must recognise (`hev1`, which a kick and a rebuild cannot repair, so it always e
 failure), but nothing here reclaims a decoder and no test shows a repair that works on
 a stuck pipeline. Those premises are answered by the `nativeVideoPlaybackStalled`,
 `nativeVideoPlaybackKick` and `nativeVideoPlaybackRebuild` counters on a real machine, and
-by the sleep, lock and unlock rows in [manual-smoke](manual-smoke.md#native-video-backend-experimental-opt-in).
+by the sleep, lock and unlock rows in [manual-smoke](manual-smoke.md#native-video-backend).
 Most of the rest of this list has rows there too: a rapid switch, the menu bar's tint, Fit,
 Original size and a scale factor against Compatibility, the Mission Control picture of a
 rotated clip, a real hot-plug, mirror set, AirPlay screen or closed lid, and a slow
