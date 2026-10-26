@@ -172,20 +172,20 @@ private struct MarkStack: View {
       glyph = theme.accent.onPrimary.color
       symbol = "checkmark"
     case .approved:
-      fill = .black.opacity(0.58)
+      fill = theme.surface.markFill.color
       glyph = theme.surface.approved.color
       symbol = "trophy.fill"
     case .favorite:
-      fill = .black.opacity(0.58)
+      fill = theme.surface.markFill.color
       glyph = theme.surface.heart.color
       symbol = "heart.fill"
     case .subscribed:
-      fill = .black.opacity(0.58)
-      glyph = .white
+      fill = theme.surface.markFill.color
+      glyph = theme.surface.markGlyph.color
       symbol = "bookmark.fill"
     case .preset:
-      fill = .black.opacity(0.58)
-      glyph = .white
+      fill = theme.surface.markFill.color
+      glyph = theme.surface.markGlyph.color
       symbol = "slider.horizontal.3"
     }
     return Image(systemName: symbol)
