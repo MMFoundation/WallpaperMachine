@@ -4677,7 +4677,7 @@
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Permitir este SteamCMD"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 SteamCMD 허용"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このSteamCMDを許可"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "允许这份 SteamCMD"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "允許這份 SteamCMD"}}}
     },
     "Locate a copy" : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Localizar uma cópia"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "기존 사본 찾기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "既存のコピーを指定"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "选择已有副本"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "指定現有副本"}}}
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Indicar cópia"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "기존 사본 찾기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "既存のコピーを指定"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "选择已有副本"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "指定現有副本"}}}
     },
     "Cancel setup" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Cancelar configuração"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "초기 설정 취소"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "セットアップをキャンセル"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "取消设置"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "取消設定"}}}
