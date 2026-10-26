@@ -707,6 +707,53 @@ TEST(ScriptRuntimeCompat, ALayerSetParentInPlaceStaysThereWhenItIsTurnedLater) {
     for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
 }
 
+// A layer hung from an edge keeps its place too: its anchor point follows it into the new
+// parent, so turning it afterwards does not move it back.
+TEST(ScriptRuntimeCompat, AnEdgeAnchoredLayerSetParentInPlaceStaysThereWhenItIsTurnedLater) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  holder  = std::make_shared<SceneNode>();
+    auto  child   = std::make_shared<SceneNode>();
+    holder->SetTranslate(linalg::Vector3f(100, 0, 0));
+    holder->SetScale(linalg::Vector3f(2, 2, 1));
+    scene.sceneGraph->AppendChild(holder);
+    scene.sceneGraph->AppendChild(child);
+    runtime->RegisterNode("holder", holder.get());
+    runtime->RegisterNode("child", child.get());
+    runtime->RegisterNodeSize("child", linalg::Vector2f(80, 40));
+    ASSERT_TRUE(runtime->SetNodeAnchorAlignment("child", "left", linalg::Vector3f(10, 0, 0)));
+    child->UpdateTrans();
+    const double before = child->ModelTrans()(0, 3);
+    runtime->RegisterSceneScript("var step = 0; function update() { step++;\n"
+                                 "var c = thisScene.getLayer('child');\n"
+                                 "if (step === 1) c.setParent(thisScene.getLayer('holder'), true);\n"
+                                 "if (step === 2) c.angles = new Vec3(0, 0, 0);\n"
+                                 "}", "");
+    runtime->Tick(0.1);
+    runtime->Tick(0.1);
+    child->UpdateTrans();
+    EXPECT_NEAR(child->ModelTrans()(0, 3), before, 1e-4) << "still where it was on screen";
+    for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
+}
+
+// A parent squashed to nothing cannot take a layer in place: there is no local transform that
+// keeps it where it is, so the layer stays with its old parent.
+TEST(ScriptRuntimeCompat, SetParentInPlaceRefusesAParentWithNoInverse) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  flat    = std::make_shared<SceneNode>();
+    auto  child   = std::make_shared<SceneNode>();
+    flat->SetScale(linalg::Vector3f(0, 0, 0));
+    child->SetTranslate(linalg::Vector3f(10, 0, 0));
+    scene.sceneGraph->AppendChild(flat);
+    scene.sceneGraph->AppendChild(child);
+    runtime->RegisterNode("flat", flat.get());
+    runtime->RegisterNode("child", child.get());
+    EXPECT_FALSE(runtime->SetNodeParent("child", "flat", true));
+    EXPECT_EQ(child->Parent(), scene.sceneGraph.get());
+    EXPECT_TRUE(runtime->SetNodeParent("child", "flat", false)) << "without keeping its place it may go";
+}
+
 // The bone calls of an image layer with a puppet: the count, a bone's index by name and its
 // parent's, and its transform as the last frame posed it, in the scene and in its parent bone.
 TEST(ScriptRuntimeCompat, PuppetBonesAnswerTheirIndexParentAndPose) {

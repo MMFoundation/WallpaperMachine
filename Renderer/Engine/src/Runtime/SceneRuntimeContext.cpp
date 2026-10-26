@@ -4556,30 +4556,34 @@ bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view 
     });
     if (entry == siblings.end()) return false;
     auto owned = *entry;
-    linalg::Matrix4d world = linalg::Matrix4d::Identity();
-    if (keep_place) {
+    // Keeping the place needs the new parent's inverse; a parent squashed to nothing has none,
+    // and the layer then stays where it hangs.
+    const bool       place   = keep_place && ! node->IgnoresParentTransform();
+    linalg::Matrix4d world   = linalg::Matrix4d::Identity();
+    linalg::Matrix4d inverse = linalg::Matrix4d::Identity();
+    if (place) {
         node->UpdateTrans();
         world = node->ModelTrans();
+        new_parent->UpdateTrans();
+        inverse = new_parent->ModelTrans().inverse();
+        if (! inverse.allFinite()) return false;
     }
     siblings.erase(entry);
     new_parent->AppendChild(std::move(owned));
-    if (keep_place && ! node->IgnoresParentTransform()) {
-        new_parent->UpdateTrans();
-        const linalg::Matrix4d inverse = new_parent->ModelTrans().inverse();
-        if (inverse.allFinite()) {
-            node->SetTransformFromMatrix(inverse * world);
-            // The new local transform is also what later writes and bindings start from. A layer
-            // hung from an edge derives its place from its anchor, so only its turn and size are
-            // carried there.
-            const std::string key(name);
-            const linalg::Vector3f scale = node->Scale(), angles = node->Rotation(), place = node->Translate();
-            SetNodeScale(key, scale);
-            SetNodeRotation(key, angles);
-            const auto anchor = m_node_alignment.find(key);
-            const bool unanchored = anchor == m_node_alignment.end() ||
-                                    AnchorDirection(anchor->second.alignment).head<2>().isZero();
-            if (unanchored) SetNodeTranslate(key, place);
+    if (place) {
+        node->SetTransformFromMatrix(inverse * world);
+        // The new local transform is also what later writes and bindings start from. Scale and
+        // angles go first; a layer hung from an edge then sets its anchor point back by the
+        // offset they give it, so its place stays the one just restored.
+        const std::string      key(name);
+        const linalg::Vector3f scale = node->Scale(), angles = node->Rotation(), at = node->Translate();
+        SetNodeScale(key, scale);
+        SetNodeRotation(key, angles);
+        linalg::Vector3f offset = linalg::Vector3f::Zero();
+        if (const auto anchor = m_node_alignment.find(key); anchor != m_node_alignment.end()) {
+            offset = node->Translate() - anchor->second.origin;
         }
+        SetNodeTranslate(key, at - offset);
     }
     MarkSceneGraphMutated("reparent");
     return true;
