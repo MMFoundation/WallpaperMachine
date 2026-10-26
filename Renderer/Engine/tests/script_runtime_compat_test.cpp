@@ -6388,6 +6388,31 @@ export function update(value) { return globalThis.seen; }
     EXPECT_FLOAT_EQ(seen->getFloat(), 5005.0f);
 }
 
+// A layer's program hears where on the layer the cursor is; a program of the scene itself,
+// which has no layer, gets no `localPosition`.
+TEST(ScriptHostLimits, ACursorEventCarriesTheLocalPositionOnlyWhenTheHostGivesOne) {
+    ScriptEngine engine;
+    DynamicValue initial(0.0f);
+    auto reader = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+export function cursorClick(event) {
+  globalThis.seen = event.localPosition === undefined ? -1 : event.localPosition.x * 1000 + event.localPosition.y;
+}
+export function update(value) { return globalThis.seen; }
+)JS", "", {}, initial, {});
+    ASSERT_NE(reader, nullptr);
+    ScriptHostContext host;
+    host.cursor_local_position = linalg::Vector2f(12, 34);
+    reader->DispatchCursorClick(host);
+    auto seen = reader->Evaluate(host, DynamicValue(0.0f));
+    ASSERT_NE(seen, nullptr);
+    EXPECT_FLOAT_EQ(seen->getFloat(), 12034.0f);
+    host.cursor_local_position.reset();
+    reader->DispatchCursorClick(host);
+    seen = reader->Evaluate(host, DynamicValue(0.0f));
+    ASSERT_NE(seen, nullptr);
+    EXPECT_FLOAT_EQ(seen->getFloat(), -1.0f);
+}
+
 TEST(ScriptHostLimits, AnEndedListenerRemovedByAnEarlierOneDoesNotFire) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto node    = std::make_shared<SceneNode>();

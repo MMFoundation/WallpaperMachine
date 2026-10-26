@@ -1333,7 +1333,13 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   value one frame later. Wallpaper Engine unprojects when the script reads; whether its
   scripts run before or after it rewrites the view each frame was not established. The
   cursor callbacks' `position` and `worldPosition` (and `input.cursorLocalPosition`) carry
-  the same far-plane point; the shape of Wallpaper Engine's event objects was not read. The
+  the same far-plane point. A program of a layer also gets `localPosition`, where the cursor
+  is on that layer's box from its lower-left corner, 0 to the layer's size on each axis while
+  over it, as Wallpaper Engine's reference describes it (`SceneRuntimeContext::CursorLocalPosition`,
+  from the same plane point the hit test uses; a held button's release can be off the box and
+  is not clamped); a program of the scene itself gets none. That the vertical axis runs up
+  from the bottom, as the world's does, was not compared with a Wallpaper Engine frame, and
+  the event's `hitBox` (a puppet's hit box) is not given. The
   pointer maps over the presented frame, so a cropped window looks through the picture's
   interior and a letterboxed presentation extrapolates the ray past the frustum, as hit
   tests already do. A camera without a usable view (a far plane or aspect that is not
