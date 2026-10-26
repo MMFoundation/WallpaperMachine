@@ -157,8 +157,13 @@ was never imported is noted as used in place from its original path, and moving 
 deleting it there breaks the wallpaper. A pick that resolves in neither place gets a
 visible alert and *Reselect…* in place of *Choose…*.
 
-Both persist through `setPropertyPath`; *Clear* sends `nil` and the engine writes the
-property's own default back. A choice the app cannot honour (a wallpaper folder that
+Both persist through `setPropertyPath`; *Clear* sends `nil` and the property is empty
+again. A `file` or `directory` property has no default but empty: the path a
+`project.json` names for one (an author's, or a [Workshop preset's](workshop-downloads.md#workshop-presets))
+is read as nothing, so no folder of the user's is imported, watched or handed to a page
+until the user picks it here (`ProjectProperty::default_value` in
+`Renderer/Bridge/src/project/manifest.rs`). Picking the very path the project named is
+an ordinary pick. A choice the app cannot honour (a wallpaper folder that
 is missing or read-only, so nothing can be staged inside it) is reported beside that
 control rather than in the window-wide banner, and the path is not sent. `texture` and
 `scenetexture` properties are a separate kind: they keep the scene texture picker and
