@@ -22,11 +22,13 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         scalingMode: BridgeScalingMode = .fill,
         scalingFactor: Double = 1.0,
         mediaPath: String = "/tmp/does-not-need-to-exist/clip.mp4",
-        framing: BridgeFraming = BridgeFraming(panX: 0.5, panY: 0.5)
+        framing: BridgeFraming = BridgeFraming(panX: 0.5, panY: 0.5),
+        audioSource: UInt32? = nil
     ) -> BridgeNativeVideoWallpaper {
         BridgeNativeVideoWallpaper(
             displayId: displayID,
             startupRevision: 0,
+            audioSourceDisplayId: audioSource ?? displayID,
             wallpaperId: id,
             title: "Clip",
             mediaPath: mediaPath,
@@ -276,6 +278,57 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             switchHold: switchHold)
         host.onStateChanged = { recorder.states.append($0) }
         return host
+    }
+
+    func testAMirrorGroupIsHeardFromOneMemberAndAHiddenSourceHandsItsSoundOn() async throws {
+        screenFrames = [
+            (7, NSRect(x: 0, y: 0, width: 80, height: 60)), (9, NSRect(x: 80, y: 0, width: 80, height: 60)),
+        ]
+        let source = wallpaper(displayID: 7, volume: 0.6)
+        let mirror = wallpaper(displayID: 9, volume: 0.8, audioSource: 7)
+        let host = makeHost(wallpapers: [], recorder: Recorder())
+        defer { host.shutdown() }
+        await host.apply([source, mirror])
+        let heard = try XCTUnwrap(surfacesMade[7])
+        let copy = try XCTUnwrap(surfacesMade[9])
+        XCTAssertFalse(heard.muted, "the source is heard")
+        XCTAssertEqual(heard.volume, 0.6)
+        XCTAssertTrue(copy.muted, "its mirror plays the same clip without a second copy of the sound")
+
+        host.setPresentationSuspended(true, forDisplay: 7)
+        XCTAssertTrue(heard.muted, "a hidden source is not heard")
+        XCTAssertFalse(copy.muted, "the mirror still in sight takes the sound over")
+        XCTAssertEqual(copy.volume, 0.8, "at its own volume")
+
+        host.setPresentationSuspended(false, forDisplay: 7)
+        XCTAssertFalse(heard.muted)
+        XCTAssertTrue(copy.muted, "and gives it back when the source is in sight again")
+
+        host.setPresentationSuspended(true)
+        XCTAssertTrue(heard.muted && copy.muted, "nothing in sight, nothing heard")
+    }
+
+    func testIndependentAssignmentsOfTheSameClipAreEachHeard() async throws {
+        screenFrames = [
+            (7, NSRect(x: 0, y: 0, width: 80, height: 60)), (8, NSRect(x: 80, y: 0, width: 80, height: 60)),
+        ]
+        let host = makeHost(wallpapers: [], recorder: Recorder())
+        defer { host.shutdown() }
+        await host.apply([wallpaper(displayID: 7), wallpaper(displayID: 8)])
+        XCTAssertFalse(try XCTUnwrap(surfacesMade[7]).muted)
+        XCTAssertFalse(
+            try XCTUnwrap(surfacesMade[8]).muted, "the same clip chosen for two displays is two wallpapers, not a mirror")
+    }
+
+    func testTheUsersMuteKeepsADisplaySilentUntilLifted() async throws {
+        screenFrames = [(7, NSRect(x: 0, y: 0, width: 80, height: 60))]
+        let host = makeHost(wallpapers: [], recorder: Recorder())
+        defer { host.shutdown() }
+        await host.apply([wallpaper(displayID: 7, muted: true)])
+        let surface = try XCTUnwrap(surfacesMade[7])
+        XCTAssertTrue(surface.muted)
+        await host.apply([wallpaper(displayID: 7)])
+        XCTAssertFalse(surface.muted, "unmuting is heard at once")
     }
 
     func testStartupWaitsForSurfaceReadinessAndAcknowledgesNewRevisions() async throws {

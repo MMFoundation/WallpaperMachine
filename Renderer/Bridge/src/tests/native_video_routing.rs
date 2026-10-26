@@ -370,6 +370,11 @@ async fn a_mirror_shares_its_sources_key_and_carries_no_rate() {
         source.admission_key, mirror.admission_key,
         "one verdict has to cover the group, so the group needs one key"
     );
+    assert_eq!(source.audio_source_display_id, 7, "a source is its own audio source");
+    assert_eq!(
+        mirror.audio_source_display_id, 7,
+        "a mirror names its source, so the host can let one member of the group be heard"
+    );
     // No member's target rate takes part in the key.
     bridge.set_mirror_target_fps("9".into(), 24).await.unwrap();
     retarget_fps(&bridge, "300", "7", 30).await;

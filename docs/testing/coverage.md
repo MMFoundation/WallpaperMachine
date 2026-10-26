@@ -810,7 +810,9 @@ need an authorized runtime check
   snapshot, judged afresh when the file changes; a failure that is not a verdict on the file is
   restated for its own startup revision and tried again under a newer one), re-evaluation
   when the admission key (the file) changes, one surface per display, a mirror group
-  judged once under its source's key, hidden-display and user-pause handling, a clip stopped
+  judged once under its source's key and heard from one member (a covered source hands the
+  sound to a mirror in sight; the same clip on two independent displays is heard on both),
+  hidden-display and user-pause handling, a clip stopped
   by a reading taken while the desktop (or one display) was covered playing again
   once `WallpaperHosts.reconcile` has the host read the bridge again (that
   `AppDelegate` makes the call after each delivery is not run by any test),
@@ -1394,7 +1396,7 @@ with no desktop window. It covers the page contract (`WebWallpaperPageTests`,
 (`WebWallpaperPropertyPayloadTests`), the author API (`WebWallpaperAuthorAPITests`:
 audio, media, random-file and directory listeners), audio delivery, output and
 single-owner rules (`WebWallpaperAudioMediaTests`, `WebWallpaperAudioOutputTests`,
-`WebWallpaperAudioOwnershipTests`), host lifecycle, crash budget and reload
+`MirrorAudioOwnershipTests`), host lifecycle, crash budget and reload
 recovery (`WebWallpaperHostLifecycleTests`, `WebWallpaperRecoveryTests`),
 suspension by presentation and by pause, with the first-frame grace (counted only
 while the view is in the window), edits drawn on a paused page, and a measured stop of

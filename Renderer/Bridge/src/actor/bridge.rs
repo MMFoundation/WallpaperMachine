@@ -1003,6 +1003,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 Ok(BridgeNativeVideoWallpaper {
                     display_id: desc.display.display_id,
                     startup_revision: self.reserved_startup_revision(),
+                    audio_source_display_id: desc.audio_source_display_id,
                     wallpaper_id: desc.wallpaper_id,
                     title,
                     media_path,

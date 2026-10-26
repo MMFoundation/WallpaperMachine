@@ -849,6 +849,9 @@ pub struct BridgeNativeVideoWallpaper {
     pub display_id: u32,
     /// Reconcile revision to echo when this host finishes its initial load.
     pub startup_revision: u64,
+    /// Source display of this assignment: a mirror carries its source's, so the host can let one
+    /// member of the group be heard. Independent assignments of one clip remain separate.
+    pub audio_source_display_id: u32,
     pub wallpaper_id: String,
     pub title: String,
     /// Absolute path to the media file, already containment-checked against the

@@ -2,17 +2,17 @@ import XCTest
 
 @testable import WallpaperMachine
 
-final class WebWallpaperAudioOwnershipTests: XCTestCase {
+final class MirrorAudioOwnershipTests: XCTestCase {
     func testSourceWinsOverEarlierMirrorAndHiddenSourceHandsOverOneOwner() {
         let wallpapers: [UInt32: BridgeWebWallpaper] = [7: descriptor(7, source: 7), 2: descriptor(2, source: 7), 3: descriptor(3, source: 7)]
-        XCTAssertEqual(WebWallpaperAudioOwnership.owners(in: wallpapers, canPresent: { _ in true }), [7: 7])
-        XCTAssertEqual(WebWallpaperAudioOwnership.owners(in: wallpapers, canPresent: { $0 != 7 }), [7: 2])
-        XCTAssertEqual(WebWallpaperAudioOwnership.owners(in: wallpapers, canPresent: { _ in false }), [:])
+        XCTAssertEqual(MirrorAudioOwnership.owners(in: wallpapers, canPresent: { _ in true }), [7: 7])
+        XCTAssertEqual(MirrorAudioOwnership.owners(in: wallpapers, canPresent: { $0 != 7 }), [7: 2])
+        XCTAssertEqual(MirrorAudioOwnership.owners(in: wallpapers, canPresent: { _ in false }), [:])
     }
 
     func testIndependentInstancesOfTheSameWallpaperRemainSeparate() {
         let wallpapers: [UInt32: BridgeWebWallpaper] = [7: descriptor(7, source: 7), 8: descriptor(8, source: 8)]
-        XCTAssertEqual(WebWallpaperAudioOwnership.owners(in: wallpapers, canPresent: { _ in true }), [7: 7, 8: 8])
+        XCTAssertEqual(MirrorAudioOwnership.owners(in: wallpapers, canPresent: { _ in true }), [7: 7, 8: 8])
     }
 
     func testPausedMutedAndZeroVolumeSurfacesCannotBecomeAudioOwner() {
@@ -23,7 +23,7 @@ final class WebWallpaperAudioOwnershipTests: XCTestCase {
         var silent = descriptor(3, source: 7)
         silent.volume = 0
         let wallpapers: [UInt32: BridgeWebWallpaper] = [7: source, 2: mirror, 3: silent, 4: descriptor(4, source: 7)]
-        XCTAssertEqual(WebWallpaperAudioOwnership.owners(in: wallpapers, canPresent: { _ in true }), [7: 4])
+        XCTAssertEqual(MirrorAudioOwnership.owners(in: wallpapers, canPresent: { _ in true }), [7: 4])
     }
 
     private func descriptor(_ display: UInt32, source: UInt32) -> BridgeWebWallpaper {

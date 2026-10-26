@@ -5336,6 +5336,11 @@ public struct BridgeNativeVideoWallpaper {
      * Reconcile revision to echo when this host finishes its initial load.
      */
     public var startupRevision: UInt64
+    /**
+     * Source display of this assignment: a mirror carries its source's, so the host can let one
+     * member of the group be heard. Independent assignments of one clip remain separate.
+     */
+    public var audioSourceDisplayId: UInt32
     public var wallpaperId: String
     public var title: String
     /**
@@ -5372,7 +5377,11 @@ public struct BridgeNativeVideoWallpaper {
     public init(displayId: UInt32, 
         /**
          * Reconcile revision to echo when this host finishes its initial load.
-         */startupRevision: UInt64, wallpaperId: String, title: String, 
+         */startupRevision: UInt64, 
+        /**
+         * Source display of this assignment: a mirror carries its source's, so the host can let one
+         * member of the group be heard. Independent assignments of one clip remain separate.
+         */audioSourceDisplayId: UInt32, wallpaperId: String, title: String, 
         /**
          * Absolute path to the media file, already containment-checked against the
          * project directory.
@@ -5395,6 +5404,7 @@ public struct BridgeNativeVideoWallpaper {
          */paused: Bool, volume: Float, muted: Bool, scalingMode: BridgeScalingMode, scalingFactor: Double) {
         self.displayId = displayId
         self.startupRevision = startupRevision
+        self.audioSourceDisplayId = audioSourceDisplayId
         self.wallpaperId = wallpaperId
         self.title = title
         self.mediaPath = mediaPath
@@ -5416,6 +5426,9 @@ extension BridgeNativeVideoWallpaper: Equatable, Hashable {
             return false
         }
         if lhs.startupRevision != rhs.startupRevision {
+            return false
+        }
+        if lhs.audioSourceDisplayId != rhs.audioSourceDisplayId {
             return false
         }
         if lhs.wallpaperId != rhs.wallpaperId {
@@ -5454,6 +5467,7 @@ extension BridgeNativeVideoWallpaper: Equatable, Hashable {
     public func hash(into hasher: inout Hasher) {
         hasher.combine(displayId)
         hasher.combine(startupRevision)
+        hasher.combine(audioSourceDisplayId)
         hasher.combine(wallpaperId)
         hasher.combine(title)
         hasher.combine(mediaPath)
@@ -5477,6 +5491,7 @@ public struct FfiConverterTypeBridgeNativeVideoWallpaper: FfiConverterRustBuffer
             try BridgeNativeVideoWallpaper(
                 displayId: FfiConverterUInt32.read(from: &buf), 
                 startupRevision: FfiConverterUInt64.read(from: &buf), 
+                audioSourceDisplayId: FfiConverterUInt32.read(from: &buf), 
                 wallpaperId: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 mediaPath: FfiConverterString.read(from: &buf), 
@@ -5493,6 +5508,7 @@ public struct FfiConverterTypeBridgeNativeVideoWallpaper: FfiConverterRustBuffer
     public static func write(_ value: BridgeNativeVideoWallpaper, into buf: inout [UInt8]) {
         FfiConverterUInt32.write(value.displayId, into: &buf)
         FfiConverterUInt64.write(value.startupRevision, into: &buf)
+        FfiConverterUInt32.write(value.audioSourceDisplayId, into: &buf)
         FfiConverterString.write(value.wallpaperId, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.mediaPath, into: &buf)
