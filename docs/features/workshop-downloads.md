@@ -554,8 +554,9 @@ work.
   the queue (`queue.json`) and outlives a relaunch.
 - **Retry failed.** Once two or more downloads stopped with a failure or were cancelled, the
   footer offers **Retry failed (N)**, which tries each again in list order, Steam's and
-  pixiv's alike, exactly as its own **Try again** would: partial content is reused, and
-  Steam's are left out while SteamCMD is not ready. The first that cannot start stops the
+  pixiv's alike, exactly as its own **Try again** would: partial content is reused where it
+  is still there (a cancelled download discarded its own), and Steam's are left out while
+  SteamCMD is not ready. The first that cannot start stops the
   batch and says why. One stopped download has only its own **Try again**.
 - **Dropped connections.** A download whose connection drops after sign-in
   retries itself up to three times before it fails (see [Prompt and retry

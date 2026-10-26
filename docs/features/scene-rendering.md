@@ -20,10 +20,10 @@ The three scene controls in **Advanced**:
 
 Native Metal is the only scene renderer, on the desktop and on the lock screen. A scene
 it cannot draw is not drawn by anything else and no effect is dropped to make it fit: it
-is held on what the display already shows, and **Drawn by** says why
-([when Native Metal cannot draw a scene](#when-native-metal-cannot-draw-a-scene)).
-Compatibility, the Vulkan-through-MoltenVK renderer, is gone; a `scene_renderer` key
-an older version wrote is read past.
+is held without drawing, and **Drawn by** says why; what the display then shows is in
+[when Native Metal cannot draw a scene](#when-native-metal-cannot-draw-a-scene).
+Compatibility, the Vulkan-through-MoltenVK renderer, is gone; the `scene_renderer` key
+older versions wrote is ignored.
 
 Native Metal replaced it once it drew every scene of the local test library the way
 Compatibility did (drawn by both renderers in one harness, the pictures were the same)
@@ -46,8 +46,9 @@ trail, a fluid or ripple simulation), images the runtime replaces while the scen
 plays, and BGRA or 8-bit NV12 video textures — the latter either converted once per
 frame or, with
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) on,
-sampled by the layer's own shader. A 10-bit or HDR video texture is converted and tone
-mapped to SDR ([10-bit and HDR video textures](#10-bit-and-hdr-video-textures)). A
+sampled by the layer's own shader. A 10-bit video texture is converted to SDR, and one
+that declares an HDR curve (PQ or HLG) is tone mapped on the way
+([10-bit and HDR video textures](#10-bit-and-hdr-video-textures)). A
 scene is held instead of drawn when a shader does not translate for Metal, a video
 texture is an animated sprite sheet or names no media, a puppet shader is bound to a
 mesh without bone weights, or its render graph has a step the native renderer does not
