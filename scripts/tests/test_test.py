@@ -2,7 +2,9 @@
 """Unit tests for scripts/test.py's command construction."""
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import importlib.util
+import io
 import shutil
 import sys
 import tempfile
@@ -108,15 +110,22 @@ class ScriptTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def module(self, name, exit_status):
+    def module(self, name, exit_status, delay=0):
         path = self.root / name
-        path.write_text(f"import sys\nsys.exit({exit_status})\n")
+        path.write_text(f"import sys, time\ntime.sleep({delay})\nsys.exit({exit_status})\n")
         return path
 
     def test_passing_modules_report_success(self):
         with patch("sys.stdout"):
             status = runner.run_script_tests([self.module("test_a.py", 0), self.module("test_b.py", 0)])
         self.assertEqual(status, 0)
+
+    def test_modules_are_reported_in_the_order_given_whichever_finishes_first(self):
+        report = io.StringIO()
+        with redirect_stdout(report):
+            runner.run_script_tests([self.module("test_a.py", 0, delay=0.5), self.module("test_b.py", 0)])
+        lines = report.getvalue().splitlines()
+        self.assertEqual([line.split()[1].rstrip(":") for line in lines], ["test_a.py", "test_b.py"])
 
     def test_a_failing_module_fails_the_run_with_its_status(self):
         with patch("sys.stdout"):
