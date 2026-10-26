@@ -336,6 +336,59 @@ TEST(TexContainer, VideoFlagWithCompressedPayloadTakesTheMetadataPath) {
     EXPECT_TRUE(headerOf(plainRig).isVideo);
 }
 
+// Every level of a texture is uploaded as its first one is: a decoded picture as RGBA, raw
+// pixels in the container's format. A level of another kind would be read as the first one's
+// pixels, past the end of its own bytes, so it ends the chain, and the levels behind it go too.
+TEST(TexContainer, ALevelOfAnotherKindEndsTheChain) {
+    struct Case {
+        const char*            what;
+        int                    format;
+        std::vector<LevelSpec> levels;
+        uint8_t                first; // the first byte of the one level kept
+    };
+    const std::vector<Case> cases {
+        { "a picture, then raw one-byte pixels", 9,
+          { levelOf(2, 2, redPng(40)), levelOf(1, 1, Blob(1, 9)), levelOf(1, 1, Blob(1, 9)) }, 40 },
+        { "raw pixels, then a picture", 0, { rawLevel(2, 2, 3), levelOf(1, 1, redPng(41)) }, 3 },
+        { "raw pixels, then a clip", 0, { rawLevel(2, 2, 4), levelOf(1, 1, mp4Marker()), rawLevel(1, 1, 5) }, 4 },
+    };
+    for (const auto& k : cases) {
+        SCOPED_TRACE(k.what);
+        Container c(3, k.levels);
+        c.format = k.format;
+        auto rig = texRig(c);
+        const auto image = rig->Parse("sample");
+        ASSERT_NE(image, nullptr);
+        ASSERT_EQ(image->slots.size(), 1u);
+        ASSERT_EQ(image->slots[0].mipmaps.size(), 1u);
+        EXPECT_EQ(image->slots[0].mipmaps[0].data.get()[0], k.first);
+        EXPECT_FALSE(image->header.isVideo);
+    }
+}
+
+// A sprite sheet's pictures share one format too: a frame that holds another kind of level
+// than the first frame cannot be shown, and neither can the sheet.
+TEST(TexContainer, ASpriteFrameOfAnotherKindRefusesTheSheet) {
+    Container c;
+    c.texb  = 3;
+    c.flags = kSprite;
+    c.pictures.push_back({ { levelOf(1, 1, redPng(50)) }, std::nullopt });
+    c.pictures.push_back({ { rawLevel(1, 1, 51) }, std::nullopt });
+    auto rig = texRig(c);
+    EXPECT_EQ(rig->Parse("sample"), nullptr);
+
+    // Two frames of one kind are a sheet as before.
+    Container same;
+    same.texb  = 3;
+    same.flags = kSprite;
+    same.pictures.push_back({ { levelOf(1, 1, redPng(52)) }, std::nullopt });
+    same.pictures.push_back({ { levelOf(1, 1, redPng(53)) }, std::nullopt });
+    auto sameRig = texRig(same);
+    const auto image = sameRig->Parse("sample");
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(image->slots.size(), 2u);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Sprite sheets
 // ---------------------------------------------------------------------------------------------
@@ -810,6 +863,51 @@ TEST(TexLoose, PackagedBmpDecodesToItsPixels) {
     const uint8_t want[4] = { 90, 60, 30, 255 };
     for (int i = 0; i < 4; ++i) EXPECT_EQ(image->slots[0].mipmaps[0].data.get()[i], want[i]) << i;
     EXPECT_EQ(rig->ParseHeader("backdrop.bmp").type, ImageType::BMP);
+}
+
+// Pictures are decoded only in the formats a wallpaper's textures come in.
+TEST(TexLoose, APictureInAFormatNoTextureUsesIsNotDecoded) {
+    auto rig = rigFor({ { "/materials/backdrop.png", pnm1x1(1, 2, 3) } });
+    EXPECT_EQ(rig->Parse("backdrop.png"), nullptr);
+
+    // The same bytes as a container's declared picture are refused too.
+    Container c(3, { levelOf(1, 1, pnm1x1(1, 2, 3)) });
+    c.type = 13;
+    auto container = texRig(c);
+    EXPECT_EQ(container->Parse("sample"), nullptr);
+}
+
+TEST(TexLoose, APictureWiderThanAnyTextureIsNotDecoded) {
+    auto widest = rigFor({ { "/materials/wide.bmp", bmpRow(16384, 9, 8, 7) } });
+    const auto image = widest->Parse("wide.bmp");
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(image->slots[0].width, 16384);
+
+    auto wider = rigFor({ { "/materials/wide.bmp", bmpRow(16385, 9, 8, 7) } });
+    EXPECT_EQ(wider->Parse("wide.bmp"), nullptr);
+}
+
+TEST(TexLoose, ATgaShorterThanItsPixelsIsNotDecoded) {
+    auto whole = rigFor({ { "/materials/mark.tga", tga(1, 1, { 30, 60, 90 }) } });
+    const auto image = whole->Parse("mark.tga");
+    ASSERT_NE(image, nullptr);
+    const uint8_t want[4] = { 90, 60, 30, 255 };
+    for (int i = 0; i < 4; ++i) EXPECT_EQ(image->slots[0].mipmaps[0].data.get()[i], want[i]) << i;
+
+    // Four by four pixels promised, one given: the rest would be whatever the heap held.
+    auto cut = rigFor({ { "/materials/mark.tga", tga(4, 4, { 30, 60, 90 }) } });
+    EXPECT_EQ(cut->Parse("mark.tga"), nullptr);
+}
+
+TEST(TexLoose, AJpegWhoseMarkersFailBeforeAnyScanIsNotDecoded) {
+    // A frame header, then a marker no JPEG has, and no scan: there are no pixels to show, so
+    // the picture is refused rather than handed back as whatever its buffer held.
+    const Blob broken { 0xFF, 0xD8,                                  // start of image
+                        0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
+                        0xFF, 0xC8, 0x00, 0x02,                      // a marker no JPEG uses
+                        0xFF, 0xD9 };                                // end of image
+    auto rig = rigFor({ { "/materials/broken.jpg", broken } });
+    EXPECT_EQ(rig->Parse("broken.jpg"), nullptr);
 }
 
 TEST(TexLoose, HostLooseAssetReadability) {

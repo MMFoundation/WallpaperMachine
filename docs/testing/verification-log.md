@@ -34,6 +34,14 @@ entry's recorded result is not allowed.
 - Gap: no desktop run: the card, the Apply question, mirrored-video sound hand-off and real two-display behaviour are unverified on screen.
 - Not compared with Wallpaper Engine frames: no renderer output changed.
 - Not done: one shared player per mirror group (double decode remains), pending an authorized two-display measurement.
+## 2026-10-25 — Brazilian Portuguese (pt-BR) localization
+
+- Added pt-BR (Português, Wallpaper Engine locale pt-br) to AppLanguage.supported; every key of App/Resources/Localizable.xcstrings, InfoPlist.xcstrings and Extension/Localizable.xcstrings is translated, including the menu bar and update window strings.
+- Added README.pt-BR.md; README switchers, scripts/update_sponsors.py, supporters.yml and docs list it.
+- Tests: AppLanguageTests (pt, pt-BR, pt-PT match pt-BR), SettingsBRenderTests pt-BR layout cases; localization tests accept words Portuguese shares with English (Experimental, min, Spaces…); PanelRootRenderTests accepts Latin script for pt-BR.
+- Welcome guide: six language tiles keep each name on one line (tighter spacing, slight shrink) instead of breaking inside a word.
+- python3 scripts/test.py (before the rebase): 4106 passed, 5 failed, 49 skipped; the 5 (DisplaysSettingsModelTests x4, InspectorWordingTests) also fail on unmodified main on a Mac whose region is pt_BR (decimal comma).
+- Release build installed locally and checked by the contributor in Portuguese.
 
 ## 2026-10-25 — Puppet texture channels: weight rows and non-finite weights (PR #93 review)
 
@@ -108,12 +116,3 @@ Space mode reworked: wallpaper windows of a display in the mode stay on its curr
 - Another disk is simulated with a fake StorageVolumeInspecting; no real external drive, ExFAT disk or eject was exercised.
 - Not checked: Settings › Storage rows and the Wallpaper Library Unavailable window visually, the removable-volume privacy prompt, a live Steam download to a moved library.
 - Renderer built in this worktree with scripts/build.py --renderer-only; bindings unchanged. App not rebuilt as Release.
-
-## 2026-10-24 — Desktop posters kept until the wallpaper changes (issue 79)
-
-macOS 26+ WallpaperAgent keeps a full-size bitmap of every desktop picture file and never deletes it; animated wallpapers made every poster retake a new file. Snapshots that change no display, Space changes, wakes and resumes now keep a settled poster, and a frame nobody asked for never replaces one.
-
-- `python3 scripts/test.py --only DesktopWallpaperTests` — 77 passed; the new hours-of-activity test failed (13 captures instead of 3) with the old two-minute expiry put back temporarily
-- `python3 scripts/test.py` — exit 0; 4070 tests: 4023 passed, 47 opt-in skipped; Python script tests passed; 1 runtime warning (main-thread call) from another class, not raised by DesktopWallpaperTests
-- Not verified: WallpaperAgent's cache on a real Mac (another app's container, not read), real Mission Control thumbnails, `AppDelegate.desktopPosterLayout` (wiring, no unit test); app not rebuilt
-- Space-selection mode still takes posters on every Space visit that switches the wallpaper; not changed here

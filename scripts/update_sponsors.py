@@ -8,8 +8,8 @@ list, names and months only, at /api/sponsors, with a version that changes whene
 the wall does, and draws the wall as one picture at /sponsors/wall: its portraits,
 names and months on the brand wallpaper. This reads the list and rewrites the block
 between the `supporters:start` and `supporters:end` markers under README.md's
-"Thank you. To every Supporter." heading, and under its translation's in
-README.zh-CN.md: the picture, linked to the wall, at /sponsors/wall?v=<version>, so
+"Thank you. To every Supporter." heading, and under its translations' in
+README.zh-CN.md and README.pt-BR.md: the picture, linked to the wall, at /sponsors/wall?v=<version>, so
 GitHub's image proxy fetches it again when the wall changes, with every listed name
 and the count in its alt text. A Supporter who turns the listing on, off, renames it
 or changes their picture is followed here too. Nothing outside the markers changes.
@@ -40,8 +40,8 @@ from lib.glyphs import markers
 from lib.paths import ROOT
 
 MARK = markers()
-# Every README that carries the list: the English page and its translation.
-READMES = (ROOT / "README.md", ROOT / "README.zh-CN.md")
+# Every README that carries the list: the English page and its translations.
+READMES = (ROOT / "README.md", ROOT / "README.zh-CN.md", ROOT / "README.pt-BR.md")
 SOURCE = "https://www.wallpapermachine.app/api/sponsors"
 # The picture and the wall it links to, on the same site as the list.
 PICTURE_PATH = "/sponsors/wall"

@@ -21,6 +21,7 @@ struct AppLanguage: Equatable, Sendable {
     AppLanguage(tag: "zh-Hant", name: "繁體中文", wallpaperEngineLocale: "zh-cht"),
     AppLanguage(tag: "ja", name: "日本語", wallpaperEngineLocale: "ja-jp"),
     AppLanguage(tag: "ko", name: "한국어", wallpaperEngineLocale: "ko-kr"),
+    AppLanguage(tag: "pt-BR", name: "Português", wallpaperEngineLocale: "pt-br"),
   ]
 
   /// The locales a wallpaper's label table is read in, most preferred first: this language,
