@@ -57,8 +57,12 @@ for them.
 The page is loaded from `file://` with read access to its project folder, matching
 Wallpaper Engine's CEF host: ES modules, `fetch()` and media inside the project
 folder work, and `location.protocol` is `file:`. The top frame cannot navigate away
-from the entry page; subframes and network requests are unrestricted (macOS ATS
-applies, so plain `http://` requests fail).
+from the entry page; subframes and network requests are unrestricted, plain `http://`
+included, as in Chromium. The app and the lock-screen extension relax App Transport
+Security for web content only (`NSAllowsArbitraryLoadsInWebContent` in their
+`Info.plist`): the app's own requests to Steam, pixiv and GitHub still need HTTPS, and
+WebKit still blocks an `http://` subresource of an `https://` page as mixed content.
+The sign-in windows are web content too, and load only Steam's and pixiv's HTTPS pages.
 
 Four scripts are installed at document start, built in one place
 (`Shared/WebWallpaperUserScripts.swift`) for the desktop page, the preview and the
@@ -252,8 +256,9 @@ media state is re-derived on resume, and directory additions and removals are he
 across the suspension and replayed in order.
 
 The wallpaper web view has exactly one `WKScriptMessageHandler`, named
-`mweWallpaper`, carrying listener registration and random-file requests; it is
-removed when the page stops.
+`mweWallpaper`, carrying listener registration, random-file requests and the page's
+own errors and warnings for the log ([diagnostics](diagnostics.md#inspecting-a-web-wallpaper));
+it is removed when the page stops.
 
 ## Runtime shape
 
@@ -502,6 +507,12 @@ follows too);
 independent assignments of the same project stay independent, and a hidden owner
 hands off to a visible mirror without duplicate sound.
 
+Whenever the host suspends a page (a pause, or a display no pixel can reach), its
+WebAudio stops rendering as well as going quiet: suspending media playback moves every
+`AudioContext` of the page to WebKit's `interrupted` state, and lifting it gives each
+context back the state the page left it in, so one the page had suspended itself stays
+suspended (`WebWallpaperSuspensionTests`). The host does not track contexts itself.
+
 These are private WebKit interfaces and may be unavailable on another macOS version.
 **Audio and media status** in the inspector reports the observed availability and
 never substitutes Pause for an unavailable mute.
@@ -567,10 +578,6 @@ never substitutes Pause for an unavailable mute.
   them. Measured on offscreen snapshots; see [Verification](#verification) for what was not.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.
-- A paused wallpaper's WebAudio is muted (`MirrorAudioOwnership` gives a paused
-  page no audible output) but not suspended: the host has no `AudioContext`
-  handling, and what WebKit's own throttling does to a detached page's audio graph
-  is unmeasured.
 
 ## Verification
 
@@ -597,8 +604,9 @@ document, subframes get it, an https document does not, and every surface's user
 `quality_settings.rs`, `web_audio_media.rs`); file and directory properties are
 covered under [user files](user-files.md#verification), and the domain inventory is in
 [coverage](../testing/coverage.md). The held picture over a replacement page is covered
-there with a fake window; whether 500 ms after `didFinish` is enough for a real project's
-first paint, and how long the system picture shows while a page's window is replaced, need
+there with a fake window, and the wait for its first committed frame in
+`WebWallpaperFrameConfirmationTests`; how much of a real project's picture that frame shows,
+and how long the system picture shows while a page's window is replaced, need
 an authorized desktop run, listed in [manual smoke](../testing/manual-smoke.md#wallpaper-switching).
 Show Desktop and Space transition smoothness,
 real hover and window-server routing on a desktop, how flicks and parallax pages feel

@@ -245,10 +245,56 @@ enum WebWallpaperProtocol {
         return true;
       };
       setScale(seed.renderScale);
+      const nativeConsoleError = console.error;
       const post = message => {
         try { window.webkit.messageHandlers.\(WebWallpaperProtocol.messageHandlerName).postMessage(message); }
-        catch (error) { console.error("wallpaper host channel unavailable", error); }
+        catch (error) { nativeConsoleError.call(console, "wallpaper host channel unavailable", error); }
       };
+      // The page's own errors and warnings go to the app's log too, so a wallpaper
+      // that shows nothing can be diagnosed from a diagnostics report and not only
+      // through Web Inspector: console.error and console.warn, uncaught errors,
+      // unhandled promise rejections and elements that failed to load. At most
+      // eight a second leave the page, a repeat of the last one is dropped, and the
+      // host caps each document again. The project folder's own URL is cut from the
+      // text, which is otherwise the page's and stays untrusted.
+      const projectBase = String(location.href).replace(/[^/]*([?#].*)?$/, "");
+      let reportSecond = 0, reportsThisSecond = 0, lastReport = "";
+      const describe = value => {
+        try {
+          if (value instanceof Error) return value.name + ": " + value.message;
+          if (typeof value === "string") return value;
+          const json = JSON.stringify(value);
+          return json === undefined ? String(value) : json;
+        } catch (unreadable) { return Object.prototype.toString.call(value); }
+      };
+      const report = (kind, text) => {
+        const now = Date.now();
+        if (now - reportSecond >= 1000) { reportSecond = now; reportsThisSecond = 0; }
+        const line = String(text).split(projectBase).join("").slice(0, 600);
+        if (line === lastReport || ++reportsThisSecond > 8) return;
+        lastReport = line;
+        post({ type: "pageDiagnostic", kind, text: line });
+      };
+      for (const [level, kind] of [["error", "error"], ["warn", "warning"]]) {
+        const original = console[level];
+        if (typeof original !== "function") continue;
+        console[level] = function () {
+          report(kind, Array.from(arguments, describe).join(" "));
+          return original.apply(this, arguments);
+        };
+      }
+      window.addEventListener("error", event => {
+        if (event instanceof ErrorEvent) {
+          const where = event.filename ? " (" + event.filename + ":" + event.lineno + ")" : "";
+          report("uncaught", (event.error !== undefined && event.error !== null ? describe(event.error) : event.message) + where);
+          return;
+        }
+        const element = event.target;
+        if (!element || element === window || typeof element.tagName !== "string") return;
+        const source = element.currentSrc || element.src || element.href || "";
+        report("resource", element.tagName.toLowerCase() + " failed to load " + source);
+      }, true);
+      window.addEventListener("unhandledrejection", event => report("rejection", describe(event.reason)));
       let listener = null;
       let lastPaused = null;
       // The pause state the page last took in.

@@ -292,7 +292,7 @@ final class AppUpdateTests: XCTestCase {
         let image = try Self.makeDiskImage(in: root, bundleIdentifier: "app.wallpapermachine")
         defer { Self.forceDetach(image) }
 
-        let app = try await AppUpdateInstaller().prepareInstallation(archive: image)
+        let app = try await AppUpdateInstaller(signingRequirement: Self.adHocRequirement).prepareInstallation(archive: image)
         let work = app.deletingLastPathComponent()
         defer { try? FileManager.default.removeItem(at: work) }
         XCTAssertEqual(app.lastPathComponent, "WallpaperMachine.app")
@@ -309,12 +309,45 @@ final class AppUpdateTests: XCTestCase {
         defer { Self.forceDetach(image) }
 
         do {
-            _ = try await AppUpdateInstaller().prepareInstallation(archive: image)
+            _ = try await AppUpdateInstaller(signingRequirement: Self.adHocRequirement).prepareInstallation(archive: image)
             XCTFail("Foreign applications must not be accepted")
         } catch {
             XCTAssertEqual((error as? AppUpdateIssue)?.code, .verification)
         }
         XCTAssertEqual(try Self.attachedDevices(of: image), [])
+    }
+
+    func testInstallerRejectsACopyNotSignedWithTheReleaseCertificateAndDetachesIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mwe-update-dmg-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let image = try Self.makeDiskImage(in: root, bundleIdentifier: "app.wallpapermachine")
+        defer { Self.forceDetach(image) }
+
+        do {
+            _ = try await AppUpdateInstaller().prepareInstallation(archive: image)
+            XCTFail("A copy signed without the release certificate must not be accepted")
+        } catch {
+            XCTAssertEqual((error as? AppUpdateIssue)?.code, .verification)
+        }
+        XCTAssertEqual(try Self.attachedDevices(of: image), [])
+    }
+
+    func testSignatureCheckRefusesAnUnsignedOrAlteredCopy() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mwe-update-sign-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = try Self.makeApplication(in: root, bundleIdentifier: "app.wallpapermachine", signed: false)
+        XCTAssertThrowsError(try AppUpdateInstaller.verifySignature(of: app, requirement: Self.adHocRequirement))
+
+        try Self.signAdHoc(app)
+        XCTAssertNoThrow(try AppUpdateInstaller.verifySignature(of: app, requirement: Self.adHocRequirement))
+        XCTAssertThrowsError(try AppUpdateInstaller.verifySignature(
+            of: app, requirement: AppUpdateConfiguration.signingRequirement))
+
+        let info = app.appendingPathComponent("Contents/Info.plist")
+        var values = try XCTUnwrap(NSDictionary(contentsOf: info) as? [String: Any])
+        values["CFBundleShortVersionString"] = "9.9.9"
+        try PropertyListSerialization.data(fromPropertyList: values, format: .xml, options: 0).write(to: info)
+        XCTAssertThrowsError(try AppUpdateInstaller.verifySignature(of: app, requirement: Self.adHocRequirement))
     }
 
     func testOnlyACopyThisUserCanWriteIsReplacedInPlace() throws {
@@ -1157,16 +1190,42 @@ private extension AppUpdateTests {
         return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
     }
 
+    /// What an ad-hoc copy of this app satisfies: its identifier, with no certificate.
+    static let adHocRequirement = #"identifier "app.wallpapermachine""#
+
+    /// A minimal app bundle around a real Mach-O executable, signed ad hoc unless `signed` is
+    /// false, so the installer's signature check has something genuine to read.
+    static func makeApplication(in folder: URL, bundleIdentifier: String, signed: Bool = true) throws -> URL {
+        let app = folder.appendingPathComponent("WallpaperMachine.app")
+        try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
+        let info: [String: Any] = ["CFBundleIdentifier": bundleIdentifier, "CFBundleExecutable": "WallpaperMachine",
+                                   "CFBundlePackageType": "APPL"]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: app.appendingPathComponent("Contents/Info.plist"))
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"),
+                                         to: app.appendingPathComponent("Contents/MacOS/WallpaperMachine"))
+        if signed { try signAdHoc(app) }
+        return app
+    }
+
+    static func signAdHoc(_ app: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        process.arguments = ["--force", "--sign", "-", app.path]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw AppUpdateIssue(code: .unknown, detail: "codesign exited \(process.terminationStatus)")
+        }
+    }
+
     /// A compressed HFS+ image shaped like the release: the app plus an `Applications` link.
     static func makeDiskImage(in root: URL, bundleIdentifier: String) throws -> URL {
         let source = root.appendingPathComponent("source", isDirectory: true)
-        let app = source.appendingPathComponent("WallpaperMachine.app")
-        try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
-        try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": bundleIdentifier], format: .xml, options: 0)
-            .write(to: app.appendingPathComponent("Contents/Info.plist"))
-        let executable = app.appendingPathComponent("Contents/MacOS/WallpaperMachine")
-        try Data("#!/bin/sh\n".utf8).write(to: executable)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        _ = try makeApplication(in: source, bundleIdentifier: bundleIdentifier)
         try FileManager.default.createSymbolicLink(atPath: source.appendingPathComponent("Applications").path,
                                                    withDestinationPath: "/Applications")
         let image = root.appendingPathComponent("WallpaperMachine-1.2.3-arm64.dmg")

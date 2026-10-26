@@ -83,7 +83,7 @@ struct WorkshopSummaryLine: View {
     switch summary {
     case .searching:
       Text("Searching Steam Workshop…")
-    case .subscriptions:
+    case .subscriptions, .favorites:
       EmptyView()
     case .lookup:
       Text("Showing the item from your link. Filters don’t apply to it.")

@@ -129,6 +129,8 @@ pub struct BridgeActor<E: EngineFacade> {
 enum PlaybackChangeOrigin {
     Manual,
     Power,
+    /// The pause the previous session ended with, brought back after the first frame.
+    Restored,
 }
 
 
@@ -636,6 +638,10 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
         match origin {
             PlaybackChangeOrigin::Manual => {
+                // The user's latest choice is what the next launch restores, and it
+                // overrides a restored pause that has not come back yet.
+                self.state.pending_user_pause_after_initial_frame = false;
+                self.save_user_pause(playback_state == BridgePlaybackState::Paused);
                 if playback_state == BridgePlaybackState::Playing
                     && self.state.power_source == crate::power::PowerSource::Battery
                 {
@@ -645,10 +651,54 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     self.state.auto_paused_for_battery = false;
                 }
             }
-            PlaybackChangeOrigin::Power => {}
+            PlaybackChangeOrigin::Power | PlaybackChangeOrigin::Restored => {}
         }
         self.invalidate_operations();
         Ok(())
+    }
+
+    /// Saves the user's own Play/Pause for the next launch. A failed save keeps the
+    /// pause in force for this session: it is logged, not reported as a failed pause,
+    /// and the same choice made again tries the save again.
+    fn save_user_pause(&mut self, paused: bool) {
+        if self.state.app_config.general.paused == paused && !self.state.user_pause_unsaved {
+            return;
+        }
+        self.state.app_config.general.paused = paused;
+        let Some(store) = &self.config_store else { return };
+        self.state.user_pause_unsaved = match store.save_app_config(&self.state.app_config) {
+            Ok(()) => false,
+            Err(error) => {
+                log::warn!("could not save the playback choice for the next launch: {error}");
+                true
+            }
+        };
+    }
+
+    /// Brings back the pause the previous session ended with, once the first
+    /// frame is up. Before the battery policy runs, so a pause on battery that
+    /// waited for the same frame finds playback already paused by the user.
+    /// A pause that fails is logged and stays pending for the next ready report;
+    /// the report itself and the battery policy after it go on.
+    async fn restore_user_pause(&mut self) {
+        if !self.state.pending_user_pause_after_initial_frame {
+            return;
+        }
+        if self.state.playback_state != BridgePlaybackState::Paused {
+            log::info!("pausing wallpaper playback as the previous session ended paused");
+            let restored = self
+                .set_playback(BridgePlaybackState::Paused, PlaybackChangeOrigin::Restored)
+                .await;
+            if let Err(error) = restored {
+                log::warn!("could not bring back the saved pause, trying again at the next ready report: {error}");
+                return;
+            }
+        } else {
+            // Paused already, by the battery rule on a report before this one: the
+            // pause is now the user's, so external power does not end it.
+            self.state.auto_paused_for_battery = false;
+        }
+        self.state.pending_user_pause_after_initial_frame = false;
     }
 
 
@@ -2898,6 +2948,7 @@ impl<E: EngineFacade + Clone> Message<InitialFrameReady> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.state.initial_frame_ready = true;
+        self.restore_user_pause().await;
         if self.state.pending_battery_pause_after_initial_frame {
             self.state.pending_battery_pause_after_initial_frame = false;
             self.apply_power_policy().await?;
@@ -2929,6 +2980,9 @@ impl<E: EngineFacade + Clone> Message<messages::ReportHostWallpaperStartup> for 
         };
         if !current { return Ok(self.all_snapshots()); }
         self.state.initial_frame_ready |= msg.ready;
+        if msg.ready {
+            self.restore_user_pause().await;
+        }
         if self.state.pending_battery_pause_after_initial_frame {
             self.state.pending_battery_pause_after_initial_frame = false;
             self.apply_power_policy().await?;

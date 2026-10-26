@@ -248,6 +248,55 @@ final class DownloadQueueTests: DownloaderTestCase {
     }
   }
 
+  /// **Download next** moves a waiting job ahead of the other waiting ones, never ahead of one
+  /// that runs, and the saved queue keeps the new order.
+  func testDownloadNextStartsAWaitingJobAtTheNextFreeSlot() async throws {
+    let root = try makeParallelRuntime()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let manager = WorkshopDownloadManager(
+      sessionDirectory: root.appendingPathComponent("SteamSession"),
+      runtimeProvider: ShellRuntimeProvider(), maximumConcurrentDownloads: 1)
+    let queueFolder = root.appendingPathComponent("Queue", isDirectory: true)
+    manager.configurePersistence(at: queueFolder)
+    let jobs = try ["1", "2", "3", "4"].map { id in
+      manager.start(
+        item: WorkshopItem(
+          id: id, title: "Batch \(id)", creator: "Test", summary: "", previewURL: nil,
+          tags: ["Video"], size: 0, subscriptions: 0),
+        username: "localtest", executable: root.appendingPathComponent("runtime/steamcmd"),
+        library: root.appendingPathComponent("Library")
+      ) {}
+      return try XCTUnwrap(manager.download(for: id))
+    }
+    let started = { (id: String) in
+      FileManager.default.fileExists(atPath: root.appendingPathComponent("running-\(id)").path)
+    }
+    do {
+      try await waitUntil { jobs[0].worker.prompt == .password }
+      XCTAssertFalse(manager.canPrioritize(jobs[0]), "a running job is not in line")
+      XCTAssertFalse(manager.canPrioritize(jobs[1]), "the first waiting job is already next")
+      XCTAssertTrue(manager.canPrioritize(jobs[3]))
+
+      manager.prioritize(jobs[3])
+      XCTAssertEqual(manager.downloads.map(\.id), ["1", "4", "2", "3"])
+      XCTAssertFalse(manager.canPrioritize(jobs[3]))
+      let saved = try JSONSerialization.jsonObject(
+        with: Data(contentsOf: queueFolder.appendingPathComponent("queue.json"))) as? [[String: Any]]
+      XCTAssertEqual(saved?.compactMap { $0["id"] as? String }, ["1", "4", "2", "3"])
+
+      jobs[0].worker.submitSecret("local-password")
+      try await waitUntil { started("1") }
+      try Data().write(to: root.appendingPathComponent("release-1"))
+      try await waitUntil { started("4") }
+      XCTAssertFalse(started("2"), "the moved job took the free slot")
+      for id in ["4", "2", "3"] { try Data().write(to: root.appendingPathComponent("release-\(id)")) }
+      try await waitUntil { !manager.isRunning }
+    } catch {
+      await manager.shutdown()
+      throw error
+    }
+  }
+
   /// With a sign-in already saved, a batch does not wait for its first job to get through
   /// Steam's login: every job restores the saved sign-in itself and they start together.
   func testSavedSignInStartsAWholeBatchAtOnceWithoutWaitingForTheFirstLogin() async throws {

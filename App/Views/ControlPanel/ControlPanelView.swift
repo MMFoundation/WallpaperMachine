@@ -27,6 +27,9 @@ final class ControlPanelNavigation: ObservableObject {
   /// window when the panel is reopened. Memory only, and not `@Published`: nothing in SwiftUI
   /// reads it, the window writes it as the person types and scrolls.
   var viewState: PanelViewState?
+  /// The open panel, which View › Zoom In, Zoom Out and Actual Size act on; nil while no panel is
+  /// open, which leaves those items disabled. Set by `PanelController.start()`, cleared by `stop()`.
+  weak var tileZoomTarget: PanelController?
   /// The Settings reveal a panel last acted on, so a window opened afterwards starts on Quick
   /// Settings instead of repeating it. Not `@Published`: only `SettingsModel.adoptReveal` uses it.
   var handledSettingsRevealToken: UInt64 = 0
@@ -69,6 +72,7 @@ struct ControlPanelView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .environment(controller)
       .environment(\.panelImages, controller.images)
+      .environment(\.panelTileWidth, TileGridLayout.preferredWidth(zoom: controller.tileZoom))
       .background(WindowObserver { controller.presentation.attach(to: $0) })
       .onAppear { controller.start() }
       .onDisappear { controller.stop() }

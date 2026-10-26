@@ -573,6 +573,36 @@ export function cursorUp(event) { held = false; }
     EXPECT_EQ(rt.scriptErrorCount(), 0u);
 }
 
+// `CursorEvent.localPosition` is where the cursor is on the program's own layer, measured from
+// the corner of its box: 0 to its size on each axis while over it.
+TEST(CursorHitTest, ACursorEventSaysWhereOnItsLayerTheCursorIs)
+{
+    const std::string script = R"JS('use strict';
+var at = null;
+export function update(value) { return at ? new Vec3(at.x, at.y, 1) : value; }
+export function cursorDown(event) { at = event.localPosition; }
+)JS";
+    ParseRig rig(BasicAssets());
+    Json     pad = { { "id", 1 }, { "name", "pad" }, { "image", "image.json" }, { "origin", V3(200, 150, 0) }, { "size", V2(80, 80) },
+                     { "scale", { { "script", script }, { "value", "1.00000 1.00000 1.00000" } } }, { "visible", true } };
+    auto scene = rig.Parse(Canvas(Json::array({ pad }), { { "orthogonalprojection", { { "width", 400 }, { "height", 300 } } } }), ParseOptions { .live = true });
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    SceneRuntimeContext& rt = *scene->runtime;
+
+    rt.Tick(0.01);
+    rt.SetCursorInput(230.0f / 400.0f, 150.0f / 300.0f);
+    rt.SetCursorEnter(true);
+    rt.Tick(0.01);
+    rt.SetCursorButtons(1, 1, 0);
+    rt.DispatchCursorFrameEvents(true);
+    rt.SetCursorButtons(1, 0, 0);
+    rt.Tick(0.01);
+    EXPECT_NEAR(rt.NodeScale("pad").x(), 70.0f, 0.01f) << "30 right of the centre of an 80-wide box";
+    EXPECT_NEAR(rt.NodeScale("pad").y(), 40.0f, 0.01f) << "half way up it";
+    EXPECT_EQ(rt.scriptErrorCount(), 0u);
+}
+
 // ---- a script-made layer from a workshop model ------------------------------------------------
 
 std::string WhiteTexture(int allocated_w, int allocated_h, int picture_w, int picture_h)

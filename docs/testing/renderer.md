@@ -1095,8 +1095,13 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   and an image layer's `color` play their `animation` (loop, single, relative,
   start-paused with the first frame applied, named for `getAnimation`, keyed together
   through `options.parent` on one clock); the rest of the option set is not read. The
-  `mirror` play mode plays as `single`, for every timeline (the local scenes use it on
-  origin, alpha, light intensity, shader constants and bloom strength). A timeline on `alpha` keeps a clock of its own even when it is keyed
+  `mirror` play mode plays to the end, back to the start and over again
+  (`ScalarAnimationMode::Mirror`): the clock's position stays inside the timeline with a
+  direction beside it, so component curves, `getFrame` and markers see real frames on the
+  way back, and a marker is met on the way out and again on the way back (once at either
+  end). Whether Wallpaper Engine shows the end frame once or twice at the turn was not
+  compared with its frames (the local scenes use mirror on origin, alpha, light intensity,
+  shader constants and bloom strength). A timeline on `alpha` keeps a clock of its own even when it is keyed
   under another setting, so a paused parent does not hold it. A text layer's or a light's
   `color` timeline holds the authored colour, and a timeline on a setting that also has
   a script or a user property is dropped (the script or property is its only writer),
@@ -1336,7 +1341,13 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   value one frame later. Wallpaper Engine unprojects when the script reads; whether its
   scripts run before or after it rewrites the view each frame was not established. The
   cursor callbacks' `position` and `worldPosition` (and `input.cursorLocalPosition`) carry
-  the same far-plane point; the shape of Wallpaper Engine's event objects was not read. The
+  the same far-plane point. A program of a layer also gets `localPosition`, where the cursor
+  is on that layer's box from its lower-left corner, 0 to the layer's size on each axis while
+  over it, as Wallpaper Engine's reference describes it (`SceneRuntimeContext::CursorLocalPosition`,
+  from the same plane point the hit test uses; a held button's release can be off the box and
+  is not clamped); a program of the scene itself gets none. That the vertical axis runs up
+  from the bottom, as the world's does, was not compared with a Wallpaper Engine frame, and
+  the event's `hitBox` (a puppet's hit box) is not given. The
   pointer maps over the presented frame, so a cropped window looks through the picture's
   interior and a letterboxed presentation extrapolates the ray past the frustum, as hit
   tests already do. A camera without a usable view (a far plane or aspect that is not

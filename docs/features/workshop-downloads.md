@@ -186,7 +186,7 @@ cache.
 ## Collections, authors and subscriptions
 
 A segmented control leading Discover's header chooses what it lists: **Wallpapers**
-(the browse page above), **Collections** or **Your subscriptions**. In the narrowest
+(the browse page above), **Collections**, **Your subscriptions** or **Your favorites**. In the narrowest
 column it becomes one menu; the arrow keys move between the segments, and Space or
 Return chooses one. An author's wallpapers and a
 collection's items are opened from a tile instead: no segment is current, and the
@@ -199,7 +199,7 @@ list that failed.
 
 Only Wallpapers and Collections are searched and sorted by Steam; the others come
 in their own order, so the panel hides the search field and the sort menu for
-them. The filters apply everywhere: Steam applies them to the two lists,
+them; Your favorites has an order menu of its own ([favorites](#favorites)). The filters apply everywhere: Steam applies them to the two lists,
 and `WorkshopService.matching` applies the same rules to the other sources'
 pages, which can therefore show fewer than 30 tiles, or none while Steam's count
 says more exist; such a page says the filters hide everything on it and offers
@@ -293,6 +293,21 @@ sign-in as any download does. Nothing is subscribed or unsubscribed on Steam. Th
 welcome guide's **Import my subscriptions** and its one-time offer to existing users
 ([first run](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer))
 do the same, signing in first when needed.
+
+### Favorites
+
+**Your favorites** lists the wallpapers the signed-in account marked as favorites on the
+Workshop, read with the same Steam Community session as the subscriptions, so it needs the
+same sign-in and offers the same **Sign in to Steam…** without it. Its page is the account's
+own Workshop page with `browsefilter=myfavorites`, which lays its items out as an author's
+tiles. Steam sorts it: the bar above the grid says who is signed in and how many favorites
+there are, and its order menu offers Steam's four orders, **Date favorited** (Steam's default),
+**Alphabetical**, **Date updated** and **Date created** (`WorkshopFavoritesOrder`, Steam's
+`sortmethod` values `subscriptiondate`, `alpha`, `lastupdated` and `creationorder`, read off
+Steam's own favorites page). Choosing one lists the favorites again from page 1; the order is
+kept for the rest of the app's run. Nothing is favorited or unfavorited on Steam from here, and
+the list offers no bulk download. A signed-in subscriptions page was not available to check its
+sort menu, so Your subscriptions keeps its own order.
 
 ## One decision per download
 
@@ -532,6 +547,17 @@ work.
   (`sessionConflictDetected`). A session Steam ends while no sibling is running is
   reported as an ordinary failure with a retry. Settings says when the queue is
   running one at a time.
+- **Order.** Waiting jobs start in the order they were asked for. **Download next** on a
+  waiting row moves that job to the front of the line, ahead of every other waiting job and
+  behind those that run, so it takes the next free slot; it is offered only when another
+  waiting job is ahead of it (`WorkshopDownloadManager.prioritize`). The order is saved with
+  the queue (`queue.json`) and outlives a relaunch.
+- **Retry failed.** Once two or more downloads stopped with a failure or were cancelled, the
+  footer offers **Retry failed (N)**, which tries each again in list order, Steam's and
+  pixiv's alike, exactly as its own **Try again** would: partial content is reused where it
+  is still there (a cancelled download discarded its own), and Steam's are left out while
+  SteamCMD is not ready. The first that cannot start stops the
+  batch and says why. One stopped download has only its own **Try again**.
 - **Dropped connections.** A download whose connection drops after sign-in
   retries itself up to three times before it fails (see [Prompt and retry
   handling](#prompt-and-retry-handling)); it keeps its slot while it waits.

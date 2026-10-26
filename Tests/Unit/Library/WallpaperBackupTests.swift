@@ -720,6 +720,21 @@ final class WallpaperBackupTests: XCTestCase {
         }
     }
 
+    func testTileZoomIsBackedUpAndOnlyAZoomStepRestores() throws {
+        let preferences = try defaults()
+        PanelPreferences.setTileZoom(2, in: preferences)
+        let export = try WallpaperBackupPreferences(defaults: preferences, domainName: domainName(for: preferences))
+        let stored = try WallpaperBackupPreferences.decode(XCTUnwrap(export.values["WallpaperMachine.tileZoom"]))
+        XCTAssertNoThrow(try WallpaperBackupPreferences.validate(stored, forKey: "WallpaperMachine.tileZoom"))
+        XCTAssertEqual("\(stored)", "2")
+        for zoom in -1...2 {
+            XCTAssertNoThrow(try WallpaperBackupPreferences.validate(NSNumber(value: zoom), forKey: "WallpaperMachine.tileZoom"))
+        }
+        for zoom: Any in [-2, 3, 1.5, "1", true, NSNumber(value: 1e30)] {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(zoom, forKey: "WallpaperMachine.tileZoom"), "\(zoom)")
+        }
+    }
+
     func testPlayingOnlyOnTheActiveDisplayIsBackedUpAndOnlyABooleanRestores() throws {
         let preferences = try defaults()
         preferences.set(true, forKey: "WallpaperMachine.playOnlyOnActiveDisplay")

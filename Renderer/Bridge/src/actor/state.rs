@@ -104,6 +104,14 @@ pub struct BridgeActorState {
     /// frame. It is set by `apply_startup_power_source`
     /// and cleared when the frame arrives.
     pub pending_battery_pause_after_initial_frame: bool,
+    /// The previous session ended with the user's own pause in force
+    /// (`general.paused`): it returns once the first frame is up, as the
+    /// battery pause does, so a launch never leaves a display without one.
+    /// Cleared when it is applied or the user plays or pauses first.
+    pub pending_user_pause_after_initial_frame: bool,
+    /// The user's latest Play/Pause failed to reach the saved configuration,
+    /// so the same choice made again writes it once more.
+    pub user_pause_unsaved: bool,
     /// The library filter: whether wallpapers of each kind are listed.
     /// They are saved with the app settings, and `filter_enabled`
     /// answers for a kind.
@@ -164,6 +172,9 @@ impl Default for BridgeActorState {
             // later, once the startup sample has said where the power comes from.
             initial_frame_ready: false,
             pending_battery_pause_after_initial_frame: false,
+            // `from_app_config` sets it from the saved pause.
+            pending_user_pause_after_initial_frame: false,
+            user_pause_unsaved: false,
             // Every kind of wallpaper is listed until the saved filter, which
             // `from_app_config` applies, says otherwise.
             // A fresh state therefore hides nothing.
@@ -178,14 +189,20 @@ impl Default for BridgeActorState {
 
 impl BridgeActorState {
     #[allow(clippy::single_call_fn)]
-    pub fn from_app_config(app_config: AppConfig) -> Self {
+    pub fn from_app_config(mut app_config: AppConfig) -> Self {
         let active_wallpaper_ids = state_values::configured_ids(&app_config);
+        // A saved pause with nothing assigned has nothing to hold still, and must
+        // not freeze the first wallpaper the user applies later on.
+        if active_wallpaper_ids.is_empty() {
+            app_config.general.paused = false;
+        }
         Self {
             filter_scene: app_config.ui.filter.scene,
             filter_video: app_config.ui.filter.video,
             filter_webpage: app_config.ui.filter.web,
             filter_unknown: app_config.ui.filter.unknown,
             selected_wallpaper_id: app_config.general.last_selected_wallpaper.clone(),
+            pending_user_pause_after_initial_frame: app_config.general.paused,
             active_wallpaper_ids,
             app_config,
             ..Self::default()

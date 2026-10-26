@@ -249,6 +249,10 @@ The rules that bind every change:
 - Files under `docs/` are `lowercase-hyphenated.md`, with exactly one `#` H1.
   Product feature docs go in `docs/features/`, test documents in `docs/testing/`.
 - Adding or removing a document means updating [README.md](README.md), the index.
+- A relative link must reach its file, and its `#anchor` a heading of that page as GitHub
+  spells it (or an `<a id>`). Renaming a heading means updating the links to it:
+  `scripts/tests/test_doc_links.py` checks every Markdown page outside the archives in the
+  routine gate's Python stage, and `python3 scripts/tests/test_doc_links.py` runs it alone.
 - Ground every statement in the repository: real paths, real flags, real test
   names. Delete a claim you cannot confirm instead of softening it.
 - [testing/verification-log.md](testing/verification-log.md) is newest-entry

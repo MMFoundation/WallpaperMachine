@@ -420,6 +420,18 @@ final class DownloadsModel {
     }
   }
 
+  func prioritize(_ row: DownloadRow) {
+    controller.launch(PanelActionCoordinator.key("downloadPrioritize", id: row.id)) { [controller] in
+      try await controller.prioritizeDownload(id: row.id)
+    }
+  }
+
+  func retryFailed() {
+    controller.launch(PanelActionCoordinator.key("retryFailedDownloads")) { [controller] in
+      try await controller.retryFailedDownloads()
+    }
+  }
+
   func removeRequest(_ request: DownloadRequestRow) {
     // The dialog goes first when it is open on this request, as it always did.
     if session?.target == request.id { closeDialog() }

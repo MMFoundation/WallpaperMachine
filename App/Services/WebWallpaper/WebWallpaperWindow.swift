@@ -225,6 +225,8 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     /// a dropped removal leaves a deleted file in its list.
     private var deferredRandomFileReplies: [RandomFileReply] = []
     private var deferredDirectoryChanges: [DirectoryChange] = []
+    /// What this document's own errors and warnings have put in the log, and its cap.
+    private(set) var pageDiagnostics = WebWallpaperPageDiagnostics()
     /// A page cannot be allowed to grow host memory by asking without waiting,
     /// nor to bank an unbounded replay across a long suspension.
     private static let maximumPendingRandomFileRequests = 32
@@ -468,6 +470,7 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         pendingRandomFileRequests.removeAll()
         deferredRandomFileReplies.removeAll()
         deferredDirectoryChanges.removeAll()
+        pageDiagnostics = WebWallpaperPageDiagnostics()
         refreshDemand()
     }
 
@@ -743,6 +746,53 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     /// inactive scheduling policy keys off exactly this.
     var isInWindowTree: Bool { container != nil && webView.superview === container }
 
+    enum FrameConfirmation: Equatable, Sendable {
+        /// WebKit drew and committed a frame of the document.
+        case committed
+        /// WebKit refused the snapshot that waits for one (a view with no size).
+        case unavailable
+        /// No frame within the limit: a display that draws nothing, a page that holds its main thread.
+        case timedOut
+    }
+
+    /// Answers once WebKit has drawn and committed a frame of the current document, which
+    /// `didFinish` comes before: a snapshot taken after the pending screen updates returns
+    /// only once there has been one. It is a frame of the document, not necessarily its
+    /// finished picture, since a page that builds itself after load still draws in steps.
+    /// The snapshot is one point at the centre, so it costs nothing to read. An answer for
+    /// a document that has since been replaced is dropped.
+    func confirmFrame(within limit: Duration, _ completion: @escaping @MainActor (FrameConfirmation) -> Void) {
+        let generation = documentGeneration
+        let answer = FrameConfirmationAnswer(completion)
+        let bounds = webView.bounds
+        let configuration = WKSnapshotConfiguration()
+        configuration.afterScreenUpdates = true
+        configuration.rect = CGRect(x: bounds.midX.rounded(.down), y: bounds.midY.rounded(.down), width: 1, height: 1)
+        configuration.snapshotWidth = 1
+        webView.takeSnapshot(with: configuration) { [weak self] image, error in
+            MainActor.assumeIsolated {
+                guard let self, self.documentGeneration == generation else { return }
+                answer.give(image != nil && error == nil ? .committed : .unavailable)
+            }
+        }
+        Task { @MainActor [weak self, wait] in
+            try? await wait(limit)
+            guard let self, self.documentGeneration == generation else { return }
+            answer.give(.timedOut)
+        }
+    }
+
+    @MainActor
+    private final class FrameConfirmationAnswer {
+        private var completion: (@MainActor (FrameConfirmation) -> Void)?
+        init(_ completion: @escaping @MainActor (FrameConfirmation) -> Void) { self.completion = completion }
+        func give(_ confirmation: FrameConfirmation) {
+            let completion = self.completion
+            self.completion = nil
+            completion?(confirmation)
+        }
+    }
+
     /// `restaged` is not committed: a document that loads later is given the whole
     /// set, which already carries the new staged bytes.
     private func deliverUserProperties(restaged: Set<String> = []) {
@@ -915,6 +965,10 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         case "audioUnsubscribed": audioListenerRegistered = false
         case "mediaSubscribed": mediaListenerRegistered = true
         case "mediaUnsubscribed": mediaListenerRegistered = false
+        case "pageDiagnostic":
+            guard let line = pageDiagnostics.line(project: projectURL.lastPathComponent, payload: payload) else { return }
+            if line.level == .warn { AppLog.warn(line.text, load: logLoad) } else { AppLog.info(line.text, load: logLoad) }
+            return
         case "randomFileRequest":
             guard let requestId = payload["requestId"] as? String, !requestId.isEmpty,
                   let propertyId = payload["propertyId"] as? String, !propertyId.isEmpty,

@@ -257,6 +257,65 @@ final class WorkshopSourceTests: XCTestCase {
     try await finished(store)
   }
 
+  func testFavoritesAreTheSignedInAccountsOwnInTheOrderChosen() async throws {
+    let store = fixture.store
+    store.open(.favorites)
+    try await finished(store)
+    XCTAssertNotNil(store.errorMessage, "a favorites list needs the account it belongs to")
+    XCTAssertEqual(store.items, [])
+
+    fixture.favoritePages = [
+      "subscriptiondate": profileHTML(ids: ["2", "1"], name: "Me", total: "2"),
+      "alpha": profileHTML(ids: ["1", "2"], name: "Me", total: "2"),
+    ]
+    fixture.details = ["1": detailsRow("1", tags: ["Scene", "Everyone"]), "2": detailsRow("2", tags: ["Video", "Everyone"])]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["2", "1"])
+    XCTAssertEqual(store.totalCount, 2)
+    XCTAssertTrue(fixture.cookies.contains("steamLoginSecure=\(Self.author)||0123456789abcdef0123"))
+
+    store.favoritesOrder = .alphabetical
+    store.search()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["1", "2"])
+    XCTAssertEqual(fixture.favoriteOrdersRequested, ["subscriptiondate", "alpha"])
+    XCTAssertEqual(fixture.favoriteProfilesRequested, [Self.author, Self.author], "the signed-in account's own favorites")
+    let url = try XCTUnwrap(URLComponents(url: store.browseURL, resolvingAgainstBaseURL: false))
+    XCTAssertEqual(url.path, "/profiles/\(Self.author)/myworkshopfiles/")
+    XCTAssertEqual(url.queryItems?.first { $0.name == "browsefilter" }?.value, "myfavorites")
+    XCTAssertEqual(url.queryItems?.first { $0.name == "sortmethod" }?.value, "alpha")
+
+    store.signOutOfSteamWeb()
+    XCTAssertEqual(store.items, [], "signing out empties the account's own list")
+  }
+
+  /// Signing out while the account's favorites are on their way, opened from a public list,
+  /// leaves nothing of that account on show once Steam answers.
+  func testSigningOutWhileFavoritesLoadLeavesNothingOfTheAccountOnShow() async throws {
+    let store = fixture.store
+    fixture.profiles[Self.author] = profileHTML(ids: ["1"], name: "Fixture Author", total: "1")
+    fixture.favoritePages = ["subscriptiondate": profileHTML(ids: ["2"], name: "Me", total: "1")]
+    fixture.details = ["1": detailsRow("1", tags: ["Scene", "Everyone"]), "2": detailsRow("2", tags: ["Scene", "Everyone"])]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    store.open(.creator(id: Self.author, name: "Fixture Author"))
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["1"])
+
+    let gate = fixture.holdFavorites()
+    store.open(.favorites)
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while !gate.isHolding, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
+    XCTAssertTrue(gate.isHolding, "the favorites request reached Steam with the session")
+    let load = try XCTUnwrap(store.searchTask)
+    store.signOutOfSteamWeb()
+    gate.open()
+    // The cancelled load settles only after Steam's answer was handed over, or was dropped.
+    await load.value
+    XCTAssertEqual(store.items, [])
+    XCTAssertFalse(store.hasLoaded)
+  }
+
   func testSubscriptionsWaitForASignInAndAnEndedSessionIsForgotten() async throws {
     let store = fixture.store
     store.open(.subscriptions)
@@ -931,6 +990,13 @@ private final class SourceFixture {
     get { answers.read { $0.subscriptionPages } }
     set { answers.write { $0.subscriptionPages = newValue } }
   }
+  var favoritePages: [String: Data] {
+    get { answers.read { $0.favoritePages } }
+    set { answers.write { $0.favoritePages = newValue } }
+  }
+  var favoriteOrdersRequested: [String] { answers.read { $0.favoriteOrdersRequested } }
+  /// The SteamID64 in the path of each favorites request.
+  var favoriteProfilesRequested: [String] { answers.read { $0.favoriteProfilesRequested } }
   var browseSections: [String] { answers.read { $0.browseSections } }
   var browsePagesRequested: [Int] { answers.read { $0.browsePagesRequested } }
   var detailsRequests: Int { answers.read { $0.detailsRequests } }
@@ -942,6 +1008,13 @@ private final class SourceFixture {
   }
   /// The form of each renewal request.
   var renewalForms: [String] { answers.read { $0.renewalForms } }
+
+  /// Holds Steam's favorites answers until the gate returned is opened.
+  func holdFavorites() -> AnswerGate {
+    let gate = AnswerGate()
+    answers.write { $0.favoritesGate = gate }
+    return gate
+  }
 
   init() throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -987,12 +1060,17 @@ private final class SourceAnswers: @unchecked Sendable {
     var details: [String: [String: Any]] = [:]
     var profiles: [String: Data] = [:]
     var subscriptionPages: [Int: Data] = [:]
+    /// Steam's favorites answer, by the `sortmethod` asked for.
+    var favoritePages: [String: Data] = [:]
+    var favoriteOrdersRequested: [String] = []
+    var favoriteProfilesRequested: [String] = []
     var browseSections: [String] = []
     var browsePagesRequested: [Int] = []
     var detailsRequests = 0
     var cookies: [String?] = []
     var renewal = Data(#"{"response":{}}"#.utf8)
     var renewalForms: [String] = []
+    var favoritesGate: AnswerGate?
   }
   private let lock = NSLock()
   private var state = State()
@@ -1006,6 +1084,7 @@ private final class SourceAnswers: @unchecked Sendable {
     let value = { (name: String) in query.first { $0.name == name }?.value }
     // `URL.path` drops a trailing slash.
     let path = url.path.hasSuffix("/") ? String(url.path.dropLast()) : url.path
+    if value("browsefilter") == "myfavorites", let gate = read({ $0.favoritesGate }) { gate.hold() }
     return lock.withLock {
       if host == "steamcommunity.com" { state.cookies.append(request.value(forHTTPHeaderField: "Cookie")) }
       switch (host, path) {
@@ -1035,10 +1114,30 @@ private final class SourceAnswers: @unchecked Sendable {
         if value("browsefilter") == "mysubscriptions" {
           return (200, state.subscriptionPages[Int(value("p") ?? "1") ?? 1] ?? Data())
         }
+        if value("browsefilter") == "myfavorites" {
+          let order = value("sortmethod") ?? ""
+          state.favoriteOrdersRequested.append(order)
+          state.favoriteProfilesRequested.append(String(parts[1]))
+          return (200, state.favoritePages[order] ?? Data())
+        }
         return (200, state.profiles[String(parts[1])] ?? Data())
       }
     }
   }
+}
+
+/// Keeps a request at Steam, on the loading thread, until it is opened (or five seconds pass).
+private final class AnswerGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private let opened = DispatchSemaphore(value: 0)
+  private var holding = false
+  var isHolding: Bool { lock.withLock { holding } }
+
+  func hold() {
+    lock.withLock { holding = true }
+    _ = opened.wait(timeout: .now() + 5)
+  }
+  func open() { opened.signal() }
 }
 
 private final class SourceFixtureProtocol: URLProtocol, @unchecked Sendable {

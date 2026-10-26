@@ -15,6 +15,8 @@ enum PanelPreferences {
   static let dragSelectLearnedKey = "WallpaperMachine.dragSelectLearned"
   /// Whether applying a wallpaper hides the app so the result is visible.
   static let hideAfterActivatingKey = "WallpaperMachine.hideAfterActivating"
+  /// How far the tile grids are zoomed: a step of `TileGridLayout.zoomWidths`, 0 the standard size.
+  static let tileZoomKey = "WallpaperMachine.tileZoom"
   /// Earlier builds stored a dragged inspector width here; the width now follows the window
   /// alone, so the key is removed rather than read.
   static let legacyInspectorWidthKey = "WallpaperMachine.inspectorWidth"
@@ -38,6 +40,16 @@ enum PanelPreferences {
   /// Off unless turned on, so the panel stays open until the user closes it.
   static func hidesAfterActivating(in defaults: UserDefaults = ClientPreferences.defaults) -> Bool {
     defaults.object(forKey: hideAfterActivatingKey) as? Bool ?? false
+  }
+
+  /// The tile zoom step, held to the steps there are; anything unreadable is the standard size.
+  static func tileZoom(in defaults: UserDefaults = ClientPreferences.defaults) -> Int {
+    TileGridLayout.clampedZoom(defaults.object(forKey: tileZoomKey) as? Int ?? 0)
+  }
+
+  static func setTileZoom(_ zoom: Int, in defaults: UserDefaults) {
+    let zoom = TileGridLayout.clampedZoom(zoom)
+    if zoom == 0 { defaults.removeObject(forKey: tileZoomKey) } else { defaults.set(zoom, forKey: tileZoomKey) }
   }
 
   /// The favorites; anything unreadable is an empty set rather than a failure.

@@ -384,9 +384,9 @@ describes what should happen and the log lines to read afterwards.
 - [ ] Switch a web page to another web page (a project with a different entry page): the
       previous picture stays until the new page has loaded and painted, then fades out, and
       the new page is never seen empty or black behind it. The log has `frame captured`,
-      `adopted by host` and `released ... (host ready)`, half a second after the page finished
-      loading. Look for a flash of an empty page as the picture goes, which would mean 500 ms
-      after `didFinish` is not enough for that project's first paint, and for the system
+      `adopted by host` and `released ... (host ready)`, once the page has committed its first
+      frame. Look for a flash of an empty page as the picture goes, which would mean that
+      project's first frame shows too little of it, and for the system
       picture between the old page closing and the new one opening, which the host cannot
       cover.
 - [ ] Switch a web page to a scene: the page's snapshot answers the request for a still (the

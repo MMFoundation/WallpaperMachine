@@ -174,7 +174,7 @@ function tickScene(prog) {
   try { runListeners('update', undefined); } catch (e) { reportError('update', e); }
 }
 
-function cursorEvent(prog, index, button) {
+function cursorEvent(prog, index, button, hasLocal, localX, localY) {
   var name = CURSOR[index];
   // Each program gets its own vectors: one that edits `event.worldPosition` must not
   // change what `input` or the next program's event holds.
@@ -185,6 +185,8 @@ function cursorEvent(prog, index, button) {
     worldPosition: world,
     position: world
   };
+  // Relative to the program's layer: 0 to its size on each axis while over it.
+  if (hasLocal) event.localPosition = new Vec3(localX, localY, 0);
   shortcutBudget = 1;
   try {
     guard(name, prog, event);

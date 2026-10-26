@@ -62,10 +62,14 @@ final class WebWallpaperHost {
     /// Keeps the picture of the wallpaper a switch replaces on screen until the new page has
     /// loaded and painted. `nil` for a host that never holds one, as in most of the tests.
     private let switchHold: WallpaperSwitchHold?
-    /// How long after a page reports it has loaded the held picture stays. `didFinish` comes
-    /// before the first meaningful paint (see `scheduleSurfaceChange`, which reads the poster
-    /// again two seconds later), so taking the picture away at once could show the empty page.
-    /// A fade over a page that has painted anyway hides what is left of the lag.
+    /// How long after a page has loaded the held picture waits for WebKit to commit a frame of
+    /// it. `didFinish` comes before the first paint, so taking the picture away at once could
+    /// show the empty page; a page that holds its main thread through its first frame (a large
+    /// WebGL build) is shown when this runs out, as is one on a display that draws nothing.
+    static let firstFrameLimit = Duration.seconds(3)
+    /// How long after a page has loaded the held picture stays when WebKit cannot say whether
+    /// a frame was committed. A fade over a page that has painted anyway hides what is left of
+    /// the lag.
     static let firstPaintSettle = Duration.milliseconds(500)
     /// Distinguishes surfaces that reused one display id across a wallpaper
     /// switch, so their counters are not merged.
@@ -522,7 +526,13 @@ final class WebWallpaperHost {
                     guard let self, let page, self.windows[displayID]?.page === page,
                           let current = self.descriptors[displayID] else { return }
                     self.recordState(current, phase: .ready)
-                    self.switchHold?.contentReady(displayID: displayID, after: Self.firstPaintSettle)
+                    if self.switchHold != nil {
+                        page.confirmFrame(within: Self.firstFrameLimit) { [weak self, weak page] confirmation in
+                            guard let self, let page, self.windows[displayID]?.page === page else { return }
+                            self.switchHold?.contentReady(
+                                displayID: displayID, after: confirmation == .unavailable ? Self.firstPaintSettle : .zero)
+                        }
+                    }
                     self.replayDirectories(displayID: displayID)
                     self.scheduleSurfaceChange()
                     self.refreshAudioOutputs()

@@ -751,16 +751,15 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     XCTAssertFalse(first.hasVeil)
     XCTAssertEqual(harness.state(), .onHost)
 
-    // Loading is not enough: the page reports it has finished before it has painted.
+    // Loading is not enough: the page reports it has finished before it has drawn, so the
+    // picture waits for WebKit to commit a frame of it (`WebWallpaperFrameConfirmationTests`
+    // shows the wait), not for a fixed delay.
     try await wait { fixture.model.states.last?.phase == .ready }
-    try await wait { harness.timers.pendingCount == 1 }
-    XCTAssertEqual(harness.timers.requested.last, WebWallpaperHost.firstPaintSettle)
-    XCTAssertEqual(harness.state(), .onHost, "the page has loaded but not painted")
-    XCTAssertTrue(second.hasVeil)
-
-    harness.timers.fireNext()
     try await wait { harness.state() == nil }
-    XCTAssertFalse(second.hasVeil, "the picture goes once the page has had time to paint")
+    XCTAssertFalse(second.hasVeil, "the picture goes once the page has drawn")
+    XCTAssertFalse(
+      harness.timers.requested.contains(WebWallpaperHost.firstPaintSettle),
+      "a committed frame releases it, not a timer")
   }
 
   func testAPageThatFailsToLoadReleasesTheHeldPicture() async throws {
