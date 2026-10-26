@@ -90,6 +90,7 @@ Shared/                            contracts compiled into both targets: lock-sc
                                    video planner and player
 Resources/StarterWallpaper/        bundled sample wallpaper (Aurora.mp4, preview.jpg, project.json)
 Resources/ReleaseBanners/          release banners, x.y.z.jpg, x.y.z.zh-Hans.jpg and x.y.z.ko.jpg (or .png), shown in CHANGELOG.md and on the release page
+Resources/ReleaseNotes/            developer's notes, x.y.z.md, x.y.z.zh-Hans.md and x.y.z.ko.md, printed as written in a version's notes
 Tests/Unit/<Domain>/               WallpaperMachineTests, one folder per App/Services domain plus Panel for
                                    Views/ControlPanel; hosted in the app binary
 Tests/UI/                          WallpaperMachineUITests; desktop-driving XCUITest suite
