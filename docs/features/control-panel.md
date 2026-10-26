@@ -73,7 +73,13 @@ Motion) and draws a focus ring under keyboard focus; selection is an accent ring
 surface-coloured gap so blue artwork does not hide it. Each grid fills its width with as
 many columns as fit at a preferred tile size (140 points, 14-point gaps) that shrinks
 with the column, and never fewer than three, so a narrower window shows smaller tiles
-and more of them; the column count is a pure function of the width. The grids are lazy:
+and more of them; the column count is a pure function of the width. **View → Zoom In**
+(⌘+), **Zoom Out** (⌘−) and **Actual Size** (⌘0) step the preferred size through 112,
+140, 176 and 220 points for every grid (Installed, Discover and pixiv) while the window is
+open (`TileGridLayout.zoomWidths`). The step is saved as `WallpaperMachine.tileZoom`
+(nothing at the standard size), travels with a [backup](backup-restore.md), and Reset all
+settings returns it to Actual Size. **Help → WallpaperMachine Guides** opens the website's
+guides, in Chinese for either Chinese and in English otherwise. The grids are lazy:
 only the rows near the screen are built. While a trackpad or wheel scroll (and its glide)
 is under way, tiles ignore the pointer: no lift, no hover controls, no live preview; they
 come back under the pointer when the scroll stops, so content moving under a still pointer

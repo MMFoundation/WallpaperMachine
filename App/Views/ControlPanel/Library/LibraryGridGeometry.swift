@@ -17,6 +17,8 @@ struct LibraryGridGeometry: Equatable {
   static let controlSize: CGFloat = 24
   static let controlInset: CGFloat = 6
 
+  /// The width the grid prefers its tiles at, as the panel's zoom sets it.
+  var preferredTileWidth = TileGridLayout.preferredTileWidth
   /// The scroll view's own size.
   var viewport = CGSize.zero
   /// One drawn tile, caption included.
@@ -30,7 +32,8 @@ struct LibraryGridGeometry: Equatable {
 
   var columns: Int {
     TileGridLayout.columnCount(
-      forWidth: viewport.width - Self.insets.leading - Self.insets.trailing, spacing: Self.spacing)
+      forWidth: viewport.width - Self.insets.leading - Self.insets.trailing, spacing: Self.spacing,
+      preferredWidth: preferredTileWidth)
   }
 
   /// The farthest the content can scroll.

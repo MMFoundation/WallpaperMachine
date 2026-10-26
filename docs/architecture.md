@@ -88,11 +88,12 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
   (`App/Services/Desktop/ScreenLock.swift`). The application menu holds the app menu
   (About, which opens Settings → About; Settings…, Check for Updates…, Services, Hide / Hide
   Others / Show All, Quit), **File → Close** (Command-W sends `performClose` to the key window),
-  **Edit**, **View** (the panel's tabs, Command-1 to Command-3, the one on show ticked, and Enter
-  Full Screen), **Wallpaper** (`StatusMenuModel.wallpaperMenuEntries`: the status item's commands
+  **Edit**, **View** (the panel's tabs, Command-1 to Command-3, the one on show ticked; Zoom In,
+  Zoom Out and Actual Size for the tile grids, enabled while a panel is open,
+  [control panel](features/control-panel.md); and Enter Full Screen), **Wallpaper** (`StatusMenuModel.wallpaperMenuEntries`: the status item's commands
   without its lines that open the panel, rebuilt when the menu opens), **Window** (Minimize, Zoom,
-  Bring All to Front and the window list) and **Help** (the repository, its releases and its issue
-  list, through `ExternalLink`). What the navigation actions do is owned by
+  Bring All to Front and the window list) and **Help** (the website's guides in the app's
+  language, then the repository, its releases and its issue list, through `ExternalLink`). What the navigation actions do is owned by
   [playlists](features/playlists.md) and [automation](features/automation.md).
 - **Closing the panel.** `windowWillClose` drops the window's hosting controller, which releases
   the SwiftUI root and its `PanelController`; reopening builds a fresh view around the existing

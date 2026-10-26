@@ -1871,6 +1871,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             viewMenu.addItem(item)
         }
         viewMenu.addItem(.separator())
+        // The tile grids' size, as Finder and Photos zoom their icons.
+        let zoomIn = menuItem("Zoom In", action: #selector(zoomTilesIn))
+        zoomIn.keyEquivalent = "+"
+        viewMenu.addItem(zoomIn)
+        let zoomOut = menuItem("Zoom Out", action: #selector(zoomTilesOut))
+        zoomOut.keyEquivalent = "-"
+        viewMenu.addItem(zoomOut)
+        let actualSize = menuItem("Actual Size", action: #selector(resetTileZoom))
+        actualSize.keyEquivalent = "0"
+        viewMenu.addItem(actualSize)
+        viewMenu.addItem(.separator())
         // The window titles this item Enter or Exit Full Screen itself.
         let fullScreen = NSMenuItem(title: String(localized: "Enter Full Screen"),
                                     action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
@@ -1903,6 +1914,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
 
         let helpItem = NSMenuItem()
         let helpMenu = NSMenu(title: String(localized: "Help"))
+        helpMenu.addItem(menuItem("WallpaperMachine Guides", action: #selector(openGuides)))
+        helpMenu.addItem(.separator())
         helpMenu.addItem(menuItem("WallpaperMachine on GitHub", action: #selector(openRepository)))
         helpMenu.addItem(menuItem("Release Notes", action: #selector(openReleaseNotes)))
         helpMenu.addItem(menuItem("Report an Issue…", action: #selector(openIssues)))
@@ -1922,6 +1935,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         } else {
             items.forEach(menu.addItem)
         }
+    }
+
+    @objc private func zoomTilesIn() { controlPanelNavigation.tileZoomTarget?.zoomTiles(.zoomIn) }
+    @objc private func zoomTilesOut() { controlPanelNavigation.tileZoomTarget?.zoomTiles(.zoomOut) }
+    @objc private func resetTileZoom() { controlPanelNavigation.tileZoomTarget?.zoomTiles(.actualSize) }
+
+    /// The website's guides, in Chinese for either Chinese and in English otherwise, the two
+    /// languages they are written in.
+    @objc private func openGuides() {
+        ExternalLink.open(Self.guidesURL(languageTag: AppLanguageStore.shared.effective.tag))
+    }
+
+    nonisolated static func guidesURL(languageTag: String) -> URL {
+        URL(string: languageTag.lowercased().hasPrefix("zh")
+            ? "https://www.wallpapermachine.app/zh/guides/" : "https://www.wallpapermachine.app/guides/")!
     }
 
     private func rebuildMenu(_ menu: NSMenu? = nil) {
@@ -2097,13 +2125,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         ExternalLink.open(ExternalLink.repositoryIssues)
     }
 
-    /// Ticks the View menu's page on show.
+    /// Ticks the View menu's page on show, and enables Zoom In, Zoom Out and Actual Size while a
+    /// panel is open and has a step to go that way.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(showPage(_:)) {
             let shown = controlPanelWindow?.isVisible == true
                 && controlPanelNavigation.selection?.rawValue == item.representedObject as? String
             item.state = shown ? .on : .off
         }
+        let zoom: TileZoomCommand? =
+            switch item.action {
+            case #selector(zoomTilesIn)?: .zoomIn
+            case #selector(zoomTilesOut)?: .zoomOut
+            case #selector(resetTileZoom)?: .actualSize
+            default: nil
+            }
+        if let zoom { return controlPanelNavigation.tileZoomTarget?.canZoomTiles(zoom) ?? false }
         return true
     }
 

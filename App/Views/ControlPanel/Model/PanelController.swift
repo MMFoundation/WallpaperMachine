@@ -93,6 +93,9 @@ final class PanelController {
   var welcomeSeen: Bool
   /// Whether the user has swept across tiles to select them, or dismissed the tip that teaches it.
   var dragSelectLearned: Bool
+  /// How far View › Zoom In and Zoom Out have zoomed the tile grids, 0 the standard size; saved
+  /// under `PanelPreferences.tileZoomKey` by `setTileZoom`.
+  var tileZoom: Int
   /// Whether the Steam sign-in keeps its session while the download runs; a running download's own
   /// choice wins over this.
   var remembersSession = true
@@ -323,6 +326,7 @@ final class PanelController {
     self.chooseApplication = chooseApplication
     welcomeSeen = PanelPreferences.welcomeSeen(in: defaults)
     dragSelectLearned = PanelPreferences.dragSelectLearned(in: defaults)
+    tileZoom = PanelPreferences.tileZoom(in: defaults)
     favoriteIDs = PanelPreferences.favorites(in: defaults)
     PanelPreferences.removeLegacyKeys(from: defaults)
 
@@ -360,6 +364,7 @@ final class PanelController {
     isStopped = false
     presentation.onBecameKey = { [weak self] in self?.windowDidBecomeKey() }
     presentation.onClose = { [weak self] in self?.stop() }
+    navigation.tileZoomTarget = self
     revisions.start()
     // Discover previews start caching the moment Steam's page arrives, and the following page is
     // fetched behind the one on show, so neither waits for a tile to ask. The pixiv page does the
@@ -383,6 +388,7 @@ final class PanelController {
     guard isStarted else { return }
     isStarted = false
     isStopped = true
+    if navigation.tileZoomTarget === self { navigation.tileZoomTarget = nil }
     importPicker.cancel()
     energyUsage.setActive(false)
     loginItemRefresh?.cancel()

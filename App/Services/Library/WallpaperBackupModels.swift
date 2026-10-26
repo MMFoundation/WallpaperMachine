@@ -112,7 +112,8 @@ struct WallpaperBackupPreferences: Sendable {
         "WallpaperMachine.lowPowerModeAction", "WallpaperMachine.thermalAction",
         "WallpaperMachine.lowBatteryAction", "WallpaperMachine.lowBatteryThreshold",
         "WallpaperMachine.playOnlyOnActiveDisplay",
-        "WallpaperMachine.hideAfterActivating", "WallpaperMachine.concurrentDownloads",
+        "WallpaperMachine.hideAfterActivating", "WallpaperMachine.tileZoom",
+        "WallpaperMachine.concurrentDownloads",
         "WallpaperMachine.workshopUpdateChecks", "WallpaperMachineAssetsPath",
         // No longer read since filters became a popover; still accepted so that backups made
         // by earlier versions, which carry them, keep restoring.
