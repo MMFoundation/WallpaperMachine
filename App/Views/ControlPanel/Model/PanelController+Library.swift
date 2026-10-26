@@ -78,16 +78,18 @@ extension PanelController {
   }
 
   /// Applies or restarts `id` on the display targeted *now*, which is the one the user means:
-  /// the command may wait behind others, and the target can change in the meantime.
+  /// the command may wait behind others, and the target can change in the meantime. It is read
+  /// before anything here waits (the shared resources, reading a refused scene again), so the
+  /// display that is checked and the one applied to are the one the user had chosen.
   private func applyToTarget(_ id: String, restarts: Bool) async throws {
+    let displayID = navigation.targetDisplayID
     if try await getsSceneResourcesInstead(of: id) { return }
     // Restarting a scene, or choosing the one the display shows, puts up nothing new.
-    if !restarts, !store.isWallpaperActive(id: id, displayId: navigation.targetDisplayID) {
+    if !restarts, !store.isWallpaperActive(id: id, displayId: displayID) {
       guard await confirmsUndrawableScene(id) else { return }
     }
     do {
       let id = try installedWallpaperID(id)
-      let displayID = navigation.targetDisplayID
       let slot = BridgeStore.activationSlot(displayId: displayID)
       let ran = try await run(.queued, slot: slot, subject: id) {
         if restarts {

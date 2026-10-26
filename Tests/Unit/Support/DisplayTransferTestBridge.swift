@@ -35,6 +35,8 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
     /// What reading a scene answers, and the scenes read, in order. Nil answers throw.
     var sceneCapabilityAnswer: BridgeSceneCapability?
     private(set) var sceneCapabilityReads: [String] = []
+    /// Runs while a scene is being read, as the user may act during that wait.
+    var whileReadingScene: (@MainActor () -> Void)?
 
     func installProjects(in library: URL) throws {
         for id in ["a", "b", "c"] {
@@ -84,6 +86,7 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
     override func allSnapshots() async throws -> BridgeSnapshotBundle { currentBundle }
     override func sceneCapability(wallpaperId: String) async throws -> BridgeSceneCapability {
         sceneCapabilityReads.append(wallpaperId)
+        whileReadingScene?()
         guard let sceneCapabilityAnswer else { throw WallpaperActionError(message: "no scene probe in this test") }
         return sceneCapabilityAnswer
     }

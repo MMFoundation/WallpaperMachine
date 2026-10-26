@@ -345,6 +345,31 @@ final class PanelLibraryActionsTests: PanelTestCase {
     }
   }
 
+  func testATargetChosenWhileTheSceneIsReadAgainDoesNotRedirectTheApply() async throws {
+    try await withApplyingPanel { panel, bridge, _ in
+      let controller = panel.controller
+      panel.store.librarySnapshot.wallpapers = panel.store.librarySnapshot.wallpapers.map {
+        var entry = $0
+        if entry.id == "c" { entry.kind = .projectScene }
+        return entry
+      }
+      panel.sceneAssets.available = true
+      let library = panel.library
+      let verdicts = SceneDrawVerdicts(
+        file: panel.root.appendingPathComponent("SceneDrawVerdicts.json"), library: { library })
+      panel.store.sceneDrawVerdicts = verdicts
+      await verdicts.record("c", outcome: .notDrawn, stage: "unsupported", reason: "a light probe")
+      bridge.sceneCapabilityAnswer = BridgeSceneCapability(
+        readError: nil, failureStage: nil, failureReason: nil, missingFiles: [])
+      panel.navigation.targetDisplayID = "primary"
+      bridge.whileReadingScene = { panel.navigation.targetDisplayID = "secondary" }
+
+      try await controller.activate("c")
+      XCTAssertEqual(bridge.assignments["primary"], "c", "the display targeted when Apply was pressed")
+      XCTAssertEqual(bridge.assignments["secondary"], "b", "the one chosen during the wait is left alone")
+    }
+  }
+
   func testWhenTheSceneCannotBeReadAgainTheRememberedRefusalStillAsks() async throws {
     try await withApplyingPanel { panel, bridge, _ in
       let controller = panel.controller
