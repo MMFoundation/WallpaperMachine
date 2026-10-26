@@ -15,14 +15,16 @@
 # since the control panel became SwiftUI, and CodeQL fails a language it finds no code
 # for.
 #
+# Not on pull requests: the Swift job rebuilds the whole app with compile caching off for
+# about half an hour per run, and its findings were mostly false positives. Pushes to
+# main and the weekly run still report anything new.
+#
 # Default setup must be off (Settings -> Code security -> CodeQL analysis), or
 # GitHub rejects this workflow's uploads (docs/release.md).
 name: CodeQL
 
 on:
   push:
-    branches: [main]
-  pull_request:
     branches: [main]
   schedule:
     - cron: "41 4 * * 2"
@@ -33,7 +35,6 @@ permissions:
 
 concurrency:
   group: codeql-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze:

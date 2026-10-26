@@ -205,9 +205,9 @@ right of the **Release notes** row above the box picks the translation for this 
 only and returns the notes to the top (the title bar holds only the window buttons); it never changes the app's
 language. The window opens on the app's effective language (Settings → General →
 Language): Simplified or Traditional Chinese opens on the Chinese notes, Korean on the
-Korean ones (English for releases before 1.5.7), and English or Japanese on the English
-ones; section headings the catalogs know are translated for Japanese and Traditional
-Chinese. When the manifest has no changelog (the API path,
+Korean ones (English for releases before 1.5.7), and English, Japanese or Brazilian
+Portuguese on the English ones; section headings the catalogs know are translated for
+Japanese, Traditional Chinese and Brazilian Portuguese. When the manifest has no changelog (the API path,
 or a release published before it carried one), when it does not parse, or when it
 lacks the available version, the window shows the release body's English notes for
 the available version alone. `AppReleaseHistory` parses the changelog with the same

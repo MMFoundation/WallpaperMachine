@@ -57,6 +57,8 @@ jobs:
         env:
           TAG: ${{ steps.bump.outputs.tag }}
           RELEASE_NOTES_API_KEY: ${{ secrets.RELEASE_NOTES_API_KEY }}
+          # Names the GitHub account behind each commit, for the thanks line.
+          RELEASE_NOTES_GITHUB_TOKEN: ${{ github.token }}
           NOTES_FROM: ${{ github.event.inputs.notes_from }}
         # The tag does not exist yet, so the range ends at HEAD. The bump commit
         # itself is never part of the notes it describes. Without the key, or when the

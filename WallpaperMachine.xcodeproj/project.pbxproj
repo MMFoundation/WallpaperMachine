@@ -3789,6 +3789,7 @@
 				en,
 				ja,
 				ko,
+				"pt-BR",
 				"zh-Hans",
 				"zh-Hant",
 			);

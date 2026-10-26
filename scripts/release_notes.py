@@ -23,7 +23,9 @@ is cut. Sections carry all three languages from v1.5.7; older recorded English a
 Simplified Chinese sections remain valid. The update manifest carries the newest
 sections, which the app's update window shows (scripts/update_manifest.py
 --changelog). `--release-body` publishes only the English part and the compare link
-on GitHub, then adds the install footer. A hand-pushed tag with no section is written
+on GitHub, then adds the install footer. Each language block of a new section ends by
+thanking the outside contributors whose commits are in the range, by GitHub login;
+the script writes that line, not the model. A hand-pushed tag with no section is written
 once, into the working tree, before the build. A recorded localized section is reused
 without another model request.
 A version with a banner picture in Resources/ReleaseBanners/ (`x.y.z.jpg` or `.png`,
@@ -168,6 +170,18 @@ SQUASHED = re.compile(r"^\* (?=[a-z]+(?:\([^)]*\))?!?:)", re.MULTILINE)
 # Trailers and the rule GitHub puts before a squash merge's own; they only spend the budget.
 TRAILER = re.compile(r"^(?:(?:co-authored-by|signed-off-by|reviewed-by|claude-session):.*|-{3,}[ \t]*)$",
                      re.IGNORECASE | re.MULTILINE)
+# Who a release thanks: the GitHub accounts behind the commits of the range, from a
+# `<id>+login@users.noreply.github.com` address or, with RELEASE_NOTES_GITHUB_TOKEN set,
+# GitHub's own record of each commit's author. Maintainers, the coding agents that
+# commit for them and bots are not thanked; an address GitHub links to no account is
+# not credited, so a maintainer's new address can never be thanked by name.
+GITHUB_TOKEN_VARIABLE = "RELEASE_NOTES_GITHUB_TOKEN"
+GITHUB_API = "https://api.github.com"
+GITHUB_TIMEOUT = 20
+MAINTAINERS = frozenset({"bobbyhuang-dev", "fzlzjerry", "t3code"})
+NOREPLY = re.compile(r"^(?:\d+\+)?(?P<login>[^@\s]+)@users\.noreply\.github\.com$", re.IGNORECASE)
+LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+CO_AUTHOR = re.compile(r"^co-authored-by:[ \t]*[^<\n]*<(?P<email>[^>\n]+)>[ \t]*$", re.IGNORECASE | re.MULTILINE)
 MODEL_SECTIONS = (
     ("highlights", "Highlights"),
     ("breaking", "Breaking Changes"),
@@ -297,12 +311,13 @@ class Change(NamedTuple):
 
 
 class Commit(NamedTuple):
-    """One commit of the range: full and abbreviated hash, subject and body."""
+    """One commit of the range: full and abbreviated hash, subject, body and author address."""
 
     sha: str
     short: str
     subject: str
     body: str
+    email: str = ""
 
 
 class Bullet(NamedTuple):
@@ -377,12 +392,13 @@ def previous_tag(version, revision, cwd=ROOT, tags=None):
 def commits(previous, revision, cwd=ROOT):
     """A `Commit` for every non-merge commit in the range, newest first."""
     span = f"{previous}..{revision}" if previous else revision
-    raw = git("log", "--no-merges", f"--format=%H{FIELD}%h{FIELD}%s{FIELD}%b{RECORD}", span, cwd=cwd)
+    raw = git("log", "--no-merges", f"--format=%H{FIELD}%h{FIELD}%ae{FIELD}%s{FIELD}%b{RECORD}", span, cwd=cwd)
     for record in raw.split(RECORD):
         record = record.strip("\n")
         if not record:
             continue
-        yield Commit(*record.split(FIELD, 3))
+        sha, short, email, subject, body = record.split(FIELD, 4)
+        yield Commit(sha, short, subject, body, email)
 
 
 def closing_refs(message):
@@ -416,13 +432,16 @@ def classify(sha, subject, body=""):
     return Change(group, (match.group("scope") or "").strip(), sentence(match.group("subject")), sha, closes)
 
 
-def changes(previous, revision, cwd=ROOT):
-    collected = []
+def release_commits(previous, revision, cwd=ROOT):
+    """`(Commit, Change)` for every commit of the range but CI's bump commit, newest first."""
     for entry in commits(previous, revision, cwd):
         change = classify(entry.sha, entry.subject, entry.body)
         if change is not None:
-            collected.append(change)
-    return collected
+            yield entry, change
+
+
+def changes(previous, revision, cwd=ROOT):
+    return [change for _, change in release_commits(previous, revision, cwd)]
 
 
 def group_changes(collected):
@@ -474,6 +493,77 @@ def bullet(changes_behind, repo=None):
     scope = f"**{first.scope}** — " if first.scope else ""
     closes = [number for change in changes_behind for number in change.closes]
     return f"- {scope}{first.subject}{link_suffix([change.sha for change in changes_behind], closes, repo)}"
+
+
+def github_author(repo, sha, token):
+    """`(login, type)` GitHub records as the author of `sha`, or None when the address
+    links no account or GitHub does not know the commit (one not pushed yet)."""
+    request = urllib.request.Request(f"{GITHUB_API}/repos/{repo}/commits/{sha}", headers={
+        "accept": "application/vnd.github+json",
+        "authorization": f"Bearer {token}",
+        "user-agent": USER_AGENT,
+        "x-github-api-version": "2022-11-28",
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=GITHUB_TIMEOUT) as response:
+            author = json.load(response).get("author") or {}
+    except urllib.error.HTTPError as error:
+        error.close()
+        if error.code in (404, 422):
+            return None
+        raise NotesError(f"GitHub refused to name the author of {sha[:SHORT_HASH]} (HTTP {error.code})") from None
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        raise NotesError(f"Could not ask GitHub who wrote {sha[:SHORT_HASH]}: {getattr(error, 'reason', error)}") from None
+    return (author["login"], author.get("type")) if author.get("login") else None
+
+
+def outside_contributors(entries, repo=None, environ=None, lookup=None):
+    """The GitHub logins a release thanks, in the order of their first commit (oldest first).
+
+    A commit's author counts by the login in a GitHub noreply address, else by what
+    `lookup(sha)` answers (GitHub's record, asked once per address, when
+    RELEASE_NOTES_GITHUB_TOKEN is set); a co-author only by a noreply address. Maintainers
+    and bots are left out, and so is anyone without a login.
+    """
+    environ = os.environ if environ is None else environ
+    token = environ.get(GITHUB_TOKEN_VARIABLE, "").strip()
+    if lookup is None and token and repo:
+        lookup = lambda sha: github_author(repo, sha, token)  # noqa: E731
+    logins = {}
+    thanked = {}
+
+    def credit(login):
+        if login and LOGIN.match(login) and login.lower() not in MAINTAINERS:
+            thanked.setdefault(login.lower(), login)
+
+    for entry in reversed(list(entries)):
+        address = entry.email.strip()
+        if address.lower() not in logins:
+            noreply = NOREPLY.match(address)
+            author = None if noreply or not (lookup and address) else lookup(entry.sha)
+            if noreply:
+                logins[address.lower()] = noreply.group("login")
+            else:
+                logins[address.lower()] = author[0] if author and author[1] != "Bot" else None
+        credit(logins[address.lower()])
+        for match in CO_AUTHOR.finditer(entry.body or ""):
+            noreply = NOREPLY.match(match.group("email").strip())
+            credit(noreply and noreply.group("login"))
+    return tuple(thanked.values())
+
+
+def thanks_line(code, logins):
+    """The sentence a language block ends with when outside contributors are in the range."""
+    if not logins:
+        return None
+    names = [f"[@{login}](https://github.com/{login})" for login in logins]
+    if code == "english":
+        listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        return f"Thanks to {listed} for contributing to this release."
+    if code == "chinese":
+        listed = names[0] if len(names) == 1 else "、".join(names[:-1]) + " 和 " + names[-1]
+        return f"感谢 {listed} 为本版本做出的贡献。"
+    return f"이번 릴리스에 기여해 주신 {', '.join(names)} 님께 감사드립니다."
 
 
 def compare_url(previous, tag, repo):
@@ -595,9 +685,9 @@ def release_body(notes, version, built_from=None, repo=None, compare=None):
     return "\n\n".join(parts) + "\n"
 
 
-def render(version, collected, previous=None, repo=None, internal_label=True):
-    """The listed notes for one version: an English block of `####` categories and an
-    internal-work count. The section heading carries the compare link."""
+def render(version, collected, previous=None, repo=None, internal_label=True, thanks=()):
+    """The listed notes for one version: an English block of `####` categories, an
+    internal-work count and the thanks line. The section heading carries the compare link."""
     grouped = group_changes(collected)
     parts = []
     for key, category in SECTIONS:
@@ -612,6 +702,8 @@ def render(version, collected, previous=None, repo=None, internal_label=True):
     elif internal and internal_label:
         noun = "commit" if internal == 1 else "commits"
         parts.append(f"Plus {internal} documentation, test and tooling {noun}.")
+    if thanks:
+        parts.append(thanks_line("english", thanks))
     return "### English\n\n" + "\n\n".join(parts).strip() + "\n"
 
 
@@ -868,8 +960,9 @@ def bullet_suffix(item, repo=None):
     return link_suffix([entry.sha for entry in item.commits], closes, repo)
 
 
-def render_language(code, heading, notes, previous, banner=None, repo=None):
-    """One language block: its banner, optional summary, then `####` categories, or the empty line."""
+def render_language(code, heading, notes, previous, banner=None, repo=None, thanks=()):
+    """One language block: its banner, optional summary, then `####` categories, or the
+    empty line; then the thanks line when outside contributors are in the range."""
     parts = [banner] if banner else []
     if notes["summary"][code]:
         parts.append(notes["summary"][code])
@@ -880,18 +973,20 @@ def render_language(code, heading, notes, previous, banner=None, repo=None):
     if len(parts) == (1 if banner else 0):
         no_changes = {"english": nothing_to_say, "chinese": nothing_to_say_zh, "korean": nothing_to_say_ko}
         parts.append(no_changes[code](previous))
+    if thanks:
+        parts.append(thanks_line(code, thanks))
     return f"### {heading}\n\n" + "\n\n".join(parts)
 
 
-def render_model_notes(version, notes, previous=None, repo=None, banners=None):
+def render_model_notes(version, notes, previous=None, repo=None, banners=None, thanks=()):
     """Trilingual notes: English, 简体中文, then 한국어; categories at `####`.
 
     `banners` maps a language to the image line its block opens with. Every bullet
     ends with the same issue and commit links in all three languages; the compare
-    link belongs to the section heading.
+    link belongs to the section heading. `thanks` holds the logins every block thanks.
     """
     banners = banners or {}
-    parts = [render_language(code, heading, notes, previous, banners.get(code), repo)
+    parts = [render_language(code, heading, notes, previous, banners.get(code), repo, thanks)
              for code, heading in LANGUAGE_BLOCKS]
     return "\n\n".join(parts).strip() + "\n"
 
@@ -1010,20 +1105,19 @@ def require_bundled_history(text, root=ROOT):
     return text
 
 
-def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport=None, environ=None):
+def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport=None, environ=None, lookup=None):
     """Notes the release-notes model writes from the commits in the range. A range with
     no commits is reported in all three languages without a request. The model names
-    each bullet's commits; their issue and commit links are added here."""
+    each bullet's commits; their issue and commit links, and the thanks line, are added here."""
     entries = []
     available = []
-    for entry in commits(previous, revision, cwd):
-        change = classify(entry.sha, entry.subject, entry.body)
-        if change is not None:
-            available.append(entry)
-            entries.append((entry.short, " ".join(entry.subject.split()), entry.body, change.group == "internal"))
+    for entry, change in release_commits(previous, revision, cwd):
+        available.append(entry)
+        entries.append((entry.short, " ".join(entry.subject.split()), entry.body, change.group == "internal"))
     banners = {code: banner_line(version, cwd, code) for code, _ in LANGUAGE_BLOCKS}
     if not entries:
         return render_model_notes(version, empty_notes(), previous, repo, banners)
+    thanks = outside_contributors(available, repo, environ, lookup)
     url, model, key = model_settings(environ)
     payload = {
         "model": model,
@@ -1033,16 +1127,19 @@ def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport
         "messages": [{"role": "user", "content": model_prompt(version, previous, entries)}],
     }
     text = streamed_text((transport or stream)(url, key, payload))
-    return render_model_notes(version, parse_notes(text, available), previous, repo, banners)
+    return render_model_notes(version, parse_notes(text, available), previous, repo, banners, thanks)
 
 
-def notes_for(version, previous, revision, repo=None, ai=False, cwd=ROOT, transport=None, environ=None):
+def notes_for(version, previous, revision, repo=None, ai=False, cwd=ROOT, transport=None, environ=None, lookup=None):
     if ai:
-        return write_with_model(version, previous, revision, repo, cwd, transport, environ)
-    return render(version, changes(previous, revision, cwd), previous, repo)
+        return write_with_model(version, previous, revision, repo, cwd, transport, environ, lookup)
+    pairs = list(release_commits(previous, revision, cwd))
+    thanks = outside_contributors([entry for entry, _ in pairs], repo, environ, lookup)
+    return render(version, [change for _, change in pairs], previous, repo, thanks=thanks)
 
 
-def published_notes(version, previous, revision, repo, changelog_text, day, ai=False, cwd=ROOT, transport=None, environ=None):
+def published_notes(version, previous, revision, repo, changelog_text, day, ai=False, cwd=ROOT, transport=None, environ=None,
+                    lookup=None):
     """Localized source notes and the changelog text the update manifest must carry.
 
     A recorded localized section is returned unchanged and the model is not called.
@@ -1061,7 +1158,8 @@ def published_notes(version, previous, revision, repo, changelog_text, day, ai=F
             "Publishing needs localized notes. Listed notes are a developer preview; "
             "pass --ai, or record a ### English / ### 简体中文 / ### 한국어 section first."
         )
-    notes = notes_for(version, previous, revision, repo, ai=True, cwd=cwd, transport=transport, environ=environ)
+    notes = notes_for(version, previous, revision, repo, ai=True, cwd=cwd, transport=transport, environ=environ,
+                      lookup=lookup)
     require_localized_notes(notes, version)
     entry = section(version, day, notes, previous, repo)
     updated = insert_section(changelog_text or CHANGELOG_PREAMBLE, version, entry)

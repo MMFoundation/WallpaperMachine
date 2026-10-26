@@ -45,7 +45,7 @@ manages itself at run time; it is not a build dependency. See
 FFmpeg is not used any more: video plays with the app's own container readers and
 VideoToolbox, sounds with AudioToolbox and a vendored public-domain Ogg Vorbis
 decoder, and nothing links or bundles a `libav*` library (the check is recorded in
-[../LICENSING.md](../LICENSING.md#ffmpeg)). The Homebrew `ffmpeg` formulas, `mwe-ffmpeg` and
+[../LICENSING.md](../LICENSING.md#components-and-their-licenses)). The Homebrew `ffmpeg` formulas, `mwe-ffmpeg` and
 `dav1d` that an earlier checkout installed are not needed and can be uninstalled;
 nothing in the build looks at them.
 
@@ -251,8 +251,8 @@ bundle is absent.
    link and the window layout must be there. Only then is
    `WallpaperMachine-<version>-arm64.dmg.sha256` written, in the format
    `shasum -a 256 -c` reads. The in-app updater depends on the image name; see
-   [release.md](release.md). The script labels the image not cleared for
-   distribution; [../LICENSING.md](../LICENSING.md) records why.
+   [release.md](release.md). The notices the bundle carries are listed in
+   [../LICENSING.md](../LICENSING.md#notice-payload).
 7. **`--install`.** Copies the bundle to `~/Applications/WallpaperMachine.app`.
    It refuses to overwrite an existing installation: quit and remove the old copy
    first.

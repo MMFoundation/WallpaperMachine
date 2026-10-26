@@ -1,5 +1,7 @@
 #include "MetalSharedImages.hpp"
 
+#include "MetalImageLevels.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -54,6 +56,7 @@ struct State
     std::mutex                                 mutex;
     std::unordered_map<Key, Entry, KeyHash>    entries;
     std::atomic<uint64_t>                      uploads { 0 };
+    std::atomic<uint64_t>                      levels_read_back { 0 };
 };
 
 State& StateOf()
@@ -105,6 +108,9 @@ bool PixelsEqual(id<MTLTexture> texture, const Image::Slot& slot, uint32_t bytes
         const auto& mipmap = slot.mipmaps[level];
         // A level with no data was never written, so there is nothing to compare.
         if (mipmap.data == nullptr || mipmap.width <= 0 || mipmap.height <= 0) continue;
+        // A level the upload clipped to its extent, or skipped, is not read back at the size
+        // the file claims, which lies outside it: such a picture is uploaded afresh.
+        if (! LevelIsWrittenWhole(texture, mipmap, level, block_bytes)) return false;
         const std::size_t width = static_cast<std::size_t>(mipmap.width);
         const std::size_t height = static_cast<std::size_t>(mipmap.height);
 
@@ -120,6 +126,7 @@ bool PixelsEqual(id<MTLTexture> texture, const Image::Slot& slot, uint32_t bytes
         if (mipmap.size < 0 || static_cast<std::size_t>(mipmap.size) < bytes_per_row * rows) return false;
         if (bytes_per_row == 0) return false;
 
+        StateOf().levels_read_back.fetch_add(1, std::memory_order_relaxed);
         const std::size_t band_rows = std::max<std::size_t>(1, kBandBytes / bytes_per_row);
         band.resize(std::min(rows, band_rows) * bytes_per_row);
         const uint8_t* source = mipmap.data.get();
@@ -221,6 +228,11 @@ std::size_t SharedImageCache::entries()
 uint64_t SharedImageCache::uploads()
 {
     return StateOf().uploads.load(std::memory_order_relaxed);
+}
+
+uint64_t SharedImageCache::levelsReadBack()
+{
+    return StateOf().levels_read_back.load(std::memory_order_relaxed);
 }
 #endif
 

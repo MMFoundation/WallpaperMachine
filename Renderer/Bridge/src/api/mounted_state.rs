@@ -996,15 +996,13 @@ fn m16_public_k_operations_and_immutable_overlay_preserve_independent_baselines(
             isolated.property_overrides[property]
         );
         draft.set_property_path_immediate(&model, property, None);
-        // Clearing means no chosen path, not restoration of a nonempty authored default.
-        assert_eq!(
-            draft.current().property_overrides[property],
-            serde_json::json!("")
-        );
-        assert_eq!(
-            draft.committed().property_overrides[property],
-            serde_json::json!("")
-        );
+        // Clearing means no chosen path, not restoration of a nonempty authored default: a
+        // file or folder starts empty and keeps no override, a texture keeps an empty one.
+        let cleared = |config: &WallpaperConfig| {
+            config.property_overrides.get(property).cloned().unwrap_or_else(|| serde_json::json!(""))
+        };
+        assert_eq!(cleared(draft.current()), serde_json::json!(""));
+        assert_eq!(cleared(draft.committed()), serde_json::json!(""));
         assert_eq!(draft.current().audio.volume, 0.31);
         assert_eq!(draft.committed().audio.volume, 1.0);
         assert_eq!(
@@ -1014,19 +1012,20 @@ fn m16_public_k_operations_and_immutable_overlay_preserve_independent_baselines(
         assert!(!draft.committed().property_overrides.contains_key(SLIDER));
         assert_eq!(draft.enabled_displays(), &[selector(71)]);
     }
+    // Choosing a texture's authored picture is its default again; choosing the path the
+    // project names for a file is a choice of the user's, which the authored value never is.
+    draft.set_property_path_immediate(&model, "veil_texture", Some("authored/veil.png".into()));
+    assert!(!draft.current().property_overrides.contains_key("veil_texture"));
+    assert!(!draft.committed().property_overrides.contains_key("veil_texture"));
+    draft.set_property_path_immediate(&model, "veil_texture", None);
     draft.set_property_path_immediate(&model, "atlas_file", Some("authored/atlas.png".into()));
-    assert!(
-        !draft
-            .current()
-            .property_overrides
-            .contains_key("atlas_file")
+    assert_eq!(
+        draft.committed().property_overrides["atlas_file"],
+        serde_json::json!("authored/atlas.png")
     );
-    assert!(
-        !draft
-            .committed()
-            .property_overrides
-            .contains_key("atlas_file")
-    );
+    draft.set_property_path_immediate(&model, "atlas_file", None);
+    assert!(!draft.current().property_overrides.contains_key("atlas_file"));
+    assert!(!draft.committed().property_overrides.contains_key("atlas_file"));
     let source = draft.clone();
     let overlay = draft.with_edits(
         &model,

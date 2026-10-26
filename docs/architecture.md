@@ -868,8 +868,8 @@ Both the app and the extension link the same renderer flag set (`project.yml` an
 `-llz4`, `-lfreetype`, `-lqjs` (quickjs-ng), `-liconv` and the system
 frameworks. Library search paths point at
 `Renderer/target/release` and the Homebrew prefixes. No FFmpeg library is linked:
-video and sound decode with the system frameworks and the project's own readers. What still keeps the bundle from being
-distributable is recorded in [../LICENSING.md](../LICENSING.md#remaining-blockers). A freshly built
+video and sound decode with the system frameworks and the project's own readers. The licenses of what the bundle
+links are in [../LICENSING.md](../LICENSING.md#components-and-their-licenses). A freshly built
 app still depends on Homebrew until `scripts/package.py` bundles its libraries
 ([build.md](build.md#packaging-and-installing)).
 
@@ -892,7 +892,7 @@ history ([../LICENSING.md](../LICENSING.md#source-license-gpl-30-only)).
 `ThirdParty/provenance.json` records that history and, for vendored code, the repositories, pinned
 revisions and modification status, with the current `distributionStatus`. The Workshop browser is recorded there and in
 [../LICENSING.md](../LICENSING.md) as independently implemented. Licence policy, the Supporter
-model and the open distribution blockers live in `LICENSING.md`; which notices `scripts/package.py`
+model and the component licenses live in `LICENSING.md`; which notices `scripts/package.py`
 bundles is in [build.md](build.md#packaging-and-installing).
 
 ## Targets

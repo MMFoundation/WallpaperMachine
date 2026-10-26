@@ -65,6 +65,8 @@ public:
     [[nodiscard]] std::size_t entries();
     /// Uploads made through `import` since the process started.
     [[nodiscard]] uint64_t uploads();
+    /// Levels of held textures read back to compare with an import since the process started.
+    [[nodiscard]] uint64_t levelsReadBack();
 #endif
 
 private:

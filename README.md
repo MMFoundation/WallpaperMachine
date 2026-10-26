@@ -1,8 +1,8 @@
-<!-- README.zh-CN.md is this page in 简体中文: change both together.
+<!-- README.zh-CN.md is this page in 简体中文 and README.pt-BR.md in Português: change them together.
      The hero is six real WallpaperMachine renders on a macOS 27 desktop (menu bar and Dock drawn from
      system assets), uploaded as a GitHub attachment. When it changes, update the alt text below and the
      wallpaper credits at the end. -->
-<p align="center"><sub><b>English</b>&ensp;·&ensp;<a href="README.zh-CN.md">简体中文</a></sub></p>
+<p align="center"><sub><b>English</b>&ensp;·&ensp;<a href="README.zh-CN.md">简体中文</a>&ensp;·&ensp;<a href="README.pt-BR.md">Português</a></sub></p>
 
 <a href="https://www.wallpapermachine.app">
   <img src="https://github.com/user-attachments/assets/df92d34d-b718-4d58-b8e9-b002c4915516" width="100%" alt="A Mac desktop cycling through six live wallpapers played by WallpaperMachine: Chisaki over rippling water, Lucy on the Moon, a Red Bull F1 car in the snow, Firefly at dusk, Ellen at a rainy bus stop and Into The Abyss, under the macOS menu bar and Dock.">
@@ -45,8 +45,8 @@
 </p>
 
 <!-- The screenshot is a GitHub attachment, hosted by issue #37 ("README app screenshot"). When it
-     changes, upload the new one there and update the alt text and caption below, here and in
-     README.zh-CN.md. -->
+     changes, upload the new one there and update the alt text and caption below, here, in
+     README.zh-CN.md and in README.pt-BR.md. -->
 <p align="center">
   <img src="https://github.com/user-attachments/assets/9526d41a-4764-4df9-a678-22d75982a7fd" width="100%" alt="WallpaperMachine’s window in the dark appearance: the Library, Steam Workshop, pixiv and Settings tabs across the top, a grid of installed wallpapers with the active one marked, the active wallpaper’s preview, compatibility check and options in the inspector on the right, and what is playing along the bottom.">
 </p>
@@ -101,7 +101,7 @@ without opening the window.
 | [**Displays**](docs/features/control-panel.md#target-display) | Every display gets its own wallpaper, or mirrors another, with its own scaling, position, frame rate and volume. [Fit with blurred backdrop](docs/features/wallpaper-properties.md#fit-with-blurred-backdrop) shows a wallpaper whole on a screen of another shape and fills the edges with a blurred copy instead of black bars. [Apply one wallpaper to every display, copy or swap wallpapers and save multi-display arrangements](docs/features/display-layouts.md) to restore their wallpaper choices from Settings or Shortcuts. |
 | [**Battery**](docs/features/performance.md#playback) | On battery, keep running, drop to a render scale and frame rate you choose, or pause. Low Power Mode, a hot Mac and a low battery can lower quality the same way instead of pausing. Off until you pick it. The rest of playback and quality is on [Performance](docs/features/performance.md). |
 | [**Energy**](docs/features/performance.md#energy-use) | Settings → Performance shows the power the app draws and, on a laptop, its share of a full charge per hour. Change a setting there and it compares before and after. Each installed wallpaper gets its own rating once it has been measured. |
-| [**Native**](docs/features/appearance.md) | Light, dark and your accent colour, like the rest of macOS, in English, [简体中文, 繁體中文, 日本語 or 한국어](docs/features/control-panel.md#language). |
+| [**Native**](docs/features/appearance.md) | Light, dark and your accent colour, like the rest of macOS, in English, [简体中文, 繁體中文, 日本語, 한국어 or Português](docs/features/control-panel.md#language). |
 | [**Import**](docs/features/control-panel.md#downloads-and-import) | Bring the Wallpaper Engine folders you already have, or your own videos and pictures. Drop them on the Dock icon or use Import; the app copies them and leaves the originals alone. |
 | [**Keep your setup**](docs/features/backup-restore.md#local-backup-and-restore) | Export settings and retained files, optionally the whole wallpaper library; preview conflicts before a recoverable restore at the next launch. Sign-ins and passwords stay on this Mac. |
 | [**External drive**](docs/features/library-location.md) | Keep the wallpaper library and downloads on an external drive or in another folder, and move them back to this Mac at any time. Settings and Steam sign-ins stay on this Mac. |
@@ -295,7 +295,7 @@ Working on the code: [CONTRIBUTING.md](CONTRIBUTING.md).
 | [docs/testing/README.md](docs/testing/README.md) | Test strategy, commands, evidence policy |
 | [docs/release.md](docs/release.md) | Versioning, release notes and the CI release pipeline |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each published version |
-| [LICENSING.md](LICENSING.md) | License policy, Supporter model and distribution status |
+| [LICENSING.md](LICENSING.md) | License, code origin, Supporter model and component licenses |
 | [SPONSORS.md](SPONSORS.md) | Supporter pricing, what it includes and other ways to help |
 | [AGENTS.md](AGENTS.md) | Rules for agents working in this repository |
 
@@ -321,8 +321,7 @@ recorded in [ThirdParty/provenance.json](ThirdParty/provenance.json). Every reci
 keeps every right the GPL grants, whether or not they are a Supporter.
 
 [LICENSING.md](LICENSING.md) is the account of where the code comes from, the license of
-each third-party component, the Supporter model, and what is still open before any
-distribution; this README claims no binary is cleared or legally reviewed. The
+each third-party component, the Supporter model, and where the source of each download is. The
 Apache-2.0 and GPL-3.0 components the build used to link (MoltenVK, the Vulkan loader,
 SPIRV-Tools, glslang, the vendored spirv_reflect, and the spirv Rust crate) were removed
 on 2026-10-17 under the earlier GPL-2.0-only policy and are GPLv3-compatible. Workshop
