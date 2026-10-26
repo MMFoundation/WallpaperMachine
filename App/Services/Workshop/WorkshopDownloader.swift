@@ -352,7 +352,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 }.value
             }
             try Task.checkCancellation()
-            try await ensureFreeSpace(under: root, staging: content, label: label)
+            try await ensureFreeSpace(under: root, staging: content, item: itemID, label: label)
 
             var currentItem = itemID
             var followedUp = false
@@ -368,14 +368,14 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                     if let delay = nextRetryDelay() {
                         prepareRetry(label: label, delay: delay)
                         if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
-                        try await ensureFreeSpace(under: root, staging: content, label: label)
+                        try await ensureFreeSpace(under: root, staging: content, item: currentItem, label: label)
                         continue
                     }
                     throw passFailure(reason, itemID: currentItem)
                 }
                 if exitStatus == Self.restartStatus, restarts < Self.maximumRestarts {
                     restarts += 1
-                    try await ensureFreeSpace(under: root, staging: content, label: label)
+                    try await ensureFreeSpace(under: root, staging: content, item: currentItem, label: label)
                     continue
                 }
                 try judgeExit(exitStatus, itemID: currentItem)
@@ -402,7 +402,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                     } else {
                         status = String(localized: "Downloading the wallpaper this preset is based on…")
                     }
-                    try await ensureFreeSpace(under: root, staging: content, label: label)
+                    try await ensureFreeSpace(under: root, staging: content, item: currentItem, label: label)
                     continue
                 }
                 break
@@ -643,8 +643,9 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// of SteamCMD (a retry after a dropped connection or a wake, or Steam asking to be
     /// started again), so a retry only needs the space still missing. A preset's base is
     /// checked before its pass at the size Steam lists for it (not at all when it lists none);
-    /// concurrent jobs are checked one by one, not summed.
-    private func ensureFreeSpace(under root: URL, staging: URL, label: String) async throws {
+    /// concurrent jobs are checked one by one, not summed. Only `item`'s own files count as
+    /// already staged, so a preset on the disk is not taken for part of its base.
+    private func ensureFreeSpace(under root: URL, staging: URL, item: String?, label: String) async throws {
         let installingAssets = isInstallingAssets
         let expected = expectedBytes
         guard !isSigningInOnly,
@@ -655,7 +656,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         let content = staging.appendingPathComponent(installingAssets ? "wallpaper-engine" : "steamapps/workshop", isDirectory: true)
         let measure = freeSpace
         let (staged, available) = await Task.detached(priority: .utility) { () -> (Int64, Int64?) in
-            (Self.bytesOnDisk(under: content), measure(root))
+            (Self.bytesOnDisk(under: content, item: installingAssets ? nil : item), measure(root))
         }.value
         guard let needed = Self.requiredFreeBytes(expected: expected, alreadyStaged: staged, installingAssets: installingAssets),
               let available, available < needed else { return }
@@ -1295,14 +1296,18 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// Steam moves a download between workshop/downloads, workshop/temp, and workshop/content, so
     /// the whole steamapps/workshop tree is summed; the min keeps sparse pre-allocated files from
     /// reporting their full logical size before the blocks exist.
-    nonisolated private static func bytesOnDisk(under root: URL) -> Int64 {
+    /// With `item`, only files inside a folder named for it count (Steam keeps an item under
+    /// `content/431960/<id>` and `downloads/431960/<id>`).
+    nonisolated private static func bytesOnDisk(under root: URL, item: String? = nil) -> Int64 {
         var total: Int64 = 0
         var visited = 0
+        let depth = root.standardizedFileURL.pathComponents.count
         guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
                                                           options: []) else { return 0 }
         for case let url as URL in walker {
             visited += 1
             guard visited <= 200_000 else { break }
+            if let item, !url.standardizedFileURL.pathComponents.dropFirst(depth).contains(item) { continue }
             var entry = stat()
             guard lstat(url.path, &entry) == 0, entry.st_mode & S_IFMT == S_IFREG else { continue }
             total += min(entry.st_size, entry.st_blocks * 512)

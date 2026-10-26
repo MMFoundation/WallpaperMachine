@@ -501,6 +501,38 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
     assertNothingInstalled(in: root)
   }
 
+  /// The preset already on the disk is not part of the base: a large preset must not make a
+  /// base that does not fit look as if most of it had already arrived.
+  func testAPresetsOwnFilesDoNotCountAsTheBaseAlreadyStaged() async throws {
+    let root = try makeRuntime(
+      """
+      item=''
+      while [ "$#" -gt 0 ]; do
+          case "$1" in +workshop_download_item) shift; shift; item="$1" ;; esac
+          shift
+      done
+      printf '%s\\n' "$item" >> ../invocations
+      printf 'Waiting for user info...OK\\nDownloading item %s ...\\n' "$item"
+      content="steamapps/workshop/content/431960/$item"
+      mkdir -p "$content"
+      if [ "$item" = 123456 ]; then
+          printf '{"title":"Purple preset","dependency":"654321","preset":{"speed":7}}' > "$content/project.json"
+          dd if=/dev/urandom of="$content/extra.bin" bs=1048576 count=60 2>/dev/null
+      fi
+      printf 'Success. Downloaded item %s\\n' "$item"
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let base = WorkshopItem(
+      id: "654321", title: "Big base", creator: "", summary: "", previewURL: nil,
+      tags: ["Video"], size: 50 * 1_048_576, subscriptions: 0)
+    let downloader = startDownload(in: root, freeSpace: FreeSpaceProbe(100 * 1_048_576).measure,
+                                   presetBaseDetails: { id in id == "654321" ? base : nil })
+    try await waitForStop(downloader)
+    let message = try XCTUnwrap(downloader.errorMessage, "A 50 MB base with its headroom does not fit in 100 MB")
+    XCTAssertTrue(message.contains("disk space"), message)
+    XCTAssertEqual(try invocations(in: root), ["123456"])
+  }
+
   func testAPresetsBaseThatFitsIsFetchedAsBefore() async throws {
     let root = try makePresetRuntime(base: deliverBase)
     defer { try? FileManager.default.removeItem(at: root) }
