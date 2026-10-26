@@ -6,6 +6,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 #include "MetalBackdrop.hpp"
+#include "MetalImageLevels.hpp"
 #include "MetalPosterCapture.hpp"
 #include "MetalSharedImages.hpp"
 #include "MetalVideoTextures.hpp"
@@ -302,37 +303,6 @@ bool ToMetalImageFormat(TextureFormat format, bool block_compression, MTLPixelFo
     case TextureFormat::RGB8: return false;
     }
     return false;
-}
-
-/// Writes every level of `slot` into `texture`, as the pixels or the 4x4 blocks
-/// the image holds. A level with no data is skipped; false when a block-
-/// compressed level is shorter than its own block grid, which the copy would
-/// read past.
-bool UploadImageLevels(id<MTLTexture> texture, const Image::Slot& slot, uint32_t bytes_per_pixel,
-                       uint32_t block_bytes)
-{
-    for (std::size_t level = 0; level < slot.mipmaps.size(); ++level) {
-        const auto& mipmap = slot.mipmaps[level];
-        if (mipmap.data == nullptr || mipmap.width <= 0 || mipmap.height <= 0) continue;
-        MTLRegion region = MTLRegionMake2D(0, 0, (NSUInteger)mipmap.width,
-                                           (NSUInteger)mipmap.height);
-        NSUInteger bytes_per_row = (NSUInteger)mipmap.width * bytes_per_pixel;
-        if (block_bytes > 0) {
-            const NSUInteger blocks_wide = ((NSUInteger)mipmap.width + 3) / 4;
-            const NSUInteger blocks_high = ((NSUInteger)mipmap.height + 3) / 4;
-            bytes_per_row                = blocks_wide * block_bytes;
-            // A level shorter than its own block grid would be read past
-            // its end by the copy below.
-            if (mipmap.size < 0 || (NSUInteger)mipmap.size < bytes_per_row * blocks_high) {
-                return false;
-            }
-        }
-        [texture replaceRegion:region
-                   mipmapLevel:level
-                     withBytes:mipmap.data.get()
-                   bytesPerRow:bytes_per_row];
-    }
-    return true;
 }
 
 /// Reads the material texture slot out of a generated chroma-plane resource
@@ -2340,7 +2310,7 @@ void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
 
         const auto width  = static_cast<uint32_t>(mipmap.width);
         const auto height = static_cast<uint32_t>(mipmap.height);
-        const auto levels = static_cast<uint32_t>(source.mipmaps.size());
+        const auto levels = static_cast<uint32_t>(ImageTextureLevels(source.mipmaps.size(), width, height));
         if (ring.slots.size() != kFramesInFlight || ring.width != width ||
             ring.height != height || ring.format != format || ring.levels != levels) {
             // A new size or format needs new images. The ones being replaced
@@ -2481,21 +2451,7 @@ id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string
         request.bytes_per_pixel = bytes_per_pixel;
         request.block_bytes     = block_bytes;
         id<MTLTexture> texture = SharedImageCache::shared().import(request, [&]() -> id<MTLTexture> {
-            MTLTextureDescriptor* descriptor =
-                [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
-                                                                   width:(NSUInteger)slot.width
-                                                                  height:(NSUInteger)slot.height
-                                                               mipmapped:slot.mipmaps.size() > 1];
-            descriptor.mipmapLevelCount = slot.mipmaps.size();
-            descriptor.usage            = MTLTextureUsageShaderRead;
-            // Shared storage, so the pixels are written straight into the texture.
-            // A staging buffer plus a blit would need the frame to wait on an
-            // upload, which is exactly what the per-frame path must never do.
-            descriptor.storageMode = MTLStorageModeShared;
-
-            id<MTLTexture> made = [device newTextureWithDescriptor:descriptor];
-            if (made == nil) return nil;
-            return UploadImageLevels(made, slot, bytes_per_pixel, block_bytes) ? made : nil;
+            return MakeImageTexture(device, format, slot, bytes_per_pixel, block_bytes);
         });
         if (texture == nil) break;
         slot_textures.push_back(texture);

@@ -146,8 +146,8 @@ ThirdParty/                        vendored third-party code only, each item und
   miniaudio/                       miniaudio 0.11.21 (public domain or MIT-0); the engine's audio output device
   naga/                            naga 29.0.3 (MIT OR Apache-2.0, used under MIT), patched so codespan-reporting is
                                    optional (PATCHES.md lists the differences); a path dependency of Renderer/Cargo.toml
-  stb_image/                       stb_image 2.26 (public domain or MIT); the engine's image decoder
-  stb_vorbis/                      stb_vorbis 1.22 (public domain or MIT, unchanged); the Ogg Vorbis decoder
+  stb_image/                       stb_image 2.30 (public domain or MIT, patched: PATCHES.md); the engine's image decoder
+  stb_vorbis/                      stb_vorbis 1.22 (public domain or MIT, patched: PATCHES.md); the Ogg Vorbis decoder
   received-licenses/               the GPLv2 texts the imported renderer and scene engine arrived under (a record; that
                                    code is only in Git history)
 artifacts/                         Git-ignored: all test and verification evidence

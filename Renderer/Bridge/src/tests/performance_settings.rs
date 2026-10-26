@@ -576,7 +576,8 @@ async fn native_export_keeps_all_wallpaper_kinds_and_mirrors_with_playback_and_p
     assert_eq!(web["speed"]["value"], 2.0);
     let still: serde_json::Value =
         serde_json::from_str(by_display[&14].properties_json.as_deref().unwrap()).unwrap();
-    assert_eq!(still["image"]["value"], "poster.png");
+    // The path project.json names is no pick of the user's: the page gets none.
+    assert_eq!(still["image"]["value"], "");
 
     bridge.set_presentation_unloaded(true).await.unwrap();
     assert_eq!(bridge.lock_screen_scenes().await.unwrap(), exported);
