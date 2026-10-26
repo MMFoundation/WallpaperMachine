@@ -321,6 +321,45 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(relaunched.subscribedIDs, ["1"])
   }
 
+  /// A read of the subscriptions that Steam answers after a subscribe went through does not
+  /// put back the list from before it.
+  func testASubscriptionsReadDoesNotUndoANewerSubscribe() async throws {
+    let store = fixture.store
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    let gate = DispatchSemaphore(value: 0)
+    fixture.subscriptionsGate = gate
+    let read = Task { try await store.refreshSubscribedIDs() }
+    for _ in 0..<500 where fixture.subscriptionReads == 0 { try await Task.sleep(for: .milliseconds(10)) }
+    XCTAssertEqual(fixture.subscriptionReads, 1, "the read is held at Steam")
+    try await store.setSubscribed(true, itemID: "2")
+    gate.signal()
+    _ = try await read.value
+    XCTAssertEqual(store.subscribedIDs, ["2"], "the subscribe that finished last is what is marked")
+  }
+
+  /// Steam ending the session a request was sent with does not sign out a newer sign-in made
+  /// while it was answering.
+  func testAnEndedSessionDoesNotForgetTheSignInThatReplacedIt() async throws {
+    let store = fixture.store
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    let gate = DispatchSemaphore(value: 0)
+    fixture.subscriptionsGate = gate
+    let read = Task { try await store.refreshSubscribedIDs() }
+    for _ in 0..<500 where fixture.subscriptionReads == 0 { try await Task.sleep(for: .milliseconds(10)) }
+    XCTAssertEqual(fixture.subscriptionReads, 1, "the read is held at Steam")
+    store.signOutOfSteamWeb()
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||fedcba9876543210fedc") }
+    fixture.subscriptionPages = [1: Data("<html><head><title>Sign In</title></head></html>".utf8)]
+    gate.signal()
+    do {
+      _ = try await read.value
+      XCTFail("Steam ended the session the read was sent with")
+    } catch is SteamSignInRequired {}
+    XCTAssertNotNil(store.steamWebSession, "the new sign-in stays")
+  }
+
   func testSubscribingWithoutASignInChangesNothing() async throws {
     do {
       try await fixture.store.setSubscribed(true, itemID: "2")
@@ -1044,6 +1083,13 @@ private final class SourceFixture {
     get { answers.read { $0.subscriptionPages } }
     set { answers.write { $0.subscriptionPages = newValue } }
   }
+  /// Holds every subscriptions read until it is signalled; `subscriptionReads` counts the reads
+  /// that reached the fixture, so a test can act while one is held.
+  var subscriptionsGate: DispatchSemaphore? {
+    get { answers.read { $0.subscriptionsGate } }
+    set { answers.write { $0.subscriptionsGate = newValue } }
+  }
+  var subscriptionReads: Int { answers.read { $0.subscriptionReads } }
   var browseSections: [String] { answers.read { $0.browseSections } }
   var browsePagesRequested: [Int] { answers.read { $0.browsePagesRequested } }
   var detailsRequests: Int { answers.read { $0.detailsRequests } }
@@ -1110,6 +1156,8 @@ private final class SourceAnswers: @unchecked Sendable {
     var details: [String: [String: Any]] = [:]
     var profiles: [String: Data] = [:]
     var subscriptionPages: [Int: Data] = [:]
+    var subscriptionsGate: DispatchSemaphore?
+    var subscriptionReads = 0
     var browseSections: [String] = []
     var browsePagesRequested: [Int] = []
     var detailsRequests = 0
@@ -1127,6 +1175,18 @@ private final class SourceAnswers: @unchecked Sendable {
   private var state = State()
   func read<T>(_ body: (State) -> T) -> T { lock.withLock { body(state) } }
   func write(_ body: (inout State) -> Void) { lock.withLock { body(&state) } }
+
+  /// The gate a subscriptions read waits at before it is answered, counting the read.
+  func hold(_ request: URLRequest) -> DispatchSemaphore? {
+    guard let url = request.url,
+      URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+        .contains(where: { $0.name == "browsefilter" && $0.value == "mysubscriptions" }) == true
+    else { return nil }
+    return lock.withLock {
+      state.subscriptionReads += 1
+      return state.subscriptionsGate
+    }
+  }
 
   /// The status and body Steam would answer `request` with.
   func answer(_ request: URLRequest, body: Data) -> (Int, Data) {
@@ -1196,11 +1256,20 @@ private final class SourceFixtureProtocol: URLProtocol, @unchecked Sendable {
       client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
       return
     }
-    let (status, data) = answers.answer(request, body: Self.body(of: request))
-    let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
-    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-    client?.urlProtocol(self, didLoad: data)
-    client?.urlProtocolDidFinishLoading(self)
+    let body = Self.body(of: request)
+    let finish = { [self] in
+      let (status, data) = answers.answer(request, body: body)
+      let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: data)
+      client?.urlProtocolDidFinishLoading(self)
+    }
+    // A held read waits off the session's loading thread, so other requests are still answered.
+    guard let gate = answers.hold(request) else { return finish() }
+    DispatchQueue.global().async {
+      gate.wait()
+      finish()
+    }
   }
   override func stopLoading() {}
 
