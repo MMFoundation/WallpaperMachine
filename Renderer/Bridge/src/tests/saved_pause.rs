@@ -73,6 +73,22 @@ async fn a_saved_pause_returns_once_the_first_frame_is_up() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_saved_pause_that_fails_is_tried_again_at_the_next_ready_report() {
+    let engine = FakeEngineFacade::default();
+    let fixture = bridge(&engine, installed(showing_scenic(true), vec![(SCENIC, None)]), true);
+
+    engine.fail_next_pause();
+    fixture.bridge.initial_frame_ready_for_test().await;
+    let failed = fixture.bridge.app_snapshot().await.expect("snapshot");
+    assert_eq!(failed.playback_state, BridgePlaybackState::Playing, "the failed pause is rolled back");
+
+    fixture.bridge.initial_frame_ready_for_test().await;
+    let after = fixture.bridge.app_snapshot().await.expect("snapshot");
+    assert_eq!(after.playback_state, BridgePlaybackState::Paused);
+    assert_eq!(engine.paused_calls().last(), Some(&true));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn playing_before_the_first_frame_cancels_the_saved_pause() {
     let engine = FakeEngineFacade::default();
     let fixture = bridge(&engine, installed(showing_scenic(true), vec![(SCENIC, None)]), true);

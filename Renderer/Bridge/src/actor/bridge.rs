@@ -674,16 +674,23 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     /// Brings back the pause the previous session ended with, once the first
     /// frame is up. Before the battery policy runs, so a pause on battery that
     /// waited for the same frame finds playback already paused by the user.
-    async fn restore_user_pause(&mut self) -> Result<(), BridgeError> {
+    /// A pause that fails is logged and stays pending for the next ready report;
+    /// the report itself and the battery policy after it go on.
+    async fn restore_user_pause(&mut self) {
         if !self.state.pending_user_pause_after_initial_frame {
-            return Ok(());
+            return;
+        }
+        if self.state.playback_state != BridgePlaybackState::Paused {
+            log::info!("pausing wallpaper playback as the previous session ended paused");
+            let restored = self
+                .set_playback(BridgePlaybackState::Paused, PlaybackChangeOrigin::Restored)
+                .await;
+            if let Err(error) = restored {
+                log::warn!("could not bring back the saved pause, trying again at the next ready report: {error}");
+                return;
+            }
         }
         self.state.pending_user_pause_after_initial_frame = false;
-        if self.state.playback_state == BridgePlaybackState::Paused {
-            return Ok(());
-        }
-        log::info!("pausing wallpaper playback as the previous session ended paused");
-        self.set_playback(BridgePlaybackState::Paused, PlaybackChangeOrigin::Restored).await
     }
 
 
@@ -2895,7 +2902,7 @@ impl<E: EngineFacade + Clone> Message<InitialFrameReady> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.state.initial_frame_ready = true;
-        self.restore_user_pause().await?;
+        self.restore_user_pause().await;
         if self.state.pending_battery_pause_after_initial_frame {
             self.state.pending_battery_pause_after_initial_frame = false;
             self.apply_power_policy().await?;
@@ -2928,7 +2935,7 @@ impl<E: EngineFacade + Clone> Message<messages::ReportHostWallpaperStartup> for 
         if !current { return Ok(self.all_snapshots()); }
         self.state.initial_frame_ready |= msg.ready;
         if msg.ready {
-            self.restore_user_pause().await?;
+            self.restore_user_pause().await;
         }
         if self.state.pending_battery_pause_after_initial_frame {
             self.state.pending_battery_pause_after_initial_frame = false;
