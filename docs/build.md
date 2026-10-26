@@ -318,9 +318,14 @@ imports it from the `SIGNING_CERTIFICATE_P12` (base64 PKCS#12, legacy 3DES
 encryption so `security import` reads it) and `SIGNING_CERTIFICATE_PASSWORD`
 repository secrets into a temporary keychain and fails when either is missing,
 rather than shipping an ad-hoc build. The private key is kept only by the
-maintainer, outside the repository. Replacing the certificate changes the
-requirement, so the release after a replacement asks for permissions once more; the
-same change updates `TelemetryEnvironment.releaseCertificateSHA256` with the SHA-256
+maintainer, outside the repository. The in-app updater of an installed release
+installs only an update that meets this requirement
+(`AppUpdateInstaller.releaseRequirement`, [installing](features/updates.md#installing)).
+Replacing the certificate changes the requirement, so every release before the
+replacement refuses the one after it in place: its users install it from the disk
+image by hand once, and it asks for permissions once more. The same change updates
+`AppUpdateInstaller.releaseRequirement` with the new certificate's SHA-1 and
+`TelemetryEnvironment.releaseCertificateSHA256` with the SHA-256
 of the new certificate's DER bytes, or every copy of the next release reports itself
 as a build from source ([telemetry](features/telemetry.md#what-a-report-holds)). This
 telemetry fingerprint is independent of the designated requirement's SHA-1; changing

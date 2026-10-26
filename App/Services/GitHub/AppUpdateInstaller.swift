@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import Foundation
+import Security
 
 protocol AppUpdateInstallationTask: Sendable {
     /// Returns true only once the helper can no longer replace or reopen the app.
@@ -49,7 +50,8 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
     /// validates the copy. The image is mounted invisibly and read-only, and is always
     /// detached before this returns or throws.
     func prepareInstallation(archive: URL) async throws -> URL {
-        try await AppUpdatePreparationWorker().prepare(archive: archive, root: fileManager.temporaryDirectory)
+        try await AppUpdatePreparationWorker().prepare(
+            archive: archive, root: fileManager.temporaryDirectory, replacing: currentAppURL)
     }
 
     func discardPreparation(_ extractedApp: URL) async {
@@ -60,7 +62,7 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
         await AppUpdatePreparationWorker().discard(work)
     }
 
-    fileprivate static func prepare(archive: URL, root: URL) throws -> URL {
+    fileprivate static func prepare(archive: URL, root: URL, replacing currentApp: URL) throws -> URL {
         try Task.checkCancellation()
         let fileManager = FileManager.default
         let work = root.appendingPathComponent("mwe-update-\(UUID().uuidString)", isDirectory: true)
@@ -68,6 +70,7 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
         do {
             let app = try Self.copyApplication(fromDiskImage: archive, into: work)
             try Self.validate(app)
+            try Self.verifySignature(of: app, satisfying: Self.signatureRequirement(replacing: currentApp))
             try Task.checkCancellation()
             return app
         } catch {
@@ -251,9 +254,46 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
     }
 }
 
+extension AppUpdateInstaller {
+    /// The release's designated requirement: the project certificate's SHA-1
+    /// ([build](../../../docs/build.md#release-signing)). Replacing the certificate changes it.
+    static let releaseRequirement =
+        #"identifier "app.wallpapermachine" and certificate root = H"2bdf4e2431b7edeb731de288726c896480a0fa82""#
+
+    /// What the update must meet to replace `currentApp`: the release requirement when
+    /// `currentApp` is the release, so only the holder of the release certificate can
+    /// replace it, and nothing for a build from source (signed ad hoc or with its builder's
+    /// own certificate), whose update needs only an intact signature.
+    static func signatureRequirement(replacing currentApp: URL, release: String = releaseRequirement) -> SecRequirement? {
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString(release as CFString, [], &requirement) == errSecSuccess,
+              let requirement, let code = staticCode(at: currentApp)
+        else { return nil }
+        // Only the signature is compared; the installed copy's files are not hashed again.
+        let flags = SecCSFlags(rawValue: kSecCSDoNotValidateExecutable | kSecCSDoNotValidateResources)
+        return SecStaticCodeCheckValidity(code, flags, requirement) == errSecSuccess ? requirement : nil
+    }
+
+    /// The staged copy's signature must be intact in every architecture, nested code
+    /// included and checked strictly (`codesign --verify --deep --strict`), and meet
+    /// `requirement` when there is one.
+    static func verifySignature(of app: URL, satisfying requirement: SecRequirement?) throws {
+        let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate)
+        guard let code = staticCode(at: app),
+              SecStaticCodeCheckValidityWithErrors(code, flags, requirement, nil) == errSecSuccess
+        else { throw verificationIssue }
+    }
+
+    private static func staticCode(at app: URL) -> SecStaticCode? {
+        var code: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess else { return nil }
+        return code
+    }
+}
+
 private actor AppUpdatePreparationWorker {
-    func prepare(archive: URL, root: URL) throws -> URL {
-        try AppUpdateInstaller.prepare(archive: archive, root: root)
+    func prepare(archive: URL, root: URL, replacing currentApp: URL) throws -> URL {
+        try AppUpdateInstaller.prepare(archive: archive, root: root, replacing: currentApp)
     }
     func discard(_ work: URL) {
         try? FileManager.default.removeItem(at: work)

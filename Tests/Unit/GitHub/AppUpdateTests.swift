@@ -317,6 +317,74 @@ final class AppUpdateTests: XCTestCase {
         XCTAssertEqual(try Self.attachedDevices(of: image), [])
     }
 
+    func testAnUpdateWithoutAnIntactSignatureIsRefused() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mwe-update-sign-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let unsigned = try Self.makeSignableApp(at: root.appendingPathComponent("unsigned/WallpaperMachine.app"))
+        XCTAssertThrowsError(try AppUpdateInstaller.verifySignature(of: unsigned, satisfying: nil))
+
+        let signed = try Self.makeSignableApp(at: root.appendingPathComponent("signed/WallpaperMachine.app"))
+        try Self.signAdHoc(signed)
+        XCTAssertNoThrow(try AppUpdateInstaller.verifySignature(of: signed, satisfying: nil))
+
+        let handle = try FileHandle(forWritingTo: signed.appendingPathComponent("Contents/MacOS/WallpaperMachine"))
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("tampered".utf8))
+        try handle.close()
+        XCTAssertThrowsError(
+            try AppUpdateInstaller.verifySignature(of: signed, satisfying: nil),
+            "A copy changed after it was signed is not the published build")
+    }
+
+    func testTheReleaseAcceptsOnlyAnUpdateThatMeetsItsRequirement() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mwe-update-req-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Stands in for the release certificate: ad-hoc fixtures cannot carry it, so the
+        // publisher is a signed Info.plist value instead.
+        let release = #"identifier "app.wallpapermachine" and info [MWEPublisher] = "release""#
+        let current = try Self.makeSignableApp(
+            at: root.appendingPathComponent("current/WallpaperMachine.app"), extraInfo: ["MWEPublisher": "release"])
+        try Self.signAdHoc(current)
+        let requirement = try XCTUnwrap(AppUpdateInstaller.signatureRequirement(replacing: current, release: release))
+
+        let genuine = try Self.makeSignableApp(
+            at: root.appendingPathComponent("genuine/WallpaperMachine.app"), extraInfo: ["MWEPublisher": "release"])
+        try Self.signAdHoc(genuine)
+        XCTAssertNoThrow(try AppUpdateInstaller.verifySignature(of: genuine, satisfying: requirement))
+
+        let other = try Self.makeSignableApp(
+            at: root.appendingPathComponent("other/WallpaperMachine.app"), extraInfo: ["MWEPublisher": "someone else"])
+        try Self.signAdHoc(other)
+        XCTAssertThrowsError(
+            try AppUpdateInstaller.verifySignature(of: other, satisfying: requirement),
+            "An intact signature from another signer must not replace the release")
+    }
+
+    func testABuildFromSourceNeedsNoParticularSignerForItsUpdate() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mwe-update-src-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let current = try Self.makeSignableApp(at: root.appendingPathComponent("current/WallpaperMachine.app"))
+        try Self.signAdHoc(current)
+        XCTAssertNil(AppUpdateInstaller.signatureRequirement(replacing: current))
+        XCTAssertNil(AppUpdateInstaller.signatureRequirement(
+            replacing: root.appendingPathComponent("missing/WallpaperMachine.app")))
+    }
+
+    func testInstallerRejectsAnUnsignedAppInTheDiskImageAndDetachesIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mwe-update-dmg-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let image = try Self.makeDiskImage(in: root, bundleIdentifier: "app.wallpapermachine", signed: false)
+        defer { Self.forceDetach(image) }
+
+        do {
+            _ = try await AppUpdateInstaller().prepareInstallation(archive: image)
+            XCTFail("An unsigned application must not be accepted")
+        } catch {
+            XCTAssertEqual((error as? AppUpdateIssue)?.code, .verification)
+        }
+        XCTAssertEqual(try Self.attachedDevices(of: image), [])
+    }
+
     func testOnlyACopyThisUserCanWriteIsReplacedInPlace() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("mwe-update-perm-\(UUID().uuidString)")
         let app = root.appendingPathComponent("WallpaperMachine.app")
@@ -1157,22 +1225,49 @@ private extension AppUpdateTests {
         return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
     }
 
-    /// A compressed HFS+ image shaped like the release: the app plus an `Applications` link.
-    static func makeDiskImage(in root: URL, bundleIdentifier: String) throws -> URL {
+    /// A compressed HFS+ image shaped like the release: the app, signed ad hoc unless
+    /// `signed` is false, plus an `Applications` link.
+    static func makeDiskImage(in root: URL, bundleIdentifier: String, signed: Bool = true) throws -> URL {
         let source = root.appendingPathComponent("source", isDirectory: true)
-        let app = source.appendingPathComponent("WallpaperMachine.app")
-        try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
-        try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": bundleIdentifier], format: .xml, options: 0)
-            .write(to: app.appendingPathComponent("Contents/Info.plist"))
-        let executable = app.appendingPathComponent("Contents/MacOS/WallpaperMachine")
-        try Data("#!/bin/sh\n".utf8).write(to: executable)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        let app = try makeSignableApp(
+            at: source.appendingPathComponent("WallpaperMachine.app"), bundleIdentifier: bundleIdentifier)
+        if signed { try signAdHoc(app) }
         try FileManager.default.createSymbolicLink(atPath: source.appendingPathComponent("Applications").path,
                                                    withDestinationPath: "/Applications")
         let image = root.appendingPathComponent("WallpaperMachine-1.2.3-arm64.dmg")
         _ = try hdiutil(["create", "-srcfolder", source.path, "-volname", "WallpaperMachine 1.2.3",
                          "-fs", "HFS+", "-format", "UDZO", "-ov", image.path])
         return image
+    }
+
+    /// An app bundle `codesign` can sign: a real Mach-O main executable (a copy of
+    /// `/usr/bin/true`) named by its Info.plist.
+    static func makeSignableApp(
+        at app: URL, bundleIdentifier: String = "app.wallpapermachine", extraInfo: [String: String] = [:]
+    ) throws -> URL {
+        try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
+        var info = ["CFBundleIdentifier": bundleIdentifier, "CFBundleExecutable": "WallpaperMachine",
+                    "CFBundlePackageType": "APPL"]
+        info.merge(extraInfo) { _, new in new }
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: app.appendingPathComponent("Contents/Info.plist"))
+        try FileManager.default.copyItem(
+            at: URL(fileURLWithPath: "/usr/bin/true"), to: app.appendingPathComponent("Contents/MacOS/WallpaperMachine"))
+        return app
+    }
+
+    static func signAdHoc(_ app: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        process.arguments = ["--force", "--sign", "-", app.path]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw AppUpdateIssue(code: .unknown, detail: "codesign exited \(process.terminationStatus)")
+        }
     }
 
     /// The devices `image` is attached as, according to `hdiutil info`; empty once detached.

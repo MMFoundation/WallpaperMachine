@@ -666,7 +666,11 @@ What a release must satisfy:
   app refuses an image it cannot verify;
 - releases are signed with the project certificate
   ([build.md](build.md#release-signing)), so the replacement keeps the designated
-  requirement and macOS keeps the app's privacy permissions;
+  requirement and macOS keeps the app's privacy permissions. An installed release
+  also refuses an update that does not meet that requirement or whose signature is
+  not intact under `codesign --verify --deep --strict`
+  ([installing](features/updates.md#installing)), so an image signed any other way
+  never installs over it;
 - the release body is the English notes above `<!-- release-notes-end -->`
   ([Release notes and the changelog](#release-notes-and-the-changelog)); the app
   shows what is above the marker as **What's new** in About and ignores the rest;

@@ -451,9 +451,13 @@ running app.
   reachable; missing repositories, failed lookups and malformed metadata remain
   errors, and rechecking clears stale notes and availability.
 - Installing, against real disk images made with `hdiutil`: the app is copied out
-  without following the `Applications` link, a foreign bundle is refused, the
-  image is detached either way, and an app that cannot install in place opens
-  the downloaded image.
+  without following the `Applications` link, a foreign bundle and an unsigned one
+  are refused, the image is detached either way, and an app that cannot install in
+  place opens the downloaded image. Signatures, against bundles signed ad hoc with
+  `codesign`: an unsigned or altered copy is refused, an installed copy that meets
+  the release requirement (a signed `Info.plist` value stands in for the release
+  certificate, which fixtures cannot carry) accepts only an update that meets it
+  too, and a build from source asks for no particular signer.
 - `UpdatePresentationTests` and `AboutSettingsTests` (Panel) walk the About card
   from no release through the download to an install that needs a yes.
 - `UpdatePromptGateTests`: when the unattended update window is held (suspended
