@@ -290,6 +290,25 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
     persist()
   }
 
+  /// **Download next**: moves a job that waits for a slot to the front of the line, ahead of
+  /// every other waiting job and behind those that run, so it starts at the next free slot.
+  /// The order is saved with the queue, so it outlives a relaunch.
+  func prioritize(_ job: WorkshopDownload) {
+    guard job.isQueued, !job.isPaused, let index = downloads.firstIndex(where: { $0 === job }),
+      let front = downloads.firstIndex(where: { $0.isQueued && !$0.isPaused }), front < index
+    else { return }
+    downloads.remove(at: index)
+    downloads.insert(job, at: front)
+    AppLog.info("Workshop download \(job.id) moved to the front of the queue")
+    persist()
+    startQueuedDownloads()
+  }
+
+  /// Whether `prioritize` would move `job`: it waits, and another waiting job is ahead of it.
+  func canPrioritize(_ job: WorkshopDownload) -> Bool {
+    job.isQueued && !job.isPaused && downloads.first(where: { $0.isQueued && !$0.isPaused }) !== job
+  }
+
   /// A prerequisite request owns this paused job until it can be enqueued again.
   /// Its content checkpoint remains available under the same stable id.
   func transferPausedToRequest(id: String) {

@@ -5044,6 +5044,12 @@
     "Clear finished" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "종료된 항목 지우기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "終了した項目を消去"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "清除已结束"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "清除已結束項目"}}}
     },
+    "Retry failed (%lld)" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "실패한 항목 다시 시도(%lld)"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "失敗した項目を再試行（%lld）"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "重试失败项（%lld）"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "重試失敗項目（%lld）"}}}
+    },
+    "Download next" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "다음에 다운로드"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "次にダウンロード"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "下一个下载"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "下一個下載"}}}
+    },
     "Show download logs" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "다운로드 로그 보기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロードログを表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "显示下载日志"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示下載記錄"}}}
     },

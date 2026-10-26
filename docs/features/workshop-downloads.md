@@ -532,6 +532,16 @@ work.
   (`sessionConflictDetected`). A session Steam ends while no sibling is running is
   reported as an ordinary failure with a retry. Settings says when the queue is
   running one at a time.
+- **Order.** Waiting jobs start in the order they were asked for. **Download next** on a
+  waiting row moves that job to the front of the line, ahead of every other waiting job and
+  behind those that run, so it takes the next free slot; it is offered only when another
+  waiting job is ahead of it (`WorkshopDownloadManager.prioritize`). The order is saved with
+  the queue (`queue.json`) and outlives a relaunch.
+- **Retry failed.** Once two or more downloads stopped with a failure or were cancelled, the
+  footer offers **Retry failed (N)**, which tries each again in list order, Steam's and
+  pixiv's alike, exactly as its own **Try again** would: partial content is reused, and
+  Steam's are left out while SteamCMD is not ready. The first that cannot start stops the
+  batch and says why. One stopped download has only its own **Try again**.
 - **Dropped connections.** A download whose connection drops after sign-in
   retries itself up to three times before it fails (see [Prompt and retry
   handling](#prompt-and-retry-handling)); it keeps its slot while it waits.
