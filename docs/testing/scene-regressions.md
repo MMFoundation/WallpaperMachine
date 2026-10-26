@@ -1676,6 +1676,18 @@ texture entrances are not decoded-image or native-rendering evidence.
 - **JPEG/EXIF orientation** — `tex_schema_tests`: all eight EXIF display
   transforms on asymmetric RGBA pixels, both TIFF byte orders, truncated
   JPEG/EXIF data, invalid IFD offsets.
+- **Every level is of the first level's kind** — `TexContainer.ALevelOfAnotherKindEndsTheChain`,
+  `TexContainer.ASpriteFrameOfAnotherKindRefusesTheSheet`: a texture's levels are uploaded
+  in one format, so a decoded picture after raw pixels (or raw one-byte pixels, or a clip,
+  after a picture) ends the chain with the levels behind it, and a sprite frame of another
+  kind refuses the sheet; otherwise the upload reads the level as the first one's pixels,
+  past its own bytes.
+- **Picture formats and sizes** — `TexLoose.APictureInAFormatNoTextureUsesIsNotDecoded`,
+  `TexLoose.APictureWiderThanAnyTextureIsNotDecoded`, `TexLoose.ATgaShorterThanItsPixelsIsNotDecoded`,
+  `TexLoose.AJpegWhoseMarkersFailBeforeAnyScanIsNotDecoded`:
+  stb_image decodes only PNG, JPEG, BMP, GIF and TGA (a PNM named `.png` and as a declared
+  picture is refused), nothing wider or taller than 16384 (16384 still loads), no TGA
+  whose rows the file does not hold, and no JPEG whose markers fail before any scan ([ThirdParty/stb_image/PATCHES.md](../../ThirdParty/stb_image/PATCHES.md)).
 - **Texture mip budget** — `TexBudget.*` in `tex_container_tests` and
   `MetalSceneDraw.ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullSizeLevel`
   in `metal_scene_draw_smoke`. A 2D scene's packaged chain loses a leading level only

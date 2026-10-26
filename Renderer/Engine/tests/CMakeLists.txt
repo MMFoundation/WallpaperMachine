@@ -1006,10 +1006,12 @@ if(APPLE)
     )
   endforeach()
 
-  # What a running wallpaper holds in memory: the pipeline-archive stores and the pictures
-  # displays share. Private textures and archive files in the temp directory only.
+  # What a running wallpaper holds in memory: the pipeline-archive stores, the pictures
+  # displays share and the levels a picture's texture holds. Private textures and archive
+  # files in the temp directory only.
   add_executable(metal_memory_test
       metal_archive_store_test.mm
+      metal_image_levels_test.mm
       scene_shared_pictures_test.mm)
   target_link_libraries(metal_memory_test PRIVATE scene_test_support GTest::gtest_main)
   set_target_properties(metal_memory_test PROPERTIES

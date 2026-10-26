@@ -908,7 +908,10 @@ staging, or cloned from the library, which stays unchanged), the preset's files
 over it, and the base's manifest with the preset's title, description, tags,
 rating, preview and Workshop id, `dependency` recorded, and each preset value
 written into the base property of the same name (`null` headings and undeclared
-names are ignored). The renderer reads the preset's files where they land, beside
+names are ignored). A value for a `file` or `directory` property is written too but
+never used: such a property starts empty and only the user's own pick fills it
+([user files](user-files.md#in-the-inspector)), so a preset cannot point a wallpaper at
+a folder of the user's. The renderer reads the preset's files where they land, beside
 the base's `scene.pkg`: a scene mounts its folder under its package, so a property
 naming `files/clip.mp4` finds the clip while packaged files still win. A base
 fetched for a preset is not added to the library. If only the base's pass fails

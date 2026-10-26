@@ -11,6 +11,7 @@ live under `testing/`.
 |---|---|
 | [../README.md](../README.md) | What the app is, feature tour, FAQ, build quickstart, sponsor list; follows the website |
 | [../README.zh-CN.md](../README.zh-CN.md) | README.md in 简体中文; changes with it, wording follows the app's zh-Hans catalog and the website's /zh/ pages |
+| [../README.pt-BR.md](../README.pt-BR.md) | README.md in Português; changes with it, wording follows the app's pt-BR catalog |
 | [../SPONSORS.md](../SPONSORS.md) | Supporter pricing and benefits for users; follows the website's pricing page, policy in LICENSING.md |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Contributor working agreement and day-to-day loop |
 | [../CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) | Conduct expected in issues, discussions, pull requests and reviews; how it is enforced |
@@ -36,7 +37,7 @@ live under `testing/`.
 | [../CHANGELOG.md](../CHANGELOG.md) | Published versions, newest first; written by `scripts/release_notes.py` |
 | [development-tools.md](development-tools.md) | Optional diagnostic tools (Peekaboo, Instruments, `xctrace`), the safe setup check, and when a desktop run needs authorization |
 | [../AGENTS.md](../AGENTS.md) / [../CLAUDE.md](../CLAUDE.md) | Agent rules; CLAUDE.md is a symlink, not a separate policy |
-| [../LICENSING.md](../LICENSING.md) | GPL-3.0-only source policy, Supporter model (free signed download; sponsor place and priority support), Mac App Store questions, component licenses, distribution blockers |
+| [../LICENSING.md](../LICENSING.md) | GPL-3.0-only source license and its origin, Supporter model (free signed download; sponsor place and priority support), corresponding source, component licenses, bundled notices |
 | [../LICENSE](../LICENSE) | GNU GPL version 3 text, the license of this repository's source |
 
 ## Testing

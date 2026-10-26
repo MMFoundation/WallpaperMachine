@@ -1692,7 +1692,8 @@ fn retained_real_path_kinds_edit_each_map_independently_and_omit_their_own_defau
     let active = vec![a.clone(), b.clone()];
     for (id, authored_default) in [
         ("sample_clip", ""),
-        ("source_tree", "library/base//"),
+        // The authored folder is no default: a directory starts empty.
+        ("source_tree", ""),
         ("surface_layer", "textures/seed.png"),
     ] {
         let mut saved = retained_path_config();
@@ -1835,7 +1836,7 @@ fn retained_nonlive_documents_defer_all_three_path_kinds_including_default_remov
     draft.edit_property(
         &model,
         "source_tree",
-        PropertyValue::String("library/base//".into()),
+        PropertyValue::String(String::new()),
     );
     draft.edit_property(
         &model,
@@ -2008,7 +2009,7 @@ fn retained_path_overlay_keeps_nonlive_saved_values_until_its_independent_apply(
             ),
             (
                 "source_tree".into(),
-                PropertyValue::String("library/base//".into()),
+                PropertyValue::String(String::new()),
             ),
             (
                 "sample_clip".into(),

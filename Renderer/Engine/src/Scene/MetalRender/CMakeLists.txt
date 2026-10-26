@@ -17,6 +17,7 @@ if(APPLE)
   list(APPEND METAL_RENDER_SOURCES
     MetalRender.mm
     MetalBackdrop.mm
+    MetalImageLevels.mm
     MetalPosterCapture.mm
     MetalSharedImages.mm
     MetalVideoTextures.mm)

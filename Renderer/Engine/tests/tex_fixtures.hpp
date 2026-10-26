@@ -83,6 +83,39 @@ inline Blob bmp1x1(uint8_t r, uint8_t g, uint8_t b) {
     return f.data();
 }
 
+// A `width` x 1 24-bit BMP of one colour.
+inline Blob bmpRow(int width, uint8_t r, uint8_t g, uint8_t b) {
+    const uint32_t row = (static_cast<uint32_t>(width) * 3 + 3) & ~3u;
+    Bytes f;
+    f.raw({ 'B', 'M' }).u32(54 + row).u32(0).u32(54);
+    f.u32(40).i32(width).i32(1).u16(1).u16(24).u32(0).u32(row).i32(2835).i32(2835).u32(0).u32(0);
+    Blob pixels(row, 0);
+    for (int x = 0; x < width; ++x) {
+        pixels[static_cast<size_t>(x) * 3]     = b;
+        pixels[static_cast<size_t>(x) * 3 + 1] = g;
+        pixels[static_cast<size_t>(x) * 3 + 2] = r;
+    }
+    f.raw(pixels);
+    return f.data();
+}
+
+// An uncompressed, top-first 24-bit TGA of `width` x `height` whose pixel bytes are `pixels`
+// (blue, green, red each), however many there are.
+inline Blob tga(int width, int height, Blob pixels) {
+    Bytes f;
+    f.u8(0).u8(0).u8(2).u16(0).u16(0).u8(0).u16(0).u16(0);
+    f.u16(static_cast<uint32_t>(width)).u16(static_cast<uint32_t>(height)).u8(24).u8(0x20);
+    f.raw(pixels);
+    return f.data();
+}
+
+// A 1x1 binary PNM (P6) of (r, g, b): a format no wallpaper texture is in.
+inline Blob pnm1x1(uint8_t r, uint8_t g, uint8_t b) {
+    Blob out { 'P', '6', '\n', '1', ' ', '1', '\n', '2', '5', '5', '\n' };
+    out.insert(out.end(), { r, g, b });
+    return out;
+}
+
 // A 1x1 GIF whose two-colour table is c0, c1 and whose pixel is entry `pixel`.
 inline Blob gif1x1(std::array<uint8_t, 3> c0, std::array<uint8_t, 3> c1, int pixel) {
     Bytes f;
@@ -170,6 +203,7 @@ constexpr uint32_t kPointSampling = 1, kClamp = 2, kSprite = 4, kVideo = 32;
 
 struct Container {
     int      texb { 3 };
+    int      format { 0 }; // the pixel format code: 0 RGBA8, 7 BC1, 9 R8, ...
     uint32_t flags { 0 };
     int      width { 8 }, height { 8 }, mapWidth { 8 }, mapHeight { 8 };
     int      type { -1 };
@@ -188,7 +222,7 @@ struct Container {
 inline Blob build(const Container& c) {
     Bytes b;
     b.stamp("TEXV", 5).stamp("TEXI", 1);
-    b.i32(0).u32(c.flags);
+    b.i32(c.format).u32(c.flags);
     b.i32(c.width).i32(c.height).i32(c.mapWidth).i32(c.mapHeight).i32(0);
     b.stamp("TEXB", c.texb);
     b.i32(c.pictureCount.value_or(static_cast<int>(c.pictures.size())));
