@@ -595,6 +595,39 @@ class ModelRangeTests(unittest.TestCase):
         release_notes.write_with_model("0.2.1", "v0.1.0", "HEAD", REPOSITORY, self.root, self.reply, KEY)
         self.assertIn("This is a feature release", self.reply.requests[0][2]["messages"][0]["content"])
 
+    def test_a_developer_note_is_printed_as_written_in_every_language(self):
+        notes_dir = self.root / release_notes.DEVELOPER_NOTES
+        notes_dir.mkdir(parents=True)
+        (notes_dir / "0.2.0.md").write_text("Sorry about\nthis bug.\n\nWe will test more.\n", encoding="utf-8")
+        (notes_dir / "0.2.0.zh-Hans.md").write_text("抱歉。\n\n我们会多测试。\n", encoding="utf-8")
+        with self.assertRaisesRegex(release_notes.NotesError, "0.2.0.ko.md"):
+            self.write()
+        self.assertEqual(len(self.reply.requests), 0, "A broken note stops the run before the model is asked")
+        (notes_dir / "0.2.0.ko.md").write_text("죄송합니다.\n\n더 많이 테스트하겠습니다.\n", encoding="utf-8")
+        notes = self.write()
+        self.assertIn("### English\n\n#### A note from the developer\n\nSorry about this bug.\n\nWe will test more.\n\n"
+                      "#### Bug Fixes", notes)
+        self.assertIn("### 简体中文\n\n#### 开发者的话\n\n抱歉。\n\n我们会多测试。\n\n#### 问题修复", notes)
+        self.assertIn("### 한국어\n\n#### 개발자의 말\n\n죄송합니다.\n\n더 많이 테스트하겠습니다.\n\n#### 버그 수정", notes)
+        self.assertNotIn("Sorry", self.reply.requests[-1][2]["messages"][0]["content"], "The model never sees the note")
+        release_notes.require_bundled_history(release_notes.section("0.2.0", "2026-01-01", notes), root=self.root)
+        page = release_notes.release_body(notes, "0.2.0", repo=REPOSITORY).split(release_notes.NOTES_END)[0]
+        self.assertIn("#### A note from the developer\n\nSorry about this bug.", page)
+        self.assertNotIn("抱歉", page)
+
+    def test_a_developer_note_is_plain_paragraphs(self):
+        notes_dir = self.root / release_notes.DEVELOPER_NOTES
+        notes_dir.mkdir(parents=True)
+        (notes_dir / "0.2.0.zh-Hans.md").write_text("抱歉。\n", encoding="utf-8")
+        (notes_dir / "0.2.0.ko.md").write_text("죄송합니다.\n", encoding="utf-8")
+        for english in ("## 9.9.9\n", "- a list\n", "![x](y.png)\n", "Ends <!-- release-notes-end -->\n"):
+            (notes_dir / "0.2.0.md").write_text("Sorry.\n\n" + english, encoding="utf-8")
+            with self.subTest(english=english), self.assertRaisesRegex(release_notes.NotesError, "plain paragraphs"):
+                self.write()
+        (notes_dir / "0.2.0.md").write_text("抱歉。\n", encoding="utf-8")
+        with self.assertRaisesRegex(release_notes.NotesError, "not english|repeat a language"):
+            self.write()
+
     def test_each_language_opens_with_its_own_banner(self):
         self.assertNotIn("![", self.write(), "No picture, no banner line")
         banners = self.root / "Resources" / "ReleaseBanners"

@@ -38,6 +38,11 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     }
     private(set) var prompt: Prompt?
     private(set) var steamGuardChallenge: SteamGuardChallenge?
+    /// The method this pass's output has named for Steam Guard so far (the email wording, or the
+    /// mobile app's), which a later code prompt is read by: the prompt's own words do not say.
+    @ObservationIgnored private var steamGuardMethod: SteamGuardChallenge?
+    /// A Steam Guard code was submitted in this pass and Steam has not answered yet.
+    @ObservationIgnored private var steamGuardAnswered = false
     var canRetryAuthentication: Bool { authenticationFailed && !isRunning }
     private var authenticationFailed = false
     private(set) var errorMessage: String?
@@ -262,6 +267,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         bytesPerSecond = nil
         prompt = nil
         steamGuardChallenge = nil
+        steamGuardMethod = nil
+        steamGuardAnswered = false
         authenticationFailed = false
         errorMessage = nil
         downloadedID = nil
@@ -446,7 +453,10 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             : isInstallingAssets ? assetsDownloadCompleted : workshopDownloadCompleted
         if exitStatus != 0 {
             authenticationFailed = isAuthenticating && !signInAccepted
-            throw passFailure(isSigningInOnly
+            // Only the step it ended in is logged, never what SteamCMD printed.
+            AppLog.warn("SteamCMD \(runLabel): exited with status \(exitStatus) while \(phase.rawValue) (sign-in accepted: \(signInAccepted), Steam Guard answered: \(steamGuardAnswered))")
+            // Before Steam accepts the sign-in, ownership has not been asked about yet.
+            throw passFailure(isSigningInOnly || authenticationFailed
                 ? String(localized: "SteamCMD exited before confirming the sign-in. Check the account name and password, approve Steam Guard, and retry.")
                 : String(localized: "SteamCMD exited before completing the download. Confirm this account owns Wallpaper Engine, approve Steam Guard, and retry."),
                 itemID: itemID)
@@ -730,6 +740,11 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             authenticationFailed = true
             return
         }
+        if prompt == .guardCode {
+            // The code is Steam's to judge now; a card that still asks for it has no field to fill.
+            steamGuardAnswered = true
+            steamGuardChallenge = nil
+        }
         prompt = nil
         recentOutput = ""
         phase = .signingIn
@@ -799,6 +814,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         licenseIsActive = false
         prompt = nil
         steamGuardChallenge = nil
+        steamGuardMethod = nil
+        steamGuardAnswered = false
         isAuthenticating = true
         receivesNetwork = false
         networkStarted = false
@@ -920,6 +937,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             && ["invalid", "expired", "revoked"].contains { text.contains($0) }
         let reason = Self.failureReason(in: text)
 
+        if complete, isAuthenticating { noteSteamGuardMethod(text) }
+
         // Failures come first. A reason is judged only once its closing bracket is there.
         if cachedLine { cachedCredentialsRejected = true }
         if text.contains("logged in elsewhere") || text.contains("logged in from another")
@@ -931,7 +950,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         if let reason {
             let kind = SteamCMDReportedFailure(
                 reason: reason, cachedCredentialsRejected: cachedCredentialsRejected,
-                awaitingSteamGuard: steamGuardChallenge != nil || prompt == .guardCode)
+                awaitingSteamGuard: awaitingSteamGuard)
             AppLog.warn("SteamCMD \(runLabel): reported failure (\(kind.rawValue))")
             let transfer = text.contains("download item") || text.contains("app '431960'") || text.contains("app 431960")
                 || text.contains("start downloading item") || text.contains("install app")
@@ -960,7 +979,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             if text.contains("invalid password") || text.contains("invalid login") || text.contains("account logon denied") {
                 let kind = SteamCMDReportedFailure(
                     reason: text, cachedCredentialsRejected: cachedCredentialsRejected,
-                    awaitingSteamGuard: steamGuardChallenge != nil || prompt == .guardCode)
+                    awaitingSteamGuard: awaitingSteamGuard)
                 setFailure(kind.message)
                 return
             }
@@ -985,7 +1004,10 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         }
         if text.hasSuffix("code:") {
             prompt = .guardCode
-            steamGuardChallenge = text.hasSuffix("steam guard code:") ? .emailCode : .authenticatorCode
+            // A bare "Steam Guard code:" is used for more than one method, so only what Steam said
+            // before it names one; with neither, the general guide is shown.
+            steamGuardChallenge = text.hasSuffix("two-factor code:") ? .authenticatorCode : steamGuardMethod
+            steamGuardAnswered = false
             progress = nil
             phase = .signingIn
             status = String(localized: "Enter the code from Steam Guard or your email")
@@ -1100,10 +1122,26 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         }
     }
 
+    /// Whether a failure Steam reports now answers a Steam Guard request: one still open, or a code
+    /// that was just submitted.
+    private var awaitingSteamGuard: Bool {
+        steamGuardChallenge != nil || prompt == .guardCode || steamGuardAnswered
+    }
+
+    /// Remembers which Steam Guard method a whole line of sign-in output names.
+    private func noteSteamGuardMethod(_ text: String) {
+        if text.contains("email") {
+            steamGuardMethod = .emailCode
+        } else if text.contains("mobile") || text.contains("two-factor") || text.contains("authenticator") {
+            steamGuardMethod = .authenticatorCode
+        }
+    }
+
     /// Steam has taken the sign-in: nothing from here on is a sign-in failure.
     private func markAuthenticated() {
         isAuthenticating = false
         signInAccepted = true
+        steamGuardAnswered = false
     }
 
     private static var deniedMessage: String {
