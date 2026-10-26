@@ -3,8 +3,10 @@ every `#anchor` names a heading (or an explicit `<a id>`) of the page it points 
 
 GitHub derives a heading's anchor from its rendered text: lowercased, punctuation and symbols
 removed, each space a hyphen, and `-1`, `-2` … appended to repeats. A link whose heading was
-renamed still opens the page, at the top, so nothing shows it is broken. External links,
-links inside code and anchors into files other than Markdown are out of scope. The archives are
+renamed still opens the page, at the top, so nothing shows it is broken. Inline links, HTML
+links and reference definitions (`[label]: target`) are checked; `#` and setext headings both
+define anchors. External links, links inside code and anchors into files other than Markdown
+are out of scope. The archives are
 history and are not checked, though a current page may link into them.
 """
 from collections import Counter
@@ -20,10 +22,16 @@ ROOT = Path(__file__).resolve().parents[2]
 UNCHECKED = ("docs/archive/", "docs/testing/archive/", "ThirdParty/")
 SHOWN = 12
 
-FENCE = re.compile(r"^\s*(```|~~~)")
+# A fence opens with three or more backticks or tildes and closes with at least as many of the
+# same, alone on its line, so a shorter or other fence inside the block is code.
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
+SETEXT_UNDERLINE = re.compile(r"^ {0,3}(=+|-+)\s*$")
+REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?")
 COMMENT = re.compile(r"<!--.*?-->", re.S)
 INLINE_CODE = re.compile(r"(`+)(.+?)\1")
+# A code span may carry on to the next line of its paragraph, though not past a blank line.
+CODE_SPAN = re.compile(r"(`+)(?:.|\n(?![ \t]*\n))+?\1")
 # `[text](target)` and `![alt](target)`, the target without its optional title.
 MARKDOWN_LINK = re.compile(r"!?\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 HTML_LINK = re.compile(r"""<(?:a|img)\b[^>]*?\b(?:href|src)\s*=\s*["']([^"']+)["']""", re.I)
@@ -42,13 +50,17 @@ def prose_lines(text):
     """The page's lines outside fenced code, with their numbers, comments and inline code
     removed (both keep their line breaks, so the numbers stay true)."""
     text = COMMENT.sub(lambda match: "\n" * match.group(0).count("\n"), text)
-    fenced = False
+    fence = None
     for number, line in enumerate(text.split("\n"), start=1):
-        if FENCE.match(line):
-            fenced = not fenced
-            continue
-        if not fenced:
-            yield number, line
+        match = FENCE.match(line)
+        if fence is None:
+            if match and not (match.group(1)[0] == "`" and "`" in match.group(2)):
+                fence = match.group(1)
+            else:
+                yield number, line
+        elif match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) \
+                and not match.group(2).strip():
+            fence = None
 
 
 def heading_text(source):
@@ -70,27 +82,45 @@ def slug(text):
     return "".join(kept).replace(" ", "-")
 
 
-def anchors(path, cache={}):
-    """Every anchor a page defines: its headings' slugs, repeats numbered, and explicit ids."""
-    if path not in cache:
+_ANCHORS = {}
+
+
+def anchors(path):
+    """Every anchor a page defines: its headings' slugs, repeats numbered, and explicit ids.
+    A setext heading is a line of text underlined with `=` or `-` on the next line."""
+    if path not in _ANCHORS:
         found, seen = set(), Counter()
+
+        def add(heading):
+            base = slug(heading_text(heading))
+            found.add(f"{base}-{seen[base]}" if seen[base] else base)
+            seen[base] += 1
+
         text = path.read_text(encoding="utf-8")
-        for _, line in prose_lines(text):
+        previous = None
+        for number, line in prose_lines(text):
             match = HEADING.match(line)
             if match:
-                base = slug(heading_text(match.group(2)))
-                found.add(f"{base}-{seen[base]}" if seen[base] else base)
-                seen[base] += 1
+                add(match.group(2))
+                previous = None
+            elif previous and previous[0] == number - 1 and SETEXT_UNDERLINE.match(line):
+                add(previous[1])
+                previous = None
+            else:
+                previous = (number, line.strip()) if line.strip() else None
             found.update(EXPLICIT_ANCHOR.findall(line))
-        cache[path] = found
-    return cache[path]
+        _ANCHORS[path] = found
+    return _ANCHORS[path]
 
 
 def links(path):
     """The page's relative link targets, with their line numbers."""
-    for number, line in prose_lines(path.read_text(encoding="utf-8")):
-        line = INLINE_CODE.sub("", line)
-        for target in MARKDOWN_LINK.findall(line) + HTML_LINK.findall(line):
+    prose = dict(prose_lines(path.read_text(encoding="utf-8")))
+    text = "\n".join(prose.get(number, "") for number in range(1, max(prose, default=0) + 1))
+    text = CODE_SPAN.sub(lambda match: "\n" * match.group(0).count("\n"), text)
+    for number, line in enumerate(text.split("\n"), start=1):
+        found = MARKDOWN_LINK.findall(line) + HTML_LINK.findall(line) + REFERENCE_DEFINITION.findall(line)
+        for target in found:
             if not re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I):
                 yield number, target
 
@@ -130,6 +160,31 @@ class DocLinkTests(unittest.TestCase):
             page = Path(folder) / "page.md"
             page.write_text("# Limits\n\n## Limits\n\n```\n# not a heading\n```\n", encoding="utf-8")
             self.assertEqual(anchors(page), {"limits", "limits-1"})
+
+    def test_setext_headings_define_anchors(self):
+        with tempfile.TemporaryDirectory() as folder:
+            page = Path(folder) / "page.md"
+            page.write_text("Setup\n=====\n\nNext steps\n---\n\ntext\n\n---\n", encoding="utf-8")
+            self.assertEqual(anchors(page), {"setup", "next-steps"})
+
+    def test_a_longer_fence_holds_a_shorter_one_as_code(self):
+        with tempfile.TemporaryDirectory() as folder:
+            page = Path(folder) / "page.md"
+            page.write_text(
+                "````md\n```\n[example](missing.md)\n```\n````\n\n[real](missing.md)\n", encoding="utf-8")
+            self.assertEqual([number for number, _ in links(page)], [7])
+
+    def test_reference_definitions_are_checked(self):
+        with tempfile.TemporaryDirectory() as folder:
+            page = Path(folder) / "page.md"
+            page.write_text("[guide][install]\n\n[install]: missing.md#setup\n", encoding="utf-8")
+            self.assertEqual(list(links(page)), [(3, "missing.md#setup")])
+
+    def test_a_code_span_over_two_lines_holds_no_link(self):
+        with tempfile.TemporaryDirectory() as folder:
+            page = Path(folder) / "page.md"
+            page.write_text("Say `thanks to\n[@login](…) here` once.\n\n[real](missing.md)\n", encoding="utf-8")
+            self.assertEqual([number for number, _ in links(page)], [4])
 
     def test_relative_links_lead_somewhere(self):
         pages = [
