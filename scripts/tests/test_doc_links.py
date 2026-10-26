@@ -33,6 +33,8 @@ REFERENCE_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:[ \t]*<?([^\s>]+)>?", re.M
 EXTERNAL = re.compile(r"^(?:[a-z][a-z0-9+.-]*:|//)", re.I)
 COMMENT = re.compile(r"<!--.*?-->", re.S)
 INLINE_CODE = re.compile(r"(`+)(.+?)\1")
+# A paragraph: lines up to the next blank one.
+PARAGRAPH = re.compile(r"(?:[^\n]|\n(?![ \t]*\n))+")
 # A code span may carry on to the next line of its paragraph, though not past a blank line.
 CODE_SPAN = re.compile(r"(`+)(?:.|\n(?![ \t]*\n))+?\1")
 # `[text](target)` and `![alt](target)`, the target without its optional title.
@@ -134,15 +136,17 @@ def links(path):
     prose = dict(prose_lines(path.read_text(encoding="utf-8")))
     text = "\n".join(prose.get(number, "") for number in range(1, max(prose, default=0) + 1))
     text = CODE_SPAN.sub(lambda match: "\n" * match.group(0).count("\n"), text)
-    # Read from the whole page, so a link wrapped onto the next line is still one link.
-    found = [
-        match for pattern in (MARKDOWN_LINK, HTML_LINK, REFERENCE_DEFINITION)
-        for match in pattern.finditer(text)
-    ]
-    for match in sorted(found, key=lambda match: match.start()):
-        target = match.group(1)
-        if not EXTERNAL.match(target):
-            yield text.count("\n", 0, match.start()) + 1, target
+    # Read a paragraph at a time, so a link wrapped onto the next line is still one link but
+    # none runs on past a blank line.
+    for paragraph in PARAGRAPH.finditer(text):
+        found = [
+            match for pattern in (MARKDOWN_LINK, HTML_LINK, REFERENCE_DEFINITION)
+            for match in pattern.finditer(paragraph.group(0))
+        ]
+        for match in sorted(found, key=lambda match: match.start()):
+            target = match.group(1)
+            if not EXTERNAL.match(target):
+                yield text.count("\n", 0, paragraph.start() + match.start()) + 1, target
 
 
 def broken(path):
@@ -220,6 +224,12 @@ class DocLinkTests(unittest.TestCase):
             page = Path(folder) / "page.md"
             page.write_text("See the [guide](\nmissing.md) first.\n", encoding="utf-8")
             self.assertEqual(list(links(page)), [(1, "missing.md")])
+
+    def test_a_link_does_not_run_on_past_a_blank_line(self):
+        with tempfile.TemporaryDirectory() as folder:
+            page = Path(folder) / "page.md"
+            page.write_text("See the [guide](\n\nmissing.md) first.\n", encoding="utf-8")
+            self.assertEqual(list(links(page)), [])
 
     def test_a_code_span_over_two_lines_holds_no_link(self):
         with tempfile.TemporaryDirectory() as folder:
