@@ -1700,10 +1700,18 @@ void RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t he
         const std::size_t offset =
             (static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)) * 4u;
         if (offset + 3u >= rgba.size()) return;
-        rgba[offset + 0u] = r;
-        rgba[offset + 1u] = g;
-        rgba[offset + 2u] = b;
-        rgba[offset + 3u] = static_cast<uint8_t>(std::lround(static_cast<float>(a) * alpha_scale));
+        // Laid over what an earlier glyph left (straight alpha), so a soft edge never thins it.
+        const float source = static_cast<float>(a) * alpha_scale / 255.0f;
+        const float below  = static_cast<float>(rgba[offset + 3u]) / 255.0f * (1.0f - source);
+        const float out    = source + below;
+        if (out <= 0.0f) return;
+        const auto over = [&](uint8_t top, uint8_t under) {
+            return static_cast<uint8_t>(std::lround((static_cast<float>(top) * source + static_cast<float>(under) * below) / out));
+        };
+        rgba[offset + 0u] = over(r, rgba[offset + 0u]);
+        rgba[offset + 1u] = over(g, rgba[offset + 1u]);
+        rgba[offset + 2u] = over(b, rgba[offset + 2u]);
+        rgba[offset + 3u] = static_cast<uint8_t>(std::lround(out * 255.0f));
     });
 }
 
