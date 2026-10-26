@@ -310,20 +310,20 @@ final class WorkshopSourceTests: XCTestCase {
   func testReadingSubscriptionsWaitsForTheSavedSignInAndSaysWhetherItRead() async throws {
     let store = fixture.store
     let readSignedOut = try await store.refreshSubscribedIDs()
-    XCTAssertFalse(readSignedOut, "signed out, nothing is read")
+    XCTAssertNil(readSignedOut, "signed out, nothing is read")
 
     fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
     try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
     let relaunched = fixture.relaunchedStore()
     relaunched.restoreSteamWebSession()
     let readRestored = try await relaunched.refreshSubscribedIDs()
-    XCTAssertTrue(readRestored, "the read waited for the saved sign-in")
+    XCTAssertNotNil(readRestored, "the read waited for the saved sign-in")
     XCTAssertEqual(relaunched.subscribedIDs, ["1"])
   }
 
-  /// A read of the subscriptions that Steam answers after a subscribe went through does not
-  /// put back the list from before it.
-  func testASubscriptionsReadDoesNotUndoANewerSubscribe() async throws {
+  /// A read of the subscriptions that Steam answers after a subscribe went through is still
+  /// shown, with the subscribe laid over it, so neither the list nor the change is lost.
+  func testASubscriptionsReadKeepsASubscribeMadeWhileItWasAnswered() async throws {
     let store = fixture.store
     fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
     try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
@@ -334,8 +334,9 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(fixture.subscriptionReads, 1, "the read is held at Steam")
     try await store.setSubscribed(true, itemID: "2")
     gate.signal()
-    _ = try await read.value
-    XCTAssertEqual(store.subscribedIDs, ["2"], "the subscribe that finished last is what is marked")
+    let used = try await read.value
+    XCTAssertEqual(used, store.steamWebSession, "the read answers the session it read with")
+    XCTAssertEqual(store.subscribedIDs, ["1", "2"], "the list Steam sent, and the subscribe made meanwhile")
   }
 
   /// Steam ending the session a request was sent with does not sign out a newer sign-in made

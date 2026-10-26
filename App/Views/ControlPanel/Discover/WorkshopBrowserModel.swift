@@ -355,8 +355,9 @@ final class WorkshopBrowserModel {
       controller.launch(PanelActionCoordinator.key("workshop-subscriptions")) { [controller, weak self] in
         let read = try await controller.refreshWorkshopSubscriptions()
         guard let self else { return }
-        subscriptionsRead = read
-        subscriptionsSession = read ? controller.workshop.steamWebSession : nil
+        // The sign-in the read used, not whichever is current now: another one reads again.
+        subscriptionsRead = read != nil
+        subscriptionsSession = read
       }
     }
   }

@@ -87,8 +87,10 @@ final class WorkshopStore {
   /// Where the session is kept between launches; nil keeps it in memory only.
   @ObservationIgnored private let webSessions: (any SteamWebSessionStoring)?
   @ObservationIgnored private var webSessionRestore: Task<Void, Never>?
-  /// Counts the subscription changes Steam accepted, so a read sent before one is not published.
-  @ObservationIgnored private var subscriptionChanges = 0
+  /// Subscription reads in flight, and the changes Steam accepted while any was: a read lays
+  /// those made after it started over what Steam sent. Emptied once no read is in flight.
+  @ObservationIgnored private var subscriptionReads = 0
+  @ObservationIgnored private var editsDuringReads: [(id: String, subscribed: Bool)] = []
   /// The renewal in flight, which every reader of an expired session waits for.
   @ObservationIgnored private var webSessionRenewal: Task<SteamWebSession, Error>?
   private(set) var isSigningInToSteamWeb = false
@@ -835,21 +837,31 @@ final class WorkshopStore {
   }
 
   /// Reads every id the signed-in account subscribes to, after a saved sign-in still being
-  /// restored, and answers whether there was a session to read with. Signed out it does nothing;
-  /// Steam ending the session forgets it and throws `SteamSignInRequired`.
+  /// restored, and answers the session it read with (nil when there was none). Signed out it
+  /// does nothing; Steam ending the session forgets it and throws `SteamSignInRequired`.
   @discardableResult
-  func refreshSubscribedIDs() async throws -> Bool {
+  func refreshSubscribedIDs() async throws -> SteamWebSession? {
     var used: SteamWebSession?
+    subscriptionReads += 1
+    defer {
+      subscriptionReads -= 1
+      if subscriptionReads == 0 { editsDuringReads = [] }
+    }
     do {
-      guard let session = try await currentSteamWebSession() else { return false }
+      guard let session = try await currentSteamWebSession() else { return nil }
       used = session
-      let changes = subscriptionChanges
+      let start = editsDuringReads.count
       let ids = try await service.subscribedIDs(account: session)
-      // A sign-out, another account or a subscribe while Steam answered keeps what that set.
-      if steamWebSession?.steamID == session.steamID, subscriptionChanges == changes {
-        subscribedIDs = Set(ids)
+      // A sign-out or another sign-in while Steam answered keeps what that set; a subscribe
+      // or unsubscribe made meanwhile is laid over what Steam sent.
+      if steamWebSession == session {
+        var marked = Set(ids)
+        for edit in editsDuringReads[start...] {
+          if edit.subscribed { marked.insert(edit.id) } else { marked.remove(edit.id) }
+        }
+        subscribedIDs = marked
       }
-      return true
+      return session
     } catch is SteamSignInRequired {
       forgetSteamWebSession(endedWith: used)
       throw SteamSignInRequired()
@@ -866,7 +878,7 @@ final class WorkshopStore {
       try await service.setSubscribed(subscribed, itemID: itemID, account: session)
       if steamWebSession?.steamID == session.steamID {
         if subscribed { subscribedIDs.insert(itemID) } else { subscribedIDs.remove(itemID) }
-        subscriptionChanges &+= 1
+        if subscriptionReads > 0 { editsDuringReads.append((itemID, subscribed)) }
       }
     } catch is SteamSignInRequired {
       forgetSteamWebSession(endedWith: used)
