@@ -522,8 +522,10 @@ toolchain hash, so the next build compiles every crate once and starts a new ent
 Only runs on `main` save either cache; every other ref (pull requests, branches,
 hand-pushed tags) restores and never saves. An entry saved under another ref is
 readable by that ref alone, and those entries pushed the repository past GitHub's
-10 GB cache limit, which evicts the `main` entries releases need. A tag Version
-produces is built by Version's run on `main`, so release builds still save.
+10 GB cache limit, which evicts the `main` entries releases need. Version calls Build
+directly for each tag it creates, so a release cut by a `release:` push to `main`
+still saves; a Version run dispatched by hand from another branch builds its tag
+without saving.
 
 **What the attestation does and does not say.** Its SLSA predicate is built from
 the run's OIDC claims: `resolvedDependencies[0]` is `git+<repo>@<claims.ref>` with
@@ -563,8 +565,8 @@ use the release workflow for the shared lock. The script's docstring and
 The test gate on hosted runners, run by hand from **Actions -> Test -> Run
 workflow** on the branch or tag chosen under "Use workflow from" (`--ref` below). It
 does not tag, build the Release app or publish, and no release waits for it
-([why](#build-buildyml)). It has no input naming another ref to test: its jobs save
-caches under the ref the run starts from, and a run started from `main` that built
+([why](#build-buildyml)). It has no input naming another ref to test: only a run started from `main` saves
+caches (other refs restore without saving), and a run started from `main` that built
 another ref's code would let that code write the caches every release restores. Its
 three jobs run in parallel on `macos-26` runners, each after `prepare-build` and
 `python3 scripts/build.py --renderer-only` for the renderer and the generated bridge,
