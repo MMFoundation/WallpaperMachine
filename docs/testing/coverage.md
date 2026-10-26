@@ -238,7 +238,8 @@ picture shows between a window closing and the web page's window opening.
   defaults and corrupt stored values (the battery mode's `reducedQuality` is not a
   condition choice), the stored Reduced quality choice of the three system conditions
   that is never a rule action, running versus frontmost rules, and the
-  other-audio settle. The quality channel is one more delivery beside presentation and audio:
+  other-audio settle and the system feedback services (alerts, the volume click, Siri
+  listening) it ignores by their system path. The quality channel is one more delivery beside presentation and audio:
   a reduction reaches the bridge on its own without suspending anything, an unchanged set is
   not sent again, a refused request or release is sent again by the next evaluation (and not
   inside the same one), `stop()` releases it, and it waits for the global acknowledgement and
