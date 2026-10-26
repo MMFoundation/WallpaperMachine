@@ -36,9 +36,9 @@ Particle-layer script API, camera transforms, setParent with adjustTransforms, b
 - D13/D16 not attempted: no SteamCMD setup or saved Steam sign-in here; C10 left for a reference capture, since it changes every effect pass
 - App not rebuilt; nothing checked on a live desktop
 
-## 2026-10-25 — Audio exclusions, Window menu, update signatures, click on release, material reads
+## 2026-10-25 — Audio exclusions, update signatures, click on release, material reads
 
-Five changes: system feedback sounds no longer count as another app playing, a Window menu with Command-M and Command-H, in-app updates must carry an intact signature that meets the release requirement when replacing a release, scene scripts get cursorClick on release over the pressed layer, and scripts read a material constant's authored or default value. Each was written test first; nine existing engine tests that treated a lone press as a click now tap.
+System feedback sounds no longer count as another app playing, in-app updates must carry an intact signature that meets the release requirement when replacing a release, scene scripts get cursorClick on release over the pressed layer, and scripts read a material constant's authored or default value. Each was written test first; nine existing engine tests that treated a lone press as a click now tap. A Window menu written alongside was dropped in favour of the one main added in the meantime, so `ApplicationMenuTests` below no longer exists.
 
 - `python3 scripts/test.py --only OtherAudioMonitorTests --only ApplicationMenuTests --only AppUpdateTests` — 68 passed
 - `python3 scripts/test.py` — exit 0; 4162 tests: 4115 passed, 47 skipped; Swift linked the renderer library built before the engine changes, which check_renderer covers
