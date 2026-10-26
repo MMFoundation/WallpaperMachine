@@ -1187,13 +1187,13 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
 - **Text details not matched.** Wallpaper Engine shapes text with HarfBuzz (OpenType
   kerning, ligatures, complex scripts) and draws colour glyphs from an RGBA atlas; the
   layout kerns only from a font's legacy `kern` table (Arial has one, many OpenType
-  fonts have only GPOS kerning and so go unkerned), forms no ligatures, and colour
-  glyphs are monochrome or missing. A glyph the layer's font lacks is drawn from the first
+  fonts have only GPOS kerning and so go unkerned), forms no ligatures, and draws an
+  emoji sequence as its parts. A glyph the layer's font lacks is drawn from the first
   face of a list that has it, as Wallpaper Engine does (Arial, Segoe UI Emoji, Arial
   Unicode, Segoe UI, Twemoji, Segoe UI Symbol, Microsoft YaHei, Malgun Gothic), with two
-  differences that are not worked around: the colour emoji faces have no stand-in, since
-  FreeType's monochrome glyphs do not draw a colour bitmap, so an emoji the font and the
-  other faces lack is skipped, and Arial Unicode MS is last and not third, because that
+  differences that are not worked around: the colour emoji are Apple Color Emoji's, which
+  do not look like Segoe UI Emoji's, and are tinted by a text colour that is not white and
+  drawn by their shape alone in a styled layer, and Arial Unicode MS is last and not third, because that
   font is Office's and not Windows' (on a stock install the reference draws Chinese in
   Microsoft YaHei, whose Simplified Chinese punctuation PingFang SC shares; Arial
   Unicode MS in the third place would draw it in its own forms). That order of the

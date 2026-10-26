@@ -2048,6 +2048,11 @@ texture entrances are not decoded-image or native-rendering evidence.
 
 ## Text, fonts and clocks
 
+- **Colour emoji** — `TextObjectRuntime.AColourEmojiIsDrawnInItsOwnColoursAndTakesRoomInTheRow`
+  (`text_object_runtime_test`, macOS only): an emoji the layer's font lacks comes from Apple
+  Color Emoji, takes room in the row and is drawn in its own colours (the grinning face's
+  yellow) in white text.
+
 - **Fonts and limits** — `text_object_runtime_test`. Font decoding prefers valid
   authored bytes, then the installed face of the font the scene names, then Arial;
   missing paths and malformed embedded fonts use the same fallback for both
@@ -2067,8 +2072,8 @@ texture entrances are not decoded-image or native-rendering evidence.
   faces read from their files, not from a copy of the font in memory),
   `.AFallbackFaceIsOpenedOnlyWhenAGlyphIsMissing` that text the font can draw asks for
   no second face, `.AFontTheWallpaperShipsIsNotOpenedFromAFile` that an authored font
-  stays in memory, and `.TheFaceCacheKeepsEightFacesAndDropsTheOneUnusedLongest`
-  that ten fonts leave eight open and the one used last is not reopened, and
+  stays in memory, and `.TheFaceCacheKeepsNineFacesAndDropsTheOneUnusedLongest`
+  that ten fonts leave nine open and the one used last is not reopened, and
   `.AFontFileThatChangedIsOpenedAgainBeforeItsCachedFaceIsUsed` that a font file
   rewritten or deleted under a cached face is opened again, not read through the old
   mapping. The face of

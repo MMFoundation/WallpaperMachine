@@ -675,7 +675,14 @@ fullwidth forms (inferred: they go to the next face, so a string does not mix a 
 fullwidth comma with a left-set ideographic one), PingFang SC for Microsoft YaHei, Apple SD
 Gothic Neo for Malgun Gothic, and Arial Unicode MS last), each opened only when no face
 already held has the glyph, so the list is gone down as far as the text needs, once for
-a layout, and a glyph that none has is skipped; colour emoji have no face.
+a layout, and a glyph that none has is skipped. Apple Color Emoji stands for Segoe UI Emoji,
+second in the list: its glyphs are colour bitmaps held at fixed sizes, so the size nearest
+above the layer's em is read and scaled to it, and they are drawn in their own colours into
+the text's picture. The card's colour multiplies them as it does the text, so white text
+shows them as Apple draws them and coloured text tints them; a styled layer (outline, blur,
+shadow) draws them by their shape in its masks, without their colours. Each code point is
+one glyph, so an emoji made of several (a flag, a skin tone, a family joined by zero-width
+joiners) shows as its parts.
 
 An
 `opaquebackground` fills the card's rectangle (not the room a style needs around it) with

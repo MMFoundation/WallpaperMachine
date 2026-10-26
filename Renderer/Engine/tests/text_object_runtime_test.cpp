@@ -752,6 +752,42 @@ TEST(TextObjectRuntime, EveryTexelOfRasterizedTextCarriesTheTextsColourWhateverI
     EXPECT_EQ(off_colour, 0u) << "a texel is not the text's colour";
 }
 
+// A colour emoji no face of the layer's has is drawn from Apple Color Emoji, standing in for
+// Wallpaper Engine's Segoe UI Emoji, in its own colours: the grinning face is yellow where the
+// rest of the white text is white, and it takes room in the row as a glyph does.
+TEST(TextObjectRuntime, AColourEmojiIsDrawnInItsOwnColoursAndTakesRoomInTheRow) {
+    TextLayerState state {
+        .text                   = "A\xF0\x9F\x98\x80",  // "A" and U+1F600
+        .font_key               = "systemfont_Helvetica",
+        .resolved_font_kind     = "system",
+        .resolved_font_identity = "Helvetica",
+        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
+        .point_size             = 40.0f,
+        .padding                = { 4.0f, 4.0f },
+    };
+#ifndef __APPLE__
+    GTEST_SKIP() << "Apple Color Emoji is a macOS font";
+#endif
+    ASSERT_FALSE(state.resolved_font_path.empty());
+    TextLayerState plain = state;
+    plain.text           = "A";
+    const auto with_emoji = MeasureTextLayerLayout(state);
+    const auto without    = MeasureTextLayerLayout(plain);
+    EXPECT_GT(with_emoji.card.x(), without.card.x() + 40.0f) << "the emoji takes room in the row";
+
+    const auto     size   = TextLayerRasterSizeForLayout(state, with_emoji);
+    const uint32_t width  = static_cast<uint32_t>(std::ceil(size.x()));
+    const uint32_t height = static_cast<uint32_t>(std::ceil(size.y()));
+    std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * height * 4u, 0u);
+    RasterizeTextLayer(state, width, height, rgba);
+    std::size_t yellow = 0;
+    for (std::size_t offset = 0; offset < rgba.size(); offset += 4u) {
+        const int r = rgba[offset], g = rgba[offset + 1u], b = rgba[offset + 2u], a = rgba[offset + 3u];
+        if (a > 200 && r > 200 && g > 150 && b < 100) ++yellow;
+    }
+    EXPECT_GT(yellow, 100u) << "the face is drawn in its own yellow";
+}
+
 // The styled text's channels are coverage masks, not a colour: a clear texel is no mask in all
 // three, or an outline or a shadow would fill the whole card.
 TEST(TextObjectRuntime, StyledTextLeavesEveryTexelOutsideItsMasksClear) {
@@ -4475,7 +4511,7 @@ TEST(TextObjectRuntime, AFontTheWallpaperShipsIsNotOpenedFromAFile) {
 #endif
 }
 
-TEST(TextObjectRuntime, TheFaceCacheKeepsEightFacesAndDropsTheOneUnusedLongest) {
+TEST(TextObjectRuntime, TheFaceCacheKeepsNineFacesAndDropsTheOneUnusedLongest) {
 #ifdef __APPLE__
     std::vector<SystemFontFace> fonts;
     for (const char* family : {"Arial", "Courier New", "Georgia", "Impact", "Tahoma", "Trebuchet MS",
@@ -4496,16 +4532,16 @@ TEST(TextObjectRuntime, TheFaceCacheKeepsEightFacesAndDropsTheOneUnusedLongest) 
     ResetTextFontCacheForTests();
     for (std::size_t font = 0; font < 10; ++font) lay_out(font);
     EXPECT_EQ(TextFontFilesOpenedForTests(), 10u);
-    EXPECT_EQ(TextFontFacesCachedForTests(), 8u);
+    EXPECT_EQ(TextFontFacesCachedForTests(), 9u);
 
     lay_out(9);
     EXPECT_EQ(TextFontFilesOpenedForTests(), 10u) << "the face used last was not kept";
     lay_out(8);
     lay_out(2);
-    EXPECT_EQ(TextFontFilesOpenedForTests(), 10u) << "a face among the last eight was dropped";
+    EXPECT_EQ(TextFontFilesOpenedForTests(), 10u) << "a face among the last nine was dropped";
     lay_out(0);
     EXPECT_EQ(TextFontFilesOpenedForTests(), 11u) << "the face unused longest was kept";
-    EXPECT_EQ(TextFontFacesCachedForTests(), 8u);
+    EXPECT_EQ(TextFontFacesCachedForTests(), 9u);
 #endif
 }
 
