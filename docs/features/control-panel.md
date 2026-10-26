@@ -457,7 +457,13 @@ wallpaper selected on Installed. Its controls:
 - **Previous wallpaper**, play/pause, **Next wallpaper** and **Recently used**
   (below). Play/pause acts on every wallpaper and is enabled whenever any display
   has an assignment, even if the target display is empty; with no assignments it is
-  disabled and reports **No wallpaper playing**.
+  disabled and reports **No wallpaper playing**. The choice outlives a quit: it is
+  saved as `paused` under `[general]` in `config.toml`, and an app that quit paused
+  pauses again at its next launch once the first wallpaper has drawn its first frame,
+  so no display starts without a picture. Pressing play or pause before then wins. A
+  pause that a playback rule made (battery, Low Power Mode, another app's sound) is not
+  saved, and a saved pause with no wallpaper assigned is dropped, so it never holds
+  still a wallpaper applied later. Bridge tests: `Renderer/Bridge/src/tests/saved_pause.rs`.
 - **Next wallpaper** changes the target display the way Change now does when a
   rotating playlist runs there: it moves along at once with a fresh interval
   ([playlists](playlists.md#where-it-lives)). Otherwise it takes the library's next supported

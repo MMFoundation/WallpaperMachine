@@ -230,6 +230,7 @@ fn all_app_fields_and_selector_variants_round_trip_without_normalizing_preferenc
                     primary_display: None,
                     general: GeneralCfg {
                         last_selected_wallpaper: optional.then(|| "item-52".to_owned()),
+                        paused: optional,
                     },
                     power: PowerCfg {
                         on_battery: mode,
@@ -308,6 +309,7 @@ fn all_app_fields_and_selector_variants_round_trip_without_normalizing_preferenc
                     output["general"].get("last_selected_wallpaper").is_some(),
                     optional
                 );
+                assert_eq!(output["general"].get("paused").is_some(), optional);
                 assert_eq!(output["quality"].get("frame_rate_cap").is_some(), optional);
                 assert!(output["power"].get("pause_on_battery_power").is_none());
                 assert!(output["power"].get("on_battery_explicit").is_none());
