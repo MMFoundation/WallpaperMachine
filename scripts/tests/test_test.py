@@ -120,6 +120,19 @@ class ScriptTests(unittest.TestCase):
             status = runner.run_script_tests([self.module("test_a.py", 0), self.module("test_b.py", 0)])
         self.assertEqual(status, 0)
 
+    def test_python_only_runs_the_script_tests_and_never_xcode(self):
+        with (
+            patch.object(sys, "argv", ["test.py", "--python-only"]),
+            patch.object(runner, "run_script_tests", return_value=4) as script_tests,
+            patch.object(runner.subprocess, "run") as tools,
+            patch.object(runner, "run_quiet") as xcodebuild,
+        ):
+            status = runner.main()
+        self.assertEqual(status, 4)
+        script_tests.assert_called_once_with(verbose=False)
+        tools.assert_not_called()
+        xcodebuild.assert_not_called()
+
     def test_modules_are_reported_in_the_order_given_whichever_finishes_first(self):
         report = io.StringIO()
         with redirect_stdout(report):
