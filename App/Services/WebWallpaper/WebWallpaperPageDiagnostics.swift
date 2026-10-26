@@ -21,12 +21,13 @@ struct WebWallpaperPageDiagnostics {
               let raw = payload["text"] as? String
         else { return nil }
         logged += 1
-        // Only what can reach the line is read, however long the page made its report.
-        let head = raw.prefix(Self.maximumLength + 1)
+        // Counted in Unicode scalars, so one character stacked with combining marks cannot
+        // carry a report past the limit: only what can reach the line is read.
+        let head = String(String.UnicodeScalarView(raw.unicodeScalars.prefix(Self.maximumLength + 1)))
         var text = head.components(separatedBy: .newlines).joined(separator: " ")
             .trimmingCharacters(in: .whitespaces)
-        if head.count > Self.maximumLength || text.count > Self.maximumLength {
-            text = String(text.prefix(Self.maximumLength)) + "…"
+        if text.unicodeScalars.count > Self.maximumLength {
+            text = String(String.UnicodeScalarView(text.unicodeScalars.prefix(Self.maximumLength))) + "…"
         }
         let last = logged == Self.maximumLines ? "; later page messages of this document are not logged" : ""
         return (level, "web wallpaper \(project): page \(kind): \(text)\(last)")

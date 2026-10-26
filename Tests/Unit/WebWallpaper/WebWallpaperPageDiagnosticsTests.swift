@@ -44,7 +44,12 @@ final class WebWallpaperPageDiagnosticsTests: XCTestCase {
     let long = try XCTUnwrap(diagnostics.line(
       project: "p", payload: ["kind": "error", "text": String(repeating: "a", count: 5000)]))
     XCTAssertLessThan(long.text.count, WebWallpaperPageDiagnostics.maximumLength + 60)
-    for _ in 1..<(WebWallpaperPageDiagnostics.maximumLines - 1) {
+    let stacked = "a" + String(repeating: "\u{301}", count: 5000)
+    let marks = try XCTUnwrap(diagnostics.line(project: "p", payload: ["kind": "error", "text": stacked]))
+    XCTAssertLessThan(
+      marks.text.unicodeScalars.count, WebWallpaperPageDiagnostics.maximumLength + 60,
+      "one character with thousands of combining marks is cut too")
+    for _ in 2..<(WebWallpaperPageDiagnostics.maximumLines - 1) {
       XCTAssertNotNil(diagnostics.line(project: "p", payload: ["kind": "error", "text": "again"]))
     }
     let last = try XCTUnwrap(diagnostics.line(project: "p", payload: ["kind": "error", "text": "last"]))
