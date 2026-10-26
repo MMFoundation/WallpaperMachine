@@ -2,8 +2,8 @@
 
 How the app chooses a language, where each layer's strings live, and the exact
 steps for shipping another language. English is the source language; Simplified
-Chinese (`zh-Hans`), Traditional Chinese (`zh-Hant`), Japanese (`ja`) and Korean
-(`ko`) are translations. The user-facing behaviour is in
+Chinese (`zh-Hans`), Traditional Chinese (`zh-Hant`), Japanese (`ja`), Korean
+(`ko`) and Brazilian Portuguese (`pt-BR`) are translations. The user-facing behaviour is in
 [Control panel → Language](features/control-panel.md#language).
 
 ## Which language the app shows
@@ -17,7 +17,7 @@ shipped language. The effective language is
    `AppLanguage.supported`, using `Bundle.preferredLocalizations(from:forPreferences:)`
    so the rules are the ones macOS applies to the bundle (`zh-CN`, `zh`,
    `zh-Hans-TW` → `zh-Hans`; `zh-TW`, `zh-HK`, `zh-Hant` → `zh-Hant`; `ja-JP` → `ja`;
-   `ko-KR` → `ko`; `en-GB`, `fr` → English).
+   `ko-KR` → `ko`; `pt`, `pt-BR`, `pt-PT` → `pt-BR`; `en-GB`, `fr`, `es` → English).
 
 The macOS list is read from the global defaults domain, not from
 `Locale.preferredLanguages`, because the store also writes the user's choice into
@@ -54,7 +54,7 @@ numbered (`%1$@`, `%2$lld`) in a translation that reorders them, and a literal
 Steam session warnings describe unavailable reusable authentication information or
 failure to update retained authentication state; they do not turn a successful sign-in
 into a failed download. The update warning interpolates one opaque error description
-as text, including any percent signs it contains. Both warnings ship in all four languages.
+as text, including any percent signs it contains. Both warnings ship in every shipped language.
 
 ## The panel's live language
 
@@ -94,7 +94,7 @@ refuses a tag the app does not ship.
 The effective language also reaches the bridge, because a wallpaper can carry
 its own label translations (`general.localization`) and the bridge resolves them
 when it builds the property snapshot. `AppLanguage.wallpaperEngineLocale` names
-the table's language code (`en-us`, `zh-chs`, `zh-cht`, `ja-jp`, `ko-kr`) and
+the table's language code (`en-us`, `zh-chs`, `zh-cht`, `ja-jp`, `ko-kr`, `pt-br`) and
 `labelLocales` lists it followed by `en-us`. `BridgeStore.setLabelLanguageAsync`
 sends the list through `setLabelLanguages`, once before the library loads
 (`AppDelegate`) and again from `PanelController.setLanguage`; it then re-reads
@@ -233,7 +233,7 @@ catalogs agree.
    [release notes](release.md#release-notes-and-the-changelog).
 5. **Document.** Add the language to
    [Control panel → Language](features/control-panel.md#language) and to the
-   language list in both READMEs, and record the run with
+   language list in every README, and record the run with
    `python3 scripts/log_verification.py`.
 
 Adding or changing a string in the app means adding it to every catalog in the

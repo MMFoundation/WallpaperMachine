@@ -301,7 +301,7 @@ The rules that bind every change:
   - a bridge-crate interface change and the regenerated `App/Bridge/Generated`;
   - a behavior change and the documentation that describes that behavior;
   - a new user-facing string and every shipped catalog;
-  - `README.md` and `README.zh-CN.md`;
+  - `README.md`, `README.zh-CN.md` and `README.pt-BR.md`;
   - a vendored `ThirdParty/` update and `ThirdParty/provenance.json`.
 - History stays linear: catch up with `origin/main` by rebasing unpushed commits
   (`git pull --rebase`), not with a `Merge remote-tracking branch` commit. CI commits

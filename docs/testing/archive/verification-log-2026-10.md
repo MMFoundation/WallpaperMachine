@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-23 — Report on GitHub opens the bug form with required fields
+
+- bug_report.yml: What you did, What went wrong, What you expected and the diagnostics report are required; app facts go to optional wallpaper, version and app-details fields.
+- ExternalLink.newIssue opens ?template=bug_report.yml and prefills only those three field ids; no required field is filled by the app.
+- YAML parsed with PyYAML; the app's query names match the form's field ids (grep both sides).
+- python3 scripts/test.py --only ExternalLinkTests --only PanelLibraryStateTests: 20 passed; --only InspectorPolicyTests: 19 passed.
+- python3 scripts/test.py: 4016 passed, 0 failed, 46 skipped (after rebuilding the stale renderer library with build.py --renderer-only).
+- Not checked: GitHub's rendering of the form and the URL prefill; it only takes effect once the template is on the default branch.
+- Blank issues stay on for the body-prefilled link of app versions up to 1.6.0; app not rebuilt.
+
 ## 2026-10-23 — Web wallpapers: assigning the property listener is not a delivery
 
 A React page that assigns `wallpaperPropertyListener` while it renders (issue #69) looped on the host script's synchronous replay until React error 301 left it blank. The host script now replays only what the page has not taken in, once after the assigning turn, and once more for a listener a handler assigns during that replay. This Mac cannot link the test host, so the native gate runs in CI on the pull request (#72), as agreed on the issue.
