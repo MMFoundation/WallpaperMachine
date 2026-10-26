@@ -455,7 +455,8 @@ runtime; setup also remains available in **Settings → Library & Steam**. Pendi
 download requests continue once their prerequisites are met. In the download
 dialog, installation always shows progress while busy (an unknown total is
 indeterminate rather than 0%), **Cancel setup** stands in for **Install SteamCMD**
-until it ends, and a failure retains its details and offers **Try
+while setup can still be cancelled (the final step that publishes the installation
+cannot be, and shows the install button disabled instead), and a failure retains its details and offers **Try
 again**, unless the retained copy needs explicit approval first.
 
 Setup downloads Valve's HTTPS `client/steam_cmd_osx` package manifest and installs
