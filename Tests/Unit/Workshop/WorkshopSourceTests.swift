@@ -280,6 +280,7 @@ final class WorkshopSourceTests: XCTestCase {
     try await finished(store)
     XCTAssertEqual(store.items.map(\.id), ["1", "2"])
     XCTAssertEqual(fixture.favoriteOrdersRequested, ["subscriptiondate", "alpha"])
+    XCTAssertEqual(fixture.favoriteProfilesRequested, [Self.author, Self.author], "the signed-in account's own favorites")
     let url = try XCTUnwrap(URLComponents(url: store.browseURL, resolvingAgainstBaseURL: false))
     XCTAssertEqual(url.path, "/profiles/\(Self.author)/myworkshopfiles/")
     XCTAssertEqual(url.queryItems?.first { $0.name == "browsefilter" }?.value, "myfavorites")
@@ -993,6 +994,8 @@ private final class SourceFixture {
     set { answers.write { $0.favoritePages = newValue } }
   }
   var favoriteOrdersRequested: [String] { answers.read { $0.favoriteOrdersRequested } }
+  /// The SteamID64 in the path of each favorites request.
+  var favoriteProfilesRequested: [String] { answers.read { $0.favoriteProfilesRequested } }
   var browseSections: [String] { answers.read { $0.browseSections } }
   var browsePagesRequested: [Int] { answers.read { $0.browsePagesRequested } }
   var detailsRequests: Int { answers.read { $0.detailsRequests } }
@@ -1059,6 +1062,7 @@ private final class SourceAnswers: @unchecked Sendable {
     /// Steam's favorites answer, by the `sortmethod` asked for.
     var favoritePages: [String: Data] = [:]
     var favoriteOrdersRequested: [String] = []
+    var favoriteProfilesRequested: [String] = []
     var browseSections: [String] = []
     var browsePagesRequested: [Int] = []
     var detailsRequests = 0
@@ -1112,6 +1116,7 @@ private final class SourceAnswers: @unchecked Sendable {
         if value("browsefilter") == "myfavorites" {
           let order = value("sortmethod") ?? ""
           state.favoriteOrdersRequested.append(order)
+          state.favoriteProfilesRequested.append(String(parts[1]))
           return (200, state.favoritePages[order] ?? Data())
         }
         return (200, state.profiles[String(parts[1])] ?? Data())
