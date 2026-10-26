@@ -80,6 +80,17 @@ final class SceneDrawVerdictsTests: XCTestCase {
     XCTAssertEqual(replaced?.outcome, .notDrawn, "a refusal is news, whatever was seen before")
   }
 
+  func testAnOlderSnapshotsReportArrivingLateDoesNotUndoANewerOne() async throws {
+    let store = verdicts()
+    await store.record(reports: [report(backend: "native_metal")], revision: 8)
+    await store.record(reports: [report(backend: "unknown", stage: "unsupported", reason: "old")], revision: 7)
+    let kept = await store.verdict(for: "scene")
+    XCTAssertEqual(kept?.outcome, .drawn, "the report of revision 7 describes a scene that has since changed")
+    await store.record(reports: [report(backend: "unknown", stage: "unsupported", reason: "new")], revision: 9)
+    let newer = await store.verdict(for: "scene")
+    XCTAssertEqual(newer?.reason, "new")
+  }
+
   func testAProjectWithoutAManifestGetsNoVerdict() async throws {
     let store = verdicts()
     await store.record(reports: [report("missing", backend: "native_metal")])

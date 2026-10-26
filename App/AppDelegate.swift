@@ -820,7 +820,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         let reports = store.settingsSnapshot.sceneRenderers
         guard reports != recordedSceneReports, let verdicts = store.sceneDrawVerdicts else { return }
         recordedSceneReports = reports
-        Task { await verdicts.record(reports: reports) }
+        let revision = store.snapshotRevision
+        Task { await verdicts.record(reports: reports, revision: revision) }
     }
 
     /// Rates each wallpaper's energy use from background samples while it plays alone.

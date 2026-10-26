@@ -38,6 +38,9 @@ actor SceneDrawVerdicts {
   private let library: @Sendable () -> URL
   private let build: String
   private var entries: [String: SceneDrawVerdict]
+  /// The newest snapshot whose reports were recorded. Each snapshot's reports arrive in a task of
+  /// their own, which may run after a newer one's.
+  private var recordedRevision: UInt64?
 
   init(
     file: URL, library: @escaping @Sendable () -> URL = { ClientPaths.libraryURL },
@@ -84,7 +87,13 @@ actor SceneDrawVerdicts {
   }
 
   /// Records what the running scenes report; reports that state nothing about the content are skipped.
-  func record(reports: [BridgeSceneBackendReport]) {
+  /// `revision` orders snapshots: reports older than ones already recorded are dropped, since they
+  /// describe scenes that have changed since.
+  func record(reports: [BridgeSceneBackendReport], revision: UInt64? = nil) {
+    if let revision {
+      if let recordedRevision, revision <= recordedRevision { return }
+      recordedRevision = revision
+    }
     var changed = false
     for report in reports {
       guard let outcome = Self.outcome(backend: report.backend, failureStage: report.failureStage)
