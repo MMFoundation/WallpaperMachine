@@ -653,7 +653,11 @@ then CMake-builds the `wescene-renderer` target of the scene engine (`Renderer/E
 `BUILD_TESTING` and `BUILD_TESTS` off and `RUST_SHADER_FFI` on, and emits the static link flags.
 The scene engine is only the statically linked renderer backend behind bindgen-generated
 `extern "C-unwind"` calls; `Core/src/owe/` is deliberately not a runtime layer, and runtime
-state lives in `WallpaperEngine` (`Core/src/engine/`). The engine's vendored C libraries
+state lives in `WallpaperEngine` (`Core/src/engine/`). One call holds no scene object:
+`owe_scene_capability_probe` reads a scene the way the scene host loads it (the shared mounting
+and property reading of `Scene/SceneProjectLoading`, the parser, the Metal capability gate) with
+no display, GPU or sound, and answers JSON; `Core/src/owe/capability.rs` wraps it and the bridge
+runs it off its actor (`WallpaperBridge.sceneCapability`) for the Compatibility check. The engine's vendored C libraries
 (miniaudio, stb_image, stb_vorbis) are in `ThirdParty/`; `Renderer/Engine/Dependencies` defines
 their targets and finds the Homebrew packages.
 

@@ -540,8 +540,16 @@ on [manual-smoke.md](manual-smoke.md).
   `StorageSettingsModelTests` (Panel) turn the Storage page's choices into the
   requested pending restore and open no file panels.
 - `WallpaperCompatibilityTests` — target, content and configuration generations
-  and truthful unknown states. They do not establish complete scene or on-screen
-  compatibility.
+  and truthful unknown states; the scene row from a remembered verdict and read again
+  each check, a check that reads the scene through an injected renderer probe (a refusal
+  with its reason, the files its layers lack with their layer, a scene that cannot be read,
+  no read without the shared resources) and records what it found. They do not establish
+  complete scene or on-screen compatibility: the probe itself is the renderer's
+  (`scene_capability_probe_test`, `tests::scene_capability` in the bridge).
+- `SceneDrawVerdictsTests` — a drawn scene remembered across launches for the same build
+  and files, forgotten for another build or changed files; only content outcomes kept
+  (`unsupported`, `compile`), never preparing or a frame or surface failure; a clean check
+  never replaces a scene seen drawing; no verdict without a manifest.
 - `LetterboxDetectorTests` — the black-bar decision over synthetic luma frames:
   letterbox, pillarbox and windowbox edges within a row, hairline edges ignored,
   noisy black and a logo or subtitle inside a bar, fades and dark scenes skipped,

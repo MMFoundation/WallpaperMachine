@@ -9,6 +9,7 @@
 #include "Shader/SceneMetalVariants.hpp"
 #include "SceneWallpaperSurface.hpp"
 #include "SceneSourceResolver.hpp"
+#include "Scene/SceneProjectLoading.hpp"
 #include "Project/ProjectProperties.hpp"
 
 #include "Image.hpp"
@@ -49,7 +50,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <charconv>
 #include <string_view>
 #include <cmath>
 #include <condition_variable>
@@ -57,7 +57,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <future>
 #include <limits>
 #include <mutex>
@@ -152,46 +151,6 @@ void UnpackPointer(uint64_t bits, float& x, float& y) {
     const auto by = static_cast<uint32_t>(bits & 0xFFFFFFFFu);
     std::memcpy(&x, &bx, sizeof(x));
     std::memcpy(&y, &by, sizeof(y));
-}
-
-/// The version a package's leading tag names ("PKGV" then decimal digits to the end), or the
-/// unknown value when the tag is anything else (R-H6).
-uint16_t VersionFromPackageTag(std::string_view tag) {
-    constexpr std::string_view kPrefix = "PKGV";
-    if (tag.size() <= kPrefix.size() || tag.substr(0, kPrefix.size()) != kPrefix) {
-        return SceneParseRequest::kUnknownPkgVersion;
-    }
-    const std::string_view digits = tag.substr(kPrefix.size());
-    if (! std::all_of(digits.begin(), digits.end(),
-                      [](char c) { return c >= '0' && c <= '9'; })) {
-        return SceneParseRequest::kUnknownPkgVersion;
-    }
-    uint16_t value = 0;
-    const auto [stop, status] = std::from_chars(digits.data(), digits.data() + digits.size(), value);
-    if (status != std::errc {} || stop != digits.data() + digits.size()) {
-        return SceneParseRequest::kUnknownPkgVersion;
-    }
-    return value;
-}
-
-/// The version of the package file at `path`, or the unknown value (R-H6).
-uint16_t ReadPackageVersion(const std::string& path) {
-    constexpr int32_t kLongestTag = 64;
-    std::ifstream     in(path, std::ios::binary);
-    int32_t           declared = 0;
-    if (! in.read(reinterpret_cast<char*>(&declared), sizeof(declared))) {
-        return SceneParseRequest::kUnknownPkgVersion;
-    }
-    if (declared < 1 || declared > kLongestTag) return SceneParseRequest::kUnknownPkgVersion;
-    std::array<char, kLongestTag> field {};
-    if (! in.read(field.data(), declared)) return SceneParseRequest::kUnknownPkgVersion;
-    return VersionFromPackageTag(
-        std::string_view(field.data(), static_cast<std::size_t>(declared)));
-}
-
-/// Whether `folder` can be written to.
-bool IsWritableFolder(const std::string& folder) {
-    return ::access(folder.c_str(), W_OK) == 0;
 }
 
 } // namespace
@@ -2253,28 +2212,8 @@ void MainHandler::loadScene() {
 
     // The file space the scene reads for the whole of its life, lowest layer first.
     auto vfs = std::make_unique<fs::VFS>();
-    {
-        auto shared = fs::CreatePhysicalFs(m_assets);
-        if (shared == nullptr || ! vfs->Mount("/assets", std::move(shared))) {
-            LOG_ERROR("scene not loaded, the shared assets cannot be mounted: %s",
-                      m_assets.c_str());
-            return;
-        }
-    }
-    if (! MountSceneSource(*vfs, resolved.scene_source, &error)) {
-        LOG_ERROR("scene not loaded, the wallpaper's files cannot be mounted: %s", error.c_str());
-        return;
-    }
-    if (! m_cache_path.empty()) {
-        // Optional: a scene without a cache only compiles its shaders again.
-        auto cache = fs::CreatePhysicalFs(m_cache_path, true);
-        if (cache == nullptr || ! IsWritableFolder(m_cache_path) ||
-            ! vfs->Mount("/cache", std::move(cache), "cache")) {
-            LOG_ERROR("shader cache not available, loading without it: %s", m_cache_path.c_str());
-        }
-    }
-    if (! InstallVirtualAssets(*vfs)) {
-        LOG_ERROR("scene not loaded, the built-in assets cannot be installed");
+    if (! MountSceneFileSpace(*vfs, m_assets, resolved.scene_source, m_cache_path, &error)) {
+        LOG_ERROR("scene not loaded, %s", error.c_str());
         return;
     }
     const std::string scene_text =
@@ -2286,19 +2225,10 @@ void MainHandler::loadScene() {
     }
 
     ProjectProperties authored;
-    if (! ParseProjectProperties(m_source, &authored, &error)) {
-        LOG_ERROR("scene not loaded, the project properties cannot be read: %s", error.c_str());
+    ProjectProperties merged;
+    if (! ReadSceneProperties(m_source, m_override_json, &authored, &merged, &error)) {
+        LOG_ERROR("scene not loaded, %s", error.c_str());
         return;
-    }
-    ProjectProperties merged = authored;
-    if (! m_override_json.empty()) {
-        ProjectProperties saved;
-        if (! ParseFlatProjectPropertyOverrideJson(m_override_json, &saved, &error)) {
-            LOG_ERROR("scene not loaded, the saved property choices cannot be read: %s",
-                      error.c_str());
-            return;
-        }
-        merged = MergeProjectProperties(authored, saved);
     }
 
     SceneParseRequest request;

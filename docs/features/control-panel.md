@@ -348,7 +348,13 @@ screen. Activation is explicit.
 - **Apply wallpaper** activates the selected wallpaper on the current target
   display; for the wallpaper already active there it reads **Reapply wallpaper**.
   An Installed tile shows an **Applying** spinner while its apply runs and a quiet
-  play mark while it waits behind another apply.
+  play mark while it waits behind another apply. A scene Native Metal refused with this
+  app version and these files, when it last ran or its
+  [Compatibility check](wallpaper-properties.md#compatibility-check) read it, asks first
+  (**Native Metal can’t draw this scene**, with the renderer's reason): applied, it would show
+  its preview picture instead of moving. **Apply Anyway** applies it; **Cancel** leaves the
+  display as it is. **Apply to all displays** asks the same; Reapply, choosing the scene a
+  display already shows, playlists, schedules and shortcuts never ask.
 - **Apply to all displays** (the inspector's **More actions** menu of an installed
   wallpaper, offered only when two or more enabled independent displays exist) puts the wallpaper on every one of
   them in a single step, whichever display is targeted, and is unavailable once they

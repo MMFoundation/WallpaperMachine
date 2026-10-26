@@ -5,6 +5,7 @@
 #include "Core/RendererCounters.hpp"
 #include "Presentation/WallpaperScaling.hpp"
 #include "SceneWallpaper.hpp"
+#include "Scene/SceneCapabilityProbe.hpp"
 #include "Runtime/MediaArtwork.hpp"
 #include "SceneWallpaperSurface.hpp"
 #include "Utils/Logging.h"
@@ -15,6 +16,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <atomic>
 #include <chrono>
@@ -1312,6 +1314,36 @@ extern "C" int owe_renderer_shared_counters(
     if (written > 1) out_values[1] = analysis.accepted_frame_count;
     if (out_written != nullptr) *out_written = static_cast<uintptr_t>(written);
     return 0;
+}
+
+extern "C" int owe_scene_capability_probe(const char* project_file, const char* assets_dir,
+                                          const char* cache_dir, const char* property_override_json,
+                                          char** out_json)
+{
+    clear_last_error();
+    if (out_json == nullptr) return fail("the output pointer is NULL");
+    *out_json = nullptr;
+    if (project_file == nullptr || *project_file == '\0') return fail("the project file is empty");
+    if (assets_dir == nullptr || *assets_dir == '\0') return fail("the shared assets folder is empty");
+    return guarded([&] {
+        wallpaper::SceneCapabilityProbeRequest request;
+        request.project_file           = project_file;
+        request.assets                 = assets_dir;
+        request.cache                  = cache_dir != nullptr ? cache_dir : "";
+        request.property_override_json = property_override_json != nullptr ? property_override_json : "";
+        const std::string document =
+            wallpaper::SceneCapabilityProbeJson(wallpaper::ProbeSceneCapability(request));
+        char* copy = static_cast<char*>(std::malloc(document.size() + 1));
+        if (copy == nullptr) return fail("the probe's answer could not be allocated");
+        std::memcpy(copy, document.c_str(), document.size() + 1);
+        *out_json = copy;
+        return 0;
+    });
+}
+
+extern "C" void owe_free_string(char* value)
+{
+    std::free(value);
 }
 
 extern "C" const char* owe_last_error(void)

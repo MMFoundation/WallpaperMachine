@@ -1,6 +1,48 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Native Metal can’t draw this scene" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "네이티브 Metal이 이 장면을 그릴 수 없습니다"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalではこのシーンを描画できません"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 无法绘制此场景"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 無法繪製此場景"}}}
+    },
+    "It was refused when it last ran or was checked with this version of the app: %@. Applied, it shows its preview picture instead of moving." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 버전의 앱에서 마지막으로 실행하거나 검사했을 때 거부되었습니다: %@. 적용하면 움직이는 대신 미리보기 이미지가 표시됩니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "It was refused when it last ran or was checked with this version of the app: %@. Applied, it shows its preview picture instead of moving."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このバージョンのアプリで最後に実行または確認したときに拒否されました：%@。適用すると、動く代わりにプレビュー画像が表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "上次在此版本的应用中运行或检查时被拒绝：%@。应用后会显示其预览图，而不是动态壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "上次在此版本的 App 中執行或檢查時被拒絕：%@。套用後會顯示其預覽圖，而不是動態桌布。"}}}
+    },
+    "Apply Anyway" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "그래도 적용"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このまま適用"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "仍然应用"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "仍然套用"}}}
+    },
+    "Files the scene names" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "장면이 사용하는 파일"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "シーンが使うファイル"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "场景用到的文件"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "場景用到的檔案"}}}
+    },
+    "The renderer could not check this scene: %@" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "렌더러가 이 장면을 검사할 수 없습니다: %@"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "The renderer could not check this scene: %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "レンダラーはこのシーンを確認できませんでした：%@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "渲染器无法检查此场景：%@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "算繪器無法檢查此場景：%@"}}}
+    },
+    "The renderer could not read this scene: %@" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "렌더러가 이 장면을 읽을 수 없습니다: %@"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "The renderer could not read this scene: %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "レンダラーはこのシーンを読み込めませんでした：%@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "渲染器无法读取此场景：%@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "算繪器無法讀取此場景：%@"}}}
+    },
+    "Every file the scene names is installed." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "장면이 사용하는 파일이 모두 설치되어 있습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "シーンが使うファイルはすべてインストールされています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "场景用到的文件都已安装。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "場景用到的檔案都已安裝。"}}}
+    },
+    "Layer “%@”: %@" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "레이어 “%1$@”: %2$@"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Layer “%@”: %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "レイヤー「%1$@」：%2$@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "图层“%1$@”：%2$@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "圖層「%1$@」：%2$@"}}}
+    },
+    "and %lld more" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "외 %lld개"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "and %lld more"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ほか %lld 件"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "另有 %lld 个"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "另有 %lld 個"}}}
+    },
+    "Some files the scene names are not installed. A layer that needs one is drawn without it, or not at all." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "장면이 사용하는 파일 중 일부가 설치되어 있지 않습니다. 이 파일이 필요한 레이어는 파일 없이 그려지거나 그려지지 않습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "シーンが使うファイルの一部がインストールされていません。そのファイルが必要なレイヤーは、ファイルなしで描画されるか、描画されません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "场景用到的部分文件未安装。需要这些文件的图层会在缺少它们的情况下绘制，或完全不绘制。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "場景用到的部分檔案未安裝。需要這些檔案的圖層會在缺少它們的情況下繪製，或完全不繪製。"}}}
+    },
+    "Native Metal has drawn this scene with this version of the app. Options that turn other layers or effects on are not covered." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 버전의 앱에서 네이티브 Metal이 이 장면을 그린 적이 있습니다. 다른 레이어나 효과를 켜는 옵션은 포함되지 않습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このバージョンのアプリで、ネイティブMetalはこのシーンを描画したことがあります。ほかのレイヤーやエフェクトをオンにするオプションは対象外です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此版本的应用中，原生 Metal 已绘制过此场景。打开其他图层或特效的选项不在此列。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此版本的 App 中，原生 Metal 已繪製過此場景。開啟其他圖層或特效的選項不在此列。"}}}
+    },
+    "The renderer read the whole scene and found nothing Native Metal cannot draw. Its shaders are compiled, and its render graph built, only when it is drawn." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "렌더러가 장면 전체를 읽었으며 네이티브 Metal이 그릴 수 없는 요소를 찾지 못했습니다. 셰이더 컴파일과 렌더 그래프 구성은 실제로 그릴 때에만 이루어집니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "レンダラーがシーン全体を読み込み、ネイティブMetalで描画できないものは見つかりませんでした。シェーダーのコンパイルとレンダーグラフの構築は、実際に描画するときにだけ行われます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "渲染器已读取整个场景，未发现原生 Metal 无法绘制的内容。着色器编译和渲染图构建只在实际绘制时进行。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "算繪器已讀取整個場景，未發現原生 Metal 無法繪製的內容。著色器編譯和算繪圖建構只在實際繪製時進行。"}}}
+    },
+    "no reason was given" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이유가 제공되지 않았습니다"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "理由は示されていません"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "未提供原因"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "未提供原因"}}}
+    },
+    "Native Metal cannot draw this scene with this version of the app: %@. Applying it shows its preview picture instead." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 버전의 앱에서는 네이티브 Metal이 이 장면을 그릴 수 없습니다: %@. 적용하면 대신 미리보기 이미지가 표시됩니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Native Metal cannot draw this scene with this version of the app: %@. Applying it shows its preview picture instead."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このバージョンのアプリでは、ネイティブMetalはこのシーンを描画できません：%@。適用すると、代わりにプレビュー画像が表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此版本的应用中，原生 Metal 无法绘制此场景：%@。应用后会改为显示其预览图。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此版本的 App 中，原生 Metal 無法繪製此場景：%@。套用後會改為顯示其預覽圖。"}}}
+    },
     "About WallpaperMachine" : {
       "extractionState" : "manual",
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine에 관하여"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "About WallpaperMachine"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineについて"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "关于 WallpaperMachine"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "關於 WallpaperMachine"}}}

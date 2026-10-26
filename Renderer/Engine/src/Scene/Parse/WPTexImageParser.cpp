@@ -966,6 +966,8 @@ std::shared_ptr<Image> WPTexImageParser::ParseLooseAsset(const std::string& name
     const auto found = ResolveLooseFile(m_vfs, name);
     if (! found) {
         LOG_ERROR("texture \"%s\" not found", name.c_str());
+        // Neither a container nor a loose picture: named by the material folder it was looked for in.
+        fs::ReportMissingFile("/assets/materials/" + name);
         return nullptr;
     }
     // A clip is never read whole: it is played where it lies, or from a cache file.
@@ -1001,7 +1003,11 @@ std::shared_ptr<Image> WPTexImageParser::ParseLooseAsset(const std::string& name
 ImageHeader WPTexImageParser::ParseLooseAssetHeader(const std::string& name)
 {
     const auto found = ResolveLooseFile(m_vfs, name);
-    if (! found) return {};
+    if (! found) {
+        // The parse reads a texture's header only; the picture itself is loaded when drawn.
+        fs::ReportMissingFile("/assets/materials/" + name);
+        return {};
+    }
     if (found->video) {
         if (const std::string host = HostPathOf(m_vfs, *found); ! host.empty()) {
             const auto meta = ProbeHostFile(host);

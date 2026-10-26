@@ -79,6 +79,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private var globalHotKeys: GlobalHotKeys?
     private var playbackPreferencesObserver: NSObjectProtocol?
     private var wallpaperEnergy: WallpaperEnergyRecorder?
+    /// The scene reports last handed to `BridgeStore.sceneDrawVerdicts`.
+    private var recordedSceneReports: [BridgeSceneBackendReport] = []
     private var telemetry: TelemetryService?
     private var activeCount: TelemetryActiveCount?
     /// Last presentation the bridge accepted, so leaving unloaded clears that flag first.
@@ -132,6 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             try ClientPaths.prepare()
             let created = try BridgeStore()
             store = created
+            created.sceneDrawVerdicts = SceneDrawVerdicts(
+                file: ClientPaths.supportURL.appendingPathComponent("SceneDrawVerdicts.json"))
             created.openPreview = { [weak self] selection in self?.showWallpaperPreview(selection) }
             created.onPropertyDraftChanged = { [weak self] id in self?.previewWindow?.session.propertiesDidChange(wallpaperID: id) }
             created.onPropertyDragged = { [weak self] id in
@@ -332,8 +336,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                 self.spacePinning?.update()
             }
             nativeVideo.start()
-            store.onSnapshotApplied = { [weak self, weak lockScreen] in
+            store.onSnapshotApplied = { [weak self, weak lockScreen, weak store] in
                 guard let self, !self.shutdownInProgress else { return }
+                if let store { self.recordSceneDrawVerdicts(store) }
                 // Any engine change (playback, assignment, quality) ends the interval
                 // being measured; its two ends could otherwise match across it.
                 self.wallpaperEnergy?.invalidate()
@@ -807,6 +812,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     /// The panel's favorites, which a playlist can rotate through.
     private static func favoriteWallpaperIDs() -> Set<String> {
         PanelPreferences.favorites()
+    }
+
+    /// Keeps what the running scenes say about being drawn, so the Compatibility card can tell it
+    /// later without running them. Only a changed set of reports is handed over.
+    private func recordSceneDrawVerdicts(_ store: BridgeStore) {
+        let reports = store.settingsSnapshot.sceneRenderers
+        guard reports != recordedSceneReports, let verdicts = store.sceneDrawVerdicts else { return }
+        recordedSceneReports = reports
+        Task { await verdicts.record(reports: reports) }
     }
 
     /// Rates each wallpaper's energy use from background samples while it plays alone.

@@ -301,7 +301,15 @@ final class PanelController {
     self.backup = backup ?? WallpaperBackupStore(defaults: defaults)
     self.libraryLocation = libraryLocation ?? StorageLocationStore()
     self.imagePlacement = imagePlacement
-    self.compatibility = compatibility ?? WallpaperCompatibilityStore()
+    self.compatibility =
+      compatibility
+      ?? WallpaperCompatibilityStore(
+        service: WallpaperCompatibilityService(
+          verdicts: store.sceneDrawVerdicts,
+          sceneProbe: { @MainActor [weak store] id in
+            guard let store else { throw CancellationError() }
+            return try await store.bridge.sceneCapability(wallpaperId: id)
+          }))
     self.letterbox = letterbox ?? Self.letterboxStore(for: store)
     self.displayTitles = displayTitles
     self.libraryMetrics = libraryMetrics ?? LibraryMetricsService()

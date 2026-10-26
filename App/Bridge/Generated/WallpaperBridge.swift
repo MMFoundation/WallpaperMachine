@@ -431,6 +431,22 @@ fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
+    typealias FfiType = Int32
+    typealias SwiftType = Int32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int32, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -949,6 +965,19 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * failed.
      */
     func revalidateScenePresentation(reason: String) async throws  -> [BridgeSurfaceCheck]
+    
+    /**
+     * Reads an installed scene without drawing it, with its saved property choices: whether
+     * Native Metal would refuse it, and which files its layers name and lack. Takes as long as
+     * loading the scene's files and translating its shaders (seconds for a large scene), on a
+     * thread of its own; nothing on screen changes and no other request waits for it.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper is not an installed scene, or the probe itself failed.
+     * A scene that cannot be read is not an error: `read_error` says why.
+     */
+    func sceneCapability(wallpaperId: String) async throws  -> BridgeSceneCapability
     
     /**
      * Running scene wallpapers whose users enabled music information.
@@ -2408,6 +2437,34 @@ open func revalidateScenePresentation(reason: String)async throws  -> [BridgeSur
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypeBridgeSurfaceCheck.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Reads an installed scene without drawing it, with its saved property choices: whether
+     * Native Metal would refuse it, and which files its layers name and lack. Takes as long as
+     * loading the scene's files and translating its shaders (seconds for a large scene), on a
+     * thread of its own; nothing on screen changes and no other request waits for it.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper is not an installed scene, or the probe itself failed.
+     * A scene that cannot be read is not an error: `read_error` says why.
+     */
+open func sceneCapability(wallpaperId: String)async throws  -> BridgeSceneCapability {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_scene_capability(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeSceneCapability.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -6619,6 +6676,219 @@ public func FfiConverterTypeBridgeSceneBackendReport_lower(_ value: BridgeSceneB
 
 
 /**
+ * What reading an installed scene, without drawing it, says about it
+ * (`WallpaperBridge::scene_capability`).
+ */
+public struct BridgeSceneCapability {
+    /**
+     * Why the scene could not be read at all, or `None` when it was. Nothing below is known
+     * otherwise.
+     */
+    public var readError: String?
+    /**
+     * `"unsupported"` or `"compile"` when Native Metal would refuse the scene, `None` when it
+     * would not. A scene it accepts can still fail later, when its shaders are compiled for the
+     * device or its render graph is built.
+     */
+    public var failureStage: String?
+    /**
+     * The renderer's own English explanation of the refusal.
+     */
+    public var failureReason: String?
+    /**
+     * At most 64, each once, in the order the parse asked for them.
+     */
+    public var missingFiles: [BridgeSceneMissingFile]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Why the scene could not be read at all, or `None` when it was. Nothing below is known
+         * otherwise.
+         */readError: String?, 
+        /**
+         * `"unsupported"` or `"compile"` when Native Metal would refuse the scene, `None` when it
+         * would not. A scene it accepts can still fail later, when its shaders are compiled for the
+         * device or its render graph is built.
+         */failureStage: String?, 
+        /**
+         * The renderer's own English explanation of the refusal.
+         */failureReason: String?, 
+        /**
+         * At most 64, each once, in the order the parse asked for them.
+         */missingFiles: [BridgeSceneMissingFile]) {
+        self.readError = readError
+        self.failureStage = failureStage
+        self.failureReason = failureReason
+        self.missingFiles = missingFiles
+    }
+}
+
+
+
+extension BridgeSceneCapability: Equatable, Hashable {
+    public static func ==(lhs: BridgeSceneCapability, rhs: BridgeSceneCapability) -> Bool {
+        if lhs.readError != rhs.readError {
+            return false
+        }
+        if lhs.failureStage != rhs.failureStage {
+            return false
+        }
+        if lhs.failureReason != rhs.failureReason {
+            return false
+        }
+        if lhs.missingFiles != rhs.missingFiles {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(readError)
+        hasher.combine(failureStage)
+        hasher.combine(failureReason)
+        hasher.combine(missingFiles)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBridgeSceneCapability: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeSceneCapability {
+        return
+            try BridgeSceneCapability(
+                readError: FfiConverterOptionString.read(from: &buf), 
+                failureStage: FfiConverterOptionString.read(from: &buf), 
+                failureReason: FfiConverterOptionString.read(from: &buf), 
+                missingFiles: FfiConverterSequenceTypeBridgeSceneMissingFile.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BridgeSceneCapability, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.readError, into: &buf)
+        FfiConverterOptionString.write(value.failureStage, into: &buf)
+        FfiConverterOptionString.write(value.failureReason, into: &buf)
+        FfiConverterSequenceTypeBridgeSceneMissingFile.write(value.missingFiles, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeSceneCapability_lift(_ buf: RustBuffer) throws -> BridgeSceneCapability {
+    return try FfiConverterTypeBridgeSceneCapability.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeSceneCapability_lower(_ value: BridgeSceneCapability) -> RustBuffer {
+    return FfiConverterTypeBridgeSceneCapability.lower(value)
+}
+
+
+/**
+ * A file an installed scene names that none of its file systems holds.
+ */
+public struct BridgeSceneMissingFile {
+    /**
+     * The layer being built when the file was asked for, as the author named it; empty when none
+     * was.
+     */
+    public var layer: String
+    /**
+     * That layer's object id in the scene file, or -1.
+     */
+    public var objectId: Int32
+    /**
+     * The path below the scene's own space, such as `materials/rain.json`.
+     */
+    public var path: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The layer being built when the file was asked for, as the author named it; empty when none
+         * was.
+         */layer: String, 
+        /**
+         * That layer's object id in the scene file, or -1.
+         */objectId: Int32, 
+        /**
+         * The path below the scene's own space, such as `materials/rain.json`.
+         */path: String) {
+        self.layer = layer
+        self.objectId = objectId
+        self.path = path
+    }
+}
+
+
+
+extension BridgeSceneMissingFile: Equatable, Hashable {
+    public static func ==(lhs: BridgeSceneMissingFile, rhs: BridgeSceneMissingFile) -> Bool {
+        if lhs.layer != rhs.layer {
+            return false
+        }
+        if lhs.objectId != rhs.objectId {
+            return false
+        }
+        if lhs.path != rhs.path {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(layer)
+        hasher.combine(objectId)
+        hasher.combine(path)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBridgeSceneMissingFile: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeSceneMissingFile {
+        return
+            try BridgeSceneMissingFile(
+                layer: FfiConverterString.read(from: &buf), 
+                objectId: FfiConverterInt32.read(from: &buf), 
+                path: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BridgeSceneMissingFile, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.layer, into: &buf)
+        FfiConverterInt32.write(value.objectId, into: &buf)
+        FfiConverterString.write(value.path, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeSceneMissingFile_lift(_ buf: RustBuffer) throws -> BridgeSceneMissingFile {
+    return try FfiConverterTypeBridgeSceneMissingFile.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeSceneMissingFile_lower(_ value: BridgeSceneMissingFile) -> RustBuffer {
+    return FfiConverterTypeBridgeSceneMissingFile.lower(value)
+}
+
+
+/**
  * What one running scene wallpaper's update clock is actually doing.
  *
  * `mode` composes the renderer's own answer with the host's pause state, in
@@ -10202,6 +10472,31 @@ fileprivate struct FfiConverterSequenceTypeBridgeSceneBackendReport: FfiConverte
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeBridgeSceneMissingFile: FfiConverterRustBuffer {
+    typealias SwiftType = [BridgeSceneMissingFile]
+
+    public static func write(_ value: [BridgeSceneMissingFile], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBridgeSceneMissingFile.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BridgeSceneMissingFile] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BridgeSceneMissingFile]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBridgeSceneMissingFile.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeBridgeSceneUpdateModeReport: FfiConverterRustBuffer {
     typealias SwiftType = [BridgeSceneUpdateModeReport]
 
@@ -10577,6 +10872,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_revalidate_scene_presentation() != 55430) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_scene_capability() != 18649) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_scene_media_wallpaper_ids() != 29687) {

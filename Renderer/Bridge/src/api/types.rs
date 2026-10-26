@@ -876,6 +876,55 @@ pub struct BridgeNativeVideoWallpaper {
     pub scaling_factor: f64,
 }
 
+/// A file an installed scene names that none of its file systems holds.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeSceneMissingFile {
+    /// The layer being built when the file was asked for, as the author named it; empty when none
+    /// was.
+    pub layer: String,
+    /// That layer's object id in the scene file, or -1.
+    pub object_id: i32,
+    /// The path below the scene's own space, such as `materials/rain.json`.
+    pub path: String,
+}
+
+/// What reading an installed scene, without drawing it, says about it
+/// (`WallpaperBridge::scene_capability`).
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeSceneCapability {
+    /// Why the scene could not be read at all, or `None` when it was. Nothing below is known
+    /// otherwise.
+    pub read_error: Option<String>,
+    /// `"unsupported"` or `"compile"` when Native Metal would refuse the scene, `None` when it
+    /// would not. A scene it accepts can still fail later, when its shaders are compiled for the
+    /// device or its render graph is built.
+    pub failure_stage: Option<String>,
+    /// The renderer's own English explanation of the refusal.
+    pub failure_reason: Option<String>,
+    /// At most 64, each once, in the order the parse asked for them.
+    pub missing_files: Vec<BridgeSceneMissingFile>,
+}
+
+impl From<wallpaper_core::SceneCapabilityProbe> for BridgeSceneCapability {
+    fn from(probe: wallpaper_core::SceneCapabilityProbe) -> Self {
+        let text = |value: String| (!value.is_empty()).then_some(value);
+        Self {
+            read_error: text(probe.read_error),
+            failure_stage: text(probe.failure_stage),
+            failure_reason: text(probe.failure_reason),
+            missing_files: probe
+                .missing_files
+                .into_iter()
+                .map(|file| BridgeSceneMissingFile {
+                    layer: file.layer,
+                    object_id: file.object_id,
+                    path: file.path,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// One `engine.openUserShortcut` request from a running wallpaper.
 ///
 /// `value` is what the wallpaper's user chose for that property, and is the
