@@ -397,6 +397,8 @@ void CollectCrossedEvents(const ScalarAnimation& animation, double previous, dou
     };
     for (const auto& event : animation.events) {
         if (event.name.empty()) continue;
+        // A mirror turns at its ends, so a marker past either is never reached.
+        if (mirror && (event.frame < 0.0 || event.frame > length)) continue;
         meet(event.frame, event);
         const double back = period - event.frame;
         if (mirror && wrap(back) != wrap(event.frame)) meet(back, event);

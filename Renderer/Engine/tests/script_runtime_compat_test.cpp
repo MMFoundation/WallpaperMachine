@@ -4769,6 +4769,24 @@ TEST(ScriptRuntimeCompat, AMirrorTimelinePlaysBackFromItsEndAndOverAgain) {
         << "a marker is met on the way out and on the way back, the end once";
 }
 
+TEST(ScriptRuntimeCompat, AMirrorTimelineNeverMeetsAMarkerPastItsEnds) {
+    ScalarAnimationPlayback clock;
+    clock.animation.fps           = 10.0;
+    clock.animation.mode          = ScalarAnimationMode::Mirror;
+    clock.animation.length_frames = 10.0;
+    clock.animation.keyframes     = { { .frame = 0.0, .value = 0.0f }, { .frame = 10.0, .value = 1.0f } };
+    clock.animation.events        = { { .frame = 15.0, .name = "past" }, { .frame = -2.0, .name = "before" },
+                                      { .frame = 4.0, .name = "inside" } };
+    clock.playing = true;
+    clock.Advance(1.8);
+    EXPECT_NEAR(clock.frame, 2.0, 1e-9);
+    EXPECT_TRUE(clock.reversing);
+    std::vector<std::string> met;
+    for (const auto& event : clock.pending_events) met.push_back(event.name);
+    EXPECT_EQ(met, (std::vector<std::string> { "inside", "inside" }))
+        << "out and most of the way back: only the marker within the timeline is met";
+}
+
 TEST(ScriptRuntimeCompat, AMirrorModeTimelineIsReadFromItsOptions) {
     Scene scene;
     auto  runtime = MakeRuntimeWithScene(scene);
