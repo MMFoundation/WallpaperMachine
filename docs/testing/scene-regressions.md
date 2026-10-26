@@ -1584,6 +1584,11 @@ texture entrances are not decoded-image or native-rendering evidence.
     `getEffect(index | name)` (preserving the instance `name` from `scene.json` over
     the effect file's), `effect.visible` and `effect.getMaterial(i)` constant writes
     update the effect chain and its pass uniforms (issue #89).
+  - `EffectMaterialsGiveScriptsTheirAuthoredAndDefaultConstants` in
+    `layer_texture_reference_test`: a script reads a material constant as the material
+    holds it, the scene's authored value or the shader's default, by material name or
+    through `getConstant`, so `m.speed += 0.25` steps the authored value instead of
+    writing `NaN` (sent as 0), and an unauthored vector reads as a `Vec3` of its default.
   - `AnEffectPassReadingTextureResolutionWithoutSamplingTheSlotGetsItsTargetSize` in
     `layer_texture_reference_test`: an effect pass that reads `g_Texture0Resolution`
     without sampling `g_Texture0` in the active combo branch still receives its effect

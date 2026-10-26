@@ -1561,6 +1561,42 @@ std::size_t SceneRuntimeContext::EffectMaterialCount(std::string_view reference)
     return found != m_effect_objects.end() ? found->second.passes.size() : 0u;
 }
 
+namespace
+{
+// The uniform an effect pass's constant `name` stands for: a material name through the shader's
+// annotations, or a uniform the material holds a value for. Empty when it is neither.
+std::string EffectPassUniform(const SceneRuntimeContext::EffectMaterialPass& pass, std::string_view name) {
+    if (const auto alias = pass.aliases.find(std::string(name)); alias != pass.aliases.end()) {
+        return alias->second;
+    }
+    if (pass.material->customShader.constValues.contains(std::string(name))) return std::string(name);
+    return {};
+}
+} // namespace
+
+std::vector<float> SceneRuntimeContext::EffectMaterialConstant(std::string_view reference,
+                                                               std::size_t pass_index,
+                                                               std::string_view name) const {
+    if (name.empty()) return {};
+    const auto found = m_effect_objects.find(std::string(reference));
+    if (found == m_effect_objects.end() || pass_index >= found->second.passes.size()) return {};
+    const auto& pass = found->second.passes[pass_index];
+    if (pass.material == nullptr) return {};
+    const auto  uniform = EffectPassUniform(pass, name);
+    if (uniform.empty()) return {};
+    const auto& held = pass.material->customShader.constValues;
+    if (const auto value = held.find(uniform); value != held.end()) {
+        return { value->second.data(), value->second.data() + value->second.size() };
+    }
+    // Nothing authored it: the shader's own default stands.
+    if (const auto* shader = pass.material->customShader.shader.get(); shader != nullptr) {
+        if (const auto def = shader->default_uniforms.find(uniform); def != shader->default_uniforms.end()) {
+            return { def->second.data(), def->second.data() + def->second.size() };
+        }
+    }
+    return {};
+}
+
 bool SceneRuntimeContext::SetEffectMaterialConstant(std::string_view reference,
                                                     std::size_t pass_index,
                                                     std::string_view name,
@@ -1571,14 +1607,8 @@ bool SceneRuntimeContext::SetEffectMaterialConstant(std::string_view reference,
     auto& pass = found->second.passes[pass_index];
     if (pass.material == nullptr) return false;
 
-    std::string uniform;
-    if (const auto alias = pass.aliases.find(std::string(name)); alias != pass.aliases.end()) {
-        uniform = alias->second;
-    } else if (pass.material->customShader.constValues.contains(std::string(name))) {
-        uniform = std::string(name);
-    } else {
-        return false;
-    }
+    const std::string uniform = EffectPassUniform(pass, name);
+    if (uniform.empty()) return false;
 
     std::size_t count = values.size();
     if (pass.material->customShader.shader != nullptr) {

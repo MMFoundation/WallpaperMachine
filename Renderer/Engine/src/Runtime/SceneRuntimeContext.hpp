@@ -291,6 +291,11 @@ public:
     std::string   LayerEffectReferenceByName(std::string_view layer_key,
                                              std::string_view effect_name) const;
     std::size_t   EffectMaterialCount(std::string_view reference) const;
+    /// The constant `name` (a material name or a uniform) of an effect pass's material as it
+    /// holds it now: what the scene or a script set, else the shader's default; empty when the
+    /// pass has no such constant.
+    std::vector<float> EffectMaterialConstant(std::string_view reference, std::size_t pass_index,
+                                              std::string_view name) const;
     bool          SetEffectMaterialConstant(std::string_view reference, std::size_t pass_index,
                                             std::string_view name,
                                             std::span<const float> values);

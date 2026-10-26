@@ -1077,7 +1077,8 @@ constexpr const char* kLibFnNames[kLibFnCount] = {
     X(soundSetMuted) X(puppet) X(puppetName) X(timeline) X(sheet) X(sheetInfo) X(video)           \
     X(audioMark) X(audioGeneration) X(audio) X(shortcutValue) X(requestShortcut) X(timeOfDay)       \
     X(effectVisible) X(setEffectVisible) X(effectCount) X(effectAt) X(effectByName)                 \
-    X(effectName) X(effectMaterialCount) X(setMaterialConstant) X(rotateObjectSpace)
+    X(effectName) X(effectMaterialCount) X(materialConstant) X(setMaterialConstant)                 \
+    X(rotateObjectSpace)
 
 enum NativeId : int
 {
@@ -2107,6 +2108,15 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         return text(rt_ != nullptr ? rt_->EffectObjectName(str(0)) : std::string());
     case kNative_effectMaterialCount:
         return number(rt_ != nullptr ? static_cast<double>(rt_->EffectMaterialCount(str(0))) : 0.0);
+    case kNative_materialConstant: {
+        const double index = num(1);
+        if (rt_ == nullptr || index < 0) return JS_UNDEFINED;
+        const auto values = rt_->EffectMaterialConstant(str(0), static_cast<std::size_t>(index), str(2));
+        if (values.empty()) return JS_UNDEFINED;
+        JSValue out = JS_NewArray(ctx);
+        for (uint32_t i = 0; i < values.size(); ++i) JS_SetPropertyUint32(ctx, out, i, JS_NewFloat64(ctx, values[i]));
+        return out;
+    }
     case kNative_setMaterialConstant: {
         if (rt_ == nullptr || argc < 4 || ! JS_IsArray(argv[3])) return boolean(false);
         JSValue  length_val = JS_GetPropertyStr(ctx, argv[3], "length");

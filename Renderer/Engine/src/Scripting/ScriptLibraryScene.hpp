@@ -233,13 +233,24 @@ function materialConstantFloats(v) {
   }
   return [];
 }
+// A constant as the material holds it (a number, or a vector of its width), or what a script
+// stored under a name the material does not have.
+function materialConstantOf(reference, index, store, key) {
+  var live = n.materialConstant(reference, index, key);
+  if (live === undefined) return store[key];
+  if (live.length === 1) return live[0];
+  if (live.length === 2) return new Vec2(live[0], live[1]);
+  if (live.length === 3) return new Vec3(live[0], live[1], live[2]);
+  if (live.length === 4) return new Vec4(live[0], live[1], live[2], live[3]);
+  return live;
+}
 function materialObjectOf(reference, index) {
   var id = reference + '\u0001' + index;
   var found = materialCache.get(id);
   if (found !== undefined) return found;
   var store = Object.create(null);
   var target = {
-    getConstant: function (name) { return store[String(name)]; },
+    getConstant: function (name) { return materialConstantOf(reference, index, store, String(name)); },
     setConstant: function (name, value) {
       var key = String(name);
       store[key] = value;
@@ -250,7 +261,7 @@ function materialObjectOf(reference, index) {
   found = new Proxy(target, {
     get: function (obj, prop) {
       if (typeof prop !== 'string' || prop in obj) return obj[prop];
-      return store[prop];
+      return materialConstantOf(reference, index, store, prop);
     },
     set: function (obj, prop, value) {
       if (typeof prop === 'string' && !(prop in obj)) obj.setConstant(prop, value);

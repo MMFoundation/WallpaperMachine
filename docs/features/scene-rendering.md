@@ -132,7 +132,10 @@ own axes by Euler angles in radians, and `layer.getEffectCount()` and
 `layer.getEffect(indexOrName)` return the layer's authored effects (built even when
 authored hidden in scenes whose scripts call `getEffect`), each exposing `name`,
 `visible` and `getMaterial(passIndex)` (whose constants can be read and written through
-`getConstant`/`setConstant` or as properties on the material object). The remaining
+`getConstant`/`setConstant` or as properties on the material object, by material name or
+uniform; a read answers the value the material holds, which is the scene's authored value
+or the shader's default until something writes it, as a number or a `Vec2` to `Vec4` by
+the constant's width). The remaining
 layer transform calls (`setParent`, `lookAt`, `lookAtYaw` and `getAttachment*`) do not
 exist yet: a script that calls one stops at that line.
 

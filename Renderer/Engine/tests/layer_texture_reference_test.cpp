@@ -452,6 +452,64 @@ void main() {
     EXPECT_FLOAT_EQ(mat->customShader.constValues.at("u_channelMask")[2], 0.0f);
 }
 
+// A script reads an effect material's constants as the material holds them: the value
+// the scene authored, or the shader's default where it authored none, by the material
+// name or through `getConstant`. Reading one before writing it is how a script steps it.
+TEST(LayerTextureReference, EffectMaterialsGiveScriptsTheirAuthoredAndDefaultConstants) {
+    constexpr std::string_view kStepFrag = R"(uniform sampler2D g_Texture0;
+uniform float g_Speed; // {"material":"speed","default":"0.5"}
+uniform vec3 g_Tint; // {"material":"color","default":"1 0 0"}
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord) * vec4(g_Tint * g_Speed, 1.0);
+}
+)";
+    const ProjectProperties properties {};
+    fs::VFS                 vfs;
+    auto parsed = ParseScene(vfs, R"([
+        {"id":13,"name":"dial","image":"image.json",
+         "origin":{"script":"'use strict';\nexport function init(value) {\n  var m = thisLayer.getEffect(0).getMaterial(0);\n  m.speed += 0.25;\n  var tint = m.getConstant('color');\n  m.color = new Vec3(tint.x * 0.5, tint.y + 0.25, tint.z);\n  return value;\n}\n","value":"32 16 0"},
+         "effects":[
+           {"file":"effects/step/effect.json","id":90,"name":"Step","visible":true,
+            "passes":[{"constantshadervalues":{"speed":"2"}}]}
+         ]}
+      ])",
+      {{ "/effects/step/effect.json",
+         R"({"name":"step","passes":[{"material":"materials/step.json"}]})" },
+       { "/materials/step.json",
+         R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"step","textures":[null]}]})" },
+       { "/shaders/step.vert", std::string(kVert) },
+       { "/shaders/step.frag", std::string(kStepFrag) }},
+      &properties);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    AddScreenTarget(*parsed);
+    auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+
+    parsed->runtime->Tick(1.0 / 60.0);
+    EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
+
+    SceneNode* dial = nullptr;
+    for (auto& child : parsed->sceneGraph->GetChildren()) {
+        if (child->Name() == "dial") dial = child.get();
+    }
+    ASSERT_NE(dial, nullptr);
+    const auto camera = parsed->cameras.find(dial->Camera());
+    ASSERT_NE(camera, parsed->cameras.end());
+    ASSERT_TRUE(camera->second->HasImgEffect());
+    const auto* mat = camera->second->GetImgEffect()->GetEffect(0)->nodes.front().sceneNode->Mesh()->Material();
+    ASSERT_NE(mat, nullptr);
+    ASSERT_TRUE(mat->customShader.constValues.contains("g_Speed"));
+    ASSERT_EQ(mat->customShader.constValues.at("g_Speed").size(), 1u);
+    EXPECT_FLOAT_EQ(mat->customShader.constValues.at("g_Speed")[0], 2.25f) << "the authored 2, stepped";
+    ASSERT_TRUE(mat->customShader.constValues.contains("g_Tint"));
+    ASSERT_EQ(mat->customShader.constValues.at("g_Tint").size(), 3u);
+    EXPECT_FLOAT_EQ(mat->customShader.constValues.at("g_Tint")[0], 0.5f) << "the default red, halved";
+    EXPECT_FLOAT_EQ(mat->customShader.constValues.at("g_Tint")[1], 0.25f);
+    EXPECT_FLOAT_EQ(mat->customShader.constValues.at("g_Tint")[2], 0.0f);
+}
+
 // An effect pass (such as a procedural grid with `USE_MASK == 0`) may declare
 // `g_Texture0` and size its cells from `g_Texture0Resolution` without sampling
 // `g_Texture0` in the active branch. The slot stays unbound on the pass, while
