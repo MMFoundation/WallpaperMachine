@@ -439,7 +439,12 @@ Puppets and rope geometry behave the same on both renderers. A puppet is deforme
 by its author's own skinning shader, and its pose comes from the one animation
 system the scene already has (animation layers, their play, pause, stop, rate,
 blend and visibility, and any script or user property driving them); the renderer
-only uploads the resulting bone matrices. Rope and rope-trail geometry is generated
+only uploads the resulting bone matrices. A puppet whose animations fade bones (a
+`blend_curves` value below 1, such as an eyelid that fades) also gets each bone's opacity
+(`g_BonesAlpha`, with the `SKINNING_ALPHA` combo its shader reads): every visible layer
+samples the bone's curve between its two frames, and the rest pose counts as opaque by the
+share of the blend the layers leave it, as the bones' transforms are mixed. A puppet whose
+curves never dip compiles without it. Rope and rope-trail geometry is generated
 once by the shared particle simulation, with the rope renderers' *UV scale*, scrolling
 and smoothing. A particle's sprite, rope or trail is sized as authored and drawn
 through its layer's model matrix, so a particle layer scaled up draws its

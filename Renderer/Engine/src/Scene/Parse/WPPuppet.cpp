@@ -582,6 +582,48 @@ void WPPuppetLayer::textureChannelWeights(double time, std::span<float> out) noe
     }
 }
 
+bool WPPuppet::hasAlphaCurves() const noexcept {
+    for (const auto& anim : anims) {
+        for (const auto& curve : anim.blend_curves) {
+            for (const float value : curve.values) {
+                if (std::isfinite(value) && value < 1.0f) return true;
+            }
+        }
+    }
+    return false;
+}
+
+void WPPuppetLayer::boneAlphas(double time, std::span<float> out) noexcept {
+    std::fill(out.begin(), out.end(), 1.0f);
+    if (! m_puppet || ! m_state) return;
+    genFrame(time);
+    const auto& state = *m_state;
+    const usize count = std::min(out.size(), m_puppet->bones.size());
+    for (usize bone = 0; bone < count; bone++) {
+        double weight = state.m_global_blend;
+        double sum    = state.m_global_blend;
+        for (const auto& layer : state.m_layers) {
+            if (layer.anim == nullptr || ! layer.anim_layer.visible || ! (layer.blend > 0.0)) continue;
+            double sample = 1.0;
+            if (bone < layer.anim->blend_curves.size()) {
+                const auto& values = layer.anim->blend_curves[bone].values;
+                if (! values.empty()) {
+                    const auto at = [&values](idx frame) {
+                        const usize clamped = std::min(static_cast<usize>(std::max<idx>(frame, 0)), values.size() - 1);
+                        return static_cast<double>(values[clamped]);
+                    };
+                    const auto& frames = layer.interp_info;
+                    sample = at(frames.frame_a) + (at(frames.frame_b) - at(frames.frame_a)) * frames.t;
+                    if (! std::isfinite(sample)) sample = 1.0;
+                }
+            }
+            weight += layer.blend;
+            sum += layer.blend * sample;
+        }
+        if (weight > 0.0 && std::isfinite(sum)) out[bone] = static_cast<float>(std::clamp(sum / weight, 0.0, 1.0));
+    }
+}
+
 void WPPuppetLayer::invalidatePose() noexcept {
     if (m_state) m_state->m_pose_valid = false;
 }

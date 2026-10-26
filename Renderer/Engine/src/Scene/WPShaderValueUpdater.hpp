@@ -39,6 +39,7 @@ struct WPUniformInfo {
     bool has_effect_mvpi { false };
 
     bool has_BONES { false };
+    bool has_BONES_ALPHA { false };
     bool has_BLENDMAP { false };
     bool has_TIME { false };
     bool has_DAYTIME { false };

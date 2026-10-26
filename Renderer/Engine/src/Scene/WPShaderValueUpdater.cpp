@@ -400,6 +400,7 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* node, uint32_t material_slot,
     info.has_effect_mvp       = exists(G_EFFECTMVP);
     info.has_effect_mvpi      = exists(G_EFFECTMVPI);
     info.has_BONES            = exists(G_BONES);
+    info.has_BONES_ALPHA      = exists(G_BONES_ALPHA);
     info.has_BLENDMAP         = exists(G_BLENDMAP);
     info.has_TIME             = exists(G_TIME);
     info.has_FRAMETIME        = exists(G_FRAMETIME);
@@ -480,6 +481,11 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
             }
             write(G_BONES, ShaderValue(packed.data(), packed.size()));
         }
+    }
+    if (info->has_BONES_ALPHA && data != nullptr && data->puppet_layer.hasPuppet()) {
+        std::vector<float> alphas(const_cast<WPShaderValueData*>(data)->puppet_layer.boneCount(), 1.0f);
+        const_cast<WPShaderValueData*>(data)->puppet_layer.boneAlphas(m_scene->elapsingTime, alphas);
+        if (! alphas.empty()) write(G_BONES_ALPHA, ShaderValue(alphas.data(), alphas.size()));
     }
     if (info->has_BLENDMAP) {
         if (const auto weights = TextureChannelWeights(node); ! weights.empty()) {

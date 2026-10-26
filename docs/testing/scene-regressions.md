@@ -2646,6 +2646,12 @@ texture entrances are not decoded-image or native-rendering evidence.
 
 ## Animation and puppets
 
+- **Bone opacity** — `PuppetBoneAlpha.CurvesAreSampledAndMixedWithTheOpaqueRestPose`
+  (`puppet_pose_tests`: a curve sampled between frames, a half blend leaving half to the
+  opaque rest pose, a hidden layer fading nothing, curves that never dip asking for no
+  alpha) and `ShaderUpdaterPuppet.BonesAlphaCarriesOneOpacityPerBone`
+  (`shader_updater_behavior_test`: `g_BonesAlpha` holds one opacity per bone).
+
 - **Non-additive layer weights** — `PuppetPose.NonAdditiveLayersShareOneUnitOfPoseWeight`
   (normalized and partial weights, rotation, scale, loop wrap, repeated samples)
   and `.DistinctMotionMixesAndAdditiveOffsetsRideOnTop` (distinct

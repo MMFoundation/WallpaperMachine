@@ -123,6 +123,9 @@ public:
     bool world_anchored_bones { false };
 
     void prepared();
+    /// Whether some animation fades a bone (a `blend_curves` value below 1). Only then does
+    /// the shader take per-bone alpha (`SKINNING_ALPHA`).
+    bool hasAlphaCurves() const noexcept;
 
 private:
     friend class WPPuppetLayer;
@@ -170,6 +173,11 @@ public:
     /// of the layers' blend. A layer alone counts in full whatever its blend, as in Wallpaper
     /// Engine. Channels no animation names stay 0.
     void textureChannelWeights(double time, std::span<float> out) noexcept;
+    /// Each bone's opacity at `time` (`g_BonesAlpha`), advancing the layers as `genFrame` does:
+    /// every visible layer samples the bone's curve between its two frames, and the rest pose
+    /// counts as opaque by the share of the blend the layers leave it. A bone no animation
+    /// fades stays 1.
+    void boneAlphas(double time, std::span<float> out) noexcept;
 
     // SceneScript IAnimationLayer surface. Layers resolve by authored name
     // first, then by stack index; -1 means no such layer.

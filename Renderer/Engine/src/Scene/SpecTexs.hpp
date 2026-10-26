@@ -112,6 +112,7 @@ constexpr std::string_view G_EFFECTMVPI { "g_EffectModelViewProjectionMatrixInve
 constexpr std::string_view G_TEXELSIZE { "g_TexelSize" };
 constexpr std::string_view G_TEXELSIZEHALF { "g_TexelSizeHalf" };
 constexpr std::string_view G_BONES { "g_Bones" };
+constexpr std::string_view G_BONES_ALPHA { "g_BonesAlpha" };
 /// A puppet's texture channel weights, four channels to a row.
 constexpr std::string_view G_BLENDMAP { "g_BlendMap" };
 constexpr std::string_view G_SCREEN { "g_Screen" };
