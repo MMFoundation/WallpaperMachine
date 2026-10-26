@@ -113,6 +113,13 @@ final class WorkshopBrowserModel {
 
   func refresh() { search() }
 
+  /// The favorites list's order, which Steam applies: shows the list again from its first page.
+  func choose(favoritesOrder new: WorkshopFavoritesOrder) {
+    controller.launch(PanelActionCoordinator.key("workshopSearch"), policy: .latestWins) { [controller] in
+      try await controller.sortWorkshopFavorites(new)
+    }
+  }
+
   // MARK: Filters
 
   /// How many filters the Filter button counts.

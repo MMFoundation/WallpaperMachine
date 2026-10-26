@@ -186,7 +186,7 @@ cache.
 ## Collections, authors and subscriptions
 
 A segmented control leading Discover's header chooses what it lists: **Wallpapers**
-(the browse page above), **Collections** or **Your subscriptions**. In the narrowest
+(the browse page above), **Collections**, **Your subscriptions** or **Your favorites**. In the narrowest
 column it becomes one menu; the arrow keys move between the segments, and Space or
 Return chooses one. An author's wallpapers and a
 collection's items are opened from a tile instead: no segment is current, and the
@@ -199,7 +199,7 @@ list that failed.
 
 Only Wallpapers and Collections are searched and sorted by Steam; the others come
 in their own order, so the panel hides the search field and the sort menu for
-them. The filters apply everywhere: Steam applies them to the two lists,
+them; Your favorites has an order menu of its own ([favorites](#favorites)). The filters apply everywhere: Steam applies them to the two lists,
 and `WorkshopService.matching` applies the same rules to the other sources'
 pages, which can therefore show fewer than 30 tiles, or none while Steam's count
 says more exist; such a page says the filters hide everything on it and offers
@@ -293,6 +293,21 @@ sign-in as any download does. Nothing is subscribed or unsubscribed on Steam. Th
 welcome guide's **Import my subscriptions** and its one-time offer to existing users
 ([first run](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer))
 do the same, signing in first when needed.
+
+### Favorites
+
+**Your favorites** lists the wallpapers the signed-in account marked as favorites on the
+Workshop, read with the same Steam Community session as the subscriptions, so it needs the
+same sign-in and offers the same **Sign in to Steam…** without it. Its page is the account's
+own Workshop page with `browsefilter=myfavorites`, which lays its items out as an author's
+tiles. Steam sorts it: the bar above the grid says who is signed in and how many favorites
+there are, and its order menu offers Steam's four orders, **Date favorited** (Steam's default),
+**Alphabetical**, **Date updated** and **Date created** (`WorkshopFavoritesOrder`, Steam's
+`sortmethod` values `subscriptiondate`, `alpha`, `lastupdated` and `creationorder`, read off
+Steam's own favorites page). Choosing one lists the favorites again from page 1; the order is
+kept for the rest of the app's run. Nothing is favorited or unfavorited on Steam from here, and
+the list offers no bulk download. A signed-in subscriptions page was not available to check its
+sort menu, so Your subscriptions keeps its own order.
 
 ## One decision per download
 

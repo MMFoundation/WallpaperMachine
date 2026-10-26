@@ -36,6 +36,9 @@ struct WorkshopHeader: View {
       if source.source == .subscriptions, browse.isSignedInToSteam {
         WorkshopSubscriptionBar(browse: browse)
       }
+      if source.source == .favorites, browse.isSignedInToSteam {
+        WorkshopFavoritesBar(browse: browse)
+      }
     }
     .padding(.horizontal, 20)
     .padding(.top, 12)
@@ -376,6 +379,73 @@ struct WorkshopSubscriptionBar: View {
         isBusy: busy, hasLoaded: browse.hasLoaded, totalCount: browse.totalCount)
     )
     .help(L("Downloads every wallpaper you subscribe to that isn’t in your library yet"))
+    Button("Sign out of Steam") { model.signOutOfSteam() }
+      .buttonStyle(.panelLink)
+      .font(.system(size: 12))
+      .help(L("Forgets the Steam session this app read your subscriptions with"))
+  }
+}
+
+/// Your favorites, signed in: whose list it is, how many, the order Steam lists them in, and the
+/// way to sign out. Nothing is favorited or unfavorited from here.
+struct WorkshopFavoritesBar: View {
+  let browse: WorkshopBrowseState
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    let model = controller.workshopBrowser
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 12) {
+        account
+        Spacer(minLength: 8)
+        actions(model: model)
+      }
+      VStack(alignment: .leading, spacing: 8) {
+        account
+        HStack(spacing: 12) { actions(model: model) }
+      }
+    }
+  }
+
+  private var account: some View {
+    HStack(spacing: 12) {
+      Label {
+        Text("Signed in to Steam")
+      } icon: {
+        Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.surface.approved.color)
+      }
+      .font(.system(size: 12.5, weight: .medium))
+      if browse.hasLoaded {
+        Text("\(browse.totalCount) favorites")
+          .font(.system(size: 12.5))
+          .foregroundStyle(theme.surface.muted.color)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func actions(model: WorkshopBrowserModel) -> some View {
+    let order = controller.workshop.favoritesOrder
+    Menu {
+      Picker(selection: Binding(get: { order }, set: { model.choose(favoritesOrder: $0) })) {
+        ForEach(WorkshopFavoritesOrder.allCases) { order in
+          Text(verbatim: order.panelTitle).tag(order)
+        }
+      } label: {
+        Text("Sort favorites")
+      }
+      .pickerStyle(.inline)
+    } label: {
+      Text(verbatim: order.panelTitle)
+    }
+    .menuStyle(.button)
+    .buttonStyle(.panelCapsule)
+    .fixedSize()
+    .help(L("Sort favorites"))
+    .accessibilityLabel(Text("Sort favorites"))
+    .accessibilityValue(Text(verbatim: order.panelTitle))
     Button("Sign out of Steam") { model.signOutOfSteam() }
       .buttonStyle(.panelLink)
       .font(.system(size: 12))

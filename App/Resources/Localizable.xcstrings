@@ -6609,6 +6609,36 @@
     "Sign in to see your subscriptions" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "구독 항목을 보려면 로그인"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "サインインしてサブスクライブ中のアイテムを表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "登录以查看你的订阅"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "登入以查看你的訂閱"}}}
     },
+    "Your favorites" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "즐겨찾기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "お気に入り"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "我的收藏"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "我的收藏"}}}
+    },
+    "%lld favorites" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "즐겨찾기 %lld개"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "お気に入り%lld件"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已收藏 %lld 项"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已收藏 %lld 項"}}}
+    },
+    "Sign in to see your favorites" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "즐겨찾기를 보려면 로그인"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "サインインしてお気に入りを表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "登录以查看你的收藏"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "登入以查看你的收藏"}}}
+    },
+    "Your favorites are read from your own Steam account. You sign in on Steam’s own page, and WallpaperMachine uses the session only to read your lists." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "즐겨찾기는 본인의 Steam 계정에서 읽어 옵니다. 로그인은 Steam 자체 페이지에서 하며, WallpaperMachine은 이 세션을 목록을 읽는 데만 사용합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "お気に入りはご自身のSteamアカウントから読み込みます。サインインはSteam自身のページで行い、WallpaperMachineはそのセッションをリストの読み込みにのみ使います。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "收藏列表读取自你自己的 Steam 账户。你在 Steam 自己的页面上登录，WallpaperMachine 只用这个会话读取你的列表。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "收藏清單讀取自你自己的 Steam 帳號。你在 Steam 自己的頁面上登入，WallpaperMachine 只用這個工作階段讀取你的清單。"}}}
+    },
+    "Wallpapers you favorite on the Steam Workshop appear here." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam 창작마당에서 즐겨찾기한 배경화면이 여기에 표시됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamワークショップでお気に入りにした壁紙がここに表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "你在 Steam 创意工坊收藏的壁纸会显示在这里。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "你在 Steam 工作坊收藏的桌布會顯示在這裡。"}}}
+    },
+    "Sort favorites" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "즐겨찾기 정렬"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "お気に入りを並べ替え"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "收藏排序"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "排序收藏"}}}
+    },
+    "Date favorited" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "즐겨찾기한 날짜순"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "お気に入りに追加した順"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "收藏时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "收藏時間"}}}
+    },
+    "Alphabetical" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이름순"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "名前順"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "按名称"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "依名稱"}}}
+    },
+    "Date updated" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 날짜순"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "更新日順"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "更新时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "更新時間"}}}
+    },
+    "Date created" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "생성 날짜순"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "作成日順"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "创建时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "建立時間"}}}
+    },
     "Steam shows the wallpapers you subscribe to only to you. You sign in on Steam’s own page; WallpaperMachine keeps the session only until it quits, and uses it only to read this list." : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam은 구독한 배경화면을 본인에게만 표시합니다. 로그인은 Steam의 공식 페이지에서 진행합니다. WallpaperMachine은 종료할 때까지만 세션을 유지하며, 이 목록을 읽는 용도로만 사용합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamでは、サブスクライブ中の壁紙は本人にのみ表示されます。サインインはSteam自身のページで行います。WallpaperMachineはセッションをAppの終了時までしか保持せず、このリストの読み込みにのみ使用します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Steam 只向你本人显示你订阅的壁纸。你在 Steam 自己的页面上登录；WallpaperMachine 只在退出前保留该会话，且只用它读取这份列表。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Steam 只會向你本人顯示你訂閱的桌布。你會在 Steam 自己的網頁上登入；WallpaperMachine 只會保留該工作階段直到結束執行，且只用它來讀取這份列表。"}}}
     },

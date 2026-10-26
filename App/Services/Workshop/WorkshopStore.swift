@@ -11,6 +11,8 @@ struct WorkshopQuery: Equatable, Sendable {
   var excludedTags: [String] = []
   /// Where the tiles come from; only the browse and collections lists read `text` and `sort`.
   var source: WorkshopSource = .browse
+  /// The order of the favorites list; no other source reads it.
+  var favoritesOrder: WorkshopFavoritesOrder = .dateFavorited
 
   /// The Workshop item a pasted link or id names. Only the wallpapers list takes it: the
   /// other sources read `text` as words to search for.
@@ -72,6 +74,8 @@ final class WorkshopStore {
   /// rated in, genre-less items are hidden, and Application / Asset are never offered.
   static let defaultExcludedTags = ["Application", "Asset", "Questionable", "Mature", "Unspecified"]
   var selectedItem: WorkshopItem?
+  /// The order Steam lists the account's favorites in.
+  var favoritesOrder: WorkshopFavoritesOrder = .dateFavorited
   /// Where the next search looks. Opening an author or a collection remembers the source it
   /// was opened from, so Back returns to it.
   var source: WorkshopSource = .browse
@@ -719,7 +723,7 @@ final class WorkshopStore {
   private var draftQuery: WorkshopQuery {
     WorkshopQuery(
       text: searchText.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind, sort: sort,
-      tags: tags, excludedTags: excludedTags, source: source)
+      tags: tags, excludedTags: excludedTags, source: source, favoritesOrder: favoritesOrder)
   }
 
   /// The Steam page showing the current page's tiles.
@@ -736,9 +740,11 @@ final class WorkshopStore {
     case .collection(let id, _):
       return WorkshopItem.pageURL(id: id)
     case .creator(let id, _):
-      return WorkshopService.profileURL(steamID: id, subscriptions: false, page: page)
-    case .subscriptions:
-      return steamWebSession.map { WorkshopService.profileURL(steamID: $0.steamID, subscriptions: true, page: page) }
+      return WorkshopService.profileURL(steamID: id, list: .items, page: page)
+    case .subscriptions, .favorites:
+      let list: WorkshopProfileList =
+        query.source == .favorites ? .favorites(query.favoritesOrder) : .subscriptions
+      return steamWebSession.map { WorkshopService.profileURL(steamID: $0.steamID, list: list, page: page) }
         ?? URL(string: "https://steamcommunity.com/app/\(WorkshopApp.id)/workshop/")!
     }
   }
@@ -755,7 +761,7 @@ final class WorkshopStore {
     case .creator, .collection:
       let current = committedQuery?.source ?? source
       if current != next { sourceHistory.append(current) }
-    case .browse, .collections, .subscriptions:
+    case .browse, .collections, .subscriptions, .favorites:
       sourceHistory = []
     }
     source = next
@@ -782,7 +788,7 @@ final class WorkshopStore {
         !self.isSigningInToSteamWeb
       else { return }
       self.steamWebSession = saved
-      if (self.committedQuery?.source ?? self.source) == .subscriptions { self.search() }
+      if (self.committedQuery?.source ?? self.source).isPersonal { self.search() }
     }
   }
 
@@ -801,7 +807,7 @@ final class WorkshopStore {
     webSessionRenewal?.cancel()
     webSessionRenewal = nil
     steamWebSession = session
-    if (committedQuery?.source ?? source) == .subscriptions { search() }
+    if (committedQuery?.source ?? source).isPersonal { search() }
     persist(session)
   }
 
@@ -809,7 +815,7 @@ final class WorkshopStore {
   /// no cookie either.
   func signOutOfSteamWeb() {
     forgetSteamWebSession()
-    if (committedQuery?.source ?? source) == .subscriptions {
+    if (committedQuery?.source ?? source).isPersonal {
       cancelSearch()
       clearResults()
     }
@@ -920,7 +926,7 @@ final class WorkshopStore {
       if Self.fillsPages(query), let self {
         result = try await self.filledPage(number, query: query, cacheID: cacheID)
       } else {
-        let account = query.source == .subscriptions ? try await self?.currentSteamWebSession() : nil
+        let account = query.source.isPersonal ? try await self?.currentSteamWebSession() : nil
         result = try await service.page(for: query, page: number, account: account)
       }
       try Task.checkCancellation()

@@ -1,15 +1,16 @@
 import Foundation
 
-/// The three lists Discover's tabs open. An author or a collection is opened from a tile, so the
+/// The four lists Discover's tabs open. An author or a collection is opened from a tile, so the
 /// type that says which list to open cannot name one.
 enum WorkshopList: CaseIterable, Equatable {
-  case browse, collections, subscriptions
+  case browse, collections, subscriptions, favorites
 
   var source: WorkshopSource {
     switch self {
     case .browse: .browse
     case .collections: .collections
     case .subscriptions: .subscriptions
+    case .favorites: .favorites
     }
   }
 }
@@ -28,6 +29,7 @@ struct WorkshopSourceState: Equatable {
     case .browse: .browse
     case .collections: .collections
     case .subscriptions: .subscriptions
+    case .favorites: .favorites
     case .collection, .creator: nil
     }
   }
