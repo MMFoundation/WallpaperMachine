@@ -10,6 +10,8 @@ import XCTest
 @MainActor
 final class WebWallpaperFrameConfirmationTests: XCTestCase {
   private var project: URL!
+  /// The view each test's page is attached to; the page holds it only weakly.
+  private var container: NSView?
 
   override func setUpWithError() throws {
     project = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -18,6 +20,7 @@ final class WebWallpaperFrameConfirmationTests: XCTestCase {
   }
 
   override func tearDownWithError() throws {
+    container = nil
     try? FileManager.default.removeItem(at: project)
   }
 
@@ -80,6 +83,7 @@ final class WebWallpaperFrameConfirmationTests: XCTestCase {
     let page = WebWallpaperPage(projectURL: project, entryFile: "index.html")
     let container = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
     container.wantsLayer = true
+    self.container = container
     page.attach(to: container)
     page.load()
     let deadline = Date().addingTimeInterval(10)
