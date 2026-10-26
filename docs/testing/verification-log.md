@@ -25,6 +25,18 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-25 — Updates, web, downloads, Workshop, scene and panel improvements
+
+Update signature check, http in web content, page errors in the log, frame-confirmed switch hold, saved pause, download queue order and batch retry, Steam favorites, timeline mirror mode, CursorEvent.localPosition, tile zoom and Help menu, doc link check.
+
+- `python3 scripts/test.py` — exit 0; Python stage 26 modules OK (`test_doc_links` included); native 4174 tests: 4127 passed, 0 failed, 47 skipped
+- `python3 scripts/check_rust.py` — exit 0; bridge 897 passed (7 new in `tests::saved_pause`), core 413 passed, shader and core-integration OK; desktop/media/network opt-ins off
+- `python3 scripts/check_renderer.py` — exit 0 on an idle machine; an earlier run beside Xcode tests failed two `metal_scene_draw_smoke` direct-video timing cases that pass alone
+- Updater requirement checked against the published 1.6.3 image: `codesign -R` and `SecStaticCodeCheckValidity` accept it, refuse it under another certificate root
+- Steam favorites page layout and `sortmethod` values read off a public profile's favorites page; a signed-in subscriptions page was not checked
+- Not compared with Wallpaper Engine frames (no VM run): mirror end-frame behaviour, `localPosition` y direction
+- Not run on a desktop: the frame-confirmed release of the switch hold, http loads, the View and Help menus, the fourth Discover tab's fit
+
 ## 2026-10-25 — Puppet texture channels: weight rows and non-finite weights (PR #93 review)
 
 - Supplements the entry above. python3 scripts/build.py --renderer-only before that entry's test.py run: exit 0 (cargo release build and bindings; the regenerated App/Bridge/Generated matched the committed files).
@@ -107,13 +119,3 @@ macOS 26+ WallpaperAgent keeps a full-size bitmap of every desktop picture file 
 - `python3 scripts/test.py` — exit 0; 4070 tests: 4023 passed, 47 opt-in skipped; Python script tests passed; 1 runtime warning (main-thread call) from another class, not raised by DesktopWallpaperTests
 - Not verified: WallpaperAgent's cache on a real Mac (another app's container, not read), real Mission Control thumbnails, `AppDelegate.desktopPosterLayout` (wiring, no unit test); app not rebuilt
 - Space-selection mode still takes posters on every Space visit that switches the wallpaper; not changed here
-
-## 2026-10-23 — Report on GitHub opens the bug form with required fields
-
-- bug_report.yml: What you did, What went wrong, What you expected and the diagnostics report are required; app facts go to optional wallpaper, version and app-details fields.
-- ExternalLink.newIssue opens ?template=bug_report.yml and prefills only those three field ids; no required field is filled by the app.
-- YAML parsed with PyYAML; the app's query names match the form's field ids (grep both sides).
-- python3 scripts/test.py --only ExternalLinkTests --only PanelLibraryStateTests: 20 passed; --only InspectorPolicyTests: 19 passed.
-- python3 scripts/test.py: 4016 passed, 0 failed, 46 skipped (after rebuilding the stale renderer library with build.py --renderer-only).
-- Not checked: GitHub's rendering of the form and the URL prefill; it only takes effect once the template is on the default branch.
-- Blank issues stay on for the body-prefilled link of app versions up to 1.6.0; app not rebuilt.
