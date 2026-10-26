@@ -811,6 +811,10 @@ std::shared_ptr<Image> LoadContainer(std::shared_ptr<fs::IBinaryStream> stream, 
     image->key = name;
     ImageHeader header = HeaderOf(c);
     PictureDims dims(static_cast<std::size_t>(c.pictures));
+    // Every level is uploaded as the first one kept is: decoded pictures as RGBA, raw levels in
+    // the container's format, a clip as itself. A level of another kind would be read as the
+    // first one's pixels, past the end of its own bytes.
+    std::optional<Kind> kind;
 
     for (std::size_t p = 0; p < loaded; ++p) {
         if (BytesLeft(file) < 4) return fail("the file ends inside the level tables");
@@ -819,6 +823,7 @@ std::shared_ptr<Image> LoadContainer(std::shared_ptr<fs::IBinaryStream> stream, 
         if (p == 0 && levels == 0) return fail("the first picture has no levels");
 
         Image::Slot slot;
+        bool        cut = false;
         for (i32 i = 0; i < levels; ++i) {
             LevelHead head;
             if (! ReadLevelHead(file, c.texb, head) || ! LevelUsable(file, c.texb, head))
@@ -826,6 +831,11 @@ std::shared_ptr<Image> LoadContainer(std::shared_ptr<fs::IBinaryStream> stream, 
             if (i == 0) {
                 dims[p] = { head.width, head.height };
                 if (p == 0) NoteFirstLevel(header, head.width, head.height);
+            }
+            // Behind a level of another kind the chain has ended: what follows is skipped.
+            if (cut) {
+                if (! file.SeekCur(head.stored)) return fail("a level lies outside the file");
+                continue;
             }
             // The level behind this one can cover the surface by itself: this one is
             // not needed. Its payload is skipped, never decoded.
@@ -840,6 +850,15 @@ std::shared_ptr<Image> LoadContainer(std::shared_ptr<fs::IBinaryStream> stream, 
             if (! bytes) return fail("a level cannot be read");
             DecodedLevel level;
             if (! BuildLevel(c, head, std::move(bytes), size, level)) return fail("a level cannot be used");
+            if (! kind) kind = level.kind;
+            if (level.kind != *kind) {
+                // A picture of a sheet that would begin with one has nothing to show.
+                if (slot.mipmaps.empty()) return fail("a picture's levels are not of the first picture's kind");
+                LOG_ERROR("texture \"%s\": a level is not of the first level's kind; it and the levels after it are dropped",
+                          name.c_str());
+                cut = true;
+                continue;
+            }
 
             if (p == 0 && slot.mipmaps.empty()) {
                 if (level.kind == Kind::Picture) {

@@ -170,6 +170,7 @@ constexpr uint32_t kPointSampling = 1, kClamp = 2, kSprite = 4, kVideo = 32;
 
 struct Container {
     int      texb { 3 };
+    int      format { 0 }; // the pixel format code: 0 RGBA8, 7 BC1, 9 R8, ...
     uint32_t flags { 0 };
     int      width { 8 }, height { 8 }, mapWidth { 8 }, mapHeight { 8 };
     int      type { -1 };
@@ -188,7 +189,7 @@ struct Container {
 inline Blob build(const Container& c) {
     Bytes b;
     b.stamp("TEXV", 5).stamp("TEXI", 1);
-    b.i32(0).u32(c.flags);
+    b.i32(c.format).u32(c.flags);
     b.i32(c.width).i32(c.height).i32(c.mapWidth).i32(c.mapHeight).i32(0);
     b.stamp("TEXB", c.texb);
     b.i32(c.pictureCount.value_or(static_cast<int>(c.pictures.size())));

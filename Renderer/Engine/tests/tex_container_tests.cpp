@@ -336,6 +336,59 @@ TEST(TexContainer, VideoFlagWithCompressedPayloadTakesTheMetadataPath) {
     EXPECT_TRUE(headerOf(plainRig).isVideo);
 }
 
+// Every level of a texture is uploaded as its first one is: a decoded picture as RGBA, raw
+// pixels in the container's format. A level of another kind would be read as the first one's
+// pixels, past the end of its own bytes, so it ends the chain, and the levels behind it go too.
+TEST(TexContainer, ALevelOfAnotherKindEndsTheChain) {
+    struct Case {
+        const char*            what;
+        int                    format;
+        std::vector<LevelSpec> levels;
+        uint8_t                first; // the first byte of the one level kept
+    };
+    const std::vector<Case> cases {
+        { "a picture, then raw one-byte pixels", 9,
+          { levelOf(2, 2, redPng(40)), levelOf(1, 1, Blob(1, 9)), levelOf(1, 1, Blob(1, 9)) }, 40 },
+        { "raw pixels, then a picture", 0, { rawLevel(2, 2, 3), levelOf(1, 1, redPng(41)) }, 3 },
+        { "raw pixels, then a clip", 0, { rawLevel(2, 2, 4), levelOf(1, 1, mp4Marker()), rawLevel(1, 1, 5) }, 4 },
+    };
+    for (const auto& k : cases) {
+        SCOPED_TRACE(k.what);
+        Container c(3, k.levels);
+        c.format = k.format;
+        auto rig = texRig(c);
+        const auto image = rig->Parse("sample");
+        ASSERT_NE(image, nullptr);
+        ASSERT_EQ(image->slots.size(), 1u);
+        ASSERT_EQ(image->slots[0].mipmaps.size(), 1u);
+        EXPECT_EQ(image->slots[0].mipmaps[0].data.get()[0], k.first);
+        EXPECT_FALSE(image->header.isVideo);
+    }
+}
+
+// A sprite sheet's pictures share one format too: a frame that holds another kind of level
+// than the first frame cannot be shown, and neither can the sheet.
+TEST(TexContainer, ASpriteFrameOfAnotherKindRefusesTheSheet) {
+    Container c;
+    c.texb  = 3;
+    c.flags = kSprite;
+    c.pictures.push_back({ { levelOf(1, 1, redPng(50)) }, std::nullopt });
+    c.pictures.push_back({ { rawLevel(1, 1, 51) }, std::nullopt });
+    auto rig = texRig(c);
+    EXPECT_EQ(rig->Parse("sample"), nullptr);
+
+    // Two frames of one kind are a sheet as before.
+    Container same;
+    same.texb  = 3;
+    same.flags = kSprite;
+    same.pictures.push_back({ { levelOf(1, 1, redPng(52)) }, std::nullopt });
+    same.pictures.push_back({ { levelOf(1, 1, redPng(53)) }, std::nullopt });
+    auto sameRig = texRig(same);
+    const auto image = sameRig->Parse("sample");
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(image->slots.size(), 2u);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Sprite sheets
 // ---------------------------------------------------------------------------------------------

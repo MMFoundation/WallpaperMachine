@@ -201,6 +201,13 @@ device.
   collector when the older work runs, and an older scheduled write publishes nothing of it
   (`AnOldCompletionDoesNotFeedAStoreOpenedAgainUnderTheSamePath`,
   `AnOldScheduledWriteDoesNotPublishAStoreOpenedAgain`).
+- **A picture's texture holds only levels it can** — `MetalImageLevels.*` in `metal_memory_test`
+  (`MetalImageLevels.hpp`): a texture made for a parsed slot has no more levels than the
+  halvings of its size (a 2x2 slot claiming four levels gets two; before, creating it aborted
+  the process), each level is written inside its own extent whatever size the file gives it,
+  a level shorter than the rows it fills is refused (raw or block-compressed), and a
+  block-compressed level that stops inside a block short of its edge is skipped. An honest
+  chain fills every level.
 - **Displays share the pictures of one scene** — `SharedPictures.*` in `metal_memory_test`:
   two renderers loading one scene at the same moment bind one texture, the cache holds one
   display's bytes for both and the second display uploaded nothing, both draw the same

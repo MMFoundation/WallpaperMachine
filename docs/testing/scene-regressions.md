@@ -1641,6 +1641,12 @@ texture entrances are not decoded-image or native-rendering evidence.
 - **JPEG/EXIF orientation** — `tex_schema_tests`: all eight EXIF display
   transforms on asymmetric RGBA pixels, both TIFF byte orders, truncated
   JPEG/EXIF data, invalid IFD offsets.
+- **Every level is of the first level's kind** — `TexContainer.ALevelOfAnotherKindEndsTheChain`,
+  `TexContainer.ASpriteFrameOfAnotherKindRefusesTheSheet`: a texture's levels are uploaded
+  in one format, so a decoded picture after raw pixels (or raw one-byte pixels, or a clip,
+  after a picture) ends the chain with the levels behind it, and a sprite frame of another
+  kind refuses the sheet; otherwise the upload reads the level as the first one's pixels,
+  past its own bytes.
 - **Texture mip budget** — `TexBudget.*` in `tex_container_tests` and
   `MetalSceneDraw.ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullSizeLevel`
   in `metal_scene_draw_smoke`. A 2D scene's packaged chain loses a leading level only

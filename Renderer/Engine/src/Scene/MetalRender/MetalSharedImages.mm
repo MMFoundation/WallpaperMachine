@@ -1,5 +1,7 @@
 #include "MetalSharedImages.hpp"
 
+#include "MetalImageLevels.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -105,6 +107,9 @@ bool PixelsEqual(id<MTLTexture> texture, const Image::Slot& slot, uint32_t bytes
         const auto& mipmap = slot.mipmaps[level];
         // A level with no data was never written, so there is nothing to compare.
         if (mipmap.data == nullptr || mipmap.width <= 0 || mipmap.height <= 0) continue;
+        // A level the upload clipped to its extent, or skipped, is not read back at the size
+        // the file claims, which lies outside it: such a picture is uploaded afresh.
+        if (! LevelIsWrittenWhole(texture, mipmap, level, block_bytes)) return false;
         const std::size_t width = static_cast<std::size_t>(mipmap.width);
         const std::size_t height = static_cast<std::size_t>(mipmap.height);
 
