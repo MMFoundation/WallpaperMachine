@@ -58,6 +58,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     @ObservationIgnored private var fetchingPresetBase = false
     /// What the base pass says while it starts and transfers, naming the base when Steam lists it.
     @ObservationIgnored private var presetBaseStatus: String?
+    /// The item the current pass fetches; transfer progress counts only its files.
+    @ObservationIgnored private var transferItem: String?
     @ObservationIgnored private var process: SteamCMDTerminalProcess?
     @ObservationIgnored private var terminal: FileHandle?
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -284,6 +286,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         workshopDownloadCompleted = false
         fetchingPresetBase = false
         presetBaseStatus = nil
+        transferItem = nil
         endedBySessionConflict = false
         signInHandedOff = false
         signInAccepted = false
@@ -803,6 +806,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
 
     private func launch(executable: URL, staging: URL, content: URL, account: String, itemID: String?, claim: Int32,
                         contentClaim: Int32) throws {
+        transferItem = itemID
         var master: Int32 = -1
         var slave: Int32 = -1
         guard openpty(&master, &slave, nil, nil, nil) == 0 else {
@@ -1174,7 +1178,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         lastDiskSample = Date()
         let root = staging.appendingPathComponent("steamapps/workshop", isDirectory: true)
         diskSampleTask = Task {
-            let onDisk = await Task.detached(priority: .utility) { Self.bytesOnDisk(under: root) }.value
+            let item = transferItem
+            let onDisk = await Task.detached(priority: .utility) { Self.bytesOnDisk(under: root, item: item) }.value
             diskSampleTask = nil
             guard isRunning, receivesNetwork, failure == nil else { return }
             noteTransfer(onDisk, on: .disk)

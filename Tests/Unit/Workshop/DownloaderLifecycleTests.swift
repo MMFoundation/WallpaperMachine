@@ -555,6 +555,49 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
     XCTAssertNil(downloader.errorMessage)
   }
 
+  /// The base's progress counts the base's own files: a large preset already on the disk does
+  /// not make a base that has not started look nearly done.
+  func testTheBasesProgressCountsOnlyTheBasesFiles() async throws {
+    let root = try makeRuntime(
+      """
+      item=''
+      while [ "$#" -gt 0 ]; do
+          case "$1" in +workshop_download_item) shift; shift; item="$1" ;; esac
+          shift
+      done
+      printf '%s\\n' "$item" >> ../invocations
+      printf 'Waiting for user info...OK\\nDownloading item %s ...\\n' "$item"
+      content="steamapps/workshop/content/431960/$item"
+      mkdir -p "$content"
+      if [ "$item" = 123456 ]; then
+          printf '{"title":"Purple preset","dependency":"654321","preset":{"speed":7}}' > "$content/project.json"
+          dd if=/dev/urandom of="$content/extra.bin" bs=1048576 count=12 2>/dev/null
+      else
+          sleep 2
+          printf '{"title":"Base","type":"video","file":"movie.mp4"}' > "$content/project.json"
+          printf 'base-content' > "$content/movie.mp4"
+      fi
+      printf 'Success. Downloaded item %s\\n' "$item"
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let base = WorkshopItem(
+      id: "654321", title: "Big base", creator: "", summary: "", previewURL: nil,
+      tags: ["Video"], size: 10 * 1_048_576, subscriptions: 0)
+    let downloader = startDownload(in: root, presetBaseDetails: { _ in base })
+    var highest = 0.0
+    var sawBase = false
+    for _ in 0..<400 where downloader.isRunning {
+      if downloader.phase == .transferring, (try? invocations(in: root).count) == 2 {
+        sawBase = true
+        highest = max(highest, downloader.progress ?? 0)
+      }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    try await waitForStop(downloader)
+    XCTAssertTrue(sawBase, "The base pass reached its transfer")
+    XCTAssertLessThan(highest, 0.5, "The preset's 12 MB are not the base's 10 MB")
+  }
+
   func testAPresetsBaseThatFitsIsFetchedAsBefore() async throws {
     let root = try makePresetRuntime(base: deliverBase)
     defer { try? FileManager.default.removeItem(at: root) }
