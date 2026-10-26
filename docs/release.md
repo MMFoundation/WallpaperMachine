@@ -665,8 +665,9 @@ What a release must satisfy:
   `browser_download_url` on github.com, both derived by `update_manifest.py`; the
   app refuses an image it cannot verify;
 - releases are signed with the project certificate
-  ([build.md](build.md#release-signing)), so the replacement keeps the designated
-  requirement and macOS keeps the app's privacy permissions;
+  ([build.md](build.md#release-signing)): the updater installs only a copy that meets
+  `AppUpdateConfiguration.signingRequirement`, and keeping the designated requirement
+  is what lets macOS keep the app's privacy permissions;
 - the release body is the English notes above `<!-- release-notes-end -->`
   ([Release notes and the changelog](#release-notes-and-the-changelog)); the app
   shows what is above the marker as **What's new** in About and ignores the rest;

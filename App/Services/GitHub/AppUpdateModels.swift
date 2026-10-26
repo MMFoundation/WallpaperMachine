@@ -7,6 +7,14 @@ enum AppUpdateConfiguration {
     static let applicationName = productName + ".app"
     static let maximumDownloadBytes: Int64 = 1_073_741_824
 
+    /// The code-signing requirement every release meets: this app's identifier, signed with
+    /// the project certificate `WallpaperMachine Code Signing` (`docs/build.md#release-signing`).
+    /// It is the releases' designated requirement, so a copy that meets it also keeps the
+    /// app's privacy permissions. Replacing the certificate means shipping, first, a release
+    /// whose requirement accepts both certificates.
+    static let signingRequirement =
+        #"identifier "app.wallpapermachine" and certificate root = H"2bdf4e2431b7edeb731de288726c896480a0fa82""#
+
     /// The drag-to-install disk image `scripts/package.py` produces and the Build workflow
     /// publishes. Renaming the product moves both sides of this contract at once.
     static func assetName(for version: SemanticVersion) -> String {

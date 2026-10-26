@@ -319,8 +319,10 @@ encryption so `security import` reads it) and `SIGNING_CERTIFICATE_PASSWORD`
 repository secrets into a temporary keychain and fails when either is missing,
 rather than shipping an ad-hoc build. The private key is kept only by the
 maintainer, outside the repository. Replacing the certificate changes the
-requirement, so the release after a replacement asks for permissions once more; the
-same change updates `TelemetryEnvironment.releaseCertificateSHA256` with the SHA-256
+requirement, so the release after a replacement asks for permissions once more, and
+the in-app updater refuses a copy that does not meet `AppUpdateConfiguration.signingRequirement`
+([updates](features/updates.md#installing)): a release whose requirement accepts both
+certificates has to ship first. The same change updates `TelemetryEnvironment.releaseCertificateSHA256` with the SHA-256
 of the new certificate's DER bytes, or every copy of the next release reports itself
 as a build from source ([telemetry](features/telemetry.md#what-a-report-holds)). This
 telemetry fingerprint is independent of the designated requirement's SHA-1; changing

@@ -156,9 +156,14 @@ temporary folder, finds its single `WallpaperMachine.app` without following
 symbolic links (so the `Applications` link is never traversed), copies it out with
 `ditto --noqtn` and detaches the image whatever happens. The copy must carry the
 bundle identifier `app.wallpapermachine` and a readable
-`Contents/MacOS/WallpaperMachine` before anything is replaced. The updater checks
-that and the digest, not the copy's code signature; signing is the publish side's
-concern ([release](../release.md#what-the-in-app-updater-expects)). Cancelling
+`Contents/MacOS/WallpaperMachine` before anything is replaced. Its signature must
+then be intact throughout the bundle (strict validation, every architecture and all
+nested code) and satisfy `AppUpdateConfiguration.signingRequirement`, the releases'
+designated requirement: this identifier, signed with the project certificate
+([release signing](../build.md#release-signing)). The digest proves the image is the one
+the release lists; the signature proves who built it, so a release asset someone replaced
+is refused as unverifiable, never installed, and so is a copy signed any other way, ad hoc
+included ([release](../release.md#what-the-in-app-updater-expects)). Cancelling
 stops the process, detaches the image, removes the staging directory and leaves
 the update ready to start again.
 
@@ -176,7 +181,8 @@ the helper and reports that the install timed out; **Retry installation** is
 enabled only after cancellation confirms the old helper has stopped.
 
 `Tests/Unit/GitHub/AppUpdateTests.swift` covers checking, the manifest and API
-paths, rate limits, asset selection, digest verification, installing from a real
+paths, rate limits, asset selection, digest verification, the signature check
+(an unsigned, altered or foreign-signed copy is refused), installing from a real
 disk image and the replacement helper's success, failure and locking.
 `UpdatePromptGateTests` covers when the unattended update window is held and that a
 held one is offered exactly once afterwards.
