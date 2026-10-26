@@ -33,8 +33,24 @@ FileMap ParticleAssets(double rate)
     return files;
 }
 
+// Like ParticleAssets, with a timetable: emission starts after `delay` seconds, and each
+// particle lives `lifetime` seconds.
+FileMap DelayedParticleAssets(double rate, double delay, double lifetime)
+{
+    FileMap files = BasicAssets();
+    PutJson(files, "/sparks.json",
+            { { "emitter", Json::array({ { { "name", "boxrandom" }, { "id", 1 }, { "rate", rate }, { "delay", delay } } }) },
+              { "initializer",
+                Json::array({ { { "name", "lifetimerandom" }, { "min", lifetime }, { "max", lifetime } } }) },
+              { "material", "mat.json" },
+              { "maxcount", 200 },
+              { "starttime", 0 } });
+    return files;
+}
+
 struct ParticleStage {
-    explicit ParticleStage(double rate) : rig(ParticleAssets(rate))
+    explicit ParticleStage(double rate) : ParticleStage(ParticleAssets(rate)) {}
+    explicit ParticleStage(FileMap files) : rig(std::move(files))
     {
         scene = rig.Parse(QuietScene(Json::array({ { { "id", 1 },
                                                      { "name", "sparks" },
@@ -155,5 +171,25 @@ TEST(ParticleScripts, TheInstanceReachesTheOverridesAPropertyWouldBind)
     const auto points = stage.scene->paritileSys->subsystems.front()->Controlpoints();
     EXPECT_DOUBLE_EQ(points[2].base_offset.x(), 4.0);
     EXPECT_DOUBLE_EQ(points[2].base_offset.z(), 6.0);
+    for (const auto& error : stage.rt().scriptErrors()) ADD_FAILURE() << error;
+}
+
+// A pause is not a stop: once the live particles have died during it, play() goes on emitting
+// at once, without replaying the emitter's start delay.
+TEST(ParticleScripts, PlayAfterAPauseResumesEvenOnceTheParticlesHaveDied)
+{
+    ParticleStage stage(DelayedParticleAssets(100.0, 1.0, 0.2));
+    ASSERT_TRUE(stage.ok());
+    for (int i = 0; i < 12; i++) stage.Frame();
+    ASSERT_GT(stage.Alive(), 0u) << "emitting once the delay is over";
+
+    stage.Run("thisScene.getLayer('sparks').pause();");
+    for (int i = 0; i < 5; i++) stage.Frame();
+    ASSERT_EQ(stage.Alive(), 0u) << "the paused system's particles have died";
+
+    stage.Run("thisScene.getLayer('sparks').play();");
+    stage.Frame();
+    stage.Frame();
+    EXPECT_GT(stage.Alive(), 0u) << "play resumes; the start delay is not replayed";
     for (const auto& error : stage.rt().scriptErrors()) ADD_FAILURE() << error;
 }

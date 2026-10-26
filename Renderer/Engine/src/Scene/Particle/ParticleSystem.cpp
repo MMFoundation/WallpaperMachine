@@ -429,7 +429,9 @@ void ParticleSubSystem::Advance(double dt) {
         AdvanceInstance(*m_instances[next], dt, m_time, recording);
     }
     m_spawn_ctx->manual = 0;
-    m_emission_active   = m_spawn_ctx->active;
+    // A paused system emits nothing and keeps what its last emitting step found, so play()
+    // resumes it instead of taking it for a spent timetable.
+    if (m_emitting) m_emission_active = m_spawn_ctx->active;
 
     for (auto& point : m_controlpoints) point.prev_offset = point.offset;
 }
