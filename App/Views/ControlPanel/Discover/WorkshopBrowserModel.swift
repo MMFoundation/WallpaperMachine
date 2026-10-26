@@ -59,8 +59,10 @@ final class WorkshopBrowserModel {
   @ObservationIgnored private var lastScrollOffset: Double?
   /// The grid's offset was restored from the last window, once.
   @ObservationIgnored private(set) var restoredScroll = false
-  /// Whether this launch has read the signed-in account's subscriptions for the tiles' marks.
+  /// Whether this launch has read the signed-in account's subscriptions for the tiles' marks,
+  /// and the sign-in they were read with: another sign-in, even of the same account, reads again.
   @ObservationIgnored private var subscriptionsRead = false
+  @ObservationIgnored private var subscriptionsSession: SteamWebSession?
 
   init(controller: PanelController) {
     self.controller = controller
@@ -346,10 +348,15 @@ final class WorkshopBrowserModel {
     }
     // Signed in, the tiles mark the account's subscriptions; they are read once a launch. The
     // read waits for a saved sign-in still being restored; with none, the next visit asks again.
-    if !subscriptionsRead {
+    let session = workshop.steamWebSession
+    if !subscriptionsRead || (session != nil && session != subscriptionsSession) {
       subscriptionsRead = true
+      subscriptionsSession = session
       controller.launch(PanelActionCoordinator.key("workshop-subscriptions")) { [controller, weak self] in
-        if try await !controller.refreshWorkshopSubscriptions() { self?.subscriptionsRead = false }
+        let read = try await controller.refreshWorkshopSubscriptions()
+        guard let self else { return }
+        subscriptionsRead = read
+        subscriptionsSession = read ? controller.workshop.steamWebSession : nil
       }
     }
   }

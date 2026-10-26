@@ -35,6 +35,25 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
       videoCount: UInt64(ids.count), webpageCount: 0, unknownCount: 0)
   }
 
+  /// The Workshop page marks the subscriptions of whoever is signed in now: after a sign-out and
+  /// a new sign-in (here the same account), the next visit reads them again.
+  func testTheWorkshopPageReadsTheMarksAgainForANewSignIn() async throws {
+    let panel = try makePanel(subscribed: ["111": "Video"])
+    try await panel.workshop.signInToSteamWeb {
+      WebSignInCookies(session: "76561198000000001%7C%7C0123456789abcdef0123")
+    }
+    panel.controller.workshopBrowser.pageAppeared()
+    try await waitFor { panel.workshop.subscribedIDs == ["111"] }
+
+    panel.workshop.signOutOfSteamWeb()
+    SubscriptionsProtocol.subscribed = ["222": "Video"]
+    try await panel.workshop.signInToSteamWeb {
+      WebSignInCookies(session: "76561198000000001%7C%7Cfedcba9876543210fedc")
+    }
+    panel.controller.workshopBrowser.pageAppeared()
+    try await waitFor { panel.workshop.subscribedIDs == ["222"] }
+  }
+
   func testOnlyWhatTheLibraryLacksIsRequestedAndApplicationsAreSkipped() async throws {
     let panel = try makePanel(subscribed: ["111": "Video", "222": "Application", "333": "Scene", "444": "Video"])
     panel.store.librarySnapshot = installed(["111"])
