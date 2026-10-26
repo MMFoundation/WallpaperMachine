@@ -1648,10 +1648,11 @@ texture entrances are not decoded-image or native-rendering evidence.
   kind refuses the sheet; otherwise the upload reads the level as the first one's pixels,
   past its own bytes.
 - **Picture formats and sizes** — `TexLoose.APictureInAFormatNoTextureUsesIsNotDecoded`,
-  `TexLoose.APictureWiderThanAnyTextureIsNotDecoded`, `TexLoose.ATgaShorterThanItsPixelsIsNotDecoded`:
+  `TexLoose.APictureWiderThanAnyTextureIsNotDecoded`, `TexLoose.ATgaShorterThanItsPixelsIsNotDecoded`,
+  `TexLoose.AJpegWhoseMarkersFailBeforeAnyScanIsNotDecoded`:
   stb_image decodes only PNG, JPEG, BMP, GIF and TGA (a PNM named `.png` and as a declared
-  picture is refused), nothing wider or taller than 16384 (16384 still loads), and no TGA
-  whose rows the file does not hold ([ThirdParty/stb_image/PATCHES.md](../../ThirdParty/stb_image/PATCHES.md)).
+  picture is refused), nothing wider or taller than 16384 (16384 still loads), no TGA
+  whose rows the file does not hold, and no JPEG whose markers fail before any scan ([ThirdParty/stb_image/PATCHES.md](../../ThirdParty/stb_image/PATCHES.md)).
 - **Texture mip budget** — `TexBudget.*` in `tex_container_tests` and
   `MetalSceneDraw.ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullSizeLevel`
   in `metal_scene_draw_smoke`. A 2D scene's packaged chain loses a leading level only

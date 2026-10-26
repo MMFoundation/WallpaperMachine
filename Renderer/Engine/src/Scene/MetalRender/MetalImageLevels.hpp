@@ -30,7 +30,7 @@ bool LevelIsWrittenWhole(id<MTLTexture> texture, const ImageData& mipmap, NSUInt
 /// Writes the levels of `slot` that `texture` holds, each inside its own extent in the texture
 /// whatever size the file gives it. A level with no data, or a block-compressed one that stops
 /// inside a block short of its edge, is skipped; false when a level is shorter than the rows it
-/// fills, which the copy would read past.
+/// fills, which the copy would read past, and then no level is written.
 bool UploadImageLevels(id<MTLTexture> texture, const Image::Slot& slot, uint32_t bytes_per_pixel,
                        uint32_t block_bytes);
 

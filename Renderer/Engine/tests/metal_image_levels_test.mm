@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -138,10 +139,27 @@ TEST_F(MetalImageLevels, ABlockLevelThatStopsInsideAPartialBlockIsSkipped)
     if (! device.supportsBCTextureCompression) GTEST_SKIP() << "no BC textures on this device";
     // Level 1 of an 8x8 texture is 4x4, one block; a 2x2 region inside it cannot be written as
     // blocks. The level is left as it is and the texture still holds level 0.
-    const Image::Slot slot = SlotOf(Level(8, 8, 0, 256, 32), Level(2, 2, 0, 64, 8));
+    const Image::Slot slot = SlotOf(Level(8, 8, 0, 256, 32), Level(2, 2, 0xab, 64, 8));
     id<MTLTexture>    texture = MakeImageTexture(device, MTLPixelFormatBC1_RGBA, slot, 0, 8);
     ASSERT_NE(texture, nil);
     EXPECT_EQ(texture.mipmapLevelCount, 2u);
+    // Level 1 is one block: none of its eight bytes came from the skipped level.
+    std::array<uint8_t, 8> block {};
+    [texture getBytes:block.data() bytesPerRow:8 fromRegion:MTLRegionMake2D(0, 0, 4, 4) mipmapLevel:1];
+    EXPECT_FALSE(std::all_of(block.begin(), block.end(), [](uint8_t b) { return b == 0xab; }));
+}
+
+TEST_F(MetalImageLevels, ARefusedUploadLeavesTheTextureAsItWas)
+{
+    // A runtime picture is written into a texture that may already be shown. When a later level
+    // is too short, nothing is written: not even the levels before it.
+    const Image::Slot first = SlotOf(Level(4, 4, 1), Level(2, 2, 2));
+    id<MTLTexture>    texture = MakeImageTexture(device, MTLPixelFormatRGBA8Unorm, first, 4, 0);
+    ASSERT_NE(texture, nil);
+    const Image::Slot short_later = SlotOf(Level(4, 4, 7), Level(2, 2, 8, 16, 4));
+    EXPECT_FALSE(wallpaper::metal::UploadImageLevels(texture, short_later, 4, 0));
+    EXPECT_TRUE(AllEqual(Pixels(texture, 0), 1));
+    EXPECT_TRUE(AllEqual(Pixels(texture, 1), 2));
 }
 
 TEST_F(MetalImageLevels, ASecondDisplayNeverReadsALevelBackPastItsExtent)
@@ -159,10 +177,13 @@ TEST_F(MetalImageLevels, ASecondDisplayNeverReadsALevelBackPastItsExtent)
     const auto upload = [&] { return MakeImageTexture(device, MTLPixelFormatRGBA8Unorm, slot, 4, 0); };
     id<MTLTexture> first = SharedImageCache::shared().import(request, upload);
     ASSERT_NE(first, nil);
-    const uint64_t uploads = SharedImageCache::shared().uploads();
-    id<MTLTexture> second  = SharedImageCache::shared().import(request, upload);
+    const uint64_t uploads  = SharedImageCache::shared().uploads();
+    const uint64_t readback = SharedImageCache::shared().levelsReadBack();
+    id<MTLTexture> second   = SharedImageCache::shared().import(request, upload);
     ASSERT_NE(second, nil);
     EXPECT_EQ(SharedImageCache::shared().uploads(), uploads + 1);
+    // Level 0 was compared; level 1, which the file claims is 4x4, was never read back.
+    EXPECT_EQ(SharedImageCache::shared().levelsReadBack(), readback + 1);
     EXPECT_TRUE(AllEqual(Pixels(second, 1), 2));
 
     // An honest chain is shared as before.

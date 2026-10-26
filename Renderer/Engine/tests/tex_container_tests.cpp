@@ -899,6 +899,17 @@ TEST(TexLoose, ATgaShorterThanItsPixelsIsNotDecoded) {
     EXPECT_EQ(cut->Parse("mark.tga"), nullptr);
 }
 
+TEST(TexLoose, AJpegWhoseMarkersFailBeforeAnyScanIsNotDecoded) {
+    // A frame header, then a marker no JPEG has, and no scan: there are no pixels to show, so
+    // the picture is refused rather than handed back as whatever its buffer held.
+    const Blob broken { 0xFF, 0xD8,                                  // start of image
+                        0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
+                        0xFF, 0xC8, 0x00, 0x02,                      // a marker no JPEG uses
+                        0xFF, 0xD9 };                                // end of image
+    auto rig = rigFor({ { "/materials/broken.jpg", broken } });
+    EXPECT_EQ(rig->Parse("broken.jpg"), nullptr);
+}
+
 TEST(TexLoose, HostLooseAssetReadability) {
     ScratchDir dir("tex-readable");
     const std::string chosen = dir.write("chosen.png", png1x1(1, 2, 3, 4));

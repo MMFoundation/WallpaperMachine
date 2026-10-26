@@ -12,6 +12,10 @@ that blob is the whole record: nothing else differs.
 2. `stbi__tga_load` refuses an uncompressed image whose rows the file does not hold, instead
    of returning the uninitialised rest of its buffer as pixels (CVE-2023-45663, GHSL-2023-147,
    not fixed upstream). The HDR half of that finding is not built here.
+3. `stbi__decode_jpeg_image` treats a marker it cannot process as the end of the image only
+   once a scan has been decoded (junk after the image still ends it). Before one, it fails:
+   upstream reported success and the caller converted the uninitialised component buffers
+   into pixels.
 
 `Renderer/Engine/src/Scene/Parse/WPTexImageParser.cpp`, the only production user, builds it
 with `STBI_ONLY_PNG`, `STBI_ONLY_JPEG`, `STBI_ONLY_BMP`, `STBI_ONLY_GIF` and `STBI_ONLY_TGA`

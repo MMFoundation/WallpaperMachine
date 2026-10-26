@@ -487,7 +487,10 @@ TEST(VorbisDecoder, ABookWithNoCodewordsChoosesNothingAndReadsNothingBeforeItsTa
     Layout layout;
     layout.codebooks = { { 1, 1 }, { 0, 0, 0, 0 } };
     layout.floors    = { 1 };
-    EXPECT_TRUE(PlaysSafely(Stream(layout)));
+    bool opened = false;
+    EXPECT_TRUE(PlaysSafely(Stream(layout), &opened));
+    // Refusing it would not reach that decode at all: the file is valid and must open.
+    EXPECT_TRUE(opened);
 }
 
 TEST(VorbisDecoder, AMappingOfSixteenSubmapsKeepsEveryOneApart)

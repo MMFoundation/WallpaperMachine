@@ -1,6 +1,7 @@
 #include "MetalImageLevels.hpp"
 
 #include <algorithm>
+#include <vector>
 
 namespace wallpaper::metal
 {
@@ -60,7 +61,16 @@ bool LevelIsWrittenWhole(id<MTLTexture> texture, const ImageData& mipmap, NSUInt
 bool UploadImageLevels(id<MTLTexture> texture, const Image::Slot& slot, uint32_t bytes_per_pixel,
                        uint32_t block_bytes)
 {
-    const NSUInteger levels = std::min<NSUInteger>(slot.mipmaps.size(), texture.mipmapLevelCount);
+    struct Write {
+        NSUInteger     level;
+        MTLRegion      region;
+        NSUInteger     bytes_per_row;
+        const uint8_t* bytes;
+    };
+    // Every level is checked before any is written, so a refused one leaves a texture that is
+    // already shown exactly as it was.
+    std::vector<Write> writes;
+    const NSUInteger   levels = std::min<NSUInteger>(slot.mipmaps.size(), texture.mipmapLevelCount);
     for (NSUInteger level = 0; level < levels; ++level) {
         const auto& mipmap = slot.mipmaps[level];
         if (mipmap.data == nullptr || mipmap.width <= 0 || mipmap.height <= 0) continue;
@@ -80,10 +90,13 @@ bool UploadImageLevels(id<MTLTexture> texture, const Image::Slot& slot, uint32_t
         }
         // A level shorter than the rows the copy reads would be read past its end.
         if (mipmap.size < 0 || (NSUInteger)mipmap.size < bytes_per_row * rows) return false;
-        [texture replaceRegion:MTLRegionMake2D(0, 0, wide, high)
-                   mipmapLevel:level
-                     withBytes:mipmap.data.get()
-                   bytesPerRow:bytes_per_row];
+        writes.push_back({ level, MTLRegionMake2D(0, 0, wide, high), bytes_per_row, mipmap.data.get() });
+    }
+    for (const Write& write : writes) {
+        [texture replaceRegion:write.region
+                   mipmapLevel:write.level
+                     withBytes:write.bytes
+                   bytesPerRow:write.bytes_per_row];
     }
     return true;
 }
