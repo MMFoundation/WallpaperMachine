@@ -131,6 +131,50 @@ thread_local const LayerObjectIndex* g_parse_layer_index { nullptr };
 /// a scene is never drawn with a part of it missing.
 thread_local std::vector<std::string> g_shader_failures;
 
+/// The object `BuildLayers` is building, so a file it asks for and does not find is put down to
+/// it: id -1 and no name between objects.
+thread_local int32_t     g_parse_object_id { -1 };
+thread_local std::string g_parse_object_name;
+/// The files this parse asked for that the scene does not have (`Scene::missing_files`).
+thread_local std::vector<SceneMissingFile> g_missing_files;
+constexpr std::size_t kMissingFileLimit = 64;
+
+/// Records a file asked for and not found. Only the scene's own space counts: a shader cache
+/// entry that is not there yet is not something the scene lacks. A file asked for again by a
+/// layer is put down to that layer if it was first asked for between objects.
+void RecordMissingFile(std::string_view path) {
+    constexpr std::string_view kSceneSpace = "/assets/";
+    if (path.substr(0, kSceneSpace.size()) != kSceneSpace) return;
+    std::string relative(path.substr(kSceneSpace.size()));
+    if (relative.empty()) return;
+    const auto known = std::find_if(g_missing_files.begin(), g_missing_files.end(),
+                                    [&](const SceneMissingFile& file) { return file.path == relative; });
+    if (known != g_missing_files.end()) {
+        if (known->object_id < 0 && g_parse_object_id >= 0) {
+            known->object_id = g_parse_object_id;
+            known->layer     = g_parse_object_name;
+        }
+        return;
+    }
+    if (g_missing_files.size() >= kMissingFileLimit) return;
+    g_missing_files.push_back(SceneMissingFile {
+        .layer = g_parse_object_name, .object_id = g_parse_object_id, .path = std::move(relative) });
+}
+
+/// Puts the files asked for while it lives down to one object of the scene file.
+struct ParseObjectScope {
+    ParseObjectScope(int32_t id, std::string name) {
+        g_parse_object_id   = id;
+        g_parse_object_name = std::move(name);
+    }
+    ~ParseObjectScope() {
+        g_parse_object_id = -1;
+        g_parse_object_name.clear();
+    }
+    ParseObjectScope(const ParseObjectScope&)            = delete;
+    ParseObjectScope& operator=(const ParseObjectScope&) = delete;
+};
+
 /// Records that `shader_name` could not be compiled, with the compiler's own
 /// explanation when it has one (its first line, so a long diagnostic does not
 /// become the panel's reason).
@@ -851,7 +895,9 @@ std::optional<wpscene::WPImageEffect> MakeFogCompositeEffect(fs::VFS& vfs) {
     wpscene::WPImageEffect effect;
     wpscene::WPMaterial    material;
     nlohmann::json         json;
-    if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/materials/util/effectpassthrough_4.json"), json))
+    // Looked for, not required: asking `Contains` first keeps its absence off the missing files.
+    constexpr const char* kMaterial = "/assets/materials/util/effectpassthrough_4.json";
+    if (! vfs.Contains(kMaterial) || ! PARSE_JSON(fs::GetFileContent(vfs, kMaterial), json))
         return std::nullopt;
     material.FromJson(json);
     material.combos["BONECOUNT"] = 1;
@@ -5394,8 +5440,11 @@ struct HdrBloomState {
 bool BuildHdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general,
                    ScenePostProcess& post, UndoList& undo) {
     auto&       scene = *context.scene;
+    // A lookup, so a material that is not there (the optional cubic upsample) is not reported as
+    // a file the scene lacks; a required one that is absent fails the scene below.
     const auto  exists = [&](const char* name) {
-        return ! fs::GetFileContent(*context.vfs, std::string("/assets/materials/util/") + name + ".json").empty();
+        const std::string path = std::string("/assets/materials/util/") + name + ".json";
+        return context.vfs->Contains(path) && ! fs::GetFileContent(*context.vfs, path).empty();
     };
     for (const char* required : { "hdr_downsample_bloom", "hdr_downsample", "hdr_upsample",
                                   "combine_hdr_upsample_linear" }) {
@@ -5671,6 +5720,11 @@ void BuildLayers(ParseContext& context, const wpscene::WPSceneGeneral& general,
         const auto& plan  = plans[at];
         const auto& entry = objects[at];
         if (plan.admission == Admission::Skip) continue;
+        std::string authored_name = plan.key;
+        if (const auto name = entry.find("name"); name != entry.end() && name->is_string()) {
+            authored_name = name->get<std::string>();
+        }
+        const ParseObjectScope object_scope(plan.id, std::move(authored_name));
         const bool plain = plan.admission == Admission::Node;
         const bool typed_node = plan.kind == EntryKind::Light || plan.kind == EntryKind::Camera;
         if (plain || (plan.placeholder && ! typed_node)) {
@@ -6090,19 +6144,35 @@ std::array<int32_t, 2> ResolveCanvas(ParseContext& context, const wpscene::WPSce
 /// The thread-local state of one parse: nothing from an earlier parse is left in
 /// it, and nothing of this one remains once it ends, however it ends.
 struct ParseSession {
-    ParseSession() {
+    ParseSession() : previous_missing_file_observer(fs::t_missing_file_observer) {
         g_pending_metal_translations.clear();
         g_shader_failures.clear();
         g_parse_layer_index = nullptr;
+        ClearMissingFiles();
+        fs::t_missing_file_observer = &missing_file_observer;
         WPShaderParser::BeginShaderSession();
     }
     ~ParseSession() {
         g_pending_metal_translations.clear();
         g_shader_failures.clear();
         g_parse_layer_index = nullptr;
+        fs::t_missing_file_observer = previous_missing_file_observer;
+        ClearMissingFiles();
         WPShaderParser::EndShaderSession();
     }
+    ParseSession(const ParseSession&)            = delete;
+    ParseSession& operator=(const ParseSession&) = delete;
+
+    static void ClearMissingFiles() {
+        g_missing_files.clear();
+        g_parse_object_id = -1;
+        g_parse_object_name.clear();
+    }
+
+    const fs::MissingFileObserver  missing_file_observer { [](std::string_view path) { RecordMissingFile(path); } };
+    const fs::MissingFileObserver* previous_missing_file_observer;
 };
+
 
 std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, const std::string& buf,
                                           fs::VFS& vfs, audio::SoundManager& sm) {
@@ -6217,6 +6287,8 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
 
     FlushPendingMetalTranslations(*scene);
     scene->shader_compile_error = ShaderFailureReason();
+    scene->missing_files        = std::move(g_missing_files);
+    g_missing_files.clear();
 
     // The registries a script may query (P3 R72): the declared order of the layers, and the
     // scene file's objects when some script says it reads them.

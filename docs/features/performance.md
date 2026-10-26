@@ -702,6 +702,13 @@ display is reported as failed with the reason (below) and keeps the picture it h
 and screen saver do the same: a clip their own players cannot play is held on its last frame with the
 reason as a note ([lock screen](lock-screen.md#plain-video-wallpapers)).
 
+A mirror display plays its source's clip with a player of its own, and each mirror group is
+heard from one member (`MirrorAudioOwnership`, the rule [web pages](web-wallpapers.md) follow):
+the source while it is in sight and not paused or muted, otherwise the lowest-numbered mirror that
+is, at that display's own volume. The others play silently, so the sound is never heard twice,
+and a covered source hands the sound to a mirror still in sight. The same clip chosen for two
+independent displays is two wallpapers, and both are heard.
+
 Applying a video checks that its entry is a readable, nonempty file. A file that is
 missing or empty fails with the usual error. It also checks that the format can be played,
 on both **Apply** and **Apply changes** (and on Reapply), before any display changes. A

@@ -35,8 +35,8 @@ use crate::{
             ClearShaderCache,
             CompleteAudioResponse, EditProperty,
             GetAllSnapshots, GetAppSnapshot, GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview,
-            GetMonitorInformationSnapshot, GetSettingsSnapshot, GetWallpaperOptionsSnapshot,
-            GetWebWallpapers,
+            GetMonitorInformationSnapshot, GetSceneProbeRequest, GetSettingsSnapshot,
+            GetWallpaperOptionsSnapshot, GetWebWallpapers,
             InitialFrameReady, InjectDisplayForTest, InjectSceneProjectForTest,
             InjectSceneWallpaperConfigForTest, InjectWallpaperForTest, PollMousePosition,
             GetNativeVideoWallpapers, RefreshDisplays, RefreshLibrary,
@@ -1003,6 +1003,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 Ok(BridgeNativeVideoWallpaper {
                     display_id: desc.display.display_id,
                     startup_revision: self.reserved_startup_revision(),
+                    audio_source_display_id: desc.audio_source_display_id,
                     wallpaper_id: desc.wallpaper_id,
                     title,
                     media_path,
@@ -1712,6 +1713,43 @@ impl<E: EngineFacade + Clone> Message<GetWallpaperOptionsSnapshot> for BridgeAct
     ) -> Self::Reply {
         let displays = self.engine.display_snapshot();
         self.state.options(&displays, msg.wallpaper_id, &self.paths)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<GetSceneProbeRequest> for BridgeActor<E> {
+    type Reply = messages::SceneProbeRequestReply;
+
+    async fn handle(
+        &mut self,
+        msg: GetSceneProbeRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let entry = self
+            .state
+            .library
+            .iter()
+            .find(|entry| entry.id == msg.wallpaper_id)
+            .ok_or_else(|| BridgeError::invalid_input("the wallpaper is not installed"))?;
+        if entry.kind != BridgeWallpaperKind::ProjectScene {
+            return Err(BridgeError::invalid_input("only a scene wallpaper can be read this way"));
+        }
+        // What a load would use: the saved choices, not edits still waiting for Apply.
+        let saved = self
+            .state
+            .wallpaper_configs
+            .get(&msg.wallpaper_id)
+            .map(|config| config.property_overrides.clone())
+            .unwrap_or_default();
+        let property_overrides = crate::project::scene_property_override_json(
+            self.state.project_models.get(&msg.wallpaper_id),
+            &saved,
+        );
+        Ok(crate::engine::SceneProbeRequest {
+            project_file: self.paths.project_json(&msg.wallpaper_id),
+            assets: self.paths.assets_root(),
+            shader_cache: self.paths.shader_cache_root(),
+            property_overrides,
+        })
     }
 }
 

@@ -1025,6 +1025,15 @@ if(APPLE)
       DISCOVERY_TIMEOUT 60
   )
 
+  add_executable(scene_capability_probe_test scene_capability_probe_test.cpp)
+  target_link_libraries(scene_capability_probe_test PRIVATE scene_test_support GTest::gtest_main)
+  gtest_discover_tests(
+      scene_capability_probe_test
+      TEST_PREFIX scene_capability_probe_test.
+      PROPERTIES TIMEOUT 60
+      DISCOVERY_TIMEOUT 60
+  )
+
   add_executable(scene_layer_size_test scene_layer_size_test.cpp)
   target_link_libraries(scene_layer_size_test PRIVATE scene_test_support GTest::gtest_main)
   gtest_discover_tests(

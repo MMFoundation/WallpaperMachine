@@ -497,7 +497,8 @@ protocol.
 
 User mute and temporary app/Focus/other-audio mute compose in the existing bridge
 configuration; ending a rule does not clear user mute. Mirrored pages elect one
-presenting audible owner per actual source assignment (`WebWallpaperAudioOwnership`);
+presenting audible owner per actual source assignment (`MirrorAudioOwnership`, which native video
+follows too);
 independent assignments of the same project stay independent, and a hidden owner
 hands off to a visible mirror without duplicate sound.
 
@@ -566,7 +567,7 @@ never substitutes Pause for an unavailable mute.
   them. Measured on offscreen snapshots; see [Verification](#verification) for what was not.
 - Nonzero WebAudio gain is not controlled by the native media-volume interface;
   whole-page Mute still applies where WebKit exposes it.
-- A paused wallpaper's WebAudio is muted (`WebWallpaperAudioOwnership` gives a paused
+- A paused wallpaper's WebAudio is muted (`MirrorAudioOwnership` gives a paused
   page no audible output) but not suspended: the host has no `AudioContext`
   handling, and what WebKit's own throttling does to a detached page's audio graph
   is unmeasured.

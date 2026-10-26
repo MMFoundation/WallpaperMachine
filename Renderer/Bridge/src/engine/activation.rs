@@ -68,6 +68,10 @@ pub struct ActivationInputs<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeVideoWallpaperDesc {
     pub display: DisplayDesc,
+    /// The display whose assignment this plays: its own, or for a mirror its source's, which it
+    /// takes through `..source`. Independent assignments of one clip stay separate. The host lets
+    /// one member of each group be heard, as it does for web pages.
+    pub audio_source_display_id: u32,
     pub wallpaper_id: String,
     pub media_path: PathBuf,
     /// Identifies the media the host plays: the file, its length and its modification time.
@@ -571,6 +575,7 @@ impl ActivationInputs<'_> {
                 self.displays,
             );
             videos.push(NativeVideoWallpaperDesc {
+                audio_source_display_id: slot.display.display_id,
                 wallpaper_id: slot.wallpaper_id.to_string(),
                 media_path: admission.media_path,
                 admission_key: admission.admission_key,
