@@ -13,6 +13,7 @@ extension PanelController {
   enum EngineSettingDefaults {
     static let batteryMode = BridgeBatteryMode.keepRunning
     static let renderScale: Float = 1
+    static let metalFXUpscaling = false
     static let frameRateCap: UInt32? = nil
     static let batteryRenderScale: Float = 0.75
     static let batteryTargetFps: UInt32 = 30
@@ -110,6 +111,9 @@ extension PanelController {
     }
     if current().preferredRenderScale != D.renderScale {
       await attempt { try await store.setRenderScaleAsync(D.renderScale) }
+    }
+    if current().metalfxUpscalingEnabled != D.metalFXUpscaling {
+      await attempt { try await store.setMetalFXUpscalingEnabledAsync(D.metalFXUpscaling) }
     }
     if current().frameRateCap != D.frameRateCap {
       await attempt { try await store.setFrameRateCapAsync(D.frameRateCap) }

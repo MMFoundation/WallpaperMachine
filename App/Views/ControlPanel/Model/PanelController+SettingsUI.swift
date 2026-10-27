@@ -8,6 +8,7 @@ enum SettingsSwitchKey: String, CaseIterable, Sendable {
   case writeDesktopPicture, refreshDesktopPicture, keepWindowsOnWallpaperClick, livePropertyEdits
   case lockScreenEnabled, screenSaverEnabled
   case wallpapersMuted, playOnlyOnActiveDisplay
+  case metalFXUpscaling
   case sceneOptimization, sceneOnDemand, sceneVideoPlaneSampling
   /// Different wallpaper for each desktop, on the display the Library applies wallpapers to: the
   /// same switch as that display's card in Settings › Displays and the toolbar's display menu.
@@ -33,6 +34,7 @@ extension PanelController {
       { _ = revisions.playback; return playback.wallpapersMuted }()
     case .playOnlyOnActiveDisplay:
       { _ = revisions.playback; return playback.playsOnlyOnActiveDisplay }()
+    case .metalFXUpscaling: store.settingsSnapshot.metalfxUpscalingEnabled
     case .sceneOptimization: store.settingsSnapshot.sceneOptimizationEnabled
     case .sceneOnDemand: store.settingsSnapshot.sceneOnDemandEnabled
     case .sceneVideoPlaneSampling: store.settingsSnapshot.sceneVideoPlaneSamplingEnabled
@@ -77,6 +79,7 @@ extension PanelController {
     case .screenSaverEnabled: try await setScreenSaverEnabled(on)
     case .wallpapersMuted: try await setWallpapersMuted(on)
     case .playOnlyOnActiveDisplay: try await setPlaysOnlyOnActiveDisplay(on)
+    case .metalFXUpscaling: try await setMetalFXUpscaling(on)
     case .sceneOptimization: try await setSceneOptimization(on)
     case .sceneOnDemand: try await setSceneOnDemand(on)
     case .desktopWallpapers: try await setDesktopWallpapers(on, display: targetDisplayID)

@@ -306,6 +306,10 @@ pub struct SetSceneOptimizationEnabled {
     pub enabled: bool,
 }
 
+pub struct SetMetalFxUpscalingEnabled {
+    pub enabled: bool,
+}
+
 pub struct SetSceneOnDemandEnabled {
     pub enabled: bool,
 }
@@ -478,6 +482,7 @@ pub type SetBatteryQualityProfileReply = AllSnapshotsReply;
 pub type SetSceneOptimizationEnabledReply = AllSnapshotsReply;
 pub type SetSceneResolutionReply = AllSnapshotsReply;
 pub type SetSceneOnDemandEnabledReply = AllSnapshotsReply;
+pub type SetMetalFxUpscalingEnabledReply = AllSnapshotsReply;
 pub type SetSceneVideoPlaneSamplingEnabledReply = AllSnapshotsReply;
 pub type SetWebAudioSubscribedReply = Result<(), BridgeError>;
 pub type AudioRequirementChangedReply = Result<(), BridgeError>;

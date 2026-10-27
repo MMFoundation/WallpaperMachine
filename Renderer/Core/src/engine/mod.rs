@@ -736,6 +736,19 @@ impl WallpaperEngine {
         self.backend.set_scene_video_plane_sampling_enabled(enabled)
     }
 
+    /// Brings a scene drawn below full resolution back to full size with
+    /// MetalFX instead of a bilinear stretch, for every scene.
+    ///
+    /// Off by default. Nothing changes at render scale 1. A scene picks it up
+    /// at its next presented frame; nothing is rebuilt.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the renderer rejects the call.
+    pub fn set_metalfx_upscaling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
+        self.backend.set_metalfx_upscaling_enabled(enabled)
+    }
+
     /// Chooses how many pixels a 2D scene is rasterized with: the canvas it
     /// was authored at, or the size it is presented at on the display.
     ///

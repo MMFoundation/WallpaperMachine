@@ -64,7 +64,7 @@ enum BridgeSnapshotFixtures {
 
   /// A settings snapshot carrying shipped defaults: full
   /// render scale, keep-running on battery, no frame-rate cap, both experiments
-  /// off, scene optimisation on and 2D scenes drawn at the display's resolution. Tests that care about one of those pass it
+  /// off, MetalFX upscaling off, scene optimisation on and 2D scenes drawn at the display's resolution. Tests that care about one of those pass it
   /// explicitly.
   static func settings(
     displays: [BridgeDisplaySettingsRow] = [],
@@ -72,6 +72,7 @@ enum BridgeSnapshotFixtures {
     videoBackends: [BridgeVideoBackendReport] = [],
     sceneOptimizationEnabled: Bool = true,
     sceneOnDemandEnabled: Bool = false,
+    metalfxUpscalingEnabled: Bool = false,
     sceneVideoPlaneSamplingEnabled: Bool = false,
     sceneResolution: String = "display",
     sceneUpdateModes: [BridgeSceneUpdateModeReport] = [],
@@ -102,6 +103,7 @@ enum BridgeSnapshotFixtures {
       videoBackends: videoBackends,
       sceneOptimizationEnabled: sceneOptimizationEnabled,
       sceneOnDemandEnabled: sceneOnDemandEnabled,
+      metalfxUpscalingEnabled: metalfxUpscalingEnabled,
       sceneVideoPlaneSamplingEnabled: sceneVideoPlaneSamplingEnabled,
       sceneResolution: sceneResolution,
       sceneUpdateModes: sceneUpdateModes,

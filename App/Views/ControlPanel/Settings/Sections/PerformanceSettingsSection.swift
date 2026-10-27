@@ -41,6 +41,11 @@ struct PerformanceSettingsSection: View {
     note:
       "Renders at a lower resolution and scales the result to fill the same area. Size and position on screen don’t change.",
     keywords: ["Not applicable to the wallpapers currently running", "100% (native)"])
+  static let metalFXUpscaling = SettingsItem(
+    id: "performance.metalfx-upscaling", section: .performance, group: quality,
+    title: "MetalFX upscaling",
+    note:
+      "Below 100%, scenes are brought back to full size with Apple’s MetalFX upscaler instead of being stretched. Hard edges can look slightly sharper, but every frame needs extra GPU work, which can raise energy use noticeably. Web and video wallpapers aren’t affected.")
   /// What the engine uses now where it differs from the saved Frame rate limit and render scale,
   /// and which condition lowers them.
   static let renderScaleEffective = SettingsItem(
@@ -105,7 +110,8 @@ struct PerformanceSettingsSection: View {
   )
 
   static let items = [
-    energyUse, energyMethod, preset, frameRateLimit, renderScale, renderScaleEffective,
+    energyUse, energyMethod, preset, frameRateLimit, renderScale, metalFXUpscaling,
+    renderScaleEffective,
     sceneResolution, advanced, videoDiagnostics, videoInUse, sceneOptimization, sceneOnDemand,
     sceneDiagnostics, sceneDrawnBy, sceneInForce, sceneUpdating, sceneCompatibility,
     videoPlaneSampling,
@@ -161,6 +167,7 @@ struct PerformanceSettingsSection: View {
             }, isEnabled: performance.canChangeRenderScale
           ) { try await controller.setRenderScale(Double($0)) }
         }
+        SettingsRow(Self.metalFXUpscaling) { SettingsSwitchControl(key: .metalFXUpscaling) }
         if let effective = performance.quality.effectiveNowText {
           SettingsRow(Self.renderScaleEffective) {
             SettingsStatusText(text: effective) {

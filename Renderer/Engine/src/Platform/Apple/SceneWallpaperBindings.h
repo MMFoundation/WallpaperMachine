@@ -395,6 +395,19 @@ void owe_set_scene_video_plane_sampling_enabled(bool enabled);
 bool owe_scene_video_plane_sampling_enabled(void);
 
 /*
+ * MetalFX upscaling of a scene drawn below full resolution, process-wide. Off
+ * by default.
+ *
+ * Each presented frame of a scene whose render scale is below 1 is brought
+ * back to the size of its full-resolution output by MetalFX's spatial scaler
+ * before it is composed, instead of by the composition's bilinear sample. At
+ * render scale 1 nothing changes. An image MetalFX does not take is composed
+ * the old way.
+ */
+void owe_set_metalfx_upscaling_enabled(bool enabled);
+bool owe_metalfx_upscaling_enabled(void);
+
+/*
  * How each of a scene's video textures reached the shaders sampling it, as of
  * the last frame it drew. Reported, never requested: it says what the frame's
  * real pixel format and the material's own program allowed.

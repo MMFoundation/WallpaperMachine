@@ -20,6 +20,7 @@ if(APPLE)
     MetalImageLevels.mm
     MetalPosterCapture.mm
     MetalSharedImages.mm
+    MetalUpscaler.mm
     MetalVideoTextures.mm)
 endif()
 
@@ -61,6 +62,7 @@ if(APPLE)
     "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
   target_link_libraries(${LIB_NAME} PUBLIC
     ${METAL_FRAMEWORK}
+    ${METAL_FX_FRAMEWORK}
     ${QUARTZ_CORE_FRAMEWORK}
     ${CORE_VIDEO_FRAMEWORK}
     ${FOUNDATION_FRAMEWORK})

@@ -90,7 +90,7 @@ the load.
 
 - The logger's own line: process id and level in force.
 - The saved preferences that decide how wallpapers render: render scale, battery mode, frame-rate limit, scene optimisation,
-  on-demand updating and the experimental switches.
+  on-demand updating, MetalFX upscaling and the experimental switches.
 - `environment:` lines from Swift (`DiagnosticEnvironment`): app version and
   build, macOS, hardware model, CPU, core count, memory, GPU, low-power and
   thermal state, languages, locale, time zone, and each display's pixel size,

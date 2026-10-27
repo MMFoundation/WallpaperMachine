@@ -9,10 +9,12 @@
 #include "MetalImageLevels.hpp"
 #include "MetalPosterCapture.hpp"
 #include "MetalSharedImages.hpp"
+#include "MetalUpscaler.hpp"
 #include "MetalVideoTextures.hpp"
 
 #include "MetalRender/MetalBlend.hpp"
 #include "MetalRender/MetalCapability.hpp"
+#include "MetalRender/MetalUpscaling.hpp"
 #include "MetalRender/MetalVideoSupport.hpp"
 #include "MetalRender/MetalProjection.hpp"
 #include "MetalRender/MetalShaderReflection.hpp"
@@ -1321,6 +1323,9 @@ struct MetalRender::Impl
     /// The blurred copy "Fit with blurred backdrop" fills the bars with. Holds nothing in any
     /// other mode.
     MetalBackdrop      backdrop;
+    /// The full-size picture MetalFX makes of a scene drawn below full resolution, while
+    /// upscaling is on. Holds nothing otherwise.
+    MetalUpscaler      upscaler;
     MetalVideoTextures video;
     /// Whether the graph currently compiled has produced a frame. A poster
     /// composed before that would publish an empty image as the wallpaper.
@@ -1762,6 +1767,10 @@ struct MetalRender::Impl
     /// Builds what the scaling mode needs for the blurred backdrop, or lets go of it when the
     /// mode is any other. Between frames only.
     void prepareBackdrop();
+    /// `output`, or the full-size picture MetalFX made of it when upscaling is on and the
+    /// scene is drawn below full resolution. `frame` as for `encodeComposition`.
+    id<MTLTexture> upscaledPicture(id<MTLCommandBuffer> command, id<MTLTexture> output,
+                                   const Scene& scene, bool frame);
     bool encodeScaledCopy(id<MTLCommandBuffer> command, id<MTLTexture> source,
                           id<MTLTexture> destination);
     bool compile(Scene& scene, rg::RenderGraph& graph);
@@ -1947,6 +1956,8 @@ void MetalRender::Impl::releaseGraph()
     pending_target_clears.clear();
     preserved_targets.clear();
     targets.clear();
+    // The full-size picture of the output just let go; a graph compiled next makes its own.
+    upscaler.release();
     owned_targets.clear();
     depth_targets.clear();
     pass_targets.clear();
@@ -2131,6 +2142,9 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
     const auto layout =
         scalingLayout(scene, (uint32_t)destination.width, (uint32_t)destination.height);
 
+    // Before the pass below opens: MetalFX encodes its own work into the command buffer.
+    id<MTLTexture> picture = upscaledPicture(command, output->second, scene, frame);
+
     // The copy for the bars is made first, so the composition below can read it. It exists
     // while a composition has room to fill: the first frame that has none lets it go.
     bool draw_backdrop = false;
@@ -2190,11 +2204,39 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
     [encoder setVertexBuffer:(horizontal_flip ? present_vertices_flipped : present_vertices)
                       offset:0
                      atIndex:0];
-    [encoder setFragmentTexture:output->second atIndex:0];
+    [encoder setFragmentTexture:picture atIndex:0];
     [encoder setFragmentSamplerState:present_sampler atIndex:0];
     [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
     [encoder endEncoding];
     return true;
+}
+
+id<MTLTexture> MetalRender::Impl::upscaledPicture(id<MTLCommandBuffer> command,
+                                                  id<MTLTexture> output, const Scene& scene,
+                                                  bool frame)
+{
+    const double scale = render::ResolveSceneRenderScale(scene);
+    if (MetalUpscalingEnabled() && scale < 1.0) {
+        // The size the scene's output has at full resolution, so the composition samples
+        // the picture exactly as it would at render scale 1.
+        constexpr int32_t kMaxDimension = 16384;
+        const auto width  = (uint32_t)std::min(
+            kMaxDimension, render::ResolveScreenBoundRenderTargetDimension((double)output.width, 1.0 / scale));
+        const auto height = (uint32_t)std::min(
+            kMaxDimension, render::ResolveScreenBoundRenderTargetDimension((double)output.height, 1.0 / scale));
+        if (width > output.width || height > output.height) {
+            id<MTLTexture> upscaled = upscaler.encode(device, command, output, width, height);
+            if (upscaled != nil) return upscaled;
+            // A refusal is kept, not released, so the next frame does not try again.
+            return output;
+        }
+        // Nothing to bring back at this size: the image made for a larger one goes.
+        if (frame) upscaler.release();
+    } else if (frame) {
+        // Like the backdrop's images: the first drawn frame that has no use for it lets it go.
+        upscaler.release();
+    }
+    return output;
 }
 
 id<MTLSamplerState> MetalRender::Impl::samplerFor(const TextureSample& sample)
@@ -4836,6 +4878,7 @@ void MetalRender::destroy()
         pImpl->video.closeHeld();
         pImpl->releasePresentation();
         pImpl->backdrop.release();
+        pImpl->upscaler.release();
         pImpl->present_pipelines.clear();
         pImpl->queue  = nil;
         pImpl->device = nil;
@@ -5651,6 +5694,8 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         impl.present_key.Add(static_cast<uint64_t>(static_cast<uint32_t>(layout.scissor_px.width)));
         impl.present_key.Add(static_cast<uint64_t>(static_cast<uint32_t>(layout.scissor_px.height)));
         impl.present_key.Add(impl.horizontal_flip ? 1u : 0u);
+        // Turning upscaling on or off changes the picture of a scene that changed nothing.
+        impl.present_key.Add(MetalUpscalingEnabled() ? 1u : 0u);
         // The copy's rectangle, which no other word of the key follows: it moves with the
         // display and the mode, never with the picture.
         impl.present_key.Add(layout.backdrop ? 1u : 0u);
@@ -5874,7 +5919,7 @@ uint64_t MetalRender::RenderTargetBytesForTests() const
             bytes += texture.allocatedSize;
         }
     }
-    return bytes + pImpl->backdrop.allocatedBytes();
+    return bytes + pImpl->backdrop.allocatedBytes() + pImpl->upscaler.allocatedBytes();
 }
 
 uint64_t MetalRender::ProgramCompilesForTests() { return MetalProgramCache::shared().compileCount(); }

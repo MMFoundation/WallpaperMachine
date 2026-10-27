@@ -113,6 +113,7 @@ targets:
           - -framework Foundation
           - -framework IOSurface
           - -framework Metal
+          - -framework MetalFX
           - -framework OpenGL
           - -framework QuartzCore
           - -framework VideoToolbox

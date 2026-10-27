@@ -657,6 +657,11 @@ pub struct BridgeSettingsSnapshot {
     /// default. A preference, not a read-back: `scene_update_modes` is where
     /// what actually happened shows up.
     pub scene_on_demand_enabled: bool,
+    /// The saved preference for bringing a scene drawn below full resolution
+    /// back to full size with MetalFX instead of a bilinear stretch. Off by
+    /// default. A preference, not a read-back: a scene at render scale 1, or one
+    /// whose image MetalFX does not take, is composed the old way.
+    pub metalfx_upscaling_enabled: bool,
     /// The saved preference for direct NV12 plane sampling inside native Metal
     /// scenes. Off by default, experimental. A preference, not a read-back:
     /// the `video_path` of each `scene_renderers` row is what actually

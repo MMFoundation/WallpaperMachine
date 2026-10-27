@@ -228,7 +228,7 @@ bool GpuScene::Impl::OpenRenderer()
 bool GpuScene::Impl::CompileGraph()
 {
     // Targets are allocated once, at the size they will keep.
-    scene->render_scale = 1.0;
+    scene->render_scale = options.render_scale;
     scene->resolution   = CurrentSceneResolution();
     auto next           = sceneToRenderGraph(*scene);
     if (next == nullptr) return Fail("the scene produced no render graph");

@@ -190,6 +190,10 @@ pub(crate) enum EngineObservation {
         enabled: bool,
         phase: OperationPhase,
     },
+    Upscaling {
+        enabled: bool,
+        phase: OperationPhase,
+    },
     Resolution {
         resolution: wallpaper_core::SceneResolution,
         phase: OperationPhase,
@@ -286,6 +290,7 @@ struct Data {
     optimization: Option<bool>,
     on_demand: Option<bool>,
     video_sampling: Option<bool>,
+    upscaling: Option<bool>,
     resolution: Option<wallpaper_core::SceneResolution>,
     counters_enabled: bool,
     pointer_consumer: Option<wallpaper_core::PointerConsumerCallback>,
@@ -347,6 +352,7 @@ impl ControlledEngine {
                     optimization: None,
                     on_demand: None,
                     video_sampling: None,
+                    upscaling: None,
                     resolution: None,
                     counters_enabled: false,
                     pointer_consumer: None,
@@ -1348,6 +1354,12 @@ impl EngineFacade for ControlledEngine {
             |d| d.video_sampling = Some(enabled),
         )
     }
+    fn set_metalfx_upscaling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
+        self.setting(
+            move |phase| EngineObservation::Upscaling { enabled, phase },
+            |d| d.upscaling = Some(enabled),
+        )
+    }
     fn set_scene_resolution(
         &self,
         resolution: wallpaper_core::SceneResolution,
@@ -2156,7 +2168,7 @@ async fn nonempty_bootstrap_releases_real_readiness_before_queued_first_frame_ha
         let scenes = bounded(control.entered).await.unwrap(); assert_eq!(scenes.len(), 1); assert_eq!(scenes[0].display.display_id, 731);
         let observed = engine.observations();
         let reconcile_start = observed.iter().position(|e| matches!(e, EngineObservation::Reconcile { phase: OperationPhase::Started, .. })).unwrap();
-        for index in [observed.iter().position(|e| matches!(e, EngineObservation::Optimization { phase: OperationPhase::Applied, .. })), observed.iter().position(|e| matches!(e, EngineObservation::OnDemand { phase: OperationPhase::Applied, .. })), observed.iter().position(|e| matches!(e, EngineObservation::Resolution { phase: OperationPhase::Applied, .. })), observed.iter().position(|e| matches!(e, EngineObservation::VideoSampling { phase: OperationPhase::Applied, .. }))] {
+        for index in [observed.iter().position(|e| matches!(e, EngineObservation::Optimization { phase: OperationPhase::Applied, .. })), observed.iter().position(|e| matches!(e, EngineObservation::OnDemand { phase: OperationPhase::Applied, .. })), observed.iter().position(|e| matches!(e, EngineObservation::Resolution { phase: OperationPhase::Applied, .. })), observed.iter().position(|e| matches!(e, EngineObservation::VideoSampling { phase: OperationPhase::Applied, .. })), observed.iter().position(|e| matches!(e, EngineObservation::Upscaling { phase: OperationPhase::Applied, .. }))] {
             assert!(index.expect("real bootstrap must configure renderer before opening") < reconcile_start);
         }
         release.release();

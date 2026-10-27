@@ -274,6 +274,16 @@ pub trait EngineFacade: Send + Sync + 'static {
         let _ = enabled;
         Ok(())
     }
+    /// Brings a scene drawn below full resolution back to full size with
+    /// MetalFX instead of a bilinear stretch, process-wide. Off by default.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the renderer rejects the call.
+    fn set_metalfx_upscaling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
+        let _ = enabled;
+        Ok(())
+    }
     /// Chooses how many pixels a 2D scene is rasterized with, process-wide.
     /// `Canvas` by default.
     ///
@@ -599,6 +609,10 @@ impl EngineFacade for RealEngineFacade {
 
     fn set_scene_video_plane_sampling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
         self.engine.set_scene_video_plane_sampling_enabled(enabled)
+    }
+
+    fn set_metalfx_upscaling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
+        self.engine.set_metalfx_upscaling_enabled(enabled)
     }
 
     fn set_scene_resolution(&self, resolution: SceneResolution) -> Result<(), EngineError> {
@@ -1217,6 +1231,7 @@ pub struct FakeEngineFacade {
     scene_optimization_calls: Observation<bool>,
     scene_on_demand_calls: Observation<bool>,
     scene_video_plane_sampling_calls: Observation<bool>,
+    metalfx_upscaling_calls: Observation<bool>,
     scene_resolution_calls: Observation<SceneResolution>,
     scene_runtime_reports: Reading<Vec<SceneRuntimeReport>>,
     /// Scripted snapshots retain the final sample; `None` reads the live state.
@@ -1419,6 +1434,7 @@ impl Default for FakeEngineFacade {
             scene_optimization_calls: Observation::new(),
             scene_on_demand_calls: Observation::new(),
             scene_video_plane_sampling_calls: Observation::new(),
+            metalfx_upscaling_calls: Observation::new(),
             scene_resolution_calls: Observation::new(),
             scene_runtime_reports: Reading::new(Default::default()),
             display_snapshot_script: Reading::new(Default::default()),
@@ -1825,6 +1841,12 @@ impl FakeEngineFacade {
     #[must_use]
     pub fn scene_video_plane_sampling_calls(&self) -> Vec<bool> {
         self.scene_video_plane_sampling_calls.snapshot()
+    }
+
+    /// Every MetalFX upscaling change the bridge pushed, in order.
+    #[must_use]
+    pub fn metalfx_upscaling_calls(&self) -> Vec<bool> {
+        self.metalfx_upscaling_calls.snapshot()
     }
 
     /// Every 2D scene resolution the bridge pushed, in order.
@@ -2483,6 +2505,11 @@ impl EngineFacade for FakeEngineFacade {
 
     fn set_scene_video_plane_sampling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
         self.scene_video_plane_sampling_calls.record(enabled);
+        Ok(())
+    }
+
+    fn set_metalfx_upscaling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
+        self.metalfx_upscaling_calls.record(enabled);
         Ok(())
     }
 

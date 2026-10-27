@@ -54,7 +54,7 @@ use crate::{
             SetLaunchAtLogin, SetMediaIntegrationEnabled,
             SetMuted, SetAudioSuppressed, SetBatteryMode, SetLabelLanguages, SetPowerSource,
             SetPresentationSuspended, SetPresentationUnloaded, SetPropertyPath,
-            SetRenderScale,
+            SetMetalFxUpscalingEnabled, SetRenderScale,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled,
             SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
@@ -1568,6 +1568,11 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
         {
             self.state.errors.push(error.to_string());
         }
+        if let Err(error) = self.engine.set_metalfx_upscaling_enabled(
+            self.state.app_config.quality.metalfx_upscaling_enabled,
+        ) {
+            self.state.errors.push(error.to_string());
+        }
 
         if let Err(error) = self.refresh_displays().await {
             self.state.errors.push(error.message().to_string());
@@ -2461,6 +2466,29 @@ impl<E: EngineFacade + Clone> Message<SetSceneVideoPlaneSamplingEnabled> for Bri
         // anything.
         self.engine
             .set_scene_video_plane_sampling_enabled(msg.enabled)
+            .map_err(|error| BridgeError::engine(error.to_string()))?;
+        self.invalidate_operations();
+        Ok(self.all_snapshots())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetMetalFxUpscalingEnabled> for BridgeActor<E> {
+    type Reply = messages::SetMetalFxUpscalingEnabledReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetMetalFxUpscalingEnabled,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.app_config.quality.metalfx_upscaling_enabled = msg.enabled;
+        if let Some(store) = &self.config_store {
+            store.save_app_config(&self.state.app_config)?;
+        }
+        // How a finished frame is brought to the display, not what a scene
+        // draws: running scenes pick it up at their next presented frame, so
+        // nothing here rebuilds, reparses or reopens anything.
+        self.engine
+            .set_metalfx_upscaling_enabled(msg.enabled)
             .map_err(|error| BridgeError::engine(error.to_string()))?;
         self.invalidate_operations();
         Ok(self.all_snapshots())

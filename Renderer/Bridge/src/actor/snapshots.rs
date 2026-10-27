@@ -519,6 +519,7 @@ impl BridgeActorState {
             video_backends,
             scene_optimization_enabled: candidate.quality.scene_optimization_enabled,
             scene_on_demand_enabled: candidate.quality.scene_on_demand_enabled,
+            metalfx_upscaling_enabled: candidate.quality.metalfx_upscaling_enabled,
             scene_video_plane_sampling_enabled: candidate
                 .experimental
                 .scene_video_plane_sampling,

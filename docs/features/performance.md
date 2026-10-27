@@ -258,6 +258,37 @@ the saved limit, perhaps **No limit**; a ceiling the saved limit sets gets no li
 While a cause is in force the row offers **Open Playback & Power**, where those
 choices are made.
 
+### MetalFX upscaling
+
+**MetalFX upscaling** (off by default, saved as `quality.metalfx_upscaling_enabled`)
+changes how a scene drawn below 100% is brought back to its size on screen. Off, the
+composition stretches the lowered picture with a bilinear sample, as it always has. On,
+each presented frame of a scene whose render scale is below 1 first runs Apple's MetalFX
+spatial scaler on the scene's final output, writing an image the size that output has at
+100%, and the composition then samples that image exactly as it would at full resolution;
+scaling mode, zoom, framing, flip and the poster are unchanged. It applies to the
+effective scale, so the battery or a reduced-quality condition's lower scale is upscaled
+too. At 100% it does nothing and costs nothing. A running scene picks it up at its next
+presented frame; nothing is rebuilt or reparsed.
+
+The cost while it is in force is one MetalFX pass per presented frame (a frame skipped
+as unchanged runs none) and one extra image the size of the scene's full-resolution
+output, which is let go on the first frame that no longer needs it, and when the scene's
+graph is released. The pass is priced by the output size, not the render scale: on an
+M2 Pro it took about 1.1 ms of GPU per frame for a 3024×1964 output and about 2.6 ms
+for 5120×2880, against 0.1–0.3 ms for the stretch, at 75% as at 50%. A lightweight
+wallpaper can need little more than that per frame at a lowered scale, so on a real
+machine one such wallpaper used about 50% more power with it on than at the same scale
+with it off, and 50% with MetalFX can cost more than plain 100%. The gain is small: it
+sharpens hard edges (PSNR against the 100% picture 24.5 dB instead of 22.9 dB for a
+synthetic pattern at 50%), cannot add detail that was never drawn, and on soft wallpaper
+art and photos the stretch is already as close or closer. That is why it is off by
+default. 8-bit outputs use MetalFX's perceptual mode and half-float ones its HDR mode. An
+output MetalFX cannot take is logged once and composed the old way. Web wallpapers
+(WebKit draws them) and videos are not affected. FSR is not offered: FSR 1 is the same
+kind of spatial upscaler, and MetalFX's temporal scaler or FSR 2 and later need motion
+vectors, depth and jittered rendering that scene passes do not provide.
+
 ### 2D scene resolution
 
 **2D scene resolution** (**Display resolution**, the default, or **Canvas size**) is

@@ -1044,6 +1044,61 @@ async fn video_plane_sampling_defaults_off_and_survives_a_restart() {
     );
 }
 
+#[tokio::test]
+async fn metalfx_upscaling_defaults_off_and_survives_a_restart() {
+    // Like the other process-wide renderer switches: off unless asked for,
+    // pushed straight at the renderer without reopening a scene, and pushed
+    // back in on the next launch because the value lives in C.
+    let temp = tempfile::tempdir().unwrap();
+    let store = crate::config::ConfigStore::open(temp.path().to_path_buf());
+    let engine = FakeEngineFacade::default();
+    let bridge = BridgeBuilder::new(engine.clone())
+        .with_config_store(store.clone())
+        .build()
+        .unwrap();
+
+    assert!(
+        !bridge
+            .settings_snapshot()
+            .await
+            .unwrap()
+            .metalfx_upscaling_enabled,
+        "an extra pass per frame is the user's to choose"
+    );
+
+    let snapshot = bridge
+        .set_metalfx_upscaling_enabled(true)
+        .await
+        .unwrap()
+        .settings;
+    assert!(snapshot.metalfx_upscaling_enabled);
+    assert_eq!(engine.metalfx_upscaling_calls(), vec![true]);
+    assert!(
+        engine.rendered_scenes().is_empty(),
+        "changing it must not reopen, reparse or restart anything"
+    );
+
+    drop(bridge);
+    let restarted_engine = FakeEngineFacade::default();
+    let restarted = BridgeBuilder::new(restarted_engine.clone())
+        .with_config_store(store)
+        .build()
+        .unwrap();
+    assert!(
+        restarted
+            .settings_snapshot()
+            .await
+            .unwrap()
+            .metalfx_upscaling_enabled
+    );
+    restarted.bootstrap().await.unwrap();
+    assert_eq!(
+        restarted_engine.metalfx_upscaling_calls().last().copied(),
+        Some(true),
+        "a saved opt-in has to be pushed back into the renderer"
+    );
+}
+
 /// The tap is rebuilt when the default output device changes. The listener that
 /// reports the change is `CoreAudio` glue and needs a device, so these replay
 /// the worker's decisions through the production handlers and the real

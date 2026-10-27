@@ -149,6 +149,24 @@ final class PanelPerformanceSettingsTests: PanelTestCase {
     }
   }
 
+  func testMetalFXUpscalingShipsOffAndRoundTripsThroughItsSwitch() async throws {
+    try await withRecordingPanel { panel, bridge in
+      panel.store.settingsSnapshot = BridgeSnapshotFixtures.settings()
+      let controller = panel.controller
+      XCTAssertFalse(controller.isSwitchOn(.metalFXUpscaling), "An extra pass per frame ships off")
+
+      try await controller.setSwitch(.metalFXUpscaling, to: true)
+      XCTAssertEqual(bridge.metalFXUpscalingCalls, [true])
+      XCTAssertTrue(
+        controller.isSwitchOn(.metalFXUpscaling),
+        "The state is the one the engine returned, not the click")
+
+      try await controller.setSwitch(.metalFXUpscaling, to: false)
+      XCTAssertEqual(bridge.metalFXUpscalingCalls, [true, false])
+      XCTAssertFalse(controller.isSwitchOn(.metalFXUpscaling))
+    }
+  }
+
   func testSceneOnDemandAndDirectVideoPlaneSamplingShipOffAndRoundTrip() async throws {
     try await withRecordingPanel { panel, bridge in
       panel.store.settingsSnapshot = BridgeSnapshotFixtures.settings()

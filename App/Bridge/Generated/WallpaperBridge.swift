@@ -1167,6 +1167,23 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func setMediaIntegrationEnabled(wallpaperId: String, enabled: Bool) async throws  -> BridgeWallpaperMutationBundle
     
     /**
+     * Brings a scene drawn below full resolution back to full size with
+     * MetalFX's spatial upscaler instead of the composition's bilinear
+     * stretch.
+     *
+     * Off by default. It costs nothing at render scale 1; below it each
+     * presented frame of a scene runs one MetalFX pass and keeps one image the
+     * size of the scene's full-resolution output. Running scenes pick it up at
+     * their next presented frame. Web and video wallpapers are not affected.
+     *
+     * # Errors
+     *
+     * Returns an error when the setting cannot be saved or the renderer
+     * rejects the call.
+     */
+    func setMetalfxUpscalingEnabled(enabled: Bool) async throws  -> BridgeSnapshotBundle
+    
+    /**
      * # Errors
      *
      * Returns an error when the display id is unknown, not in mirror mode, or
@@ -2912,6 +2929,38 @@ open func setMediaIntegrationEnabled(wallpaperId: String, enabled: Bool)async th
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Brings a scene drawn below full resolution back to full size with
+     * MetalFX's spatial upscaler instead of the composition's bilinear
+     * stretch.
+     *
+     * Off by default. It costs nothing at render scale 1; below it each
+     * presented frame of a scene runs one MetalFX pass and keeps one image the
+     * size of the scene's full-resolution output. Running scenes pick it up at
+     * their next presented frame. Web and video wallpapers are not affected.
+     *
+     * # Errors
+     *
+     * Returns an error when the setting cannot be saved or the renderer
+     * rejects the call.
+     */
+open func setMetalfxUpscalingEnabled(enabled: Bool)async throws  -> BridgeSnapshotBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_metalfx_upscaling_enabled(
+                    self.uniffiClonePointer(),
+                    FfiConverterBool.lower(enabled)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -7135,6 +7184,13 @@ public struct BridgeSettingsSnapshot {
      */
     public var sceneOnDemandEnabled: Bool
     /**
+     * The saved preference for bringing a scene drawn below full resolution
+     * back to full size with MetalFX instead of a bilinear stretch. Off by
+     * default. A preference, not a read-back: a scene at render scale 1, or one
+     * whose image MetalFX does not take, is composed the old way.
+     */
+    public var metalfxUpscalingEnabled: Bool
+    /**
      * The saved preference for direct NV12 plane sampling inside native Metal
      * scenes. Off by default, experimental. A preference, not a read-back:
      * the `video_path` of each `scene_renderers` row is what actually
@@ -7218,6 +7274,12 @@ public struct BridgeSettingsSnapshot {
          * what actually happened shows up.
          */sceneOnDemandEnabled: Bool, 
         /**
+         * The saved preference for bringing a scene drawn below full resolution
+         * back to full size with MetalFX instead of a bilinear stretch. Off by
+         * default. A preference, not a read-back: a scene at render scale 1, or one
+         * whose image MetalFX does not take, is composed the old way.
+         */metalfxUpscalingEnabled: Bool, 
+        /**
          * The saved preference for direct NV12 plane sampling inside native Metal
          * scenes. Off by default, experimental. A preference, not a read-back:
          * the `video_path` of each `scene_renderers` row is what actually
@@ -7277,6 +7339,7 @@ public struct BridgeSettingsSnapshot {
         self.videoBackends = videoBackends
         self.sceneOptimizationEnabled = sceneOptimizationEnabled
         self.sceneOnDemandEnabled = sceneOnDemandEnabled
+        self.metalfxUpscalingEnabled = metalfxUpscalingEnabled
         self.sceneVideoPlaneSamplingEnabled = sceneVideoPlaneSamplingEnabled
         self.sceneResolution = sceneResolution
         self.sceneUpdateModes = sceneUpdateModes
@@ -7340,6 +7403,9 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         if lhs.sceneOnDemandEnabled != rhs.sceneOnDemandEnabled {
             return false
         }
+        if lhs.metalfxUpscalingEnabled != rhs.metalfxUpscalingEnabled {
+            return false
+        }
         if lhs.sceneVideoPlaneSamplingEnabled != rhs.sceneVideoPlaneSamplingEnabled {
             return false
         }
@@ -7400,6 +7466,7 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         hasher.combine(videoBackends)
         hasher.combine(sceneOptimizationEnabled)
         hasher.combine(sceneOnDemandEnabled)
+        hasher.combine(metalfxUpscalingEnabled)
         hasher.combine(sceneVideoPlaneSamplingEnabled)
         hasher.combine(sceneResolution)
         hasher.combine(sceneUpdateModes)
@@ -7439,6 +7506,7 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
                 videoBackends: FfiConverterSequenceTypeBridgeVideoBackendReport.read(from: &buf), 
                 sceneOptimizationEnabled: FfiConverterBool.read(from: &buf), 
                 sceneOnDemandEnabled: FfiConverterBool.read(from: &buf), 
+                metalfxUpscalingEnabled: FfiConverterBool.read(from: &buf), 
                 sceneVideoPlaneSamplingEnabled: FfiConverterBool.read(from: &buf), 
                 sceneResolution: FfiConverterString.read(from: &buf), 
                 sceneUpdateModes: FfiConverterSequenceTypeBridgeSceneUpdateModeReport.read(from: &buf), 
@@ -7471,6 +7539,7 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
         FfiConverterSequenceTypeBridgeVideoBackendReport.write(value.videoBackends, into: &buf)
         FfiConverterBool.write(value.sceneOptimizationEnabled, into: &buf)
         FfiConverterBool.write(value.sceneOnDemandEnabled, into: &buf)
+        FfiConverterBool.write(value.metalfxUpscalingEnabled, into: &buf)
         FfiConverterBool.write(value.sceneVideoPlaneSamplingEnabled, into: &buf)
         FfiConverterString.write(value.sceneResolution, into: &buf)
         FfiConverterSequenceTypeBridgeSceneUpdateModeReport.write(value.sceneUpdateModes, into: &buf)
@@ -10929,6 +10998,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_media_integration_enabled() != 29153) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_metalfx_upscaling_enabled() != 22115) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_mirror_muted() != 46663) {
