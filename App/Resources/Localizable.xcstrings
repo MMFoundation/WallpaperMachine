@@ -5089,6 +5089,46 @@
     "Review" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Revisar"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "검토"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "確認"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "查看"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "檢視"}}}
     },
+    "Your Steam subscriptions could not be read, so the tiles do not mark them yet: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your Steam subscriptions could not be read, so the tiles do not mark them yet: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steamのサブスクリプションを読み込めなかったため、タイルにはまだ印が付いていません: %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steam 구독을 읽을 수 없어 타일에 아직 구독 표시가 없습니다: %@"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Não foi possível ler suas inscrições na Steam, então os blocos ainda não as marcam: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取你在 Steam 上的订阅，卡片暂时不显示订阅标记：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取你在 Steam 上的訂閱，縮圖暫時不顯示訂閱標記：%@"
+          }
+        }
+      }
+    },
     "Your desktop won’t change until you apply a wallpaper." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Sua mesa não vai mudar até você aplicar um papel de parede."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면을 적용하기 전까지 데스크탑은 변경되지 않습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙を適用するまで、デスクトップは変わりません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "应用壁纸之前，桌面不会有任何变化。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在你套用桌布之前，桌面不會有任何變化。"}}}
     },

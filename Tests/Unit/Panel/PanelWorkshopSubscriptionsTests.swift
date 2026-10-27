@@ -57,7 +57,8 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     try await waitFor { panel.workshop.subscribedIDs == ["222"] }
   }
 
-  /// A marks read that fails says so in the banner, and the next visit to the page tries again.
+  /// A marks read that fails says so in the banner, naming what could not be read as well as
+  /// Steam's reason, and the next visit to the page tries again.
   func testAFailedMarksReadIsReportedAndTriedAgainOnTheNextVisit() async throws {
     let panel = try makePanel(subscribed: ["111": "Video"])
     try await panel.workshop.signInToSteamWeb {
@@ -67,6 +68,10 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     panel.controller.errors.actionError = nil
     panel.controller.workshopBrowser.pageAppeared()
     try await waitFor { panel.controller.errors.actionError != nil }
+    let message = try XCTUnwrap(panel.controller.errors.actionError)
+    let reason = URLError(.notConnectedToInternet).localizedDescription
+    XCTAssertTrue(message.hasSuffix(reason), "Steam's reason ends the line: \(message)")
+    XCTAssertGreaterThan(message.count, reason.count, "the line also says what could not be read")
     XCTAssertEqual(panel.workshop.subscribedIDs, [])
     XCTAssertNotNil(panel.workshop.steamWebSession, "a connection failure keeps the sign-in")
 
