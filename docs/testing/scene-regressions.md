@@ -449,7 +449,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     bound with a condition reads 1 or 0 while one with no condition keeps the number.
   - `ChoiceAsFlagUndeclared.*`: layers whose `visible` names a property the project
     never declares, with a condition or none, keep each one's own authored value (a
-    conditioned `true` stays visible; one binding's value never leaks into another's).
+    conditioned `true` stays visible; one binding's value never leaks into another's),
+    and all of them follow the name once a property document supplies it.
   - `ScriptEffectObject.*`: `thisObject.visible` of an effect script, written from
     `init`, `update` and a media handler, switches that effect only (also where a
     property hid the layer, and with two effects on a layer).

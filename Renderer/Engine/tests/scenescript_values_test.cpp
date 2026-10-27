@@ -267,6 +267,18 @@ TEST(ChoiceAsFlagUndeclared, AVisibilityBoundToAnUndeclaredPropertyKeepsItsOwnAu
     EXPECT_TRUE(scene.Visible("shown"));
     EXPECT_FALSE(scene.Visible("hidden"));
     EXPECT_FALSE(scene.Visible("plain"));
+
+    // Once a document supplies the name, every binding follows it as a declared one would.
+    ASSERT_TRUE(scene.SetProperty("missing", Json("0")));
+    scene.Tick();
+    EXPECT_TRUE(scene.Visible("shown"));
+    EXPECT_TRUE(scene.Visible("hidden"));
+    EXPECT_FALSE(scene.Visible("plain"));
+    ASSERT_TRUE(scene.SetProperty("missing", Json(1)));
+    scene.Tick();
+    EXPECT_FALSE(scene.Visible("shown"));
+    EXPECT_FALSE(scene.Visible("hidden"));
+    EXPECT_TRUE(scene.Visible("plain"));
 }
 
 INSTANTIATE_TEST_SUITE_P(Choices, ChoiceAsFlag, ::testing::Values(true, false),
