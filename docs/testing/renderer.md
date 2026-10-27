@@ -774,8 +774,9 @@ keeps the pictures.
 through the scene harness at 100%, at 50% stretched, and at 50% with
 [MetalFX upscaling](../features/performance.md#metalfx-upscaling): the upscaled picture
 keeps the display's size, differs from the stretch, and is closer to the 100% picture
-than the stretch is (mean channel error); the scene holds one extra full-size 8-bit image
-only while upscaling is in force; and at 100% the switch changes neither the bytes nor the
+than the stretch is (mean channel error); the upscaled draw holds one extra full-size 8-bit image;
+in one running scene, turning upscaling off lets that image go on the next drawn frame and
+turning it on again makes it again; and at 100% the switch changes neither the bytes nor the
 memory. `WE_TEST_KEEP_PICTURES` keeps the pictures.
 
 `horizontal_flip_pointer_test` (native Metal on a detached layer, in the check) drives a

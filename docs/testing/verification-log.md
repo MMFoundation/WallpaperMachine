@@ -48,7 +48,7 @@ Tooling and CI change: crowdin.yml, scripts/crowdin_sync.py (push/pull), scripts
 
 ## 2026-10-26 — MetalFX upscaling for a lowered render scale (issue 96)
 
-- python3 scripts/check_renderer.py: exit 0, passed; new metalfx_upscale_test (3 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image only while in force, no change at 100%.
+- python3 scripts/check_renderer.py: exit 0, passed; new metalfx_upscale_test (3 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image in the upscaled 50% draw, no change at 100%.
 - python3 scripts/check_rust.py: exit 0, passed, including metalfx_upscaling_defaults_off_and_survives_a_restart and the config contract default.
 - python3 scripts/build.py --renderer-only: exit 0, bindings regenerated.
 - python3 scripts/test.py: exit 0, 4157 passed, 0 failed, 47 skipped (panel switch round trip, reset, energy-restart coverage).

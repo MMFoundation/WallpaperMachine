@@ -150,6 +150,35 @@ TEST(MetalFxUpscale, KeepsOneFullSizeImageOnlyWhileItIsUsed)
     EXPECT_LE(upscaled.bytes, stretched.bytes + 2 * full_size);
 }
 
+TEST(MetalFxUpscale, LetsTheImageGoOnTheFirstFrameAfterItIsTurnedOff)
+{
+    WE_SKIP_WITHOUT_METAL();
+    const Upscaling switched(true);
+    ScenePackage    package;
+    MakeEdgeScene(package);
+    GpuSceneOptions options;
+    options.width        = kCanvasWidth;
+    options.height       = kCanvasHeight;
+    options.render_scale = 0.5;
+    GpuScene scene(package, options);
+    ASSERT_TRUE(scene.ok()) << scene.error();
+    const uint64_t full_size = uint64_t(kCanvasWidth) * kCanvasHeight * 4;
+
+    ASSERT_FALSE(scene.Run(3).empty());
+    const uint64_t on = scene.renderer().RenderTargetBytesForTests();
+
+    // The same scene, without being rebuilt: the next drawn frame lets the image go.
+    wallpaper::metal::SetMetalUpscalingEnabled(false);
+    ASSERT_FALSE(scene.Run(2).empty());
+    const uint64_t off = scene.renderer().RenderTargetBytesForTests();
+    EXPECT_GE(on, off + full_size);
+
+    // And turning it back on makes it again.
+    wallpaper::metal::SetMetalUpscalingEnabled(true);
+    ASSERT_FALSE(scene.Run(2).empty());
+    EXPECT_EQ(scene.renderer().RenderTargetBytesForTests(), on);
+}
+
 TEST(MetalFxUpscale, ChangesNothingAtFullResolution)
 {
     WE_SKIP_WITHOUT_METAL();
