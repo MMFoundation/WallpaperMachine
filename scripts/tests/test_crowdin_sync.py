@@ -130,6 +130,57 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(json.loads(text)["strings"]['Quote "x"']["localizations"]["ja"]["stringUnit"]["value"], value)
 
 
+RUSSIAN = {
+    "Open": ("translated", "Открыть"),
+    "Delete %@": ("translated", "Удалить %@"),
+    'Quote "x"': ("translated", 'Цитата "x"'),
+}
+
+
+class InsertLanguageTests(unittest.TestCase):
+    def insert(self, units=RUSSIAN, repo=REPO):
+        return crowdin_sync.insert_language(repo, crowdin_catalog({key: {"ru": unit} for key, unit in units.items()}), "ru")
+
+    def test_every_key_gets_the_language_and_nothing_else_changes(self):
+        text, added, missing = self.insert()
+        self.assertEqual((added, missing), (3, []))
+        data = json.loads(text)
+        for key, (_, value) in RUSSIAN.items():
+            self.assertEqual(data["strings"][key]["localizations"]["ru"]["stringUnit"], {"state": "translated", "value": value})
+        before = json.loads(REPO)
+        for entry in data["strings"].values():
+            del entry["localizations"]["ru"]
+        self.assertEqual(data, before)
+
+    def test_the_layout_is_kept_one_line_and_expanded_alike(self):
+        text, _, _ = self.insert()
+        unit = lambda value: '"ru" : {"stringUnit" : {"state" : "translated", "value" : ' + json.dumps(value, ensure_ascii=False) + "}}"
+        want = (REPO
+                .replace('"localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "開く"}}',
+                         '"localizations" : {' + unit("Открыть") + ', "ja" : {"stringUnit" : {"state" : "translated", "value" : "開く"}}')
+                .replace('"localizations" : {\n        "ja"', '"localizations" : {\n        ' + unit("Удалить %@") + ',\n        "ja"')
+                .replace('"localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "引用',
+                         '"localizations" : {' + unit('Цитата "x"') + ', "ja" : {"stringUnit" : {"state" : "translated", "value" : "引用'))
+        self.assertNotEqual(want, REPO)
+        self.assertEqual(text, want)
+
+    def test_an_empty_localizations_object_gets_the_unit_alone(self):
+        repo = '{"sourceLanguage" : "en", "strings" : {"Open" : {"localizations" : {}}}, "version" : "1.0"}'
+        text, added, missing = self.insert({"Open": ("translated", "Открыть")}, repo=repo)
+        self.assertEqual((added, missing), (1, []))
+        self.assertEqual(json.loads(text)["strings"]["Open"]["localizations"],
+                         {"ru": {"stringUnit": {"state": "translated", "value": "Открыть"}}})
+
+    def test_untranslated_absent_and_broken_translations_are_reported_not_inserted(self):
+        text, added, missing = self.insert({
+            "Open": ("new", "Open"),
+            "Delete %@": ("translated", "Удалить"),
+        })
+        self.assertEqual(added, 0)
+        self.assertEqual(text, REPO)
+        self.assertEqual(sorted(key for key, _ in missing), sorted(["Open", "Delete %@", 'Quote "x"']))
+
+
 class TranslationProblemTests(unittest.TestCase):
     def test_valid_translations_pass(self):
         self.assertIsNone(translation_problem("Delete %@", "%@を削除"))
@@ -218,6 +269,59 @@ class CommandTests(unittest.TestCase):
                 self.assertIn("3 translation(s) would change", out.getvalue())
                 self.assertEqual(crowdin_sync.pull(dry_run=False), 0)
             self.assertTrue(all(path.read_text() == REPO.replace('"開く"', '"開く!"') for path in catalogs))
+
+    def run_add_language(self, units, *, language="ru", registered=("en", "ja", "zh-Hans"), dry_run=False):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            catalogs = []
+            for relative in ("App/Resources/Localizable.xcstrings", "Extension/Localizable.xcstrings"):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(REPO)
+                catalogs.append(path)
+
+            def fake_download(command, **kwargs):
+                base = Path(command[command.index("--base-path") + 1])
+                for path in catalogs:
+                    (base / path.relative_to(root)).write_text(crowdin_catalog({key: {language: unit} for key, unit in units.items()}))
+                return mock.Mock(returncode=0, stdout="", stderr="")
+
+            out = io.StringIO()
+            with mock.patch.object(crowdin_sync, "ROOT", root), mock.patch.object(crowdin_sync, "CATALOGS", tuple(catalogs)), \
+                    mock.patch.object(crowdin_sync, "swift_languages", return_value=list(registered)), \
+                    mock.patch.object(crowdin_sync.shutil, "which", return_value="/usr/local/bin/crowdin"), \
+                    mock.patch.object(crowdin_sync.subprocess, "run", side_effect=fake_download) as run, \
+                    contextlib.redirect_stdout(out):
+                code = crowdin_sync.add_language(language, dry_run)
+            return code, [json.loads(path.read_text()) for path in catalogs], out.getvalue(), run.call_count
+
+    def test_add_language_writes_a_finished_language_into_every_catalog(self):
+        code, catalogs, _, _ = self.run_add_language(RUSSIAN)
+        self.assertEqual(code, 0)
+        for data in catalogs:
+            self.assertTrue(all("ru" in entry["localizations"] for entry in data["strings"].values()))
+
+    def test_add_language_writes_nothing_until_every_string_is_translated(self):
+        code, catalogs, out, _ = self.run_add_language({**RUSSIAN, "Open": ("new", "Open")})
+        self.assertEqual(code, 1)
+        self.assertTrue(all(data == json.loads(REPO) for data in catalogs))
+        self.assertIn("'Open'", out)
+
+    def test_add_language_dry_run_writes_nothing(self):
+        code, catalogs, _, _ = self.run_add_language(RUSSIAN, dry_run=True)
+        self.assertEqual(code, 0)
+        self.assertTrue(all(data == json.loads(REPO) for data in catalogs))
+
+    def test_add_language_refuses_a_registered_language_without_downloading(self):
+        code, _, out, downloads = self.run_add_language(RUSSIAN, language="ja")
+        self.assertEqual((code, downloads), (1, 0))
+        self.assertIn("pull", out)
+
+    def test_add_language_reports_a_language_crowdin_does_not_export(self):
+        code, catalogs, out, _ = self.run_add_language({}, language="de")
+        self.assertEqual(code, 1)
+        self.assertTrue(all(data == json.loads(REPO) for data in catalogs))
+        self.assertIn("exported no 'de'", out)
 
 
 if __name__ == "__main__":

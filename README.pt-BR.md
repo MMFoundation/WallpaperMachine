@@ -277,6 +277,8 @@ Os papéis de parede de cena também precisam de recursos compartilhados de um W
 
 Ferramentas, empacotamento e solução de problemas: [docs/build.md](docs/build.md).
 Para trabalhar no código: [CONTRIBUTING.md](CONTRIBUTING.md).
+Para traduzir o app ou pedir outro idioma: [Crowdin](https://translate.wallpapermachine.app/project/wallpaper-machine),
+sem precisar de código ([como a tradução chega ao app](docs/localization.md#contributing-translations)).
 
 ## Documentação
 

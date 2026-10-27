@@ -9,6 +9,12 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-25 — Update window review fixes (PR #90)
+
+- python3 scripts/test.py: exit 0; Python stage 25 of 25 modules OK; native 4106 passed, 0 failed, 47 skipped.
+- Covers automatic updates gated on an in-place install, the update check waiting while the window is open, the checkbox through an action, and the manifest requiring the release's section first.
+- Not run: Release build; live download/install from the window and automatic install on display sleep or lock (manual-smoke App update).
+
 ## 2026-10-24 — Update window replaces the update alert and What's New; conventional changelog layout
 
 - python3 scripts/test.py: Python stage all OK (test_release_notes 84, test_update_manifest 7, catalogs and panel localization OK); native 4105 passed, 0 failed, 47 skipped.
