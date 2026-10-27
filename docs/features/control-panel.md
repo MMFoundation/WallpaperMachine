@@ -52,7 +52,7 @@ title bar is one colour across the whole window, the page's, inspector included
 | Name | Beside the traffic lights: the app's mark, **WallpaperMachine** and the version, as the web panel had them. Under 960 points only the mark stays, with the name and version as its tooltip; VoiceOver reads "WallpaperMachine" and the version |
 | Tabs | In the middle of the title bar: **Library** (Installed), **Steam Workshop**, **pixiv** and **Settings**, each as wide as its name; in a window under 960 points they show their symbols alone, with the names as tooltips and VoiceOver labels, so the toolbar's tools keep their places. The page on show is tinted with the accent; VoiceOver reads them as buttons, that one as selected, in a group named **Main navigation** ([Pages and Settings](#pages-and-settings)) |
 | Toolbar | The window title, not drawn in the title bar (the tabs stand for it) but used by the Window menu and Mission Control, names the place on show: **All wallpapers**, **Favorites**, the collection's name, **Steam Workshop**, **pixiv**, or the Settings section's name (**Search results** while searching Settings). The subtitle counts All wallpapers (with the number of updates), Favorites and a collection, and says nothing while the library loads. On the right: activity pills while there is something to report (an import in progress or a result not yet looked at, which opens Import; SteamCMD setup in progress; pixiv saves, which lead to the pixiv page), the target-display menu (named by the screen alone; its items, tooltip and VoiceOver value keep the renderer's full title, and two screens of one name keep it on the button too), the downloads button and **Wallpaper details**, which shows and hides the inspector; Settings shows neither the menu nor **Wallpaper details**. The downloads button appears once there is download activity, rings itself with the batch's mean progress while anything transfers, and carries the batch summary (status, percent, network speed, time left, **needs attention**) as its label and tooltip. |
-| Page | Installed, Steam Workshop and pixiv open with one full-width search bar at the top (Command-F puts the keyboard in it), which stays in place when moving between them; VoiceOver names it for what it searches (**Search installed wallpapers**, **Search Steam Workshop**, **Search pixiv by tag**). Settings' search field heads its section list instead. **Installed**: a row of view chips, **All wallpapers** (its count, and an accent dot while Workshop updates exist, whose tooltip and VoiceOver value say how many) and **Favorites** (its count; it is Installed's own Favorite filter), lit for the view on show, plus the shown collection's chip, which puts the collection away ([Local collections](#local-collections)); then a header row (**Filter** with its count, the sort menu and its direction, then **Select**, **Refresh** and **Import**; in a narrow column the controls keep their places and drop their words, which stay as tooltips and VoiceOver names), the tile grid and a footer (how many a search or filter leaves, **Update N wallpapers**, the selection tools, the drag-select tip, or *Loading your library…*; with none of these it is not shown, since the subtitle counts the view). **Steam Workshop** (the Discover page): a header with its lists (**Wallpapers**, **Collections**, **Your subscriptions**; one menu in the narrowest column), Filter, sort and Refresh (it searches from the page's search bar, which an author's or a collection's list leaves out); then the grid and a footer with the result summary and the pager (Previous, an editable page number with the number of pages, Next). A Workshop page is one Steam page of 30 tiles, at most 1,000 pages. **pixiv**: see [pixiv](pixiv.md#browsing) |
+| Page | Installed, Steam Workshop and pixiv open with one full-width search bar at the top (Command-F puts the keyboard in it), which stays in place when moving between them; VoiceOver names it for what it searches (**Search installed wallpapers**, **Search Steam Workshop**, **Search pixiv by tag**). Settings' search field heads its section list instead. **Installed**: a row of view chips, **All wallpapers** (its count, and an accent dot while Workshop updates exist, whose tooltip and VoiceOver value say how many) and **Favorites** (its count; it is Installed's own Favorite filter), lit for the view on show, plus the shown collection's chip, which puts the collection away ([Local collections](#local-collections)), and at the row's end **Play** and **Shuffle**, which make the target display rotate through the view on show ([playlists](playlists.md#playing-from-installed)); then a header row (**Filter** with its count, the sort menu and its direction, then **Select**, **Refresh** and **Import**; in a narrow column the controls keep their places and drop their words, which stay as tooltips and VoiceOver names), the tile grid and a footer (how many a search or filter leaves, **Update N wallpapers**, the selection tools, the drag-select tip, or *Loading your library…*; with none of these it is not shown, since the subtitle counts the view). **Steam Workshop** (the Discover page): a header with its lists (**Wallpapers**, **Collections**, **Your subscriptions**; one menu in the narrowest column), Filter, sort and Refresh (it searches from the page's search bar, which an author's or a collection's list leaves out); then the grid and a footer with the result summary and the pager (Previous, an editable page number with the number of pages, Next). A Workshop page is one Steam page of 30 tiles, at most 1,000 pages. **pixiv**: see [pixiv](pixiv.md#browsing) |
 | Filters sidebar | A floating panel at the page's leading edge, opened from the page's **Filter** button on Installed, Discover and pixiv ([Filtering](#filtering)) |
 | Inspector | A column of the page along its trailing edge (not the system's inspector column, which gave the title bar a second shade): preview, title, facts, actions, tags, and the selected wallpaper's options and properties ([wallpaper properties](wallpaper-properties.md)). 300 points wide; dragging its leading edge resizes it from 260 to 420. It starts open in a window 960 points wide or more and closed in a narrower one, and follows the width once a resize has settled, until the person opens or closes it with **Wallpaper details**: that choice then holds whatever the width, also across a visit to Settings, which has none. Nothing is stored. The top of an installed wallpaper's inspector is washed with a blurred copy of its still (never the animation); the sections below are collapsible cards |
 | Now Playing | The bar along the bottom of the window, on every page: the target display's wallpaper, which opens its details, and the playback controls ([Now Playing](#now-playing)) |
@@ -471,7 +471,8 @@ no Share: they have no page to share.
 
 The bar along the bottom of the window shows the target display's wallpaper: its
 still, its title, and the display's name beside a small equalizer that moves only
-while playback runs and the window is on screen. When the target display is empty it
+while playback runs and the window is on screen; while the display rotates, the name is
+followed by what it rotates through (All wallpapers, Favorites, its list or a collection). When the target display is empty it
 says **Nothing on this display** and the hint to pick a wallpaper; VoiceOver reads the
 global playback state (**Playback running** or **Playback paused**) as the bar's
 value. The wallpaper's part of the bar lights on hover and, clicked, opens its details
@@ -479,7 +480,7 @@ above it: the still at 16:9, a *Now Playing* caption, the title (selectable), it
 the display's full name, the playback state and **Show in library**, which shows the
 wallpaper selected on Installed. Its controls:
 
-- **Previous wallpaper**, play/pause, **Next wallpaper** and **Recently used**
+- **Previous wallpaper**, play/pause, **Next wallpaper**, **Playlist** and **Recently used**
   (below). Play/pause acts on every wallpaper and is enabled whenever any display
   has an assignment, even if the target display is empty; with no assignments it is
   disabled and reports **No wallpaper playing**. The choice outlives a quit: it is
@@ -494,6 +495,13 @@ wallpaper selected on Installed. Its controls:
   ([playlists](playlists.md#where-it-lives)). Otherwise it takes the library's next supported
   wallpaper, the rule of the Next wallpaper keyboard shortcut ([automation](automation.md)).
   A playlist with nothing else to change to says so.
+- **Playlist** is lit, with the order's symbol (repeat or shuffle), while the target
+  display rotates, and is unavailable for a mirror or a disabled display. It opens the
+  target display's playlist above the bar: what it rotates through, the order and how
+  often, when it changes next (or **Playlist paused**), **Change now** (or **Resume
+  playlist**), **Stop**, which turns the playlist off and leaves the wallpaper on screen,
+  and **Settings…**, which opens Settings → Displays. A display that does not rotate
+  says to press Play on Installed.
 
 ## Previous, next and recently used
 
@@ -732,7 +740,8 @@ the Filter count includes it), choosing it again or pressing its chip shows ever
 wallpaper again, and a collection deleted while it is shown returns the page to All
 wallpapers. **New collection…** under the list creates one with an inline name field
 (a refused name says why under the field), and a collection's context menu
-(and its VoiceOver actions) offers **Rename…**, inline, and **Delete…**, which asks
+(and its VoiceOver actions) offers **Play** and **Shuffle**
+([playlists](playlists.md#playing-from-installed)), **Rename…**, inline, and **Delete…**, which asks
 in a confirmation sheet. Add selected wallpapers through **Add to collection…** in
 Installed's footer (or **New collection…** there, named from the selection), remove
 selected members of the shown collection, or toggle membership in the inspector's

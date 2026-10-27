@@ -6625,6 +6625,24 @@
     "Changes when you unlock the Mac, while wallpapers are playing." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Troca quando você desbloqueia o Mac, enquanto os papéis de parede estão em reprodução."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면이 재생 중일 때 Mac의 잠금을 해제하면 변경됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Macのロックを解除したときに切り替わります（壁紙が再生中の場合）。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "解锁 Mac 时更换（届时壁纸需在播放）。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "解鎖 Mac 時更換（若屆時桌布正在播放）。"}}}
     },
+    "None of these wallpapers can play on this Mac." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Nenhum destes papéis de parede pode ser reproduzido neste Mac."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 배경화면은 모두 이 Mac에서 재생할 수 없습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "これらの壁紙はどれもこの Mac では再生できません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "这些壁纸都无法在这台 Mac 上播放。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "這些桌布都無法在這台 Mac 上播放。"}}}
+    },
+    "Plays these wallpapers in order on this display" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reproduz estes papéis de parede em ordem neste monitor"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 디스플레이에서 이 배경화면들을 순서대로 재생합니다"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このディスプレイでこれらの壁紙を順番どおりに再生します"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在此显示器上按顺序播放这些壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在此顯示器上依序播放這些桌布"}}}
+    },
+    "Plays these wallpapers in a random order on this display" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reproduz estes papéis de parede em ordem aleatória neste monitor"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 디스플레이에서 이 배경화면들을 임의 순서로 재생합니다"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このディスプレイでこれらの壁紙をランダムな順番で再生します"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在此显示器上随机播放这些壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在此顯示器上隨機播放這些桌布"}}}
+    },
+    "The wallpaper on screen stays until you change it." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O papel de parede na tela fica até você trocá-lo."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "화면의 배경화면은 직접 바꿀 때까지 유지됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "表示中の壁紙は、変更するまでそのままです。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "当前壁纸会一直保留，直到你更换它。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "目前的桌布會一直保留，直到你更換它。"}}}
+    },
+    "Changes between the day and night wallpapers." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Alterna entre os papéis de parede de dia e de noite."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "낮 배경화면과 밤 배경화면 사이를 전환합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "昼と夜の壁紙を切り替えます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在白天和夜晚的壁纸之间切换。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在白天和夜晚的桌布之間切換。"}}}
+    },
+    "To rotate wallpapers, press Play above All wallpapers, Favorites or a collection in Installed." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Para alternar papéis de parede, abra Todos os papéis de parede, Favoritos ou uma coleção em Instalados e pressione Reproduzir acima."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면을 순환하려면 ‘설치됨’에서 모든 배경화면, 즐겨찾기 또는 컬렉션을 연 다음 위쪽의 재생을 누르세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙をローテーションするには、「インストール済み」で「すべての壁紙」「お気に入り」またはコレクションを開き、上の「再生」を押します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "要轮换壁纸，请在“已安装”中打开全部壁纸、收藏或某个合集，然后点按上方的“播放”。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "若要輪播桌布，請在「已安裝」中開啟所有桌布、最愛或某個收藏集，然後按一下上方的「播放」。"}}}
+    },
     "Playlist paused" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Playlist pausada"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "재생목록 일시 정지됨"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "プレイリストを一時停止中"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "播放列表已暂停"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "播放列表已暫停"}}}
     },
@@ -7390,8 +7408,8 @@
     "Energy use, picture quality and the renderers behind them." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Consumo de energia, qualidade da imagem e os renderizadores por trás deles."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "에너지 사용량, 화질 및 이를 처리하는 렌더러 설정입니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "エネルギー使用量、画質、それを支えるレンダラ。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "能耗、画质，以及背后的渲染器。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "能耗、畫質，以及背後的渲染器。"}}}
     },
-    "Group wallpapers for browsing and for playlists." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Agrupe papéis de parede para navegar e para playlists."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면을 그룹으로 묶어 탐색하거나 재생목록에 사용합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙をまとめて、閲覧やプレイリストに使えます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "将壁纸分组，便于浏览，也可用于播放列表。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "將桌布分組，便於瀏覽，也可用於播放列表。"}}}
+    "Group wallpapers to browse them together or play them in turn." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Agrupe papéis de parede para navegar por eles juntos ou reproduzi-los em sequência."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면을 그룹으로 묶어 함께 탐색하거나 차례로 재생합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙をまとめて、一緒に閲覧したり順番に再生したりできます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "将壁纸分组，便于一起浏览，也可以轮流播放。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "將桌布分組，便於一起瀏覽，也可以輪流播放。"}}}
     },
     "Help" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ajuda"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "도움말"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ヘルプ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "帮助"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "說明"}}}

@@ -62,6 +62,20 @@ plan, like other manual edits. A stale reorder is refused if membership or order
 changed while it was being dragged; it never overwrites a concurrent edit.
 Wallpapers moved to Trash leave every list and every day or night choice.
 
+### Playing from Installed
+
+**Play** and **Shuffle** at the end of Installed's view chips, and in a local
+collection's context menu in the Filters sidebar, turn the view on show (All
+wallpapers, Favorites or that collection) into the target display's rotation:
+**Play** in order, **Shuffle** shuffled. The display changes to its first wallpaper at
+once, keeps its interval or unlock trigger, and a display you emptied is filled again;
+when it already shows the only wallpaper the source has, the rotation is set and the
+wallpaper stays. A source with no wallpaper that can play is refused and nothing
+changes. The buttons are unavailable while the view is empty or the target display
+is a mirror or disabled. While the target display rotates, Now Playing names the
+source and its **Playlist** button shows the order, interval and next change, with
+**Change now**, **Stop** and **Settings…** ([Now Playing](control-panel.md#now-playing)).
+
 ### Collections and saved playlists
 
 Local collections are created and filled from Installed (see
@@ -257,9 +271,9 @@ left out of a backup too.
 | Candidates, next pick, day and night | `App/Services/Playlist/PlaylistPlanner.swift` |
 | Persistence and dates | `App/Services/Playlist/PlaylistStore.swift` |
 | Timer and switching | `App/Services/Playlist/PlaylistScheduler.swift`, wired in `AppDelegate.startPlaylistScheduler` |
-| Panel actions | `editPlaylist`, `addToPlaylist`, `removeFromPlaylist`, `reorderPlaylist`, `clearPlaylistFailures`, `skipPlaylist`, `resumePlaylist` in `App/Views/ControlPanel/Model/PanelController+Playlists.swift`; the menus' rules in `Model/PlaylistEdit.swift` |
-| Panel | Settings → Displays in `App/Views/ControlPanel/Settings/Sections/DisplaysPlaylistRows.swift`, with drag and button ordering in `DisplaysOrderEditor.swift` and the page state in `Settings/DisplaysSettingsModel.swift`; the inspector's playlist item and Installed's **Add to playlist** in `Inspector/` and `Library/` |
-| Collections and saved-plan actions | `WallpaperCollectionStore.swift`; `createCollection` … `removeFromCollection` in `Model/PanelController+Collections.swift` and `savePlaylistPlan` … `applyPlaylistPlan` in `Model/PanelController+Playlists.swift`; the sidebar's `Shell/CollectionsSidebarSection.swift` and the Saved playlists group in `Settings/Sections/DisplaysGroups.swift` |
+| Panel actions | `editPlaylist`, `playPlaylist`, `addToPlaylist`, `removeFromPlaylist`, `reorderPlaylist`, `clearPlaylistFailures`, `skipPlaylist`, `resumePlaylist` in `App/Views/ControlPanel/Model/PanelController+Playlists.swift`; the menus' rules in `Model/PlaylistEdit.swift` |
+| Panel | Settings → Displays in `App/Views/ControlPanel/Settings/Sections/DisplaysPlaylistRows.swift`, with drag and button ordering in `DisplaysOrderEditor.swift` and the page state in `Settings/DisplaysSettingsModel.swift`; the inspector's playlist item and Installed's **Add to playlist** in `Inspector/` and `Library/`; Installed's Play and Shuffle in `Library/InstalledScopeBar.swift` and `Library/CollectionsFilterGroup.swift`; Now Playing's playlist in `Shell/NowPlayingPlaylist.swift` |
+| Collections and saved-plan actions | `WallpaperCollectionStore.swift`; `createCollection` … `removeFromCollection` in `Model/PanelController+Collections.swift` and `savePlaylistPlan` … `applyPlaylistPlan` in `Model/PanelController+Playlists.swift`; the sidebar's `Library/CollectionsFilterGroup.swift` and the Saved playlists group in `Settings/Sections/DisplaysGroups.swift` |
 
 ## Verification
 
@@ -284,7 +298,8 @@ rotation once and ignoring a double report, waiting for a display that cannot pl
 only for the 30-second window, leaving timed rotations, cleared displays and a hand-chosen
 wallpaper alone, and never dating a display) and
 `PanelPlaylistActionsTests` and `PanelPlanActionsTests` (the actions' validation, the trigger
-and the held state) with `PanelLibraryActionsTests` (Now Playing's Next wallpaper). `WallpaperPresentationPolicyTests` checks the unlock edge: once per unlock, also
+and the held state, and Play: the source, order and kept interval, the change at once, an emptied
+display filled, and a source with nothing that can play refused) with `PanelLibraryActionsTests` (Now Playing's Next wallpaper). `WallpaperPresentationPolicyTests` checks the unlock edge: once per unlock, also
 when the notification was missed, after a wake or a user switch, and never at start or
 stop. `WallpaperBackupTests` checks that a backup carries the trigger and rejects an
 unknown one.
