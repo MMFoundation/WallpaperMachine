@@ -115,3 +115,12 @@ struct LockScreenReadiness: Codable {
   /// Absent from copies that predate it.
   var processID: Int32? = nil
 }
+
+/// An empty file the extension leaves in the exchange directory once macOS has closed every
+/// connection to its process, and removes when a host connects again. macOS ends such a process
+/// while the Mac is unlocked, live surfaces and all; that ending is not the renderer failing.
+/// A copy of the extension that predates it never leaves one.
+enum LockScreenHostRelease {
+  static func fileName(processID: Int32) -> String { "released-\(processID)" }
+  static let prefix = "released-"
+}

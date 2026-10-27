@@ -794,6 +794,56 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertFalse(try storeOwnsDisplayOne())
   }
 
+  /// While the Mac is unlocked macOS closes its connections to the renderer and then ends the
+  /// process, minutes apart and with nothing wrong. Each is published again, and more of them
+  /// than the limit for other exits do not restore the system wallpaper. A renderer that keeps
+  /// dying after its connections closed still reaches a limit of its own.
+  @MainActor
+  func testRendererThatMacOSEndsAfterClosingItsConnectionsKeepsTheLockScreen() async throws {
+    var record = scene()
+    record.displayId = 1
+    var watches: [Int32: @MainActor () -> Void] = [:]
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { [1: "one"][$0] },
+      watchProcessExit: { pid, exited in
+        watches[pid] = exited
+        return {}
+      })
+    var pid: Int32 = 999_920
+    var responder = readinessResponder(processID: pid)
+    defer { responder.cancel() }
+    try service.start()
+    service.setEnabled(true)
+    await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
+    let endings =
+      LockScreenWallpaperService.rendererReleaseLimit + LockScreenWallpaperService.rendererRecoveryLimit
+    for ending in 1...endings {
+      let exited = try XCTUnwrap(watches[pid])
+      let marker = exchange.appendingPathComponent(LockScreenHostRelease.fileName(processID: pid))
+      XCTAssertTrue(FileManager.default.createFile(atPath: marker.path, contents: nil))
+      let first = try publishedRevision()
+      pid += 1
+      responder.cancel()
+      responder = readinessResponder(processID: pid)
+      exited()
+      await waitFor("ending \(ending)") {
+        !service.isBusy && watches[pid] != nil && (try? self.publishedRevision()) != first
+      }
+      XCTAssertTrue(service.isEnabled)
+      XCTAssertNil(service.errorMessage)
+      XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+    XCTAssertTrue(try storeOwnsDisplayOne())
+    let marker = exchange.appendingPathComponent(LockScreenHostRelease.fileName(processID: pid))
+    XCTAssertTrue(FileManager.default.createFile(atPath: marker.path, contents: nil))
+    try XCTUnwrap(watches[pid])()
+    await waitFor("the failure") { !service.isBusy && service.errorMessage != nil }
+    XCTAssertFalse(service.isEnabled)
+    XCTAssertFalse(try storeOwnsDisplayOne())
+  }
+
   /// Core Graphics lists no sleeping display, and an external one can drop off while it sleeps.
   /// While the Mac is locked or dark that keeps the committed lock screen; awake, it applies.
   @MainActor
