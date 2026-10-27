@@ -539,8 +539,10 @@ While the Mac is unlocked, macOS also closes every connection to a renderer that
 drawing nothing wrong and then ends its process, sometimes a few times within minutes.
 Once its last connection closes, the extension leaves an empty `released-<pid>` file in
 the exchange directory, and removes it when a host connects again. An exit that follows
-one is published again like any other but is never counted towards the limit, so it
-cannot hand the lock screen back to macOS. The app removes the file of the process that
+one is published again like any other but is not counted towards the limit, so a few
+of them cannot hand the lock screen back to macOS. The file shows the disconnection,
+not why the process then ended, so these exits have a limit of their own: past ten
+within ten minutes, each counts like any other exit. The app removes the file of the process that
 ended and any left by processes that are gone.
 
 Repeated checks do not rewrite an unchanged recovery journal. New Spaces, choices made

@@ -795,8 +795,9 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   /// While the Mac is unlocked macOS closes its connections to the renderer and then ends the
-  /// process, minutes apart and with nothing wrong. Each is published again, and however many
-  /// there are, none restores the system wallpaper.
+  /// process, minutes apart and with nothing wrong. Each is published again, and more of them
+  /// than the limit for other exits do not restore the system wallpaper. A renderer that keeps
+  /// dying after its connections closed still reaches a limit of its own.
   @MainActor
   func testRendererThatMacOSEndsAfterClosingItsConnectionsKeepsTheLockScreen() async throws {
     var record = scene()
@@ -816,7 +817,9 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     try service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
-    for ending in 1...(LockScreenWallpaperService.rendererRecoveryLimit + 2) {
+    let endings =
+      LockScreenWallpaperService.rendererReleaseLimit + LockScreenWallpaperService.rendererRecoveryLimit
+    for ending in 1...endings {
       let exited = try XCTUnwrap(watches[pid])
       let marker = exchange.appendingPathComponent(LockScreenHostRelease.fileName(processID: pid))
       XCTAssertTrue(FileManager.default.createFile(atPath: marker.path, contents: nil))
@@ -833,7 +836,12 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
     }
     XCTAssertTrue(try storeOwnsDisplayOne())
-    try await service.shutdown()
+    let marker = exchange.appendingPathComponent(LockScreenHostRelease.fileName(processID: pid))
+    XCTAssertTrue(FileManager.default.createFile(atPath: marker.path, contents: nil))
+    try XCTUnwrap(watches[pid])()
+    await waitFor("the failure") { !service.isBusy && service.errorMessage != nil }
+    XCTAssertFalse(service.isEnabled)
+    XCTAssertFalse(try storeOwnsDisplayOne())
   }
 
   /// Core Graphics lists no sleeping display, and an external one can drop off while it sleeps.
