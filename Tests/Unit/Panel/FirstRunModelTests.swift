@@ -406,9 +406,9 @@ final class FirstRunModelTests: PanelTestCase {
       XCTAssertEqual(missingAccount, .invalidAccount)
       XCTAssertEqual(
         model.error,
-        "Enter your Steam account name: the login name, not the profile name. Letters, numbers and underscores only.")
+        "Enter your Steam account name: the login name, not the profile name.")
 
-      for bad in ["anonymous", "Anonymous", "my name", "名前", "a-b"] {
+      for bad in ["anonymous", "Anonymous", "my name", "名前", "-login", "+quit", "@example.com", "a+b", "a;b"] {
         model.signInAccount = bad
         let result = await model.submitSignIn(password: "secret")
         XCTAssertEqual(result, .invalidAccount, bad)
@@ -424,6 +424,12 @@ final class FirstRunModelTests: PanelTestCase {
       XCTAssertTrue(panel.workshop.downloadRequests.isEmpty)
       XCTAssertFalse(model.holdsSecret)
     }
+  }
+
+  /// Steam once accepted email addresses as account names, and those accounts cannot be renamed.
+  func testAnEmailAddressAccountNameIsAccepted() {
+    XCTAssertNil(FirstRunModel.problem(account: "Old.User-1@Example.com", password: "x"))
+    XCTAssertEqual(WorkshopDownloader.normalizedAccount(" Old.User-1@Example.com "), "old.user-1@example.com")
   }
 
   func testThePasswordIsNotTrimmed() {

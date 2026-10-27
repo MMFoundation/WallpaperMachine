@@ -290,8 +290,9 @@ final class FirstRunModel {
   /// Whether Steam's answer is on its way, so the response field waits.
   func isAnswering(_ job: DownloadRow) -> Bool { controller.isBusy(Self.inputKey(for: job.id)) }
 
-  /// What **Sign in** checks before anything reaches Steam: a login name (letters, digits and
-  /// underscores, not `anonymous`) and a password. The password is not trimmed.
+  /// What **Sign in** checks before anything reaches Steam: a login name (the characters
+  /// `WorkshopDownloader.normalizedAccount` accepts, not `anonymous`) and a password. The
+  /// password is not trimmed.
   static func problem(account: String, password: String) -> Submission? {
     let trimmed = account.trimmingCharacters(in: .whitespacesAndNewlines)
     if WorkshopDownloader.normalizedAccount(trimmed) == nil { return .invalidAccount }
@@ -308,7 +309,7 @@ final class FirstRunModel {
     }
     error =
       problem == .invalidAccount
-      ? L("Enter your Steam account name: the login name, not the profile name. Letters, numbers and underscores only.")
+      ? L("Enter your Steam account name: the login name, not the profile name.")
       : L("Enter your Steam password.")
     return problem
   }

@@ -36,7 +36,9 @@ have **Back**, and decision pages have **Skip**:
 2. **Steam.** Explains that browsing is free and that downloading needs a Steam
    account that owns Wallpaper Engine, with **Create a Steam account**
    (`store.steampowered.com/join/`) and **Buy Wallpaper Engine** beside that
-   explanation. The form takes the account name (login name, not profile name),
+   explanation. The form takes the account name (login name, not profile name;
+   ASCII letters, digits and `_`, plus the `@`, `.` and `-` of the email addresses
+   Steam once accepted as account names, starting with a letter or digit),
    the password (with a show/hide button) and **Keep me signed in on this Mac** (on
    by default). **Sign in** checks the form and then sends only the account name and
    the remember choice; the form hands the password to the guide's model, which holds
