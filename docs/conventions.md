@@ -307,7 +307,7 @@ The rules that bind every change:
   - a behavior change and the documentation that describes that behavior;
   - a new user-facing string and the catalog of each target that shows it, in
     every language;
-  - `README.md`, `README.zh-CN.md` and `README.pt-BR.md`;
+  - `README.md`, `README.zh-CN.md`, `README.pt-BR.md` and `README.ko.md`;
   - a vendored `ThirdParty/` update and `ThirdParty/provenance.json`.
 - History stays linear: catch up with `origin/main` by rebasing unpushed commits
   (`git pull --rebase`), not with a `Merge remote-tracking branch` commit. CI commits

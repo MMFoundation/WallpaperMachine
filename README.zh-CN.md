@@ -1,6 +1,6 @@
 <!-- README.md in 简体中文: change both together. Wording follows the app's zh-Hans catalog
      (App/Resources/Localizable.xcstrings) and the website's /zh/ pages. The Supporter list between the markers is written by scripts/update_sponsors.py, as in README.md. -->
-<p align="center"><sub><a href="README.md">English</a>&ensp;·&ensp;<b>简体中文</b>&ensp;·&ensp;<a href="README.pt-BR.md">Português</a></sub></p>
+<p align="center"><sub><a href="README.md">English</a>&ensp;·&ensp;<b>简体中文</b>&ensp;·&ensp;<a href="README.ko.md">한국어</a>&ensp;·&ensp;<a href="README.pt-BR.md">Português</a></sub></p>
 
 <a href="https://www.wallpapermachine.app/zh/">
   <img src="https://github.com/user-attachments/assets/df92d34d-b718-4d58-b8e9-b002c4915516" width="100%" alt="一台 Mac 的桌面轮流播放 WallpaperMachine 的六张动态壁纸：水波中的千咲、月球上的 Lucy、雪地里的红牛 F1 赛车、黄昏中的流萤、雨中公交站的艾莲，以及 Into The Abyss，上方是 macOS 菜单栏，下方是程序坞。">

@@ -1,7 +1,7 @@
 <!-- README.md in Português: change both together. Wording follows the app's pt-BR catalog
      (App/Resources/Localizable.xcstrings); the website has no Portuguese pages, so its links point to the English site.
      The Supporter list between the markers is written by scripts/update_sponsors.py, as in README.md. -->
-<p align="center"><sub><a href="README.md">English</a>&ensp;·&ensp;<a href="README.zh-CN.md">简体中文</a>&ensp;·&ensp;<b>Português</b></sub></p>
+<p align="center"><sub><a href="README.md">English</a>&ensp;·&ensp;<a href="README.zh-CN.md">简体中文</a>&ensp;·&ensp;<a href="README.ko.md">한국어</a>&ensp;·&ensp;<b>Português</b></sub></p>
 
 <a href="https://www.wallpapermachine.app">
   <img src="https://github.com/user-attachments/assets/df92d34d-b718-4d58-b8e9-b002c4915516" width="100%" alt="A mesa de um Mac alternando entre seis papéis de parede animados reproduzidos pelo WallpaperMachine: Chisaki sobre a água ondulante, Lucy na Lua, um carro de F1 da Red Bull na neve, Firefly ao entardecer, Ellen num ponto de ônibus na chuva e Into The Abyss, sob a barra de menus e o Dock do macOS.">

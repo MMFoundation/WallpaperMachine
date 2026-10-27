@@ -50,10 +50,10 @@ jobs:
             git fetch --quiet origin main
             git reset --quiet --hard origin/main
             python3 scripts/update_sponsors.py
-            if git diff --quiet -- README.md README.zh-CN.md README.pt-BR.md; then
+            if git diff --quiet -- README.md README.zh-CN.md README.pt-BR.md README.ko.md; then
               exit 0
             fi
-            git commit --quiet -m "docs(readme): update the Supporter list" -- README.md README.zh-CN.md README.pt-BR.md
+            git commit --quiet -m "docs(readme): update the Supporter list" -- README.md README.zh-CN.md README.pt-BR.md README.ko.md
             if git push origin HEAD:main; then
               exit 0
             fi

@@ -58,7 +58,7 @@ use `rg -u` only when those are the target.
   that shows it, in every language that catalog ships (`App/Resources/*.xcstrings` for the
   app, `Extension/Localizable.xcstrings` only for what the lock-screen extension shows); a panel literal
   (`Text("…")`, `L("…")`) must equal its catalog key or it renders English.
-  `README.md`, `README.zh-CN.md` and `README.pt-BR.md` change together ([localization](docs/localization.md)).
+  `README.md`, `README.zh-CN.md`, `README.pt-BR.md` and `README.ko.md` change together ([localization](docs/localization.md)).
 - Match surrounding conventions; reuse `ClientPaths`, `AppLog` and dependency injection.
   Unit tests run inside the real app, so `UserDefaults.standard` is the installed app's
   preferences: isolate with `WALLPAPER_MACHINE_HOME` and `TemporaryDefaults`, never a
