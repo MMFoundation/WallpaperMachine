@@ -15,6 +15,7 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
   var batteryProfileCalls: [Profile] = []
   var sceneOptimizationCalls: [Bool] = []
   var sceneOnDemandCalls: [Bool] = []
+  var metalFXUpscalingCalls: [Bool] = []
   var sceneVideoPlaneSamplingCalls: [Bool] = []
   var sceneResolutionCalls: [String] = []
   var verboseLoggingCalls: [Bool] = []
@@ -49,6 +50,12 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
 
   override func setSceneOnDemandEnabled(enabled: Bool) async throws -> BridgeSnapshotBundle {
     try await record({ $0.sceneOnDemandCalls.append(enabled) }) { $0.sceneOnDemandEnabled = enabled }
+  }
+
+  override func setMetalfxUpscalingEnabled(enabled: Bool) async throws -> BridgeSnapshotBundle {
+    try await record({ $0.metalFXUpscalingCalls.append(enabled) }) {
+      $0.metalfxUpscalingEnabled = enabled
+    }
   }
 
   override func setSceneVideoPlaneSamplingEnabled(enabled: Bool) async throws

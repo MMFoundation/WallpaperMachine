@@ -37,7 +37,7 @@ const STATIC_ARCHIVES: [&str; 15] = [
 
 const SHARED_LIBRARIES: [&str; 4] = ["c++", "lz4", "freetype", "qjs"];
 
-const FRAMEWORKS: [&str; 12] = [
+const FRAMEWORKS: [&str; 13] = [
     "Accelerate",
     "AppKit",
     "AudioToolbox",
@@ -47,6 +47,7 @@ const FRAMEWORKS: [&str; 12] = [
     "Foundation",
     "IOSurface",
     "Metal",
+    "MetalFX",
     "OpenGL",
     "QuartzCore",
     "VideoToolbox",

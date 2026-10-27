@@ -258,6 +258,19 @@ impl OweBackend {
         }
     }
 
+    /// Turns MetalFX upscaling of scenes drawn below full resolution on or
+    /// off, process-wide.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] if the call unwinds.
+    pub fn set_metalfx_upscaling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
+        unsafe {
+            UnwindSafeFFI::new("owe_set_metalfx_upscaling_enabled")
+                .call(|| sys::owe_set_metalfx_upscaling_enabled(enabled))
+        }
+    }
+
     /// Chooses how many pixels a 2D scene is rasterized with, process-wide.
     ///
     /// New scenes take it when they are built; a running scene takes it the

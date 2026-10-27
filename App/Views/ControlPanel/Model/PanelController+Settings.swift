@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 /// choices, muting, the low-battery level, app rules, hiding after applying) are not here.
 enum RenderingSetting: String, CaseIterable, Sendable {
   case batteryMode, batteryRenderScale, batteryTargetFps, frameRateCap, qualityPreset, renderScale
+  case metalFXUpscaling
   case sceneOptimization, sceneOnDemand
   case sceneVideoPlaneSampling, sceneResolution
   case lowPowerModeAction, thermalAction, lowBatteryAction
@@ -259,6 +260,12 @@ extension PanelController {
   private func clampedScale(_ scale: Double) throws -> Float {
     guard scale.isFinite else { throw InvalidControlValue() }
     return Float(min(max(scale, Self.renderScaleRange.lowerBound), Self.renderScaleRange.upperBound))
+  }
+
+  /// `metalFXUpscaling`: a scene drawn below full resolution is brought back to full size by
+  /// MetalFX instead of being stretched. Running scenes pick it up at their next frame.
+  func setMetalFXUpscaling(_ enabled: Bool) async throws {
+    try await change(.metalFXUpscaling) { try await store.setMetalFXUpscalingEnabledAsync(enabled) }
   }
 
   /// `sceneOptimization`.

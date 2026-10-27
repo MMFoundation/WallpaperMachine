@@ -25,6 +25,14 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-26 — MetalFX upscaling for a lowered render scale (issue 96)
+
+- python3 scripts/check_renderer.py: passed; new metalfx_upscale_test (3 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image only while in force, no change at 100%.
+- python3 scripts/check_rust.py: passed, including metalfx_upscaling_defaults_off_and_survives_a_restart and the config contract default.
+- python3 scripts/build.py --renderer-only: bindings regenerated.
+- python3 scripts/test.py: 4157 passed, 0 failed, 47 skipped (panel switch round trip, reset, energy-restart coverage).
+- Not checked: a real wallpaper on the desktop, the energy cost, or a comparison against Wallpaper Engine (WE has no MetalFX equivalent). Release app not rebuilt.
+
 ## 2026-10-25 — Updates, web, downloads, Workshop, scene and panel improvements
 
 Update signature check, http in web content, page errors in the log, frame-confirmed switch hold, saved pause, download queue order and batch retry, Steam favorites, timeline mirror mode, CursorEvent.localPosition, tile zoom and Help menu, doc link check.
@@ -36,7 +44,6 @@ Update signature check, http in web content, page errors in the log, frame-confi
 - Steam favorites page layout and `sortmethod` values read off a public profile's favorites page; a signed-in subscriptions page was not checked
 - Not compared with Wallpaper Engine frames (no VM run): mirror end-frame behaviour, `localPosition` y direction
 - Not run on a desktop: the frame-confirmed release of the switch hold, http loads, the View and Help menus, the fourth Discover tab's fit
-
 
 ## 2026-10-25 — Scene capability probe, remembered Native Metal verdicts, mirror audio and issue-report details
 
@@ -113,12 +120,3 @@ Space mode reworked: wallpaper windows of a display in the mode stay on its curr
 - Panel: card switch, desktop strip, chooser popover and the toolbar's toggle and "· Desktop 1" label rendered as intended
 - Gap: ad-hoc test builds ask again for System Audio Recording; an audio-responsive scene's first frame waits for the answer (6.4 s and 180 s stalls seen); a pixiv keychain prompt was denied
 - Not checked live: Apply assigning the current desktop (unit-tested), chooser search typing, multiple displays with separate Spaces, web/video on a pinned display, VoiceOver
-
-## 2026-10-24 — Daily active count (DAU/MAU) without an install id
-
-- App: TelemetryActiveCount sends one ping per UTC day to /api/telemetry/active (random per-day ping id, day, version, source, monthFirst); hourly retry with the same ping, next send 0-15 min after UTC midnight; no count with WALLPAPER_MACHINE_HOME or a defaults suite.
-- python3 scripts/test.py --only TelemetryActiveCountTests --only TelemetryClientTests --only TelemetryServiceTests: 18 passed, 0 failed.
-- python3 scripts/test.py (full gate, worktree): Python script tests OK; native 4062 passed, 0 failed, 47 skipped; 1 runtime warning (main-thread call), not traced to this change and not baselined.
-- Website (separate repo, branch feat/telemetry-active-count): npm run typecheck OK; local wrangler dev on a scratch D1 with migration 0002: retries (same and lowercase ping) counted once, a day-behind clock kept its day, a far-off clock took the arrival day, bad schema/ping/day/agent 400, cron prune kept 400-day totals and 2-day pings.
-- Dashboard DAU/MAU SQL run on the scratch D1 gave the expected sums; the page's new section was not viewed in a browser (owner sign-in needed).
-- Not done: no D1 remote migration, no Worker deploy, no app Release build, no desktop run.

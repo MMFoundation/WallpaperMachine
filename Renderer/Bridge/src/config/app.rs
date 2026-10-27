@@ -93,6 +93,8 @@ pub struct QualityCfg {
     pub scene_optimization_enabled: bool,
     pub scene_on_demand_enabled: bool,
     pub scene_resolution: SceneResolutionCfg,
+    /// MetalFX upscaling of a scene drawn below full resolution. Off by default.
+    pub metalfx_upscaling_enabled: bool,
 }
 
 impl Default for QualityCfg {
@@ -105,6 +107,7 @@ impl Default for QualityCfg {
             scene_optimization_enabled: true,
             scene_on_demand_enabled: false,
             scene_resolution: SceneResolutionCfg::default(),
+            metalfx_upscaling_enabled: false,
         }
     }
 }

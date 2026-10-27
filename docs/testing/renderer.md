@@ -770,6 +770,14 @@ Fit's per-frame pass count is the mode's. The drawable composition itself is not
 back: the harness sees the poster, which runs the same composition code. `WE_TEST_KEEP_PICTURES`
 keeps the pictures.
 
+`metalfx_upscale_test` (native Metal, headless, in the check) draws a hard-edged canvas
+through the scene harness at 100%, at 50% stretched, and at 50% with
+[MetalFX upscaling](../features/performance.md#metalfx-upscaling): the upscaled picture
+keeps the display's size, differs from the stretch, and is closer to the 100% picture
+than the stretch is (mean channel error); the scene holds one extra full-size 8-bit image
+only while upscaling is in force; and at 100% the switch changes neither the bytes nor the
+memory. `WE_TEST_KEEP_PICTURES` keeps the pictures.
+
 `horizontal_flip_pointer_test` (native Metal on a detached layer, in the check) drives a
 `SceneWallpaper` built through the C bindings with a parsed synthetic scene and reads the
 pointer the frame loop hands the scene: untouched by default, mirrored left to right (y

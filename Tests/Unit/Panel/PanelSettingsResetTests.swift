@@ -33,10 +33,12 @@ final class PanelSettingsResetTests: PanelTestCase {
       try await controller.setConcurrentDownloads(6)
       try await controller.setWorkshopUpdateChecks(false)
       try await controller.setSceneOptimization(false)
+      try await controller.setMetalFXUpscaling(true)
       try await controller.setVerboseLogging(true)
       try await controller.setBatteryTargetFps(15)
       try PanelPreferences.saveFavorites(["kept"], in: panel.defaults)
       bridge.sceneOptimizationCalls = []
+      bridge.metalFXUpscalingCalls = []
       bridge.verboseLoggingCalls = []
       bridge.batteryProfileCalls = []
 
@@ -56,6 +58,7 @@ final class PanelSettingsResetTests: PanelTestCase {
       XCTAssertTrue(controller.workshop.updates.checksAutomatically)
 
       XCTAssertEqual(bridge.sceneOptimizationCalls, [true])
+      XCTAssertEqual(bridge.metalFXUpscalingCalls, [false])
       XCTAssertEqual(bridge.verboseLoggingCalls, [false])
       XCTAssertEqual(bridge.batteryProfileCalls, [.init(renderScale: 0.75, targetFps: 30)])
 

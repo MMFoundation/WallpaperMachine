@@ -258,6 +258,28 @@ the saved limit, perhaps **No limit**; a ceiling the saved limit sets gets no li
 While a cause is in force the row offers **Open Playback & Power**, where those
 choices are made.
 
+### MetalFX upscaling
+
+**MetalFX upscaling** (off by default, saved as `quality.metalfx_upscaling_enabled`)
+changes how a scene drawn below 100% is brought back to its size on screen. Off, the
+composition stretches the lowered picture with a bilinear sample, as it always has. On,
+each presented frame of a scene whose render scale is below 1 first runs Apple's MetalFX
+spatial scaler on the scene's final output, writing an image the size that output has at
+100%, and the composition then samples that image exactly as it would at full resolution;
+scaling mode, zoom, framing, flip and the poster are unchanged. It applies to the
+effective scale, so the battery or a reduced-quality condition's lower scale is upscaled
+too. At 100% it does nothing and costs nothing. A running scene picks it up at its next
+presented frame; nothing is rebuilt or reparsed.
+
+The cost while it is in force is one MetalFX pass per presented frame (a frame skipped
+as unchanged runs none) and one extra image the size of the scene's full-resolution
+output, which is let go on the first frame that no longer needs it. Edges and fine
+detail come out closer to the 100% picture than the stretch does; it does not add detail
+that was never drawn. 8-bit outputs use MetalFX's perceptual mode and half-float ones its
+HDR mode. An output MetalFX cannot take is logged once and composed the old way. Web
+wallpapers (WebKit draws them) and videos are not affected. The energy effect has not
+been measured, and FSR is not offered: MetalFX is the system's own upscaler.
+
 ### 2D scene resolution
 
 **2D scene resolution** (**Display resolution**, the default, or **Canvas size**) is

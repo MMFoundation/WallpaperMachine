@@ -95,7 +95,8 @@ use crate::{
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
             SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile,
             SetFrameRateCap, SetLabelLanguages, SetMediaIntegrationEnabled,
-            SetPresentationUnloaded, SetPresentationSuspended, SetPropertyPath,
+            SetMetalFxUpscalingEnabled, SetPresentationUnloaded, SetPresentationSuspended,
+            SetPropertyPath,
             SetQualityThrottle, SetRenderScale,
             SetVerboseLogging,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
@@ -304,6 +305,10 @@ impl<E: crate::engine::EngineFacade> BridgeBuilder<E> {
         log::info!(
             "Requested video-plane sampling: {}",
             config.experimental.scene_video_plane_sampling,
+        );
+        log::info!(
+            "Requested MetalFX upscaling: {}",
+            config.quality.metalfx_upscaling_enabled,
         );
 
         let engine = ArcEngineFacade::new(engine);
@@ -849,6 +854,13 @@ impl EngineFacade for ArcEngineFacade {
         enabled: bool,
     ) -> Result<(), wallpaper_core::EngineError> {
         self.0.set_scene_video_plane_sampling_enabled(enabled)
+    }
+
+    fn set_metalfx_upscaling_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<(), wallpaper_core::EngineError> {
+        self.0.set_metalfx_upscaling_enabled(enabled)
     }
 
     fn set_scene_resolution(
@@ -2140,6 +2152,26 @@ impl WallpaperBridge {
         self.actor
             .ask(SetSceneVideoPlaneSamplingEnabled { enabled })
             .await
+    }
+
+    /// Brings a scene drawn below full resolution back to full size with
+    /// MetalFX's spatial upscaler instead of the composition's bilinear
+    /// stretch.
+    ///
+    /// Off by default. It costs nothing at render scale 1; below it each
+    /// presented frame of a scene runs one MetalFX pass and keeps one image the
+    /// size of the scene's full-resolution output. Running scenes pick it up at
+    /// their next presented frame. Web and video wallpapers are not affected.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the setting cannot be saved or the renderer
+    /// rejects the call.
+    pub async fn set_metalfx_upscaling_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<BridgeSnapshotBundle, BridgeError> {
+        self.actor.ask(SetMetalFxUpscalingEnabled { enabled }).await
     }
 
     /// Chooses how many pixels a 2D scene wallpaper is rasterized with.

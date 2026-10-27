@@ -58,6 +58,9 @@ struct GpuSceneOptions {
     /// Static reuse and copy elimination. Process-wide and restored when the scene is
     /// destroyed; switch it off to count every pass of every frame.
     bool scene_optimization { true };
+    /// The internal render scale the graph is compiled at, as the host's quality setting
+    /// applies it: 1 draws at full resolution.
+    double render_scale { 1.0 };
     /// The container version the scene file is read as, as a package of that version would
     /// say it. 0 reads every key the scene file holds, as a loose project does.
     uint16_t package_version { 0 };

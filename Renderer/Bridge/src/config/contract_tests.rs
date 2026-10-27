@@ -85,6 +85,7 @@ fn assert_default_app(config: &AppConfig) {
     assert_eq!(config.quality.battery.target_fps, 30);
     assert!(config.quality.scene_optimization_enabled);
     assert!(!config.quality.scene_on_demand_enabled);
+    assert!(!config.quality.metalfx_upscaling_enabled);
     assert_eq!(config.quality.scene_resolution, SceneResolutionCfg::Display);
     assert!(config.monitors.is_empty());
     assert!(config.monitor_settings.is_empty());
@@ -270,6 +271,7 @@ fn all_app_fields_and_selector_variants_round_trip_without_normalizing_preferenc
                         scene_optimization_enabled: false,
                         scene_on_demand_enabled: true,
                         scene_resolution: resolution,
+                        metalfx_upscaling_enabled: true,
                     },
                     monitors: Vec::new(),
                     monitor_settings: Vec::new(),

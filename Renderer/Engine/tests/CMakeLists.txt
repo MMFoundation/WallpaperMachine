@@ -969,6 +969,20 @@ if(APPLE)
       DISCOVERY_TIMEOUT 60
   )
 
+  # MetalFX upscaling of a scene drawn below full resolution, through the harness above.
+  add_executable(metalfx_upscale_test metalfx_upscale_test.mm)
+  target_link_libraries(metalfx_upscale_test PRIVATE scene_test_support GTest::gtest_main)
+  set_target_properties(metalfx_upscale_test PROPERTIES
+      OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+  target_compile_options(metalfx_upscale_test PRIVATE
+      $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+  gtest_discover_tests(
+      metalfx_upscale_test
+      TEST_PREFIX metalfx_upscale_test.
+      PROPERTIES TIMEOUT 120
+      DISCOVERY_TIMEOUT 60
+  )
+
   # The pointer follows the picture under the horizontal flip: the real host path on a detached
   # Metal layer, driven through the C bindings.
   add_executable(horizontal_flip_pointer_test horizontal_flip_pointer_test.mm)

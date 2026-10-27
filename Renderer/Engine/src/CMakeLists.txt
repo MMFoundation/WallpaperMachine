@@ -15,7 +15,7 @@ if(APPLE)
           ACCELERATE:Accelerate AUDIO_TOOLBOX:AudioToolbox AUDIO_UNIT:AudioUnit
           CORE_AUDIO:CoreAudio CORE_TEXT:CoreText CORE_GRAPHICS:CoreGraphics
           CORE_MEDIA:CoreMedia CORE_VIDEO:CoreVideo FOUNDATION:Foundation
-          IOSURFACE:IOSurface METAL:Metal QUARTZ_CORE:QuartzCore
+          IOSURFACE:IOSurface METAL:Metal METAL_FX:MetalFX QUARTZ_CORE:QuartzCore
           VIDEOTOOLBOX:VideoToolbox)
     string(REPLACE ":" ";" entry_parts "${entry}")
     list(GET entry_parts 0 framework_stem)

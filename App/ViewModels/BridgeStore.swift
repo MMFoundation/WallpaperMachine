@@ -1094,6 +1094,13 @@ final class BridgeStore {
         apply(bundle)
     }
 
+    /// MetalFX upscaling of a scene drawn below full resolution. Off by default. A preference:
+    /// a scene at 100% render scale, or one MetalFX cannot take, is stretched as before.
+    func setMetalFXUpscalingEnabledAsync(_ enabled: Bool) async throws {
+        let bundle = try await bridge.setMetalfxUpscalingEnabled(enabled: enabled)
+        apply(bundle)
+    }
+
     /// Whole-scene on-demand updating. Off by default. The bundle carries back the saved
     /// preference plus `sceneUpdateModes`, which is the live per-scene read-back: the
     /// preference being on does not mean any scene actually stopped ticking.
@@ -1427,7 +1434,7 @@ final class BridgeStore {
                 shaderCacheSizeBytes: 0,
                 logs: BridgeLogStatus(logsRoot: "", activeSession: "", activeFile: "", activeFileSizeBytes: 0)),
             videoBackends: [], sceneOptimizationEnabled: true, sceneOnDemandEnabled: false,
-            sceneVideoPlaneSamplingEnabled: false, sceneResolution: "display", sceneUpdateModes: [],
+            metalfxUpscalingEnabled: false, sceneVideoPlaneSamplingEnabled: false, sceneResolution: "display", sceneUpdateModes: [],
             sceneRenderers: [], userAssetsPath: "", renderScale: 1, preferredRenderScale: 1,
             frameRateCap: nil, batteryRenderScale: 0.75, batteryTargetFps: 30, onBatteryPower: false,
             qualityThrottle: [], effectiveFrameRateCap: nil, renderScaleSupported: false)
