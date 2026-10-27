@@ -188,9 +188,24 @@ edit it as text rather than re-serialising the JSON.
 ## Contributing translations
 
 Community translations and corrections are welcome in the
-[Wallpaper Machine project on Crowdin](https://crowdin.com/project/wallpaper-machine):
-translate or proofread there, and the next [sync](#crowdin) carries the result into the
-catalogs. A pull request that edits an existing translation in the catalogs directly is
+[Wallpaper Machine project on Crowdin](https://translate.wallpapermachine.app/project/wallpaper-machine)
+(`translate.wallpapermachine.app` is the project's own address on Crowdin). With a free
+Crowdin account, pick a language and translate: the project is public and anyone can join
+any of its languages without waiting for approval. The shipped languages' translations are
+approved, so a suggestion there replaces the shipped wording once a proofreader approves it;
+the daily [sync](#crowdin)'s pull request then carries it into the catalogs, and it ships in
+the next release.
+
+- **Correcting a shipped language** is a suggestion on the string in Crowdin; the comments
+  there are the place to ask about context or discuss wording.
+- **A new language** is translated on Crowdin first. When it is not in the project's list,
+  ask for it in a [feature request](https://github.com/WallpaperMachine/WallpaperMachine/issues/new?template=feature_request.yml)
+  or a Crowdin comment; a maintainer adds it. The app ships it once every string is
+  translated: a maintainer then [adds the language](#adding-a-language) to the catalogs.
+- **Proofreaders** approve other people's suggestions. A regular translator of a language can
+  ask to become its proofreader in a GitHub issue or on Crowdin.
+
+A pull request that edits an existing translation in the catalogs directly is
 also fine, with one caveat: once it merges, `push` hands the new wording to Crowdin, where
 an approved translation of that string outranks it, so a maintainer then runs
 `python3 scripts/crowdin_sync.py push --overwrite` ([below](#crowdin)) or the next pull puts
@@ -217,10 +232,16 @@ multilingual file, so every shipped language is in it, with Apple's own tags: `z
 translators work. `scripts/crowdin_sync.py` moves strings both ways and needs the Crowdin CLI
 (`npm install -g @crowdin/cli`) signed in with `crowdin login`, or `CROWDIN_PERSONAL_TOKEN`.
 
+The project is public, at `translate.wallpapermachine.app` (a CNAME to Crowdin), with open
+language access: anyone signed in can join any of its languages and translate, without task
+assignments (Crowdin cannot combine open access with task-based access control). Its target
+languages are the shipped ones plus languages being translated for a later release (`ru`).
+
 ```sh
 python3 scripts/crowdin_sync.py push              # keys, plus translations Crowdin lacks
 python3 scripts/crowdin_sync.py push --overwrite  # a maintainer's correction: replace Crowdin's
 python3 scripts/crowdin_sync.py pull [--dry-run]  # Crowdin's translations into the catalogs
+python3 scripts/crowdin_sync.py add-language <tag> [--dry-run]  # a finished language, into the catalogs
 ```
 
 - **`push`** sends the English keys and the catalogs' translations as ordinary, unapproved
@@ -242,8 +263,14 @@ python3 scripts/crowdin_sync.py pull [--dry-run]  # Crowdin's translations into 
   exactly where the string is a format; a refused translation is reported and the catalog's
   kept). The catalog is edited in place, so its mixed one-line layout and every other byte
   stay; a pull's diff is the real changes. Keys come from the repository: a key Crowdin has
-  and a catalog lacks is not added, and a language the app does not ship (the project also
-  has `de`, `fr`, `ru` and `pt-PT`) is ignored until it is [added](#adding-a-language).
+  and a catalog lacks is not added, and a language the app does not ship is ignored until it
+  is [added](#adding-a-language).
+- **`add-language <tag>`** writes a language the app does not ship yet into every catalog, from
+  Crowdin's export, as the first step of [adding a language](#adding-a-language). It writes all
+  or nothing: while any string lacks a translation that passes the format rules, it lists
+  them and changes no catalog, so `--dry-run` doubles as the "is it finished?" check. Each
+  new unit goes first in its key's `localizations`, inline or on its own line to match the
+  entry, so the diff is those lines and nothing else.
 - **The loop.** `.github/workflows/crowdin.yml` runs `push` when a push to `main` changes a
   catalog, and `pull` every day (or from Actions → Crowdin → Run workflow): it checks the
   catalogs with `test_localization_catalogs.py` and opens a pull request on `l10n/crowdin`
@@ -265,16 +292,18 @@ Use the BCP 47 tag Xcode uses for the locale (`zh-Hant`, `ja`, `de`, `pt-BR`…)
 `scripts/tests/test_localization_catalogs.py` fails until the registry and the
 catalogs agree.
 
-1. **Catalogs.** In Xcode, open `App/Resources/Localizable.xcstrings`,
-   `App/Resources/InfoPlist.xcstrings` and `Extension/Localizable.xcstrings`, add
-   the language and translate every key, panel strings included; each unit must
-   end in the `translated` state. Xcode compiles each into a `<tag>.lproj` folder,
-   which is what `PanelLocale` reads. Run `xcodegen generate` to refresh the
-   generated project's known regions from the catalogs; no `project.yml` edit is needed.
-   Also add the language to the [Crowdin](#crowdin) project's target languages (Settings →
-   Languages; use the one whose export tag is the catalog's tag, which Crowdin maps for
-   `zh-Hans`, `zh-Hant`, `ja`, `ko` and `pt-BR`) and run `python3 scripts/crowdin_sync.py push`,
-   which hands the catalogs' new translations to Crowdin. `pull` only touches registered languages.
+1. **Catalogs.** A community language is translated on [Crowdin](#crowdin): add it to the
+   project's target languages (Settings → Languages; use the one whose export tag is the
+   catalog's tag, which Crowdin maps for `zh-Hans`, `zh-Hant`, `ja`, `ko`, `pt-BR` and `ru`),
+   and once every string is translated and proofread run
+   `python3 scripts/crowdin_sync.py add-language <tag>`, which writes it into all three
+   catalogs. A language translated in the repository instead is added in Xcode to
+   `App/Resources/Localizable.xcstrings`, `App/Resources/InfoPlist.xcstrings` and
+   `Extension/Localizable.xcstrings`, every key translated, then handed to Crowdin with
+   `python3 scripts/crowdin_sync.py push`. Either way each unit must end in the `translated`
+   state. Xcode compiles each catalog into a `<tag>.lproj` folder, which is what `PanelLocale`
+   reads. Run `xcodegen generate` to refresh the generated project's known regions from the
+   catalogs; no `project.yml` edit is needed. `pull` only touches registered languages.
 2. **Registry.** Append
    `AppLanguage(tag: "<tag>", name: "<own name>", wallpaperEngineLocale: "<code>")`
    to `AppLanguage.supported`. The locale is the Wallpaper Engine code that

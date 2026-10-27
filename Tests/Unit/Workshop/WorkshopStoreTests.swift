@@ -125,6 +125,44 @@ final class WorkshopStoreTests: XCTestCase {
       WorkshopDownloadManager.concurrentDownloadRange.upperBound)
   }
 
+  /// The sort and filters searched with outlive a relaunch, as after an update; a draft that was
+  /// never searched does not, and a stored list larger than a search accepts leaves the defaults.
+  func testSearchedSortAndFiltersSurviveRelaunch() throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let relaunch = {
+      WorkshopStore(
+        downloader: WorkshopDownloadManager(
+          sessionDirectory: fixture.root.appendingPathComponent("SteamSession")),
+        supportDirectory: fixture.root, defaults: fixture.defaults)
+    }
+    let fresh = relaunch()
+    XCTAssertEqual(fresh.sort, .trendingYear)
+    XCTAssertEqual(fresh.tags, [])
+    XCTAssertEqual(fresh.excludedTags, WorkshopStore.defaultExcludedTags)
+
+    let store = fixture.store
+    store.sort = .topRated
+    store.tags = ["Approved", "Anime"]
+    store.excludedTags = ["Application", "Asset", "Web"]
+    store.search()
+    store.sort = .newest
+    store.tags = []
+
+    let restored = relaunch()
+    XCTAssertEqual(restored.sort, .topRated)
+    XCTAssertEqual(restored.tags, ["Approved", "Anime"])
+    XCTAssertEqual(restored.excludedTags, ["Application", "Asset", "Web"])
+
+    fixture.defaults.set(
+      ["sort": "unknown", "tags": Array(repeating: "Anime", count: 40), "excludedTags": []],
+      forKey: WorkshopStore.browseFiltersKey)
+    let rejected = relaunch()
+    XCTAssertEqual(rejected.sort, .trendingYear)
+    XCTAssertEqual(rejected.tags, [])
+    XCTAssertEqual(rejected.excludedTags, WorkshopStore.defaultExcludedTags)
+  }
+
   func testFailedPageAndFailedSubmissionRetryTheirOwnQueryWithoutChangingDraft() async throws {
     let fixture = try Fixture()
     defer { fixture.remove() }

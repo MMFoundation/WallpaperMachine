@@ -201,6 +201,7 @@ python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 
 构建好的应用位于 `build/Build/Products/Release/WallpaperMachine.app`。`python3 scripts/test.py` 运行测试，`python3 scripts/package.py --configuration Release --install` 会让应用包自包含、封装成磁盘映像，并复制到 `~/Applications`。场景壁纸同样需要你所拥有的 Wallpaper Engine 中的共享资源。
 
 工具链、打包和故障排查：[docs/build.md](docs/build.md)。参与开发：[CONTRIBUTING.md](CONTRIBUTING.md)。
+翻译应用或申请新的语言：在 [Crowdin](https://translate.wallpapermachine.app/project/wallpaper-machine) 上进行，不需要写代码（[译文如何进入应用](docs/localization.md#contributing-translations)）。
 
 ## 文档
 

@@ -281,6 +281,8 @@ Scene wallpapers also need shared resources from a Wallpaper Engine you own.
 
 Toolchain, packaging and troubleshooting: [docs/build.md](docs/build.md).
 Working on the code: [CONTRIBUTING.md](CONTRIBUTING.md).
+Translating the app, or asking for another language: [Crowdin](https://translate.wallpapermachine.app/project/wallpaper-machine),
+no code needed ([how it reaches the app](docs/localization.md#contributing-translations)).
 
 ## Documentation
 
