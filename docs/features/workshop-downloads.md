@@ -289,10 +289,30 @@ with **Download the ones not in your library** as the list's main action beside
 **Download the ones not in your library** reads every page of subscriptions (at
 most 1,000 pages of 30), drops what is installed, collections and Application
 items, and queues the rest as ordinary downloads, which need SteamCMD's own
-sign-in as any download does. Nothing is subscribed or unsubscribed on Steam. The
+sign-in as any download does. The
 welcome guide's **Import my subscriptions** and its one-time offer to existing users
 ([first run](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer))
 do the same, signing in first when needed.
+
+Signed in, the Workshop changes the account's subscriptions on Steam too. The inspector
+of an item that is not a collection offers **Subscribe on Steam** or **Unsubscribe on
+Steam** (`WorkshopService.setSubscribed`): a POST to
+`steamcommunity.com/sharedfiles/subscribe` or `/unsubscribe` with the item, Wallpaper
+Engine's app id and a `sessionid` CSRF token that the same request also sends as a cookie
+beside `steamLoginSecure`, since Steam only checks that the two match; a fresh random one
+serves. The request follows no redirect with the cookie. Steam's `{"success":1}` is the
+only answer taken as done; another `success`, an answer that cannot be read or a
+connection failure reaches the banner, and Steam's sign-in page or a 401 or 403 ends the
+session. The tiles of what the account subscribes to wear a bookmark mark (VoiceOver:
+**Subscribed on Steam**), from `WorkshopStore.subscribedIDs`: every page of the
+subscriptions is read the first time the Workshop page appears for each sign-in (after a
+saved one still being restored) and again right after a sign-in, and a subscribe or
+unsubscribe Steam accepted updates it, also over a read still in flight; signed out it is
+empty. A read that fails leaves the marks as they were, says why in the banner and is tried
+again the next time the Workshop page appears. Downloading stays a separate choice: subscribing does not
+download, and SteamCMD is not involved. This has not been tried against live Steam from
+the development machine, which cannot reach steamcommunity.com; the requests and answers
+are pinned against fixtures (`WorkshopSourceTests`).
 
 ### Favorites
 
@@ -308,6 +328,19 @@ Steam's own favorites page). Choosing one lists the favorites again from page 1;
 kept for the rest of the app's run. Nothing is favorited or unfavorited on Steam from here, and
 the list offers no bulk download. A signed-in subscriptions page was not available to check its
 sort menu, so Your subscriptions keeps its own order.
+
+### Comments
+
+The inspector of an item that is not a collection and whose author's SteamID is known
+shows its newest ten comments, read-only, from Steam's public comment thread
+(`steamcommunity.com/comment/PublishedFile_Public/render/<author>/<item>/`, no sign-in and
+no cookie), when the inspector shows the item, with how many there are in all and
+**Read all comments on Steam**, which opens the item's page. Each comment is the
+author's name, how long ago it was posted and its text, read as plain text from the
+thread's HTML (`WorkshopService.decodeComments`): markup dropped, `<br>` kept as a line
+break, entities decoded. All of it is Steam's text, shown verbatim. Posting is not
+offered. A thread that cannot be read says so in place of the comments. Like
+subscribing, this was pinned against fixtures, not tried against live Steam.
 
 ## One decision per download
 
@@ -889,7 +922,8 @@ against a measured installation. When the disk is short
 the download fails with a message naming what it needs and what is available; its
 partial data is kept and **Try again** checks again. Nothing blocks a download
 whose size Steam does not list, a sign-in-only run, or a disk whose free space
-cannot be read. A preset's base wallpaper (size unknown) is not checked, and
+cannot be read. A preset's base wallpaper is checked before its pass at the size
+Steam lists for it ([Workshop presets](#workshop-presets)), and
 parallel jobs are checked one by one, not added together, so a bulk **Download the
 ones not in your library** or **Update N wallpapers** can report a shortfall on
 some jobs and not on others.
@@ -902,8 +936,14 @@ id>"` and, under `preset`, values for the base's properties, plus any files thos
 values point at. After the preset arrives,
 `WallpaperImportService.presetBaseToDownload` names the base unless the same
 staging or the library already holds it, and `WorkshopDownloader` fetches it in a
-second SteamCMD pass of the same job, staging and sign-in (status "Downloading the
-wallpaper this preset is based on…"). The importer then assembles one
+second SteamCMD pass of the same job, staging and sign-in. Before that pass the base's
+listing is read from Steam's public details endpoint (`WorkshopDownloader.ItemDetails`):
+the status names it and its size ("Downloading “Title” (120 MB), the wallpaper this preset
+is based on…", or without the size when Steam lists none, and "Downloading the wallpaper
+this preset is based on…" when the listing cannot be read), its progress has that total,
+and the disk is checked for it as for any item, so a base that cannot fit stops before
+SteamCMD is asked for it. Discover marks a preset's tile with a sliders mark (VoiceOver
+reads it as **Preset**). The importer then assembles one
 self-contained wallpaper under the preset's id: the base's content (moved from
 staging, or cloned from the library, which stays unchanged), the preset's files
 over it, and the base's manifest with the preset's title, description, tags,
@@ -921,8 +961,8 @@ handling](#prompt-and-retry-handling)), the error says the preset downloaded but
 its base (Workshop item N) did not, so nothing was added, and gives Steam's own
 reason; the partial download is kept and Try again picks up from it. A preset of
 a preset, or one naming itself, is rejected without publishing anything. Updating a preset
-reassembles it on the current base; an update of the base alone does not reach
-presets already installed. Importing a preset folder works the same way with the
+reassembles it on the current base, and a change to the base alone is an update of the
+presets built on it ([Updates](#updates)). Importing a preset folder works the same way with the
 base found next to it or in the library.
 
 ## Updates
@@ -935,7 +975,12 @@ key and no sign-in, up to 100 ids a request) and compares each item's
 downloading it, or, for an item it did not download (an import, or a download
 from before installs were recorded), when its `project.json` was last written. An
 import copies files, so an item that was already out of date when imported is not
-caught. A difference of a minute or less counts as the same version.
+caught. A difference of a minute or less counts as the same version. An installed
+preset carries its base's content, so the base its `project.json` names (`dependency`)
+is asked about with the installed items, and a base changed after the preset was
+installed offers the preset as an update, with the preset's own details; updating it
+fetches the current base again unless the library holds the base as a wallpaper of its
+own, which then has to be updated first.
 
 It checks at most once a day on its own, after the library loads and from the same
 six-hourly loop as app updates, unless **Settings → Library & Steam → Workshop

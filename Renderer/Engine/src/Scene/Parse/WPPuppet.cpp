@@ -207,7 +207,7 @@ void PostFinishNotice(std::vector<i32>& queue, usize stack_index) {
 // True when `layer` is a running single-shot animation whose clock has
 // reached or passed its duration.
 bool HasReachedEnd(const WPPuppetLayer::AnimationLayer& layer, const WPPuppet::Animation* anim) {
-    if (anim == nullptr || anim->mode != WPPuppet::PlayMode::Single) return false;
+    if (anim == nullptr || (anim->mode != WPPuppet::PlayMode::Single && ! layer.once)) return false;
     if (! layer.playing) return false;
     return anim->max_time > 0.0 && layer.cur_time >= anim->max_time;
 }
@@ -480,8 +480,9 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> layers) {
         }
         state.m_layers.push_back(std::move(layer));
     }
+    // Unposed bones skin nothing: their pose is the bind until the first evaluation.
     if (state.m_final_affines.size() != m_puppet->bones.size()) {
-        state.m_final_affines.resize(m_puppet->bones.size());
+        state.m_final_affines.resize(m_puppet->bones.size(), linalg::Affine3f::Identity());
     }
     rebuildBlend();
     state.m_pose_valid = false;
@@ -582,6 +583,48 @@ void WPPuppetLayer::textureChannelWeights(double time, std::span<float> out) noe
     }
 }
 
+bool WPPuppet::hasAlphaCurves() const noexcept {
+    for (const auto& anim : anims) {
+        for (const auto& curve : anim.blend_curves) {
+            for (const float value : curve.values) {
+                if (std::isfinite(value) && value < 1.0f) return true;
+            }
+        }
+    }
+    return false;
+}
+
+void WPPuppetLayer::boneAlphas(double time, std::span<float> out) noexcept {
+    std::fill(out.begin(), out.end(), 1.0f);
+    if (! m_puppet || ! m_state) return;
+    genFrame(time);
+    const auto& state = *m_state;
+    const usize count = std::min(out.size(), m_puppet->bones.size());
+    for (usize bone = 0; bone < count; bone++) {
+        double weight = state.m_global_blend;
+        double sum    = state.m_global_blend;
+        for (const auto& layer : state.m_layers) {
+            if (layer.anim == nullptr || ! layer.anim_layer.visible || ! (layer.blend > 0.0)) continue;
+            double sample = 1.0;
+            if (bone < layer.anim->blend_curves.size()) {
+                const auto& values = layer.anim->blend_curves[bone].values;
+                if (! values.empty()) {
+                    const auto at = [&values](idx frame) {
+                        const usize clamped = std::min(static_cast<usize>(std::max<idx>(frame, 0)), values.size() - 1);
+                        return static_cast<double>(values[clamped]);
+                    };
+                    const auto& frames = layer.interp_info;
+                    sample = at(frames.frame_a) + (at(frames.frame_b) - at(frames.frame_a)) * frames.t;
+                    if (! std::isfinite(sample)) sample = 1.0;
+                }
+            }
+            weight += layer.blend;
+            sum += layer.blend * sample;
+        }
+        if (weight > 0.0 && std::isfinite(sum)) out[bone] = static_cast<float>(std::clamp(sum / weight, 0.0, 1.0));
+    }
+}
+
 void WPPuppetLayer::invalidatePose() noexcept {
     if (m_state) m_state->m_pose_valid = false;
 }
@@ -606,12 +649,23 @@ void WPPuppetLayer::updateInterpolation(double time) noexcept {
         }
     }
 
-    // Step 1: record, for every layer, which frames its current time maps to.
-    for (auto& layer : state.m_layers) {
-        double& cur = layer.anim_layer.cur_time;
+    // Step 1: record, for every layer, which frames its current time maps to. A layer played
+    // once ends at the animation's end, before a looping animation would wrap.
+    bool hidden_one = false;
+    for (usize i = 0; i < state.m_layers.size(); i++) {
+        auto&   layer = state.m_layers[i];
+        double& cur   = layer.anim_layer.cur_time;
         if (! std::isfinite(cur)) cur = 0.0;
+        if (layer.anim_layer.once && HasReachedEnd(layer.anim_layer, layer.anim)) {
+            layer.anim_layer.playing = false;
+            layer.anim_layer.visible = false;
+            hidden_one               = true;
+            PostFinishNotice(state.m_finished_layers, i);
+            continue;
+        }
         if (layer.anim != nullptr) layer.interp_info = layer.anim->getInterpolationInfo(&cur);
     }
+    if (hidden_one) rebuildBlend();
 
     // Step 2: with the frames recorded, find single-shot layers that ran out.
     for (usize i = 0; i < state.m_layers.size(); i++) {
@@ -620,6 +674,82 @@ void WPPuppetLayer::updateInterpolation(double time) noexcept {
         layer.anim_layer.playing = false;
         PostFinishNotice(state.m_finished_layers, i);
     }
+}
+
+i32 WPPuppetLayer::addLayer(std::string_view animation, bool once) noexcept {
+    if (! m_state || ! m_puppet) return -1;
+    auto&                      state = *m_state;
+    const WPPuppet::Animation* found = nullptr;
+    for (const auto& anim : m_puppet->anims) {
+        if (anim.name == animation || std::to_string(anim.id) == animation) {
+            found = &anim;
+            break;
+        }
+    }
+    if (found == nullptr) return -1;
+    i32 index = -1;
+    if (once) {
+        for (usize i = 0; i < state.m_layers.size(); i++) {
+            const auto& layer = state.m_layers[i].anim_layer;
+            if (layer.once && ! layer.playing && ! layer.visible && state.m_layers[i].anim == found) {
+                index = static_cast<i32>(i);
+                break;
+            }
+        }
+    }
+    if (index < 0) {
+        AnimationLayer made;
+        made.id   = found->id;
+        made.name = found->name;
+        state.m_layers.push_back(Layer { made, 0.0, found, {} });
+        index = static_cast<i32>(state.m_layers.size() - 1);
+    }
+    auto& layer               = state.m_layers[static_cast<usize>(index)];
+    layer.anim_layer.once     = once;
+    layer.anim_layer.cur_time = 0.0;
+    layer.anim_layer.playing  = true;
+    layer.anim_layer.visible  = true;
+    layer.interp_info         = found->getInterpolationInfo(&layer.anim_layer.cur_time);
+    rebuildBlend();
+    state.m_pose_valid = false;
+    return index;
+}
+
+usize WPPuppetLayer::boneCount() const noexcept { return m_puppet ? m_puppet->bones.size() : 0; }
+
+i32 WPPuppetLayer::boneIndex(std::string_view name) const noexcept {
+    if (! m_puppet) return -1;
+    for (usize i = 0; i < m_puppet->bones.size(); i++) {
+        if (m_puppet->bones[i].name == name) return static_cast<i32>(i);
+    }
+    return -1;
+}
+
+i32 WPPuppetLayer::boneParent(i32 index) const noexcept {
+    if (! m_puppet || index < 0 || static_cast<usize>(index) >= m_puppet->bones.size()) return -1;
+    const auto parent = m_puppet->bones[static_cast<usize>(index)].anim_parent;
+    return parent == WPPuppet::NO_PARENT || parent >= static_cast<u32>(index) ? -1 : static_cast<i32>(parent);
+}
+
+std::optional<Affine3f> WPPuppetLayer::boneModel(i32 index) const noexcept {
+    if (! m_puppet || ! m_state || index < 0 || static_cast<usize>(index) >= m_puppet->bones.size()) {
+        return std::nullopt;
+    }
+    const auto& skins = m_state->m_final_affines;
+    const auto& bone  = m_puppet->bones[static_cast<usize>(index)];
+    // The skinning matrix undoes the bind before posing; the bind put back is the pose.
+    if (static_cast<usize>(index) >= skins.size()) return bone.world_bind;
+    return Affine3f(skins[static_cast<usize>(index)] * bone.world_bind);
+}
+
+std::optional<Affine3f> WPPuppetLayer::boneLocal(i32 index) const noexcept {
+    const auto model = boneModel(index);
+    if (! model) return std::nullopt;
+    const i32 parent = boneParent(index);
+    if (parent < 0) return model;
+    const auto above = boneModel(parent);
+    if (! above) return model;
+    return Affine3f(above->inverse() * *model);
 }
 
 std::vector<i32> WPPuppetLayer::takeFinishedLayers() noexcept {
@@ -783,7 +913,7 @@ bool WPPuppetLayer::visible(i32 index) const noexcept {
 
 WPPuppetLayer::WPPuppetLayer(std::shared_ptr<WPPuppet> pup)
     : m_state(pup ? std::make_shared<State>() : nullptr), m_puppet(std::move(pup)) {
-    if (m_state) m_state->m_final_affines.resize(m_puppet->bones.size());
+    if (m_state) m_state->m_final_affines.resize(m_puppet->bones.size(), linalg::Affine3f::Identity());
 }
 WPPuppetLayer::WPPuppetLayer()  = default;
 WPPuppetLayer::~WPPuppetLayer() = default;

@@ -249,6 +249,17 @@ public:
     /// by position; empty when the layer or the animation layer is unknown.
     std::string   PuppetAnimationLayerName(std::string_view layer_name,
                                            std::string_view animation_layer);
+    /// `playSingleAnimation` (`once`) and `createAnimationLayer`: the new animation layer's
+    /// index, or -1 when the layer has no puppet or the puppet no such animation.
+    int           AddPuppetAnimationLayer(std::string_view layer_name, std::string_view animation,
+                                          bool once);
+    /// The bones of a layer's puppet, as its last frame posed them: how many, which index a
+    /// name has (-1 for none), a bone's parent (-1 for a root), and a bone's transform in the
+    /// scene (the layer's matrix over the bone's) or in its parent bone.
+    int           PuppetBoneCount(std::string_view layer_name);
+    int           PuppetBoneIndex(std::string_view layer_name, std::string_view bone_name);
+    int           PuppetBoneParent(std::string_view layer_name, int bone);
+    std::optional<linalg::Matrix4d> PuppetBoneMatrix(std::string_view layer_name, int bone, bool world);
     void          RegisterLayerTemplate(std::string template_path, std::shared_ptr<SceneNode> node,
                                         linalg::Vector2f size);
     // Called synchronously on a registry miss. The loader registers the requested
@@ -291,6 +302,11 @@ public:
     std::string   LayerEffectReferenceByName(std::string_view layer_key,
                                              std::string_view effect_name) const;
     std::size_t   EffectMaterialCount(std::string_view reference) const;
+    /// The constant `name` (a material name or a uniform) of an effect pass's material as it
+    /// holds it now: what the scene or a script set, else the shader's default; empty when the
+    /// pass has no such constant.
+    std::vector<float> EffectMaterialConstant(std::string_view reference, std::size_t pass_index,
+                                              std::string_view name) const;
     bool          SetEffectMaterialConstant(std::string_view reference, std::size_t pass_index,
                                             std::string_view name,
                                             std::span<const float> values);
@@ -477,6 +493,49 @@ public:
     bool  SetSoundLayerMuted(std::string_view layer_name, bool muted);
     bool  SoundLayerMuted(std::string_view layer_name) const;
 
+    /// What a script reaches through a particle layer (Wallpaper Engine's IParticleSystem):
+    /// playback, `emitParticles`, and the layer's instance overrides by field name (`alpha`,
+    /// `size`, `count`, `speed`, `lifetime`, `rate`, `colorn`, `controlpoint0`..`7`). The
+    /// loader fills it; an empty function does nothing.
+    struct ParticleLayerControl {
+        std::function<void()>                                            play;
+        std::function<void()>                                            pause;
+        std::function<void()>                                            stop;
+        std::function<bool()>                                            playing;
+        std::function<void(uint32_t)>                                    emit;
+        std::function<std::vector<float>(std::string_view)>              get_instance;
+        std::function<bool(std::string_view, std::span<const float>)>    set_instance;
+    };
+    void RegisterParticleLayer(std::string name, ParticleLayerControl control);
+    bool HasParticleLayer(std::string_view layer_name) const;
+    /// Each returns false when no such particle layer exists.
+    bool PlayParticleLayer(std::string_view layer_name);
+    bool PauseParticleLayer(std::string_view layer_name);
+    bool StopParticleLayer(std::string_view layer_name);
+    bool ParticleLayerPlaying(std::string_view layer_name) const;
+    bool EmitParticles(std::string_view layer_name, uint32_t count);
+    /// An instance field as it stands; empty for an unknown layer or field.
+    std::vector<float> ParticleInstanceValue(std::string_view layer_name, std::string_view field) const;
+    bool SetParticleInstanceValue(std::string_view layer_name, std::string_view field,
+                                  std::span<const float> values);
+
+    /// The scene camera's static transforms, as `thisScene.getCameraTransforms()` answers them:
+    /// where it looks from and at, which way is up, and the zoom of a 2D scene.
+    struct SceneCameraTransforms {
+        linalg::Vector3d eye { 0.0, 0.0, 1.0 };
+        linalg::Vector3d center { 0.0, 0.0, 0.0 };
+        linalg::Vector3d up { 0.0, 1.0, 0.0 };
+        double           zoom { 1.0 };
+    };
+    /// The camera block the scene loaded with. `aim` places a perspective scene's camera from
+    /// eye, centre and up; a 2D scene passes none and takes only the zoom.
+    void RegisterSceneCamera(SceneCameraTransforms initial,
+                             std::function<void(const SceneCameraTransforms&)> aim);
+    SceneCameraTransforms CameraTransforms() const;
+    /// Replaces them (`thisScene.setCameraTransforms`). A camera path that plays moves the
+    /// camera again on its next frame, as Wallpaper Engine warns.
+    void SetCameraTransforms(const SceneCameraTransforms& transforms);
+
     /// Position of the named node among its siblings.
     int NodeSiblingIndex(std::string_view name) const;
 
@@ -612,7 +671,10 @@ public:
     /// `createLayer`'s `name`, `parent`, `size` and `parallaxDepth` for a layer
     /// a script made, and the same properties of any layer afterwards.
     bool                          NameLayer(std::string_view runtime_name, std::string authored_name);
-    bool                          SetNodeParent(std::string_view name, std::string_view parent_name);
+    /// With `keep_place` the layer stays where it is in the scene: its local transform is
+    /// recomputed under the new parent (`setParent(parent, true)`); without it, it is kept.
+    bool                          SetNodeParent(std::string_view name, std::string_view parent_name,
+                                                bool keep_place = false);
     bool                          SetNodeSize(std::string_view name, const linalg::Vector2f& size);
     /// `parallaxDepth`: how far the cursor moves a layer. A write reaches the
     /// layer, its effect passes and the layers below it (Wallpaper Engine moves
@@ -1039,6 +1101,9 @@ private:
     std::unordered_map<std::string, linalg::Vector2f, StringHash, std::equal_to<>> m_node_size;
     std::unordered_map<std::string, NodeHitMask, StringHash, std::equal_to<>> m_node_hit_masks;
     std::unordered_map<std::string, WPPuppetLayer>                 m_puppet_layers;
+    std::unordered_map<std::string, ParticleLayerControl>          m_particle_layers;
+    SceneCameraTransforms                                          m_camera_transforms;
+    std::function<void(const SceneCameraTransforms&)>              m_aim_camera;
     std::unordered_map<std::string, TextLayer, StringHash, std::equal_to<>> m_text_layers;
     std::unordered_map<std::string, TextEffectGate>                m_text_effect_gates;
     std::unordered_map<std::string, NodeAlignmentBinding>          m_node_alignment;

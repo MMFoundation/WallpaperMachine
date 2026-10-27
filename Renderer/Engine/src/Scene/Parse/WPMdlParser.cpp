@@ -1297,11 +1297,13 @@ void WPMdlParser::AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl) {
     if (mdl.puppet == nullptr || mdl.puppet->bones.empty()) return;
     info.combos["SKINNING"] = "1";
     info.combos["BONECOUNT"] = std::to_string(mdl.puppet->bones.size());
+    if (mdl.puppet->hasAlphaCurves()) info.combos["SKINNING_ALPHA"] = "1";
 }
 
 void WPMdlParser::AddPuppetMatInfo(wpscene::WPMaterial& mat, const WPMdl& mdl) {
     if (mdl.puppet == nullptr || mdl.puppet->bones.empty()) return;
     mat.combos["SKINNING"]  = 1;
     mat.combos["BONECOUNT"] = static_cast<int32_t>(mdl.puppet->bones.size());
+    if (mdl.puppet->hasAlphaCurves()) mat.combos["SKINNING_ALPHA"] = 1;
     mat.use_puppet          = true;
 }

@@ -340,7 +340,10 @@ Installed and Discover tiles wear status marks as small round badges:
   for imported wallpapers.
 - A download arrow on Installed marks a Workshop wallpaper whose author has
   published an update ([Updates](workshop-downloads.md#updates)).
-- Discover also retains a check for items already in the library.
+- Discover also retains a check for items already in the library, marks what the
+  signed-in Steam account subscribes to with a bookmark
+  ([subscriptions](workshop-downloads.md#subscriptions)) and a Workshop preset with
+  sliders ([presets](workshop-downloads.md#workshop-presets)).
 
 On Discover the marks stack in the upper-left corner. On Installed the trophy and the
 update arrow sit in the lower-right corner, clear of the selection check in the

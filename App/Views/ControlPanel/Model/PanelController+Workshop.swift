@@ -21,6 +21,7 @@ extension PanelController {
     WorkshopTile(
       item: item, isInstalled: mediaLibraryContains(item.id),
       isFavorite: favoriteIDs.contains(item.id),
+      isSubscribed: workshop.subscribedIDs.contains(item.id),
       download: item.isCollection
         ? nil
         : TileDownloadState.workshop(
@@ -187,7 +188,34 @@ extension PanelController {
   /// the subscriptions: whoever signed in has found the feature.
   private func signInToSteamCommunity(_ obtain: @MainActor () async -> WebSignInCookies?) async throws {
     try await workshop.signInToSteamWeb(obtainCookies: obtain)
-    if workshop.steamWebSession != nil { store.supportPrompt?.recordSubscriptionsOffered() }
+    if workshop.steamWebSession != nil {
+      store.supportPrompt?.recordSubscriptionsOffered()
+      try? await workshop.refreshSubscribedIDs()
+    }
+  }
+
+  /// Reads what the signed-in account subscribes to, so the Workshop tiles mark it, and answers
+  /// the sign-in they were read with (nil signed out). A read that fails leaves the marks as they
+  /// were and throws, so the banner says what could not be read and why; an ended session is
+  /// forgotten as anywhere, and its own message already says to sign in again.
+  @discardableResult
+  func refreshWorkshopSubscriptions() async throws -> SteamWebSession? {
+    var read: SteamWebSession?
+    try await run(.direct) {
+      do {
+        read = try await workshop.refreshSubscribedIDs()
+      } catch let error where !(error is CancellationError) && !(error is SteamSignInRequired) {
+        let reason = error.localizedDescription
+        throw WorkshopFailure(message: L("Your Steam subscriptions could not be read, so the tiles do not mark them yet: \(reason)"))
+      }
+    }
+    return read
+  }
+
+  /// **Subscribe** and **Unsubscribe** in the Workshop inspector: changes the signed-in account's
+  /// subscriptions on Steam itself. A failure, or Steam ending the session, reaches the banner.
+  func setWorkshopSubscribed(_ subscribed: Bool, item: WorkshopItem) async throws {
+    try await run(.direct) { try await workshop.setSubscribed(subscribed, itemID: item.id) }
   }
 
   /// **Import my subscriptions**, in the welcome guide and the one-time offer: signs in to Steam

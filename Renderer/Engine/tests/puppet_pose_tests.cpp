@@ -636,3 +636,47 @@ TEST(PuppetAnchoring, CentroidOffsetAppliesOnlyToWorldAnchoredRoots) {
         EXPECT_NEAR(frame[1].translation().x(), 0, 1e-5);
     }
 }
+
+// A bone's opacity curve (the animation's `blend_curves`): each visible layer samples it between
+// its two frames, and the rest pose counts fully opaque by whatever share of the blend the layers
+// leave it, as the bones' transforms are mixed. A bone without a curve stays opaque, and only a
+// puppet whose curves dip below 1 asks the shader for per-bone alpha.
+TEST(PuppetBoneAlpha, CurvesAreSampledAndMixedWithTheOpaqueRestPose) {
+    auto puppet = std::make_shared<WPPuppet>();
+    puppet->bones.resize(2);
+    auto anim = makeAnimation(1, PlayMode::Loop, 1, 2, { Vector3f(0, 0, 0), Vector3f(0, 0, 0), Vector3f(0, 0, 0) });
+    anim.blend_curves.resize(2);
+    anim.blend_curves[0].values = { 1.0f, 0.5f, 0.0f };
+    puppet->anims.push_back(anim);
+    puppet->prepared();
+    EXPECT_TRUE(puppet->hasAlphaCurves());
+
+    auto layer = layerOf(puppet, { layerSpec(1, false, 1.0) });
+    std::vector<float> alphas(2, -1.0f);
+    layer.boneAlphas(0.0, alphas);
+    layer.boneAlphas(1.0, alphas);  // frame 1
+    EXPECT_NEAR(alphas[0], 0.5f, 1e-5);
+    EXPECT_NEAR(alphas[1], 1.0f, 1e-5) << "no curve, opaque";
+    layer.boneAlphas(1.5, alphas);  // halfway to frame 2
+    EXPECT_NEAR(alphas[0], 0.25f, 1e-5);
+
+    auto half = layerOf(puppet, { layerSpec(1, false, 0.5) });
+    half.boneAlphas(0.0, alphas);
+    half.boneAlphas(1.0, alphas);
+    EXPECT_NEAR(alphas[0], 0.75f, 1e-5) << "half the blend leaves half to the opaque rest pose";
+
+    auto hidden = layerOf(puppet, { layerSpec(1, false, 1.0) });
+    hidden.setVisible(0, false);
+    hidden.boneAlphas(0.0, alphas);
+    hidden.boneAlphas(1.0, alphas);
+    EXPECT_NEAR(alphas[0], 1.0f, 1e-5) << "a hidden layer fades nothing";
+
+    auto opaque = std::make_shared<WPPuppet>();
+    opaque->bones.resize(1);
+    auto flat = makeAnimation(1, PlayMode::Loop, 1, 1, { Vector3f(0, 0, 0), Vector3f(0, 0, 0) });
+    flat.blend_curves.resize(1);
+    flat.blend_curves[0].values = { 1.0f, 1.0f };
+    opaque->anims.push_back(flat);
+    opaque->prepared();
+    EXPECT_FALSE(opaque->hasAlphaCurves()) << "curves that never dip need no alpha";
+}

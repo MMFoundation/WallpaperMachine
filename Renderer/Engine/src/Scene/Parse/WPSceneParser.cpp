@@ -1039,44 +1039,10 @@ void ResolveLoadTimeTextStyle(ParseContext& context, wpscene::WPTextObject& obj,
     }
 }
 
-/// Gives `node` the local translation, scale and angles that make its local matrix
-/// `transform` (translation, then z, y and x rotations, then scale: the order
-/// `SceneNode::LocalTransOf` composes). A mirrored matrix carries its mirror on x.
+/// Gives `node` the local transform that makes its local matrix `transform`
+/// (`SceneNode::SetTransformFromMatrix`).
 void SetNodeTransformFromMatrix(SceneNode& node, const Matrix4d& transform) {
-    const auto at = [&transform](int row, int column) { return transform(row, column); };
-    std::array<double, 3> scale {};
-    for (int column = 0; column < 3; ++column) {
-        scale[column] = std::sqrt(at(0, column) * at(0, column) + at(1, column) * at(1, column) +
-                                  at(2, column) * at(2, column));
-    }
-    // The sign of the 3x3 part's determinant tells a mirror from a turn.
-    const double det = at(0, 0) * (at(1, 1) * at(2, 2) - at(1, 2) * at(2, 1)) -
-                       at(0, 1) * (at(1, 0) * at(2, 2) - at(1, 2) * at(2, 0)) +
-                       at(0, 2) * (at(1, 0) * at(2, 1) - at(1, 1) * at(2, 0));
-    if (det < 0.0) scale[0] = -scale[0];
-    double rotation[3][3];
-    for (int column = 0; column < 3; ++column) {
-        for (int row = 0; row < 3; ++row) {
-            rotation[row][column] = std::abs(scale[column]) > 1e-12 ? at(row, column) / scale[column]
-                                                                    : (row == column ? 1.0 : 0.0);
-        }
-    }
-    // R = Rz * Ry * Rx.
-    const double sin_y = std::clamp(-rotation[2][0], -1.0, 1.0);
-    double       x     = 0.0;
-    double       y     = std::asin(sin_y);
-    double       z     = 0.0;
-    if (std::abs(sin_y) < 1.0 - 1e-9) {
-        x = std::atan2(rotation[2][1], rotation[2][2]);
-        z = std::atan2(rotation[1][0], rotation[0][0]);
-    } else {
-        x = std::atan2(-rotation[1][2], rotation[1][1]);
-    }
-    node.SetTranslate(Vector3f(static_cast<float>(at(0, 3)), static_cast<float>(at(1, 3)),
-                               static_cast<float>(at(2, 3))));
-    node.SetScale(Vector3f(static_cast<float>(scale[0]), static_cast<float>(scale[1]),
-                           static_cast<float>(scale[2])));
-    node.SetRotation(Vector3f(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)));
+    node.SetTransformFromMatrix(transform);
 }
 
 // ---------------------------------------------------------------------------
@@ -4951,6 +4917,69 @@ void FollowParticleOverride(ParseContext& context, const nlohmann::json& entry,
     }
 }
 
+/// What a script reaches through a particle layer: playback of its system and the fields of its
+/// instance override, which a write turns on, as a bound property would.
+SceneRuntimeContext::ParticleLayerControl MakeParticleLayerControl(
+    const std::shared_ptr<wpscene::ParticleInstanceoverride>& over, ParticleSubSystem* system) {
+    using Override = wpscene::ParticleInstanceoverride;
+    static constexpr std::array<std::pair<std::string_view, float Override::*>, 6> kNumbers { {
+        { "alpha", &Override::alpha }, { "size", &Override::size }, { "count", &Override::count },
+        { "speed", &Override::speed }, { "lifetime", &Override::lifetime }, { "rate", &Override::rate } } };
+    const auto point_index = [](std::string_view field) -> int {
+        constexpr std::string_view prefix = "controlpoint";
+        if (field.size() != prefix.size() + 1 || ! field.starts_with(prefix)) return -1;
+        const char digit = field.back();
+        return digit >= '0' && digit <= '7' ? digit - '0' : -1;
+    };
+    SceneRuntimeContext::ParticleLayerControl control;
+    control.play    = [system] { system->Play(); };
+    control.pause   = [system] { system->Pause(); };
+    control.stop    = [system] { system->Stop(); };
+    control.playing = [system] { return system->IsPlaying(); };
+    control.emit    = [system](uint32_t count) { system->EmitNow(count); };
+    control.get_instance = [over, point_index](std::string_view field) -> std::vector<float> {
+        for (const auto& [name, member] : kNumbers) {
+            if (field == name) return { (*over).*member };
+        }
+        if (field == "colorn") return { over->colorn.begin(), over->colorn.end() };
+        if (const int index = point_index(field); index >= 0) {
+            const auto& point = over->controlpoint[static_cast<std::size_t>(index)];
+            return { point.begin(), point.end() };
+        }
+        return {};
+    };
+    control.set_instance = [over, point_index](std::string_view field, std::span<const float> values) {
+        if (values.empty() || ! std::all_of(values.begin(), values.end(), [](float v) { return std::isfinite(v); }))
+            return false;
+        for (const auto& [name, member] : kNumbers) {
+            if (field != name) continue;
+            (*over).*member = values.front();
+            over->enabled   = true;
+            return true;
+        }
+        // A colour is three lanes; one number tints all three alike.
+        const auto lanes = [&values] {
+            return std::array<float, 3> { values[0], values.size() > 1 ? values[1] : values[0],
+                                          values.size() > 2 ? values[2] : values[0] };
+        };
+        if (field == "colorn") {
+            over->colorn     = lanes();
+            over->overColorn = ! over->overColor;
+            over->enabled    = true;
+            return true;
+        }
+        if (const int index = point_index(field); index >= 0 && values.size() >= 2) {
+            over->controlpoint[static_cast<std::size_t>(index)] = { values[0], values[1],
+                                                                   values.size() > 2 ? values[2] : 0.0f };
+            over->controlpointSet[static_cast<std::size_t>(index)] = true;
+            over->enabled = true;
+            return true;
+        }
+        return false;
+    };
+    return control;
+}
+
 /// What the commit of every system of one layer shares.
 struct ParticleCommit {
     ParseContext*                                     context { nullptr };
@@ -5196,6 +5225,9 @@ bool LoadParticleEntry(ParseContext& context, std::size_t at, const nlohmann::js
     const bool world = object.particleObj.flags[wpscene::Particle::FlagEnum::wordspace];
     auto sub = CommitParticleSystem(commit, build, layer.node, world,
                                     ParticleSubSystem::SpawnType::STATIC, statics);
+    if (auto* runtime = scene.runtime.get(); runtime != nullptr) {
+        runtime->RegisterParticleLayer(plan.key, MakeParticleLayerControl(over, sub.get()));
+    }
     // Pre-simulation waits for the finished tree, children before their parent (R91).
     for (auto* child : statics) context.pending_prewarms.push_back(child);
     context.pending_prewarms.push_back(sub.get());
@@ -5925,6 +5957,32 @@ void BuildCamerasAndTargets(ParseContext& context, const wpscene::WPScene& wp, d
         scene.activeCamera = perspective.get();
     }
     scene.cameras["global_perspective"] = perspective;
+
+    // What a script reads and replaces through thisScene.get/setCameraTransforms.
+    if (auto* runtime = scene.runtime.get(); runtime != nullptr) {
+        const auto vec = [](const std::array<float, 3>& v) { return Vector3d(v[0], v[1], v[2]); };
+        SceneRuntimeContext::SceneCameraTransforms initial;
+        initial.eye    = vec(wp.camera.eye);
+        initial.center = vec(wp.camera.center);
+        initial.up     = vec(wp.camera.up);
+        initial.zoom   = zoom;
+        std::function<void(const SceneRuntimeContext::SceneCameraTransforms&)> aim;
+        if (! context.is_ortho) {
+            aim = [node = context.global_perspective_camera_node, camera = perspective](
+                      const SceneRuntimeContext::SceneCameraTransforms& transforms) {
+                wpscene::WPSceneCamera block;
+                const auto put = [](std::array<float, 3>& out, const Vector3d& v) {
+                    out = { static_cast<float>(v.x()), static_cast<float>(v.y()), static_cast<float>(v.z()) };
+                };
+                put(block.eye, transforms.eye);
+                put(block.center, transforms.center);
+                put(block.up, transforms.up);
+                PlacePerspectiveCameraNode(*node, block);
+                camera->Update();
+            };
+        }
+        runtime->RegisterSceneCamera(initial, std::move(aim));
+    }
 }
 
 /// Every setting of the `general` block that reaches the scene or its runtime

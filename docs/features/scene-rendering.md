@@ -131,9 +131,52 @@ own axes by Euler angles in radians, and `layer.getEffectCount()` and
 `layer.getEffect(indexOrName)` return the layer's authored effects (built even when
 authored hidden in scenes whose scripts call `getEffect`), each exposing `name`,
 `visible` and `getMaterial(passIndex)` (whose constants can be read and written through
-`getConstant`/`setConstant` or as properties on the material object). The remaining
-layer transform calls (`setParent`, `lookAt`, `lookAtYaw` and `getAttachment*`) do not
-exist yet: a script that calls one stops at that line.
+`getConstant`/`setConstant` or as properties on the material object, by material name or
+uniform; a read answers the value the material holds, which is the scene's authored value
+or the shader's default until something writes it, as a number or a `Vec2` to `Vec4` by
+the constant's width). `layer.setParent(parent, adjustTransforms)` hangs the layer from
+another (a layer, its name or its index; none puts it at the root): with
+`adjustTransforms` it stays where it is on screen, its local transform worked out under the
+new parent, and without it the layer keeps its local transform and moves with the parent.
+The form that names a puppet attachment hangs the layer from the parent layer itself; the
+attachment is not followed. `lookAt`, `lookAtYaw` and `getAttachment*` do not exist yet: a
+script that calls one stops at that line.
+
+A particle layer answers Wallpaper Engine's IParticleSystem calls. `pause()` stops new
+particles and lets the live ones run out, `stop()` also clears them, `play()` resumes and,
+after a stop or once every emitter's timetable has run out with nothing left alive, starts
+the timetables (delay, duration, first burst) over, and `isPlaying()` answers whether an
+emitter still emits or a particle is alive, in the layer's system or a child's. Pause and
+stop reach the child systems too. `emitParticles(count)` makes every emitter of the layer's
+own system place `count` more particles in the next frame (1 when no count is given), even
+while paused or stopped; how Wallpaper Engine shares a count among several emitters was not
+established. `instance` is the layer's instance override, as a scene property binds it:
+`alpha`, `size`, `count`, `speed`, `lifetime`, `rate`, `colorn` (a `Vec3`, or one number for
+all three) and `controlpoint0` to `controlpoint7` (`Vec3`) read what the layer holds and take
+a script's value, which turns the override on with its other fields neutral. A script's
+request reaches the particles on the next frame, since the particles step before the
+scripts do.
+
+`thisScene.getCameraTransforms()` answers the scene camera's `eye`, `center` and `up`
+(`Vec3`s) and `zoom`, as the scene file's camera block and zoom set them, and
+`setCameraTransforms(transforms)` replaces them (a field left out keeps its value): a
+scene with a perspective projection looks from the new eye at the new centre, and a 2D
+scene takes the zoom. A 2D scene's eye and centre are kept and read back but do not pan
+the view, which Wallpaper Engine's documentation does not describe. A camera path that
+plays moves the camera again on its next frame, as Wallpaper Engine warns.
+
+An image layer with a puppet answers the bone calls: `getBoneCount()`, `getBoneIndex(name)`
+(-1 for none), `getBoneParentIndex(bone)` (-1 for a root), `getBoneTransform(bone)` (the
+bone's transform in the scene, a `Mat4`: the layer's matrix over the bone's pose in the
+puppet), `getLocalBoneTransform(bone)`, `getLocalBoneOrigin(bone)` and
+`getLocalBoneAngles(bone)` (in its parent bone, angles in degrees as a layer's are), each as
+the last frame posed it, a bone named or numbered. The setters (`setBoneTransform`, the
+local ones and the physics impulses) do not exist yet. `playSingleAnimation(animation,
+config)` plays an animation of the puppet (by name or id) once over the layers it has,
+then hides that layer so the pose goes back to them (`config` may set `rate` and `blend`);
+a hidden layer that played once is reused for the next. `createAnimationLayer(animation)`
+adds one that stays, and `destroyAnimationLayer(layer)` stops and hides it: layers keep
+their index, so an animation-layer object a script holds stays valid.
 
 A layer's `origin`, `scale` and `angles`, and an image layer's `color`, can be keyed on
 a timeline (`animation`: curves `c0` to `c2` and `options`), and all four play the
@@ -230,7 +273,9 @@ this app's own windows is not a click on the wallpaper, so neither scripts
 (`cursorDown`, `cursorClick`, `cursorUp`) nor effects that react to a held button
 (cursor ripples, fluid simulations) see it, or its release, even when the pointer is
 dragged onto the desktop before the button is let go. A press the wallpaper did get is
-always released, wherever the pointer ends up.
+always released, wherever the pointer ends up. As in Wallpaper Engine, the press brings
+`cursorDown` and the release `cursorUp`, then `cursorClick` only when the pointer is still
+over the layer that was pressed: letting go elsewhere cancels the click.
 
 Both scene renderers share video decoder selection. On macOS, an eligible FFmpeg
 default is kept; a software-only default does not rule out another decoder for
@@ -393,7 +438,12 @@ Puppets and rope geometry behave the same on both renderers. A puppet is deforme
 by its author's own skinning shader, and its pose comes from the one animation
 system the scene already has (animation layers, their play, pause, stop, rate,
 blend and visibility, and any script or user property driving them); the renderer
-only uploads the resulting bone matrices. Rope and rope-trail geometry is generated
+only uploads the resulting bone matrices. A puppet whose animations fade bones (a
+`blend_curves` value below 1, such as an eyelid that fades) also gets each bone's opacity
+(`g_BonesAlpha`, with the `SKINNING_ALPHA` combo its shader reads): every visible layer
+samples the bone's curve between its two frames, and the rest pose counts as opaque by the
+share of the blend the layers leave it, as the bones' transforms are mixed. A puppet whose
+curves never dip compiles without it. Rope and rope-trail geometry is generated
 once by the shared particle simulation, with the rope renderers' *UV scale*, scrolling
 and smoothing. A particle's sprite, rope or trail is sized as authored and drawn
 through its layer's model matrix, so a particle layer scaled up draws its
@@ -624,7 +674,14 @@ fullwidth forms (inferred: they go to the next face, so a string does not mix a 
 fullwidth comma with a left-set ideographic one), PingFang SC for Microsoft YaHei, Apple SD
 Gothic Neo for Malgun Gothic, and Arial Unicode MS last), each opened only when no face
 already held has the glyph, so the list is gone down as far as the text needs, once for
-a layout, and a glyph that none has is skipped; colour emoji have no face.
+a layout, and a glyph that none has is skipped. Apple Color Emoji stands for Segoe UI Emoji,
+second in the list: its glyphs are colour bitmaps held at fixed sizes, so the size nearest
+above the layer's em is read and scaled to it, and they are drawn in their own colours into
+the text's picture. The card's colour multiplies them as it does the text, so white text
+shows them as Apple draws them and coloured text tints them; a styled layer (outline, blur,
+shadow) draws them by their shape in its masks, without their colours. Each code point is
+one glyph, so an emoji made of several (a flag, a skin tone, a family joined by zero-width
+joiners) shows as its parts.
 
 An
 `opaquebackground` fills the card's rectangle (not the room a style needs around it) with

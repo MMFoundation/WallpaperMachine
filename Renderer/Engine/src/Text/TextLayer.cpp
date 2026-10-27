@@ -217,7 +217,7 @@ bool HasPostScriptName(FT_Face face, const std::string& name) {
 // before a layout takes any face, so the next use opens the file as it is.
 class FaceCache {
 public:
-    static constexpr std::size_t kCapacity = 8;
+    static constexpr std::size_t kCapacity = 9;
 
     static FaceCache& Get() {
         static FaceCache instance;
@@ -375,8 +375,9 @@ FT_Face OpenInstalledFace(const std::string& path, const std::string& postscript
 // Twemoji, Segoe UI Symbol, Microsoft YaHei and Malgun Gothic, each from the Windows Fonts
 // folder (or, for Twemoji, its own assets). The faces here are the ones that stand for them.
 //
-//  - Colour emoji (Segoe UI Emoji, Twemoji) are colour bitmaps, which FreeType's monochrome
-//    glyphs do not draw (docs/features/scene-rendering.md), so neither has a face here.
+//  - Apple Color Emoji stands for Segoe UI Emoji (and so for Twemoji, which comes after it):
+//    its glyphs are colour bitmaps at fixed sizes, read with FreeType's colour loading, scaled
+//    to the layer's size and drawn in their own colours (`ColorStrike`).
 //  - Arial Unicode MS is last, not third: it ships with Microsoft Office and not with Windows,
 //    so Wallpaper Engine on a stock install draws Chinese in Microsoft YaHei, and PingFang SC
 //    is the face that sets Simplified Chinese punctuation as it does. The scripts no other face
@@ -392,9 +393,12 @@ struct ChainFace {
     bool             scene_key;
     // The face is not asked for CJK punctuation and fullwidth forms (`IsCjkPunctuation`).
     bool             not_for_cjk_punctuation { false };
+    // The face's glyphs are colour bitmaps at fixed sizes (`ColorStrike`).
+    bool             color_bitmaps { false };
 };
 constexpr ChainFace kFallbackChain[] = {
     { "systemfont_arial", true },   // arial.ttf
+    { "Apple Color Emoji", false, false, true }, // seguiemj.ttf
     { "systemfont_segoe", true },   // segoeui.ttf
     { "Apple Symbols", false, true }, // seguisym.ttf
     { "PingFang SC", false },       // msyh.ttc
@@ -410,6 +414,29 @@ constexpr bool IsCjkPunctuation(uint32_t codepoint) {
 // A layout holds its font, a face standing in for it when it cannot be opened, and the chain,
 // so none of what it holds is the face the cache drops.
 static_assert(std::size(kFallbackChain) + 2 <= FaceCache::kCapacity);
+
+// A colour bitmap face cannot be sized freely: it holds its glyphs at a few fixed sizes. The
+// size picked is the smallest at least as large as the layer's em (else the largest), and the
+// factor that takes its pixels to the layer's em is what its metrics and bitmaps are scaled
+// by. Nothing when the face has no sizes to pick from.
+std::optional<float> ColorStrike(FT_Face face, float point_size) {
+    if (face == nullptr || face->num_fixed_sizes <= 0 || face->available_sizes == nullptr) return std::nullopt;
+    const double wanted = static_cast<double>(FreeTypeCharHeight(point_size)) / 64.0 * kTextDpi / kPointsPerInch;
+    int pick = -1;
+    for (int index = 0; index < face->num_fixed_sizes; ++index) {
+        const double ppem = static_cast<double>(face->available_sizes[index].y_ppem) / 64.0;
+        if (ppem <= 0.0) continue;
+        const bool large_enough = ppem >= wanted;
+        if (pick < 0) { pick = index; continue; }
+        const double held = static_cast<double>(face->available_sizes[pick].y_ppem) / 64.0;
+        if ((large_enough && (held < wanted || ppem < held)) || (! large_enough && held < wanted && ppem > held)) {
+            pick = index;
+        }
+    }
+    if (pick < 0 || FT_Select_Size(face, pick) != 0) return std::nullopt;
+    const double ppem = static_cast<double>(face->available_sizes[pick].y_ppem) / 64.0;
+    return static_cast<float>(wanted / ppem);
+}
 
 // The faces one layout draws with: the layer's own font, and the fallback chain's, none of
 // which is opened until a glyph needs it. All are sized for the layout and only good while the
@@ -444,6 +471,11 @@ public:
     // How the primary face stands in for the font the layer names, if it does.
     const SystemFontFit& primaryFit() const { return m_fit; }
     FT_Face              face(uint8_t index) const { return m_held[index]; }
+    // What the face's glyph pixels and metrics are multiplied by: 1, except for a colour
+    // bitmap face held at a fixed size (`ColorStrike`).
+    float                scale(uint8_t index) const { return m_scale[index]; }
+    // Whether the face's glyphs are colour bitmaps.
+    bool                 color(uint8_t index) const { return m_color[index]; }
 
     // The index of the face that draws `codepoint` -- the layer's font if it has the glyph,
     // else the first face of the chain that does, opened now if it has not been -- or -1 when
@@ -464,8 +496,15 @@ public:
             // A face that is held already has been asked for the glyph, and is sized for the
             // layer's font: the cache hands out one face per file, so it is left alone.
             if (other == nullptr || std::ranges::find(m_held, other) != m_held.end()) continue;
-            if (! SetFaceSize(other, m_point_size * font.fit.size_adjust)) continue;
-            Hold(other, entry.not_for_cjk_punctuation);
+            float scale = 1.0f;
+            if (entry.color_bitmaps) {
+                const auto strike = ColorStrike(other, m_point_size * font.fit.size_adjust);
+                if (! strike) continue;
+                scale = *strike;
+            } else if (! SetFaceSize(other, m_point_size * font.fit.size_adjust)) {
+                continue;
+            }
+            Hold(other, entry.not_for_cjk_punctuation, scale, entry.color_bitmaps);
             if (Declines(m_held.size() - 1, codepoint)) continue;
             if (FT_Get_Char_Index(other, codepoint) != 0u) return static_cast<int>(m_held.size() - 1);
         }
@@ -479,10 +518,12 @@ private:
         return OpenInstalledFace(path, postscript_name, m_point_size * fit.size_adjust);
     }
 
-    void Hold(FT_Face face, bool not_for_cjk_punctuation = false) {
+    void Hold(FT_Face face, bool not_for_cjk_punctuation = false, float scale = 1.0f, bool color = false) {
         if (face == nullptr) return;
         m_held.push_back(face);
         m_not_for_cjk_punctuation.push_back(not_for_cjk_punctuation);
+        m_scale.push_back(scale);
+        m_color.push_back(color);
     }
 
     // Whether the face held at `index` is one that is not asked for `codepoint`.
@@ -495,6 +536,8 @@ private:
     std::vector<FT_Face> m_held;
     // For each face held: whether it is not asked for CJK punctuation.
     std::vector<bool>    m_not_for_cjk_punctuation;
+    std::vector<float>   m_scale;
+    std::vector<bool>    m_color;
     OwnedFace            m_owned;
     SystemFontFit        m_fit;
     std::size_t          m_next_in_chain { 0 };
@@ -607,11 +650,39 @@ float GlyphAdvance(const GlyphRun& glyph, float spacing_x) {
     return std::floor(static_cast<float>(glyph.advance_26_6 + glyph.kerning_26_6) / 64.0f) + spacing_x;
 }
 
+// A glyph of a colour bitmap face: its bitmap's box and advance at the strike, scaled to the
+// layer's em.
+std::optional<GlyphRun> MeasureColorGlyph(FT_Face face, float scale, uint32_t codepoint, uint8_t face_index,
+                                          float spacing_x) {
+    if (FT_Load_Char(face, codepoint, FT_LOAD_COLOR) != 0) return std::nullopt;
+    const FT_GlyphSlot slot    = face->glyph;
+    const bool         has_ink = slot->bitmap.width > 0u && slot->bitmap.rows > 0u;
+    GlyphRun           glyph {
+                  .codepoint    = codepoint,
+                  .face         = face_index,
+                  .has_ink      = has_ink,
+                  .glyph_index  = FT_Get_Char_Index(face, codepoint),
+                  .advance_26_6 = static_cast<int32_t>(std::lround(static_cast<double>(slot->advance.x) * scale)),
+    };
+    glyph.advance = GlyphAdvance(glyph, spacing_x);
+    if (has_ink) {
+        glyph.left   = std::round(static_cast<float>(slot->bitmap_left) * scale);
+        glyph.right  = glyph.left + std::round(static_cast<float>(slot->bitmap.width) * scale);
+        glyph.top    = std::round(static_cast<float>(slot->bitmap_top) * scale);
+        glyph.bottom = glyph.top - std::round(static_cast<float>(slot->bitmap.rows) * scale);
+    }
+    return glyph;
+}
+
 std::optional<GlyphRun> MeasureGlyph(FaceChain& faces, uint32_t codepoint, float spacing_x) {
     // Only a glyph the font lacks looks for another face, and a glyph no face has is skipped.
     const int face_index = faces.FaceFor(codepoint);
     if (face_index < 0) return std::nullopt;
-    FT_Face face = faces.face(static_cast<uint8_t>(face_index));
+    FT_Face     face  = faces.face(static_cast<uint8_t>(face_index));
+    const float scale = faces.scale(static_cast<uint8_t>(face_index));
+    if (faces.color(static_cast<uint8_t>(face_index))) {
+        return MeasureColorGlyph(face, scale, codepoint, static_cast<uint8_t>(face_index), spacing_x);
+    }
     if (FT_Load_Char(face, codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) return std::nullopt;
 
     const FT_GlyphSlot slot    = face->glyph;
@@ -1288,12 +1359,54 @@ void RasterizeFallbackText(const TextLayerState& state, uint32_t width, uint32_t
     }
 }
 
+// Draws a colour glyph's bitmap (premultiplied BGRA at its strike) scaled by `scale` with its
+// top left at (`left`, `top`), each pixel the average of the strike pixels it covers, through
+// `plot_color(x, y, r, g, b, a)` in straight alpha.
+template<typename PlotColor>
+void PaintColorBitmap(const FT_Bitmap& bitmap, float scale, long left, long top, uint32_t width,
+                      uint32_t height, PlotColor&& plot_color) {
+    if (bitmap.pixel_mode != FT_PIXEL_MODE_BGRA || bitmap.buffer == nullptr || ! (scale > 0.0f)) return;
+    const long out_w = std::lround(static_cast<double>(bitmap.width) * scale);
+    const long out_h = std::lround(static_cast<double>(bitmap.rows) * scale);
+    const double step = 1.0 / scale;
+    for (long oy = 0; oy < out_h; ++oy) {
+        const long y = top + oy;
+        if (y < 0 || y >= static_cast<long>(height)) continue;
+        const long sy0 = static_cast<long>(std::floor(static_cast<double>(oy) * step));
+        const long sy1 = std::min(static_cast<long>(bitmap.rows), std::max(sy0 + 1, static_cast<long>(std::ceil((oy + 1) * step))));
+        for (long ox = 0; ox < out_w; ++ox) {
+            const long x = left + ox;
+            if (x < 0 || x >= static_cast<long>(width)) continue;
+            const long sx0 = static_cast<long>(std::floor(static_cast<double>(ox) * step));
+            const long sx1 = std::min(static_cast<long>(bitmap.width), std::max(sx0 + 1, static_cast<long>(std::ceil((ox + 1) * step))));
+            double b = 0.0, g = 0.0, r = 0.0, a = 0.0;
+            long   n = 0;
+            for (long sy = sy0; sy < sy1; ++sy) {
+                const unsigned char* row = bitmap.buffer + sy * static_cast<long>(bitmap.pitch);
+                for (long sx = sx0; sx < sx1; ++sx, ++n) {
+                    const unsigned char* px = row + sx * 4;
+                    b += px[0];
+                    g += px[1];
+                    r += px[2];
+                    a += px[3];
+                }
+            }
+            if (n == 0 || a <= 0.0) continue;
+            // Premultiplied in, straight out.
+            const auto straight = [a](double c) { return static_cast<uint8_t>(std::clamp(std::lround(c * 255.0 / a), 0L, 255L)); };
+            plot_color(static_cast<int>(x), static_cast<int>(y), straight(r), straight(g), straight(b),
+                       static_cast<uint8_t>(std::clamp(std::lround(a / static_cast<double>(n)), 0L, 255L)));
+        }
+    }
+}
+
 // Paints the text with FreeType, calling `plot(x, y, coverage)` for each pixel a
-// glyph covers; the caller decides what a pixel of coverage becomes. False when
-// there is no face to paint with.
-template<typename Plot>
+// glyph covers; the caller decides what a pixel of coverage becomes. A colour glyph
+// goes to `plot_color(x, y, r, g, b, a)` instead. False when there is no face to
+// paint with.
+template<typename Plot, typename PlotColor>
 bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t height,
-                           Plot&& plot) {
+                           Plot&& plot, PlotColor&& plot_color) {
     FaceChain faces(state);
     if (faces.primary() == nullptr) return false;
     if (state.text.empty() || width == 0 || height == 0) return true;
@@ -1307,6 +1420,16 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
         float       pen      = padding.x() - block.min_x + RowOffset(state, block.widest_row, line.LayoutWidth());
         for (const auto& glyph : line.glyphs) {
             FT_Face face = faces.face(glyph.face);
+            if (faces.color(glyph.face)) {
+                if (glyph.has_ink && face != nullptr && FT_Load_Char(face, glyph.codepoint, FT_LOAD_COLOR) == 0) {
+                    const long left = static_cast<long>(std::round(pen + glyph.left));
+                    const long top  = static_cast<long>(std::round(baseline - glyph.top));
+                    PaintColorBitmap(face->glyph->bitmap, faces.scale(glyph.face), left, top, width, height,
+                                     plot_color);
+                }
+                pen += glyph.advance;
+                continue;
+            }
             // A glyph the face will not render now is skipped, and still moves the pen.
             if (glyph.has_ink && face != nullptr &&
                 FT_Load_Char(face, glyph.codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) == 0) {
@@ -1522,12 +1645,13 @@ std::string TextTextureName(std::string_view layer_key) {
 
 void RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t height,
                         std::vector<uint8_t>& rgba) {
-    // Paints the text, FreeType's part under its lock, into `plot`.
-    const auto paint = [&](auto&& plot) {
+    // Paints the text, FreeType's part under its lock, into `plot`, and colour glyphs into
+    // `plot_color`.
+    const auto paint = [&](auto&& plot, auto&& plot_color) {
         bool rasterized = false;
         {
             const std::lock_guard lock { g_freetype_mutex };
-            rasterized = RasterizeFreeTypeText(state, width, height, plot);
+            rasterized = RasterizeFreeTypeText(state, width, height, plot, plot_color);
         }
         if (! rasterized) RasterizeFallbackText(state, width, height, plot);
     };
@@ -1536,10 +1660,12 @@ void RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t he
         // The style mixes the coverage of the glyphs into three masks; see
         // ComposeStyledText.
         std::vector<uint8_t> coverage(static_cast<std::size_t>(width) * height, 0u);
-        paint([&](int x, int y, uint8_t value) {
+        const auto cover = [&](int x, int y, uint8_t value) {
             auto& pixel = coverage[static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)];
             pixel       = std::max(pixel, value);
-        });
+        };
+        // The style's masks hold no colour: a colour glyph is styled by its shape.
+        paint(cover, [&](int x, int y, uint8_t, uint8_t, uint8_t, uint8_t alpha) { cover(x, y, alpha); });
         ComposeStyledText(ResolveStyleMetrics(state.style, state.point_size), coverage, width,
                           height, rgba);
         return;
@@ -1561,7 +1687,8 @@ void RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t he
         rgba[texel * 4u + 1u] = color[1];
         rgba[texel * 4u + 2u] = color[2];
     }
-    // The colour is already in every texel; the glyphs only raise the alpha.
+    // The colour is already in every texel; the glyphs only raise the alpha. A colour glyph
+    // brings its own colour, which the card's tint then multiplies as it does the text's.
     paint([&](int x, int y, uint8_t coverage) {
         const auto alpha =
             static_cast<uint8_t>(std::lround(static_cast<float>(coverage) * alpha_scale));
@@ -1569,6 +1696,22 @@ void RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t he
             (static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)) * 4u;
         if (offset + 3u >= rgba.size()) return;
         rgba[offset + 3u] = std::max(rgba[offset + 3u], alpha);
+    }, [&](int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+        const std::size_t offset =
+            (static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)) * 4u;
+        if (offset + 3u >= rgba.size()) return;
+        // Laid over what an earlier glyph left (straight alpha), so a soft edge never thins it.
+        const float source = static_cast<float>(a) * alpha_scale / 255.0f;
+        const float below  = static_cast<float>(rgba[offset + 3u]) / 255.0f * (1.0f - source);
+        const float out    = source + below;
+        if (out <= 0.0f) return;
+        const auto over = [&](uint8_t top, uint8_t under) {
+            return static_cast<uint8_t>(std::lround((static_cast<float>(top) * source + static_cast<float>(under) * below) / out));
+        };
+        rgba[offset + 0u] = over(r, rgba[offset + 0u]);
+        rgba[offset + 1u] = over(g, rgba[offset + 1u]);
+        rgba[offset + 2u] = over(b, rgba[offset + 2u]);
+        rgba[offset + 3u] = static_cast<uint8_t>(std::lround(out * 255.0f));
     });
 }
 

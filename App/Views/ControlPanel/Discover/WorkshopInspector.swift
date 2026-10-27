@@ -41,6 +41,7 @@ private struct ItemInspector: View {
         tags
         DownloadNotes(item: item, download: download)
         summary
+        if !item.isCollection, item.authorProfileID != nil { ItemComments(item: item) }
       }
       .padding(16)
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,6 +124,79 @@ private struct ItemInspector: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(12)
           .textSelection(.enabled)
+      }
+    }
+  }
+}
+
+// MARK: - Comments
+
+/// The newest comments on the item, read-only, from Steam's public thread; the rest are on its
+/// Steam page. All of it is Steam's text.
+private struct ItemComments: View {
+  let item: WorkshopItem
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    let model = controller.workshopBrowser
+    PanelCard {
+      VStack(alignment: .leading, spacing: 10) {
+        HStack(spacing: 6) {
+          Text("Comments")
+            .font(.system(size: 13, weight: .semibold))
+            .accessibilityAddTraits(.isHeader)
+          if model.commentsItemID == item.id, case .loaded(let thread) = model.comments, thread.total > 0 {
+            CountBadge(count: thread.total)
+          }
+          Spacer(minLength: 0)
+        }
+        content(model: model)
+        Button("Read all comments on Steam") { model.viewOnSteam(item) }
+          .buttonStyle(.panelLink)
+          .font(.system(size: 12))
+      }
+      .padding(12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .task(id: item.id) { await model.loadComments(for: item) }
+  }
+
+  @ViewBuilder
+  private func content(model: WorkshopBrowserModel) -> some View {
+    if model.commentsItemID != item.id || model.comments == .loading {
+      Text("Loading comments…")
+        .font(.system(size: 12))
+        .foregroundStyle(theme.surface.muted.color)
+    } else if case .failed(let message) = model.comments {
+      Text(verbatim: message)
+        .font(.system(size: 12))
+        .foregroundStyle(theme.surface.muted.color)
+    } else if case .loaded(let thread) = model.comments {
+      if thread.comments.isEmpty {
+        Text("No comments yet")
+          .font(.system(size: 12))
+          .foregroundStyle(theme.surface.muted.color)
+      } else {
+        ForEach(Array(thread.comments.enumerated()), id: \.offset) { _, comment in
+          VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+              Text(verbatim: comment.author)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+              if let date = comment.date {
+                Text(date, format: .relative(presentation: .named))
+                  .font(.system(size: 11))
+                  .foregroundStyle(theme.surface.muted.color)
+              }
+            }
+            Text(verbatim: comment.text)
+              .font(.system(size: 12))
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .textSelection(.enabled)
+          }
+        }
       }
     }
   }
@@ -298,6 +372,7 @@ private struct ItemActions: View {
         .buttonStyle(.panelSecondary(size: .regular, expands: true))
         .help(L("Open a live preview without changing your desktop"))
       }
+      if controller.workshop.steamWebSession != nil, !item.isCollection { subscription }
       HStack(spacing: 8) {
         Button {
           model.viewOnSteam(item)
@@ -318,6 +393,26 @@ private struct ItemActions: View {
         }
       }
     }
+  }
+
+  /// **Subscribe on Steam** or **Unsubscribe on Steam**, for the signed-in Steam Community account.
+  private var subscription: some View {
+    let subscribed = controller.workshop.subscribedIDs.contains(item.id)
+    let key = PanelActionCoordinator.key("workshopSubscription", id: item.id)
+    return Button {
+      let item = item
+      controller.launch(key) { [controller] in
+        try await controller.setWorkshopSubscribed(!subscribed, item: item)
+      }
+    } label: {
+      if subscribed {
+        Label("Unsubscribe on Steam", systemImage: "bookmark.slash")
+      } else {
+        Label("Subscribe on Steam", systemImage: "bookmark")
+      }
+    }
+    .buttonStyle(.panelSecondary(size: .regular, expands: true))
+    .disabled(controller.isBusy(key))
   }
 
   @ViewBuilder

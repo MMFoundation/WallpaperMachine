@@ -100,7 +100,9 @@ add_scene_schema_behavior_test(scene_schema_part10_test
     scene_schema_part10_vector_test.cpp)
 add_scene_schema_behavior_test(scene_schema_part11_test
     scene_schema_part11_timelines_test.cpp
-    scene_schema_part11_audio_test.cpp)
+    scene_schema_part11_audio_test.cpp
+    scene_schema_part11_particle_scripts_test.cpp
+    scene_schema_part11_camera_scripts_test.cpp)
 # ------------------------------------------------------------------------------------------
 
 add_executable(mdl_schema_tests mdl_schema_tests.cpp)

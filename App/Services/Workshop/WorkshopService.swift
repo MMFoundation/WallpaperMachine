@@ -25,6 +25,19 @@ struct WorkshopItem: Identifiable, Codable, Equatable, Sendable {
     static func pageURL(id: String) -> URL { URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(id)")! }
 }
 
+/// One comment on a Workshop item, as plain text; Steam's text, never a catalog key.
+struct WorkshopComment: Equatable, Sendable {
+    let author: String
+    let date: Date?
+    let text: String
+}
+
+/// The newest comments on an item and how many it has in all.
+struct WorkshopComments: Equatable, Sendable {
+    let total: Int
+    let comments: [WorkshopComment]
+}
+
 enum WorkshopKind: String, CaseIterable, Identifiable, Sendable {
     case all = "All types", scene = "Scene", video = "Video", web = "Web", application = "Application"
     var id: String { rawValue }
@@ -529,6 +542,125 @@ actor WorkshopService {
             ]
         }
         return url.url!
+    }
+
+    // MARK: Subscriptions and comments
+
+    /// Subscribes the signed-in account to `itemID` on Steam, or unsubscribes it: a POST to
+    /// steamcommunity.com with the session and a CSRF token, which Steam checks against a cookie of
+    /// the same value, so a fresh random one serves. The request follows no redirect off
+    /// steamcommunity.com with the cookie. Steam's sign-in page, or a refusal of the session,
+    /// throws `SteamSignInRequired`; any other answer than success throws `WorkshopFailure`.
+    func setSubscribed(_ subscribed: Bool, itemID: String, account: SteamWebSession) async throws {
+        guard !itemID.isEmpty, itemID.allSatisfy({ $0.isASCII && $0.isNumber }) else {
+            throw WorkshopFailure(message: String(localized: "Choose a valid numeric Workshop item identifier."))
+        }
+        let url = URL(string: "https://steamcommunity.com/sharedfiles/\(subscribed ? "subscribe" : "unsubscribe")")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 35
+        request.setValue("WallpaperMachine/1.0 (macOS; public Workshop browser)", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let token = Self.csrfToken()
+        request.httpShouldHandleCookies = false
+        request.setValue("steamLoginSecure=\(account.cookie); sessionid=\(token)", forHTTPHeaderField: "Cookie")
+        request.httpBody = Data("id=\(itemID)&appid=431960&sessionid=\(token)".utf8)
+        let (data, response) = try await session.data(for: request, delegate: SteamCookieRedirectGuard())
+        try Task.checkCancellation()
+        guard let http = response as? HTTPURLResponse else { throw SteamSignInRequired() }
+        if http.statusCode == 401 || http.statusCode == 403 { throw SteamSignInRequired() }
+        if (200..<300).contains(http.statusCode),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let success = object["success"] as? Int {
+            guard success == 1 else {
+                throw WorkshopFailure(message: subscribed
+                    ? String(localized: "Steam did not subscribe you to this item. Try again, or subscribe on its Steam page.")
+                    : String(localized: "Steam did not unsubscribe you from this item. Try again, or unsubscribe on its Steam page."))
+            }
+            return
+        }
+        let page = String(decoding: data.prefix(200_000), as: UTF8.self)
+        if (Self.firstMatch(#"<title>([^<]*)</title>"#, in: page) ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == "Sign In" {
+            throw SteamSignInRequired()
+        }
+        throw WorkshopFailure(message: String(localized: "Steam could not be reached to change your subscription. Check your connection and try again."))
+    }
+
+    /// A value for Steam's `sessionid` CSRF check: 24 random hexadecimal digits.
+    static func csrfToken() -> String {
+        (0..<12).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
+    }
+
+    /// The newest comments on an item, from Steam's public comment thread (no sign-in, no
+    /// cookie), with how many there are in all. `creatorID` is the author's SteamID, which names
+    /// the thread.
+    func comments(itemID: String, creatorID: String, count: Int = 10) async throws -> WorkshopComments {
+        guard !itemID.isEmpty, itemID.allSatisfy({ $0.isASCII && $0.isNumber }), SteamWebSession.isSteamID(creatorID) else {
+            throw WorkshopFailure(message: String(localized: "Steam has no comments to show for this item."))
+        }
+        var components = URLComponents(string: "https://steamcommunity.com/comment/PublishedFile_Public/render/\(creatorID)/\(itemID)/")!
+        components.queryItems = [URLQueryItem(name: "start", value: "0"), URLQueryItem(name: "count", value: String(max(1, min(count, 50))))]
+        var request = URLRequest(url: components.url!)
+        request.timeoutInterval = 35
+        request.httpShouldHandleCookies = false
+        request.setValue("WallpaperMachine/1.0 (macOS; public Workshop browser)", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation()
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              data.count < 4_000_000,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let html = object["comments_html"] as? String
+        else {
+            throw WorkshopFailure(message: String(localized: "Steam’s comments could not be read. Try again, or read them on the item’s Steam page."))
+        }
+        let comments = Self.decodeComments(html)
+        let total = (object["total_count"] as? Int) ?? comments.count
+        return WorkshopComments(total: max(total, comments.count), comments: comments)
+    }
+
+    /// The comments of a thread's HTML, each as plain text: markup dropped, line breaks kept,
+    /// entities decoded and the ends trimmed.
+    static func decodeComments(_ html: String) -> [WorkshopComment] {
+        let blocks = html.components(separatedBy: #"class="commentthread_comment "#).dropFirst()
+        return blocks.compactMap { block -> WorkshopComment? in
+            guard let body = firstMatch(#"(?s)class="commentthread_comment_text"[^>]*>(.*?)</div>"#, in: block) else { return nil }
+            let text = plainText(body)
+            guard !text.isEmpty else { return nil }
+            let author = firstMatch(#"(?s)commentthread_author_link[^>]*>\s*<bdi>(.*?)</bdi>"#, in: block).map(plainText) ?? ""
+            let date = firstMatch(#"data-timestamp="(\d+)""#, in: block).flatMap(TimeInterval.init).map(Date.init(timeIntervalSince1970:))
+            return WorkshopComment(author: author, date: date, text: text)
+        }
+    }
+
+    /// Text of an HTML fragment: white space in the markup is one space, as a browser shows it, a
+    /// `<br>` is a line break, every other tag is dropped, entities are decoded and each line's
+    /// ends are trimmed.
+    static func plainText(_ html: String) -> String {
+        var text = html.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?i)<br\s*/?>"#, with: "\n", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"<[^>]*>"#, with: "", options: .regularExpression)
+        text = decodeNumericEntities(unescapeHTML(text))
+        let lines = text.components(separatedBy: "\n").map {
+            $0.replacingOccurrences(of: #"[ \t\r]+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces)
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// `&#NNN;` and `&#xHH;` as the characters they name.
+    private static func decodeNumericEntities(_ text: String) -> String {
+        guard text.contains("&#"), let regex = try? NSRegularExpression(pattern: #"&#(x?)([0-9A-Fa-f]+);"#) else { return text }
+        var result = ""
+        var last = text.startIndex
+        for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let whole = Range(match.range, in: text), let hex = Range(match.range(at: 1), in: text),
+                  let digits = Range(match.range(at: 2), in: text) else { continue }
+            result += text[last..<whole.lowerBound]
+            let value = UInt32(text[digits], radix: text[hex].isEmpty ? 10 : 16)
+            result += value.flatMap(Unicode.Scalar.init).map { String(Character($0)) } ?? String(text[whole])
+            last = whole.upperBound
+        }
+        return result + text[last...]
     }
 
     /// One page of an account's Workshop items, subscriptions or favorites, with the account's name.

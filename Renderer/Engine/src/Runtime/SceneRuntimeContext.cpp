@@ -1136,6 +1136,7 @@ void SceneRuntimeContext::UnregisterNode(std::string_view view) {
     m_node_size.erase(name);
     m_node_hit_masks.erase(name);
     m_puppet_layers.erase(name);
+    m_particle_layers.erase(name);
     m_text_layers.erase(name);
     m_text_effect_gates.erase(name);
     m_node_alignment.erase(name);
@@ -1329,6 +1330,7 @@ SceneRuntimeContext::CaptureNodeRegistration(std::string_view name) const {
     remember(&SceneRuntimeContext::m_node_hit_masks);
     remember(&SceneRuntimeContext::m_node_cursor_targets);
     remember(&SceneRuntimeContext::m_puppet_layers);
+    remember(&SceneRuntimeContext::m_particle_layers);
     remember(&SceneRuntimeContext::m_text_layers);
     remember(&SceneRuntimeContext::m_text_effect_gates);
     remember(&SceneRuntimeContext::m_node_alignment);
@@ -1391,6 +1393,41 @@ void SceneRuntimeContext::RegisterPuppetLayer(std::string name, WPPuppetLayer la
 WPPuppetLayer* SceneRuntimeContext::FindPuppetLayer(std::string_view name) {
     const auto iterator = m_puppet_layers.find(std::string(name));
     return iterator == m_puppet_layers.end() ? nullptr : &iterator->second;
+}
+
+int SceneRuntimeContext::AddPuppetAnimationLayer(std::string_view layer_name, std::string_view animation,
+                                                 bool once) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    return puppet != nullptr ? puppet->addLayer(animation, once) : -1;
+}
+
+int SceneRuntimeContext::PuppetBoneCount(std::string_view layer_name) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    return puppet != nullptr ? static_cast<int>(puppet->boneCount()) : 0;
+}
+
+int SceneRuntimeContext::PuppetBoneIndex(std::string_view layer_name, std::string_view bone_name) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    return puppet != nullptr ? puppet->boneIndex(bone_name) : -1;
+}
+
+int SceneRuntimeContext::PuppetBoneParent(std::string_view layer_name, int bone) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    return puppet != nullptr ? puppet->boneParent(bone) : -1;
+}
+
+std::optional<linalg::Matrix4d> SceneRuntimeContext::PuppetBoneMatrix(std::string_view layer_name, int bone,
+                                                                     bool world) {
+    auto* puppet = FindPuppetLayer(layer_name);
+    if (puppet == nullptr) return std::nullopt;
+    const auto pose = world ? puppet->boneModel(bone) : puppet->boneLocal(bone);
+    if (! pose) return std::nullopt;
+    const linalg::Matrix4d matrix = pose->matrix().cast<double>();
+    if (! world) return matrix;
+    const auto node = m_nodes.find(std::string(layer_name));
+    if (node == m_nodes.end() || node->second == nullptr) return matrix;
+    node->second->UpdateTrans();
+    return linalg::Matrix4d(node->second->ModelTrans() * matrix);
 }
 
 double SceneRuntimeContext::PuppetAnimationControl(std::string_view layer_name,
@@ -1561,6 +1598,42 @@ std::size_t SceneRuntimeContext::EffectMaterialCount(std::string_view reference)
     return found != m_effect_objects.end() ? found->second.passes.size() : 0u;
 }
 
+namespace
+{
+// The uniform an effect pass's constant `name` stands for: a material name through the shader's
+// annotations, or a uniform the material holds a value for. Empty when it is neither.
+std::string EffectPassUniform(const SceneRuntimeContext::EffectMaterialPass& pass, std::string_view name) {
+    if (const auto alias = pass.aliases.find(std::string(name)); alias != pass.aliases.end()) {
+        return alias->second;
+    }
+    if (pass.material->customShader.constValues.contains(std::string(name))) return std::string(name);
+    return {};
+}
+} // namespace
+
+std::vector<float> SceneRuntimeContext::EffectMaterialConstant(std::string_view reference,
+                                                               std::size_t pass_index,
+                                                               std::string_view name) const {
+    if (name.empty()) return {};
+    const auto found = m_effect_objects.find(std::string(reference));
+    if (found == m_effect_objects.end() || pass_index >= found->second.passes.size()) return {};
+    const auto& pass = found->second.passes[pass_index];
+    if (pass.material == nullptr) return {};
+    const auto  uniform = EffectPassUniform(pass, name);
+    if (uniform.empty()) return {};
+    const auto& held = pass.material->customShader.constValues;
+    if (const auto value = held.find(uniform); value != held.end()) {
+        return { value->second.data(), value->second.data() + value->second.size() };
+    }
+    // Nothing authored it: the shader's own default stands.
+    if (const auto* shader = pass.material->customShader.shader.get(); shader != nullptr) {
+        if (const auto def = shader->default_uniforms.find(uniform); def != shader->default_uniforms.end()) {
+            return { def->second.data(), def->second.data() + def->second.size() };
+        }
+    }
+    return {};
+}
+
 bool SceneRuntimeContext::SetEffectMaterialConstant(std::string_view reference,
                                                     std::size_t pass_index,
                                                     std::string_view name,
@@ -1571,14 +1644,8 @@ bool SceneRuntimeContext::SetEffectMaterialConstant(std::string_view reference,
     auto& pass = found->second.passes[pass_index];
     if (pass.material == nullptr) return false;
 
-    std::string uniform;
-    if (const auto alias = pass.aliases.find(std::string(name)); alias != pass.aliases.end()) {
-        uniform = alias->second;
-    } else if (pass.material->customShader.constValues.contains(std::string(name))) {
-        uniform = std::string(name);
-    } else {
-        return false;
-    }
+    const std::string uniform = EffectPassUniform(pass, name);
+    if (uniform.empty()) return false;
 
     std::size_t count = values.size();
     if (pass.material->customShader.shader != nullptr) {
@@ -1964,11 +2031,34 @@ void SceneRuntimeContext::ApplySceneZoomAnimation() {
     ApplySceneZoom(m_scene_zoom_animation->Value());
 }
 
+void SceneRuntimeContext::RegisterSceneCamera(SceneCameraTransforms initial,
+                                              std::function<void(const SceneCameraTransforms&)> aim) {
+    m_camera_transforms = initial;
+    m_aim_camera        = std::move(aim);
+}
+
+SceneRuntimeContext::SceneCameraTransforms SceneRuntimeContext::CameraTransforms() const {
+    return m_camera_transforms;
+}
+
+void SceneRuntimeContext::SetCameraTransforms(const SceneCameraTransforms& transforms) {
+    const auto finite = [](const linalg::Vector3d& v) { return v.allFinite(); };
+    if (finite(transforms.eye)) m_camera_transforms.eye = transforms.eye;
+    if (finite(transforms.center)) m_camera_transforms.center = transforms.center;
+    if (finite(transforms.up)) m_camera_transforms.up = transforms.up;
+    if (m_aim_camera) {
+        m_aim_camera(m_camera_transforms);
+    } else if (std::isfinite(transforms.zoom) && transforms.zoom > 0.0) {
+        ApplySceneZoom(transforms.zoom);
+    }
+}
+
 void SceneRuntimeContext::ApplySceneZoom(double zoom) {
     if (m_scene == nullptr) return;
     const auto global = m_scene->cameras.find("global");
     if (global == m_scene->cameras.end() || global->second == nullptr) return;
     const double applied = std::isfinite(zoom) && zoom > 0.0 ? zoom : 1.0;
+    m_camera_transforms.zoom = applied;
     constexpr double kMostUnits = 2147483647.0;
     SceneCamera&     canvas     = *global->second;
     canvas.SetWidth(std::clamp(static_cast<double>(m_scene->ortho[0]) / applied, 1.0, kMostUnits));
@@ -2037,6 +2127,7 @@ void SceneRuntimeContext::ApplyCameraShots() {
         return;
     }
     m_framed_camera_shot = std::make_pair(zoom, offset);
+    m_camera_transforms.zoom = zoom;
     m_scene->FrameCanvas(zoom, offset);
 }
 
@@ -2285,6 +2376,69 @@ void SceneRuntimeContext::RegisterNodeVideoTexture(std::string name, std::string
     auto& keys = m_node_video_textures[name];
     if (std::find(keys.begin(), keys.end(), texture_key) == keys.end()) keys.push_back(texture_key);
     m_video_texture_playback.try_emplace(std::move(texture_key));
+}
+
+void SceneRuntimeContext::RegisterParticleLayer(std::string name, ParticleLayerControl control) {
+    m_particle_layers.insert_or_assign(std::move(name), std::move(control));
+}
+
+bool SceneRuntimeContext::HasParticleLayer(std::string_view layer_name) const {
+    return m_particle_layers.contains(ResolveLayerName(layer_name));
+}
+
+namespace
+{
+template<typename Layers>
+auto* FindParticleControl(Layers& layers, const std::string& name) {
+    const auto found = layers.find(name);
+    return found != layers.end() ? &found->second : nullptr;
+}
+} // namespace
+
+bool SceneRuntimeContext::PlayParticleLayer(std::string_view layer_name) {
+    auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    if (control == nullptr) return false;
+    if (control->play) control->play();
+    return true;
+}
+
+bool SceneRuntimeContext::PauseParticleLayer(std::string_view layer_name) {
+    auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    if (control == nullptr) return false;
+    if (control->pause) control->pause();
+    return true;
+}
+
+bool SceneRuntimeContext::StopParticleLayer(std::string_view layer_name) {
+    auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    if (control == nullptr) return false;
+    if (control->stop) control->stop();
+    return true;
+}
+
+bool SceneRuntimeContext::ParticleLayerPlaying(std::string_view layer_name) const {
+    const auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    return control != nullptr && control->playing && control->playing();
+}
+
+bool SceneRuntimeContext::EmitParticles(std::string_view layer_name, uint32_t count) {
+    auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    if (control == nullptr) return false;
+    if (control->emit && count > 0) control->emit(count);
+    return true;
+}
+
+std::vector<float> SceneRuntimeContext::ParticleInstanceValue(std::string_view layer_name,
+                                                              std::string_view field) const {
+    const auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    if (control == nullptr || ! control->get_instance) return {};
+    return control->get_instance(field);
+}
+
+bool SceneRuntimeContext::SetParticleInstanceValue(std::string_view layer_name, std::string_view field,
+                                                   std::span<const float> values) {
+    auto* control = FindParticleControl(m_particle_layers, ResolveLayerName(layer_name));
+    return control != nullptr && control->set_instance && control->set_instance(field, values);
 }
 
 void SceneRuntimeContext::RegisterSoundLayer(std::string                    name,
@@ -3792,12 +3946,15 @@ void SceneRuntimeContext::DispatchCursorUp(int button) {
 
 // One frame of cursor events for the programs that listen (a scene program carries no mask of
 // the handlers it defines, since it may register them as it runs, so each is asked): enter, leave and move by whether
-// the pointer is over their layer, then the press and release edges this frame brought.
+// the pointer is over their layer, then the press and release edges this frame brought. As in
+// Wallpaper Engine, a press brings `cursorDown` and its release `cursorUp`, then `cursorClick` when
+// the pointer is still over the layer that took the press.
 bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
     const bool in_window = m_host_context->cursor_in_window;
-    constexpr uint8_t kPress = static_cast<uint8_t>(ScriptCursorEvent::Down) |
-                               static_cast<uint8_t>(ScriptCursorEvent::Click);
-    constexpr uint8_t kRelease = static_cast<uint8_t>(ScriptCursorEvent::Up);
+    // Both go with the button: a program with only a click handler holds it from the press.
+    constexpr uint8_t kButton = static_cast<uint8_t>(ScriptCursorEvent::Down) |
+                                static_cast<uint8_t>(ScriptCursorEvent::Up) |
+                                static_cast<uint8_t>(ScriptCursorEvent::Click);
     // The walk's programs are the ones there are as it begins; what a callback adds joins at the
     // next frame, and one it removes leaves an empty slot.
     const auto value_count  = m_scripted_values.size();
@@ -3890,7 +4047,7 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
     }
 
     // Presses go to the programs under the pointer, which then hold the button; the release
-    // goes to the holders wherever the pointer has gone since.
+    // goes to the holders wherever the pointer has gone since, and clicks those it is still over.
     const uint32_t pressed  = m_host_context->mouse_buttons_pressed;
     const uint32_t released = m_host_context->mouse_buttons_released;
     for (uint32_t button = 0; button < 32; ++button) {
@@ -3902,14 +4059,11 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
             m_cursor_blocker_cached = false;
             for (std::size_t index = 0; index < value_count; ++index) {
                 auto* value = m_scripted_values[index];
-                if (value == nullptr || (value->CursorHandlerMask() & kPress) == 0) continue;
+                if (value == nullptr || (value->CursorHandlerMask() & kButton) == 0) continue;
                 if (VisitScriptLayer(*value) != CursorVisit::Inside) continue;
                 m_scripted_value_cursor_held[button].push_back(value);
                 aim(value->LayerName());
                 value->DispatchCursorDown(*m_host_context);
-                if (m_scripted_values.size() > index && m_scripted_values[index] == value) {
-                    value->DispatchCursorClick(*m_host_context);
-                }
                 callback_ran();
             }
             for (std::size_t index = 0; index < script_count; ++index) {
@@ -3919,9 +4073,6 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
                 m_scene_script_cursor_held[button].push_back(index);
                 aim(script->LayerName());
                 script->DispatchCursorDown(*m_host_context);
-                if (index < m_scene_scripts.size() && m_scene_scripts[index].script.get() == script) {
-                    script->DispatchCursorClick(*m_host_context);
-                }
                 callback_ran();
             }
         }
@@ -3932,13 +4083,17 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
         m_cursor_blocker_cached = false;
         for (std::size_t index = 0; index < value_count; ++index) {
             auto* value = m_scripted_values[index];
-            if (value == nullptr || (value->CursorHandlerMask() & kRelease) == 0) continue;
+            if (value == nullptr || (value->CursorHandlerMask() & kButton) == 0) continue;
             const bool holder = std::find(held_values.begin(), held_values.end(), value) != held_values.end();
             const bool scene_wide = value->LayerName().empty();
-            if (holder || scene_wide ||
-                (in_window && VisitScriptLayer(*value) == CursorVisit::Inside)) {
+            const bool over = in_window && VisitScriptLayer(*value) == CursorVisit::Inside;
+            if (! holder && ! scene_wide && ! over) continue;
+            aim(value->LayerName());
+            value->DispatchCursorUp(*m_host_context);
+            callback_ran();
+            if (holder && over && m_scripted_values.size() > index && m_scripted_values[index] == value) {
                 aim(value->LayerName());
-                value->DispatchCursorUp(*m_host_context);
+                value->DispatchCursorClick(*m_host_context);
                 callback_ran();
             }
         }
@@ -3947,10 +4102,14 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
             auto* script = m_scene_scripts[index].script.get();
             const bool holder = std::find(held_scripts.begin(), held_scripts.end(), index) != held_scripts.end();
             const bool scene_wide = script->LayerName().empty();
-            if (holder || scene_wide ||
-                (in_window && VisitScriptLayer(*script) == CursorVisit::Inside)) {
+            const bool over = in_window && VisitScriptLayer(*script) == CursorVisit::Inside;
+            if (! holder && ! scene_wide && ! over) continue;
+            aim(script->LayerName());
+            script->DispatchCursorUp(*m_host_context);
+            callback_ran();
+            if (holder && over && index < m_scene_scripts.size() && m_scene_scripts[index].script.get() == script) {
                 aim(script->LayerName());
-                script->DispatchCursorUp(*m_host_context);
+                script->DispatchCursorClick(*m_host_context);
                 callback_ran();
             }
         }
@@ -4410,7 +4569,8 @@ bool SceneRuntimeContext::NameLayer(std::string_view runtime_name, std::string a
     return ResolveLayerName(authored_name) == key;
 }
 
-bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view parent_name) {
+bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view parent_name,
+                                        bool keep_place) {
     const auto found = m_nodes.find(std::string(name));
     if (found == m_nodes.end() || found->second == nullptr || m_scene == nullptr ||
         m_scene->sceneGraph == nullptr) {
@@ -4437,8 +4597,35 @@ bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view 
     });
     if (entry == siblings.end()) return false;
     auto owned = *entry;
+    // Keeping the place needs the new parent's inverse; a parent squashed to nothing has none,
+    // and the layer then stays where it hangs.
+    const bool       place   = keep_place && ! node->IgnoresParentTransform();
+    linalg::Matrix4d world   = linalg::Matrix4d::Identity();
+    linalg::Matrix4d inverse = linalg::Matrix4d::Identity();
+    if (place) {
+        node->UpdateTrans();
+        world = node->ModelTrans();
+        new_parent->UpdateTrans();
+        inverse = new_parent->ModelTrans().inverse();
+        if (! inverse.allFinite()) return false;
+    }
     siblings.erase(entry);
     new_parent->AppendChild(std::move(owned));
+    if (place) {
+        node->SetTransformFromMatrix(inverse * world);
+        // The new local transform is also what later writes and bindings start from. Scale and
+        // angles go first; a layer hung from an edge then sets its anchor point back by the
+        // offset they give it, so its place stays the one just restored.
+        const std::string      key(name);
+        const linalg::Vector3f scale = node->Scale(), angles = node->Rotation(), at = node->Translate();
+        SetNodeScale(key, scale);
+        SetNodeRotation(key, angles);
+        linalg::Vector3f offset = linalg::Vector3f::Zero();
+        if (const auto anchor = m_node_alignment.find(key); anchor != m_node_alignment.end()) {
+            offset = node->Translate() - anchor->second.origin;
+        }
+        SetNodeTranslate(key, at - offset);
+    }
     MarkSceneGraphMutated("reparent");
     return true;
 }

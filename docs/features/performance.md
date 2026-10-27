@@ -455,7 +455,13 @@ wallpaper and does not change the user's own Play/Pause.
 Another app counts as playing sound while Core Audio reports it running audio
 output (`kAudioProcessPropertyIsRunningOutput`). This app and the processes it is
 responsible for, such as the WebKit processes playing a web wallpaper, are
-excluded. Sound must last 0.5 s before it counts and silence 2 s before it clears,
+excluded, and so are the Mac's own feedback sounds: alerts and interface sounds
+(`systemsoundserverd`, `audiomxd`), the login sound (`loginwindow`), the
+volume-change click (`ControlCenter`) and Siri listening (`corespeechd`,
+`corespeechd_system`), which keeps an output stream running while it waits.
+These are matched by their full path on the system volume
+(`OtherAudioMonitor.systemSoundServices`), so a program elsewhere with one of
+those names still counts. Sound must last 0.5 s before it counts and silence 2 s before it clears,
 so a gap between tracks does not restart the wallpaper. Nothing is observed while
 the choice is **Keep running**.
 

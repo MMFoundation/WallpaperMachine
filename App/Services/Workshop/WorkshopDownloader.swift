@@ -61,6 +61,10 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     @ObservationIgnored private var workshopDownloadCompleted = false
     /// The run's second pass, which fetches the wallpaper a downloaded preset is based on.
     @ObservationIgnored private var fetchingPresetBase = false
+    /// What the base pass says while it starts and transfers, naming the base when Steam lists it.
+    @ObservationIgnored private var presetBaseStatus: String?
+    /// The item the current pass fetches; transfer progress counts only its files.
+    @ObservationIgnored private var transferItem: String?
     @ObservationIgnored private var process: SteamCMDTerminalProcess?
     @ObservationIgnored private var terminal: FileHandle?
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -89,6 +93,10 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     @ObservationIgnored private let now: () -> Date
     /// Free bytes on the volume that holds a folder, as the system would hand them to this app.
     @ObservationIgnored private let freeSpace: @Sendable (URL) -> Int64?
+    /// Steam's listing of one Workshop item (title and size), for a preset's base; nil when it
+    /// cannot be read. Tests pass their own.
+    typealias ItemDetails = @Sendable (String) async -> WorkshopItem?
+    @ObservationIgnored private let itemDetails: ItemDetails
     @ObservationIgnored private var failure: String?
     @ObservationIgnored private var receivesNetwork = false
     @ObservationIgnored private var networkStarted = false
@@ -151,13 +159,15 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
          inactivityTimeout: TimeInterval = 300, passTimeout: TimeInterval = 1800,
          now: @escaping () -> Date = Date.init,
          freeSpace: @escaping @Sendable (URL) -> Int64? = WorkshopDownloader.systemFreeSpace,
-         retryDelays: [TimeInterval] = [2, 8, 30], resumeGrace: TimeInterval = 45) {
+         retryDelays: [TimeInterval] = [2, 8, 30], resumeGrace: TimeInterval = 45,
+         itemDetails: @escaping ItemDetails = WorkshopDownloader.publicItemDetails) {
         self.sessionDirectory = sessionDirectory
         self.checkpointDirectory = checkpointDirectory
         self.inactivityTimeout = inactivityTimeout
         self.passTimeout = passTimeout
         self.now = now
         self.freeSpace = freeSpace
+        self.itemDetails = itemDetails
         self.retryDelays = retryDelays
         self.resumeGrace = resumeGrace
         self.runtimeProvider = runtimeProvider
@@ -282,6 +292,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         assetsDownloadCompleted = false
         workshopDownloadCompleted = false
         fetchingPresetBase = false
+        presetBaseStatus = nil
+        transferItem = nil
         endedBySessionConflict = false
         signInHandedOff = false
         signInAccepted = false
@@ -353,7 +365,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 }.value
             }
             try Task.checkCancellation()
-            try await ensureFreeSpace(under: root, staging: content, label: label)
+            try await ensureFreeSpace(under: root, staging: content, item: itemID, label: label)
 
             var currentItem = itemID
             var followedUp = false
@@ -369,14 +381,14 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                     if let delay = nextRetryDelay() {
                         prepareRetry(label: label, delay: delay)
                         if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
-                        try await ensureFreeSpace(under: root, staging: content, label: label)
+                        try await ensureFreeSpace(under: root, staging: content, item: currentItem, label: label)
                         continue
                     }
                     throw passFailure(reason, itemID: currentItem)
                 }
                 if exitStatus == Self.restartStatus, restarts < Self.maximumRestarts {
                     restarts += 1
-                    try await ensureFreeSpace(under: root, staging: content, label: label)
+                    try await ensureFreeSpace(under: root, staging: content, item: currentItem, label: label)
                     continue
                 }
                 try judgeExit(exitStatus, itemID: currentItem)
@@ -387,12 +399,24 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                     fetchingPresetBase = true
                     currentItem = base
                     workshopDownloadCompleted = false
-                    self.expectedBytes = nil
                     receivedFloor = 0
                     receivedBaseline = 0
                     retryAttempt = 0
                     silentRetries = 0
-                    status = String(localized: "Downloading the wallpaper this preset is based on…")
+                    // Steam's listing names the base and gives its size, so its progress has a
+                    // total and the disk is checked for it as for any item.
+                    let listing = await itemDetails(base)
+                    self.expectedBytes = listing.flatMap { $0.size > 0 ? $0.size : nil }
+                    if let listing, !listing.title.isEmpty {
+                        let size = listing.size > 0
+                            ? ByteCountFormatter.string(fromByteCount: listing.size, countStyle: .file) : nil
+                        presetBaseStatus = size.map { String(localized: "Downloading “\(listing.title)” (\($0)), the wallpaper this preset is based on…") }
+                            ?? String(localized: "Downloading “\(listing.title)”, the wallpaper this preset is based on…")
+                    } else {
+                        presetBaseStatus = String(localized: "Downloading the wallpaper this preset is based on…")
+                    }
+                    status = presetBaseStatus ?? status
+                    try await ensureFreeSpace(under: root, staging: content, item: currentItem, label: label)
                     continue
                 }
                 break
@@ -635,9 +659,10 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// Try again) after any checkpoint is restored, and again before each automatic relaunch
     /// of SteamCMD (a retry after a dropped connection or a wake, or Steam asking to be
     /// started again), so a retry only needs the space still missing. A preset's base is
-    /// fetched in a second pass of unknown size, which is not checked; concurrent jobs are
-    /// checked one by one, not summed.
-    private func ensureFreeSpace(under root: URL, staging: URL, label: String) async throws {
+    /// checked before its pass at the size Steam lists for it (not at all when it lists none);
+    /// concurrent jobs are checked one by one, not summed. Only `item`'s own files count as
+    /// already staged, so a preset on the disk is not taken for part of its base.
+    private func ensureFreeSpace(under root: URL, staging: URL, item: String?, label: String) async throws {
         let installingAssets = isInstallingAssets
         let expected = expectedBytes
         guard !isSigningInOnly,
@@ -648,7 +673,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         let content = staging.appendingPathComponent(installingAssets ? "wallpaper-engine" : "steamapps/workshop", isDirectory: true)
         let measure = freeSpace
         let (staged, available) = await Task.detached(priority: .utility) { () -> (Int64, Int64?) in
-            (Self.bytesOnDisk(under: content), measure(root))
+            (Self.bytesOnDisk(under: content, item: installingAssets ? nil : item), measure(root))
         }.value
         guard let needed = Self.requiredFreeBytes(expected: expected, alreadyStaged: staged, installingAssets: installingAssets),
               let available, available < needed else { return }
@@ -665,6 +690,11 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     nonisolated static func availableCapacity(at url: URL) -> Int64? {
         try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage
+    }
+
+    /// What a download asks Steam's public details endpoint by default; tests pass their own.
+    nonisolated static let publicItemDetails: ItemDetails = { id in
+        try? await WorkshopService().details(ids: [id]).first
     }
 
     /// What a download reads by default; tests pass their own disk instead.
@@ -791,6 +821,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
 
     private func launch(executable: URL, staging: URL, content: URL, account: String, itemID: String?, claim: Int32,
                         contentClaim: Int32) throws {
+        transferItem = itemID
         var master: Int32 = -1
         var slave: Int32 = -1
         guard openpty(&master, &slave, nil, nil, nil) == 0 else {
@@ -861,7 +892,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         close(slave)
         terminal = FileHandle(fileDescriptor: master, closeOnDealloc: true)
         phase = .connecting
-        status = String(localized: "Starting SteamCMD and contacting Steam…")
+        status = presetBaseStatus ?? String(localized: "Starting SteamCMD and contacting Steam…")
     }
 
     private func readTerminalOutput() throws {
@@ -1053,7 +1084,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             phase = .transferring
             receivesNetwork = true
             estimator = TransferEstimator()
-            status = String(localized: "Downloading Workshop files…")
+            status = presetBaseStatus ?? String(localized: "Downloading Workshop files…")
             if let expected = expectedBytes, expected > 0, receivedFloor > 0 {
                 progress = min(0.99, Double(receivedFloor) / Double(expected))
             } else {
@@ -1185,7 +1216,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         lastDiskSample = Date()
         let root = staging.appendingPathComponent("steamapps/workshop", isDirectory: true)
         diskSampleTask = Task {
-            let onDisk = await Task.detached(priority: .utility) { Self.bytesOnDisk(under: root) }.value
+            let item = transferItem
+            let onDisk = await Task.detached(priority: .utility) { Self.bytesOnDisk(under: root, item: item) }.value
             diskSampleTask = nil
             guard isRunning, receivesNetwork, failure == nil else { return }
             noteTransfer(onDisk, on: .disk)
@@ -1315,14 +1347,18 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// Steam moves a download between workshop/downloads, workshop/temp, and workshop/content, so
     /// the whole steamapps/workshop tree is summed; the min keeps sparse pre-allocated files from
     /// reporting their full logical size before the blocks exist.
-    nonisolated private static func bytesOnDisk(under root: URL) -> Int64 {
+    /// With `item`, only files inside a folder named for it count (Steam keeps an item under
+    /// `content/431960/<id>` and `downloads/431960/<id>`).
+    nonisolated private static func bytesOnDisk(under root: URL, item: String? = nil) -> Int64 {
         var total: Int64 = 0
         var visited = 0
+        let depth = root.standardizedFileURL.pathComponents.count
         guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
                                                           options: []) else { return 0 }
         for case let url as URL in walker {
             visited += 1
             guard visited <= 200_000 else { break }
+            if let item, !url.standardizedFileURL.pathComponents.dropFirst(depth).contains(item) { continue }
             var entry = stat()
             guard lstat(url.path, &entry) == 0, entry.st_mode & S_IFMT == S_IFREG else { continue }
             total += min(entry.st_size, entry.st_blocks * 512)
