@@ -1178,6 +1178,94 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
     }
   }
 
+  /// A code prompt is only called an emailed code when Steam said so; a bare prompt names no method.
+  func testGuardCodeGuideFollowsTheMethodSteamNamed() async throws {
+    let cases: [(String, WorkshopDownloader.SteamGuardChallenge?)] = [
+      (
+        "Please check your email for the message from Steam, and enter the Steam Guard\\n code from that message.\\nSteam Guard code: ",
+        .emailCode
+      ),
+      ("Please confirm the login in the Steam Mobile app on your phone.\\nSteam Guard code: ", .authenticatorCode),
+      ("This account is protected by a Steam Guard mobile authenticator.\\nSteam Guard code: ", .authenticatorCode),
+      ("Two-factor code: ", .authenticatorCode),
+      ("Steam Guard code: ", nil),
+    ]
+    for (output, expected) in cases {
+      let root = try makeRuntime("printf '\(output)'\nIFS= read -r code")
+      defer { try? FileManager.default.removeItem(at: root) }
+      let downloader = startDownload(in: root)
+      do {
+        try await waitUntil { downloader.prompt == .guardCode }
+        XCTAssertEqual(downloader.steamGuardChallenge, expected, output)
+        await downloader.shutdown()
+      } catch {
+        await downloader.shutdown()
+        throw error
+      }
+    }
+  }
+
+  /// Once a code is submitted nothing asks for it again: the job waits on Steam, and a rejection
+  /// that follows is still read as Steam Guard's.
+  func testSubmittedGuardCodeLeavesNoGuideAskingForIt() async throws {
+    let root = try makeRuntime(
+      """
+      printf 'Please check your email for the message from Steam.\\nSteam Guard code: '
+      IFS= read -r code
+      touch ../code-read
+      while [ ! -f ../reject-code ]; do sleep 0.02; done
+      printf '\\nFAILED (Access Denied)\\n'
+      exit 1
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let downloader = startDownload(in: root)
+    do {
+      try await waitUntil { downloader.prompt == .guardCode }
+      XCTAssertEqual(downloader.steamGuardChallenge, .emailCode)
+      downloader.submitSecret("ABCDE")
+      try await waitUntil {
+        FileManager.default.fileExists(atPath: root.appendingPathComponent("code-read").path)
+      }
+      XCTAssertTrue(downloader.isRunning)
+      XCTAssertNil(downloader.prompt)
+      XCTAssertNil(downloader.steamGuardChallenge)
+      XCTAssertEqual(downloader.phase, .signingIn)
+
+      try Data().write(to: root.appendingPathComponent("reject-code"))
+      try await waitUntil { !downloader.isRunning }
+      XCTAssertEqual(downloader.errorMessage, SteamCMDReportedFailure.steamGuard.message)
+      XCTAssertTrue(downloader.canRetryAuthentication)
+    } catch {
+      await downloader.shutdown()
+      throw error
+    }
+  }
+
+  /// An unexplained exit is blamed on the step it interrupted: the sign-in until Steam accepts
+  /// it, the download after.
+  func testUnexplainedExitIsBlamedOnTheStepItInterrupted() async throws {
+    let signIn = String(
+      localized:
+        "SteamCMD exited before confirming the sign-in. Check the account name and password, approve Steam Guard, and retry."
+    )
+    let cases = [("Logging in user to Steam Public...", false), ("Waiting for user info...OK", true)]
+    for (output, signedIn) in cases {
+      let root = try makeRuntime("printf '\(output)\\n'\nexit 1")
+      defer { try? FileManager.default.removeItem(at: root) }
+      let downloader = startDownload(in: root)
+      do {
+        try await waitUntil { !downloader.isRunning }
+        XCTAssertEqual(downloader.canRetryAuthentication, !signedIn, output)
+        XCTAssertNotNil(downloader.errorMessage, output)
+        XCTAssertEqual(downloader.errorMessage == signIn, !signedIn, output)
+        XCTAssertNil(downloader.downloadedID)
+      } catch {
+        await downloader.shutdown()
+        throw error
+      }
+    }
+  }
+
   func testWorkshopAccessDenialDoesNotOfferAuthenticationRetry() async throws {
     let root = try makeRuntime(
       """

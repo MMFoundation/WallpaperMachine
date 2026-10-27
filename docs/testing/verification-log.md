@@ -47,6 +47,27 @@ System feedback sounds no longer count as another app playing, in-app updates mu
 - Not compared with Wallpaper Engine frames (no VM run); the order of cursorUp before cursorClick was not read from Wallpaper Engine
 - Not checked: the Window menu and hiding on a live desktop, the audio exclusions against real Siri or volume sounds; app not rebuilt
 
+## 2026-10-27 — Crowdin integration: GitHub and Crowdin setup
+
+Follows the Crowdin integration entry; those entry's open items were set up afterwards.
+
+- `gh secret list` — CROWDIN_PERSONAL_TOKEN present on the repository (value never read back); the same token read and wrote to Crowdin with no saved CLI identity (`crowdin status`, unchanged `push`)
+- `gh api .../actions/permissions/workflow` — organization and repository both read back `can_approve_pull_request_reviews: true`, `default_workflow_permissions: read`, so Actions can open the translation pull request
+- `python3 scripts/crowdin_sync.py push --overwrite` — ja, ko, pt-BR, zh-CN, zh-TW at 100% translated and 100% approved; `pull --dry-run` afterwards: the catalogs already match Crowdin
+- Bot commits and pull requests are titled `chore(localization): update translations from Crowdin`, so they stay out of the release notes
+- Not verified: .github/workflows/crowdin.yml has not run on GitHub (it is not on main yet), so the push, pull and pull-request steps are untested there
+
+## 2026-10-27 — Crowdin integration
+
+Tooling and CI change: crowdin.yml, scripts/crowdin_sync.py (push/pull), scripts/lib/localization.py, .github/workflows/crowdin.yml and docs/localization.md#crowdin. No app code changed, so no app build.
+
+- `python3 scripts/test.py --python-only` — exit 0; 27 test files OK, incl. test_crowdin_sync.py (17 tests), test_localization_catalogs.py (8) and test_doc_links.py (11)
+- First push to the Crowdin project (941177): 3 catalogs; ja, ko, pt-BR, zh-CN, zh-TW 100% translated, 0% approved; `pull --dry-run` on the real export: catalogs already match
+- Real export tags confirmed: zh-Hans, zh-Hant, ja, ko, pt-BR (pt-PT exports as `pt`, ignored); untranslated units export as `new` and are skipped
+- End to end on a throwaway Crowdin branch: 3 translator edits flowed into 3 of 366 cells with the one-line layout kept; a %@ to %d edit was refused
+- Conflict probes on throwaway branches: an approved translation survives a plain re-push; unapproved ones do not outrank a newer value; --auto-approve-imported overwrites (documented in docs/localization.md#crowdin)
+- Not verified: the workflow has never run on GitHub and was only parsed as YAML (no actionlint); PR creation (the repo setting "Allow GitHub Actions to create and approve pull requests" is off); the CROWDIN_PERSONAL_TOKEN secret is not set
+
 ## 2026-10-25 — Updates, web, downloads, Workshop, scene and panel improvements
 
 Update signature check, http in web content, page errors in the log, frame-confirmed switch hold, saved pause, download queue order and batch retry, Steam favorites, timeline mirror mode, CursorEvent.localPosition, tile zoom and Help menu, doc link check.
@@ -102,22 +123,3 @@ Update signature check, http in web content, page errors in the log, frame-confi
 - python3 scripts/test.py: exit 0; Python stage 25 of 25 modules OK; native 4106 passed, 0 failed, 47 skipped.
 - Covers automatic updates gated on an in-place install, the update check waiting while the window is open, the checkbox through an action, and the manifest requiring the release's section first.
 - Not run: Release build; live download/install from the window and automatic install on display sleep or lock (manual-smoke App update).
-
-## 2026-10-24 — Update window replaces the update alert and What's New; conventional changelog layout
-
-- python3 scripts/test.py: Python stage all OK (test_release_notes 84, test_update_manifest 7, catalogs and panel localization OK); native 4105 passed, 0 failed, 47 skipped.
-- Targeted: AppUpdateTests, AppReleaseHistoryTests, UpdatePromptGateTests, ActivationPolicyRuleTests, ClientPreferencesTests, AboutSettingsTests, UpdatePresentationTests pass.
-- Update window drawn offscreen (light and dark) from the converted CHANGELOG.md top sections with sample issue/commit links; matches the requested layout. No window shown on the desktop.
-- CHANGELOG.md converted: 39 sections and 1254 bullets kept, no Full changelog lines or old category names left; history validation passes.
-- Not run: Release build, a live GitHub check, a real download/install from the window, automatic install on display sleep or lock (manual-smoke App update).
-- Gap: model-written history bullets have no issue/commit links (no recorded mapping); links start with the next release cut.
-
-## 2026-10-24 — Keep each visited desktop's wallpaper loaded and paused
-
-Follow-up to PR #77: a display with a different wallpaper for each desktop keeps the wallpapers of visited desktops parked (renderer, bridge, web and video hosts) instead of reloading them on every desktop change; memory pressure and Stop (free memory) let them go.
-
-- `python3 scripts/check_rust.py` — exit 0; core, bridge, core-integration and shader all pass, including the new `engine::actor::space_parking_tests` (9), `tests::space_parking` (3) and `first_frame_tests::a_wallpaper_the_display_keeps_parked_is_not_awaited`
-- `python3 scripts/check_renderer.py` — exit 0; corpus and media cases skipped as listed (no local assets)
-- `python3 scripts/test.py` — exit 0; 4107 tests: 4060 passed, 47 skipped, after one rerun: the first run on the final code failed `EnergyUsageMonitorTests/testKernelCountersForThisProcessAdvanceWithGPUWork` (3.7 mW against a 10 mW floor, right after the renderer check), which passed alone and in the rerun
-- New Swift tests: `WallpaperSpaceParkingTests`, per-window placement and opening windows in `WallpaperSpacePinningTests`, kept clips and pages in `NativeVideoWallpaperHostTests` and `WebWallpaperHostLifecycleTests`, the auditor's kept-window excuse, pressure edges in `MemoryPressureMonitorTests`
-- Not checked: no desktop run (no intro on return, the kept frame during a swipe, a shared wallpaper on several desktops, `CGSAddWindowsToSpaces`/`CGSRemoveWindowsFromSpaces`, the memory held, release under real memory pressure); the Release app was not rebuilt

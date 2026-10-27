@@ -169,6 +169,20 @@ Banners are drawn for the product, not taken from Workshop wallpapers: their art
 belongs to their authors. Sections whose tag exists keep the banner they shipped
 with, so a banner never goes back into an older release.
 
+### Developer's notes
+
+A release can also carry a note from the developer, printed word for word: commit
+`Resources/ReleaseNotes/x.y.z.md` (English), `x.y.z.zh-Hans.md` (Simplified Chinese)
+and `x.y.z.ko.md` (Korean) before the commit with the `release:` line. Each language
+block then puts it under its own heading (**A note from the developer**, **开发者的话**,
+**개발자의 말**) after the summary and before the categories, so it reaches
+`CHANGELOG.md`, the release page (English) and the app's update window. The model never
+sees it and cannot rewrite it. The note is all three files or none, each in its own
+script, and only plain paragraphs separated by blank lines: a heading, list, picture or
+the boundary marker stops the run before the model is asked, because each would change
+how the section is read. Like a banner, it belongs to the version it names and is never
+added to a section whose tag exists.
+
 ### Written by the release-notes model
 
 With `--ai` the commits between two version tags go to a language model that

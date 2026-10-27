@@ -486,7 +486,9 @@ in. A download can guide you through installing it or locating an existing macOS
 runtime; setup also remains available in **Settings → Library & Steam**. Pending
 download requests continue once their prerequisites are met. In the download
 dialog, installation always shows progress while busy (an unknown total is
-indeterminate rather than 0%), and a failure retains its details and offers **Try
+indeterminate rather than 0%), **Cancel setup** stands in for **Install SteamCMD**
+while setup can still be cancelled (the final step that publishes the installation
+cannot be, and shows the install button disabled instead), and a failure retains its details and offers **Try
 again**, unless the retained copy needs explicit approval first.
 
 Setup downloads Valve's HTTPS `client/steam_cmd_osx` package manifest and installs
@@ -638,7 +640,13 @@ work.
   the keep-signed-in checkbox and a note that the password and Steam Guard come
   next; a password prompt is the same without the checkbox. Steam Guard stages are
   guide cards: a glyph, a one-line title and numbered steps for whichever method
-  Steam asked for — mobile approval, authenticator code or emailed code. The
+  Steam asked for — mobile approval, authenticator code or emailed code. A code
+  prompt names no method by itself (SteamCMD can ask for a "Steam Guard code" for
+  more than one), so the card follows what Steam printed before it: its email
+  wording gives the emailed-code card, the mobile app or a "Two-factor code"
+  prompt gives the authenticator card, and anything else the general card. Once a
+  code is submitted the card gives way to the waiting state until Steam answers,
+  so it never asks for a code below a field that is gone. The
   mobile-approval steps say to answer **Steam Client** when the Steam app asks
   "Where are you trying to sign in?", because SteamCMD signs in as the client.
   Steam may still require another approval.
@@ -870,7 +878,12 @@ the parentheses waits for the rest, and output that ends without a newline is
 judged when the process exits. Unrecognised reasons do not
 establish bad credentials: the app asks to check connectivity and export [a
 diagnostics report](diagnostics.md#diagnostics-report) if retries keep failing.
-Logs include the failure category, never the raw terminal reason or secrets.
+SteamCMD exiting with an error and no reported failure is blamed on the step it
+interrupted: before Steam accepted the sign-in it is a sign-in that did not
+complete (with **Try again** for the sign-in), after it the download, where the
+purchase requirement applies. Logs include the failure category, or for such an
+exit its status, step and whether a Steam Guard code was waiting on Steam, never
+the raw terminal reason or secrets.
 
 Generic Workshop download failures also explain the purchase requirement: buy
 Wallpaper Engine on Steam or sign in with an account that already owns it, then

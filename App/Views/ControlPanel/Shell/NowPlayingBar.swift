@@ -67,7 +67,7 @@ struct NowPlayingBar: View {
     // Upward: the bar is at the bottom of the window, so one below would be pushed back up by the
     // screen edge.
     .popover(isPresented: shell.popover(.history), arrowEdge: .top) {
-      RecentlyUsedPopover()
+      RecentlyUsedPopover().panelPresentationLocale()
     }
   }
 }
@@ -120,7 +120,7 @@ private struct NowPlayingSummary: View {
     .accessibilityHint(Text("Details"))
     .accessibilityIdentifier("now-playing-details")
     .popover(isPresented: shell.popover(.nowPlaying), arrowEdge: .top) {
-      NowPlayingDetails()
+      NowPlayingDetails().panelPresentationLocale()
     }
   }
 

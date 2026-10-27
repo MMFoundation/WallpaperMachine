@@ -31,6 +31,9 @@ without another model request.
 A version with a banner picture in Resources/ReleaseBanners/ (`x.y.z.jpg` or `.png`,
 and optionally Chinese `x.y.z.zh-Hans` and Korean `x.y.z.ko` pictures) gets an image
 line at the top of each language block; languages without a picture share English's.
+A version with a developer's note in Resources/ReleaseNotes/ (`x.y.z.md`, `x.y.z.zh-Hans.md`
+and `x.y.z.ko.md`, all three or none) gets it under its own heading after the summary,
+word for word: the model never sees or rewrites it.
 A `##` heading that is not a version — `## Unreleased`, a prerelease token, or a
 heading inside the notes — stops publishing. The app rejects that whole changelog,
 so the heading is not kept and not dropped.
@@ -72,6 +75,10 @@ BANNER_TYPES = (".png", ".jpg")
 # The file name each language block's banner takes after `x.y.z`; translations fall back to English's.
 BANNER_SUFFIXES = {"english": "", "chinese": ".zh-Hans", "korean": ".ko"}
 BANNER = re.compile(r"^!\[(?P<alt>[^\]\n]*)\]\((?P<path>Resources/ReleaseBanners/(?P<name>[^/)\s]+))\)[ \t]*$", re.MULTILINE)
+# A version's note from the developer, committed before the version is cut in every language,
+# with the same file-name suffixes as the banners. It is printed as written, never by the model.
+DEVELOPER_NOTES = Path("Resources") / "ReleaseNotes"
+DEVELOPER_NOTE_HEADINGS = {"english": "A note from the developer", "chinese": "开发者的话", "korean": "개발자의 말"}
 APPLICATION = "WallpaperMachine"
 
 # `type(scope)!: subject`, the convention docs/conventions.md describes.
@@ -601,6 +608,34 @@ def banner_names(version):
             for suffix in BANNER_SUFFIXES.values() for kind in BANNER_TYPES}
 
 
+def developer_notes(version, root=ROOT):
+    """The version's note from the developer in every language, one paragraph per line, or None.
+
+    The note is all three files or none: a language without its own would read another's.
+    It is prose, so it may not open a heading, a list, a picture or the boundary marker,
+    any of which would change how the section is read.
+    """
+    number = display_version(version)
+    paths = {code: Path(root) / DEVELOPER_NOTES / f"{number}{BANNER_SUFFIXES[code]}.md" for code, _ in LANGUAGE_BLOCKS}
+    present = {code for code, path in paths.items() if path.is_file()}
+    if not present:
+        return None
+    if len(present) != len(paths):
+        missing = ", ".join(paths[code].relative_to(root).as_posix() for code in paths if code not in present)
+        raise NotesError(f"The developer's note of {number} is missing {missing}")
+    notes = {}
+    for code, path in paths.items():
+        paragraphs = [" ".join(chunk.split()) for chunk in re.split(r"\n[ \t]*\n", path.read_text(encoding="utf-8"))]
+        paragraphs = [paragraph for paragraph in paragraphs if paragraph]
+        for paragraph in paragraphs:
+            if paragraph.startswith(("#", "- ", "* ", "![", "**Full changelog**")) or "<!--" in paragraph:
+                raise NotesError(f"The developer's note {path.relative_to(root).as_posix()} must be plain "
+                                 f"paragraphs, not {paragraph[:40]!r}")
+        notes[code] = "\n\n".join(paragraphs)
+    require_translations(notes, f"developer's note of {number}")
+    return notes
+
+
 def nothing_to_say(previous):
     span = f"since `{previous}`" if previous else "in this history"
     return f"No user-visible changes {span}."
@@ -960,17 +995,20 @@ def bullet_suffix(item, repo=None):
     return link_suffix([entry.sha for entry in item.commits], closes, repo)
 
 
-def render_language(code, heading, notes, previous, banner=None, repo=None, thanks=()):
-    """One language block: its banner, optional summary, then `####` categories, or the
-    empty line; then the thanks line when outside contributors are in the range."""
+def render_language(code, heading, notes, previous, banner=None, repo=None, thanks=(), note=None):
+    """One language block: its banner, optional summary and developer's note, then `####`
+    categories, or the empty line; then the thanks line when outside contributors are in the range."""
     parts = [banner] if banner else []
     if notes["summary"][code]:
         parts.append(notes["summary"][code])
+    if note:
+        parts.append(f"#### {DEVELOPER_NOTE_HEADINGS[code]}\n\n{note}")
+    changes = len(parts)
     for key, _ in MODEL_SECTIONS:
         items = [f"{item.texts[code]}{bullet_suffix(item, repo)}" for item in notes[key] if item.texts[code]]
         if items:
             parts.append(f"#### {LANGUAGE_HEADINGS[code][key]}\n\n" + "\n".join(f"- {item}" for item in items))
-    if len(parts) == (1 if banner else 0):
+    if len(parts) == changes and not notes["summary"][code]:
         no_changes = {"english": nothing_to_say, "chinese": nothing_to_say_zh, "korean": nothing_to_say_ko}
         parts.append(no_changes[code](previous))
     if thanks:
@@ -978,15 +1016,17 @@ def render_language(code, heading, notes, previous, banner=None, repo=None, than
     return f"### {heading}\n\n" + "\n\n".join(parts)
 
 
-def render_model_notes(version, notes, previous=None, repo=None, banners=None, thanks=()):
+def render_model_notes(version, notes, previous=None, repo=None, banners=None, thanks=(), developer=None):
     """Trilingual notes: English, 简体中文, then 한국어; categories at `####`.
 
-    `banners` maps a language to the image line its block opens with. Every bullet
-    ends with the same issue and commit links in all three languages; the compare
-    link belongs to the section heading. `thanks` holds the logins every block thanks.
+    `banners` maps a language to the image line its block opens with, and `developer`
+    to its developer's note. Every bullet ends with the same issue and commit links in
+    all three languages; the compare link belongs to the section heading. `thanks`
+    holds the logins every block thanks.
     """
     banners = banners or {}
-    parts = [render_language(code, heading, notes, previous, banners.get(code), repo, thanks)
+    developer = developer or {}
+    parts = [render_language(code, heading, notes, previous, banners.get(code), repo, thanks, developer.get(code))
              for code, heading in LANGUAGE_BLOCKS]
     return "\n\n".join(parts).strip() + "\n"
 
@@ -1115,8 +1155,9 @@ def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport
         available.append(entry)
         entries.append((entry.short, " ".join(entry.subject.split()), entry.body, change.group == "internal"))
     banners = {code: banner_line(version, cwd, code) for code, _ in LANGUAGE_BLOCKS}
+    developer = developer_notes(version, cwd)
     if not entries:
-        return render_model_notes(version, empty_notes(), previous, repo, banners)
+        return render_model_notes(version, empty_notes(), previous, repo, banners, developer=developer)
     thanks = outside_contributors(available, repo, environ, lookup)
     url, model, key = model_settings(environ)
     payload = {
@@ -1127,7 +1168,7 @@ def write_with_model(version, previous, revision, repo=None, cwd=ROOT, transport
         "messages": [{"role": "user", "content": model_prompt(version, previous, entries)}],
     }
     text = streamed_text((transport or stream)(url, key, payload))
-    return render_model_notes(version, parse_notes(text, available), previous, repo, banners, thanks)
+    return render_model_notes(version, parse_notes(text, available), previous, repo, banners, thanks, developer)
 
 
 def notes_for(version, previous, revision, repo=None, ai=False, cwd=ROOT, transport=None, environ=None, lookup=None):
