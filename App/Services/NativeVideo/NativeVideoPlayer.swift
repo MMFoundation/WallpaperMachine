@@ -606,6 +606,13 @@ final class NativeVideoPlayer {
         return image
     }
 
+    /// How far from the playing position a poster's frame may be. Unbounded,
+    /// the generator answers with the nearest key frame, which in a clip with
+    /// few of them can be its intro, and a settled poster is kept until the
+    /// wallpaper changes. Bounded, it decodes from the key frame before up to
+    /// this window, a one-shot cost of at most one group of pictures.
+    static let posterTolerance = CMTime(value: 1, timescale: 2)
+
     /// A second decode of a few frames, created and released inside this
     /// request and counted: a permanently retained generator would be a
     /// second decoder for the whole session.
@@ -613,15 +620,26 @@ final class NativeVideoPlayer {
         guard !stopped, let mediaURL, let item = player.currentItem else { return lastPoster }
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: mediaURL))
         generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .positiveInfinity
-        generator.requestedTimeToleranceAfter = .positiveInfinity
+        generator.requestedTimeToleranceBefore = Self.posterTolerance
+        generator.requestedTimeToleranceAfter = Self.posterTolerance
         counters.record(.nativeVideoPosterDecode, for: surface)
-        guard let image = try? await generator.image(at: item.currentTime()).image else {
+        let requested = item.currentTime()
+        guard let (image, actual) = try? await generator.image(at: requested),
+            Self.isWithinPosterTolerance(actual, of: requested)
+        else {
             return stopped ? nil : lastPoster
         }
         guard !stopped else { return nil }
         lastPoster = image
         return image
+    }
+
+    /// Whether a frame the generator returned is close enough to the playing
+    /// position to stand for it. The generator is asked for the same window;
+    /// this keeps a frame it returned from elsewhere out of `lastPoster`.
+    nonisolated static func isWithinPosterTolerance(_ actual: CMTime, of requested: CMTime) -> Bool {
+        guard actual.isNumeric, requested.isNumeric else { return false }
+        return CMTimeAbsoluteValue(CMTimeSubtract(actual, requested)) <= posterTolerance
     }
 
     func stop() {

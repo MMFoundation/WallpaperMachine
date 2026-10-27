@@ -95,7 +95,9 @@ at once, without visiting them, except on a display with a
 and every other desktop gets the saved poster of its own wallpaper.
 
 A native-backend clip's poster is read with a one-shot image generator on its own copy
-of the file, at the playing item's position (the nearest key frame), and it applies the
+of the file, at the playing item's position (within half a second of it, so a clip with
+few key frames does not give its opening instead; a frame from further away is not
+kept), and it applies the
 clip's orientation, so a clip stored rotated or mirrored (a portrait phone recording)
 comes out upright like the picture. It is never read from the playing item: attaching a
 video output to that item, or taking one off, makes it reconfigure its pipeline, which

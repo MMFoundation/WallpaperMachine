@@ -281,6 +281,39 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         XCTAssertTrue(player.isPlaying)
     }
 
+    func testAPosterOfAClipWithOneKeyFrameShowsWhereItPlays() async throws {
+        // The nearest key frame of a clip that has only its first one is the
+        // clip's opening, which as a settled poster would stay on the desktop
+        // until the wallpaper changes. The poster has to come from where the
+        // clip is: dark for the first half here, bright for the second.
+        var request = SyntheticVideoFixture.Request.constantRate(
+            name: "poster-one-key-frame", numerator: 30, denominator: 1, frames: 90)
+        request.maxKeyFrameInterval = 90
+        request.painter = { buffer, index in
+            CVPixelBufferLockBaseAddress(buffer, [])
+            defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+            guard let base = CVPixelBufferGetBaseAddress(buffer) else { return }
+            let level: UInt8 = index < 45 ? 0 : 255
+            memset(base, Int32(level), CVPixelBufferGetBytesPerRow(buffer) * CVPixelBufferGetHeight(buffer))
+        }
+        let url = try await SyntheticVideoFixture.write(request, into: directory)
+        let player = makePlayer(url: url)
+        let late = await wait(upTo: .seconds(8)) { player.playbackTimeForTest.seconds >= 2.0 }
+        XCTAssertTrue(late, "the clip never reached its second half")
+        player.setUserPaused(true)
+        let position = player.playbackTimeForTest.seconds
+        XCTAssertGreaterThanOrEqual(position, 2.0, "the loop wrapped before the pause: \(position)")
+
+        let poster = await player.posterImage()
+        let image = try XCTUnwrap(poster)
+
+        let corners = Self.corners(of: image)
+        XCTAssertEqual(corners.count, 4)
+        XCTAssertTrue(
+            corners.allSatisfy { $0.red > 128 && $0.green > 128 },
+            "the poster is the clip's opening, not where it plays (at \(position) s): \(corners)")
+    }
+
     func testAPosterOfARotatedClipIsUpright() async throws {
         // The item's presentation size and the layer follow the display
         // matrix; the frames a video output returns do not. The poster has to
