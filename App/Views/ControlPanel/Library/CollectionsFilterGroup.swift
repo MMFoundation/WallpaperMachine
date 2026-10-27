@@ -119,16 +119,20 @@ private struct CollectionFilterRow: View {
     .accessibilityIdentifier("collection-\(collection.id)")
   }
 
-  /// Play needs a wallpaper in the collection that can play and a target display with a playlist
-  /// of its own.
+  /// Play's action key, shared with Installed's Play and Shuffle.
+  private static let playKey = PanelActionCoordinator.key("playlistPlay")
+
+  /// Play needs a wallpaper in the collection that can play, a target display with a playlist of
+  /// its own, and no Play request still pending.
   private var canPlay: Bool {
-    controller.targetDisplay?.isSelectable == true && controller.canPlay(.collection(id: collection.id))
+    controller.targetDisplay?.isSelectable == true && !controller.isBusy(Self.playKey)
+      && controller.canPlay(.collection(id: collection.id))
   }
 
   /// The target display rotates through the collection and changes to it at once.
   private func play(order: PlaylistOrder) {
     let source = PlaylistSourceChoice.collection(id: collection.id)
-    controller.launch(PanelActionCoordinator.key("playlistPlay")) { [controller] in
+    controller.launch(Self.playKey) { [controller] in
       try await controller.playPlaylist(source, order: order)
     }
   }
