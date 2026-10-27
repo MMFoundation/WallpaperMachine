@@ -667,6 +667,36 @@ final class WebWallpaperHostLifecycleTests: XCTestCase {
     XCTAssertEqual(frames.first?.context, "space-change")
   }
 
+  func testAPosterRequestedBeforeThePageHasLoadedIsAnsweredOnceItHas() async throws {
+    let fixture = try Fixture(attachedSurfaces: true)
+    defer { fixture.close() }
+    fixture.host.start()
+    var frames: [(loaded: Bool, context: String)] = []
+    var page: WebWallpaperPage?
+    let observer = fixture.center.addObserver(
+      forName: DesktopPosterNotification.ready, object: nil, queue: .main
+    ) { note in
+      MainActor.assumeIsolated {
+        frames.append((page?.isLoaded == true, note.userInfo?["context"] as? String ?? ""))
+      }
+    }
+    defer { fixture.center.removeObserver(observer) }
+    await fixture.host.apply([fixture.descriptor])
+    let surface = try XCTUnwrap(fixture.model.surfaces.last)
+    page = surface.page
+    // The poster sync asks as soon as the window opens. The page has nothing of its own
+    // on screen yet, so a snapshot now is the empty window.
+    XCTAssertFalse(surface.page.isLoaded)
+    fixture.center.post(
+      name: DesktopPosterNotification.request, object: surface.posterLayer,
+      userInfo: ["context": "space-change"])
+
+    try await wait { !frames.isEmpty }
+    XCTAssertEqual(frames.count, 1)
+    XCTAssertEqual(frames.first?.loaded, true, "the answer waits for the page, not the empty window")
+    XCTAssertEqual(frames.first?.context, "space-change")
+  }
+
   // MARK: Switch hold
 
   /// A switch hold on a notification center the test owns. The wallpaper on screen answers its
