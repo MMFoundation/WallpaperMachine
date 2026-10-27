@@ -240,12 +240,13 @@ struct WallpaperBackupPreferences: Sendable {
                 guard let number = item as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite else { throw invalid() }
             }
         case "WallpaperMachine.appTheme":
-            guard let record = value as? [String: String], Set(record.keys).isSubset(of: ["mode", "accent", "tone", "icon"]) else { throw invalid() }
+            guard let record = value as? [String: String], Set(record.keys).isSubset(of: ["mode", "accent", "tone", "icon", "halloween"]) else { throw invalid() }
             for (key, item) in record {
                 switch key {
                 case "mode": guard AppThemePreferences.Mode(rawValue: item) != nil else { throw invalid() }
                 case "tone": guard AppThemePreferences.Tone(rawValue: item) != nil else { throw invalid() }
                 case "icon": guard AppThemePreferences.Icon(rawValue: item) != nil else { throw invalid() }
+                case "halloween": guard AppThemePreferences.Halloween(rawValue: item) != nil else { throw invalid() }
                 default: guard AppThemePreferences.validAccent(item) else { throw invalid() }
                 }
             }

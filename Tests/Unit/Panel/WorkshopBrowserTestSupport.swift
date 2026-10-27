@@ -154,7 +154,7 @@ extension MediaPanelTestCase {
     let store = makeStore().store
     let dialogs = RecordingDialogs()
     let presentation = PanelPresentation()
-    let theme = AppThemeStore(defaults: defaults)
+    let theme = AppThemeStore(defaults: defaults, now: { .outsideAnySeason })
     let previousHome = ProcessInfo.processInfo.environment["WALLPAPER_MACHINE_HOME"]
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     setenv("WALLPAPER_MACHINE_HOME", root.path, 1)

@@ -96,6 +96,18 @@ extension PanelController {
     return theme.preferences
   }
 
+  /// The seasonal look the window wears now, nil for the person's own.
+  var season: Season? {
+    _ = revisions.theme
+    return theme.season
+  }
+
+  /// The asset catalog image set the Dock shows now: the season's or the person's choice.
+  var dockIconName: String {
+    _ = revisions.theme
+    return theme.dockIconName
+  }
+
   func setThemeMode(_ mode: AppThemePreferences.Mode) throws {
     try theme.set("mode", value: mode.rawValue)
   }
@@ -109,6 +121,10 @@ extension PanelController {
 
   func setThemeIcon(_ icon: AppThemePreferences.Icon) throws {
     try theme.set("icon", value: icon.rawValue)
+  }
+
+  func setThemeHalloween(_ halloween: AppThemePreferences.Halloween) throws {
+    try theme.set("halloween", value: halloween.rawValue)
   }
 
   func resetTheme() { theme.reset() }

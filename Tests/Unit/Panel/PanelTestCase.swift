@@ -455,7 +455,7 @@ final class PanelFixture {
       service: PixivService(transport: pixivTransport ?? transport, minimumInterval: .zero),
       packager: PixivWallpaperPackager(library: library),
       sessions: pixivSessions)
-    theme = AppThemeStore(defaults: defaults)
+    theme = AppThemeStore(defaults: defaults, now: { .outsideAnySeason })
     playlists = PlaylistStore(defaults: defaults)
     automations = WallpaperAutomationStore(defaults: defaults)
     self.spaces = spaces ?? WallpaperSpaceMonitor()

@@ -33,6 +33,16 @@ entry's recorded result is not allowed.
 - Catalog checks (test_localization_catalogs, test_panel_localization) pass; 7 new strings in all 5 languages.
 - Gap: no desktop run; layout of the scope-bar buttons, the bar's fifth control and the popover is not visually checked. App not rebuilt.
 
+## 2026-10-27 — Halloween look
+
+Settings › Appearance gains a Halloween look (Halloween week, the default, October 24 to November 1; Always; Off): its own palettes and pumpkin accent, a jack-o'-lantern in the title-bar mark and the Dock icon, and a Victorian papercut horizon (silhouettes cut from a sheet generated with GPT Image 2.5 on fal.ai) standing on the Now Playing bar, at the top of Appearance and in the empty states.
+
+- `python3 scripts/test.py` — exit 0; Python stage all OK; native 4232: 4185 passed, 0 failed, 47 skipped; 2 runtime warnings without a source location ("should not be called on the main thread"), not traced to this change
+- `python3 scripts/brand.py --seasonal` — wrote AppIconHalloween; `scripts/tests/test_brand.py` 8 passed, the Halloween icon render test included
+- Offscreen renders (temporary tests drawing `HostedPanel` in a never-shown window, since deleted), two rounds: Library at 1240 and 760 pt, Settings › Appearance, the empty and no-match states, light and dark. Fixed from them: held rows dimmed twice, a weak dark backlight, a moon lost in the light dusk
+- Offscreen capture draws the Settings list's selection material black in either appearance; a plain system sidebar list does the same, so it is the capture, not the panel
+- Not checked: the real Dock, title bar and window on the desktop, a Release build, and a live midnight change on a running app (covered by a unit test posting `NSCalendarDayChanged`)
+
 ## 2026-10-27 — Crowdin open to community translators; add-language import
 
 Issue #106. Crowdin project 941177 made open-join (languageAccessPolicy open, task-based access off) with ru added as a target; crowdin_sync.py gains add-language to write a finished language into the three catalogs; docs, CONTRIBUTING and the three READMEs point translators to Crowdin.

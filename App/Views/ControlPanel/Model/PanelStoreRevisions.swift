@@ -169,6 +169,9 @@ final class PanelStoreRevisions {
     // here: a view reads the counter and the store later, in its own update.
     themeStore.$preferences.dropFirst().sink { [weak self] _ in self?.bump(.theme) }
       .store(in: &cancellables)
+    // A season starts or ends with the date, not only with a choice.
+    themeStore.$season.dropFirst().removeDuplicates().sink { [weak self] _ in self?.bump(.theme) }
+      .store(in: &cancellables)
     languageStore.objectWillChange.sink { [weak self] _ in self?.bump(.language) }
       .store(in: &cancellables)
     navigationModel.objectWillChange.sink { [weak self] _ in self?.bump(.navigation) }

@@ -15,12 +15,20 @@ is linked from the domain; the shared limits are collected at the end.
 
 - `AppThemeTests` — a chosen theme survives recreation and reset leaves other
   preferences alone; an invalid change cannot overwrite saved values; a damaged
-  saved accent or an unknown icon does not discard the rest.
+  saved accent or an unknown icon does not discard the rest. Halloween week runs
+  from October 24 to November 1 by the local calendar; the Halloween choice decides
+  when the look and its Dock icon are on, a day change while the app runs starts and
+  ends it, and reset returns to Halloween week.
+- `AppIconImageTests` — every Dock icon, the Halloween one included, loads sharp from
+  the bundle as its own artwork.
 - `AppearanceSettingsTests` and `PanelShellActionsTests` (Panel) save every
-  Appearance choice (mode, accent, tone, icon) in the store's format, refuse an
-  invalid accent, round-trip accents through the colour well and reset without
-  touching unrelated preferences; `PanelThemeTests` derive the palettes from the
-  preferences and the resolved appearance.
+  Appearance choice (mode, accent, tone, icon, Halloween look) in the store's format,
+  refuse an invalid accent, round-trip accents through the colour well and reset
+  without touching unrelated preferences; while the Halloween look is on, the window
+  and the Dock wear it and the person's own choices are kept. `PanelThemeTests` derive
+  the palettes from the preferences, the season and the resolved appearance, and
+  `SurfacePaletteTests` hold every tone's and the Halloween look's palettes to the
+  contrast floor.
 
 ## Automation
 
