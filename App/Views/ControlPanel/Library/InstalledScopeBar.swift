@@ -36,7 +36,7 @@ struct InstalledScopeBar: View {
         .frame(maxWidth: 260, alignment: .leading)
       }
       Spacer(minLength: 0)
-      ScopePlayButtons(scope: scope, count: count(of: scope, in: counts))
+      ScopePlayButtons(scope: scope)
     }
     .padding(.horizontal, 20)
     .frame(height: 34)
@@ -46,29 +46,19 @@ struct InstalledScopeBar: View {
   }
 }
 
-/// How many wallpapers the view on show holds; nil while the library loads.
-private func count(of scope: LibraryScope, in counts: SidebarCounts?) -> Int? {
-  guard let counts else { return nil }
-  switch scope {
-  case .all: return counts.all
-  case .favorites: return counts.favorites
-  case .collection(let id): return counts.collections.first { $0.id == id }?.count ?? 0
-  }
-}
-
 /// Play and Shuffle: the target display rotates through the view on show, in library order or
-/// shuffled, and changes to it at once. Unavailable while the view is empty or the target
-/// display has no playlist of its own (off, or a mirror).
+/// shuffled, and changes to it at once. Unavailable while the view has no wallpaper that can play
+/// or the target display has no playlist of its own (off, or a mirror).
 private struct ScopePlayButtons: View {
   let scope: LibraryScope
-  let count: Int?
 
   @Environment(PanelController.self) private var controller
 
   var body: some View {
     let key = PanelActionCoordinator.key("playlistPlay")
     let isEnabled =
-      (count ?? 0) > 0 && controller.targetDisplay?.isSelectable == true && !controller.isBusy(key)
+      controller.targetDisplay?.isSelectable == true && !controller.isBusy(key)
+      && controller.canPlay(scope.playlistSource)
     HStack(spacing: 6) {
       Button {
         play(order: .sequential, key: key)

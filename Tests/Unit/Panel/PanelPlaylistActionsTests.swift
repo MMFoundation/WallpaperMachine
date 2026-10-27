@@ -500,8 +500,13 @@ final class PanelPlaylistActionsTests: PanelTestCase {
     } catch { XCTAssertTrue(error is InvalidControlValue) }
     XCTAssertEqual(panel.playlists.playlist(for: "primary"), DisplayPlaylist())
     XCTAssertEqual(asked, 0)
+    for source in [PlaylistSourceChoice.favorites, .collection(id: unplayable.id), .collection(id: "gone")] {
+      XCTAssertFalse(controller.canPlay(source), "the buttons are off for \(source)")
+    }
+    XCTAssertTrue(controller.canPlay(.all))
 
     controller.favoriteIDs = ["a"]
+    XCTAssertTrue(controller.canPlay(.favorites))
     try await controller.playPlaylist(.favorites, display: "primary")
     XCTAssertEqual(panel.playlists.playlist(for: "primary").source, .favorites)
     XCTAssertEqual(asked, 1)

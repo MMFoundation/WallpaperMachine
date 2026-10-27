@@ -119,9 +119,10 @@ private struct CollectionFilterRow: View {
     .accessibilityIdentifier("collection-\(collection.id)")
   }
 
-  /// Play needs wallpapers in the collection and a target display with a playlist of its own.
+  /// Play needs a wallpaper in the collection that can play and a target display with a playlist
+  /// of its own.
   private var canPlay: Bool {
-    collection.count > 0 && controller.targetDisplay?.isSelectable == true
+    controller.targetDisplay?.isSelectable == true && controller.canPlay(.collection(id: collection.id))
   }
 
   /// The target display rotates through the collection and changes to it at once.
