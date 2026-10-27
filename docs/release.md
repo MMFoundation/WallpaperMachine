@@ -653,6 +653,10 @@ the extractor sees every Swift compile. C/C++ (only vendored third-party code is
 visible to it), Ruby (the repository has none) and JavaScript/TypeScript (none since
 the SwiftUI control panel; CodeQL fails a language with no code) are deliberately not
 analyzed.
+The renderer's Rust test sources (`tests/` directories, `tests.rs` and `*_tests`
+modules under `Renderer/`) are excluded through `paths-ignore`: their fixture values
+in panic messages read as cleartext logging, and those alerts kept returning after
+being dismissed whenever a test file moved. Keep new Rust tests under those names.
 Removing a language from the matrix does not remove its configuration: **Security ->
 Code scanning -> Tool status** keeps showing that language's last scan, failed or
 not, because nothing uploads to its category again. In the same change, delete it

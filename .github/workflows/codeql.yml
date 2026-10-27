@@ -69,6 +69,17 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          # The renderer's Rust tests format fixture values (fake display UUIDs, raw
+          # test pointers) into panic messages, which the Rust queries report as
+          # sensitive logging and invalid pointer access. Rust has no build, so
+          # paths-ignore takes effect there; inline `#[cfg(test)]` modules still get
+          # scanned.
+          config: |
+            paths-ignore:
+              - Renderer/**/tests/**
+              - Renderer/**/tests.rs
+              - Renderer/**/*_tests/**
+              - Renderer/**/*_tests.rs
 
       - name: Build the app
         if: matrix.language == 'swift'
