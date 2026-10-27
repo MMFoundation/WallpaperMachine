@@ -7,6 +7,9 @@ import SwiftUI
 /// collection's chip here says which one is on show and puts it away. All wallpapers carries an
 /// accent dot while Workshop wallpapers have an update, with how many as its tooltip and for
 /// VoiceOver.
+///
+/// Play and Shuffle at the end turn the view on show into the target display's rotation, so a
+/// collection plays from where it is chosen rather than only from Settings › Displays.
 struct InstalledScopeBar: View {
   @Environment(PanelController.self) private var controller
 
@@ -33,12 +36,65 @@ struct InstalledScopeBar: View {
         .frame(maxWidth: 260, alignment: .leading)
       }
       Spacer(minLength: 0)
+      ScopePlayButtons(scope: scope, count: count(of: scope, in: counts))
     }
     .padding(.horizontal, 20)
     .frame(height: 34)
     .padding(.top, 6)
     .accessibilityElement(children: .contain)
     .accessibilityLabel(Text("Library"))
+  }
+}
+
+/// How many wallpapers the view on show holds; nil while the library loads.
+private func count(of scope: LibraryScope, in counts: SidebarCounts?) -> Int? {
+  guard let counts else { return nil }
+  switch scope {
+  case .all: return counts.all
+  case .favorites: return counts.favorites
+  case .collection(let id): return counts.collections.first { $0.id == id }?.count ?? 0
+  }
+}
+
+/// Play and Shuffle: the target display rotates through the view on show, in library order or
+/// shuffled, and changes to it at once. Unavailable while the view is empty or the target
+/// display has no playlist of its own (off, or a mirror).
+private struct ScopePlayButtons: View {
+  let scope: LibraryScope
+  let count: Int?
+
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    let key = PanelActionCoordinator.key("playlistPlay")
+    let isEnabled =
+      (count ?? 0) > 0 && controller.targetDisplay?.isSelectable == true && !controller.isBusy(key)
+    HStack(spacing: 6) {
+      Button {
+        play(order: .sequential, key: key)
+      } label: {
+        Label("Play", systemImage: "play.fill")
+      }
+      .help(L("Plays these wallpapers in order on this display"))
+      .accessibilityIdentifier("scope-play")
+      Button {
+        play(order: .shuffle, key: key)
+      } label: {
+        Label("Shuffle", systemImage: "shuffle")
+          .labelStyle(.iconOnly)
+      }
+      .help(L("Plays these wallpapers in a random order on this display"))
+      .accessibilityLabel(Text("Shuffle"))
+      .accessibilityIdentifier("scope-shuffle")
+    }
+    .buttonStyle(.panelCapsule)
+    .fixedSize()
+    .disabled(!isEnabled)
+  }
+
+  private func play(order: PlaylistOrder, key: String) {
+    let source = scope.playlistSource
+    controller.launch(key) { [controller] in try await controller.playPlaylist(source, order: order) }
   }
 }
 

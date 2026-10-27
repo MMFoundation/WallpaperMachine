@@ -102,6 +102,41 @@ extension PanelController {
     try await run(.immediate) { playlists.resumeHandler?(try standaloneDisplayID(display)) }
   }
 
+  /// `playlistPlay`: Installed's Play button and a collection's Play and Shuffle. The display
+  /// rotates through `source` (`order`, or the order it already had), changes to its first
+  /// wallpaper at once, and keeps its interval or unlock trigger. A display the user emptied is
+  /// filled again. Refused, and nothing changes, when `source` holds no wallpaper that can play.
+  /// Counts as a manual choice for the automatic selection.
+  func playPlaylist(_ source: PlaylistSourceChoice, order: PlaylistOrder? = nil, display: String? = nil)
+    async throws
+  {
+    try await changePlaylist(display) { display in
+      var playlist = playlists.playlist(for: display)
+      playlist.mode = .rotate
+      if let order { playlist.order = order }
+      switch source {
+      case .all: playlist.source = .all
+      case .favorites: playlist.source = .favorites
+      case .list: playlist.source = .list
+      case .collection(let id):
+        guard collections.collection(id: id) != nil else { throw LibraryOrganizationError.missingCollection }
+        playlist.source = .collection
+        playlist.collectionID = id
+      case .missingCollection: throw LibraryOrganizationError.missingCollection
+      }
+      let members = playlist.collectionID.flatMap { collections.collection(id: $0)?.wallpaperIDs } ?? []
+      let candidates = PlaylistPlanner.candidates(
+        for: playlist, library: store.librarySnapshot.wallpapers.filter(\.supported).map(\.id),
+        favorites: favoriteIDs, collectionIDs: members)
+      guard !candidates.isEmpty else {
+        throw WallpaperActionError(message: L("None of these wallpapers can play on this Mac."))
+      }
+      playlists.update(display) { $0 = playlist }
+      // Already showing the only wallpaper it has is not a failure: the rotation is set either way.
+      if playlists.skipHandler?(display) != true { playlists.setHold(nil, on: display) }
+    }
+  }
+
   /// `historyClear`: forgets what the display showed recently, so Previous has nothing to go back to.
   /// Other displays and the wallpaper files are not touched.
   func clearHistory(display: String? = nil) async throws {
