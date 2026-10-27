@@ -99,6 +99,29 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
     /// edge handling does not matter, as 8-bit sRGB: top-left, top-right,
     /// bottom-left, bottom-right. Only red and green are meaningful for the
     /// fixture, whose blue changes per frame.
+    /// Which frames of a clip, in decode order, are key frames.
+    private static func keyFrameIndices(of url: URL) async throws -> [Int] {
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        reader.add(output)
+        XCTAssertTrue(reader.startReading(), "\(String(describing: reader.error))")
+        var indices: [Int] = []
+        var index = 0
+        while let sample = output.copyNextSampleBuffer() {
+            guard CMSampleBufferGetNumSamples(sample) > 0 else { continue }
+            let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false)
+                as? [[CFString: Any]]
+            let notSync = attachments?.first?[kCMSampleAttachmentKey_NotSync] as? Bool ?? false
+            if !notSync { indices.append(index) }
+            index += 1
+        }
+        XCTAssertEqual(reader.status, .completed, "\(String(describing: reader.error))")
+        return indices
+    }
+
     private static func corners(of image: CGImage) -> [(red: Int, green: Int, blue: Int)] {
         let width = image.width, height = image.height
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
@@ -297,6 +320,11 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
             memset(base, Int32(level), CVPixelBufferGetBytesPerRow(buffer) * CVPixelBufferGetHeight(buffer))
         }
         let url = try await SyntheticVideoFixture.write(request, into: directory)
+        // The interval is a ceiling, and an encoder may still start a key frame
+        // at the cut from dark to bright, which would let the nearest key frame
+        // pass for the playing position.
+        let keyFrames = try await Self.keyFrameIndices(of: url)
+        XCTAssertEqual(keyFrames, [0], "the fixture needs its first frame as its only key frame")
         let player = makePlayer(url: url)
         let late = await wait(upTo: .seconds(8)) { player.playbackTimeForTest.seconds >= 2.0 }
         XCTAssertTrue(late, "the clip never reached its second half")
