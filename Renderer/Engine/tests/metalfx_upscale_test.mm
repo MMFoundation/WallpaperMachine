@@ -7,6 +7,9 @@
 
 #include <gtest/gtest.h>
 
+#import <Metal/Metal.h>
+#import <MetalFX/MetalFX.h>
+
 #include "support/gpu_scene.hpp"
 #include "support/pixels.hpp"
 #include "support/scene_package.hpp"
@@ -26,6 +29,20 @@ using namespace we_test;
 
 constexpr uint32_t kCanvasWidth  = 512;
 constexpr uint32_t kCanvasHeight = 288;
+
+/// Whether this device has MetalFX's spatial scaler, the one `MetalUpscaler` checks for. A
+/// Metal device without it composes the old way, so a test that needs MetalFX skips.
+bool MetalFxAvailable()
+{
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    return device != nil && [MTLFXSpatialScalerDescriptor supportsDevice:device];
+}
+
+#define WE_SKIP_WITHOUT_METALFX()                                                                  \
+    do {                                                                                           \
+        WE_SKIP_WITHOUT_METAL();                                                                   \
+        if (!MetalFxAvailable()) GTEST_SKIP() << "no MetalFX spatial scaler on this device";       \
+    } while (false)
 
 /// Restores the process-wide switch whatever the test does.
 class Upscaling {
@@ -115,7 +132,7 @@ double MeanError(const Image& a, const Image& b)
 
 TEST(MetalFxUpscale, BringsALoweredSceneCloserToItsFullResolutionPicture)
 {
-    WE_SKIP_WITHOUT_METAL();
+    WE_SKIP_WITHOUT_METALFX();
     const Drawn native    = Draw(1.0, false);
     const Drawn stretched = Draw(0.5, false);
     const Drawn upscaled  = Draw(0.5, true);
@@ -140,7 +157,7 @@ TEST(MetalFxUpscale, BringsALoweredSceneCloserToItsFullResolutionPicture)
 
 TEST(MetalFxUpscale, KeepsOneFullSizeImageOnlyWhileItIsUsed)
 {
-    WE_SKIP_WITHOUT_METAL();
+    WE_SKIP_WITHOUT_METALFX();
     const Drawn stretched = Draw(0.5, false);
     const Drawn upscaled  = Draw(0.5, true);
     ASSERT_GT(stretched.bytes, 0u);
@@ -152,7 +169,7 @@ TEST(MetalFxUpscale, KeepsOneFullSizeImageOnlyWhileItIsUsed)
 
 TEST(MetalFxUpscale, LetsTheImageGoOnTheFirstFrameAfterItIsTurnedOff)
 {
-    WE_SKIP_WITHOUT_METAL();
+    WE_SKIP_WITHOUT_METALFX();
     const Upscaling switched(true);
     ScenePackage    package;
     MakeEdgeScene(package);
