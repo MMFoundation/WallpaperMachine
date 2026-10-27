@@ -82,8 +82,9 @@ Adding a new target, source directory, resource or build setting means editing
   prompt) uses `PanelLocale.shared.catalogString(_:)`. A literal must equal its
   catalog key exactly, interpolations included (`"\(count) wallpapers"` with an
   `Int` is the key `%lld wallpapers`), or it renders English; a ternary of two
-  literals is a `String`, not a key. A new string goes into every shipped catalog
-  in the same change; a new language follows [localization.md](localization.md)
+  literals is a `String`, not a key. A new string goes into the catalog of each
+  target that shows it, in every language that catalog ships, in the same change
+  (a string only the app shows stays out of the extension's); a new language follows [localization.md](localization.md)
   and is declared in `AppLanguage.supported`. Translate labels, never identifiers,
   option values, paths or third-party content; write whole phrases with
   placeholders instead of assembling sentences from English fragments. Missing
@@ -304,7 +305,8 @@ The rules that bind every change:
     does for you);
   - a bridge-crate interface change and the regenerated `App/Bridge/Generated`;
   - a behavior change and the documentation that describes that behavior;
-  - a new user-facing string and every shipped catalog;
+  - a new user-facing string and the catalog of each target that shows it, in
+    every language;
   - `README.md`, `README.zh-CN.md` and `README.pt-BR.md`;
   - a vendored `ThirdParty/` update and `ThirdParty/provenance.json`.
 - History stays linear: catch up with `origin/main` by rebasing unpushed commits

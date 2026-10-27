@@ -54,8 +54,9 @@ use `rg -u` only when those are the target.
   without the Windows VM, say the fix was not compared. No frame-time, memory or
   energy cost to paper over a bug (extra passes, per-frame CPU work, unbounded
   caches); if a real trade-off is unavoidable, stop and ask.
-- Every new user-facing string goes into every shipped catalog in the same change
-  (`App/Resources/*.xcstrings`, `Extension/Localizable.xcstrings`); a panel literal
+- Every new user-facing string goes, in the same change, into the catalog of each target
+  that shows it, in every language that catalog ships (`App/Resources/*.xcstrings` for the
+  app, `Extension/Localizable.xcstrings` only for what the lock-screen extension shows); a panel literal
   (`Text("…")`, `L("…")`) must equal its catalog key or it renders English.
   `README.md`, `README.zh-CN.md` and `README.pt-BR.md` change together ([localization](docs/localization.md)).
 - Match surrounding conventions; reuse `ClientPaths`, `AppLog` and dependency injection.

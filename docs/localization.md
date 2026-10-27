@@ -304,9 +304,12 @@ catalogs agree.
    language list in every README, and record the run with
    `python3 scripts/log_verification.py`.
 
-Adding or changing a string in the app means adding it to every catalog in the
-same change; the Python check fails on a key that is missing a registered
-language. English needs no translation: the source string is the fallback.
+Adding or changing a string means adding it, in the same change, to the catalog of
+each target that shows it, in every language that catalog ships: the app's catalogs for
+the app and its panel, `Extension/Localizable.xcstrings` only for text the lock-screen
+extension shows. A string only one target shows stays out of the other's catalog. The
+Python check fails on a key that is missing a registered language. English needs no
+translation: the source string is the fallback.
 
 ## Removing a language
 
