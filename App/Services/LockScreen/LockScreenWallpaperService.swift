@@ -765,6 +765,16 @@ final class LockScreenWallpaperService {
       armRendererWatches(published)
       return
     }
+    if Self.takeHostRelease(exchange: exchange, processID: pid) {
+      // macOS closed its connections first, which it does while the Mac is unlocked. That is
+      // not the renderer failing, so it never counts towards restoring the system wallpaper.
+      AppLog.info(
+        "Native lock screen: macOS ended the renderer process \(pid) after closing its connections; "
+          + "publishing again so macOS reloads it")
+      forceRepublish = true
+      if !isBusy { refresh() }
+      return
+    }
     let now = ContinuousClock.now
     rendererLosses = rendererLosses.filter { now - $0 < Self.rendererRecoveryWindow } + [now]
     if rendererLosses.count > Self.rendererRecoveryLimit {
@@ -779,6 +789,21 @@ final class LockScreenWallpaperService {
     }
     // A running update leaves either for the monitor's next tick.
     if !isBusy { refresh() }
+  }
+
+  /// Whether the ended process `processID` had left a host release marker. Removes it, and any
+  /// marker of another process that is gone, since only a watched process's is ever read.
+  static func takeHostRelease(exchange: URL, processID: Int32) -> Bool {
+    let manager = FileManager.default
+    let own = LockScreenHostRelease.fileName(processID: processID)
+    let released = manager.fileExists(atPath: exchange.appendingPathComponent(own).path)
+    let names = (try? manager.contentsOfDirectory(atPath: exchange.path)) ?? []
+    for name in names where name.hasPrefix(LockScreenHostRelease.prefix) {
+      let pid = Int32(name.dropFirst(LockScreenHostRelease.prefix.count))
+      guard name == own || pid.map({ kill($0, 0) != 0 && errno == ESRCH }) ?? true else { continue }
+      try? manager.removeItem(at: exchange.appendingPathComponent(name))
+    }
+    return released
   }
 
   private struct RendererUnavailable: LocalizedError {
