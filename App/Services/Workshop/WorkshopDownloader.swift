@@ -1236,10 +1236,14 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         await process?.stop()
     }
 
+    /// A Steam login name: ASCII letters, digits and underscores, plus the `@`, `.` and `-` of the
+    /// email addresses Steam once accepted as account names. It starts with a letter or digit, so
+    /// SteamCMD never reads it as one of its own `+command` or `-option` arguments.
     nonisolated static func normalizedAccount(_ username: String) -> String? {
         let name = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !name.isEmpty, name != "anonymous",
-              name.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "_") })
+        func isAlphanumeric(_ scalar: Unicode.Scalar) -> Bool { scalar.isASCII && CharacterSet.alphanumerics.contains(scalar) }
+        guard let first = name.unicodeScalars.first, isAlphanumeric(first), name != "anonymous",
+              name.unicodeScalars.allSatisfy({ isAlphanumeric($0) || "_@.-".unicodeScalars.contains($0) })
         else { return nil }
         return name
     }
