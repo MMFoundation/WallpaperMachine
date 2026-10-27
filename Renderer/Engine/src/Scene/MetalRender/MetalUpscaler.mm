@@ -13,6 +13,7 @@ namespace
 /// Off by default: what a lowered render scale has always shown is the
 /// bilinear stretch, and the extra pass is the user's to choose.
 std::atomic<bool> g_upscaling_enabled { false };
+std::atomic<bool> g_unsupported_for_tests { false };
 
 /// The scene's colours are stored as they are shown, gamma and all, so an
 /// 8-bit image is perceptual. A half-float one can hold light above 1 (bloom,
@@ -31,6 +32,11 @@ void SetMetalUpscalingEnabled(bool enabled)
 }
 
 bool MetalUpscalingEnabled() { return g_upscaling_enabled.load(std::memory_order_relaxed); }
+
+void SetMetalUpscalerUnsupportedForTests(bool unsupported)
+{
+    g_unsupported_for_tests.store(unsupported, std::memory_order_relaxed);
+}
 
 MetalUpscaler::MetalUpscaler()  = default;
 MetalUpscaler::~MetalUpscaler() = default;
@@ -57,7 +63,8 @@ bool MetalUpscaler::make(id<MTLDevice> device, id<MTLTexture> source, uint32_t w
 {
     scaler_ = nil;
     output_ = nil;
-    if (! [MTLFXSpatialScalerDescriptor supportsDevice:device]) {
+    if (g_unsupported_for_tests.load(std::memory_order_relaxed) ||
+        ! [MTLFXSpatialScalerDescriptor supportsDevice:device]) {
         error_ = "MetalFX spatial scaling is not supported on this GPU";
         return false;
     }

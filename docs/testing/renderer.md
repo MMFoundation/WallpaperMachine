@@ -776,7 +776,10 @@ through the scene harness at 100%, at 50% stretched, and at 50% with
 keeps the display's size, differs from the stretch, and is closer to the 100% picture
 than the stretch is (mean channel error); the upscaled draw holds one extra full-size 8-bit image;
 in one running scene, turning upscaling off lets that image go on the next drawn frame and
-turning it on again makes it again; and at 100% the switch changes neither the bytes nor the
+turning it on again makes it again; a GPU without MetalFX's spatial scaler (simulated with
+`SetMetalUpscalerUnsupportedForTests`, so any machine runs it) composes the stretch byte for
+byte and holds no more memory; the tests that need MetalFX itself skip on a GPU without it;
+and at 100% the switch changes neither the bytes nor the
 memory. `WE_TEST_KEEP_PICTURES` keeps the pictures.
 
 `horizontal_flip_pointer_test` (native Metal on a detached layer, in the check) drives a

@@ -15,4 +15,8 @@ namespace wallpaper::metal
 void SetMetalUpscalingEnabled(bool enabled);
 [[nodiscard]] bool MetalUpscalingEnabled();
 
+/// Makes every scaler from now on answer as a GPU without MetalFX's spatial scaler does, so
+/// the fallback can be tested on a machine that has one. Tests only.
+void SetMetalUpscalerUnsupportedForTests(bool unsupported);
+
 } // namespace wallpaper::metal

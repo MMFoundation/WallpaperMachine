@@ -197,6 +197,18 @@ TEST(MetalFxUpscale, LetsTheImageGoOnTheFirstFrameAfterItIsTurnedOff)
     EXPECT_EQ(scene.renderer().RenderTargetBytesForTests(), on);
 }
 
+TEST(MetalFxUpscale, AGpuWithoutTheScalerComposesTheStretchAndHoldsNothingMore)
+{
+    WE_SKIP_WITHOUT_METAL();
+    const Drawn stretched = Draw(0.5, false);
+    wallpaper::metal::SetMetalUpscalerUnsupportedForTests(true);
+    const Drawn refused = Draw(0.5, true);
+    wallpaper::metal::SetMetalUpscalerUnsupportedForTests(false);
+    ASSERT_FALSE(stretched.picture.empty());
+    EXPECT_TRUE(ExpectSamePicture(refused.picture, stretched.picture));
+    EXPECT_EQ(refused.bytes, stretched.bytes);
+}
+
 TEST(MetalFxUpscale, ChangesNothingAtFullResolution)
 {
     WE_SKIP_WITHOUT_METAL();
