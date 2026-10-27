@@ -2227,7 +2227,11 @@ id<MTLTexture> MetalRender::Impl::upscaledPicture(id<MTLCommandBuffer> command,
         if (width > output.width || height > output.height) {
             id<MTLTexture> upscaled = upscaler.encode(device, command, output, width, height);
             if (upscaled != nil) return upscaled;
+            // A refusal is kept, not released, so the next frame does not try again.
+            return output;
         }
+        // Nothing to bring back at this size: the image made for a larger one goes.
+        if (frame) upscaler.release();
     } else if (frame) {
         // Like the backdrop's images: the first drawn frame that has no use for it lets it go.
         upscaler.release();

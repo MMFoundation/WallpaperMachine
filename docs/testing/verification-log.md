@@ -48,11 +48,11 @@ Tooling and CI change: crowdin.yml, scripts/crowdin_sync.py (push/pull), scripts
 
 ## 2026-10-26 — MetalFX upscaling for a lowered render scale (issue 96)
 
-- python3 scripts/check_renderer.py: passed; new metalfx_upscale_test (3 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image only while in force, no change at 100%.
-- python3 scripts/check_rust.py: passed, including metalfx_upscaling_defaults_off_and_survives_a_restart and the config contract default.
-- python3 scripts/build.py --renderer-only: bindings regenerated.
-- python3 scripts/test.py: 4157 passed, 0 failed, 47 skipped (panel switch round trip, reset, energy-restart coverage).
-- Not checked: a real wallpaper on the desktop, the energy cost, or a comparison against Wallpaper Engine (WE has no MetalFX equivalent). Release app not rebuilt.
+- python3 scripts/check_renderer.py: exit 0, passed; new metalfx_upscale_test (3 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image only while in force, no change at 100%.
+- python3 scripts/check_rust.py: exit 0, passed, including metalfx_upscaling_defaults_off_and_survives_a_restart and the config contract default.
+- python3 scripts/build.py --renderer-only: exit 0, bindings regenerated.
+- python3 scripts/test.py: exit 0, 4157 passed, 0 failed, 47 skipped (panel switch round trip, reset, energy-restart coverage).
+- Measured afterwards: on a real machine about 50% more power with it on at the same scale, and about 1.1 ms (3024×1964) to 2.6 ms (5K) of extra GPU per frame on an M2 Pro in a headless probe. Not checked: a comparison against Wallpaper Engine (WE has no MetalFX equivalent). Release app not rebuilt.
 
 ## 2026-10-25 — Updates, web, downloads, Workshop, scene and panel improvements
 

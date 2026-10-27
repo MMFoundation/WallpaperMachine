@@ -45,7 +45,7 @@ struct PerformanceSettingsSection: View {
     id: "performance.metalfx-upscaling", section: .performance, group: quality,
     title: "MetalFX upscaling",
     note:
-      "Below 100%, scenes are brought back to full size with Apple’s MetalFX upscaler instead of being stretched, which keeps edges sharper for a little extra GPU work. Web and video wallpapers aren’t affected.")
+      "Below 100%, scenes are brought back to full size with Apple’s MetalFX upscaler instead of being stretched. Hard edges can look slightly sharper, but every frame needs extra GPU work, which can raise energy use noticeably. Web and video wallpapers aren’t affected.")
   /// What the engine uses now where it differs from the saved Frame rate limit and render scale,
   /// and which condition lowers them.
   static let renderScaleEffective = SettingsItem(
