@@ -429,11 +429,41 @@ Playback, backend, host and startup areas are in
   callback can hide or move a blocker, and costs nothing in a scene with no blocker.
   A cost has not been measured on a scene with many scripted layers and one blocker.
   Not modelled: Wallpaper Engine's walk skips blocking while a button is held and a
-  captured set is non-empty, and fires its click on release rather than on press.
+  captured set is non-empty.
+- **Click on release** — `MouseInput.TheClickComesOnReleaseOverTheLayerThatTookThePress`
+  in `mouse_input_test`, with the press-and-release taps of `sound_layer_cursor_behavior_test`,
+  `ClickScripts.OnlyTheHitOneOfThreeSameNamedLayersPlaysItsOwnSound` (`scene_schema_part05_test`),
+  `CursorInputState.SceneScriptStillGetsTheReleaseAfterThePointerLeftTheWindow` and
+  `ScriptRuntimeCompat.CursorCoveragePreservesAllPhasesThresholdsAndLiveTransforms`. As in
+  Wallpaper Engine, a press brings `cursorDown` to the layers the walk reaches, which hold
+  the button; the release brings each holder `cursorUp` wherever the pointer is, then
+  `cursorClick` only when the pointer is still over that layer (for a script of the scene
+  itself, anywhere on the wallpaper). A release elsewhere cancels the click, and a press
+  that began off a layer clicks nothing where it ends. A program with only a click handler
+  holds the button from the press. Up before click follows the browsers' order; Wallpaper
+  Engine's order between the two was not read from the binary.
 
 ## Scene scripts and property bindings
 
 All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
+
+- **Particle layers from scripts** — `ParticleScripts.EmitParticlesEmitsAtOnceEvenWithNoRateOfItsOwn`,
+  `.PauseKeepsTheLiveParticlesStopClearsThemAndPlayResumes` and
+  `.TheInstanceReachesTheOverridesAPropertyWouldBind` (`scene_schema_part11_test`): a parsed
+  particle layer answers `emitParticles` (at once, once, also while paused), `pause`, `stop`,
+  `play` and `isPlaying`, and `instance.count`, `size` and `controlpointN` read and write the
+  layer's instance override, a count of 3 emitting three times the authored rate.
+- **Camera transforms from scripts** — `CameraScripts.APerspectiveSceneAnswersAndTakesItsCameraBlock`
+  and `.A2DSceneZoomsThroughItsCameraTransforms` (`scene_schema_part11_test`): the camera block
+  reads back, a new eye places the perspective camera there looking at the centre, and a 2D
+  scene's zoom of 2 shows half the canvas.
+- **Parenting and bones from scripts** — `ScriptRuntimeCompat.SetParentKeepsTheLayersPlaceOnlyWhenAskedTo`
+  (with `adjustTransforms` the layer stays in place under a moved, scaled parent; without it
+  it rides the parent; no parent puts it back at the root),
+  `.PuppetBonesAnswerTheirIndexParentAndPose` (count, index by name, parent, the posed
+  transform in the scene and in the parent bone) and
+  `.PlaySingleAnimationPlaysOnceAndCreatedLayersStay` (a single play of a looping animation
+  ends and gives the pose back, is reused, and a created layer stays until destroyed).
 
 - **Script values, objects, start-up and local rotation without a device** —
   `scenescript_behavior_test` loads synthetic scenes for their runtime only
@@ -1572,6 +1602,11 @@ texture entrances are not decoded-image or native-rendering evidence.
     `getEffect(index | name)` (preserving the instance `name` from `scene.json` over
     the effect file's), `effect.visible` and `effect.getMaterial(i)` constant writes
     update the effect chain and its pass uniforms (issue #89).
+  - `EffectMaterialsGiveScriptsTheirAuthoredAndDefaultConstants` in
+    `layer_texture_reference_test`: a script reads a material constant as the material
+    holds it, the scene's authored value or the shader's default, by material name or
+    through `getConstant`, so `m.speed += 0.25` steps the authored value instead of
+    writing `NaN` (sent as 0), and an unauthored vector reads as a `Vec3` of its default.
   - `AnEffectPassReadingTextureResolutionWithoutSamplingTheSlotGetsItsTargetSize` in
     `layer_texture_reference_test`: an effect pass that reads `g_Texture0Resolution`
     without sampling `g_Texture0` in the active combo branch still receives its effect
@@ -2025,6 +2060,11 @@ texture entrances are not decoded-image or native-rendering evidence.
 
 ## Text, fonts and clocks
 
+- **Colour emoji** — `TextObjectRuntime.AColourEmojiIsDrawnInItsOwnColoursAndTakesRoomInTheRow`
+  (`text_object_runtime_test`, macOS only): an emoji the layer's font lacks comes from Apple
+  Color Emoji, takes room in the row and is drawn in its own colours (the grinning face's
+  yellow) in white text.
+
 - **Fonts and limits** — `text_object_runtime_test`. Font decoding prefers valid
   authored bytes, then the installed face of the font the scene names, then Arial;
   missing paths and malformed embedded fonts use the same fallback for both
@@ -2044,8 +2084,8 @@ texture entrances are not decoded-image or native-rendering evidence.
   faces read from their files, not from a copy of the font in memory),
   `.AFallbackFaceIsOpenedOnlyWhenAGlyphIsMissing` that text the font can draw asks for
   no second face, `.AFontTheWallpaperShipsIsNotOpenedFromAFile` that an authored font
-  stays in memory, and `.TheFaceCacheKeepsEightFacesAndDropsTheOneUnusedLongest`
-  that ten fonts leave eight open and the one used last is not reopened, and
+  stays in memory, and `.TheFaceCacheKeepsNineFacesAndDropsTheOneUnusedLongest`
+  that ten fonts leave nine open and the one used last is not reopened, and
   `.AFontFileThatChangedIsOpenedAgainBeforeItsCachedFaceIsUsed` that a font file
   rewritten or deleted under a cached face is opened again, not read through the old
   mapping. The face of
@@ -2622,6 +2662,12 @@ texture entrances are not decoded-image or native-rendering evidence.
   each layer should hold. The earlier diagnostic that loaded a real package from environment variables is gone.
 
 ## Animation and puppets
+
+- **Bone opacity** — `PuppetBoneAlpha.CurvesAreSampledAndMixedWithTheOpaqueRestPose`
+  (`puppet_pose_tests`: a curve sampled between frames, a half blend leaving half to the
+  opaque rest pose, a hidden layer fading nothing, curves that never dip asking for no
+  alpha) and `ShaderUpdaterPuppet.BonesAlphaCarriesOneOpacityPerBone`
+  (`shader_updater_behavior_test`: `g_BonesAlpha` holds one opacity per bone).
 
 - **Non-additive layer weights** — `PuppetPose.NonAdditiveLayersShareOneUnitOfPoseWeight`
   (normalized and partial weights, rotation, scale, loop wrap, repeated samples)

@@ -257,6 +257,159 @@ final class WorkshopSourceTests: XCTestCase {
     try await finished(store)
   }
 
+  /// Subscribing and unsubscribing change the account's subscriptions on Steam: a POST to
+  /// steamcommunity.com carrying the session and a CSRF token Steam checks against its cookie.
+  /// The store's set of subscribed items, which the tiles mark, follows what Steam accepted.
+  func testSubscribingChangesTheAccountsSubscriptionsAndWhatIsMarked() async throws {
+    let store = fixture.store
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    try await store.refreshSubscribedIDs()
+    XCTAssertEqual(store.subscribedIDs, ["1"])
+
+    try await store.setSubscribed(true, itemID: "2")
+    XCTAssertEqual(store.subscribedIDs, ["1", "2"])
+    let subscribe = try XCTUnwrap(fixture.subscribeRequests.last)
+    XCTAssertEqual(subscribe.path, "/sharedfiles/subscribe")
+    let fields = Dictionary(
+      subscribe.form.split(separator: "&").map { pair -> (String, String) in
+        let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+        return (parts[0], parts.count > 1 ? parts[1] : "")
+      }, uniquingKeysWith: { first, _ in first })
+    XCTAssertEqual(fields["id"], "2")
+    XCTAssertEqual(fields["appid"], "431960")
+    let token = try XCTUnwrap(fields["sessionid"])
+    XCTAssertFalse(token.isEmpty)
+    let cookie = try XCTUnwrap(subscribe.cookie)
+    XCTAssertTrue(cookie.contains("sessionid=\(token)"), "the CSRF token is the cookie Steam compares it with")
+    XCTAssertTrue(cookie.contains("steamLoginSecure="))
+
+    try await store.setSubscribed(false, itemID: "1")
+    XCTAssertEqual(store.subscribedIDs, ["2"])
+    XCTAssertEqual(fixture.subscribeRequests.last?.path, "/sharedfiles/unsubscribe")
+
+    fixture.subscribeAnswer = Data(#"{"success":2}"#.utf8)
+    do {
+      try await store.setSubscribed(true, itemID: "3")
+      XCTFail("Steam refusing the change must be reported")
+    } catch {}
+    XCTAssertEqual(store.subscribedIDs, ["2"], "nothing Steam refused is marked")
+
+    fixture.subscribeAnswer = Data("<html><head><title>Sign In</title></head></html>".utf8)
+    do {
+      try await store.setSubscribed(true, itemID: "3")
+      XCTFail("A sign-in page is an ended session")
+    } catch is SteamSignInRequired {}
+    XCTAssertNil(store.steamWebSession)
+    XCTAssertEqual(store.subscribedIDs, [], "signed out, nothing is marked as subscribed")
+  }
+
+  /// The page can ask for the marks before the saved sign-in has come back from the keychain:
+  /// the read waits for it, and answers whether there was a session to read with, so a page
+  /// opened signed out can ask again later.
+  func testReadingSubscriptionsWaitsForTheSavedSignInAndSaysWhetherItRead() async throws {
+    let store = fixture.store
+    let readSignedOut = try await store.refreshSubscribedIDs()
+    XCTAssertNil(readSignedOut, "signed out, nothing is read")
+
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    let relaunched = fixture.relaunchedStore()
+    relaunched.restoreSteamWebSession()
+    let readRestored = try await relaunched.refreshSubscribedIDs()
+    XCTAssertNotNil(readRestored, "the read waited for the saved sign-in")
+    XCTAssertEqual(relaunched.subscribedIDs, ["1"])
+  }
+
+  /// A read of the subscriptions that Steam answers after a subscribe went through is still
+  /// shown, with the subscribe laid over it, so neither the list nor the change is lost.
+  func testASubscriptionsReadKeepsASubscribeMadeWhileItWasAnswered() async throws {
+    let store = fixture.store
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    let gate = DispatchSemaphore(value: 0)
+    fixture.subscriptionsGate = gate
+    let read = Task { try await store.refreshSubscribedIDs() }
+    for _ in 0..<500 where fixture.subscriptionReads == 0 { try await Task.sleep(for: .milliseconds(10)) }
+    XCTAssertEqual(fixture.subscriptionReads, 1, "the read is held at Steam")
+    try await store.setSubscribed(true, itemID: "2")
+    gate.signal()
+    let used = try await read.value
+    XCTAssertEqual(used, store.steamWebSession, "the read answers the session it read with")
+    XCTAssertEqual(store.subscribedIDs, ["1", "2"], "the list Steam sent, and the subscribe made meanwhile")
+  }
+
+  /// Steam ending the session a request was sent with does not sign out a newer sign-in made
+  /// while it was answering.
+  func testAnEndedSessionDoesNotForgetTheSignInThatReplacedIt() async throws {
+    let store = fixture.store
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    let gate = DispatchSemaphore(value: 0)
+    fixture.subscriptionsGate = gate
+    let read = Task { try await store.refreshSubscribedIDs() }
+    for _ in 0..<500 where fixture.subscriptionReads == 0 { try await Task.sleep(for: .milliseconds(10)) }
+    XCTAssertEqual(fixture.subscriptionReads, 1, "the read is held at Steam")
+    store.signOutOfSteamWeb()
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||fedcba9876543210fedc") }
+    fixture.subscriptionPages = [1: Data("<html><head><title>Sign In</title></head></html>".utf8)]
+    gate.signal()
+    do {
+      _ = try await read.value
+      XCTFail("Steam ended the session the read was sent with")
+    } catch is SteamSignInRequired {}
+    XCTAssertNotNil(store.steamWebSession, "the new sign-in stays")
+  }
+
+  func testSubscribingWithoutASignInChangesNothing() async throws {
+    do {
+      try await fixture.store.setSubscribed(true, itemID: "2")
+      XCTFail("Subscribing needs a Steam Community sign-in")
+    } catch is SteamSignInRequired {}
+    XCTAssertTrue(fixture.subscribeRequests.isEmpty)
+  }
+
+  /// An item's comments come from Steam's public comment thread, newest first, read as plain
+  /// text: markup is dropped, line breaks kept and entities decoded. No session is sent.
+  func testCommentsAreReadAsPlainTextFromThePublicThread() async throws {
+    let html = """
+      <div class="commentthread_comment responsive_body_text" id="comment_1">
+        <div class="commentthread_comment_content"><div class="commentthread_comment_author">
+          <a class="hoverunderline commentthread_author_link" href="https://steamcommunity.com/id/a" data-miniprofile="1">
+          <bdi>Tom &amp; Jerry</bdi></a>
+          <span class="commentthread_comment_timestamp" title="1 Oct" data-timestamp="1759312800">1 Oct</span>
+        </div>
+        <div class="commentthread_comment_text" id="comment_content_1">
+          Lovely &lt;3<br>Second line <a href="https://example.com" class="bb_link">link</a>
+        </div></div>
+      </div>
+      <div class="commentthread_comment responsive_body_text" id="comment_2">
+        <a class="hoverunderline commentthread_author_link" href="x"><bdi>B</bdi></a>
+        <span class="commentthread_comment_timestamp" data-timestamp="1759226400">x</span>
+        <div class="commentthread_comment_text" id="comment_content_2">  Nice  </div>
+      </div>
+      """
+    fixture.comments = try JSONSerialization.data(withJSONObject: [
+      "success": true, "start": 0, "total_count": 12, "comments_html": html,
+    ])
+    let thread = try await fixture.service.comments(itemID: "55", creatorID: Self.author)
+    XCTAssertEqual(thread.total, 12)
+    XCTAssertEqual(thread.comments.count, 2)
+    XCTAssertEqual(thread.comments[0].author, "Tom & Jerry")
+    XCTAssertEqual(thread.comments[0].text, "Lovely <3\nSecond line link")
+    XCTAssertEqual(thread.comments[0].date, Date(timeIntervalSince1970: 1_759_312_800))
+    XCTAssertEqual(thread.comments[1].author, "B")
+    XCTAssertEqual(thread.comments[1].text, "Nice")
+    XCTAssertEqual(fixture.commentPaths, ["/comment/PublishedFile_Public/render/\(Self.author)/55?start=0&count=10"])
+    XCTAssertEqual(fixture.cookies.compactMap { $0 }, [], "the public thread is read without the session")
+
+    fixture.comments = Data("not json".utf8)
+    do {
+      _ = try await fixture.service.comments(itemID: "55", creatorID: Self.author)
+      XCTFail("An answer that is not the thread must be reported")
+    } catch {}
+  }
+
   func testFavoritesAreTheSignedInAccountsOwnInTheOrderChosen() async throws {
     let store = fixture.store
     store.open(.favorites)
@@ -990,6 +1143,13 @@ private final class SourceFixture {
     get { answers.read { $0.subscriptionPages } }
     set { answers.write { $0.subscriptionPages = newValue } }
   }
+  /// Holds every subscriptions read until it is signalled; `subscriptionReads` counts the reads
+  /// that reached the fixture, so a test can act while one is held.
+  var subscriptionsGate: DispatchSemaphore? {
+    get { answers.read { $0.subscriptionsGate } }
+    set { answers.write { $0.subscriptionsGate = newValue } }
+  }
+  var subscriptionReads: Int { answers.read { $0.subscriptionReads } }
   var favoritePages: [String: Data] {
     get { answers.read { $0.favoritePages } }
     set { answers.write { $0.favoritePages = newValue } }
@@ -1008,6 +1168,16 @@ private final class SourceFixture {
   }
   /// The form of each renewal request.
   var renewalForms: [String] { answers.read { $0.renewalForms } }
+  var subscribeAnswer: Data {
+    get { answers.read { $0.subscribeAnswer } }
+    set { answers.write { $0.subscribeAnswer = newValue } }
+  }
+  var subscribeRequests: [(path: String, form: String, cookie: String?)] { answers.read { $0.subscribeRequests } }
+  var comments: Data {
+    get { answers.read { $0.comments } }
+    set { answers.write { $0.comments = newValue } }
+  }
+  var commentPaths: [String] { answers.read { $0.commentPaths } }
 
   /// Holds Steam's favorites answers until the gate returned is opened.
   func holdFavorites() -> AnswerGate {
@@ -1060,6 +1230,8 @@ private final class SourceAnswers: @unchecked Sendable {
     var details: [String: [String: Any]] = [:]
     var profiles: [String: Data] = [:]
     var subscriptionPages: [Int: Data] = [:]
+    var subscriptionsGate: DispatchSemaphore?
+    var subscriptionReads = 0
     /// Steam's favorites answer, by the `sortmethod` asked for.
     var favoritePages: [String: Data] = [:]
     var favoriteOrdersRequested: [String] = []
@@ -1070,12 +1242,30 @@ private final class SourceAnswers: @unchecked Sendable {
     var cookies: [String?] = []
     var renewal = Data(#"{"response":{}}"#.utf8)
     var renewalForms: [String] = []
+    /// What Steam answers a subscribe or unsubscribe with, and each such request.
+    var subscribeAnswer = Data(#"{"success":1}"#.utf8)
+    var subscribeRequests: [(path: String, form: String, cookie: String?)] = []
+    /// What the public comment thread answers, and the paths it was asked for.
+    var comments = Data()
+    var commentPaths: [String] = []
     var favoritesGate: AnswerGate?
   }
   private let lock = NSLock()
   private var state = State()
   func read<T>(_ body: (State) -> T) -> T { lock.withLock { body(state) } }
   func write(_ body: (inout State) -> Void) { lock.withLock { body(&state) } }
+
+  /// The gate a subscriptions read waits at before it is answered, counting the read.
+  func hold(_ request: URLRequest) -> DispatchSemaphore? {
+    guard let url = request.url,
+      URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+        .contains(where: { $0.name == "browsefilter" && $0.value == "mysubscriptions" }) == true
+    else { return nil }
+    return lock.withLock {
+      state.subscriptionReads += 1
+      return state.subscriptionsGate
+    }
+  }
 
   /// The status and body Steam would answer `request` with.
   func answer(_ request: URLRequest, body: Data) -> (Int, Data) {
@@ -1094,6 +1284,13 @@ private final class SourceAnswers: @unchecked Sendable {
         state.browsePagesRequested.append(page)
         if !state.browseQueue.isEmpty { return (200, state.browseQueue.removeFirst()) }
         return (200, state.browsePages[page] ?? state.browse)
+      case ("steamcommunity.com", "/sharedfiles/subscribe"), ("steamcommunity.com", "/sharedfiles/unsubscribe"):
+        state.subscribeRequests.append(
+          (path, String(decoding: body, as: UTF8.self), request.value(forHTTPHeaderField: "Cookie")))
+        return (200, state.subscribeAnswer)
+      case (_, _) where host == "steamcommunity.com" && path.hasPrefix("/comment/PublishedFile_Public/render/"):
+        state.commentPaths.append(path + "?" + (url.query ?? ""))
+        return (200, state.comments)
       case ("api.steampowered.com", "/IAuthenticationService/GenerateAccessTokenForApp/v1"):
         state.renewalForms.append(String(decoding: body, as: UTF8.self))
         return (200, state.renewal)
@@ -1159,11 +1356,20 @@ private final class SourceFixtureProtocol: URLProtocol, @unchecked Sendable {
       client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
       return
     }
-    let (status, data) = answers.answer(request, body: Self.body(of: request))
-    let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
-    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-    client?.urlProtocol(self, didLoad: data)
-    client?.urlProtocolDidFinishLoading(self)
+    let body = Self.body(of: request)
+    let finish = { [self] in
+      let (status, data) = answers.answer(request, body: body)
+      let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: data)
+      client?.urlProtocolDidFinishLoading(self)
+    }
+    // A held read waits off the session's loading thread, so other requests are still answered.
+    guard let gate = answers.hold(request) else { return finish() }
+    DispatchQueue.global().async {
+      gate.wait()
+      finish()
+    }
   }
   override func stopLoading() {}
 

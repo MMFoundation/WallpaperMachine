@@ -11,6 +11,8 @@ struct WorkshopTile: Identifiable, Equatable {
   let isInstalled: Bool
   /// The installed copy is a favorite, which the tile's heart mark shows.
   let isFavorite: Bool
+  /// The signed-in Steam account subscribes to it.
+  var isSubscribed = false
   let download: TileDownloadState?
 
   var id: String { item.id }
@@ -27,6 +29,9 @@ extension WorkshopItem {
 
   /// Staff-approved wallpapers carry the `Approved` tag, which the tile marks with a trophy.
   var isApproved: Bool { tags.contains { $0.caseInsensitiveCompare("Approved") == .orderedSame } }
+
+  /// Workshop presets carry the `Preset` category tag, which the tile marks.
+  var isPreset: Bool { tags.contains { $0.caseInsensitiveCompare("Preset") == .orderedSame } }
 
   /// The cached still for the tile, nil when Steam gave no preview or one that is not https.
   var thumbnail: PanelImageSource? {

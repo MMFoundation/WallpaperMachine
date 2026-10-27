@@ -167,15 +167,16 @@ TEST(MetalFxUpscale, LetsTheImageGoOnTheFirstFrameAfterItIsTurnedOff)
     ASSERT_FALSE(scene.Run(3).empty());
     const uint64_t on = scene.renderer().RenderTargetBytesForTests();
 
-    // The same scene, without being rebuilt: the next drawn frame lets the image go.
+    // The same scene, without being rebuilt: the first drawn frame lets the image go, before
+    // any poster is composed.
     wallpaper::metal::SetMetalUpscalingEnabled(false);
-    ASSERT_FALSE(scene.Run(2).empty());
+    ASSERT_TRUE(scene.Step(1)) << scene.error();
     const uint64_t off = scene.renderer().RenderTargetBytesForTests();
     EXPECT_GE(on, off + full_size);
 
     // And turning it back on makes it again.
     wallpaper::metal::SetMetalUpscalingEnabled(true);
-    ASSERT_FALSE(scene.Run(2).empty());
+    ASSERT_TRUE(scene.Step(1)) << scene.error();
     EXPECT_EQ(scene.renderer().RenderTargetBytesForTests(), on);
 }
 

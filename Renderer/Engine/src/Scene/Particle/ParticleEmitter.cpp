@@ -68,7 +68,18 @@ struct Schedule {
     double window_left { 0.0 };
     double pause_left { 0.0 };
     u32    window_emitted { 0 };
+    /// The spawn context's `restart` this timetable started from.
+    u64    restart { 0 };
 };
+
+/// The timetable an emitter starts from.
+Schedule FreshSchedule(const EmitterConfig& cfg) {
+    Schedule schedule;
+    schedule.delay_left    = cfg.timing.delay;
+    schedule.duration_left = cfg.timing.duration;
+    schedule.burst_pending = cfg.burst > 0;
+    return schedule;
+}
 
 double LengthBetween(float a, float b) {
     return Random::get(static_cast<double>(a), static_cast<double>(b));
@@ -305,7 +316,19 @@ void EmitInto(const EmitterConfig& cfg, Schedule& schedule, Place& place,
             cfg.spawn->has_world_linear ? point->world_linear : linalg::Matrix3d::Identity();
     }
 
-    const double wanted = PlanStep(cfg, schedule, dt);
+    // A script's play() after a stop starts the timetable over; while it is paused or
+    // stopped the timetable waits, and a request for particles comes on top of either.
+    if (cfg.spawn && cfg.spawn->restart != schedule.restart) {
+        const u64 restart = cfg.spawn->restart;
+        schedule          = FreshSchedule(cfg);
+        schedule.restart  = restart;
+    }
+    const bool emitting = ! cfg.spawn || cfg.spawn->emitting;
+    double     wanted   = emitting ? PlanStep(cfg, schedule, dt) : 0.0;
+    if (cfg.spawn) {
+        wanted += static_cast<double>(cfg.spawn->manual);
+        if (emitting && ! schedule.finished) cfg.spawn->active = true;
+    }
     if (wanted >= 1.0) {
         const double duration = cfg.rate > 0.0 ? 1.0 / cfg.rate : 0.0;
         std::size_t  cursor   = 0;
@@ -328,10 +351,8 @@ void EmitInto(const EmitterConfig& cfg, Schedule& schedule, Place& place,
 
 template<class Place>
 ParticleEmittOp MakeOp(EmitterConfig cfg, Place place) {
-    Schedule schedule;
-    schedule.delay_left     = cfg.timing.delay;
-    schedule.duration_left  = cfg.timing.duration;
-    schedule.burst_pending  = cfg.burst > 0;
+    Schedule schedule = FreshSchedule(cfg);
+    if (cfg.spawn) schedule.restart = cfg.spawn->restart;
     return [cfg = std::move(cfg), schedule, place](std::vector<Particle>&           slots,
                                                     std::vector<ParticleInitOp>&     initializers,
                                                     u32 maxcount, double dt,

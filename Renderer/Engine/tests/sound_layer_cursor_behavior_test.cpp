@@ -232,8 +232,8 @@ TEST(SoundLayerScripts, OnePressEdgeIsExactlyOneClick)
     EXPECT_TRUE(stage.Playing("clickSound")) << "one tap reached the script more than once";
     EXPECT_EQ(stage->scriptErrorCount(), 0u);
 
-    // A second press is the second click: the script's own guard now stops the layer.
-    stage.Cursor(0.25f, 0.75f, true, 0, 1, 0);
+    // A second tap is the second click: the script's own guard now stops the layer.
+    stage.Cursor(0.25f, 0.75f, true, 0, 1, 1);
     stage.Frame();
     EXPECT_FALSE(stage.Playing("clickSound"));
     EXPECT_EQ(stage->scriptErrorCount(), 0u);
@@ -260,11 +260,11 @@ TEST(SoundLayerScripts, ALayerBoundSceneScriptIgnoresClicksOutsideItsLayer)
     stage.AddNode("button", kButtonX, kButtonY, kButtonW, kButtonH);
     stage->RegisterSceneScript(source, "button");
 
-    stage.Cursor(kOutsideX, kOutsideY, true, 0, 1, 0);
+    stage.Cursor(kOutsideX, kOutsideY, true, 0, 1, 1);
     EXPECT_TRUE(stage.Frame());
     EXPECT_FALSE(stage.Playing("clickSound"));
 
-    stage.Cursor(kInsideX, kInsideY, true, 0, 1, 0);
+    stage.Cursor(kInsideX, kInsideY, true, 0, 1, 1);
     EXPECT_TRUE(stage.Frame());
     EXPECT_TRUE(stage.Playing("clickSound"));
     EXPECT_EQ(stage->scriptErrorCount(), 0u);
@@ -274,7 +274,7 @@ TEST(SoundLayerScripts, ALayerBoundSceneScriptIgnoresClicksOutsideItsLayer)
     right.AddSound("clickSound");
     right.AddNode("button", kButtonX, kButtonY, kButtonW, kButtonH);
     right->RegisterSceneScript(source, "button");
-    right.Cursor(0.7f, kInsideY, true, 0, 1, 0);
+    right.Cursor(0.7f, kInsideY, true, 0, 1, 1);
     EXPECT_TRUE(right.Frame());
     EXPECT_FALSE(right.Playing("clickSound"));
     EXPECT_EQ(right->scriptErrorCount(), 0u);
@@ -288,11 +288,11 @@ TEST(SoundLayerScripts, APropertyScriptOnALayerIgnoresClicksOutsideIt)
                           VisibilitySetting(kPlayOnClickModule, true));
     EXPECT_EQ(stage->sceneScriptCount(), 1u);
 
-    stage.Cursor(kOutsideX, kOutsideY, true, 0, 1, 0);
+    stage.Cursor(kOutsideX, kOutsideY, true, 0, 1, 1);
     EXPECT_TRUE(stage.Frame());
     EXPECT_FALSE(stage.Playing("clickSound"));
 
-    stage.Cursor(kInsideX, kInsideY, true, 0, 1, 0);
+    stage.Cursor(kInsideX, kInsideY, true, 0, 1, 1);
     EXPECT_TRUE(stage.Frame());
     EXPECT_TRUE(stage.Playing("clickSound"));
     EXPECT_EQ(stage->scriptErrorCount(), 0u);
@@ -331,7 +331,7 @@ TEST(SoundLayerScripts, IdenticalScriptsOnTwoLayersEachTestTheirOwnBox)
         EXPECT_FALSE(stage.Playing("soundA"));
         EXPECT_FALSE(stage.Playing("soundB"));
 
-        stage.Cursor(0.25f, 0.5f, true, 0, 1, 0);
+        stage.Cursor(0.25f, 0.5f, true, 0, 1, 1);
         stage.Frame();
         EXPECT_TRUE(stage.Playing("soundA"));
         EXPECT_FALSE(stage.Playing("soundB"));
@@ -341,7 +341,7 @@ TEST(SoundLayerScripts, IdenticalScriptsOnTwoLayersEachTestTheirOwnBox)
         // (300, 150): inside the second box only.
         Stage stage(400, 300);
         build(stage);
-        stage.Cursor(0.75f, 0.5f, true, 0, 1, 0);
+        stage.Cursor(0.75f, 0.5f, true, 0, 1, 1);
         stage.Frame();
         EXPECT_TRUE(stage.Playing("soundB"));
         EXPECT_FALSE(stage.Playing("soundA"));
@@ -351,7 +351,7 @@ TEST(SoundLayerScripts, IdenticalScriptsOnTwoLayersEachTestTheirOwnBox)
         // (200, 150): between the boxes.
         Stage stage(400, 300);
         build(stage);
-        stage.Cursor(0.5f, 0.5f, true, 0, 1, 0);
+        stage.Cursor(0.5f, 0.5f, true, 0, 1, 1);
         stage.Frame();
         EXPECT_FALSE(stage.Playing("soundA"));
         EXPECT_FALSE(stage.Playing("soundB"));

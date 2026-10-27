@@ -12,6 +12,7 @@
 #include "Scripting/ScriptEngine.hpp"
 #include "SpecTexs.hpp"
 #include "SpriteAnimation.hpp"
+#include "WPPuppet.hpp"
 #include "WPShaderValueUpdater.hpp"
 
 #include <gtest/gtest.h>
@@ -441,6 +442,44 @@ TEST(ShaderUpdaterAudio, ReadingAudioInOneSlotDoesNotChangeAnotherSlotsUniforms)
         EXPECT_FLOAT_EQ(lanes[4 * i + 2], 0.0f) << i;
         EXPECT_FLOAT_EQ(lanes[4 * i + 3], 0.0f) << i;
     }
+}
+
+// ---- puppet bone alpha --------------------------------------------------------------------------
+
+// A shader that declares `g_BonesAlpha` gets one opacity per bone of the node's puppet.
+TEST(ShaderUpdaterPuppet, BonesAlphaCarriesOneOpacityPerBone)
+{
+    auto puppet = std::make_shared<WPPuppet>();
+    puppet->bones.resize(3);
+    WPPuppet::Animation anim {};
+    anim.id = 1;
+    anim.fps = 1;
+    anim.length = 1;
+    anim.mode = WPPuppet::PlayMode::Loop;
+    anim.blend_curves.resize(3);
+    anim.blend_curves[1].values = { 0.25f, 0.25f };
+    puppet->anims.push_back(anim);
+    puppet->prepared();
+    WPPuppetLayer layer(puppet);
+    WPPuppetLayer::AnimationLayer spec;
+    spec.id = 1;
+    std::vector<WPPuppetLayer::AnimationLayer> stack { spec };
+    layer.prepared(stack);
+
+    Stage f;
+    WPShaderValueData data;
+    data.puppet_layer = layer;
+    f.updater.SetNodeData(f.node.get(), 0, data);
+    f.updater.InitUniforms(f.node.get(), 0, Declares({ "g_BonesAlpha" }));
+    f.Update(0);
+    f.scene.elapsingTime = 0.5;
+    const auto written = f.Update(0);
+    ASSERT_TRUE(written.contains("g_BonesAlpha"));
+    const auto& alphas = written.at("g_BonesAlpha");
+    ASSERT_EQ(alphas.size(), 3u);
+    EXPECT_FLOAT_EQ(alphas[0], 1.0f);
+    EXPECT_FLOAT_EQ(alphas[1], 0.25f);
+    EXPECT_FLOAT_EQ(alphas[2], 1.0f);
 }
 
 // ---- per-slot reflection ------------------------------------------------------------------------

@@ -98,6 +98,10 @@ public:
     void        SetRotation(linalg::Vector3f v) { Assign(m_rotation, v); }
     void        SetTranslate(linalg::Vector3f v) { Assign(m_translate, v); }
     void        SetScale(linalg::Vector3f v) { Assign(m_scale, v); }
+    /// Gives the node the translation, scale and angles that make its local matrix
+    /// `transform` (translation, then z, y and x rotations, then scale: the order
+    /// `LocalTransOf` composes). A mirrored matrix carries its mirror on x.
+    void        SetTransformFromMatrix(const linalg::Matrix4d& transform);
     void        SetVisible(bool visible) { m_visible = visible; }
     void        SetSkipRenderPass(bool skip) { m_skipRenderPass = skip; }
     /// A node placed by its own transform alone, whatever its ancestors do: a

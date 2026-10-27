@@ -240,7 +240,8 @@ picture shows between a window closing and the web page's window opening.
   defaults and corrupt stored values (the battery mode's `reducedQuality` is not a
   condition choice), the stored Reduced quality choice of the three system conditions
   that is never a rule action, running versus frontmost rules, and the
-  other-audio settle. The quality channel is one more delivery beside presentation and audio:
+  other-audio settle and the system feedback services (alerts, the volume click, Siri
+  listening) it ignores by their system path. The quality channel is one more delivery beside presentation and audio:
   a reduction reaches the bridge on its own without suspending anything, an unchanged set is
   not sent again, a refused request or release is sent again by the next evaluation (and not
   inside the same one), `stop()` releases it, and it waits for the global acknowledgement and
@@ -453,9 +454,13 @@ running app.
   reachable; missing repositories, failed lookups and malformed metadata remain
   errors, and rechecking clears stale notes and availability.
 - Installing, against real disk images made with `hdiutil`: the app is copied out
-  without following the `Applications` link, a foreign bundle is refused, the
-  image is detached either way, and an app that cannot install in place opens
-  the downloaded image.
+  without following the `Applications` link, a foreign bundle and an unsigned one
+  are refused, the image is detached either way, and an app that cannot install in
+  place opens the downloaded image. Signatures, against bundles signed ad hoc with
+  `codesign`: an unsigned or altered copy is refused, an installed copy that meets
+  the release requirement (a signed `Info.plist` value stands in for the release
+  certificate, which fixtures cannot carry) accepts only an update that meets it
+  too, and a build from source asks for no particular signer.
 - `UpdatePresentationTests` and `AboutSettingsTests` (Panel) walk the About card
   from no release through the download to an install that needs a yes.
 - `UpdatePromptGateTests`: when the unattended update window is held (suspended
@@ -503,8 +508,10 @@ on [manual-smoke.md](manual-smoke.md).
   reloading a replaced wallpaper. Fetching a preset's base in the same
   SteamCMD run is in `DownloaderLifecycleTests`, with a base that is denied, exits
   early or keeps dropping the connection reported as the base failing (naming it
-  and keeping Steam's reason), the preset's own failure left as it is, and Try again
-  resuming from the kept preset.
+  and keeping Steam's reason), the preset's own failure left as it is, Try again
+  resuming from the kept preset, and a base Steam lists as too large for the free space
+  stopping before SteamCMD is asked for it while one that fits is fetched (an injected
+  listing, not Steam).
 - `ImageImportTests` import real ImageIO pictures as the still `web` project with
   the original's bytes kept and the file name kept out of the page, the fit
   chosen from the picture's shape, a JPEG display copy for a TIFF, an undecodable
@@ -1455,7 +1462,11 @@ faces (`WebWallpaperFontAliasTests`) and the screen-saver surface
   (`WALLPAPER_MACHINE_NETWORK_TESTS=1`, see
   [README.md](README.md#opt-in-layers)); the page format stays covered offline
   through the real parser against fixture markup.
-- `WorkshopSourceTests` (fixture protocol, nothing reaches the network) — Steam's
+- `WorkshopSourceTests` (fixture protocol, nothing reaches the network) — subscribing and
+  unsubscribing (the form, the CSRF token matching its cookie, the subscribed set following
+  what Steam accepted, a refusal changing nothing, a sign-in page ending the session, none
+  without a session), the public comment thread read as plain text without the session,
+  Steam's
   session cookie read and never sent off Steam Community, author pages, a
   collection's order, collections marked on browse pages, the sidebar's rules on
   unfiltered pages, age-rating sampling of collections, every subscription page
@@ -1588,7 +1599,8 @@ and `WorkshopDownloadPersistenceTests`:
 `WorkshopUpdateStoreTests` — what counts as outdated, recorded downloads and
 imports against `project.json` dates, non-Workshop ids never sent, results kept
 across a relaunch, a download making an item current, the daily limit and its
-switch, a failed check keeping what was known, and forgetting deleted items;
+switch, a failed check keeping what was known, forgetting deleted items, and a preset
+offered when the base its manifest names changed after it was installed;
 `PanelWorkshopUpdateTests` — only an outdated wallpaper is marked and can be
 updated, and a reinstall needs an installed wallpaper and the user's yes before
 Steam is asked; `ImportTests` covers the swap that replaces an installed tree,

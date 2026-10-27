@@ -164,6 +164,20 @@ public:
     /// each particle's position before moving it.
     void SetTracksPreviousPosition(bool value) { m_tracks_prev_position = value; }
 
+    /// What a script reaches through the layer (Wallpaper Engine's IParticleSystem), for this
+    /// subsystem and those under it. `Pause` stops new particles and keeps the live ones,
+    /// `Stop` also clears them, and `Play` resumes; after a stop, or once every emitter's
+    /// timetable has run out and nothing is left alive, it starts the timetables over.
+    void Play();
+    void Pause();
+    void Stop();
+    /// Whether anything is still emitted or simulated: an emitter whose timetable runs, or a
+    /// live particle, here or below.
+    bool IsPlaying() const;
+    /// Every emitter of this subsystem's own instance places `count` more particles in the
+    /// next step, whether or not it is emitting.
+    void EmitNow(u32 count);
+
     void AddChild(std::unique_ptr<ParticleSubSystem>&&);
     /// A second renderer for the particles this subsystem simulates: it owns a
     /// mesh and a material of its own and is filled from this subsystem's
@@ -209,6 +223,11 @@ private:
     void PrewarmInstance(ParticleInstance& inst);
     void BindInstance(ParticleInstance& inst);
     void UpdateControlpoints();
+    /// Whether any particle of this subsystem or one below it is alive.
+    bool AnyAlive() const;
+    /// Removes every particle here and below; event children let their instances go.
+    void ClearParticles();
+    void SetEmitting(bool emitting, bool restart);
     /// Fills a mirror's mesh from the instances of the subsystem it draws.
     void GenerateFrom(const ParticleSubSystem& source);
     /// For a world-space system: moves the draw matrix of its nodes with the
@@ -246,6 +265,13 @@ private:
     bool                                   m_have_prev_model { false };
     linalg::Matrix4d                        m_prev_model { linalg::Matrix4d::Identity() };
     bool                                   m_cp_primed { false };
+    /// Script control (`Play`, `Pause`, `Stop`, `EmitNow`).
+    bool                                   m_emitting { true };
+    bool                                   m_stopped { false };
+    u64                                    m_restart { 0 };
+    u32                                    m_manual_pending { 0 };
+    /// Whether an emitter's timetable was still running in the last step.
+    bool                                   m_emission_active { true };
 
     std::array<ParticleControlpoint, 8> m_controlpoints;
 

@@ -610,6 +610,252 @@ std::shared_ptr<WPPuppet> MakeSingleShotPuppet() { return MakePuppet(WPPuppet::P
 
 } // namespace
 
+namespace
+{
+// Two bones: `root` slides along x one unit a frame (10 fps, 5 frames, looping), and `hand`
+// hangs one unit above it.
+std::shared_ptr<WPPuppet> MakeArmPuppet() {
+    auto puppet = std::make_shared<WPPuppet>();
+    puppet->bones.resize(2);
+    puppet->bones[0].name = "root";
+    puppet->bones[1].name        = "hand";
+    puppet->bones[1].parent      = 0;
+    puppet->bones[1].bind_parent = 0;
+    puppet->bones[1].anim_parent = 0;
+    WPPuppet::Animation animation;
+    animation.id     = 7;
+    animation.fps    = 10.0;
+    animation.length = 5;
+    animation.mode   = WPPuppet::PlayMode::Loop;
+    animation.name   = "gesture";
+    WPPuppet::Animation::BoneTrack root, hand;
+    for (int frame = 0; frame <= animation.length; ++frame) {
+        root.frames.push_back(WPPuppet::BoneFrame { .position = linalg::Vector3f(static_cast<float>(frame), 0.0f, 0.0f),
+                                                    .angle = linalg::Vector3f::Zero(), .scale = linalg::Vector3f::Ones() });
+        hand.frames.push_back(WPPuppet::BoneFrame { .position = linalg::Vector3f(0.0f, 1.0f, 0.0f),
+                                                    .angle = linalg::Vector3f::Zero(), .scale = linalg::Vector3f::Ones() });
+    }
+    animation.bone_tracks.push_back(std::move(root));
+    animation.bone_tracks.push_back(std::move(hand));
+    puppet->anims.push_back(std::move(animation));
+    puppet->prepared();
+    return puppet;
+}
+} // namespace
+
+// layer.setParent(parent, adjustTransforms): with the flag the layer stays where it is on
+// screen, its local transform taking the new parent into account; without it the local
+// transform is kept, so the layer moves with its new parent. No parent puts it back at the root.
+TEST(ScriptRuntimeCompat, SetParentKeepsTheLayersPlaceOnlyWhenAskedTo) {
+    for (const bool adjust : { true, false }) {
+        SCOPED_TRACE(adjust);
+        Scene scene;
+        auto  runtime = MakeRuntimeWithScene(scene);
+        auto  holder  = std::make_shared<SceneNode>();
+        auto  child   = std::make_shared<SceneNode>();
+        holder->SetTranslate(linalg::Vector3f(100, 0, 0));
+        holder->SetScale(linalg::Vector3f(2, 2, 1));
+        child->SetTranslate(linalg::Vector3f(10, 0, 0));
+        scene.sceneGraph->AppendChild(holder);
+        scene.sceneGraph->AppendChild(child);
+        runtime->RegisterNode("holder", holder.get());
+        runtime->RegisterNode("child", child.get());
+        runtime->RegisterSceneScript(std::string("var done = false; function update() { if (done) return; done = true;\n"
+                                                 "thisScene.getLayer('child').setParent(thisScene.getLayer('holder'), ") +
+                                         (adjust ? "true" : "false") + "); }", "");
+        runtime->Tick(0.1);
+        EXPECT_EQ(child->Parent(), holder.get());
+        child->UpdateTrans();
+        const linalg::Matrix4d world = child->ModelTrans();
+        EXPECT_NEAR(world(0, 3), adjust ? 10.0 : 120.0, 1e-4);
+        EXPECT_NEAR(world(0, 0), adjust ? 1.0 : 2.0, 1e-4) << "scale";
+
+        runtime->RegisterSceneScript("var done = false; function update() { if (done) return; done = true;\n"
+                                     "thisScene.getLayer('child').setParent(undefined, true); }", "");
+        runtime->Tick(0.1);
+        EXPECT_EQ(child->Parent(), scene.sceneGraph.get());
+        child->UpdateTrans();
+        EXPECT_NEAR(child->ModelTrans()(0, 3), world(0, 3), 1e-4) << "back at the root, in place";
+        for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
+    }
+}
+
+// A layer reparented in place keeps that place through later writes: turning it or scaling it
+// afterwards starts from its new local transform, not from the one it had under its old parent.
+TEST(ScriptRuntimeCompat, ALayerSetParentInPlaceStaysThereWhenItIsTurnedLater) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  holder  = std::make_shared<SceneNode>();
+    auto  child   = std::make_shared<SceneNode>();
+    holder->SetTranslate(linalg::Vector3f(100, 0, 0));
+    holder->SetScale(linalg::Vector3f(2, 2, 1));
+    child->SetTranslate(linalg::Vector3f(10, 0, 0));
+    scene.sceneGraph->AppendChild(holder);
+    scene.sceneGraph->AppendChild(child);
+    runtime->RegisterNode("holder", holder.get());
+    runtime->RegisterNode("child", child.get());
+    runtime->RegisterSceneScript("var step = 0; function update() { step++;\n"
+                                 "var c = thisScene.getLayer('child');\n"
+                                 "if (step === 1) c.setParent(thisScene.getLayer('holder'), true);\n"
+                                 "if (step === 2) { c.angles = new Vec3(0, 0, 0); c.scale = c.scale; }\n"
+                                 "}", "");
+    runtime->Tick(0.1);
+    runtime->Tick(0.1);
+    child->UpdateTrans();
+    EXPECT_NEAR(child->ModelTrans()(0, 3), 10.0, 1e-4) << "still where it was on screen";
+    EXPECT_NEAR(child->ModelTrans()(0, 0), 1.0, 1e-4) << "and its size";
+    for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
+}
+
+// A layer hung from an edge keeps its place too: its anchor point follows it into the new
+// parent, so turning it afterwards does not move it back.
+TEST(ScriptRuntimeCompat, AnEdgeAnchoredLayerSetParentInPlaceStaysThereWhenItIsTurnedLater) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  holder  = std::make_shared<SceneNode>();
+    auto  child   = std::make_shared<SceneNode>();
+    holder->SetTranslate(linalg::Vector3f(100, 0, 0));
+    holder->SetScale(linalg::Vector3f(2, 2, 1));
+    scene.sceneGraph->AppendChild(holder);
+    scene.sceneGraph->AppendChild(child);
+    runtime->RegisterNode("holder", holder.get());
+    runtime->RegisterNode("child", child.get());
+    runtime->RegisterNodeSize("child", linalg::Vector2f(80, 40));
+    ASSERT_TRUE(runtime->SetNodeAnchorAlignment("child", "left", linalg::Vector3f(10, 0, 0)));
+    child->UpdateTrans();
+    const double before = child->ModelTrans()(0, 3);
+    runtime->RegisterSceneScript("var step = 0; function update() { step++;\n"
+                                 "var c = thisScene.getLayer('child');\n"
+                                 "if (step === 1) c.setParent(thisScene.getLayer('holder'), true);\n"
+                                 "if (step === 2) c.angles = new Vec3(0, 0, 0);\n"
+                                 "}", "");
+    runtime->Tick(0.1);
+    runtime->Tick(0.1);
+    child->UpdateTrans();
+    EXPECT_NEAR(child->ModelTrans()(0, 3), before, 1e-4) << "still where it was on screen";
+    for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
+}
+
+// A parent squashed to nothing cannot take a layer in place: there is no local transform that
+// keeps it where it is, so the layer stays with its old parent.
+TEST(ScriptRuntimeCompat, SetParentInPlaceRefusesAParentWithNoInverse) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  flat    = std::make_shared<SceneNode>();
+    auto  child   = std::make_shared<SceneNode>();
+    flat->SetScale(linalg::Vector3f(0, 0, 0));
+    child->SetTranslate(linalg::Vector3f(10, 0, 0));
+    scene.sceneGraph->AppendChild(flat);
+    scene.sceneGraph->AppendChild(child);
+    runtime->RegisterNode("flat", flat.get());
+    runtime->RegisterNode("child", child.get());
+    EXPECT_FALSE(runtime->SetNodeParent("child", "flat", true));
+    EXPECT_EQ(child->Parent(), scene.sceneGraph.get());
+    EXPECT_TRUE(runtime->SetNodeParent("child", "flat", false)) << "without keeping its place it may go";
+}
+
+// The bone calls of an image layer with a puppet: the count, a bone's index by name and its
+// parent's, and its transform as the last frame posed it, in the scene and in its parent bone.
+TEST(ScriptRuntimeCompat, PuppetBonesAnswerTheirIndexParentAndPose) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  node    = std::make_shared<SceneNode>();
+    node->SetTranslate(linalg::Vector3f(100, 0, 0));
+    scene.sceneGraph->AppendChild(node);
+    runtime->RegisterNode("character", node.get());
+    std::vector<WPPuppetLayer::AnimationLayer> authored(1);
+    authored[0].id = 7;
+    WPPuppetLayer layer(MakeArmPuppet());
+    layer.prepared(authored);
+    WPPuppetLayer render_copy = layer;
+    runtime->RegisterPuppetLayer("character", layer);
+    render_copy.genFrame(0.0);
+    render_copy.genFrame(0.2);  // frame 2: root at x 2
+
+    runtime->RegisterSceneScript(R"JS(
+var done = false;
+function near(a, b) { return Math.abs(a - b) < 1e-4; }
+function update() {
+  if (done) return; done = true;
+  var c = thisScene.getLayer('character');
+  if (c.getBoneCount() !== 2) throw new Error('count ' + c.getBoneCount());
+  if (c.getBoneIndex('hand') !== 1 || c.getBoneIndex('nothing') !== -1) throw new Error('index');
+  if (c.getBoneParentIndex('hand') !== 0 || c.getBoneParentIndex(0) !== -1) throw new Error('parent');
+  var world = c.getBoneTransform('hand').translation();
+  if (!near(world.x, 102) || !near(world.y, 1) || !near(world.z, 0)) throw new Error('world ' + world.x + ' ' + world.y);
+  var local = c.getLocalBoneOrigin('hand');
+  if (!near(local.x, 0) || !near(local.y, 1)) throw new Error('local ' + local.x + ' ' + local.y);
+  var root = c.getLocalBoneTransform(0).translation();
+  if (!near(root.x, 2)) throw new Error('root local ' + root.x);
+}
+)JS", "");
+    runtime->Tick(0.1);
+    for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
+}
+
+// Before the puppet has been posed, a bone answers its bind pose, not whatever memory held.
+TEST(ScriptRuntimeCompat, ABoneReadBeforeTheFirstPoseIsItsBindPose) {
+    const auto puppet = MakeArmPuppet();
+    std::vector<WPPuppetLayer::AnimationLayer> authored(1);
+    authored[0].id = 7;
+    WPPuppetLayer layer(puppet);
+    layer.prepared(authored);
+    for (i32 i = 0; i < 2; i++) {
+        const auto model = layer.boneModel(i);
+        ASSERT_TRUE(model.has_value());
+        EXPECT_TRUE(model->matrix().isApprox(puppet->bones[static_cast<usize>(i)].world_bind.matrix(), 1e-5f))
+            << "bone " << i;
+    }
+}
+
+// playSingleAnimation plays an animation once over the layers the puppet already has and then
+// leaves the pose to them; createAnimationLayer adds one that stays.
+TEST(ScriptRuntimeCompat, PlaySingleAnimationPlaysOnceAndCreatedLayersStay) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  node    = std::make_shared<SceneNode>();
+    scene.sceneGraph->AppendChild(node);
+    runtime->RegisterNode("character", node.get());
+    WPPuppetLayer layer(MakeArmPuppet());
+    layer.prepared({});
+    WPPuppetLayer render_copy = layer;
+    runtime->RegisterPuppetLayer("character", layer);
+    render_copy.genFrame(0.0);
+
+    runtime->RegisterSceneScript(R"JS(
+var done = false;
+function update() {
+  if (done) return; done = true;
+  var c = thisScene.getLayer('character');
+  var once = c.playSingleAnimation('gesture');
+  if (!once || !once.isPlaying()) throw new Error('playing once');
+  if (c.getAnimationLayerCount() !== 1) throw new Error('count ' + c.getAnimationLayerCount());
+  if (c.playSingleAnimation('no such animation') !== undefined) throw new Error('unknown');
+}
+)JS", "");
+    runtime->Tick(0.1);
+    render_copy.genFrame(0.2);
+    EXPECT_NEAR(render_copy.genFrame(0.2)[0].translation().x(), 2.0f, 1e-4) << "frame 2 of the single play";
+    render_copy.genFrame(0.9);  // past its 0.5 s
+    EXPECT_FALSE(render_copy.isPlaying(0));
+    EXPECT_NEAR(render_copy.genFrame(0.9)[0].translation().x(), 0.0f, 1e-4) << "the pose goes back to the rest";
+
+    runtime->RegisterSceneScript(R"JS(
+var done = false;
+function update() {
+  if (done) return; done = true;
+  var c = thisScene.getLayer('character');
+  c.playSingleAnimation('gesture');
+  if (c.getAnimationLayerCount() !== 1) throw new Error('a finished single play is reused');
+  var kept = c.createAnimationLayer('gesture');
+  if (!kept || c.getAnimationLayerCount() !== 2) throw new Error('created');
+  if (!c.destroyAnimationLayer(kept) || kept.isPlaying()) throw new Error('destroyed');
+}
+)JS", "");
+    runtime->Tick(0.1);
+    for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
+}
+
 // getAnimationLayer(...).play() from a click handler restarts a single-shot
 // puppet layer that already finished, and every copy of the layer follows.
 TEST(ScriptRuntimeCompat, PuppetAnimationLayerPlayRestartsFinishedSingleShotForAllCopies) {
@@ -1481,8 +1727,9 @@ TEST(ScriptRuntimeCompat, ScriptsLoadedByAnEventStartWithTheFollowingEvent) {
         const auto dispatch = [&] {
             if (event == 0) runtime->DispatchCursorClick(0);
             else if (event == 1) {
+                // A tap: the click comes with the release.
                 runtime->SetCursorEnter(true);
-                runtime->SetCursorButtons(1, 1, 0);
+                runtime->SetCursorButtons(0, 1, 1);
                 runtime->DispatchCursorFrameEvents(true);
             } else {
                 runtime->DispatchMediaEventJson(R"({"type":"mediaThumbnailChanged","hasThumbnail":false})");
@@ -3958,14 +4205,15 @@ function cursorLeave() { emit(6); }
     EXPECT_FLOAT_EQ(marker->Translate().y(), 0);
     point(10);
     runtime->DispatchCursorFrameEvents(true);
-    EXPECT_FLOAT_EQ(marker->Translate().x(), 12345);
+    // Enter, move, down; then the release's up and its click.
+    EXPECT_FLOAT_EQ(marker->Translate().x(), 12354);
     EXPECT_FLOAT_EQ(marker->Translate().y(), 1);
     runtime->BeginFrame();
     runtime->DispatchCursorFrameEvents(true);
-    EXPECT_FLOAT_EQ(marker->Translate().x(), 123452);
+    EXPECT_FLOAT_EQ(marker->Translate().x(), 123542);
     point(-10);
     runtime->DispatchCursorFrameEvents(true);
-    EXPECT_FLOAT_EQ(marker->Translate().x(), 1234526);
+    EXPECT_FLOAT_EQ(marker->Translate().x(), 1235426);
     runtime->SetNodeTranslate("marker", linalg::Vector3f::Zero());
     target->SetRotation(linalg::Vector3f::Zero());
     target->SetScale(linalg::Vector3f(-1, 1, 1));
@@ -3992,7 +4240,7 @@ TEST(ScriptRuntimeCompat, CursorCallbacksRecheckLaterTargetsWithoutAddingVisibil
     runtime->RegisterNodeVisibility("first", first.get(), ResolveBoolSetting(*runtime, {
         {"value", true}, {"script", R"JS(
 let calls = 0;
-function cursorClick() {
+function cursorDown() {
     const next = thisScene.getLayer('second');
     const origin = next.origin;
     origin.x = ++calls === 1 ? 100 : 0;
