@@ -23,9 +23,9 @@
 </p>
 
 <p align="center">
-  <a href="https://www.wallpapermachine.app/download"><img src="https://img.shields.io/badge/Download_for_Mac-free-0a84ff?style=for-the-badge&logo=apple&logoColor=white" height="36" alt="Mac용 무료 다운로드"></a>
+  <a href="https://www.wallpapermachine.app/download"><img src="https://img.shields.io/badge/Mac%EC%9A%A9-%EB%AC%B4%EB%A3%8C_%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C-0a84ff?style=for-the-badge&logo=apple&logoColor=white" height="36" alt="Mac용 무료 다운로드"></a>
   &ensp;
-  <a href="https://www.wallpapermachine.app/#app"><img src="https://img.shields.io/badge/Try_it_in_your_browser-live_demo-34c759?style=for-the-badge&logo=safari&logoColor=white" height="36" alt="브라우저에서 라이브 데모 체험하기"></a>
+  <a href="https://www.wallpapermachine.app/#app"><img src="https://img.shields.io/badge/%EB%B8%8C%EB%9D%BC%EC%9A%B0%EC%A0%80%EC%97%90%EC%84%9C-%EC%B2%B4%ED%97%98%ED%95%98%EA%B8%B0-34c759?style=for-the-badge&logo=safari&logoColor=white" height="36" alt="브라우저에서 라이브 데모 체험하기"></a>
 </p>
 
 <p align="center">
