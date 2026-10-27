@@ -447,6 +447,9 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     `0` and `2` read `true`/`false` (typeof boolean) as the choice moves through 2, 0, 1,
     as a number and as text; a conditional layer `visible` follows the choice; a constant
     bound with a condition reads 1 or 0 while one with no condition keeps the number.
+  - `ChoiceAsFlagUndeclared.*`: layers whose `visible` names a property the project
+    never declares, with a condition or none, keep each one's own authored value (a
+    conditioned `true` stays visible; one binding's value never leaks into another's).
   - `ScriptEffectObject.*`: `thisObject.visible` of an effect script, written from
     `init`, `update` and a media handler, switches that effect only (also where a
     property hid the layer, and with two effects on a layer).

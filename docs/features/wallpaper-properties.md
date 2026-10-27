@@ -217,7 +217,9 @@ scene file alone says what a value switches on or off ([scene
 rendering](scene-rendering.md)). The rules are evaluated when the panel's property
 list is built, never per frame, and the scene resolves its bindings when it loads
 and on a property change. A rule that is always false, such as a bare `false`,
-hides its property for good, as Wallpaper Engine does.
+hides its property for good, as Wallpaper Engine does. A setting bound to a
+property the wallpaper never declares keeps its own authored value, with or
+without a `condition`, until a property document supplies that name.
 
 Audio, scaling mode, position and frame rate take effect immediately. Everything
 else is pending until committed:

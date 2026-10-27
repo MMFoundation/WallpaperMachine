@@ -247,6 +247,28 @@ TEST_P(ChoiceAsFlag, AShaderConstantBoundWithAConditionReadsOneOrZero)
     EXPECT_EQ(scene.EffectConstant(1, "g_Flag"), std::vector<float> { 1.0f });
 }
 
+// Wallpaper Engine shows a layer whose visibility names a property the project never declares
+// by its own authored value, with or without a condition: there is no choice to compare.
+TEST(ChoiceAsFlagUndeclared, AVisibilityBoundToAnUndeclaredPropertyKeepsItsOwnAuthoredValue)
+{
+    ScenePackage package;
+    const auto   model = ModelOf(package);
+    const auto   gated = [](const char* condition, bool authored) {
+        return Json { { "user", { { "name", "missing" }, { "condition", condition } } }, { "value", authored } };
+    };
+    Publish(package, { PlainImage(model, 1, "shown", { { "visible", gated("0", true) } }),
+                       PlainImage(model, 2, "hidden", { { "visible", gated("0", false) } }),
+                       PlainImage(model, 3, "plain", { { "visible", { { "user", "missing" }, { "value", false } } } }) },
+            { { "format", ComboProperty("1") } });
+
+    ScriptScene scene(package);
+    ASSERT_TRUE(scene.ok()) << scene.error();
+    scene.Tick();
+    EXPECT_TRUE(scene.Visible("shown"));
+    EXPECT_FALSE(scene.Visible("hidden"));
+    EXPECT_FALSE(scene.Visible("plain"));
+}
+
 INSTANTIATE_TEST_SUITE_P(Choices, ChoiceAsFlag, ::testing::Values(true, false),
                          [](const auto& info) { return info.param ? "NumbersFromThePreview" : "TextFromThePreview"; });
 
