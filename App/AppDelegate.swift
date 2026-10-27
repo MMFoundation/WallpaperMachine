@@ -120,13 +120,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         themeSubscription = AppThemeStore.shared.$preferences
             .map(\.mode).removeDuplicates()
             .sink { mode in NSApp.appearance = mode.appearance }
+        // A season's icon stands in for the chosen one while the season is on.
         iconSubscription = AppThemeStore.shared.$preferences
-            .map(\.icon).removeDuplicates()
-            .sink { icon in
+            .combineLatest(AppThemeStore.shared.$season)
+            .map { preferences, season in season?.dockImageName ?? preferences.icon.imageName }
+            .removeDuplicates()
+            .sink { name in
                 do {
-                    NSApp.applicationIconImage = try icon.image()
+                    NSApp.applicationIconImage = try AppThemePreferences.dockImage(named: name)
                 } catch {
-                    AppLog.error("Dock icon \(icon.rawValue) could not load: \(error.localizedDescription)")
+                    AppLog.error("Dock icon \(name) could not load: \(error.localizedDescription)")
                 }
             }
         AppLog.info("startup: didFinishLaunching start")

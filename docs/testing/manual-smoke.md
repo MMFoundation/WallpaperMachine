@@ -84,6 +84,9 @@ was run.
 - [ ] Set an accent and a surface tone; relaunch and confirm both persist.
 - [ ] Try white and black accents, then Reset appearance. Wallpapers and
       playback must not change.
+- [ ] Choose **Always** under Halloween look: the window, the pumpkin beside the
+      traffic lights and the Dock icon change at once, in light and dark; **Off** brings
+      back your own accent, tone and Dock icon.
 
 ## Library and import
 

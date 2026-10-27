@@ -224,6 +224,7 @@ struct WorkshopEmptyStateView: View {
         Button("Clear search and filters") { model.clearSearchAndFilters() }
           .buttonStyle(.panelSecondary)
       }
+      .seasonalArt(.noResults)
     case .clearSearch:
       PanelEmptyState(
         verbatim: L("No wallpapers found"), systemImage: "magnifyingglass",
@@ -232,6 +233,7 @@ struct WorkshopEmptyStateView: View {
         Button("Clear search") { model.clearSearchAndFilters() }
           .buttonStyle(.panelSecondary)
       }
+      .seasonalArt(.noResults)
     case .clearFilters(let count):
       PanelEmptyState(
         verbatim: L("No wallpapers found"), systemImage: "line.3.horizontal.decrease.circle",
@@ -247,6 +249,7 @@ struct WorkshopEmptyStateView: View {
         }
         .buttonStyle(.panelSecondary)
       }
+      .seasonalArt(.noResults)
     case .screened(let isCollections, let nextPage):
       PanelEmptyState(
         verbatim: L("No wallpapers found"), systemImage: "line.3.horizontal.decrease.circle",

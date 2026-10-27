@@ -219,7 +219,7 @@ the rest opens in a popover from the ⓘ beside the title.
   coming back clears the note and the button. The first-run Preferences page carries
   the same note.
 - **Appearance** holds the window's look: appearance, accent color, surface tone,
-  app icon and **Reset appearance** ([appearance](appearance.md)).
+  app icon, the Halloween look and **Reset appearance** ([appearance](appearance.md)).
 - **Desktop & Lock Screen** holds the Desktop group (**Different wallpaper for each
   desktop** for the display the Library applies wallpapers to, named when there are several,
   with **Choose…** opening that display's card in Displays to pick each desktop's wallpaper;

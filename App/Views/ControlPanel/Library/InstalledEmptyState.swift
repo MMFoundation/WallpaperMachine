@@ -35,6 +35,7 @@ struct InstalledEmptyState: View {
           }
         }
         .textSelectable()
+        .seasonalArt(.emptyLibrary)
       case .emptyCollection(let name):
         PanelEmptyState(
           "No matching wallpapers", systemImage: "folder",
@@ -53,6 +54,7 @@ struct InstalledEmptyState: View {
             .buttonStyle(.panelCapsule)
         }
         .textSelectable()
+        .seasonalArt(.noResults)
       case .search(let text):
         PanelEmptyState(
           "No matching wallpapers", systemImage: "magnifyingglass",
@@ -62,6 +64,7 @@ struct InstalledEmptyState: View {
             .buttonStyle(.panelCapsule)
         }
         .textSelectable()
+        .seasonalArt(.noResults)
       case .filters(let count):
         PanelEmptyState(
           "No matching wallpapers", systemImage: "line.3.horizontal.decrease",
@@ -79,6 +82,7 @@ struct InstalledEmptyState: View {
           }
         }
         .textSelectable()
+        .seasonalArt(.noResults)
       }
     }
     .accessibilityIdentifier("installed-empty")
