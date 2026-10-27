@@ -12,6 +12,122 @@ app's update window shows the sections of every version newer than the installed
 one, in the app's language; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.6.5](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.4...v1.6.5) (2026-10-27)
+
+### English
+
+This update lets you play a collection with one click, brings scripted particles, cameras and puppets plus colour emoji to scene wallpapers, and adds Steam subscriptions to the Workshop
+
+#### Features
+
+- Play and Shuffle buttons in the Library and in a collection's menu start rotating a display through all wallpapers, Favorites or that collection right away ([c1dde08](https://github.com/WallpaperMachine/WallpaperMachine/commit/c1dde0879fa9cb44daf020d53eee1ad6a081bde2))
+- The Now Playing bar names what a display rotates through, and its new Playlist button shows the order and next change, with Change now and Stop ([c1dde08](https://github.com/WallpaperMachine/WallpaperMachine/commit/c1dde0879fa9cb44daf020d53eee1ad6a081bde2))
+- Scene wallpapers whose scripts control particles, the camera, puppet bones or layer parenting now work, so click-to-burst effects and scripted camera moves play ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- Emoji in scene text layers, such as a clock or a song title, now appear in colour instead of being left out ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- Signed in to Steam, the Steam Workshop page marks your subscriptions and presets, and lets you subscribe, unsubscribe and read an item's newest comments ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- A new Halloween look under Appearance dresses the window in pumpkin orange and papercut scenery, on by itself during Halloween week or set to Always or Off ([b39a773](https://github.com/WallpaperMachine/WallpaperMachine/commit/b39a773043cb5e80490f5f1f5424a69043335869))
+- Optional MetalFX upscaling under Performance, off by default, enlarges scenes drawn at a lowered render scale more sharply instead of stretching them (closes [#96](https://github.com/WallpaperMachine/WallpaperMachine/issues/96)) ([f4ea93b](https://github.com/WallpaperMachine/WallpaperMachine/commit/f4ea93bb90fc8aa0fe493822220ac3b061d92fa8))
+- Anyone with a Crowdin account can now help translate WallpaperMachine without waiting for approval ([1207823](https://github.com/WallpaperMachine/WallpaperMachine/commit/1207823d4b3acb1c1ab334f8c80a88dc8724b003))
+
+#### Improvements
+
+- The Steam Workshop page keeps your last sort and filters after the app is relaunched or updated (closes [#113](https://github.com/WallpaperMachine/WallpaperMachine/issues/113)) ([b0a9116](https://github.com/WallpaperMachine/WallpaperMachine/commit/b0a9116358f9ead38be71d3e27a1b376407daeaa))
+- Updates install only when their code signature is intact, and official releases accept only updates signed with the release certificate ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- Downloading a preset names its base wallpaper and size, stops early when the base will not fit, and offers the preset as an update when its base changes ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- Buttons in scene wallpapers now click when you release the mouse, and dragging off before letting go cancels the click, as in Wallpaper Engine ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+
+#### Bug Fixes
+
+- Video wallpapers no longer flash black for a moment now and then (closes [#110](https://github.com/WallpaperMachine/WallpaperMachine/issues/110)) ([427d195](https://github.com/WallpaperMachine/WallpaperMachine/commit/427d1956b77e8b131fa48e0b1975461afcee2fa3))
+- Some scenes that showed only their fog on black now show all their layers (closes [#117](https://github.com/WallpaperMachine/WallpaperMachine/issues/117)) ([2650061](https://github.com/WallpaperMachine/WallpaperMachine/commit/26500615219da7c646927b68314132758a04948a))
+- Scene effects that scripts adjust no longer stop or turn black ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- The experimental animated lock screen no longer falls back to the macOS wallpaper when macOS briefly ends it while the Mac is unlocked (closes [#109](https://github.com/WallpaperMachine/WallpaperMachine/issues/109)) ([fbb10de](https://github.com/WallpaperMachine/WallpaperMachine/commit/fbb10de84887278154d7e628a2842a7b54705149))
+- The menu bar no longer flips between dark and light while a web wallpaper starts (closes [#118](https://github.com/WallpaperMachine/WallpaperMachine/issues/118)) ([f821ab4](https://github.com/WallpaperMachine/WallpaperMachine/commit/f821ab412c0ba1cb4d2ef6f77a9ba0668e1d25fe))
+- Steam accounts whose login name is an email address can now sign in and download wallpapers (closes [#103](https://github.com/WallpaperMachine/WallpaperMachine/issues/103)) ([e24348a](https://github.com/WallpaperMachine/WallpaperMachine/commit/e24348a6e78a5f00c4026013f76b5560c434a037))
+- Alert sounds, the volume click and Hey Siri no longer mute or pause wallpapers when they are set to react to other apps' sound ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- A video wallpaper's desktop picture in Mission Control now matches where the clip is playing instead of its opening frame (closes [#110](https://github.com/WallpaperMachine/WallpaperMachine/issues/110)) ([427d195](https://github.com/WallpaperMachine/WallpaperMachine/commit/427d1956b77e8b131fa48e0b1975461afcee2fa3))
+- Puppet wallpapers now show parts such as eyelids fading in and out instead of leaving them fully opaque ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- Dialogs and popovers such as Steam sign-in, Downloads and Now Playing now switch language together with the window ([af61263](https://github.com/WallpaperMachine/WallpaperMachine/commit/af6126325ccfdbc98beec42916e36430147e187f))
+- The SteamCMD dialog keeps its buttons on one row while SteamCMD installs ([b882e77](https://github.com/WallpaperMachine/WallpaperMachine/commit/b882e779c8caeeb496adb5404f1df5c3b5a45d17))
+
+Thanks to [@opastorello](https://github.com/opastorello) for contributing to this release.
+
+### 简体中文
+
+本次更新支持一键播放合集，为场景壁纸带来脚本控制的粒子、镜头、骨骼和彩色表情符号，并在创意工坊中加入 Steam 订阅功能
+
+#### 新功能
+
+- 壁纸库和合集菜单中新增播放和随机播放按钮，可立即让显示器轮播全部壁纸、个人收藏或该合集 ([c1dde08](https://github.com/WallpaperMachine/WallpaperMachine/commit/c1dde0879fa9cb44daf020d53eee1ad6a081bde2))
+- 正在播放栏会显示显示器当前轮播的内容，新的播放列表按钮可查看顺序和下次切换时间，并可立即切换或停止 ([c1dde08](https://github.com/WallpaperMachine/WallpaperMachine/commit/c1dde0879fa9cb44daf020d53eee1ad6a081bde2))
+- 通过脚本控制粒子、镜头、木偶骨骼或图层父子关系的场景壁纸现在可以正常运行，点击迸发特效和脚本镜头运动都能播放 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 场景文字图层中的表情符号（如时钟或歌曲名中的）现在以彩色显示，不再被省略 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 登录 Steam 后，Steam 创意工坊页面会标出你订阅的项目和预设，并可直接订阅、取消订阅和查看最新评论 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 外观中新增万圣节主题，为窗口换上南瓜橙配色和剪纸风景，默认在万圣节周自动开启，也可设为始终开启或关闭 ([b39a773](https://github.com/WallpaperMachine/WallpaperMachine/commit/b39a773043cb5e80490f5f1f5424a69043335869))
+- 性能中新增可选的 MetalFX 放大（默认关闭），可将以较低渲染比例绘制的场景更清晰地放大，而不是简单拉伸 (closes [#96](https://github.com/WallpaperMachine/WallpaperMachine/issues/96)) ([f4ea93b](https://github.com/WallpaperMachine/WallpaperMachine/commit/f4ea93bb90fc8aa0fe493822220ac3b061d92fa8))
+- 现在任何拥有 Crowdin 账户的人都可以直接参与翻译 WallpaperMachine，无需等待审批 ([1207823](https://github.com/WallpaperMachine/WallpaperMachine/commit/1207823d4b3acb1c1ab334f8c80a88dc8724b003))
+
+#### 改进
+
+- 重新打开或更新 App 后，Steam 创意工坊页面会保留上次使用的排序和筛选条件 (closes [#113](https://github.com/WallpaperMachine/WallpaperMachine/issues/113)) ([b0a9116](https://github.com/WallpaperMachine/WallpaperMachine/commit/b0a9116358f9ead38be71d3e27a1b376407daeaa))
+- 更新仅在代码签名完整时才会安装，正式版只接受使用发布证书签名的更新 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 下载预设时会显示其基础壁纸的名称和大小，空间不足时提前停止，基础壁纸有变化时也会提示更新预设 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 场景壁纸中的按钮现在在松开鼠标时才响应，按下后拖离按钮即可取消点击，与 Wallpaper Engine 一致 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+
+#### 问题修复
+
+- 视频壁纸不再偶尔短暂黑屏 (closes [#110](https://github.com/WallpaperMachine/WallpaperMachine/issues/110)) ([427d195](https://github.com/WallpaperMachine/WallpaperMachine/commit/427d1956b77e8b131fa48e0b1975461afcee2fa3))
+- 部分场景此前只在黑色背景上显示雾效，现在可完整显示所有图层 (closes [#117](https://github.com/WallpaperMachine/WallpaperMachine/issues/117)) ([2650061](https://github.com/WallpaperMachine/WallpaperMachine/commit/26500615219da7c646927b68314132758a04948a))
+- 由脚本调整的场景特效不再停止或变黑 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 实验性的动态锁定屏幕在 Mac 解锁期间被 macOS 短暂结束后，不再退回到 macOS 壁纸 (closes [#109](https://github.com/WallpaperMachine/WallpaperMachine/issues/109)) ([fbb10de](https://github.com/WallpaperMachine/WallpaperMachine/commit/fbb10de84887278154d7e628a2842a7b54705149))
+- 网页壁纸启动时，菜单栏不再在深色和浅色之间来回切换 (closes [#118](https://github.com/WallpaperMachine/WallpaperMachine/issues/118)) ([f821ab4](https://github.com/WallpaperMachine/WallpaperMachine/commit/f821ab412c0ba1cb4d2ef6f77a9ba0668e1d25fe))
+- 以电子邮件地址作为登录名的 Steam 账户现在可以登录并下载壁纸 (closes [#103](https://github.com/WallpaperMachine/WallpaperMachine/issues/103)) ([e24348a](https://github.com/WallpaperMachine/WallpaperMachine/commit/e24348a6e78a5f00c4026013f76b5560c434a037))
+- 设置为在其他 App 播放声音时静音或暂停后，提示音、音量调节声和“嘿 Siri”不再触发壁纸静音或暂停 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 调度中心里视频壁纸的桌面图片现在与当前播放位置一致，不再停留在开头画面 (closes [#110](https://github.com/WallpaperMachine/WallpaperMachine/issues/110)) ([427d195](https://github.com/WallpaperMachine/WallpaperMachine/commit/427d1956b77e8b131fa48e0b1975461afcee2fa3))
+- 木偶壁纸中眼睑等部件现在会正常淡入淡出，不再始终完全不透明 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- Steam 登录、下载和正在播放等对话框与弹出面板现在会随窗口一起切换语言 ([af61263](https://github.com/WallpaperMachine/WallpaperMachine/commit/af6126325ccfdbc98beec42916e36430147e187f))
+- 安装 SteamCMD 时，对话框中的按钮会保持在同一行 ([b882e77](https://github.com/WallpaperMachine/WallpaperMachine/commit/b882e779c8caeeb496adb5404f1df5c3b5a45d17))
+
+感谢 [@opastorello](https://github.com/opastorello) 为本版本做出的贡献。
+
+### 한국어
+
+이번 업데이트에서는 컬렉션을 클릭 한 번으로 재생할 수 있고, 장면 배경화면에서 스크립트로 제어하는 파티클, 카메라, 퍼펫과 컬러 이모지가 표시되며, 창작마당에서 Steam 구독을 관리할 수 있습니다
+
+#### 새로운 기능
+
+- 보관함과 컬렉션 메뉴의 재생 및 셔플 버튼으로 모든 배경화면, 즐겨찾기 또는 해당 컬렉션을 디스플레이에서 바로 순환 재생할 수 있습니다 ([c1dde08](https://github.com/WallpaperMachine/WallpaperMachine/commit/c1dde0879fa9cb44daf020d53eee1ad6a081bde2))
+- 지금 재생 중 막대에 디스플레이가 순환 재생하는 대상이 표시되고, 새 재생 목록 버튼에서 순서와 다음 전환 시점을 확인하고 바로 전환하거나 중지할 수 있습니다 ([c1dde08](https://github.com/WallpaperMachine/WallpaperMachine/commit/c1dde0879fa9cb44daf020d53eee1ad6a081bde2))
+- 스크립트로 파티클, 카메라, 퍼펫 본 또는 레이어 부모 관계를 제어하는 장면 배경화면이 이제 작동하여 클릭 폭발 효과와 카메라 움직임이 재생됩니다 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 시계나 노래 제목 같은 장면 텍스트 레이어의 이모지가 이제 빠지지 않고 컬러로 표시됩니다 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- Steam에 로그인하면 Steam 창작마당 페이지에 구독한 항목과 프리셋이 표시되며, 구독, 구독 취소와 최신 댓글 보기를 할 수 있습니다 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 화면 모드에 새 핼러윈 테마가 추가되어 창을 호박색과 종이 공예 풍경으로 꾸미며, 핼러윈 주간에 자동으로 켜지거나 항상 또는 끔으로 설정할 수 있습니다 ([b39a773](https://github.com/WallpaperMachine/WallpaperMachine/commit/b39a773043cb5e80490f5f1f5424a69043335869))
+- 성능에 선택 사항인 MetalFX 업스케일링이 추가되어(기본적으로 꺼짐) 낮춘 렌더링 배율로 그린 장면을 단순히 늘이지 않고 더 선명하게 확대합니다 (closes [#96](https://github.com/WallpaperMachine/WallpaperMachine/issues/96)) ([f4ea93b](https://github.com/WallpaperMachine/WallpaperMachine/commit/f4ea93bb90fc8aa0fe493822220ac3b061d92fa8))
+- 이제 Crowdin 계정이 있으면 누구나 승인을 기다리지 않고 WallpaperMachine 번역에 참여할 수 있습니다 ([1207823](https://github.com/WallpaperMachine/WallpaperMachine/commit/1207823d4b3acb1c1ab334f8c80a88dc8724b003))
+
+#### 개선 사항
+
+- 앱을 다시 실행하거나 업데이트해도 Steam 창작마당 페이지가 마지막으로 사용한 정렬과 필터를 유지합니다 (closes [#113](https://github.com/WallpaperMachine/WallpaperMachine/issues/113)) ([b0a9116](https://github.com/WallpaperMachine/WallpaperMachine/commit/b0a9116358f9ead38be71d3e27a1b376407daeaa))
+- 업데이트는 코드 서명이 온전할 때만 설치되며, 정식 버전은 릴리스 인증서로 서명된 업데이트만 받아들입니다 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 프리셋을 다운로드할 때 기본 배경화면의 이름과 크기를 보여 주고, 공간이 부족하면 미리 멈추며, 기본 배경화면이 바뀌면 프리셋 업데이트를 제안합니다 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 장면 배경화면의 버튼은 이제 마우스를 놓을 때 반응하며, 놓기 전에 버튼 밖으로 끌면 클릭이 취소되어 Wallpaper Engine과 같게 동작합니다 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+
+#### 버그 수정
+
+- 동영상 배경화면이 가끔 잠깐씩 검게 깜빡이던 문제가 해결되었습니다 (closes [#110](https://github.com/WallpaperMachine/WallpaperMachine/issues/110)) ([427d195](https://github.com/WallpaperMachine/WallpaperMachine/commit/427d1956b77e8b131fa48e0b1975461afcee2fa3))
+- 검은 화면에 안개만 보이던 일부 장면이 이제 모든 레이어를 표시합니다 (closes [#117](https://github.com/WallpaperMachine/WallpaperMachine/issues/117)) ([2650061](https://github.com/WallpaperMachine/WallpaperMachine/commit/26500615219da7c646927b68314132758a04948a))
+- 스크립트로 조정하는 장면 효과가 더 이상 멈추거나 검게 변하지 않습니다 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- 실험적 기능인 애니메이션 잠금 화면이 Mac 잠금 해제 중 macOS가 잠시 종료해도 더 이상 macOS 배경화면으로 되돌아가지 않습니다 (closes [#109](https://github.com/WallpaperMachine/WallpaperMachine/issues/109)) ([fbb10de](https://github.com/WallpaperMachine/WallpaperMachine/commit/fbb10de84887278154d7e628a2842a7b54705149))
+- 웹 배경화면이 시작될 때 메뉴 막대가 어두운 색과 밝은 색 사이를 오가지 않습니다 (closes [#118](https://github.com/WallpaperMachine/WallpaperMachine/issues/118)) ([f821ab4](https://github.com/WallpaperMachine/WallpaperMachine/commit/f821ab412c0ba1cb4d2ef6f77a9ba0668e1d25fe))
+- 로그인 이름이 이메일 주소인 Steam 계정도 이제 로그인하고 배경화면을 다운로드할 수 있습니다 (closes [#103](https://github.com/WallpaperMachine/WallpaperMachine/issues/103)) ([e24348a](https://github.com/WallpaperMachine/WallpaperMachine/commit/e24348a6e78a5f00c4026013f76b5560c434a037))
+- 다른 앱이 소리를 낼 때 음소거하거나 일시 정지하도록 설정해도 알림음, 음량 조절음, Siri야 호출이 더 이상 배경화면을 멈추지 않습니다 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- Mission Control에 보이는 동영상 배경화면의 데스크탑 사진이 이제 첫 장면 대신 현재 재생 중인 위치와 일치합니다 (closes [#110](https://github.com/WallpaperMachine/WallpaperMachine/issues/110)) ([427d195](https://github.com/WallpaperMachine/WallpaperMachine/commit/427d1956b77e8b131fa48e0b1975461afcee2fa3))
+- 퍼펫 배경화면에서 눈꺼풀 같은 부위가 이제 완전히 불투명하게 남지 않고 자연스럽게 나타났다 사라집니다 ([9eac2e4](https://github.com/WallpaperMachine/WallpaperMachine/commit/9eac2e4b9f5100022e903dd8288b240f9c9c6583))
+- Steam 로그인, 다운로드, 지금 재생 중 같은 대화상자와 팝오버가 이제 창과 함께 언어가 바뀝니다 ([af61263](https://github.com/WallpaperMachine/WallpaperMachine/commit/af6126325ccfdbc98beec42916e36430147e187f))
+- SteamCMD를 설치하는 동안 대화상자의 버튼이 한 줄로 유지됩니다 ([b882e77](https://github.com/WallpaperMachine/WallpaperMachine/commit/b882e779c8caeeb496adb5404f1df5c3b5a45d17))
+
+이번 릴리스에 기여해 주신 [@opastorello](https://github.com/opastorello) 님께 감사드립니다.
+
 ## [1.6.4](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.3...v1.6.4) (2026-10-26)
 
 ### English
