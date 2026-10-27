@@ -132,6 +132,8 @@ final class WorkshopStore {
   @ObservationIgnored private let service: WorkshopService
   @ObservationIgnored private let defaults: UserDefaults
   static let concurrentDownloadsKey = "WallpaperMachine.concurrentDownloads"
+  /// The sort and filters of the last search, kept across launches (and so across updates).
+  static let browseFiltersKey = "WallpaperMachine.workshopBrowseFilters"
   var username = ""
   var selectedDownloadID: String?
   var showsDownloadDetails = false
@@ -228,6 +230,7 @@ final class WorkshopStore {
       // A crash between queue handoff writes may leave both records; the retained request wins.
       for request in downloadRequests { downloader.transferPausedToRequest(id: request.id) }
     }
+    restoreBrowseFilters()
   }
 
   func showDownload(_ job: WorkshopDownload) {
@@ -750,8 +753,28 @@ final class WorkshopStore {
   }
 
   func search() {
+    persistBrowseFilters()
     resetCache(for: draftQuery)
     load(WorkshopRequest(query: draftQuery, page: 1))
+  }
+
+  /// Takes back the sort and filters an earlier launch searched with. A stored value this build
+  /// cannot read, or one larger than a search accepts, leaves the defaults.
+  private func restoreBrowseFilters() {
+    guard let saved = defaults.dictionary(forKey: Self.browseFiltersKey) else { return }
+    if let raw = saved["sort"] as? String, let stored = WorkshopSort(rawValue: raw) { sort = stored }
+    let valid = { (list: [String], limit: Int) in list.count <= limit && list.allSatisfy { $0.count <= 128 } }
+    if let stored = saved["tags"] as? [String], let excluded = saved["excludedTags"] as? [String],
+      valid(stored, 32), valid(excluded, 64)
+    {
+      tags = stored
+      excludedTags = excluded
+    }
+  }
+
+  private func persistBrowseFilters() {
+    let value: [String: Any] = ["sort": sort.rawValue, "tags": tags, "excludedTags": excludedTags]
+    defaults.set(value, forKey: Self.browseFiltersKey)
   }
 
   /// Shows another source from its first page. An author or a collection is opened from what

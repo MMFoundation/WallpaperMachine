@@ -706,6 +706,8 @@ tags are not claimed to be represented by the sum of visible group counts.
   (required tags), then Type, Age rating and Resolution as tick boxes whose
   unticked entries are excluded, and the Tags chips (see [workshop-downloads](workshop-downloads.md)).
   Sort opens on Most popular this year; the other orders are listed there too.
+  The sort and filters of the last search are kept across relaunches and app
+  updates (`WorkshopStore.browseFiltersKey`); the search text is not.
 - **pixiv:** the sidebar starts with the pixiv account (sign in, or who is signed
   in and **Log out**), then Orientation, Minimum size, Age rating and
   AI-generated; its Mature (R-18) box waits for a sign-in. The page's menu lists
