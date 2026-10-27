@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The bar along the bottom of the window: what the target display is showing, and the previous,
-/// play or pause, next and Recently used buttons.
+/// play or pause, next, playlist and Recently used buttons. While the target display rotates, the
+/// line under the title names what it rotates through and the playlist button is lit.
 ///
 /// The wallpaper's part of the bar is a button: it lights on hover and opens the details, a wider
 /// still with the title, its kind, the display and the playback state, and Show in library.
@@ -60,9 +61,10 @@ struct NowPlayingBar: View {
           systemImage: "forward.fill", label: L("Next wallpaper"),
           isEnabled: state.canGoNext && !shell.isNextBusy, identifier: "now-playing-next"
         ) { shell.nextWallpaper() }
+        NowPlayingPlaylistButton()
         history(shell)
       }
-      .frame(width: 160)
+      .frame(width: 200)
     }
     .padding(.horizontal, 10)
     .frame(height: Self.height)
@@ -139,11 +141,13 @@ private struct NowPlayingSummary: View {
   }
 
   /// The target display as the toolbar's menu button names it, which is what the line has room
-  /// for; the details and VoiceOver keep the full title.
+  /// for, and what it rotates through; the details and VoiceOver keep the full title.
   private func displayName(_ state: NowPlayingState) -> String {
     let displays = controller.targetDisplays
     let target = displays.first { $0.id == controller.targetDisplayID }
-    return target?.shortLabel(among: displays) ?? state.displayTitle
+    let name = target?.shortLabel(among: displays) ?? state.displayTitle
+    guard let rotation = NowPlayingRotation(controller: controller) else { return name }
+    return "\(name) · \(rotation.title)"
   }
 }
 

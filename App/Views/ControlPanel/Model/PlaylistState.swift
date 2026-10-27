@@ -31,6 +31,29 @@ struct PlaylistState: Equatable, Sendable {
   /// off waits for nothing.
   var showsResume: Bool { isHeld && playlist.mode != .off }
 
+  /// What the Wallpapers menu says for the source in use: also the name Now Playing gives the
+  /// rotation.
+  @MainActor func sourceTitle(collections: [CollectionRow]) -> String {
+    switch source {
+    case .all: L("All wallpapers")
+    case .favorites: L("Favorites")
+    case .list: L("This display’s list (\(listedCount))")
+    case .collection(let id): collections.first { $0.id == id }?.name ?? L("A collection that no longer exists")
+    case .missingCollection: L("A collection that no longer exists")
+    }
+  }
+
+  /// When the rotation changes next, in words.
+  @MainActor var nextNote: String {
+    if playlist.trigger == .unlock {
+      return L("Changes when you unlock the Mac, while wallpapers are playing.")
+    }
+    if let time = nextChangeText(locale: PanelLocale.shared.locale) {
+      return L("Around \(time), if wallpapers are playing then.")
+    }
+    return L("Starts counting once wallpapers play.")
+  }
+
   /// `nextChange` as the page worded it: the time alone when it falls today, with the short weekday
   /// otherwise, in `locale`'s language and conventions. Nil when the change is not dated.
   func nextChangeText(now: Date = Date(), locale: Locale, calendar: Calendar = .current) -> String? {

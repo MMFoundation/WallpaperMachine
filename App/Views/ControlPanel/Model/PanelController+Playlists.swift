@@ -102,6 +102,36 @@ extension PanelController {
     try await run(.immediate) { playlists.resumeHandler?(try standaloneDisplayID(display)) }
   }
 
+  /// `playlistPlay`: Installed's Play button and a collection's Play and Shuffle. The display
+  /// rotates through `source` (`order`, or the order it already had), changes to its first
+  /// wallpaper at once, and keeps its interval or unlock trigger. A display the user emptied is
+  /// filled again. Refused, and nothing changes, when `source` holds no wallpaper that can play.
+  /// Counts as a manual choice for the automatic selection.
+  func playPlaylist(_ source: PlaylistSourceChoice, order: PlaylistOrder? = nil, display: String? = nil)
+    async throws
+  {
+    try await changePlaylist(display) { display in
+      var playlist = try rotation(through: source, from: playlists.playlist(for: display))
+      if let order { playlist.order = order }
+      guard hasPlayableWallpaper(playlist) else {
+        throw WallpaperActionError(message: L("None of these wallpapers can play on this Mac."))
+      }
+      playlists.update(display) { $0 = playlist }
+      // Already showing the only wallpaper it has is not a failure: the rotation is set either way.
+      if playlists.skipHandler?(display) != true { playlists.setHold(nil, on: display) }
+    }
+  }
+
+  /// Whether Installed's `source` (All wallpapers, Favorites or a collection; a display's own list
+  /// is not one) holds a wallpaper that can play: what Play and Shuffle are enabled on, by the same
+  /// rule `playPlaylist` refuses with, so a source of removed or unsupported wallpapers only offers
+  /// disabled buttons.
+  func canPlay(_ source: PlaylistSourceChoice) -> Bool {
+    _ = revisions.collections
+    guard let playlist = try? rotation(through: source, from: DisplayPlaylist()) else { return false }
+    return hasPlayableWallpaper(playlist)
+  }
+
   /// `historyClear`: forgets what the display showed recently, so Previous has nothing to go back to.
   /// Other displays and the wallpaper files are not touched.
   func clearHistory(display: String? = nil) async throws {
@@ -210,6 +240,34 @@ extension PanelController {
     case .nightStart(let start):
       playlists.update(display) { $0.nightStart = start.minutes }
     }
+  }
+
+  /// `playlist` rotating through `source`. Throws when the source is a collection that is gone.
+  private func rotation(through source: PlaylistSourceChoice, from playlist: DisplayPlaylist) throws
+    -> DisplayPlaylist
+  {
+    var playlist = playlist
+    playlist.mode = .rotate
+    switch source {
+    case .all: playlist.source = .all
+    case .favorites: playlist.source = .favorites
+    case .list: playlist.source = .list
+    case .collection(let id):
+      guard collections.collection(id: id) != nil else { throw LibraryOrganizationError.missingCollection }
+      playlist.source = .collection
+      playlist.collectionID = id
+    case .missingCollection: throw LibraryOrganizationError.missingCollection
+    }
+    return playlist
+  }
+
+  /// Whether the rotation has a wallpaper to pick: installed, able to play, and in its source.
+  private func hasPlayableWallpaper(_ playlist: DisplayPlaylist) -> Bool {
+    let members = playlist.collectionID.flatMap { collections.collection(id: $0)?.wallpaperIDs } ?? []
+    return !PlaylistPlanner.candidates(
+      for: playlist, library: store.librarySnapshot.wallpapers.filter(\.supported).map(\.id),
+      favorites: favoriteIDs, collectionIDs: members
+    ).isEmpty
   }
 
   /// nil, which clears the choice, or an installed wallpaper that can play.

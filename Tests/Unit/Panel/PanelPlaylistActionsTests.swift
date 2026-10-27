@@ -431,4 +431,85 @@ final class PanelPlaylistActionsTests: PanelTestCase {
     try await panel.waitUntil { changes.withLock { $0 } == 1 }
     XCTAssertTrue(controller.playlistState(for: "primary").isHeld)
   }
+
+  /// Play turns a part of the library into the display's rotation and changes to it at once; the
+  /// display keeps its interval and, unless one is chosen, its order.
+  func testPlayRotatesThroughAPartOfTheLibraryAndChangesAtOnce() async throws {
+    let panel = try makePanel()
+    defer { Task { await panel.shutdown() } }
+    let controller = panel.controller
+    let collection = try await controller.createCollection(name: "Night", wallpaperIDs: ["b"])
+    var asked: [String] = []
+    panel.playlists.skipHandler = { display in
+      asked.append(display)
+      return true
+    }
+    try await controller.editPlaylist(.interval(.preset(60)), display: "primary")
+    try await controller.editPlaylist(.order(.shuffle), display: "primary")
+    panel.playlists.setHold(.removedWallpaper, on: "primary")
+
+    try await controller.playPlaylist(.collection(id: collection.id))
+    var playlist = panel.playlists.playlist(for: "primary")
+    XCTAssertEqual(playlist.mode, .rotate)
+    XCTAssertEqual(playlist.source, .collection)
+    XCTAssertEqual(playlist.collectionID, collection.id)
+    XCTAssertEqual(playlist.order, .shuffle, "no order chosen: the display's own")
+    XCTAssertEqual(playlist.interval, 60)
+    XCTAssertEqual(asked, ["primary"], "the target display changes now")
+
+    try await controller.playPlaylist(.all, order: .sequential, display: "primary")
+    playlist = panel.playlists.playlist(for: "primary")
+    XCTAssertEqual(playlist.source, .all)
+    XCTAssertEqual(playlist.order, .sequential)
+    XCTAssertEqual(asked.count, 2)
+
+    panel.playlists.skipHandler = { _ in false }
+    panel.playlists.setHold(.removedWallpaper, on: "primary")
+    try await controller.playPlaylist(.collection(id: collection.id))
+    XCTAssertEqual(panel.playlists.playlist(for: "primary").source, .collection)
+    XCTAssertFalse(
+      controller.playlistState(for: "primary").isHeld,
+      "a rotation already on its only wallpaper is set, and an emptied display waits no longer")
+  }
+
+  func testPlayRefusesWhatHasNothingToPlayAndChangesNothing() async throws {
+    let panel = try makePanel()
+    defer { Task { await panel.shutdown() } }
+    let controller = panel.controller
+    let unplayable = try await controller.createCollection(name: "Apps", wallpaperIDs: ["app"])
+    var asked = 0
+    panel.playlists.skipHandler = { _ in
+      asked += 1
+      return true
+    }
+    for source in [PlaylistSourceChoice.favorites, .list, .collection(id: unplayable.id)] {
+      do {
+        try await controller.playPlaylist(source, display: "primary")
+        XCTFail("played \(source)")
+      } catch { XCTAssertTrue(error is WallpaperActionError, "\(source)") }
+    }
+    for source in [PlaylistSourceChoice.collection(id: "gone"), .missingCollection] {
+      do {
+        try await controller.playPlaylist(source, display: "primary")
+        XCTFail("played \(source)")
+      } catch { XCTAssertTrue(error is LibraryOrganizationError, "\(source)") }
+    }
+    do {
+      try await controller.playPlaylist(.all, display: "mirrored")
+      XCTFail("a mirror follows its source")
+    } catch { XCTAssertTrue(error is InvalidControlValue) }
+    XCTAssertEqual(panel.playlists.playlist(for: "primary"), DisplayPlaylist())
+    XCTAssertEqual(asked, 0)
+    for source in [PlaylistSourceChoice.favorites, .collection(id: unplayable.id), .collection(id: "gone")] {
+      XCTAssertFalse(controller.canPlay(source), "the buttons are off for \(source)")
+    }
+    XCTAssertTrue(controller.canPlay(.all))
+
+    controller.favoriteIDs = ["a"]
+    XCTAssertTrue(controller.canPlay(.favorites))
+    try await controller.playPlaylist(.favorites, display: "primary")
+    XCTAssertEqual(panel.playlists.playlist(for: "primary").source, .favorites)
+    XCTAssertEqual(asked, 1)
+  }
+
 }
