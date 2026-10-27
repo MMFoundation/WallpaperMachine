@@ -20,7 +20,7 @@ struct NowPlayingPlaylistButton: View {
       shell.popover(.playlist).wrappedValue = !isOpen
     }
     .popover(isPresented: shell.popover(.playlist), arrowEdge: .top) {
-      NowPlayingPlaylistDetails()
+      NowPlayingPlaylistDetails().panelPresentationLocale()
     }
   }
 }
@@ -103,7 +103,9 @@ private struct NowPlayingPlaylistDetails: View {
         Spacer(minLength: 0)
         Button("Settings…") {
           controller.shell.popover(.playlist).wrappedValue = false
-          controller.launch("openSettings") { try await controller.openSettings(.displays) }
+          controller.launch(PanelActionCoordinator.key("openSettings")) {
+            try await controller.openSettings(.displays)
+          }
         }
         .accessibilityIdentifier("now-playing-playlist-settings")
       }
