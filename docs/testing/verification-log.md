@@ -25,14 +25,6 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
-## 2026-10-26 — MetalFX upscaling for a lowered render scale (issue 96)
-
-- python3 scripts/check_renderer.py: passed; new metalfx_upscale_test (3 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image only while in force, no change at 100%.
-- python3 scripts/check_rust.py: passed, including metalfx_upscaling_defaults_off_and_survives_a_restart and the config contract default.
-- python3 scripts/build.py --renderer-only: bindings regenerated.
-- python3 scripts/test.py: 4157 passed, 0 failed, 47 skipped (panel switch round trip, reset, energy-restart coverage).
-- Not checked: a real wallpaper on the desktop, the energy cost, or a comparison against Wallpaper Engine (WE has no MetalFX equivalent). Release app not rebuilt.
-
 ## 2026-10-27 — Crowdin integration: GitHub and Crowdin setup
 
 Follows the Crowdin integration entry; those entry's open items were set up afterwards.
@@ -53,6 +45,14 @@ Tooling and CI change: crowdin.yml, scripts/crowdin_sync.py (push/pull), scripts
 - End to end on a throwaway Crowdin branch: 3 translator edits flowed into 3 of 366 cells with the one-line layout kept; a %@ to %d edit was refused
 - Conflict probes on throwaway branches: an approved translation survives a plain re-push; unapproved ones do not outrank a newer value; --auto-approve-imported overwrites (documented in docs/localization.md#crowdin)
 - Not verified: the workflow has never run on GitHub and was only parsed as YAML (no actionlint); PR creation (the repo setting "Allow GitHub Actions to create and approve pull requests" is off); the CROWDIN_PERSONAL_TOKEN secret is not set
+
+## 2026-10-26 — MetalFX upscaling for a lowered render scale (issue 96)
+
+- python3 scripts/check_renderer.py: passed; new metalfx_upscale_test (3 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image only while in force, no change at 100%.
+- python3 scripts/check_rust.py: passed, including metalfx_upscaling_defaults_off_and_survives_a_restart and the config contract default.
+- python3 scripts/build.py --renderer-only: bindings regenerated.
+- python3 scripts/test.py: 4157 passed, 0 failed, 47 skipped (panel switch round trip, reset, energy-restart coverage).
+- Not checked: a real wallpaper on the desktop, the energy cost, or a comparison against Wallpaper Engine (WE has no MetalFX equivalent). Release app not rebuilt.
 
 ## 2026-10-25 — Updates, web, downloads, Workshop, scene and panel improvements
 

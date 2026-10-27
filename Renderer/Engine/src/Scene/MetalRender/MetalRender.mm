@@ -1956,6 +1956,8 @@ void MetalRender::Impl::releaseGraph()
     pending_target_clears.clear();
     preserved_targets.clear();
     targets.clear();
+    // The full-size picture of the output just let go; a graph compiled next makes its own.
+    upscaler.release();
     owned_targets.clear();
     depth_targets.clear();
     pass_targets.clear();
