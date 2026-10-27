@@ -275,7 +275,7 @@ private struct ImportButton: View {
         set: { if !$0 { model.closeImport() } }),
       arrowEdge: .bottom
     ) {
-      ImportPopover()
+      ImportPopover().panelPresentationLocale()
     }
     .help(L("Import wallpapers"))
     .accessibilityLabel(Text("Import"))

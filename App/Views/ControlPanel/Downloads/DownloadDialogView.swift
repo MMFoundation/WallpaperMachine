@@ -261,13 +261,16 @@ private struct SetupStage: View {
           Label("Locate a copy", systemImage: "folder")
         }
         .disabled(setup.isBusy)
-        if setup.isBusy && setup.canCancel {
-          Button("Cancel setup") { controller.downloads.cancelSteamCMDSetup() }
-        }
       } trailing: {
         Button("Not now") { controller.downloads.closeDialog() }
           .keyboardShortcut(.cancelAction)
-        primary(setup)
+        // While setup runs, Cancel setup takes the place of the install button, which could not be
+        // used anyway, so the row keeps three buttons and stays on one line.
+        if setup.isBusy && setup.canCancel {
+          Button("Cancel setup") { controller.downloads.cancelSteamCMDSetup() }
+        } else {
+          primary(setup)
+        }
       }
       if setup.candidatePath != nil {
         HStack(spacing: 14) {
