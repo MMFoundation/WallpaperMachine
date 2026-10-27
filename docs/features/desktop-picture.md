@@ -94,12 +94,17 @@ at once, without visiting them, except on a display with a
 [different wallpaper for each desktop](spaces.md), where it goes to the current desktop
 and every other desktop gets the saved poster of its own wallpaper.
 
-A native-backend clip stored rotated or mirrored (a portrait phone recording) is shown
-upright by the player layer, but the frames the playing item hands back are not, so its
-poster is read with a one-shot image generator that applies the clip's orientation. That
-is a second decode of a few frames per poster and is counted as
-`nativeVideoPosterFallback`; an upright clip reads the frame that is already playing.
-Neither path resumes a paused video.
+A native-backend clip's poster is read with a one-shot image generator on its own copy
+of the file, at the playing item's position (within half a second of it, so a clip with
+few key frames does not give its opening instead; a frame from further away is not
+kept), and it applies the
+clip's orientation, so a clip stored rotated or mirrored (a portrait phone recording)
+comes out upright like the picture. It is never read from the playing item: attaching a
+video output to that item, or taking one off, makes it reconfigure its pipeline, which
+holds the picture for 80 to 160 ms (measured on a 1080p and a 4K clip), a black flash on
+the desktop at every poster (issue 110).
+Each poster is a second decode of a few frames and is counted as
+`nativeVideoPosterDecode`. It never resumes a paused video.
 
 - **A wallpaper starts or changes.** It is captured at once and again after
   `DesktopWallpaperSync.settleCaptureDelays` (3 s and 15 s), because intros, fades and

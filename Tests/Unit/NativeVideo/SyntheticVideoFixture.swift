@@ -39,6 +39,9 @@ enum SyntheticVideoFixture {
         /// Paints each frame (the pixel buffer and the frame's index) in place of the default
         /// distinguishable-per-frame fill, for tests that need a particular picture.
         var painter: ((CVPixelBuffer, Int) -> Void)?
+        /// The most frames between key frames, for a clip whose key frames are
+        /// sparse; `nil` leaves the encoder its own choice.
+        var maxKeyFrameInterval: Int?
 
         /// Constant frame rate expressed exactly: `numerator / denominator`
         /// fps. 24 is 24/1, NTSC 30 is 30000/1001.
@@ -107,7 +110,7 @@ enum SyntheticVideoFixture {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         defer { if writer.status == .writing { writer.cancelWriting() } }
-        let settings: [String: Any] = [
+        var settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: request.width,
             AVVideoHeightKey: request.height,
@@ -120,6 +123,9 @@ enum SyntheticVideoFixture {
                 kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String: false
             ] as [String: Any],
         ]
+        if let interval = request.maxKeyFrameInterval {
+            settings[AVVideoCompressionPropertiesKey] = [AVVideoMaxKeyFrameIntervalKey: interval]
+        }
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false
         var matrix = CGAffineTransform.identity

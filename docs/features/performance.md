@@ -841,7 +841,7 @@ A clip that has shown a picture is checked, and repaired if need be, after anyth
 can cost it its decoder. The system may reclaim the decoder while nothing is playing (a
 covered desktop for hours, display sleep, Low Power Mode, a locked session), and a clip
 that carries on afterwards can report that it is playing, with its clock running, while no
-picture comes out. A check starts when a clip is resumed after at least 5 seconds paused
+picture comes out. A check starts when a clip is resumed after at least 5 minutes paused
 (by the user's Pause or because its display was hidden), and when the displays wake, the
 Mac wakes or the session becomes active again (an unlock, or a switch back to this user).
 A wake waits one second first, so the system can hand the decoder back, and the
@@ -853,8 +853,14 @@ A check waits half a second and then, for up to 2 seconds, looks every tenth of 
 at the playing item. It needs both signs of life in that time: a new picture handed over by
 a video output attached to the item for the check, and a clock that moved by about a frame.
 The clock alone is not enough, because a pipeline that decodes nothing keeps its clock
-running. A healthy clip is proven within a couple of samples, so its cost is one short-lived
-video output and no visible change. When no picture comes out, the check works up a ladder
+running. A healthy clip is proven within a couple of samples. Attaching the output makes
+the item reconfigure its pipeline, which holds the picture for 80 to 160 ms (measured on a
+1080p and a 4K clip; taking it off does the same), so a check is not free: with a 5-second
+threshold every short cover (a full-screen app, Mission Control) ended in a visible flash
+(issue 110), hence the
+5 minutes, which still covers a desktop left covered for long. The output stays on the item
+it sampled until the loop retires that item, and comes off then, out of sight, rather than
+holding the picture a second time. When no picture comes out, the check works up a ladder
 of repairs, looking again after each:
 
 1. The clip is kicked: a seek to where it already is, with no tolerance, and `play()`. It
@@ -889,9 +895,9 @@ diagnostics log under the wallpaper's load (`playback did not advance after the 
 woke: the clock advances but no frame is produced`). A clip that shows fewer than one
 picture in two seconds can be reported as stalled, and kicked, while it plays. Whether a
 kick or a rebuild really brings back a decoder the system reclaimed has not been seen on a
-real Mac, and neither has the cost of the check's video output on a 4K clip; the output
-exists only while the check samples, normally a fraction of a second after the settle, and
-reads the clip's own pixel format.
+real Mac. The check's output reads the clip's own pixel format and is read only while the
+check samples; left on until its item is retired, it is never more than one pass of the
+loop on one copy.
 
 Switching wallpapers quickly does not put the ones in between on the desktop. Reading
 a clip's metadata can take a moment, and the next switch may be committed meanwhile.
