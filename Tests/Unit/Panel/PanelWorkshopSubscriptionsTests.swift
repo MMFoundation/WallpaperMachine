@@ -11,7 +11,10 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     subscribed: [String: String], supportPrompt: SupportPromptStore? = nil
   ) throws -> BrowsingPanel {
     SubscriptionsProtocol.subscribed = subscribed
-    addTeardownBlock { SubscriptionsProtocol.subscribed = [:] }
+    addTeardownBlock {
+      SubscriptionsProtocol.subscribed = [:]
+      SubscriptionsProtocol.unreachable = false
+    }
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [SubscriptionsProtocol.self]
     let panel = try makeBrowsingPanel(
@@ -52,6 +55,24 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     }
     panel.controller.workshopBrowser.pageAppeared()
     try await waitFor { panel.workshop.subscribedIDs == ["222"] }
+  }
+
+  /// A marks read that fails says so in the banner, and the next visit to the page tries again.
+  func testAFailedMarksReadIsReportedAndTriedAgainOnTheNextVisit() async throws {
+    let panel = try makePanel(subscribed: ["111": "Video"])
+    try await panel.workshop.signInToSteamWeb {
+      WebSignInCookies(session: "76561198000000001%7C%7C0123456789abcdef0123")
+    }
+    SubscriptionsProtocol.unreachable = true
+    panel.controller.errors.actionError = nil
+    panel.controller.workshopBrowser.pageAppeared()
+    try await waitFor { panel.controller.errors.actionError != nil }
+    XCTAssertEqual(panel.workshop.subscribedIDs, [])
+    XCTAssertNotNil(panel.workshop.steamWebSession, "a connection failure keeps the sign-in")
+
+    SubscriptionsProtocol.unreachable = false
+    panel.controller.workshopBrowser.pageAppeared()
+    try await waitFor { panel.workshop.subscribedIDs == ["111"] }
   }
 
   func testOnlyWhatTheLibraryLacksIsRequestedAndApplicationsAreSkipped() async throws {
@@ -179,6 +200,8 @@ private actor Gate {
 /// Steam: the subscriptions profile page of one account, and the details of any item asked about.
 private final class SubscriptionsProtocol: URLProtocol, @unchecked Sendable {
   nonisolated(unsafe) static var subscribed: [String: String] = [:]
+  /// The subscriptions page cannot be reached while this is set.
+  nonisolated(unsafe) static var unreachable = false
 
   override class func canInit(with request: URLRequest) -> Bool { true }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -198,6 +221,7 @@ private final class SubscriptionsProtocol: URLProtocol, @unchecked Sendable {
 
   private static func body(for url: URL, request: URLRequest) -> Data? {
     if url.host == "steamcommunity.com", url.path.contains("myworkshopfiles") {
+      if unreachable { return nil }
       // Without the session cookie Steam shows its sign-in page.
       guard request.value(forHTTPHeaderField: "Cookie")?.hasPrefix("steamLoginSecure=") == true else {
         return Data("<html><head><title>Sign In</title></head><body></body></html>".utf8)

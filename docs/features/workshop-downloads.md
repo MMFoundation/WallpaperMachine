@@ -308,7 +308,8 @@ session. The tiles of what the account subscribes to wear a bookmark mark (Voice
 subscriptions is read the first time the Workshop page appears for each sign-in (after a
 saved one still being restored) and again right after a sign-in, and a subscribe or
 unsubscribe Steam accepted updates it, also over a read still in flight; signed out it is
-empty. Downloading stays a separate choice: subscribing does not
+empty. A read that fails leaves the marks as they were, says why in the banner and is tried
+again the next time the Workshop page appears. Downloading stays a separate choice: subscribing does not
 download, and SteamCMD is not involved. This has not been tried against live Steam from
 the development machine, which cannot reach steamcommunity.com; the requests and answers
 are pinned against fixtures (`WorkshopSourceTests`).

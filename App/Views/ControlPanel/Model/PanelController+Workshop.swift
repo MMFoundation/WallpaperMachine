@@ -194,13 +194,13 @@ extension PanelController {
     }
   }
 
-  /// Reads what the signed-in account subscribes to, so the Workshop tiles mark it. Quiet: a read
-  /// that fails leaves the marks as they were, and an ended session is forgotten as anywhere.
-  /// Answers the sign-in they were read with: nil signed out, or when Steam could not be read.
+  /// Reads what the signed-in account subscribes to, so the Workshop tiles mark it, and answers
+  /// the sign-in they were read with (nil signed out). A read that fails leaves the marks as they
+  /// were and throws, so the banner says why; an ended session is forgotten as anywhere.
   @discardableResult
   func refreshWorkshopSubscriptions() async throws -> SteamWebSession? {
     var read: SteamWebSession?
-    try await run(.direct) { read = try? await workshop.refreshSubscribedIDs() }
+    try await run(.direct) { read = try await workshop.refreshSubscribedIDs() }
     return read
   }
 
