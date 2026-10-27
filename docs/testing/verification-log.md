@@ -25,13 +25,23 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
-## 2026-10-26 — MetalFX upscaling for a lowered render scale (issue 96)
+## 2026-10-27 — MetalFX upscaling for a lowered render scale (issue 96)
 
-- python3 scripts/check_renderer.py: exit 0, passed; metalfx_upscale_test (4 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image in the upscaled 50% draw, released on the first drawn frame after it is turned off in a running scene and made again when turned on, no change at 100%.
+- python3 scripts/check_renderer.py: exit 0, passed; metalfx_upscale_test (5 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image in the upscaled 50% draw, released on the first drawn frame after it is turned off in a running scene and made again when turned on, a GPU without the scaler (simulated) composes the stretch byte for byte with no extra memory, no change at 100%.
 - python3 scripts/check_rust.py: exit 0, passed, including metalfx_upscaling_defaults_off_and_survives_a_restart and the config contract default.
 - python3 scripts/build.py --renderer-only: exit 0, bindings regenerated with no change.
-- python3 scripts/test.py: exit 0, 4175 passed, 0 failed, 47 skipped (panel switch round trip, reset, energy-restart coverage), after merging main.
+- python3 scripts/test.py: exit 0 on the second run, 4186 passed, 0 failed, 49 skipped, after merging main; the first run failed only EnergyUsageMonitorTests.testKernelCountersForThisProcessAdvanceWithGPUWork (a real GPU power reading of 4.6 mW under its 10 mW floor), which passed alone and in the rerun.
 - Measured: on a real machine about 50% more power with it on at the same scale, and about 1.1 ms (3024×1964) to 2.6 ms (5K) of extra GPU per frame on an M2 Pro in a headless probe. Not checked: a comparison against Wallpaper Engine (WE has no MetalFX equivalent). Release app not rebuilt.
+
+## 2026-10-27 — Halloween look
+
+Settings › Appearance gains a Halloween look (Halloween week, the default, October 24 to November 1; Always; Off): its own palettes and pumpkin accent, a jack-o'-lantern in the title-bar mark and the Dock icon, and a Victorian papercut horizon (silhouettes cut from a sheet generated with GPT Image 2.5 on fal.ai) standing on the Now Playing bar, at the top of Appearance and in the empty states.
+
+- `python3 scripts/test.py` — exit 0; Python stage all OK; native 4232: 4185 passed, 0 failed, 47 skipped; 2 runtime warnings without a source location ("should not be called on the main thread"), not traced to this change
+- `python3 scripts/brand.py --seasonal` — wrote AppIconHalloween; `scripts/tests/test_brand.py` 8 passed, the Halloween icon render test included
+- Offscreen renders (temporary tests drawing `HostedPanel` in a never-shown window, since deleted), two rounds: Library at 1240 and 760 pt, Settings › Appearance, the empty and no-match states, light and dark. Fixed from them: held rows dimmed twice, a weak dark backlight, a moon lost in the light dusk
+- Offscreen capture draws the Settings list's selection material black in either appearance; a plain system sidebar list does the same, so it is the capture, not the panel
+- Not checked: the real Dock, title bar and window on the desktop, a Release build, and a live midnight change on a running app (covered by a unit test posting `NSCalendarDayChanged`)
 
 ## 2026-10-27 — Crowdin open to community translators; add-language import
 
@@ -116,12 +126,3 @@ Update signature check, http in web content, page errors in the log, frame-confi
 - Welcome guide: six language tiles keep each name on one line (tighter spacing, slight shrink) instead of breaking inside a word.
 - python3 scripts/test.py (before the rebase): 4106 passed, 5 failed, 49 skipped; the 5 (DisplaysSettingsModelTests x4, InspectorWordingTests) also fail on unmodified main on a Mac whose region is pt_BR (decimal comma).
 - Release build installed locally and checked by the contributor in Portuguese.
-
-## 2026-10-25 — Puppet texture channels: weight rows and non-finite weights (PR #93 review)
-
-- Supplements the entry above. python3 scripts/build.py --renderer-only before that entry's test.py run: exit 0 (cargo release build and bindings; the regenerated App/Bridge/Generated matched the committed files).
-- g_BlendMap is uploaded as exactly the rows the shader declares: enough for every channel the mesh names, more when the material's BLENDROWCOUNT asks for more; a channel past 255 is not painted. Non-finite weights read as 0.
-- New tests: MdlSkeleton.ATextureChannelWeightThatIsNotANumberPaintsNothing and three row cases in MaterialContracts.APuppetsTextureChannelPaintsIntoItsPictureOnlyWhileItsAnimationWeighsItIn; both row cases fail on the earlier sizing.
-- python3 scripts/check_renderer.py: exit 0. python3 scripts/build.py --renderer-only: exit 0.
-- python3 scripts/test.py: first run failed 4 PanelImageViewTests/PanelImagePipelineTests cases right after the renderer check; they passed alone (11 of 11) and the full rerun passed 4111, 0 failed, 47 skipped. Treated as load-timing flakiness, not investigated.
-- Not re-compared with Wallpaper Engine: the changes do not alter output for Swimming Kirby (one channel, one row authored).

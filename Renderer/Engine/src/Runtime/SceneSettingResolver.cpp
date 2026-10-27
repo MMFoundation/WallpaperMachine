@@ -144,18 +144,21 @@ UserLink ReadUserLink(const nlohmann::json& setting) {
 enum class FollowShape { Whole, Vec3 };
 
 // Makes `value` follow the property its setting names, if any. The condition goes on before the
-// first read. A property the table does not declare yet is followed once a document supplies it.
+// first read. A property the table does not declare yet is followed once a document supplies it;
+// until then the value keeps its own authored value, as Wallpaper Engine shows it: there is no
+// choice to compare a condition with, and another setting's authored value is not this one's.
 void FollowUserProperty(SceneRuntimeContext& context, const nlohmann::json& setting,
                         FollowShape shape, DynamicValue& value) {
     const UserLink link = ReadUserLink(setting);
     if (link.property.empty()) return;
-    DynamicValue* target = context.FollowProperty(link.property, value);
+    const bool    declared = context.FindPropertyValue(link.property) != nullptr;
+    DynamicValue* target   = context.FollowProperty(link.property, value);
     if (target == nullptr) return;
     if (link.condition) value.attachCondition(*link.condition);
     if (shape == FollowShape::Vec3) {
-        value.connectVec3(target);
+        value.connectVec3(target, declared);
     } else {
-        value.connect(target);
+        value.connect(target, declared);
     }
 }
 

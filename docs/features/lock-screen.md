@@ -535,6 +535,16 @@ exits within ten minutes restore the system wallpaper with "The lock-screen rend
 stopped repeatedly" and **Retry**. An extension copy older than the field is not
 watched.
 
+While the Mac is unlocked, macOS also closes every connection to a renderer that is
+drawing nothing wrong and then ends its process, sometimes a few times within minutes.
+Once its last connection closes, the extension leaves an empty `released-<pid>` file in
+the exchange directory, and removes it when a host connects again. An exit that follows
+one is published again like any other but is not counted towards the limit, so a few
+of them cannot hand the lock screen back to macOS. The file shows the disconnection,
+not why the process then ended, so these exits have a limit of their own: past ten
+within ten minutes, each counts like any other exit. The app removes the file of the process that
+ended and any left by processes that are gone.
+
 Repeated checks do not rewrite an unchanged recovery journal. New Spaces, choices made
 in System Settings and wallpaper-service reloads all rewrite the system wallpaper
 store, so each check compares only the store file's identity (device, inode, size,

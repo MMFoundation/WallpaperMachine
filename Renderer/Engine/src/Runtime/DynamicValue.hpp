@@ -83,8 +83,10 @@ public:
     virtual void update();
 
     std::function<void()> listen(const std::function<void(const DynamicValue&)>& callback);
-    void                  connect(DynamicValue* other);
-    void                  connectVec3(DynamicValue* other);
+    /// Follows `other`. With `read_now` false the value keeps what it holds until `other`
+    /// next changes (a property the project has not declared has nothing to read yet).
+    void                  connect(DynamicValue* other, bool read_now = true);
+    void                  connectVec3(DynamicValue* other, bool read_now = true);
     void                  disconnect();
     void                  attachCondition(const ConditionInfo& condition);
     /// Whether the value follows a choice through a condition (`attachCondition`): what it
@@ -99,7 +101,7 @@ private:
     void assignText(const std::string& text);
     [[nodiscard]] bool conditionHolds(const DynamicValue& choice) const;
     void finishAssignment();
-    void track(DynamicValue* other, bool as_vec3);
+    void track(DynamicValue* other, bool as_vec3, bool read_now);
 
     mutable uint64_t m_generation { 0 };
     UnderlyingType   m_type { Null };

@@ -39,6 +39,9 @@ final class WebWallpaperHost {
     }
     private var descriptors: [UInt32: BridgeWebWallpaper] = [:]
     private var posterObserver: NSObjectProtocol?
+    /// Poster requests that reached a window before its page had loaded, by content layer: the
+    /// contexts they asked in, answered once the page has loaded.
+    private var deferredPosterRequests: [ObjectIdentifier: [String?]] = [:]
     private var inspectionObserver: NSObjectProtocol?
     /// Whether pages may be attached to Safari's Web Inspector, read when a page
     /// is made and again whenever the preference changes.
@@ -521,11 +524,14 @@ final class WebWallpaperHost {
                     // Nothing is coming to replace the held picture with: the failed page, and
                     // the retry that is offered, belong on screen and not behind it.
                     self.switchHold?.contentReady(displayID: displayID)
+                    // Nor a page to take a poster of: one that loads later asks for posters itself.
+                    if let window = self.windows[displayID] { self.dropDeferredPosterRequests(of: window) }
                 }
                 page.onLoaded = { [weak self, weak page] in
                     guard let self, let page, self.windows[displayID]?.page === page,
                           let current = self.descriptors[displayID] else { return }
                     self.recordState(current, phase: .ready)
+                    if let window = self.windows[displayID] { self.answerDeferredPosterRequests(of: window) }
                     if self.switchHold != nil {
                         page.confirmFrame(within: Self.firstFrameLimit) { [weak self, weak page] confirmation in
                             guard let self, let page, self.windows[displayID]?.page === page else { return }
@@ -630,6 +636,7 @@ final class WebWallpaperHost {
 
     /// Stops a page that is no longer any display's and takes its window away.
     private func retire(_ window: any WebWallpaperSurface) {
+        dropDeferredPosterRequests(of: window)
         window.page.stop()
         window.retire()
     }
@@ -887,6 +894,7 @@ final class WebWallpaperHost {
             states.removeValue(forKey: displayID)
             loadedProjectRevisions.removeValue(forKey: displayID)
         }
+        dropDeferredPosterRequests(of: window)
         window.page.stop()
         window.retire()
     }
@@ -1271,6 +1279,34 @@ final class WebWallpaperHost {
             }
             return
         }
+        // A page that has not loaded has drawn nothing of its own, and the web view does not
+        // draw a background, so a snapshot now is the black window. Taken as the desktop
+        // picture it would darken the menu bar for nothing; the page answers once it has loaded.
+        guard window.page.isLoaded else {
+            let key = ObjectIdentifier(layer)
+            if deferredPosterRequests[key]?.contains(context) != true {
+                deferredPosterRequests[key, default: []].append(context)
+            }
+            return
+        }
+        snapshotPoster(of: webView, for: layer, contexts: [context])
+    }
+
+    /// Answers the poster requests a window was sent before its page loaded. The snapshot is
+    /// taken after the pending screen updates, so it shows the document that has just loaded.
+    private func answerDeferredPosterRequests(of window: any WebWallpaperSurface) {
+        guard let layer = window.posterLayer,
+              let contexts = deferredPosterRequests.removeValue(forKey: ObjectIdentifier(layer)) else { return }
+        snapshotPoster(of: window.page.webView, for: layer, contexts: contexts)
+    }
+
+    private func dropDeferredPosterRequests(of window: any WebWallpaperSurface) {
+        guard let layer = window.posterLayer else { return }
+        deferredPosterRequests.removeValue(forKey: ObjectIdentifier(layer))
+    }
+
+    private func snapshotPoster(of webView: WKWebView, for layer: CALayer, contexts: [String?]) {
+        let center = frameCenter
         webView.takeSnapshot(with: nil) { image, error in
             MainActor.assumeIsolated {
                 guard let image else {
@@ -1278,8 +1314,8 @@ final class WebWallpaperHost {
                     return
                 }
                 guard let frame = Self.rgbaPixels(of: image) else { return }
-                DesktopPosterFrame(pixels: frame.pixels, width: frame.width, height: frame.height, bgra: false)
-                    .publish(for: layer, to: center, context: context)
+                let poster = DesktopPosterFrame(pixels: frame.pixels, width: frame.width, height: frame.height, bgra: false)
+                for context in contexts { poster.publish(for: layer, to: center, context: context) }
             }
         }
     }

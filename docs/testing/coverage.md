@@ -15,12 +15,20 @@ is linked from the domain; the shared limits are collected at the end.
 
 - `AppThemeTests` — a chosen theme survives recreation and reset leaves other
   preferences alone; an invalid change cannot overwrite saved values; a damaged
-  saved accent or an unknown icon does not discard the rest.
+  saved accent or an unknown icon does not discard the rest. Halloween week runs
+  from October 24 to November 1 by the local calendar; the Halloween choice decides
+  when the look and its Dock icon are on, a day change while the app runs starts and
+  ends it, and reset returns to Halloween week.
+- `AppIconImageTests` — every Dock icon, the Halloween one included, loads sharp from
+  the bundle as its own artwork.
 - `AppearanceSettingsTests` and `PanelShellActionsTests` (Panel) save every
-  Appearance choice (mode, accent, tone, icon) in the store's format, refuse an
-  invalid accent, round-trip accents through the colour well and reset without
-  touching unrelated preferences; `PanelThemeTests` derive the palettes from the
-  preferences and the resolved appearance.
+  Appearance choice (mode, accent, tone, icon, Halloween look) in the store's format,
+  refuse an invalid accent, round-trip accents through the colour well and reset
+  without touching unrelated preferences; while the Halloween look is on, the window
+  and the Dock wear it and the person's own choices are kept. `PanelThemeTests` derive
+  the palettes from the preferences, the season and the resolved appearance, and
+  `SurfacePaletteTests` hold every tone's and the Halloween look's palettes to the
+  contrast floor.
 
 ## Automation
 
@@ -972,11 +980,6 @@ need an authorized runtime check
   directly (it needs no GPU header), hand `ComputeWallpaperScalingLayout` the display as
   `lround(devicePixels / scale)` logical points (as `MetalRender::Impl::scalingLayout`
   does), and print `viewport_px`.
-- `NativeVideoPosterOrientationTests` — which clips cannot take a poster from
-  the playing item: the display matrix of real generated clips (rotated by 0, 90,
-  180 and 270 degrees, one mirrored, and a movie with no picture) is read back,
-  and every one but the upright clip selects the one-shot image generator.
-  Metadata only; no player is created.
 - `SyntheticVideoFixtureTests` cover the generated-clip writer's input-ready
   waiting; the writer can store a clip rotated by a display matrix.
   `NativeVideoPlayerMediaTests` drive the real player and are opt-in
@@ -990,8 +993,9 @@ need an authorized runtime check
   frame without being shown; the poster of a
   portrait-rotated clip has the picture's orientation and size and matches an
   upright reference frame, a paused rotated clip still answers without resuming,
-  and an upright clip keeps reading the playing frame (`nativeVideoPosterFallback`
-  stays 0).
+  and a poster never attaches anything to the playing item (one
+  `nativeVideoPosterDecode` per request); a health check's output stays on the item it
+  sampled until the loop retires that item, and then comes off (issue 110).
 
 Not covered: first frames presented on a real display, a rapid A, then B switch on
 a real display (that no window of the replaced clip appears, even briefly), the Mission Control

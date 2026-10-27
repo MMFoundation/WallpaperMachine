@@ -149,7 +149,7 @@ private struct WelcomeInlineLabelStyle: LabelStyle {
   }
 }
 
-/// The app icon the person chose for the Dock, over the welcome.
+/// The app icon the Dock shows (the person's choice, or the season's), over the welcome.
 struct WelcomeHero: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.welcomeIsCompact) private var compact
@@ -157,7 +157,7 @@ struct WelcomeHero: View {
   @State private var hasAppeared = false
 
   var body: some View {
-    Image(controller.themePreferences.icon.imageName)
+    Image(controller.dockIconName)
       .resizable()
       .interpolation(.high)
       .aspectRatio(contentMode: .fit)

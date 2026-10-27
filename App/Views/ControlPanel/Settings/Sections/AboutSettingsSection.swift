@@ -76,17 +76,15 @@ struct AboutSettingsSection: View {
 // MARK: - Product header
 
 /// The app's icon as the Dock shows it, its name and version. The icon follows the Dock icon choice
-/// of Settings › Appearance.
+/// of Settings › Appearance, or the season's while one is on.
 private struct AboutProductHeader: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
 
   var body: some View {
-    // The icon is the person's choice, which SwiftUI cannot see change; its counter is read first.
-    let _ = controller.revisions.theme
     let version = controller.aboutInfo.version
     HStack(spacing: 16) {
-      Image(nsImage: AboutIcons.image(controller.theme.preferences.icon))
+      Image(nsImage: AboutIcons.image(named: controller.dockIconName))
         .resizable()
         .interpolation(.high)
         .frame(width: 72, height: 72)
@@ -111,15 +109,16 @@ private struct AboutProductHeader: View {
   }
 }
 
-/// The three Dock icons, decoded once: they are 1024-pixel artwork that the header only shows small.
+/// The Dock icons, decoded once: they are 1024-pixel artwork that the header only shows small.
 @MainActor
 private enum AboutIcons {
-  private static var cache: [AppThemePreferences.Icon: NSImage] = [:]
+  private static var cache: [String: NSImage] = [:]
 
-  static func image(_ icon: AppThemePreferences.Icon) -> NSImage {
-    if let cached = cache[icon] { return cached }
-    let image = (try? icon.image()) ?? NSApp.applicationIconImage ?? NSImage()
-    cache[icon] = image
+  static func image(named name: String) -> NSImage {
+    if let cached = cache[name] { return cached }
+    let image =
+      (try? AppThemePreferences.dockImage(named: name)) ?? NSApp.applicationIconImage ?? NSImage()
+    cache[name] = image
     return image
   }
 }

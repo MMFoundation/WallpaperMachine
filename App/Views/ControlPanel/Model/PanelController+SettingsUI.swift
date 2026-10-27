@@ -210,3 +210,15 @@ extension AppThemePreferences.Icon {
     }
   }
 }
+
+extension AppThemePreferences.Halloween: CaseIterable {
+  static let allCases: [AppThemePreferences.Halloween] = [.automatic, .always, .off]
+
+  @MainActor var title: String {
+    switch self {
+    case .automatic: L("Halloween week")
+    case .always: L("Always")
+    case .off: L("Off")
+    }
+  }
+}
