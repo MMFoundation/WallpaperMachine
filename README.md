@@ -1,8 +1,8 @@
-<!-- README.zh-CN.md is this page in 简体中文 and README.pt-BR.md in Português: change them together.
+<!-- README.zh-CN.md is this page in 简体中文, README.ko.md in 한국어 and README.pt-BR.md in Português: change them together.
      The hero is six real WallpaperMachine renders on a macOS 27 desktop (menu bar and Dock drawn from
      system assets), uploaded as a GitHub attachment. When it changes, update the alt text below and the
      wallpaper credits at the end. -->
-<p align="center"><sub><b>English</b>&ensp;·&ensp;<a href="README.zh-CN.md">简体中文</a>&ensp;·&ensp;<a href="README.pt-BR.md">Português</a></sub></p>
+<p align="center"><sub><b>English</b>&ensp;·&ensp;<a href="README.zh-CN.md">简体中文</a>&ensp;·&ensp;<a href="README.ko.md">한국어</a>&ensp;·&ensp;<a href="README.pt-BR.md">Português</a></sub></p>
 
 <a href="https://www.wallpapermachine.app">
   <img src="https://github.com/user-attachments/assets/df92d34d-b718-4d58-b8e9-b002c4915516" width="100%" alt="A Mac desktop cycling through six live wallpapers played by WallpaperMachine: Chisaki over rippling water, Lucy on the Moon, a Red Bull F1 car in the snow, Firefly at dusk, Ellen at a rainy bus stop and Into The Abyss, under the macOS menu bar and Dock.">
@@ -46,7 +46,7 @@
 
 <!-- The screenshot is a GitHub attachment, hosted by issue #37 ("README app screenshot"). When it
      changes, upload the new one there and update the alt text and caption below, here, in
-     README.zh-CN.md and in README.pt-BR.md. -->
+     README.zh-CN.md, in README.ko.md and in README.pt-BR.md. -->
 <p align="center">
   <img src="https://github.com/user-attachments/assets/9526d41a-4764-4df9-a678-22d75982a7fd" width="100%" alt="WallpaperMachine’s window in the dark appearance: the Library, Steam Workshop, pixiv and Settings tabs across the top, a grid of installed wallpapers with the active one marked, the active wallpaper’s preview, compatibility check and options in the inspector on the right, and what is playing along the bottom.">
 </p>

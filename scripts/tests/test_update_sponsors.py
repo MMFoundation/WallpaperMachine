@@ -167,7 +167,8 @@ class MainTests(unittest.TestCase):
             return update_sponsors.main()
 
     def test_rewrites_every_readme(self):
-        readmes = [self.readme("README.md"), self.readme("README.zh-CN.md"), self.readme("README.pt-BR.md")]
+        readmes = [self.readme("README.md"), self.readme("README.zh-CN.md"), self.readme("README.pt-BR.md"),
+                   self.readme("README.ko.md")]
         self.assertEqual(self.main(readmes), 0)
         for readme in readmes:
             self.assertIn("Alice", readme.read_text(encoding="utf-8"))
