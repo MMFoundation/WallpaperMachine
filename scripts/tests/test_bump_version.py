@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -148,6 +149,58 @@ class FileUpdateTests(unittest.TestCase):
             self.assertIn("changed=true\n", text)
             self.assertIn("new_marketing=0.2.0\n", text)
             self.assertIn("tag=v0.2.0\n", text)
+
+
+class HotfixTests(unittest.TestCase):
+    def test_a_hotfix_is_the_next_patch_and_the_newest_version(self):
+        bump_version.check_hotfix("1.6.5", "1.6.6", ["v1.6.4", "v1.6.5"])
+        bump_version.check_hotfix("1.6.5", "1.6.7", ["v1.6.5", "v1.6.6"])
+        refused = {
+            "minor": ("1.6.5", "1.7.0", ["v1.6.5"]),
+            "major": ("1.6.5", "2.0.0", ["v1.6.5"]),
+            "same version": ("1.6.5", "1.6.5", ["v1.6.5"]),
+            "older line": ("1.5.9", "1.5.10", ["v1.5.9", "v1.6.0"]),
+            "taken": ("1.6.5", "1.6.6", ["v1.6.5", "v1.6.6"]),
+        }
+        for reason, (current, new, tags) in refused.items():
+            with self.subTest(reason), self.assertRaises(bump_version.VersionError):
+                bump_version.check_hotfix(current, new, tags)
+
+    def test_hotfix_branch_refuses_a_minor_release_from_the_cli(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "WallpaperMachine.xcodeproj").mkdir()
+            (root / "project.yml").write_text(SAMPLE_YML)
+            (root / "WallpaperMachine.xcodeproj/project.pbxproj").write_text(SAMPLE_PBX)
+            for spec, status in (("minor", 1), ("patch", 0)):
+                with self.subTest(spec), patch.object(bump_version.sys, "argv", [
+                    "bump_version.py", "--spec", spec, "--branch", "hotfix/0.1.0", "--root", str(root),
+                    "--output", str(root / "out")]):
+                    self.assertEqual(bump_version.main(), status)
+            self.assertIn('MARKETING_VERSION: "0.1.0"', (root / "project.yml").read_text(), "No --apply, no write")
+
+    def test_commits_a_tag_contains_are_not_released_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+            git("init", "-q")
+            git("config", "user.email", "test@example.com")
+            git("config", "user.name", "Test")
+            git("commit", "-q", "--allow-empty", "-m", "fix: the hotfix\n\nrelease: patch")
+            released = git("rev-parse", "HEAD")
+            git("tag", "v0.1.1")
+            git("commit", "-q", "--allow-empty", "-m", "chore: merge hotfix 0.1.1 into main")
+            merged = git("rev-parse", "HEAD")
+            event = {
+                "head_commit": {"id": merged, "message": "chore: merge hotfix 0.1.1 into main"},
+                "commits": [{"id": released, "message": "fix: the hotfix\n\nrelease: patch"},
+                            {"id": merged, "message": "chore: merge hotfix 0.1.1 into main"}],
+            }
+            messages = bump_version.collect_event_messages(event, lambda commit: bump_version.tagged_commit(root, commit))
+            self.assertIsNone(bump_version.spec_from_messages(messages))
+            self.assertFalse(bump_version.tagged_commit(root, merged))
+            self.assertFalse(bump_version.tagged_commit(root, "0" * 40), "An unknown commit is not released")
 
 
 class RepoFileTests(unittest.TestCase):

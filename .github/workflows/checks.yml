@@ -9,9 +9,9 @@ name: Checks
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "hotfix/**"]
   push:
-    branches: [main]
+    branches: [main, "hotfix/**"]
   workflow_dispatch:
 
 permissions:
