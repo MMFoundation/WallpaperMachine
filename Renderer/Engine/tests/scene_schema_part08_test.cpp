@@ -277,6 +277,27 @@ export function update(value) { return value; }
     EXPECT_EQ(label_config.value("id", -1), 7);
 }
 
+// An id passed as text (`getLayerByID(String(id))`) finds the same layer as the number: a
+// scene that looks its layers up that way and hides one by alpha shows it hidden in Wallpaper
+// Engine (issue #127).
+TEST(LayerRegistry, AnIdWrittenAsTextFindsTheSameLayer)
+{
+    const std::string script = std::string(kCheckHelper) + R"JS(
+export function init(value) {
+    check(thisScene.getLayerByID('31') === thisScene.getLayer('first'), 'text id 31 is first');
+    check(thisScene.getLayerByID(String(7)) === thisScene.getLayer('label'), 'text id 7 is the label');
+    check(thisScene.getLayerByID('9999') === null, 'unknown text id');
+    check(thisScene.getLayerByID('') === null, 'empty text');
+    check(thisScene.getLayerByID('x') === null, 'non-numeric text');
+}
+export function update(value) { return value; }
+)JS";
+    Played run(Json::array({ ImageObject(31, "first"), TextObject(7, "label"),
+                             ImageObject(12, "last", { { "visible", { { "value", true }, { "script", script } } } }) }));
+    ASSERT_TRUE(run.ok());
+    EXPECT_TRUE(run.rt().scriptErrors().empty()) << (run.rt().scriptErrors().empty() ? "" : run.rt().scriptErrors().front());
+}
+
 // The order scripts see is the order of the file, whatever order the layers' bindings were made in.
 TEST(LayerRegistry, DeclarationOrderHoldsForLayersWhoseBindingsAreMadeLate)
 {
