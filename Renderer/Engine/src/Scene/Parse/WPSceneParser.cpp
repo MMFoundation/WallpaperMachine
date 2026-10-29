@@ -46,6 +46,7 @@
 #include "Shader/RustShaderBridge.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -2632,6 +2633,28 @@ void CollectScriptStringLiterals(std::string_view source, std::unordered_set<std
     }
 }
 
+// The whole decimal numbers of a script that fit a layer id: digits standing alone, not part
+// of a name or a fraction (inside strings and comments too, which only ever adds ids).
+void CollectScriptIntegerLiterals(std::string_view source, std::unordered_set<int32_t>& out) {
+    const auto word = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_' || c == '$';
+    };
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        if (std::isdigit(static_cast<unsigned char>(source[i])) == 0) continue;
+        std::size_t j = i;
+        while (j < source.size() && std::isdigit(static_cast<unsigned char>(source[j])) != 0) ++j;
+        const bool alone = (i == 0 || (! word(source[i - 1]) && source[i - 1] != '.')) &&
+                           (j == source.size() || (! word(source[j]) && source[j] != '.'));
+        if (alone && j - i <= 10) {
+            const long long value = std::stoll(std::string(source.substr(i, j - i)));
+            if (value > 0 && value <= std::numeric_limits<int32_t>::max()) {
+                out.insert(static_cast<int32_t>(value));
+            }
+        }
+        i = j;
+    }
+}
+
 } // namespace
 
 // A texture property carries whatever the editor or the picker wrote into it:
@@ -2896,28 +2919,41 @@ nlohmann::json WithExternalMaterials(const nlohmann::json& objects, fs::VFS& vfs
 }
 
 /// What the scripts of the object list could reach: the quoted strings of every
-/// script anywhere in it.
-std::unordered_set<std::string> ScriptLiterals(const nlohmann::json& objects) {
-    std::unordered_set<std::string> literals;
+/// script anywhere in it, and, when some script looks layers up by id
+/// (`getLayerByID`), the whole numbers they write.
+struct ScriptLiteralSet {
+    std::unordered_set<std::string> strings;
+    std::unordered_set<int32_t>     ids;
+};
+
+ScriptLiteralSet ScriptLiterals(const nlohmann::json& objects) {
+    ScriptLiteralSet                literals;
     std::vector<const std::string*> sources;
     CollectScriptSources(objects, sources);
-    for (const auto* source : sources) CollectScriptStringLiterals(*source, literals);
+    for (const auto* source : sources) CollectScriptStringLiterals(*source, literals.strings);
+    const bool by_id = std::any_of(sources.begin(), sources.end(), [](const std::string* source) {
+        return source->find("getLayerByID") != std::string::npos;
+    });
+    if (by_id) {
+        for (const auto* source : sources) CollectScriptIntegerLiterals(*source, literals.ids);
+    }
     return literals;
 }
 
 /// Whether a statically hidden entry is built anyway: a script sits inside it, a
-/// script names it by a quoted literal, or (for an image) another built image
-/// reads its picture.
+/// script names it by a quoted literal or by its id, or (for an image) another
+/// built image reads its picture.
 bool RetainedWhileHidden(EntryKind kind, const nlohmann::json& entry, int32_t id,
-                         const std::unordered_set<int32_t>&     reachable,
-                         const std::unordered_set<std::string>& literals) {
+                         const std::unordered_set<int32_t>& reachable,
+                         const ScriptLiteralSet&            literals) {
     if (kind == EntryKind::Image && id != 0 && reachable.contains(id)) return true;
     std::vector<const std::string*> sources;
     CollectScriptSources(entry, sources);
     if (! sources.empty()) return true;
+    if (id != 0 && literals.ids.contains(id)) return true;
     if (const auto name = entry.find("name");
         name != entry.end() && name->is_string() && ! name->get_ref<const std::string&>().empty()) {
-        return literals.contains(name->get<std::string>());
+        return literals.strings.contains(name->get<std::string>());
     }
     return false;
 }

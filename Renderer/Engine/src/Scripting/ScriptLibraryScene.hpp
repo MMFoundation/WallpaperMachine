@@ -696,6 +696,8 @@ var sceneApi = {
     return out;
   },
   getLayerByID: function (id) {
+    // An id written as text (`String(id)`) finds the layer the number does.
+    if (typeof id === 'string' && id.trim() !== '') id = Number(id);
     if (typeof id !== 'number' || !isFinite(id)) return null;
     var key = n.layerById(id);
     return key ? layerFor(key) : null;

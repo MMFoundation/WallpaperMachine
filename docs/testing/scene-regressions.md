@@ -1114,6 +1114,15 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     instantiated are counted: an object the scene file marks statically invisible
     (and nothing can show) is never built, so it has no index and no id, and the
     count and later indices differ from the scene file's object list by those.
+    "Nothing can show" includes being named by a script: a quoted name, or, when
+    some script calls `getLayerByID`, a whole number in any script that equals the
+    layer's id (ids often come from a config object, never quoted), keeps the hidden
+    layer built (`HiddenLayerRetention.AHiddenImageIsKeptWhenAScriptLooksItUpById`
+    and `.ANumberInAScriptThatNeverLooksUpByIdKeepsNothing`, `scene_schema_part02_test`).
+    `LayerRegistry.AnIdWrittenAsTextFindsTheSameLayer`: `getLayerByID('31')` finds
+    what `getLayerByID(31)` does; a non-numeric or empty string finds nothing. Issue
+    #127: a scene controller looked up hidden layers as `getLayerByID(String(id))`,
+    its `init` threw on the first `null`, and both scenes' clocks stayed shown.
     `.LayersShowTheNameTheSceneFileGaveThemWhateverKeyTheyAreRegisteredUnder` and
     `LayerRegistry.ScriptsSeeTheAuthoredNameOfLayersRegisteredUnderGeneratedKeys`:
     `layer.name` is the authored name (empty for an unnamed layer) even where the
