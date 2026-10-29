@@ -353,10 +353,14 @@ final class WorkshopBrowserModel {
         try await controller.navigate(.workshop)
       }
     }
-    // Signed in, the tiles mark the account's subscriptions; they are read once for each sign-in.
-    // The read waits for a saved sign-in still being restored; with none, or after a failure,
-    // the next visit asks again.
-    let session = workshop.steamWebSession
+    readSubscriptionsOnce()
+  }
+
+  /// Signed in, the tiles and the Installed inspector's menu mark the account's subscriptions;
+  /// they are read once for each sign-in, whichever of the two asks first. The read waits for a
+  /// saved sign-in still being restored; with none, or after a failure, the next visit asks again.
+  func readSubscriptionsOnce() {
+    let session = controller.workshop.steamWebSession
     if !subscriptionsRead || (session != nil && session != subscriptionsSession) {
       subscriptionsRead = true
       subscriptionsSession = session

@@ -88,6 +88,13 @@ final class WorkshopStore {
   /// What the signed-in account subscribes to on Steam, which the Workshop tiles mark: read
   /// by `refreshSubscribedIDs`, then kept by what `setSubscribed` changed. Empty signed out.
   private(set) var subscribedIDs: Set<String> = []
+  /// The SteamID whose subscriptions `subscribedIDs` holds since a read of them succeeded.
+  private var subscriptionsReadFor: String?
+  /// Whether `subscribedIDs` says what the signed-in account subscribes to: Steam has answered a
+  /// read for this account. Until then a wallpaper missing from it may be subscribed after all.
+  var subscriptionsKnown: Bool {
+    steamWebSession.map { $0.steamID == subscriptionsReadFor } ?? false
+  }
   /// Where the session is kept between launches; nil keeps it in memory only.
   @ObservationIgnored private let webSessions: (any SteamWebSessionStoring)?
   @ObservationIgnored private var webSessionRestore: Task<Void, Never>?
@@ -454,6 +461,11 @@ final class WorkshopStore {
     if let item = downloadRequests.first(where: { $0.id == id })?.item { return item }
     if let item = downloader.downloads.first(where: { $0.item?.id == id })?.item { return item }
     return updates.available[id]
+  }
+
+  /// One item's current details from Steam's public endpoint, nil when Steam no longer serves it.
+  func lookUpItem(id: String) async throws -> WorkshopItem? {
+    try await service.details(ids: [id]).first { $0.id == id }
   }
 
   /// A running session pins the account every queued job reuses; a name typed elsewhere must
@@ -889,6 +901,7 @@ final class WorkshopStore {
           if edit.subscribed { marked.insert(edit.id) } else { marked.remove(edit.id) }
         }
         subscribedIDs = marked
+        subscriptionsReadFor = session.steamID
       }
       return session
     } catch is SteamSignInRequired {
@@ -979,6 +992,7 @@ final class WorkshopStore {
     webSessionRenewal = nil
     steamWebSession = nil
     subscribedIDs = []
+    subscriptionsReadFor = nil
     webSessions?.remove()
   }
 
