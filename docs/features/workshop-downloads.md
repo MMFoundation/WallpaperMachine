@@ -301,7 +301,10 @@ do the same, signing in first when needed.
 Signed in, the Workshop changes the account's subscriptions on Steam too. The inspector
 of an item that is not a collection offers **Subscribe on Steam** or **Unsubscribe on
 Steam**, and so does the **More actions** menu of an installed Workshop wallpaper, so a
-wallpaper tried out first can be subscribed afterwards (`WorkshopService.setSubscribed`): a POST to
+wallpaper tried out first can be subscribed afterwards; that menu item stays disabled
+until Steam has answered a subscriptions read for the account
+(`WorkshopStore.subscriptionsKnown`), since before then a missing mark may be a
+subscription after all (`WorkshopService.setSubscribed`): a POST to
 `steamcommunity.com/sharedfiles/subscribe` or `/unsubscribe` with the item, Wallpaper
 Engine's app id and a `sessionid` CSRF token that the same request also sends as a cookie
 beside `steamLoginSecure`, since Steam only checks that the two match; a fresh random one

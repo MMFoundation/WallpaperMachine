@@ -219,7 +219,9 @@ struct InspectorMoreMenu: View {
       if isWorkshop {
         if controller.workshop.steamWebSession != nil { subscription }
         Button {
-          controller.launch(PanelActionCoordinator.key("workshopCreator", id: row.id)) {
+          // Under the shell's navigation key, so a page or author chosen while Steam is still
+          // asked about this one wins.
+          controller.launch(PanelActionCoordinator.key("navigate"), policy: .latestWins) {
             try await controller.openInstalledWorkshopAuthor(id: row.id)
           }
         } label: {
@@ -292,8 +294,11 @@ struct InspectorMoreMenu: View {
     .help(L("More actions"))
     .accessibilityLabel(L("More actions"))
     .accessibilityIdentifier("inspector.more")
-    // The subscription item's label needs the account's subscriptions, as Discover's tiles do.
-    .task(id: row.id) { if isWorkshop { controller.workshopBrowser.readSubscriptionsOnce() } }
+    // The subscription item's label needs the account's subscriptions, as Discover's tiles do;
+    // asked again for another wallpaper or sign-in, which also retries a read that failed.
+    .task(id: "\(row.id) \(controller.workshop.steamWebSession?.steamID ?? "")") {
+      if isWorkshop { controller.workshopBrowser.readSubscriptionsOnce() }
+    }
   }
 
   private var isWorkshop: Bool { InspectorPolicy.isWorkshopID(row.id) }
@@ -312,6 +317,7 @@ struct InspectorMoreMenu: View {
         Label("Subscribe on Steam", systemImage: "bookmark")
       }
     }
-    .disabled(controller.isBusy(key))
+    // Until Steam has answered for this account, a missing mark may be a subscription after all.
+    .disabled(controller.isBusy(key) || !controller.workshop.subscriptionsKnown)
   }
 }

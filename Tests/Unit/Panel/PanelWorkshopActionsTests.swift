@@ -97,6 +97,17 @@ final class PanelWorkshopActionsTests: MediaPanelTestCase {
       XCTFail("signed out, nothing can be subscribed")
     } catch {}
     XCTAssertFalse(panel.workshop.subscribedIDs.contains(OfflineProtocol.itemID))
+    XCTAssertFalse(panel.workshop.subscriptionsKnown, "signed out, no subscriptions are known")
+
+    panel.controller.signInToSteamWeb = {
+      WebSignInCookies(session: "76561198000000001%7C%7C0123456789abcdef0123")
+    }
+    try await panel.controller.steamWebSignIn()
+    await panel.controller.steamWebSignInTask?.value
+    XCTAssertNotNil(panel.workshop.steamWebSession)
+    XCTAssertFalse(
+      panel.workshop.subscriptionsKnown,
+      "Steam never answered the read, so a wallpaper without a mark may be subscribed after all")
   }
 
   func testSubscriptionsSignInThroughSteamsPageAndSignOutForgetsTheSession() async throws {

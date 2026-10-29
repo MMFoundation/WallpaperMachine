@@ -231,7 +231,11 @@ extension PanelController {
   func openInstalledWorkshopAuthor(id: String) async throws {
     guard let itemID = TelemetryWallpaper.workshopID(id) else { throw InvalidControlValue() }
     var item = workshop.workshopItem(id: itemID)
-    if item?.authorProfileID == nil { item = try await workshop.lookUpItem(id: itemID) }
+    if item?.authorProfileID == nil {
+      item = try await workshop.lookUpItem(id: itemID)
+      // A page or author chosen while Steam answered cancels this one.
+      try Task.checkCancellation()
+    }
     guard let item, let author = item.authorProfileID else {
       throw WorkshopFailure(
         message: L("Steam did not say who made this wallpaper, so their other wallpapers can’t be shown."))
