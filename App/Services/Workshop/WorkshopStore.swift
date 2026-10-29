@@ -456,6 +456,11 @@ final class WorkshopStore {
     return updates.available[id]
   }
 
+  /// One item's current details from Steam's public endpoint, nil when Steam no longer serves it.
+  func lookUpItem(id: String) async throws -> WorkshopItem? {
+    try await service.details(ids: [id]).first { $0.id == id }
+  }
+
   /// A running session pins the account every queued job reuses; a name typed elsewhere must
   /// not seed an intent that would sign in as somebody else.
   var suggestedAccount: String {

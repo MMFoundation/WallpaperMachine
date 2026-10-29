@@ -216,6 +216,16 @@ struct InspectorMoreMenu: View {
           Label("Share…", systemImage: "square.and.arrow.up")
         }
       }
+      if isWorkshop {
+        if controller.workshop.steamWebSession != nil { subscription }
+        Button {
+          controller.launch(PanelActionCoordinator.key("workshopCreator", id: row.id)) {
+            try await controller.openInstalledWorkshopAuthor(id: row.id)
+          }
+        } label: {
+          Label("More by this author", systemImage: "person.crop.rectangle.stack")
+        }
+      }
       if offersAll {
         Button {
           controller.launch(PanelActionCoordinator.key("activateAll", id: row.id)) {
@@ -282,5 +292,26 @@ struct InspectorMoreMenu: View {
     .help(L("More actions"))
     .accessibilityLabel(L("More actions"))
     .accessibilityIdentifier("inspector.more")
+    // The subscription item's label needs the account's subscriptions, as Discover's tiles do.
+    .task(id: row.id) { if isWorkshop { controller.workshopBrowser.readSubscriptionsOnce() } }
+  }
+
+  private var isWorkshop: Bool { InspectorPolicy.isWorkshopID(row.id) }
+
+  /// **Subscribe on Steam** or **Unsubscribe on Steam**, for the signed-in Steam Community account,
+  /// as in Discover's inspector.
+  private var subscription: some View {
+    let subscribed = controller.workshop.subscribedIDs.contains(row.id)
+    let key = PanelActionCoordinator.key("workshopSubscription", id: row.id)
+    return Button {
+      controller.launch(key) { try await controller.setInstalledWorkshopSubscribed(!subscribed, id: row.id) }
+    } label: {
+      if subscribed {
+        Label("Unsubscribe on Steam", systemImage: "bookmark.slash")
+      } else {
+        Label("Subscribe on Steam", systemImage: "bookmark")
+      }
+    }
+    .disabled(controller.isBusy(key))
   }
 }

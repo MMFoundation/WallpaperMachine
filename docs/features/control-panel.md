@@ -425,7 +425,10 @@ The inspector follows Wallpaper Engine's hierarchy: preview (16:10, rounded), ti
 facts (kind and size; on Discover the creator and subscribers too), actions and tags.
 For an installed wallpaper the filled accent button is **Apply wallpaper** (or
 **Reapply wallpaper**), beside the favorite button and **More actions**, a menu with
-**Preview wallpaper**, **Show in Finder**, **Apply to all displays**, adding it to or
+**Preview wallpaper**, **Show in Finder**, **Share…**, **Subscribe on Steam** (signed in
+to Steam Community) and **More by this author** for a Workshop wallpaper (see
+[Collections, authors and subscriptions](workshop-downloads.md#collections-authors-and-subscriptions)),
+**Apply to all displays**, adding it to or
 removing it from the target display's playlist, **Reinstall from Workshop…** for a
 Workshop wallpaper (see
 [Reinstall from Workshop](workshop-downloads.md#reinstall-from-workshop)), **Report this

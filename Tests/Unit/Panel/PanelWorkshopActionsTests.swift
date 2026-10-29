@@ -62,6 +62,43 @@ final class PanelWorkshopActionsTests: MediaPanelTestCase {
     XCTAssertFalse(controller.workshopBrowse.source.canGoBack, "choosing a list starts the history over")
   }
 
+  func testAnInstalledWallpapersAuthorOpensInDiscoverFromItsWorkshopDetails() async throws {
+    let panel = try makePanel()
+    let controller = panel.controller
+    for id in ["", "My folder", String(repeating: "9", count: 21)] {
+      do {
+        try await controller.openInstalledWorkshopAuthor(id: id)
+        XCTFail("\(id) is not a Workshop wallpaper")
+      } catch is InvalidControlValue {}
+      do {
+        try await controller.setInstalledWorkshopSubscribed(true, id: id)
+        XCTFail("\(id) is not a Workshop wallpaper")
+      } catch is InvalidControlValue {}
+    }
+
+    // The library keeps no author: Steam's details of the item name them.
+    try await controller.openInstalledWorkshopAuthor(id: OfflineProtocol.itemID)
+    let source = controller.workshopBrowse.source
+    XCTAssertEqual(source.source.key, "creator")
+    XCTAssertEqual(source.source.id, "76561198000000001")
+    XCTAssertTrue(source.canGoBack, "Back returns to the list Discover showed")
+    XCTAssertEqual(controller.navigation.selection, .workshop)
+
+    do {
+      try await controller.openInstalledWorkshopAuthor(id: "1")
+      XCTFail("Steam serves no item 1, so no author is known")
+    } catch is WorkshopFailure {}
+  }
+
+  func testSubscribingAnInstalledWallpaperNeedsASteamSignIn() async throws {
+    let panel = try makePanel()
+    do {
+      try await panel.controller.setInstalledWorkshopSubscribed(true, id: OfflineProtocol.itemID)
+      XCTFail("signed out, nothing can be subscribed")
+    } catch {}
+    XCTAssertFalse(panel.workshop.subscribedIDs.contains(OfflineProtocol.itemID))
+  }
+
   func testSubscriptionsSignInThroughSteamsPageAndSignOutForgetsTheSession() async throws {
     let panel = try makePanel()
     let controller = panel.controller

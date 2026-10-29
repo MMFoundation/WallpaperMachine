@@ -218,6 +218,29 @@ extension PanelController {
     try await run(.direct) { try await workshop.setSubscribed(subscribed, itemID: item.id) }
   }
 
+  /// **Subscribe on Steam** and **Unsubscribe on Steam** in the Installed inspector's menu: the
+  /// same change for an installed Workshop wallpaper, named by its library id.
+  func setInstalledWorkshopSubscribed(_ subscribed: Bool, id: String) async throws {
+    guard let itemID = TelemetryWallpaper.workshopID(id) else { throw InvalidControlValue() }
+    try await run(.direct) { try await workshop.setSubscribed(subscribed, itemID: itemID) }
+  }
+
+  /// **More by this author** in the Installed inspector's menu: Discover with the author's
+  /// wallpapers, Back returning to the list it showed. The library keeps no author, so a wallpaper
+  /// Discover has not shown is looked up on Steam first.
+  func openInstalledWorkshopAuthor(id: String) async throws {
+    guard let itemID = TelemetryWallpaper.workshopID(id) else { throw InvalidControlValue() }
+    var item = workshop.workshopItem(id: itemID)
+    if item?.authorProfileID == nil { item = try await workshop.lookUpItem(id: itemID) }
+    guard let item, let author = item.authorProfileID else {
+      throw WorkshopFailure(
+        message: L("Steam did not say who made this wallpaper, so their other wallpapers can’t be shown."))
+    }
+    // Opened before the page is shown, so a first visit loads the author and not the browse list.
+    try await openWorkshopAuthor(id: author, name: item.creator)
+    try await navigate(.workshop)
+  }
+
   /// **Import my subscriptions**, in the welcome guide and the one-time offer: signs in to Steam
   /// Community first when no session is held, waiting for that window, then downloads every
   /// subscribed wallpaper the library lacks, as `downloadSubscribedWorkshopItems` does. Answers how

@@ -244,7 +244,11 @@ A Discover tile's details offer **More by this author** when Steam named the
 author's SteamID64. The author's public Workshop page
 (`steamcommunity.com/profiles/<id>/myworkshopfiles/?appid=431960`) lists 30 ids a
 page with the total and the author's name, and the details endpoint fills them
-in. A profile that is private or has nothing to show is simply empty.
+in. A profile that is private or has nothing to show is simply empty. An installed
+Workshop wallpaper's **More actions** menu offers **More by this author** too: the
+library keeps no author, so unless Discover still holds the item, its details are read
+from the public details endpoint first, and Discover then opens on the author's list
+with Back returning to the list it showed.
 
 ### Subscriptions
 
@@ -296,7 +300,8 @@ do the same, signing in first when needed.
 
 Signed in, the Workshop changes the account's subscriptions on Steam too. The inspector
 of an item that is not a collection offers **Subscribe on Steam** or **Unsubscribe on
-Steam** (`WorkshopService.setSubscribed`): a POST to
+Steam**, and so does the **More actions** menu of an installed Workshop wallpaper, so a
+wallpaper tried out first can be subscribed afterwards (`WorkshopService.setSubscribed`): a POST to
 `steamcommunity.com/sharedfiles/subscribe` or `/unsubscribe` with the item, Wallpaper
 Engine's app id and a `sessionid` CSRF token that the same request also sends as a cookie
 beside `steamLoginSecure`, since Steam only checks that the two match; a fresh random one
@@ -305,8 +310,8 @@ only answer taken as done; another `success`, an answer that cannot be read or a
 connection failure reaches the banner, and Steam's sign-in page or a 401 or 403 ends the
 session. The tiles of what the account subscribes to wear a bookmark mark (VoiceOver:
 **Subscribed on Steam**), from `WorkshopStore.subscribedIDs`: every page of the
-subscriptions is read the first time the Workshop page appears for each sign-in (after a
-saved one still being restored) and again right after a sign-in, and a subscribe or
+subscriptions is read the first time the Workshop page or an installed Workshop
+wallpaper's inspector appears for each sign-in (after a saved one still being restored) and again right after a sign-in, and a subscribe or
 unsubscribe Steam accepted updates it, also over a read still in flight; signed out it is
 empty. A read that fails leaves the marks as they were, says why in the banner and is tried
 again the next time the Workshop page appears. Downloading stays a separate choice: subscribing does not
