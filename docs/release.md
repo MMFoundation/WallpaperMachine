@@ -388,13 +388,17 @@ in minutes, its notes say only what it fixes, and `main` goes on as before.
    ```
 
    GitHub runs the workflow files of the branch that is pushed, so a tag older than this
-   process (1.6.5 and earlier) needs them on the branch first, in a commit of their own
-   without a `release:` line:
+   process (1.6.5 and earlier) needs them on the branch first. Take them from `main` now,
+   and commit them on their own, without a `release:` line, once the gate in step 2 has
+   passed with the fix, before the fix's commit:
 
    ```sh
    git checkout origin/main -- .github/workflows/version.yml .github/workflows/checks.yml \
      scripts/bump_version.py scripts/tests/test_bump_version.py
-   git commit -m "ci(release): bring the hotfix release workflow to this branch"
+   # after the gate:
+   git commit -m "ci(release): bring the hotfix release workflow to this branch" -- \
+     .github/workflows/version.yml .github/workflows/checks.yml \
+     scripts/bump_version.py scripts/tests/test_bump_version.py
    ```
 
    The merge back into `main` meets the same files there and changes nothing.
@@ -409,7 +413,7 @@ in minutes, its notes say only what it fixes, and `main` goes on as before.
    branch was cut from (only the fix), commits, tags and pushes to the hotfix branch,
    and calls Build exactly as for `main`. Build and `publish_release.py` do not care
    which branch a tag is on.
-4. Version's `merge-back` job then merges the tag into `main` with a merge commit
+4. Version's bump job then merges the tag into `main` with a merge commit
    (`chore: merge hotfix x.y.z into main`), which brings the fix, the version and the
    CHANGELOG.md section there. Main's next release continues from the hotfix's number,
    and its notes start at the hotfix's tag, which is now an ancestor, so the fix is not
@@ -441,7 +445,7 @@ Nothing in the repository blocks this today: as of 2026-10-29 it has no rulesets
 branch protection (`gh api repos/WallpaperMachine/WallpaperMachine/rules/branches/main`
 and `.../rules/branches/hotfix%2Fx.y.z` both return `[]`), and every workflow declares
 the write permissions it needs. Protection added later must let GitHub Actions push to
-`main` (bumps and `merge-back`) and to `hotfix/**` (the hotfix's bump commit and tag),
+`main` (bumps and the hotfix merge) and to `hotfix/**` (the hotfix's bump commit and tag),
 or the release stops after its notes are written.
 
 ### Emergency patch release for someone else (agents)
@@ -455,10 +459,10 @@ written. Do this, in order:
    commits since it (`git log --oneline <tag>..origin/main`); if it has none, a hotfix
    branch gains nothing, so release from `main` the usual way instead and say so.
 2. **Find the fix.** Cut `hotfix/<base version>` from that tag
-   (`git switch -c hotfix/1.6.5 v1.6.5`); when the tag predates the hotfix workflow, commit
-   it onto the branch first as [step 1 above](#hotfix-releases) shows. Then make the fix
-   with its test, or apply the commit the developer names with
-   `git cherry-pick --no-commit`, never on `main`. Keep only what the
+   (`git switch -c hotfix/1.6.5 v1.6.5`); when the tag predates the hotfix workflow, take
+   its files from `main` as [step 1 above](#hotfix-releases) shows and commit them after
+   the gate. Then make the fix with its test, or apply the commit the developer names with
+   `git cherry-pick --no-commit <commit>`, never on `main`. Keep only what the
    emergency needs: anything else waits for `main`'s next release.
 3. **Verify** as for any change: the routine gate `python3 scripts/test.py`, plus
    `scripts/check_rust.py` or `scripts/check_renderer.py` when the fix touches them.
@@ -473,10 +477,10 @@ written. Do this, in order:
    it becomes and the verification result, and push only after they agree:
    `git push -u origin hotfix/<base>`.
 6. **Follow it through.** Watch the Version run for the branch
-   (`gh run list --workflow version.yml --branch hotfix/<base>`), its Build, and
-   `merge-back`. Then check the release as the [checklist](#checklist-for-a-release)
+   (`gh run list --workflow version.yml --branch hotfix/<base>`), its merge step and its
+   Build. Then check the release as the [checklist](#checklist-for-a-release)
    says (Latest, image, manifest, notes), and that
-   `chore: merge hotfix x.y.z into main` is on `origin/main`; when `merge-back`
+   `chore: merge hotfix x.y.z into main` is on `origin/main`; when the merge step
    opened an issue instead, resolve that merge before anything else is released.
    Offer to delete the remote hotfix branch once the merge is on `main`.
 
@@ -532,20 +536,24 @@ workflow** with a `spec` input. On an `ubuntu-latest` runner it:
    `WallpaperMachine.xcodeproj/project.pbxproj` and `CHANGELOG.md` as
    `chore: bump version to x.y.z`, tags `vx.y.z`, and pushes branch and tag
    atomically as `github-actions[bot]`;
-5. calls the Build workflow directly for the tag it just pushed;
-6. for a `hotfix/**` branch, merges that tag into `main` (`merge-back`, in the same
-   `version-refs/heads/main` lock as a bump on `main`), or opens an issue when it
-   cannot ([Hotfix releases](#hotfix-releases)).
+5. for a `hotfix/**` branch, merges that tag into `main` in the same job, or opens an
+   issue when it cannot, without holding the release back
+   ([Hotfix releases](#hotfix-releases));
+6. calls the Build workflow directly for the tag it just pushed.
 
-Step 5 is not redundant. **A tag pushed with `GITHUB_TOKEN` never starts another
+Step 6 is not redundant. **A tag pushed with `GITHUB_TOKEN` never starts another
 workflow**, so the tag-triggered Release workflow would never fire for a
 CI-produced tag; without the direct call, a bumped version would be tagged but
 never published.
 
-The bump job holds a `version-<ref>` concurrency group only while the bump commit
-is produced. A workflow-wide group would keep the lock through the macOS build,
-and because GitHub retains only the newest pending run, a queued `release:` push
-could be replaced by a later ordinary push and silently lost.
+The bump job holds one `version-release` concurrency group, shared by `main` and every
+hotfix branch, only while the version is chosen, committed and tagged and a hotfix is
+merged into `main`. A workflow-wide group would keep the lock through the macOS build.
+Runs queue (`queue: max`) instead of replacing the pending one, so a queued `release:`
+push is never lost behind a later ordinary push, and `main` never releases between a
+hotfix's tag and its merge. A queued run checks out the branch as it is when the lock is
+free, not the commit that was pushed, so its push is never rejected as out of date; the
+release spec still comes from its own push.
 
 The workflow needs permission to push to `main`: `contents: write`, and branch
 protection must allow GitHub Actions.

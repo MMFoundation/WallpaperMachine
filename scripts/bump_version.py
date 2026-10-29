@@ -159,9 +159,9 @@ def check_hotfix(current: str, new: str, tags: list[str]) -> None:
     if target[:2] != old[:2] or target[2] <= old[2]:
         raise VersionError(f"a hotfix branch releases a patch of {current}, not {new}; use `release: patch`")
     newest = max((parse_semver(tag[1:]) for tag in tags), default=(0, 0, 0))
-    if old < newest:
+    if tags and old != newest:
         raise VersionError(
-            f"this branch carries {current}, older than the released {format_semver(newest)}; cut hotfix "
+            f"this branch carries {current}, not the newest released {format_semver(newest)}; cut hotfix "
             "branches from the newest release tag")
     if target <= newest:
         raise VersionError(

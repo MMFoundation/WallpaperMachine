@@ -162,6 +162,7 @@ class HotfixTests(unittest.TestCase):
             "older line": ("1.5.9", "1.5.10", ["v1.5.9", "v1.6.0"]),
             "taken": ("1.6.5", "1.6.6", ["v1.6.5", "v1.6.6"]),
             "behind the newest release": ("1.6.5", "1.6.7", ["v1.6.5", "v1.6.6"]),
+            "ahead of the newest release": ("1.6.7", "1.6.8", ["v1.6.5", "v1.6.6"]),
         }
         for reason, (current, new, tags) in refused.items():
             with self.subTest(reason), self.assertRaises(bump_version.VersionError):

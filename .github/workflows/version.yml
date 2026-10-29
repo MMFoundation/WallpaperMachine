@@ -10,8 +10,8 @@
 #
 # A `hotfix/<x.y.z>` branch cut from the newest release tag releases the same way, but
 # only as a patch newer than every tag (scripts/bump_version.py refuses anything else), so
-# an urgent fix ships without what main has gathered since. Once it is tagged, `merge-back`
-# merges the branch into main with a merge commit, which carries the fix, the version and
+# an urgent fix ships without what main has gathered since. Once it is tagged, the same job
+# merges the tag into main with a merge commit, which carries the fix, the version and
 # the CHANGELOG.md section there; a conflict opens an issue instead. See
 # docs/release.md#hotfix-releases.
 name: Version
@@ -37,19 +37,28 @@ permissions:
 jobs:
   bump:
     runs-on: ubuntu-latest
-    # Lock the branch only while the bump commit is produced. A workflow-wide group would
-    # hold it through the macOS build, and GitHub keeps only the newest pending run, so a
-    # queued `release:` push could be replaced by a later ordinary push and silently lost.
+    # One release lock for every branch, held only while a version is chosen, committed and
+    # tagged (and, for a hotfix, merged into main), never through the macOS build. Main and a
+    # hotfix branch therefore never pick a version at the same time, and main cannot release
+    # between a hotfix's tag and its merge. Runs queue rather than replace each other, so a
+    # `release:` push waiting behind an ordinary one is never lost.
     concurrency:
-      group: version-${{ github.ref }}
-      # merge-back shares main's group; queue so neither replaces the other's pending run.
+      group: version-release
       queue: max
       cancel-in-progress: false
+    permissions:
+      contents: write
+      # Opens an issue when a hotfix cannot be merged into main by itself.
+      issues: write
     outputs:
       tag: ${{ steps.push.outputs.tag }}
     steps:
+      # The branch as it is once the lock is held, not the pushed commit: a queued run would
+      # otherwise build on a commit the branch has moved past and fail to push. The release
+      # request still comes from this run's own push event.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - name: Bump version files
@@ -98,55 +107,23 @@ jobs:
           git push --atomic origin "HEAD:${{ github.ref_name }}" "refs/tags/${TAG}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-  publish:
-    needs: bump
-    if: needs.bump.outputs.tag != ''
-    uses: ./.github/workflows/build.yml
-    with:
-      tag: ${{ needs.bump.outputs.tag }}
-    # Build reads RELEASE_NOTES_API_KEY for a tag that has no CHANGELOG.md section.
-    secrets: inherit
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-    concurrency:
-      group: publish-${{ needs.bump.outputs.tag }}
-      cancel-in-progress: false
-
-  merge-back:
-    # Main must hold the released version and its CHANGELOG.md section before its own next
-    # release, or that release would reuse the hotfix's number. Runs whether or not Build
-    # succeeds: the tag is taken either way (docs/release.md#recovering-a-failed-release).
-    # The merge is pushed with GITHUB_TOKEN, which starts no workflow, so it never releases
-    # the hotfix's `release:` line again; bump_version.py skips tagged commits besides.
-    needs: bump
-    if: needs.bump.outputs.tag != '' && startsWith(github.ref_name, 'hotfix/')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      # Opens an issue when the hotfix cannot be merged into main by itself.
-      issues: write
-    concurrency:
-      group: version-refs/heads/main
-      queue: max
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
       - name: Merge the hotfix into main
+        # Main must hold the released version and its CHANGELOG.md section before its own
+        # next release, or that release would reuse the hotfix's number; the tag is taken
+        # whether or not Build succeeds (docs/release.md#recovering-a-failed-release). The
+        # push uses GITHUB_TOKEN, which starts no workflow, so the hotfix's `release:` line is
+        # never released again; bump_version.py skips tagged commits besides.
+        if: steps.push.outputs.tag != '' && startsWith(github.ref_name, 'hotfix/')
+        # A merge that needs a person opens an issue; it must not keep the release from Build.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.bump.outputs.tag }}
+          TAG: ${{ steps.push.outputs.tag }}
           BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git switch --detach origin/main
           if git merge --no-ff --no-edit -m "chore: merge hotfix ${TAG#v} into main" "refs/tags/${TAG}" \
               && git push origin HEAD:main; then
             echo "Merged ${TAG} into main."
@@ -168,3 +145,19 @@ jobs:
           BODY
           )"
           exit 1
+
+  publish:
+    needs: bump
+    if: needs.bump.outputs.tag != ''
+    uses: ./.github/workflows/build.yml
+    with:
+      tag: ${{ needs.bump.outputs.tag }}
+    # Build reads RELEASE_NOTES_API_KEY for a tag that has no CHANGELOG.md section.
+    secrets: inherit
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    concurrency:
+      group: publish-${{ needs.bump.outputs.tag }}
+      cancel-in-progress: false

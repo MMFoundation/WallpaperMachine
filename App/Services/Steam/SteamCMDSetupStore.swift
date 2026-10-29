@@ -381,7 +381,7 @@ final class SteamCMDSetupStore {
         // A download waits for this check, so a stalled server is given seconds, not minutes.
         _ = try await SteamCMDDownload(source: SteamCMDPackageManifest.url, destination: file,
                                        maximum: SteamCMDPackageManifest.maximumSize,
-                                       configuration: sessionConfiguration, requestTimeout: 30).start()
+                                       configuration: sessionConfiguration, timeout: 30).start()
         return try Data(contentsOf: file)
     }
 
