@@ -12,6 +12,80 @@ app's update window shows the sections of every version newer than the installed
 one, in the app's language; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.6.6](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.5...v1.6.6) (2026-10-29)
+
+### English
+
+This update keeps Steam downloads and sign-in working when Valve updates SteamCMD, and lets WallpaperMachine update itself where GitHub can't be reached
+
+#### Features
+
+- Where GitHub can't be reached, such as mainland China without a VPN, update checks and downloads now go through public download proxies, with every update still verified before installing ([682cffb](https://github.com/WallpaperMachine/WallpaperMachine/commit/682cffbd6481de762056d5262774f4775093036e))
+- An installed Workshop wallpaper's More actions menu in the Library now offers Subscribe on Steam or Unsubscribe while you're signed in to Steam Community (closes [#126](https://github.com/WallpaperMachine/WallpaperMachine/issues/126)) ([bbd1003](https://github.com/WallpaperMachine/WallpaperMachine/commit/bbd1003b641157365aeea12414334ce4ef65f565))
+- More by this author in the same menu opens the author's other wallpapers without searching the Workshop (closes [#126](https://github.com/WallpaperMachine/WallpaperMachine/issues/126)) ([bbd1003](https://github.com/WallpaperMachine/WallpaperMachine/commit/bbd1003b641157365aeea12414334ce4ef65f565))
+
+#### Improvements
+
+- WallpaperMachine now keeps SteamCMD up to date by itself, checking at most once a day, and a waiting download continues on its own afterwards ([8820e47](https://github.com/WallpaperMachine/WallpaperMachine/commit/8820e47edcad5d9e28cede97092be5548151bb38))
+- Update downloads that stall or slow to a trickle switch to another source and continue from where they stopped ([682cffb](https://github.com/WallpaperMachine/WallpaperMachine/commit/682cffbd6481de762056d5262774f4775093036e))
+- Diagnostics reports now include what SteamCMD printed during recent failed downloads and sign-ins, with account names, email addresses, Steam IDs and tokens removed ([8820e47](https://github.com/WallpaperMachine/WallpaperMachine/commit/8820e47edcad5d9e28cede97092be5548151bb38))
+
+#### Bug Fixes
+
+- Steam sign-in no longer stalls after approving Steam Guard when Valve releases a new SteamCMD, and an interrupted download is retried once ([8820e47](https://github.com/WallpaperMachine/WallpaperMachine/commit/8820e47edcad5d9e28cede97092be5548151bb38))
+- Scene wallpapers whose scripts build their own particles or trails now play instead of stopping, drawn through their layers' effects as in Wallpaper Engine ([e20f622](https://github.com/WallpaperMachine/WallpaperMachine/commit/e20f6223bddb39048e5785dfdfd5d76da546d325))
+- Wallpapers that switch between scenes no longer show both scenes' clocks on top of each other (closes [#127](https://github.com/WallpaperMachine/WallpaperMachine/issues/127)) ([2bcf883](https://github.com/WallpaperMachine/WallpaperMachine/commit/2bcf8831356ea59232b9b7f61b758d3d5148f8f0))
+
+Thanks to [@pandemoniummm](https://github.com/pandemoniummm) for contributing to this release.
+
+### 简体中文
+
+此版本让 Steam 下载和登录在 Valve 更新 SteamCMD 后依然可用，并让 WallpaperMachine 在无法访问 GitHub 时也能完成更新
+
+#### 新功能
+
+- 在无法访问 GitHub 的地区（例如未使用 VPN 的中国大陆），检查和下载更新现在会通过公共下载代理进行，安装前仍会验证每个更新 ([682cffb](https://github.com/WallpaperMachine/WallpaperMachine/commit/682cffbd6481de762056d5262774f4775093036e))
+- 登录 Steam 社区后，壁纸库中已安装的创意工坊壁纸的“更多操作”菜单现在提供“在 Steam 上订阅”或“取消订阅” (closes [#126](https://github.com/WallpaperMachine/WallpaperMachine/issues/126)) ([bbd1003](https://github.com/WallpaperMachine/WallpaperMachine/commit/bbd1003b641157365aeea12414334ce4ef65f565))
+- 同一菜单中的“该作者的更多作品”可直接打开作者的其他壁纸，无需在创意工坊中搜索 (closes [#126](https://github.com/WallpaperMachine/WallpaperMachine/issues/126)) ([bbd1003](https://github.com/WallpaperMachine/WallpaperMachine/commit/bbd1003b641157365aeea12414334ce4ef65f565))
+
+#### 改进
+
+- WallpaperMachine 现在会自动将 SteamCMD 保持为最新版本，每天最多检查一次，等待中的下载会在检查后自动继续 ([8820e47](https://github.com/WallpaperMachine/WallpaperMachine/commit/8820e47edcad5d9e28cede97092be5548151bb38))
+- 更新下载卡住或速度过慢时，会切换到其他下载源并从中断处继续 ([682cffb](https://github.com/WallpaperMachine/WallpaperMachine/commit/682cffbd6481de762056d5262774f4775093036e))
+- 诊断报告现在包含最近失败的下载和登录中 SteamCMD 的输出，并已移除帐户名、电子邮件地址、Steam ID 和令牌 ([8820e47](https://github.com/WallpaperMachine/WallpaperMachine/commit/8820e47edcad5d9e28cede97092be5548151bb38))
+
+#### 问题修复
+
+- Valve 发布新版 SteamCMD 后，Steam 登录不再在批准 Steam 令牌后卡住，意外中断的下载也会自动重试一次 ([8820e47](https://github.com/WallpaperMachine/WallpaperMachine/commit/8820e47edcad5d9e28cede97092be5548151bb38))
+- 通过脚本自行生成粒子或拖尾的场景壁纸现在可以正常播放而不会中止，并会像在 Wallpaper Engine 中一样经过图层效果绘制 ([e20f622](https://github.com/WallpaperMachine/WallpaperMachine/commit/e20f6223bddb39048e5785dfdfd5d76da546d325))
+- 在场景间切换的壁纸不再同时叠加显示两个场景的时钟 (closes [#127](https://github.com/WallpaperMachine/WallpaperMachine/issues/127)) ([2bcf883](https://github.com/WallpaperMachine/WallpaperMachine/commit/2bcf8831356ea59232b9b7f61b758d3d5148f8f0))
+
+感谢 [@pandemoniummm](https://github.com/pandemoniummm) 为本版本做出的贡献。
+
+### 한국어
+
+이번 업데이트로 Valve가 SteamCMD를 업데이트해도 Steam 다운로드와 로그인이 계속 작동하며, GitHub에 접속할 수 없는 곳에서도 WallpaperMachine을 업데이트할 수 있습니다
+
+#### 새로운 기능
+
+- VPN 없이 중국 본토처럼 GitHub에 접속할 수 없는 곳에서도 이제 공개 다운로드 프록시로 업데이트를 확인하고 내려받으며, 설치 전에는 모든 업데이트를 검증합니다 ([682cffb](https://github.com/WallpaperMachine/WallpaperMachine/commit/682cffbd6481de762056d5262774f4775093036e))
+- Steam 커뮤니티에 로그인하면 보관함에 설치된 창작마당 배경화면의 추가 작업 메뉴에서 Steam 구독이나 구독 취소를 할 수 있습니다 (closes [#126](https://github.com/WallpaperMachine/WallpaperMachine/issues/126)) ([bbd1003](https://github.com/WallpaperMachine/WallpaperMachine/commit/bbd1003b641157365aeea12414334ce4ef65f565))
+- 같은 메뉴의 이 제작자의 다른 작품을 선택하면 창작마당을 검색하지 않고도 제작자의 다른 배경화면을 바로 볼 수 있습니다 (closes [#126](https://github.com/WallpaperMachine/WallpaperMachine/issues/126)) ([bbd1003](https://github.com/WallpaperMachine/WallpaperMachine/commit/bbd1003b641157365aeea12414334ce4ef65f565))
+
+#### 개선 사항
+
+- WallpaperMachine이 이제 하루에 최대 한 번 확인해 SteamCMD를 자동으로 최신 상태로 유지하며, 대기 중인 다운로드는 확인 후 알아서 이어집니다 ([8820e47](https://github.com/WallpaperMachine/WallpaperMachine/commit/8820e47edcad5d9e28cede97092be5548151bb38))
+- 업데이트 다운로드가 멈추거나 매우 느려지면 다른 다운로드 경로로 전환해 중단된 지점부터 이어서 받습니다 ([682cffb](https://github.com/WallpaperMachine/WallpaperMachine/commit/682cffbd6481de762056d5262774f4775093036e))
+- 진단 보고서에 이제 최근 실패한 다운로드와 로그인에서 SteamCMD가 출력한 내용이 포함되며, 계정 이름, 이메일 주소, Steam ID와 토큰은 제거됩니다 ([8820e47](https://github.com/WallpaperMachine/WallpaperMachine/commit/8820e47edcad5d9e28cede97092be5548151bb38))
+
+#### 버그 수정
+
+- Valve가 새 SteamCMD를 출시해도 Steam Guard 승인 후 Steam 로그인이 멈추지 않으며, 중단된 다운로드는 한 번 자동으로 다시 시도합니다 ([8820e47](https://github.com/WallpaperMachine/WallpaperMachine/commit/8820e47edcad5d9e28cede97092be5548151bb38))
+- 스크립트로 파티클이나 궤적을 직접 만드는 장면 배경화면이 이제 멈추지 않고 재생되며, Wallpaper Engine처럼 레이어 효과를 거쳐 그려집니다 ([e20f622](https://github.com/WallpaperMachine/WallpaperMachine/commit/e20f6223bddb39048e5785dfdfd5d76da546d325))
+- 장면을 전환하는 배경화면에서 두 장면의 시계가 겹쳐 보이던 문제가 해결되었습니다 (closes [#127](https://github.com/WallpaperMachine/WallpaperMachine/issues/127)) ([2bcf883](https://github.com/WallpaperMachine/WallpaperMachine/commit/2bcf8831356ea59232b9b7f61b758d3d5148f8f0))
+
+이번 릴리스에 기여해 주신 [@pandemoniummm](https://github.com/pandemoniummm) 님께 감사드립니다.
+
 ## [1.6.5](https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.4...v1.6.5) (2026-10-27)
 
 ### English
