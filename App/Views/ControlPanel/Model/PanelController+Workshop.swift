@@ -233,11 +233,17 @@ extension PanelController {
     var item = workshop.workshopItem(id: itemID)
     if item?.authorProfileID == nil {
       // Asked outside the navigation key, so no other page waits for Steam; a page or wallpaper
-      // chosen while it answered wins, and the answer is dropped.
+      // chosen while it answered wins, and the answer, or the failure, is dropped.
       let page = navigation.selection
       let wallpaper = selectedWallpaperID
-      item = try await workshop.lookUpItem(id: itemID)
-      guard navigation.selection == page, selectedWallpaperID == wallpaper else { return }
+      let isCurrent = { self.navigation.selection == page && self.selectedWallpaperID == wallpaper }
+      do {
+        item = try await workshop.lookUpItem(id: itemID)
+      } catch {
+        guard isCurrent() else { return }
+        throw error
+      }
+      guard isCurrent() else { return }
     }
     guard let item, let author = item.authorProfileID else {
       throw WorkshopFailure(
