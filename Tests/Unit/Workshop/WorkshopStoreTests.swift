@@ -1023,6 +1023,39 @@ final class WorkshopDownloadIntentTests: XCTestCase {
     XCTAssertEqual(fixture.store.downloader.downloads.count, 1, "No job starts without an account")
   }
 
+  func testSignInThatEndsForNoReasonIsTriedAgainOnceAfterSteamCMDChanged() async throws {
+    let fixture = try makeFixture()
+    let launches = home.appendingPathComponent("launches")
+    try Data("#!/bin/sh\nprintf x >> '\(launches.path)'\nprintf 'Logging in user to Steam Public...\\n'\nexit 8\n".utf8)
+      .write(to: fixture.executable)
+    var checks: [TimeInterval] = []
+    var updated = true
+    fixture.store.updateSteamCMD = { interval in
+      checks.append(interval)
+      return updated
+    }
+    try await makeSetupReady(fixture)
+    func launched() -> Int { (try? Data(contentsOf: launches).count) ?? 0 }
+
+    fixture.store.requestSignIn(account: "localtest", rememberSession: true, bridge: fixture.bridge)
+    try await waitUntil { launched() == 2 && fixture.store.downloader.signIn?.isPending == false }
+    XCTAssertEqual(checks, [SteamCMDSetupStore.failureUpdateCheckInterval])
+    XCTAssertNotNil(fixture.store.downloader.signIn?.errorMessage)
+    // The retry failed too: what an update could fix, it did not, so the failure is the user's.
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertEqual(launched(), 2)
+    XCTAssertEqual(checks.count, 1)
+
+    // When SteamCMD did not change, nothing is tried again.
+    updated = false
+    try FileManager.default.removeItem(at: launches)
+    fixture.store.requestDownload(item: video, rememberSession: true, bridge: fixture.bridge)
+    try await waitUntil { checks.count == 2 }
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertEqual(launched(), 1)
+    XCTAssertEqual(fixture.store.downloader.download(for: video.id)?.isPending, false)
+  }
+
   func testSceneSkipsResourceConsentWhenAssetsAreReady() async throws {
     let fixture = try makeFixture(sceneAssetsReady: true)
     try await makeSetupReady(fixture)

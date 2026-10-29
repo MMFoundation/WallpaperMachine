@@ -167,6 +167,13 @@ final class WorkshopStore {
   @ObservationIgnored private let requestFile: URL
   @ObservationIgnored private weak var downloadBridge: BridgeStore?
   @ObservationIgnored private var observingDownloads = false
+  /// Jobs whose sign-in ended for no reason Steam gave, waiting for the SteamCMD check it calls for.
+  @ObservationIgnored private var awaitingSteamCMDCheck: Set<String> = []
+  /// Jobs already tried again after such a check updated SteamCMD: a second failure is the user's.
+  @ObservationIgnored private var retriedAfterSteamCMDUpdate: Set<String> = []
+  /// Runs that check: `SteamCMDSetupStore.updateIfOutdated`, which says whether SteamCMD changed.
+  /// Tests stand in for Valve's servers here.
+  @ObservationIgnored var updateSteamCMD: @MainActor (TimeInterval) async -> Bool = { _ in false }
 
   static let sceneAssetsRequestID = "scene-assets"
   static let signInRequestID = WorkshopDownloadManager.signInID
@@ -245,6 +252,8 @@ final class WorkshopStore {
       for request in downloadRequests { downloader.transferPausedToRequest(id: request.id) }
     }
     restoreBrowseFilters()
+    updateSteamCMD = { [steamCMDSetup] in await steamCMDSetup.updateIfOutdated(within: $0) }
+    downloader.onUnexplainedSignInFailure = { [weak self] job in self?.checkSteamCMD(after: job) }
   }
 
   func showDownload(_ job: WorkshopDownload) {
@@ -531,6 +540,10 @@ final class WorkshopStore {
   }
 
   private func resolve(_ request: WorkshopDownloadRequest, bridge: BridgeStore) {
+    // Downloads never let SteamCMD update itself, and Steam stops accepting a client that falls
+    // behind, so a daily check against Valve's newest comes first. The request waits for it as
+    // for setup, and the prerequisite observer resumes it once the check is over.
+    steamCMDSetup.startUpdateCheck()
     guard stage(for: request) == .ready, let runtime = steamCMDSetup.selectedRuntime else {
       let previous = downloadRequests
       if upsert(request) {
@@ -575,6 +588,34 @@ final class WorkshopStore {
       var refused = request
       refused.refused = true
       upsert(refused)
+    }
+  }
+
+  /// SteamCMD ended a job before Steam accepted the sign-in and Steam said nothing about why,
+  /// which is how a SteamCMD Steam no longer accepts fails. Once no job runs, Valve's newest is
+  /// looked for without waiting for the daily check, and when a different SteamCMD was installed
+  /// every job that failed this way is tried again, once.
+  private func checkSteamCMD(after job: WorkshopDownload) {
+    guard !retriedAfterSteamCMDUpdate.contains(job.id) else { return }
+    awaitingSteamCMDCheck.insert(job.id)
+    // Jobs still running would end the same way if SteamCMD is to blame; the last one checks.
+    guard !downloader.isRunning else { return }
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      let updated = await self.updateSteamCMD(SteamCMDSetupStore.failureUpdateCheckInterval)
+      let failed = self.awaitingSteamCMDCheck
+      self.awaitingSteamCMDCheck = []
+      guard updated, let bridge = self.downloadBridge else { return }
+      for id in failed.sorted() {
+        guard let job = self.downloader.downloads.first(where: { $0.id == id }),
+          !job.isPending, !job.isPaused, !job.isCancelled, job.errorMessage != nil
+        else { continue }
+        self.retriedAfterSteamCMDUpdate.insert(id)
+        AppLog.info("Workshop download \(id): trying again after SteamCMD was updated")
+        self.continueDownload(
+          id: id, account: job.account, rememberSession: job.rememberSession,
+          includeResources: false, bridge: bridge)
+      }
     }
   }
 

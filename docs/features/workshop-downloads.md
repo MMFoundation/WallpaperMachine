@@ -536,9 +536,47 @@ revalidate it, then launch natively. The installation candidate stays quarantine
 and is revalidated before publication.
 
 Downloads and smoke runs use `-inhibitbootstrap`, so a prepared complete runtime
-never self-updates mid-download. Reinstall through setup when a newer version is
-needed. The implementation is `App/Services/Steam/SteamCMDPackages.swift`,
+never self-updates mid-download; the app keeps it current instead (below). The
+implementation is `App/Services/Steam/SteamCMDPackages.swift`,
 `SteamCMDRuntime.swift` and `SteamCMDSetupStore.swift`.
+
+### Keeping SteamCMD current
+
+Steam stops accepting a SteamCMD that falls too far behind Valve's, and a copy run
+with `-inhibitbootstrap` never catches up by itself. In October 2026 Valve shipped
+a new SteamCMD on the 21st, and copies installed earlier stopped finishing the
+sign-in: Steam Guard was approved and SteamCMD still exited (1.6.4). So the app
+compares the managed copy (the one under `SteamCMD/` in app support) with Valve's
+manifest:
+
+- **Before a download or sign-in starts**, at most once a day
+  (`SteamCMDSetupStore.updateCheckInterval`), and when the control panel opens. The
+  request waits while the check runs, as it waits for setup ("Checking SteamCMD…"),
+  and continues by itself afterwards. A manifest whose `version` differs from the
+  one in `package/steam_cmd_osx.manifest` (newer, or one Valve withdrew) is
+  installed with every check of **Install SteamCMD** and replaces the copy only once
+  it has passed them; a candidate macOS holds for approval waits in Settings while
+  downloads go on with the copy already there. The check runs only while no download
+  does. The time of each check is recorded before Valve is asked, so an offline Mac
+  is not asked again on every download, and a manifest that cannot be read leaves
+  the installed copy in use without a message.
+- **After a sign-in that ends for no reason Steam gave**: SteamCMD exited before
+  Steam accepted the sign-in, with no rejected password or code and no failure
+  reason (`WorkshopDownloader.endedBeforeSignInUnexplained`), which is how an
+  outdated copy fails. Once no other job runs, the app looks again without waiting
+  for the day (at most every ten minutes) and, when that installed a different
+  SteamCMD, tries every job that failed this way again, once each; a second failure
+  is shown as usual.
+
+A SteamCMD you located yourself (Homebrew, `~/Steam`) is never replaced: update it
+the way you installed it. **Reinstall…** in Settings still forces a fresh copy.
+
+Valve's releases are also watched from CI: the
+[SteamCMD canary](../../.github/workflows/steamcmd-canary.yml) installs the newest
+SteamCMD every day the way the app does (`scripts/steamcmd_canary.py`, including
+Valve's code signature), signs in anonymously, and opens an issue when Valve
+publishes a version no issue names yet or the sign-in fails, so a release can be
+tried with a real account before the app's daily check brings it to everyone.
 
 ### Proxies
 
@@ -837,7 +875,10 @@ retry) starts a new private SteamCMD session for the selected wallpaper or asset
 installation and for the account name still in the form. The prior process is
 stopped and its private staging removed first. Supply a password or a fresh code
 when Steam asks: rejected requests are never reused, approval is never bypassed,
-and authentication retries are never automatic. If Steam reports rate limiting,
+and authentication retries are automatic only once, after a sign-in that ended
+for no reason Steam gave brought in a different SteamCMD
+([Keeping SteamCMD current](#keeping-steamcmd-current)); Steam then asks again as
+for any new sign-in. If Steam reports rate limiting,
 wait before retrying. Workshop content-access errors are a separate failure and
 offer no authentication retry.
 
