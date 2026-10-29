@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-28 — Updater: public GitHub proxy fallback and resumable downloads
+
+- Change: when GitHub is unreachable the update check and download go through ghfast.top, gh-proxy.com, gh.llkk.cc; downloads resume across sources with Range; installer refuses a copy not newer than the running one; release page opened only on github.com.
+- python3 scripts/test.py --only AppUpdateTests: 62 passed.
+- python3 scripts/test.py: 4193 passed, 0 failed, 49 skipped.
+- Live probe (curl, this Mac's network): the three proxies served the v1.6.5 manifest (200) and a ranged image request (206); ghproxy.net failed TLS. URLSession fetched the manifest through ghfast.top.
+- Renderer libraries rebuilt with scripts/build.py --renderer-only (stale after the MetalFX commit); generated bindings unchanged.
+- Not checked: an end-to-end update from mainland China without a VPN; no Release build.
+
 ## 2026-10-27 — MetalFX upscaling for a lowered render scale (issue 96)
 
 - python3 scripts/check_renderer.py: exit 0, passed; metalfx_upscale_test (5 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image in the upscaled 50% draw, released on the first drawn frame after it is turned off in a running scene and made again when turned on, a GPU without the scaler (simulated) composes the stretch byte for byte with no extra memory, no change at 100%.
@@ -115,13 +124,3 @@ Update signature check, http in web content, page errors in the log, frame-confi
 - Steam favorites page layout and `sortmethod` values read off a public profile's favorites page; a signed-in subscriptions page was not checked
 - Not compared with Wallpaper Engine frames (no VM run): mirror end-frame behaviour, `localPosition` y direction
 - Not run on a desktop: the frame-confirmed release of the switch hold, http loads, the View and Help menus, the fourth Discover tab's fit
-
-## 2026-10-25 — Scene capability probe, remembered Native Metal verdicts, mirror audio and issue-report details
-
-- `python3 scripts/test.py`: 4124 passed, 0 failed, 47 skipped (opt-in layers); includes `SceneDrawVerdictsTests`, the new `WallpaperCompatibilityTests`, `PanelLibraryActionsTests` (Apply question), `PanelLibraryStateTests` (changed properties, missing files), `NativeVideoWallpaperHostTests` and `MirrorAudioOwnershipTests`.
-- `python3 scripts/check_rust.py`: passed, with `tests::scene_capability` and the mirror audio-source assertion in `native_video_routing`; desktop/media/network opt-ins off.
-- `python3 scripts/check_renderer.py`: passed, with the new `scene_capability_probe_test` (4 tests) and the loader now on `Scene/SceneProjectLoading`; local-corpus cases skipped (no Wallpaper Engine assets or library on this Mac).
-- Gap: the probe's missing-file list was checked only on synthetic scenes, so false positives on real Workshop scenes are unmeasured.
-- Gap: no desktop run: the card, the Apply question, mirrored-video sound hand-off and real two-display behaviour are unverified on screen.
-- Not compared with Wallpaper Engine frames: no renderer output changed.
-- Not done: one shared player per mirror group (double decode remains), pending an authorized two-display measurement.

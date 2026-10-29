@@ -43,6 +43,14 @@ enum AppUpdateConfiguration {
     static var latestManifestURL: URL {
         URL(string: "https://github.com/\(repository)/releases/latest/download/\(manifestName)")!
     }
+
+    /// Public GitHub download proxies, tried in order for the manifest and the disk image when
+    /// GitHub itself can't be reached (mainland China without a VPN). Each takes the whole GitHub
+    /// URL after its own (`https://ghfast.top/https://github.com/…`) and relays GitHub's bytes.
+    /// They are untrusted transport: what installs is decided by the signature and version
+    /// checks, so a proxy can withhold an update but never substitute one.
+    static let mirrors: [URL] = ["https://ghfast.top/", "https://gh-proxy.com/", "https://gh.llkk.cc/"]
+        .map { URL(string: $0)! }
 }
 
 enum AppUpdateErrorCode: String, Equatable, Sendable {
@@ -316,7 +324,10 @@ enum GitHubReleaseParser {
             guard let url = URL(string: asset.browserDownloadURL) else { return nil }
             return GitHubReleaseAsset(name: asset.name, downloadURL: url, size: asset.size, digest: asset.digest)
         }
-        return GitHubRelease(version: version, htmlURL: htmlURL, prerelease: payload.prerelease,
+        // A manifest relayed by a mirror could name any page; About opens only GitHub's.
+        let releasePage = htmlURL.scheme == "https" && htmlURL.host?.lowercased() == "github.com"
+            ? htmlURL : AppUpdateConfiguration.releasesURL
+        return GitHubRelease(version: version, htmlURL: releasePage, prerelease: payload.prerelease,
                              assets: assets, notes: payload.body ?? "", changelog: payload.changelog ?? "")
     }
 

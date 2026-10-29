@@ -20,12 +20,16 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
     let fileManager: FileManager
     /// What a downloaded copy's signature must satisfy; tests pass one an ad-hoc copy meets.
     let signingRequirement: String
+    /// The running version; a downloaded copy must be newer.
+    let currentVersion: String
 
     init(currentAppURL: URL = Bundle.main.bundleURL, fileManager: FileManager = .default,
-         signingRequirement: String = AppUpdateConfiguration.signingRequirement) {
+         signingRequirement: String = AppUpdateConfiguration.signingRequirement,
+         currentVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") {
         self.currentAppURL = currentAppURL
         self.fileManager = fileManager
         self.signingRequirement = signingRequirement
+        self.currentVersion = currentVersion
     }
 
     var canInstallInPlace: Bool {
@@ -55,7 +59,8 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
     /// read-only, and is always detached before this returns or throws.
     func prepareInstallation(archive: URL) async throws -> URL {
         try await AppUpdatePreparationWorker().prepare(
-            archive: archive, root: fileManager.temporaryDirectory, signingRequirement: signingRequirement)
+            archive: archive, root: fileManager.temporaryDirectory, signingRequirement: signingRequirement,
+            currentVersion: currentVersion)
     }
 
     func discardPreparation(_ extractedApp: URL) async {
@@ -66,7 +71,7 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
         await AppUpdatePreparationWorker().discard(work)
     }
 
-    fileprivate static func prepare(archive: URL, root: URL, signingRequirement: String) throws -> URL {
+    fileprivate static func prepare(archive: URL, root: URL, signingRequirement: String, currentVersion: String) throws -> URL {
         try Task.checkCancellation()
         let fileManager = FileManager.default
         let work = root.appendingPathComponent("mwe-update-\(UUID().uuidString)", isDirectory: true)
@@ -75,6 +80,7 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
             let app = try Self.copyApplication(fromDiskImage: archive, into: work)
             try Self.validate(app)
             try Self.verifySignature(of: app, requirement: signingRequirement)
+            try Self.verifyNewer(app, than: currentVersion)
             try Task.checkCancellation()
             return app
         } catch {
@@ -269,11 +275,22 @@ struct AppUpdateInstaller: AppUpdateInstalling, @unchecked Sendable {
               SecStaticCodeCheckValidity(code, flags, compiled) == errSecSuccess
         else { throw verificationIssue }
     }
+
+    /// Refuses a copy that is not newer than the running one. A genuine older release passes
+    /// the signature check, so this is what stops a mirror relaying it as the latest from
+    /// rolling the app back.
+    static func verifyNewer(_ app: URL, than currentVersion: String) throws {
+        let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any]
+        guard let candidate = (info?["CFBundleShortVersionString"] as? String).flatMap(SemanticVersion.init),
+              let current = SemanticVersion(currentVersion), candidate > current
+        else { throw verificationIssue }
+    }
 }
 
 private actor AppUpdatePreparationWorker {
-    func prepare(archive: URL, root: URL, signingRequirement: String) throws -> URL {
-        try AppUpdateInstaller.prepare(archive: archive, root: root, signingRequirement: signingRequirement)
+    func prepare(archive: URL, root: URL, signingRequirement: String, currentVersion: String) throws -> URL {
+        try AppUpdateInstaller.prepare(archive: archive, root: root, signingRequirement: signingRequirement,
+                                       currentVersion: currentVersion)
     }
     func discard(_ work: URL) {
         try? FileManager.default.removeItem(at: work)
