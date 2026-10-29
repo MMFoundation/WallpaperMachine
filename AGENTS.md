@@ -17,6 +17,8 @@ use `rg -u` only when those are the target.
 - Product / features: [README](README.md), [docs index](docs/README.md).
 - A wallpaper that looks wrong (issue reports): [wallpaper fixes](docs/testing/wallpaper-fixes.md),
   skill `wallpaper-issue`.
+- An emergency/urgent/hotfix patch release: [hotfix releases](docs/release.md#hotfix-releases),
+  skill `hotfix-release`; the request authorizes the `release:` line, not the push.
 
 ## Ownership and invariants
 
@@ -86,8 +88,8 @@ use `rg -u` only when those are the target.
   `.omo/`, `.omp/`, `.pi/`) and `CLAUDE.local.md` are Git-ignored, machine-local state
   and personal rules: never `git add -f` them or link them from tracked docs. Ignore a
   new agent tool's dir in the same change; a shared file inside one follows the
-  `.gitignore` recipe and is listed here: the `wallpaper-issue` skill
-  (`.agents/skills/wallpaper-issue/`, linked from `.claude/skills/`). Check `git status`
+  `.gitignore` recipe and is listed here: the `wallpaper-issue` and `hotfix-release` skills
+  (`.agents/skills/<name>/`, linked from `.claude/skills/`). Check `git status`
   for agent paths before every commit.
 
 ## Permissions
