@@ -108,6 +108,11 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
   @ObservationIgnored private var persistenceDirectory: URL?
   @ObservationIgnored private let wakeCenter: NotificationCenter
   @ObservationIgnored private var wakeObserver: NSObjectProtocol?
+  /// Where failed runs leave what SteamCMD printed, beside the saved sign-in.
+  @ObservationIgnored let failureLog: SteamCMDFailureLog
+  /// Called when a job's SteamCMD ended before Steam accepted the sign-in and Steam gave no
+  /// reason, which is how an outdated SteamCMD fails; the store checks for a newer one.
+  @ObservationIgnored var onUnexplainedSignInFailure: (@MainActor (WorkshopDownload) -> Void)?
 
   private struct SavedDownload: Codable {
     let id: String
@@ -187,6 +192,8 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
     self.runtimeProvider = runtimeProvider
     self.networkMonitorFactory = networkMonitorFactory
     self.wakeCenter = wakeCenter
+    failureLog = SteamCMDFailureLog(
+      url: sessionDirectory.deletingLastPathComponent().appendingPathComponent(SteamCMDFailureLog.fileName))
     self.maximumConcurrentDownloads = Self.clampedConcurrentDownloads(maximumConcurrentDownloads)
     savedAccount = WorkshopDownloader.readSavedAccount(at: sessionDirectory)
     // A connection often dies with the sleep; each running transfer checks that bytes still arrive.
@@ -397,10 +404,14 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
         job.isPaused = false
         job.wasCancelled = false
       }
+      if let output = job.worker.failureOutput { self.failureLog.append(output) }
       self.settleSessionConflict(for: job)
       if !job.isQueued && !job.isPaused { job.begin = nil }
       self.persist()
       self.startQueuedDownloads()
+      if job.worker.endedBeforeSignInUnexplained, !job.isCancelled, !self.isShuttingDown {
+        self.onUnexplainedSignInFailure?(job)
+      }
     }
     let previous = downloads
     if let index = downloads.firstIndex(where: { $0.id == job.id }) { downloads[index] = job }

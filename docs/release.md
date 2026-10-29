@@ -3,7 +3,8 @@
 Version numbers, the pipeline that publishes a build, the notes it writes, and what
 the in-app updater expects of a release. Build mechanics live in [build.md](build.md). To cut
 a release, follow the [checklist](#checklist-for-a-release); when one fails, see
-[Recovering a failed release](#recovering-a-failed-release).
+[Recovering a failed release](#recovering-a-failed-release); for an urgent fix that
+must not wait for what `main` holds, see [Hotfix releases](#hotfix-releases).
 
 ## Source of truth
 
@@ -370,14 +371,131 @@ API, maintainers and bots left out) and the thanks line in every language, the p
 `scripts/tests/test_update_manifest.py` covers the manifest. Both run as part of
 `python3 scripts/test.py`.
 
+## Hotfix releases
+
+An urgent fix (a broken sign-in, a crash on launch) ships on its own, not together
+with the features `main` has gathered since the last release. A release that carries
+both waits for both to be checked, and if it breaks something nobody can tell, or
+pull back, one without the other: 1.6.4 shipped the SteamCMD sign-in fix with the
+whole of #100. A hotfix release holds the fix and nothing else, so it can be checked
+in minutes, its notes say only what it fixes, and `main` goes on as before.
+
+1. Branch from the newest release tag, named after it:
+
+   ```sh
+   git fetch --tags
+   git switch -c hotfix/1.6.5 v1.6.5
+   ```
+
+   GitHub runs the workflow files of the branch that is pushed, so a tag older than this
+   process (1.6.5 and earlier) needs them on the branch first. Take them from `main` now,
+   and commit them on their own, without a `release:` line, once the gate in step 2 has
+   passed with the fix, before the fix's commit:
+
+   ```sh
+   git checkout origin/main -- .github/workflows/version.yml .github/workflows/checks.yml \
+     scripts/bump_version.py scripts/tests/test_bump_version.py
+   # after the gate:
+   git commit -m "ci(release): bring the hotfix release workflow to this branch" -- \
+     .github/workflows/version.yml .github/workflows/checks.yml \
+     scripts/bump_version.py scripts/tests/test_bump_version.py
+   ```
+
+   The merge back into `main` meets the same files there and changes nothing.
+
+2. Make the fix there, with its test, not on `main`; run the gate
+   (`python3 scripts/test.py`) as for any change. Pull requests into `hotfix/**` get the
+   same Checks as those into `main`.
+3. Push the branch with `release: patch` in the fix's commit message, or merge a pull
+   request into the branch with that line, or run
+   `gh workflow run version.yml --ref hotfix/1.6.5 -f spec=patch`. Version bumps the
+   patch number, writes the CHANGELOG.md section from the commits since the tag the
+   branch was cut from (only the fix), commits, tags and pushes to the hotfix branch,
+   and calls Build exactly as for `main`. Build and `publish_release.py` do not care
+   which branch a tag is on.
+4. Version's bump job then merges the tag into `main` with a merge commit
+   (`chore: merge hotfix x.y.z into main`), which brings the fix, the version and the
+   CHANGELOG.md section there. Main's next release continues from the hotfix's number,
+   and its notes start at the hotfix's tag, which is now an ancestor, so the fix is not
+   listed twice. When the merge conflicts, or `main` moved while it pushed, the job
+   opens an issue "Merge hotfix x.y.z into main" with the commands, and fails; do that
+   merge before `main` releases again.
+
+`scripts/bump_version.py` holds a hotfix branch to this: only a patch of the version
+the branch carries, which must be the newest `vx.y.z` tag. It also refuses a release
+from `main` while the newest tag is not merged into it. A minor or major spec, a branch
+cut from an older release, or a version another release already took fails the bump
+before anything is written, so a hotfix always becomes Latest and never takes a
+number `main` will want. To fix an older line instead, release from `main`.
+
+Merge a hotfix branch into `main` only with a merge commit, never a squash or a
+rebase: those copy the fix's `release:` line into a new commit on `main`, and its push
+would release again. A plain merge is safe: Version skips the `release:` lines of
+pushed commits that a version tag already contains. This is the one merge commit the
+[commit rules](conventions.md#commits-and-pull-requests) allow on `main`. Delete the
+hotfix branch once the merge is on `main`.
+
+Make the fix on the hotfix branch. A fix that already landed on `main` can be
+cherry-picked without committing (`git cherry-pick --no-commit <commit>`, then commit it
+after the gate, ending the message with `(cherry picked from commit <commit>)`): the
+merge back then meets the same change
+on both sides and goes through, but the commit on `main` is not part of the hotfix tag,
+so `main`'s next notes may describe the fix again. Read that section before its release.
+
+Nothing in the repository blocks this today: as of 2026-10-29 it has no rulesets and no
+branch protection (`gh api repos/WallpaperMachine/WallpaperMachine/rules/branches/main`
+and `.../rules/branches/hotfix%2Fx.y.z` both return `[]`), and every workflow declares
+the write permissions it needs. Protection added later must let GitHub Actions push to
+`main` (bumps and the hotfix merge) and to `hotfix/**` (the hotfix's bump commit and tag),
+or the release stops after its notes are written.
+
+### Emergency patch release for someone else (agents)
+
+When the developer asks for an emergency, urgent or hotfix patch release, that request
+is the release the [agent rules](../AGENTS.md) require before a `release:` line is
+written. Do this, in order:
+
+1. **Find the base.** `git fetch --tags origin` and take the newest tag,
+   `git tag --list 'v*' --sort=-v:refname | head -1`. Check that `main` has unreleased
+   commits since it (`git log --oneline <tag>..origin/main`); if it has none, a hotfix
+   branch gains nothing, so release from `main` the usual way instead and say so.
+2. **Find the fix.** Cut `hotfix/<base version>` from that tag
+   (`git switch -c hotfix/1.6.5 v1.6.5`); when the tag predates the hotfix workflow, take
+   its files from `main` as [step 1 above](#hotfix-releases) shows and commit them after
+   the gate. Then make the fix with its test, or apply the commit the developer names with
+   `git cherry-pick --no-commit <commit>`, never on `main`. Keep only what the
+   emergency needs: anything else waits for `main`'s next release.
+3. **Verify** as for any change: the routine gate `python3 scripts/test.py`, plus
+   `scripts/check_rust.py` or `scripts/check_renderer.py` when the fix touches them.
+   No push on a failed or missing verdict.
+4. **Commit** with a user-facing `fix(scope): …` subject and body (they become the notes),
+   `Closes #n` for the issue, and a standalone `release: patch` line. A developer's
+   note, if asked for, is committed first ([Developer's notes](#developers-notes)).
+   `python3 scripts/bump_version.py --spec patch --branch hotfix/<base>` is a dry run
+   of the version the push will cut.
+5. **Confirm, then push.** Pushing publishes a release to every user. Show the
+   developer the commits on the branch (`git log --oneline <tag>..HEAD`), the version
+   it becomes and the verification result, and push only after they agree:
+   `git push -u origin hotfix/<base>`.
+6. **Follow it through.** Watch the Version run for the branch
+   (`gh run list --workflow version.yml --branch hotfix/<base>`), its merge step and its
+   Build. Then check the release as the [checklist](#checklist-for-a-release)
+   says (Latest, image, manifest, notes), and that
+   `chore: merge hotfix x.y.z into main` is on `origin/main`; when the merge step
+   opened an issue instead, resolve that merge before anything else is released.
+   Offer to delete the remote hotfix branch once the merge is on `main`.
+
+A failure along the way follows [Recovering a failed release](#recovering-a-failed-release),
+on the hotfix branch rather than `main`.
+
 ## Workflows
 
 Version, Build, Release, Warm caches and Supporters are the release workflows in
 `.github/workflows/`; Supporters shares only `main` with the others.
 `claude.yml` and `claude-code-review.yml` are pull-request automation, described
 in [CONTRIBUTING.md](../CONTRIBUTING.md#automated-review). `checks.yml` runs
-`python3 scripts/test.py --python-only` on Linux for every pull request into `main` and
-every push to it, the fast check a pull request waits for. `codeql.yml` is code scanning,
+`python3 scripts/test.py --python-only` on Linux for every pull request into `main` or a
+`hotfix/**` branch and every push to them, the fast check a pull request waits for. `codeql.yml` is code scanning,
 described [below](#codeql-codeqlyml).
 
 Version, Build and Release grant `contents: write`; Build's publish job also needs
@@ -401,7 +519,8 @@ repository `origin` points at.
 
 ### Version (`version.yml`)
 
-Runs on every push to `main`, and on demand from **Actions -> Version -> Run
+Runs on every push to `main` or to a `hotfix/**` branch
+([Hotfix releases](#hotfix-releases)), and on demand from **Actions -> Version -> Run
 workflow** with a `spec` input. On an `ubuntu-latest` runner it:
 
 1. checks out with full history;
@@ -418,17 +537,27 @@ workflow** with a `spec` input. On an `ubuntu-latest` runner it:
    `WallpaperMachine.xcodeproj/project.pbxproj` and `CHANGELOG.md` as
    `chore: bump version to x.y.z`, tags `vx.y.z`, and pushes branch and tag
    atomically as `github-actions[bot]`;
-5. calls the Build workflow directly for the tag it just pushed.
+5. for a `hotfix/**` branch, merges that tag into `main` in the same job, or opens an
+   issue when it cannot, without holding the release back
+   ([Hotfix releases](#hotfix-releases));
+6. calls the Build workflow directly for the tag it just pushed.
 
-Step 5 is not redundant. **A tag pushed with `GITHUB_TOKEN` never starts another
+Step 6 is not redundant. **A tag pushed with `GITHUB_TOKEN` never starts another
 workflow**, so the tag-triggered Release workflow would never fire for a
 CI-produced tag; without the direct call, a bumped version would be tagged but
 never published.
 
-The bump job holds a `version-<ref>` concurrency group only while the bump commit
-is produced. A workflow-wide group would keep the lock through the macOS build,
-and because GitHub retains only the newest pending run, a queued `release:` push
-could be replaced by a later ordinary push and silently lost.
+The bump job holds one `version-release` concurrency group, shared by `main` and every
+hotfix branch, only while the version is chosen, committed and tagged and a hotfix is
+merged into `main`. A workflow-wide group would keep the lock through the macOS build.
+Runs queue (`queue: max`) instead of replacing the pending one, so a queued `release:`
+push is never lost behind a later ordinary push, and `main` cannot release between a
+hotfix's tag and its merge. When that merge needs a person (a conflict), the lock ends
+with the job, but `bump_version.py` refuses a release from any branch that does not
+contain the newest tag, so `main` releases again only once the hotfix is merged. A merge
+whose push lost a race with another push to `main` (the Supporter list) is retried. A queued run checks out the branch as it is when the lock is
+free, not the commit that was pushed, so its push is never rejected as out of date; the
+release spec still comes from its own push.
 
 The workflow needs permission to push to `main`: `contents: write`, and branch
 protection must allow GitHub Actions.
@@ -770,7 +899,9 @@ carries `CHANGELOG.md` as it is at the patch's tag, and that copy is not rewritt
 ## Checklist for a release
 
 1. Land the change on `main` with a `release:` spec line, or run the Version
-   workflow with a spec.
+   workflow with a spec. An urgent fix goes on a `hotfix/<x.y.z>` branch from the
+   newest tag instead ([Hotfix releases](#hotfix-releases)); afterwards also confirm
+   `chore: merge hotfix x.y.z into main` reached `main`, or that its issue is handled.
 2. Confirm the Version run committed `chore: bump version to x.y.z` with the new
    `CHANGELOG.md` section and pushed `vx.y.z`. Read the section: its heading is
    `## [x.y.z](<compare link>) (YYYY-MM-DD)`, then `### English`, `### 简体中文` and

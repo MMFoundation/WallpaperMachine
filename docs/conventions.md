@@ -312,7 +312,14 @@ The rules that bind every change:
 - History stays linear: catch up with `origin/main` by rebasing unpushed commits
   (`git pull --rebase`), not with a `Merge remote-tracking branch` commit. CI commits
   to `main` on its own (version bumps, the Supporter list), so a local `main`
-  falls behind often. Commits that are already pushed are never rewritten.
+  falls behind often. Commits that are already pushed are never rewritten. The one
+  merge commit on `main` brings a released hotfix branch back
+  (`chore: merge hotfix x.y.z into main`, see
+  [release.md](release.md#hotfix-releases)); a squash or rebase of that branch would
+  release its `release:` line again.
+- An urgent fix that must ship without the rest of `main` goes on a `hotfix/<x.y.z>`
+  branch cut from the newest release tag, not on `main`
+  ([release.md](release.md#hotfix-releases)).
 - Never commit `artifacts/`, `build/`, screenshots, traces, wallpaper payloads,
   Steam session data, credentials, or absolute personal paths.
 

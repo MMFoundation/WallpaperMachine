@@ -74,9 +74,19 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     @ObservationIgnored var onAuthenticated: (@MainActor () -> Void)?
     /// Steam ended this session because the same account signed in from somewhere else.
     private(set) var endedBySessionConflict = false
+    /// SteamCMD ended before Steam accepted the sign-in, without a word from Steam about why:
+    /// no rejected password or code, no failure reason. An outdated SteamCMD ends this way.
+    private(set) var endedBeforeSignInUnexplained = false
     @ObservationIgnored private var signInHandedOff = false
     @ObservationIgnored private var loggedStatus = ""
     @ObservationIgnored private var recentOutput = ""
+    /// The run's last lines of output, redacted as they arrive, for `failureOutput`.
+    @ObservationIgnored private var outputTail: [String] = []
+    @ObservationIgnored private var outputTailPartial = ""
+    @ObservationIgnored private var runAccount = ""
+    /// What SteamCMD printed before the last run failed, redacted (`SteamCMDFailureLog`); nil after
+    /// a run that did not fail.
+    @ObservationIgnored private(set) var failureOutput: String?
     @ObservationIgnored private var outputBuffer = [UInt8](repeating: 0, count: 8192)
     nonisolated static let stagingPrefix = ".WallpaperMachine-workshop-"
     nonisolated private static let ownerName = "owner"
@@ -254,6 +264,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             }
         }
         resetRunState(itemID: itemID, signInOnly: signInOnly, expectedBytes: expectedBytes)
+        runAccount = account
         let label = itemID ?? (signInOnly ? "sign-in" : "scene assets")
         runLabel = label
         task = Task {
@@ -295,10 +306,14 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         presetBaseStatus = nil
         transferItem = nil
         endedBySessionConflict = false
+        endedBeforeSignInUnexplained = false
         signInHandedOff = false
         signInAccepted = false
         loggedStatus = ""
         recentOutput = ""
+        outputTail = []
+        outputTailPartial = ""
+        failureOutput = nil
         failure = nil
         receivesNetwork = false
         networkStarted = false
@@ -436,6 +451,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         } catch {
             failedRun = true
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failureOutput = failureTranscript(label: label)
             status = isSigningInOnly
                 ? String(localized: "Sign-in could not finish")
                 : String(localized: "Download could not finish")
@@ -479,6 +495,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             authenticationFailed = isAuthenticating && !signInAccepted
             // Only the step it ended in is logged, never what SteamCMD printed.
             AppLog.warn("SteamCMD \(runLabel): exited with status \(exitStatus) while \(phase.rawValue) (sign-in accepted: \(signInAccepted), Steam Guard answered: \(steamGuardAnswered))")
+            endedBeforeSignInUnexplained = authenticationFailed
             // Before Steam accepts the sign-in, ownership has not been asked about yet.
             throw passFailure(isSigningInOnly || authenticationFailed
                 ? String(localized: "SteamCMD exited before confirming the sign-in. Check the account name and password, approve Steam Guard, and retry.")
@@ -488,6 +505,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         guard confirmed else {
             if isSigningInOnly {
                 authenticationFailed = true
+                endedBeforeSignInUnexplained = isAuthenticating && !signInAccepted
                 throw WorkshopFailure(message: String(localized: "Steam closed the session without confirming the sign-in. Check the account name and password, then retry."))
             }
             throw passFailure(isInstallingAssets
@@ -841,6 +859,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
 
         // The state of one pass starts from nothing.
         recentOutput = ""
+        keepOutputLine("--- SteamCMD started ---")
         readingLicense = false
         licenseIsActive = false
         prompt = nil
@@ -918,6 +937,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     private func consume(_ text: String) {
         guard isRunning else { return }
         lastActivity = now()
+        keepOutput(text)
         recentOutput += text.lowercased()
         while let newline = recentOutput.firstIndex(where: { $0.isNewline }) {
             let line = String(recentOutput[..<newline])
@@ -928,6 +948,38 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         // An old prompt must not mask a later failure, and a prompt has no newline to wait for.
         if recentOutput.count > 4096 { recentOutput = String(recentOutput.suffix(4096)) }
         consumeLine(recentOutput, complete: false)
+    }
+
+    /// Adds output to the run's tail, a line at a time once its end has arrived.
+    private func keepOutput(_ text: String) {
+        outputTailPartial += text
+        while let end = outputTailPartial.firstIndex(where: { $0.isNewline }) {
+            let line = String(outputTailPartial[..<end])
+            outputTailPartial.removeSubrange(...end)
+            if !line.trimmingCharacters(in: .whitespaces).isEmpty { keepOutputLine(line) }
+        }
+        if outputTailPartial.count > SteamCMDFailureLog.maximumLineLength * 4 {
+            keepOutputLine(outputTailPartial)
+            outputTailPartial = ""
+        }
+    }
+
+    private func keepOutputLine(_ line: String) {
+        outputTail.append(SteamCMDFailureLog.redacted(line, account: runAccount))
+        if outputTail.count > SteamCMDFailureLog.maximumLines { outputTail.removeFirst(outputTail.count - SteamCMDFailureLog.maximumLines) }
+    }
+
+    /// The failed run's tail with what the app made of it, for `SteamCMDFailureLog`.
+    private func failureTranscript(label: String) -> String {
+        var lines = outputTail
+        let partial = outputTailPartial.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !partial.isEmpty { lines.append(SteamCMDFailureLog.redacted(partial, account: runAccount)) }
+        let stamp = ISO8601DateFormatter().string(from: now())
+        let header = "== \(stamp) SteamCMD \(label): failed while \(phase.rawValue) (sign-in accepted: \(signInAccepted), "
+            + "Steam Guard answered: \(steamGuardAnswered), no reason from Steam: \(endedBeforeSignInUnexplained))"
+        let message = SteamCMDFailureLog.redacted(errorMessage ?? "", account: runAccount)
+        return ([header, "app said: \(message)"] + (lines.isEmpty ? ["(SteamCMD printed nothing)"] : lines))
+            .joined(separator: "\n")
     }
 
     /// Output the process left without a final newline is a whole line once nothing more can

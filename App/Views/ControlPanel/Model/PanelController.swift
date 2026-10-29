@@ -382,8 +382,12 @@ final class PanelController {
     pixiv.prefetchesNextPage = true
     pixiv.onThumbnailsAvailable = { [cache = images.pixivThumbnailCache] in cache.warm($0) }
     // Opening the panel looks for SteamCMD once, so Discover and the download dialog know whether
-    // it is installed without a visit to Settings.
-    Task { await workshop.steamCMDSetup.refresh() }
+    // it is installed without a visit to Settings, and brings a managed copy that is due up to
+    // Valve's newest before the first download asks for it.
+    Task {
+      await workshop.steamCMDSetup.refresh()
+      workshop.steamCMDSetup.startUpdateCheck()
+    }
     errors.reconcile()
     errorLoop?.start()
     lifecycleLoop?.start()
