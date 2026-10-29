@@ -4703,7 +4703,6 @@ std::shared_ptr<SceneNode> MakeScriptModelLayer(const std::shared_ptr<Scene>& sc
         slots.emplace_back(std::move(*authored), std::move(loaded));
     }
     FlushPendingMetalTranslations(*scene);
-    lazy.uses_models = true;
 
     auto&      layer = AddLayer(lazy, 0, entry, plan, true, false);
     const auto node  = layer.node;
