@@ -857,6 +857,11 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   generation, which is what makes the renderer copy the buffers. Before it, a
   script calling `thisScene.createModelData` threw `IModelData is not defined`
   in `init` (Workshop item 3798688689, issue #127).
+  `ScriptModelLayer.ALayerAScriptParentsToAComposeLayerIsDrawnThroughItsEffects`
+  covers a compose layer without authored children that a script parents layers
+  to: it is built as a composition (`ScriptMayParentTo` in the parser), so they
+  are drawn into its buffer and through its effects; before, they were drawn
+  straight onto the screen and the item's particle canvas added them up uncomposed.
 - **Timeline events** — `ScriptRuntimeCompat.*Timeline*Event*`, `*Marker*`,
   `GlobalAnimationListenersRunOncePerMarkerWhateverIsBound`,
   `GlobalOnlyAnimationListenerSeesTheCurrentTickTime` and

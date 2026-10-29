@@ -2811,7 +2811,7 @@ struct EntryPlan {
     EntryKind   kind { EntryKind::Ignored };
     Admission   admission { Admission::Skip };
     int32_t     id { 0 };
-    bool        has_children { false }; // another entry names this one as its parent
+    bool        has_children { false }; // another entry, or a script (`ScriptMayParentTo`), parents to it
     bool        placeholder { false }; // a node standing in for a typed object that has children
     std::string key;
 };
@@ -2924,6 +2924,7 @@ nlohmann::json WithExternalMaterials(const nlohmann::json& objects, fs::VFS& vfs
 struct ScriptLiteralSet {
     std::unordered_set<std::string> strings;
     std::unordered_set<int32_t>     ids;
+    bool                            creates_layers { false }; // some script calls `createLayer`
 };
 
 ScriptLiteralSet ScriptLiterals(const nlohmann::json& objects) {
@@ -2937,6 +2938,9 @@ ScriptLiteralSet ScriptLiterals(const nlohmann::json& objects) {
     if (by_id) {
         for (const auto* source : sources) CollectScriptIntegerLiterals(*source, literals.ids);
     }
+    literals.creates_layers = std::any_of(sources.begin(), sources.end(), [](const std::string* source) {
+        return source->find("createLayer") != std::string::npos;
+    });
     return literals;
 }
 
@@ -2956,6 +2960,21 @@ bool RetainedWhileHidden(EntryKind kind, const nlohmann::json& entry, int32_t id
         return literals.strings.contains(name->get<std::string>());
     }
     return false;
+}
+
+/// Whether a compose layer takes children from scripts: some script creates layers and names
+/// this one by a quoted literal or its id. It is then built as a composition, as one with
+/// children in the scene file is, so what a script parents to it is drawn through its effects.
+bool ScriptMayParentTo(const nlohmann::json& entry, int32_t id, const ScriptLiteralSet& literals) {
+    if (! literals.creates_layers) return false;
+    const auto image = entry.find("image");
+    if (image == entry.end() || ! image->is_string() || ! IsComposeLayerModel(image->get<std::string>())) {
+        return false;
+    }
+    if (id != 0 && literals.ids.contains(id)) return true;
+    const auto name = entry.find("name");
+    return name != entry.end() && name->is_string() && ! name->get_ref<const std::string&>().empty() &&
+           literals.strings.contains(name->get<std::string>());
 }
 
 /// Decides, for every entry, what is built and what is called.
@@ -2983,7 +3002,7 @@ std::vector<EntryPlan> PlanEntries(ParseContext& context, const nlohmann::json& 
         plan.id            = EntryId(entry);
         const bool has_id  = plan.id != 0;
         const bool has_kids = has_id && parent_ids.contains(plan.id);
-        plan.has_children   = has_kids;
+        plan.has_children   = has_kids || ScriptMayParentTo(entry, plan.id, literals);
         const bool hidden  = StaticallyHidden(entry);
         switch (plan.kind) {
         case EntryKind::Group:

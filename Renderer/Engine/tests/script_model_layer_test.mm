@@ -15,6 +15,7 @@
 #include "Scene/SceneNode.h"
 
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -71,7 +72,7 @@ protected:
     void SetUp() override { WE_SKIP_WITHOUT_METAL(); }
 
     // A black 256 x 144 canvas, a group `holder` at (200, 40) and a group running `script`.
-    static void Build(ScenePackage& package, const std::string& script)
+    static void Build(ScenePackage& package, const std::string& script, std::vector<Json> more = {})
     {
         package.InstallStandardAssets();
         package.AddShader("vcolour", kColourVertex, kColourFragment);
@@ -92,7 +93,10 @@ protected:
         backdrop.color  = "0 0 0";
         backdrop.model  = package.AddImageModel("backdrop", "util/white", { .blending = "disabled" });
         package.SetProject();
-        package.SetScene(SceneJson(SceneGeneral {}, { ImageLayerJson(backdrop), GroupJson(10, "holder", { 200.0f, 40.0f, 0.0f }), owner }));
+        std::vector<Json> objects { ImageLayerJson(backdrop), GroupJson(10, "holder", { 200.0f, 40.0f, 0.0f }) };
+        for (auto& object : more) objects.push_back(std::move(object));
+        objects.push_back(owner);
+        package.SetScene(SceneJson(SceneGeneral {}, objects));
     }
 
     static std::string Errors(GpuScene& scene)
@@ -293,4 +297,47 @@ export function init(value) {
     ASSERT_FALSE(picture.empty()) << scene.error();
     EXPECT_TRUE(ExpectPixel(picture, 64, Row(72), kRed, 2));
     EXPECT_EQ(scene.LastFramePasses().total(), 0u) << "a static model is part of a still scene";
+}
+
+// A compose layer no scene object is a child of still composes the layers a script parents to it:
+// they are drawn into its buffer and reach the screen through its effects, not past them.
+TEST_F(ScriptModelLayer, ALayerAScriptParentsToAComposeLayerIsDrawnThroughItsEffects)
+{
+    ScenePackage package;
+    package.InstallStandardAssets();
+    package.PutJson("models/util/composelayer.json", { { "passthrough", true }, { "material", "materials/util/composelayer.json" } });
+    package.PutJson("materials/util/composelayer.json",
+                    { { "passes", Json::array({ { { "shader", "harness_image" },
+                                                  { "textures", Json::array({ "_rt_FullFrameBuffer" }) },
+                                                  { "blending", "translucent" },
+                                                  { "cullmode", "nocull" },
+                                                  { "depthtest", "disabled" },
+                                                  { "depthwrite", "disabled" } } }) } });
+    const std::string half = package.AddTintEffect("half");
+    Json canvas = { { "id", 30 },
+                    { "name", "canvas" },
+                    { "image", "models/util/composelayer.json" },
+                    { "origin", "128 72 0" },
+                    { "size", "256 144" },
+                    { "copybackground", false },
+                    { "visible", true },
+                    { "effects", Json::array({ EffectUse(half, { { "tint", "0.5 0.5 0.5" } }, 31) }) } };
+    Build(package, R"JS(
+export function init(value) {
+    const vertices = new Float32Array(4 * 9);
+    square(vertices, 0, 0, 0, 16, 1, 0, 0);
+    const layer = thisScene.createLayer({ model: thisScene.createModelData({ shapes: [{ vertexBuffer: vertices,
+        indexBuffer: QUAD, vertexFormat: FORMAT, material: material }] }) });
+    layer.setParent(thisScene.getLayerByID('30'), false);
+    return value;
+}
+)JS", { canvas });
+    GpuScene scene(package);
+    ASSERT_TRUE(scene.ok()) << scene.error();
+    const Image picture = scene.Run(3);
+    ASSERT_FALSE(picture.empty()) << scene.error();
+    KeepPicture("script_model_layer_composed", picture);
+    EXPECT_EQ(Errors(scene), "");
+    EXPECT_TRUE(ExpectPixel(picture, 128, Row(72), Rgba { 128, 0, 0, 255 }, 3)) << "red, halved by the compose layer's effect";
+    EXPECT_TRUE(ExpectPixel(picture, 40, Row(40), kBlack, 2)) << "the empty rest of the compose layer adds nothing";
 }

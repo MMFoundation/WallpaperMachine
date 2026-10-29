@@ -916,7 +916,11 @@ move meanwhile and keeps whatever hover state it had. An image layer is as large
 the size its scene saved; the `width` and `height` a model states (a sprite sheet's
 frame) size only a layer that saved none. A project layer
 (`models/util/projectlayer.json`) is as large as the scene's canvas, and the
-depth-testing composition layer composes like the plain one. A pass-through layer
+depth-testing composition layer composes like the plain one. A composition layer
+no scene object is a child of still composes when scripts may give it children: some
+script creates layers and one names it by a quoted name or, with `getLayerByID` in use,
+by its id; what a script then parents to it is drawn into its buffer and through its
+effects, not straight onto the screen. A pass-through layer
 drawn through effects, such as a project layer under a CRT effect, copies the part of
 the screen it is drawn over, under the groups it sits in, not at the origin it has
 within them, and follows them when a property, a script or a timeline moves them while
