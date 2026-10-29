@@ -33,8 +33,6 @@ on:
 
 permissions:
   contents: write
-  # merge-back opens an issue when the hotfix cannot be merged into main by itself.
-  issues: write
 
 jobs:
   bump:
@@ -44,6 +42,8 @@ jobs:
     # queued `release:` push could be replaced by a later ordinary push and silently lost.
     concurrency:
       group: version-${{ github.ref }}
+      # merge-back shares main's group; queue so neither replaces the other's pending run.
+      queue: max
       cancel-in-progress: false
     outputs:
       tag: ${{ steps.push.outputs.tag }}
@@ -124,8 +124,13 @@ jobs:
     if: needs.bump.outputs.tag != '' && startsWith(github.ref_name, 'hotfix/')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
+      # Opens an issue when the hotfix cannot be merged into main by itself.
+      issues: write
     concurrency:
       group: version-refs/heads/main
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4

@@ -30,6 +30,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The job runs Valve's downloaded code; it needs no Git credentials, only GH_TOKEN.
+          persist-credentials: false
 
       - name: Install SteamCMD and sign in anonymously
         env:

@@ -332,9 +332,12 @@ final class SteamCMDSetupStore {
             AppLog.info("SteamCMD update: installed \(before ?? "unknown"), Valve publishes \(manifest.version)")
             do {
                 try await store.performInstall(replacingExisting: true, prefetchedManifest: manifestData, token: token)
-            } catch let issue as SteamCMDSetupIssue where issue.kind != .securityApprovalRequired && !Task.isCancelled {
+            } catch {
                 // A download that failed part-way is tried again the next day, quietly, while the copy
                 // in use still validates; a candidate that waits for approval is the user's to see.
+                guard !Task.isCancelled, !(error is CancellationError),
+                      (error as? SteamCMDSetupIssue)?.kind != .securityApprovalRequired else { throw error }
+                let issue = Self.issue(error)
                 try store.check(token)
                 guard (try? await store.checkedRuntime(installed.executableURL)) != nil else { throw issue }
                 try store.check(token)
@@ -375,9 +378,10 @@ final class SteamCMDSetupStore {
                                                 attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: folder) }
         let file = folder.appendingPathComponent("steam_cmd_osx")
+        // A download waits for this check, so a stalled server is given seconds, not minutes.
         _ = try await SteamCMDDownload(source: SteamCMDPackageManifest.url, destination: file,
                                        maximum: SteamCMDPackageManifest.maximumSize,
-                                       configuration: sessionConfiguration).start()
+                                       configuration: sessionConfiguration, requestTimeout: 30).start()
         return try Data(contentsOf: file)
     }
 

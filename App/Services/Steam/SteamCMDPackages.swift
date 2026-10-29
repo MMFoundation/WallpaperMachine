@@ -177,6 +177,7 @@ final class SteamCMDDownload: NSObject, URLSessionDataDelegate, @unchecked Senda
     private let maximum: Int64
     private let expectedSize: Int64?
     private let configuration: URLSessionConfiguration
+    private let requestTimeout: TimeInterval
     private let progress: @Sendable (Int64, Int64?) -> Void
     private let lock = NSLock()
     private var cancelled = false
@@ -194,7 +195,9 @@ final class SteamCMDDownload: NSObject, URLSessionDataDelegate, @unchecked Senda
     /// `expectedSize` is the exact length the manifest promises; a response of any other length
     /// fails. Without it, `maximum` alone bounds the response.
     init(source: URL, destination: URL, maximum: Int64, expectedSize: Int64? = nil,
-         configuration: URLSessionConfiguration, progress: @escaping @Sendable (Int64, Int64?) -> Void = { _, _ in }) {
+         configuration: URLSessionConfiguration, requestTimeout: TimeInterval = 300,
+         progress: @escaping @Sendable (Int64, Int64?) -> Void = { _, _ in }) {
+        self.requestTimeout = requestTimeout
         self.source = source
         self.destination = destination
         self.maximum = maximum
@@ -218,7 +221,7 @@ final class SteamCMDDownload: NSObject, URLSessionDataDelegate, @unchecked Senda
                     configuration.urlCredentialStorage = nil
                     configuration.urlCache = nil
                     configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-                    configuration.timeoutIntervalForRequest = 300
+                    configuration.timeoutIntervalForRequest = requestTimeout
                     configuration.timeoutIntervalForResource = 1800
                     let queue = OperationQueue()
                     queue.maxConcurrentOperationCount = 1

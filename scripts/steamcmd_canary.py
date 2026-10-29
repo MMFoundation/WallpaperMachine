@@ -31,7 +31,6 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 import subprocess
-import sys
 import tempfile
 from typing import NamedTuple
 import urllib.request
@@ -314,7 +313,17 @@ def existing_titles() -> dict[str, tuple[int, str]]:
     listed = subprocess.run(
         ["gh", "issue", "list", "--state", "all", "--search", "SteamCMD in:title", "--limit", "200",
          "--json", "number,title,state"], capture_output=True, text=True, check=True)
-    return {issue["title"]: (issue["number"], issue["state"]) for issue in json.loads(listed.stdout)}
+    return titles_from(json.loads(listed.stdout))
+
+
+def titles_from(issues: list[dict]) -> dict[str, tuple[int, str]]:
+    """Each title once, with its open issue when one of several sharing it is open."""
+    titles: dict[str, tuple[int, str]] = {}
+    for issue in issues:
+        known = titles.get(issue["title"])
+        if known is None or (issue["state"] == "OPEN" and known[1] != "OPEN"):
+            titles[issue["title"]] = (issue["number"], issue["state"])
+    return titles
 
 
 def apply(actions: list[Action]) -> None:
@@ -360,4 +369,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

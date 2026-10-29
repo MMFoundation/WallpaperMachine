@@ -139,6 +139,14 @@ class IssueTests(unittest.TestCase):
         reopened = canary.issue_actions(self.manifest, False, "", known)
         self.assertEqual([(a.title, a.number) for a in reopened], [(canary.FAILING_TITLE, None)])
 
+    def test_an_open_issue_wins_over_a_closed_one_with_the_same_title(self) -> None:
+        listed = [{"title": canary.FAILING_TITLE, "number": 12, "state": "OPEN"},
+                  {"title": canary.FAILING_TITLE, "number": 9, "state": "CLOSED"}]
+        for order in (listed, list(reversed(listed))):
+            titles = canary.titles_from(order)
+            actions = canary.issue_actions(self.manifest, False, "", titles)
+            self.assertIn((canary.FAILING_TITLE, 12), [(a.title, a.number) for a in actions])
+
     def test_output_is_cut_to_its_last_lines(self) -> None:
         output = "\r\n".join(f"line {i}" for i in range(100))
         kept = canary.tail(output).splitlines()

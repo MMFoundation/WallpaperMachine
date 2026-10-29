@@ -171,6 +171,8 @@ final class WorkshopStore {
   @ObservationIgnored private var awaitingSteamCMDCheck: Set<String> = []
   /// Jobs already tried again after such a check updated SteamCMD: a second failure is the user's.
   @ObservationIgnored private var retriedAfterSteamCMDUpdate: Set<String> = []
+  /// That check is running; the failure and the end of downloads both ask for it, and one is enough.
+  @ObservationIgnored private var checkingSteamCMD = false
   /// Runs that check: `SteamCMDSetupStore.updateIfOutdated`, which says whether SteamCMD changed.
   /// Tests stand in for Valve's servers here.
   @ObservationIgnored var updateSteamCMD: @MainActor (TimeInterval) async -> Bool = { _ in false }
@@ -434,6 +436,7 @@ final class WorkshopStore {
         guard let self, let bridge = self.downloadBridge else { return }
         self.resumeDownloadRequests(bridge: bridge)
         self.settleApplyIntentsAwaitingAssets(bridge: bridge)
+        self.runPendingSteamCMDCheck()
         self.observeDownloadPrerequisites()
       }
     }
@@ -598,11 +601,18 @@ final class WorkshopStore {
   private func checkSteamCMD(after job: WorkshopDownload) {
     guard !retriedAfterSteamCMDUpdate.contains(job.id) else { return }
     awaitingSteamCMDCheck.insert(job.id)
-    // Jobs still running would end the same way if SteamCMD is to blame; the last one checks.
-    guard !downloader.isRunning else { return }
+    runPendingSteamCMDCheck()
+  }
+
+  /// Jobs still running would end the same way if SteamCMD is to blame, so the check waits for
+  /// downloads to stop, however the last one ends; the prerequisite observer calls this then.
+  private func runPendingSteamCMDCheck() {
+    guard !awaitingSteamCMDCheck.isEmpty, !downloader.isRunning, !checkingSteamCMD else { return }
+    checkingSteamCMD = true
     Task { @MainActor [weak self] in
       guard let self else { return }
       let updated = await self.updateSteamCMD(SteamCMDSetupStore.failureUpdateCheckInterval)
+      self.checkingSteamCMD = false
       let failed = self.awaitingSteamCMDCheck
       self.awaitingSteamCMDCheck = []
       guard updated, let bridge = self.downloadBridge else { return }

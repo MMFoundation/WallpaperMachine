@@ -387,6 +387,18 @@ in minutes, its notes say only what it fixes, and `main` goes on as before.
    git switch -c hotfix/1.6.5 v1.6.5
    ```
 
+   GitHub runs the workflow files of the branch that is pushed, so a tag older than this
+   process (1.6.5 and earlier) needs them on the branch first, in a commit of their own
+   without a `release:` line:
+
+   ```sh
+   git checkout origin/main -- .github/workflows/version.yml .github/workflows/checks.yml \
+     scripts/bump_version.py scripts/tests/test_bump_version.py
+   git commit -m "ci(release): bring the hotfix release workflow to this branch"
+   ```
+
+   The merge back into `main` meets the same files there and changes nothing.
+
 2. Make the fix there, with its test, not on `main`; run the gate
    (`python3 scripts/test.py`) as for any change. Pull requests into `hotfix/**` get the
    same Checks as those into `main`.
@@ -419,7 +431,9 @@ pushed commits that a version tag already contains. This is the one merge commit
 hotfix branch once the merge is on `main`.
 
 Make the fix on the hotfix branch. A fix that already landed on `main` can be
-cherry-picked (`git cherry-pick -x <commit>`): the merge back then meets the same change
+cherry-picked without committing (`git cherry-pick --no-commit <commit>`, then commit it
+after the gate, ending the message with `(cherry picked from commit <commit>)`): the
+merge back then meets the same change
 on both sides and goes through, but the commit on `main` is not part of the hotfix tag,
 so `main`'s next notes may describe the fix again. Read that section before its release.
 
@@ -440,9 +454,11 @@ written. Do this, in order:
    `git tag --list 'v*' --sort=-v:refname | head -1`. Check that `main` has unreleased
    commits since it (`git log --oneline <tag>..origin/main`); if it has none, a hotfix
    branch gains nothing, so release from `main` the usual way instead and say so.
-2. **Find the fix.** Make it with its test, or cherry-pick the commit the developer
-   names (`-x`), on `hotfix/<base version>` cut from that tag
-   (`git switch -c hotfix/1.6.5 v1.6.5`), never on `main`. Keep only what the
+2. **Find the fix.** Cut `hotfix/<base version>` from that tag
+   (`git switch -c hotfix/1.6.5 v1.6.5`); when the tag predates the hotfix workflow, commit
+   it onto the branch first as [step 1 above](#hotfix-releases) shows. Then make the fix
+   with its test, or apply the commit the developer names with
+   `git cherry-pick --no-commit`, never on `main`. Keep only what the
    emergency needs: anything else waits for `main`'s next release.
 3. **Verify** as for any change: the routine gate `python3 scripts/test.py`, plus
    `scripts/check_rust.py` or `scripts/check_renderer.py` when the fix touches them.
