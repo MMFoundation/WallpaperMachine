@@ -759,6 +759,114 @@ TEST(Teardown, TheRastersOfMadeAndDestroyedTextLayersAreReleased)
     EXPECT_TRUE(images->IsRuntimeImage("$mediaThumbnail")) << "cover images are never removed";
 }
 
+// ---- layers made with createLayer({ model: thisScene.createModelData(...) }) -----------------
+
+// One triangle per shape: `tri(x)` is three POSITION | UV | COLOR vertices whose first x is `x`.
+const std::string kModelHelpers = std::string(kCheckHelper) + R"JS(
+function tri(x) {
+    return new Float32Array([x, 0, 0, 0, 0, 1, 0, 0, 1,  x + 10, 0, 0, 1, 0, 0, 1, 0, 1,  x, 10, 0, 0, 1, 0, 0, 1, 1]);
+}
+const FORMAT = [IModelData.POSITION, IModelData.UV, IModelData.COLOR];
+function throws(fn, what) {
+    try { fn(); } catch (e) { return; }
+    throw new Error('check failed: no exception for ' + what);
+}
+)JS";
+
+TEST(ScriptMadeModel, TheVertexFormatFlagsAreWallpaperEnginesWords)
+{
+    const std::string script = kModelHelpers + R"JS(
+export function init(value) {
+    check(IModelData.POSITION === 'position' && IModelData.NORMAL === 'normal' && IModelData.UV === 'uv', 'flags');
+    check(IModelData.TANGENT_SIGNED === 'tangentSigned' && IModelData.COLOR === 'color', 'more flags');
+    const model = thisScene.createModelData({ shapes: [{ vertexBuffer: tri(0), vertexFormat: FORMAT, material: 'mat.json' }] });
+    check(model.POSITION === 'position' && model.COLOR === 'color', 'the flags on a model data object');
+    check(model instanceof IModelData, 'instanceof');
+    return value;
+}
+)JS";
+    Played run(Json::array({ ScriptOwner(2, script) }));
+    ASSERT_TRUE(run.ok());
+    EXPECT_TRUE(run.rt().scriptErrors().empty()) << (run.rt().scriptErrors().empty() ? "" : run.rt().scriptErrors().front());
+    EXPECT_EQ(run.rt().sceneScriptCount(), 1u);
+}
+
+TEST(ScriptMadeModel, AModelLayerHoldsTheScriptsVerticesInTheFormatsOrderAndIsAnOrdinaryLayer)
+{
+    const std::string script = kModelHelpers + R"JS(
+export function init(value) {
+    const model = thisScene.createModelData({ boundingBoxMins: new Vec3(-50, -50, -1), boundingBoxMaxs: new Vec3(50, 50, 1),
+        shapes: [{ vertexBuffer: tri(0), indexBuffer: new Uint16Array([0, 1, 2]), vertexFormat: FORMAT, material: 'mat.json' },
+                 { vertexBuffer: tri(20), vertexFormat: FORMAT, material: 'mat.json', isVertexBufferDynamic: true }] });
+    const layer = thisScene.createLayer({ model: model, name: 'mesh', origin: new Vec3(5, 6, 0) });
+    check(thisScene.getLayer('mesh') === layer, 'found by name');
+    check(layer.origin.x === 5 && layer.origin.y === 6, 'origin');
+    check(thisScene.getLayerCount() === 2, 'count');
+    const gone = thisScene.createLayer(model);
+    check(thisScene.destroyLayer(gone), 'destroyed');
+    return value;
+}
+)JS";
+    Played run(Json::array({ ScriptOwner(2, script) }));
+    ASSERT_TRUE(run.ok());
+    SceneRuntimeContext& rt = run.rt();
+    EXPECT_TRUE(rt.scriptErrors().empty()) << (rt.scriptErrors().empty() ? "" : rt.scriptErrors().front());
+    ASSERT_EQ(rt.LayerCount(), 2u);
+    const std::string name = rt.ResolveLayerName("mesh");
+    SceneNode* node = run.Root(name);
+    ASSERT_NE(node, nullptr);
+    ASSERT_NE(node->Mesh(), nullptr);
+    const SceneMesh& mesh = *node->Mesh();
+    ASSERT_EQ(mesh.Submeshes().size(), 2u);
+    EXPECT_TRUE(mesh.Dynamic()) << "one shape is dynamic";
+    EXPECT_FALSE(mesh.UpdateDriver() == MeshUpdate::PerFrame) << "rewritten only when the script applies data";
+    for (std::size_t shape = 0; shape < 2; ++shape) {
+        const auto& submesh = mesh.Submeshes()[shape];
+        EXPECT_EQ(submesh.material_slot, shape);
+        ASSERT_EQ(submesh.VertexCount(), 1u);
+        const SceneVertexArray& vertices = submesh.GetVertexArray(0);
+        ASSERT_EQ(vertices.Attributes().size(), 3u);
+        EXPECT_EQ(vertices.Attributes()[0].name, "a_Position");
+        EXPECT_EQ(vertices.Attributes()[1].name, "a_TexCoord");
+        EXPECT_EQ(vertices.Attributes()[2].name, "a_Color");
+        ASSERT_EQ(vertices.OneSize(), 9u) << "tightly packed, as the script lays the buffer out";
+        ASSERT_EQ(vertices.VertexCount(), 3u);
+        EXPECT_FLOAT_EQ(vertices.Data()[0], shape == 0 ? 0.0f : 20.0f);
+        EXPECT_FLOAT_EQ(vertices.Data()[9], shape == 0 ? 10.0f : 30.0f);
+        EXPECT_FLOAT_EQ(vertices.Data()[9 + 6], 1.0f) << "the second vertex is green";
+    }
+    ASSERT_EQ(mesh.Submeshes()[0].IndexCount(), 1u);
+    EXPECT_EQ(mesh.Submeshes()[0].GetIndexArray(0).DrawIndexCount(), 3u);
+    EXPECT_EQ(mesh.Submeshes()[1].IndexCount(), 0u) << "no index buffer: drawn as a triangle list";
+    ASSERT_EQ(mesh.MaterialSlots().size(), 2u);
+    EXPECT_NE(mesh.MaterialForSlot(0), nullptr);
+}
+
+TEST(ScriptMadeModel, BuffersThatDoNotFitTheirFormatOrTheModelAreRefused)
+{
+    const std::string script = kModelHelpers + R"JS(
+export function init(value) {
+    throws(function () { thisScene.createModelData({ shapes: [{ vertexBuffer: tri(0), vertexFormat: [IModelData.UV, IModelData.POSITION, IModelData.COLOR], material: 'mat.json' }] }); }, 'reordered format');
+    throws(function () { thisScene.createModelData({ shapes: [{ vertexBuffer: new Float32Array(10), vertexFormat: FORMAT, material: 'mat.json' }] }); }, 'a partial vertex');
+    throws(function () { thisScene.createModelData({ shapes: [] }); }, 'no shapes');
+    const model = thisScene.createModelData({ shapes: [{ vertexBuffer: tri(0), vertexFormat: FORMAT, material: 'mat.json', isVertexBufferDynamic: true }] });
+    throws(function () { model.applyData({ vertexBuffer: new Float32Array(18) }); }, 'a different length');
+    throws(function () { model.applyData([{}, { vertexBuffer: tri(1) }]); }, 'a shape the model does not have');
+    throws(function () { model.applyData({ indexBuffer: new Uint16Array([0, 1, 2]) }); }, 'an index buffer that is not dynamic');
+    model.applyData({ vertexBuffer: tri(40) });
+    model.applyData([{ vertexBuffer: tri(50) }]);
+    thisScene.destroyModelData(model);
+    throws(function () { model.applyData({ vertexBuffer: tri(0) }); }, 'destroyed model data');
+    throws(function () { thisScene.createLayer({ model: model }); }, 'a layer of destroyed model data');
+    return value;
+}
+)JS";
+    Played run(Json::array({ ScriptOwner(2, script) }));
+    ASSERT_TRUE(run.ok());
+    EXPECT_TRUE(run.rt().scriptErrors().empty()) << (run.rt().scriptErrors().empty() ? "" : run.rt().scriptErrors().front());
+    EXPECT_EQ(run.rt().LayerCount(), 1u);
+}
+
 // ---- bounded JSON nesting ---------------------------------------------------------------------
 
 std::string NestedDocument(std::size_t depth)

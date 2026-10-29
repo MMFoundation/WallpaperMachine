@@ -1080,7 +1080,8 @@ constexpr const char* kLibFnNames[kLibFnCount] = {
     X(effectVisible) X(setEffectVisible) X(effectCount) X(effectAt) X(effectByName)                 \
     X(effectName) X(effectMaterialCount) X(materialConstant) X(setMaterialConstant)                 \
     X(rotateObjectSpace) X(hasParticles) X(particleControl) X(emitParticles) X(particleInstance)      \
-    X(setParticleInstance) X(cameraTransforms) X(setCameraTransforms) X(puppetAddLayer) X(bone)
+    X(setParticleInstance) X(cameraTransforms) X(setCameraTransforms) X(puppetAddLayer) X(bone)    \
+    X(createModel) X(applyModel) X(destroyModel) X(createModelLayer)
 
 enum NativeId : int
 {
@@ -1094,6 +1095,103 @@ constexpr const char* kNativeNames[] = {
     SCRIPT_NATIVE_LIST(SCRIPT_NATIVE_NAME)
 #undef SCRIPT_NATIVE_NAME
 };
+
+// The elements of a typed array a script passed: its kind (`JSTypedArrayEnum`) and where
+// they lie; kind -1 for anything else or a detached buffer. The bytes stay the script's.
+struct TypedArrayView {
+    int            kind { -1 };
+    const uint8_t* bytes { nullptr };
+    std::size_t    count { 0 };
+};
+
+TypedArrayView ViewTypedArray(JSContext* ctx, JSValueConst value) {
+    TypedArrayView view;
+    const int      kind = JS_GetTypedArrayType(value);
+    if (kind < 0) return view;
+    std::size_t offset = 0, length = 0, element = 0;
+    JSValue     buffer = JS_GetTypedArrayBuffer(ctx, value, &offset, &length, &element);
+    if (JS_IsException(buffer)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return view;
+    }
+    std::size_t size = 0;
+    uint8_t*    data = JS_GetArrayBuffer(ctx, &size, buffer);
+    JS_FreeValue(ctx, buffer);
+    if (JS_HasException(ctx)) JS_FreeValue(ctx, JS_GetException(ctx));
+    if (data == nullptr || element == 0 || offset > size || length > size - offset) return view;
+    view.kind  = kind;
+    view.bytes = data + offset;
+    view.count = length / element;
+    return view;
+}
+
+// One shape object as the script library hands it over (`vertexBuffer` a Float32Array,
+// `indexBuffer` a Uint16Array or Uint32Array, `vertexFormat` the flag words, `material`, the
+// two dynamic flags). The buffers are borrowed from the object, which the caller holds for as
+// long as `shape` is used. Empty, or what the script got wrong.
+std::string ReadModelShape(JSContext* ctx, JSValueConst object, ScriptModelShapeInput& shape) {
+    const auto member = [&](const char* name) { return JS_GetPropertyStr(ctx, object, name); };
+    const auto truthy = [&](const char* name) {
+        JSValue    value = member(name);
+        const bool on    = JS_ToBool(ctx, value) > 0;
+        JS_FreeValue(ctx, value);
+        return on;
+    };
+
+    JSValue vertices = member("vertexBuffer");
+    if (! JS_IsUndefined(vertices) && ! JS_IsNull(vertices)) {
+        const auto view = ViewTypedArray(ctx, vertices);
+        if (view.kind != JS_TYPED_ARRAY_FLOAT32) {
+            JS_FreeValue(ctx, vertices);
+            return "vertexBuffer must be a Float32Array";
+        }
+        shape.has_vertices = true;
+        shape.vertices     = std::span<const float>(reinterpret_cast<const float*>(view.bytes), view.count);
+    }
+    JS_FreeValue(ctx, vertices);
+
+    JSValue indices = member("indexBuffer");
+    if (! JS_IsUndefined(indices) && ! JS_IsNull(indices)) {
+        const auto view = ViewTypedArray(ctx, indices);
+        if (view.kind != JS_TYPED_ARRAY_UINT16 && view.kind != JS_TYPED_ARRAY_UINT32) {
+            JS_FreeValue(ctx, indices);
+            return "indexBuffer must be a Uint16Array or a Uint32Array";
+        }
+        shape.has_indices = true;
+        shape.indices     = { view.bytes, view.count, view.kind == JS_TYPED_ARRAY_UINT32 };
+    }
+    JS_FreeValue(ctx, indices);
+
+    JSValue format = member("vertexFormat");
+    if (JS_IsArray(format)) {
+        JSValue  length_value = JS_GetPropertyStr(ctx, format, "length");
+        uint32_t length       = 0;
+        JS_ToUint32(ctx, &length, length_value);
+        JS_FreeValue(ctx, length_value);
+        for (uint32_t i = 0; i < length && i < 16; ++i) {
+            JSValue     word  = JS_GetPropertyUint32(ctx, format, i);
+            const char* chars = JS_ToCString(ctx, word);
+            shape.format.emplace_back(chars != nullptr ? chars : "");
+            if (chars != nullptr) JS_FreeCString(ctx, chars);
+            JS_FreeValue(ctx, word);
+        }
+    }
+    JS_FreeValue(ctx, format);
+
+    JSValue material = member("material");
+    if (JS_IsString(material)) {
+        const char* chars = JS_ToCString(ctx, material);
+        if (chars != nullptr) {
+            shape.material = chars;
+            JS_FreeCString(ctx, chars);
+        }
+    }
+    JS_FreeValue(ctx, material);
+    shape.dynamic_vertices = truthy("isVertexBufferDynamic");
+    shape.dynamic_indices  = truthy("isIndexBufferDynamic");
+    if (JS_HasException(ctx)) JS_FreeValue(ctx, JS_GetException(ctx));
+    return {};
+}
 
 thread_local ScriptStartupMetrics g_startup_metrics;
 
@@ -1953,6 +2051,43 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         return text(rt_ != nullptr ? rt_->CreateLayerFromTemplate(str(0), str(1), str(2)) : std::string());
     case kNative_createText:
         return text(rt_ != nullptr ? rt_->CreateTextLayer(str(0), str(1)) : std::string());
+    case kNative_createModel: {
+        // [shape objects] -> the model's id, or the error.
+        if (rt_ == nullptr || argc < 1 || ! JS_IsArray(argv[0])) return text("createModelData needs shapes");
+        JSValue  length_value = JS_GetPropertyStr(ctx, argv[0], "length");
+        uint32_t length       = 0;
+        JS_ToUint32(ctx, &length, length_value);
+        JS_FreeValue(ctx, length_value);
+        // Read before anything is sized from it: an array's length is the script's to claim.
+        if (length > 1024) return text("createModelData takes at most 1024 shapes");
+        std::vector<ScriptModelShapeInput> shapes(length);
+        std::string                        error;
+        for (uint32_t i = 0; i < length && error.empty(); ++i) {
+            JSValue shape = JS_GetPropertyUint32(ctx, argv[0], i);
+            // The array the script library built holds every shape object for the whole call.
+            error = ReadModelShape(ctx, shape, shapes[i]);
+            if (! error.empty()) error = "shape " + std::to_string(i) + ": " + error;
+            JS_FreeValue(ctx, shape);
+        }
+        if (! error.empty()) return text(error);
+        const int32_t model = rt_->CreateScriptModel(shapes, error);
+        return model > 0 ? number(model) : text(error);
+    }
+    case kNative_applyModel: {
+        // (id, shape index, shape object) -> '' or the error.
+        if (rt_ == nullptr || argc < 3) return text("applyData needs a shape");
+        ScriptModelShapeInput shape;
+        std::string           error = ReadModelShape(ctx, argv[2], shape);
+        if (error.empty()) {
+            error = rt_->ApplyScriptModel(static_cast<int32_t>(num(0)), static_cast<std::size_t>(num(1)), shape);
+        }
+        return text(error);
+    }
+    case kNative_destroyModel:
+        return boolean(rt_ != nullptr && rt_->DestroyScriptModel(static_cast<int32_t>(num(0))));
+    case kNative_createModelLayer:
+        return text(rt_ != nullptr ? rt_->CreateModelLayer(static_cast<int32_t>(num(0)), flag(1), str(2))
+                                   : std::string());
     case kNative_nameLayer: return boolean(rt_ != nullptr && rt_->NameLayer(str(0), str(1)));
     case kNative_destroyLayer: {
         std::vector<std::string> destroyed;

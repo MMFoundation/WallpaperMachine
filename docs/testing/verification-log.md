@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-29 — SceneScript model data (createModelData)
+
+Scripts build geometry with thisScene.createModelData and draw it with createLayer({ model }); a compose layer that scripts parent layers to is built as a composition. Workshop item 3798688689 (issue #127) as the real case.
+
+- `script_model_layer_test` — 7 passed (draw, applyData on shared models, refusal, parent/visibility, dirty generation, static reuse, compose layer)
+- `scene_schema_part08_test --gtest_filter='ScriptMadeModel.*'` — 3 passed; failed with `IModelData is not defined` before
+- `python3 scripts/test.py` — exit 0; 4199 passed, 0 failed, 49 skipped (after `scripts/build.py --renderer-only` supplied the bridge library to a fresh worktree)
+- `python3 scripts/check_renderer.py` — exit 1 only for the pre-existing, font-dependent `TextObjectRuntime.CjkPunctuationIsNotDrawnByTheSymbolFace`; every other binary, the new one included, passed
+- `we_reference.py compare 3798688689` (opened = taken[0] - 30 s) — mean diff / off>48 vs Wallpaper Engine: 2.72 / 1.4% and 2.96 / 1.7%; the same build with the two particle scripts made no-ops (what main draws): 2.70 / 1.4% and 2.93 / 1.7%; particles are random, so equal numbers with the particles drawn is the expected outcome
+- Not covered: replaceData (throws), bounding-box culling and hit tests (accepted, unused); no probe scene was captured in the VM
+
 ## 2026-10-28 — Updater: public GitHub proxy fallback and resumable downloads
 
 - Change: when GitHub is unreachable the update check and download go through ghfast.top, gh-proxy.com, gh.llkk.cc; downloads resume across sources with Range; installer refuses a copy not newer than the running one; release page opened only on github.com.
@@ -112,15 +123,3 @@ Tooling and CI change: crowdin.yml, scripts/crowdin_sync.py (push/pull), scripts
 - End to end on a throwaway Crowdin branch: 3 translator edits flowed into 3 of 366 cells with the one-line layout kept; a %@ to %d edit was refused
 - Conflict probes on throwaway branches: an approved translation survives a plain re-push; unapproved ones do not outrank a newer value; --auto-approve-imported overwrites (documented in docs/localization.md#crowdin)
 - Not verified: the workflow has never run on GitHub and was only parsed as YAML (no actionlint); PR creation (the repo setting "Allow GitHub Actions to create and approve pull requests" is off); the CROWDIN_PERSONAL_TOKEN secret is not set
-
-## 2026-10-25 — Updates, web, downloads, Workshop, scene and panel improvements
-
-Update signature check, http in web content, page errors in the log, frame-confirmed switch hold, saved pause, download queue order and batch retry, Steam favorites, timeline mirror mode, CursorEvent.localPosition, tile zoom and Help menu, doc link check.
-
-- `python3 scripts/test.py` — exit 0; Python stage 26 modules OK (`test_doc_links` included); native 4174 tests: 4127 passed, 0 failed, 47 skipped
-- `python3 scripts/check_rust.py` — exit 0; bridge 897 passed (7 new in `tests::saved_pause`), core 413 passed, shader and core-integration OK; desktop/media/network opt-ins off
-- `python3 scripts/check_renderer.py` — exit 0 on an idle machine; an earlier run beside Xcode tests failed two `metal_scene_draw_smoke` direct-video timing cases that pass alone
-- Updater requirement checked against the published 1.6.3 image: `codesign -R` and `SecStaticCodeCheckValidity` accept it, refuse it under another certificate root
-- Steam favorites page layout and `sortmethod` values read off a public profile's favorites page; a signed-in subscriptions page was not checked
-- Not compared with Wallpaper Engine frames (no VM run): mirror end-frame behaviour, `localPosition` y direction
-- Not run on a desktop: the frame-confirmed release of the switch hold, http loads, the View and Help menus, the fourth Discover tab's fit

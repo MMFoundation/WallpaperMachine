@@ -845,6 +845,23 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   scene file stays and the call answers false. Without
   it, a script that rebuilds its layers when a setting changes threw
   `not a function` before building the new set.
+- **Script-built model geometry** — `ScriptMadeModel.*` (`scene_schema_part08_test`)
+  covers the `IModelData` flag words (`position`, `normal`, `tangentSigned`, `uv`,
+  `color`), a model layer's submeshes holding the script's vertices tightly packed
+  in format order with 32-bit indices, and the refusals (a reordered format, a
+  partial vertex, a length `applyData` did not keep, a buffer not created dynamic,
+  a destroyed model). `ScriptModelLayer.*` (`script_model_layer_test`) draws the
+  shapes with their materials and vertex colours, moves them with `applyData` on
+  every layer sharing the model, follows `setParent` and `visible`, keeps a
+  static model reusable, and checks that only `applyData` moves the mesh's dirty
+  generation, which is what makes the renderer copy the buffers. Before it, a
+  script calling `thisScene.createModelData` threw `IModelData is not defined`
+  in `init` (Workshop item 3798688689, issue #127).
+  `ScriptModelLayer.ALayerAScriptParentsToAComposeLayerIsDrawnThroughItsEffects`
+  covers a compose layer without authored children that a script parents layers
+  to: it is built as a composition (`ScriptMayParentTo` in the parser), so they
+  are drawn into its buffer and through its effects; before, they were drawn
+  straight onto the screen and the item's particle canvas added them up uncomposed.
 - **Timeline events** — `ScriptRuntimeCompat.*Timeline*Event*`, `*Marker*`,
   `GlobalAnimationListenersRunOncePerMarkerWhateverIsBound`,
   `GlobalOnlyAnimationListenerSeesTheCurrentTickTime` and

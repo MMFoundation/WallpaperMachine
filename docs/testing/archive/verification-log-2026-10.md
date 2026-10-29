@@ -9,6 +9,18 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-25 — Updates, web, downloads, Workshop, scene and panel improvements
+
+Update signature check, http in web content, page errors in the log, frame-confirmed switch hold, saved pause, download queue order and batch retry, Steam favorites, timeline mirror mode, CursorEvent.localPosition, tile zoom and Help menu, doc link check.
+
+- `python3 scripts/test.py` — exit 0; Python stage 26 modules OK (`test_doc_links` included); native 4174 tests: 4127 passed, 0 failed, 47 skipped
+- `python3 scripts/check_rust.py` — exit 0; bridge 897 passed (7 new in `tests::saved_pause`), core 413 passed, shader and core-integration OK; desktop/media/network opt-ins off
+- `python3 scripts/check_renderer.py` — exit 0 on an idle machine; an earlier run beside Xcode tests failed two `metal_scene_draw_smoke` direct-video timing cases that pass alone
+- Updater requirement checked against the published 1.6.3 image: `codesign -R` and `SecStaticCodeCheckValidity` accept it, refuse it under another certificate root
+- Steam favorites page layout and `sortmethod` values read off a public profile's favorites page; a signed-in subscriptions page was not checked
+- Not compared with Wallpaper Engine frames (no VM run): mirror end-frame behaviour, `localPosition` y direction
+- Not run on a desktop: the frame-confirmed release of the switch hold, http loads, the View and Help menus, the fourth Discover tab's fit
+
 ## 2026-10-25 — Scene capability probe, remembered Native Metal verdicts, mirror audio and issue-report details
 
 - `python3 scripts/test.py`: 4124 passed, 0 failed, 47 skipped (opt-in layers); includes `SceneDrawVerdictsTests`, the new `WallpaperCompatibilityTests`, `PanelLibraryActionsTests` (Apply question), `PanelLibraryStateTests` (changed properties, missing files), `NativeVideoWallpaperHostTests` and `MirrorAudioOwnershipTests`.

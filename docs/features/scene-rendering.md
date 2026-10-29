@@ -103,7 +103,21 @@ order like any other, found by its id and played through the object
 layers the parser built are counted: an object the scene file marks statically
 invisible, which nothing can show, is never built, so it has no index or id and the
 count differs from the object list by those. `destroyLayer` removes the layers a
-script made below the layer too. A scene script's `init` runs once the scene is
+script made below the layer too. A script can also build geometry of its own:
+`thisScene.createModelData({ shapes })` takes, per shape, a `Float32Array` of
+vertices laid out as its `vertexFormat` lists the `IModelData` flags (`POSITION`,
+`NORMAL`, `TANGENT_SIGNED`, `UV`, `COLOR`, in that order; POSITION | NORMAL | UV when
+left out), an optional `Uint16Array` or `Uint32Array` of triangle indices and a
+material file, and `createLayer({ model })` (or `createLayer(model)`) draws it as a
+model layer like any other script layer. `applyData` copies new buffers of the same
+length over a shape created with `isVertexBufferDynamic` / `isIndexBufferDynamic`;
+the renderer copies a shape's buffers only after such a change, never on a frame the
+script changed nothing, though a model with a dynamic shape, like a text card, is
+drawn every frame rather than reused. Every layer made from one model data object
+shares its geometry. The bounding box is accepted and unused (Wallpaper Engine culls
+and hit-tests with it; these layers are never culled or hit), `replaceData` throws,
+and what scripts keep alive is capped at 4096 objects and 256 MiB.
+A scene script's `init` runs once the scene is
 built, so it sees all of that. Property scripts start on the scene's first tick:
 every one runs `init`, in the scene's order, before any of them is told the user
 properties, and that before any `update`, because a widget's options layer may call
@@ -902,7 +916,11 @@ move meanwhile and keeps whatever hover state it had. An image layer is as large
 the size its scene saved; the `width` and `height` a model states (a sprite sheet's
 frame) size only a layer that saved none. A project layer
 (`models/util/projectlayer.json`) is as large as the scene's canvas, and the
-depth-testing composition layer composes like the plain one. A pass-through layer
+depth-testing composition layer composes like the plain one. A composition layer
+no scene object is a child of still composes when scripts may give it children: some
+script creates layers and one names it by a quoted name or, with `getLayerByID` in use,
+by its id; what a script then parents to it is drawn into its buffer and through its
+effects, not straight onto the screen. A pass-through layer
 drawn through effects, such as a project layer under a CRT effect, copies the part of
 the screen it is drawn over, under the groups it sits in, not at the origin it has
 within them, and follows them when a property, a script or a timeline moves them while

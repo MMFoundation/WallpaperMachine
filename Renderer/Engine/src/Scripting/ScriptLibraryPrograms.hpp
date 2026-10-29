@@ -252,6 +252,7 @@ lock('shared', shared);
 lock('localStorage', localStorage);
 G.scene = sceneProxy;
 G.console = consoleShim;
+G.IModelData = IModelData;
 G.WEMath = WEMath;
 G.WEColor = WEColor;
 G.WEVector = WEVector;
