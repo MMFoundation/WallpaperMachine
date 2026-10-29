@@ -232,9 +232,12 @@ extension PanelController {
     guard let itemID = TelemetryWallpaper.workshopID(id) else { throw InvalidControlValue() }
     var item = workshop.workshopItem(id: itemID)
     if item?.authorProfileID == nil {
+      // Asked outside the navigation key, so no other page waits for Steam; a page or wallpaper
+      // chosen while it answered wins, and the answer is dropped.
+      let page = navigation.selection
+      let wallpaper = selectedWallpaperID
       item = try await workshop.lookUpItem(id: itemID)
-      // A page or author chosen while Steam answered cancels this one.
-      try Task.checkCancellation()
+      guard navigation.selection == page, selectedWallpaperID == wallpaper else { return }
     }
     guard let item, let author = item.authorProfileID else {
       throw WorkshopFailure(

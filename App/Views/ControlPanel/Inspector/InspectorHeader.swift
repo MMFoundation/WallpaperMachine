@@ -219,9 +219,7 @@ struct InspectorMoreMenu: View {
       if isWorkshop {
         if controller.workshop.steamWebSession != nil { subscription }
         Button {
-          // Under the shell's navigation key, so a page or author chosen while Steam is still
-          // asked about this one wins.
-          controller.launch(PanelActionCoordinator.key("navigate"), policy: .latestWins) {
+          controller.launch(PanelActionCoordinator.key("workshopCreator", id: row.id)) {
             try await controller.openInstalledWorkshopAuthor(id: row.id)
           }
         } label: {
