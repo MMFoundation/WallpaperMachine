@@ -15,6 +15,8 @@ to match so a committed pbxproj stays in sync without running xcodegen.
 On a `hotfix/` branch (`--branch`, or `GITHUB_REF_NAME` with `--ci`) only a patch
 release is allowed, and it must be newer than every `vx.y.z` tag: a hotfix is cut
 from the newest release and becomes the newest release (docs/release.md#hotfix-releases).
+Any other branch releases only once it contains the newest tag, so `main` never ships
+without a hotfix whose merge back failed.
 With `--ci`, a pushed commit that a version tag already contains is not scanned, so
 merging a released hotfix branch into `main` does not release its `release:` line again.
 """
@@ -153,6 +155,23 @@ def tagged_commit(root: Path, commit_id: str) -> bool:
     return listed.returncode == 0 and any(SEMVER.fullmatch(tag[1:]) for tag in listed.stdout.split())
 
 
+def newest_tag(tags: list[str]) -> str | None:
+    return max(tags, key=lambda tag: parse_semver(tag[1:]), default=None)
+
+
+def check_contains_newest_release(root: Path, tags: list[str]) -> None:
+    """A release outside a hotfix branch must carry the newest released version."""
+    newest = newest_tag(tags)
+    if newest is None:
+        return
+    contained = subprocess.run(["git", "merge-base", "--is-ancestor", newest, "HEAD"],
+                               cwd=root, capture_output=True, check=False)
+    if contained.returncode != 0:
+        raise VersionError(
+            f"{newest} is not merged into this branch; merge that hotfix (`git merge --no-ff {newest}`) "
+            "before releasing from here")
+
+
 def check_hotfix(current: str, new: str, tags: list[str]) -> None:
     """A hotfix release is the next patch of the release it was cut from, and the newest version."""
     old, target = parse_semver(current), parse_semver(new)
@@ -247,6 +266,8 @@ def main() -> int:
             branch = args.branch or (os.environ.get("GITHUB_REF_NAME", "") if args.ci else "")
             if result["changed"] and branch.startswith(HOTFIX_PREFIX):
                 check_hotfix(str(result["old_marketing"]), str(result["new_marketing"]), version_tags(args.root))
+            elif result["changed"] and branch:
+                check_contains_newest_release(args.root, version_tags(args.root))
             if result["changed"] and args.apply:
                 apply_bump(args.root, str(result["new_marketing"]), str(result["new_build"]))
             if result["changed"]:

@@ -122,14 +122,20 @@ jobs:
           BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          git fetch origin main
-          git switch --detach origin/main
-          if git merge --no-ff --no-edit -m "chore: merge hotfix ${TAG#v} into main" "refs/tags/${TAG}" \
-              && git push origin HEAD:main; then
-            echo "Merged ${TAG} into main."
-            exit 0
-          fi
-          git merge --abort 2>/dev/null || true
+          # Another workflow (the Supporter list) may push to main in between: start over.
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git switch --detach origin/main
+            if ! git merge --no-ff --no-edit -m "chore: merge hotfix ${TAG#v} into main" "refs/tags/${TAG}"; then
+              git merge --abort 2>/dev/null || true
+              break
+            fi
+            if git push origin HEAD:main; then
+              echo "Merged ${TAG} into main."
+              exit 0
+            fi
+            echo "main moved while merging ${TAG} (attempt ${attempt}); retrying."
+          done
           gh issue create --title "Merge hotfix ${TAG#v} into main" --body "$(cat <<BODY
           The Version workflow released \`${TAG}\` from \`${BRANCH}\` but could not merge it into \`main\` by itself (a conflict, or \`main\` moved while it pushed).
 

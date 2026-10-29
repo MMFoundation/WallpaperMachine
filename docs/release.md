@@ -422,7 +422,8 @@ in minutes, its notes say only what it fixes, and `main` goes on as before.
    merge before `main` releases again.
 
 `scripts/bump_version.py` holds a hotfix branch to this: only a patch of the version
-the branch carries, and newer than every `vx.y.z` tag. A minor or major spec, a branch
+the branch carries, which must be the newest `vx.y.z` tag. It also refuses a release
+from `main` while the newest tag is not merged into it. A minor or major spec, a branch
 cut from an older release, or a version another release already took fails the bump
 before anything is written, so a hotfix always becomes Latest and never takes a
 number `main` will want. To fix an older line instead, release from `main`.
@@ -550,8 +551,11 @@ The bump job holds one `version-release` concurrency group, shared by `main` and
 hotfix branch, only while the version is chosen, committed and tagged and a hotfix is
 merged into `main`. A workflow-wide group would keep the lock through the macOS build.
 Runs queue (`queue: max`) instead of replacing the pending one, so a queued `release:`
-push is never lost behind a later ordinary push, and `main` never releases between a
-hotfix's tag and its merge. A queued run checks out the branch as it is when the lock is
+push is never lost behind a later ordinary push, and `main` cannot release between a
+hotfix's tag and its merge. When that merge needs a person (a conflict), the lock ends
+with the job, but `bump_version.py` refuses a release from any branch that does not
+contain the newest tag, so `main` releases again only once the hotfix is merged. A merge
+whose push lost a race with another push to `main` (the Supporter list) is retried. A queued run checks out the branch as it is when the lock is
 free, not the commit that was pushed, so its push is never rejected as out of date; the
 release spec still comes from its own push.
 

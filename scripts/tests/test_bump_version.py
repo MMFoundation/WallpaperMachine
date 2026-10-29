@@ -205,6 +205,29 @@ class HotfixTests(unittest.TestCase):
             self.assertFalse(bump_version.tagged_commit(root, "0" * 40), "An unknown commit is not released")
 
 
+class MergedHotfixTests(unittest.TestCase):
+    def test_main_releases_only_once_the_newest_tag_is_merged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "test@example.com")
+            git("config", "user.name", "Test")
+            git("commit", "-q", "--allow-empty", "-m", "base")
+            git("tag", "v0.1.0")
+            git("switch", "-q", "-c", "hotfix/0.1.0")
+            git("commit", "-q", "--allow-empty", "-m", "fix")
+            git("tag", "v0.1.1")
+            git("switch", "-q", "main")
+            git("commit", "-q", "--allow-empty", "-m", "feature")
+            with self.assertRaises(bump_version.VersionError):
+                bump_version.check_contains_newest_release(root, bump_version.version_tags(root))
+            git("merge", "-q", "--no-ff", "--no-edit", "v0.1.1")
+            bump_version.check_contains_newest_release(root, bump_version.version_tags(root))
+            bump_version.check_contains_newest_release(root, [])
+
+
 class RepoFileTests(unittest.TestCase):
     def test_checked_in_project_yml_is_valid(self):
         root = Path(__file__).resolve().parents[2]
@@ -224,7 +247,7 @@ class CLITests(unittest.TestCase):
             (root / "project.yml").write_text(SAMPLE_YML)
             (root / "WallpaperMachine.xcodeproj/project.pbxproj").write_text(SAMPLE_PBX)
             output = root / "github-output"
-            env = {"RELEASE_SPEC": "patch", "GITHUB_OUTPUT": str(output)}
+            env = {"RELEASE_SPEC": "patch", "GITHUB_OUTPUT": str(output), "GITHUB_REF_NAME": ""}
             with patch.dict(os.environ, env, clear=False), patch.object(
                 bump_version.sys, "argv", ["bump_version.py", "--ci", "--apply", "--root", str(root)]
             ):
@@ -241,7 +264,8 @@ class CLITests(unittest.TestCase):
             event = root / "event.json"
             event.write_text(json.dumps({"head_commit": {"message": "release: major\n"}}))
             output = root / "github-output"
-            env = {"GITHUB_EVENT_PATH": str(event), "GITHUB_OUTPUT": str(output), "RELEASE_SPEC": ""}
+            env = {"GITHUB_EVENT_PATH": str(event), "GITHUB_OUTPUT": str(output), "RELEASE_SPEC": "",
+                   "GITHUB_REF_NAME": ""}
             with patch.dict(os.environ, env, clear=False), patch.object(
                 bump_version.sys, "argv", ["bump_version.py", "--ci", "--root", str(root)]
             ):
