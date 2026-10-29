@@ -571,6 +571,60 @@ class Video {
   set rate(v) { n.video(this[KEY].key, 'setRate', Number(v)); }
 }
 
+// ---- model data (thisScene.createModelData) -------------------------------
+// Wallpaper Engine's vertex format flags; a format lists them in this order.
+var MODEL_FLAGS = { POSITION: 'position', NORMAL: 'normal', TANGENT_SIGNED: 'tangentSigned', UV: 'uv',
+                    COLOR: 'color' };
+var MODEL_ID = Symbol('model');
+// A shape as the host reads it: plain arrays become the typed arrays Wallpaper Engine takes.
+function modelShape(shape) {
+  if (shape === null || typeof shape !== 'object') throw new TypeError('A shape must be an object');
+  var out = {
+    vertexFormat: Array.isArray(shape.vertexFormat) ? shape.vertexFormat.map(String) : undefined,
+    material: shape.material === undefined || shape.material === null ? '' : String(shape.material),
+    isVertexBufferDynamic: !!shape.isVertexBufferDynamic,
+    isIndexBufferDynamic: !!shape.isIndexBufferDynamic
+  };
+  var vertices = shape.vertexBuffer, indices = shape.indexBuffer;
+  out.vertexBuffer = Array.isArray(vertices) ? new Float32Array(vertices) : vertices;
+  out.indexBuffer = Array.isArray(indices) ? new Uint32Array(indices) : indices;
+  return out;
+}
+class IModelData {
+  constructor(token, id) {
+    if (token !== MODEL_ID) throw new TypeError('Model data is made with thisScene.createModelData');
+    Object.defineProperty(this, MODEL_ID, { value: { id: id } });
+  }
+  // One shape object for the first shape, or an array of them (an entry left out changes nothing).
+  applyData(shapes) {
+    var list = Array.isArray(shapes) ? shapes : [shapes];
+    for (var i = 0; i < list.length; ++i) {
+      var shape = list[i];
+      if (shape === undefined || shape === null) continue;
+      var error = n.applyModel(this[MODEL_ID].id, i, modelShape(shape));
+      if (error) throw new Error(error);
+    }
+  }
+  replaceData() { throw new Error('replaceData is not supported; create new model data instead'); }
+}
+Object.keys(MODEL_FLAGS).forEach(function (flag) {
+  Object.defineProperty(IModelData, flag, { value: MODEL_FLAGS[flag], enumerable: true });
+  Object.defineProperty(IModelData.prototype, flag, { value: MODEL_FLAGS[flag], enumerable: true });
+});
+function createModelData(cfg) {
+  if (cfg === null || typeof cfg !== 'object' || !Array.isArray(cfg.shapes) || cfg.shapes.length === 0) {
+    throw new TypeError('createModelData needs a configuration with a shapes array');
+  }
+  // The bounding box serves Wallpaper Engine's culling and hit tests; layers drawn here are
+  // neither culled nor hit.
+  var result = n.createModel(cfg.shapes.map(modelShape));
+  if (typeof result !== 'number') throw new Error('Unable to create model data: ' + result);
+  return new IModelData(MODEL_ID, result);
+}
+function destroyModelData(model) {
+  if (model instanceof IModelData) n.destroyModel(model[MODEL_ID].id);
+}
+
 // ---- scene API ------------------------------------------------------------
 function getLayer(x) {
   if (typeof x === 'number') {
@@ -646,16 +700,23 @@ function applyCreateOptions(layer, cfg) {
 function createLayer(cfg, creatorKey, workshopId) {
   var template, key;
   var options = {};
+  var model;
   if (typeof cfg === 'string') {
     template = cfg;
+  } else if (cfg instanceof IModelData) {
+    model = cfg;
   } else if (cfg !== null && typeof cfg === 'object') {
     options = cfg;
-    if (cfg.image !== undefined && cfg.image !== null) template = String(cfg.image);
+    if (cfg.model instanceof IModelData) model = cfg.model;
+    else if (cfg.image !== undefined && cfg.image !== null) template = String(cfg.image);
     else if (cfg.text === undefined) throw new Error('Unable to create layer: ');
   } else {
     throw new Error('Unable to create layer: ' + String(cfg));
   }
-  if (template !== undefined) {
+  if (model !== undefined) {
+    key = n.createModelLayer(model[MODEL_ID].id, !!options.perspective, creatorKey);
+    if (!key) throw new Error('Unable to create model layer');
+  } else if (template !== undefined) {
     key = n.createFromTemplate(template, creatorKey, workshopId === undefined ? '' : String(workshopId));
     if (!key) throw new Error('Unable to create layer: ' + template);
   } else {
@@ -732,6 +793,8 @@ var sceneApi = {
   },
   createLayer: function (cfg) { return createLayer(cfg, '', ''); },
   destroyLayer: destroyLayer,
+  createModelData: createModelData,
+  destroyModelData: destroyModelData,
   on: addListener
 };
 var sceneProxy = new Proxy(sceneApi, {

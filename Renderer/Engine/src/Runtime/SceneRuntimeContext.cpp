@@ -4557,6 +4557,77 @@ std::string SceneRuntimeContext::CreateTextLayer(std::string_view config_json,
 }
 
 // ---------------------------------------------------------------------------
+// Model layers: geometry a script builds (`createModelData`) and the layers drawing it.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// What scripts may keep alive at once: far beyond a wallpaper's needs, short of a script that
+// makes model data every frame and never destroys it taking the process down.
+constexpr std::size_t kMaxScriptModels     = 4096;
+constexpr std::size_t kMaxScriptModelBytes = std::size_t { 256 } << 20;
+} // namespace
+
+int32_t SceneRuntimeContext::CreateScriptModel(std::span<const ScriptModelShapeInput> shapes,
+                                               std::string&                           error) {
+    if (m_script_models.size() >= kMaxScriptModels) {
+        error = "too much model data is alive; destroy what is no longer drawn with destroyModelData";
+        return 0;
+    }
+    auto model = ScriptModelData::Build(shapes, error);
+    if (model == nullptr) return 0;
+    if (model->Bytes() > kMaxScriptModelBytes - std::min(m_script_model_bytes, kMaxScriptModelBytes)) {
+        error = "the model data is larger than what scripts may keep alive";
+        return 0;
+    }
+    m_script_model_bytes += model->Bytes();
+    const int32_t id = m_next_script_model++;
+    m_script_models.emplace(id, std::move(model));
+    return id;
+}
+
+std::string SceneRuntimeContext::ApplyScriptModel(int32_t id, std::size_t index,
+                                                  const ScriptModelShapeInput& input) {
+    const auto found = m_script_models.find(id);
+    if (found == m_script_models.end()) return "applyData on model data that was destroyed";
+    return found->second->Apply(index, input);
+}
+
+bool SceneRuntimeContext::DestroyScriptModel(int32_t id) {
+    const auto found = m_script_models.find(id);
+    if (found == m_script_models.end()) return false;
+    m_script_model_bytes -= std::min(m_script_model_bytes, found->second->Bytes());
+    m_script_models.erase(found);
+    return true;
+}
+
+void SceneRuntimeContext::SetModelLayerFactory(ModelLayerFactory factory) {
+    m_model_layer_factory = std::move(factory);
+}
+
+std::string SceneRuntimeContext::CreateModelLayer(int32_t id, bool perspective,
+                                                  std::string_view current_layer_name) {
+    const auto model = m_script_models.find(id);
+    if (model == m_script_models.end() || ! m_model_layer_factory || m_scene == nullptr ||
+        m_scene->sceneGraph == nullptr) {
+        return {};
+    }
+    auto node = m_model_layer_factory(*model->second, perspective, m_next_generated_text_id++);
+    if (node == nullptr || node->Name().empty()) return {};
+    const std::string name = node->Name();
+
+    SceneNode* parent = m_scene->sceneGraph.get();
+    if (const auto current = m_nodes.find(std::string(current_layer_name));
+        current != m_nodes.end() && current->second != nullptr && current->second->Parent() != nullptr) {
+        parent = current->second->Parent();
+    }
+    parent->AppendChild(node);
+    m_script_created_layers.insert(name);
+    MarkSceneGraphMutated("create-layer");
+    return name;
+}
+
+// ---------------------------------------------------------------------------
 // What `createLayer` and the layer properties change about a layer.
 // ---------------------------------------------------------------------------
 

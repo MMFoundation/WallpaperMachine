@@ -57,7 +57,7 @@ add_subdirectory(Scene/MetalRender)
 # Runtime, scripting, shader bridge and scene-parsing sources of the engine library.
 set(WESCENE_CORE_SOURCES
   Runtime/SceneRuntimeContext.cpp Runtime/SceneSettingResolver.cpp Runtime/ScriptedDynamicValue.cpp
-  Runtime/VirtualAssetRegistry.cpp
+  Runtime/ScriptModelData.cpp Runtime/VirtualAssetRegistry.cpp
   Shader/RustShaderBridge.cpp Shader/SceneMetalVariants.cpp
   Text/SystemFontResolver.cpp Text/TextLayer.cpp
   Scripting/ScriptEngine.cpp Scripting/ScriptModuleSyntax.cpp

@@ -4647,6 +4647,72 @@ std::shared_ptr<SceneNode> MakeScriptTextLayer(const std::shared_ptr<Scene>& sce
     return lazy.layers.back().node;
 }
 
+/// The layer a script's `createLayer({ model })` makes: a model layer drawing the geometry
+/// of `createModelData`, each shape with the material it names, read like a model object's
+/// material. The mesh shares the model's geometry and is rewritten only when the script
+/// applies data. Not attached; the runtime joins it to the scene graph.
+std::shared_ptr<SceneNode> MakeScriptModelLayer(const std::shared_ptr<Scene>& scene, fs::VFS* vfs,
+                                                const LazyParseInputs& inputs, ScriptModelData& model,
+                                                bool perspective, int32_t object_id) {
+    if (scene == nullptr || scene->runtime == nullptr || vfs == nullptr) return nullptr;
+    EntryPlan plan;
+    plan.kind      = EntryKind::Model;
+    plan.admission = Admission::Object;
+    plan.id        = object_id;
+    plan.key       = "__we_model_" + std::to_string(object_id);
+    const nlohmann::json entry = { { "id", object_id },
+                                   { "visible", true },
+                                   { "origin", { 0, 0, 0 } },
+                                   { "scale", { 1, 1, 1 } },
+                                   { "angles", { 0, 0, 0 } } };
+
+    ParseContext         lazy = MakeLazyParseContext(scene, *vfs, inputs);
+    LazyShaderParseScope scope(inputs.index);
+    auto mesh = std::make_shared<SceneMesh>(model.Dynamic() ? MeshUpdate::OnEvent : MeshUpdate::Fixed);
+    mesh->ChangeMeshDataFrom(model.Geometry());
+    std::vector<std::pair<wpscene::WPMaterial, LoadedMaterial>> slots;
+    for (const auto& shape : model.Shapes()) {
+        auto authored = ReadModelMaterial(*vfs, shape.material);
+        SceneMaterial  material;
+        LoadedMaterial loaded;
+        if (! authored.has_value() || ! LoadMaterial(lazy, *authored, material, loaded)) {
+            // The geometry is shared, so a shape cannot be left out of this layer alone.
+            LOG_ERROR("createLayer: the model material '%s' cannot be loaded", shape.material.c_str());
+            return nullptr;
+        }
+        mesh->AddMaterial(std::move(material));
+        slots.emplace_back(std::move(*authored), std::move(loaded));
+    }
+    FlushPendingMetalTranslations(*scene);
+    lazy.uses_models = true;
+
+    auto&      layer = AddLayer(lazy, 0, entry, plan, true, false);
+    const auto node  = layer.node;
+    node->AddMesh(mesh);
+    if (perspective || (scene->activeCamera != nullptr && scene->activeCamera->IsPerspective())) {
+        node->SetCamera("global_perspective");
+    }
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+        if (lazy.shader_updater != nullptr) {
+            WPShaderValueData data;
+            data.renderTargets = slots[slot].second.render_targets;
+            lazy.shader_updater->SetNodeData(node.get(), static_cast<uint32_t>(slot), data);
+        }
+        RegisterDrivenMaterialConstants(lazy, mesh->MaterialSlotPtr(slot), slots[slot].first,
+                                        slots[slot].second.info, plan.key);
+    }
+    // The renderer copies a changed mesh once per frame slot and skips it while its generation
+    // stays the one it copied; generation 0 would read as never copied.
+    mesh->SetDirty();
+    model.AddUser(mesh);
+    // Nothing to hit: the layer has no picture and no size.
+    SetUnhittable(lazy, plan.key);
+    for (auto& [source, key] : lazy.scene_scripts) {
+        scene->runtime->RegisterSceneScript(std::move(source), std::move(key));
+    }
+    return node;
+}
+
 /// Reads an asset as a JSON object. A file that is missing (the virtual file system has
 /// already said so) or empty is no document, and is not parsed to log a second error.
 bool ReadAssetObject(fs::VFS& vfs, const std::string& asset_path, nlohmann::json& out) {
@@ -6371,6 +6437,10 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
         scene->runtime->SetTextLayerFactory(
             [weak, vfs_pointer, inputs](const std::string& config, int32_t object_id) {
                 return MakeScriptTextLayer(weak.lock(), vfs_pointer, inputs, config, object_id);
+            });
+        scene->runtime->SetModelLayerFactory(
+            [weak, vfs_pointer, inputs](ScriptModelData& model, bool perspective, int32_t object_id) {
+                return MakeScriptModelLayer(weak.lock(), vfs_pointer, inputs, model, perspective, object_id);
             });
     }
 

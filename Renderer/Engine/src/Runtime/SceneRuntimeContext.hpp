@@ -4,6 +4,7 @@
 #include "Audio/include/Audio/AudioResponseService.h"
 #include "Runtime/CameraPath.hpp"
 #include "Runtime/ScalarAnimation.hpp"
+#include "Runtime/ScriptModelData.hpp"
 #include "Scene/Parse/WPPuppet.hpp"
 #include "Scene/include/Scene/SceneShader.h"
 #include "Scene/include/Scene/SceneUpdateDemand.hpp"
@@ -22,6 +23,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -668,6 +670,25 @@ public:
     /// be made. It joins the scene beside `current_layer_name`.
     std::string                   CreateTextLayer(std::string_view config_json,
                                                   std::string_view current_layer_name);
+    /// `thisScene.createModelData`: the id scripts refer to the geometry by (from 1), or 0
+    /// with `error` saying why the shapes were refused. What scripts keep alive is bounded.
+    int32_t                       CreateScriptModel(std::span<const ScriptModelShapeInput> shapes,
+                                                    std::string& error);
+    /// `modelData.applyData` on shape `index`: empty on success, else the error to throw.
+    std::string                   ApplyScriptModel(int32_t id, std::size_t index,
+                                                   const ScriptModelShapeInput& input);
+    /// `thisScene.destroyModelData`: layers drawing the geometry keep it until they go.
+    bool                          DestroyScriptModel(int32_t id);
+    /// Builds a layer drawing `model` (`createLayer({ model })`), registered and named but not
+    /// yet attached, and tells the model about its mesh. Installed by the parser, which loads
+    /// the shapes' materials. `object_id` is unique to it.
+    using ModelLayerFactory = std::function<std::shared_ptr<SceneNode>(ScriptModelData& model, bool perspective,
+                                                                       int32_t object_id)>;
+    void                          SetModelLayerFactory(ModelLayerFactory factory);
+    /// `createLayer({ model })`: the layer's name, or empty when it could not be made. It
+    /// joins the scene beside `current_layer_name`.
+    std::string                   CreateModelLayer(int32_t id, bool perspective,
+                                                   std::string_view current_layer_name);
     /// `createLayer`'s `name`, `parent`, `size` and `parallaxDepth` for a layer
     /// a script made, and the same properties of any layer afterwards.
     bool                          NameLayer(std::string_view runtime_name, std::string authored_name);
@@ -1040,7 +1061,12 @@ private:
     InitialLayerConfigProvider                                     m_initial_layer_config_provider;
     TextFontResolver                                               m_text_font_resolver;
     TextLayerFactory                                               m_text_layer_factory;
+    /// The object ids of the text and model layers scripts make.
     int32_t                                                        m_next_generated_text_id { 0x40000000 };
+    ModelLayerFactory                                              m_model_layer_factory;
+    std::unordered_map<int32_t, std::shared_ptr<ScriptModelData>>  m_script_models;
+    int32_t                                                        m_next_script_model { 1 };
+    std::size_t                                                    m_script_model_bytes { 0 };
     std::unordered_map<std::string, std::string>                   m_layer_aliases;
     std::unordered_map<std::string, NodeVisibilityBinding>         m_node_visibility;
     /// The colour value an image layer takes its materials' colour from.
