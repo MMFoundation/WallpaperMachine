@@ -42,6 +42,7 @@ final class AppUpdateStore {
     @ObservationIgnored private var downloadTask: Task<AppUpdateState, Never>?
     @ObservationIgnored private var available: GitHubRelease?
     @ObservationIgnored private var downloadedArchive: URL?
+    @ObservationIgnored private var downloadedApplication: URL?
     @ObservationIgnored private var extractedApp: URL?
     @ObservationIgnored private var activeOperation: AppUpdateOperation?
     @ObservationIgnored private var installScheduled = false
@@ -198,8 +199,8 @@ final class AppUpdateStore {
     }
 
     func revealDownloadedUpdate() {
-        guard let downloadedArchive else { return }
-        workspace.reveal(downloadedArchive)
+        guard let downloadedApplication else { return }
+        workspace.reveal(downloadedApplication)
     }
 
     func openReleases() {
@@ -303,12 +304,18 @@ final class AppUpdateStore {
                     DispatchQueue.main.sync(execute: apply)
                 }
             }
-            if Task.isCancelled { return state }
-            downloadedArchive = destination
-            if !installer.canInstallInPlace {
-                // Finder mounts the disk image and shows its drag-to-Applications window.
-                workspace.open(destination)
+            try Task.checkCancellation()
+            // A mirror controls the DMG and its digest. Finder gets only the verified app,
+            // never the original image, which could contain unsigned sibling installers.
+            let verified = try await installer.prepareInstallation(archive: destination)
+            if let previous = downloadedApplication { await installer.discardPreparation(previous) }
+            do { try Task.checkCancellation() } catch {
+                await installer.discardPreparation(verified)
+                throw error
             }
+            downloadedApplication = verified
+            downloadedArchive = destination
+            if !installer.canInstallInPlace { workspace.reveal(verified) }
             state = .ready(currentVersion: currentVersion, availableVersion: release.version.display)
             return state
         } catch is CancellationError {
@@ -399,7 +406,9 @@ struct AppUpdateWorkspace: Sendable {
         AppUpdateWorkspace(
             archiveURL: { version, name in
                 let folder = ClientPaths.supportURL.appendingPathComponent("Updates", isDirectory: true)
-                let sanitized = name.isEmpty ? "WallpaperMachine-\(version).dmg" : name
+                // A mirror relays the manifest, so the name is untrusted: keep only its last component.
+                let last = (name as NSString).lastPathComponent
+                let sanitized = ["", ".", "..", "/"].contains(last) ? "WallpaperMachine-\(version).dmg" : last
                 return folder.appendingPathComponent(sanitized)
             },
             // The store calls these on the main actor; `DesktopActions` is where tests stop them.

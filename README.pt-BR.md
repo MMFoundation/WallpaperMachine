@@ -130,6 +130,9 @@ sem abrir a janela.
 - **Atualizações verificáveis.** O atualizador integrado só instala uma imagem de disco cujo
   SHA-256 corresponde ao da versão; uma que ele não consegue verificar é
   [recusada, nunca instalada sem verificação](docs/features/updates.md#downloading).
+  Onde o GitHub não é acessível, como na China continental sem VPN, ele baixa os
+  mesmos arquivos por [proxies públicos de download do GitHub](docs/features/updates.md#what-a-check-reads),
+  que não podem mudar o que é instalado.
 - **Mantido ativamente.** Novas versões saem com frequência, e cada uma é descrita
   no [changelog](CHANGELOG.md), em inglês e 简体中文.
 - **Problemas têm um caminho de verdade.** **Não funciona? Relatar no GitHub**, nos detalhes de

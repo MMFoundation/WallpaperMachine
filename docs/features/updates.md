@@ -62,6 +62,25 @@ when the Latest release has no manifest (404) or one the parser rejects; a manif
 that is rate-limited, fails or redirects off the GitHub hosts listed under
 [Downloading](#downloading) is an error, not a reason to spend an API request.
 
+**Mirrors.** Where GitHub can't be reached (typically mainland China without a VPN),
+the check asks public GitHub download proxies for the same manifest, in the order of
+`AppUpdateConfiguration.mirrors` (`ghfast.top`, `gh-proxy.com`, `gh.llkk.cc`). Each
+takes the whole GitHub URL after its own
+(`https://ghfast.top/https://github.com/…`). Only an unreachable route moves on: a
+request that fails to connect, times out or answers with an error status. GitHub's own
+answers (a rate limit, a missing repository) stand and are never taken to a mirror. A
+mirror is asked only for the manifest, never the API, and anything it answers other
+than a readable manifest counts as a dead route. The way that last worked (GitHub or
+a mirror) is tried first by the next check and the next download, for as long as the
+app runs, so a Mac that can't reach GitHub doesn't wait out its 30-second timeout
+every time. When every route fails, the error reported is GitHub's. The mirrors are
+untrusted transport: what installs is decided by the signature and version checks
+under [Installing](#installing), so a mirror can withhold an update but never
+substitute one. A release page a manifest names is opened only on `github.com`;
+any other falls back to GitHub Releases. Using the mirrors sends the device's IP
+address and the requested GitHub URL to those third parties, and only after GitHub
+itself has failed.
+
 With a manifest a check spends no API request; without one it spends one (two when
 `/releases/latest` is 404). A 403 with `x-ratelimit-remaining: 0` or a
 `retry-after` header, or a 429, from either source is a distinct `rateLimited`
@@ -114,23 +133,42 @@ Application Support folder (`ClientPaths.supportURL`), and About shows percent a
 bytes. `GitHubReleaseDownload` enforces:
 
 - HTTPS on `github.com`, `api.github.com` and the `objects`, `release-assets` and
-  `github-releases` hosts under `githubusercontent.com` (default port only), for
-  the manifest as for the image: every redirect must stay on them and one that
-  leaves ends the request with an error. The image's own URL and its final
-  response must be on them too.
+  `github-releases` hosts under `githubusercontent.com` (default port only), plus
+  the [mirrors](#what-a-check-reads)' hosts for a request relayed through one, for
+  the manifest as for the image: every redirect must stay on them, and one that
+  leaves ends that source's request. The image URL the manifest names must be on
+  GitHub's hosts; a mirror is only another way to fetch that URL.
 - A `sha256:` digest for the image, from the manifest (or from GitHub when the API
   was asked). An image that comes without a usable digest is refused as
   unverifiable before the request starts, never installed unchecked.
-- The bytes are hashed as they arrive. An answer other than HTTP 200, a size above
+- The bytes are hashed as they arrive. An answer other than HTTP 200 (or a valid
+  206 when resuming), a size above
   1 GiB (`maximumDownloadBytes`), a byte count that differs from the published
   `size` (or `Content-Length`) and a SHA-256 that differs from the digest each fail
-  the download. A request stalls out after 5 minutes without data, the whole
-  transfer after 30 minutes.
+  the download. Each request stalls out after 60 seconds without data and times
+  out after 30 minutes in total.
+- Sources take turns: the route that last worked first, then GitHub and each mirror.
+  A source that fails, stalls, closes early or answers with an unusable status hands over
+  to the next. While another source is left in the first round, one still below
+  32 KiB/s after 30 seconds (`GitHubReleaseDownload.slowSourceRate`) gives way too,
+  so a trickling connection to GitHub doesn't hold the image for half an hour. The
+  next source resumes with `Range: bytes=<n>-` and must answer 206 from exactly
+  that byte; one that sends the whole image (200) replaces what was written. Bytes
+  that add up to the wrong size or digest are thrown away and the next source
+  starts over. The download ends once every source in a row has failed without
+  exceeding the highest byte offset reached, so repeated truncated responses that
+  ignore Range cannot keep it retrying forever. Nothing is kept between downloads.
+
+Before a download becomes ready, the app inside is copied out and checked for its
+signature and newer version using the same checks as installation. Finder only
+reveals this verified app, never the original image: a mirror could repackage a
+genuine app alongside unsigned installers. Restart-install checks a fresh copy
+again before replacing the running app.
 
 A finished download leaves About on **Version x.y.z is ready** with **Restart and
 Install** and **Show in Finder**. When the installed copy cannot be replaced in
-place (next section), the app instead opens the image in Finder as soon as it is
-downloaded, so Finder shows its drag-to-Applications window for a manual install.
+place (next section), the app reveals the verified application in Finder as soon
+as the download is verified, so the user can move it to Applications manually.
 
 ## Installing
 
@@ -163,7 +201,10 @@ designated requirement: this identifier, signed with the project certificate
 ([release signing](../build.md#release-signing)). The digest proves the image is the one
 the release lists; the signature proves who built it, so a release asset someone replaced
 is refused as unverifiable, never installed, and so is a copy signed any other way, ad hoc
-included ([release](../release.md#what-the-in-app-updater-expects)). Cancelling
+included ([release](../release.md#what-the-in-app-updater-expects)). Its
+`CFBundleShortVersionString` must also be above the running version: a genuine older
+release passes the signature check, so this is what stops a mirror relaying it as the
+latest from rolling the app back. Cancelling
 stops the process, detaches the image, removes the staging directory and leaves
 the update ready to start again.
 
@@ -181,8 +222,9 @@ the helper and reports that the install timed out; **Retry installation** is
 enabled only after cancellation confirms the old helper has stopped.
 
 `Tests/Unit/GitHub/AppUpdateTests.swift` covers checking, the manifest and API
-paths, rate limits, asset selection, digest verification, the signature check
-(an unsigned, altered or foreign-signed copy is refused), installing from a real
+paths, the mirror fallback and its route memory, rate limits, asset selection,
+digest verification, resuming across sources, the signature and version checks
+(an unsigned, altered, foreign-signed or older copy is refused), installing from a real
 disk image and the replacement helper's success, failure and locking.
 `UpdatePromptGateTests` covers when the unattended update window is held and that a
 held one is offered exactly once afterwards.
@@ -217,7 +259,7 @@ strict rules publishing applies ([release](../release.md#release-notes-and-the-c
   checkbox, then quits and reopens on the new version (**Preparing update…** while
   the image is copied out). It is consent to both steps: closing the window or
   **Remind Me Later** during the download does not call the install off. When the
-  installed copy cannot be replaced in place, the download opens in Finder instead
+  installed copy cannot be replaced in place, the verified application is revealed in Finder instead
   and the window closes. A failed download closes the window and opens About.
 - A downloaded update reads **A new version of WallpaperMachine is ready to install!**
   and offers **Install and Relaunch**. A release without a disk image offers **Open

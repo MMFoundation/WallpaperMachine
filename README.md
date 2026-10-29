@@ -134,6 +134,9 @@ without opening the window.
 - **Updates it can check.** The built-in updater installs only a disk image whose
   SHA-256 matches the release; one it can't verify is
   [refused, never installed unchecked](docs/features/updates.md#downloading).
+  Where GitHub can't be reached, as in mainland China without a VPN, it fetches the
+  same files through [public GitHub download proxies](docs/features/updates.md#what-a-check-reads),
+  which can't change what installs.
 - **Actively maintained.** New versions ship often, and every one is written up
   in the [changelog](CHANGELOG.md), in English and 简体中文.
 - **Problems get a real path.** **Not working? Report on GitHub** in any
