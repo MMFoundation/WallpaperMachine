@@ -1121,7 +1121,13 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   start-paused timeline is neither shown at its first frame nor played, and with no
   timeline of its own the script's no-name `getAnimation()` finds the layer's first
   unnamed clock. A shader constant keeps its timeline beside its script, and there the
-  no-name call is the constant's own timeline.
+  no-name call is the constant's own timeline. A constant's script without `update`
+  leaves that timeline the value and plays its clock, as Wallpaper Engine 2.8 does in a
+  generated probe (2026-10-30). A script with `update` is still the constant's only
+  writer: in the same probe, `update(value) { return value; }` beside a timeline its
+  `init` played showed the timeline's end in Wallpaper Engine and the authored value here,
+  and whether `value` arrives animated or the timeline overrides the script was not
+  separated.
   That a start-paused timeline shows its first frame before anything plays follows the
   origin and shader-constant timelines here and the editor's start-paused flag being a
   play state beside the curves; no frame of Wallpaper Engine showing a paused scale or

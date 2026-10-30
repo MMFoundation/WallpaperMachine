@@ -206,3 +206,60 @@ TEST(ScriptKeyedSettingObject, ASettingWithoutAnAnimationFindsTheLayersFirstUnna
     EXPECT_GT(scene.Origin("slider")[0], 100.0f) << "the layer's unnamed animation plays";
     EXPECT_TRUE(scene.ScriptErrors().empty()) << Describe(scene.ScriptErrors());
 }
+
+namespace
+{
+// A layer whose effect's `flag` constant is keyed from 1 down to 0 (start-paused, played once)
+// and carries `source`, a script that exports no `update`.
+void KeyedFlagLayer(ScenePackage& package, const std::string& source)
+{
+    const auto model  = ModelOf(package);
+    const auto effect = AddProbeEffect(package);
+    Json       flag   = ScriptedValue(source, 0.0);
+    Json       keyed  = Keyed({ 1 }, { 0 });
+    keyed["options"]["mode"] = "single";
+    flag["animation"]        = keyed;
+    Publish(package, { PlainImage(model, 1, "cover", {}, { EffectUse(effect, { { "flag", flag } }) }) });
+}
+} // namespace
+
+TEST(ScriptKeyedSettingObject, AHandlerOnlyScriptPlaysTheConstantsOwnTimeline)
+{
+    // A cover cross-fade: the blend amount rests on its first key and a new cover plays it
+    // down to the last. The script exports no `update`, so the timeline stays the value and
+    // the script only starts it.
+    ScenePackage package;
+    KeyedFlagLayer(package, Join({ "export function mediaThumbnailChanged(event) {",
+                                   "  thisObject.getAnimation().play();",
+                                   "}" }));
+
+    ScriptScene scene(package);
+    ASSERT_TRUE(scene.ok()) << scene.error();
+    scene.Tick(2);
+    EXPECT_FLOAT_EQ(scene.EffectConstant(0, "g_Flag").at(0), 1.0f) << "start-paused on its first key";
+    scene.runtime().SetMediaIntegrationEnabled(true);
+    scene.runtime().DispatchMediaEventJson(
+        R"({"type":"mediaThumbnailChanged","hasThumbnail":true,"primaryColor":[1,0,0]})");
+    // 30 fps on a 1/60 s tick: half a frame per tick, from the tick after the handler ran.
+    scene.Tick(61);
+    EXPECT_NEAR(scene.EffectConstant(0, "g_Flag").at(0), 0.5f, 0.02f) << "halfway along the curve";
+    scene.Tick(120);
+    EXPECT_FLOAT_EQ(scene.EffectConstant(0, "g_Flag").at(0), 0.0f) << "held on its last key";
+    EXPECT_TRUE(scene.ScriptErrors().empty()) << Describe(scene.ScriptErrors());
+}
+
+TEST(ScriptKeyedSettingObject, AnInitOnlyScriptPlaysTheConstantsOwnTimeline)
+{
+    // Wallpaper Engine 2.8 draws a probe opacity keyed this way at its last key, and at its
+    // first without the script (captured 2026-10-30).
+    ScenePackage package;
+    KeyedFlagLayer(package, "export function init() { thisObject.getAnimation().play(); }");
+
+    ScriptScene scene(package);
+    ASSERT_TRUE(scene.ok()) << scene.error();
+    scene.Tick(61);
+    EXPECT_NEAR(scene.EffectConstant(0, "g_Flag").at(0), 0.5f, 0.02f);
+    scene.Tick(120);
+    EXPECT_FLOAT_EQ(scene.EffectConstant(0, "g_Flag").at(0), 0.0f);
+    EXPECT_TRUE(scene.ScriptErrors().empty()) << Describe(scene.ScriptErrors());
+}

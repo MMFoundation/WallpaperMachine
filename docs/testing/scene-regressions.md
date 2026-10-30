@@ -487,7 +487,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   - `ScriptKeyedSettingObject.*`: `thisObject.getAnimation()` with no name is a keyed
     constant's own animation (the layer's slide does not play); a named lookup still
     finds the layer's animation; a setting without a timeline finds the layer's first
-    unnamed one.
+    unnamed one; a keyed constant whose script exports no `update` rests on its first
+    key and plays to its last when the script's `init` or `mediaThumbnailChanged`
+    handler calls `play()` (it stayed on the first key, so a cover cross-fade left the
+    previous cover over the current one).
   - `ScriptStartUp.*`, `ScriptInitResult.*`: all `init`s, then all first notices, then
     `update`, in layer order; a notice may call what a later layer's `init` set up through
     `shared`; what `init` returns is the value (a handle hides itself, a typing text starts

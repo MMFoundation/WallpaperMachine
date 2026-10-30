@@ -208,7 +208,11 @@ authored value, until a script plays it, and `getAnimation(name)` finds it by it
 gets that timeline from `thisObject.getAnimation()` with no name, as Wallpaper
 Engine's `IThisPropertyObject` does; it got the layer's first unnamed timeline, which
 on a layer that also slides is its origin's, so a cross-fade a new cover restarts
-restarted the slide and never faded. Settings the editor keyed together (`options.parent`: an origin and the angles
+restarted the slide and never faded. When that script exports no `update` (an `init`
+or an event handler that only calls `play()`), the timeline stays the constant's value
+and the script holds its clock: Wallpaper Engine plays it to the end, and such a script
+was dropped, which left a start-paused cover cross-fade on its first key and the
+previous cover over the current one. Settings the editor keyed together (`options.parent`: an origin and the angles
 that turn with it) are one animation on the first one's clock, so playing or holding
 it moves them all. A script or a property bound to the same setting is its only
 writer. A colour timeline tints the layer's own material and each of its effect passes

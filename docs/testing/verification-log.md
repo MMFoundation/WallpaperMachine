@@ -25,6 +25,19 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-30 — Keyed shader constant played by a script without update
+
+A cover cross-fade (blend amount keyed 1 to 0, start-paused, played by a mediaThumbnailChanged handler that only calls thisObject.getAnimation().play()) stayed on its first key, so the previous-cover slot covered the current cover. The handler-only script was never started; it now runs on the clock its constant's timeline plays on.
+
+- Wallpaper Engine 2.8.0.42 probe (generated opacity cells, scene version 4, two shots): no script 255 / 255 before / 255 after; init plays with no update 0 / 255 / 0; init plays with update(value) 0 / 128 / 128 (not fixed, documented in renderer.md); static 0.25 64 / 64 / 64; keys not paused 0 / 0 / 0
+- `we_reference.py compare` on the probe: before mean 21.73, off48 11.7%, corr 0.634; after mean 7.69, off48 6.2%, corr 0.883 (the update(value) cell and the watermark remain)
+- Workshop 3280146735 in the poster harness with `WE_TEST_MEDIA_ARTWORK=64x64:e01010` and playing/thumbnail events: cover centre (30,30,30) before, (224,16,16) after, at 8 s and 15 s
+- Not compared: that wallpaper against Wallpaper Engine (the VM has no player, so its card hides on PLAYBACK_STOPPED), and a live Apple Music cover in the app (needs a desktop run)
+- Cost: about 0.36 µs per tick per such constant (one update-less script evaluation, as other handler-only scripts)
+- `scenescript_behavior_test --gtest_filter=ScriptKeyedSettingObject.*`: 5 passed; both new tests failed before the fix
+- `python3 scripts/check_renderer.py` — exit 0; local-corpus tests skipped (no corpus environment)
+- `python3 scripts/test.py` — 4211 passed, 0 failed, 49 skipped (after clearing build-product xattrs and rebuilding a stale `libwallpaper_bridge.a` with `build.py --renderer-only`)
+
 ## 2026-10-29 — Keep SteamCMD current, SteamCMD canary, hotfix releases
 
 - python3 scripts/test.py on the branch rebased onto e20f6223: 4211 passed, 0 failed, 49 skipped (Python, XcodeGen, native).
@@ -113,13 +126,3 @@ System feedback sounds no longer count as another app playing, in-app updates mu
 - Update signature logic checked by hand against the published 1.6.3 disk image: release requirement met, strict deep check 0.17 s, a wrong certificate hash refused (-67050)
 - Not compared with Wallpaper Engine frames (no VM run); the order of cursorUp before cursorClick was not read from Wallpaper Engine
 - Not checked: the Window menu and hiding on a live desktop, the audio exclusions against real Siri or volume sounds; app not rebuilt
-
-## 2026-10-27 — Crowdin integration: GitHub and Crowdin setup
-
-Follows the Crowdin integration entry; those entry's open items were set up afterwards.
-
-- `gh secret list` — CROWDIN_PERSONAL_TOKEN present on the repository (value never read back); the same token read and wrote to Crowdin with no saved CLI identity (`crowdin status`, unchanged `push`)
-- `gh api .../actions/permissions/workflow` — organization and repository both read back `can_approve_pull_request_reviews: true`, `default_workflow_permissions: read`, so Actions can open the translation pull request
-- `python3 scripts/crowdin_sync.py push --overwrite` — ja, ko, pt-BR, zh-CN, zh-TW at 100% translated and 100% approved; `pull --dry-run` afterwards: the catalogs already match Crowdin
-- Bot commits and pull requests are titled `chore(localization): update translations from Crowdin`, so they stay out of the release notes
-- Not verified: .github/workflows/crowdin.yml has not run on GitHub (it is not on main yet), so the push, pull and pull-request steps are untested there

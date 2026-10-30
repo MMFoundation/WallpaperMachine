@@ -1326,8 +1326,17 @@ void RegisterDrivenMaterialConstants(ParseContext& context, const std::shared_pt
                                                                  std::move(own_clock));
             runtime->RegisterMaterialConstant(material, entry.uniform, std::move(value));
         } else if (const auto timeline = timelines.find(entry.key); timeline != timelines.end()) {
-            runtime->RegisterMaterialConstant(material, entry.uniform,
-                                              std::make_unique<DynamicValue>(0.0f), timeline->second);
+            // A script that exports no `update` leaves the timeline the value, and its
+            // `thisObject.getAnimation()` is the clock that timeline plays on: a handler that
+            // calls `play()` (a cover cross-fade a new track starts) plays the constant.
+            std::unique_ptr<DynamicValue> value;
+            if (setting.contains("script")) {
+                value = ResolveVectorSetting(*runtime, setting, entry.constant->value.size(), layer_name,
+                                             timeline->second->playback);
+            } else {
+                value = std::make_unique<DynamicValue>(0.0f);
+            }
+            runtime->RegisterMaterialConstant(material, entry.uniform, std::move(value), timeline->second);
         }
     }
 }
