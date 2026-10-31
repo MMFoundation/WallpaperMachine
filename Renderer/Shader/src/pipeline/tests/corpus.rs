@@ -143,7 +143,7 @@ fn shipped_programs_compile_end_to_end() {
     let includes = Layered { dirs: vec![root.clone()] };
     // `HLSL/` holds Direct3D programs for another path and the volumetric shader is out of scope
     // (spec C1 R22); both are left out of the sweep, as the earlier parts do.
-    let s = sweep(&files, &includes, |n| n.starts_with("HLSL/") || n.starts_with("volumetricsfront"), &[]);
+    let s = sweep(&files, &includes, |n| n.starts_with("HLSL/"), &[]);
     report("shipped programs", &s);
     for (cause, labels) in &s.failures {
         // The shadow-caster vertex stage of the foliage model reads `g_Texture1Texel`, which
@@ -166,7 +166,7 @@ fn shipped_programs_compile_as_the_video_plane_variant_when_they_can() {
     };
     let files = shader_files(&root);
     let includes = Layered { dirs: vec![root.clone()] };
-    let s = sweep(&files, &includes, |n| n.starts_with("HLSL/") || n.starts_with("volumetricsfront"), &[0]);
+    let s = sweep(&files, &includes, |n| n.starts_with("HLSL/"), &[0]);
     report("shipped programs, slot 0 as video planes", &s);
     assert!(s.ok >= 150, "{} plane variants compiled", s.ok);
     assert!(s.refused_names.is_empty(), "{:?}", s.refused_names.keys().collect::<Vec<_>>());

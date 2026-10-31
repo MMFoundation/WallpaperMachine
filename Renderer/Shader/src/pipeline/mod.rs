@@ -184,13 +184,22 @@ fn legalize_program(request: &ValidRequest, prepared: &PreparedProgram, name: &s
         prepared.stages.iter().find(|s| s.kind == kind).map(|s| s.evaluated.as_str()).unwrap_or_default()
     };
     let planar = request.planar_slots();
+    let single_sample = request.single_sample_slots();
     let input = ProgramInput {
         vertex: Some(text_of(StageKind::Vertex)),
         fragment: Some(text_of(StageKind::Fragment)),
         planar_slots: &planar,
+        single_sample_slots: &single_sample,
         // The model's highest binding is reflection's to enforce (D R60, R61): a texture the
         // stage uses above it is a reflection error, one it only declares is no error.
         unlimited_bindings: true,
+        // `sampler2DBackBuffer` follows the program's `BACKBUFFER_MS` combo (E-D8).
+        backbuffer_ms: prepared
+            .compile_combos
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case("BACKBUFFER_MS"))
+            .and_then(|c| c.value.trim().parse::<i64>().ok())
+            .is_some_and(|v| v != 0),
     };
     legalize(&input).map_err(|e| legalize_failure(e, name, text_of))
 }

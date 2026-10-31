@@ -157,7 +157,28 @@ pub fn reflect_module(
             Some(HandleCount::Constant(n)) => n,
             Some(HandleCount::Unsized) => 0,
         };
-        descriptors.push(DescriptorBinding { name, set, binding, descriptor, stages: mask, count });
+        let (image, comparison) = handle_shape(module, var.ty);
+        descriptors.push(DescriptorBinding { name, set, binding, descriptor, stages: mask, count, image, comparison });
+    }
+
+    /// The image shape and comparison flag of a handle type, through a binding array.
+    fn handle_shape(module: &Module, ty: naga::Handle<naga::Type>) -> (crate::reflection::ImageShape, bool) {
+        use crate::reflection::ImageShape;
+        match &module.types[ty].inner {
+            TypeInner::Image { dim, arrayed, class } => {
+                let shape = match (dim, arrayed, class) {
+                    (naga::ImageDimension::D2, false, naga::ImageClass::Depth { multi: false }) => ImageShape::Depth2D,
+                    (naga::ImageDimension::D2, false, naga::ImageClass::Sampled { multi: true, .. }) => ImageShape::D2Ms,
+                    (naga::ImageDimension::D2, false, naga::ImageClass::Sampled { multi: false, .. }) => ImageShape::D2,
+                    (naga::ImageDimension::D3, false, naga::ImageClass::Sampled { multi: false, .. }) => ImageShape::D3,
+                    _ => ImageShape::Other,
+                };
+                (shape, false)
+            }
+            TypeInner::Sampler { comparison } => (ImageShape::D2, *comparison),
+            TypeInner::BindingArray { base, .. } => handle_shape(module, *base),
+            _ => (ImageShape::D2, false),
+        }
     }
 
     let vertex_inputs = if kind == StageKind::Vertex { inputs_of(module, index, names)? } else { Vec::new() };
