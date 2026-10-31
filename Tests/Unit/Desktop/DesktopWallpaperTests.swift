@@ -1508,6 +1508,98 @@ final class DesktopWallpaperTests: XCTestCase {
         try await waitUntil { rig.total == 2 }
     }
 
+    /// A sync over windows the test opens and closes, as a host does after the snapshot that
+    /// asked for posters, with the requests each window was sent.
+    @MainActor
+    private final class OpeningWindowsRig {
+        let workspace = MemoryDesktopWorkspace()
+        let frames = NotificationCenter()
+        let sync: DesktopWallpaperSync
+        var shown: [CAMetalLayer] = []
+        private(set) var requests: [ObjectIdentifier: Int] = [:]
+        private var observer: NSObjectProtocol?
+
+        init(root: URL, settleDelays: [Duration]) throws {
+            var current: () -> [CAMetalLayer] = { [] }
+            sync = try DesktopWallpaperSync(
+                folder: root, workspace: workspace,
+                surfaces: { current().map { DesktopPosterSurface(layer: $0, display: "1") } },
+                frameCenter: frames, encode: { $0.pixels }, settleDelays: settleDelays)
+            current = { [unowned self] in self.shown }
+            observer = frames.addObserver(forName: DesktopPosterNotification.request, object: nil, queue: nil) { [weak self] note in
+                guard let layer = note.object as? CALayer else { return }
+                MainActor.assumeIsolated { self?.requests[ObjectIdentifier(layer), default: 0] += 1 }
+            }
+            sync.start()
+        }
+
+        func asked(_ layer: CALayer) -> Int { requests[ObjectIdentifier(layer)] ?? 0 }
+
+        func finish() {
+            if let observer { frames.removeObserver(observer) }
+            sync.stop()
+        }
+    }
+
+    @MainActor
+    func testAWindowThatClosesAfterTheSnapshotGivesItsDisplayItsOwnPictureBack() async throws {
+        let rig = try OpeningWindowsRig(root: root, settleDelays: [])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        let video = CAMetalLayer()
+        rig.shown = [video]
+        rig.sync.refresh()
+        let written = rig.workspace.writes.count
+        post(Data([1]), layer: video, center: rig.frames)
+        try await waitUntil { rig.workspace.writes.count > written }
+        XCTAssertNotEqual(rig.workspace.pictures[one], original("one"))
+
+        // The same windows again: nothing is asked and nothing written.
+        let settled = rig.workspace.writes.count
+        rig.sync.surfacesChanged()
+        XCTAssertEqual(rig.asked(video), 1)
+        XCTAssertEqual(rig.workspace.writes.count, settled)
+
+        // The wallpaper is taken off the display. Its window closes after the snapshot that
+        // said so, and the display shows the user's own picture again at once.
+        rig.shown = []
+        rig.sync.surfacesChanged()
+        XCTAssertEqual(rig.workspace.pictures[one], original("one"))
+    }
+
+    @MainActor
+    func testAWindowThatOpensWhileEveryPosterSettlesIsAskedAtOnce() async throws {
+        let rig = try OpeningWindowsRig(root: root, settleDelays: [.milliseconds(150), .milliseconds(300)])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        // A snapshot assigns a video: every surface is asked and settles, but its window opens
+        // only once the host has read the clip.
+        rig.sync.refresh()
+        let video = CAMetalLayer()
+        rig.shown = [video]
+        rig.sync.surfacesChanged()
+        XCTAssertEqual(rig.asked(video), 1, "the menu bar and Mission Control need its picture now")
+        // Asked once: the settle captures under way take it again.
+        rig.sync.surfacesChanged()
+        XCTAssertEqual(rig.asked(video), 1)
+        try await waitUntil { rig.asked(video) == 3 }
+    }
+
+    @MainActor
+    func testAWindowThatOpensAfterSettlingIsAskedAtOnceAndSettles() async throws {
+        let rig = try OpeningWindowsRig(root: root, settleDelays: [.milliseconds(20), .milliseconds(50)])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        try await Task.sleep(for: .milliseconds(120))
+        // The clip took longer to read than the wallpaper takes to settle.
+        let video = CAMetalLayer()
+        rig.shown = [video]
+        rig.sync.surfacesChanged()
+        XCTAssertEqual(rig.asked(video), 1)
+        try await waitUntil { rig.asked(video) == 3 }
+    }
+
     @MainActor
     func testAFrameDroppedForItsContextStillAnswersTheRequest() async throws {
         let rig = try PosterRig(root: root, periodicInterval: .milliseconds(30))

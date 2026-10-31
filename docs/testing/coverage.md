@@ -77,8 +77,12 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
   however long ago a settled one was taken; a Space change or snapshot during
   settling leaves the capture to the settle sequence; a resume retakes only displays
   without a settled poster; a frame nobody asked for never replaces a settled poster
-  and settles a new surface like a new wallpaper; periodic captures only while
-  enabled; later captures skip displays that are not presenting.
+  and settles a new surface like a new wallpaper; a window a host opens after the
+  snapshot is asked at once, whether the snapshot's settle captures are still under
+  way or already over, and then settles, while one that closes gives its display its
+  own picture back at once and a pass with the same windows asks for and writes
+  nothing; periodic captures only while enabled; later captures skip displays that
+  are not presenting.
 - Unsaved looks: a display that draws property edits nobody applied is asked for
   nothing by a new wallpaper, a settle capture or a Space change, a frame already on
   its way is dropped, the poster stays the saved look, and it is retaken once the

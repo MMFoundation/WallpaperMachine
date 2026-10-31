@@ -163,6 +163,15 @@ Each poster is a second decode of a few frames and is counted as
   a window that just opened (a wallpaper unloaded while the displays slept gets a new
   one), it becomes the poster without settling it, and the surface settles as a new
   wallpaper does.
+- **A video window opens or closes.** The native video host opens and closes its windows
+  after the snapshot that asked for posters, once it has read the clip, and a clip sends
+  no frame of its own. Every host pass calls `DesktopWallpaperSync.surfacesChanged`
+  (unless the animated lock screen claims the desktop): a window that opened and was neither asked nor
+  answered is asked at once and settles as a new wallpaper does, even when the snapshot's
+  settle captures are still under way, so the menu bar and Mission Control do not wait
+  for them. A display left without a window gets the user's own picture back at once,
+  not at the next snapshot. A pass that leaves the windows as they were asks for
+  nothing and writes nothing, and a settled poster stays.
 - **Periodically**, every `periodicRefreshInterval` (300 s), while the setting is on.
 - Settling and periodic captures ask only displays whose wallpaper is presenting
   (`canCapture`: the presentation policy has not suspended playback globally or for

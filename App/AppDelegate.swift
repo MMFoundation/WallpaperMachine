@@ -338,12 +338,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                 self.windowAuditor?.windowsMayHaveChanged()
                 self.spacePinning?.update()
                 guard lockScreen?.claimsDesktopPicture != true else { return }
-                do {
-                    // The snapshot can precede an async open or close. Recheck the actual windows
-                    // without retaking settled posters on every unchanged host pass.
-                    try self.startDesktopWallpaperSync(afterSnapshot: true)
-                    self.desktopWallpaperSync?.presentationResumed()
-                } catch {
+                // The host opens and closes its windows after the snapshot that asked for posters,
+                // once it has read the clip: the window that opened is asked for one, and a display
+                // left without a window gets its own picture back.
+                do { try self.startDesktopWallpaperSync(.surfacesChanged) } catch {
                     AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
                 }
             }
@@ -375,7 +373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                 // screen is on its way to taking it; a screen saver chosen on its own leaves it here.
                 if lockScreen?.claimsDesktopPicture != true {
                     // A suspended poster sync must never outlive the native provider.
-                    do { try self.startDesktopWallpaperSync(afterSnapshot: true) } catch {
+                    do { try self.startDesktopWallpaperSync(.snapshot) } catch {
                         self.lastError = error
                         AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
                     }
@@ -1479,9 +1477,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         return nil
     }
 
-    /// A sync that starts takes every poster. A running one takes every poster again, or after an
-    /// engine snapshot (`afterSnapshot`) only when it changed what the displays show.
-    private func startDesktopWallpaperSync(afterSnapshot: Bool = false) throws {
+    /// What has the poster sync start or look at the desktops again.
+    private enum DesktopPosterTrigger {
+        /// Every poster is taken again.
+        case refresh
+        /// An engine snapshot: every poster is taken again only when it changed what the displays show.
+        case snapshot
+        /// Wallpaper windows opened or closed: only those are looked at.
+        case surfacesChanged
+    }
+
+    /// A sync that starts takes every poster. A running one does what `trigger` asks.
+    private func startDesktopWallpaperSync(_ trigger: DesktopPosterTrigger = .refresh) throws {
         guard !shutdownInProgress else { return }
         // Every start comes through here, so with the switch off no poster can be written.
         guard PlaybackPreferences.shared.writesDesktopPicture else { return }
@@ -1490,7 +1497,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         // The restore re-runs this through `applyDesktopPicturePreference` when it ends.
         guard restoringDesktopPicture == nil else { return }
         if let sync = desktopWallpaperSync, !sync.isSuspended {
-            if afterSnapshot { sync.snapshotApplied(desktopPosterLayout()) } else { sync.refresh() }
+            switch trigger {
+            case .refresh: sync.refresh()
+            case .snapshot: sync.snapshotApplied(desktopPosterLayout())
+            case .surfacesChanged: sync.surfacesChanged()
+            }
             return
         }
         let sync = try DesktopWallpaperSync(folder: ClientPaths.supportURL.appendingPathComponent("DesktopPosters"),
