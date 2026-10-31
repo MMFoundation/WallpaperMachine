@@ -332,11 +332,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                 self?.lastError = WallpaperActionError(message: message)
                 self?.rebuildMenu()
             }
-            nativeVideo.onSurfacesChanged = { [weak self] in
+            nativeVideo.onSurfacesChanged = { [weak self, weak lockScreen] in
                 guard let self, !self.shutdownInProgress else { return }
                 self.presentationPolicy?.evaluate()
                 self.windowAuditor?.windowsMayHaveChanged()
                 self.spacePinning?.update()
+                guard lockScreen?.claimsDesktopPicture != true else { return }
+                do {
+                    // The snapshot can precede an async open or close. Recheck the actual windows
+                    // without retaking settled posters on every unchanged host pass.
+                    try self.startDesktopWallpaperSync(afterSnapshot: true)
+                    self.desktopWallpaperSync?.presentationResumed()
+                } catch {
+                    AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
+                }
             }
             nativeVideo.start()
             store.onSnapshotApplied = { [weak self, weak lockScreen, weak store] in
