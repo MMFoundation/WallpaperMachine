@@ -78,8 +78,9 @@ var MEDIA_COLORS = ['primaryColor', 'secondaryColor', 'tertiaryColor', 'textColo
 function make(factory, kind, layerName, animIndex, effectRef, animRef) {
   var sp = {};
   var builder = makeBuilder(sp);
-  var layerKey = layerName ? n.resolve(layerName) : '';
-  var layer = layerName ? getLayer(layerName) : undefined;
+  // The layer the script belongs to: its key, or (a test's) name.
+  var layerKey = layerName ? (n.hasNode(layerName) ? layerName : n.resolve(layerName)) : '';
+  var layer = layerName ? layerFor(layerKey) : undefined;
   var object = layer;
   if (layer !== undefined) {
     if (animIndex >= 0) object = animationLayerOf(layerKey, animIndex);
@@ -96,7 +97,7 @@ function make(factory, kind, layerName, animIndex, effectRef, animRef) {
     },
     writable: true, configurable: true, enumerable: false
   });
-  var prog = { kind: kind, layerName: layerName, h: null, sp: sp, started: false, caps: 0 };
+  var prog = { kind: kind, layerName: layerName, layerKey: layerKey, h: null, sp: sp, started: false, caps: 0 };
   try {
     prog.h = factory(layer, object, scene, function createScriptProperties() { return builder; }, sp,
                      moduleNamespace, moduleNamed, hooks);
@@ -174,19 +175,22 @@ function tickScene(prog) {
   try { runListeners('update', undefined); } catch (e) { reportError('update', e); }
 }
 
-function cursorEvent(prog, index, button, hasLocal, localX, localY) {
+function cursorEvent(prog, index, button) {
   var name = CURSOR[index];
+  var registered = prog.kind === 1 ? listeners[name] : undefined;
+  if (typeof prog.h[name] !== 'function' && (registered === undefined || registered.length === 0)) return;
   // Each program gets its own vectors: one that edits `event.worldPosition` must not
   // change what `input` or the next program's event holds.
   var world = worldVec.copy();
+  var local = n.cursorData(prog.layerKey, button === 0 && (index === 0 || index === 1 || index === 5));
   var event = {
     button: button,
     normalizedPosition: new Vec2(curX, curY),
     worldPosition: world,
+    localPosition: toVec3(local),
     position: world
   };
-  // Relative to the program's layer: 0 to its size on each axis while over it.
-  if (hasLocal) event.localPosition = new Vec3(localX, localY, 0);
+  if (local[3] !== undefined) event.hitBox = local[3];
   shortcutBudget = 1;
   try {
     guard(name, prog, event);
@@ -269,7 +273,7 @@ return {
   animationEvent: animationEvent, animationListeners: animationListeners,
   mediaJson: mediaJson, mediaThumbnail: mediaThumbnail, resizeProgram: resizeProgram,
   resizeListeners: resizeListeners, applyProps: applyProps, destroyProgram: destroyProgram,
-  noticeLanguage: noticeLanguage, notifyEnded: notifyAnimationLayerEnded,
+  noticeLanguage: noticeLanguage, notifyEnded: notifyAnimationLayerEnded, notifyVideoEnded: notifyVideoEnded,
   resetTransient: resetTransient, runInit: runInit, userNotices: userNotices
 };
 })

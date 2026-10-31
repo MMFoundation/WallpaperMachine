@@ -2,6 +2,7 @@
 #include "Runtime/DynamicValue.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Runtime/ScriptedDynamicValue.hpp"
+#include "Scene/include/Scene/SceneFrameStep.hpp"
 #include "Scene/include/Scene/SceneImageEffectLayer.h"
 #include "Runtime/SceneSettingResolver.hpp"
 #include "Scene/Scene.h"
@@ -28,6 +29,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -608,7 +610,217 @@ std::shared_ptr<WPPuppet> MakePuppet(WPPuppet::PlayMode mode) {
 
 std::shared_ptr<WPPuppet> MakeSingleShotPuppet() { return MakePuppet(WPPuppet::PlayMode::Single); }
 
+// MakePuppet's looping clip (x = frame, 10 fps), turned 0.1 rad about y a frame when `turn`,
+// carrying the root-motion `bits` and a clip record on its own frames for bone 0 (B-D9.2).
+std::shared_ptr<WPPuppet> MakeRootMotionPuppet(uint32_t bits, bool turn) {
+    auto  puppet = MakePuppet(WPPuppet::PlayMode::Loop);
+    auto& anim   = puppet->anims[0];
+    if (turn) {
+        for (size_t k = 0; k < anim.bone_tracks[0].frames.size(); ++k) {
+            auto& frame    = anim.bone_tracks[0].frames[k];
+            frame.position = linalg::Vector3f::Zero();
+            frame.angle    = linalg::Vector3f(0.0f, 0.1f * static_cast<float>(k), 0.0f);
+        }
+    }
+    anim.flags = WPPuppet::kAnimClip | WPPuppet::kAnimOwnFrames | bits;
+    WPPuppet::Animation::Clip clip;
+    clip.bone = 0;
+    clip.end  = static_cast<uint32_t>(anim.length);
+    anim.clip = clip;
+    puppet->prepared();
+    return puppet;
+}
+
 } // namespace
+
+// B-D9.2 / I8: a `rootmotion` model's clip moves the layer before any script runs on the frame:
+// the origin by the model's world 3x3 times the motion (sub_140225900), the yaw about y.
+TEST(ScriptRuntimeCompat, RootMotionMovesTheModelLayerBeforeTheScriptsRun) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    ASSERT_NE(runtime, nullptr);
+    auto walker  = std::make_shared<SceneNode>();
+    auto spinner = std::make_shared<SceneNode>();
+    auto probe   = std::make_shared<SceneNode>();
+    walker->SetTranslate(linalg::Vector3f(100.0f, 0.0f, 0.0f));
+    walker->SetScale(linalg::Vector3f(2.0f, 2.0f, 2.0f));
+    runtime->RegisterNode("walker", walker.get());
+    runtime->RegisterNode("spinner", spinner.get());
+    runtime->RegisterNode("probe", probe.get());
+
+    std::vector<WPPuppetLayer::AnimationLayer> authored(1);
+    authored[0].id = 7;
+    WPPuppetLayer walk(MakeRootMotionPuppet(WPPuppet::kRootX, false));
+    walk.prepared(authored);
+    walk.setRootMotion(true);
+    runtime->RegisterPuppetLayer("walker", walk);
+    WPPuppetLayer spin(MakeRootMotionPuppet(WPPuppet::kRootYaw, true));
+    spin.prepared(authored);
+    spin.setRootMotion(true);
+    runtime->RegisterPuppetLayer("spinner", spin);
+
+    runtime->RegisterNodeVisibility("probe", probe.get(), ResolveBoolSetting(*runtime, {
+        {"value", true}, {"script", R"JS(
+export function update(value) {
+    thisScene.getLayer('probe').origin = new Vec3(thisScene.getLayer('walker').origin.x, 0, 0);
+    return value;
+}
+)JS"}}, "probe"));
+
+    runtime->Tick(0.0);
+    scene.PassFrameTime(0.2);
+    runtime->Tick(0.2);
+    EXPECT_NEAR(runtime->NodeTranslate("walker").x(), 104.0f, 1e-4f);
+    EXPECT_NEAR(runtime->NodeTranslate("probe").x(), 104.0f, 1e-4f);
+    EXPECT_NEAR(runtime->NodeRotation("spinner").y(), 0.2f, 1e-5f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+namespace
+{
+// Bones (name, parent, bind translation) whose clip 7 (10 fps, loop) holds every bone at its bind.
+std::shared_ptr<WPPuppet> MakeStillSkeleton(
+    const std::vector<std::tuple<std::string, uint32_t, linalg::Vector3f>>& bones) {
+    auto puppet = std::make_shared<WPPuppet>();
+    WPPuppet::Animation animation;
+    animation.id     = 7;
+    animation.fps    = 10.0;
+    animation.length = 5;
+    animation.mode   = WPPuppet::PlayMode::Loop;
+    for (const auto& [name, parent, at] : bones) {
+        auto& bone                    = puppet->bones.emplace_back();
+        bone.name                     = name;
+        bone.parent = bone.bind_parent = bone.anim_parent = bone.file_parent = parent;
+        bone.local_bind.translation() = at;
+        WPPuppet::Animation::BoneTrack track;
+        for (int frame = 0; frame <= animation.length; ++frame) {
+            track.frames.push_back(WPPuppet::BoneFrame {
+                .position = at, .angle = linalg::Vector3f::Zero(), .scale = linalg::Vector3f::Ones() });
+        }
+        animation.bone_tracks.push_back(std::move(track));
+    }
+    puppet->anims.push_back(std::move(animation));
+    puppet->prepared();
+    return puppet;
+}
+
+WPPuppetLayer StillLayer(std::shared_ptr<WPPuppet> puppet) {
+    std::vector<WPPuppetLayer::AnimationLayer> authored(1);
+    authored[0].id = 7;
+    WPPuppetLayer layer(std::move(puppet));
+    layer.prepared(authored);
+    return layer;
+}
+
+linalg::Vector3f Mapped(const linalg::Affine3f& palette, float x, float y) {
+    return palette * linalg::Vector3f(x, y, 0.0f);
+}
+} // namespace
+
+// B-D8 (0x14020F1D0 / 0x14020F350): a bone's world matrix is the layer's world times its
+// model-space bone; a world write is drawn at once (palette = model * bind inverse), holds through
+// a recompute at the same time and is gone when the clock moves.
+TEST(ScriptRuntimeCompat, PuppetBoneTransformIsWorldSpaceAndAWriteIsDrawn) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node    = std::make_shared<SceneNode>();
+    node->SetTranslate(linalg::Vector3f(100.0f, 50.0f, 0.0f));
+    runtime->RegisterNode("character", node.get());
+    auto layer = StillLayer(MakeStillSkeleton({ { "root", WPPuppet::NO_PARENT, { 3, 4, 0 } } }));
+    runtime->RegisterPuppetLayer("character", layer);
+    layer.genFrame(0.0);
+
+    const auto world = runtime->PuppetBoneTransform("character", 0, SceneRuntimeContext::PuppetBoneSpace::World);
+    ASSERT_TRUE(world.has_value());
+    EXPECT_NEAR((*world)(0, 3), 103.0, 1e-6);
+    EXPECT_NEAR((*world)(1, 3), 54.0, 1e-6);
+
+    linalg::Matrix4d target = linalg::Matrix4d::Identity();
+    target(0, 3)            = 110.0;
+    target(1, 3)            = 60.0;
+    ASSERT_TRUE(runtime->SetPuppetBoneTransform("character", 0, SceneRuntimeContext::PuppetBoneSpace::World, target));
+    auto moved = Mapped(layer.genFrame(0.0)[0], 3.0f, 4.0f);
+    EXPECT_NEAR(moved.x(), 10.0f, 1e-4f);
+    EXPECT_NEAR(moved.y(), 10.0f, 1e-4f);
+    ASSERT_TRUE(layer.setBlend(0, 0.5));
+    moved = Mapped(layer.genFrame(0.0)[0], 3.0f, 4.0f);
+    EXPECT_NEAR(moved.x(), 10.0f, 1e-4f) << "a recompute at the same time keeps the write";
+    moved = Mapped(layer.genFrame(1.0 / 60.0)[0], 3.0f, 4.0f);
+    EXPECT_NEAR(moved.x(), 3.0f, 1e-4f) << "the next frame's pose replaces it";
+    EXPECT_NEAR(moved.y(), 4.0f, 1e-4f);
+}
+
+// 0x140210790 / 0x140210860: the first bone of a name, the parent index the file stores; a local
+// write (0x14020F840 -> sub_14020DB40) carries the bones below it, a world write only its bone.
+TEST(ScriptRuntimeCompat, PuppetBoneIndexAndParentFollowTheSkeleton) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node    = std::make_shared<SceneNode>();
+    runtime->RegisterNode("character", node.get());
+    auto layer = StillLayer(MakeStillSkeleton({ { "root", WPPuppet::NO_PARENT, { 0, 0, 0 } },
+                                                { "arm", 0, { 10, 0, 0 } },
+                                                { "hand", 1, { 5, 0, 0 } },
+                                                { "arm", 0, { 0, 3, 0 } } }));
+    runtime->RegisterPuppetLayer("character", layer);
+    layer.genFrame(0.0);
+    EXPECT_EQ(runtime->PuppetBoneCount("character"), 4);
+    EXPECT_EQ(runtime->PuppetBoneIndex("character", "arm"), 1);
+    EXPECT_EQ(runtime->PuppetBoneIndex("character", "foot"), -1);
+    EXPECT_EQ(runtime->PuppetBoneIndex("character", ""), -1);
+    EXPECT_EQ(runtime->PuppetBoneParentIndex("character", 2), 1);
+    EXPECT_EQ(runtime->PuppetBoneParentIndex("character", 0), -1);
+    EXPECT_EQ(runtime->PuppetBoneParentIndex("character", 9), -1);
+
+    const auto local = runtime->PuppetBoneTransform("character", 2, SceneRuntimeContext::PuppetBoneSpace::Local);
+    ASSERT_TRUE(local.has_value());
+    EXPECT_NEAR((*local)(0, 3), 5.0, 1e-6);
+
+    linalg::Matrix4d lifted = linalg::Matrix4d::Identity();
+    lifted(0, 3)            = 10.0;
+    lifted(1, 3)            = 20.0;
+    ASSERT_TRUE(runtime->SetPuppetBoneTransform("character", 1, SceneRuntimeContext::PuppetBoneSpace::Local, lifted));
+    auto hand = runtime->PuppetBoneTransform("character", 2, SceneRuntimeContext::PuppetBoneSpace::World);
+    ASSERT_TRUE(hand.has_value());
+    EXPECT_NEAR((*hand)(1, 3), 20.0, 1e-6) << "the hand follows its arm's local write";
+
+    linalg::Matrix4d placed = linalg::Matrix4d::Identity();
+    placed(1, 3)            = -40.0;
+    ASSERT_TRUE(runtime->SetPuppetBoneTransform("character", 1, SceneRuntimeContext::PuppetBoneSpace::World, placed));
+    hand = runtime->PuppetBoneTransform("character", 2, SceneRuntimeContext::PuppetBoneSpace::World);
+    EXPECT_NEAR((*hand)(1, 3), 20.0, 1e-6) << "a world write leaves the bones below";
+    EXPECT_FALSE(runtime->SetPuppetBoneTransform("character", 4, SceneRuntimeContext::PuppetBoneSpace::World, placed));
+}
+
+TEST(ScriptRuntimeCompat, PuppetBoneQueriesOnAnUnknownLayerAnswerNothing) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    EXPECT_EQ(runtime->PuppetBoneCount("nobody"), 0);
+    EXPECT_EQ(runtime->PuppetBoneIndex("nobody", "root"), -1);
+    EXPECT_EQ(runtime->PuppetBoneParentIndex("nobody", 0), -1);
+    EXPECT_FALSE(runtime->PuppetBoneTransform("nobody", 0, SceneRuntimeContext::PuppetBoneSpace::World).has_value());
+    EXPECT_FALSE(runtime->SetPuppetBoneTransform("nobody", 0, SceneRuntimeContext::PuppetBoneSpace::Local,
+                                                 linalg::Matrix4d::Identity()));
+    EXPECT_FALSE(runtime->ApplyPuppetBoneImpulse("nobody", 0, linalg::Vector3d(1, 0, 0), linalg::Vector3d(0, 0, 0)));
+    EXPECT_FALSE(runtime->ResetPuppetBoneSimulation("nobody", -1));
+}
+
+// B-D2.3: the runtime's impulse and reset reach a bone that simulates; a bone that does not, or a
+// negative index (the script methods take a number or a name), is left alone.
+TEST(ScriptRuntimeCompat, PuppetBoneImpulseAndResetReachASimulatingBone) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node    = std::make_shared<SceneNode>();
+    runtime->RegisterNode("character", node.get());
+    auto puppet = MakeStillSkeleton({ { "root", WPPuppet::NO_PARENT, { 0, 0, 0 } }, { "tail", 0, { 10, 0, 0 } } });
+    puppet->bones[1].simulation.flags =
+        WPPuppet::BoneSimulation::kSpring | WPPuppet::BoneSimulation::kTranslation;
+    puppet->prepared();
+    auto layer = StillLayer(puppet);
+    runtime->RegisterPuppetLayer("character", layer);
+    layer.genFrame(0.0);
+    EXPECT_TRUE(runtime->ApplyPuppetBoneImpulse("character", 1, linalg::Vector3d(60, 0, 0), linalg::Vector3d(0, 0, 0)));
+    EXPECT_FALSE(runtime->ApplyPuppetBoneImpulse("character", 0, linalg::Vector3d(60, 0, 0), linalg::Vector3d(0, 0, 0)));
+    EXPECT_FALSE(runtime->ApplyPuppetBoneImpulse("character", -1, linalg::Vector3d(60, 0, 0), linalg::Vector3d(0, 0, 0)));
+    EXPECT_TRUE(runtime->ResetPuppetBoneSimulation("character", 1));
+    EXPECT_FALSE(runtime->ResetPuppetBoneSimulation("character", -1));
+    EXPECT_FALSE(runtime->ResetPuppetBoneSimulation("character", 0));
+}
 
 namespace
 {
@@ -622,6 +834,7 @@ std::shared_ptr<WPPuppet> MakeArmPuppet() {
     puppet->bones[1].parent      = 0;
     puppet->bones[1].bind_parent = 0;
     puppet->bones[1].anim_parent = 0;
+    puppet->bones[1].file_parent = 0;
     WPPuppet::Animation animation;
     animation.id     = 7;
     animation.fps    = 10.0;
@@ -749,9 +962,9 @@ TEST(ScriptRuntimeCompat, SetParentInPlaceRefusesAParentWithNoInverse) {
     scene.sceneGraph->AppendChild(child);
     runtime->RegisterNode("flat", flat.get());
     runtime->RegisterNode("child", child.get());
-    EXPECT_FALSE(runtime->SetNodeParent("child", "flat", true));
+    EXPECT_FALSE(runtime->SetNodeParent("child", "flat", -1, true));
     EXPECT_EQ(child->Parent(), scene.sceneGraph.get());
-    EXPECT_TRUE(runtime->SetNodeParent("child", "flat", false)) << "without keeping its place it may go";
+    EXPECT_TRUE(runtime->SetNodeParent("child", "flat", -1, false)) << "without keeping its place it may go";
 }
 
 // The bone calls of an image layer with a puppet: the count, a bone's index by name and its
@@ -795,65 +1008,21 @@ function update() {
 
 // Before the puppet has been posed, a bone answers its bind pose, not whatever memory held.
 TEST(ScriptRuntimeCompat, ABoneReadBeforeTheFirstPoseIsItsBindPose) {
-    const auto puppet = MakeArmPuppet();
+    const auto puppet  = MakeArmPuppet();
+    auto       runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto       node    = std::make_shared<SceneNode>();
+    runtime->RegisterNode("character", node.get());
     std::vector<WPPuppetLayer::AnimationLayer> authored(1);
     authored[0].id = 7;
     WPPuppetLayer layer(puppet);
     layer.prepared(authored);
-    for (i32 i = 0; i < 2; i++) {
-        const auto model = layer.boneModel(i);
-        ASSERT_TRUE(model.has_value());
-        EXPECT_TRUE(model->matrix().isApprox(puppet->bones[static_cast<usize>(i)].world_bind.matrix(), 1e-5f))
+    runtime->RegisterPuppetLayer("character", layer);
+    for (int32_t i = 0; i < 2; i++) {
+        const auto world = runtime->PuppetBoneTransform("character", i, SceneRuntimeContext::PuppetBoneSpace::World);
+        ASSERT_TRUE(world.has_value());
+        EXPECT_TRUE(world->isApprox(puppet->bones[static_cast<std::size_t>(i)].world_bind.matrix().cast<double>(), 1e-5))
             << "bone " << i;
     }
-}
-
-// playSingleAnimation plays an animation once over the layers the puppet already has and then
-// leaves the pose to them; createAnimationLayer adds one that stays.
-TEST(ScriptRuntimeCompat, PlaySingleAnimationPlaysOnceAndCreatedLayersStay) {
-    Scene scene;
-    auto  runtime = MakeRuntimeWithScene(scene);
-    auto  node    = std::make_shared<SceneNode>();
-    scene.sceneGraph->AppendChild(node);
-    runtime->RegisterNode("character", node.get());
-    WPPuppetLayer layer(MakeArmPuppet());
-    layer.prepared({});
-    WPPuppetLayer render_copy = layer;
-    runtime->RegisterPuppetLayer("character", layer);
-    render_copy.genFrame(0.0);
-
-    runtime->RegisterSceneScript(R"JS(
-var done = false;
-function update() {
-  if (done) return; done = true;
-  var c = thisScene.getLayer('character');
-  var once = c.playSingleAnimation('gesture');
-  if (!once || !once.isPlaying()) throw new Error('playing once');
-  if (c.getAnimationLayerCount() !== 1) throw new Error('count ' + c.getAnimationLayerCount());
-  if (c.playSingleAnimation('no such animation') !== undefined) throw new Error('unknown');
-}
-)JS", "");
-    runtime->Tick(0.1);
-    render_copy.genFrame(0.2);
-    EXPECT_NEAR(render_copy.genFrame(0.2)[0].translation().x(), 2.0f, 1e-4) << "frame 2 of the single play";
-    render_copy.genFrame(0.9);  // past its 0.5 s
-    EXPECT_FALSE(render_copy.isPlaying(0));
-    EXPECT_NEAR(render_copy.genFrame(0.9)[0].translation().x(), 0.0f, 1e-4) << "the pose goes back to the rest";
-
-    runtime->RegisterSceneScript(R"JS(
-var done = false;
-function update() {
-  if (done) return; done = true;
-  var c = thisScene.getLayer('character');
-  c.playSingleAnimation('gesture');
-  if (c.getAnimationLayerCount() !== 1) throw new Error('a finished single play is reused');
-  var kept = c.createAnimationLayer('gesture');
-  if (!kept || c.getAnimationLayerCount() !== 2) throw new Error('created');
-  if (!c.destroyAnimationLayer(kept) || kept.isPlaying()) throw new Error('destroyed');
-}
-)JS", "");
-    runtime->Tick(0.1);
-    for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
 }
 
 // getAnimationLayer(...).play() from a click handler restarts a single-shot
@@ -1731,6 +1900,8 @@ TEST(ScriptRuntimeCompat, ScriptsLoadedByAnEventStartWithTheFollowingEvent) {
                 runtime->SetCursorEnter(true);
                 runtime->SetCursorButtons(0, 1, 1);
                 runtime->DispatchCursorFrameEvents(true);
+                // A host frame initializes event-created properties before its next input walk.
+                runtime->Tick(0.0);
             } else {
                 runtime->DispatchMediaEventJson(R"({"type":"mediaThumbnailChanged","hasThumbnail":false})");
             }
@@ -2043,7 +2214,7 @@ export function update() {
             image: 'models/point.json',
             origin: new Vec3(frame, 2, -3),
             scale: '0.1 0.2 0.3',
-            angles: new Vec3(0, 0, 90),
+            angles: new Vec3(0, 0, Math.PI / 2), // scene-file radians
             color: new Vec3(0.2, 0.4, 0.6),
             alpha: 0.25,
             visible: false
@@ -3163,7 +3334,7 @@ TEST(ShaderValuePacking, PackedValuesOwnTheirStorageAcrossInputChanges) {
     EXPECT_FLOAT_EQ(packed[2][0], 0.7f) << "single coefficient";
 }
 
-TEST(ShaderValueUpdaterCompat, FourLightColorsRoundTripThroughPackedUniforms) {
+TEST(ShaderValueUpdaterCompat, FourLightColorsRoundTripAndAFifthLightTakesSlotZero) {
     Scene scene;
     auto camera = std::make_shared<SceneCamera>(384, 256, -1.f, 1.f);
     scene.activeCamera = camera.get();
@@ -3175,13 +3346,14 @@ TEST(ShaderValueUpdaterCompat, FourLightColorsRoundTripThroughPackedUniforms) {
     updater.InitUniforms(node.get(), [](std::string_view name) {
         return name == "g_LightsPosition" || name == "g_LightsColorPremultiplied";
     });
-    // Different channels expose transposition as well as the lost fourth light;
-    // five lights must leave the shader's bounded four-light input unchanged.
+    // Different channels expose transposition. Wallpaper Engine hands a fifth
+    // light slot 0 again (sub_14018FF60), and the later writer of a slot wins.
     for (size_t count = 0; count <= 5; ++count) {
         SCOPED_TRACE(count);
         if (count > 0) {
             const float n = static_cast<float>(count);
             auto light = std::make_unique<SceneLight>(linalg::Vector3f(n, n + 1, n + 2), 2.f, 0.5f);
+            light->setLegacySlot(static_cast<uint8_t>(count - 1 < 4 ? count - 1 : 0));
             auto transform = std::make_shared<SceneNode>();
             transform->SetTranslate(linalg::Vector3f(n * 10, n * 20, n * 30));
             light->setNode(transform);
@@ -3196,12 +3368,15 @@ TEST(ShaderValueUpdaterCompat, FourLightColorsRoundTripThroughPackedUniforms) {
         const auto& positions = values.at("g_LightsPosition");
         ASSERT_EQ(colors.size(), 12u);
         ASSERT_EQ(positions.size(), 16u);
-        for (size_t light = 0; light < 4; ++light) {
+        for (size_t slot = 0; slot < 4; ++slot) {
+            // The light number (1-based) holding this slot, 0 for none.
+            size_t owner = slot < count ? slot + 1 : 0;
+            if (slot == 0 && count == 5) owner = 5;
             for (size_t channel = 0; channel < 3; ++channel) {
-                const size_t index = light < 3 ? light * 4 + channel : channel * 4 + 3;
-                EXPECT_FLOAT_EQ(colors[index], light < count ? 2.f * (light + 1 + channel) : 0.f);
-                EXPECT_FLOAT_EQ(positions[light * 4 + channel],
-                                light < count ? 10.f * (light + 1) * (channel + 1) : 0.f);
+                const size_t index = slot < 3 ? slot * 4 + channel : channel * 4 + 3;
+                EXPECT_FLOAT_EQ(colors[index], owner > 0 ? 2.f * (owner + channel) : 0.f);
+                EXPECT_FLOAT_EQ(positions[slot * 4 + channel],
+                                owner > 0 ? 10.f * owner * (channel + 1) : 0.f);
             }
         }
     }
@@ -3212,6 +3387,39 @@ TEST(ShaderValueUpdaterCompat, FourLightColorsRoundTripThroughPackedUniforms) {
         if (name == "g_LightsColorPremultiplied")
             for (size_t i = 0; i < value.size(); ++i) EXPECT_FLOAT_EQ(value[i], 0.f);
     });
+    scene.activeCamera = nullptr;
+}
+
+// `g_LightsColorRadius` is (colour × intensity, radius) per slot, and a hidden
+// light's slot reads (0, 0, 0, 1) (Wallpaper Engine's sub_14025D1F0).
+TEST(ShaderValueUpdaterCompat, LegacyLightsFillColorRadiusSlots) {
+    Scene scene;
+    auto camera = std::make_shared<SceneCamera>(384, 256, -1.f, 1.f);
+    scene.activeCamera = camera.get();
+    auto node = std::make_shared<SceneNode>();
+    auto mesh = std::make_shared<SceneMesh>();
+    mesh->AddMaterial(SceneMaterial {});
+    node->AddMesh(mesh);
+    WPShaderValueUpdater updater(&scene);
+    updater.InitUniforms(node.get(), [](std::string_view name) { return name == "g_LightsColorRadius"; });
+    for (uint8_t slot = 0; slot < 2; ++slot) {
+        auto light = std::make_unique<SceneLight>(linalg::Vector3f(1.f, 0.5f, 0.25f), 1000.f, 0.75f);
+        light->setLegacySlot(slot);
+        auto transform = std::make_shared<SceneNode>();
+        if (slot == 1) transform->SetVisible(false);
+        light->setNode(transform);
+        scene.lights.push_back(std::move(light));
+    }
+    sprite_map_t sprites;
+    std::unordered_map<std::string, ShaderValue> values;
+    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, const ShaderValue& value) {
+        values.emplace(std::string(name), value);
+    });
+    ASSERT_TRUE(values.contains("g_LightsColorRadius"));
+    const auto& slots = values.at("g_LightsColorRadius");
+    const std::array<float, 16> expected { 0.75f, 0.375f, 0.1875f, 1000.f, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
+    ASSERT_EQ(slots.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) EXPECT_FLOAT_EQ(slots[i], expected[i]) << i;
     scene.activeCamera = nullptr;
 }
 
@@ -4672,6 +4880,50 @@ TEST(ScriptRuntimeCompat, AnimationLayerCountIsZeroWithoutAPuppet) {
     EXPECT_FLOAT_EQ(result->getFloat(), 0.0f);
 }
 
+// AnimationLayer `additive`, `blendin`, `blendout` and `blendtime` (we_ss_reg_AnimationLayer
+// 0x14026C980) read back what a script wrote and change how the layer is weighted.
+TEST(ScriptPuppetLayers, AdditiveReadsBackAndChangesEffectiveBlend) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node    = std::make_shared<SceneNode>();
+    runtime->RegisterNode("character", node.get());
+    std::vector<WPPuppetLayer::AnimationLayer> authored(1);
+    authored[0].id   = 7;
+    authored[0].name = "gesture";
+    WPPuppetLayer layer(MakePuppet(WPPuppet::PlayMode::Loop));
+    layer.prepared(authored);
+    runtime->RegisterPuppetLayer("character", layer);
+
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
+        runtime.get(),
+        R"JS(
+export function update(value) {
+  var a = thisLayer.getAnimationLayer('gesture');
+  var before = (a.additive ? 1 : 0) + (a.blendin ? 2 : 0) + (a.blendout ? 4 : 0);
+  var defaultTime = a.blendtime;
+  a.additive = true;
+  a.blendin = true;
+  a.blendout = true;
+  a.blendtime = 0.2;
+  a.blendtime = -1; // refused
+  return before * 1000 + (a.additive ? 100 : 0) + (a.blendin ? 10 : 0) + (a.blendout ? 1 : 0)
+       + a.blendtime + defaultTime * 10000;
+}
+)JS",
+        "character", {}, DynamicValue(0.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(0.0f));
+    ASSERT_NE(result, nullptr);
+    EXPECT_FLOAT_EQ(result->getFloat(), 5111.2f);
+    EXPECT_TRUE(layer.additive(0));
+    EXPECT_TRUE(layer.blendIn(0));
+    EXPECT_TRUE(layer.blendOut(0));
+    EXPECT_DOUBLE_EQ(layer.blendTime(0), 0.2);
+    // Frame 1 holds x 1: halfway through the 0.2 s fade-in it counts for half.
+    layer.genFrame(0.0);
+    EXPECT_FLOAT_EQ(layer.genFrame(0.1)[0].translation().x(), 0.5f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
 namespace
 {
 
@@ -4710,6 +4962,219 @@ struct ThreeLayers {
 };
 
 } // namespace
+
+namespace
+{
+// A puppet layer "character" with one authored animation layer `siche` on MakePuppet's clip
+// (id 7, "gesture", half a second), a "probe" node, and the runtime driving them.
+struct CreatedAnimationLayers {
+    std::unique_ptr<SceneRuntimeContext> runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    std::shared_ptr<SceneNode>           node    = std::make_shared<SceneNode>();
+    std::shared_ptr<SceneNode>           probe   = std::make_shared<SceneNode>();
+    WPPuppetLayer                        layer;
+    WPPuppetLayer                        render_copy;
+
+    CreatedAnimationLayers(WPPuppet::PlayMode mode, const char* script) : layer(MakePuppet(mode)) {
+        runtime->RegisterNode("character", node.get());
+        runtime->RegisterNode("probe", probe.get());
+        std::vector<WPPuppetLayer::AnimationLayer> authored(1);
+        authored[0].id      = 7;
+        authored[0].name    = "siche";
+        authored[0].playing = false;  // holds still, so only the created layer ends
+        layer.prepared(authored);
+        render_copy = layer;
+        runtime->RegisterPuppetLayer("character", layer);
+        runtime->RegisterNodeVisibility("character", node.get(),
+                                        ResolveBoolSetting(*runtime, { { "value", true }, { "script", script } },
+                                                           "character"));
+    }
+};
+
+constexpr const char* kPlaySingleScript = R"JS(
+var ended = 0;
+export function init(value) {
+  var made = thisLayer.playSingleAnimation('gesture');
+  if (made === null) throw new Error('no layer made');
+  if (thisLayer.getAnimationLayerCount() !== 2) throw new Error('not on the stack');
+  made.addEndedCallback(function() {
+    ++ended;
+    // While its listeners run the layer is still on the stack.
+    thisScene.getLayer('probe').origin = new Vec3(ended, made.isPlaying() ? 1 : 0, thisLayer.getAnimationLayerCount());
+  });
+  return value;
+}
+)JS";
+} // namespace
+
+// playSingleAnimation 0x14020EF40 = createAnimationLayer plus flag 0x8000000: the composer
+// (0x1401FDF90) calls the layer's ended listeners at the end of its clip, then deletes it
+// (decompiles/A-8.md).
+TEST(ScriptPuppetLayers, PlaySingleAnimationEndsAndIsGone) {
+    CreatedAnimationLayers fixture(WPPuppet::PlayMode::Single, kPlaySingleScript);
+    fixture.runtime->Tick(0.01);
+    ASSERT_EQ(fixture.runtime->scriptErrorCount(), 0u) << fixture.runtime->scriptErrors().front();
+    EXPECT_EQ(fixture.layer.layerCount(), 2u);
+
+    fixture.render_copy.genFrame(0.0);
+    fixture.render_copy.genFrame(0.3);
+    fixture.runtime->Tick(0.01);
+    EXPECT_FLOAT_EQ(fixture.probe->Translate().x(), 0.0f) << "still playing";
+    EXPECT_EQ(fixture.layer.layerCount(), 2u);
+
+    fixture.render_copy.genFrame(0.6);  // the half-second clip played out
+    fixture.runtime->Tick(0.01);
+    EXPECT_FLOAT_EQ(fixture.probe->Translate().x(), 1.0f) << "the listener ran";
+    EXPECT_FLOAT_EQ(fixture.probe->Translate().z(), 2.0f) << "before the layer went";
+    EXPECT_EQ(fixture.layer.layerCount(), 1u) << "and then it went";
+    EXPECT_EQ(fixture.layer.layerName(0), "siche");
+
+    for (const double seconds : { 1.2, 2.0, 3.0 }) {
+        fixture.render_copy.genFrame(seconds);
+        fixture.runtime->Tick(0.01);
+    }
+    EXPECT_FLOAT_EQ(fixture.probe->Translate().x(), 1.0f) << "once";
+    EXPECT_EQ(fixture.runtime->scriptErrorCount(), 0u);
+}
+
+// The flag ends the layer with its first cycle whatever the clip's mode: a looping clip at
+// its first wrap (0x1401FDF90 sets the ended flag when a loop's clock goes down).
+TEST(ScriptPuppetLayers, PlaySingleAnimationOfALoopingClipGoesAtItsFirstWrap) {
+    CreatedAnimationLayers fixture(WPPuppet::PlayMode::Loop, kPlaySingleScript);
+    fixture.runtime->Tick(0.01);
+    ASSERT_EQ(fixture.runtime->scriptErrorCount(), 0u) << fixture.runtime->scriptErrors().front();
+    fixture.render_copy.genFrame(0.0);
+    fixture.render_copy.genFrame(0.4);
+    fixture.runtime->Tick(0.01);
+    EXPECT_EQ(fixture.layer.layerCount(), 2u);
+    fixture.render_copy.genFrame(0.6);  // 0.6 s wraps to 0.1 s
+    fixture.runtime->Tick(0.01);
+    EXPECT_FLOAT_EQ(fixture.probe->Translate().x(), 1.0f);
+    EXPECT_EQ(fixture.layer.layerCount(), 1u);
+    EXPECT_EQ(fixture.runtime->scriptErrorCount(), 0u);
+}
+
+// createAnimationLayer 0x14020EA30 -> sub_1401FCC20: a name or a config object; blendin and
+// blendout default on (blendout only stays for a clip that plays once); `autosort` goes below
+// the trailing additive layers, `index` is clamped to the last place, else on top.
+// destroyAnimationLayer 0x14020EF80 takes a name (every layer with it), an index or the
+// object; the layers above move down and their objects keep naming them.
+TEST(ScriptPuppetLayers, CreatedLayersTakeTheirPlaceAndDestroyingOneShiftsTheRest) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node    = std::make_shared<SceneNode>();
+    runtime->RegisterNode("character", node.get());
+    std::vector<WPPuppetLayer::AnimationLayer> authored(2);
+    authored[0].id       = 7;
+    authored[0].name     = "base";
+    authored[1].id       = 7;
+    authored[1].name     = "add";
+    authored[1].additive = true;
+    WPPuppetLayer layer(MakePuppet(WPPuppet::PlayMode::Loop));
+    layer.prepared(authored);
+    runtime->RegisterPuppetLayer("character", layer);
+
+    const auto run = RunUpdateOn(*runtime, "character", std::string(kCheckHelpers) + R"JS(
+function order() {
+  var names = [];
+  for (var i = 0; i < thisLayer.getAnimationLayerCount(); ++i) names.push(thisLayer.getAnimationLayer(i).name);
+  return names.join(',');
+}
+export function update(value) {
+  var add = thisLayer.getAnimationLayer('add');
+  var early = thisLayer.getAnimationLayer('d');
+  var b = thisLayer.createAnimationLayer({ animation: 7, name: 'b', autosort: true });
+  check('autosort goes below the additive layer', order() === 'base,b,add');
+  var a = thisLayer.createAnimationLayer('gesture', { name: 'a', rate: 2 });
+  check('a name goes on top', order() === 'base,b,add,a');
+  check('config read', a.name === 'a' && a.rate === 2);
+  check('blendin on, blendout off for a loop', a.blendin === true && a.blendout === false);
+  thisLayer.createAnimationLayer({ animation: 7, name: 'c', index: 0 });
+  thisLayer.createAnimationLayer({ animation: 7, name: 'f', index: 99 });
+  check('index clamps to the last place', order() === 'c,base,b,add,f,a');
+  var d = thisLayer.createAnimationLayer({ animation: 7, name: 'd', blendin: false });
+  check('the defaults are copied over the object', d.blendin === true);
+  check('a name asked for before finds the new layer', early !== d && thisLayer.getAnimationLayer('d') === d);
+  var e = thisLayer.createAnimationLayer({ animation: 7, name: 'e' }, { blendin: false });
+  check('the second argument wins', e.blendin === false);
+  check('unnamed animation', thisLayer.createAnimationLayer('missing') === null);
+  check('a number is not accepted', thisLayer.createAnimationLayer(7) === null);
+  check('no such animation id', thisLayer.createAnimationLayer({ animation: 8 }) === null);
+  check('the made object is the one asked for', thisLayer.getAnimationLayer('a') === a);
+
+  check('destroy by index', thisLayer.destroyAnimationLayer(0) === true);
+  check('the rest moved down', order() === 'base,b,add,f,a,d,e');
+  check('objects follow their layers', b.name === 'b' && add.name === 'add' && thisLayer.getAnimationLayer(1) === b);
+  check('destroy by name', thisLayer.destroyAnimationLayer('f') === true && order() === 'base,b,add,a,d,e');
+  check('destroy by object', thisLayer.destroyAnimationLayer(b) === true && order() === 'base,add,a,d,e');
+  check('a destroyed object names nothing', b.name === '' && b.isPlaying() === false);
+  check('again', thisLayer.destroyAnimationLayer(b) === false);
+  check('unknown name', thisLayer.destroyAnimationLayer('nothere') === false);
+  check('out of range', thisLayer.destroyAnimationLayer(10) === false && thisLayer.destroyAnimationLayer(-1) === false);
+  check('still the same add', thisLayer.getAnimationLayer('add') === add && add.additive === true);
+  return 1;
+}
+)JS");
+    EXPECT_SCRIPT_PASSES(run);
+    ASSERT_EQ(layer.layerCount(), 5u);
+    EXPECT_EQ(layer.layerName(1), "add");
+    EXPECT_DOUBLE_EQ(layer.rate(2), 2.0);
+}
+
+// A script may give a layer a name that resembles an internal serial reference.
+TEST(ScriptPuppetLayers, LayerNamesCannotRedirectAnExistingAnimationObject) {
+    CreatedAnimationLayers fixture(WPPuppet::PlayMode::Loop, "export function init(value) { return value; }");
+    const auto run = RunUpdateOn(*fixture.runtime, "character", std::string(kCheckHelpers) + R"JS(
+export function update(value) {
+  var original = thisLayer.getAnimationLayer('siche');
+  var named = thisLayer.createAnimationLayer('gesture', { name: '#0' });
+  check('names do not change identity', original.name === 'siche' && named.name === '#0');
+  check('authored name lookup', thisLayer.getAnimationLayer('#0') === named);
+  original.rate = 2;
+  check('the original receives the write', original.rate === 2 && named.rate === 1);
+  check('destroying the original succeeds', thisLayer.destroyAnimationLayer(original));
+  check('the named layer survives', thisLayer.getAnimationLayerCount() === 1 && named.name === '#0');
+  check('the stale object stays destroyed', original.name === '' && !thisLayer.destroyAnimationLayer(original));
+  return 1;
+}
+)JS");
+    EXPECT_SCRIPT_PASSES(run);
+}
+
+TEST(ScriptPuppetLayers, DestroyingEmptyNameRemovesOnlyUnnamedLayers) {
+    CreatedAnimationLayers fixture(WPPuppet::PlayMode::Loop, "export function init(value) { return value; }");
+    const auto run = RunUpdateOn(*fixture.runtime, "character", std::string(kCheckHelpers) + R"JS(
+export function update(value) {
+  var a = thisLayer.createAnimationLayer('gesture');
+  var b = thisLayer.createAnimationLayer('gesture');
+  check('created unnamed layers', a.name === '' && b.name === '' && thisLayer.getAnimationLayerCount() === 3);
+  check('empty name is still a name', thisLayer.destroyAnimationLayer(''));
+  check('only the named layer survives', thisLayer.getAnimationLayerCount() === 1 && thisLayer.getAnimationLayer(0).name === 'siche');
+  check('removed objects stay removed', !a.isPlaying() && !b.isPlaying());
+  return 1;
+}
+)JS");
+    EXPECT_SCRIPT_PASSES(run);
+}
+
+// Every layer with the name goes, as 0x14020EF80 erases each match.
+TEST(ScriptPuppetLayers, DestroyingByNameTakesEveryLayerWithIt) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node    = std::make_shared<SceneNode>();
+    runtime->RegisterNode("character", node.get());
+    std::vector<WPPuppetLayer::AnimationLayer> authored(3);
+    for (auto& entry : authored) entry.id = 7;
+    authored[0].name = "twin";
+    authored[1].name = "other";
+    authored[2].name = "twin";
+    WPPuppetLayer layer(MakePuppet(WPPuppet::PlayMode::Loop));
+    layer.prepared(authored);
+    runtime->RegisterPuppetLayer("character", layer);
+    const auto run = RunUpdateOn(*runtime, "character",
+                                 "export function update(v) { return thisLayer.destroyAnimationLayer('twin') "
+                                 "&& thisLayer.getAnimationLayerCount() === 1 ? 1 : 0; }");
+    EXPECT_SCRIPT_PASSES(run);
+    ASSERT_EQ(layer.layerCount(), 1u);
+    EXPECT_EQ(layer.layerName(0), "other");
+}
 
 // IScene.getLayerCount / getLayer(index) / enumerateLayers / getLayerByID: the
 // layers in the order the scene lists them, as the very objects `getLayer(name)`
@@ -5214,38 +5679,50 @@ export function init(value) {
     EXPECT_FLOAT_EQ(probe->Translate().x(), 0.0f);
 }
 
-// A layer that loops plays past its last frame over and over without ever
-// ending, so its listener is never called, and it is still playing.
-TEST(ScriptRuntimeCompat, ALoopingAnimationLayerNeverEndsAndItsListenerStaysSilent) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    auto node    = std::make_shared<SceneNode>();
-    auto probe   = std::make_shared<SceneNode>();
-    runtime->RegisterNode("character", node.get());
-    runtime->RegisterNode("probe", probe.get());
-    std::vector<WPPuppetLayer::AnimationLayer> authored(1);
-    authored[0].id   = 7;
-    authored[0].name = "sway";
-    WPPuppetLayer layer(MakePuppet(WPPuppet::PlayMode::Loop));
-    layer.prepared(authored);
-    runtime->RegisterPuppetLayer("character", layer);
-    runtime->RegisterNodeVisibility("character", node.get(), ResolveBoolSetting(*runtime, {
-        { "value", true }, { "script", R"JS(
+// WE's composer (0x1401FDF90) notifies every wrap or mirror turn without stopping
+// the layer. This is independent of playSingleAnimation's destroy-on-end flag.
+TEST(ScriptRuntimeCompat, LoopingAndMirroredAnimationLayersNotifyEachCycleAndKeepPlaying) {
+    for (const auto mode : { WPPuppet::PlayMode::Loop, WPPuppet::PlayMode::Mirror }) {
+        SCOPED_TRACE(mode == WPPuppet::PlayMode::Loop ? "loop" : "mirror");
+        auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+        auto node    = std::make_shared<SceneNode>();
+        auto probe   = std::make_shared<SceneNode>();
+        runtime->RegisterNode("character", node.get());
+        runtime->RegisterNode("probe", probe.get());
+        std::vector<WPPuppetLayer::AnimationLayer> authored(1);
+        authored[0].id   = 7;
+        authored[0].name = "sway";
+        WPPuppetLayer layer(MakePuppet(mode));
+        layer.prepared(authored);
+        runtime->RegisterPuppetLayer("character", layer);
+        runtime->RegisterNodeVisibility("character", node.get(), ResolveBoolSetting(*runtime, {
+            { "value", true }, { "script", R"JS(
 export function init(value) {
   thisLayer.getAnimationLayer('sway').addEndedCallback(function() {
-    thisScene.getLayer('probe').origin = new Vec3(1, 0, 0);
+    var probe = thisScene.getLayer('probe');
+    probe.origin = probe.origin.add(new Vec3(1, 0, 0));
   });
   return value;
 }
 )JS" } }, "character"));
-    runtime->Tick(0.01);
-    WPPuppetLayer render_copy = layer;
-    for (const double seconds : {0.0, 0.7, 1.4, 2.1, 5.0}) {  // the animation is half a second long
-        render_copy.genFrame(seconds);
         runtime->Tick(0.01);
+        WPPuppetLayer render_copy = layer;
+        // The half-second clip crosses a loop boundary or mirror turn twice.
+        for (const double seconds : {0.0, 0.4, 0.6, 0.9, 1.1}) {
+            render_copy.genFrame(seconds);
+            runtime->Tick(0.01);
+        }
+        EXPECT_TRUE(render_copy.isPlaying(0)) << "the next cycle keeps playing";
+        EXPECT_FLOAT_EQ(probe->Translate().x(), 2.0f) << "one notice per wrap or turn";
+        render_copy.genFrame(1.1);
+        runtime->Tick(0.01);
+        EXPECT_FLOAT_EQ(probe->Translate().x(), 2.0f) << "a repeated draw emits no new notice";
+        ASSERT_TRUE(layer.pause(0));
+        render_copy.genFrame(2.0);
+        runtime->Tick(0.01);
+        EXPECT_FLOAT_EQ(probe->Translate().x(), 2.0f) << "a paused clock emits no notice";
+        EXPECT_EQ(runtime->scriptErrorCount(), 0u);
     }
-    EXPECT_TRUE(render_copy.isPlaying(0)) << "a looping layer keeps playing";
-    EXPECT_FLOAT_EQ(probe->Translate().x(), 0.0f) << "and never ends";
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
 // A paused sprite sheet holds its frame, play() resumes it from there, stop()
@@ -5324,13 +5801,13 @@ TEST(ScriptRuntimeCompat, StoppedSpriteSheetReturnsToItsFirstFrameAndSetFrameSti
     EXPECT_EQ(fixture.Draw(0.3), 0) << "and stays there";
 
     EXPECT_EQ(fixture.Run("anim.setFrame(2); return anim.getFrame();"), 2.0f);
-    EXPECT_EQ(fixture.Draw(0.3), 2) << "setFrame pins the frame, as it always did";
-    EXPECT_EQ(fixture.node->TextureFrame(), 2.0);
+    EXPECT_EQ(fixture.Draw(0.3), 2) << "setFrame on a stopped sheet holds that frame";
+    EXPECT_TRUE(fixture.node->SheetDetached());
     EXPECT_EQ(fixture.Run("return anim.isPlaying() ? 1 : 0;"), 0.0f);
 
     // play() lets the sheet run on from the pinned frame.
     EXPECT_EQ(fixture.Run("anim.play(); return anim.isPlaying() ? 1 : 0;"), 1.0f);
-    EXPECT_FALSE(fixture.node->TextureFrame().has_value());
+    EXPECT_TRUE(fixture.node->SheetDetached()) << "play() does not put it back on the sheet's clock";
     EXPECT_EQ(fixture.Draw(0.0), 2);
     EXPECT_EQ(fixture.Draw(0.15), 3);
 }
@@ -5354,6 +5831,81 @@ TEST(ScriptRuntimeCompat, SpriteSheetRateScalesPlaybackAndTheSheetDescribesItsel
     EXPECT_EQ(fast.Run("return anim.name === 'sheet' ? 1 : 0;"), 1.0f);
 }
 
+// Wallpaper Engine's TextureAnimation (0x1402131A0, decompiles/A-5.md): setFrame
+// on a sheet that follows its clock detaches it and keeps it playing from there.
+TEST(SpriteSheetScript, SetFrameOnARunningSheetKeepsItPlaying) {
+    SpriteSheetScene fixture;
+    fixture.Draw(0.0);
+    EXPECT_EQ(fixture.Run("anim.setFrame(2); return anim.isPlaying() ? 1 : 0;"), 1.0f);
+    EXPECT_EQ(fixture.Draw(0.0), 2);
+    EXPECT_EQ(fixture.Draw(0.15), 3) << "a frame's time later it is on the next frame";
+    EXPECT_EQ(fixture.Run("return anim.isPlaying() ? 1 : 0;"), 1.0f);
+}
+
+// setFrame takes an integer argument: the whole part of the number.
+TEST(SpriteSheetScript, SetFrameTakesTheWholePartOfTheNumber) {
+    SpriteSheetScene fixture;
+    fixture.Draw(0.0);
+    EXPECT_EQ(fixture.Run("anim.stop(); anim.setFrame(2.7); return anim.getFrame();"), 2.0f);
+    EXPECT_EQ(fixture.Draw(0.0), 2);
+    EXPECT_EQ(fixture.Run("return anim.getFrame();"), 2.0f);
+}
+
+// join() puts the layer back on the sheet's clock, which kept running while the
+// layer held a frame of its own.
+TEST(SpriteSheetScript, JoinReturnsToTheLayerClock) {
+    SpriteSheetScene fixture;
+    SpriteSheetScene clock;
+    fixture.Draw(0.0);
+    clock.Draw(0.0);
+    const int held = fixture.Draw(0.05);
+    clock.Draw(0.05);
+    fixture.Run("anim.pause();");
+    EXPECT_EQ(fixture.Draw(0.3), held) << "paused";
+    const int now = clock.Draw(0.3);
+    ASSERT_NE(now, held) << "the times are chosen so the clock has moved to another frame";
+    EXPECT_EQ(fixture.Run("anim.join(); return anim.isPlaying() ? 1 : 0;"), 1.0f);
+    EXPECT_EQ(fixture.Draw(0.0), clock.Draw(0.0));
+    EXPECT_EQ(fixture.Draw(0.15), clock.Draw(0.15)) << "and runs with it";
+}
+
+// A rate other than one detaches the sheet; setting the rate back to one does
+// not put it back on the clock, join() does.
+TEST(SpriteSheetScript, RateOtherThanOneDetaches) {
+    SpriteSheetScene fixture;
+    SpriteSheetScene clock;
+    fixture.Draw(0.0);
+    clock.Draw(0.0);
+    fixture.Run("anim.rate = 0.5;");
+    fixture.Draw(0.2);
+    clock.Draw(0.2);
+    fixture.Run("anim.rate = 1;");
+    EXPECT_NE(fixture.Draw(0.1), clock.Draw(0.1)) << "still on its own, slower, frame";
+    EXPECT_EQ(fixture.Run("return anim.isPlaying() ? 1 : 0;"), 1.0f);
+    fixture.Run("anim.join();");
+    EXPECT_EQ(fixture.Draw(0.05), clock.Draw(0.05));
+}
+
+// stop() holds frame zero and is not playing; play() runs the layer's own frame
+// on, still detached from the clock.
+TEST(SpriteSheetScript, StopHoldsFrameZero) {
+    SpriteSheetScene fixture;
+    SpriteSheetScene clock;
+    fixture.Draw(0.0);
+    clock.Draw(0.0);
+    fixture.Draw(0.25);
+    clock.Draw(0.25);
+    EXPECT_EQ(fixture.Run("anim.stop(); return anim.isPlaying() ? 1 : 0;"), 0.0f);
+    EXPECT_EQ(fixture.Run("return anim.getFrame();"), 0.0f);
+    EXPECT_EQ(fixture.Draw(0.5), 0);
+    clock.Draw(0.5);
+    fixture.Run("anim.play();");
+    EXPECT_EQ(fixture.Draw(0.15), 1) << "its own frame 0, 0.15s on";
+    clock.Draw(0.15);
+    fixture.Run("anim.join();");
+    EXPECT_EQ(fixture.Draw(0.0), clock.Draw(0.0));
+}
+
 TEST(ScriptRuntimeCompat, ALayerWithoutASpriteSheetReportsNoFrames) {
     Scene scene;
     auto  runtime = MakeRuntimeWithScene(scene);
@@ -5367,6 +5919,167 @@ export function update(value) {
 }
 )JS");
     EXPECT_SCRIPT_PASSES(run);
+}
+
+// ---------------------------------------------------------------------------
+// Image layer members (we_ss_reg_ImageLayer 0x1401EE520, decompiles/A-7a.md)
+// ---------------------------------------------------------------------------
+namespace
+{
+struct ImageFlagScene {
+    Scene                                scene;
+    std::unique_ptr<SceneRuntimeContext> runtime = MakeRuntimeWithScene(scene);
+    std::shared_ptr<SceneNode>           node    = std::make_shared<SceneNode>();
+    std::shared_ptr<SceneMaterial>       tinted  = std::make_shared<SceneMaterial>();
+
+    ImageFlagScene() {
+        runtime->RegisterNode("card", node.get());
+        tinted->tint.color = { 1.0f, 0.5f, 0.25f };
+        tinted->customShader.constValues["g_Color4"] = ShaderValue(std::array<float, 4> { 1.0f, 0.5f, 0.25f, 0.75f });
+        runtime->RegisterImageLayerFlags("card", node.get(), SceneRuntimeContext::ImageLayerFlags {}, { tinted });
+    }
+    int Mutations(const std::string& reason) const {
+        const auto& reasons = runtime->SceneGraphMutationReasonsForTests();
+        const auto  found   = reasons.find(reason);
+        return found == reasons.end() ? 0 : found->second;
+    }
+};
+} // namespace
+
+// Wallpaper Engine reads `brightness` (+832) every draw: a write reaches the layer's tint
+// at once, and rebuilds nothing.
+TEST(ScriptLayerFlags, BrightnessWriteReachesTheLayersTint) {
+    ImageFlagScene fixture;
+    const auto run = RunUpdateOn(*fixture.runtime, "card", "export function update(value) { thisLayer.brightness = 2; return thisLayer.brightness; }");
+    ASSERT_TRUE(run.errors.empty()) << run.errors.front();
+    EXPECT_EQ(run.value, 2.0f);
+    const auto& tint = fixture.tinted->customShader.constValues.at("g_Color4");
+    ASSERT_EQ(tint.size(), 4u);
+    EXPECT_FLOAT_EQ(tint[0], 2.0f);
+    EXPECT_FLOAT_EQ(tint[1], 1.0f);
+    EXPECT_FLOAT_EQ(tint[2], 0.5f);
+    EXPECT_FLOAT_EQ(tint[3], 0.75f);
+    EXPECT_TRUE(fixture.runtime->SceneGraphMutationReasonsForTests().empty());
+}
+
+// The sampler members are read when the layer is built; a write is kept and read back
+// and changes nothing drawn (their setters have no extra, 0x1401EE520 record +88 = 0).
+TEST(ScriptLayerFlags, ClampUvsWriteIsKeptAndRebuildsNothing) {
+    ImageFlagScene fixture;
+    const auto run = RunUpdateOn(*fixture.runtime, "card", std::string(kCheckHelpers) + R"JS(
+export function update(value) {
+  check('authored', thisLayer.clampuvs === true && thisLayer.nointerpolation === false);
+  thisLayer.clampuvs = false;
+  thisLayer.nointerpolation = 1;
+  thisLayer.castshadow = true;
+  thisLayer.colorBlendMode = 3.8;
+  check('clampuvs', thisLayer.clampuvs === false);
+  check('nointerpolation', thisLayer.nointerpolation === true);
+  check('castshadow', thisLayer.castshadow === true);
+  check('colorBlendMode is an integer', thisLayer.colorBlendMode === 3);
+  return 1;
+}
+)JS");
+    EXPECT_SCRIPT_PASSES(run);
+    EXPECT_EQ(fixture.runtime->NodeLayerFlag("card", "castshadow"), 1.0);
+    EXPECT_TRUE(fixture.runtime->SceneGraphMutationReasonsForTests().empty());
+}
+
+// `copybackground` (+772 & 0x40) decides per draw how the layer's children blend alpha.
+TEST(ScriptLayerFlags, CopyBackgroundWriteChangesTheChildrenAlphaRule) {
+    ImageFlagScene fixture;
+    EXPECT_FALSE(fixture.node->ChildrenAlphaMax());
+    RunUpdateOn(*fixture.runtime, "card", "export function update(v) { thisLayer.copybackground = false; return 1; }");
+    EXPECT_TRUE(fixture.node->ChildrenAlphaMax());
+    EXPECT_EQ(fixture.Mutations("layer-flag"), 1);
+    RunUpdateOn(*fixture.runtime, "card", "export function update(v) { thisLayer.copybackground = false; return 1; }");
+    EXPECT_EQ(fixture.Mutations("layer-flag"), 1) << "the same value again changes nothing";
+}
+
+// A layer that is not an image layer keeps the names as plain script properties.
+TEST(ScriptLayerFlags, ALayerWithoutImageMembersKeepsThemAsPlainProperties) {
+    ImageFlagScene fixture;
+    auto other = std::make_shared<SceneNode>();
+    fixture.runtime->RegisterNode("other", other.get());
+    const auto run = RunUpdateOn(*fixture.runtime, "other",
+                                 "export function update(v) { thisLayer.brightness = 3; thisLayer.clampuvs = 'x'; "
+                                 "return thisLayer.brightness === 3 && thisLayer.clampuvs === 'x' ? 1 : 0; }");
+    EXPECT_SCRIPT_PASSES(run);
+}
+
+// `solid` and `disablepropagation` are cursor members of every layer (bits @288 of
+// we_ss_reg_SceneObjectBase 0x1401E0530): a script that writes `solid = false` takes the
+// layer out of hit testing.
+TEST(CursorHitTest, ASolidFalseWriteStopsHits) {
+    Scene scene;
+    auto runtime = MakeRuntimeWithScene(scene);
+    auto button = std::make_shared<SceneNode>();
+    auto target = std::make_shared<SceneNode>();
+    button->SetTranslate(linalg::Vector3f(300, 200, 0));
+    runtime->RegisterNode("button", button.get());
+    runtime->RegisterNodeSize("button", linalg::Vector2f(80, 60));
+    runtime->SetNodeCursorTarget("button", true, true, false);
+    runtime->RegisterNode("target", target.get());
+    runtime->RegisterNodeVisibility("button", button.get(), ResolveBoolSetting(*runtime, {
+        {"value", true}, {"script", R"JS(
+export function init(value) {
+  var before = thisLayer.solid === true && thisLayer.disablepropagation === false;
+  thisLayer.solid = false;
+  thisLayer.disablepropagation = true;
+  if (!(before && thisLayer.solid === false && thisLayer.disablepropagation === true)) throw new Error('read back');
+  return value;
+}
+export function cursorClick(event) { thisScene.getLayer('target').visible = false; }
+)JS"}}, "button"));
+    runtime->Tick(0.01);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+    const auto held = runtime->NodeCursorTargetOf("button");
+    ASSERT_TRUE(held.has_value());
+    EXPECT_FALSE(held->solid);
+    EXPECT_TRUE(held->blocks);
+    runtime->SetCursorEnter(true);
+    runtime->SetCursorWorldPosition(linalg::Vector3f(300, 200, 0));
+    runtime->SetCursorButtons(0, 1, 1);
+    runtime->DispatchCursorFrameEvents(true);
+    runtime->Tick(0.01);
+    EXPECT_TRUE(target->Visible()) << "a layer that is not solid hears no click";
+}
+
+// A layer's video texture (we_ss_reg_VideoTexture 0x140214050, decompiles/A-7i.md): `loop`
+// reads back what was written; a clip that does not loop stops on its last frame and tells its
+// `addEndedCallback` listeners once.
+TEST(ScriptVideo, ANonLoopingVideoEndsOnceAndCallsBack) {
+    Scene scene;
+    auto runtime = MakeRuntimeWithScene(scene);
+    auto screen  = std::make_shared<SceneNode>();
+    runtime->RegisterNode("screen", screen.get());
+    runtime->RegisterNodeVideoTexture("screen", "videos/clip.mp4");
+    runtime->SetVideoTextureDuration("videos/clip.mp4", 1.0);
+    runtime->RegisterNodeVisibility("screen", screen.get(), ResolveBoolSetting(*runtime, {
+        {"value", true}, {"script", R"JS(
+var ended = 0, video;
+export function init(value) {
+  video = thisLayer.getVideoTexture();
+  if (video.loop !== true) throw new Error('loops by default');
+  video.loop = false;
+  video.addEndedCallback(function () { ++ended; });
+  return value;
+}
+export function update(value) {
+  thisLayer.origin = new Vec3(ended, video.loop ? 1 : 0, video.isPlaying() ? 1 : 0);
+  return value;
+}
+)JS"}}, "screen"));
+    for (int tick = 0; tick < 70; ++tick) runtime->Tick(1.0 / 60.0);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+    EXPECT_FLOAT_EQ(screen->Translate().x(), 1.0f) << "called back once";
+    EXPECT_FLOAT_EQ(screen->Translate().y(), 0.0f) << "loop reads back false";
+    EXPECT_FLOAT_EQ(screen->Translate().z(), 0.0f) << "an ended clip is not playing";
+    const auto state = runtime->ResolveVideoPlaybackState("videos/clip.mp4", 0.0);
+    EXPECT_LT(state.scene_elapsed_seconds, 1.0) << "held on its last frame, not wrapped to the first";
+    EXPECT_GT(state.scene_elapsed_seconds, 0.99);
+    for (int tick = 0; tick < 70; ++tick) runtime->Tick(1.0 / 60.0);
+    EXPECT_FLOAT_EQ(screen->Translate().x(), 1.0f) << "and only once";
 }
 
 // ---------------------------------------------------------------------------
@@ -5853,7 +6566,7 @@ TEST(ScriptRuntimeCompat, DestroyLayerRemovesEveryLayerBelowItFromTheRuntime) {
     ASSERT_FALSE(parent.empty() || child.empty() || grandchild.empty() || bystander.empty());
     ASSERT_TRUE(runtime.SetNodeParent(child, parent));
     ASSERT_TRUE(runtime.SetNodeParent(grandchild, child));
-    ASSERT_TRUE(runtime.NameLayer(child, "kid"));
+    ASSERT_TRUE(runtime.RenameLayer(child, "kid"));
     ASSERT_EQ(runtime.LayerCount(), 5u);
     ASSERT_EQ(runtime.NodeParentName(grandchild), child);
 
@@ -6159,7 +6872,7 @@ export function update(value) {
 // horizontalalign is left, center or right and verticalalign top, center or
 // bottom, as Wallpaper Engine registers them. Anything else is not an alignment:
 // it changes nothing about the layer, and stays a plain property.
-TEST(ScriptRuntimeCompat, TextAlignmentOnlyTakesTheWordsItIsDefinedFor) {
+TEST(ScriptRuntimeCompat, TextAlignmentUnknownWordsUseTheRegistryDefaults) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto node    = std::make_shared<SceneNode>();
     node->SetTranslate(linalg::Vector3f(10, 20, 0));
@@ -6170,7 +6883,7 @@ TEST(ScriptRuntimeCompat, TextAlignmentOnlyTakesTheWordsItIsDefinedFor) {
 export function update(value) {
   ['top', 'Left', 'banana', '', 'LEFT', 'middle'].forEach(function(word) {
     thisLayer.horizontalalign = word;
-    check('horizontal ' + word, thisLayer.horizontalalign === 'center');
+    check('horizontal ' + word, thisLayer.horizontalalign === 'left');
   });
   ['left', 'Top', 'banana', '', 'right'].forEach(function(word) {
     thisLayer.verticalalign = word;
@@ -6263,10 +6976,44 @@ export function init(value) {
   check('a name no layer has', ghost.name === 'nothing' && ghost === thisLayer.getAnimationLayer('nothing'));
   return value;
 }
+
 )JS" } }, "character", 1));
     runtime->Tick(0.01);
     for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
 }
+
+TEST(ScriptRuntimeCompat, AnimationObjectValidityFollowsItsSerialThroughRemoval) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node = std::make_shared<SceneNode>();
+    runtime->RegisterNode("character", node.get());
+    std::vector<WPPuppetLayer::AnimationLayer> authored(2);
+    authored[0].id = authored[1].id = 7;
+    authored[0].name = "first";
+    authored[1].name = "second";
+    WPPuppetLayer layer(MakeSingleShotPuppet());
+    layer.prepared(authored);
+    runtime->RegisterPuppetLayer("character", layer);
+    runtime->RegisterNodeVisibility("character", node.get(), ResolveBoolSetting(*runtime, {
+        {"value", true}, {"script", std::string(kCheckHelpers) + R"JS(
+export function init(value) {
+    var first = thisLayer.getAnimationLayer('first');
+    var second = thisLayer.getAnimationLayer('second');
+    check('live animation', engine.isObjectValid(first) && engine.isObjectValid(second));
+    second.visible = false;
+    check('hidden still exists', engine.isObjectValid(second));
+    thisLayer.destroyAnimationLayer(first);
+    check('removed invalid', !engine.isObjectValid(first));
+    check('surviving serial valid', engine.isObjectValid(second));
+    check('unknown invalid', !engine.isObjectValid(thisLayer.getAnimationLayer('missing')));
+    thisLayer.destroyAnimationLayer(second);
+    check('last removed invalid', !engine.isObjectValid(second));
+    return value;
+}
+)JS"}}, "character"));
+    runtime->Tick(0.01);
+    for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
+}
+
 
 namespace
 {
@@ -6455,33 +7202,72 @@ struct EffectLayerScene {
 };
 } // namespace
 
-// parallaxDepth is what is drawn: for a layer drawn through effects that is its
-// passes' depth. A write reaches the layer's passes and the layers below it, and
-// not the layers beside it. A layer that starts or stops following the cursor
-// asks for a new render graph, because the one built before has it standing still.
-TEST(ScriptRuntimeCompat, ParallaxDepthIsTheDepthOfWhatIsDrawnAndAWriteReachesTheLayersBelow) {
+// A child reads its authored depth even while its parent's depth drives its
+// draw. A layer that starts or stops following the cursor asks for a new graph.
+TEST(ScriptRuntimeCompat, ParallaxDepthKeepsChildValuesWhileParentWritesMoveTheirDraws) {
     EffectLayerScene fixture;
     auto&            runtime = *fixture.card.runtime;
+    auto drawable=std::make_shared<SceneMesh>();
+    drawable->AddMaterial(SceneMaterial {});
+    fixture.kid->AddMesh(drawable);
+    fixture.beside->AddMesh(drawable);
+    auto camera = std::make_shared<SceneCamera>(1920,1080,-1.0f,1.0f);
+    auto camera_node = std::make_shared<SceneNode>();
+    camera_node->SetTranslate(linalg::Vector3f(960,540,0));
+    camera->AttatchNode(camera_node);
+    fixture.card.scene.cameras["parallax-test"] = camera;
+    fixture.card.scene.activeCamera = camera.get();
+    fixture.card.scene.ortho[0]=1920;fixture.card.scene.ortho[1]=1080;
+    fixture.card.owner->SetTranslate(linalg::Vector3f(960,540,0));
+    fixture.kid->SetTranslate(linalg::Vector3f(40,0,0));
+    fixture.beside->SetTranslate(linalg::Vector3f(960,540,0));
+    fixture.updater.SetCameraParallax({.enable=true,.amount=.5f,.delay=0,
+                                       .mouseinfluence=1,.canvas_scene=true});
+    fixture.updater.MouseInput(1,0);
+    fixture.updater.FrameBegin();
+    const auto displacement=[&](SceneNode& node) -> linalg::Vector2f {
+        fixture.updater.InitUniforms(&node,[](std::string_view name){return name=="g_ModelMatrix";});
+        sprite_map_t sprites;
+        ShaderValue value;
+        fixture.updater.UpdateUniforms(&node,sprites,[&](std::string_view name,const ShaderValue& v){
+            if (name=="g_ModelMatrix") value=v;
+        });
+        EXPECT_EQ(value.size(),16u);
+        if (value.size()!=16u) return linalg::Vector2f::Zero();
+        node.UpdateTrans();
+        return linalg::Vector2f(value[12]-float(node.ModelTrans()(0,3)),
+                                value[13]-float(node.ModelTrans()(1,3)));
+    };
+    const auto child_before=displacement(*fixture.kid),beside_before=displacement(*fixture.beside);
+    EXPECT_GT(std::abs(child_before.x()),1.0f);
+    EXPECT_GT(std::abs(child_before.y()),1.0f);
     runtime.ConsumeSceneGraphMutationFlag();
     auto run = RunUpdateOn(runtime, "owner", std::string(kCheckHelpers) + R"JS(
 export function update(value) {
   check('the passes carry it', thisLayer.parallaxDepth.x === 0.5 && thisLayer.parallaxDepth.y === 0.25);
   thisLayer.parallaxDepth = new Vec2(2, 3);
   check('read back', thisLayer.parallaxDepth.x === 2 && thisLayer.parallaxDepth.y === 3);
-  check('a layer below', thisScene.getLayer('kid').parallaxDepth.x === 2);
+  check('child retains its own depth', thisScene.getLayer('kid').parallaxDepth.x === 0.5 &&
+        thisScene.getLayer('kid').parallaxDepth.y === 0.25);
   check('a layer beside', thisScene.getLayer('beside').parallaxDepth.x === 0.5);
   return 1;
 }
 )JS");
     EXPECT_SCRIPT_PASSES(run);
     EXPECT_EQ(fixture.Depth(*fixture.pass), (std::array<float, 2> { 2.0f, 3.0f }));
-    EXPECT_EQ(fixture.Depth(*fixture.kid), (std::array<float, 2> { 2.0f, 3.0f }));
+    EXPECT_EQ(fixture.Depth(*fixture.kid), (std::array<float, 2> { 0.5f, 0.25f }));
     EXPECT_EQ(fixture.Depth(*fixture.beside), (std::array<float, 2> { 0.5f, 0.25f }));
+    const auto child_after=displacement(*fixture.kid);
+    EXPECT_NEAR(child_after.x(),child_before.x()*4,1e-3);
+    EXPECT_NEAR(child_after.y(),child_before.y()*12,1e-3);
+    EXPECT_TRUE(displacement(*fixture.beside).isApprox(beside_before,1e-5));
     EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag()) << "following the cursor before and after";
 
     run = RunUpdateOn(runtime, "owner", "export function update(value) { thisLayer.parallaxDepth = new Vec2(0, 0); return 1; }");
     EXPECT_SCRIPT_PASSES(run);
     EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag()) << "it stopped following the cursor";
+    EXPECT_LT(displacement(*fixture.kid).norm(),1e-3f);
+    EXPECT_TRUE(displacement(*fixture.beside).isApprox(beside_before,1e-5));
     run = RunUpdateOn(runtime, "owner", "export function update(value) { thisLayer.parallaxDepth = new Vec2(0, 0); return 1; }");
     EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag()) << "still not following";
     run = RunUpdateOn(runtime, "owner", "export function update(value) { thisLayer.parallaxDepth = new Vec2(0, 1); return 1; }");
@@ -6652,31 +7438,6 @@ export function update(value) { return globalThis.seen; }
     const auto seen = reader->Evaluate(host, DynamicValue(0.0f));
     ASSERT_NE(seen, nullptr);
     EXPECT_FLOAT_EQ(seen->getFloat(), 5005.0f);
-}
-
-// A layer's program hears where on the layer the cursor is; a program of the scene itself,
-// which has no layer, gets no `localPosition`.
-TEST(ScriptHostLimits, ACursorEventCarriesTheLocalPositionOnlyWhenTheHostGivesOne) {
-    ScriptEngine engine;
-    DynamicValue initial(0.0f);
-    auto reader = engine.CreatePropertyScriptProgram(nullptr, R"JS(
-export function cursorClick(event) {
-  globalThis.seen = event.localPosition === undefined ? -1 : event.localPosition.x * 1000 + event.localPosition.y;
-}
-export function update(value) { return globalThis.seen; }
-)JS", "", {}, initial, {});
-    ASSERT_NE(reader, nullptr);
-    ScriptHostContext host;
-    host.cursor_local_position = linalg::Vector2f(12, 34);
-    reader->DispatchCursorClick(host);
-    auto seen = reader->Evaluate(host, DynamicValue(0.0f));
-    ASSERT_NE(seen, nullptr);
-    EXPECT_FLOAT_EQ(seen->getFloat(), 12034.0f);
-    host.cursor_local_position.reset();
-    reader->DispatchCursorClick(host);
-    seen = reader->Evaluate(host, DynamicValue(0.0f));
-    ASSERT_NE(seen, nullptr);
-    EXPECT_FLOAT_EQ(seen->getFloat(), -1.0f);
 }
 
 TEST(ScriptHostLimits, AnEndedListenerRemovedByAnEarlierOneDoesNotFire) {
@@ -6979,3 +7740,15 @@ export function update(value) { return value; }
 
 } // namespace
 } // namespace wallpaper
+
+// Wallpaper Engine 2.8.0.42 advances a scene by the frame's elapsed time held to [1e-4, 0.25] s,
+// times the playback rate, held to [1e-4, 0.25] s again (`sub_140110630` before
+// `sub_14017FA70`); that step is g_Frametime and what g_Time gains.
+TEST(ShaderValueUpdaterCompat, FrametimeIsClampedToAQuarterSecondAndNeverZero) {
+    EXPECT_FLOAT_EQ(wallpaper::SceneFrameStep(0.5, 1.0), 0.25f);
+    EXPECT_FLOAT_EQ(wallpaper::SceneFrameStep(0.0, 1.0), 0.0001f);
+    EXPECT_FLOAT_EQ(wallpaper::SceneFrameStep(1.0 / 30.0, 1.0), static_cast<float>(1.0 / 30.0));
+    EXPECT_FLOAT_EQ(wallpaper::SceneFrameStep(0.2, 2.0), 0.25f) << "the rate is applied before the second hold";
+    EXPECT_FLOAT_EQ(wallpaper::SceneFrameStep(1.0, 0.5), 0.125f) << "a hitch is held before the rate halves it";
+    EXPECT_FLOAT_EQ(wallpaper::SceneFrameStep(1.0 / 60.0, 0.0), 0.0001f);
+}

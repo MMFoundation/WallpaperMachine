@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
 
@@ -28,10 +27,6 @@ struct ScriptHostContext {
     linalg::Vector2f screen_resolution { 0.0f, 0.0f };
     linalg::Vector2f cursor_normalized_position { 0.5f, 0.5f };
     linalg::Vector3f cursor_world_position { 0.0f, 0.0f, 0.0f };
-    // Where the cursor is on the layer of the program a cursor event goes to, from the
-    // corner of its box: 0 to its size on each axis while over it (`CursorEvent.localPosition`).
-    // Empty for a program of the scene itself, which has no layer.
-    std::optional<linalg::Vector2f> cursor_local_position {};
     double          frame_time { 0.0 };
     double          runtime_seconds { 0.0 };
     bool            cursor_in_window { false };
@@ -257,9 +252,12 @@ public:
                                     std::string_view event_name, double frame);
     // Listeners registered with `engine.on('resizeScreen', ...)`, once per resize.
     void RunResizeScreenCallbacks(const ScriptHostContext& host_context);
-    // `addEndedCallback` listeners of one animation layer of a puppet layer.
-    void NotifyAnimationLayerEnded(const ScriptHostContext& host_context,
-                                   std::string_view layer_name, int animation_layer_index);
+    // `addEndedCallback` listeners of a layer's video texture.
+    void NotifyVideoEnded(const ScriptHostContext& host_context, std::string_view layer_name);
+    // `addEndedCallback` listeners of one animation layer of a puppet layer, by the layer's
+    // serial; `removed` when the layer goes right after (playSingleAnimation).
+    void NotifyAnimationLayerEnded(const ScriptHostContext& host_context, std::string_view layer_name,
+                                   int animation_layer_serial, bool removed);
 
 private:
     std::shared_ptr<ScriptEngineContext> m_context;

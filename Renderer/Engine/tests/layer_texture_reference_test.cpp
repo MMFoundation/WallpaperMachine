@@ -7,6 +7,7 @@
 #include "Fs/MemBinaryStream.h"
 #include "Fs/VFS.h"
 #include "support/byte_fs.hpp"
+#include "support/font_assets.hpp"
 #include "Image.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
@@ -55,7 +56,7 @@ void main() {
 constexpr std::string_view kFrag = R"(uniform sampler2D g_Texture0;
 varying vec2 v_TexCoord;
 void main() {
-  gl_FragColor = texture(g_Texture0, v_TexCoord);
+  gl_FragColor = texSample2D(g_Texture0, v_TexCoord);
 }
 )";
 
@@ -83,7 +84,7 @@ void MountFiles(fs::VFS& vfs, std::map<std::string, std::string> extra = {}) {
         { "/materials/solid.tex", "" },
     };
     for (auto& [path, content] : extra) files[path] = std::move(content);
-    ASSERT_TRUE(vfs.Mount("/assets", MakeTextFs(files)));
+    ASSERT_TRUE(vfs.Mount("/assets", MakeTextFs(test::WithFontAssets(std::move(files)))));
 }
 
 /// With `properties`, parsed with a runtime as the wallpaper is, so a layer the
@@ -320,7 +321,7 @@ TEST(LayerTextureReference, MutualLayerReferencesCarryTheLaterLayerFromThePrevio
 uniform sampler2D g_Texture1;
 varying vec2 v_TexCoord;
 void main() {
-  gl_FragColor = texture(g_Texture0, v_TexCoord) + texture(g_Texture1, v_TexCoord);
+  gl_FragColor = texSample2D(g_Texture0, v_TexCoord) + texSample2D(g_Texture1, v_TexCoord);
 }
 )";
     fs::VFS vfs;
@@ -358,26 +359,24 @@ void main() {
     };
     const auto* pattern_composite = FindPassByOutput(*graph, LayerCompositeTargetKey(288));
     const auto* canvas_composite  = FindPassByOutput(*graph, LayerCompositeTargetKey(16));
-    const auto* pattern_link      = FindLinkCopy(*graph, GenLinkTex(288));
-    const auto* canvas_link       = FindLinkCopy(*graph, GenLinkTex(16));
     ASSERT_NE(pattern_composite, nullptr);
     ASSERT_NE(canvas_composite, nullptr);
-    ASSERT_NE(pattern_link, nullptr);
-    ASSERT_NE(canvas_link, nullptr);
 
-    // The earlier layer (288) produces its composite first; the later layer (16)
-    // copies and samples it in the same frame, then writes its own composite and
-    // copies it into `_rt_link_16` for the next frame.
-    EXPECT_LT(index_of(pattern_composite), index_of(pattern_link));
-    EXPECT_LT(index_of(pattern_link), index_of(canvas_composite));
-    EXPECT_LT(index_of(canvas_composite), index_of(canvas_link));
+    // Each object samples the retained composite at its authored position. The
+    // earlier pattern observes the preceding frame's canvas; the canvas sees this frame's
+    // pattern. No separate copy is needed for distinct layer pictures.
+    EXPECT_LT(index_of(pattern_composite), index_of(canvas_composite));
+    EXPECT_EQ(pattern_composite->desc().textures[1], LayerCompositeTargetKey(16));
+    EXPECT_EQ(canvas_composite->desc().textures[1], LayerCompositeTargetKey(288));
+    EXPECT_EQ(FindLinkCopy(*graph, GenLinkTex(288)), nullptr);
+    EXPECT_EQ(FindLinkCopy(*graph, GenLinkTex(16)), nullptr);
 
-    EXPECT_EQ(parsed->FindRenderTarget(GenLinkTex(288)), nullptr)
-        << "the earlier layer's link is read after it is written and is not history";
-    const auto* carried = parsed->FindRenderTarget(GenLinkTex(16));
-    ASSERT_NE(carried, nullptr) << "the later layer's link was not declared as history";
+    ASSERT_NE(parsed->FindRenderTarget(LayerCompositeTargetKey(288)), nullptr);
+    EXPECT_FALSE(parsed->FindRenderTarget(LayerCompositeTargetKey(288))->carriesPreviousFrame);
+    const auto* carried = parsed->FindRenderTarget(LayerCompositeTargetKey(16));
+    ASSERT_NE(carried, nullptr);
     EXPECT_TRUE(carried->carriesPreviousFrame);
-    EXPECT_FALSE(carried->allowReuse);
+    EXPECT_TRUE(carried->allowReuse) << "the producer starts a fresh composite when reached";
 }
 
 TEST(LayerTextureReference, LayerScriptsReachChildrenEffectsAndEffectMaterials) {
@@ -386,7 +385,7 @@ uniform vec3 g_Tint; // {"material":"color","default":"1 0 0"}
 uniform vec3 u_channelMask; // {"material":"channelMask","default":"1 1 1"}
 varying vec2 v_TexCoord;
 void main() {
-  gl_FragColor = texture(g_Texture0, v_TexCoord) * vec4(g_Tint * u_channelMask, 1.0);
+  gl_FragColor = texSample2D(g_Texture0, v_TexCoord) * vec4(g_Tint * u_channelMask, 1.0);
 }
 )";
     const ProjectProperties properties {};
@@ -461,7 +460,7 @@ uniform float g_Speed; // {"material":"speed","default":"0.5"}
 uniform vec3 g_Tint; // {"material":"color","default":"1 0 0"}
 varying vec2 v_TexCoord;
 void main() {
-  gl_FragColor = texture(g_Texture0, v_TexCoord) * vec4(g_Tint * g_Speed, 1.0);
+  gl_FragColor = texSample2D(g_Texture0, v_TexCoord) * vec4(g_Tint * g_Speed, 1.0);
 }
 )";
     const ProjectProperties properties {};
@@ -644,7 +643,7 @@ TEST(LayerTextureReference, AnEffectsOwnBuffersAreTargetsWhateverTheyAreCalled) 
          "effects":[{"file":"effects/buffers/effect.json","id":6,"visible":true}]}
       ])",
       {{ "/effects/buffers/effect.json",
-         R"({"name":"buffers","fbos":[{"name":"_half","scale":2},{"name":"plain","scale":1},{"name":"_rt_plain","scale":1},{"name":"_alias_cookie","scale":1}],"passes":[)"
+         R"({"name":"buffers","fbos":[{"name":"_half","format":"rgba8888","scale":2},{"name":"plain","format":"rgba8888","scale":1},{"name":"_rt_plain","format":"rgba8888","scale":1},{"name":"_alias_cookie","format":"rgba8888","scale":1}],"passes":[)"
          R"({"material":"materials/copy.json","target":"_half","bind":[{"name":"previous","index":0}]},)"
          R"({"material":"materials/copy.json","target":"plain","bind":[{"name":"_half","index":0}]},)"
          R"({"material":"materials/copy.json","target":"_rt_plain","bind":[{"name":"plain","index":0}]},)"
@@ -1019,10 +1018,12 @@ TEST(LayerTextureReference, ExternalMaterialsKeepHiddenTransitiveProducers) {
     EXPECT_EQ(source->desc().output, LayerCompositeTargetKey(159));
     EXPECT_EQ(middle->desc().output, LayerCompositeTargetKey(160));
     EXPECT_LT(PassIndexByNode(*graph, "source"), PassIndexByNode(*graph, "middle"));
-    EXPECT_LT(PassIndexByNode(*graph, "middle"), PassIndexByNode(*graph, "consumer"));
+    EXPECT_LT(PassIndexByNode(*graph, "consumer"), PassIndexByNode(*graph, "middle"));
+    ASSERT_NE(parsed->FindRenderTarget(LayerCompositeTargetKey(160)), nullptr);
+    EXPECT_TRUE(parsed->FindRenderTarget(LayerCompositeTargetKey(160))->carriesPreviousFrame);
 }
 
-TEST(LayerTextureReference, ProducerRunsBeforeConsumer) {
+TEST(LayerTextureReference, LaterCompositeProducerStaysAfterItsConsumer) {
     fs::VFS vfs;
     auto    parsed = ParseScene(vfs, R"([
         {"id":160,"name":"consumer","image":"linked.json","visible":true,
@@ -1043,17 +1044,16 @@ TEST(LayerTextureReference, ProducerRunsBeforeConsumer) {
     const auto* consumer = FindPassByNode(*graph, "consumer");
     ASSERT_NE(consumer, nullptr);
     ASSERT_FALSE(consumer->desc().textures.empty());
-    EXPECT_EQ(consumer->desc().textures[0], GenLinkTex(159));
+    EXPECT_EQ(consumer->desc().textures[0], LayerCompositeTargetKey(159));
 
     const auto source_index   = PassIndexByNode(*graph, "source");
     const auto consumer_index = PassIndexByNode(*graph, "consumer");
     EXPECT_NE(source_index, static_cast<size_t>(-1));
-    EXPECT_LT(source_index, consumer_index);
-
-    const auto* link = FindLinkCopy(*graph, GenLinkTex(159));
-    ASSERT_NE(link, nullptr);
-    EXPECT_NE(link->desc().src, SpecTex_Default);
-    EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(159));
+    EXPECT_LT(consumer_index, source_index);
+    const auto* retained = parsed->FindRenderTarget(LayerCompositeTargetKey(159));
+    ASSERT_NE(retained, nullptr);
+    EXPECT_TRUE(retained->carriesPreviousFrame);
+    EXPECT_EQ(FindLinkCopy(*graph, GenLinkTex(159)), nullptr);
 }
 
 TEST(LayerTextureReference, EffectChainSourceLinksFromCompositeNotDefault) {
@@ -1086,12 +1086,10 @@ TEST(LayerTextureReference, EffectChainSourceLinksFromCompositeNotDefault) {
     const auto* consumer = FindPassByNode(*graph, "consumer");
     ASSERT_NE(consumer, nullptr);
     ASSERT_FALSE(consumer->desc().textures.empty());
-    EXPECT_EQ(consumer->desc().textures[0], GenLinkTex(159));
+    EXPECT_EQ(consumer->desc().textures[0], LayerCompositeTargetKey(159));
 
-    const auto* link = FindLinkCopy(*graph, GenLinkTex(159));
-    ASSERT_NE(link, nullptr) << "the consumer never received a copy of the source composite";
-    EXPECT_NE(link->desc().src, SpecTex_Default);
-    EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(159));
+    EXPECT_EQ(FindLinkCopy(*graph, GenLinkTex(159)), nullptr);
+    EXPECT_LT(PassIndexByNode(*graph, "source"), PassIndexByNode(*graph, "consumer"));
 
     const auto* composite = FindPassByOutput(*graph, LayerCompositeTargetKey(159));
     ASSERT_NE(composite, nullptr);
@@ -1110,9 +1108,9 @@ uniform sampler2D g_Texture1; // {"combo":"MASKED","default":"solid"}
 varying vec2 v_TexCoord;
 void main() {
 #if MASKED
-  gl_FragColor = texture(g_Texture1, v_TexCoord);
+  gl_FragColor = texSample2D(g_Texture1, v_TexCoord);
 #else
-  gl_FragColor = texture(g_Texture0, v_TexCoord);
+  gl_FragColor = texSample2D(g_Texture0, v_TexCoord);
 #endif
 }
 )";
@@ -1191,9 +1189,8 @@ TEST(LayerTextureReference, AReferencedLayerIsItsCardWhereverTheSceneShowsIt) {
     EXPECT_EQ(varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax), 0u);
 }
 
-// A layer's composite is copied into its link texture while the graph is
-// built, so its size is known only then, and the value updater reports it every
-// frame. A zero folded into the material at parse time in its place was divided
+// A layer reference uses its producer's retained composite. Its current size
+// is reported by the value updater every frame, including after a resize. A zero folded into the material at parse time in its place was divided
 // by: in the consumer's card padding, which made every texture coordinate of
 // the card NaN, and by `uv * size.z / size.x` wherever a shader maps
 // coordinates through it.
@@ -1231,11 +1228,8 @@ TEST(LayerTextureReference, AReferencedCompositeIsSampledAtItsRealSize) {
         }
     }
 
-    // A backend declares the link target from the composite as it prepares the
-    // copy (CopyPass, ScenePassDescription); this harness prepares none, so it
-    // declares it the same way.
-    parsed->renderTargets[GenLinkTex(159)] =
-        parsed->renderTargets.at(LayerCompositeTargetKey(159));
+    // A direct reference has no separate link texture or metadata record.
+    ASSERT_EQ(parsed->FindRenderTarget(GenLinkTex(159)), nullptr);
     const auto live = PassUniforms(*parsed, *consumer, { "g_Texture0Resolution" });
     // Metal writes the material's constants and then the value updater's live
     // values; the other order is checked too, so the shader reads the composite's
@@ -1260,6 +1254,23 @@ TEST(LayerTextureReference, AReferencedCompositeIsSampledAtItsRealSize) {
         EXPECT_FLOAT_EQ(size->second[0], 64.0f);
         EXPECT_FLOAT_EQ(size->second[1], 32.0f);
     }
+    // A target resize changes the uniforms without rebuilding the binding or
+    // inventing a second target record under the parsed link name.
+    auto& resized = parsed->renderTargets.at(LayerCompositeTargetKey(159));
+    resized.width = 96;
+    resized.height = 48;
+    resized.mipmap_level = 3;
+    const auto changed = PassUniforms(*parsed, *consumer,
+        {"g_Texture0Resolution", "g_Texture0Texel", "g_Texture0MipMapInfo"});
+    ASSERT_TRUE(changed.contains("g_Texture0Resolution"));
+    EXPECT_FLOAT_EQ(changed.at("g_Texture0Resolution")[0], 96.0f);
+    EXPECT_FLOAT_EQ(changed.at("g_Texture0Resolution")[1], 48.0f);
+    ASSERT_TRUE(changed.contains("g_Texture0Texel"));
+    EXPECT_FLOAT_EQ(changed.at("g_Texture0Texel")[0], 1.0f / 96.0f);
+    EXPECT_FLOAT_EQ(changed.at("g_Texture0Texel")[1], 1.0f / 48.0f);
+    ASSERT_TRUE(changed.contains("g_Texture0MipMapInfo"));
+    EXPECT_FLOAT_EQ(changed.at("g_Texture0MipMapInfo")[0], 3.0f);
+
 }
 
 // A compose layer draws its children into its own target through a camera
@@ -1505,10 +1516,8 @@ TEST(LayerTextureReference, ABareComposeLayerAnotherSamplesIsDrawnOnlyIntoItsCom
     const auto* mask = FindPassByNode(*graph, "mask");
     ASSERT_NE(mask, nullptr);
     ASSERT_FALSE(mask->desc().textures.empty());
-    EXPECT_EQ(mask->desc().textures[0], GenLinkTex(89));
-    const auto* link = FindLinkCopy(*graph, GenLinkTex(89));
-    ASSERT_NE(link, nullptr) << "the mask was given nothing to sample";
-    EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(89));
+    EXPECT_EQ(mask->desc().textures[0], LayerCompositeTargetKey(89));
+    EXPECT_EQ(FindLinkCopy(*graph, GenLinkTex(89)), nullptr);
     EXPECT_LT(PassIndexByNode(*graph, "behind"), PassIndexByNode(*graph, "clouds"));
 
     // Nobody samples it: it stays out of the graph, as before.
@@ -1535,7 +1544,7 @@ TEST(LayerTextureReference, AComposeLayersEffectCanSampleItsOwnChild) {
 uniform sampler2D g_Texture1;
 varying vec2 v_TexCoord;
 void main() {
-  gl_FragColor = texture(g_Texture0, v_TexCoord) * texture(g_Texture1, v_TexCoord);
+  gl_FragColor = texSample2D(g_Texture0, v_TexCoord) * texSample2D(g_Texture1, v_TexCoord);
 }
 )";
     // A child hidden for good is only its composite; one a script hides may
@@ -1589,13 +1598,12 @@ void main() {
             auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id));
             if (pass == nullptr) continue;
             const auto& textures = pass->desc().textures;
-            if (std::find(textures.begin(), textures.end(), GenLinkTex(2)) != textures.end())
+            if (std::find(textures.begin(), textures.end(), LayerCompositeTargetKey(2)) != textures.end())
                 tint = pass;
         }
         ASSERT_NE(tint, nullptr) << "the effect was given nothing to sample";
-        const auto* link = FindLinkCopy(*graph, GenLinkTex(2));
-        ASSERT_NE(link, nullptr);
-        EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(2));
+        EXPECT_EQ(FindLinkCopy(*graph, GenLinkTex(2)), nullptr);
+        EXPECT_NE(FindPassByOutput(*graph, LayerCompositeTargetKey(2)), nullptr);
 
         // The palette is its own card in its composite, and still part of the
         // compose layer's picture wherever it shows.
@@ -1718,10 +1726,8 @@ TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
                 const auto* marquee = FindPassByNode(*graph, "marquee");
                 ASSERT_NE(marquee, nullptr);
                 ASSERT_FALSE(marquee->desc().textures.empty());
-                EXPECT_EQ(marquee->desc().textures[0], GenLinkTex(416));
-                const auto* link = FindLinkCopy(*graph, GenLinkTex(416));
-                ASSERT_NE(link, nullptr) << "the marquee was given nothing to sample";
-                EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(416));
+                EXPECT_EQ(marquee->desc().textures[0], LayerCompositeTargetKey(416));
+                EXPECT_EQ(FindLinkCopy(*graph, GenLinkTex(416)), nullptr);
 
                 const auto before = find_composite(*graph);
                 expect_composite_is_the_card(before);
@@ -1766,7 +1772,7 @@ void ExpectOwnEffectsReadTheChainInput(std::string_view first, std::string_view 
 uniform sampler2D g_Texture1;
 varying vec2 v_TexCoord;
 void main() {
-  gl_FragColor = texture(g_Texture0, v_TexCoord) * texture(g_Texture1, v_TexCoord);
+  gl_FragColor = texSample2D(g_Texture0, v_TexCoord) * texSample2D(g_Texture1, v_TexCoord);
 }
 )";
     const std::array<std::pair<std::string_view, std::string_view>, 2> layers { {
@@ -1834,13 +1840,17 @@ void main() {
             const auto own = passes_of(outlined);
             const auto first  = passes_of(chain.GetEffect(0)->nodes.front().sceneNode.get());
             const auto second = passes_of(chain.GetEffect(1)->nodes.front().sceneNode.get());
-            ASSERT_EQ(own.size(), 1u);
+            ASSERT_FALSE(own.empty());
             ASSERT_EQ(first.size(), 1u);
             ASSERT_FALSE(second.empty());
 
-            // The first effect reads the layer as drawn, before any effect...
+            // Text's seed and glyph draws all produce the same chain input. The
+            // first effect reads that complete image, before any effect...
             ASSERT_FALSE(first[0]->desc().textures.empty());
-            EXPECT_EQ(first[0]->desc().textures[0], own[0]->desc().output);
+            EXPECT_EQ(first[0]->desc().textures[0], chain.FirstTarget());
+            for (const auto* pass : own) {
+                EXPECT_EQ(pass->desc().output, first[0]->desc().textures[0]);
+            }
             // ...and the second what the first made of it, in both slots.
             for (const auto* pass : second) {
                 ASSERT_GE(pass->desc().textures.size(), 2u);
@@ -1858,9 +1868,8 @@ void main() {
             const auto* mirror = FindPassByNode(*graph, "mirror");
             ASSERT_NE(mirror, nullptr);
             ASSERT_FALSE(mirror->desc().textures.empty());
-            EXPECT_EQ(mirror->desc().textures[0], GenLinkTex(7));
-            ASSERT_NE(link, nullptr) << "the mirror was given nothing to sample";
-            EXPECT_EQ(link->desc().src, LayerCompositeTargetKey(7));
+            EXPECT_EQ(mirror->desc().textures[0], LayerCompositeTargetKey(7));
+            EXPECT_EQ(link, nullptr);
             EXPECT_NE(FindPassByOutput(*graph, LayerCompositeTargetKey(7)), nullptr);
         }
     }
