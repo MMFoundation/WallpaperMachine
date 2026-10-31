@@ -53,7 +53,12 @@ public:
     usize        OneSizeOf() const { return m_stride * sizeof(float); }
 
     const auto&                                  Attributes() const { return m_attrs; }
+    // Every attribute by name with its byte offset, plus each alias at its target's offset.
     Map<std::string, SceneVertexAttributeOffset> GetAttrOffsetMap() const;
+    // Lets a shader input named `alias` read attribute `target` (same bytes, no copy). An
+    // alias never hides a real attribute of that name; one naming no attribute is ignored.
+    void AddAlias(std::string alias, std::string target);
+    const auto& Aliases() const { return m_aliases; }
 
     uint32_t ID() const { return m_id; }
     void     SetID(uint32_t id) { m_id = id; }
@@ -68,6 +73,7 @@ private:
     usize                             m_size { 0 };     // words filled
     std::unique_ptr<float[]>          m_data;
     Map<std::string, bool>            m_options;
+    std::vector<std::pair<std::string, std::string>> m_aliases; // alias, target
     uint32_t                          m_id { 0 };
 };
 } // namespace wallpaper

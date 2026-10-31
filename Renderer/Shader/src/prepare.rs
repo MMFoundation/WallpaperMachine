@@ -31,7 +31,7 @@ use crate::items::{BraceMode, scan_items};
 use crate::lexer::lex;
 use crate::metadata::{ExtractMode, extract};
 use crate::preprocess::{MacroFacts, Mode, preprocess_stage};
-use crate::request::{Combo, StageKind, ValidRequest};
+use crate::request::{Combo, Stage, StageKind, ValidRequest};
 use crate::response::Metadata;
 use crate::source::{CachingSource, IncludeSource};
 
@@ -72,12 +72,23 @@ pub fn prepare_program(request: &ValidRequest, includes: &dyn IncludeSource) -> 
     let name = request.shader_name();
     let cache = CachingSource::new(includes);
     let textures = request.textures();
+    let geometry_stage = request.point_geometry().map(|geometry| Stage {
+        kind: StageKind::Vertex, source: geometry.source.clone(),
+    });
+    let mut inputs: Vec<&Stage> = Vec::new();
+    for stage in request.stages() {
+        inputs.push(stage);
+        if stage.kind == StageKind::Vertex {
+            if let Some(geometry) = &geometry_stage { inputs.push(geometry); }
+        }
+    }
+
 
     // 1 and 2: the view with the request combos, the reported metadata, the texture switches.
     let mut views = Vec::new();
     let mut reported = Metadata::default();
     let mut compile_combos: Vec<Combo> = request.combos().to_vec();
-    for stage in request.stages() {
+    for stage in &inputs {
         let view = preprocess_stage(stage.kind, &stage.source, request.combos(), &cache, Mode::MetadataPreserving)
             .map_err(|e| e.into_shader_error(name))?;
         let tokens = lex(&view.text);
@@ -98,7 +109,7 @@ pub fn prepare_program(request: &ValidRequest, includes: &dyn IncludeSource) -> 
     // 3: evaluated text for request plus texture-derived combos; annotation defaults that survive.
     let mut discovered: Vec<(String, String)> = Vec::new();
     let mut first_pass = Vec::new();
-    for stage in request.stages() {
+    for stage in &inputs {
         let evaluated = preprocess_stage(stage.kind, &stage.source, &compile_combos, &cache, Mode::Evaluated)
             .map_err(|e| e.into_shader_error(name))?;
         let tokens = lex(&evaluated.text);
@@ -116,7 +127,7 @@ pub fn prepare_program(request: &ValidRequest, includes: &dyn IncludeSource) -> 
 
     // 4: the final text.
     let mut stages = Vec::new();
-    for ((stage, view), earlier) in request.stages().iter().zip(views).zip(first_pass) {
+    for ((stage, view), earlier) in inputs.iter().zip(views).zip(first_pass) {
         let evaluated = if changed {
             preprocess_stage(stage.kind, &stage.source, &compile_combos, &cache, Mode::Evaluated)
                 .map_err(|e| e.into_shader_error(name))?
@@ -130,6 +141,14 @@ pub fn prepare_program(request: &ValidRequest, includes: &dyn IncludeSource) -> 
             view,
             diagnostics: evaluated.diagnostics,
         });
+    }
+    if let Some(geometry) = request.point_geometry() {
+        let vertex = stages.iter().position(|stage| stage.kind == StageKind::Vertex).expect("vertex stage");
+        let geometry_stage = stages.remove(vertex + 1);
+        stages[vertex].evaluated = crate::point_geometry::lower(
+            &stages[vertex].evaluated, &geometry_stage.evaluated, geometry)
+            .map_err(|message| ShaderError::Request(crate::request::RequestError::Program(message)))?;
+        stages[vertex].diagnostics.extend(geometry_stage.diagnostics);
     }
     Ok(PreparedProgram { stages, compile_combos, metadata: reported, includes_read: cache.paths_read() })
 }

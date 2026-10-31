@@ -492,3 +492,283 @@ TEST(SceneDemandMapping, GeometryRewrittenOnAnEventIsNotAReasonToKeepDrawing)
         }
     }
 }
+
+TEST(StaticSubgraphCache, ADelayedReaderCatchesUpAfterOneSourceChange)
+{
+    auto reader = Pass("reader");
+    reader.previous_inputs = { "source" };
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector { reader, Pass("source") });
+    PinAllCacheable(cache);
+    RunFrame(cache, { kStable, kStable });
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, kStable }), (std::vector<uint8_t> { 0, 1 }));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, kStable }), (std::vector<uint8_t> { 1, 1 }));
+
+    const StaticPassSample changed { .hash = 99 };
+    EXPECT_EQ(RunFrame(cache, { kStable, changed }), (std::vector<uint8_t> { 1, 0 }));
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, changed }), (std::vector<uint8_t> { 0, 1 }));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, changed }), (std::vector<uint8_t> { 1, 1 }));
+}
+
+TEST(StaticSubgraphCache, DelayedInputsRetainSignaturesFromUnpinnedSources)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector { Pass("reader", { "source" }), Pass("source") });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1 });
+    cache.SetTargetPinned(0, true, 1024);
+    RunFrame(cache, { kStable, kStable });
+    RunFrame(cache, { kStable, kStable });
+    EXPECT_EQ(RunFrame(cache, { kStable, kStable }), (std::vector<uint8_t> { 1, 0 }));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+
+    const StaticPassSample changed { .hash = 99 };
+    EXPECT_EQ(RunFrame(cache, { kStable, changed }), (std::vector<uint8_t> { 1, 0 }));
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, changed }), (std::vector<uint8_t> { 0, 0 }));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+}
+
+TEST(StaticSubgraphCache, ChangingExecutionOrderChangesReadTimingWithoutDroppingPins)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector { Pass("reader", { "source" }), Pass("source") });
+    PinAllCacheable(cache);
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1 });
+    RunFrame(cache, { kStable, kStable });
+    RunFrame(cache, { kStable, kStable });
+    const auto pinned = cache.stats().pinned_bytes;
+
+    cache.SetExecutionOrder(std::vector<std::size_t> { 1, 0 });
+    const StaticPassSample changed { .hash = 99 };
+    EXPECT_EQ(RunFrame(cache, { kStable, changed }), (std::vector<uint8_t> { 0, 0 }));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(cache.stats().pinned_bytes, pinned);
+    EXPECT_EQ(RunFrame(cache, { kStable, changed }), (std::vector<uint8_t> { 1, 1 }));
+
+    cache.SetPreviousFrameInputs(std::vector<wallpaper::render::StaticPreviousFrameInput> {
+        { 0, "source" },
+    });
+    EXPECT_EQ(RunFrame(cache, { kStable, changed }), (std::vector<uint8_t> { 0, 1 }));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+}
+
+TEST(StaticSubgraphCache, OneTargetCanConsumeCurrentAndPreviousSourceVersions)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector {
+        Pass("reader", { "source" }), Pass("source"), Pass("reader", { "source" }),
+    });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 2 });
+    PinAllCacheable(cache);
+    RunFrame(cache, { kStable, kStable, kStable });
+    RunFrame(cache, { kStable, kStable, kStable });
+    const StaticPassSample changed { .hash = 99 };
+    EXPECT_EQ(RunFrame(cache, { kStable, changed, kStable }),
+              (std::vector<uint8_t> { 0, 0, 0 }));
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, changed, kStable }),
+              (std::vector<uint8_t> { 0, 1, 0 }));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, changed, kStable }),
+              (std::vector<uint8_t> { 1, 1, 1 }));
+}
+
+TEST(StaticSubgraphCache, ADelayedEdgeDoesNotMakeAFeedbackCycleCacheable)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector { Pass("a", { "b" }), Pass("b", { "a" }) });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1 });
+    EXPECT_TRUE(cache.HasFeedbackCycles());
+    for (std::size_t i = 0; i < cache.TargetCount(); ++i) {
+        EXPECT_FALSE(cache.TargetCacheable(i));
+        EXPECT_TRUE(cache.TargetDynamicReasons(i) & DynamicReason::Feedback);
+    }
+    EXPECT_EQ(RunFrame(cache, { kStable, kStable }), (std::vector<uint8_t> { 0, 0 }));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+}
+
+TEST(StaticSubgraphCache, DelayedEventGeometryKeepsOnlyItsCatchUpFramePending)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector {
+        Pass("reader", { "source" }),
+        Pass("source", {}, static_cast<uint32_t>(DynamicReason::EventMesh)),
+    });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1 });
+    EXPECT_TRUE(cache.PassSampled(0));
+    EXPECT_TRUE(cache.PassSampled(1));
+    EXPECT_FALSE(cache.TargetCacheable(0));
+    EXPECT_FALSE(cache.TargetCacheable(1));
+    RunFrame(cache, { kStable, kStable });
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    RunFrame(cache, { kStable, kStable });
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+    RunFrame(cache, { kStable, { .hash = 99 } });
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    RunFrame(cache, { kStable, { .hash = 99 } });
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+}
+
+TEST(StaticSubgraphCache, ClearingRetainedPixelsRestartsDelayedInitialization)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector { Pass("reader", { "source" }), Pass("source") });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1 });
+    PinAllCacheable(cache);
+    RunFrame(cache, { kStable, kStable });
+    RunFrame(cache, { kStable, kStable });
+    cache.InvalidateAll();
+    EXPECT_EQ(RunFrame(cache, { kStable, kStable }), (std::vector<uint8_t> { 0, 0 }));
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, kStable }), (std::vector<uint8_t> { 0, 1 }));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+}
+
+TEST(StaticSubgraphCache, ADelayedChainRequestsOnlyItsRemainingPropagationFrames)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector {
+        Pass("last", { "middle" }), Pass("middle", { "source" }), Pass("source"),
+    });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 2 });
+    PinAllCacheable(cache);
+    EXPECT_TRUE(cache.HasDelayedInputs());
+    EXPECT_FALSE(cache.HasFeedbackCycles());
+    EXPECT_TRUE(cache.TargetReadFromPreviousFrame(1));
+    EXPECT_TRUE(cache.TargetReadFromPreviousFrame(2));
+    for (int frame = 0; frame < 3; ++frame) RunFrame(cache, { kStable, kStable, kStable });
+    ASSERT_FALSE(cache.HasPendingDelayedInputs());
+
+    const StaticPassSample changed { .hash = 99 };
+    EXPECT_EQ(RunFrame(cache, { kStable, kStable, changed }),
+              (std::vector<uint8_t> { 1, 1, 0 }));
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, kStable, changed }),
+              (std::vector<uint8_t> { 1, 0, 1 }));
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, kStable, changed }),
+              (std::vector<uint8_t> { 0, 1, 1 }));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+    EXPECT_EQ(RunFrame(cache, { kStable, kStable, changed }),
+              (std::vector<uint8_t> { 1, 1, 1 }));
+}
+
+TEST(StaticSubgraphCache, CurrentFrameSnapshotCyclesDoNotKeepTheIdleClockRunning)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector {
+        Pass("scene"), Pass("snapshot", { "scene" }),
+        Pass("effect", { "snapshot" }), Pass("scene", { "effect" }),
+    });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 2, 3 });
+    EXPECT_FALSE(cache.HasDelayedInputs());
+    EXPECT_FALSE(cache.HasFeedbackCycles());
+    for (std::size_t i = 0; i < cache.TargetCount(); ++i)
+        EXPECT_FALSE(cache.TargetCacheable(i));
+
+    cache.SetExecutionOrder(std::vector<std::size_t> { 1, 2, 0, 3 });
+    EXPECT_TRUE(cache.HasDelayedInputs());
+    EXPECT_TRUE(cache.HasFeedbackCycles());
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 2, 3 });
+    EXPECT_FALSE(cache.HasFeedbackCycles());
+}
+
+TEST(StaticSubgraphCache, ADelayedReaderOfACurrentFrameCycleIsNotItselfFeedback)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector {
+        Pass("reader", { "effect" }), Pass("scene"),
+        Pass("snapshot", { "scene" }), Pass("effect", { "snapshot" }),
+        Pass("scene", { "effect" }),
+    });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 2, 3, 4 });
+    EXPECT_TRUE(cache.HasDelayedInputs());
+    EXPECT_FALSE(cache.HasFeedbackCycles());
+}
+
+TEST(StaticSubgraphCache, ADelayedReaderOfASnapshotCycleCatchesUpAfterAnEvent)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector {
+        Pass("reader", { "effect" }), Pass("scene"),
+        Pass("snapshot", { "scene" }), Pass("effect", { "snapshot" }),
+        Pass("scene", { "effect" }),
+    });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 2, 3, 4 });
+    ASSERT_FALSE(cache.HasFeedbackCycles());
+    for (std::size_t i = 0; i < 5; ++i) EXPECT_TRUE(cache.PassSampled(i));
+    RunFrame(cache, { kStable, kStable, kStable, kStable, kStable });
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    RunFrame(cache, { kStable, kStable, kStable, kStable, kStable });
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+
+    const StaticPassSample changed { .hash = 99 };
+    RunFrame(cache, { kStable, changed, kStable, kStable, kStable });
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    RunFrame(cache, { kStable, changed, kStable, kStable, kStable });
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+    EXPECT_FALSE(cache.HasFeedbackCycles());
+}
+
+TEST(StaticSubgraphCache, ACurrentFrameCycleWithoutDelayedReadersDoesNotSampleWriters)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector {
+        Pass("scene"), Pass("snapshot", { "scene" }),
+        Pass("effect", { "snapshot" }), Pass("scene", { "effect" }),
+    });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 2, 3 });
+    for (std::size_t i = 0; i < 4; ++i) EXPECT_FALSE(cache.PassSampled(i));
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+    EXPECT_FALSE(cache.HasFeedbackCycles());
+}
+
+TEST(StaticSubgraphCache, ReorderedCopyWritersInvalidateTheirSharedTarget)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector {
+        Pass("red"), Pass("green"),
+        Pass("output", { "red" }), Pass("output", { "green" }),
+    });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 2, 3 });
+    PinAllCacheable(cache);
+    const std::vector<StaticPassSample> samples {
+        { .hash = 17 }, { .hash = 99 }, {}, {},
+    };
+    RunFrame(cache, samples);
+    ASSERT_EQ(RunFrame(cache, samples), (std::vector<uint8_t> { 1, 1, 1, 1 }));
+
+    // Both copies have identical per-pass samples and the same union of input
+    // targets. Only which source is copied last changes the retained picture.
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 3, 2 });
+    EXPECT_EQ(RunFrame(cache, samples), (std::vector<uint8_t> { 1, 1, 0, 0 }));
+    EXPECT_EQ(RunFrame(cache, samples), (std::vector<uint8_t> { 1, 1, 1, 1 }));
+}
+
+TEST(StaticSubgraphCache, ReorderedCopiesInsideASnapshotCycleRequestDelayedCatchUp)
+{
+    StaticSubgraphCache cache;
+    cache.Compile(std::vector {
+        Pass("reader", { "output" }), Pass("output"),
+        Pass("red", { "output" }), Pass("green"),
+        Pass("output", { "red" }), Pass("output", { "green" }),
+    });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 2, 3, 4, 5 });
+    const std::vector<StaticPassSample> samples {
+        {}, {}, { .hash = 17 }, { .hash = 99 }, {}, {},
+    };
+    RunFrame(cache, samples);
+    RunFrame(cache, samples);
+    ASSERT_FALSE(cache.HasPendingDelayedInputs());
+    ASSERT_FALSE(cache.HasFeedbackCycles());
+
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1, 2, 3, 5, 4 });
+    RunFrame(cache, samples);
+    EXPECT_TRUE(cache.HasPendingDelayedInputs());
+    RunFrame(cache, samples);
+    EXPECT_FALSE(cache.HasPendingDelayedInputs());
+}

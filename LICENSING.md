@@ -109,6 +109,8 @@ component, with its version, is listed in the bundled `THIRD-PARTY-NOTICES.txt`.
 | ungive/mediaremote-adapter | `ThirdParty/mediaremote-adapter`, modified (see `provenance.json`) | BSD-3-Clause | Compatible; an embedded, unlinked framework |
 | miniaudio | `ThirdParty/miniaudio` | Public domain or MIT-0 | Compatible |
 | stb_image, stb_vorbis | `ThirdParty/stb_image`, `ThirdParty/stb_vorbis`, patched (`PATCHES.md` in each) | Public domain or MIT | Compatible |
+| HarfBuzz | `ThirdParty/harfbuzz`, 15.0.0 (harfbuzz/harfbuzz tag `15.0.0`, commit `66946f52`), `src/` unchanged (build files and tests left out), linked statically (`harfbuzz`, from `src/harfbuzz.cc`) | Old MIT, SPDX MIT-Modern-Variant (`LICENSE` there, the release's `COPYING`) | Compatible |
+| msdfgen | `ThirdParty/msdfgen`, 1.13 (Chlumsky/msdfgen tag `v1.13`, commit `1874bcf7`), `core/`, `ext/import-font.*` and `msdfgen.h` unchanged, linked statically (`msdfgen`) | MIT (`LICENSE` there, the release's `LICENSE.txt`) | Compatible |
 | nlohmann-json, argparse | Homebrew, header-only | MIT | Compatible |
 | quickjs-ng | Homebrew `quickjs-ng` | MIT | Compatible |
 | lz4 | Homebrew `lz4` | BSD-2-Clause | Compatible |

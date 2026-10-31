@@ -93,7 +93,8 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       displayId: CGMainDisplayID(), wallpaperId: "2001", title: "t",
       projectPath: project.appendingPathComponent("project.json").path,
       assetsPath: project.path, fps: 30, scalingMode: .fill, scalingFactor: 1,
-      framing: .centered, propertiesJson: propertiesJSON, paused: false)
+      framing: .centered, propertiesJson: propertiesJSON, paused: false,
+      engineOptions: nil, sceneQuality: nil, borderColor: nil)
   }
 
   /// The managed store as the app writes it, isolated per test through
@@ -1800,13 +1801,16 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
 
   /// The scene the app publishes for one display showing a project of `type` at `framing`.
   @MainActor
-  private func publishedScene(type: String, framing: BridgeFraming) async throws -> LockScreenScene {
+  private func publishedScene(
+    type: String, framing: BridgeFraming, edit: (inout BridgeLockScreenScene) -> Void = { _ in }
+  ) async throws -> LockScreenScene {
     try Data(#"{"type":"\#(type)","title":"t","file":"index.html"}"#.utf8).write(
       to: project.appendingPathComponent("project.json"))
     try Data("<html></html>".utf8).write(to: project.appendingPathComponent("index.html"))
     var record = scene()
     record.displayId = 1
     record.framing = framing
+    edit(&record)
     let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
       selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
       exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
@@ -1825,6 +1829,57 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testPublishedVideoCarriesItsEngineOptionsFilterAndBorder() async throws {
+    let lut = project.appendingPathComponent("materials/lut", isDirectory: true)
+    try FileManager.default.createDirectory(at: lut, withIntermediateDirectories: true)
+    try Data("TEXV0005".utf8).write(to: lut.appendingPathComponent("amber.tex"))
+    let options = BridgeSnapshotFixtures.engineOptionValues(
+      imageFilter: "amber", flipHorizontal: true, playbackRate: 150)
+    let video = try await publishedScene(type: "video", framing: .centered) {
+      $0.engineOptions = options
+      $0.sceneQuality = BridgeSceneQuality(
+        msaa: .x4, shadows: .high, volumetrics: .low, reflections: false, postProcessing: .ultra)
+      $0.borderColor = BridgeRgb(red: 1, green: 0, blue: 0.5)
+    }
+    XCTAssertEqual(video.engineOptions, WallpaperEngineOptions(options))
+    XCTAssertNil(video.sceneQuality, "a video has no scene quality")
+    XCTAssertEqual(video.borderColor, [1, 0, 0.5])
+    let file = try XCTUnwrap(video.lutFile)
+    XCTAssertTrue(file.hasSuffix("/amber.tex"))
+    let copy = exchange.appendingPathComponent(file)
+    XCTAssertEqual(try Data(contentsOf: copy), Data("TEXV0005".utf8), "the filter is published into the exchange")
+
+    let scene = try await publishedScene(type: "scene", framing: .centered) {
+      $0.engineOptions = options
+      $0.sceneQuality = BridgeSceneQuality(
+        msaa: .x4, shadows: .high, volumetrics: .low, reflections: false, postProcessing: .ultra)
+    }
+    XCTAssertEqual(scene.sceneQuality, SceneQualitySettings(msaa: 4, shadows: 3, volumetrics: 1, reflection: false, postProcessing: 4))
+    XCTAssertEqual(scene.engineOptions?.imageFilter, "amber")
+    XCTAssertNil(scene.lutFile, "a scene reads its filter from the published shared assets")
+    XCTAssertNil(scene.borderColor)
+  }
+
+  func testEngineOptionsQualityFilterAndBorderEachReplaceTheRenderer() {
+    let base = LockScreenScene(
+      displayID: 1, title: "t", projectPath: "p/project.json", assetsPath: "a", previewPath: nil, fps: 30,
+      scalingMode: 2, scalingFactor: 1, propertiesJSON: nil, paused: false)
+    XCTAssertTrue(base.sharesRenderer(with: base))
+    var options = base
+    options.engineOptions = .identity
+    options.engineOptions?.playbackRate = 150
+    var quality = base
+    quality.sceneQuality = .wallpaperEngineDefault
+    var filter = base
+    filter.lutFile = "r/amber.tex"
+    var border = base
+    border.borderColor = [1, 0, 0]
+    for changed in [options, quality, filter, border] {
+      XCTAssertFalse(changed.sharesRenderer(with: base))
+    }
+  }
+
+  @MainActor
   func testASceneAndAVideoPublishTheirPositionButAWebPageDoesNot() async throws {
     let position = BridgeFraming(panX: 0.2, panY: 0.8)
     for type in ["video", "scene"] {
@@ -1836,6 +1891,31 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     let web = try await publishedScene(type: "web", framing: position)
     XCTAssertEqual(web.webEntryFile, "index.html")
     XCTAssertNil(web.framing, "a web page fills its window, so it carries no position")
+  }
+
+  /// A scene's saved script storage reaches the lock screen as a copy taken at publish time,
+  /// with the key of its display's screen file; a video carries none (plan decision I3).
+  @MainActor
+  func testPublishedSceneCarriesStorageSnapshot() async throws {
+    let folder = ClientPaths.sceneStorageURL.appendingPathComponent("2001", isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data(#"{"version":1,"entries":{"k":"1"}}"#.utf8).write(to: folder.appendingPathComponent("global.json"))
+    try Data(#"{"version":1,"entries":{"pos":"2"}}"#.utf8)
+      .write(to: folder.appendingPathComponent("screen-uuid-one.json"))
+    defer { try? FileManager.default.removeItem(at: folder) }
+
+    let scene = try await publishedScene(type: "scene", framing: .centered)
+    let path = try XCTUnwrap(scene.sceneStoragePath)
+    XCTAssertEqual(scene.sceneStorageScreenKey, "uuid-one")
+    let copy = exchange.appendingPathComponent(path, isDirectory: true)
+    XCTAssertEqual(
+      try Data(contentsOf: copy.appendingPathComponent("screen-uuid-one.json")),
+      Data(#"{"version":1,"entries":{"pos":"2"}}"#.utf8))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: copy.appendingPathComponent("global.json").path))
+    XCTAssertFalse(copy.path.hasPrefix(ClientPaths.sceneStorageURL.path), "the extension reads only the exchange")
+
+    let video = try await publishedScene(type: "video", framing: .centered)
+    XCTAssertNil(video.sceneStoragePath)
   }
 
   /// Moving a wallpaper on its display has to reach the extension. It publishes a new

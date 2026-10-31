@@ -83,6 +83,13 @@ extension PanelController {
         frameRateCap: settings.frameRateCap, preferredRenderScale: settings.preferredRenderScale),
       videoBackends: settings.videoBackends.map(VideoBackendReport.init),
       sceneResolution: SceneResolutionMode(rawValue: settings.sceneResolution) ?? .display,
+      sceneQuality: settings.sceneQuality,
+      sceneQualityInForce: settings.sceneRenderers.map {
+        SceneQualityInForceReport(
+          displayID: $0.displayId, display: $0.displayName,
+          wallpaperTitle: $0.wallpaperTitle.isEmpty ? $0.wallpaperId : $0.wallpaperTitle,
+          quality: $0.qualityInForce)
+      },
       sceneOptimization: settings.sceneOptimizationEnabled,
       sceneOnDemand: settings.sceneOnDemandEnabled,
       sceneVideoPlaneSampling: settings.sceneVideoPlaneSamplingEnabled,

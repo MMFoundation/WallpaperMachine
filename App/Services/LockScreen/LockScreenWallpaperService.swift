@@ -434,7 +434,10 @@ final class LockScreenWallpaperService {
           projectPath: record.projectPath, assetsPath: record.assetsPath, fps: record.fps,
           scalingMode: record.scalingMode.rendererValue, scalingFactor: record.scalingFactor,
           framing: LockScreenFraming(panX: record.framing.panX, panY: record.framing.panY),
-          propertiesJSON: record.propertiesJson, paused: record.paused))
+          propertiesJSON: record.propertiesJson, paused: record.paused,
+          engineOptions: record.engineOptions.map(WallpaperEngineOptions.init),
+          sceneQuality: record.sceneQuality.map(SceneQualitySettings.init),
+          borderColor: record.borderColor.map { [Double($0.red), Double($0.green), Double($0.blue)] }))
       }
       inputs.sort { $0.displayID < $1.displayID }
       let currentContentRevision = contentRevision()
@@ -462,10 +465,12 @@ final class LockScreenWallpaperService {
       if screenSaverRequested { screenSaverStatus = String(localized: "Preparing committed wallpapers…") }
       let root = exchange
       let userAssets = UserAssetStorage.managedRootURL
+      let sceneStorage = ClientPaths.sceneStorageURL
       let includeWeb = screenSaverRequested
       let staging = Task.detached(priority: .utility) {
         try LockScreenAssetPublisher.prepare(
-          inputs: inputs, exchange: root, userAssets: userAssets, includeWeb: includeWeb)
+          inputs: inputs, exchange: root, userAssets: userAssets, sceneStorage: sceneStorage,
+          includeWeb: includeWeb)
       }
       let prepared = try await withTaskCancellationHandler {
         try await staging.value
@@ -947,6 +952,11 @@ private struct LockScreenPublishInput: Equatable, Sendable {
   var framing: LockScreenFraming
   var propertiesJSON: String?
   var paused: Bool
+  /// Wallpaper Engine's options as saved, the scene quality (scenes) and the scheme-colour
+  /// border (videos): what the lock screen shows is the saved look.
+  var engineOptions: WallpaperEngineOptions? = nil
+  var sceneQuality: SceneQualitySettings? = nil
+  var borderColor: [Double]? = nil
 }
 
 /// A source-tree metadata fingerprint reuses immutable snapshots without reading
@@ -968,7 +978,8 @@ private enum LockScreenAssetPublisher {
   }
 
   static func prepare(
-    inputs: [LockScreenPublishInput], exchange: URL, userAssets: URL, includeWeb: Bool
+    inputs: [LockScreenPublishInput], exchange: URL, userAssets: URL, sceneStorage: URL,
+    includeWeb: Bool
   ) throws -> Prepared {
     var sources: [String: String] = [:]
     var scenes: [LockScreenScene] = []
@@ -1032,6 +1043,29 @@ private enum LockScreenAssetPublisher {
       }
       let isVideo = type.lowercased() == "video"
       let nativeVideoFile = isVideo ? nativeVideoMedia(in: source, metadata: metadata) : nil
+      // A scene's saved script storage is copied as it is now; the lock screen never writes it
+      // and is not republished when a script writes (plan decision I3).
+      var storagePath: String?
+      if type.lowercased() == "scene" {
+        let folder = sceneStorage.appendingPathComponent(input.wallpaperID, isDirectory: true)
+        if let saved = try? FileManager.default.contentsOfDirectory(atPath: folder.path),
+          saved.contains(where: { $0.hasSuffix(".json") })
+        {
+          storagePath = try snapshot(source: folder, exchange: exchange, reused: &sources)
+        }
+      }
+      // A video's image filter is published with it: the extension cannot read the shared
+      // assets, which only scenes snapshot.
+      var lutFile: String?
+      if isVideo, let filter = input.engineOptions?.imageFilter, !filter.isEmpty,
+        input.engineOptions?.isFilterIdentity == false
+      {
+        let folder = URL(fileURLWithPath: input.assetsPath, isDirectory: true)
+          .appendingPathComponent("materials/lut", isDirectory: true)
+        if FileManager.default.fileExists(atPath: folder.appendingPathComponent(filter + ".tex").path) {
+          lutFile = try snapshot(source: folder, exchange: exchange, reused: &sources) + "/" + filter + ".tex"
+        }
+      }
       scenes.append(
         LockScreenScene(
           displayID: input.displayID, title: input.title,
@@ -1041,7 +1075,14 @@ private enum LockScreenAssetPublisher {
           propertiesJSON: properties, paused: input.paused, webEntryFile: webEntry,
           // A web page fills its window, so it has no position to carry.
           framing: isWeb ? nil : input.framing,
-          plainVideo: isVideo ? true : nil, nativeVideoFile: nativeVideoFile))
+          plainVideo: isVideo ? true : nil, nativeVideoFile: nativeVideoFile,
+          sceneStoragePath: storagePath,
+          sceneStorageScreenKey: storagePath == nil
+            ? nil : SceneStorageKey.screenKey(uuid: input.displayUUID, displayID: input.displayID),
+          engineOptions: isWeb ? nil : input.engineOptions,
+          sceneQuality: type.lowercased() == "scene" ? input.sceneQuality : nil,
+          lutFile: lutFile,
+          borderColor: isVideo ? input.borderColor : nil))
     }
     return Prepared(
       configuration: LockScreenConfiguration(scenes: scenes),

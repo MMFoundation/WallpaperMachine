@@ -139,7 +139,7 @@ final class WallpaperCompatibilityTests: XCTestCase {
       BridgeSceneBackendReport(
         displayId: 1, displayName: "Main", wallpaperId: "one", wallpaperTitle: "One",
         backend: "native_metal", failureStage: nil, failureReason: nil, videoPath: "none",
-        optimizationApplied: nil)
+        optimizationApplied: nil, qualityInForce: nil)
     ])
     let drawn = await row()
     XCTAssertEqual(drawn?.status, .ok, "the answer is read again, not cached from the last check")

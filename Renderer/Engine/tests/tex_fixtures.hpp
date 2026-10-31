@@ -74,6 +74,42 @@ inline Blob png1x1(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return out;
 }
 
+// A w x h RGBA PNG of `rgba` (rows top first), stored without compression.
+inline Blob pngRgba(int w, int h, const Blob& rgba) {
+    Blob out { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+    Blob header;
+    bigEndian32(header, static_cast<uint32_t>(w));
+    bigEndian32(header, static_cast<uint32_t>(h));
+    for (uint8_t v : { 8, 6, 0, 0, 0 }) header.push_back(v);
+    pngChunk(out, "IHDR", header);
+    Blob raw;
+    for (int y = 0; y < h; ++y) {
+        raw.push_back(0);
+        raw.insert(raw.end(), rgba.begin() + static_cast<long>(y) * w * 4, rgba.begin() + static_cast<long>(y + 1) * w * 4);
+    }
+    uint32_t s1 = 1, s2 = 0;
+    for (uint8_t v : raw) {
+        s1 = (s1 + v) % 65521;
+        s2 = (s2 + s1) % 65521;
+    }
+    Blob z { 0x78, 0x01 };
+    for (size_t at = 0; at < raw.size() || at == 0; at += 65535) {
+        const size_t n    = std::min<size_t>(65535, raw.size() - at);
+        const bool   last = at + n >= raw.size();
+        z.push_back(last ? 1 : 0);
+        z.push_back(static_cast<uint8_t>(n));
+        z.push_back(static_cast<uint8_t>(n >> 8));
+        z.push_back(static_cast<uint8_t>(~n));
+        z.push_back(static_cast<uint8_t>(~n >> 8));
+        z.insert(z.end(), raw.begin() + static_cast<long>(at), raw.begin() + static_cast<long>(at + n));
+        if (last) break;
+    }
+    bigEndian32(z, (s2 << 16) | s1);
+    pngChunk(out, "IDAT", z);
+    pngChunk(out, "IEND", {});
+    return out;
+}
+
 // A 1x1 24-bit BMP; it decodes to (r, g, b, 255).
 inline Blob bmp1x1(uint8_t r, uint8_t g, uint8_t b) {
     Bytes f;
@@ -150,12 +186,31 @@ inline Blob lz4Block(const Blob& raw) {
 
 // ---- .tex containers -------------------------------------------------------------------------
 
+// One rectangle of a TEXB0004 variant, written after its level.
+struct PatchSpec {
+    int  id { 0 };
+    int  x { 0 }, y { 0 }, width { 1 }, height { 1 };
+    int  format { 0 };
+    Blob bytes;
+};
+
 struct LevelSpec {
     int                width { 1 }, height { 1 };
+    int                depth { 1 }; // written only for a volume container (flag 0x40)
     Blob               bytes;
     bool               lz4 { false };
     std::optional<int> expanded; // declared expanded length; default: the stored bytes
     std::optional<int> stored;   // declared stored length; default: the bytes written
+    std::vector<PatchSpec> patches; // one group, written when the container has variant records
+};
+
+// One variant record of a TEXB0004 container.
+struct VariantSpec {
+    int         id { 0 };
+    int         key { 0 };
+    uint32_t    value { 0 };
+    std::string json;
+    bool        terminated { true };
 };
 
 // Width x height RGBA pixels, every byte `mark`.
@@ -199,15 +254,17 @@ struct SpriteTail {
     std::optional<int> declaredRows;
 };
 
-constexpr uint32_t kPointSampling = 1, kClamp = 2, kSprite = 4, kVideo = 32;
+constexpr uint32_t kPointSampling = 1, kClamp = 2, kSprite = 4, kVideo = 32, kVolume = 64;
 
 struct Container {
     int      texb { 3 };
     int      format { 0 }; // the pixel format code: 0 RGBA8, 7 BC1, 9 R8, ...
     uint32_t flags { 0 };
     int      width { 8 }, height { 8 }, mapWidth { 8 }, mapHeight { 8 };
+    int      depth { 1 }; // written after mapHeight when `flags` has kVolume
     int      type { -1 };
-    int      reserved { 0 };
+    std::vector<VariantSpec> variants;
+    std::optional<uint32_t>  variantCount; // replaces the variant count field
     std::optional<int>      pictureCount;
     std::vector<PictureSpec> pictures;
     std::optional<SpriteTail> tail;
@@ -223,18 +280,36 @@ inline Blob build(const Container& c) {
     Bytes b;
     b.stamp("TEXV", 5).stamp("TEXI", 1);
     b.i32(c.format).u32(c.flags);
-    b.i32(c.width).i32(c.height).i32(c.mapWidth).i32(c.mapHeight).i32(0);
+    b.i32(c.width).i32(c.height).i32(c.mapWidth).i32(c.mapHeight);
+    if (c.flags & kVolume) b.i32(c.depth);
+    b.i32(0);
     b.stamp("TEXB", c.texb);
     b.i32(c.pictureCount.value_or(static_cast<int>(c.pictures.size())));
     if (c.texb >= 3) b.i32(c.type);
-    if (c.texb >= 4) b.i32(c.reserved);
+    if (c.texb >= 4) {
+        b.u32(c.variantCount.value_or(static_cast<uint32_t>(c.variants.size())));
+        for (const auto& v : c.variants) {
+            b.i32(v.id).i32(v.key).u32(v.value);
+            b.raw(Blob(v.json.begin(), v.json.end()));
+            if (v.terminated) b.raw(Blob { 0 });
+        }
+    }
     for (const auto& pic : c.pictures) {
         b.i32(pic.declaredLevels.value_or(static_cast<int>(pic.levels.size())));
         for (const auto& l : pic.levels) {
             b.i32(l.width).i32(l.height);
+            if (c.flags & kVolume) b.i32(l.depth);
             if (c.texb >= 2) b.i32(l.lz4 ? 1 : 0).i32(l.expanded.value_or(static_cast<int>(l.bytes.size())));
             b.i32(l.stored.value_or(static_cast<int>(l.bytes.size())));
             b.raw(l.bytes);
+            if (! c.variants.empty()) {
+                b.u32(1).u32(static_cast<uint32_t>(l.patches.size()));
+                for (const auto& p : l.patches) {
+                    b.i32(0).i32(p.id).i32(p.x).i32(p.y).i32(p.width).i32(p.height).i32(p.format);
+                    b.u32(static_cast<uint32_t>(p.bytes.size()));
+                    b.raw(p.bytes);
+                }
+            }
         }
     }
     if (c.tail) {

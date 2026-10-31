@@ -805,6 +805,14 @@ need an authorized runtime check
 
 ## NativeVideo
 
+- `VideoColorPipelineTests` checks the ccsimple kernel, transparent pixels, encoded-space LUT
+  mixing, the identity path, rate and flip placement, and matching scheme-colour borders in a
+  lock-screen snapshot. `VideoWallpaperPreviewSurfaceTests` covers the default direct path,
+  edits received before preparation completes, and switching filtering on and back off while paused.
+  `WebMFilteredVideoSinkTests` observes the samples passed to a recording consumer: decoded frames
+  are filtered, timing survives, invisible reference frames never appear, and a bad compressed
+  packet reports failure instead of being sent through unfiltered. These use generated or bundled
+  fixtures with no visible window and no audio hardware.
 - `NativeVideoAdmissionTests` — a clip is admitted at every rate it was written at
   (including 120 fps) and as a variable-rate clip, since it plays at its own rate; refusal
   of corrupt, missing, audio-only and unplayable content.

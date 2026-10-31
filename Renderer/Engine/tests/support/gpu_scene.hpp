@@ -13,6 +13,9 @@
 
 #include "support/pixels.hpp"
 #include "support/scene_package.hpp"
+#include "Scene/WeUserOptions.hpp"
+#include "Scene/SceneQuality.hpp"
+#include "MetalRender/MetalRender.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -64,6 +67,12 @@ struct GpuSceneOptions {
     /// The container version the scene file is read as, as a package of that version would
     /// say it. 0 reads every key the scene file holds, as a loose project does.
     uint16_t package_version { 0 };
+    /// Wallpaper Engine's per-wallpaper options the scene is parsed with (identity by default).
+    wallpaper::WeUserOptions user_options {};
+    wallpaper::SceneQuality quality {};
+    std::function<wallpaper::metal::MetalDisplayCharacteristics(uint32_t)> display_characteristics;
+    bool display_hdr_output_allowed {true};
+    uint32_t display_id {0};
 };
 
 /// What the renderer opened for one frame: the pass count a test compares between scenes.

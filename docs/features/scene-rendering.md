@@ -48,8 +48,9 @@ frame or, with
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) on,
 sampled by the layer's own shader. A 10-bit video texture is converted to SDR, and one
 that declares an HDR curve (PQ or HLG) is tone mapped on the way
-([10-bit and HDR video textures](#10-bit-and-hdr-video-textures)). A
-scene is held instead of drawn when a shader does not translate for Metal, a video
+([10-bit and HDR video textures](#10-bit-and-hdr-video-textures)). A shader that does
+not translate for Metal is drawn with Wallpaper Engine's own fallback shader, as Wallpaper
+Engine draws one that does not compile. A scene is held instead of drawn when a video
 texture is an animated sprite sheet or names no media, a puppet shader is bound to a
 mesh without bone weights, or its render graph has a step the native renderer does not
 recognise.
@@ -69,6 +70,12 @@ plane). The camera is read as it stood when the cursor was sampled. Layers are s
 where the cursor ray meets their own plane, and a particle control point still follows
 the cursor in canvas units.
 
+In a 3D scene an image layer with the `perspective` flag is drawn as Wallpaper Engine
+draws it: through the scene camera's orientation from 2000 units in front of its
+look-at point, the lens scaled by 2000, so the look-at point keeps its framing and
+everything near it appears close to orthographically at the scale the scene camera
+gives that point (matrices read back from Wallpaper Engine with the eye, look-at
+point and field of view varied, probes pcam-a to pcam-f).
 In a 2D scene, a particle system, 3D model or image layer with the `perspective` flag
 is drawn through a perspective camera seated as Wallpaper Engine seats it (an image
 layer's effects still run in its own card; the pass that puts the result onto the
@@ -95,6 +102,62 @@ Scripts list the scene's layers through `thisScene`. `getLayer(index)`,
 `getLayerCount()`, `enumerateLayers()`, `getLayerIndex()` and `sortLayer()` share
 one order, the scene file's object order followed by the layers scripts made, and a
 sort moves a layer in it as well as in the draw order among its siblings.
+With `customsortorder` enabled, drawing uses ascending `sortorder`, keeping that
+layer-list order for ties. Ordinary parent groups share the same sorted draw list;
+composition layers keep their children inside their own rendering scope. This
+changes drawing without changing script layer indices or inherited opacity.
+In a perspective scene, `transparentsorting` takes priority when both flags are
+enabled. In a canvas scene, enabling both flags disables custom sorting.
+Transparent sorting draws unmarked objects in authored order, followed by marked
+objects from back to front using their raw local origin and the camera direction.
+Equal depths retain the preceding draw order; fullscreen and projected layers come
+last. Composition children keep their private order. An object's effect passes,
+snapshots and final draw move together; changing depth or camera direction reorders
+prepared passes without rebuilding the graph or allocating GPU resources. Target
+loads, mip generation and snapshot lifetimes are replanned only when order changes.
+A layer-composite reader before its source uses the previous frame; one after the
+source uses the current picture. This also applies to authored order with sorting
+disabled. Self-links retain a separate snapshot. A one-shot change propagates through
+its delayed readers and then returns to idle; real feedback cycles continue updating.
+Shared effect targets that span multiple sorted objects keep bounded storage for
+possible overlap, and ordered dependencies can require additional render batches.
+Per-object temporary targets still share images when their lifetimes permit it.
+
+A model material that samples `_rt_Reflection` requests a planar scene picture before
+the ordinary scene is drawn. It uses the active camera reflected across world
+`y = 0`; objects on either side of that plane remain eligible. Images, models,
+particles and text participate by default; only literal `reflected: false`
+excludes an authored layer. A model sampling the reflection itself is excluded;
+an image sampler can consume an activated picture but cannot activate it alone.
+A loaded model's active material can enable this picture while the model is hidden.
+A declared reflection texture slot retains hidden models for this material check,
+including their initial model and material reads. Admission is conservative: a
+slot later removed as inactive can still cause this initial loading; it adds no
+per-frame model loading. Unused sampler slots and shadow-only material slots do
+not enable the GPU reflection phase.
+The reflected view mirrors eye/right/up and uses the target's vertical projection
+convention, while `g_ViewForward` keeps the ordinary camera direction. HDR display
+framing, including zoom and pan, is applied before the target's projection flip.
+With transparent sorting, Wallpaper Engine's globally marked objects are drawn
+in both phases even when their `reflected` flag is false. Each phase keeps its
+effect chains and layer-link timing, and camera or object movement updates the
+prepared draws without rebuilding the graph. An image drawn directly into the
+reflection target that also samples that same target reads zero in every channel,
+matching the native attachment conflict; this does not create a history snapshot.
+
+The reflection picture uses the scene raster resolution and a single-sample depth attachment
+and 8-bit RGB colour even in an HDR scene. Its Metal RGBA8 backing keeps alpha
+opaque. Disabling reflection quality retains the sampled picture but clears it
+to the scene's background colour without allocating its depth attachment.
+Scenes without an active reflection sampler
+add no reflected draws or GPU target. Sampling scenes pay for that bounded
+picture and a second draw of eligible content; geometry storage is shared, and
+unchanged pictures return to the normal idle path.
+
+`thisScene.createLayer` reads its configuration like an object in the scene file:
+its `angles` are radians, as in `scene.json`, while a layer's `angles` member reads
+and writes degrees.
+
 `layer.name` is the name the scene file gives the layer, empty for an unnamed one,
 whatever key the engine files it under, from the moment any script can reach the
 layer, its own script compiling with it included. A sound object is a layer in that
@@ -103,33 +166,107 @@ order like any other, found by its id and played through the object
 layers the parser built are counted: an object the scene file marks statically
 invisible, which nothing can show, is never built, so it has no index or id and the
 count differs from the object list by those. `destroyLayer` removes the layers a
-script made below the layer too. A script can also build geometry of its own:
-`thisScene.createModelData({ shapes })` takes, per shape, a `Float32Array` of
-vertices laid out as its `vertexFormat` lists the `IModelData` flags (`POSITION`,
-`NORMAL`, `TANGENT_SIGNED`, `UV`, `COLOR`, in that order; POSITION | NORMAL | UV when
-left out), an optional `Uint16Array` or `Uint32Array` of triangle indices and a
-material file, and `createLayer({ model })` (or `createLayer(model)`) draws it as a
-model layer like any other script layer. `applyData` copies new buffers of the same
-length over a shape created with `isVertexBufferDynamic` / `isIndexBufferDynamic`;
-the renderer copies a shape's buffers only after such a change, never on a frame the
-script changed nothing, though a model with a dynamic shape, like a text card, is
-drawn every frame rather than reused. Every layer made from one model data object
-shares its geometry. The bounding box is accepted and unused (Wallpaper Engine culls
-and hit-tests with it; these layers are never culled or hit), `replaceData` throws,
-and what scripts keep alive is capped at 4096 objects and 256 MiB.
+script made below the layer too.
 A scene script's `init` runs once the scene is
 built, so it sees all of that. Property scripts start on the scene's first tick:
 every one runs `init`, in the scene's order, before any of them is told the user
 properties, and that before any `update`, because a widget's options layer may call
-from its first `applyUserProperties` what a later layer's `init` set up. What `init`
+from its first `applyUserProperties` what a later layer's `init` set up. Every tick
+the scripts' `update`s then run in the scene's order too (layer order; a layer's own
+scripts in the order they were made), whatever setting they sit on: a group's `scale`
+script that publishes `shared.size` runs before a later layer's script reads it, as in
+Wallpaper Engine, which registers each script while it parses the object list and
+dispatches `update` down that list (`sub_1401A4DB0`, `sub_140177AD0`). What `init`
 returns is the property's value from then on, as what `update` returns is: a drag
 handle hides itself there, and a typing text starts empty.
+`engine.isObjectValid(value)` checks a native wrapper's current lifetime. Removed
+layers, their effects and removed animation layers become invalid; hiding a layer
+does not destroy it. Plain objects, vectors and objects inheriting a wrapper do not
+gain a native lifetime. Unbacked timeline, sheet and video objects are invalid too.
+
+`thisScene.createModelData()` creates custom triangle geometry from Float32 vertex
+buffers and optional Uint16/Uint32 index buffers, including typed-array views with
+nonzero byte offsets. The vertex format selects position, normal, signed tangent,
+UV and colour components in that canonical order. Coordinates are pixels in a 2D
+scene and scene units in a 3D scene; triangles use counter-clockwise winding.
+Materials come from registered material assets. A model can be passed directly to
+`createLayer` or through its `model` option, and its instances share geometry while
+keeping their own transforms, tint and opacity.
+
+`applyData` writes previously dynamic buffers without rebuilding the graph.
+Vertex and index buffers have separate update policies, and instances share one
+GPU buffer set and one upload of each changed generation per frame slot.
+`replaceData` can change the layout, material, buffer sizes or shape list; a null
+shape removes it and a null index buffer removes that index stream. It prepares the
+replacement before publishing it and is rejected during `update`; use an event
+callback such as `applyUserProperties`. Explicit model bounds can cover animated
+vertices without rescanning them on every upload.
+
+WE 2.8.0.42's ModelData object is a token wrapper: `engine.isObjectValid(data)`
+returns false even while its model draws. Its `toConfigString()` returns the numeric
+token. Destruction uses `thisScene.destroyModelData(data.toConfigString())`; the
+wrapper object itself is ignored by that version's native Uint32 argument check.
+A requested destruction keeps data usable while a layer still holds it, then
+invalidates the token when the last layer is removed. Outgoing render graphs retain
+their geometry until they have released the old draws.
+
+`thisScene.getCameraTransforms()` returns a detached snapshot of the static camera's
+`eye`, `center`, `up` and `zoom`; `setCameraTransforms()` accepts partial updates.
+Camera positions in a 2D scene are relative to the canvas centre. The zoom changes
+the canvas projection; a 3D scene keeps its field of view and only stores that zoom
+value. As in WE, startup `init` sees the temporary camera pose; loading the authored
+pose before the first `update` replaces an init-written position but keeps an
+init-written zoom. Camera paths are outside this static-camera contract (see the
+[WE camera API](https://docs.wallpaperengine.io/en/scene/scenescript/reference/class/CameraTransforms.html)).
+The top-level `camera.paths` list loads the scene camera's legacy path files. The
+last file supplies the queue of `duration` / `transforms` segments; these use
+timestamped eye, centre, up and zoom values, independently of a camera layer's
+animation curves. Each omitted pose vector defaults to zero; omitted zoom is 1.
+Interpolation uses half the endpoint difference as its two Hermite tangents.
+A frame samples the pose before advancing the clock; the clock, duration and
+timestamps use WE's 32-bit float precision. Crossing a timestamp strictly advances
+the key, and a cut starts the next segment without carrying overshoot. A visible
+camera layer overrides this queue and pauses its clock. Canvas path zoom composes
+with the scene's base zoom; handing control to a camera layer restores the original
+camera basis, so path rotation, depth and zoom cannot remain on that shot. Only a
+canvas with global paths retains this saved pose, and restoration runs on the
+handoff frame. Hidden shots leave the global path in sole control of the canvas.
+This global queue fades during each segment's first and last half-second when
+`camerafade` is enabled (the default); the end ramp wins when both windows overlap
+in a short segment. The closing pass blends the project's `schemecolor`, or the
+fade shader's default tint `(0.315, 0.135, 0.1125)` when absent, multiplied by 0.7,
+after colour correction. The separate border-clear default is black. Camera-layer paths do
+not create this fade. Scenes without a global queue or with fading disabled
+allocate no fade pass. Opacity updates do not rebuild the render graph, and a
+fully transparent fade skips drawing.
+The global `requestFeatures` remains absent: WE 2.8.0.42's runtime probe also rejects
+that name, so the earlier proposed no-op would introduce an unsupported capability.
+
+`thisScene` exposes native general settings for clearing, camera projection, shake,
+parallax, sorting, lighting/fog uniforms and bloom. Flags are booleans, scalar
+values are numbers and colours are detached `Vec3` values. These members take
+precedence over project properties with the same name. Setters share existing
+property/script drivers, so a later property change still reaches the current
+consumer. `thisScene.zoom` reads the loaded zoom during `init` and shares subsequent
+writes with the static-camera API; perspective zoom does not alter the projection.
+
+Changing `bloom` creates or removes its post-process chain at the next runtime
+commit. Changing HDR bloom iterations replaces the chain only when its effective
+level count changes. Failed replacements retain the working chain, and retired
+passes release their targets and bindings. Scalar bloom parameters and tint update
+the current materials without a graph rebuild. Bloom stays before the existing
+colour/LUT correction and camera fade, preserving live user options. Disabled
+post-processing still draws no bloom, while the script reads its requested flag.
+As in WE, changing the raw `hdr`, `fogdistance` or `fogheight` member after loading
+does not recompile existing shaders or change their layer-buffer formats.
+
 `applyGeneralSettings({ language })` is always told `en-us`: the host does not
-yet pass the interface language on. `parallaxDepth` set on a layer reaches the
-layer, its effect passes and the layers below it (a layer drawn through effects
-holds it on its effect passes alone, so its first pass, which draws into the
-layer's own target, stays where it is), and one that starts or stops following the
-cursor rebuilds the render graph.
+yet pass the interface language on. `parallaxDepth` reads and writes the layer's
+own value. Canvas draws use the current outermost parent's depth and origin, so
+changing a root moves its descendants without replacing their raw values;
+detaching a layer exposes its own depth again. Effect passes follow their logical
+owner, while layer-local passes stay still. Starting or stopping effective cursor
+following rebuilds the render graph.
 
 `layer.getTransformMatrix()` answers the layer's world transform as a `Mat4`: its
 own placement with every ancestor's scale and turn applied, in canvas units with y
@@ -143,54 +280,75 @@ transform answers its own placement. `layer.getChildren()` answers the direct ch
 of the layer in scene order, `layer.rotateObjectSpace(angles)` turns the layer about its
 own axes by Euler angles in radians, and `layer.getEffectCount()` and
 `layer.getEffect(indexOrName)` return the layer's authored effects (built even when
-authored hidden in scenes whose scripts call `getEffect`), each exposing `name`,
-`visible` and `getMaterial(passIndex)` (whose constants can be read and written through
-`getConstant`/`setConstant` or as properties on the material object, by material name or
-uniform; a read answers the value the material holds, which is the scene's authored value
-or the shader's default until something writes it, as a number or a `Vec2` to `Vec4` by
-the constant's width). `layer.setParent(parent, adjustTransforms)` hangs the layer from
-another (a layer, its name or its index; none puts it at the root): with
-`adjustTransforms` it stays where it is on screen, its local transform worked out under the
-new parent, and without it the layer keeps its local transform and moves with the parent.
-The form that names a puppet attachment hangs the layer from the parent layer itself; the
-attachment is not followed. `lookAt`, `lookAtYaw` and `getAttachment*` do not exist yet: a
-script that calls one stops at that line.
+authored hidden in scenes whose scripts call `getEffect`). Name lookup returns the last
+matching instance; an unnamed instance stays unnamed and cannot be found by the effect
+file's display title. Each effect exposes `name`, `visible`, `getMaterialCount`,
+`getMaterial`, `setMaterialProperty` and `executeMaterialFunction`, without inheriting
+the layer's transform setters. `getMaterial` accepts an index or the material path as written
+in the effect file; an empty string selects the last pass and an unknown name returns null.
+`getConstant`/`setConstant`, and properties on the material object, read and write its
+constants by material name or uniform; a read answers the value the material holds (the
+scene's authored value, or the shader's default until something writes it) as a number or a
+`Vec2` to `Vec4` by the constant's width.
+`setMaterialProperty` writes every pass declaring the alias, converting displayed degrees
+to radians for `conversion: "rad2deg"`. Material constants retain floating-point storage,
+including the raw float bits observed by a shader uniform declared as `int`, as in
+Wallpaper Engine. `lookAt(target, up)` turns a layer toward a point in its parent's
+coordinate space, keeping its origin; `lookAtYaw` first removes the direction's
+component along `up` (default `(0,1,0)`). Images and models face along positive Z,
+camera layers along negative Z. A direction whose squared length is at most float
+epsilon leaves the current angles unchanged.
+`setParent` accepts a layer, its name or its scene-list index; `null`, `undefined`
+and unresolved names remove the parent. Its boolean second argument adjusts the
+transform, or an attachment name/index can precede the adjustment flag. Ordinary
+adjustments use WE's separate origin, rotation and axis-length rules; mirrored and
+nonuniform parents can consequently change the picture's orientation. An adjusted
+attachment snaps local origin and angles to zero while retaining local scale.
+Parenting leaves scene-list indices unchanged. Self-parenting unparents the layer
+before reporting an error; ancestor cycles are rejected before creating a cycle.
+Composition nesting permits three boundaries along a branch. Reparenting counts
+the destination's composition ancestors and the deepest composition branch in the
+moved subtree; ordinary parents add nothing and sibling depths are not summed.
+The model's `passthrough` flag marks a boundary even without a private composition
+buffer; an ordinary image's effect camera does not count as one.
+Exceeding this limit removes the previous parent and attachment before reporting
+an error, preserving the layer's local components even when adjustment was requested.
 
-A particle layer answers Wallpaper Engine's IParticleSystem calls. `pause()` stops new
-particles and lets the live ones run out, `stop()` also clears them, `play()` resumes and,
-after a stop or once every emitter's timetable has run out with nothing left alive, starts
-the timetables (delay, duration, first burst) over, and `isPlaying()` answers whether an
-emitter still emits or a particle is alive, in the layer's system or a child's. Pause and
-stop reach the child systems too. `emitParticles(count)` makes every emitter of the layer's
-own system place `count` more particles in the next frame (1 when no count is given), even
-while paused or stopped; how Wallpaper Engine shares a count among several emitters was not
-established. `instance` is the layer's instance override, as a scene property binds it:
-`alpha`, `size`, `count`, `speed`, `lifetime`, `rate`, `colorn` (a `Vec3`, or one number for
-all three) and `controlpoint0` to `controlpoint7` (`Vec3`) read what the layer holds and take
-a script's value, which turns the override on with its other fields neutral. A script's
-request reaches the particles on the next frame, since the particles step before the
-scripts do.
+`getAttachmentIndex` matches names exactly, including an authored empty name.
+`getAttachmentMatrix`, `getAttachmentOrigin` and `getAttachmentAngles` read the
+current bone pose in world space; an unknown attachment uses the layer's own
+transform. Bone writes refresh attached children immediately, and reparenting
+removes the previous bone binding. `transformAttachmentToTexture` returns a `Mat3`
+with unit texture-space axes and a UV origin, including WE's half-texel offset and
+the current source/receiver cameras and transforms. Its parallax offsets are the
+values saved by their last scene-view draws: zero before the first draw, held
+while hidden, and replaced with zero by a visible zero-depth draw. Shadow and
+layer-local work do not replace them, and a projection query only reads them. The
+ray intersection uses a normalized world ray and the native float-epsilon
+parallel threshold. A singular receiver or a ray that cannot meet its plane
+uses a zero local intersection. If both projected samples fail, the query still
+returns a `Mat3` with zero axes and the half-texel UV origin; a target exactly on
+the camera plane follows this rule as well. Unknown layers and nonpositive
+receiver dimensions still return no projection. The
+[WE layer reference](https://docs.wallpaperengine.io/en/scene/scenescript/reference/class/ILayer.html)
+describes the public overloads; runtime controls establish the edge behavior above.
 
-`thisScene.getCameraTransforms()` answers the scene camera's `eye`, `center` and `up`
-(`Vec3`s) and `zoom`, as the scene file's camera block and zoom set them, and
-`setCameraTransforms(transforms)` replaces them (a field left out keeps its value): a
-scene with a perspective projection looks from the new eye at the new centre, and a 2D
-scene takes the zoom. A 2D scene's eye and centre are kept and read back but do not pan
-the view, which Wallpaper Engine's documentation does not describe. A camera path that
-plays moves the camera again on its next frame, as Wallpaper Engine warns.
-
-An image layer with a puppet answers the bone calls: `getBoneCount()`, `getBoneIndex(name)`
-(-1 for none), `getBoneParentIndex(bone)` (-1 for a root), `getBoneTransform(bone)` (the
-bone's transform in the scene, a `Mat4`: the layer's matrix over the bone's pose in the
-puppet), `getLocalBoneTransform(bone)`, `getLocalBoneOrigin(bone)` and
-`getLocalBoneAngles(bone)` (in its parent bone, angles in degrees as a layer's are), each as
-the last frame posed it, a bone named or numbered. The setters (`setBoneTransform`, the
-local ones and the physics impulses) do not exist yet. `playSingleAnimation(animation,
-config)` plays an animation of the puppet (by name or id) once over the layers it has,
-then hides that layer so the pose goes back to them (`config` may set `rate` and `blend`);
-a hidden layer that played once is reused for the next. `createAnimationLayer(animation)`
-adds one that stays, and `destroyAnimationLayer(layer)` stops and hides it: layers keep
-their index, so an animation-layer object a script holds stays valid.
+Script `localStorage` follows Wallpaper Engine's LocalStorageSet/Get (scenescript64.dll
+`sub_181658680`/`sub_181658A80`, wallpaper64.exe `sub_14018E3A0`): the key must be a string
+("LocalStorageSet key not a string."), `set` stores `JSON.stringify(value)` at the call and
+`get` parses a fresh copy each time (a `Vec3` comes back as a plain `{x, y, z}`), an
+undefined value deletes, and the location is `LOCATION_GLOBAL` only for the word `global`
+(`LOCATION_SCREEN` is the default). A location refuses a set once its values would pass
+100,000 bytes, each counted with WE's 8-byte prefix ("LocalStorageSet failed, possibly out of
+memory."). `delete` answers whether the key existed, `clear()` empties both locations, and
+`remove` stays as our alias. The values persist per wallpaper in
+`<support>/SceneStorage/<wallpaper id>/global.json` and `screen-<display key>.json` (the key is
+`uuid-<UUID>`, else `edid-<vendor>-<model>-<serial>`, else `display-<id>`; a mirror uses its own
+display's key). A desktop scene writes at most every 2 s (temporary file, then rename, merging
+only the keys it changed, under one lock per file), and once more when its scripts are torn
+down. The preview window reads the same files and never writes; the lock screen reads the copy
+published with its revision, taken at publish time, and never writes either. Resetting
+properties keeps the storage; deleting the wallpaper deletes its folder; backups include it.
 
 A layer's `origin`, `scale` and `angles`, and an image layer's `color`, can be keyed on
 a timeline (`animation`: curves `c0` to `c2` and `options`), and all four play the
@@ -222,16 +380,9 @@ multiplies the timeline's colour as it does the authored or bound one. Not follo
 clock of its own), and the colour timeline of a text layer or a light
 ([known limitations](../testing/renderer.md#known-limitations)).
 
-A scene starts as a desktop with no player. On its first tick, after every script has
-started and before anything is drawn, its scripts are told `mediaPropertiesChanged`
-with no track and `mediaPlaybackChanged` with `PLAYBACK_STOPPED`, once, whether or not
-media integration is on. Wallpaper Engine's media widgets are authored
-visible (a group layer, a cover, a mascot parented to it) and hide themselves on
-`PLAYBACK_STOPPED`, so a scene that was never told would show them on every start for
-anyone not playing music. The state names no one's music, so it does not wait for the
-consent that real events do. A real event that reached the scene first (the replay to
-a scene that has just attached) is not repeated as idle, per event type, and a real
-one after it is delivered as usual ([media integration](media-integration.md#scene-wallpapers)).
+A scene with no player hears no media event, as in Wallpaper Engine: its scripts keep
+the state their `init` left them in until a player reports
+([media integration](media-integration.md#scene-wallpapers)).
 
 An image layer's `color` that a script decides is that script's value, every frame, as
 it is in Wallpaper Engine and on a text layer: the media widgets' colour script returns
@@ -295,6 +446,28 @@ always released, wherever the pointer ends up. As in Wallpaper Engine, the press
 `cursorDown` and the release `cursorUp`, then `cursorClick` only when the pointer is still
 over the layer that was pressed: letting go elsewhere cancels the click.
 
+Cursor events include a detached `localPosition` Vec3 in layer pixels, measured
+from the image's top-left with y down and z zero. Parent transforms, mirrored
+scales and the current canvas parallax offset affect that position and the hit
+test together. Leaving the layer keeps the current coordinates outside its
+rectangle; they are not clamped to its edges. `worldPosition` remains a separate
+world-space vector.
+
+An image puppet's button events can also supply `hitBox`, the name of the
+intersected bone box, or the bone's decimal index when its name is empty. Picking
+uses the published bone pose and the reverse order of the model's box table; it
+does not evaluate animation again. Ordinary hover, a miss, a plain image and a
+3D model omit that member. An exported function named `cursorHitTest` does not
+override geometry: Wallpaper Engine 2.8.0.42 retains the name in its script table
+but does not dispatch it in the cursor walk. Solid-layer and propagation rules
+remain in force.
+
+The first frame's cursor events wait for property-script `init` and initial
+notices. That frame's sampled button edges are delivered once, before updates;
+its clock and pose still advance only once. Replacing the scene discards that
+pending input. A newly registered script does not consume its first enter before
+it has started.
+
 Both scene renderers share video decoder selection. On macOS, an eligible FFmpeg
 default is kept; a software-only default does not rule out another decoder for
 the same codec that supports VideoToolbox, as with dav1d and native AV1. A codec
@@ -348,12 +521,39 @@ every frame: colour times intensity with the radius, the world position with the
 exponent, a spot's cone cosines and the light's own x axis as the way a spot or
 directional light points, a tube's far end its control point carried by the light's
 transform. The older `point` light still fills the four packed legacy lights
-(`g_LightsPosition`, `g_LightsColorPremultiplied`). A light is a node like any layer:
+(`g_LightsPosition`, `g_LightsColorPremultiplied`, `g_LightsColorRadius`): every
+light object, hidden or of the newer kinds, takes a slot in file order, and a fifth
+light shares slot 0, the later one winning, as in Wallpaper Engine. A light is a node like any layer:
 it follows its parent, and its visibility, transform, colour, intensity, radius and
 exponent follow user properties, scripts and timelines; a hidden light, or one under
 a hidden layer, lights nothing. Each kind lights at most as many lights as the config
-names, the first ones in scene order. A lit pass reuses its last image only while
-the lights it reads are unchanged. `g_NormalModelMatrix` is each draw's own rotation
+names. As in Wallpaper Engine the lights are sorted every frame, of a kind those
+casting shadows or using a cookie first, then nearest along the camera's forward axis
+(by their own origin), and each kind's array holds its `lightconfig` subsets ahead of
+its plain lights: a spot's `spotshadowcookie`, `spotcookie` and `spotshadow` slots, a
+point or directional light's shadow slots (`pointshadow`, `directionalshadow`, kept
+only while the Shadows setting is on; with it off `spotshadowcookie` counts as
+cookies). Shadow subsets sample the model-shadow depth atlas. Cookie spots project the
+selected cookie image instead of applying the ordinary inner/outer-cone attenuation.
+Each light loads its `cookie` texture, defaulting to `cookie/flashlight1`; as in
+Wallpaper Engine, every cookie spot samples the same texture, selected by the last
+visible cookie spot inside the packed light budget. Visibility, movement and budget
+changes update that selection. The alias reads transparent black outside the image.
+Cookie projections also work with shadows disabled or without a caster, and add no
+shadow camera, atlas or render pass. With neither a prepared cookie sampler nor a
+projection reader, a scene performs no draw-time cookie packing or GPU image import.
+A projection-only reader updates its matrices without importing cookie images.
+For a texture consumer, candidate images load
+once during graph preparation, including a cookie-owning light whose public type
+may later switch to spot; selection changes never read files inside a draw.
+A lit pass reuses its last image only while
+the lights it reads are unchanged. A lit or reflective image layer with effects is
+drawn unlit into its card and lit once, by a closing `PRELIGHTING` pass drawn where
+the layer sits. As in Wallpaper Engine, whose image mesh spans the picture's pixels
+while the layer's world matrix carries no size, that pass measures lights against the
+card squeezed to its texture's size around the layer's origin (`g_AltModelMatrix` is
+the layer's world matrix scaled by picture / card size); that pass also takes the scene's fog and the layer's colour blend, as in
+Wallpaper Engine. `g_NormalModelMatrix` is each draw's own rotation
 and `g_LightSkylightColor` the scene's skylight; `g_Texture<N>Texel` is the step of
 the texture a slot samples, as for Wallpaper Engine's morph-target and downsample
 shaders. Distance and height fog
@@ -385,59 +585,111 @@ that blends onto the screen by colour blend mode, text layers, and a layer whose
 material takes no fog keep what they drew.
 
 Height fog is read whenever its JSON fields are present, including older package
-containers. Ambient/skylight colours and height-fog settings resolve user-property
-values at scene load; preview edits are deferred to the existing apply/reload path
-rather than adding per-frame uniform work. SceneScript `rotateObjectSpace(Vec3)` composes a
+containers. Ambient/skylight colours and the height- and distance-fog colours and
+ranges that a script or a user property drives are followed every frame, as Wallpaper
+Engine evaluates every `general` setting: the shared uniform (`g_LightAmbientColor`,
+`g_LightSkylightColor`, `g_FogHeightColor`/`Params`, `g_FogDistanceColor`/`Params`) is
+recomputed on a tick in which one of its inputs changed and written into every
+material that declares it (`SceneRuntimeContext::RegisterSceneUniform`), so a script
+that returns a new ambient colour or a live property edit shows without a reload. A
+scene whose settings are literal registers nothing and pays nothing per frame.
+Direct `thisScene` colour/range/density setters update the same uniforms; static
+overrides collect recipients once on demand, without adding a per-frame polling
+binding. Fog shader variants stay as loaded when a script changes the raw
+`fogheight` or `fogdistance` flag. SceneScript `rotateObjectSpace(Vec3)` composes a
 radians Euler increment around the layer's local axes; the `angles` property
 continues to read and write degrees.
 
-Shadow maps, spot cookies and
-volumetric light shafts are not drawn: a light that casts a shadow lights as if
-nothing did, which is also what Wallpaper Engine shows when nothing in the scene
-casts one. Both renderers apply a material's depth state and cull mode the same way: a
+An ordinary `sampler2D` can read a 2D depth target's depth channel without a
+comparison sampler. The renderer binds that depth texture directly, without a
+copy or conversion pass; a 2D colour image still cannot stand in for a comparison
+or 3D texture declaration.
+
+Point, spot and directional lights cast model shadows through a depth atlas, gated by
+the Shadows quality setting and the visible lights and model casters. Spot-cookie
+sampling uses the existing lighting pass. Point and spot lights with `castvolumetrics`
+draw their volume after the scene and before its post-processing, using the light's
+colour, intensity, radius, density and volumetric exponent. Spot cookies and shadow
+maps modulate those shafts. A scene-depth reader retains its forward-depth convention
+while the shadow atlas uses reversed depth. HDR display framing uses the same raster
+projection to draw and reconstruct the light volume. The camera can enter or leave a volume without rebuilding
+the graph; light kind, cookie mode, casting and visibility changes rebuild the utility
+materials and release the old geometry and targets. A failed utility-material load
+rolls back its target declarations and shader-updater registrations.
+
+Volumetrics Off and scenes without an active casting point or spot allocate no volume
+targets or draw volume passes. Low and Medium accumulate at one eighth of the render
+width and height and apply two blur passes; High and Ultra use one quarter without
+those blur passes. Each active light draws its exit depth and either its entry surface
+or the fullscreen entry variant. Meshes are retained until the light topology changes,
+and a static volume requests no continuous uniform clock. Scene depth is sampled from
+the existing depth attachment; MSAA resolves it to one additional full-resolution
+32-bit depth image in the same encoder. An ordinary scene
+clear also clears that depth when the last occluder is hidden, and cached readers follow
+the depth writers' visibility and inputs. Scenes with no depth writers use one far-depth
+texel. **Quality in force** reports the selected level only while a volume is active.
+Shadow edge filtering is not a pixel-identical match to the reference probes
+([known limitations](../testing/renderer.md#known-limitations)).
+Both renderers apply a material's depth state and cull mode the same way: a
 pass into a depth-attached target (a model, a skybox, a scene with a perspective
-camera) takes its material's depth test, depth write and cull mode, against the same
-front faces, and every other pass draws in painter's order and culls nothing. A pass
+camera) takes its material's depth test and depth write, and every other pass draws
+in painter's order. Every pass takes its material's cull mode, as Wallpaper Engine
+does on a 2D canvas too, with counter-clockwise front faces: a layer's card faces the
+camera as authored, whether its shader writes clip coordinates or uses the
+model-view-projection matrix, and a `cullmode normal` card mirrored in x (by its
+vertices or by a negative layer scale) is culled. The reflected phase keeps the same
+front faces, so the mirrored camera reverses which side of a culled card or model is
+drawn, as in Wallpaper Engine's reflection controls. A pass
 reads these words as Wallpaper Engine does: only `enabled` turns on a depth test or a
 depth write and only `nocull` turns culling off, so any other value (`less`,
 `inverted`) means no depth test, no depth write or back faces culled; there is no
-depth compare to choose. A material writes depth as authored whatever its blending,
-as Wallpaper Engine's own translucent depth-tested font materials expect, so a
-translucent or additive layer that asks to write depth hides what is drawn behind it
-afterwards, its transparent texels included; a pass that does not depth-test writes
-none. The last pass of an image layer's effects, the one that puts the layer into the
-scene, is drawn with the layer's own blending and depth test, not the ones its effect
-pass authored, and with its depth write unless the layer is one Wallpaper Engine
-sorts: Wallpaper Engine's image layer copies all three from its material onto that
-pass, but a scene that turns `transparentsorting` on draws the layers whose material
-blends (`translucent`, `additive`) back to front after the others, where the write
-hides nothing that comes after it, and this engine draws in scene order, where the
-write would cut the layer's whole card, transparent texels included, out of every
-farther layer drawn later (another star's glow, a HUD ring). A layer whose material is
-`normal` (which `disabled` also reads as) or `alphatocoverage` stays in the scene-order
-set drawn first and keeps its write, which hides the farther layers drawn after it.
-A translucent glare layer authored `depthtest` enabled is hidden by a nearer model
-whether or not an effect runs over it, a layer authored `depthwrite` hides what is
-drawn behind it afterwards unless the scene sorts it, and the editor's depth-testing
-solid and compose layers, image layers too, test their effects' result against the
-scene. A text layer drawn through effects keeps its last pass's depth state, and a
-plain translucent layer that writes depth still hides farther layers drawn after it
-in a scene that sorts
+depth compare to choose. A draw that blends (`translucent`, `additive`) never writes
+depth, whatever its material says, and still tests it: Wallpaper Engine's device
+chooses its depth state from the material's two words and the draw's blend mode
+(`sub_140099F60`), and its frames of a depth probe agree (a nearer translucent card
+authored with both enabled, at any alpha, does not hide a farther card drawn after
+it; a nearer `normal` one does). So a translucent glare or HUD card drawn before the
+labels behind it no longer hides them (3662790108). A `normal` (which `disabled` also
+reads as), `alphatocoverage` or unblended draw writes depth as authored, and a pass
+that does not depth-test writes none. The last pass of an image layer's effects, the
+one that puts the layer into the scene, is drawn with the layer's own blending, depth
+test and depth write, not the ones its effect pass authored: Wallpaper Engine's image
+layer copies all three from its material onto that pass. A translucent glare layer
+authored `depthtest` enabled is hidden by a nearer model whether or not an effect runs
+over it, a `normal` layer authored `depthwrite` hides what is drawn behind it
+afterwards, and the editor's depth-testing solid and compose layers, image layers too,
+test their effects' result against the scene. Text in a perspective scene is depth-tested unless it says `depthtest`
+`disabled`, using the depth font material and a depth-tested closing effect pass.
+Text in an ortho scene is not depth-tested
 ([known limitations](../testing/renderer.md#known-limitations)). A target the frame
 reads before it writes it keeps its own image from one frame to the next on both
 renderers, so the reader sees exactly the previous frame, and transparent black on
-the first frame, since both renderers clear every new target; a scene with such a loop
+the first frame unless the effect supplies a clear colour; a scene with such a loop
 is never called still while it runs. An effect's own buffers are made the way
-Wallpaper Engine makes them: a float format (`r16f`, `rg1616f`) is a float target,
-so a fluid simulation's velocity and pressure keep their sign; an explicit 8-bit
-format stays 8-bit and the back-buffer formats follow the scene; a buffer with its
-own `width`/`height` or a `fit` has that size, its longer side shrunk to the `fit`
-with its aspect kept, before `scale`. An effect's `swap` command exchanges two
+Wallpaper Engine makes them (`sub_1401E7170`, `sub_1401EA500`): each `fbos` entry needs a
+`name` and a `format`, or it is left out; the format is its row of the texture format table
+(`r8` and `rg88` are one- and two-channel 8-bit targets, `r16f`/`rg1616f`/`rgba16161616f`
+float ones, so a fluid simulation's velocity and pressure keep their sign), the two
+back-buffer formats follow the scene, and a name the table does not have, `r32f` included,
+is 8-bit RGBA; a buffer with its own `width`/`height` or a `fit` has that size, its longer
+side shrunk to the `fit` with its aspect kept, before `scale`. A `unique` buffer belongs to
+its effect; any other is one target for every effect of the scene that names it at the same
+size and scale (by name alone in a passthrough layer), as in Wallpaper Engine; text layers
+keep their buffers their own because they follow the card. `uvs: "repeat"` samples the buffer
+wrapped. A `clear` colour (`"r g b a"`, or an empty string for black) clears the buffer to it
+whenever it is made or resized. For a shared buffer, the last declaration with an explicit
+clear supplies that colour; a later declaration without one keeps it. `conditions` on a buffer, a pass or a bind keep it only when
+every element of the array holds against the effect instance's own `combos` (each key equal,
+or `ge`/`gt`/`le`/`lt` against a `value`; a missing combo reads 0); a dropped pass moves the
+later ones up. The runtime retains the effect's `functions` with action `clear` and can
+clear the effect's first N buffers, N the names that
+resolved, to their own `clear` colours before the next frame (`sub_1401EE3A0`: the counter,
+not the listed names, picks the buffers). SceneScript invokes these actions with
+`executeMaterialFunction(name)`. An effect's `swap` command exchanges two
 buffers where it stands among the effect's passes, so a simulation carries its state from one frame to the
 next; when the effect draws into the second buffer before reading it again, one copy
 into the first is the whole exchange, otherwise it goes through a temporary buffer.
-A buffer's `clear` colour and `conditions` are not read: buffers start cleared to
-zero and are made whether or not the effect's combos use them. A layer's colour blend
+A layer's colour blend
 mode mixes it with the screen behind it through Wallpaper Engine's passthrough
 material, the layer's last step; the passthrough takes the layer as its first pass
 drew it, colour and alpha included, and does not apply them again. Mode 31 ("add")
@@ -445,7 +697,7 @@ has no passthrough: an image layer, or its last effect, is drawn with additive b
 straight onto the scene, so it costs neither the extra pass nor a copy of the screen (a
 text layer that goes through a visible effect is the exception, see below). Translating to the
 Metal shading language
-turns GLSL's `inverse`, which Metal has no built-in for, into helper functions, so
+preserves the shader's own `inverse` functions, as Wallpaper Engine's perspective include defines them, so
 the stock perspective, reflection, water, light-shaft and cursor-ripple effects
 translate. A step that samples an image nothing in the scene produces (a layer
 texture whose layer draws no composite) is skipped on Native Metal exactly as
@@ -455,13 +707,157 @@ exists and does not load still does.
 Puppets and rope geometry behave the same on both renderers. A puppet is deformed
 by its author's own skinning shader, and its pose comes from the one animation
 system the scene already has (animation layers, their play, pause, stop, rate,
-blend and visibility, and any script or user property driving them); the renderer
-only uploads the resulting bone matrices. A puppet whose animations fade bones (a
-`blend_curves` value below 1, such as an eyelid that fades) also gets each bone's opacity
-(`g_BonesAlpha`, with the `SKINNING_ALPHA` combo its shader reads): every visible layer
-samples the bone's curve between its two frames, and the rest pose counts as opaque by the
-share of the blend the layers leave it, as the bones' transforms are mixed. A puppet whose
-curves never dip compiles without it. Rope and rope-trail geometry is generated
+blend, visibility, additive mode and `blendin`/`blendout` fades over `blendtime`,
+and any script or user property driving them); the renderer only uploads the
+resulting bone matrices. A script can add layers to the stack with
+`createAnimationLayer` (an animation name, or a config object naming the animation's id, with
+the same keys an authored layer has plus `autosort`, which goes below the additive layers on
+top, and `index`; a made layer fades in and, when its clip plays once, out, unless told
+otherwise) and take them off with `destroyAnimationLayer` (a name, every layer with it; an
+index; or the layer object); the layers above move down and their script objects keep
+following them. `playSingleAnimation` makes a layer that plays one cycle of its clip, calls
+its `addEndedCallback` listeners and is removed after those listeners run. Ordinary looping
+and mirrored layers call the same listeners at every wrap or turn and keep playing
+(`0x1401FDF90`). Both authored and script-created repeating layers start with `blendout`
+cleared (`sub_1401FCC20`); a script can enable it later. The layers are composed as Wallpaper Engine composes them:
+in stack order over the reference pose, a whole layer replacing what is below it, a
+partial one lerped toward (rotations as a normalised lerp), an additive one adding its
+weighted offset from the reference, and a bone outside a clip keeping the value below
+it. A puppet whose first mesh is flagged for per-bone alpha (flag-word bit 4) is drawn with
+`SKINNING_ALPHA`: each bone's alpha starts at 1 every frame and every layer pulls it toward its
+clip's per-bone curve by its weight, and the author's shader fades the bone's vertices by it
+(`g_BonesAlpha`). A clip can play another clip's frames from a start frame on (an MDLA clip
+record). A 3D model with `rootmotion` set whose clip carries root-motion bits keeps its root bone
+where the clip starts on the locked axes, takes the clip's turn about y out of the root, and moves
+the model layer itself by what the root would have moved: its origin by the model's world matrix
+times the distance, its yaw by the turn, weighted by the layer and by what the layers above leave of
+it, continuing across a loop. Every puppet's pose is evaluated before the frame's scripts run, so a
+script reads the moved origin and this frame's bones: the bone methods (`getBoneTransform`,
+`setBoneTransform`, the local transform, origin and angle calls, bone index and parent) read and
+write the evaluated bones, a world write moving that bone and a local write moving the bones below
+it too, and a write lasts until the next frame's pose. A bone whose simulation settings (the JSON
+after its matrix) turn on rotation or translation with a spring or rigid response is simulated as
+Wallpaper Engine 2.8.0.42's puppet composer does, in bone order right after the bone's animated
+pose: in the layer's world space, starting from where the bone was drawn last frame, its tip keeps
+where it was by the inertia setting, a spring pulls the turn and the offset back to the animated pose,
+friction damps the velocity, held axes, angle limits, the turn rate limit and the offset cap apply, and
+gravity pulls when it is on; the bone's model matrix takes the result and the bones below follow.
+`applyBonePhysicsImpulse` adds to a simulating bone's velocity (world units a second) and turns its
+angular velocity by degrees; `resetBonePhysicsSimulation` puts its state back at rest. A script that
+drags a bone with `setBoneTransform` leaves it where the simulation starts next frame, so it springs
+back when released. A puppet without a simulating bone keeps no spring or rigid-body state.
+Visual attachments read the completed pose after the runtime has supplied the layer's
+current world transform; registering a child or beginning its frame does not advance
+the parent's simulation early. Standalone rendering without a runtime supplies that
+world transform from the child's parent before stepping the puppet.
+
+An image puppet's explicit MDLS inverse-kinematics chain is solved at its stored root, after that bone's
+animation and simulation. Its position and pole targets follow the same absolute and additive
+animation-layer mixing as bones, including source-clip offsets; the driven bones keep the
+solution and their other children follow it. The solver uses the stored bone lengths and
+neighbour directions, makes at most ten backward/forward sweeps and stops earlier when each
+goal's squared distance is at most 0.1. A long chain can therefore stop short of a reachable
+target on one frame. `ikce` applies the planar angle limits `ikrminl`/`ikrmaxl` in radians;
+these fields do not set segment lengths. Rope links keep Verlet points per instance in world
+space, constrain their lengths in model space, and honour the free endpoint and stretch flags.
+Their friction is `tf`; `ikrd` controls how the endpoint's orientation follows a distant target.
+Chain data and working storage are prepared once. Three-dimensional `model` layers keep
+forward kinematics, as Wallpaper Engine's separate model composer does; they allocate no IK
+instance state. A puppet without a usable chain or blend-rule consumer allocates no link/IK instance state.
+An IK position target can also follow a source bone through an MDLS blend rule.
+Flag 1 blends its position alone; flag 0 blends translation, scale and Euler rotation.
+Flag 2 projects the target onto the source bone's local X line before blending;
+it keeps the target's orientation and scale and takes precedence over flag 1.
+This axis rule runs once for each stored segment endpoint matching the target's
+owner. The source axis is normalized, so its scale does not multiply the displacement.
+The rule names its MDLA weight curve explicitly. Curves use the source clip's frame
+offset, ordinary animation layers blend in order, additive layers add their weighted
+sample, and the disabled-curve bit keeps the value below. Rules run in the chain's
+stored target order before the solve, using the source bone's available model pose.
+Only consumed curve indices and their instance weights are prepared; a puppet without
+these rules adds no curve-sampling traversal. A constant-weight 0/1 image-puppet
+control shows the position-linked limb following its source in Wallpaper Engine and
+the native renderer; the zero-weight native picture is unchanged by this support.
+A separate axis-rule control shows the limb moving toward the source's X line in
+both renderers, with zero-weight native output unchanged. The control retains
+existing pose and placement differences; it does not establish general skeletal parity.
+A rule with `0x10000` instead uses the source's X axis as a grounding-plane normal.
+Its positive displacement is bounded by the chain reach remaining beyond the source;
+a source beyond that reach, or a target behind the plane, contributes its position
+without replacing the target's rotation and scale. This flag takes precedence over
+the ordinary target modes. After the first backward sweep only, joints on the wrong
+side of the source normal are reflected before the forward sweep. That correction
+uses the rule flag even when its animated blend weight is zero, and has the native
+32-attempt bound.
+
+Rules attached to ordinary non-IK image-puppet bones blend their full world transform,
+regardless of the IK-only mode bits. They run after the animated parent transform and
+before bone simulation and descendants. Earlier source bones supply the current pose;
+later source bones supply that instance's previously published pose. Rule and weight
+storage is sparse, prepared once, and shared curve sampling retains the same clip,
+mask and additive-layer rules. Ordinary-only consumers allocate no per-bone solver
+arrays and refresh only the source poses their rules actually read. The separate model
+composition remains FK. Five reference controls agree at the observed world positions
+of five bones to within 0.0002 canvas units. A consecutive-frame control also confirms
+the native alternating first-sweep solution at zero blend; zero blend does not disable
+that high-bit rule. The ordinary zero-weight and bit-off pictures remain unchanged.
+These bounded controls do not establish general skeletal frame parity; broader
+pose/placement differences remain in the
+[known limitations](../testing/renderer.md#known-limitations).
+
+Image-rope links consume the scene's `gravitydirection`, `gravitystrength`,
+`windenabled`, `winddirection` and `windstrength`, including property bindings and
+SceneScript writes. With the end bone's `ge` flag, gravity is the raw scene vector
+times its strength and that bone's mass. Wind is independent of the bone's mass:
+it takes the positive part of Wallpaper Engine's 2D simplex noise at scene time
+and `worldX / canvasWidth * 10`, then multiplies the raw wind vector and strength.
+Directions retain their magnitude; the layer's turn and scale do not rotate or
+scale these world-space forces. Verlet integration adds the resulting acceleration
+times squared seconds. The ordinary spring/rigid bone path retains its authored
+`gd`, and particle movement operators retain their own gravity settings.
+
+The force state is shared by a scene's rope consumers and allocated only when a
+rope is registered. Static/default settings add no driver, image rasterization or
+render pass, and a scene without a force consumer gains no continuous work.
+Repeated equal assignments keep the existing state without rebuilding the graph.
+As with other script bone controls, a force-value script runs after the current
+pose and affects the following simulation step.
+
+Morph targets (`MDMP`, blend shapes) reach the vertex shader through an immutable
+`RGBA16Snorm` data texture. Image puppets use their first mesh's four-wide position index
+and position/alpha texels; 3D models use a separate texture per mesh with tightly packed
+position deltas and, when present, normal deltas. The visible material samples slot 5 and
+a model's shadow caster samples slot 1. MDLA version 4 and later stores morph curves per
+mesh, sampled with the animation layer's interpolation and source-clip offset. These
+curves are independent of the puppet's texture-channel/albedo blending.
+Models without bones retain their base geometry even when the material explicitly enables
+`MORPHING`, matching the controlled Wallpaper Engine model probe; they allocate no morph
+state or delta texture.
+
+`getBlendShapeIndex` resolves a name in the first mesh; `getBlendShapeWeight` and
+`setBlendShapeWeight` address those shapes by index or name. Names match ASCII case-insensitively, with the first
+duplicate winning; finite script weights keep their sign and are not clamped to 0–1.
+An unknown shape's weight is the number zero, not a null value.
+Writes survive recomposition at the same scene time and the next animation evaluation
+replaces them. A draw takes the first eleven active shapes in index order, then sorts
+those entries by signed weight. A complete zero-valued animation layer clears a shape's
+active flag without overwriting its earlier weight: a getter can still return that value
+while the shader no longer uses it. Image bone-distance modifiers use the inverse of the
+current model-space bone, including script bone writes.
+
+Morph textures are registered once per model resource and mesh in a scene and use the
+ordinary immutable-image cache across displays. The cache compares source bytes when a
+new scene loads, so replacing a model at the same path cannot reuse stale deltas. Playback
+updates fixed-size uniform storage; it neither rewrites vertices on the CPU nor uploads
+the delta texture every frame. Puppets without shapes keep no morph instance storage.
+The remaining scope and reference-frame gaps are listed under
+[known limitations](../testing/renderer.md#known-limitations).
+
+A model's vertices are read with Wallpaper Engine's 26-bit vertex table, every stored
+stream (second and further texture-coordinate sets, colour, the four-wide morph position, the
+second position) reaches the shader under its attribute name, and a shader input reading a
+narrower name of a texture-coordinate set (`a_TexCoord` of a lightmap model's
+`a_TexCoordVec4`) reads the same bytes. Rope and rope-trail geometry is generated
 once by the shared particle simulation, with the rope renderers' *UV scale*, scrolling
 and smoothing. A particle's sprite, rope or trail is sized as authored and drawn
 through its layer's model matrix, so a particle layer scaled up draws its
@@ -502,8 +898,8 @@ itself draws only in frames where a channel weighs more than the 0.001 the shade
 discards at, and costs nothing otherwise. A text layer is an ordinary layer: it takes its place in the layer order and
 carries its transform, opacity, blend, effect chain, camera and the final
 composition, appears in desktop posters, and uses the engine's one text system on
-both renderers. Text whose content has not changed is not laid out, rasterised or
-uploaded again; a script that produces it still runs on its own schedule every
+both renderers. Text whose content has not changed is not laid out, its glyph quads
+are not rewritten and its atlases are not uploaded again; a script that produces it still runs on its own schedule every
 frame. A text script that writes `thisLayer.text` from `update()` and returns nothing
 keeps what it wrote, as in Wallpaper Engine (a clock that writes the time once a
 minute shows it, not the text the scene file starts with), and its next
@@ -579,33 +975,128 @@ child file's own start time. A `sphererandom` spawn is a uniform point of the un
 particle born exactly on the centre leaves along a random direction. An emitter's
 `delay`, `duration` and periodic windows (`flags` 4 with the four `*periodic*` keys and
 `maxtoemitperperiod`) are honoured, `flags` 2 means at most one particle a frame at the
-file's rate, and an `instantaneous` burst is paid for out of the rate's account. The
-random initializers take their `exponent`, a lifetime is never below a millisecond, a
+file's rate, and an `instantaneous` burst is paid for out of the rate's account.
+SceneScript particle controls use that simulation state. `pause()` suppresses scheduled
+emission in the root and its children; existing particles still age and move, while
+`isPlaying()` reports false. `stop()` clears particles, trails and event instances and
+resets emitter delays, durations, bursts and initializer counters, preserving the pause
+flag. `play()` clears pause and, only when the whole tree has no live particles or active
+emitters, reopens the finished flags. It does not rewind an expired duration: `stop()`
+followed by `play()` starts a fresh cycle. Outside pause, `isPlaying()` includes live or
+emitting static and event children. `emitParticles(n)` adds `n` to each root emitter
+immediately, within its capacity; zero means one and negative values do nothing. Manual
+emission bypasses pause, stop and the ordinary per-frame/window quota, but an active
+unpaused stream charges it to its rate balance. It does not multiply the manual count
+by the instance count factor or unpause the system. Script emission and clearing rebuild
+invalidated geometry before that frame is drawn.
+
+The read-only `instance` object exposes seven numeric factors (`alpha`, `size`, `count`,
+`speed`, `lifetime`, `rate`, `brightness`), `colorn`, and control points and angles 0–7.
+Vector getters return copies. Writes read back immediately and bind to the simulation
+at its next step, so an `emitParticles()` in the same script still uses the previous
+binding. That rebind clamps `rate` to at least 0.01 and reopens positive-rate emitters,
+even when a script wrote the same value after stopping. Unset colour reads as
+`(-1,-1,-1)`; a negative first colour component disables that tint. An unset point or
+angle has `FLT_MAX` in its first component; assigning this sentinel leaves the last
+effective point or rotation alone. Removing the layer releases its simulation and
+invalidates retained instance wrappers. Pending instance storage is allocated only on
+a script write and only written layers enter the update queue. The ordinary simulation
+walk caches whether particles still need time: an exhausted or stopped system does not
+keep the frame clock running, but paused live particles do.
+A zero or negative count factor finishes a stream with no pending burst; a burst
+waiting behind a zero count remains active and can fire when the count is restored.
+
+`layerimage` emits from the layer named by its `emitterimage` dependency, including a
+hidden image, an on-demand quarter image of published text glyphs, and a puppet's UV pieces. It builds one
+shared map for that source with the four taps of `downsample_quarter`, keeps texels whose
+8-bit alpha is at least 127, and chooses them uniformly. The map is built after the
+scene is attached, then rebuilt only when its image size changes or flag `0x20000`
+requests the one-second refresh. Flag `0x10000` (on by default) copies the sampled
+colour; `0x80000` applies `offsetmin`/`offsetmax` in source space; `0x40000` inherits the
+source layer's motion over the unscaled scene timestep, multiplied by `speedmin`/`speedmax`.
+The particle's position and inherited velocity exist before the initializer chain runs.
+Puppet points read the most recently evaluated skin palette without evaluating or copying
+it. Text donors are composed over transparency with material alpha blending, so a solid
+glyph at opacity `a` contributes alpha `a*a` before the emission threshold; image donors
+read the original texture alpha instead of the layer opacity. Text sampling uses the existing
+mesh and atlases, and releases the temporary quarter image after building the map; it
+does not shape the text again or keep a full-size bitmap. Layers with no image-emitter
+consumer do no emission-map work.
+The random initializers take their `exponent`, a lifetime is never below a millisecond, a
 `sizerandom` or `alpharandom` scales the size or alpha the particle has so far (as the
 colour initializers do, so a second `sizerandom` narrows the first one's draw; only the
 lifetime is replaced), and every particle carries one random number of its own that picks
 its oscillation phase and frequency, its turbulence speed and phase, and its
 `randomframe` sprite (which is never cross-faded with a neighbouring frame). `movement` and
 `angularmovement` advance the particle where they stand among the operators, with the
-damping `velocity * (1 - drag * dt)`, and nothing else does: a particle file without
-them keeps its particles where they were placed, whatever velocity they were given (a
-movement operator with `flags` 1 keeps gravity in screen axes by multiplying it with the
-layer's transposed matrix, scale included, in a system that is not `worldspace`; a
-`worldspace` system is already in the scene's own axes and takes it as written); `controlpointattract` pulls hardest at the
+damping `velocity * (1 - drag * dt')`, and nothing else does: a particle file without
+them keeps its particles where they were placed, whatever velocity they were given. The
+forces act over Wallpaper Engine's second time step `dt' = dt * pow(min(0.025 * fps, 1), 0.7)`
+with fps the scene's frame-rate cap (the drags, the pull of `controlpointattract`, and the
+`turbulence`, `vortex` and `vortex_v2` speeds and the `boids` steering; positions and gravity still integrate over `dt`), so below
+40 frames a second those forces act more weakly per second (at the default 15 frames a
+second they act over about half the step), and at a cap of 20 frames a second or less the
+operators run twice per frame over half steps, each pass from the particle's birth colour,
+alpha and size and at the same system time, while emission, ageing and trail points stay
+once per frame. A system's start-time prewarm runs at load, before the scene's frame rate
+is known, with full steps. A movement operator with `flags` 1 keeps gravity in screen axes
+by multiplying it with the layer's transposed matrix, scale included, in a system that is
+not `worldspace` (a `worldspace` system is already in the scene's own axes and takes it as
+written); `controlpointattract` pulls hardest at the
 control point and not at all at its threshold, and with `flags` 1 removes a particle
 whose path over the last step, from where the movement operator found it, came within
 `deletethreshold` of the control point; `vortex` swirls about the control point
-plus its offset; `turbulence`, the oscillators, the vortex and `capvelocity` take the
-blend window (`blendin*`, `blendout*`), and `turbulence` and the vortex an
+plus its offset; `turbulence`, the oscillators, `capvelocity`, `angularmovement`,
+`controlpointattract`, `reducemovementnearcontrolpoint`, the two maintain-distance
+operators, `vortex_v2`, `remapvalue` and `inheritvaluefromevent` take the blend window
+(`blendin*`, `blendout*`), the vortex and `boids` do not; `alphafade`
+fades in before `fadeintime` and out after `fadeouttime`, and where the two overlap (fade in
+ending after fade out starts) multiplies by the two factors' bits ORed together, as Wallpaper
+Engine's SIMD kernel does; `turbulence` reads Wallpaper Engine's 3D simplex noise (times 32),
+`positionoffsetrandom` a normalised fbm of its 2D simplex, and `turbulentvelocityrandom` turns
+`forward` about `right` by its 1D simplex of the system time (plus a random share of the phase
+range) times π, `scale` and plus `offset`, so particles born together share a heading; the
+override `rate` scales both noise timescales on top of the rate-scaled time, and is held at
+0.01 or more (a negative or non-number rate runs the system at a hundredth of its speed); and
+`turbulence`, the vortex and `vortex_v2` an
 `audioprocessing*` level (the loudest selected band), which makes a scene that has
-either of them need audio capture like an audio-driven emitter does. `capvelocity`,
+any of them need audio capture like an audio-driven emitter does. `vortex_v2` swirls
+about its control point's axis (`flags` 1 measures from the axis line, 2 holds each
+particle at its distance with `centerforce`, 4 swirls about a ring of `ringradius` and
+pulls particles within `ringpulldistance` outside its `ringwidth` band toward it);
+`boids` steers each particle toward its neighbours' mean velocity and centre and away
+from those inside `separationthreshold`, a slice of the particles per step once a file
+holds 200 or more, `flags` 1 capping the speed it gives; `remapvalue` (each step) and
+`remapinitialvalue` (at birth) map one of twenty particle or system quantities through
+an input range, a `sine`, `square`, `saw`, `triangle`, `simplexnoise` or `fbmnoise`
+transform and an output range into another (`remap`, `multiply`, `add` or `subtract`,
+`flags` 1 and 2 clamping the input and the output; a record without `flags` clamps its
+input, as the engine's loader writes 1 when the key is missing). With a control point
+as output, `remapvalue` writes that point every step from the first particle of each
+group of four (the engine's SIMD kernel broadcasts lane zero), its full translation
+and the matrix's w, which takes z; `remapinitialvalue` writes it when a particle is
+born and keeps w. A written point keeps its value until the next write, also for
+later readers in the same step, and owns its slot over cursor links and parent
+copies; and `inheritvaluefromevent` gives an
+event child its parent particle's running colour, opacity, velocity, size, rotation or
+spin each step, as `inheritinitialvaluefromevent` does once at birth. `capvelocity`,
 `reducemovementnearcontrolpoint`, `maintaindistancetocontrolpoint`,
 `maintaindistancebetweencontrolpoints`, `collisionplane` and `collisionsphere` work on the
 control points' motion and orientation (every particle found inside a collision shape
 takes its response, a bounce or a slide, whichever way it is moving; a sphere without an
 `origin` is centred 200 below the origin in a pixel scene; with `flags` 1 a sphere is centred
 on its control point and a plane passes through it, turned by the control point's
-orientation, and neither reads its own `origin` or `distance`), and the `hsvcolorrandom`
+orientation, and neither reads its own `origin` or `distance`; with `flags` 2 every
+collision kind also stops the spin of each particle it hits), the collision shapes
+`collisionbounds` (four planes round the scene canvas, taken into the layer's frame; the
+last plane a particle is behind pushes it back), `collisionquad` (a particle that crossed
+the quad's front since the last step, inside its `size`, default 200 × 200, is pushed out
+by 1.05 times its depth; `flags` 1 carries the quad with its control point) and
+`collisionmodel` (capsules built every step from the linked layer's bone boxes, or from
+the box round its vertices for a model without them, through the bones' current pose and
+the layer's matrix; the layer is the one the scene object's `dependencies` entry of type
+`collisionmodel` and that `index` names), while `collisionbox` does nothing, as in
+Wallpaper Engine (`artifacts/we-parity/decompiles/F-D13.md`), and the `hsvcolorrandom`
 (its hue steps spaced as the loader spaces them), `colorlist` (its noise a draw over the
 entry's value plus and minus the noise, cut off at 0 and 1), `inheritcontrolpointvelocity`,
 `positionoffsetrandom`, `mapsequencearoundcontrolpoint`,
@@ -619,9 +1110,36 @@ does); from version 5 the re-tint alone is the colour, so a dark override is not
 twice. A preset without colours takes the override as its colour, and an override equal
 to the preset's own colour changes nothing; its
 `controlpoint0`..`7` and `controlpointangle0`..`7` replace the preset's control points
-(a control point flagged 2 is held at its scene position as the layer moves), and
+(a control point flagged 2 is held at its scene position as the layer moves; a file's
+control points fill slots 0 to 7 in list order, whatever `id` they carry, take their
+`angles` as their orientation), and
 `brightness` multiplies the tint in an HDR scene, and each of them follows a user
-property while the scene runs. Its `size` multiplies the size a particle is born with and
+property while the scene runs, or plays the timeline it is keyed with (`animation`, on the
+layer's clock: the stock vortex orb preset turns its control point 1 this way).
+`maintaindistancetocontrolpoint` measures the distance in its control point's frame (kernel
+0xB, `0x14024198B`): in a world-space system that frame carries the layer's matrix, so a
+layer scaled by 0.5 holds its particles half the authored distance away.
+Control-point flag 4 copies the registered `parentcontrolpoint` frame into a child's
+space, including its orientation and scale; adding flag 8 copies the raw frame.
+An authored parent point is available only when an emitter or operator references
+that slot or a later one. Cursor-linked points and points owned by a remap output
+keep precedence. Event children retain each instance's previous copied positions,
+read nested copies from the bound parent instance, and reset that history when a
+pool slot is reused or recreated after stopping.
+A child's `controlpointstartindex` does not change its emitters' control-point indices.
+With child-entry flag 1, the child's points from that index on take the positions of
+the parent instance's live particles each step, in particle order, through the
+parent's simulation frame into the child's space. A cursor-linked, parent-copied or
+remap-written point there stops the feed rather than being skipped; with fewer live
+particles than points, the remaining ones keep their last value. A cursor-linked
+point takes the cursor's position as its whole translation; its authored offset is
+not added.
+Each event child uses its own particle file's world-space flag. World particles
+retain the origin at which they were emitted when their parent moves, including
+rope history and additional renderers. A local child of a world-space parent uses
+that parent's simulation frame. World-space remaps read absolute positions and
+control points; distance and direction inputs remain relative quantities.
+The override's `size` multiplies the size a particle is born with and
 every `sizechange` ramp of the file besides, as Wallpaper Engine's loader binds the
 override to each size record: a ramp scales the running size by the override times its own
 factor, so a particle under two ramps is the override cubed, not the override, unless the
@@ -629,7 +1147,16 @@ particle file sets the "ignore size override" flag (128), which keeps it out of 
 and the ramps alike. Its `speed` scales the emitters' and velocity
 initializers' speeds, `movement` gravity, `angularmovement` force, the vortex and turbulence
 speeds, the pull of `controlpointattract` and the frequency of `oscillateposition`, unless the
-particle file sets the "ignore speed override" flag (16). An `eventfollow` child whose bound
+particle file sets the "ignore speed override" flag (16). Its `count` scales the emitter
+rates (not the spacing of the `mapsequence*` initializers, which a Wallpaper Engine probe
+shows unchanged under counts 2 and 0.5), and its `lifetime` scales the
+`lifetimerandom` draw only (a file without one keeps its lifetime). File flag 8 keeps the
+colour override (and its brightness) away from the colour records, 32 keeps `count` and 64
+`lifetime` out. A file that leaves `maxcount` out holds no particles; a child entry without
+it allows 10 instances. An `eventdeath` child starts where its particle died, with
+its own prewarm, and keeps emitting at its own rate: the death that made it does not
+stop it, and it is used again only once its emitters have finished and its particles
+are gone. An `eventfollow` child whose bound
 particle ends stops emitting but keeps the particles it already emitted until they die.
 A file with the `worldspace` flag leaves its live particles where they are in the scene
 when the layer moves, and when it turns or is rescaled. A file that lists several `renderer` entries draws the same
@@ -645,24 +1172,69 @@ pieces between them; the renderers fill the keys a file omits with their own def
 clamping what they read. What a file omits in an operator or initializer takes the
 pixel-canvas defaults in a scene drawn with an orthogonal projection of a size (a scene
 that names none is drawn as the default canvas) and the scene-unit defaults otherwise.
-The known differences, among them the operators
-(`vortex_v2`, `boids`, `remapvalue`) and the renderer `orientation`, `fadealpha` and
-`fadesize` keys that are not implemented, are listed under
-[Known limitations](../testing/renderer.md#known-limitations).
+Each renderer has its own `orientation`, `axis` and `flags`: the exact strings
+`screen`, `upright` and `fixed` select the modes; other strings and numeric values
+use screen mode. A zero axis becomes `(0,1,0)`. Fixed orientation takes the axis
+as forward, while local upright takes it as up. Renderer flag 1 selects worldspace
+orientation; worldspace upright uses world Y. The basis follows the current draw
+model and camera through WE's model-transpose operations, with up and forward
+normalized independently, preserving its nonuniform-scale behavior. A parallel
+upright axis has the native non-finite right/forward result. Rope shaders receive
+the corresponding `ORIENTATION` combo. These values are produced in the existing
+uniform update, independently for renderers that share one particle simulation.
+Like Wallpaper Engine on DirectX 11, a rope whose shader has a geometry stage
+(`genericropeparticle.geom`) is drawn through it: one record per pair of particles
+(or of recorded points), which the stage subdivides into a ribbon of
+`4 + 2 * subdivision` vertices centred on its path and facing the eye. Metal has no
+geometry stage: the shader layer runs the author's geometry program inside the vertex
+stage, once for each vertex of the ribbon. A geometry stage that cannot be translated
+leaves the rope on the shader's own vertex-only path, where the pieces are subdivided
+on the CPU.
+A rope's texture runs once along it for `uvscale` 1: the shader measures its
+coordinate against the number of points divided by `uvscale`, as Wallpaper Engine
+writes it (so `uvscale` 2 repeats slightly more than twice on a short rope). With
+`uvscrolling` the measure is what the rope holds once steady, its file's first
+emitter rate times its average lifetime (`lifetimerandom` bounds, lifetime override
+included) less one, the rate bounded by the frame-rate cap while the rope holds fewer,
+and the texture moves on by one point for each particle that dies, so a growing rope
+unrolls it. `uvsmoothing` draws a rope that has not reached that count as without it;
+once it holds that count the texture is measured against the count less one and
+starts at the newest particle's age over the spacing of births, less one, so it
+slides by one point between births instead of jumping. A scrolling rope trail is
+drawn by its shader's `TRAILSCROLLALPHA` branch, which fades its ends with the
+renderer's `fadealpha` and `fadesize`. A `boxrandom` emitter whose `directions` are
+all zero gives its particles a velocity that is not a number, as Wallpaper Engine does
+(it divides by the zero length of the spread), so they are never seen.
+A rope trail's `fadealpha` and `fadesize` take effect only while its texture scrolls
+(`uvscrolling`): each recorded point's opacity or width is weighted by a sine over
+its age, so both ends of the trail fade. A rope trail uses the thin vertex layout
+unless a sprite trail shares its particles, in which case every renderer of that
+file takes the thick layout, and the first rope trail of a file records the
+history even when another renderer comes first. A trail records a point on its
+first frame and then each time its period (`length / segments`) has run out,
+counted in whole frames as Wallpaper Engine counts it: at 15 frames a second a
+0.25 s period records every fourth frame. The oldest point stays where it was
+recorded, and a prewarm records nothing: afterwards each trail starts from where
+its particle is. The other known differences are
+listed under [Known limitations](../testing/renderer.md#known-limitations).
 
 Text is set the way Wallpaper Engine 2.8.42 sets it. `pointsize` is a size in
 points at 300 dpi, 4.17 pixels to the point, clamped to 1 through 256 and handed to
 FreeType as it is, which rounds the em to whole pixels only for the fonts that ask;
-a glyph's advance is its unhinted advance, kerned against the next glyph of the
-same face from the font's `kern` table and cut to whole pixels (Wallpaper Engine's
-shaper also reads OpenType kerning, ligatures and complex scripts, which this does
-not); the line pitch is the font's line height plus the layer's `spacing` y, its x
+text is shaped with HarfBuzz as Wallpaper Engine shapes it (`hb_ft_font_create`,
+unhinted advances; `artifacts/we-parity/decompiles/G-F1.md`-`G-F3.md`, `G-F14.md`): each
+paragraph is cut into runs of one face (a space, tab or zero-width joiner stays in the run
+before it), each run is shaped on its own with the direction and script HarfBuzz guesses
+for it, so OpenType and AAT kerning, ligatures and complex scripts apply and a run guessed
+right to left is set right to left, but runs keep their logical order (Wallpaper Engine
+has no bidi algorithm); a paragraph is shaped once and its rows are cut from the shaped
+glyphs, an ellipsis candidate is shaped again with U+2026, and a glyph's advance is the
+shaper's advance cut to whole pixels; the line pitch is the font's line height plus the layer's `spacing` y, its x
 adds to every glyph's advance, and a row is as wide as its ink and the pen at each
 glyph start (the advance after the last glyph is not part of it). Five cards that
 Wallpaper Engine saved for text in Arial in the local scenes (with and without
 padding, a lone full stop, a run of dashes, a long run of underscores) come out to
-the pixel; other fonts, scripts and the OpenType-only kerning of many fonts have not
-been compared. A system font is opened through FreeType from its file and not read
+the pixel; other fonts and scripts have not been compared with Wallpaper Engine. A system font is opened through FreeType from its file and not read
 into memory (PingFang is 78 MB), and the face of a font collection is the one the system
 names, by PostScript name, so `PingFang SC` is the Simplified Chinese cut and not the
 Hong Kong cut that starts `PingFang.ttc`. The faces stay open for the next layout, at most
@@ -692,22 +1264,52 @@ fullwidth forms (inferred: they go to the next face, so a string does not mix a 
 fullwidth comma with a left-set ideographic one), PingFang SC for Microsoft YaHei, Apple SD
 Gothic Neo for Malgun Gothic, and Arial Unicode MS last), each opened only when no face
 already held has the glyph, so the list is gone down as far as the text needs, once for
-a layout, and a glyph that none has is skipped. Apple Color Emoji stands for Segoe UI Emoji,
-second in the list: its glyphs are colour bitmaps held at fixed sizes, so the size nearest
-above the layer's em is read and scaled to it, and they are drawn in their own colours into
-the text's picture. The card's colour multiplies them as it does the text, so white text
-shows them as Apple draws them and coloured text tints them; a styled layer (outline, blur,
-shadow) draws them by their shape in its masks, without their colours. Each code point is
-one glyph, so an emoji made of several (a flag, a skin tone, a family joined by zero-width
-joiners) shows as its parts.
+a layout, and a glyph that none has is skipped. That list is Wallpaper Engine's order:
+Arial, Apple Color Emoji for Segoe UI Emoji, Segoe UI's stand-in, the wallpaper assets'
+`fonts/TwemojiMozilla.ttf` (read once a scene and shared by every layer), Apple Symbols,
+PingFang SC, Apple SD Gothic Neo, Arial Unicode MS. A colour glyph (`FT_LOAD_COLOR`; a
+bitmap-only face is drawn from the strike nearest the layer's size, scaled to it) comes
+from the layer's colour atlas in its own colours, through `basefontrgba`.
+
+The glyphs are drawn as Wallpaper Engine draws them (Appendix G of the parity plan): one
+quad per glyph from an atlas, through the shipped `font` shader and its
+`materials/fonts/basefont*.json` materials, in a mesh of three parts the text worker
+rewrites when the text is laid out again (a background or seed quad, the mono or
+distance-field glyphs, then the colour glyphs, `Text/TextGlyphMesh`). A plain layer's glyphs
+come from a coverage atlas (one byte a texel) rendered at the layer's size; a layer with
+`msdf`, an outline, a blur or a drop shadow takes a distance-field atlas instead
+(msdfgen, 32 atlas pixels to the em, a 24-pixel range, 12-pixel margin;
+decompiles/G-F4..F6). Runtime glyph atlases use linear, clamp-to-edge sampling; they are
+generated images, not file textures with anisotropic sampling. An atlas is kept per font,
+size and kind and shared by every layout of it, starting at 512 texels and doubling to
+4096, where it is cleared and the text laid out
+again once (G-F16), so a clock's digits are rendered once. Nothing of it costs a frame while
+the text stays the same: the mesh is an event mesh and Metal grows its storage in place when
+a longer text needs more.
+
+A particle emitter whose `emitterimage` names a text layer samples the glyphs, their
+outline or shadow and the opaque background, including a hidden layer. It requests a
+temporary RGBA map at quarter resolution, bounded at 960 by 540, from the published
+mesh and atlases (`RenderTextEmissionImage`). The map is built only when the emitter
+first needs it, its source dimensions change, or its timed refresh flag requests it;
+the emitter releases it after making its emission table. Other text has no layer
+bitmap, and sampling neither shapes the text again nor uploads an image. A hidden
+text donor still prepares changed text, fonts and point sizes on the text worker,
+so the emitter's next resize or timed refresh sees the new glyphs. This CPU demand
+does not make the hidden layer draw a GPU composite; unreferenced hidden text waits
+until it is shown. The map
+uses the font material's translucent alpha rule: a solid glyph at layer alpha `a`
+has alpha `a * a` before the emitter's 127-byte threshold. Wallpaper Engine emits
+from plain and MSDF text at 0.75 and 0.80, but not 0.70; image donors do not use this
+text-specific opacity rule. Colour glyphs keep their atlas colours; their particle
+output has a synthetic test but has not been compared with a valid reference frame.
 
 An
-`opaquebackground` fills the card's rectangle (not the room a style needs around it) with
-`backgroundcolor` times `backgroundbrightness`, the brightness only in the HDR pipeline as
-the text's is, at the layer's alpha: a layer drawn straight onto the scene draws the fill and
-the glyphs over it as the two quads Wallpaper Engine draws one after the other, and a
-composite starts as the fill's colour at the layer's alpha where it would start as the scene
-behind the card. The colour and the brightness follow a property or script bound to them.
+`opaquebackground` fills the card's rectangle with `backgroundcolor` times
+`backgroundbrightness`, the brightness only in the HDR pipeline as the text's is, at the
+layer's alpha: a layer drawn straight onto the scene draws it as the `fontbackground` quad
+before its glyphs, and a composite starts as the fill's colour at the layer's alpha where it
+would start as the scene behind the card. The colour and the brightness follow a property or script bound to them.
 
 The card is the text plus `padding` on each axis, and the margin is
 there only for a layer that has a visible effect pass, a colour blend, an LED
@@ -736,38 +1338,39 @@ of a block are set within its widest row, each starting at its own pen against i
 left edge, centred or against its right edge. The cursor is over the card where it
 hangs.
 
-Every buffer of a card, an effect's or the composite another layer
-samples, is built at the card's width and height with the fraction cut off, at least 4
-texels, whatever the size of the scene or of the editor's box, as the scene loads and
-again whenever a change of the text gives the card another size in texels (one rebuild
-of the render graph for that change; none while the card only moves, as when its
-alignment flips, or grows by less than a texel; a rebuild is about 0.5 ms of lowering and
-the compile of every pass, 0.6 to 0.9 ms in all on a scene of one layer and 39 to 45 ms on
-a scene of 72 passes, and it drops every uploaded image; a video playing in the scene stays open
-through it, as described under video textures above; a text with a visible effect whose
-card changes in texels every second, proportional digits or a typewriter, makes a heavy
-scene hitch for a few frames once per change). An effect on the text therefore sees
+A card's ping-pong buffers and the composite another layer samples are built at the
+card's width and height with the fraction cut off, at least 4 texels, whatever the size
+of the scene or of the editor's box. A change of the text that changes those dimensions
+resizes the targets under the existing render graph. A card that only moves, as when
+its alignment flips, or grows by less than a texel needs no target resize. An effect on the text sees
 the card as its whole picture: `v_TexCoord` runs 0 to 1 across it and
 `g_Texture0Resolution` is its size, so an offset, skew or scroll given as a fraction of
 the picture moves by that fraction of the card, as in Wallpaper Engine. A card past
 4096 texels on a side is drawn cut off to 4096. An effect's own buffers (`fbos`) that name no
-`width`, `height` or `fit` are the card's size whatever their `scale`; one that names its own
-size keeps that fixed size, as for an image layer, and is not resized with the card.
+`width`, `height` or `fit` follow the card divided by their `scale` (zero means one),
+rounded to a whole texel with a minimum of 4. A buffer with its own width, height or
+fit keeps the size resolved at load, including its scale, when the text changes.
+Both use the renderer's ordinary internal render scale; a half-size text buffer stays
+half the card's raster when that scale changes.
 
 A text layer that draws through a
-visible effect is a composite, as in Wallpaper Engine: the card first holds the scene behind
-it with no alpha, the glyphs are blended into it by their alpha on colour and on alpha, the
-effects run on that and the last pass goes onto the scene by the alpha it holds, so
-black text of alpha `a` through an `opacity` effect stands at `a` cubed of the way to black
-(the glyph pass leaves the alpha squared, `kTextCompositeAlphaExponent`), where text with
-no effect stands at `a`. The card seeds and blends in its own pass, sampling the scene at
-its fragment's screen position, and the last pass of the chain is drawn translucent
-whatever the colour blend mode, "add" included. A layer whose effects a script has all
-switched off is plain text: its glyphs go onto the scene by their alpha alone, drawn
-additively for mode 31, through the passthrough that ends the chain, which is given
-a white colour because the card already carries the layer's colour and alpha. A layer with
-a colour blend keeps the single alpha even with an effect running (the blend's passthrough
-is not known to treat a seeded card as Wallpaper Engine's does). Whether a chain of other
+visible effect, a colour blend other than 0 and 31 (`sub_1401E6F50` sets the composite flag
+for those, decompiles/G-colorblend-composite.md), or in a fogged scene is a composite, as in
+Wallpaper Engine: the card first holds the scene behind it with no alpha (a seed pass, as
+`composelayer_clearalpha`; the opaque background's fill instead when there is one), the
+glyphs are blended into it with the font material's translucent blend (`SRC_ALPHA` /
+`INV_SRC_ALPHA` on colour, and the composition stream's `Material` rule on alpha, so the
+alpha left is the glyph alpha squared), the effects run on that and the last pass goes onto
+the scene by the alpha it holds, depth-tested as the layer's font materials are. Black text
+of alpha `a` through an `opacity` effect, or a colour blend, therefore stands at `a` cubed
+of the way to black (`TextCompositeReach`), where text with no composite stands at `a`. The
+last pass of the chain is drawn translucent whatever the colour blend mode, "add" included.
+In a fogged scene the chain ends in the fogging passthrough (`effectpassthrough_4`), so text
+takes the fog of its place as an image layer does (the WE probe probetext-fog shows it); the
+glyph passes themselves are never fogged (decompiles/G-F11.md). A layer whose effects a script
+has all switched off, and that nothing else makes a composite, draws its glyphs straight onto
+the scene by their alpha, through its own camera, additively for mode 31: the chain is
+skipped, as Wallpaper Engine draws a layer with no effect pass. Whether a chain of other
 effects stands at the same cube is open for some of them; see
 [renderer verification](../testing/renderer.md#known-limitations).
 
@@ -785,44 +1388,37 @@ without a row of its own and without an ellipsis. With
 to exactly the width by spreading the slack over its spaces and tabs; the last row of
 a paragraph, a row a line break ended, a row the row limit cut and a row with no
 space are left alone. A text layer's colour blend mode works as an image layer's
-does, through the passthrough pass or, for mode 31, additively onto the scene while no
-effect of the layer is running (with one running the layer is a composite, above).
-The glyphs' colour is in every texel of the card's texture, the clear ones included, with
-the coverage as the alpha, as Wallpaper Engine draws its glyphs in one colour at their
-coverage: a layer scaled up past its raster, a small pixel font enlarged, samples the
-texture between texels, and an edge then fades from the text's colour to the scene by
-alpha alone. A clear texel left black would dim the colour toward black as the alpha
-falls, and draw a dark ring round every stroke. (The masks of a styled layer, below, are
-coverage and not colour, and are clear outside the glyph.) Two colour blends look at no
-alpha: the shipped `ApplyBlending` makes Darker Color (5) and Lighter Color (10) the
-per-channel min and max of the screen and the card's colour. If Wallpaper Engine draws
-a text through its effects, the colour blend's passthrough among them, from a composite
-seeded with the scene (inferred, not checked against its frames), the card is the screen
-where no glyph is drawn and the blend leaves it alone. The card here is written without
-that seed, so for those two modes its shader mixes the colour it writes with white (5)
-or black (10) by the alpha (the layer's included, as the reference's glyph pass writes
-it), which is what min and max pass the screen by. A card that wrote the text's colour
-there, as the clear texels of the raster hold it, drew a solid box of that colour over
-the whole card in mode 10 and a dark box in mode 5. The other modes mix by alpha and
-need nothing. An edge of those two is therefore the glyph's colour weighed by its alpha
-toward white or black before the min or max, where a seeded composite would weigh it
-toward the screen: at a layer alpha of 1 the stems match a seeded composite, while a
-layer alpha below 1 makes Darker Color text fade out faster (orange at 0.5 over navy
-leaves the scene unchanged) and Lighter Color text slightly darker than one.
-`outline`, `blur` and `dropshadow` give the glyphs Wallpaper Engine's signed-distance
-look: sizes, offsets and the shadow's softness are pixels of the finished text,
-capped as the shader's glyph atlas caps them, the outline and shadow keep their own
-colours while the glyph takes the layer's (with no outline the glyph is the layer's
-colour at every edge; an outline colour is mixed in only for a layer that has an
-outline), and the raster, and the card drawn from it,
-grow by what the style reaches so nothing is cut off at the layout box (the layer's
-size, which places it and answers the cursor, does not change). `msdf` alone only picks
-how that shader rebuilds glyph edges and changes nothing here. The outline and
-shadow colours follow a property or script bound to them while the scene runs. The
-switches, sizes and opacity are baked into the card's pixels, so a property bound to
-one is read once, as the scene loads, with the value the user has chosen, and is held
-at it by a preview of changed properties (a load-only property); a script or a
-timeline on one of them is not followed. `anchor` pins a text
+does: through the passthrough pass over its seeded composite (above), or for mode 31
+additively onto the scene. `outline`, `blur` and `dropshadow` give the glyphs Wallpaper
+Engine's signed-distance look through the font shader's own combos (`OUTLINE_ENABLED`,
+`BLUR_ENABLED`, `DROP_SHADOW_ENABLED`) and render variables (`g_RenderVar0` = range 24, outline,
+blur, shadow sizes in atlas pixels; `g_RenderVar1`/`g_RenderVar2` = outline and shadow colours
+with the shadow's offset; `g_RenderVar3.x` = its opacity; `TextStyleRenderVars`, with the caps
+and floors of `sub_1401B3B60`, decompiles/G-F5.md). Each glyph is its own quad, so a glyph's
+outline is drawn over its neighbour's fill as in Wallpaper Engine, and the card has no room
+around it for the style. The switches pick the combos and the atlas kind: a property bound to
+one is read once, as the scene loads, with the value the user has chosen, and held at it by a
+preview of changed properties (a load-only property). The sizes, opacity and colours are
+uniforms. Changes from a user property or a script bound to the setting update them without
+layout or a render-graph rebuild. Direct `thisLayer` writes also reach the text layer:
+
+| Members | Work when the value changes |
+| --- | --- |
+| `font`, `pointsize`, `horizontalalign`, `verticalalign`, `padding`, `spacing`, `maxwidth`, `maxrows`, `limitwidth`, `limitrows`, `limituseellipsis`, `blockalign` | Schedule layout on the text worker; resize existing targets when needed |
+| `backgroundcolor`, `backgroundbrightness`, `outlinethickness`, `outlinecolor`, `blursize`, `dropshadowsize`, `dropshadowopacity`, `dropshadowoffset`, `dropshadowcolor` | Update uniforms without layout or a graph rebuild |
+| `msdf`, `outline`, `blur`, `dropshadow`, `depthtest`, `opaquebackground` | Change the font material only when its effective variant changes; a different atlas kind also schedules layout, and an opaque background can change padding |
+| `anchor` | Update the draw offset |
+
+A write of the value already held does no work. A coverage/MSDF switch keeps drawing the old
+glyphs until their replacement atlas is published, then installs its matching material and
+requests one graph rebuild. Material objects keep their identity, so existing colour and alpha
+bindings continue to reach them. An opaque background first enabled by a script joins the
+existing alpha driver and keeps its own colour. Getters return vectors for vector members,
+booleans for flags and numbers for sizes; `maxrows` retains its signed integer value.
+An unknown enum word selects Wallpaper Engine's first registry entry: horizontal `left`,
+vertical `center`, anchor `none` and depth test `disabled`.
+
+`anchor` pins a text
 layer to an edge or corner of the area the display shows, on top of its origin and
 alignment: where the display's shape differs from the canvas's (Fill crops it, Fit or a
 pan adds room), the layer is drawn that far along that edge, and a scene shown whole
@@ -849,9 +1445,9 @@ word, a number or `null`, takes the first entry of its registry, which is
 wrapper, is read the same way, which is inferred: nothing seen shows whether Wallpaper Engine's
 loader unwraps one before the enumeration reads it, and no local scene has one). A text object has no `alignment` key, so
 one is not read. A text layer's `brightness` multiplies its colour only in a scene that
-runs the HDR pipeline (`hdr` with `bloom`, the one that also gives it 16-bit targets
-and the `HDR` combo); in any other scene it is 1, so a layer authored at brightness 0
-is drawn in its colour, and a property or script that drives the brightness changes
+runs the HDR pipeline (`hdr` with `bloom` and Ultra or Display HDR post-processing,
+which also gives it 16-bit targets and the `HDR` combo); in any other scene it is 1,
+so a layer authored at brightness 0 is drawn in its colour, and a property or script that drives the brightness changes
 nothing there (the script still runs).
 
 A texture slot a material binds to the now-playing cover (a `usertextures` entry of
@@ -906,7 +1502,17 @@ every pass of a chain writes into its buffers: the chain's last pass also puts t
 layer onto the scene with the layer's own blending, but drawn into the composite it
 replaces, so a translucent result keeps its colour instead of coming out multiplied by
 its alpha, and a data buffer that keeps numbers in all four channels (an audio widget's
-spectrum, which other layers read as bars) keeps them. A layer whose saved size is 0 on
+spectrum, which other layers read as bars) keeps them. A layer without effects leaves its
+picture in that composite with source-over alpha, `As + Ad(1 - As)`, as Wallpaper
+Engine's first chain buffer holds it. Every other translucent draw blends alpha with its
+colour's factors, `As * As + Ad(1 - As)`, as Wallpaper Engine 2.8.0.42 does
+(`sub_140099F60`), and everything a layer with `copybackground` off draws as its
+children, their effects included, keeps the larger alpha, `max(As, Ad)`
+(`sub_1401ECB20`). A passthrough layer with effects (a compose layer, or any model marked
+`passthrough`) draws its children into its own buffer. Alpha is written into layer and
+effect buffers but not into the scene's own colour buffer, unless a material asks with
+`alphawriting: enabled` or the draw keeps the larger alpha; `alphawriting: disabled`
+keeps it out of a buffer too. A layer whose saved size is 0 on
 one axis has a card with no area, which draws nothing on screen; its render targets are
 made at the size an invalid axis takes from the scene's canvas, and when it draws into
 targets of its own (through effects, or into the composite another layer reads) its card
@@ -1091,7 +1697,7 @@ beside it:
 
 | Stage | What happened | Where the engine found out |
 |---|---|---|
-| `unsupported` | The admission check refused the scene (a shader that does not translate for Metal, a video texture it cannot import, an unrecognised render-graph step, ...) | `SelectSceneBackend`, before any renderer exists |
+| `unsupported` | The admission check refused the scene (a video texture it cannot import, an unrecognised render-graph step, ...) | `SelectSceneBackend`, before any renderer exists |
 | `prepare` | The renderer could not be created on the surface (also a surface with no Metal layer, such as an offscreen probe) | `createMetal` |
 | `compile` | The scene's shaders or pipelines did not compile for Metal | `compileRenderGraph` |
 | `frame` | A frame failed after the scene was running | `drawFrame` |
@@ -1147,7 +1753,9 @@ Fit's byte for byte. Both backends build the copy the same way
 (`Presentation/WallpaperBackdrop.hpp`, `MetalWallpaperBackdrop`, `WallpaperBackdropPass`):
 the scene's output is reduced to an image 128 texels on its longer side, a picture longer
 than 1024 texels first to an eighth of its size in an 8-bit image, with bilinear taps at
-most four texels apart; that image is blurred by a separable Gaussian of 3 texels, then
+most four texels apart; HDR linear output keeps that first reduction half-float so
+highlights are not clipped. That uses four additional bytes per first-reduction texel
+but no extra reduction or blur pass. The image is blurred by a separable Gaussian of 3 texels, then
 stretched over the room through a cubic B-spline, darkened to 70% and dithered by one
 8-bit step. A quarter of the source texels is read: reading all of them cost about three
 times the GPU time on a 6880-wide raster (below), and the copy is blurred over about 160
@@ -1202,12 +1810,61 @@ costs 0.1 to 0.17 ms. Earlier versions show what the design avoids: one pass str
 the small image, reading every texel, took about 3.4 ms for the clip, and a first
 reduction reading every texel took about 0.95 ms on the 6880-wide raster against 0.3 ms.
 
+### Wallpaper Engine's per-wallpaper options
+
+Wallpaper Engine adds its own options to every wallpaper's properties (wallpaper64.exe
+`sub_140104B60` builds them; `sub_140181F30` and `sub_140115280` apply them to a scene;
+the decompiles are in `artifacts/we-parity/decompiles/H-P0-2.md` and `D-14.md`). The
+renderer takes them through `owe_scene_wallpaper_set_user_options`:
+
+- **Colour options** (`wec_e`, brightness, contrast, saturation, hue shift, sliders 0–100
+  with 50 unchanged) and the **image filter** (`wcc_v`, a LUT under `materials/lut`, with
+  its strength `wcc_amt`, default 100) are WE's `materials/util/ccsimple.json` pass, drawn
+  after bloom and its combine. Its `params` are `(pow(brs/50, 2), pow(con/50, .5),
+  pow(sa/50, .5), hue/100 − .5)` and `lutparams` is the strength / 100. As in Wallpaper
+  Engine the pass is not built at all while every slider is at 50 or the colour switch is
+  off, and while no filter is chosen or its strength is 0, so an untouched wallpaper costs
+  nothing. A LUT is a volume `.tex`, sampled in three dimensions.
+- **Flip horizontally** mirrors the presented picture and the pointer through the same
+  path as the `horizontal_flip` property.
+- **Mouse parallax** off holds cursor-driven camera parallax in the centre
+  (`g_ParallaxPosition` reads 0.5, 0.5 and no draw moves with the pointer); the scene's
+  own parallax settings are kept for when it is on again.
+- **Playback rate** (10–200 %, default 100) is offered for scenes too: Wallpaper Engine
+  runs a scene's clock at `max(rate / 100, 0.1)`, which the renderer applies as its speed.
+
+Set before a load, the options are in force for the first frame. On a running scene a
+change of a value, the flip, the rate or the parallax switch is applied without loading
+again; turning the colour pass or the filter on or off, or picking another filter, loads
+the scene again because the pass is built when the scene is parsed. A parallax change
+builds the render graph again once.
+
+The bars a fitted picture leaves (Fit, Original size, a scale below 1) take the project's
+`schemecolor` property, followed live, and stay black without one; the blurred backdrop
+fills its bars itself. Wallpaper Engine also clears the scene's own canvas with that
+colour for those alignments; here the scene keeps its authored clear colour inside the
+canvas, because Fit, Original size and scale keep this app's meaning.
+
+The inspector's [**Wallpaper Engine options**](wallpaper-properties.md#wallpaper-engine-options)
+section edits them per wallpaper; a scene loads with the saved ones
+(`WallpaperConfig.engine_options`), and Apply changes loads it again when they change. While
+an edit is pending a scene follows it live through `preview_user_options`, the options'
+counterpart of the live property edits below: the engine skips options a scene already shows
+and a reload shows the saved ones.
+
+Compared with Wallpaper Engine 2.8.0.42 on 3662790108 with brightness 60 set through
+WE's `-control applyProperties` (`artifacts/we-parity/compare-10.1`): the median
+brightness ratio of the solar system's lit pixels is 1.435 in Wallpaper Engine and 1.439
+here (1.44 expected), and the region means move from 12.2 to 17.6 and 17.5.
+
 ### Live property edits
 
 The renderer can take a whole property document on a running scene instead of
 loading the scene again. The document is the project's declared defaults with
 exactly the given values over them, so a property it leaves out is back at the
 declared default whatever the scene loaded with. It adds no per-frame work.
+[Wallpaper Engine's per-wallpaper options](#wallpaper-engines-per-wallpaper-options)
+follow an edit the same way, sent beside the document (`preview_user_options`).
 
 Nearly every property is a live binding and follows on the next tick: layer
 visibility, alpha, colour, origin, scale and angles, camera, clear colour, bloom
@@ -1404,11 +2061,23 @@ size their render targets from one shared function
 (`ResolveScreenBoundRenderTargetSizes`): the default target and every target that
 follows the screen come from the raster, a target the author sized keeps scaling
 with the render scale alone, and the canvas stays the source extent of layout,
-cursor mapping and scripts. The raster is the Fill layout of the canvas over the
-output in whole points, at the display's backing scale, capped at the device's
-largest texture (Native Metal reads Apple's published limit for the GPU family,
-Compatibility the Vulkan device's `maxImageDimension2D`). A perspective scene and a
-plain video do not read it.
+cursor mapping and scripts. SDR uses the Fill layout of the canvas over the
+output in whole points, at the display's backing scale. Native HDR Display output
+uses the physical output rectangle: placement and clipping happen before bloom,
+so its edge samples see the same boundary as Wallpaper Engine. Fit with blurred
+backdrop keeps the full canvas-cover raster that the backdrop samples. Canvas size
+keeps the authored raster. The device's largest texture caps these extents. A
+perspective scene and a plain video do not read this resolution choice.
+
+The HDR placement uses a lazily cached shader projection for each camera that needs
+one; script coordinates and cursor queries keep the authored camera. Local effect
+buffers stay local, while scene-sampling matrices and their inverses use the framed
+projection. Pass-through layers also update their baked scene UVs when placement
+changes: moving cards use their existing geometry upload, fixed cards request the
+existing graph rebuild. These updates run at layout events; idle frames add no card
+scan or relayout. Crossing into or out of Fit with blurred backdrop rebuilds the
+raster before the next draw. The change adds no rendering pass or target and usually
+reduces the HDR framebuffer area compared with the canvas-cover raster.
 
 The choice is process-wide, like [scene render optimisation](#scene-render-optimisation):
 a scene takes it when its render graph is built, and the host hands every open scene
@@ -1681,10 +2350,38 @@ unloads. Confirming a match reads the shared texture back once while the scene
 loads; nothing is added per frame. Render targets, pictures a script writes and
 video frames stay per display, and the Compatibility backend does not share.
 
-An authored `hdr` scene with its bloom on selects the HDR path on either scene
-backend, as in Wallpaper Engine: overbright color is preserved in half-float targets
-and bloom is HDR, while other scenes, an `hdr` scene with bloom off included, keep the
-8-bit path. An image layer's `brightness` multiplies its colour into the `g_Color4` the
+An authored `hdr` scene with bloom on selects the HDR path on either scene backend
+when post-processing is Ultra or Display HDR: overbright color is preserved in
+half-float targets and bloom is HDR. Enabled uses LDR bloom and Disabled draws none;
+other scenes, an `hdr` scene loaded with bloom off included, keep the 8-bit path.
+The HDR combine produces linear color before color correction and camera fade. Native
+Metal presents that color through an sRGB SDR surface, or an extended-linear sRGB
+RGBA16Float surface when Display HDR is selected and the identified display supports
+EDR. The host supplies the physical display ID during creation, window moves and surface
+replacement; an unknown display stays SDR. Current headroom is refreshed on display
+notifications, with no screen lookup or polling in the frame loop. Potential headroom
+allows the EDR surface to start while current headroom is still 1. The existing frame
+clock coalesces updates and keeps paused scenes paused. A surface that returns to SDR
+does not change the saved processing quality. Previews follow their own window's display;
+the lock-screen extension independently restricts its output to SDR. Posters always use
+an 8-bit SDR composition, including for an EDR desktop. This surface contract has
+headless coverage, and was checked once on a built-in XDR panel (M3 Max, macOS 27.2,
+headroom 8 of a potential 16) with corpus scene 3662790108 (`hdr` and `bloom`): a
+ScreenCaptureKit HDR capture of the desktop shows Ultra peaking at 1.0 and Display HDR
+at about 53 in extended linear Display P3, on 0.035 % of the pixels (the sun's core),
+while the median and the 99.9th percentile stay the same, so only overbright detail
+leaves SDR. That run checked radiance, not perceived brightness against Wallpaper
+Engine, which has no HDR output in the reference VM.
+
+An HDR scene that later disables bloom keeps the linear output contract through
+`combine_srgb` before color correction, fade and presentation filtering. This currently
+adds one full-raster conversion draw, one copy and one RGBA16F target (eight bytes per
+pixel) compared with omitting conversion; changing only the final sampler does not
+preserve nonlinear filtering or blending. These resources retire on unload and repeated
+bloom toggles do not grow residency. The already-required HDR bloom combine changes its
+shader without adding passes. An EDR surface's drawable storage is also half-float;
+those system-managed drawables are outside the scene target byte counter.
+An image layer's `brightness` multiplies its colour into the `g_Color4` the
 layer is drawn with in that path only, as in Wallpaper Engine, where every other scene
 counts it as 1; the layer's brightness is not also the `g_Brightness` of a shader that
 declares one, which stays that material's own constant. A brightness bound
@@ -1695,8 +2392,16 @@ pixel, and the cache accounts for that actual size; an eight-level bloom pyramid
 starting at half-resolution holds under a third of a full-size target's pixels. This
 is real post-processing work, not a free brightness adjustment or supersampling, and
 increasing FPS alone cannot substitute for it: the High preset controls only frame
-rate and render scale ([Quality](performance.md#quality)). The HDR bloom's levels,
-sampling and weights are Wallpaper Engine's ([scene
+rate and render scale ([Quality](performance.md#quality)). The pyramid's level count
+follows the physical scene raster after the resolution choice and internal render
+scale. Crossing a size boundary replaces the chain and recomputes extraction strength;
+shrinking retires excess levels and growing can restore them, within the same eight-level
+cap. Sizes that keep the level count retain the existing materials. This happens while
+configuring render targets, without additional steady-state frame work. The HDR bloom's
+sampling and weights are Wallpaper Engine's: level targets use integer division
+with a two-pixel minimum, while sample offsets use the full-raster reciprocal times
+the level's power of two, before allocation rounding or clamping. Ordinary effect
+buffers retain their nearest-integer allocation and four-pixel minimum ([scene
 regressions](../testing/scene-regressions.md)).
 
 On both backends, a layer hidden by its authored visibility or by one of the

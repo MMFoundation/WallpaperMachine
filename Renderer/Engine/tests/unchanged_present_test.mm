@@ -179,7 +179,7 @@ std::filesystem::path WriteStaticScene(const std::filesystem::path& root)
               "attribute vec2 a_TexCoord;\n"
               "varying vec2 v_TexCoord;\n"
               "void main() {\n"
-              "gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+              "gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n"
               "v_TexCoord = a_TexCoord;\n"
               "}\n");
     WriteText(root / "shaders/card.frag",
@@ -281,14 +281,14 @@ std::filesystem::path WriteHistoryScene(const std::filesystem::path& root)
               "attribute vec2 a_TexCoord;\n"
               "varying vec2 v_TexCoord;\n"
               "void main() {\n"
-              "gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+              "gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n"
               "v_TexCoord = a_TexCoord;\n"
               "}\n");
     WriteText(root / "shaders/echo.frag",
               "uniform sampler2D g_Texture0;\n"
               "varying vec2 v_TexCoord;\n"
               "void main() {\n"
-              "gl_FragColor = vec4(texture(g_Texture0, v_TexCoord).rgb, 1.0);\n"
+              "gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0);\n"
               "}\n");
     WriteText(root / "layout.json",
               R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"

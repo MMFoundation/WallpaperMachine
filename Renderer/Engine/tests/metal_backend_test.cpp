@@ -629,14 +629,21 @@ TEST(MetalBlend, EachModeProducesTheAuthoredFactors)
         EXPECT_FALSE(state.alpha_to_coverage);
     }
     {
+        // Wallpaper Engine blends alpha with the colour's factors
+        // (sub_140099F60): As * As + Ad(1 - As).
         const auto state = ToMetalBlendState(BlendMode::Translucent);
         EXPECT_TRUE(state.blending_enabled);
         EXPECT_EQ(state.source_rgb, MetalBlendFactor::SourceAlpha);
         EXPECT_EQ(state.destination_rgb, MetalBlendFactor::OneMinusSourceAlpha);
-        // Coverage is As + Ad(1 - As), so the source alpha factor is ONE.
-        EXPECT_EQ(state.source_alpha, MetalBlendFactor::One);
+        EXPECT_EQ(state.source_alpha, MetalBlendFactor::SourceAlpha);
         EXPECT_EQ(state.destination_alpha, MetalBlendFactor::OneMinusSourceAlpha);
         EXPECT_FALSE(state.alpha_to_coverage);
+        // A layer's own picture into its composite keeps As + Ad(1 - As).
+        const auto over = ToMetalBlendState(BlendMode::Translucent, AlphaBlendRule::SourceOver);
+        EXPECT_EQ(over.source_rgb, MetalBlendFactor::SourceAlpha);
+        EXPECT_EQ(over.destination_rgb, MetalBlendFactor::OneMinusSourceAlpha);
+        EXPECT_EQ(over.source_alpha, MetalBlendFactor::One);
+        EXPECT_EQ(over.destination_alpha, MetalBlendFactor::OneMinusSourceAlpha);
     }
     {
         const auto state = ToMetalBlendState(BlendMode::Additive);
@@ -647,14 +654,15 @@ TEST(MetalBlend, EachModeProducesTheAuthoredFactors)
         EXPECT_EQ(state.destination_alpha, MetalBlendFactor::One);
         EXPECT_FALSE(state.alpha_to_coverage);
     }
-    {
-        // Kept samples are written at full strength; blending as well would
-        // dim every partially covered texel a second time.
-        const auto state = ToMetalBlendState(BlendMode::AlphaToCoverage, 4);
-        EXPECT_FALSE(state.blending_enabled);
-        EXPECT_TRUE(state.alpha_to_coverage);
-        EXPECT_EQ(ToMetalBlendState(BlendMode::AlphaToCoverage, 1),
-                  ToMetalBlendState(BlendMode::Translucent));
+    for (const std::uint32_t samples : { 1u, 4u }) {
+        // Kept samples are written at full strength; blending as well would dim every
+        // partially covered texel a second time. One sample keeps the same state: Metal
+        // thresholds coverage at half the alpha there, as Direct3D does for Wallpaper Engine
+        // (`MetalSceneDraw.MetalSingleSampleAlphaToCoverageThresholdsAtHalf`).
+        const auto state =
+            ToMetalBlendState(BlendMode::AlphaToCoverage, AlphaBlendRule::Material, samples);
+        EXPECT_FALSE(state.blending_enabled) << samples;
+        EXPECT_TRUE(state.alpha_to_coverage) << samples;
     }
 
     for (const auto mode : { BlendMode::Disable, BlendMode::Normal, BlendMode::Translucent,
@@ -665,12 +673,59 @@ TEST(MetalBlend, EachModeProducesTheAuthoredFactors)
     }
 }
 
-TEST(MetalBlend, SceneDrawsAreRasterizedWithoutCulling)
+TEST(MetalBlend, AlphaMaxOnlyForBlendedModes)
 {
-    // Wallpaper Engine rasterizes scene draws without culling, and any
-    // clip-space fold reverses triangle winding. Culling here would silently
-    // eat half a scene.
+    // The children of a layer without copybackground: BlendOpAlpha MAX with
+    // ONE / ONE (sub_1401ECB20, flag 0x10 of sub_140099F60). The colour factors
+    // stay the material's, and an unblended draw is left as it is.
+    for (const auto mode : { BlendMode::Translucent, BlendMode::Additive }) {
+        const auto plain = ToMetalBlendState(mode);
+        const auto state = ToMetalBlendState(mode, AlphaBlendRule::Max);
+        EXPECT_TRUE(state.blending_enabled);
+        EXPECT_EQ(state.alpha_operation, MetalBlendOperation::Max);
+        EXPECT_EQ(state.source_alpha, MetalBlendFactor::One);
+        EXPECT_EQ(state.destination_alpha, MetalBlendFactor::One);
+        EXPECT_EQ(state.rgb_operation, MetalBlendOperation::Add);
+        EXPECT_EQ(state.source_rgb, plain.source_rgb);
+        EXPECT_EQ(state.destination_rgb, plain.destination_rgb);
+    }
+    const auto normal = ToMetalBlendState(BlendMode::Normal, AlphaBlendRule::Max);
+    EXPECT_EQ(normal, ToMetalBlendState(BlendMode::Normal));
+    EXPECT_EQ(normal.alpha_operation, MetalBlendOperation::Add);
+    EXPECT_EQ(normal.source_alpha, MetalBlendFactor::One);
+    EXPECT_EQ(normal.destination_alpha, MetalBlendFactor::Zero);
+    EXPECT_EQ(ToMetalBlendState(BlendMode::Disable, AlphaBlendRule::Max),
+              ToMetalBlendState(BlendMode::Disable));
+    EXPECT_EQ(ToMetalBlendState(BlendMode::AlphaToCoverage, AlphaBlendRule::Max, 4),
+              ToMetalBlendState(BlendMode::AlphaToCoverage, AlphaBlendRule::Material, 4));
+}
+
+TEST(MetalBlend, MultiplyIsDestinationColourOverInverseSourceAlpha)
+{
+    // Device flag 0x100 (sub_14009B100) on a translucent draw: SrcBlend DEST_COLOR,
+    // DestBlend INV_SRC_ALPHA, alpha ONE / ONE (sub_140099F60).
+    const auto state = ToMetalBlendState(BlendMode::Multiply);
+    EXPECT_TRUE(state.blending_enabled);
+    EXPECT_FALSE(state.alpha_to_coverage);
+    EXPECT_EQ(state.rgb_operation, MetalBlendOperation::Add);
+    EXPECT_EQ(state.alpha_operation, MetalBlendOperation::Add);
+    EXPECT_EQ(state.source_rgb, MetalBlendFactor::DestinationColor);
+    EXPECT_EQ(state.destination_rgb, MetalBlendFactor::OneMinusSourceAlpha);
+    EXPECT_EQ(state.source_alpha, MetalBlendFactor::One);
+    EXPECT_EQ(state.destination_alpha, MetalBlendFactor::One);
+    // Inside a layer without copybackground the alpha takes MAX as well.
+    EXPECT_EQ(ToMetalBlendState(BlendMode::Multiply, AlphaBlendRule::Max).alpha_operation,
+              MetalBlendOperation::Max);
+}
+
+TEST(MetalBlend, AMaterialsCullModeAppliesWhateverItsTargetHas)
+{
+    // A pass starts without culling; each draw takes its material's mode, with or
+    // without depth, as WE culls a mirrored `cullmode normal` card on a 2D canvas.
     EXPECT_EQ(kSceneCullMode, MetalCullMode::None);
+    EXPECT_EQ(SceneMetalCullMode(CullMode::None), MetalCullMode::None);
+    EXPECT_EQ(SceneMetalCullMode(CullMode::Back), MetalCullMode::Back);
+    EXPECT_EQ(SceneMetalCullMode(CullMode::Front), MetalCullMode::Front);
 }
 
 // ---------------------------------------------------------------------------
@@ -927,6 +982,33 @@ TEST(MetalShaderReflection, RefusesAResourceOutsideDescriptorSetZero)
     EXPECT_FALSE(error.empty());
 }
 
+TEST(MetalShaderReflection, ReadsTheDeclaredTextureShapeAndAComparisonSampler)
+{
+    // The translator writes `dimension` for anything but a plain 2D texture and `comparison`
+    // only for a comparison sampler; absent keys read as a 2D texture and an ordinary sampler.
+    constexpr std::string_view json = R"({
+      "descriptor_bindings": [
+        { "name": "g_Texture0", "set": 0, "binding": 1, "descriptor": "sampled_image" },
+        { "name": "g_Texture2", "set": 0, "binding": 2, "descriptor": "sampled_image", "dimension": "3d" },
+        { "name": "g_Texture6", "set": 0, "binding": 3, "descriptor": "sampled_image", "dimension": "depth_2d" },
+        { "name": "g_Texture1", "set": 0, "binding": 4, "descriptor": "sampled_image", "dimension": "2d_ms" },
+        { "name": "_we_Sampler_g_Texture6", "set": 0, "binding": 5, "descriptor": "sampler", "comparison": true },
+        { "name": "_we_Sampler_g_Texture0", "set": 0, "binding": 6, "descriptor": "sampler" }
+      ]
+    })";
+    MetalShaderReflection reflection;
+    std::string           error;
+    ASSERT_TRUE(ParseMetalShaderReflection(json, reflection, &error)) << error;
+    ASSERT_EQ(reflection.descriptors.size(), 6u);
+    using Image = MetalDescriptorBinding::Image;
+    EXPECT_EQ(reflection.descriptors[0].image, Image::D2);
+    EXPECT_EQ(reflection.descriptors[1].image, Image::D3);
+    EXPECT_EQ(reflection.descriptors[2].image, Image::Depth2D);
+    EXPECT_EQ(reflection.descriptors[3].image, Image::D2Ms);
+    EXPECT_TRUE(reflection.descriptors[4].comparison);
+    EXPECT_FALSE(reflection.descriptors[5].comparison);
+}
+
 // ---------------------------------------------------------------------------
 // Device-dependent
 
@@ -951,3 +1033,16 @@ TEST(MetalDevice, TranslatedShaderConventionsAreWhatTheBackendBindsAgainst)
     }
 }
 #endif
+
+TEST(MetalMultisampling, ChoosesTheBestSupportedCountWithoutIncreasingTheRequest)
+{
+    EXPECT_EQ(SelectSceneSampleCount(0, 15), 1u);
+    EXPECT_EQ(SelectSceneSampleCount(1, 15), 1u);
+    EXPECT_EQ(SelectSceneSampleCount(2, 15), 2u);
+    EXPECT_EQ(SelectSceneSampleCount(4, 15), 4u);
+    EXPECT_EQ(SelectSceneSampleCount(8, 15), 8u);
+    EXPECT_EQ(SelectSceneSampleCount(8, 1 | 4), 4u);
+    EXPECT_EQ(SelectSceneSampleCount(4, 1 | 2), 2u);
+    EXPECT_EQ(SelectSceneSampleCount(4, 1 | 8), 1u);
+    EXPECT_EQ(SelectSceneSampleCount(8, 1), 1u);
+}

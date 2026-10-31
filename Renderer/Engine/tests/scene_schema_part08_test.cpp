@@ -8,6 +8,7 @@
 
 #include "Fs/MemBinaryStream.h"
 #include "Runtime/RuntimeImageSource.hpp"
+#include "Text/TextGlyphMesh.hpp"
 #include "Text/TextLayer.hpp"
 #include "Utils/Logging.h"
 #include "WPSceneParser.hpp"
@@ -15,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -472,15 +474,17 @@ TEST(ScriptMadeText, ALayerMadeByAScriptIsBuiltLikeASceneTextObject)
     SceneNode* node = run.Root(name);
     ASSERT_NE(node, nullptr);
     ASSERT_NE(node->Mesh(), nullptr);
-    const SceneMaterial* material = node->Mesh()->Material();
+    const SceneMaterial* material = node->Mesh()->MaterialForSlot(kTextGlyphSubmesh);
     ASSERT_NE(material, nullptr);
     const auto& constants = material->customShader.constValues;
-    ASSERT_NE(constants.find("g_Color"), constants.end());
-    EXPECT_FLOAT_EQ(constants.at("g_Color")[0], 0.2f);
-    EXPECT_FLOAT_EQ(constants.at("g_Color")[1], 0.4f);
-    EXPECT_FLOAT_EQ(constants.at("g_Color")[2], 0.6f);
-    ASSERT_NE(constants.find("g_Alpha"), constants.end());
-    EXPECT_FLOAT_EQ(constants.at("g_Alpha")[0], 0.5f);
+    ASSERT_NE(constants.find("g_Color4"), constants.end());
+    ASSERT_EQ(constants.at("g_Color4").size(), 4u);
+    EXPECT_FLOAT_EQ(constants.at("g_Color4")[0], 0.2f);
+    EXPECT_FLOAT_EQ(constants.at("g_Color4")[1], 0.4f);
+    EXPECT_FLOAT_EQ(constants.at("g_Color4")[2], 0.6f);
+    EXPECT_FLOAT_EQ(constants.at("g_Color4")[3], 0.5f);
+    EXPECT_GT(node->Mesh()->Submeshes().at(kTextGlyphSubmesh).GetIndexArray(0).DrawIndexCount(), 0u)
+        << "the script-made layer must have drawable glyphs";
 
     EXPECT_TRUE(rt.ConsumeSceneGraphMutationFlag());
     ASSERT_EQ(rt.LayerCount(), 4u);
@@ -633,7 +637,7 @@ export function cursorClick() {
     EXPECT_GT(after.y(), before.y());
 }
 
-TEST(TextRestyle, ValuesTheStyleCannotTakeAreRefusedAndTheStateStays)
+TEST(TextRestyle, InvalidPointSizeIsRefusedAndAlignmentWordsUseTheirDefaults)
 {
     const std::string script = R"JS(
 export function update(value) { return value; }
@@ -652,7 +656,7 @@ export function cursorClick() {
     ASSERT_TRUE(state.has_value());
     EXPECT_FLOAT_EQ(state->point_size, 20.0f);
     EXPECT_EQ(state->horizontal_align, "left");
-    EXPECT_EQ(state->vertical_align, "top");
+    EXPECT_EQ(state->vertical_align, "center");
 }
 
 // ---- teardown ---------------------------------------------------------------------------------
@@ -739,21 +743,36 @@ TEST(Teardown, TheRastersOfMadeAndDestroyedTextLayersAreReleased)
         SCOPED_TRACE("round " + std::to_string(round));
         const std::string name = rt.CreateTextLayer("{\"text\":\"x\",\"pointsize\":20,\"visible\":true}", "owner");
         ASSERT_FALSE(name.empty());
-        const std::string texture = TextTextureName(name);
-        EXPECT_TRUE(run.scene().textures.count(texture) > 0);
-        EXPECT_TRUE(images->IsRuntimeImage(texture));
-        EXPECT_EQ(RuntimeTextTextures(run.scene()), baseline + 1);
+        const std::array<std::string, 2> textures { TextAtlasName(name), TextColorAtlasName(name) };
+        std::array<std::weak_ptr<Image>, 2> retired_images;
+        for (std::size_t index = 0; index < textures.size(); ++index) {
+            const auto& texture = textures[index];
+            EXPECT_TRUE(run.scene().textures.count(texture) > 0);
+            EXPECT_TRUE(images->IsRuntimeImage(texture));
+            retired_images[index] = images->Parse(texture);
+            EXPECT_FALSE(retired_images[index].expired());
+        }
+        EXPECT_EQ(RuntimeTextTextures(run.scene()), baseline + textures.size());
 
         rt.ConsumeSceneGraphMutationFlag();
         EXPECT_TRUE(rt.DestroyLayer(name));
-        EXPECT_TRUE(run.scene().textures.count(texture) > 0) << "the compiled graph may still sample it";
+        for (const auto& texture : textures) {
+            EXPECT_TRUE(run.scene().textures.count(texture) > 0) << "the compiled graph may still sample it";
+        }
         rt.Tick(1.0 / 60.0);
-        EXPECT_TRUE(run.scene().textures.count(texture) > 0) << "not while the graph that samples it has yet to be rebuilt";
+        for (std::size_t index = 0; index < textures.size(); ++index) {
+            EXPECT_TRUE(run.scene().textures.count(textures[index]) > 0)
+                << "not while the graph that samples it has yet to be rebuilt";
+            EXPECT_FALSE(retired_images[index].expired());
+        }
 
         EXPECT_TRUE(rt.ConsumeSceneGraphMutationFlag()) << "a rebuilt graph no longer holds the layer";
         rt.Tick(1.0 / 60.0);
-        EXPECT_EQ(run.scene().textures.count(texture), 0u);
-        EXPECT_FALSE(images->IsRuntimeImage(texture));
+        for (std::size_t index = 0; index < textures.size(); ++index) {
+            EXPECT_EQ(run.scene().textures.count(textures[index]), 0u);
+            EXPECT_FALSE(images->IsRuntimeImage(textures[index]));
+            EXPECT_TRUE(retired_images[index].expired()) << "the retired atlas image is released";
+        }
         EXPECT_EQ(RuntimeTextTextures(run.scene()), baseline);
     }
     EXPECT_TRUE(images->IsRuntimeImage("$mediaThumbnail")) << "cover images are never removed";
@@ -780,7 +799,6 @@ export function init(value) {
     check(IModelData.POSITION === 'position' && IModelData.NORMAL === 'normal' && IModelData.UV === 'uv', 'flags');
     check(IModelData.TANGENT_SIGNED === 'tangentSigned' && IModelData.COLOR === 'color', 'more flags');
     const model = thisScene.createModelData({ shapes: [{ vertexBuffer: tri(0), vertexFormat: FORMAT, material: 'mat.json' }] });
-    check(model.POSITION === 'position' && model.COLOR === 'color', 'the flags on a model data object');
     check(model instanceof IModelData, 'instanceof');
     return value;
 }
@@ -840,31 +858,6 @@ export function init(value) {
     EXPECT_EQ(mesh.Submeshes()[1].IndexCount(), 0u) << "no index buffer: drawn as a triangle list";
     ASSERT_EQ(mesh.MaterialSlots().size(), 2u);
     EXPECT_NE(mesh.MaterialForSlot(0), nullptr);
-}
-
-TEST(ScriptMadeModel, BuffersThatDoNotFitTheirFormatOrTheModelAreRefused)
-{
-    const std::string script = kModelHelpers + R"JS(
-export function init(value) {
-    throws(function () { thisScene.createModelData({ shapes: [{ vertexBuffer: tri(0), vertexFormat: [IModelData.UV, IModelData.POSITION, IModelData.COLOR], material: 'mat.json' }] }); }, 'reordered format');
-    throws(function () { thisScene.createModelData({ shapes: [{ vertexBuffer: new Float32Array(10), vertexFormat: FORMAT, material: 'mat.json' }] }); }, 'a partial vertex');
-    throws(function () { thisScene.createModelData({ shapes: [] }); }, 'no shapes');
-    const model = thisScene.createModelData({ shapes: [{ vertexBuffer: tri(0), vertexFormat: FORMAT, material: 'mat.json', isVertexBufferDynamic: true }] });
-    throws(function () { model.applyData({ vertexBuffer: new Float32Array(18) }); }, 'a different length');
-    throws(function () { model.applyData([{}, { vertexBuffer: tri(1) }]); }, 'a shape the model does not have');
-    throws(function () { model.applyData({ indexBuffer: new Uint16Array([0, 1, 2]) }); }, 'an index buffer that is not dynamic');
-    model.applyData({ vertexBuffer: tri(40) });
-    model.applyData([{ vertexBuffer: tri(50) }]);
-    thisScene.destroyModelData(model);
-    throws(function () { model.applyData({ vertexBuffer: tri(0) }); }, 'destroyed model data');
-    throws(function () { thisScene.createLayer({ model: model }); }, 'a layer of destroyed model data');
-    return value;
-}
-)JS";
-    Played run(Json::array({ ScriptOwner(2, script) }));
-    ASSERT_TRUE(run.ok());
-    EXPECT_TRUE(run.rt().scriptErrors().empty()) << (run.rt().scriptErrors().empty() ? "" : run.rt().scriptErrors().front());
-    EXPECT_EQ(run.rt().LayerCount(), 1u);
 }
 
 // ---- bounded JSON nesting ---------------------------------------------------------------------

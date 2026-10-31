@@ -225,13 +225,37 @@ var shared = {
   }
 };
 
-var store = new Map();
+// Wallpaper Engine's LocalStorageSet/Get (scenescript64.dll sub_181658680 / sub_181658A80): the key
+// must be a string, the value is JSON.stringify'd without a replacer at the call and JSON.parse'd at
+// each get (a fresh copy; a Vec3 comes back as a plain {x,y,z}), an undefined value deletes, and the
+// location is global only for the word 'global'. The text lives in SceneScriptStorage, which also
+// refuses a location over WE's 100,000 bytes (wallpaper64.exe sub_14018E3A0).
+function storageLocation(l) { return l === 'global' ? 'global' : 'screen'; }
+function storageKey(k) {
+  if (typeof k !== 'string') throw new TypeError('LocalStorageSet key not a string.');
+  return k;
+}
 var localStorage = {
-  get: function (key) { return store.get(String(key)); },
-  set: function (key, value) { store.set(String(key), value); return value; },
-  delete: function (key) { store.delete(String(key)); },
-  remove: function (key) { store.delete(String(key)); },
-  clear: function () { store.clear(); }
+  LOCATION_GLOBAL: 'global',
+  LOCATION_SCREEN: 'screen',
+  get: function (key, location) {
+    var text = n.storage('get', storageLocation(location), storageKey(key));
+    return text === undefined ? undefined : JSON.parse(text);
+  },
+  set: function (key, value, location) {
+    var k = storageKey(key), loc = storageLocation(location);
+    var text = value === undefined ? undefined : JSON.stringify(value);
+    if (text === undefined) { n.storage('delete', loc, k); return value; }
+    if (! n.storage('set', loc, k, text)) throw new Error('LocalStorageSet failed, possibly out of memory.');
+    return value;
+  },
+  delete: function (key, location) { return !! n.storage('delete', storageLocation(location), storageKey(key)); },
+  // Ours only (I9): an alias some scenes call.
+  remove: function (key, location) { return !! n.storage('delete', storageLocation(location), storageKey(key)); },
+  clear: function (location) {
+    if (location === undefined) { n.storage('clear', 'global'); n.storage('clear', 'screen'); }
+    else n.storage('clear', storageLocation(location));
+  }
 };
 
 var noop = function () {};

@@ -92,6 +92,10 @@ pub struct NativeVideoWallpaperDesc {
     pub muted: bool,
     pub scaling_mode: ScalingMode,
     pub scaling_factor: f64,
+    /// Wallpaper Engine's per-wallpaper options as saved; a mirror shows its source's.
+    pub engine_options: crate::config::EngineOptionsCfg,
+    /// The project's `schemecolor` property, the border colour in Fit-style modes.
+    pub border_color: Option<[f32; 3]>,
 }
 
 /// What plays the video on one display, and whether it can.
@@ -589,6 +593,8 @@ impl ActivationInputs<'_> {
                     .map(crate::config::wallpaper::MonitorRender::parse_scaling_mode)
                     .unwrap_or_default(),
                 scaling_factor: render.map_or(1.0, |render| render.scaling_factor),
+                engine_options: slot.wallpaper.engine_options.clone(),
+                border_color: self.scheme_color(slot.wallpaper_id, slot.wallpaper),
                 display: slot.display,
             });
         }
@@ -628,6 +634,18 @@ impl ActivationInputs<'_> {
         }
 
         Ok(videos)
+    }
+
+    /// The value of the project's `schemecolor` property for this wallpaper (its override, else
+    /// the project default) when it is a colour. Wallpaper Engine packs it as a video's border
+    /// colour (`sub_1400FFCB0`); absent means black.
+    pub fn scheme_color(&self, wallpaper_id: &str, wallpaper: &WallpaperConfig) -> Option<[f32; 3]> {
+        let model = self.project_models.get(wallpaper_id)?;
+        let property = model.properties.iter().find(|property| property.id == "schemecolor")?;
+        match property.effective_value(&model.override_values(&wallpaper.property_overrides)) {
+            PropertyValue::ColorRgb(red, green, blue) => Some([red, green, blue]),
+            _ => None,
+        }
     }
 
     fn web_model(&self, wallpaper_id: &str) -> Option<&ProjectModel> {

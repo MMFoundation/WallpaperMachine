@@ -33,11 +33,18 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
     private var looper: AVPlayerLooper?
     private var avLayer: AVPlayerLayer?
     private var observations: [NSKeyValueObservation] = []
+    private var looperObservation: NSKeyValueObservation?
+    private var compositionTask: Task<Void, Never>?
+    private var avAsset: AVURLAsset?
+    private var loopRange = CMTimeRange.invalid
     private var webM: WebMPlayer?
     private var muted = true
     private var paused = false
     private var stopped = false
     private var ready = false
+    /// Parameters update in place; the identity keeps the system's direct playback path.
+    private let colorPipeline = VideoColorPipeline()
+    private var options = WallpaperEngineOptions.identity
 
     init(request: WallpaperPreviewRequest) {
         self.request = request
@@ -48,9 +55,10 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
         view = content
         content.resized = { [weak self] bounds, scale in
             guard let self, !self.stopped else { return }
-            self.avLayer?.frame = bounds
+            self.placeAVLayer()
             self.webM?.relayout(bounds: bounds, backingScale: scale)
         }
+        if let options = request.engineOptions { show(options) }
     }
 
     func start() async throws {
@@ -64,7 +72,7 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
             let range = await NativeVideoPlayer.loopRange(of: asset)
             try Task.checkCancellation()
             guard !stopped else { throw CancellationError() }
-            playWithAVFoundation(asset, looping: range)
+            try await playWithAVFoundation(asset, looping: range)
             return
         }
         // AVFoundation never opens Matroska or WebM; the app's reader may.
@@ -77,19 +85,25 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
 
     /// Loops `range` of the clip, which the desktop player bounds the same way: its picture,
     /// not the end of its audio.
-    private func playWithAVFoundation(_ asset: AVURLAsset, looping range: CMTimeRange) {
+    private func playWithAVFoundation(_ asset: AVURLAsset, looping range: CMTimeRange) async throws {
         let player = AVQueuePlayer()
         player.isMuted = muted
         player.volume = request.volume
         player.preventsDisplaySleepDuringVideoPlayback = false
         let item = AVPlayerItem(asset: asset)
+        try await colorPipeline.configure(item)
+        try Task.checkCancellation()
+        guard !stopped else { throw CancellationError() }
+        player.defaultRate = Float(max(10, min(options.playbackRate, 200)) / 100)
+        avAsset = asset
+        loopRange = range
         looper = AVPlayerLooper(player: player, templateItem: item, timeRange: range)
         let layer = AVPlayerLayer(player: player)
-        layer.frame = content.bounds
         layer.videoGravity = Self.gravity(for: request.scalingMode)
         content.layer?.addSublayer(layer)
         avPlayer = player
         avLayer = layer
+        placeAVLayer()
         observations = [
             layer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
                 guard layer.isReadyForDisplay else { return }
@@ -101,15 +115,48 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
                 Task { @MainActor in self?.failed(detail) }
             },
         ]
-        if let looper {
-            observations.append(
-                looper.observe(\.status, options: [.new]) { [weak self] looper, _ in
-                    guard looper.status == .failed else { return }
-                    let detail = looper.error?.localizedDescription ?? "the clip could not be looped"
-                    Task { @MainActor in self?.failed(detail) }
-                })
-        }
+        observeLooper()
         if !paused { player.play() }
+    }
+
+    private func observeLooper() {
+        looperObservation = looper?.observe(\.status, options: [.new]) { [weak self] looper, _ in
+            guard looper.status == .failed else { return }
+            let detail = looper.error?.localizedDescription ?? "the clip could not be looped"
+            Task { @MainActor in
+                guard let self, self.looper === looper else { return }
+                self.failed(detail)
+            }
+        }
+    }
+
+    private func reloadComposition() {
+        guard let asset = avAsset, let player = avPlayer, !stopped else { return }
+        compositionTask?.cancel()
+        compositionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let item = AVPlayerItem(asset: asset)
+            do { try await self.colorPipeline.configure(item) }
+            catch is CancellationError { return }
+            catch { self.failed(error.localizedDescription); return }
+            guard !self.stopped, !Task.isCancelled, self.avPlayer === player else { return }
+            let time = player.currentTime()
+            player.pause()
+            self.looper?.disableLooping()
+            player.removeAllItems()
+            let looper = AVPlayerLooper(player: player, templateItem: item, timeRange: self.loopRange)
+            self.looper = looper
+            self.observeLooper()
+            self.compositionTask = nil
+            if time.isNumeric {
+                player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+                    Task { @MainActor in
+                        guard let self, !self.stopped, self.looper === looper else { return }
+                        if !self.paused { player.play() }
+                    }
+                }
+            } else if !self.paused { player.play() }
+        }
     }
 
     private func playWithWebM(_ file: WebMFile) {
@@ -120,6 +167,7 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
         player.setScaling(mode, factor: 1, pan: .centered)
         player.attach(to: content.layer ?? CALayer())
         player.relayout(bounds: content.bounds, backingScale: content.window?.backingScaleFactor ?? 1)
+        show(options)
         player.onFailure = { [weak self] detail, _ in self?.failed(detail) }
         player.onReadyForDisplay = { [weak self] in self?.becameReady() }
         player.start()
@@ -139,7 +187,7 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
     func setPaused(_ paused: Bool) throws {
         self.paused = paused
         if let avPlayer {
-            if paused { avPlayer.pause() } else { avPlayer.play() }
+            if paused { avPlayer.pause() } else { avPlayer.play() }  // play() honours defaultRate
         }
         webM?.setPaused(paused)
     }
@@ -153,12 +201,48 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
     /// A video has no properties to follow.
     func applyProperties(_ json: String) throws {}
 
+    /// A video's Wallpaper Engine options follow the draft in place: rate, flip, colour and filter.
+    func applyEngineOptions(_ options: WallpaperEngineOptions) throws { show(options) }
+
+    private func show(_ options: WallpaperEngineOptions) {
+        guard !stopped else { return }
+        self.options = options
+        let lut = options.isFilterIdentity ? nil : VideoLutLoader.load(
+            request.assetsURL.appendingPathComponent("materials/lut/\(options.imageFilter).tex"))
+        let wasFiltered = VideoColorPipeline.needsComposition(colorPipeline.current)
+        let parameters = VideoColorPipeline.Parameters(options: options, lut: lut)
+        colorPipeline.update(parameters)
+        let rate = Float(max(10, min(options.playbackRate, 200)) / 100)
+        avPlayer?.defaultRate = rate
+        if let avPlayer, avPlayer.rate > 0 { avPlayer.rate = rate }
+        placeAVLayer()
+        webM?.setEngineOptions(options, lut: lut, borderColor: nil)
+        if wasFiltered != VideoColorPipeline.needsComposition(parameters) { reloadComposition() }
+    }
+
+    /// Bounds and position, then the flip about the centre.
+    private func placeAVLayer() {
+        guard let avLayer else { return }
+        let bounds = content.bounds
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        avLayer.setAffineTransform(.identity)
+        avLayer.bounds = CGRect(origin: .zero, size: bounds.size)
+        avLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        avLayer.setAffineTransform(options.flipHorizontal ? CGAffineTransform(scaleX: -1, y: 1) : .identity)
+        CATransaction.commit()
+    }
+
     func stop() {
         guard !stopped else { return }
         stopped = true
         onReady = nil
         onFailure = nil
         content.resized = nil
+        compositionTask?.cancel()
+        compositionTask = nil
+        avAsset = nil
+        looperObservation = nil
         observations.removeAll()
         avPlayer?.pause()
         looper?.disableLooping()

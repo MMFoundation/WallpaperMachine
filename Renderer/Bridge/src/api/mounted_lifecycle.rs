@@ -1393,6 +1393,38 @@ impl EngineFacade for ControlledEngine {
     ) -> EngineFuture<()> {
         unsupported("apply_system_media_artwork")
     }
+    /// Answers like the engine does for a live scene of the wallpaper and for
+    /// one that draws another, without recording anything: the controlled
+    /// scenarios observe property documents, not the per-wallpaper options.
+    fn preview_user_options(
+        &self,
+        handle: SceneHandle,
+        scene_path: String,
+        options: wallpaper_core::project::SceneUserOptions,
+    ) -> EngineFuture<wallpaper_core::PropertyPreview> {
+        let engine = self.clone();
+        Box::pin(async move {
+            options.validate()?;
+            let data = engine.inner.data.lock().unwrap();
+            if !data.rows.iter().any(|row| row.handle == Some(handle)) {
+                return Err(EngineError::InvalidInput(format!(
+                    "user options preview target is not a live controlled scene: {handle:?}"
+                )));
+            }
+            if !direct_template(&data, handle).is_some_and(|template| template.scene_path == scene_path) {
+                return Ok(wallpaper_core::PropertyPreview::OtherWallpaper);
+            }
+            Ok(wallpaper_core::PropertyPreview::Shown)
+        })
+    }
+    /// The controlled engine has no scene files: no scene offers the
+    /// mouse-parallax switch.
+    fn read_scene_traits(
+        &self,
+        _: &std::path::Path,
+    ) -> Result<wallpaper_core::SceneTraits, EngineError> {
+        Ok(wallpaper_core::SceneTraits::default())
+    }
     fn preview_property_override(
         &self,
         handle: SceneHandle,

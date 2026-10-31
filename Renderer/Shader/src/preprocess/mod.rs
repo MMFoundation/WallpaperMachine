@@ -413,7 +413,9 @@ fn chain_text(stack: &[StackEntry], offending: &str) -> String {
 
 impl Engine<'_> {
     fn start(&mut self, combos: &[Combo]) {
-        for (name, value) in [("GLSL", "1"), ("HLSL", "1"), ("HLSL_SM40", "1")] {
+        // Wallpaper Engine 2.8.0.42 prepends exactly `#define HLSL 1` and `#define HLSL_SM40 1`
+        // (`sub_1400D5070`); `GLSL` stays undefined (probe T5).
+        for (name, value) in [("HLSL", "1"), ("HLSL_SM40", "1")] {
             self.env.insert(name.to_string(), value.to_string());
         }
         for combo in combos {

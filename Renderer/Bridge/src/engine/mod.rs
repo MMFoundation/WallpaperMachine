@@ -6,8 +6,10 @@ mod controlled_support;
 mod facade;
 mod facade_readiness;
 mod load_journal;
+pub mod lut_catalog;
 mod render_settings;
 pub(crate) mod revalidate;
+pub mod scene_traits;
 
 pub use activation::{ActivationInputs, RenderBackendSurvey, VideoBackendRouting};
 pub use activation_remaining::WallpaperAssignmentExt;

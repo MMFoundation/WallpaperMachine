@@ -62,6 +62,8 @@ fn sample_reflection() -> Reflection {
             descriptor: DescriptorKind::UniformBuffer,
             stages: StageMask::BOTH,
             count: 1,
+            image: Default::default(),
+            comparison: false,
         }],
         uniform_blocks: vec![UniformBlock {
             name: "GlobalUniforms".into(),

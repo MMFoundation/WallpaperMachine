@@ -36,7 +36,7 @@ struct DesktopSettingsSection: View {
     id: "desktop.live-property-edits", section: .desktop, group: desktop,
     title: "Show property edits on the desktop as I make them",
     note:
-      "While you edit a wallpaper’s properties, your displays follow each change before you press Apply changes, and Revert puts the saved look back. Pictures and options that switch an effect on or off still wait for Apply changes. The lock screen and the Mission Control picture keep the saved look until you apply."
+      "While you edit a wallpaper’s properties, your displays follow each change before you press Apply changes, and Revert puts the saved look back. Pictures, options that switch an effect on or off, and a video’s Wallpaper Engine options still wait for Apply changes. The lock screen and the Mission Control picture keep the saved look until you apply."
   )
 
   static let lockScreenSwitch = SettingsItem(

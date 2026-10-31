@@ -66,6 +66,9 @@ public:
     [[nodiscard]] const std::string& getString() const;
     [[nodiscard]] UnderlyingType     getType() const;
     [[nodiscard]] virtual std::string toString() const;
+    /// Whether `choice` is the choice `wanted` names: text compared as text, a number as a
+    /// number when `wanted` reads as one (`2` and `2.0` are the same choice).
+    [[nodiscard]] static bool ChoiceMatches(const DynamicValue& choice, const std::string& wanted);
     /// Advances every time a different value is stored; consumers compare it to detect change.
     uint64_t Generation() const noexcept { return m_generation; }
 

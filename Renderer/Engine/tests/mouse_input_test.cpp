@@ -1147,6 +1147,75 @@ function cursorLeave() { scene.getObject('marker').visible = false; }
     EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
 }
 
+// Wallpaper Engine's cursor ray (sub_1401EDB20) reads an image layer's `perspective` flag
+// (+288 & 0x80) on every event: set, the ray goes through the scene's perspective camera,
+// else through the scene's own. A script that writes the flag moves where the layer is hit
+// at once, whatever camera the layer was built with.
+TEST(MouseInput, APerspectiveFlagWriteMovesWhereTheLayerIsHit) {
+    Scene scene;
+    auto  runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
+        .canvas_width = 1920, .canvas_height = 1080 });
+    runtime->AttachScene(&scene);
+    auto lens_node = std::make_shared<SceneNode>();
+    lens_node->SetTranslate(linalg::Vector3f(960, 540, 1000));
+    auto lens = std::make_shared<SceneCamera>(16.0f / 9.0f, 5.0f, 15000.0f, 60.0f);
+    lens->AttatchNode(lens_node);
+    lens->Update();
+    scene.cameras["global_perspective"] = lens;
+    auto canvas_node = std::make_shared<SceneNode>();
+    canvas_node->SetTranslate(linalg::Vector3f(960, 540, 0));
+    auto canvas = std::make_shared<SceneCamera>(1920, 1080, -5000.0f, 5000.0f);
+    canvas->AttatchNode(canvas_node);
+    canvas->Update();
+    scene.cameras["global"] = canvas;
+    scene.activeCamera      = canvas.get();
+
+    // A 100 by 100 card left of centre: the lens draws it further right than the canvas does.
+    auto card = std::make_shared<SceneNode>();
+    card->SetTranslate(linalg::Vector3f(300, 540, 0));
+    runtime->RegisterNode("card", card.get());
+    runtime->RegisterNodeSize("card", linalg::Vector2f(100, 100));
+    runtime->RegisterImageLayerFlags("card", card.get(), SceneRuntimeContext::ImageLayerFlags {}, {});
+    auto marker = std::make_shared<SceneNode>();
+    marker->SetVisible(false);
+    runtime->RegisterNode("marker", marker.get());
+    runtime->RegisterSceneScript(
+        R"JS(
+function cursorEnter() { scene.getObject('marker').visible = true; }
+function cursorLeave() { scene.getObject('marker').visible = false; }
+)JS",
+        "card");
+    runtime->Tick(0.01);
+
+    bool       was_in_window = false;
+    const auto point_to      = [&](float x, float y) {
+        runtime->SetCursorInput(x, y);
+        runtime->SetCursorEnter(true);
+        was_in_window = runtime->DispatchCursorFrameEvents(was_in_window);
+        runtime->Tick(0.01);
+        return marker->Visible();
+    };
+    // Where each camera draws a point 45 units right of the card's centre, 5 inside its edge.
+    const float on_canvas = 345.0f / 1920.0f;
+    const linalg::Vector4d clip = lens->GetViewProjectionMatrix() * linalg::Vector4d(345.0, 540.0, 0.0, 1.0);
+    const float through_lens = static_cast<float>(0.5 + 0.5 * clip.x() / clip.w());
+    ASSERT_GT(through_lens * 1920.0f, 350.0f) << "the lens point is off the card as the canvas draws it";
+
+    EXPECT_TRUE(point_to(on_canvas, 0.5f)) << "a flat layer is hit where the canvas draws it";
+    EXPECT_FALSE(point_to(through_lens, 0.5f));
+
+    ASSERT_TRUE(runtime->SetNodeLayerFlag("card", "perspective", 1.0));
+    EXPECT_TRUE(point_to(through_lens, 0.5f)) << "with the flag, where the lens draws it";
+    EXPECT_FALSE(point_to(0.135f, 0.5f)) << "and no longer near its canvas left edge";
+
+    // A layer built with the flag, which a script clears, is hit through the canvas again.
+    card->SetCamera("global_perspective");
+    ASSERT_TRUE(runtime->SetNodeLayerFlag("card", "perspective", 0.0));
+    EXPECT_TRUE(point_to(0.135f, 0.5f));
+    EXPECT_FALSE(point_to(through_lens, 0.5f));
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
 // A particle system's mouse control point follows the cursor in the canvas
 // plane. The far-plane point scripts read is thousands of units deep in a
 // perspective scene, nowhere near where a particle is drawn.
