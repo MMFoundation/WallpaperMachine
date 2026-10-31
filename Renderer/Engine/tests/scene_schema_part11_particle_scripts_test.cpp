@@ -122,8 +122,10 @@ TEST(ParticleScripts, PauseKeepsTheLiveParticlesStopClearsThemAndPlayResumes)
     const std::size_t before = stage.Alive();
     ASSERT_GT(before, 0u);
 
+    // As Wallpaper Engine's IParticleSystem answers: a paused system is not playing, though
+    // its live particles still age and move.
     stage.Run("var s = thisScene.getLayer('sparks'); s.pause(); "
-              "if (!s.isPlaying()) throw new Error('paused particles are still simulated');");
+              "if (s.isPlaying()) throw new Error('a paused system reports that it plays');");
     stage.Frame();
     const std::size_t paused = stage.Alive();
     stage.Frame();
