@@ -1554,15 +1554,44 @@ final class DesktopWallpaperTests: XCTestCase {
         try await waitUntil { rig.workspace.writes.count > written }
         XCTAssertNotEqual(rig.workspace.pictures[one], original("one"))
 
-        // The same windows again: nothing is asked and nothing written.
+        // The same windows again, as after every host pass: nothing is asked, and the desktops
+        // and the journal are not even looked at.
+        var passes = 0
+        rig.workspace.didEnumerate = { passes += 1 }
         let settled = rig.workspace.writes.count
         rig.sync.surfacesChanged()
         XCTAssertEqual(rig.asked(video), 1)
         XCTAssertEqual(rig.workspace.writes.count, settled)
+        XCTAssertEqual(passes, 0)
 
         // The wallpaper is taken off the display. Its window closes after the snapshot that
         // said so, and the display shows the user's own picture again at once.
         rig.shown = []
+        rig.sync.surfacesChanged()
+        XCTAssertEqual(rig.workspace.pictures[one], original("one"))
+    }
+
+    @MainActor
+    func testAPictureThatCouldNotBePutBackIsTriedAgainByTheNextHostPass() async throws {
+        let rig = try OpeningWindowsRig(root: root, settleDelays: [])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        let video = CAMetalLayer()
+        rig.shown = [video]
+        rig.sync.refresh()
+        let written = rig.workspace.writes.count
+        post(Data([1]), layer: video, center: rig.frames)
+        try await waitUntil { rig.workspace.writes.count > written }
+
+        // The window closes, and macOS refuses the user's picture through every retry.
+        rig.workspace.failures = [one]
+        rig.shown = []
+        rig.sync.surfacesChanged()
+        try await Task.sleep(for: .milliseconds(800))
+        XCTAssertNotEqual(rig.workspace.pictures[one], original("one"))
+
+        // The next host pass finds the same windows, and still puts the picture back.
+        rig.workspace.failures = []
         rig.sync.surfacesChanged()
         XCTAssertEqual(rig.workspace.pictures[one], original("one"))
     }

@@ -260,7 +260,7 @@ final class DesktopWallpaperSync {
     private var awaitingFrames = Set<ObjectIdentifier>()
     /// The layout of the last engine snapshot this sync saw, nil before the first.
     private var lastLayout: DesktopPosterLayout?
-    /// The surfaces, and their displays, the last pass over the desktops was made for.
+    /// The surfaces, and their displays, the last pass over the desktops that succeeded was made for.
     private var synchronizedSurfaces: [ObjectIdentifier: String] = [:]
     private var periodic: Task<Void, Never>?
     /// Whether a surface's wallpaper is presenting, so a later capture can show
@@ -672,7 +672,6 @@ final class DesktopWallpaperSync {
     private func synchronizeAllSpaces(attempt: Int = 0) {
         let surfaces = surfaces()
         let keys = Set(surfaces.map { ObjectIdentifier($0.layer) })
-        synchronizedSurfaces = Dictionary(surfaces.map { (ObjectIdentifier($0.layer), $0.display) }) { first, _ in first }
         posters = posters.filter { keys.contains($0.key) }
         posterScopes = posterScopes.filter { keys.contains($0.key) }
         frameDigests = frameDigests.filter { keys.contains($0.key) }
@@ -711,6 +710,9 @@ final class DesktopWallpaperSync {
         do {
             try ledger.synchronize(posters: byDisplay, liveDisplays: Set(surfaces.map(\.display)).union(retained),
                                    targetSpaces: targetSpaces, spacePosters: spacePosters)
+            // Only now: a display whose picture could not be put back is tried again by the next
+            // change of windows, even one that leaves them as they are.
+            synchronizedSurfaces = Dictionary(surfaces.map { (ObjectIdentifier($0.layer), $0.display) }) { first, _ in first }
         } catch {
             report(error)
             // Retry native asynchronous acknowledgement/Space creation races,

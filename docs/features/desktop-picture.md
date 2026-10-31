@@ -171,7 +171,8 @@ Each poster is a second decode of a few frames and is counted as
   settle captures are still under way, so the menu bar and Mission Control do not wait
   for them. A display left without a window gets the user's own picture back at once,
   not at the next snapshot. A pass that leaves the windows as they were asks for
-  nothing and writes nothing, and a settled poster stays.
+  nothing, does not look at the desktops and keeps a settled poster, unless the last
+  look could not put a picture back: then it tries again.
 - **Periodically**, every `periodicRefreshInterval` (300 s), while the setting is on.
 - Settling and periodic captures ask only displays whose wallpaper is presenting
   (`canCapture`: the presentation policy has not suspended playback globally or for
