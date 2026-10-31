@@ -4,6 +4,7 @@
 
 #include "Audio/include/Audio/AudioResponseService.h"
 #include "Runtime/SceneRuntimeContext.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneNode.h"
 #include "Scene/include/Scene/SceneCamera.h"
@@ -17,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -126,8 +128,8 @@ TEST(ShaderUpdaterFrames, AScriptPinsATextureAnimationFrame)
         ASSERT_NE(result, nullptr) << "frame " << frame;
         ASSERT_FLOAT_EQ(result->getFloat(), 1.0f) << "frame " << frame;
     }
-    ASSERT_TRUE(node.TextureFrame().has_value());
-    EXPECT_EQ(*node.TextureFrame(), 1.0);
+    EXPECT_TRUE(node.SheetDetached());
+    EXPECT_EQ(rt.NodeTextureAnimationFrame("sheet"), 1.0);
     EXPECT_EQ(rt.scriptErrorCount(), 0u);
 
     // Pinning frame zero reads back zero.
@@ -142,27 +144,25 @@ TEST(ShaderUpdaterFrames, AScriptPinsATextureAnimationFrame)
     EXPECT_FLOAT_EQ(result->getFloat(), 0.0f);
 }
 
-TEST(ShaderUpdaterFrames, ASpriteTablePinsAFrameAndClampsTheIndex)
+TEST(ShaderUpdaterFrames, ASpriteTableShowsACommandedFrameAndClampsTheIndex)
 {
-    auto sheet = [] {
-        SpriteAnimation animation;
-        animation.AppendFrame(SpriteFrame { .imageId = 0, .frametime = 0.1f });
-        animation.AppendFrame(SpriteFrame { .imageId = 1, .frametime = 0.1f });
-        return animation;
-    };
+    SpriteAnimation animation;
+    animation.AppendFrame(SpriteFrame { .imageId = 0, .frametime = 0.1f });
+    animation.AppendFrame(SpriteFrame { .imageId = 1, .frametime = 0.1f });
 
-    SpriteAnimation animation = sheet();
-    EXPECT_EQ(animation.SetFrame(1).imageId, 1);
-    EXPECT_EQ(animation.SetFrame(-1).imageId, 0) << "below the first frame pins the first";
-    EXPECT_EQ(animation.SetFrame(100).imageId, 1) << "beyond the table pins the last";
-    EXPECT_EQ(animation.SetFrame(std::numeric_limits<double>::quiet_NaN()).imageId, 0);
-    EXPECT_EQ(animation.SetFrame(1.9).imageId, 1) << "fractions floor";
-    EXPECT_EQ(animation.SetFrame(0.9).imageId, 0);
+    animation.Command(1, false, 1);
+    EXPECT_EQ(animation.GetCurFrame().imageId, 1);
+    animation.Command(2, false, -1);
+    EXPECT_EQ(animation.GetCurFrame().imageId, 0) << "below the first frame shows the first";
+    animation.Command(3, false, 100);
+    EXPECT_EQ(animation.GetCurFrame().imageId, 1) << "beyond the table shows the last";
+    animation.Command(3, false, 0);
+    EXPECT_EQ(animation.GetCurFrame().imageId, 1) << "a command is applied once";
 
-    // After pinning, the clock starts a frame's full length from there.
-    animation.SetFrame(0);
-    EXPECT_EQ(animation.GetAnimateFrame(0.05).imageId, 0);
-    EXPECT_EQ(animation.GetAnimateFrame(0.1).imageId, 1);
+    // After a frame command the layer's own frame runs a full frame from there.
+    animation.Command(4, false, 0);
+    EXPECT_EQ(animation.Present(0.05, true, 0.05).imageId, 0);
+    EXPECT_EQ(animation.Present(0.1, true, 0.1).imageId, 1);
 }
 
 // ---- compose layer matrices --------------------------------------------------------------------
@@ -278,6 +278,108 @@ TEST(ShaderUpdaterMatrices, AnotherMaterialNameUsesTheNodesOwnCameraAndRenderTra
     float widest = 0.0f;
     for (std::size_t i = 0; i < composed.size(); ++i) widest = std::max(widest, std::abs(composed[i] - ordinary[i]));
     EXPECT_GT(widest, 1e-5f);
+}
+
+TEST(ShaderUpdaterMatrices, DisplayFramingKeepsComposeSamplingAndItsInverseTogether)
+{
+    ComposeFixture f;
+    f.scene.cameras.at("effect-test")->SetLayerLocal(true);
+    f.scene.display_framed = true;
+    f.scene.display_clip = {1.5, 2.0, 0.2, -0.3};
+    f.scene.display_clip_generation = 1;
+    f.updater.InitUniforms(f.child.get(), Declares({kMvp, std::string(G_MVPI)}));
+    const auto authored = f.screen->GetViewProjectionMatrix();
+    const auto verify = [&] {
+        Captured out;
+        f.updater.UpdateUniforms(f.child.get(), f.sprites, Collect(out));
+        ASSERT_TRUE(out.contains(kMvp));
+        ASSERT_TRUE(out.contains(std::string(G_MVPI)));
+        const auto base = Transform(f.Expected(), 0, 0, 0);
+        const auto actual = Transform(out.at(kMvp), 0, 0, 0);
+        EXPECT_NEAR(actual[0], base[0]*1.5 + f.scene.display_clip[2]*base[3], 1e-5);
+        EXPECT_NEAR(actual[1], base[1]*2.0 - 0.3*base[3], 1e-5);
+        const linalg::Matrix4f forward = linalg::Map<const linalg::Matrix4f>(out.at(kMvp).data());
+        const linalg::Matrix4f inverse = linalg::Map<const linalg::Matrix4f>(out.at(std::string(G_MVPI)).data());
+        EXPECT_LT((forward*inverse-linalg::Matrix4f::Identity()).norm(),1e-4);
+    };
+    verify();
+    EXPECT_TRUE(f.screen->GetViewProjectionMatrix().isApprox(authored));
+    f.scene.display_clip[2] = -0.25;
+    ++f.scene.display_clip_generation;
+    verify();
+    auto eye = std::make_shared<SceneNode>();
+    eye->SetTranslate({30,0,0});
+    f.screen->AttatchNode(eye);
+    verify();
+}
+
+TEST(ShaderUpdaterMatrices, LocalGeometryStaysLocalWhileEffectScreenCoordinatesAreFramed)
+{
+    ComposeFixture f("plain");
+    auto local = f.scene.cameras.at("effect-test");
+    local->SetLayerLocal(true);
+    f.scene.cameras["effect"] = local;
+    f.child->SetCamera("effect");
+    f.scene.display_framed = true;
+    f.scene.display_clip = {1.5,2.0,0.2,-0.3};
+    f.scene.display_clip_generation = 1;
+    WPShaderValueData data;
+    data.effect_owner = f.child.get();
+    data.effect_extent = {64,32};
+    f.updater.SetNodeData(f.child.get(),data);
+    f.updater.InitUniforms(f.child.get(),Declares({kMvp,std::string(G_EFFECTMVP),
+        std::string(G_EFFECTMVPI),std::string(G_ETVP),std::string(G_ETVPI)}));
+    Captured out;
+    f.updater.UpdateUniforms(f.child.get(),f.sprites,Collect(out));
+    ExpectClose(out.at(kMvp),LanesOf(ShaderValue::fromMatrix(local->GetViewProjectionMatrix())),1e-6f);
+    const auto base = Transform(f.Expected(),0,0,0);
+    for (const auto name : {G_EFFECTMVP,G_ETVP}) {
+        const auto actual = Transform(out.at(std::string(name)),0,0,0);
+        EXPECT_NEAR(actual[0],base[0]*1.5+0.2*base[3],1e-5);
+        EXPECT_NEAR(actual[1],base[1]*2.0-0.3*base[3],1e-5);
+    }
+    for (const auto pair : {std::pair{G_EFFECTMVP,G_EFFECTMVPI},std::pair{G_ETVP,G_ETVPI}}) {
+        const linalg::Matrix4f forward=linalg::Map<const linalg::Matrix4f>(out.at(std::string(pair.first)).data());
+        const linalg::Matrix4f inverse=linalg::Map<const linalg::Matrix4f>(out.at(std::string(pair.second)).data());
+        EXPECT_LT((forward*inverse-linalg::Matrix4f::Identity()).norm(),1e-4);
+    }
+}
+
+TEST(ShaderUpdaterMatrices, ExplicitShadowProjectionKeepsItsOwnViewport)
+{
+    Stage f(1,false);
+    f.scene.display_framed=true;
+    f.scene.display_clip={2,3,0.4,-0.6};
+    f.scene.display_clip_generation=1;
+    auto shadow=linalg::Matrix4d::Identity().eval();
+    shadow(0,0)=0.25;shadow(1,3)=0.75;
+    f.screen->SetViewProjectionOverride(shadow);
+    f.updater.InitUniforms(f.node.get(),Declares({std::string(G_VP)}));
+    ExpectClose(f.Update(0).at(std::string(G_VP)),LanesOf(ShaderValue::fromMatrix(shadow)),1e-6f);
+}
+
+// A `PRELIGHTING` pass lights through the Alt matrices: the draw's world model,
+// its normal matrix (normalised axes, vec4 columns) and its view projection.
+TEST(ShaderUpdaterMatrices, AltMatricesAreTheDrawsWorldNormalAndViewProjection)
+{
+    Stage stage(1, false);
+    stage.node->SetTranslate(Vector3f(10.0f, 20.0f, 30.0f));
+    stage.node->SetRotation(Vector3f(0.0f, 0.0f, static_cast<float>(M_PI / 2.0)));
+    stage.node->SetScale(Vector3f(2.0f, 2.0f, 2.0f));
+    stage.updater.InitUniforms(stage.node.get(),
+                               Declares({ "g_AltModelMatrix", "g_AltNormalModelMatrix", "g_AltViewProjectionMatrix" }));
+    const Captured out = stage.Update(0);
+    ASSERT_TRUE(out.contains("g_AltNormalModelMatrix"));
+    ASSERT_TRUE(out.contains("g_AltViewProjectionMatrix"));
+    const Lanes& normal = out.at("g_AltNormalModelMatrix");
+    ASSERT_EQ(normal.size(), 12u);
+    const float expected[12] = { 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0 };
+    for (std::size_t i = 0; i < 12; ++i) {
+        if (i % 4 == 3) continue;
+        EXPECT_NEAR(normal[i], expected[i], 1e-5f) << i;
+    }
+    const Lanes vp = LanesOf(ShaderValue::fromMatrix(stage.screen->GetViewProjectionMatrix()));
+    EXPECT_EQ(out.at("g_AltViewProjectionMatrix"), vp);
 }
 
 // ---- audio spectrum ---------------------------------------------------------------------------
@@ -451,6 +553,7 @@ TEST(ShaderUpdaterPuppet, BonesAlphaCarriesOneOpacityPerBone)
 {
     auto puppet = std::make_shared<WPPuppet>();
     puppet->bones.resize(3);
+    puppet->bone_alpha = true; // the first mesh's flag word bit 4 (SKINNING_ALPHA)
     WPPuppet::Animation anim {};
     anim.id = 1;
     anim.fps = 1;
@@ -587,6 +690,116 @@ TEST(ShaderUpdaterTargets, OnlyTheBoundTextureSlotAndKnownTargetsAreWritten)
     missing.Bind(0, 0, "no such target");
     missing.updater.InitUniforms(missing.node.get(), 0, Declares({ "g_Texture0Resolution" }));
     EXPECT_TRUE(missing.Update(0).empty());
+}
+
+
+TEST(ShaderUpdaterPointerHash, ACurrentPointerInputTracksOnlyThePositionItReads)
+{
+    Stage f;
+    f.updater.InitUniforms(f.node.get(), 0, Declares({ "g_PointerPosition" }));
+    f.updater.InitUniforms(f.node.get(), 1, Declares({ kTime }));
+    const auto initial = f.updater.PointerStateHash(f.node.get(), 0, "");
+    ASSERT_NE(initial, 0u);
+    EXPECT_EQ(f.updater.PointerStateHash(f.node.get(), 1, ""), 0u);
+    f.updater.MouseInput(0.7, 0.2);
+    f.updater.FrameBegin();
+    const auto moved = f.updater.PointerStateHash(f.node.get(), 0, "");
+    EXPECT_NE(moved, initial);
+    f.updater.FrameBegin();
+    EXPECT_EQ(f.updater.PointerStateHash(f.node.get(), 0, ""), moved);
+    f.updater.MouseButtonsInput(1);
+    EXPECT_EQ(f.updater.PointerStateHash(f.node.get(), 0, ""), moved);
+}
+
+TEST(ShaderUpdaterPointerHash, PreviousPositionAndButtonEdgesHaveTheirOwnVersions)
+{
+    Stage f;
+    f.updater.InitUniforms(f.node.get(), 0, Declares({ "g_PointerPositionLast" }));
+    f.updater.InitUniforms(f.node.get(), 1, Declares({ "g_PointerState" }));
+    const auto initial = f.updater.PointerStateHash(f.node.get(), 0, "");
+    f.updater.MouseInput(0.7, 0.2);
+    f.updater.FrameBegin();
+    const auto pending = f.updater.PointerStateHash(f.node.get(), 0, "");
+    EXPECT_NE(pending, initial);
+    f.updater.FrameBegin();
+    const auto caught_up = f.updater.PointerStateHash(f.node.get(), 0, "");
+    EXPECT_NE(caught_up, pending);
+    f.updater.FrameBegin();
+    EXPECT_EQ(f.updater.PointerStateHash(f.node.get(), 0, ""), caught_up);
+
+    const auto released = f.updater.PointerStateHash(f.node.get(), 1, "");
+    f.updater.MouseButtonsInput(1);
+    const auto pressed = f.updater.PointerStateHash(f.node.get(), 1, "");
+    EXPECT_NE(pressed, released);
+    f.updater.MouseButtonsInput(1);
+    const auto held = f.updater.PointerStateHash(f.node.get(), 1, "");
+    EXPECT_NE(held, pressed);
+    f.updater.MouseButtonsInput(1);
+    EXPECT_EQ(f.updater.PointerStateHash(f.node.get(), 1, ""), held);
+    f.updater.MouseButtonsInput(0);
+    EXPECT_EQ(f.updater.PointerStateHash(f.node.get(), 1, ""), released);
+}
+
+TEST(ShaderUpdaterPointerHash, DisabledParallaxIgnoresCursorMotion)
+{
+    Stage f;
+    f.updater.InitUniforms(f.node.get(), 0, Declares({ "g_ParallaxPosition" }));
+    f.updater.SetCameraParallax({ .enable = true, .amount = 1.0f, .mouseinfluence = 0.7f });
+    f.updater.SetUserMouseParallax(false);
+    const auto disabled = f.updater.PointerStateHash(f.node.get(), 0, "");
+    f.updater.MouseInput(0.7, 0.2);
+    f.updater.FrameBegin();
+    EXPECT_EQ(f.updater.PointerStateHash(f.node.get(), 0, ""), disabled);
+    f.updater.SetUserMouseParallax(true);
+    EXPECT_NE(f.updater.PointerStateHash(f.node.get(), 0, ""), disabled);
+}
+
+TEST(ShaderUpdaterPointerHash, ModelParallaxIsIncludedWithoutAPointerUniform)
+{
+    Stage f;
+    f.updater.InitUniforms(f.node.get(), 0, Declares({ kMvp }));
+    WPShaderValueData data;
+    data.parallaxDepth = { 0.2f, 0.3f };
+    f.updater.SetNodeData(f.node.get(), 0, data);
+    f.updater.SetCameraParallax({ .enable = true, .amount = 1.0f, .mouseinfluence = 0.7f });
+    const auto initial = f.updater.PointerStateHash(f.node.get(), 0, "");
+    ASSERT_NE(initial, 0u);
+    f.updater.MouseInput(0.7, 0.2);
+    f.updater.FrameBegin();
+    EXPECT_NE(f.updater.PointerStateHash(f.node.get(), 0, ""), initial);
+    f.updater.SetUserMouseParallax(false);
+    EXPECT_EQ(f.updater.PointerStateHash(f.node.get(), 0, ""), 0u);
+}
+
+TEST(ShaderUpdaterPointerHash, ADelayedLastPositionReaderIdlesAfterBothVersionsCatchUp)
+{
+    Stage f;
+    f.updater.InitUniforms(f.node.get(), 0, Declares({ "g_PointerPositionLast" }));
+    render::StaticSubgraphCache cache;
+    render::StaticPassDesc reader;
+    reader.target = "reader";
+    reader.inputs = { "source" };
+    render::StaticPassDesc source;
+    source.target = "source";
+    source.dynamic_reasons = static_cast<uint32_t>(render::DynamicReason::PointerUniform);
+    cache.Compile(std::vector { reader, source });
+    cache.SetExecutionOrder(std::vector<std::size_t> { 0, 1 });
+    const auto frame = [&] {
+        f.updater.FrameBegin();
+        const std::array<render::StaticPassSample, 2> samples {
+            render::StaticPassSample {},
+            render::StaticPassSample { .hash = f.updater.PointerStateHash(f.node.get(), 0, "") },
+        };
+        std::array<uint8_t, 2> skip {};
+        cache.Plan(samples, skip);
+        return cache.HasPendingDelayedInputs();
+    };
+    EXPECT_TRUE(frame());
+    EXPECT_FALSE(frame());
+    f.updater.MouseInput(0.7, 0.2);
+    EXPECT_TRUE(frame()) << "the last-position uniform still has its old value";
+    EXPECT_TRUE(frame()) << "the retained reader still has the uniform's old value";
+    EXPECT_FALSE(frame());
 }
 
 } // namespace

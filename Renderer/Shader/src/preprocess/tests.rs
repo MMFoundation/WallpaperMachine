@@ -77,11 +77,23 @@ fn a_combo_value_with_a_line_break_cannot_inject_lines() {
 
 #[test]
 fn dialect_macros_select_the_direct3d_branches_without_being_written() {
-    for cond in ["#if HLSL", "#ifdef HLSL", "#if GLSL", "#ifdef GLSL", "#if HLSL_SM40", "#ifdef HLSL_SM40", "#if HLSL && GLSL && HLSL_SM40"] {
+    for cond in ["#if HLSL", "#ifdef HLSL", "#if HLSL_SM40", "#ifdef HLSL_SM40", "#if HLSL && HLSL_SM40"] {
         let src = format!("{cond}\nyes\n#else\nno\n#endif\n");
         assert_eq!(eval(&src), "yes\n", "{cond}");
     }
-    for cond in ["#ifdef HLSL_SM30", "#ifdef HLSL_GS40", "#if HLSL_SM30", "#if HLSL_GS40", "#ifdef SHADERVERSION", "#ifdef VERSION"] {
+    // Wallpaper Engine defines only `HLSL` and `HLSL_SM40` (`sub_1400D5070`); `GLSL` is undefined
+    // (probe T5), so its branches are not taken.
+    for cond in [
+        "#if GLSL",
+        "#ifdef GLSL",
+        "#if HLSL && GLSL && HLSL_SM40",
+        "#ifdef HLSL_SM30",
+        "#ifdef HLSL_GS40",
+        "#if HLSL_SM30",
+        "#if HLSL_GS40",
+        "#ifdef SHADERVERSION",
+        "#ifdef VERSION",
+    ] {
         let src = format!("{cond}\nyes\n#else\nno\n#endif\n");
         assert_eq!(eval(&src), "no\n", "{cond}");
     }

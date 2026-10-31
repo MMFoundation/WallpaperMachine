@@ -26,6 +26,9 @@ fn write_all(names: &[(&str, &str)]) -> (String, String) {
 fn zero(ty: &str) -> String {
     match ty {
         "float" => "0.5".to_string(),
+        "vec2" => "CAST2(0.5)".to_string(),
+        "vec3" => "CAST3(0.5)".to_string(),
+        "vec4" => "CAST4(0.5)".to_string(),
         t => format!("{t}(0.5)"),
     }
 }
@@ -71,7 +74,7 @@ fn a_tap_array_past_location_31_compiles_and_nothing_mentions_a_location_cap() {
     let wide = Req::new(
         &vertex_with(
             &(0..40).map(|i| format!("varying vec4 v_Extra{i};")).collect::<Vec<_>>().join("\n"),
-            &(0..40).map(|i| format!("  v_Extra{i} = vec4(1.0);")).collect::<Vec<_>>().join("\n"),
+            &(0..40).map(|i| format!("  v_Extra{i} = CAST4(1.0);")).collect::<Vec<_>>().join("\n"),
         ),
         &fragment_with("varying vec4 v_Only;", "  c = v_Only;"),
     )
@@ -123,7 +126,7 @@ fn the_crossing_varying_is_found_in_source_order_not_by_size() {
 fn vertex_outputs_no_fragment_input_names_are_free() {
     let extra: Vec<(String, &'static str)> = (0..40).map(|i| (format!("v_X{i}"), "vec4")).collect();
     let vertex_declarations = format!("{}\nvarying vec2 v_Use;", declare(&named(&extra)));
-    let writes: String = extra.iter().map(|(n, _)| format!("  {n} = vec4(1.0);\n")).collect::<String>() + "  v_Use = a_Coord;\n";
+    let writes: String = extra.iter().map(|(n, _)| format!("  {n} = CAST4(1.0);\n")).collect::<String>() + "  v_Use = a_Coord;\n";
     let fragment = fragment_with("varying vec2 v_Use;\nvarying float v_Alone;", "  c = vec4(v_Use, v_Alone, 1.0);");
     let p = Req::new(&vertex_with(&vertex_declarations, &writes), &fragment).ok();
     assert!(p.stage(StageKind::Vertex).unwrap().glsl.contains("v_X39"));
@@ -140,7 +143,7 @@ fn vertex_outputs_no_fragment_input_names_are_free() {
 #[test]
 fn fragment_only_varyings_count_and_builtins_do_not() {
     // Fragment-only varyings get a synthesized vertex output and still count in full.
-    let text = components_error(&Req::new(&vertex_with("", ""), &fragment_with(&declare(&[("v_A", "vec4[31]"), ("v_B", "float")]), "  c = v_A[0] + vec4(v_B);")).err());
+    let text = components_error(&Req::new(&vertex_with("", ""), &fragment_with(&declare(&[("v_A", "vec4[31]"), ("v_B", "float")]), "  c = v_A[0] + CAST4(v_B);")).err());
     assert!(text.contains("125") && text.contains("v_B"), "{text}");
     // gl_FragCoord and friends are builtins: 31 vec4 plus a read of the fragment position is fine.
     let names = thirty_one_vec4();
@@ -172,7 +175,7 @@ fn vertex_input_locations_keep_their_cap_of_30() {
         let sum: Vec<String> = (0..n).map(|i| format!("a_{i}")).collect();
         format!("{declarations}void main() {{ gl_Position = {}; }}", sum.join(" + "))
     };
-    let fragment = "void main() { gl_FragColor = vec4(1.0); }";
+    let fragment = "void main() { gl_FragColor = CAST4(1.0); }";
     let p = ok(&many(31), fragment);
     assert_eq!(p.reflection.vertex_inputs.last().unwrap().location, 30);
     assert!(err(&many(32), fragment).to_string().contains("31"));

@@ -86,6 +86,29 @@ impl StageMask {
     }
 }
 
+/// The shape of a sampled image, as the engine must bind it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImageShape {
+    #[default]
+    D2,
+    D3,
+    D2Ms,
+    Depth2D,
+    Other,
+}
+
+impl ImageShape {
+    pub fn name(self) -> &'static str {
+        match self {
+            ImageShape::D2 => "2d",
+            ImageShape::D3 => "3d",
+            ImageShape::D2Ms => "2d_ms",
+            ImageShape::Depth2D => "depth_2d",
+            ImageShape::Other => "other",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DescriptorBinding {
     pub name: String,
@@ -97,18 +120,29 @@ pub struct DescriptorBinding {
     pub stages: StageMask,
     /// 1 for an ordinary resource, 0 for an unsized array. The engine refuses anything but 1.
     pub count: u32,
+    /// A sampled image's shape; written as `"dimension"` only when it is not a plain 2D texture.
+    pub image: ImageShape,
+    /// A comparison sampler; written as `"comparison":true` only when it is one.
+    pub comparison: bool,
 }
 
 impl DescriptorBinding {
     pub fn to_json(&self) -> String {
-        json::object(&[
+        let mut fields = vec![
             ("name", json::string(&self.name)),
             ("set", self.set.to_string()),
             ("binding", self.binding.to_string()),
             ("descriptor", json::string(self.descriptor.name())),
             ("stages", json::array(self.stages.names().into_iter().map(json::string))),
             ("count", self.count.to_string()),
-        ])
+        ];
+        if self.image != ImageShape::D2 {
+            fields.push(("dimension", json::string(self.image.name())));
+        }
+        if self.comparison {
+            fields.push(("comparison", "true".to_string()));
+        }
+        json::object(&fields)
     }
 }
 
@@ -445,7 +479,7 @@ mod tests {
     use crate::json::Value;
 
     fn desc(name: &str, binding: u32, kind: DescriptorKind, stages: StageMask) -> DescriptorBinding {
-        DescriptorBinding { name: name.into(), set: 0, binding, descriptor: kind, stages, count: 1 }
+        DescriptorBinding { name: name.into(), set: 0, binding, descriptor: kind, stages, count: 1, image: Default::default(), comparison: false }
     }
 
     fn block(name: &str, binding: u32, member_offset: u32) -> UniformBlock {
