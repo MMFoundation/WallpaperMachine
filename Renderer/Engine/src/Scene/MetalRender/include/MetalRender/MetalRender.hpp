@@ -24,12 +24,18 @@ class RenderGraph;
 
 namespace metal
 {
+enum class MetalLoadAction : uint32_t;
 
 /// Everything the native backend needs to start drawing.
 ///
 /// `metal_layer` is the `CAMetalLayer` the host created for this wallpaper
 /// window, never the `NSView`. The backend takes the layer over: it owns the
 /// drawable for as long as it is running, because two drawable loops cannot share one layer.
+struct MetalDisplayCharacteristics {
+    float current_headroom {1.0f};
+    float potential_headroom {1.0f};
+};
+
 struct MetalRenderInitInfo
 {
     void*                 metal_layer { nullptr };
@@ -39,6 +45,11 @@ struct MetalRenderInitInfo
     uint16_t              render_height { 0 };
     double                display_scale_factor { 1.0 };
     std::function<void()> redraw_callback;
+    /// Optional host/headless provider; otherwise the explicit display_id selects
+    /// an NSScreen. Queried on the main thread at configuration/display events only.
+    std::function<MetalDisplayCharacteristics(uint32_t)> display_characteristics;
+    bool display_hdr_output_allowed {true};
+    uint32_t display_id {0};
 
     /// Asked on the render thread whether the host wants a still of the
     /// wallpaper right now. Empty means posters are never captured, and the
@@ -103,6 +114,9 @@ public:
     MetalRender& operator=(const MetalRender&) = delete;
 
     bool init(const MetalRenderInitInfo& info);
+    /// Selects a supported count without creating a renderer or scene targets.
+    /// Used while loading an eligible MSAA scene, before its shaders are built.
+    [[nodiscard]] static uint32_t SelectSampleCountForDevice(uint32_t requested);
     void destroy();
     [[nodiscard]] bool inited() const;
 
@@ -133,6 +147,9 @@ public:
     /// what a compile would have drawn. The targets are cleared in that frame's own command
     /// buffer and nothing waits on the GPU. False leaves the graph unusable: build it again.
     bool ResizeRenderTargets(Scene& scene);
+    /// Applies an event-delivered surface color/headroom snapshot on the render thread.
+    void RefreshDisplayOutput(Scene& scene);
+    void SetDisplayId(uint32_t identity);
     /// Applies a new internal rasterization scale, and the resolution the scene
     /// is rasterized at, to an already compiled graph. Render targets and the
     /// pipelines attached to them are rebuilt, and only when one of the two
@@ -164,14 +181,18 @@ public:
     PosterServiceResult ServicePosterRequest(Scene& scene);
 
     void UpdateCameraFillMode(Scene& scene, FillMode fillmode);
-    void SetWallpaperScalingMode(WallpaperScalingMode mode);
+    /// True when crossing the HDR Display/FitBlur raster boundary: the host
+    /// must rebuild its graph before drawing. Other layout changes stay live;
+    /// fixed screen-copy geometry uses the runtime graph-mutation flag.
+    bool SetWallpaperScalingMode(WallpaperScalingMode mode);
     void SetWallpaperScalingFactor(double factor);
     /// Where the presented image sits in the slack around it. The composition,
     /// the cursor mapping and a poster all take it from the one layout, so they
-    /// agree. Takes effect on the next frame; no pass or target is rebuilt.
+    /// agree. Takes effect on the next frame. HDR screen-copy cards update their
+    /// UVs through the runtime geometry invalidation path.
     void SetWallpaperFraming(const WallpaperFraming& framing);
-    /// Mirrors the presented wallpaper left to right from the next frame on. No pass or target
-    /// is rebuilt.
+    /// Mirrors the presented wallpaper left to right from the next frame on;
+    /// HDR scene framing and screen-copy coordinates follow the same layout.
     void SetWallpaperHorizontalFlip(bool enabled);
 
     /// Where this surface keeps the compiled pipelines it can rebuild.
@@ -236,6 +257,8 @@ public:
     /// did not change" and "the text was uploaded again anyway": both draw the
     /// same picture.
     [[nodiscard]] uint64_t RuntimeImageUploadsForTests() const;
+    /// Draw-time light projection/packing updates, for demand regressions.
+    [[nodiscard]] uint64_t LightFeatureUpdatesForTests() const;
 
     /// Encoders the pass loop of the last drawn frame opened: render passes,
     /// how many of them rendered into the scene's output image, and blits.
@@ -258,6 +281,16 @@ public:
     /// Test-only, and the number to compare when target residency changes: the
     /// device's own counter is process-wide and moves with the drawable pool.
     [[nodiscard]] uint64_t RenderTargetBytesForTests() const;
+    [[nodiscard]] uint32_t SurfacePixelFormatForTests() const;
+    [[nodiscard]] bool SurfaceEDREnabledForTests() const;
+    bool ReadCompositionForTests(Scene& scene, uint32_t pixel_format, std::vector<uint8_t>& rgba,
+        uint32_t& width, uint32_t& height, std::vector<float>* radiance = nullptr);
+    [[nodiscard]] uint64_t GeometryBufferBytesForTests() const;
+    /// Load operation of the first enabled scene-output pass in execution order.
+    [[nodiscard]] MetalLoadAction FirstSceneOutputLoadForTests() const;
+    [[nodiscard]] uint64_t ModelDataUploadBytesForTests() const;
+    /// Actual GPU sample counts of live MS color/depth attachments; empty while Off.
+    [[nodiscard]] std::vector<uint32_t> MultisampleCountsForTests() const;
 
     /// Whether render targets whose lifetimes in a frame do not overlap share
     /// one image, for graphs compiled from now on. On unless

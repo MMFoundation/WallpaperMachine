@@ -44,6 +44,12 @@ public:
     virtual ~IShaderValueUpdater() = default;
 
     virtual void FrameBegin()                                                          = 0;
+    /// Publishes attachment transforms after the runtime has evaluated poses in
+    /// their current layer world. Updaters without puppet bindings do no work.
+    virtual void UpdateAttachmentsAfterPose() {}
+    /// A visible colour draw whose program has no uniform block still has a
+    /// native layer transform. No-op for updaters without such draw state.
+    virtual void SceneDrawWithoutUniforms(SceneNode*, uint32_t, const std::string&) {}
     virtual void InitUniforms(SceneNode*, const ExistsUniformOp&)                      = 0;
     virtual void UpdateUniforms(SceneNode*, sprite_map_t&, const UpdateUniformOp&)     = 0;
 
@@ -60,6 +66,10 @@ public:
         UpdateUniforms(node, sprites, update_op);
     }
 
+
+    /// The graph resolved a layer texture slot to this actual render target.
+    /// Remember its key once so size/texel uniforms follow that target on resize.
+    virtual void SetRenderTargetBinding(SceneNode*, uint32_t, uint32_t, std::string_view) {}
 
     /// Which self-advancing uniforms this node's material actually binds, drawn
     /// through `camera_override` when the pass sets one and through the node's
@@ -83,6 +93,15 @@ public:
         (void)material_slot;
         return 0;
     }
+    /// Event-driven pointer inputs consumed by this draw. A delayed reader
+    /// needs their version even when the pointer pass itself is not cacheable.
+    virtual uint64_t PointerStateHash(SceneNode* node, uint32_t material_slot,
+                                      const std::string& camera_override) const {
+        (void)node;
+        (void)material_slot;
+        (void)camera_override;
+        return 0;
+    }
     /// Drops what was recorded for a node that is about to be freed, so a
     /// later node allocated at the same address starts from nothing.
     virtual void ForgetNode(SceneNode* node) { (void)node; }
@@ -103,6 +122,12 @@ public:
         (void)node;
         return { 0.0f, 0.0f };
     }
+    /// The user's per-wallpaper mouse-parallax switch (Wallpaper Engine's injected
+    /// `cameraparallax`): off holds cursor-driven camera parallax at the centre;
+    /// the scene's own parallax settings are kept for when it is on again. Whether
+    /// the graph must be built again (a draw starts or stops following the cursor)
+    /// is the caller's to decide. An updater without parallax ignores it.
+    virtual void SetUserMouseParallax(bool enabled) { (void)enabled; }
     virtual void FrameEnd()                                                        = 0;
 
     virtual void MouseInput(double x, double y) = 0;

@@ -6,11 +6,19 @@
 #include "Scene/Scene.h"
 #include "SpecTexs.hpp"
 
+#include <algorithm>
 #include <functional>
 #include <unordered_map>
 
 namespace wallpaper::metal
 {
+uint32_t SelectSceneSampleCount(uint32_t requested, uint32_t supported_mask)
+{
+    for (const uint32_t count : { 8u, 4u, 2u })
+        if (count <= requested && (supported_mask & count) != 0) return count;
+    return 1;
+}
+
 namespace
 {
 
@@ -77,6 +85,39 @@ void ForEachRead(const ScenePassDescription& desc, const std::function<void(cons
 void ClearSceneBeforeAnEarlyRead(Scene& scene, std::vector<ScenePassDescription>& out)
 {
     const auto scene_key = scene.ResolveRenderTargetName(std::string(SpecTex_Default));
+    const bool sorted = std::any_of(out.begin(), out.end(), [](const auto& pass) {
+        return pass.sort_owner != nullptr;
+    });
+    if (sorted) {
+        bool any_read = false;
+        bool first_reads = false;
+        bool touched = false;
+        for (const auto& pass : out) {
+            bool reads = false;
+            ForEachRead(pass, [&](const std::string& key) { reads = reads || key == scene_key; });
+            any_read = any_read || reads;
+            if (!touched && (reads || pass.target_key == scene_key)) {
+                first_reads = reads;
+                touched = true;
+            }
+        }
+        if (any_read) {
+            ScenePassDescription clear;
+            clear.kind = MetalPassKind::Clear;
+            clear.name = "clear scene before its first reader";
+            clear.target_key = scene_key;
+            clear.load_action = MetalLoadAction::Clear;
+            clear.uses_scene_clear_color = true;
+            clear.conditional_scene_clear = true;
+            clear.enabled = first_reads;
+            clear.clear_color = {scene.clearColor[0], scene.clearColor[1], scene.clearColor[2], 1.0f};
+            if (const auto* target = scene.FindRenderTarget(scene_key))
+                clear.samples = rg::NormalizeSampleCount(target->sample_count);
+            if (TargetExtent(scene, scene_key, clear.target_width, clear.target_height))
+                out.insert(out.begin(), std::move(clear));
+        }
+        return;
+    }
     for (std::size_t i = 0; i < out.size(); ++i) {
         bool reads = false;
         ForEachRead(out[i], [&](const std::string& key) { reads = reads || key == scene_key; });
@@ -182,6 +223,8 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             const auto& pre = clear->desc();
             ScenePassDescription desc;
             desc.kind        = MetalPassKind::Clear;
+            desc.sort_owner  = pre.sort_owner;
+            desc.reflection_pass = pre.reflection_pass;
             desc.name        = std::string(pass_node->name());
             desc.target_key  = scene.ResolveRenderTargetName(pre.result);
             desc.load_action = MetalLoadAction::Clear;
@@ -204,6 +247,8 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             const auto& copy = step->desc();
             ScenePassDescription desc;
             desc.kind        = MetalPassKind::Copy;
+            desc.sort_owner  = copy.sort_owner;
+            desc.reflection_pass = copy.reflection_pass;
             desc.name        = std::string(pass_node->name());
             desc.source_key  = scene.ResolveRenderTargetName(copy.src);
             desc.target_key  = scene.ResolveRenderTargetName(copy.dst);
@@ -235,24 +280,46 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             ScenePassDescription desc;
             desc.kind            = MetalPassKind::CustomShader;
             desc.name            = material->name;
+            desc.sort_owner      = src.sort_owner;
+            desc.reflection_pass = src.reflection_pass;
             desc.node            = src.node;
             desc.visibility_node = src.visibility_node != nullptr ? src.visibility_node : src.node;
             desc.material_slot   = src.material_slot;
             desc.submesh_index   = src.submesh_index;
             desc.camera_override = src.camera_override;
             desc.blend           = src.replace_target ? BlendMode::Disable : material->blenmode;
+            desc.alpha_rule      = src.alpha_rule;
+            desc.samples         = src.samples;
+            desc.force_single_sample = src.force_single_sample;
             desc.write_alpha     = src.write_alpha;
             desc.target_key      = scene.ResolveRenderTargetName(src.output);
             {
                 const auto* target    = scene.FindRenderTarget(desc.target_key);
                 const bool  has_depth = target != nullptr && target->withDepth;
-                const auto  depth     = ResolveSceneDepthState(*material, has_depth);
+                auto        depth     = ResolveSceneDepthState(*material, desc.blend, has_depth);
+                if (src.depth_override.has_value()) depth = *src.depth_override;
                 desc.depth_test       = depth.test;
                 desc.depth_write      = depth.write;
-                desc.cull_mode        = SceneMetalCullMode(material->cull_mode, has_depth);
+                desc.depth_compare    = depth.compare == DepthCompare::GreaterEqual
+                                            ? MetalDepthCompare::GreaterEqual
+                                            : depth.compare == DepthCompare::Greater
+                                                  ? MetalDepthCompare::Greater : MetalDepthCompare::LessEqual;
+                desc.cull_mode        = SceneMetalCullMode(src.cull_override.value_or(material->cull_mode));
             }
-            desc.load_action = ResolveLoadAction(src.preserve_target_contents,
-                                                 src.clear_on_first_use);
+            desc.depth_only   = src.depth_only;
+            desc.viewport     = src.viewport_uv;
+            desc.flip_winding = src.flip_winding;
+            if (src.depth_only) {
+                // Depth alone: nothing blends, and the clear is the reversed far plane.
+                desc.blend       = BlendMode::Disable;
+                desc.write_alpha = false;
+                desc.clear_depth = src.depth_clear;
+                desc.load_action = src.clear_depth_on_first_use ? MetalLoadAction::Clear
+                                                                : MetalLoadAction::Load;
+            } else {
+                desc.load_action = ResolveLoadAction(src.preserve_target_contents,
+                                                     src.clear_on_first_use);
+            }
             // Only the scene's own colour buffer clears to the author's
             // background; every other target clears to nothing, so a layer
             // composited onto it is not composited onto a colour.
@@ -276,6 +343,15 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
                 desc.cover_keys = material->cover_slots;
                 desc.cover_keys.resize(desc.texture_keys.size());
             }
+            for (std::size_t i = 0; i < material->textures.size() && i < desc.texture_keys.size(); ++i) {
+                if (! std::string_view(material->textures[i]).starts_with(WE_ALIAS_PREFIX)) continue;
+                desc.border_slots.resize(desc.texture_keys.size());
+                desc.border_slots[i] = true;
+                if (scene.shadows.cookie_features && material->textures[i] == kLightCookieAlias) {
+                    desc.light_cookie_slots |= 1u << i;
+                    desc.texture_keys[i] = kLightCookieAlias;
+                }
+            }
             out.push_back(std::move(desc));
             continue;
         }
@@ -283,8 +359,33 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
         return set_error("the render graph contains a step the native renderer does not recognise");
     }
 
-    if (out.empty()) return set_error("the render graph draws nothing");
+    if (out.empty()) {
+        // A property init may create the scene's first model, or a replacement
+        // may temporarily remove its last shape. Keep a shader-free output so
+        // the runtime can reach that next event without inventing geometry.
+        ScenePassDescription clear;
+        clear.kind = MetalPassKind::Clear;
+        clear.name = "empty scene output";
+        clear.target_key = scene.ResolveRenderTargetName(std::string(SpecTex_Default));
+        clear.load_action = scene.clearEnabled ? MetalLoadAction::Clear : MetalLoadAction::Load;
+        clear.uses_scene_clear_color = true;
+        clear.clear_color = {scene.clearColor[0], scene.clearColor[1], scene.clearColor[2], 1.0f};
+        if (!TargetExtent(scene, clear.target_key, clear.target_width, clear.target_height))
+            return set_error("the empty scene has no output target");
+        out.push_back(std::move(clear));
+    }
     ClearSceneBeforeAnEarlyRead(scene, out);
+    const auto* frame = scene.FindRenderTarget(SpecTex_Default);
+    if (frame != nullptr && frame->withDepth && scene.FindRenderTarget("_rt_volumetricsBack")) {
+        const auto scene_key = scene.ResolveRenderTargetName(SpecTex_Default);
+        for (auto& desc : out) {
+            desc.scene_depth_attachment = desc.target_key == scene_key && !desc.depth_only &&
+                !desc.force_single_sample &&
+                (desc.kind == MetalPassKind::CustomShader || desc.kind == MetalPassKind::Clear);
+            desc.reads_scene_depth = std::find(desc.texture_keys.begin(), desc.texture_keys.end(),
+                "_rt_volumetricsBack") != desc.texture_keys.end();
+        }
+    }
     PlaceMipmapGeneration(scene, out);
     return true;
 }

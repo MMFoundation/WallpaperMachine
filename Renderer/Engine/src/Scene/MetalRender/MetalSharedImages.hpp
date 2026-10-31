@@ -26,6 +26,8 @@ struct SharedImageRequest
     uint32_t           bytes_per_pixel { 0 };
     /// Non-zero for a block-compressed format.
     uint32_t           block_bytes { 0 };
+    /// Slices of a volume texture; 1 for a plain picture.
+    uint32_t           depth { 1 };
 };
 
 /// The imported pictures every renderer in the process shares.

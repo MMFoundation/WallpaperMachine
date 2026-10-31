@@ -53,6 +53,10 @@ struct MetalDescriptorBinding
     std::string         name;
     uint32_t            binding { 0 };
     MetalDescriptorKind kind { MetalDescriptorKind::UniformBuffer };
+    /// What a sampled image is, as reflected (`"dimension"`; absent means a plain 2D texture).
+    enum class Image : uint8_t { D2, D3, D2Ms, Depth2D, Other } image { Image::D2 };
+    /// A comparison sampler (`"comparison":true`), bound with a compare function.
+    bool comparison { false };
 };
 
 struct MetalShaderReflection

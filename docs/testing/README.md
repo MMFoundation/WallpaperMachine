@@ -290,6 +290,14 @@ own sync point: a nonisolated `async` double such as `ManualSleep` runs on the
 global executor, so flushing the main queue does not show it has run; wait for the
 state it records.
 
+The hosted suite has also repeatedly reported the runtime warning “This method
+should not be called on the main thread as it may lead to UI unresponsiveness.”
+The top-level `xcresulttool` summary omits the caller. Detailed issue records in
+the 2026-10-28 gate associate it with
+`VideoFormatSupportTests.testTheOpenedFilesAreKeyedByTheFileAndForgetAChangedOne()`;
+that test passed, and the record has no source location. Report the warning beside
+the pass/fail/skip counts and inspect the detailed issue records for attribution.
+
 A failed assertion in the app-hosted bundle can take about two minutes to
 report while XCTest symbolicates the failing frame, so a failure inside a loop
 or a hosted panel can read as a hang or a timeout; look for the assertion in the
@@ -340,9 +348,10 @@ runs.
 scripts/clean.py` removes them (`--dry-run` previews). Only `scripts/test.py`
 prunes its own output: renderer runs (a few hundred megabytes each), Rust check
 runs, build logs and hand-made investigation folders stay until someone deletes
-them, so whoever produced them lists them and asks before deleting (see
-[AGENTS.md](../../AGENTS.md)). Result bundles are local: cite the numbers and
-the command, not a bundle path, when you report a result. Private GPU output,
+them. Before finishing, remove this task's output except evidence cited in the
+final reply, and report what was removed; preserve other tasks' output. Wider
+cleanup requires approval (see [AGENTS.md](../../AGENTS.md)). Result bundles are
+local: cite the numbers and the command, not a bundle path, when you report a result. Private GPU output,
 local asset inventories, screenshots, and traces stay out of Git.
 
 ## Current native coverage

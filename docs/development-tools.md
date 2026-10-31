@@ -71,6 +71,13 @@ local under `artifacts/`, and do not commit them.
 - Power and energy claims: the procedure and comparison rules in
   [testing/power-benchmark.md](testing/power-benchmark.md).
 
+When inspecting native reference code, verify consequential floating-point constants
+against instruction data references and the original executable bytes. The installed
+headless Hex-Rays path has rendered an actual `0.5f` (`00 00 00 3f`) as `0.395f` in
+pseudocode even with matching executable/database input hashes and unmodified bytes.
+Keep the byte-level check with the task's evidence; a decimal literal in pseudocode
+alone is insufficient for a physics, projection or threshold rule.
+
 Debug and Release instances share the app bundle identifier. During desktop
 tests, target the PID of the exact executable under test and quit only that
 instance. `kill -TERM <pid>` (or `-HUP`) now quits in order: the desktop picture is

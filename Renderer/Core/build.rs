@@ -17,8 +17,10 @@ const WATCHED_VARIABLES: [&str; 4] = [
 ];
 
 /// Static archives, each listed before the archives it depends on.
-const STATIC_ARCHIVES: [&str; 15] = [
+const STATIC_ARCHIVES: [&str; 17] = [
     "wescene-renderer",
+    "harfbuzz",
+    "msdfgen",
     "wpAudio",
     "wmSound",
     "stb_vorbis",

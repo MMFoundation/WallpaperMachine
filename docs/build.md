@@ -139,6 +139,8 @@ to see the raw stream as well, or open the log named in the failure line.
 | `--swift-only` | Only Swift, resources, or `project.yml` changed. | `Renderer/target/release/libwallpaper_bridge.a` and `App/Bridge/Generated` must already exist from an earlier full build. |
 | `--renderer-only` | Iterating on Rust/C++ or the uniffi interface without needing an app bundle. | Nothing further; it stops after regenerating bindings. |
 
+`--renderer-only` prints a success verdict after the renderer and binding stages finish.
+
 ## Packaging and installing
 
 ```sh

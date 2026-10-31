@@ -77,10 +77,19 @@ bool ParseMetalShaderReflection(std::string_view json, MetalShaderReflection& ou
                 }
                 return false;
             }
+            const auto dimension = descriptor.value("dimension", std::string("2d"));
+            using Image          = MetalDescriptorBinding::Image;
+            const Image image    = dimension == "3d"         ? Image::D3
+                                   : dimension == "2d_ms"    ? Image::D2Ms
+                                   : dimension == "depth_2d" ? Image::Depth2D
+                                   : dimension == "2d"       ? Image::D2
+                                                             : Image::Other;
             out.descriptors.push_back(MetalDescriptorBinding {
-                .name    = descriptor.at("name").get<std::string>(),
-                .binding = descriptor.at("binding").get<uint32_t>(),
-                .kind    = kind,
+                .name       = descriptor.at("name").get<std::string>(),
+                .binding    = descriptor.at("binding").get<uint32_t>(),
+                .kind       = kind,
+                .image      = image,
+                .comparison = descriptor.value("comparison", false),
             });
         }
 

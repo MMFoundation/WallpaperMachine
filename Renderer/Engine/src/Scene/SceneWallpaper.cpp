@@ -20,6 +20,7 @@
 #include "WPSceneParser.hpp"
 #include "WPShaderParser.hpp"
 #include "Scene/Scene.h"
+#include "Scene/SceneFrameStep.hpp"
 #include "Scene/SceneCamera.h"
 #include "Scene/SceneMaterial.h"
 #include "Scene/SceneShader.h"
@@ -244,6 +245,24 @@ private:
     /// later load reads, so the saved look is what the next load shows.
     void previewProjectProperties(const std::string& json);
     void loadScene();
+public:
+    [[nodiscard]] std::optional<SceneQuality> qualityInForce() const {
+        std::scoped_lock lock(m_quality_in_force_mutex);
+        return m_quality_in_force;
+    }
+    void setQualityInForce(const Scene& scene) {
+        SceneQuality in_force;
+        in_force.msaa            = static_cast<int>(scene.effective_msaa);
+        in_force.shadows         = scene.shadows.active() ? scene.quality.shadows
+                                                          : static_cast<int>(QualityLevel::Off);
+        in_force.volumetrics     = scene.volumetric_lights.empty() ? static_cast<int>(QualityLevel::Off)
+                                                                  : scene.quality.volumetrics;
+        in_force.reflection      = scene.reflection_enabled;
+        in_force.post_processing = scene.quality.post_processing;
+        std::scoped_lock lock(m_quality_in_force_mutex);
+        m_quality_in_force = in_force;
+    }
+private:
     bool loadNonSceneProject(const ProjectManifest& manifest);
 
     MHANDLER_CMD(LOAD_SCENE);
@@ -276,6 +295,12 @@ private:
     std::string                m_cache_path;
     /// The saved property document; empty means there is none.
     std::string                m_override_json;
+    SceneQuality               m_quality {};
+    SceneScriptStorageConfig   m_storage {};
+    mutable std::mutex         m_quality_in_force_mutex;
+    std::optional<SceneQuality> m_quality_in_force;
+    /// The per-wallpaper options the next load parses with (`PROPERTY_WE_USER_OPTIONS`).
+    WeUserOptions              m_user_options {};
     bool                       m_audio_response_enabled { false };
     bool                       m_media_integration_enabled { false };
     bool                       m_force_refresh { false };
@@ -319,8 +344,11 @@ public:
         CMD_SYSTEM_MEDIA_ARTWORK,
         CMD_APPLY_PROJECT_PROPERTIES,
         CMD_SET_SPEED,
+        CMD_SET_USER_OPTIONS,
         CMD_STOP,
         CMD_DRAW,
+        CMD_DISPLAY_OUTPUT_CHANGED,
+        CMD_SET_DISPLAY_ID,
         CMD_BEGIN_SURFACE_RECONFIGURE,
         CMD_FINISH_SURFACE_RECONFIGURE,
         CMD_POSTER_REQUEST,
@@ -366,6 +394,8 @@ public:
             CMD cmd = static_cast<CMD>(cmd_int);
             switch (cmd) {
                 CASE_CMD(DRAW);
+                CASE_CMD(DISPLAY_OUTPUT_CHANGED);
+                CASE_CMD(SET_DISPLAY_ID);
                 CASE_CMD(STOP);
                 CASE_CMD(SET_FILLMODE);
                 CASE_CMD(SET_SCALINGMODE);
@@ -379,6 +409,7 @@ public:
                 CASE_CMD(APPLY_PROJECT_PROPERTIES);
                 CASE_CMD(SET_SCENE);
                 CASE_CMD(SET_SPEED);
+                CASE_CMD(SET_USER_OPTIONS);
                 CASE_CMD(INIT_SURFACE);
                 CASE_CMD(BEGIN_SURFACE_RECONFIGURE);
                 CASE_CMD(FINISH_SURFACE_RECONFIGURE);
@@ -504,7 +535,7 @@ public:
         const uint32_t from_logic = scene.runtime != nullptr
                                         ? scene.runtime->DescribeTimeAdvancingWork()
                                         : static_cast<uint32_t>(Reason::UnknownInput);
-        const bool     emitting  = scene.paritileSys != nullptr && scene.paritileSys->HasEmitters();
+        const bool     emitting  = scene.paritileSys != nullptr && scene.paritileSys->HasTimeAdvancingWork();
         result.reasons = from_gpu | from_logic | (emitting ? static_cast<uint32_t>(Reason::Particles) : 0u);
         if (result.reasons == 0) result.kind = Kind::WaitingForEvent;
         return result;
@@ -876,8 +907,14 @@ private:
             m_still.Hide();
         }
         m_render_init_info = std::move(info);
-        if (! m_render_init_info->bind_poster_wake) return;
         std::weak_ptr<looper::Handler> weak_self = weak_from_this();
+        // Surface-color events use the existing coalescing frame clock. A
+        // paused scene stays paused; no timer or direct draw is introduced.
+        m_render_init_info->redraw_callback = [weak_self] {
+            if (const auto self = weak_self.lock())
+                CreateMsgWithCmd(self, CMD::CMD_DISPLAY_OUTPUT_CHANGED)->post();
+        };
+        if (! m_render_init_info->bind_poster_wake) return;
         m_render_init_info->bind_poster_wake([weak_self] {
             auto self = weak_self.lock();
             if (self == nullptr) return;
@@ -916,6 +953,7 @@ private:
             return false;
         }
         m_rg = std::move(graph);
+        main_handler.setQualityInForce(*m_scene);
         m_render->SetWallpaperScalingMode(m_scaling_mode);
         m_render->SetWallpaperScalingFactor(m_scaling_factor);
         m_render->SetWallpaperFraming(m_framing);
@@ -961,7 +999,7 @@ private:
         Scene&       scene   = *m_scene;
         auto* const  updater = scene.shaderValueUpdater.get();
         auto* const  runtime = scene.runtime.get();
-        const double step    = frame_timer.IdeaTime() * static_cast<double>(m_speed);
+        const double step    = SceneFrameStep(frame_timer.IdeaTime(), static_cast<double>(m_speed));
 
         // The one sample of this frame. The mirror applies after the clamp and before anything
         // stores or delivers the position.
@@ -999,6 +1037,7 @@ private:
             runtime->SetCursorButtons(buttons.down, buttons.pressed, buttons.released);
             m_cursor_was_in_window = runtime->DispatchCursorFrameEvents(m_cursor_was_in_window);
         }
+        scene.targetFps = frame_timer.RequiredFps();
         if (scene.paritileSys != nullptr) scene.paritileSys->Emitt();
         if (runtime != nullptr) {
             runtime->Tick(step);
@@ -1117,6 +1156,17 @@ private:
         refreshFrameDemand();
         publishPauseReasons();
     }
+    MHANDLER_CMD(SET_DISPLAY_ID) {
+        int32_t value=0;
+        if (!msg->findInt32("value", &value)) return;
+        const auto identity=static_cast<uint32_t>(value);
+        if (m_render_init_info) m_render_init_info->display_id=identity;
+        if (m_render->hasBackend()) m_render->SetDisplayId(identity);
+    }
+    MHANDLER_CMD(DISPLAY_OUTPUT_CHANGED) {
+        (void)msg;
+        if (m_scene && renderInited()) m_render->RefreshDisplayOutput(*m_scene);
+    }
     MHANDLER_CMD(DRAW) {
         (void)msg;
         if (m_render_blocked) {
@@ -1145,7 +1195,8 @@ private:
         const auto mode = WallpaperScalingModeFromValue(value);
         if (! mode) return;
         m_scaling_mode = *mode;
-        m_render->SetWallpaperScalingMode(m_scaling_mode);
+        const bool needs_raster_rebuild = m_render->SetWallpaperScalingMode(m_scaling_mode);
+        if (needs_raster_rebuild && renderInited()) (void)rebuildRenderGraph();
     }
     MHANDLER_CMD(SET_SCALINGFACTOR) {
         float value = 1.0f;
@@ -1296,6 +1347,8 @@ private:
         }
         syncFrameClock();
         equipSceneRuntime();
+        // Before the graph is built, so it is built with the user's parallax switch.
+        applyUserOptions(false);
 
         CancelSceneMetalVariants();
         m_shader_cache_path = std::move(cache_path);
@@ -1319,6 +1372,33 @@ private:
         m_speed = value;
         if (m_render->hasBackend()) m_render->SetVideoPlaybackRate(m_speed);
         refreshFrameDemand();
+    }
+    /// The per-wallpaper options a running scene takes without loading again: the
+    /// colour / LUT pass's values and the mouse-parallax switch. Flip and playback
+    /// rate arrive through `SET_HORIZONTAL_FLIP` / `SET_SPEED`; a change of the
+    /// pass's shape loads the scene again on the control thread.
+    MHANDLER_CMD(SET_USER_OPTIONS) {
+        std::shared_ptr<WeUserOptions> value;
+        if (! msg->findObject("value", &value) || value == nullptr) return;
+        m_user_options = *value;
+        applyUserOptions(true);
+    }
+    /// Writes the kept user options into the current scene. `rebuild` builds the
+    /// graph again when the parallax switch changed, because which draws follow
+    /// the cursor is decided when the graph is built.
+    void applyUserOptions(bool rebuild) {
+        if (m_scene == nullptr) return;
+        if (auto& material = m_scene->color_correction_material; material != nullptr) {
+            const auto params = CcsimpleParams(m_user_options);
+            material->customShader.constValues["g_Params"] = ShaderValue(params.data(), params.size());
+            material->customShader.constValues["g_LutParams"] =
+                ShaderValue(CcsimpleLutParams(m_user_options));
+        }
+        if (m_scene->shaderValueUpdater == nullptr) return;
+        const bool changed = m_applied_mouse_parallax != m_user_options.mouse_parallax;
+        m_applied_mouse_parallax = m_user_options.mouse_parallax;
+        m_scene->shaderValueUpdater->SetUserMouseParallax(m_user_options.mouse_parallax);
+        if (rebuild && changed && m_rg != nullptr) (void)rebuildRenderGraph();
     }
     /// Shows the newest staged property document on the scene that is running,
     /// without loading it again. Runs here because this thread is the only one
@@ -1685,6 +1765,11 @@ private:
     WallpaperScalingMode              m_scaling_mode { WallpaperScalingMode::FIT };
     double                            m_scaling_factor { 1.0 };
     bool                              m_mirror { false };
+    /// The per-wallpaper options the control thread last sent (`SET_USER_OPTIONS`),
+    /// written into every scene this thread commits.
+    WeUserOptions                     m_user_options {};
+    /// The mouse-parallax switch the current graph was built with.
+    bool                              m_applied_mouse_parallax { true };
     bool                              m_media_integration { false };
     /// The newest cover that could not be given to a scene yet.
     std::optional<ArtworkPayload>     m_parked_artwork {};
@@ -1859,6 +1944,29 @@ SceneBackendSelection SceneWallpaper::sceneBackendSelection() const {
     return handler->sceneBackendSelection();
 }
 
+std::optional<SceneQuality> SceneWallpaper::qualityInForce() const {
+    if (m_main_handler == nullptr) return std::nullopt;
+    return m_main_handler->qualityInForce();
+}
+
+void SceneWallpaper::setSceneQuality(const SceneQuality& quality) {
+    setPropertyObject(PROPERTY_SCENE_QUALITY, std::make_shared<SceneQuality>(quality));
+}
+void SceneWallpaper::setSceneStorage(SceneScriptStorageConfig storage) {
+    setPropertyObject(PROPERTY_SCENE_STORAGE, std::make_shared<SceneScriptStorageConfig>(std::move(storage)));
+}
+
+void SceneWallpaper::setDisplayId(uint32_t identity) {
+    if (!m_main_handler || !m_main_handler->renderHandler()) return;
+    auto msg=CreateMsgWithCmd(m_main_handler->renderHandler(),RenderHandler::CMD::CMD_SET_DISPLAY_ID);
+    msg->setInt32("value",std::bit_cast<int32_t>(identity));
+    msg->post();
+}
+
+void SceneWallpaper::setUserOptions(const WeUserOptions& options) {
+    setPropertyObject(PROPERTY_WE_USER_OPTIONS, std::make_shared<WeUserOptions>(options));
+}
+
 bool SceneWallpaper::sceneOptimizationApplied() const {
     if (m_main_handler == nullptr) return false;
     auto handler = m_main_handler->renderHandler();
@@ -2005,6 +2113,37 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
         if (! msg->findBool("value", &flag)) return;
         PostToRender(m_render_handler, CMD::CMD_SET_HORIZONTAL_FLIP,
                      [&](looper::Message& out) { out.setBool("value", flag); });
+    } else if (name == PROPERTY_WE_USER_OPTIONS) {
+        std::shared_ptr<WeUserOptions> options;
+        if (! msg->findObject("value", &options) || options == nullptr) return;
+        const bool reshaped = CcsimpleShapeOf(*options) != CcsimpleShapeOf(m_user_options);
+        m_user_options = *options;
+        // Flip and playback rate go through the paths that already mirror the
+        // picture and the pointer and scale the scene clock (WE sub_140115280:
+        // the scene's time scale is fmaxf(rate / 100, 0.1)).
+        const bool  flip  = options->flip_horizontal;
+        const float speed = ScenePlaybackRate(*options);
+        PostToRender(m_render_handler, CMD::CMD_SET_HORIZONTAL_FLIP,
+                     [&](looper::Message& out) { out.setBool("value", flip); });
+        PostToRender(m_render_handler, CMD::CMD_SET_SPEED,
+                     [&](looper::Message& out) { out.setFloat("value", speed); });
+        // The colour / LUT pass is built when the scene is parsed: turning COL or
+        // LUT on or off, or picking another LUT, loads a loaded scene again.
+        if (reshaped && qualityInForce().has_value()) loadScene();
+        PostToRender(m_render_handler, CMD::CMD_SET_USER_OPTIONS,
+                     [&](looper::Message& out) { out.setObject("value", options); });
+    } else if (name == PROPERTY_SCENE_QUALITY) {
+        std::shared_ptr<SceneQuality> quality;
+        if (! msg->findObject("value", &quality) || quality == nullptr) return;
+        if (*quality == m_quality) return;
+        m_quality = *quality;
+        // Only a scene that already loaded needs loading again; otherwise the
+        // value waits for the load that is coming.
+        if (qualityInForce().has_value()) loadScene();
+    } else if (name == PROPERTY_SCENE_STORAGE) {
+        std::shared_ptr<SceneScriptStorageConfig> storage;
+        if (! msg->findObject("value", &storage) || storage == nullptr) return;
+        m_storage = *storage;
     } else if (name == PROPERTY_FRAMING) {
         std::shared_ptr<WallpaperFraming> framing;
         if (! msg->findObject("value", &framing) || framing == nullptr) return;
@@ -2237,6 +2376,12 @@ void MainHandler::loadScene() {
     request.project_properties          = &merged;
     request.authored_project_properties = &authored;
     request.pkg_version                 = ReadPackageVersion(resolved.scene_source.pkg_path);
+    request.quality                     = m_quality;
+    request.storage_directory           = m_storage.directory;
+    request.storage_screen_key          = m_storage.screen_key;
+    request.storage_read_only           = m_storage.read_only;
+    request.user_options                = m_user_options;
+    request.select_msaa_samples         = metal::MetalRender::SelectSampleCountForDevice;
 
     // The previous scene's sounds are released only now that a parse is certain to start.
     m_sound_manager->UnMountAll();
@@ -2247,6 +2392,7 @@ void MainHandler::loadScene() {
         return;
     }
     scene->project_path = m_source;
+    setQualityInForce(*scene);
     if (scene->runtime != nullptr) {
         scene->runtime->SetAudioResponseEnabled(m_audio_response_enabled);
         scene->runtime->SetMediaIntegrationEnabled(m_media_integration_enabled);

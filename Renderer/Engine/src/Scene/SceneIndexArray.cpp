@@ -45,12 +45,45 @@ SceneIndexArray::SceneIndexArray(std::span<const uint32_t> data) {
     m_size     = data.size();
     m_capacity = data.size();
 }
+
+SceneIndexArray::SceneIndexArray(std::span<const uint16_t> data)
+    : m_width(SceneIndexWidth::UInt16) {
+    const usize slots = data.size() / 2 + data.size() % 2;
+    if (slots > std::numeric_limits<usize>::max() / sizeof(uint32_t)) return;
+    m_pData = AllocateSlots(slots);
+    if (!data.empty()) std::memcpy(m_pData, data.data(), data.size_bytes());
+    m_size = m_capacity = slots;
+    m_explicit_draw_count = data.size();
+}
+
+SceneIndexArray SceneIndexArray::FromUInt32(std::span<const uint32_t> data) {
+    SceneIndexArray out(data);
+    out.m_width = SceneIndexWidth::UInt32;
+    out.m_explicit_draw_count = data.size();
+    return out;
+}
+
 SceneIndexArray::SceneIndexArray(SceneIndexArray&& o) noexcept
     : m_pData(std::exchange(o.m_pData, nullptr)),
       m_size(std::exchange(o.m_size, 0)),
       m_capacity(std::exchange(o.m_capacity, 0)),
       m_render_size(std::exchange(o.m_render_size, std::numeric_limits<usize>::max())),
+      m_explicit_draw_count(std::exchange(o.m_explicit_draw_count, std::numeric_limits<usize>::max())),
       m_width(o.m_width),
       m_id(std::exchange(o.m_id, 0)) {}
 
 SceneIndexArray::~SceneIndexArray() { delete[] m_pData; }
+
+SceneIndexArray SceneIndexArray::Copy() const {
+    SceneIndexArray out(std::span<const uint32_t> {});
+    if (m_capacity > 0 && m_pData != nullptr) {
+        out.m_pData = new uint32_t[m_capacity];
+        std::memcpy(out.m_pData, m_pData, m_capacity * sizeof(uint32_t));
+    }
+    out.m_size        = m_size;
+    out.m_capacity    = m_capacity;
+    out.m_render_size = m_render_size;
+    out.m_explicit_draw_count = m_explicit_draw_count;
+    out.m_width       = m_width;
+    return out;
+}
