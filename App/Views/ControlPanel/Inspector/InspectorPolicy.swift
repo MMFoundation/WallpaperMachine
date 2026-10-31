@@ -177,6 +177,11 @@ enum InspectorPolicy {
   /// first draw on, so a later change of the rows never opens or closes it.
   static func displaysOpenByDefault(_ options: InspectorOptions) -> Bool { !options.displays.isEmpty }
 
+  /// Wallpaper Engine options opens when one of them differs from its default.
+  static func engineOptionsOpenByDefault(_ options: InspectorOptions) -> Bool {
+    options.engineHiddenModified || (options.engineOptions ?? []).contains { $0.row.isModified }
+  }
+
   /// Collections opens for a wallpaper that belongs to one.
   static func collectionsOpenByDefault(_ collections: [CollectionRow], wallpaperID: String) -> Bool {
     collections.contains { $0.wallpaperIDs.contains(wallpaperID) }

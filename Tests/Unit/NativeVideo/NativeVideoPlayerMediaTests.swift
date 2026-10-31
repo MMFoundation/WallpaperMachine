@@ -64,9 +64,13 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
     }
 
     private func makePlayer(
-        url: URL, paused: Bool = false, viewSize: CGSize = CGSize(width: 64, height: 36)
+        url: URL, paused: Bool = false, viewSize: CGSize = CGSize(width: 64, height: 36),
+        configureComposition: @escaping @MainActor (VideoColorPipeline, AVPlayerItem) async throws -> Void = {
+            try await $0.configure($1)
+        }
     ) -> NativeVideoPlayer {
-        let player = NativeVideoPlayer(surface: surface, counters: counters, paused: paused)
+        let player = NativeVideoPlayer(
+            surface: surface, counters: counters, paused: paused, configureComposition: configureComposition)
         // A layer with no window shows nothing, but it still has to be the
         // production object: the poster path reads the item the layer's player
         // is playing.
@@ -269,6 +273,132 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         XCTAssertFalse(
             player.isPlaying,
             "a screenshot request must never restart playback the user stopped")
+    }
+
+    func testConcurrentFlippedPostersMirrorOnceAndKeepTheCachedSourceUnflipped() async throws {
+        // The clockwise display matrix makes the fixture's green gradient asymmetric
+        // horizontally. It also uses the generator, so removing the file below forces
+        // later requests to reuse the already-produced frame without a video-output read.
+        let url = try await makeRotatedClip(name: "poster-concurrent-flipped", degrees: 90)
+        let player = makePlayer(url: url)
+        let itemReady = await wait { player.itemStatusForTest == .readyToPlay }
+        XCTAssertTrue(itemReady, "the item never became readyToPlay")
+        player.setUserPaused(true)
+        var options = WallpaperEngineOptions.identity
+        options.flipHorizontal = true
+        player.setEngineOptions(options, lut: nil, borderColor: nil)
+
+        async let first = player.posterImage()
+        async let second = player.posterImage()
+        let images = await [first, second]
+        for image in images {
+            let corners = Self.corners(of: try XCTUnwrap(image))
+            XCTAssertEqual(corners.count, 4)
+            guard corners.count == 4 else { continue }
+            XCTAssertGreaterThan(corners[1].green, corners[0].green + 60, "mirrored top row")
+            XCTAssertGreaterThan(corners[3].green, corners[2].green + 60, "mirrored bottom row")
+        }
+        XCTAssertEqual(
+            counters.snapshot().value(.nativeVideoPosterDecode, for: surface), 1,
+            "concurrent callers must share the one source-frame decode")
+
+        try FileManager.default.removeItem(at: url)
+        options.flipHorizontal = false
+        player.setEngineOptions(options, lut: nil, borderColor: nil)
+        let cached = await player.posterImage()
+        let unflipped = try XCTUnwrap(cached)
+        let originalCorners = Self.corners(of: unflipped)
+        XCTAssertEqual(originalCorners.count, 4)
+        if originalCorners.count == 4 {
+            XCTAssertGreaterThan(originalCorners[0].green, originalCorners[1].green + 60)
+            XCTAssertGreaterThan(originalCorners[2].green, originalCorners[3].green + 60)
+        }
+        options.flipHorizontal = true
+        player.setEngineOptions(options, lut: nil, borderColor: nil)
+        for _ in 0..<2 {
+            let poster = await player.posterImage()
+            let corners = Self.corners(of: try XCTUnwrap(poster))
+            XCTAssertEqual(corners.count, 4)
+            if corners.count == 4 {
+                XCTAssertGreaterThan(corners[1].green, corners[0].green + 60)
+                XCTAssertGreaterThan(corners[3].green, corners[2].green + 60)
+            }
+        }
+        player.setEngineOptions(.identity, lut: nil, borderColor: nil)
+        let restored = await player.posterImage()
+        XCTAssertTrue(restored === unflipped, "mirroring must not replace the cached source image")
+        XCTAssertFalse(player.isPlaying, "poster requests must leave playback paused")
+    }
+
+    @MainActor
+    private final class CompositionPreparation {
+        var suspendNext = false
+        private var released = false
+        private var continuation: CheckedContinuation<Void, Never>?
+        var isWaiting: Bool { continuation != nil }
+
+        func configure(_ pipeline: VideoColorPipeline, item: AVPlayerItem) async throws {
+            try await pipeline.configure(item)
+            guard suspendNext, !released else { return }
+            suspendNext = false
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func resume() {
+            // A test's defer also prevents a late preparation from suspending after cleanup.
+            released = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    func testColourReloadKeepsThePositionAndPauseChosenDuringPreparation() async throws {
+        try await checkColourReload(pausedAtReplacement: true)
+    }
+
+    func testColourReloadKeepsThePositionAndResumeChosenDuringPreparation() async throws {
+        try await checkColourReload(pausedAtReplacement: false)
+    }
+
+    private func checkColourReload(pausedAtReplacement: Bool) async throws {
+        let url = try await makeClip(name: "colour-reload", frames: 300)
+        let preparation = CompositionPreparation()
+        defer { preparation.resume() }
+        let player = makePlayer(
+            url: url, paused: !pausedAtReplacement, configureComposition: preparation.configure)
+        let ready = await wait { player.itemStatusForTest == .readyToPlay }
+        XCTAssertTrue(ready)
+        let original = try XCTUnwrap(player.currentItemForTest)
+        preparation.suspendNext = true
+        var options = WallpaperEngineOptions.identity
+        options.colorEnabled = true
+        options.brightness = 0
+        player.setEngineOptions(options, lut: nil, borderColor: nil)
+        let preparing = await wait { preparation.isWaiting }
+        XCTAssertTrue(preparing, "the replacement must be held while the original remains usable")
+        XCTAssertTrue(player.currentItemForTest === original)
+
+        // A user seek while preparation is suspended must win over the position
+        // from when the colour option changed. Exercise both pause transitions.
+        player.setUserPaused(true)
+        let sought = await original.seek(
+            to: CMTime(seconds: 4, preferredTimescale: 30), toleranceBefore: .zero, toleranceAfter: .zero)
+        XCTAssertTrue(sought)
+        let position = player.playbackTimeForTest.seconds
+        XCTAssertEqual(position, 4, accuracy: 1.0 / 30)
+        player.setUserPaused(pausedAtReplacement)
+        preparation.resume()
+
+        let restored = await wait(upTo: .seconds(2)) {
+            player.currentItemForTest !== original && player.itemStatusForTest == .readyToPlay
+                && player.playbackTimeForTest.seconds >= position - 1.0 / 30
+        }
+        XCTAssertTrue(restored, "replacement rewound from \(position) to \(player.playbackTimeForTest.seconds)")
+        XCTAssertTrue(player.hasColorCompositionForTest)
+        XCTAssertEqual(player.isPlaying, !pausedAtReplacement)
+        if pausedAtReplacement {
+            XCTAssertEqual(player.playbackTimeForTest.seconds, position, accuracy: 1.0 / 30)
+        }
     }
 
     func testAPosterLeavesThePlayingPictureUntouched() async throws {

@@ -657,7 +657,8 @@ final class BridgeStore {
         }
         // A slider or colour still being dragged shows in the preview as it does on the displays.
         let descriptor = try await bridge.wallpaperPreview(
-            wallpaperId: id, displayId: displayID, pending: editorState.propertyPreviews(wallpaperID: id))
+            wallpaperId: id, displayId: displayID, pending: editorState.propertyPreviews(wallpaperID: id),
+            pendingEngineOptions: editorState.engineOptionPreviews(wallpaperID: id))
         try Task.checkCancellation()
         var request = try WallpaperPreviewRequest(descriptor)
         request.frozenPropertyIDs = Set(options.properties.filter { Self.previewHoldsAtLoadedValue($0.kind) }.map(\.id))
@@ -823,7 +824,7 @@ final class BridgeStore {
         propertyId: String,
         value: BridgePropertyValue
     ) async throws {
-        try await changeDraftProperties(wallpaperId, replacing: propertyId) {
+        try await changeDraftProperties(wallpaperId, replacing: .property(propertyId)) {
             try await self.bridge.editProperty(wallpaperId: wallpaperId, propertyId: propertyId, value: value)
         }
     }
@@ -858,7 +859,7 @@ final class BridgeStore {
     }
 
     func restorePropertyDefaultAsync(wallpaperId: String, propertyId: String) async throws {
-        try await changeDraftProperties(wallpaperId, replacing: propertyId) {
+        try await changeDraftProperties(wallpaperId, replacing: .property(propertyId)) {
             try await self.bridge.restorePropertyDefault(wallpaperId: wallpaperId, propertyId: propertyId)
         }
     }
@@ -866,9 +867,54 @@ final class BridgeStore {
     /// Stages the authored default for every property except the files and folders the user chose,
     /// which are saved as they are picked and keep their own Clear. Revert undoes it.
     func restoreAllPropertyDefaultsAsync(wallpaperId: String) async throws {
-        try await changeDraftProperties(wallpaperId, replacing: nil) {
+        try await changeDraftProperties(wallpaperId, replacing: .everyProperty) {
             try await self.bridge.restoreAllPropertyDefaults(wallpaperId: wallpaperId)
         }
+    }
+
+    /// Stages one of Wallpaper Engine's per-wallpaper options, like a property edit: pending until
+    /// Apply changes, undone by Revert, and with the choice on shown on the displays once the edits
+    /// pause.
+    func editEngineOptionAsync(
+        wallpaperId: String, option: BridgeEngineOptionId, value: BridgePropertyValue
+    ) async throws {
+        try await changeDraftProperties(wallpaperId, replacing: .engineOption(option)) {
+            try await self.bridge.editEngineOption(wallpaperId: wallpaperId, option: option, value: value)
+        }
+    }
+
+    /// Shows the value a Wallpaper Engine option's slider is being dragged to, without making it an
+    /// edit, as ``previewPropertyAsync(wallpaperId:propertyId:value:)`` does for a property.
+    func previewEngineOptionAsync(
+        wallpaperId: String, option: BridgeEngineOptionId, value: BridgePropertyValue
+    ) async {
+        guard applyingWallpaperID != wallpaperId else { return }
+        editorState.setEngineOptionPreview(value, key: .init(wallpaperID: wallpaperId, option: option))
+        onPropertyDragged?(wallpaperId)
+        guard canShowEditsOnDesktop(wallpaperId) else { return }
+        await showPropertyEditsOnDesktop(wallpaperId)
+    }
+
+    func restoreEngineOptionDefaultAsync(wallpaperId: String, option: BridgeEngineOptionId) async throws {
+        try await changeDraftProperties(wallpaperId, replacing: .engineOption(option)) {
+            try await self.bridge.restoreEngineOptionDefault(wallpaperId: wallpaperId, option: option)
+        }
+    }
+
+    /// Stages the default of every Wallpaper Engine option of the wallpaper. Revert undoes it.
+    func restoreAllEngineOptionDefaultsAsync(wallpaperId: String) async throws {
+        try await changeDraftProperties(wallpaperId, replacing: .everyEngineOption) {
+            try await self.bridge.restoreAllEngineOptionDefaults(wallpaperId: wallpaperId)
+        }
+    }
+
+    /// What a call that changes the pending properties replaces: the value of one property or
+    /// Wallpaper Engine option, or of all of them.
+    private enum DraftReplacement {
+        case property(String)
+        case engineOption(BridgeEngineOptionId)
+        case everyProperty
+        case everyEngineOption
     }
 
     /// Runs a call that changes the wallpaper's pending properties. What the call replaces, the
@@ -876,7 +922,7 @@ final class BridgeStore {
     /// the call took or was refused: the draft is what the previews follow from then on.
     private func changeDraftProperties(
         _ wallpaperId: String,
-        replacing propertyId: String?,
+        replacing replaced: DraftReplacement,
         _ call: () async throws -> BridgeWallpaperMutationBundle
     ) async throws {
         beginWallpaperEdit(wallpaperId)
@@ -885,18 +931,30 @@ final class BridgeStore {
         do {
             bundle = try await call()
         } catch {
-            if dropPropertyPreviews(wallpaperId, propertyId: propertyId) { propertyDraftEdited(wallpaperId) }
+            if dropPropertyPreviews(wallpaperId, replaced) { propertyDraftEdited(wallpaperId) }
             throw error
         }
-        dropPropertyPreviews(wallpaperId, propertyId: propertyId)
+        dropPropertyPreviews(wallpaperId, replaced)
         apply(bundle)
         propertyDraftEdited(wallpaperId)
     }
 
     @discardableResult
-    private func dropPropertyPreviews(_ wallpaperId: String, propertyId: String?) -> Bool {
-        guard let propertyId else { return editorState.clearPropertyPreviews(wallpaperID: wallpaperId) }
-        return editorState.clearPropertyPreview(.init(wallpaperID: wallpaperId, fieldID: propertyId))
+    private func dropPropertyPreviews(_ wallpaperId: String, _ replaced: DraftReplacement) -> Bool {
+        switch replaced {
+        case .property(let propertyId):
+            return editorState.clearPropertyPreview(.init(wallpaperID: wallpaperId, fieldID: propertyId))
+        case .engineOption(let option):
+            return editorState.clearEngineOptionPreview(.init(wallpaperID: wallpaperId, option: option))
+        case .everyProperty:
+            var dropped = false
+            for key in editorState.propertyPreviewValues.keys where key.wallpaperID == wallpaperId {
+                dropped = editorState.clearPropertyPreview(key) || dropped
+            }
+            return dropped
+        case .everyEngineOption:
+            return editorState.clearEngineOptionPreviews(wallpaperID: wallpaperId)
+        }
     }
 
     /// An edit changed the wallpaper's pending properties: tells whatever follows the draft, and
@@ -938,7 +996,8 @@ final class BridgeStore {
         propertyEditsOnDesktop.insert(wallpaperId)
         do {
             try await bridge.previewWallpaperProperties(
-                wallpaperId: wallpaperId, show: true, pending: editorState.propertyPreviews(wallpaperID: wallpaperId))
+                wallpaperId: wallpaperId, show: true, pending: editorState.propertyPreviews(wallpaperID: wallpaperId),
+                pendingEngineOptions: editorState.engineOptionPreviews(wallpaperID: wallpaperId))
             desktopPreviewProblems.removeValue(forKey: wallpaperId)
         } catch {
             let problem = "properties: \(wallpaperId) could not show its pending edits on the desktop: \(error.localizedDescription)"
@@ -953,7 +1012,8 @@ final class BridgeStore {
         desktopPropertyPreviews.cancelAll()
         for wallpaperId in propertyEditsOnDesktop.sorted() {
             do {
-                try await bridge.previewWallpaperProperties(wallpaperId: wallpaperId, show: false, pending: [])
+                try await bridge.previewWallpaperProperties(
+                    wallpaperId: wallpaperId, show: false, pending: [], pendingEngineOptions: [])
                 forgetPropertyEditsOnDesktop(wallpaperId)
             } catch {
                 desktopPropertyPreviewLog("properties: \(wallpaperId) could not put its saved look back on the desktop: \(error.localizedDescription)")
@@ -1120,6 +1180,12 @@ final class BridgeStore {
     /// How many pixels a 2D scene is rasterized with, `"display"` or `"canvas"`. A preference every
     /// running 2D scene follows live, by resizing its render targets in place: nothing is reparsed (on
     /// Native Metal the scene's own video layers are reopened, as for any render-scale change).
+    /// Saves the scene quality; each running scene wallpaper loads once more with it.
+    func setSceneQualityAsync(_ quality: BridgeSceneQuality) async throws {
+        let bundle = try await bridge.setSceneQuality(quality: quality)
+        apply(bundle)
+    }
+
     func setSceneResolutionAsync(_ mode: String) async throws {
         let bundle = try await bridge.setSceneResolution(mode: mode)
         apply(bundle)
@@ -1434,7 +1500,8 @@ final class BridgeStore {
                 shaderCacheSizeBytes: 0,
                 logs: BridgeLogStatus(logsRoot: "", activeSession: "", activeFile: "", activeFileSizeBytes: 0)),
             videoBackends: [], sceneOptimizationEnabled: true, sceneOnDemandEnabled: false,
-            metalfxUpscalingEnabled: false, sceneVideoPlaneSamplingEnabled: false, sceneResolution: "display", sceneUpdateModes: [],
+            metalfxUpscalingEnabled: false, sceneVideoPlaneSamplingEnabled: false, sceneResolution: "display",
+            sceneQuality: .wallpaperEngineDefault, sceneUpdateModes: [],
             sceneRenderers: [], userAssetsPath: "", renderScale: 1, preferredRenderScale: 1,
             frameRateCap: nil, batteryRenderScale: 0.75, batteryTargetFps: 30, onBatteryPower: false,
             qualityThrottle: [], effectiveFrameRateCap: nil, renderScaleSupported: false)

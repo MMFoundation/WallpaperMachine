@@ -16,6 +16,7 @@ enum RenderingSetting: String, CaseIterable, Sendable {
   case metalFXUpscaling
   case sceneOptimization, sceneOnDemand
   case sceneVideoPlaneSampling, sceneResolution
+  case sceneMSAA, sceneShadows, sceneVolumetrics, sceneReflections, scenePostProcessing
   case lowPowerModeAction, thermalAction, lowBatteryAction
 }
 
@@ -288,6 +289,38 @@ extension PanelController {
   /// `sceneResolution`: running 2D scenes resize their render targets in place.
   func setSceneResolution(_ mode: SceneResolutionMode) async throws {
     try await change(.sceneResolution) { try await store.setSceneResolutionAsync(mode.rawValue) }
+  }
+
+  /// The scene quality rows. Each sends the saved quality with one field replaced; running scenes
+  /// load once more with it.
+  func setSceneMSAA(_ msaa: BridgeMsaa) async throws {
+    try await changeSceneQuality(.sceneMSAA) { $0.msaa = msaa }
+  }
+
+  func setSceneShadows(_ level: BridgeQualityLevel) async throws {
+    try await changeSceneQuality(.sceneShadows) { $0.shadows = level }
+  }
+
+  func setSceneVolumetrics(_ level: BridgeQualityLevel) async throws {
+    try await changeSceneQuality(.sceneVolumetrics) { $0.volumetrics = level }
+  }
+
+  func setSceneReflections(_ enabled: Bool) async throws {
+    try await changeSceneQuality(.sceneReflections) { $0.reflections = enabled }
+  }
+
+  func setScenePostProcessing(_ level: BridgePostProcessing) async throws {
+    try await changeSceneQuality(.scenePostProcessing) { $0.postProcessing = level }
+  }
+
+  private func changeSceneQuality(
+    _ setting: RenderingSetting, _ edit: @escaping (inout BridgeSceneQuality) -> Void
+  ) async throws {
+    try await change(setting) {
+      var updated = store.settingsSnapshot.sceneQuality
+      edit(&updated)
+      try await store.setSceneQualityAsync(updated)
+    }
   }
 
   // MARK: Troubleshooting and Steam

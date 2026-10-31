@@ -554,7 +554,7 @@ which leaves that choice in place; only the user can allow it. The panel's
 app when the user allows the item, so while the approval is pending the panel reads every
 snapshot again each time its window becomes key (`PanelController.windowDidBecomeKey`).
 
-`preview_wallpaper_properties(wallpaper_id, show, pending)` shows a wallpaper's pending property edits on
+`preview_wallpaper_properties(wallpaper_id, show, pending, pending_engine_options)` shows a wallpaper's pending property edits on
 every scene that draws it, mirrors included, without applying them (the Revert and drag-follow
 counterpart of `preview_display_position`). The document is built from the whole draft by the
 function that builds a scene descriptor's, except that a texture, a file and a folder keep their
@@ -576,8 +576,19 @@ handles the call, so a call that overlaps a reconcile moving a display to anothe
 not put one wallpaper's document on the other. A wallpaper that is a video or a web page, or that
 no display shows, is a silent no-op. `pending` is a list of values a host is showing without having saved them (a slider being
 dragged): each is checked by the function `edit_property` uses and made to a copy of the draft for
-that call alone, and `wallpaper_preview` takes the same list. See [scene
-rendering](features/scene-rendering.md#live-property-edits).
+that call alone, and `wallpaper_preview` takes the same list. Wallpaper Engine's per-wallpaper
+options (`WallpaperConfig.engine_options`) travel the same way: the call sends each scene the
+draft's options with `pending_engine_options` on top (`EngineFacade::preview_user_options`, whose
+engine side skips options a scene already shows), `wallpaper_preview` exports them with the chosen
+filter's `.tex` path and the saved scene quality, and `edit_engine_option`,
+`restore_engine_option_default` and `restore_all_engine_option_defaults` stage them like property
+edits. Which options a wallpaper offers depends on two readings outside its configuration, each
+refreshed when a wallpaper is selected or its options are asked for and only when its file changed:
+the image filters under the shared assets' `materials/lut` (`engine/lut_catalog.rs`) and, for a
+scene, whether its file offers the mouse-parallax switch (`EngineFacade::read_scene_traits` over
+`owe_read_scene_traits`, cached by `engine/scene_traits.rs`). See [scene
+rendering](features/scene-rendering.md#live-property-edits) and [wallpaper
+properties](features/wallpaper-properties.md#wallpaper-engine-options).
 
 ### Rust crates and the C++ scene engine
 
@@ -792,7 +803,10 @@ contracts they must agree on:
   acquiring or replacing that surface's renderer failed; it names the writing process, whose exit
   the app watches ([Background checks](features/lock-screen.md#background-checks-and-recovery)). A scene field added later is optional
   (for example `framing`, the picture's position, and `plainVideo` and `nativeVideoFile`, which
-  mark a video and name its clip; a `sceneRenderer` key an older app wrote is read past), so the version stays and an extension
+  mark a video and name its clip, and `sceneStoragePath`/`sceneStorageScreenKey`, a read-only
+  publish-time copy of a scene's script `localStorage`, and `engineOptions`, `sceneQuality`,
+  `lutFile` (a video's published image filter) and `borderColor` (a video's `schemecolor`
+  border), the saved Wallpaper Engine options; a `sceneRenderer` key an older app wrote is read past), so the version stays and an extension
   copy that predates it ignores the key; `LockScreenScene.sharesRenderer(with:)` names which
   differences make the extension replace a renderer rather than update it.
 - `LockScreenExtensionStatus` is a separate diagnostic exchange (`activation-request.json`,

@@ -58,6 +58,31 @@ struct PerformanceSettingsSection: View {
       "Display resolution draws a 2D scene at the size it covers on your display, as Wallpaper Engine does, which keeps it sharp on a high-resolution screen. Canvas size draws it at the size its author made it and stretches the result, which uses the least GPU and memory. Internal render scale applies on top. Perspective scenes and videos aren’t affected.",
     keywords: ["Display resolution", "Canvas size"])
 
+  // Scene quality: Wallpaper Engine's own settings (defaults are its first-run Medium preset).
+  static let msaa = SettingsItem(
+    id: "performance.msaa", section: .performance, group: quality, title: "Antialiasing (MSAA)",
+    note:
+      "Smooths the edges of 3D models; scenes without one are not affected. Changing it loads running scenes again.",
+    keywords: ["Off"])
+  static let shadows = SettingsItem(
+    id: "performance.shadows", section: .performance, group: quality, title: "Shadows",
+    note: "Detail of the shadows lit 3D scenes cast. Changing it loads running scenes again.",
+    keywords: ["Off", "Low", "Medium", "High", "Ultra"])
+  static let volumetrics = SettingsItem(
+    id: "performance.volumetrics", section: .performance, group: quality, title: "Volumetrics",
+    note: "Light shafts and fog volumes in 3D scenes. Changing it loads running scenes again.",
+    keywords: ["Off", "Low", "Medium", "High", "Ultra"])
+  static let reflections = SettingsItem(
+    id: "performance.reflections", section: .performance, group: quality, title: "Reflections",
+    note:
+      "Lets reflective materials show the scene around them. Changing it loads running scenes again.")
+  static let postProcessing = SettingsItem(
+    id: "performance.post-processing", section: .performance, group: quality,
+    title: "Post-processing",
+    note:
+      "How much of a scene’s bloom and HDR is drawn; HDR needs Ultra or Display HDR. Changing it loads running scenes again.",
+    keywords: ["Disabled", "Enabled", "Ultra", "Display HDR"])
+
   // Advanced
   static let advanced = SettingsItem(
     id: "performance.advanced", section: .performance, title: "Advanced",
@@ -95,6 +120,10 @@ struct PerformanceSettingsSection: View {
   static let sceneInForce = SettingsItem(
     id: "performance.scene-in-force", section: .performance, group: scene,
     inside: sceneDiagnostics, title: "In force now")
+  static let sceneQualityInForce = SettingsItem(
+    id: "performance.scene-quality-in-force", section: .performance, group: scene,
+    inside: sceneDiagnostics, title: "Quality in force",
+    keywords: ["No scene wallpaper is running."])
   static let sceneUpdating = SettingsItem(
     id: "performance.scene-updating", section: .performance, group: scene,
     inside: sceneDiagnostics, title: "Updating now", keywords: ["Retry"])
@@ -110,10 +139,10 @@ struct PerformanceSettingsSection: View {
   )
 
   static let items = [
-    energyUse, energyMethod, preset, frameRateLimit, renderScale, metalFXUpscaling,
-    renderScaleEffective,
-    sceneResolution, advanced, videoDiagnostics, videoInUse, sceneOptimization, sceneOnDemand,
-    sceneDiagnostics, sceneDrawnBy, sceneInForce, sceneUpdating, sceneCompatibility,
+    energyUse, energyMethod, preset, frameRateLimit, renderScale, metalFXUpscaling, renderScaleEffective,
+    sceneResolution, msaa, shadows, volumetrics, reflections, postProcessing, advanced,
+    videoDiagnostics, videoInUse, sceneOptimization, sceneOnDemand,
+    sceneDiagnostics, sceneDrawnBy, sceneInForce, sceneQualityInForce, sceneUpdating, sceneCompatibility,
     videoPlaneSampling,
   ]
 
@@ -189,6 +218,33 @@ struct PerformanceSettingsSection: View {
             }
           ) { try await controller.setSceneResolution($0) }
         }
+        SettingsRow(Self.msaa) {
+          SettingsMenuControl(
+            key: "sceneMSAA", saved: performance.sceneQuality.msaa,
+            options: BridgeMsaa.allCases.map { SettingsMenuOption(value: $0, title: $0.title) }
+          ) { try await controller.setSceneMSAA($0) }
+        }
+        SettingsRow(Self.shadows) {
+          SettingsMenuControl(
+            key: "sceneShadows", saved: performance.sceneQuality.shadows,
+            options: BridgeQualityLevel.allCases.map { SettingsMenuOption(value: $0, title: $0.title) }
+          ) { try await controller.setSceneShadows($0) }
+        }
+        SettingsRow(Self.volumetrics) {
+          SettingsMenuControl(
+            key: "sceneVolumetrics", saved: performance.sceneQuality.volumetrics,
+            options: BridgeQualityLevel.allCases.map { SettingsMenuOption(value: $0, title: $0.title) }
+          ) { try await controller.setSceneVolumetrics($0) }
+        }
+        SettingsRow(Self.reflections) { SettingsSwitchControl(key: .sceneReflections) }
+        SettingsRow(Self.postProcessing) {
+          SettingsMenuControl(
+            key: "scenePostProcessing", saved: performance.sceneQuality.postProcessing,
+            options: BridgePostProcessing.allCases.map {
+              SettingsMenuOption(value: $0, title: $0.title)
+            }
+          ) { try await controller.setScenePostProcessing($0) }
+        }
       }
       SettingsGroupDisclosure(Self.advanced) {
         videoGroup(performance)
@@ -224,6 +280,11 @@ struct PerformanceSettingsSection: View {
         }
         if let text = performance.optimization.text {
           SettingsRow(Self.sceneInForce, stacked: true) { Text(verbatim: text).font(.system(size: 12.5)) }
+        }
+        SettingsRow(Self.sceneQualityInForce, stacked: true) {
+          report(
+            performance.sceneQualityInForce.map(\.line),
+            empty: "No scene wallpaper is running.")
         }
         SettingsRow(Self.sceneUpdating, stacked: true) { updating(performance.sceneUpdates) }
       }

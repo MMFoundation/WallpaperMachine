@@ -13,7 +13,8 @@ struct WallpaperBackupService: Sendable {
     private let referenceRoot: String
     private var manager: FileManager { .default }
     private var files: WallpaperBackupFiles { .init(limits: limits) }
-    private let managedRoots = ["config.toml", "wallpapers", "Library", "UserAssets"]
+    /// `SceneStorage` holds each wallpaper's scene-script `localStorage` (one unit per wallpaper).
+    private let managedRoots = ["config.toml", "wallpapers", "Library", "UserAssets", "SceneStorage"]
     private static let solarLocationKey = "WallpaperMachine.solarLocation"
     private static let solarSettingsKey = "WallpaperMachine.solarSettings"
     private static let solarKeys: Set<String> = [solarLocationKey, solarSettingsKey]
@@ -562,7 +563,7 @@ struct WallpaperBackupService: Sendable {
             try ensureSafeParents(of: "ready/" + unit.path, root: staged(unit.path))
             let parts = unit.path.split(separator: "/")
             guard paths.insert(unit.path).inserted,
-                  unit.path == "config.toml" || (parts.count == 2 && ["wallpapers", "Library", "UserAssets"].contains(String(parts[0])) && unit.path != "UserAssets/PresetAssets")
+                  unit.path == "config.toml" || (parts.count == 2 && ["wallpapers", "Library", "UserAssets", "SceneStorage"].contains(String(parts[0])) && unit.path != "UserAssets/PresetAssets")
                     || (parts.count == 3 && parts[0] == "UserAssets" && parts[1] == "PresetAssets") else {
                 throw files.unsafe(unit.path)
             }

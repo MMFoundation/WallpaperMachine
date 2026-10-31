@@ -677,7 +677,7 @@ impl<E: EngineFacade + Clone> Message<CancelWallpaperOptions> for BridgeActor<E>
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let draft = self.operation_values().wallpaper_draft(&msg.wallpaper_id)?;
-        self.show_wallpaper_properties(&msg.wallpaper_id, false, Vec::new())
+        self.show_wallpaper_properties(&msg.wallpaper_id, false, Vec::new(), Vec::new())
             .await?;
         let mut cancelled = draft.clone();
         cancelled.cancel();

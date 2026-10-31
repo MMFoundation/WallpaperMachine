@@ -18,6 +18,7 @@ extension PanelController {
     static let batteryRenderScale: Float = 0.75
     static let batteryTargetFps: UInt32 = 30
     static let sceneResolution = SceneResolutionMode.display
+    static let sceneQuality = BridgeSceneQuality.wallpaperEngineDefault
     static let sceneOptimization = true
     static let sceneOnDemand = false
     static let sceneVideoPlaneSampling = false
@@ -120,6 +121,9 @@ extension PanelController {
     }
     if current().sceneResolution != D.sceneResolution.rawValue {
       await attempt { try await store.setSceneResolutionAsync(D.sceneResolution.rawValue) }
+    }
+    if current().sceneQuality != D.sceneQuality {
+      await attempt { try await store.setSceneQualityAsync(D.sceneQuality) }
     }
     if current().sceneOptimizationEnabled != D.sceneOptimization {
       await attempt { try await store.setSceneOptimizationEnabledAsync(D.sceneOptimization) }

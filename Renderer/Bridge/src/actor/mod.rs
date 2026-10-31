@@ -1,4 +1,5 @@
 mod bridge;
+mod engine_options;
 mod fixture_values;
 pub mod messages;
 mod projection_values;

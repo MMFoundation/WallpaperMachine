@@ -117,7 +117,10 @@ How the panel runs (controller, actions, observation, window hosting) is in
   property, a navigation), `.dropDuplicates` otherwise. A new action is an
   `async throws` method in `Model/PanelController+<Group>.swift` that picks its
   disposition with `run(_:slot:...)`; confirmations and file panels go through
-  `controller.dialogs`, never a direct `NSAlert` or `NSOpenPanel`.
+  `controller.dialogs`, never a direct `NSAlert` or `NSOpenPanel`. A row that draws
+  another kind of value like an existing one passes a scope instead of copying the
+  view: `PropertyRowView`'s `Scope` (`.authored` or `.engineOption(id)`) only picks
+  the typed actions and their key.
 - **Typed state only.** What a view shows is a typed computed property or a small
   value type with a `make(...)` factory on the controller or an area model, never a
   dictionary. A getter that reads a store which is not `@Observable` reads its

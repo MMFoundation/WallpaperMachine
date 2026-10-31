@@ -37,6 +37,7 @@ extension PanelController {
     let pending =
       store.editorState.hasPendingEdits(wallpaperID: id)
       || !(pendingPropertyValues[id] ?? [:]).isEmpty
+      || !(pendingEngineOptionValues[id] ?? [:]).isEmpty
     let isDirty = options?.dirty == true || pending
     let clean =
       options?.supported == true && options?.dirty == false && !pending

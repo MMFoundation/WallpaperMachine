@@ -169,6 +169,8 @@ final class PanelController {
   /// property id. A control keeps showing its value while the edit waits its turn and goes out; the
   /// entry goes when the edit ends, taken or refused, and the row reads the bridge's value again.
   var pendingPropertyValues: [String: [String: BridgePropertyValue]] = [:]
+  /// The same for Wallpaper Engine's per-wallpaper options, by wallpaper then option.
+  var pendingEngineOptionValues: [String: [BridgeEngineOptionId: BridgePropertyValue]] = [:]
   /// Runs `reconcileInspectorContext()` whenever the selection, the target display, the options or
   /// a library refresh changes; started the first time an inspector reads its state.
   @ObservationIgnored var inspectorContextLoop: ObservationLoop?

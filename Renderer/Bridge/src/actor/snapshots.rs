@@ -119,7 +119,7 @@ impl BridgeActorState {
             .map(|model| model.override_values(&config.property_overrides))
             .unwrap_or_default();
         let active_enabled_displays = self.enabled_selectors(&wallpaper_id);
-        Ok(super::snapshot_projection::project_options(
+        let mut snapshot = super::snapshot_projection::project_options(
             entry,
             &draft,
             &active_enabled_displays,
@@ -236,7 +236,14 @@ impl BridgeActorState {
                     asset_source_path,
                 }
             },
-        ))
+        );
+        snapshot.engine_options = super::engine_options::project(
+            entry.kind,
+            &config.engine_options,
+            self.scene_traits.get(&wallpaper_id),
+            self.image_filters(),
+        );
+        Ok(snapshot)
     }
 
     pub fn monitor_info(
@@ -480,6 +487,7 @@ impl BridgeActorState {
                     failure_reason: report.failure.as_ref().map(|failure| failure.reason.clone()),
                     video_path: report.video_path.name().to_string(),
                     optimization_applied: report.optimization_applied,
+                    quality_in_force: report.quality_in_force.map(Into::into),
                 }
             })
             .collect();
@@ -527,6 +535,7 @@ impl BridgeActorState {
                 SceneResolutionCfg::Canvas => SCENE_RESOLUTION_CANVAS.to_string(),
                 SceneResolutionCfg::Display => SCENE_RESOLUTION_DISPLAY.to_string(),
             },
+            scene_quality: candidate.quality.scene.to_scene().into(),
             scene_update_modes,
             scene_renderers,
             user_assets_path: paths.user_assets_root().to_string_lossy().into_owned(),

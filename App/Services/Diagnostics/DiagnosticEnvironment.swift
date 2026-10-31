@@ -57,6 +57,7 @@ enum DiagnosticEnvironment {
         }
         line += ", video path \(scene.videoPath)"
         if let mode { line += ", mode \(mode)" }
+        if let quality = scene.qualityInForce { line += ", quality \(quality.diagnosticText)" }
         return line
     }
 

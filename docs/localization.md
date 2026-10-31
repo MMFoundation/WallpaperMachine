@@ -109,7 +109,8 @@ call `setLabelLanguageAsync` too. A failure to send it is logged and never fails
 the language change.
 
 What is never translated: identifiers, option values, paths, tags sent
-to Steam, wallpaper titles, descriptions, creator names, custom property labels
+to Steam, wallpaper titles, descriptions, creator names, custom property labels,
+image filter names derived from LUT file names (`InspectorOptions.imageFilterLabel`)
 and upstream diagnostic text. The exception to custom property labels is the
 text a wallpaper translates itself: a label or choice that is exactly a token in
 its own `general.localization` table follows the app language, falling back to

@@ -126,6 +126,14 @@ pub struct BridgeActorState {
     /// handle-based audio accounting. Without this the system capture tap
     /// would stay shut for a display showing nothing but web wallpapers.
     pub web_audio_subscribers: BTreeMap<String, BTreeSet<u32>>,
+    /// The image filters the shared assets offer, read again when their folder
+    /// changes (see [`crate::engine::lut_catalog::LutCatalog::refreshed`]).
+    /// Refreshed when a wallpaper is selected or its options are asked for,
+    /// never per frame.
+    pub lut_catalog: Option<crate::engine::lut_catalog::LutCatalog>,
+    /// What each scene's own file says about the options Wallpaper Engine
+    /// offers for it, refreshed at the same moments as `lut_catalog`.
+    pub scene_traits: crate::engine::scene_traits::SceneTraitsCache,
 }
 
 impl Default for BridgeActorState {
@@ -183,6 +191,8 @@ impl Default for BridgeActorState {
             filter_webpage: true,
             filter_unknown: true,
             web_audio_subscribers: BTreeMap::new(),
+            lut_catalog: None,
+            scene_traits: crate::engine::scene_traits::SceneTraitsCache::default(),
         }
     }
 }
@@ -276,6 +286,66 @@ impl BridgeActorState {
                     .property_documents(model)
             }
         }))
+    }
+
+    /// The kind of an installed wallpaper.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper id is unknown.
+    pub fn wallpaper_kind(&self, wallpaper_id: &str) -> Result<BridgeWallpaperKind, BridgeError> {
+        self.library
+            .iter()
+            .find(|entry| entry.id == wallpaper_id)
+            .map(|entry| entry.kind)
+            .ok_or_else(|| BridgeError::invalid_input(format!("unknown wallpaper id {wallpaper_id}")))
+    }
+
+    /// The image filters as last read; none before the first read.
+    #[must_use]
+    pub fn image_filters(&self) -> &[String] {
+        self.lut_catalog.as_ref().map_or(&[], |catalog| catalog.names())
+    }
+
+    /// `pending` checked as edits of the per-wallpaper options of
+    /// `wallpaper_id` (see [`super::engine_options::check_edit`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper id is unknown or an entry is refused.
+    pub fn checked_engine_edits(
+        &self,
+        wallpaper_id: &str,
+        pending: Vec<crate::api::BridgeEngineOptionEdit>,
+    ) -> Result<Vec<(crate::config::EngineOptionId, crate::project::PropertyValue)>, BridgeError> {
+        let kind = self.wallpaper_kind(wallpaper_id)?;
+        if pending.is_empty() {
+            return Ok(Vec::new());
+        }
+        super::engine_options::check_edits(
+            kind,
+            self.scene_traits.get(wallpaper_id),
+            self.image_filters(),
+            pending,
+        )
+    }
+
+    /// The per-wallpaper options a scene of `wallpaper_id` is shown while it
+    /// is being edited, with `pending` made to the draft for this answer alone,
+    /// and the saved ones.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper id is unknown or a pending value is
+    /// refused.
+    pub fn pending_engine_options(
+        &self,
+        wallpaper_id: &str,
+        pending: Vec<crate::api::BridgeEngineOptionEdit>,
+    ) -> Result<(crate::config::EngineOptionsCfg, crate::config::EngineOptionsCfg), BridgeError> {
+        let edits = self.checked_engine_edits(wallpaper_id, pending)?;
+        let draft = self.wallpaper_draft(wallpaper_id)?.with_engine_edits(&edits);
+        Ok((draft.current().engine_options.clone(), draft.committed().engine_options.clone()))
     }
 
     pub fn project_model(&self, wallpaper_id: &str) -> Result<&ProjectModel, BridgeError> {

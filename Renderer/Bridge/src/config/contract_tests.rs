@@ -271,6 +271,7 @@ fn all_app_fields_and_selector_variants_round_trip_without_normalizing_preferenc
                         scene_optimization_enabled: false,
                         scene_on_demand_enabled: true,
                         scene_resolution: resolution,
+                        scene: SceneQualityCfg::default(),
                         metalfx_upscaling_enabled: true,
                     },
                     monitors: Vec::new(),
@@ -1529,4 +1530,151 @@ fn save_does_not_apply_schema_acceptance_or_migration() {
         bytes
     );
     assert!(backups(&wallpaper_path(&store, "future-save")).is_empty());
+}
+
+#[test]
+fn scene_quality_reads_wallpaper_engines_words_and_falls_back_per_field() {
+    let (_temporary, store) = isolated_store();
+    let defaults = store.load().unwrap().config.quality.scene;
+    assert_eq!(defaults, SceneQualityCfg::default());
+    assert_eq!(defaults.msaa, MsaaCfg::None);
+    assert_eq!(defaults.shadows, QualityLevelCfg::Medium);
+    assert_eq!(defaults.volumetrics, QualityLevelCfg::Medium);
+    assert!(defaults.reflection);
+    assert_eq!(defaults.post_processing, PostProcessingCfg::Enabled);
+
+    put(
+        &app_path(&store),
+        "schema_version = 1\n[quality.scene]\nmsaa = \"x8\"\nshadows = \"disabled\"\nvolumetrics = \"ultra\"\nreflection = false\npost_processing = \"displayhdr\"\n",
+    );
+    let read = store.load().unwrap().config.quality.scene;
+    assert_eq!(
+        read,
+        SceneQualityCfg {
+            msaa: MsaaCfg::X8,
+            shadows: QualityLevelCfg::Off,
+            volumetrics: QualityLevelCfg::Ultra,
+            reflection: false,
+            post_processing: PostProcessingCfg::DisplayHdr,
+        }
+    );
+
+    // Unknown words take Wallpaper Engine's own fallbacks (sub_14010DF40) and the
+    // file still loads: msaa none, lighting medium, post-processing enabled.
+    put(
+        &app_path(&store),
+        "schema_version = 1\n[quality.scene]\nmsaa = \"x3\"\nshadows = \"epic\"\nvolumetrics = 4\npost_processing = \"high\"\n",
+    );
+    let read = store.load().unwrap().config.quality.scene;
+    assert_eq!(read.msaa, MsaaCfg::None);
+    assert_eq!(read.shadows, QualityLevelCfg::Medium);
+    assert_eq!(read.volumetrics, QualityLevelCfg::Medium);
+    assert!(read.reflection);
+    assert_eq!(read.post_processing, PostProcessingCfg::Enabled);
+}
+
+#[test]
+fn scene_quality_is_written_in_wallpaper_engines_words() {
+    let (_temporary, store) = isolated_store();
+    let mut config = AppConfig::default();
+    config.quality.scene.shadows = QualityLevelCfg::Off;
+    config.quality.scene.msaa = MsaaCfg::X2;
+    store.save_app_config(&config).unwrap();
+    let output = app_output(&store);
+    let scene = &output["quality"]["scene"];
+    assert_eq!(scene["msaa"].as_str(), Some("x2"));
+    assert_eq!(scene["shadows"].as_str(), Some("disabled"));
+    assert_eq!(scene["volumetrics"].as_str(), Some("medium"));
+    assert_eq!(scene["post_processing"].as_str(), Some("enabled"));
+    assert_eq!(scene["reflection"].as_bool(), Some(true));
+}
+
+#[test]
+fn engine_options_missing_or_default_are_not_written_and_read_as_wallpaper_engines_defaults() {
+    let wallpaper: WallpaperConfig = serde_json::from_value(json!({"workshop_id":"plain"})).unwrap();
+    assert_eq!(wallpaper.engine_options, EngineOptionsCfg::default());
+    let defaults = &wallpaper.engine_options;
+    assert!(!defaults.color_enabled);
+    assert_eq!(
+        (defaults.brightness, defaults.contrast, defaults.saturation, defaults.hue_shift),
+        (50.0, 50.0, 50.0, 50.0)
+    );
+    assert_eq!((defaults.image_filter.as_str(), defaults.filter_strength), ("", 100.0));
+    assert!(!defaults.flip_horizontal && defaults.mouse_parallax);
+    assert_eq!(defaults.playback_rate, 100.0);
+    assert!(serde_json::to_value(&wallpaper).unwrap().get("engine_options").is_none());
+
+    let (_root, store) = isolated_store();
+    let mut edited = WallpaperConfig::new_for("edited", "scene");
+    edited.engine_options.brightness = 60.0;
+    edited.engine_options.image_filter = "lutx32_amber".into();
+    store.save_wallpaper(&edited).unwrap();
+    let written = wallpaper_output(&store, "edited");
+    assert_eq!(written["engine_options"]["brightness"], json!(60.0));
+    assert_eq!(written["engine_options"]["image_filter"], json!("lutx32_amber"));
+    assert_eq!(store.load_wallpaper("edited").unwrap().engine_options, edited.engine_options);
+}
+
+#[test]
+fn engine_options_read_each_field_on_its_own_and_hold_numbers_to_their_ranges() {
+    let wallpaper: WallpaperConfig = serde_json::from_value(json!({"workshop_id":"x","engine_options":{
+        "color_enabled": "yes",
+        "brightness": 140,
+        "contrast": -5,
+        "saturation": "60",
+        "hue_shift": 72.5,
+        "image_filter": "../escape",
+        "filter_strength": null,
+        "flip_horizontal": true,
+        "mouse_parallax": 0,
+        "playback_rate": 5,
+        "future_option": {"nested": true}
+    }}))
+    .unwrap();
+    let options = wallpaper.engine_options;
+    assert!(!options.color_enabled, "a string is not a switch");
+    assert_eq!(options.brightness, 100.0);
+    assert_eq!(options.contrast, 0.0);
+    assert_eq!(options.saturation, 50.0, "a string is not a number");
+    assert_eq!(options.hue_shift, 72.5);
+    assert_eq!(options.image_filter, "", "a path is not a filter name");
+    assert_eq!(options.filter_strength, 100.0);
+    assert!(options.flip_horizontal);
+    assert!(options.mouse_parallax, "a number is not a switch");
+    assert_eq!(options.playback_rate, 10.0);
+
+    for value in [json!(null), json!("off"), json!([1, 2]), json!(3)] {
+        let wallpaper: WallpaperConfig =
+            serde_json::from_value(json!({"workshop_id":"x","engine_options":value})).unwrap();
+        assert_eq!(wallpaper.engine_options, EngineOptionsCfg::default());
+    }
+}
+
+#[test]
+fn engine_options_reach_the_scene_renderer_under_its_own_names() {
+    let options = EngineOptionsCfg {
+        color_enabled: true,
+        brightness: 60.0,
+        contrast: 40.0,
+        saturation: 55.0,
+        hue_shift: 30.0,
+        image_filter: "amber".into(),
+        filter_strength: 70.0,
+        flip_horizontal: true,
+        mouse_parallax: false,
+        playback_rate: 150.0,
+    };
+    let scene = options.to_scene();
+    assert!(scene.color_enabled && scene.flip_horizontal && !scene.mouse_parallax);
+    assert_eq!((scene.brightness, scene.contrast, scene.saturation, scene.hue), (60.0, 40.0, 55.0, 30.0));
+    assert_eq!((scene.lut.as_str(), scene.lut_strength, scene.playback_rate), ("amber", 70.0, 150.0));
+    assert_eq!(EngineOptionsCfg::default().to_scene(), wallpaper_core::project::SceneUserOptions::default());
+
+    let mut edited = EngineOptionsCfg::default();
+    edited.set(EngineOptionId::PlaybackRate, &PropertyValue::Number(300.0));
+    assert_eq!(edited.get(EngineOptionId::PlaybackRate), PropertyValue::Number(200.0));
+    edited.set(EngineOptionId::Brightness, &PropertyValue::Bool(true));
+    assert_eq!(edited.brightness, 50.0, "a value of another kind is ignored");
+    edited.restore(EngineOptionId::PlaybackRate);
+    assert!(edited.is_default());
 }

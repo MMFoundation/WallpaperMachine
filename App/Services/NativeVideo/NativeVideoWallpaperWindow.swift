@@ -19,6 +19,9 @@ protocol NativeVideoSurface: AnyObject {
     /// this backend exactly as Compatibility draws them, so the surface never
     /// substitutes another mode, or a centred picture, for the one chosen.
     func setScaling(_ mode: BridgeScalingMode, factor: Double, pan: NativeVideoLayout.Pan)
+    /// Wallpaper Engine's per-wallpaper options (rate, flip, colour, image filter) and the
+    /// Fit-style border colour, applied to the running surface.
+    func setEngineOptions(_ options: WallpaperEngineOptions, lut: VideoLut?, borderColor: CGColor?)
     func setUserPaused(_ paused: Bool)
     func setPresentationSuspended(_ suspended: Bool)
     var isPlaying: Bool { get }
@@ -90,6 +93,7 @@ final class NativeVideoWallpaperWindow: NSWindow {
     private var scalingMode: BridgeScalingMode = .fill
     private var scalingFactor = 1.0
     private var scalingPan = NativeVideoLayout.Pan.centered
+    private var borderColor: CGColor?
 
     init(frame: NSRect, player: NativeVideoPlayer) {
         self.player = player
@@ -141,6 +145,10 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         scalingPan = pan
         player.setScaling(mode, factor: factor, pan: pan)
     }
+    func setEngineOptions(_ options: WallpaperEngineOptions, lut: VideoLut?, borderColor: CGColor?) {
+        self.borderColor = borderColor
+        player.setEngineOptions(options, lut: lut, borderColor: borderColor)
+    }
     func setUserPaused(_ paused: Bool) { player.setUserPaused(paused) }
     func setPresentationSuspended(_ suspended: Bool) {
         player.setPresentationSuspended(suspended)
@@ -156,20 +164,20 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         return Self.fittedPoster(image, pixelSize: CGSize(
             width: frame.width * backingScaleFactor, height: frame.height * backingScaleFactor),
             backingScale: backingScaleFactor, mode: scalingMode, factor: scalingFactor,
-            pan: scalingPan)
+            pan: scalingPan, borderColor: borderColor)
     }
 
     /// The desktop picture API stretches the supplied poster to the display.
     /// Draw the clip's frame where the live layer puts the picture first, so
-    /// other Spaces show the same crop, bars and zoom: Fit leaves black bars,
+    /// other Spaces show the same crop, scheme-colour bars and zoom: Fit leaves bars,
     /// Fill and Original size crop, a scale factor magnifies, and a position moves it.
     static func fittedPoster(
         _ image: CGImage, pixelSize: CGSize, backingScale: CGFloat, mode: BridgeScalingMode,
-        factor: Double, pan: NativeVideoLayout.Pan = .centered
+        factor: Double, pan: NativeVideoLayout.Pan = .centered, borderColor: CGColor? = nil
     ) -> CGImage? {
         NativeVideoLayout.composeFrame(
             image, pixelSize: pixelSize, backingScale: backingScale, mode: mode.layoutMode,
-            factor: factor, pan: pan)
+            factor: factor, pan: pan, borderColor: borderColor)
     }
     /// Forwarded straight to the player, which is what observes
     /// `AVPlayerItem.status` and knows its own surface generation.

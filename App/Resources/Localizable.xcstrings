@@ -1,6 +1,108 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "While you edit a wallpaper’s properties, your displays follow each change before you press Apply changes, and Revert puts the saved look back. Pictures, options that switch an effect on or off, and a video’s Wallpaper Engine options still wait for Apply changes. The lock screen and the Mission Control picture keep the saved look until you apply." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Enquanto você edita as propriedades de um papel de parede, suas telas acompanham cada alteração antes de você clicar em Aplicar alterações, e Reverter restaura a aparência salva. Imagens, opções que ativam ou desativam um efeito e as opções do Wallpaper Engine de um vídeo ainda aguardam Aplicar alterações. A tela bloqueada e a imagem do Mission Control mantêm a aparência salva até você aplicar."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 속성을 편집하는 동안 ‘변경 사항 적용’을 누르기 전에도 각 변경이 디스플레이에 반영되며, ‘되돌리기’를 누르면 저장된 모습으로 돌아갑니다. 이미지, 효과를 켜거나 끄는 옵션, 비디오의 Wallpaper Engine 옵션은 ‘변경 사항 적용’을 눌러야 반영됩니다. 잠금 화면과 Mission Control 이미지는 적용할 때까지 저장된 모습을 유지합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙のプロパティを編集している間、「変更を適用」を押す前でも、ディスプレイが変更に追従します。「元に戻す」を押すと保存済みの見た目に戻ります。画像、エフェクトのオン・オフを切り替えるオプション、ビデオの Wallpaper Engine のオプションは、「変更を適用」を押すまで反映されません。ロック画面とMission Controlの画像は、適用するまで保存済みの見た目のままです。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "编辑壁纸的属性时，显示器会在你按下“应用修改”之前跟随每一项更改，“还原”会恢复已保存的外观。图片、用来开关某个效果的选项，以及视频的 Wallpaper Engine 选项，仍要等到“应用修改”才会生效。锁定屏幕和调度中心的画面在你应用之前保持已保存的外观。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "編輯桌布的屬性時，顯示器會在你按下「套用變更」之前跟隨每一項變更，「還原」會恢復已儲存的外觀。圖片、用來開關某個效果的選項，以及影片的 Wallpaper Engine 選項，仍要等到「套用變更」才會生效。鎖定畫面和指揮中心的畫面在你套用之前會維持已儲存的外觀。"}}}
+    },
+    "Wallpaper Engine options" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Opções do Wallpaper Engine"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "Wallpaper Engine 옵션"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Wallpaper Engine のオプション"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Wallpaper Engine 选项"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Wallpaper Engine 選項"}}}
+    },
+    "Color adjustments" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ajustes de cor"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "색상 조정"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "色調整"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "色彩调整"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "色彩調整"}}}
+    },
+    "Contrast" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Contraste"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "대비"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "コントラスト"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "对比度"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "對比度"}}}
+    },
+    "Saturation" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Saturação"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "채도"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "彩度"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "饱和度"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "飽和度"}}}
+    },
+    "Hue shift" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Deslocamento de matiz"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "색조 이동"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "色相シフト"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "色相偏移"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "色相偏移"}}}
+    },
+    "Image filter" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Filtro de imagem"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이미지 필터"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "画像フィルタ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "图像滤镜"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影像濾鏡"}}}
+    },
+    "No filter" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Sem filtro"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "필터 없음"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "フィルタなし"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "无滤镜"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無濾鏡"}}}
+    },
+    "Filter strength" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Intensidade do filtro"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "필터 강도"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "フィルタの強さ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "滤镜强度"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "濾鏡強度"}}}
+    },
+    "Flip horizontally" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Espelhar horizontalmente"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "좌우 반전"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "左右反転"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "水平翻转"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "水平翻轉"}}}
+    },
+    "Mouse parallax" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Paralaxe do mouse"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "마우스 시차"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "マウス視差"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "鼠标视差"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "滑鼠視差"}}}
+    },
+    "Playback rate" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Velocidade de reprodução"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "재생 속도"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "再生速度"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "播放速度"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "播放速度"}}}
+    },
+    "Stages the default for every Wallpaper Engine option. Revert undoes it." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Prepara o padrão para todas as opções do Wallpaper Engine. Reverter desfaz isso."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "모든 Wallpaper Engine 옵션을 기본값으로 변경하도록 준비합니다. ‘되돌리기’로 취소할 수 있습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "すべての Wallpaper Engine のオプションについて、デフォルト値に戻す変更を準備します。「元に戻す」で取り消せます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "为每个 Wallpaper Engine 选项暂存默认值。“还原”可撤销此操作。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "為每個 Wallpaper Engine 選項暫存預設值。「還原」可取消此動作。"}}}
+    },
+    "Ultra" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Máxima"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "최고"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "最高"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "极高"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "極高"}}}
+    },
+    "Disabled" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Desativado"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "사용 안 함"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "無効"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "停用"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "停用"}}}
+    },
+    "Display HDR" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "HDR da tela"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "디스플레이 HDR"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ディスプレイ HDR"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "显示器 HDR"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示器 HDR"}}}
+    },
+    "Quality in force" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Qualidade em vigor"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "적용 중인 품질"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "適用中の画質"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "当前生效的画质"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "目前生效的畫質"}}}
+    },
+    "Antialiasing (MSAA)" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Antisserrilhamento (MSAA)"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "안티앨리어싱(MSAA)"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アンチエイリアス (MSAA)"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "抗锯齿 (MSAA)"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "抗鋸齒 (MSAA)"}}}
+    },
+    "Shadows" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Sombras"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "그림자"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "影"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "阴影"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "陰影"}}}
+    },
+    "Volumetrics" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Volumétricos"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "볼류메트릭"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ボリューメトリック"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "体积光"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "體積光"}}}
+    },
+    "Reflections" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reflexos"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "반사"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "反射"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "反射"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "反射"}}}
+    },
+    "Post-processing" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Pós-processamento"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "후처리"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ポストプロセス"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "后期处理"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "後期處理"}}}
+    },
+    "Antialiasing off" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Antisserrilhamento desativado"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "안티앨리어싱 끔"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アンチエイリアスなし"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "抗锯齿关闭"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "抗鋸齒關閉"}}}
+    },
+    "Antialiasing %lld×" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Antisserrilhamento %lld×"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "안티앨리어싱 %lld×"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アンチエイリアス %lld×"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "抗锯齿 %lld×"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "抗鋸齒 %lld×"}}}
+    },
+    "Shadows: %@" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Sombras: %@"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "그림자: %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "影：%@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "阴影：%@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "陰影：%@"}}}
+    },
+    "Volumetrics: %@" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Volumétricos: %@"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "볼류메트릭: %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ボリューメトリック：%@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "体积光：%@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "體積光：%@"}}}
+    },
+    "Reflections on" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reflexos ativados"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "반사 켬"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "反射オン"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "反射开启"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "反射開啟"}}}
+    },
+    "Reflections off" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reflexos desativados"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "반사 끔"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "反射オフ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "反射关闭"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "反射關閉"}}}
+    },
+    "Post-processing: %@" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Pós-processamento: %@"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "후처리: %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ポストプロセス：%@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "后期处理：%@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "後期處理：%@"}}}
+    },
+    "Smooths the edges of 3D models; scenes without one are not affected. Changing it loads running scenes again." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Suaviza as bordas dos modelos 3D; cenas sem modelos não são afetadas. Alterar isso recarrega as cenas em execução."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "3D 모델의 가장자리를 매끄럽게 합니다. 모델이 없는 장면에는 영향이 없습니다. 변경하면 실행 중인 장면을 다시 불러옵니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "3D モデルの輪郭を滑らかにします。モデルのないシーンには影響しません。変更すると実行中のシーンが再読み込みされます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "平滑 3D 模型的边缘；没有模型的场景不受影响。更改后，正在运行的场景会重新载入。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "平滑 3D 模型的邊緣；沒有模型的場景不受影響。變更後，正在執行的場景會重新載入。"}}}
+    },
+    "Detail of the shadows lit 3D scenes cast. Changing it loads running scenes again." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Detalhe das sombras projetadas pelas cenas 3D iluminadas. Alterar isso recarrega as cenas em execução."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "조명이 있는 3D 장면이 드리우는 그림자의 세밀함입니다. 변경하면 실행 중인 장면을 다시 불러옵니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ライティングされた 3D シーンが落とす影の精細さです。変更すると実行中のシーンが再読み込みされます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "光照 3D 场景投射阴影的精细程度。更改后，正在运行的场景会重新载入。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "光照 3D 場景投射陰影的精細程度。變更後，正在執行的場景會重新載入。"}}}
+    },
+    "Light shafts and fog volumes in 3D scenes. Changing it loads running scenes again." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Feixes de luz e volumes de neblina em cenas 3D. Alterar isso recarrega as cenas em execução."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "3D 장면의 빛줄기와 안개 볼륨입니다. 변경하면 실행 중인 장면을 다시 불러옵니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "3D シーンの光の筋とフォグボリュームです。変更すると実行中のシーンが再読み込みされます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "3D 场景中的光束和雾体积。更改后，正在运行的场景会重新载入。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "3D 場景中的光束與霧體積。變更後，正在執行的場景會重新載入。"}}}
+    },
+    "Lets reflective materials show the scene around them. Changing it loads running scenes again." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Permite que materiais reflexivos mostrem a cena ao redor deles. Alterar isso recarrega as cenas em execução."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "반사 재질에 주변 장면이 비치게 합니다. 변경하면 실행 중인 장면을 다시 불러옵니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "反射する素材に周囲のシーンを映します。変更すると実行中のシーンが再読み込みされます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "让反射材质显示周围的场景。更改后，正在运行的场景会重新载入。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "讓反射材質顯示周圍的場景。變更後，正在執行的場景會重新載入。"}}}
+    },
+    "How much of a scene’s bloom and HDR is drawn; HDR needs Ultra or Display HDR. Changing it loads running scenes again." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Quanto do bloom e do HDR de uma cena é desenhado; o HDR requer Máxima ou HDR da tela. Alterar isso recarrega as cenas em execução."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "장면의 블룸과 HDR을 얼마나 그릴지 정합니다. HDR에는 '최고' 또는 '디스플레이 HDR'이 필요합니다. 변경하면 실행 중인 장면을 다시 불러옵니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "シーンのブルームと HDR をどこまで描くかです。HDR には「最高」または「ディスプレイ HDR」が必要です。変更すると実行中のシーンが再読み込みされます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "场景的泛光和 HDR 绘制多少；HDR 需要“极高”或“显示器 HDR”。更改后，正在运行的场景会重新载入。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "場景的泛光與 HDR 繪製多少；HDR 需要「極高」或「顯示器 HDR」。變更後，正在執行的場景會重新載入。"}}}
+    },
     "Native Metal can’t draw this scene" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O Native Metal não consegue desenhar esta cena"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "네이티브 Metal이 이 장면을 그릴 수 없습니다"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalではこのシーンを描画できません"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 无法绘制此场景"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 無法繪製此場景"}}}
     },

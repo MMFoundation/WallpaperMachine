@@ -121,6 +121,67 @@ final class PanelPerformanceSettingsTests: PanelTestCase {
     }
   }
 
+  /// The scene quality ships as Wallpaper Engine's first-run Medium preset, each row sends the saved
+  /// quality with only its own field changed, and the state is what the engine answered.
+  func testSceneQualityShipsAsWallpaperEnginesMediumPresetAndEachRowChangesOneField() async throws {
+    try await withRecordingPanel { panel, bridge in
+      panel.store.settingsSnapshot = BridgeSnapshotFixtures.settings()
+      XCTAssertEqual(
+        panel.controller.performanceSettings.sceneQuality,
+        BridgeSceneQuality(
+          msaa: .off, shadows: .medium, volumetrics: .medium, reflections: true,
+          postProcessing: .enabled))
+
+      try await panel.controller.setSceneMSAA(.x4)
+      try await panel.controller.setSceneShadows(.ultra)
+      try await panel.controller.setSceneVolumetrics(.off)
+      try await panel.controller.setSceneReflections(false)
+      try await panel.controller.setScenePostProcessing(.displayHdr)
+      XCTAssertEqual(bridge.sceneQualityCalls.count, 5)
+      XCTAssertEqual(bridge.sceneQualityCalls.first?.msaa, .x4)
+      XCTAssertEqual(bridge.sceneQualityCalls.first?.shadows, .medium, "one row changes one field")
+      XCTAssertEqual(
+        panel.controller.performanceSettings.sceneQuality,
+        BridgeSceneQuality(
+          msaa: .x4, shadows: .ultra, volumetrics: .off, reflections: false,
+          postProcessing: .displayHdr))
+      XCTAssertEqual(BridgePostProcessing.allCases, [.disabled, .enabled, .ultra, .displayHdr])
+    }
+  }
+
+  /// Quality in force is the renderer's read-back, line by line, never the saved preference.
+  func testQualityInForceIsTheRenderersReadBack() async throws {
+    try await withRecordingPanel { panel, _ in
+      let drawn = BridgeSceneQuality(
+        msaa: .off, shadows: .off, volumetrics: .off, reflections: true, postProcessing: .ultra)
+      panel.store.settingsSnapshot = BridgeSnapshotFixtures.settings(
+        sceneQuality: BridgeSceneQuality(
+          msaa: .x8, shadows: .ultra, volumetrics: .ultra, reflections: true, postProcessing: .ultra),
+        sceneRenderers: [
+          BridgeSceneBackendReport(
+            displayId: 7, displayName: "Studio Display", wallpaperId: "rain-1",
+            wallpaperTitle: "Rain", backend: "native_metal", failureStage: nil, failureReason: nil,
+            videoPath: "none", optimizationApplied: true, qualityInForce: drawn)
+        ])
+      let reports = panel.controller.performanceSettings.sceneQualityInForce
+      XCTAssertEqual(reports.map(\.quality), [drawn])
+      XCTAssertEqual(
+        reports.first?.line,
+        "Studio Display — Rain: Antialiasing off, Shadows: Off, Volumetrics: Off, Reflections on, Post-processing: Ultra")
+    }
+  }
+
+  func testResetAllSettingsReturnsTheSceneQualityToWallpaperEnginesDefault() async throws {
+    try await withRecordingPanel { panel, bridge in
+      panel.store.settingsSnapshot = BridgeSnapshotFixtures.settings(
+        sceneQuality: BridgeSceneQuality(
+          msaa: .x2, shadows: .low, volumetrics: .low, reflections: false, postProcessing: .disabled))
+      panel.dialogs.confirmAnswer = true
+      try await panel.controller.resetAllSettings()
+      XCTAssertEqual(bridge.sceneQualityCalls, [.wallpaperEngineDefault])
+    }
+  }
+
   /// A name this build does not know, from a newer or hand-edited config, reads as the shipped default
   /// rather than as a choice the user never made.
   func testAnUnknownSceneResolutionNameReadsAsTheDisplay() async throws {
