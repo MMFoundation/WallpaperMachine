@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-29 — SceneScript model data (createModelData)
+
+Scripts build geometry with thisScene.createModelData and draw it with createLayer({ model }); a compose layer that scripts parent layers to is built as a composition. Workshop item 3798688689 (issue #127) as the real case.
+
+- `script_model_layer_test` — 7 passed (draw, applyData on shared models, refusal, parent/visibility, dirty generation, static reuse, compose layer)
+- `scene_schema_part08_test --gtest_filter='ScriptMadeModel.*'` — 3 passed; failed with `IModelData is not defined` before
+- `python3 scripts/test.py` — exit 0; 4199 passed, 0 failed, 49 skipped (after `scripts/build.py --renderer-only` supplied the bridge library to a fresh worktree)
+- `python3 scripts/check_renderer.py` — exit 1 only for the pre-existing, font-dependent `TextObjectRuntime.CjkPunctuationIsNotDrawnByTheSymbolFace`; every other binary, the new one included, passed
+- `we_reference.py compare 3798688689` (opened = taken[0] - 30 s) — mean diff / off>48 vs Wallpaper Engine: 2.72 / 1.4% and 2.96 / 1.7%; the same build with the two particle scripts made no-ops (what main draws): 2.70 / 1.4% and 2.93 / 1.7%; particles are random, so equal numbers with the particles drawn is the expected outcome
+- Not covered: replaceData (throws), bounding-box culling and hit tests (accepted, unused); no probe scene was captured in the VM
+
 ## 2026-10-28 — WE parity: cookies, cursor, particle axes, IK links, HDR and dynamic sorting
 
 - `python3 scripts/check_rust.py --output <task>/integration/rust` — exit 0; 2,410 passed, five desktop-window tests excluded; desktop/media/network opt-ins disabled.
