@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-29 — Keep SteamCMD current, SteamCMD canary, hotfix releases
+
+- python3 scripts/test.py on the branch rebased onto e20f6223: 4211 passed, 0 failed, 49 skipped (Python, XcodeGen, native).
+- New tests: SteamCMDSetupTests (outdated managed copy replaced; current copy left; daily and 10-minute due rules; clock set back; unreadable manifest and failed update quiet with the working copy kept; approval-held update shown; located copy never touched).
+- DownloaderFailureOutputTests (silent exit before sign-in flagged, redacted tail kept; Steam-reported failure not flagged), WorkshopStoreTests (one retry after SteamCMD changed, none when unchanged), DiagnosticsBundleTests (steamcmd-failures.txt redacted, absent without a note).
+- test_steamcmd_canary.py (manifest with Valve's kvsign blocks, checksums, zip paths and links, issue decisions); test_bump_version.py HotfixTests (patch-only, newer than every tag, tagged commits not released again).
+- Live: steamcmd_canary.py --version-only read Valve's manifest 1792617903 (2026-10-21); real packages downloaded, verified, unpacked; Valve signature (team MXGJJ98X76) verified. actionlint clean on version.yml, checks.yml, steamcmd-canary.yml.
+- Hotfix rehearsal in a scratch clone: v1.6.5 -> 1.6.6 on hotfix/1.6.5, minor refused; merge of v1.6.6 into main clean; next notes start at v1.6.6. GitHub rules for main and hotfix/** are empty, so Actions can push both.
+- Reviewed with son-loop: 1 round, Sonnet 5.5 (high), approved; four nits declined.
+- Skipped: running the downloaded SteamCMD locally (not permitted); not exercised: an in-app update against Valve, a real-account sign-in, the workflows on GitHub; the app was not rebuilt.
+
 ## 2026-10-29 — SceneScript model data (createModelData)
 
 Scripts build geometry with thisScene.createModelData and draw it with createLayer({ model }); a compose layer that scripts parent layers to is built as a composition. Workshop item 3798688689 (issue #127) as the real case.

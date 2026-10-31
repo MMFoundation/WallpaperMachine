@@ -260,6 +260,9 @@ final class DesktopWallpaperSync {
     private var awaitingFrames = Set<ObjectIdentifier>()
     /// The layout of the last engine snapshot this sync saw, nil before the first.
     private var lastLayout: DesktopPosterLayout?
+    /// The surfaces, and their displays, the last pass over the desktops was made for; nil until
+    /// a pass succeeds and after one fails, so the next change of windows tries again.
+    private var synchronizedSurfaces: [ObjectIdentifier: String]?
     private var periodic: Task<Void, Never>?
     /// Whether a surface's wallpaper is presenting, so a later capture can show
     /// something new. Settling and periodic captures skip the others; a new
@@ -370,6 +373,28 @@ final class DesktopWallpaperSync {
     /// A display whose poster has settled keeps it.
     func presentationResumed() {
         scheduleSettleCaptures(staleOnly: true)
+    }
+
+    /// Wallpaper windows opened or closed after the snapshot that asked for posters, as a host's
+    /// do once it has read what to show. A window that opened, and has neither answered nor been
+    /// asked, is asked at once, presenting or not, and settles as a new wallpaper does: a
+    /// sequence already asking every surface would skip it as covered, and settle captures skip
+    /// a display that does not present. A display left without a window gets its own picture
+    /// back. Settled posters stay, and a call that finds the windows of the last pass does nothing.
+    func surfacesChanged() {
+        guard !stopped else { return }
+        let current = surfaces()
+        var asked = Set<ObjectIdentifier>()
+        for surface in current {
+            let key = ObjectIdentifier(surface.layer)
+            guard revisions[key] == nil, !awaitingFrames.contains(key) else { continue }
+            requestFrame(for: surface)
+            // A display on hold or drawing an unsaved look is not asked; its owner asks later.
+            if awaitingFrames.contains(key), !settlesAgain(surface) { asked.insert(key) }
+        }
+        if !asked.isEmpty { scheduleSettleCaptures(staleOnly: true, adding: asked) }
+        let shown = Dictionary(current.map { (ObjectIdentifier($0.layer), $0.display) }) { first, _ in first }
+        if shown != synchronizedSurfaces { synchronizeAllSpaces() }
     }
 
     private func refresh(_ request: CaptureRequest, settle: Bool) {
@@ -535,6 +560,7 @@ final class DesktopWallpaperSync {
         workspaceObservers.removeAll()
         posters.removeAll()
         posterScopes.removeAll()
+        synchronizedSurfaces = nil
         knownDisplays.removeAll()
         frameDigests.removeAll()
         revisions.removeAll()
@@ -685,7 +711,11 @@ final class DesktopWallpaperSync {
         do {
             try ledger.synchronize(posters: byDisplay, liveDisplays: Set(surfaces.map(\.display)).union(retained),
                                    targetSpaces: targetSpaces, spacePosters: spacePosters)
+            synchronizedSurfaces = Dictionary(surfaces.map { (ObjectIdentifier($0.layer), $0.display) }) { first, _ in first }
         } catch {
+            // A display whose picture could not be put back is tried again by the next change of
+            // windows, even one that leaves them as they are.
+            synchronizedSurfaces = nil
             report(error)
             // Retry native asynchronous acknowledgement/Space creation races,
             // not the initial update. Never require the user to visit a Space.

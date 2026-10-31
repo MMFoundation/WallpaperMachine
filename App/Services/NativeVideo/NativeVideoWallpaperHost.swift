@@ -102,6 +102,9 @@ final class NativeVideoWallpaperHost {
     private var wakeTask: Task<Void, Never>?
 
     var onError: (@MainActor (String) -> Void)?
+    /// Fired at the end of every pass, and after a surface is closed on its own, so the
+    /// presentation policy and the desktop poster sync read the desktop again. A pass that
+    /// changed no window fires too: it is how callers learn that a reconcile has finished.
     var onSurfacesChanged: (@MainActor () -> Void)?
     var onStateChanged: (@MainActor (HostWallpaperState) -> Void)?
     private var states: [UInt32: HostWallpaperState] = [:]
