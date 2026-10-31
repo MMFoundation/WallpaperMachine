@@ -181,10 +181,12 @@ actor WorkshopService {
         return components.url!
     }
 
+    /// One browse page. With `account` Steam lists what it shows that account (the age-rated
+    /// items its content preferences allow, as its region allows); without, what it shows anyone.
     func browse(search: String, kind: WorkshopKind, sort: WorkshopSort, page: Int, tags: [String] = [],
-                excludedTags: [String] = []) async throws -> WorkshopPage {
+                excludedTags: [String] = [], account: SteamWebSession? = nil) async throws -> WorkshopPage {
         let url = Self.browseURL(search: search, kind: kind, sort: sort, page: page, tags: tags, excludedTags: excludedTags)
-        let (html, decoded) = try await browsePage(url) { html -> (String, WorkshopPage?) in
+        let (html, decoded) = try await browsePage(url, account: account) { html -> (String, WorkshopPage?) in
             do { return (html, try Self.decodePage(html)) } catch is WorkshopLayoutChanged { return (html, nil) }
         }
         if let decoded { return decoded }
@@ -193,10 +195,12 @@ actor WorkshopService {
 
     /// A browse page, decoded. While Steam answers it busy the page is requested again after
     /// each of `busyRetryDelays`; after the last, `WorkshopBusy` stands.
-    private func browsePage<T>(_ url: URL, decode: (String) throws -> T) async throws -> T {
+    private func browsePage<T>(
+        _ url: URL, account: SteamWebSession?, decode: (String) throws -> T
+    ) async throws -> T {
         var delays = busyRetryDelays[...]
         while true {
-            let html = try await communityPage(url)
+            let html = try await communityPage(url, account: account)
             do {
                 return try decode(html)
             } catch is WorkshopBusy where !delays.isEmpty {
@@ -405,7 +409,8 @@ actor WorkshopService {
 
     /// One page of `query`'s source. Steam filters and sorts the browse and collections pages
     /// itself; the other sources are listed in their own order and filtered here with the same
-    /// rules, so a page can hold fewer than `pageSize` tiles.
+    /// rules, so a page can hold fewer than `pageSize` tiles. `account` is required for the
+    /// account's own lists, and read with on Steam Community pages when there is one.
     func page(for query: WorkshopQuery, page: Int, account: SteamWebSession?) async throws -> WorkshopPage {
         switch query.source {
         case .browse:
@@ -413,14 +418,15 @@ actor WorkshopService {
             if let id = query.itemID { return try await itemPage(id: id) }
             return try await browse(
                 search: query.text, kind: query.kind, sort: query.sort, page: page, tags: query.tags,
-                excludedTags: query.excludedTags)
+                excludedTags: query.excludedTags, account: account)
         case .collections:
             return try await collections(
-                search: query.text, sort: query.sort, page: page, tags: query.tags, excludedTags: query.excludedTags)
+                search: query.text, sort: query.sort, page: page, tags: query.tags, excludedTags: query.excludedTags,
+                account: account)
         case .collection(let id, _):
             return try await collectionPage(id: id, page: page, tags: query.tags, excludedTags: query.excludedTags)
         case .creator(let id, let name):
-            var listing = try await profilePage(steamID: id, list: .items, account: nil, page: page)
+            var listing = try await profilePage(steamID: id, list: .items, account: account, page: page)
             let author = listing.name ?? name
             listing.page = Self.matching(listing.page, tags: query.tags, excludedTags: query.excludedTags)
             listing.page.items = listing.page.items.map { item in
@@ -460,11 +466,12 @@ actor WorkshopService {
     /// hidden tag, and it has a wallpaper to look at: collections are rarely tagged, and a title
     /// and a cover are enough to show what a hidden rating hides.
     func collections(
-        search: String, sort: WorkshopSort, page: Int, tags: [String], excludedTags: [String]
+        search: String, sort: WorkshopSort, page: Int, tags: [String], excludedTags: [String],
+        account: SteamWebSession? = nil
     ) async throws -> WorkshopPage {
         var (listing, children) = try await browsePage(Self.browseURL(
             search: search, kind: .all, sort: sort, page: page, tags: tags, excludedTags: excludedTags,
-            section: "collections"), decode: Self.decodeBrowse)
+            section: "collections"), account: account, decode: Self.decodeBrowse)
         guard Self.screensRatings(tags: tags, excludedTags: excludedTags) else { return listing }
         let excluded = Self.hiddenTags(tags: tags, excludedTags: excludedTags)
         var samples: [String: [String]] = [:]

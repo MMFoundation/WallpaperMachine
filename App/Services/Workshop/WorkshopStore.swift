@@ -900,18 +900,22 @@ final class WorkshopStore {
     webSessionRenewal?.cancel()
     webSessionRenewal = nil
     steamWebSession = session
-    if source.isPersonal { search() }
+    // Steam lists any page differently for the account, so what is on show is read again.
+    if source.isPersonal || committedQuery != nil || isLoading { search() }
     persist(session)
   }
 
   /// Forgets the Steam Community session, here and on this Mac; Steam's own sign-in window keeps
   /// no cookie either. An account's own list that is loading is stopped, and one on show is
-  /// emptied, while another list already loading in its place goes on.
+  /// emptied, while another list already loading in its place goes on. Any other list on show
+  /// is read again as anyone sees it.
   func signOutOfSteamWeb() {
     forgetSteamWebSession()
     let loadsPersonal = source.isPersonal
+    let reads = committedQuery != nil || isLoading
     if loadsPersonal { cancelSearch() }
     if loadsPersonal || committedQuery?.source.isPersonal == true { clearResults() }
+    if !loadsPersonal && reads { search() }
   }
 
   /// Empties the grid, so nothing of an earlier list stays on show in place of one that
@@ -1024,6 +1028,20 @@ final class WorkshopStore {
     }
   }
 
+  /// The session a page of `query` is read with. An account's own list needs one; any other is
+  /// read with the session when there is one, so Steam lists what it shows that account (the
+  /// age-rated items its preferences allow, as its region allows), and anonymously without.
+  /// A session Steam refuses to renew is forgotten and such a list read anonymously.
+  private func readingSession(for query: WorkshopQuery) async throws -> SteamWebSession? {
+    if query.source.isPersonal { return try await currentSteamWebSession() }
+    do {
+      return try await currentSteamWebSession()
+    } catch is SteamSignInRequired {
+      if let held = steamWebSession, held.needsRenewal(at: now()) { forgetSteamWebSession(endedWith: held) }
+      return nil
+    }
+  }
+
   /// Saves `session` for later launches. The store logs a failure.
   private func persist(_ session: SteamWebSession) {
     try? webSessions?.save(session)
@@ -1085,7 +1103,7 @@ final class WorkshopStore {
       if Self.fillsPages(query), let self {
         result = try await self.filledPage(number, query: query, cacheID: cacheID)
       } else {
-        let account = query.source.isPersonal ? try await self?.currentSteamWebSession() : nil
+        let account = try await self?.readingSession(for: query)
         result = try await service.page(for: query, page: number, account: account)
       }
       try Task.checkCancellation()
@@ -1174,7 +1192,8 @@ final class WorkshopStore {
     let service = service
     let task = Task { [weak self] in
       defer { if let self, self.cacheID == cacheID { self.screenedFetches[number] = nil } }
-      let result = try await service.page(for: query, page: number, account: nil)
+      let account = try await self?.readingSession(for: query)
+      let result = try await service.page(for: query, page: number, account: account)
       try Task.checkCancellation()
       if let self, self.cacheID == cacheID { self.screenedPages[number] = result }
       return result

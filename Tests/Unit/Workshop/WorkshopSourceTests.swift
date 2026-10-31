@@ -965,6 +965,56 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(fixture.browsePagesRequested.count, 6)
   }
 
+  /// Steam lists the Workshop differently for an account than for anyone (the age-rated items
+  /// its preferences allow, as its region allows), so signed in, search and collections are read
+  /// with the session, and signing in or out reads what is on show again.
+  func testBrowsingIsReadAsTheSignedInAccountAndAsAnyoneSignedOut() async throws {
+    let store = fixture.store
+    let signedIn = "steamLoginSecure=\(Self.author)||0123456789abcdef0123"
+    fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene", "Everyone"])])
+    store.open(.browse)
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["12"])
+    XCTAssertNil(fixture.cookies.last ?? nil, "signed out, Steam is read as anyone")
+
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    try await finished(store)
+    XCTAssertEqual(fixture.browsePagesRequested.count, 2, "signing in reads the list on show again")
+    XCTAssertEqual(fixture.cookies.last, signedIn)
+
+    // Screened collections are filled from several Steam pages, each read with the session too.
+    fixture.browse = browseHTML(rows: [collectionRow("901", children: [("12", 0, 0)])])
+    fixture.details = ["12": detailsRow("12", tags: ["Scene", "Everyone"])]
+    store.open(.collections)
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["901"])
+    XCTAssertEqual(fixture.browseSections.last, "collections")
+    XCTAssertEqual(fixture.cookies.last, signedIn)
+
+    store.signOutOfSteamWeb()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["901"], "a public list stays on show")
+    XCTAssertEqual(fixture.browseSections.count, 4, "signing out reads it again")
+    XCTAssertNil(fixture.cookies.last ?? nil)
+  }
+
+  /// A session Steam will not renew ends, and the public list is still read, as anyone.
+  func testABrowseWhoseSessionCannotBeRenewedIsReadAsAnyone() async throws {
+    let store = fixture.store
+    let expired = SteamWebFixtures.cookie(SteamWebFixtures.token(expiresIn: -60))
+    let refresh = SteamWebFixtures.cookie(SteamWebFixtures.token(expiresIn: 86_400, salt: "r"))
+    try await store.signInToSteamWeb { WebSignInCookies(session: expired, companion: refresh) }
+    fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene", "Everyone"])])
+    store.open(.browse)
+    try await finished(store)
+    XCTAssertEqual(fixture.renewalForms.count, 1)
+    XCTAssertNil(store.errorMessage)
+    XCTAssertEqual(store.items.map(\.id), ["12"])
+    XCTAssertNil(store.steamWebSession)
+    XCTAssertNil(fixture.webSessions.session)
+    XCTAssertEqual(fixture.cookies, [nil], "the expired cookie is never sent")
+  }
+
   // MARK: Fixtures
 
   private func finished(_ store: WorkshopStore) async throws {
