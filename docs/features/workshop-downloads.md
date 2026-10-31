@@ -2,7 +2,9 @@
 
 Workshop browsing and downloading are implemented independently of the Steam
 client. Browsing needs no Steam login and no Steam Web API key; downloading needs
-a login, because Steam enforces that the account owns Wallpaper Engine. The
+a login, because Steam enforces that the account owns Wallpaper Engine. Signed in to
+Steam Community ([subscriptions](#subscriptions)), the Workshop is browsed as that
+account, so the lists match what Steam shows it. The
 bundled Aurora Drift video wallpaper (`Resources/StarterWallpaper`) can be applied
 from Installed without any download. Credentials for a download are entered only
 in the app's own local prompts.
@@ -265,16 +267,24 @@ the login keychain as one generic password (`KeychainSteamWebSessionStore`, serv
 the sign-in survives quitting; **Sign out of Steam**, or Steam ending the session,
 removes it. The cookie is sent only to `steamcommunity.com` over HTTPS (a redirect
 anywhere else goes without it, `WorkshopService.redirected`), to read the subscriptions
-list (the author page with `browsefilter=mysubscriptions`).
+list (the author page with `browsefilter=mysubscriptions`), and with every other
+Steam Community page the Workshop reads: search, collections and authors' pages.
+Steam lists those differently for an account than for an anonymous visitor: age-rated
+items the account's content preferences allow, and what its store region allows, are
+left out for anyone, so signed out a Questionable or Mature search can come back with
+far fewer pages than on Steam. Signing in or out reads the list on show again from
+its first page (`WorkshopStore.signInToSteamWeb`, `signOutOfSteamWeb`); the details endpoint on
+`api.steampowered.com` is still read without a session.
 
 The cookie's own token lasts about a day; the renewal token lasts months. Before a
-subscriptions read, a cookie whose token has run out (its JWT `exp`, read without
+read with the session, a cookie whose token has run out (its JWT `exp`, read without
 checking the signature, within two minutes) is traded for a new one through
 `IAuthenticationService/GenerateAccessTokenForApp` on `api.steampowered.com`
 (`WorkshopService.renew`): the renewal token goes there alone, in a POST body, and the
 request follows no redirect. Concurrent readers wait for one renewal, and the new
 cookie is saved. Steam refusing the token (an empty `response`) ends the session like
-its sign-in page does. A session without a renewal token is used until Steam ends it.
+its sign-in page does; a public list being read then is read anonymously instead of
+failing. A session without a renewal token is used until Steam ends it.
 The SteamCMD sign-in cannot be reused here: SteamCMD keeps its own machine-bound
 client token, which the app does not read.
 
