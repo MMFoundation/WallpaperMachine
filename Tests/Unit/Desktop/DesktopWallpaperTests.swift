@@ -1597,6 +1597,37 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
+    func testAPosterAnEarlierRunLeftIsPutBackByAHostPassWhenTheFirstRestoreWasRefused() async throws {
+        // An earlier run handed its poster on without putting the picture back.
+        let earlier = try OpeningWindowsRig(root: root, settleDelays: [])
+        defer { earlier.finish() }
+        earlier.workspace.pictures = [one: original("one")]
+        let video = CAMetalLayer()
+        earlier.shown = [video]
+        earlier.sync.refresh()
+        let written = earlier.workspace.writes.count
+        post(Data([1]), layer: video, center: earlier.frames)
+        try await waitUntil { earlier.workspace.writes.count > written }
+        earlier.sync.suspendForNativeProvider()
+
+        // This run starts with no window, and macOS refuses the picture through every retry.
+        let workspace = earlier.workspace
+        workspace.failures = [one]
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace, surfaces: { [] },
+                                            frameCenter: NotificationCenter(), encode: { $0.pixels }, settleDelays: [])
+        sync.start()
+        defer { sync.stop() }
+        sync.refresh()
+        try await Task.sleep(for: .milliseconds(800))
+        XCTAssertNotEqual(workspace.pictures[one], original("one"))
+
+        // A host pass, still with no window, puts the picture back.
+        workspace.failures = []
+        sync.surfacesChanged()
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+    }
+
+    @MainActor
     func testAWindowThatOpensWhileEveryPosterSettlesIsAskedAtOnce() async throws {
         let rig = try OpeningWindowsRig(root: root, settleDelays: [.milliseconds(150), .milliseconds(300)])
         defer { rig.finish() }
