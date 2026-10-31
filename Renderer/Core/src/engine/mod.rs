@@ -1006,6 +1006,29 @@ impl WallpaperEngine {
         .await
     }
 
+    /// Shows Wallpaper Engine's per-wallpaper options on the running scene
+    /// without keeping them (an edit that is not saved yet), with the same
+    /// wallpaper check and the same forgetting on reload as
+    /// [`Self::preview_property_override`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] for out-of-range options, an unknown handle, or a
+    /// renderer that refuses them.
+    pub async fn preview_user_options<S>(
+        &self,
+        handle: SceneHandle,
+        scene_path: S,
+        options: crate::project::SceneUserOptions,
+    ) -> Result<PropertyPreview, EngineError>
+    where
+        S: Into<String> + Send,
+    {
+        options.validate()?;
+        self.ask_actor(messages::PreviewUserOptions { handle, expected_scene_path: scene_path.into(), options })
+            .await
+    }
+
     pub async fn reset_property_override(&self, handle: SceneHandle) -> Result<(), EngineError> {
         self.ask_actor(messages::ResetPropertyOverride { handle }).await
     }

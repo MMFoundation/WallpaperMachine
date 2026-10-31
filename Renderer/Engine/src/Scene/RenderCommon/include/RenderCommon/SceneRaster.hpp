@@ -39,22 +39,25 @@ namespace render
 
 inline constexpr i32 kMinRenderTargetDimension = 4;
 
-inline i32 ResolveScreenBoundRenderTargetDimension(double source, double scale) {
-    if (! std::isfinite(source) || source <= 0.0) source = kMinRenderTargetDimension;
+inline i32 ResolveScreenBoundRenderTargetDimension(double source, double scale,
+    SceneRenderTarget::Bind::SizePolicy policy = SceneRenderTarget::Bind::SizePolicy::Effect) {
+    const bool native = policy == SceneRenderTarget::Bind::SizePolicy::NativeFramebuffer;
+    const i32 minimum = native ? 2 : kMinRenderTargetDimension;
+    if (! std::isfinite(source) || source <= 0.0) source = minimum;
     if (! std::isfinite(scale) || scale <= 0.0) scale = 1.0;
     // std::round takes halves away from zero. The product can overflow a double
     // (or an i32) for absurd sources, so it saturates rather than converting.
-    const double scaled = std::round(source * scale);
+    const double scaled = native ? std::floor(source * scale) : std::round(source * scale);
     if (! (scaled < static_cast<double>(std::numeric_limits<i32>::max())))
         return std::numeric_limits<i32>::max();
-    return std::max(kMinRenderTargetDimension, static_cast<i32>(scaled));
+    return std::max(minimum, static_cast<i32>(scaled));
 }
 
 inline void ResolveScreenBoundRenderTargetSize(SceneRenderTarget& target, const Extent2D& extent) {
     target.width  = ResolveScreenBoundRenderTargetDimension(static_cast<double>(extent.width),
-                                                           target.bind.scale);
+                                                           target.bind.scale, target.bind.size_policy);
     target.height = ResolveScreenBoundRenderTargetDimension(static_cast<double>(extent.height),
-                                                           target.bind.scale);
+                                                           target.bind.scale, target.bind.size_policy);
 }
 
 /// The smallest internal render scale that still leaves a usable image. Below
@@ -231,6 +234,7 @@ inline void RefreshScreenBoundTextureResolutions(Scene& scene) {
             for (const auto& effect_node : effect->nodes) refresh(effect_node.sceneNode.get());
         }
     }
+    const auto* frame = scene.FindRenderTarget(SpecTex_Default);
     for (const auto& post : scene.post_processes) {
         if (post == nullptr) continue;
         for (const auto& step : post->steps) {
@@ -243,8 +247,20 @@ inline void RefreshScreenBoundTextureResolutions(Scene& scene) {
                 if (material == nullptr || material->textures.empty()) continue;
                 const auto* source = scene.FindRenderTarget(material->textures.front());
                 if (source == nullptr || source->width <= 0 || source->height <= 0) continue;
-                const float x = pass->source_texel_radius / source->width;
-                const float y = pass->source_texel_radius / source->height;
+                float x = pass->source_texel_radius / source->width;
+                float y = pass->source_texel_radius / source->height;
+                if (source->bind.enable && source->bind.screen &&
+                    std::isfinite(source->bind.scale) && source->bind.scale > 0.0 &&
+                    frame != nullptr && frame->width > 0 && frame->height > 0) {
+                    // WE scales the full-raster reciprocal for each bloom level
+                    // (0x140183610), before rounding or clamping its allocation.
+                    // Bicubic sampling also derives its coordinate grid from
+                    // this offset, so using the rounded texture size reshapes it.
+                    const float radius = pass->source_texel_radius /
+                                         static_cast<float>(source->bind.scale);
+                    x = radius / frame->width;
+                    y = radius / frame->height;
+                }
                 material->customShader.constValues["g_RenderVar0"] =
                     std::array<float, 4>{x, y, -x, -y};
             }
@@ -263,10 +279,11 @@ struct ScreenBoundSizingPlan {
     uint32_t cap { 0 };
 };
 
-inline Extent2D ScaleExtent(const Extent2D& extent, double scale) {
+inline Extent2D ScaleExtent(const Extent2D& extent, double scale,
+    SceneRenderTarget::Bind::SizePolicy policy = SceneRenderTarget::Bind::SizePolicy::Effect) {
     return {
-        static_cast<uint32_t>(ResolveScreenBoundRenderTargetDimension(extent.width, scale)),
-        static_cast<uint32_t>(ResolveScreenBoundRenderTargetDimension(extent.height, scale)),
+        static_cast<uint32_t>(ResolveScreenBoundRenderTargetDimension(extent.width, scale, policy)),
+        static_cast<uint32_t>(ResolveScreenBoundRenderTargetDimension(extent.height, scale, policy)),
     };
 }
 
@@ -279,7 +296,7 @@ inline ScreenBoundSizingPlan PlanScreenBoundSizing(const Scene& scene, const Ext
     const bool from_display =
         scene.resolution == SceneResolution::Display && SceneResolutionAffectsRaster(scene);
     const Extent2D basis =
-        from_display
+        from_display && scene.display_framed ? fallback : from_display
             ? ResolveSceneDisplayExtent(plan.source, fallback, surface.display_scale_factor)
             : plan.source;
     plan.raster = ScaleExtent(basis, ResolveSceneRenderScale(scene));
@@ -307,7 +324,7 @@ inline void SizeRecord(const ScreenBoundSizingPlan& plan, std::string_view key,
         return;
     }
     if (! record.bind.enable || ! record.bind.screen) return;
-    const Extent2D latched = ScaleExtent(plan.source, record.bind.scale);
+    const Extent2D latched = ScaleExtent(plan.source, record.bind.scale, record.bind.size_policy);
     LatchAuthoredSize(record, static_cast<i32>(latched.width), static_cast<i32>(latched.height));
     ResolveScreenBoundRenderTargetSize(record, plan.raster);
     if (plan.cap == 0) return;

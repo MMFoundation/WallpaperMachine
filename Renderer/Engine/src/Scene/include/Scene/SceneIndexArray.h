@@ -82,10 +82,17 @@ class SceneIndexArray : NoCopy {
 public:
     SceneIndexArray(usize indexCount);
     SceneIndexArray(usize quadCount, SceneIndexWidth width);
+    /// Legacy packed UInt16 words (two indices per word).
     SceneIndexArray(std::span<const uint32_t> data);
+    /// A general triangle index stream; unlike the packed particle constructor,
+    /// its count need not contain a whole quad or an even number of indices.
+    SceneIndexArray(std::span<const uint16_t> data);
+    static SceneIndexArray FromUInt32(std::span<const uint32_t> data);
 
     SceneIndexArray(SceneIndexArray&&) noexcept;
     ~SceneIndexArray();
+    /// An independent copy with the same width, capacity, contents and draw count.
+    SceneIndexArray Copy() const;
 
     /// Writes 32-bit values at 32-bit element `index`; a write that does not fit
     /// the capacity is dropped.
@@ -102,7 +109,10 @@ public:
     usize           DataSizeOf() const { return m_size * sizeof(uint32_t); }
 
     usize RenderDataCount() const noexcept { return std::min(m_render_size, m_size); }
-    void SetRenderDataCount(usize val) noexcept { m_render_size = val; }
+    void SetRenderDataCount(usize val) noexcept {
+        m_render_size = val;
+        m_explicit_draw_count = std::numeric_limits<usize>::max();
+    }
 
     SceneIndexWidth Width() const noexcept { return m_width; }
     usize           ElementSize() const noexcept {
@@ -112,6 +122,11 @@ public:
         return m_width == SceneIndexWidth::UInt32 ? m_capacity / 6 : m_capacity / 3;
     }
     usize DrawIndexCount() const noexcept {
+        if (m_explicit_draw_count != std::numeric_limits<usize>::max()) {
+            const uint64_t available = static_cast<uint64_t>(m_size) *
+                (m_width == SceneIndexWidth::UInt16 ? 2u : 1u);
+            return static_cast<usize>(std::min<uint64_t>(m_explicit_draw_count, available));
+        }
         const uint64_t units = RenderDataCount();
         if (m_width == SceneIndexWidth::UInt32) {
             return units > std::numeric_limits<usize>::max() ? std::numeric_limits<usize>::max()
@@ -132,6 +147,7 @@ public:
         return static_cast<usize>(bytes);
     }
     void SetDrawIndexCount(usize index_count) noexcept {
+        m_explicit_draw_count = index_count;
         if (m_width == SceneIndexWidth::UInt32) {
             m_render_size = index_count;
             return;
@@ -162,6 +178,7 @@ private:
     usize     m_capacity { 0 };
 
     usize m_render_size { std::numeric_limits<usize>::max() };
+    usize m_explicit_draw_count { std::numeric_limits<usize>::max() };
 
     SceneIndexWidth m_width { SceneIndexWidth::UInt16 };
     uint32_t        m_id { 0 };

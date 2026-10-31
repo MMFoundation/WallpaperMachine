@@ -49,6 +49,13 @@ int owe_scene_wallpaper_delete(owe_scene_wallpaper* scene);
 int owe_scene_wallpaper_init(owe_scene_wallpaper* scene);
 int owe_scene_wallpaper_shutdown(owe_scene_wallpaper* scene);
 
+/* The output policy for subsequent init/reconfigure calls. Set before init_metal.
+   Disallowing EDR keeps a surface SDR without changing its saved scene quality. */
+int owe_scene_wallpaper_set_display_hdr_output_allowed(owe_scene_wallpaper* scene, bool allowed);
+/* The host's physical display identity, never guessed from a layer delegate.
+   Zero means unknown. Applies to an active surface and subsequent reconfigurations. */
+int owe_scene_wallpaper_set_display_id(owe_scene_wallpaper* scene, uint32_t display_id);
+
 /* The drawing surface: the CAMetalLayer, its size in points and the size to render at. */
 int owe_scene_wallpaper_init_metal(
     owe_scene_wallpaper* scene,
@@ -88,6 +95,56 @@ int owe_scene_wallpaper_set_paused(owe_scene_wallpaper* scene, bool paused);
 int owe_scene_wallpaper_set_render_scale(owe_scene_wallpaper* scene, double scale);
 
 int owe_scene_wallpaper_set_framing(owe_scene_wallpaper* scene, double pan_x, double pan_y);
+
+/* Scene quality (Wallpaper Engine's msaa / shadows / volumetrics / reflection /
+   postprocessing settings). Levels follow wallpaper64.exe sub_14010DF40. */
+typedef enum owe_quality_level { OWE_QUALITY_OFF=0, OWE_QUALITY_LOW=1, OWE_QUALITY_MEDIUM=2, OWE_QUALITY_HIGH=3, OWE_QUALITY_ULTRA=4 } owe_quality_level;
+typedef enum owe_post_processing { OWE_POST_PROCESSING_DISABLED=0, OWE_POST_PROCESSING_ENABLED=2,
+                                   OWE_POST_PROCESSING_ULTRA=4, OWE_POST_PROCESSING_DISPLAY_HDR=5 } owe_post_processing;
+typedef struct owe_scene_quality { int32_t msaa; /*0,2,4,8*/ int32_t shadows; int32_t volumetrics; bool reflection; int32_t post_processing; } owe_scene_quality;
+/* Kept for the next load; set before owe_scene_wallpaper_apply_config it is in force for
+   the first frame. A different value after a scene loaded reloads that scene. */
+int owe_scene_wallpaper_set_quality(owe_scene_wallpaper* scene, const owe_scene_quality* quality);
+/* Read-back like owe_scene_wallpaper_scene_optimization_applied: 0 = filled, non-zero = no
+   reading (no scene loaded yet). Reports what is drawn: features the renderer does not
+   draw yet read 0. */
+int owe_scene_wallpaper_quality_in_force(void* scene, owe_scene_quality* out);
+
+/* Script localStorage (plan decision I3): <directory>/global.json and
+   <directory>/screen-<screen_key>.json. NULL directory = in-memory only. read_only keeps every
+   write in memory (preview window, lock screen). Kept for the load that follows. */
+int owe_scene_wallpaper_set_storage(owe_scene_wallpaper* scene, const char* directory,
+                                    const char* screen_key, bool read_only);
+/* Wallpaper Engine's per-wallpaper options (plan decision I2; wallpaper64.exe
+   sub_140104B60 / sub_140181F30 / sub_140115280). Sliders are 0..100 as stored with 50
+   unchanged; `lut` is a file stem under materials/lut (NULL or "" = none, otherwise
+   1..64 of [A-Za-z0-9._-], not "." or ".."); `lut_strength` 0..100; `playback_rate`
+   10..200 percent (the scene clock runs at max(rate/100, 0.1)). */
+typedef struct owe_user_options {
+    bool        color_enabled;
+    float       brightness, contrast, saturation, hue;
+    const char* lut;
+    float       lut_strength;
+    bool        flip_horizontal;
+    bool        mouse_parallax;
+    float       playback_rate;
+} owe_user_options;
+/* Set before owe_scene_wallpaper_apply_config the options are in force for the first
+   frame. After a load they are applied live (values, flip, rate, mouse parallax); only
+   turning the colour pass or the image filter on or off, or picking another filter,
+   loads the scene again. The string is copied. */
+int owe_scene_wallpaper_set_user_options(owe_scene_wallpaper* scene, const owe_user_options* options);
+
+typedef struct owe_scene_traits { bool camera_parallax_offered; } owe_scene_traits;
+/* Mounts scene.pkg or the loose scene file the way a load does and reads only `general`:
+   offered = `cameraparallax` is true && `cameraparallaxmouseinfluence` != 0 (each a value
+   or an object's "value", WE sub_14010DF40 / sub_14010D850). */
+int owe_read_scene_traits(const char* project_json, owe_scene_traits* out);
+
+/* Decodes a volume .tex LUT (materials/lut/<name>.tex). Two calls: with out_rgba NULL it
+   writes the edge length to *out_size; then out_len must be at least size^3 * 4 bytes,
+   filled RGBA8 with red fastest, then green, then blue. */
+int owe_lut_load_rgba8(const char* tex_path, uint32_t* out_size, uint8_t* out_rgba, size_t out_len);
 
 int owe_scene_wallpaper_set_first_frame_callback(owe_scene_wallpaper* scene,
                                                  owe_first_frame_callback callback,

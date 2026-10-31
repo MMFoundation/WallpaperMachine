@@ -259,7 +259,28 @@ negligible.
 
 Two traps: with the user active an idle WindowServer drew 141–762 mW, so compare
 only quiet windows; and Chrome left open triggered about 60 composites a second
-on its own.
+on its own. A running Parallels VM is a third: its window keeps WindowServer and the
+GPU busy (the "other GPU busy" figure), so suspend it before a desktop run.
+
+## Build-to-build checks
+
+The Wallpaper Engine 2.8.0.42 parity work (rope geometry stage, culling, rope
+trails, perspective layers; built as 1.6.2 (47)) was compared against the installed
+1.6.6 (51) release, which has later `main` changes and none of that work, on one
+Mac (M3 Max, macOS 27.2, built-in XDR at 120 Hz, 4112x2658 scaled, AC power, VM
+suspended, panel open on Installed), alternating 60 s windows 120 s after launch on
+corpus scene 3615154110 (particles and bloom, no audio). Both drew about 3,600
+frames a window (60 fps). Over three pairs the app's coalition was 124–706 mW CPU
+and 3.3–6.9 W GPU for the new build against 196–603 mW and 3.3–4.2 W for the old;
+the one high new window (6.9 W) fell in a window where WindowServer and other
+processes also doubled (16.9 W GPU over all coalitions), and the clean pairs
+differ by less than their spread. This is an upper bound, not a saving: the
+build-to-build difference is under about 0.5 W GPU, below what these windows
+resolve, and it includes whatever the two builds' other differences cost. Package
+power (`--powermetrics`) was not sampled; the runs had no root. On corpus scene 3662790108 (HDR and bloom, 847 objects) the new build's Display HDR
+cost 29.4 W GPU against Ultra's 25.1 W in the same session (about 3,620 frames
+each, both windows marked contended, one window each), the extended-range surface
+and its linear combine included.
 
 ## Runtime counters
 

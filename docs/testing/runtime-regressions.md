@@ -89,18 +89,21 @@ device.
   [scene regressions](scene-regressions.md)).
   Projection is the scene camera's own FOV/aspect/near/far, not an orthographic
   scale; a rotated card must foreshorten.
-- **Depth writes** — `MetalSceneDraw.ADepthWritingDrawHidesLaterDraws`:
-  a half-transparent card, then an opaque card behind it, authored with
-  translucent, additive and normal blending, with and without `depthtest` and
-  `depthwrite`, and with and without a depth attachment, each drawn through
-  `SceneRendererHandle` (`DrawWithRenderer`); the nearer card must hide the
-  overlap exactly when it depth-tests and writes into a depth-attached target.
-  The depth state comes from `ResolveSceneDepthState` (`SceneMaterial.h`). Native
-  Metal used to drop depth writes for translucent and additive materials, and
-  depth-tested into targets with no depth attachment, where Wallpaper Engine draws in
-  painter's order. A layer drawn through effects takes the same state from the layer, not
-  its effect pass, except that a layer Wallpaper Engine sorts (blending `translucent` or
-  `additive`) in a scene that sorts takes no write from it
+- **Depth writes** — `MetalSceneDraw.OnlyADrawThatDoesNotBlendWritesDepth`:
+  a half-transparent card, then an opaque card behind it that depth-tests, the
+  nearer one authored with translucent, additive, normal and alphatocoverage
+  blending, with and without `depthtest` and `depthwrite`, and with and without a
+  depth attachment, each drawn through `SceneRendererHandle` (`DrawWithRenderer`);
+  the nearer card must hide the overlap exactly when it depth-tests, writes and does
+  not blend, into a depth-attached target. The depth state comes from
+  `ResolveSceneDepthState` (`SceneMaterial.h`), which takes the draw's blend mode:
+  Wallpaper Engine's device drops the write for every translucent or additive draw
+  (`sub_140099F60`), confirmed by its frames of the depth probe
+  (`artifacts/we-parity/probes/depth-probe`; facts in
+  `artifacts/we-parity/decompiles/A-1-labels-cause-C.md`). The translucent and
+  additive cases fail when the write is kept as authored. A target with no depth
+  attachment draws in painter's order. A layer drawn through effects takes the same
+  state from the layer, not its effect pass
   (`MetalSceneDraw.ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWrite`,
   [scene regressions](scene-regressions.md#layers-textures-and-compositing)).
 - **Render passes** — `MetalSceneDraw.LayersSharingATargetShareOneRenderPassAndHiddenLayersCostNone`:

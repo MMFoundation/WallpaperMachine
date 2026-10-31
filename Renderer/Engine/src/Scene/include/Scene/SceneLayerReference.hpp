@@ -23,8 +23,8 @@ class VFS;
 /// ping-pong suffix. `_a` (or no suffix) is that layer's produced output.
 /// Inside the layer's own effect chain both are the chain's ping-pong buffers,
 /// the image the effect works on (`IsOwnEffectChainInput`); a layer's own `_a` or
-/// `_b` anywhere else, or a reference from an earlier layer to a later layer in a
-/// reference cycle, is the composite as the frame before left it, which the
+/// `_b` anywhere else, or a reference from an earlier layer to a later layer,
+/// is the composite as the frame before left it, which the
 /// render graph keeps for it, so it is not a reason to refuse a scene.
 inline constexpr std::string_view kLayerTextureMissingTarget =
     "a texture names a layer that does not exist";

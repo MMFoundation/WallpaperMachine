@@ -33,6 +33,14 @@ void main() {
 }
 )";
 
+// Red, with the parallax position the shader is told in green and blue.
+const char* kParallaxProbe = R"(varying vec2 v_TexCoord;
+uniform vec2 g_ParallaxPosition;
+void main() {
+    gl_FragColor = vec4(1.0, g_ParallaxPosition.x, g_ParallaxPosition.y, 1.0);
+}
+)";
+
 // A version 13 model of one square, 40 units to a side, centred on its own origin.
 std::string MakeSquareModel(const std::string& material)
 {
@@ -42,7 +50,7 @@ std::string MakeSquareModel(const std::string& material)
     const auto  u16 = [&](uint16_t value) { bytes.append(reinterpret_cast<const char*>(&value), 2); };
     bytes.append("MDLV0013", 8);
     bytes.push_back('\0');
-    u32(0x8); // positions and one set of texture coordinates
+    u32(0x9); // positions and one set of texture coordinates
     u32(0);
     u32(1);   // one mesh
     bytes.append(material);
@@ -81,12 +89,13 @@ struct ModelScene {
     bool  perspective { false };
     float amount { 0.5f };
     float influence { 0.5f };
+    const char* fragment { kRed };
 };
 
 void Build(ScenePackage& package, const ModelScene& spec, Json general_extra = Json::object(), bool three_d = false)
 {
     package.InstallStandardAssets();
-    package.AddShader("model_red", StandardVertexShader(), kRed);
+    package.AddShader("model_red", StandardVertexShader(), spec.fragment);
     package.PutJson("materials/square.json",
                     { { "passes", Json::array({ FlatPass("model_red", Json::array({ "util/white" }), "translucent") }) } });
     package.Put("models/square.mdl", MakeSquareModel("materials/square.json"));
@@ -204,6 +213,42 @@ TEST_F(ModelParallax, ASceneWithoutParallaxLeavesTheModelAlone)
     no_amount.amount = 0.0f;
     const auto [still, moved] = Centres(no_amount);
     EXPECT_NEAR(moved, still, 0.5);
+}
+
+TEST_F(ModelParallax, MouseParallaxOffKeepsLayersStill)
+{
+    // The user's per-wallpaper switch (Wallpaper Engine's injected `cameraparallax`, which
+    // sub_140115280 turns into scene flag 0x200) holds cursor parallax in the middle in a
+    // scene that has it on: the model stays put and shaders read the centre.
+    ModelScene spec;
+    spec.grouped     = false;
+    spec.model_depth = "1 1";
+    spec.fragment    = kParallaxProbe;
+    ScenePackage package;
+    Build(package, spec);
+    GpuSceneOptions options;
+    options.user_options.mouse_parallax = false;
+    GpuScene scene(package, options);
+    ASSERT_TRUE(scene.ok()) << scene.error();
+    scene.SetPointer(0.5, 0.5);
+    const Image centred = scene.Run(3);
+    scene.SetPointer(0.9, 0.1);
+    const Image moved = scene.Run(3);
+    const auto a = LitCentre(centred, 72);
+    const auto b = LitCentre(moved, 72);
+    ASSERT_TRUE(a.has_value() && b.has_value()) << "the model is drawn";
+    EXPECT_NEAR(*b, *a, 0.5);
+    const auto at = static_cast<uint32_t>(std::lround(*b));
+    EXPECT_NEAR(moved.At(at, 72)[1], 128, 1) << "g_ParallaxPosition.x reads the centre";
+    EXPECT_NEAR(moved.At(at, 72)[2], 128, 1) << "g_ParallaxPosition.y reads the centre";
+
+    // Turned on again while the scene runs, the cursor moves the model once more.
+    scene.scene().shaderValueUpdater->SetUserMouseParallax(true);
+    ASSERT_TRUE(scene.Rebuild()) << scene.error();
+    scene.SetPointer(1.0, 0.5);
+    const auto edge = LitCentre(scene.Run(3), 72);
+    ASSERT_TRUE(edge.has_value());
+    EXPECT_NEAR(*edge - *a, -32.0, 1.0);
 }
 
 TEST_F(ModelParallax, TheModelsPassReportsThatItFollowsTheCursor)

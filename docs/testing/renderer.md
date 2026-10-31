@@ -77,7 +77,7 @@ library:
 | Case | What it reads back |
 | --- | --- |
 | `generated-0` … `generated-7` | Nested compose layers: background copy on and off, visibility, sizes, transforms and declaration order; known pixels prove a first effect draws, empty or hidden nested layers leak no earlier pixels, and visible children survive their clears |
-| `generated-alpha`, `generated-alpha-single-sample` | Composed coverage as RGB: expected 128/191/255 over transparent, half-covered and opaque destinations; the second runs alpha-to-coverage on single-sample targets |
+| `generated-alpha`, `generated-alpha-single-sample` | Composed coverage as RGB: alpha-MAX expects 128/128/255 over transparent, half-covered and opaque destinations; single-sample alpha-to-coverage expects 0/159/255 |
 | `generated-perspective-animation` | A four-corner homography whose third corner follows a paused parent timeline: the page covers the centre and the margin stays the clear color |
 | `generated-origin-animation` | A relative `origin` curve: both halves of the canvas are revealed once the curtain finishes |
 
@@ -166,6 +166,9 @@ Frames, time and surfaces:
 | `WE_TEST_SAMPLE_FRAMES` | both scene probes | JSON array of frame indices. Saves each frame and `state-N.json` with live transforms, material values, text and script-error count |
 | `WE_TEST_METAL_FRAMES` | `metal_scene_draw_smoke` | Frames the local-project Metal test draws, 1/60 s apart: 120 by default, 2–3600 accepted. Its own knob, so the probe's `WE_TEST_FRAMES` in the same environment cannot move the Metal frame's scene time. The last frame is the output; the test also prints the bytes of this scene's render targets and, separately, the device-wide Metal allocation, which includes the layer's drawables and varies between runs |
 | `WE_TEST_METAL_FRAME_STEP` | `metal_scene_draw_smoke` | Simulation delta in seconds; default `1/60`. Use `1/120` and twice as many frames for a matched-duration 120 FPS scenario |
+| `WE_TEST_MSAA` | native local/compare probes in `metal_scene_draw_smoke` | Requested sample count: `0` (default), `2`, `4` or `8`. The normal model eligibility and device capability checks apply; it does not force unsupported samples |
+| `WE_TEST_REFLECTION` | native local/compare probes in `metal_scene_draw_smoke` | Reflection quality: `0` disabled or `1` enabled (default), for matching Wallpaper Engine's quality setting without changing installed preferences |
+| `WE_TEST_POSTPROCESSING` | native local/compare probes in `metal_scene_draw_smoke` | Requested post-processing quality: Disabled `0`, Enabled `2` (default), Ultra `4`, or Display HDR `5`. HDR still requires authored HDR and bloom; the setting does not force a pipeline |
 | `WE_TEST_METAL_WARMUP_TICKS` | `metal_scene_draw_smoke` | Runtime ticks of 1/60 s before the graph is built, as `offscreen_scene_probe` takes 40; `0..3600`. Unset, none. The scene clock is not advanced by them, here or there |
 | `WE_TEST_COMPARE_PROJECTS` | `metal_scene_draw_smoke --gtest_filter='*LocalProjectsDrawAPosterPicture*'` | Colon-separated `project.json` paths drawn through `SceneRendererHandle` on a layer no window owns, the last frame's final composition written as `<scene id>.ppm` under `WE_TEST_OUTPUT` (see below). Unset, the test skips |
 | `WE_TEST_COMPARE_SURFACE` | the same test | `<width>x<height>` of the layer drawn into; default `960x540` |
@@ -204,10 +207,12 @@ audio device):
 | --- | --- | --- |
 | `WE_TEST_CLICK_LAYER` | `offscreen_scene_probe` | Image-layer ID to click |
 | `WE_TEST_CLICK_COUNT` | `offscreen_scene_probe` | `1..10` synthetic clicks |
+| `WE_TEST_CURSOR_PATH` | `offscreen_scene_probe` | A scripted cursor before the captured frames: `x,y[,down];…` in world units, one entry a 1/60 s tick, press and release dispatched where `down` changes; the scene clock moves with each tick. Drives a script's drag (`cursorDown`/`cursorMove`/`cursorUp`) the same way every run |
+| `WE_TEST_CURSOR_TRACE` | `offscreen_scene_probe` | With `WE_TEST_CURSOR_PATH`: a puppet layer name whose bones' world origins are printed every tick |
 | `WE_TEST_CLICK_OFFSET` | `offscreen_scene_probe` | World-space `"dx dy"` added to the click layer's origin, to hit a covered or transparent texel instead of the centre |
 | `WE_TEST_CLICK_VIEWPORT` | `offscreen_scene_probe` | `"<px_w>x<px_h>@<scale>:<fill\|fit\|stretch\|none>"`; maps the click the way a desktop does — the presented viewport is published and the cursor arrives window-normalized — instead of handing the runtime a world position, so hit testing is exercised against a real display's geometry |
 | `WE_TEST_INPUT_JSON` | both scene probes and the poster harness (`*LocalProjectsDrawAPosterPicture*`) | Ordered synthetic pointer events: `[{"frame":600,"layer":42,"inside":true,"buttons":1},{"frame":601,"buttons":0}]`. `layer` follows that parsed node's projected centre; `x`/`y` supply normalized coordinates instead. An exit uses `inside:false` |
-| `WE_TEST_MEDIA_EVENTS` | both scene probes | JSON array of SceneScript media event objects, dispatched in order after the warm-up ticks. Enables media integration for the run, so a wallpaper that only draws its player while something is playing can be rendered without a system media source or Automation permission. Without events a scene is still told on its first tick that nothing plays, as in the app, so a widget that hides itself on `PLAYBACK_STOPPED` is hidden |
+| `WE_TEST_MEDIA_EVENTS` | both scene probes | JSON array of SceneScript media event objects, dispatched in order after the warm-up ticks. Enables media integration for the run, so a wallpaper that only draws its player while something is playing can be rendered without a system media source or Automation permission. Without events a scene hears no media event, as in the app with no player |
 | `WE_TEST_MEDIA_ARTWORK` | both scene probes | `<width>x<height>:<rrggbb>`; publishes one opaque cover through the same path the app uses, so `$mediaThumbnail` and `$mediaPreviousThumbnail` carry a color that is legible in the rendered frame. Without it a background drawn from the current cover renders flat grey and a comparison says nothing |
 | `WE_TEST_MEDIA_JSON` | `offscreen_scene_probe` | A JSON array of media events dispatched right after the parse, before the warm-up ticks |
 | `WE_TEST_AUDIO_HZ` | both scene probes | Synthetic PCM at `0..24000` Hz; `0` means silence. Each frame submits one analysis window (1,600 frames at 48 kHz) through the same service the desktop tap feeds, and the Metal gate enables audio response for the run. The 64 bands follow Wallpaper Engine's layout: one ~23 Hz bin each up to about 400 Hz (band 0 ≈ 23 Hz, band 3 ≈ 95 Hz), then widening to ~15 kHz, so a shader reading only the lowest bands needs a bass tone, not 440 Hz |
@@ -677,6 +682,25 @@ cmake --build artifacts/renderer/bin --target scene_schema_part10_test
 artifacts/renderer/bin/tests/scene_schema_part10_test --gtest_filter='*SceneZoom*'
 ```
 
+Scene MSAA defaults to Off. An eligible scene contains a non-null `model` entry;
+visibility and object order do not change that load-time gate. Only an eligible request
+asks the host for a supported sample count. The default target then owns MS color and
+matching depth attachments, while ordinary readers use its resolved image. Feedback
+texture trades keep the original MS samples; post-processing and later fades continue
+in the single-sample image, so a post-process copy cannot be overwritten by old samples.
+Off and model-free scenes allocate no MS attachments, and **Quality in force** reports
+the count actually drawn (0 for one sample).
+
+`BACKBUFFER_MS` follows that selected scene mode. Wallpaper Engine's default framebuffer
+reader has a one-sample `Texture2DMS` view after resolve: its sample-zero lookup is an
+unfiltered integer read. The shader request's physical `sample_count=1` maps this to a
+Metal 2D texel read; true MS slots retain their MS declarations. `SceneMsaa.*`,
+`MetalMultisampling.*`, the `MetalSceneDraw.Multisampl*` tests, the early-read and
+post-copy/fade tests, and the quality binding test cover selection, storage, matching
+depth, resize/rebuild, feedback, A2C and readback. A reference eligibility comparison
+must cold-start Wallpaper Engine for each scene: switching from a model to cards can
+retain the previous device's MSAA even though a cold card scene uses one sample.
+
 The video suites (`video_source_input_test`, `unchanged_present_test`, `metal_scene_draw_smoke`) decode H.264 clips written by `Renderer/Testing/synthetic_video.mm`, which is this project's own code and uses Apple frameworks only: a `VTCompressionSession` encodes one group of pictures per binary (640x360, 30 fps, no B-frames, a 200 Mbit/s noise group and a 600-frame single-keyframe bar clip), and an `AVAssetWriter` passthrough input re-times the compressed samples for as many repeats as a test needs, with the salt as iTunes comment metadata and the display matrix as the input transform. The clips carry no colour tags, so the decoders infer the matrix from the picture size and the absolute colours the tests expect depend on that. `EncoderAvailable()` is the guard (a machine with no VideoToolbox H.264 encoder reports it instead of failing on a missing file). `synthetic_video_test` (CPU only, no decoder under test) reads the files back with AVFoundation: frame times, one keyframe per repeat, the eight orientations, no colour extensions and the luma the encoder was given. The same file also writes 10-bit clips (`WriteTenBitVideo`, guarded by `TenBitEncoderAvailable()`): `kTenBitFrames` flat 640x360 frames of HEVC Main10 from `VTCompressionSession`, one keyframe, no B-frames, tagged PQ, HLG or BT.709 in both the bitstream and the container (and optionally a content light level). `synthetic_video_test` checks them with AVFoundation alone (the `hvcC` record says Main 10 and 10 bits, each tag, frame times, the decoded codes), and `vt_frame_decoder_test` requires that the project's reader plus VideoToolbox decode them to `x420` IOSurface frames carrying the curve, primaries and matrix as attachments, which is where the scene import reads them. `Renderer/Testing/hdr_reference.hpp` is the header-only, double-precision CPU reference for the 10-bit kernel (BT.2100, ST 2084, BT.2390, primaries derived from chromaticities), shared by `metal_video_texture_test` and `metal_scene_draw_smoke`. `video_source_input_test` drives the one decoder, the native backend: the input and clock cases (`VideoSourceInput`, `VideoSourceClock`), and the cases about how an embedded payload reaches it (`NativePayloads`: memory or an anonymous file, never a visible one, a stream that breaks part way, a fragmented MP4 and an AVI refused with their reason and nothing staged, a VP9 WebM and an H.264 Matroska with B-frames, the VP8 refusal). `Renderer/Testing` also writes a 60-frame clip with B-frames (`WriteReorderedVideo`) and embeds small clips made once offline (`embedded_clips.hpp`: VP9 128x96 in WebM, since VideoToolbox's VP9 decoder refuses 64x48, H.264 64x48 with B-frames in Matroska, and full-range H.264 and HEVC 64x48 ramps in MP4 with no colr box). The tests that used to count open .mp4 descriptors count `OpenVideoDecoderCount()`.
 
 `scene_schema_tests` also compiles `tests/utils_known_answer_tests.cpp`, which pins the `Random` draws that `WE_TEST_RANDOM_SEED` replays and the `genSha1` digests that key the shader and script caches, so replacing either implementation cannot change them silently. It also compiles `tests/linalg_tests.cpp`, which pins `Utils/Linalg.hpp`, the engine's own linear algebra, bit for bit against `tests/linalg_golden.inc` (results captured once from the library it replaced; the cases that call libm trigonometry are checked only where the host's libm still rounds like the capture host's, and are reported skipped otherwise) and checks the behaviour the engine's call sites rely on. The 4 x 4 inverse and determinant are held to a tolerance there, and a singular matrix with rounding noise may invert differently from the replaced library (see `sceneEngine.linalgChanges` in `ThirdParty/provenance.json`). The rest of the engine's tests use `Utils/Linalg.hpp` types directly, so every other test binary also exercises the library through the engine.
@@ -696,6 +720,29 @@ one `.tex` permission row when run as root. They cover `.mdl` mesh records for v
 and optional blocks and the generated submeshes (`MdlMesh.*`, `MdlGeometry.*`, `MdlSkeleton.*`), puppet
 layer blending and playback state (`Puppet*.*`), and `.tex` containers, loose pictures, packages and
 scene sources (`Tex*.*`; host files live in a per-process folder under the system temp directory).
+`PuppetMorph.*` covers activation, animation sampling, instance isolation, shader packing,
+bone modifiers and the distinct image/model texture layouts. `PuppetBones.BlendShape*`
+in `scenescript_puppet_bones_test` exercises the public script methods. The offscreen
+`PuppetMorphGpu.*` cases in `metal_scene_draw_smoke` check position and alpha pixels,
+animated models, immutable texture reuse across layers/displays and changed bytes under
+the same model path, including playback without repeated delta uploads.
+`PuppetIkLinks.*` checks the resulting end pose for position/full-transform target
+rules, stored curve indices, ordered multiple links, clip/additive weights, disabled
+curves, first-layer reset rules and the available source-bone pose. It also preserves
+the loader's first-target binding, the chain's explicit target list and the observed
+Euler angle adjustment. `PuppetGrounding.*` covers the high-bit reach clamp,
+behind-plane rotation preservation, first-sweep reflection at zero blend, and the
+source-distance gate. `PuppetBoneLinks.*` covers ordinary full-TRS rules, file order,
+child composition, per-instance previous poses for later sources, model FK isolation
+and the absence of per-bone solver arrays for an ordinary-only consumer.
+`MdlSkeleton.LinkCurveHeadersKeepTheDisabledBit` covers that MDLA metadata.
+`SceneForces.*` in `puppet_pose_tests` checks the actual rope pose after scene gravity
+and wind, mass and squared-second units, world-space transforms, the wind field's
+time/position/width inputs, property/script updates and isolation from ordinary bone
+physics. The attachment cases use the host's `FrameBegin`/runtime order and prove
+that adding a visual child does not change its spring or rope parent's pose,
+including standalone rendering without a runtime. `ScriptSceneForces.*` in `scenescript_behavior_test` covers the five native
+members, parsed bindings, repeated writes and a static scene with no force consumer.
 Other useful filters:
 
 ```sh
@@ -894,11 +941,11 @@ and the JSON answer survives a layer name that is not UTF-8. The probe shares th
 own file-space mounting and property reading (`Scene/SceneProjectLoading`), so it reads what a
 load reads.
 
-`scene_failure_policy_test` (registered, GPU-gated like `unchanged_present_test`) drives the whole scene wallpaper on a `CAMetalLayer` no window owns and forces the failures a real GPU almost never produces through `SceneBackendFaults` (compiled into tests only): the admission gate, creating the native renderer, compiling its graph, a frame after the scene runs and a replacement surface. Each must leave the failure logged exactly once (read through `SetWallpaperLogCallback`), the frame loop stopped without presenting again, the host's first frame settled once, and either the last frame (a layer that drew carries no sublayer) or the project's preview picture (one sublayer) in place; a retry creates the native renderer and draws, a rebuilt surface heals a failed frame and re-arms the report, and a surface with no Metal layer is a prepare failure. A scene whose effect has a fragment shader that does not compile (a card that compiles under it) is held as `unsupported` with that shader's name in the reason, presents no frame, shows the preview and says so once, where parsing used to drop the effect and draw the rest; the same scene with a compiling effect is not held (`AnEffectWhoseShaderCannotBeCompiledHoldsTheWholeScene`, `ASceneWhoseShadersAllCompileIsNotHeld`). A scene refused on a reload while another scene was drawing releases the outgoing renderer: a following resize leaves the refused scene failed, presenting nothing, with the last frame held. There is no other renderer to hand a scene to, so there is nothing else to count; the test that armed the same faults under the old preferred mode and expected the Compatibility backend, and the counters of Vulkan renderers created, are retired with it. `surface_path_tests` (pure C++: which file is a project's preview and that none outside the project folder, through a symbolic link, absolute, with `..`, empty or over 32 MB is read) and `surface_still_tests` (the `preview` key lookup, decoding, one replaceable sublayer, a replaced layer, an unreadable file) cover `Renderer/Surface` on a plain `CALayer`. `tests.test_check_renderer` reads `Renderer/Surface/tests/CMakeLists.txt` (`wm_surface_test()`), so an unregistered surface test binary fails it.
+`scene_failure_policy_test` (registered, GPU-gated like `unchanged_present_test`) drives the whole scene wallpaper on a `CAMetalLayer` no window owns and forces the failures a real GPU almost never produces through `SceneBackendFaults` (compiled into tests only): the admission gate, creating the native renderer, compiling its graph, a frame after the scene runs and a replacement surface. Each must leave the failure logged exactly once (read through `SetWallpaperLogCallback`), the frame loop stopped without presenting again, the host's first frame settled once, and either the last frame (a layer that drew carries no sublayer) or the project's preview picture (one sublayer) in place; a retry creates the native renderer and draws, a rebuilt surface heals a failed frame and re-arms the report, and a surface with no Metal layer is a prepare failure. A scene whose effect has a fragment shader that does not compile is not held: as in Wallpaper Engine (`sub_1400D5070`, probe T9), the stage that failed is replaced by the `dx11fallback` stage, the pass keeps its own blending, depth and cull state and draws dark red (0.5, 0, 0, 1), the scene presents real frames, and the shader is named in the log once (`AnEffectWhoseShaderCannotBeCompiledDrawsTheFallbackShader`, `ASceneWhoseShadersAllCompileIsNotHeld`; `Scene::shader_fallbacks` keeps the sentences). A scene refused on a reload while another scene was drawing releases the outgoing renderer: a following resize leaves the refused scene failed, presenting nothing, with the last frame held. There is no other renderer to hand a scene to, so there is nothing else to count; the test that armed the same faults under the old preferred mode and expected the Compatibility backend, and the counters of Vulkan renderers created, are retired with it. `surface_path_tests` (pure C++: which file is a project's preview and that none outside the project folder, through a symbolic link, absolute, with `..`, empty or over 32 MB is read) and `surface_still_tests` (the `preview` key lookup, decoding, one replaceable sublayer, a replaced layer, an unreadable file) cover `Renderer/Surface` on a plain `CALayer`. `tests.test_check_renderer` reads `Renderer/Surface/tests/CMakeLists.txt` (`wm_surface_test()`), so an unregistered surface test binary fails it.
 
 `scene_load_sound_test` (registered, GPU-gated) drives the same kind of unowned layer with the scene's sound on miniaudio's null backend (`SceneWallpaperInputTestAccess::UseNullSoundOutput`) and counts its output starts (`SoundManager::OutputStarts`), so a start that a mute stopped again a moment later still shows: a wallpaper configured muted never starts its music while it loads ([runtime regressions](runtime-regressions.md#audio)).
 
-`text_object_behavior_test` (registered, headless) states what the parser, the runtime and the text worker do with a text layer, next to the older `text_object_runtime_test`. Its sources are `tests/text_parse_scene_test.cpp` (the node, state, card and texture a text object parses into, layer keys and parenting, how a font reference resolves, visibility bindings, which keys place the text), `text_effect_chain_test.cpp` (an effect chain following the card as it grows, is cut to whole texels or reaches the 4096 limit; frame time reaching the effect; the default textures a shader contributes to a material), `text_runtime_cache_test.cpp` (a text change being recorded at once and measured, drawn and published by the worker later, dirty flags, cache revision and identity, hidden layers waiting) and `text_script_raster_test.cpp` (scripts on text, user-bound origin and scale, the FreeType raster, and a clock-like scene built in memory). The scenes come from `tests/support/text_scene.{hpp,cpp}` (`TextWorld`: scratch `/assets` and `/provided` mounts, the built-in assets and the parser; `SceneDocument`, `TextObject` and the mesh measuring helpers) and `tests/text_fixture.hpp`; no test reads a wallpaper package, a Steam folder or an environment variable. The worker finishes a change on its own thread and a later pump applies it, so a test that changes text pumps `PumpTextLayerCache()` until `NodeTextDirty` clears (`PumpUntilClean`). Tests that need an installed font assert a non-empty font path on macOS only.
+`text_object_behavior_test` (registered, headless) states what the parser, the runtime and the text worker do with a text layer, next to the older `text_object_runtime_test`. Its sources are `tests/text_parse_scene_test.cpp` (the node, state, glyph mesh and atlases a text object parses into, layer keys and parenting, how a font reference resolves, visibility bindings, which keys place the text), `text_effect_chain_test.cpp` (an effect chain following the card as it grows, is cut to whole texels or reaches the 4096 limit; frame time reaching the effect; the default textures a shader contributes to a material), `text_runtime_cache_test.cpp` (a text change being recorded at once and shaped into glyphs and atlases by the worker later, dirty flags, cache revision and identity, unreferenced hidden layers waiting) and `text_script_raster_test.cpp` (scripts on text, user-bound origin and scale, headless glyph-raster checks and a clock-like scene built in memory). Production text draws glyph quads through the font shader; the test raster helper does not create a layer bitmap in that path. The scenes come from `tests/support/text_scene.{hpp,cpp}` (`TextWorld`: scratch `/assets` and `/provided` mounts, the built-in assets and the parser; `SceneDocument`, `TextObject` and the mesh measuring helpers) and `tests/text_fixture.hpp`; no test reads a wallpaper package, a Steam folder or an environment variable. The worker finishes a change on its own thread and a later pump applies it, so a test that changes text pumps `PumpTextLayerCache()` until `NodeTextDirty` clears (`PumpUntilClean`). Tests that need an installed font assert a non-empty font path on macOS only.
 
 ### Synthetic scene harness
 
@@ -962,12 +1009,22 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
 
 ## Known limitations
 
+- **Scene clock and built-in texture uniforms (E-D9/D10).** A frame advances the scene by
+  `SceneFrameStep`: elapsed time held to [1e-4, 0.25] s, times the rate, held again, as
+  Wallpaper Engine does (`sub_140110630`); its clock wraps to 0 after 432000 s and ours does
+  not. A sampled slot nobody bound reads Resolution (2,2,2,2) and Texel (0.5,0.5,2,2) like
+  Wallpaper Engine's; `g_Texture<N>MipMapInfo` of a file texture stays unwritten (Wallpaper
+  Engine writes its mip count; shipped shaders read it only for render targets) and
+  `g_TextureReductionScale` stays 1. Notes: `artifacts/we-parity/decompiles/E-D9-D12.md`.
+- **Fallback stage selection (E-D11).** When a program does not translate, the fragment is
+  replaced first, then the vertex, then both; a broken vertex under a fragment that reads
+  varyings the fallback vertex does not write falls back to both stages (dark red), where
+  Wallpaper Engine draws the real fragment with whatever those varyings hold.
 - Local scenes can emit MDLA, Rust `light_map` compile and shader-value alias
   errors that are independent of a given change; compare against a baseline run
   and verify only that no *new* diagnostics appear. A
   `ShaderValue: … not found in glsl` line is authored leftovers, not a binding
-  failure. Wallpaper Engine's own `clipping_mask` effect fails to translate (see
-  [Shader pipeline](scene-regressions.md#shader-pipeline)).
+  failure.
 - **A video opened under a running clock shows the head of its clip until a seek to the scene's
   clock has landed.** An open waits for no seek: one that did would hold the render thread for
   the seek, 0.3 to 1.1 s on 1080p and 4K clips with a keyframe every 250 frames and more than the
@@ -1026,15 +1083,28 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   replaces its picture and sets no alpha of its own (an effect that ignores its input,
   or one with `copybackground` off): the layer's own pass, which carries that alpha, is
   not what reaches the screen, while an authored alpha still does through the effect's
-  seed. No local scene has such a layer with a driven alpha. Only a
-  script on the `brightness` property drives an image layer's brightness; a
-  `thisLayer.brightness` write is not read.
-- **Shadows, spot cookies and volumetric lights are not drawn.** A light with
-  `castshadow` lights as if nothing cast a shadow (`_rt_shadowAtlas` is never
-  written), a spot cookie lights through its cone instead of its cookie image, and
-  `castvolumetrics` adds no light shafts. When a kind has more lights than its
-  `lightconfig` count, the first ones in scene order are lit, where Wallpaper Engine
-  sorts them first.
+  seed. No local scene has such a layer with a driven alpha. A script bound to
+  `brightness` and a direct `thisLayer.brightness` write both update
+  the image layer's material brightness; the HDR-only gate and the effect placement
+  described above still apply.
+- **Shadow filtering differs at some edges.** Volumetric point and spot lights use
+  their shadow atlas and cookie textures. Spot cookies also project their image in
+  the existing lighting pass, including scenes
+  with no shadow atlas; the last eligible packed cookie spot selects the texture
+  shared by all cookie spots. Shadow and cookie subsets occupy Wallpaper Engine's light-array slots;
+  point, spot and directional model shadows use the depth atlas. The directional
+  cascade texel snap remains an inference from the shipped routine. The tested WE
+  directional probe agrees in its lit and shadowed regions; exact edge filtering is
+  not a pixel-identical match across the point/spot/directional probes.
+- **A `lightconfig` whose shadow or cookie subsets exceed their kind's count is not
+  packed as Wallpaper Engine packs it.** Its packer keeps writing past the kind's
+  array into the next one (`sub_140190C80`); here a slot past the array is dropped.
+- **Whether a layer under effects gets a lit closing pass is read from its combos.**
+  Wallpaper Engine decides it from material flags its loader builds (`sub_1401515B0`:
+  0x10 when the compiled program reads lights, 0x08 from a table keyed by the names of
+  the textures it samples). Here `LIGHTING` or `REFLECTION` on, after shader defaults,
+  stands for them; a shader that reads lights without a `LIGHTING` combo is lit in its
+  card instead.
 - **A vertex input the mesh does not provide is bound to the position, silently.**
   The renderer looks each reflected vertex input up in the mesh's attributes by
   name and, for a name that is not there, read the first buffer at offset 0 (the
@@ -1051,33 +1121,33 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   vertex colours has no mesh attribute for that input), reflection lists such an
   input like any other, and nothing in it says whether the shader reads it. That
   needs the use information first.
-- **A boolean stored into a declared `int` or `uint` does not compile.** The legalizer
-  turns a comparison or boolean stored into a float lvalue into `1.0`/`0.0`, and an
-  `int` filled from `step` counts as a float
-  ([Shader pipeline](scene-regressions.md#shader-pipeline)), but HLSL promotes a bool
-  to any number: `int n = 2; n *= flag;`, `n = a < b;`, `uint n *= flag;` and `int n
-  = flag;` are accepted by Wallpaper Engine and rejected by Naga, so the scene is held
-  with the effect's shader named (`Rust shader compile failed` in the log). An effect that
-  does shows up as that error.
-- **A number as an operand of `!`, `&&` or `||` does not compile.** HLSL, which
-  Wallpaper Engine compiles its shaders as, takes a number there as "not zero", so
-  `if (!mask)` and `if (mask && inside)` are valid. The legalizer compares with zero
-  only a number that is the whole condition of an `if`, `while` or `?:`; Naga rejects
-  the operand (a `float` or `int`, a `step` mask included) and the scene is held with the
-  effect's shader named (`Rust shader compile failed` in the log).
-- Wallpaper Engine's `fur4` shader does not compile on its own: its instanced shells read
-  the dialect's cast macros (`CASTF` among them), which the compiler does not supply with
-  `CASTI`, `CASTU`, `CAST4U`, `DECLARE_SAMPLER2D_PARAMETER` and `MAKE_SAMPLER2D_ARGUMENT`.
-  Its redeclared `gl_InstanceID` is no longer the obstacle.
-- **Scene composition Wallpaper Engine has and this renderer does not.** A scene
-  with a 3D model gets no multisampling (Wallpaper Engine draws such scenes 2x
-  MSAA by default, from its `msaa` setting); a camera path's `camerafade` fade,
-  the planar `_rt_Reflection` pass and `customsortorder` are not implemented
-  (the model flags are under their own entry below); and
-  `general` distance-fog keys bound to user properties keep their authored values.
-  Height fog and ambient/skylight colours resolve property values at load; preview
-  edits are deferred to the existing apply/reload path. Wallpaper Engine's user-level
-  post-processing quality (off, LDR, HDR, display HDR) is fixed at its highest SDR level.
+- **Texture containers: what is not settled against Wallpaper Engine.** `TEX<N>FORMAT` is
+  defined for every file texture in slots 0-9 (the format code, 0 for a decoded picture);
+  Wallpaper Engine's `sub_1401A5C40` writes it only for a sampler whose annotation passes a
+  test at byte +128 of its slot record (`"formatcombo":true` is necessary, not sufficient:
+  the texshader probe's T4 cells with `formatcombo` alone did not get it). Every shipped
+  shader reads it only on such slots, so they see the same values; a custom shader testing
+  `#ifdef TEX<N>FORMAT` on another slot differs. The in-memory texture flag 8
+  (`sub_14015E580`, fewer than two mip levels) has no traced reader and changes nothing
+  here. The choices a TEXB0004 variant record makes are kept (`ImageHeader::variantChoices`)
+  but no reader of them was traced. Notes: `artifacts/we-parity/decompiles/E-D*.md`.
+- **Planar reflection coverage.** `PlanarReflection` checks literal exclusion,
+  hidden model admission, active drawn material slots, quality-off clearing,
+  view-forward binding and HDR framing. `PlanarReflectionGpu` checks both sides
+  of the world plane, moving cameras and sources, sorting across both phases,
+  effects with MSAA, opaque output alpha, zero-valued self sampling, world/clip
+  winding, bounded storage, shared geometry and idle frames. An active model
+  sampler requests the raster-sized RGB8 colour picture; depth is needed only
+  when reflection quality is enabled. Quality-off consumers retain the cleared
+  colour picture. Image-only consumers do not activate reflection.
+- **Other scene composition.**
+  Custom sort order has a draw-order consumer, and `camerafade` applies to the
+  top-level `camera.paths` queue.
+  Post-processing quality selects no bloom, LDR bloom or HDR bloom. Display HDR
+  encoding and output capability negotiation are implemented and were checked once on
+  a built-in XDR panel by capture: only the overbright core leaves SDR (peak about 53
+  against Ultra's 1.0, same median); perceived brightness was not compared with
+  Wallpaper Engine.
 - **Fog reaches an effect layer only where its own material takes fog.** The pass
   that fogs an effect layer where it sits (`effectpassthrough_4`, ending the chain)
   stands in for the fog the layer's own material (its `FOG` combo) would have taken,
@@ -1090,8 +1160,10 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   off) is fogged too. Compose, fullscreen and puppet layers, and a layer that blends
   onto the screen by colour blend mode, keep the fog of their own first pass, which
   measures it in the layer's card and not where the layer sits (the vignette an
-  effect layer used to have); a text layer's card has no fog pass at all and draws
-  unfogged, where Wallpaper Engine composites every text layer of a fogged scene. A
+  effect layer used to have). A text layer of a fogged scene is a composite whose chain ends
+  in the same fogging pass, which matches the WE probe probetext-fog (text and a card at one
+  place take one fog); its glyph passes are unfogged (G-F11), and which pass of Wallpaper
+  Engine's fogs the composite was not read from the binary. A
   layer another layer samples (`_rt_imageLayerComposite_<id>`) also draws its last
   pass into that composite, from the layer-local camera, so the picture the other
   layer reads carries fog measured in the card, for a plain layer as for an effect
@@ -1132,23 +1204,71 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   origin and shader-constant timelines here and the editor's start-paused flag being a
   play state beside the curves; no frame of Wallpaper Engine showing a paused scale or
   angles timeline has been compared.
-- **The `perspective` flag of a text layer is not applied.** `WPTextObject` reads it
-  but nothing uses it: a text layer always draws through the orthographic camera, so
-  one at a depth or turned about x or y is drawn flat. Image layers, models and
-  particle systems with the flag draw through the 2D scene's perspective camera
-  (`FitCanvasPerspective`, `(canvas height / 2) / tan(fov / 2)` from the canvas plane
-  with the scene's `perspectiveoverridefov`, 95 when absent); a text layer would be
-  bound to it the same way, but no local scene has one and its card and composites
-  have not been checked through that camera. A compose layer drawn with the flag
-  still copies the screen behind it as the orthographic view places its card.
+- **A compose layer drawn with the `perspective` flag** still copies the screen behind it
+  as the orthographic view places its card.
 - **Object kinds not drawn or not modelled.** A `shape` object draws only an effect of
   a single pass: its last effect is drawn onto the scene as a mesh, so a multi-pass
   last effect, which would draw into buffers first, is left out (the editor's
   light-shaft effect has one pass). Its effects' visibility is read once: one a script
   switches keeps the value the scene file stores. A `sprite` object is read as a plain group and
-  draws nothing. Puppet morph targets (`MDMP`, blend shapes) are parsed and never read: no `MORPHING` combo, no
-  morph texture and no weight uniforms. Sound `spatialization`, `attenuation` and
+  draws nothing. A simulated bone with a rotation
+  spring but no tip (`tp` 0) is not turned, where Wallpaper Engine's normalised zero tip gives NaN;
+  no library bone has one. Sound `spatialization`, `attenuation` and
   `mindistance` are not read, so every sound plays unpositioned.
+- **Morph reference scope.** Image position/alpha morphs, model position/normal morphs,
+  MDLA mesh curves and the blend-shape script methods drive the rendered picture. The
+  image path uses the first mesh, as its reference composer does. The model tangent flag
+  (`0x800`) preserves the reference loader's zero-filled texture branch; it does not add
+  tangent deformation. More than 64 shapes and locale-dependent name matching beyond
+  ASCII have not been verified. Unknown weight lookups retain the native float wrapper's
+  numeric-zero result; the empty-name and negative-index cases have a WE control.
+  A controlled WE probe confirms positive and negative model deltas, the position/normal
+  layout, the zero-weight control, and no deformation on bone-free models with either
+  automatic or explicitly authored `MORPHING`. A known-valid image-puppet container with
+  one added shape and a mixed-case script weight shows the same visible displacement in
+  WE. These controls do not establish general pixel parity for modifiers, alpha morphs,
+  larger animation stacks or prelighting.
+- **Image-puppet IK scope.** Explicit MDLS chains solve their animated position and pole targets;
+  target reference poses, additive weights, clip offsets, stored neighbour directions and
+  planar `ikce` limits are consumed. The solver's ten-sweep limit can leave a reachable target
+  outside its squared-distance tolerance of 0.1 on that frame. Ordinary target blend rules
+  (`sub_14026F4C0`, flags 0/1) consume their MDLA weight curves and source-bone transforms.
+  Axis-projection target rules (flag 2, including flag 3) blend the closest point on
+  the source bone's local X line for every matching stored segment endpoint; source
+  axis scale does not change the result. Weight curves, rotated/scaled axes, ordered
+  rules, repeated endpoints, unmatched owners and preserved target orientation have
+  CPU coverage. A constant-weight 0/1 image-puppet axis control shows the same visible
+  limb displacement in WE and the native renderer, improves the fixed arm/chest-region
+  comparison, and leaves the zero-weight native frame pixel-identical. High-bit
+  grounding rules now clamp targets and reflect joints on the first sweep;
+  ordinary non-IK image bones consume their full-transform blend rules. The
+  correction is gated by iteration 0 and `0x10000`, independently of blend weight;
+  ordinary flags 0/1 do not enter it. Targeted CPU regressions and five WE controls
+  cover these consumers; sampled world bone positions agree within 0.0002 canvas
+  units, including six consecutive frames of a zero-weight alternating solution.
+  Full-pose frame parity is not established. A near-collinear signed-side diagnostic
+  is sensitive to one float ULP and is not used as a branch-equality assertion. A position-only 0/1 control
+  shows the linked limb moving toward its source in WE and the native renderer, while
+  zero-weight native output stays pixel-identical. The control scene retains existing
+  placement/shape residuals. Full-transform and weight-mixing boundaries have CPU
+  coverage, not a general WE frame-parity claim. Rope Verlet points, distance constraints,
+  free endpoints and stretch are implemented. The scene force interface is connected for gravity and wind: its second
+  query is the wind field (`sub_140198910`), not a collision query. The bone's authored
+  `gd` remains separate. The local
+  comparison scene, 3799253558, contains planar single-link chains. Moving only its target
+  matrix and target-track positions gives a visible image-puppet control in WE. Its captured
+  Windows Update dialog obscures the centre, so only the unobstructed arm region supports
+  that comparison, not full-frame colour equality. Three-dimensional `model` layers keep
+  forward kinematics: both their separate compositor and a visible model control leave IK
+  inactive. Controlled rope variants of the same valid image container show no force,
+  downward scene gravity and upward scene wind through repeated SceneScript writes in
+  WE. These direction controls do not establish exact constraint/recovery timing or
+  general trajectory parity. Out-of-plane image-rope layers (the same gravity control
+  with the layer turned 60 degrees about x or about y, probes p5rope-tilt/-yaw) place
+  the rope and figure as WE does, and the remaining differences are the existing pose
+  residuals of the untilted control. Branched ropes: none of the local workshop puppets
+  has one (four rope chains across 3292361861, 2998757800, 3799253558, all single), so no
+  branched control exists to build from a real file.
 - **Texture mips are chosen from the display, not from each layer.** A 2D scene's
   packaged chains are cut at the display's longest edge (a level is dropped only
   while the next is still that long), so a texture about the size of the screen keeps
@@ -1160,74 +1280,42 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   more texture memory for them than the display rule; the figures from the mip
   headers of one machine's library are in `ThirdParty/provenance.json`
   (`textureMipBudgetChanges`).
-- **A scene with `transparentsorting` is drawn in scene order.** Wallpaper Engine
-  draws such a perspective scene's objects in two sets: the unmarked ones first, in
-  scene order, then the marked ones, stably sorted by descending
-  `dot(world position, a vector of the render context)` (`FUN_14018aac0`,
-  `FUN_1401865c0`, the insertion sort `FUN_14019ee60`; layers that carry the 0x200
-  flag take minus infinity and come last). The mark is flag 0x100 of the object;
-  `FUN_14018ff60`, which creates the objects, puts a marked one in the sorted list and
-  in the set the first loop skips. An image layer is marked unless the blending its
-  material authors is `normal` or `alphatocoverage` (constructor `FUN_1401fac50`;
-  the blending enum reads `normal` 0, `translucent` 1, `additive` 2 and
-  `alphatocoverage` 3, and `disabled` or any other word as `normal`). So the layers
-  that blend, `translucent` and `additive`, are sorted, and `normal` and
-  `alphatocoverage` ones stay in the first set in scene order. A `passthrough` layer
-  (flag 0x20) would be marked whatever its blending if flag 0x40 were clear. Flag 0x40
-  is `copybackground` (its setter `FUN_1401ef350`), but it is applied by the load step
-  that runs after the constructor, and the base constructor `FUN_1401e6980` starts the
-  flags with 0x40 set, so the sort decision always sees it set and passthrough
-  changes nothing. Other object kinds were not read. That the vector is the view
-  direction, and the order therefore back to front, is inferred from the frames (no
-  farther layer is cut by a nearer star's glare card), not read from the code. This
-  engine draws its opaque set first (nodes without effects whose materials are all
-  `normal` or disabled and depth-test, narrower than the unmarked set) and the rest
-  in scene order (`Scene::opaque_first`). The one place that shows is a depth write:
-  the last pass of an image layer's effects drops it when Wallpaper Engine sorts the
-  layer (below), but a plain translucent layer authored `depthwrite` (a HUD ring's
-  card) still hides every farther layer drawn after it, inside its whole card, where
-  Wallpaper Engine draws that farther layer first. Sorting the marked layers has to
-  follow layers a script moves every frame, which the compiled graph's fixed pass
-  order does not, so it wants its own design and a measurement of the graph rebuilds
-  it would cost.
-- **A depth-tested layer with effects can show additive star sprites through it.** The
-  last pass of an image layer's effects is depth-tested like the layer's own material,
-  and in the moon scene (3477054430) about 500 of 7 million pixels of small stars that
-  Wallpaper Engine's frame does not show appear over the moon's disc: the star shell
-  model (additive, `depthwrite` enabled) is likely nearer than the moon, so the moon's
-  tested pass fails where a star was drawn. Without the test those pixels match the
-  frame. Why Wallpaper Engine's tested pass does not fail there is not established
-  (does it write depth for additive draws?); the effect on the picture is a few
-  pixels a frame.
-- **A text layer drawn through effects keeps its last effect pass's depth state.** An
-  image layer's last pass is drawn with the layer's own depth test and depth write
-  (`SceneImageEffectLayer::SetFinalDepth`; no write for a layer a sorting scene sorts,
-  above); a text layer sets none, so its last pass keeps what its effect authored.
-  Wallpaper Engine's text object (`0x140258580`) sets that pass translucent and
-  depth-tested under the condition that also selects its depth-tested font materials
-  (`materials/fonts/*_depth.json`, not selected here either) and leaves the depth
-  write alone, so a text layer is never depth-tested against a nearer model here.
-- **File textures are sampled trilinearly.** Wallpaper Engine's sampler for a file
-  texture is anisotropic (8x), which only shows on a surface seen at an angle (the
-  local scene with 3D models), and it samples a shadow atlas through a comparison
-  sampler for the shadow pass that does not exist here; this renderer does not either.
-  The anisotropy would cost fetches on every tilted surface, so it wants a
-  measurement before it lands. The exception is a texture whose header asks for
-  point sampling: it is sampled with the mip level picked by point, as the
-  reference's sampler for that flag does.
-- **Text details not matched.** Wallpaper Engine shapes text with HarfBuzz (OpenType
-  kerning, ligatures, complex scripts) and draws colour glyphs from an RGBA atlas; the
-  layout kerns only from a font's legacy `kern` table (Arial has one, many OpenType
-  fonts have only GPOS kerning and so go unkerned), forms no ligatures, and draws an
-  emoji sequence as its parts. A glyph the layer's font lacks is drawn from the first
-  face of a list that has it, as Wallpaper Engine does (Arial, Segoe UI Emoji, Arial
-  Unicode, Segoe UI, Twemoji, Segoe UI Symbol, Microsoft YaHei, Malgun Gothic), with two
-  differences that are not worked around: the colour emoji are Apple Color Emoji's, which
-  do not look like Segoe UI Emoji's, and are tinted by a text colour that is not white and
-  drawn by their shape alone in a styled layer, and Arial Unicode MS is last and not third, because that
-  font is Office's and not Windows' (on a stock install the reference draws Chinese in
-  Microsoft YaHei, whose Simplified Chinese punctuation PingFang SC shares; Arial
-  Unicode MS in the third place would draw it in its own forms). That order of the
+- **Ordered layer resources have a bounded cost.** Transparent sorting permutes
+  complete object groups while keeping prepared pipelines, geometry and uniforms.
+  Temporary targets used by several sorted objects retain separate images because
+  a depth crossing can overlap lifetimes that were initially disjoint. Targets
+  confined to one object still share normally. Earlier composite readers sample
+  retained previous pixels; later readers sample current pixels, including when
+  transparent sorting is disabled. These dependencies can split render batches.
+  The storage is bounded by the scene's declared targets and prepared sample-count
+  variants; a depth change does not allocate textures or rebuild the graph.
+  `TransparentSortingGpu` and `TransparentSortingLifetimeGpu` cover effects,
+  shared FBOs, history catch-up, self-links, first-use loads, MSAA, setting changes
+  and resize. The direct video path prepares each reachable sample-count variant
+  before adoption rather than adding a conversion on every depth crossing.
+
+- **Texture sampling.** Shadow receivers bind a linear, border-zero, GREATER comparison
+  sampler to the depth atlas. File textures are sampled as Wallpaper Engine samples
+  them: anisotropic 8x unless the header asks for point sampling, render targets and clips
+  linearly (`sub_140099980`, `TexContainer.FileTexturesAskForEightfoldAnisotropyUnlessPointSampled`;
+  `artifacts/we-parity/decompiles/E-D6-D7.md`). Runtime glyph atlases are linearly sampled
+  and clamped to their edges. A slot naming an `_alias_*` texture reads
+  transparent black outside 0..1, as Wallpaper Engine's alias wrapper does. Its GPU cost on scene 3662790108 is measured
+  by `LocalProjectEnergyIsMeasuredHeadlessly` (A/B pending).
+- **Text details not matched.** Text is shaped with HarfBuzz as the
+  reference shapes it (OpenType and AAT kerning, ligatures, complex scripts); like the
+  reference it has no bidi algorithm (decompile `G-F2.md`), so a right-to-left word in the
+  same face as Latin text around it keeps logical order. A glyph the layer's font lacks is
+  drawn from the first face of Wallpaper Engine's list that has it (Arial, Segoe UI Emoji,
+  Segoe UI, Twemoji, Segoe UI Symbol, Microsoft YaHei, Malgun Gothic, Arial Unicode), here
+  Arial, Apple Color Emoji, PT Sans, the assets' Twemoji, Apple Symbols, PingFang SC, Apple
+  SD Gothic Neo and Arial Unicode MS. Apple Color Emoji is a bitmap font, so its glyphs are
+  drawn from the strike nearest the layer's size and scaled (Wallpaper Engine leaves the
+  choice to FreeType on a scalable Segoe UI Emoji), and a COLR v1 glyph, which FreeType does
+  not render in colour, is drawn as a monochrome outline. Arial Unicode MS is last and not
+  third, because that font is Office's and not Windows' (on a stock install the reference
+  draws Chinese in Microsoft YaHei, whose Simplified Chinese punctuation PingFang SC shares;
+  Arial Unicode MS in the third place would draw it in its own forms). That order of the
   reference is read from the decompile; what a Windows machine with Office does with it
   is not. The font files are macOS's, not the Windows fonts a scene was authored with: of
   the eight keys a text object honours, four are on every Mac as the same fonts (Arial,
@@ -1241,27 +1329,19 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   are the fonts' as remembered, with only the sum of the two (the saved cards' line)
   checked. The web host has the same fonts under the same names and the same fits, set
   per page (see [web wallpapers](../features/web-wallpapers.md)), but its generic families
-  and its line metrics are not. It draws one quad per glyph from a distance-field atlas, so the outline of
-  a glyph that overlaps its neighbour's fill is drawn over it there, and the outline,
-  blur and shadow are made here from the union of the glyphs, at their reach but not
-  clipped to the atlas margin. `msdf` alone is read and draws nothing. Text enlarged past
-  its raster (a small pixel font drawn three pixels to the texel) takes the reference's
-  edge colour, with no dark ring, but its edge ramp stays softer than the reference's
-  distance field gives: the ramp is bilinear and a raster texel wide, so a row across a
-  stroke edge of 3195212886 reads 179 185 192 198 199 here against 179 192 199 there, and
-  the darkest pixel of its text windows is 158 to 161 here, within a level of the
-  reference's 158 to 160. Text with the colour blend Darker Color (5) or Lighter Color (10),
-  which weigh nothing by alpha, is written over white or black instead of a seed of the
-  scene (that the reference seeds it is inferred, not seen in a frame): at layer alpha 1
-  its stems match a seeded composite, while below 1 Darker Color text fades out faster
-  and Lighter Color text is slightly darker than one (scene-rendering.md, text
-  paragraph). An `opaquebackground`
-  is the card's rectangle in `backgroundcolor` times `backgroundbrightness` at the layer's
-  alpha, with the glyphs over it in one pass: for the colour blend "add" that is the glyph
-  over the fill and then added, where the reference adds the two quads separately, which
-  differs where they overlap (no local scene sets the key, and none has been compared with
-  a frame of the reference), and what the reference's clear covers where a layer has no
-  composite target of its own is not known. The screen `anchor` of a text layer
+  and its line metrics are not. The glyphs are Wallpaper Engine's quads from atlases through
+  its `font` shader; the plain coverage atlas is rendered with the FreeType hinting the old
+  raster used, which the decompile does not settle (`FUN_1401ae080` was read for the
+  distance-field path only). That a colour blend makes a text layer a seeded composite is
+  read from the decompile (`G-colorblend-composite.md`), not seen in a frame: no probe of a
+  translucent text with a colour blend has been captured, and the colour blend Darker Color
+  (5) or Lighter Color (10) over a seeded composite is not compared either.
+  An `opaquebackground` is drawn by the `fontbackground` quad before the glyphs (straight onto
+  the scene) or as the composite's seed fill. A synthetic reference confirms the ordinary
+  opaque card and its use as a particle donor; an opaque background through an effect chain
+  is not compared. Text donor references also confirm hidden plain and MSDF text, the
+  squared-alpha threshold and outline and shadow colours. The colour-emoji donor probe's
+  visible control was blank, so it provides no evidence for that case. The screen `anchor` of a text layer
   shifts its draw by the margins of the area the display shows, as a translation in the
   scene's axes that its children do not inherit; that the shift is made in the scene's
   axes is read from the decompile, and that its margins are those of the visible area
@@ -1269,32 +1349,24 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   check either. Where the right edge of a right-aligned text lies is the ink's own
   (the last glyph's bearing is not added): the probe frames agree to a unit on every
   glyph measured, which does not settle an italic or a glyph with a large right
-  bearing. A script's write
-  of `horizontalalign` or `verticalalign` with a word outside the registry is turned
-  away. The decompile narrows what Wallpaper Engine does: the C-string setter the
-  alignment registrations carry (`FUN_14025a880`) stores the registry's first entry for a
-  word that matches none, as its scene file reader does, and ignores a null string, so if a
-  script writes through it (not traced) `thisLayer.horizontalalign = 'middle'` gives `left`
-  (and `center` vertically) instead of being turned away. Which path a script write takes is
-  open, so the script setter keeps its rejection; the test that pins it is
-  `ScriptRuntimeCompat.TextAlignmentOnlyTakesTheWordsItIsDefinedFor`, and it is the one to
-  change if a trace shows the setter. A text layer's `brightness`
-  follows `hdr` with `bloom`, the predicate that already gives the scene its 16-bit
-  targets: Wallpaper Engine tests the flag of its HDR post-processing quality, which
-  this renderer treats as always on (see above). That the flag is the one
-  `hdr` with `bloom` sets is read from the decompile, not seen on a text layer: no
-  frame of Wallpaper Engine has been compared (the same flag's effect shows on an
-  image layer of one local HDR scene). The distance fog and height fog flags
-  of a scene, which make Wallpaper Engine pad and composite every text layer, are
-  modelled for the padding only: the composite itself and the `FOG_COMPUTED` combo
-  change nothing a text layer draws here. The buffers of an effect chain on a text
-  layer are the card's size, as in Wallpaper Engine, with three differences that are
-  not worked around. The `fbos` an effect declares are the card's size whatever their
-  `scale` (Wallpaper Engine's divide it, from the decompile's call of the buffer
-  builder, which was not re-read for the division), so a half-scale blur buffer costs
-  four times what it does there. A text layer's composite is Wallpaper Engine's in what
+  bearing. A script's unknown alignment word takes the registry default, `left`
+  horizontally and `center` vertically. A WE getter probe confirms both, anchor's
+  `none` default, vector/boolean member types and signed `maxrows` readback; the depth
+  enum's default is `disabled`. `ScriptRuntimeCompat.TextAlignmentUnknownWordsUseTheRegistryDefaults`
+  covers the alignment behavior. A text layer's `brightness` follows the active HDR
+  pipeline: `hdr`, `bloom` and Ultra or Display HDR post-processing, the same predicate
+  that gives the scene its 16-bit targets. The quality gate is implemented, but no WE
+  text frame has been compared across those quality levels; the earlier brightness
+  observation was on an image layer of one local HDR scene. Text effect buffers apply
+  the same scale, explicit width/height and fit rules as image effects. Buffers without an explicit
+  extent follow text changes at their authored ratio; explicit extents stay fixed.
+  They are still the text layer's own: Wallpaper Engine shares
+  a non-`unique` buffer between every effect that names it at the same size and scale
+  (`sub_1401EA500`), which image layers do here, but a text card's buffers follow the card as
+  the text changes, so they are never shared. A text layer's composite is Wallpaper Engine's in what
   its probes show: the card is seeded with the scene behind it and its glyph pass writes
-  the alpha squared (`kTextCompositeAlphaExponent`, 2), so text through an effect stands at
+  the alpha squared (the translucent blend's alpha rule, `TranslucentBlendAlpha`), so text
+  through an effect stands at
   the alpha cubed (`TextCompositeReach`; probetext4's `opacity` effect and the clock of
   3819684521; the `blurprecise` heading of the same scene, at alpha 1, shows the seed). **Open:** whether an effect that leaves alpha alone gives the same.
   The cube is measured for `opacity` chains only (probetext4 and the clock); the one frame of
@@ -1303,27 +1375,28 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   at the alpha cubed here. Most translucent text layers with an effect in the local corpus
   go through other chains (`blurprecise` the most, `opacity` about a third of them), so the
   exponent decides how they look. The alternative that fits every measurement is a glyph pass
-  that keeps a single alpha (exponent 1) and an `opacity` effect that takes the layer's
+  that keeps a single alpha and an `opacity` effect that takes the layer's
   alpha for its own whatever its constant says; that is a rule about effect passes that this
-  change does not make, and changing the exponent is one line (the tests derive their
-  expectations from it). A capture of black text over white at alpha 0.65, 0.5 and 0.8
+  change does not make (the tests derive their expectations from `TextCompositeReach`). A capture of black text over white at alpha 0.65, 0.5 and 0.8
   through each of `opacity` (the control), a no-op `transform`, a no-op `skew` and two
   `transform`s settles it: the cube in every column is this model, the square in all but the
   `opacity` column the alternative. The seed is sampled
   where the card lies without the camera's parallax, so under parallax it lies a few
-  pixels from the scene it is drawn over; a layer with a colour blend, and the
-  composite that fog, an LED source or an opaque background asks for without an effect,
-  are not composites here. A card past 4096 texels on a side is drawn into
-  buffers cut to 4096, where Wallpaper Engine has no limit of its own (the glyph raster
-  is capped at 4096 as well, and stretches past it). A layer with an outline, blur or
-  shadow draws into the card and the margin the style reaches, which Wallpaper Engine
-  does not have, so an effect's UV fractions on it are fractions of that slightly larger
-  picture. A style key (`outline`, `blur`,
-  `dropshadow`, their sizes and opacity) driven by a script or a timeline keeps the
-  scene file's value; one bound to a property is read once at load, with the user's
-  value, and held there (a load-only property). The text object's other layout keys
-  (`pointsize`, `padding`, `spacing`, `maxwidth`, `maxrows`, the limit flags) read the
-  scene file's value whatever property or script is bound to them. Only one text write
+  pixels from the scene it is drawn over. An LED source or an opaque background without an
+  effect pads the card but is no composite here: Wallpaper Engine seeds a composite for an
+  effect pass or its composite flag (`sub_140258900`), and which object bit besides a colour
+  blend sets that flag (`sub_1401E6F50` also tests 0x100 of the object's flags) was not traced. A card past 4096 texels on
+  a side is drawn into buffers cut to 4096, where Wallpaper Engine has no limit of its own.
+  Scene-file bindings for style switches and layout keys remain load-time choices;
+  direct assignments through `thisLayer` are supported separately. They cover layout,
+  background, MSDF, outline/blur/shadow, anchor and depth-test members. Uniform-only
+  writes do not lay text out or rebuild its graph; a material variant changes once per
+  event, after a matching replacement atlas is ready when its kind changed. WE pairs
+  compare authored values with script-written values for padding, spacing, limits,
+  styles, MSDF and background. Actual depth occlusion after a setter and preservation of
+  tint/alpha bindings have private GPU regressions; the orthographic reference's depth
+  member is a readback/equivalence control, not proof of perspective occlusion.
+  Only one text write
   is compared with Wallpaper Engine: a text script that writes `thisLayer.text` from
   `update()` and returns nothing keeps the write. Not established, and kept as the
   renderer had it: a script that writes and also returns a string shows the returned
@@ -1371,10 +1444,10 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   interior and a letterboxed presentation extrapolates the ray past the frustum, as hit
   tests already do. A camera without a usable view (a far plane or aspect that is not
   positive) leaves scripts the canvas point.
-- **Model utility flags.** A project layer is sized by the canvas but still takes the
-  passthrough path, not the compose one: it does not draw its children into a target of
-  its own and has no composite-only mode (the 11 local scenes that use it hold layers of
-  the canvas's size, where the two paths were not compared). `autosize` alone, which sizes a layer by its texture, and
+- **Model utility flags.** A project layer is sized by the canvas. Like every passthrough
+  layer with effects it draws its children into its own buffer (Wallpaper Engine
+  `sub_1401E8AA0` tests the object's passthrough flag, not the model's path), but it has no
+  composite-only mode. `autosize` alone, which sizes a layer by its texture, and
   `solidlayer` are read and not applied.
 - **A string property bound to a setting without a condition.** A flag (a layer's
   or effect's `visible`, and every other bool bound by name) reads the string as
@@ -1420,23 +1493,62 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   `Animation` reason already counts while it plays, so with on-demand rendering
   on, a scene whose only motion was such a single-play timeline keeps ticking
   after it ends.
+- **Layer-image source coverage.** `layerimage` reads CPU-backed RGBA8, BC1/2/3,
+  R8/RG8 images and on-demand text glyph samples; encoded video payloads are never
+  interpreted as image pixels, and video/render-target donor pixels have no CPU emission
+  source. Colour-emoji donor frame parity is not established: the probe's visible emoji
+  control did not render, so its empty particle output is inconclusive. Puppet points use their UV triangle and the most recently
+  evaluated skin palette. Ordinary particle emission precedes the runtime's pose
+  update; visual attachments consume that pose after its evaluation rather than
+  advancing their parent during `FrameBegin`. Cross-object emission timing has not
+  been compared with Wallpaper Engine.
 - **Particle differences from Wallpaper Engine 2.8.42 that remain.** Not
-  implemented: the operators `vortex_v2`, `boids`, `remapvalue`, `inheritvaluefromevent` and
-  the collision shapes `collisionbounds`, `collisionquad` and `collisionmodel`
-  (their kernels or input/output tables are not decoded), the `remapinitialvalue`
-  initializer, the `layerimage` emitter, the renderer `orientation`, `axis` and `flags`
-  keys (the orientation uniforms stay the screen-facing constants), the rope trail's
-  `fadealpha`/`fadesize` and the `uvscrolling` fade, a rope trail's thin vertex layout
-  (it stays in the thick layout), and the geometry-shader path: ribbons use the
-  vertex-shader fallback, which draws them with a fixed eye direction instead of
-  one per segment and, because the shipped shader applies its width factor to
-  the side offset before subtracting a constant (an operator-precedence slip in
-  the shader's source), a half ribbon width off centre. Child control point chaining (`parentcontrolpoint`,
-  flags 4 and 8), restarting flagged children at a periodic window, the audio
-  emitters' burst and silence rules (a burst waits for sound and is scaled by it), the
-  `turbulentvelocityrandom` initializer's different algorithm, the per-step time scale
-  the drag uses, the half step at low frame rates, and an `eventspawn` child's emitters
-  outliving its particle are unchanged. A particle's size is held at twice Wallpaper
+  implemented: a `remapvalue` that
+  outputs `controlpoint` (the engine moves the control point from the particles; this port
+  writes nothing, including when a nested child would consume that per-instance output), the blended kernels of `vortex_v2`, `remapvalue` and `inheritvaluefromevent`
+  (opcodes 37, 39, 40 did not decompile: the blend window lerps the particle between its old
+  and new state, `vortex_v2` weighs its whole velocity change), and the arguments of
+  `remapinitialvalue`'s noise transforms (it calls the engine's 1D simplex; this port feeds
+  it the transformed input). `positionbetweentwocontrolpoints` reads the output control
+  points, as the kernel does. `boids` steers a slice of the particles each step by the
+  subsystem's own step count, where the engine counts frames (`artifacts/we-parity/decompiles/F-D9.md`
+  to `F-D12.md`). Rope-trail `fadealpha`/`fadesize`, the thin vertex layout and
+  history recording after a sprite renderer now follow the engine, and so does the
+  recording clock (whole frames, first frame due, no prewarm recording); trails in
+  the synthetic probe are as long as Wallpaper Engine's within one recording period.
+  The `0x1402309B5` count/target-FPS product belongs to the plain-rope texture length,
+  not the trail history. Rope texture coordinates follow WE's writer (probe rope-uv-v3/v4),
+  including `uvsmoothing` once a rope holds its steady count (probe rope-uv-v5: within
+  0.01 of v at the matched frame) and the `TRAILSCROLLALPHA` branch of a scrolling rope
+  trail. Ropes are drawn through the shader's geometry stage, as on WE's DX11
+  path, one record per pair subdivided by the stage; the synthetic trail probe is
+  straight and untextured, so curved ribbons and their texture spacing have not been
+  compared with Wallpaper Engine. A rope shader whose geometry stage does not translate
+  keeps the vertex-only path, with its fixed eye direction and its half-width offset
+  (an operator-precedence slip in the shipped `.vert`). Child-entry flag 1's live-parent-particle feed and
+  remap-written control points are implemented; the start index does not shift emitter
+  indices. The blended operator kernels (opcodes 28-40) decompile once the
+  interpreter's jump table (`0x14023FBC0`) is read to all 40 entries; IDA stops at the
+  empty opcode-27 slot. The blended remap and inherit kernels lerp from the old value to
+  the unblended result by the window weight, as implemented.
+  Control-point flag 4 and raw flag 8 now copy registered parent frames. The old
+  emitter-only probe did not register the referenced parent point, so its no-op was
+  the missing-source fallback and did not establish the general rule.
+  World-space remap inputs now distinguish absolute positions/control points from
+  relative distance/direction inputs. The blend window (`blendin*`, `blendout*`) weighs what the blended kernels weigh:
+  `angularmovement`'s force, turn and clamped drag, `controlpointattract`'s pull after flag 2
+  caps it, the oscillators' amplitude, the maintain-distance operators' displacement,
+  `reducemovementnearcontrolpoint`'s reduction and `capvelocity`'s cut. The engine computes the
+  weight and the life position with approximate reciprocals (`rcpps`), which this port
+  evaluates exactly. `alphafade` divides exactly where the engine
+  uses approximate reciprocals (`rcpps`). Restarting flagged children at a periodic window, the audio
+  emitters' burst and silence rules (a burst waits for sound and is scaled by it), and an `eventspawn` child's emitters
+  outliving its particle are unchanged. The force step's frame interval is taken as one over the
+  scene's frame-rate cap (`artifacts/we-parity/decompiles/F-D5.md`: the engine divides by a field
+  whose writer was not found; at a steady cap the two agree), and a start-time prewarm runs before the
+  cap is known, with full steps. The app's default cap is 15 frames a second, so a default-configured
+  scene's drags, attraction, turbulence and vortex act over about half of each step and its
+  operators run in two half steps, as Wallpaper Engine's do at that cap. A particle's size is held at twice Wallpaper
   Engine's (the generators draw half of it, so the size initializers start from 1 where
   the engine starts from 0.5). A single `sizerandom` and an inherited `setsize` come out
   the same, and an inherited `multiplysize` multiplies by half of the parent's size, as
@@ -1445,8 +1557,11 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   it to each size record, but it multiplies the finished size once where the binary
   scales each `sizerandom` draw: the same for a file with one size initializer, but
   the override squared for one with two and no scaling at all for one with none
-  (no local preset with an override has either, so no frame shows it). Turbulence
-  uses Perlin noise where the engine's own noise function is not identified. `maxcount` is still capped at 20 000
+  (no local preset with an override has either, so no frame shows it). Turbulence,
+  `positionoffsetrandom` and `turbulentvelocityrandom` use the engine's own simplex functions
+  (3D, 2D and 1D, read off the decompile; `artifacts/we-parity/decompiles/F-D1.md` to `F-D4.md`)
+  in single precision; the 3D one keeps the engine's corner masks, which pick no second corner
+  where two cell offsets tie, so its value can pass 1 on those planes. `maxcount` is still capped at 20 000
   particles per file. A `worldspace` file is simulated and drawn in scene units from its
   layer's origin, as the binary's draw replaces the model matrix with the scene's own
   for it: the layer's turn and scale shape the offset an emitter or a control point
@@ -1483,15 +1598,29 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   cover stays white (`WPImageObject`), so the art, or the engine's own white
   placeholder a layer leaves in the slot, draws untinted while nothing plays; whether
   Wallpaper Engine tints it with the layer's colour is not established, and no local
-  scene sets a colour on such a layer. A cover layer that Wallpaper Engine hides while
-  nothing plays through a `mediaPlaybackChanged` script stays visible here until the
-  host delivers an idle playback state, so it now draws its art or placeholder in that
-  state.
-- **Layer calls a script can make that this renderer lacks.** `getTransformMatrix()`,
-  `getChildren()` and `rotateObjectSpace()` are there; `setParent`, `lookAt`, `lookAtYaw` and
-  `getAttachment*` (the layer binding Wallpaper Engine registers beside it) are not, so a
-  script that calls one throws `not a function` at that line, and in `init()` skips the
-  rest of it. Wallpaper Engine's order, filtering and frame for them were not read.
+  scene sets a colour on such a layer. A cover layer that hides itself through a
+  `mediaPlaybackChanged` script stays visible with no player, here as in Wallpaper
+  Engine, which sends no media event until a player reports.
+- **Layer transforms and attachment coverage.** `setParent`, attachment lookup/world
+  queries and `transformAttachmentToTexture` have native consumers alongside the
+  existing transform methods. Parent adjustments retain WE's component rules and
+  attachment snapping. Nested composition-depth rejection and degenerate projection
+  inputs have not been fully compared with WE.
+- **Image layer members a script writes after load.** `colorBlendMode`, `perspective`,
+  `nointerpolation`, `clampuvs` and `ledsource` read back what a script wrote and change nothing
+  drawn: Wallpaper Engine reads them only when it builds the layer and its setters only write the
+  field. A `perspective` write does move where the
+  layer is hit, as Wallpaper Engine's cursor ray (`sub_1401EDB20`) reads it on every event.
+  Image-layer `castshadow` produces no caster, as in Wallpaper Engine; model-layer
+  `castshadow` controls its shadow draw live.
+- **`sortorder` does not order the draw yet.** A layer's `sortorder` is read and a script can
+  write it, and with `general.customsortorder` a write rebuilds the graph, but the graph builder
+  does not sort by it: Wallpaper Engine draws a custom-sort-order scene's objects in ascending
+  `sortorder` (stable, `sub_14018AAC0`), which is the draw-order work still to come.
+- **The end of a video that does not loop.** Wallpaper Engine hands `loop` to its decoder
+  (`sub_1401FA700`) and what the decoder does at the end was not read: here the clip holds its
+  last frame, `isPlaying()` reads false, `addEndedCallback` listeners run once on the next tick,
+  and `play()` starts the clip again from its first frame.
 - Unimplemented non-audio scene features, including some script outputs, can
   still affect wallpaper compatibility even when every renderer check passes.
 - No renderer check proves desktop presentation, AppKit behavior, live audio

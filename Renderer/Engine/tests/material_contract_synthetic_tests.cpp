@@ -15,6 +15,7 @@
 #include "Scene/Scene.h"
 #include "Scene/SceneCamera.h"
 #include "Scene/SceneImageEffectLayer.h"
+#include "support/font_assets.hpp"
 
 #include <algorithm>
 #include <array>
@@ -151,8 +152,8 @@ uniform float g_Alpha; // {"default":1}
 uniform float g_UserAlpha; // {"material":"alpha", "default":1}
 uniform float g_Extra; // {"material":"extra", "default":0}
 void main() {
-    gl_FragColor = (texture2D(g_Texture0, v_UV) + 0.01 * texture2D(g_Texture1, v_UV))
-        * vec4(g_Color * g_Color4.rgb + vec3(g_Extra), g_Alpha * g_UserAlpha);
+    gl_FragColor = (texSample2D(g_Texture0, v_UV) + 0.01 * texSample2D(g_Texture1, v_UV))
+        * vec4(g_Color * g_Color4.rgb + CAST3(g_Extra), g_Alpha * g_UserAlpha);
 }
 )";
 const char* kTintFragment = R"(
@@ -164,7 +165,7 @@ const char* kParticleFragment = R"(
 varying vec2 v_UV;
 uniform sampler2D g_Texture0;
 uniform vec4 g_RenderVar1;
-void main() { gl_FragColor = texture2D(g_Texture0, v_UV) * g_RenderVar1; }
+void main() { gl_FragColor = texSample2D(g_Texture0, v_UV) * g_RenderVar1; }
 )";
 
 class MaterialContracts : public ::testing::Test {
@@ -180,6 +181,7 @@ protected:
         ASSERT_NE(::mkdtemp(name.data()), nullptr);
         folder = name;
         disk::create_directories(folder / "assets"); disk::create_directories(folder / "cache");
+        wallpaper::test::WriteFontAssets(folder / "assets");
         ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<fs::PhysicalFs>((folder / "assets").string())));
         ASSERT_TRUE(vfs.Mount("/cache", std::make_unique<fs::PhysicalFs>((folder / "cache").string())));
         Shader("contract_image", kImageFragment);
@@ -241,7 +243,8 @@ protected:
         auto scene = WPSceneParser().Parse(request, document.dump(), vfs, sound);
         EXPECT_NE(scene, nullptr);
         if (scene) {
-            EXPECT_TRUE(scene->shader_compile_error.empty()) << scene->shader_compile_error;
+            EXPECT_TRUE(scene->shader_fallbacks.empty())
+                << (scene->shader_fallbacks.empty() ? std::string {} : scene->shader_fallbacks.front());
             EXPECT_NE(scene->runtime, nullptr);
             scenes.push_back(scene);
         }
@@ -298,12 +301,12 @@ protected:
             varying vec2 v_UV;
             uniform sampler2D g_Texture0;
             uniform float g_UserAlpha; // {"material":"alpha", "default":1}
-            void main() { gl_FragColor = texture2D(g_Texture0, v_UV) * g_UserAlpha; }
+            void main() { gl_FragColor = texSample2D(g_Texture0, v_UV) * g_UserAlpha; }
         )");
         Material("materials/identity.json","contract_identity",{nullptr},{{"alpha",1}});
         PutJson("effects/identity.json",{{"passes",Json::array({{{"material","materials/identity.json"}}})},
-            {"fbos",Json::array({{{"name","relative"}},{{"name","fixed"},{"width",13},{"height",11}},
-                {{"name","fitted"},{"fit",27}},{{"name","explicitScaled"},{"width",18},{"height",14},{"scale",2}}})}});
+            {"fbos",Json::array({{{"name","relative"},{"format","rgba8888"}},{{"name","fixed"},{"format","rgba8888"},{"width",13},{"height",11}},
+                {{"name","fitted"},{"format","rgba8888"},{"fit",27}},{{"name","explicitScaled"},{"format","rgba8888"},{"width",18},{"height",14},{"scale",2}}})}});
     }
     Json Text(const std::string& value) {
         return {{"id",1},{"name","caption"},{"text",value},{"font","systemfont_arial"},
@@ -470,6 +473,37 @@ TEST_F(MaterialContracts, DirectAndAdditivePuppetsRetainPerMeshMaterial) {
     }
 }
 
+TEST_F(MaterialContracts, OnlyAuthoredAdditiveBlendingSetsTheAdditiveCombo) {
+    // Wallpaper Engine sets ADDITIVE from the material's own `blending` (sub_140154480),
+    // never from a layer's colour blend mode, not even the additive mode 31.
+    Shader("contract_additive", R"(
+        varying vec2 v_UV;
+        uniform sampler2D g_Texture0;
+        void main() {
+            gl_FragColor = texSample2D(g_Texture0,v_UV);
+        #if ADDITIVE
+            gl_FragColor.rgb *= 0.5;
+        #endif
+        }
+    )");
+    struct Case { const char* blending; int color_blend; bool additive; };
+    for (const Case& c : {Case{"additive",0,true}, Case{"translucent",0,false},
+                          Case{"translucent",31,false}, Case{"alphatocoverage",0,false}}) {
+        SCOPED_TRACE(std::string(c.blending) + " " + std::to_string(c.color_blend));
+        PutJson("materials/additive.json", {{"passes",Json::array({{{"shader","contract_additive"},
+            {"textures",Json::array({"sheet"})}, {"blending",c.blending}, {"cullmode","nocull"},
+            {"depthtest","disabled"}, {"depthwrite","disabled"}}})}});
+        PutJson("models/additive.json", {{"material","materials/additive.json"}, {"autosize",false}});
+        auto image = Image(); image["image"] = "models/additive.json";
+        image["colorBlendMode"] = c.color_blend;
+        auto scene = Load(Json::array({image})); ASSERT_NE(scene,nullptr);
+        auto* node = Node(*scene,"owner"); ASSERT_NE(node,nullptr); ASSERT_NE(node->Mesh(),nullptr);
+        auto* material = node->Mesh()->Material(); ASSERT_NE(material,nullptr);
+        EXPECT_EQ(std::count(material->defines.begin(),material->defines.end(),"ADDITIVE"),
+                  c.additive ? 1 : 0);
+    }
+}
+
 TEST_F(MaterialContracts, APuppetsTextureChannelMeshIsNotDrawnAsPartOfTheModel) {
     // A mesh drawn with `puppettexturechannels` paints frames into the puppet's picture;
     // its positions are pixels of that picture. Drawn directly or by the closing pass of
@@ -544,6 +578,8 @@ TEST_F(MaterialContracts, APuppetsTextureChannelPaintsIntoItsPictureOnlyWhileIts
         const auto frame = [&](double time) {
             scene->elapsingTime = time;
             updater.FrameBegin();
+            // The runtime hands texture channels their weights after it poses the puppets.
+            updater.UpdateAttachmentsAfterPose();
             const auto weights = updater.TextureChannelWeights(&painter);
             EXPECT_EQ(weights.size(),4u);
             return weights.empty() ? -1.0f : weights[0];
@@ -567,6 +603,8 @@ TEST_F(MaterialContracts, APuppetsTextureChannelPaintsIntoItsPictureOnlyWhileIts
         ASSERT_EQ(chain->CardOverlays().size(),1u);
         scene->elapsingTime = 1.0;
         scene->shaderValueUpdater->FrameBegin();
+        // The runtime hands texture channels their weights after it poses the puppets.
+        scene->shaderValueUpdater->UpdateAttachmentsAfterPose();
         EXPECT_FALSE(chain->CardOverlays()[0]->Visible());
     }
     for (const auto& [channel, authored_rows, rows] :
@@ -589,6 +627,8 @@ TEST_F(MaterialContracts, APuppetsTextureChannelPaintsIntoItsPictureOnlyWhileIts
         const SceneNode& painter = *chain->CardOverlays()[0];
         scene->elapsingTime = 1.0;
         scene->shaderValueUpdater->FrameBegin();
+        // The runtime hands texture channels their weights after it poses the puppets.
+        scene->shaderValueUpdater->UpdateAttachmentsAfterPose();
         const auto weights =
             static_cast<WPShaderValueUpdater&>(*scene->shaderValueUpdater).TextureChannelWeights(&painter);
         ASSERT_EQ(weights.size(), 4u * rows);
@@ -638,7 +678,7 @@ TEST_F(MaterialContracts, FollowupCompiledSheetMetadataSurvivesUnusedSamplerPrun
         #if SPRITESHEET == 1
             gl_FragColor = g_RenderVar1;
         #else
-            gl_FragColor = texture2D(g_Texture0,v_UV);
+            gl_FragColor = texSample2D(g_Texture0,v_UV);
         #endif
         }
     )");
@@ -907,7 +947,7 @@ TEST_F(MaterialContracts, SheetFactsFollowFinalUserAndShaderDefaultTextureSlots)
                 varying vec2 v_UV;
                 uniform sampler2D g_Texture0; // {"default":"frames"}
                 uniform vec4 g_RenderVar1;
-                void main() { gl_FragColor = texture2D(g_Texture0, v_UV) * g_RenderVar1; }
+                void main() { gl_FragColor = texSample2D(g_Texture0, v_UV) * g_RenderVar1; }
             )";
             Shader("genericparticle",fragment.c_str());
             Material("materials/particle.json","genericparticle",Json::array());
@@ -951,6 +991,45 @@ TEST_F(MaterialContracts, NonParticleShaderDoesNotReceiveSheetMaterialConstants)
     EXPECT_EQ(std::count(material->defines.begin(),material->defines.end(),"SPRITESHEETBLENDNPOT"),0);
 }
 
+TEST_F(MaterialContracts, EveryFileTextureSlotGetsItsReferenceFormatCombo) {
+    // `TEX<N>FORMAT` is the file's format code for slots 0-9, 0 included (`sub_1401A5C40`):
+    // fur4 reads `TEX8FORMAT` bare, so an RGBA8 slot must define it too.
+    Bytes blocks;
+    blocks.text("TEXV0005"); blocks.text("TEXI0001");
+    blocks.u32(7); blocks.u32(3); for (int i = 0; i < 4; ++i) blocks.u32(4);
+    blocks.u32(0); blocks.text("TEXB0002"); blocks.u32(1); blocks.u32(1);
+    blocks.u32(4); blocks.u32(4); blocks.u32(0); blocks.u32(8); blocks.u32(8);
+    for (int i = 0; i < 8; ++i) blocks.u8(0);
+    Put("materials/blocks.tex", blocks.data);
+    Shader("contract_formats", R"(
+varying vec2 v_UV;
+uniform sampler2D g_Texture0;
+uniform sampler2D g_Texture1;
+uniform sampler2D g_Texture8;
+#if TEX0FORMAT == 7
+uniform float g_BlocksSeen; // {"material":"blocks","default":1.0}
+#endif
+void main() {
+    float k = float(TEX1FORMAT) + float(TEX8FORMAT);
+    gl_FragColor = texSample2D(g_Texture0, v_UV) + texSample2D(g_Texture1, v_UV) * k +
+                   texSample2D(g_Texture8, v_UV)
+#if TEX0FORMAT == 7
+                   * g_BlocksSeen
+#endif
+                   ;
+}
+)");
+    Material("materials/base.json", "contract_formats",
+             {"blocks", "aux", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "aux"});
+    auto scene = Load(Json::array({Image()})); ASSERT_NE(scene,nullptr);
+    auto* node = Node(*scene,"owner"); ASSERT_NE(node,nullptr); ASSERT_NE(node->Mesh(),nullptr);
+    auto* material = node->Mesh()->Material(); ASSERT_NE(material,nullptr);
+    // The compile above already needed TEX1FORMAT and TEX8FORMAT defined (as 0); the BC1 slot
+    // is code 7.
+    EXPECT_EQ(std::count(material->defines.begin(), material->defines.end(), "TEX0FORMAT"), 1);
+    EXPECT_EQ(std::count(material->defines.begin(), material->defines.end(), "TEX1FORMAT"), 0);
+}
+
 TEST_F(MaterialContracts, InvalidVisibleSizeKeepsFiniteUncroppedUVsAndOmitsTexel) {
     Put("materials/sheet.tex",Tex(8,8,0,4,6,4));
     auto scene = Load(Json::array({Image()})); ASSERT_NE(scene,nullptr);
@@ -988,17 +1067,18 @@ TEST_F(MaterialContracts, TextBothWorkingTargetsFollowGrowShrinkAndStaticControl
     ASSERT_TRUE(disk::is_regular_file(state->resolved_font_path)) << state->resolved_font_path;
     const auto layout = control->runtime->NodeTextLayout("caption"); ASSERT_TRUE(layout.has_value());
     ASSERT_GT(layout->rows,0u); ASSERT_GT(layout->max_x-layout->min_x,0);
-    const auto raster = TextLayerRasterSizeForLayout(*state,*layout);
+    const auto raster = (*layout).card;
     const auto raster_w = static_cast<uint32_t>(std::clamp(std::ceil(raster.x()),1.0f,4096.0f));
     const auto raster_h = static_cast<uint32_t>(std::clamp(std::ceil(raster.y()),1.0f,4096.0f));
     std::vector<uint8_t> rgba(static_cast<std::size_t>(raster_w)*raster_h*4,0);
-    RasterizeTextLayer(*state,raster_w,raster_h,rgba);
+    RasterizeTextGlyphsForTests(*state,raster_w,raster_h,rgba);
     ASSERT_EQ(rgba.size(),static_cast<std::size_t>(raster_w)*raster_h*4);
     std::size_t visible = 0;
     for (std::size_t i = 3; i < rgba.size(); i += 4) if (rgba[i] > 0) ++visible;
     ASSERT_GT(visible,0u); ASSERT_LT(visible,static_cast<std::size_t>(raster_w)*raster_h);
-    const auto header = control->imageParser->ParseHeader(TextTextureName("caption"));
-    EXPECT_EQ(header.mapWidth,raster_w); EXPECT_EQ(header.mapHeight,raster_h);
+    // The glyphs come from the layer's atlas, a page of at least 512 (decompiles/G-F16.md).
+    const auto header = control->imageParser->ParseHeader(TextAtlasName("caption"));
+    EXPECT_GE(header.mapWidth,512u); EXPECT_GE(header.mapHeight,512u);
 
     runtime.ConsumeSceneGraphMutationFlag(); runtime.ConsumeRenderTargetResizeFlag();
     for (const auto& value : {long_text,short_text,long_text}) {
@@ -1021,7 +1101,7 @@ TEST_F(MaterialContracts, TextBothWorkingTargetsFollowGrowShrinkAndStaticControl
     }
     auto final_state = runtime.NodeTextState("caption"); ASSERT_TRUE(final_state.has_value());
     auto final_layout = runtime.NodeTextLayout("caption"); ASSERT_TRUE(final_layout.has_value());
-    const auto final_raster = TextLayerRasterSizeForLayout(*final_state,*final_layout);
+    const auto final_raster = (*final_layout).card;
     EXPECT_FLOAT_EQ(final_raster.x(),raster.x()); EXPECT_FLOAT_EQ(final_raster.y(),raster.y());
     // Independently start long, then shrink: a stale second buffer must not
     // happen to pass just because it retained this test's original short size.

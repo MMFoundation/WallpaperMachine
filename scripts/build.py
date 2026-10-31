@@ -154,6 +154,10 @@ def main():
         run(["cargo", "build", "--workspace", "--release"], RENDERER, cargo_environment(), stage="cargo")
         run([RENDERER / "target/release/uniffi-bindgen", "generate", "--library", RENDERER / "target/release/libwallpaper_bridge.a", "--language", "swift", "--no-format", "--out-dir", GENERATED_BRIDGE], cwd=RENDERER, env=env, stage="bindgen")
     if args.renderer_only:
+        if args.swift_only:
+            print(f"{MARK.warn} Renderer build skipped by --swift-only")
+        else:
+            print(f"{MARK.ok} Built renderer and regenerated Swift bindings")
         return
     # `--use-cache` skips rewriting the project when `project.yml` has not changed,
     # which keeps Xcode's incremental build state (and `scripts/test.py` agrees).

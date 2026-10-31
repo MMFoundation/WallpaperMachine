@@ -267,6 +267,14 @@ pub struct PreviewPropertyOverride {
     pub flat_json: String,
 }
 
+/// Shows Wallpaper Engine's per-wallpaper options on the running scene without
+/// keeping them, with the same wallpaper check as [`PreviewPropertyOverride`].
+pub struct PreviewUserOptions {
+    pub handle: SceneHandle,
+    pub expected_scene_path: String,
+    pub options: crate::project::SceneUserOptions,
+}
+
 pub struct CloseAllScenes;
 
 pub type ReconcileReply = Result<Vec<SceneResult>, crate::EngineError>;

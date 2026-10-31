@@ -116,7 +116,7 @@ uniform sampler2D g_Texture4; // {"hidden":true,"default":"_rt_FullFrameBuffer"}
     REQUIRE(blend_output != std::string::npos);
     blend_frag.insert(blend_output, R"(
 #if BLENDMODE
-  c.rgb *= texture(g_Texture4, v_ContractUV).rgb;
+  c.rgb *= texSample2D(g_Texture4, v_ContractUV).rgb;
 #endif
 )");
     asset(files, "/puppet_image.json",
@@ -172,7 +172,7 @@ uniform sampler2D g_Texture4; // {"hidden":true,"default":"_rt_FullFrameBuffer"}
     REQUIRE(blend_output != std::string::npos);
     frag.insert(blend_output, R"(
 #if BLENDMODE
-  c.rgb += texture(g_Texture4, v_ContractUV).rgb;
+  c.rgb += texSample2D(g_Texture4, v_ContractUV).rgb;
 #endif
 )");
     asset(files, "/models/util/solidlayer.json", R"({"material":"materials/util/solidlayer.json"})");
@@ -250,6 +250,26 @@ TEST(RenderGraph, aHiddenFirstWriterLeftOutKeepsTheSceneOutputsLoadAndClear) {
             EXPECT_EQ(first.clear_on_first_use, clear);
             EXPECT_EQ(first.preserve_target_contents, ! clear && hidden_first);
         }
+    }
+}
+
+TEST(RenderGraph, anOrdinarySceneHasNoDepthOnlyTiledOrMirroredDraw) {
+    // The shadow-atlas and mirrored-view draw options cost nothing when no light casts a
+    // shadow and nothing is reflected: no ordinary draw asks for them.
+    Scene scene;
+    defaults(scene);
+    scene.sceneGraph->AppendChild(node("first"));
+    scene.sceneGraph->AppendChild(node("second"));
+    const Observation observed(scene);
+    REQUIRE(! observed.steps.empty());
+    for (const auto& step : observed.steps) {
+        if (step.draw == nullptr) continue;
+        const auto& d = step.draw->desc();
+        EXPECT_FALSE(d.depth_only);
+        EXPECT_FALSE(d.flip_winding);
+        EXPECT_FALSE(d.clear_depth_on_first_use);
+        EXPECT_FALSE(d.depth_override.has_value());
+        EXPECT_EQ(d.viewport_uv, (std::array<float, 4> { 0.0f, 0.0f, 1.0f, 1.0f }));
     }
 }
 

@@ -48,12 +48,6 @@ void ApplyBaseline(SceneNode& node, SceneMaterial& material, const PassBaseline&
     material.blenmode = BlendMode::Normal;
 }
 
-// The blend the closing pass takes: the idle one while the whole chain is idle and
-// one was given, the ordinary final blend otherwise.
-BlendMode PickFinalBlend(bool idle, const std::optional<BlendMode>& idleBlend, BlendMode finalBlend) {
-    if (idle && idleBlend.has_value()) return *idleBlend;
-    return finalBlend;
-}
 } // namespace
 
 SceneImageEffectLayer::SceneImageEffectLayer(SceneNode* node, float w, float h,
@@ -194,11 +188,12 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         closing.AddMesh(std::move(swapped));
     }
     SceneMaterial& material = *closing.Mesh()->Material();
-    material.blenmode       = PickFinalBlend(! any_running, m_idle_final_blend, m_final_blend);
+    material.blenmode       = m_final_blend;
     if (m_final_depth.has_value()) {
         std::tie(material.depth_test, material.depth_write) =
             std::tie(m_final_depth->test, m_final_depth->write);
     }
+    if (m_final_depth_test.has_value()) material.depth_test = *m_final_depth_test;
     closing.Mesh()->ChangeMeshDataFrom(*m_final_mesh);
     closing.CopyTrans(*m_final_node);
     closing.SetCamera(m_final_camera);

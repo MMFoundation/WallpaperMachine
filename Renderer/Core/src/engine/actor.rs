@@ -496,6 +496,19 @@ impl EngineActor {
             .preview_property_override_json(expected_scene_path, flat_json)
     }
 
+    /// Shows per-wallpaper options while an edit is under way; nothing about the
+    /// scene's stored state changes.
+    pub fn preview_user_options(
+        &mut self,
+        handle: SceneHandle,
+        expected_scene_path: &str,
+        options: &crate::project::SceneUserOptions,
+    ) -> Result<PropertyPreview, EngineError> {
+        self.state
+            .scene_mut(handle)?
+            .preview_user_options(expected_scene_path, options)
+    }
+
     pub fn update_display_state(
         &mut self,
         update: impl FnOnce(&mut DisplayStateModel) -> Result<(), EngineError>,
@@ -1661,6 +1674,18 @@ impl Message<messages::ResetPropertyOverride> for EngineActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.with_snapshot_update(|actor| actor.reset_property_override(msg.handle))
+    }
+}
+
+impl Message<messages::PreviewUserOptions> for EngineActor {
+    type Reply = Result<PropertyPreview, EngineError>;
+
+    async fn handle(
+        &mut self,
+        msg: messages::PreviewUserOptions,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.preview_user_options(msg.handle, &msg.expected_scene_path, &msg.options)
     }
 }
 
