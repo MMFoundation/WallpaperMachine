@@ -74,3 +74,24 @@ target_include_directories(stb_vorbis SYSTEM PUBLIC ${WESCENE_THIRD_PARTY_DIR}/s
 # Vendored code is built as shipped: its warnings are not ours to fix.
 target_compile_options(stb_vorbis PRIVATE -w)
 set_property(TARGET stb_vorbis PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+# HarfBuzz 15.0.0 (Old MIT, unchanged): the text shaper behind text layers (Text/TextShaper),
+# built from its single-file amalgamation with the FreeType font functions only, as
+# Wallpaper Engine links it (hb_ft_font_create).
+find_package(Freetype REQUIRED)
+add_library(harfbuzz STATIC ${WESCENE_THIRD_PARTY_DIR}/harfbuzz/src/harfbuzz.cc)
+target_compile_definitions(harfbuzz PRIVATE HAVE_FREETYPE=1)
+target_include_directories(harfbuzz SYSTEM PUBLIC ${WESCENE_THIRD_PARTY_DIR}/harfbuzz/src)
+target_link_libraries(harfbuzz PUBLIC Freetype::Freetype)
+target_compile_options(harfbuzz PRIVATE -w)
+set_property(TARGET harfbuzz PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+# msdfgen 1.13 (MIT, unchanged): core and the FreeType importer only, for the text
+# layers' distance-field glyph atlases. MSDFGEN_PUBLIC empty replaces its generated config.
+file(GLOB MSDFGEN_SOURCES ${WESCENE_THIRD_PARTY_DIR}/msdfgen/core/*.cpp)
+add_library(msdfgen STATIC ${MSDFGEN_SOURCES} ${WESCENE_THIRD_PARTY_DIR}/msdfgen/ext/import-font.cpp)
+target_compile_definitions(msdfgen PUBLIC MSDFGEN_PUBLIC=)
+target_include_directories(msdfgen SYSTEM PUBLIC ${WESCENE_THIRD_PARTY_DIR})
+target_link_libraries(msdfgen PUBLIC Freetype::Freetype)
+target_compile_options(msdfgen PRIVATE -w)
+set_property(TARGET msdfgen PROPERTY POSITION_INDEPENDENT_CODE ON)

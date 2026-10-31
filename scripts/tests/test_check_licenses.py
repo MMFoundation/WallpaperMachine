@@ -425,6 +425,17 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(sum(1 for name in components if name == "lz4"), 1)
         self.assertEqual(components["lz4"].reached_from, ("CMake src/CMakeLists.txt", "build.rs dylib"))
 
+    def test_the_vendored_text_archives_carry_their_license(self):
+        self.build_rs.write_text(
+            'const STATIC_ARCHIVES: [&str; 2] = ["harfbuzz", "msdfgen"];\n'
+            'fn main() {\n    let kinds = [("static", &STATIC_ARCHIVES)];\n'
+            '    for (kind, names) in kinds { for name in names { println!("cargo:rustc-link-lib={kind}={name}"); } }\n}\n')
+        components = self.components()
+        self.assertEqual(components["harfbuzz"].license, "MIT-Modern-Variant")
+        self.assertEqual(components["msdfgen"].license, "MIT")
+        for name in ("harfbuzz", "msdfgen"):
+            self.assertEqual(check_licenses.assess(components[name])[0], "ok", name)
+
     def test_entries_missing_from_the_table_are_unknown(self):
         components = self.components()
         for name in ("mystery_lib", "Brand_New_Package"):

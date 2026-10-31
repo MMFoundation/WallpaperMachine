@@ -56,7 +56,7 @@ CARGO_TREE = ("cargo", "tree", "--offline", "--manifest-path", str(CARGO_MANIFES
 # ---------------------------------------------------------------------------
 POLICY = "GPL-3.0-only"
 ALLOWED = frozenset(license.lower() for license in (
-    "MIT", "MIT-0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "0BSD", "Unlicense", "CC0-1.0",
+    "MIT", "MIT-0", "MIT-Modern-Variant", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "0BSD", "Unlicense", "CC0-1.0",
     "BSL-1.0", "Unicode-3.0", "Unicode-DFS-2016", "libpng-2.0", "WTFPL",
     "LicenseRef-PublicDomain",
     "Apache-2.0",  # compatible with GPLv3 (not with GPLv2)
@@ -234,6 +234,10 @@ COMPONENTS = {
     "stb_image": Entry("MIT OR Unlicense", "vendored header; public domain or MIT at the user's choice"),
     "stb_vorbis": Entry("MIT OR Unlicense", "vendored source (stb_vorbis.c 1.22, patched), linked as the static archive "
                         "stb_vorbis; public domain or MIT at the user's choice"),
+    "harfbuzz": Entry("MIT-Modern-Variant", "vendored source (HarfBuzz 15.0.0 amalgamation, unchanged), linked as the "
+                      "static archive harfbuzz; HarfBuzz's 'Old MIT' license"),
+    "msdfgen": Entry("MIT", "vendored source (msdfgen 1.13 core and FreeType importer, unchanged), linked as the "
+                     "static archive msdfgen"),
     "glad": Entry(None, "added to the CMake project but never linked; license not checked", "not-linked"),
     "quickjs-ng": Entry("MIT", "Homebrew dylib"),
     "lz4": Entry("BSD-2-Clause", "Homebrew dylib"),
