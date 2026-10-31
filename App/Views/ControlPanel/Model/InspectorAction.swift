@@ -6,8 +6,8 @@ import Foundation
 /// A key names one control's work. The page keyed an action by `action:id:displayID:detail`; so
 /// does `PanelActionCoordinator.key`. A control that sends many values (a slider, a field) starts
 /// its action with `policy: .latestWins`, which waits for the pending value and then sends its own,
-/// so the newest value always lands last: `property`, `wallpaperSetting`, `displayConfig` and
-/// `displayPosition`. Every other action keeps the default and a second click while one is pending
+/// so the newest value always lands last: `property`, `engineOption`, `wallpaperSetting`,
+/// `displayConfig` and `displayPosition`. Every other action keeps the default and a second click while one is pending
 /// is ignored.
 enum InspectorAction {
   /// Apply changes and Revert lock every property control while they run.
@@ -23,6 +23,16 @@ enum InspectorAction {
   }
   static func restoreAll(_ id: String) -> String {
     PanelActionCoordinator.key("restoreAllProperties", id: id)
+  }
+  /// A Wallpaper Engine option's committed value (`.latestWins`).
+  static func engineOption(_ id: String, _ option: BridgeEngineOptionId) -> String {
+    PanelActionCoordinator.key("engineOption", id: id, detail: "\(option)")
+  }
+  static func restoreEngineOption(_ id: String, _ option: BridgeEngineOptionId) -> String {
+    PanelActionCoordinator.key("restoreEngineOption", id: id, detail: "\(option)")
+  }
+  static func restoreAllEngineOptions(_ id: String) -> String {
+    PanelActionCoordinator.key("restoreAllEngineOptions", id: id)
   }
   /// Choosing or clearing a file, folder or texture.
   static func propertyPath(_ id: String, _ propertyID: String) -> String {

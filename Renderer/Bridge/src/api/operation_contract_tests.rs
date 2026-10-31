@@ -529,6 +529,7 @@ impl Fixture {
                 property_id: "gain".into(),
                 value: BridgePropertyValue::Number { value },
             }],
+            pending_engine_options: Vec::new(),
         })
     }
     fn start_apply(&self, id: &str, user: bool) -> Pending<BridgeWallpaperMutationBundle> {

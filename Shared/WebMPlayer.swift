@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreImage
 import CoreMedia
 import Foundation
 import QuartzCore
@@ -101,6 +102,15 @@ final class WebMPlayer {
   private var pan = NativeVideoLayout.Pan.centered
   private var viewport = CGRect.zero
   private var backingScale: CGFloat = 1
+  /// Wallpaper Engine's per-wallpaper options: the clock's rate (`rate` / 100, WE
+  /// `sub_1400FFCB0`), the horizontal flip, the Fit-style border colour and the colour pipeline,
+  /// whose filtered feed runs only while it changes the picture.
+  private var playRate: Float = 1
+  private var flipHorizontal = false
+  private var borderColor: CGColor?
+  private weak var root: CALayer?
+  private let colorPipeline = VideoColorPipeline()
+  private var filteredSink: WebMFilteredVideoSink?
 
   /// Why the file's sound is not played, when the file has some and it cannot be: the codec is not
   /// decodable, the reader refused the track. nil when it plays, or when none was asked for.
@@ -178,6 +188,7 @@ final class WebMPlayer {
   func attach(to root: CALayer) {
     root.masksToBounds = true
     root.addSublayer(layer)
+    self.root = root
     applyPlacement()
   }
 
@@ -220,7 +231,9 @@ final class WebMPlayer {
     case .gravity(let gravity):
       layer.setAffineTransform(.identity)
       layer.videoGravity = gravity
-      layer.frame = viewport
+      layer.bounds = CGRect(origin: .zero, size: viewport.size)
+      layer.position = CGPoint(x: viewport.midX, y: viewport.midY)
+      layer.setAffineTransform(mirror)
     case .frame(let rect):
       // The rectangle already has the picture's own aspect, so nothing but a plain stretch may
       // apply another aspect rule to it.
@@ -228,21 +241,59 @@ final class WebMPlayer {
       // The layout measures from the top edge and the container's layer grows upward.
       let target = NativeVideoLayout.layerFrame(rect, viewportHeight: viewport.height)
         .offsetBy(dx: viewport.minX, dy: viewport.minY)
-      if upright {
-        layer.setAffineTransform(.identity)
-        layer.frame = target
-      } else {
-        // The layer keeps the stored shape and is turned about its centre onto the target.
-        let stored = file.transformSwapsAxes ? CGSize(width: target.height, height: target.width) : target.size
-        layer.setAffineTransform(.identity)
-        layer.bounds = CGRect(origin: .zero, size: stored)
-        layer.position = CGPoint(x: target.midX, y: target.midY)
-        layer.setAffineTransform(file.layerTransform)
-      }
+      // The layer keeps the stored shape and is turned about its centre onto the target; the
+      // flip mirrors the shown picture after the turn.
+      let stored = !upright && file.transformSwapsAxes ? CGSize(width: target.height, height: target.width) : target.size
+      layer.setAffineTransform(.identity)
+      layer.bounds = CGRect(origin: .zero, size: stored)
+      layer.position = CGPoint(x: target.midX, y: target.midY)
+      layer.setAffineTransform((upright ? .identity : file.layerTransform).concatenating(mirror))
     case .pending:
       break
     }
+    let fitStyle = mode != .fill && mode != .stretch
+    root?.backgroundColor = (fitStyle ? borderColor : nil) ?? CGColor(gray: 0, alpha: 1)
   }
+
+  private var mirror: CGAffineTransform { flipHorizontal ? CGAffineTransform(scaleX: -1, y: 1) : .identity }
+
+  /// Applies Wallpaper Engine's options. Switching the colour pipeline on or off rebuilds the
+  /// feed from the clock (not a repair: no recovery allowance is spent).
+  func setEngineOptions(_ options: WallpaperEngineOptions, lut: VideoLut?, borderColor: CGColor?) {
+    let rate = Float(max(10, min(options.playbackRate, 200)) / 100)
+    if rate != playRate {
+      playRate = rate
+      if started, !paused, !stopped { synchronizer.rate = rate }
+    }
+    let parameters = VideoColorPipeline.Parameters(options: options, lut: lut)
+    let wasFiltered = filteredSink != nil
+    colorPipeline.update(parameters)
+    flipHorizontal = options.flipHorizontal
+    self.borderColor = borderColor
+    applyPlacement()
+    let filtered = VideoColorPipeline.needsComposition(parameters)
+    guard filtered != wasFiltered else { return }
+    if filtered {
+      let sink = WebMFilteredVideoSink(output: layer.sampleBufferRenderer, pipeline: colorPipeline)
+      sink.onFailure = { [weak self, weak sink] error in
+        let detail = error.localizedDescription
+        Task { @MainActor in
+          guard let self, let sink, self.filteredSink === sink, !self.stopped else { return }
+          if self.hasShownFrame, self.restartPlayback(reason: detail) { return }
+          // A failure in the optional filtering path does not condemn the source file.
+          self.fail(detail, settled: false)
+        }
+      }
+      filteredSink = sink
+    } else {
+      filteredSink = nil
+    }
+    if started, !stopped, !failureLatched { rebuild() }
+  }
+
+  var rateForTest: Float { playRate }
+  var feedsFilteredForTest: Bool { filteredSink != nil }
+  var layerTransformForTest: CGAffineTransform { layer.affineTransform() }
 
   // MARK: - Sound
 
@@ -268,7 +319,7 @@ final class WebMPlayer {
     guard !started, !stopped else { return }
     started = true
     startFeeding()
-    synchronizer.setRate(paused ? 0 : 1, time: file.firstPresentationTime)
+    synchronizer.setRate(paused ? 0 : playRate, time: file.firstPresentationTime)
     if paused { pausedSince = now() }
   }
 
@@ -284,7 +335,7 @@ final class WebMPlayer {
       healthTask?.cancel()
       healthTask = nil
     } else {
-      synchronizer.rate = 1
+      synchronizer.rate = playRate
       if let since = pausedSince, now() - since >= Self.minimumPauseForCheck {
         verifyPlayback(reason: "resumed after \(Int((now() - since) / .seconds(1))) s")
       }
@@ -310,14 +361,17 @@ final class WebMPlayer {
     // The readers go once the queue has finished what it is doing; a read that hangs holds that
     // queue, not the caller.
     let feeder = self.feeder
+    filteredSink = nil
     queue.async { feeder.release() }
   }
 
   private func startFeeding() {
     let feeder = self.feeder
     let video = layer.sampleBufferRenderer
-    video.requestMediaDataWhenReady(on: queue) { [video] in
-      if !feeder.feedVideo(into: video) { video.stopRequestingMediaData() }
+    let filtered = filteredSink
+    let sink: WebMSampleSink = filtered ?? video
+    video.requestMediaDataWhenReady(on: queue) { [video, sink, filtered] in
+      if !feeder.feedVideo(into: sink) || filtered?.hasFailed == true { video.stopRequestingMediaData() }
     }
     if let audioRenderer, audioActive { startFeedingAudio(into: audioRenderer) }
   }
@@ -349,9 +403,13 @@ final class WebMPlayer {
   private func reposition(video: Bool, at time: CMTime) {
     repositioning += 1
     let feeder = self.feeder
+    let filtered = filteredSink
     let epoch = feedEpoch
     queue.async { [weak self] in
-      if video { feeder.reposition(at: time) } else { feeder.repositionAudio(at: time) }
+      if video {
+        filtered?.reset()
+        feeder.reposition(at: time)
+      } else { feeder.repositionAudio(at: time) }
       DispatchQueue.main.async { MainActor.assumeIsolated { self?.repositioned(epoch) } }
     }
   }
@@ -581,8 +639,21 @@ final class WebMPlayer {
       inPass = CMTimeSubtract(time, CMTimeMultiplyByFloat64(length, multiplier: passes))
     }
     let file = self.file
-    return await Task.detached(priority: .utility) {
-      file.copyPosterImage(at: inPass)
+    let pipeline = colorPipeline
+    let flip = flipHorizontal
+    return await Task.detached(priority: .utility) { () -> CGImage? in
+      guard var image = file.copyPosterImage(at: inPass) else { return nil }
+      // The poster shows what the layer shows: the colour options, then the flip.
+      if VideoColorPipeline.needsComposition(pipeline.current) || flip {
+        guard var picture = try? pipeline.apply(to: CIImage(cgImage: image)) else { return nil }
+        if flip {
+          picture = picture.transformed(by: CGAffineTransform(scaleX: -1, y: 1)
+            .translatedBy(x: -picture.extent.width, y: 0))
+        }
+        guard let rendered = CIContext(options: [.cacheIntermediates: false]).createCGImage(picture, from: picture.extent) else { return nil }
+        image = rendered
+      }
+      return image
     }.value
   }
 }

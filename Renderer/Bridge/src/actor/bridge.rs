@@ -33,7 +33,7 @@ use crate::{
         messages::{
             self, AudioRequirementChanged, Bootstrap,
             ClearShaderCache,
-            CompleteAudioResponse, EditProperty,
+            CompleteAudioResponse, EditEngineOption, EditProperty,
             GetAllSnapshots, GetAppSnapshot, GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview,
             GetMonitorInformationSnapshot, GetSceneProbeRequest, GetSettingsSnapshot,
             GetWallpaperOptionsSnapshot, GetWebWallpapers,
@@ -43,7 +43,8 @@ use crate::{
             PreviewDisplayPosition, PreviewWallpaperProperties, ReleaseHeldWallpaper,
             RendererCounters,
             ReplaceLibraryForTest,
-            ReplaceWallpaperConfigForTest, RestoreAllPropertyDefaults, RestorePropertyDefault,
+            ReplaceWallpaperConfigForTest, RestoreAllEngineOptionDefaults, RestoreAllPropertyDefaults,
+            RestoreEngineOptionDefault, RestorePropertyDefault,
             SelectWallpaper,
             SetAudioResponseEnabled, SetBatteryQualityProfile,
             SetDisplayConfigEnabled, SetDisplayPosition,
@@ -56,7 +57,7 @@ use crate::{
             SetPresentationSuspended, SetPresentationUnloaded, SetPropertyPath,
             SetMetalFxUpscalingEnabled, SetRenderScale,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
-            SetSceneOnDemandEnabled, SetSceneOptimizationEnabled,
+            SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneQuality,
             SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
             SetTargetFps, SetVerboseLogging, SetVolume, SetWebAudioSubscribed,
             Shutdown,
@@ -68,7 +69,7 @@ use crate::{
         BridgeAppSnapshot, BridgeDisplayMutationBundle,
         BridgeError, BridgeLibrarySnapshot,
         BridgeLockScreenScene, BridgeNativeVideoWallpaper, BridgePlaybackState,
-        BridgePropertyEdit, FirstFrameDelivery, FirstFrameTarget,
+        BridgeEngineOptionEdit, BridgePropertyEdit, FirstFrameDelivery, FirstFrameTarget,
         BridgeRendererCountersReport, BridgeRendererSurfaceCounters, BridgeScalingMode,
         BridgeSnapshotBundle, BridgeWallpaperKind,
         BridgeWallpaperMutationBundle, BridgeWallpaperPreview, BridgeWebWallpaper, MousePollingControl,
@@ -536,6 +537,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         wallpaper_id: &str,
         show: bool,
         pending: Vec<BridgePropertyEdit>,
+        pending_engine_options: Vec<BridgeEngineOptionEdit>,
     ) -> Result<(), BridgeError> {
         let Some(documents) = self
             .state
@@ -543,12 +545,19 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         else {
             return Ok(());
         };
+        // Wallpaper Engine's per-wallpaper options follow the edit the same
+        // way; a pending value is checked before any scene is told anything.
+        let (shown_options, saved_options) = self
+            .state
+            .pending_engine_options(wallpaper_id, pending_engine_options)?;
         let shown = if show {
             documents.shown
         } else {
             documents.saved.clone()
         };
-        if shown == documents.saved && !self.previewed_properties.contains(wallpaper_id) {
+        let shown_options = if show { shown_options } else { saved_options.clone() };
+        let unchanged = shown == documents.saved && shown_options == saved_options;
+        if unchanged && !self.previewed_properties.contains(wallpaper_id) {
             return Ok(());
         }
         let handles = self.wallpaper_handles(wallpaper_id, true);
@@ -564,6 +573,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             .project_json(wallpaper_id)
             .to_string_lossy()
             .into_owned();
+        let scene_options = shown_options.to_scene();
         let mut drawn = false;
         for handle in handles {
             let outcome = self
@@ -572,14 +582,44 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
             drawn |= outcome == PropertyPreview::Shown;
+            let outcome = self
+                .engine
+                .preview_user_options(handle, scene_path.clone(), scene_options.clone())
+                .await
+                .map_err(|error| BridgeError::engine(error.to_string()))?;
+            drawn |= outcome == PropertyPreview::Shown;
         }
         // A scene the engine declined no longer draws this wallpaper, so there
         // is nothing on it to show or to put back; with none left, no scene
         // shows an edit of it.
-        if shown == documents.saved || !drawn {
+        if unchanged || !drawn {
             self.previewed_properties.remove(wallpaper_id);
         }
         Ok(())
+    }
+
+    /// Reads again what the per-wallpaper options of `wallpaper_id` depend on
+    /// outside its configuration: the image filters of the shared assets and,
+    /// for a scene, whether its file offers the mouse-parallax switch. Each is
+    /// read only when its file changed since the last read.
+    fn refresh_engine_option_inputs(&mut self, wallpaper_id: &str) {
+        let Ok(kind) = self.state.wallpaper_kind(wallpaper_id) else {
+            return;
+        };
+        if !matches!(kind, BridgeWallpaperKind::ProjectScene | BridgeWallpaperKind::Video) {
+            return;
+        }
+        self.state.lut_catalog = Some(crate::engine::lut_catalog::LutCatalog::refreshed(
+            self.state.lut_catalog.as_ref(),
+            &self.paths.assets_root(),
+        ));
+        if kind == BridgeWallpaperKind::ProjectScene {
+            let project = self.paths.project_json(wallpaper_id);
+            let engine = &self.engine;
+            self.state
+                .scene_traits
+                .refresh(wallpaper_id, &project, |path| engine.read_scene_traits(path));
+        }
     }
 
     fn wallpaper_handles(&self, wallpaper_id: &str, include_mirrors: bool) -> Vec<SceneHandle> {
@@ -1064,6 +1104,15 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     muted: desc.muted,
                     scaling_mode: BridgeScalingMode::from(desc.scaling_mode),
                     scaling_factor: desc.scaling_factor,
+                    lut_path: crate::engine::lut_catalog::lut_file(
+                        &self.paths.assets_root(),
+                        &desc.engine_options.image_filter,
+                    )
+                    .filter(|file| file.is_file())
+                    .and_then(|file| std::path::absolute(file).ok())
+                    .and_then(|file| file.into_os_string().into_string().ok()),
+                    engine_options: (&desc.engine_options).into(),
+                    border_color: desc.border_color.map(Into::into),
                 })
             })
             .collect()
@@ -1150,6 +1199,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
 
     fn wallpaper_preview(
         &self, wallpaper_id: &str, display_id: &str, pending: Vec<BridgePropertyEdit>,
+        pending_engine_options: Vec<BridgeEngineOptionEdit>,
     ) -> Result<BridgeWallpaperPreview, BridgeError> {
         use std::path::{Component, Path, PathBuf};
         let mut components = Path::new(wallpaper_id).components();
@@ -1163,7 +1213,12 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             return Err(BridgeError::invalid_input("this wallpaper type cannot be previewed"));
         }
         let edits = model.checked_edits(pending)?;
-        let draft = self.state.wallpaper_draft(wallpaper_id)?.with_edits(model, &edits);
+        let engine_edits = self.state.checked_engine_edits(wallpaper_id, pending_engine_options)?;
+        let draft = self
+            .state
+            .wallpaper_draft(wallpaper_id)?
+            .with_edits(model, &edits)
+            .with_engine_edits(&engine_edits);
         let config = draft.current();
         let render = config.monitors.iter().find(|render| render.selector.id() == display_id);
         let overrides = model.override_values(&config.property_overrides);
@@ -1194,6 +1249,13 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             scaling_mode: render.map(|render| render.parse_scaling_mode().into()).unwrap_or(BridgeScalingMode::Fill),
             scaling_factor: render.map_or(1.0, |render| render.scaling_factor),
             volume: config.audio.volume,
+            engine_options: (entry.kind != BridgeWallpaperKind::Webpage)
+                .then(|| (&config.engine_options).into()),
+            lut_path: crate::engine::lut_catalog::lut_file(&self.paths.assets_root(), &config.engine_options.image_filter)
+                .filter(|file| file.is_file())
+                .map(path)
+                .transpose()?,
+            scene_quality: self.state.app_config.quality.scene.to_scene().into(),
         })
     }
 
@@ -1241,6 +1303,11 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     })?
                     .title
                     .clone();
+                let is_video = self
+                    .state
+                    .project_models
+                    .get(&wallpaper_id)
+                    .is_some_and(|model| model.project_type == wallpaper_core::project::WallpaperProjectType::Video);
                 scene.media_integration_enabled = false;
                 for path in [&mut scene.scene_path, &mut scene.assets_path] {
                     if !std::path::Path::new(path.as_str()).is_absolute() {
@@ -1270,7 +1337,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     .transpose()?;
                 Ok(BridgeLockScreenScene {
                     display_id: scene.display.display_id,
-                    wallpaper_id,
+                    wallpaper_id: wallpaper_id.clone(),
                     title,
                     project_path: scene.scene_path,
                     assets_path: scene.assets_path,
@@ -1280,6 +1347,20 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     framing: scene.framing.into(),
                     properties_json,
                     paused: scene.paused,
+                    engine_options: self
+                        .state
+                        .wallpaper_configs
+                        .get(&wallpaper_id)
+                        .map(|config| (&config.engine_options).into()),
+                    scene_quality: (!is_video).then(|| scene.quality.into()),
+                    border_color: is_video
+                        .then(|| {
+                            self.state.wallpaper_configs.get(&wallpaper_id).and_then(|config| {
+                                inputs.scheme_color(&wallpaper_id, config)
+                            })
+                        })
+                        .flatten()
+                        .map(Into::into),
                 })
             })
             .collect::<Result<Vec<_>, BridgeError>>()?;
@@ -1332,6 +1413,9 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 framing: SceneFraming::default().into(),
                 properties_json: Some(properties_json),
                 paused: desc.paused,
+                engine_options: None,
+                scene_quality: None,
+                border_color: None,
             });
         }
         Ok(scenes)
@@ -1754,7 +1838,8 @@ impl<E: EngineFacade + Clone> Message<GetWallpaperPreview> for BridgeActor<E> {
     type Reply = Result<BridgeWallpaperPreview, BridgeError>;
 
     async fn handle(&mut self, msg: GetWallpaperPreview, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.wallpaper_preview(&msg.wallpaper_id, &msg.display_id, msg.pending)
+        self.refresh_engine_option_inputs(&msg.wallpaper_id);
+        self.wallpaper_preview(&msg.wallpaper_id, &msg.display_id, msg.pending, msg.pending_engine_options)
     }
 }
 
@@ -1766,6 +1851,7 @@ impl<E: EngineFacade + Clone> Message<GetWallpaperOptionsSnapshot> for BridgeAct
         msg: GetWallpaperOptionsSnapshot,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        self.refresh_engine_option_inputs(&msg.wallpaper_id);
         let displays = self.engine.display_snapshot();
         self.state.options(&displays, msg.wallpaper_id, &self.paths)
     }
@@ -1949,6 +2035,7 @@ impl<E: EngineFacade + Clone> Message<SelectWallpaper> for BridgeActor<E> {
         }
         self.state.app_config.general.last_selected_wallpaper = Some(msg.id.clone());
         self.state.selected_wallpaper_id = Some(msg.id.clone());
+        self.refresh_engine_option_inputs(&msg.id);
         self.invalidate_operations();
         self.snapshots_with_options(msg.id)
     }
@@ -2351,6 +2438,38 @@ impl<E: EngineFacade + Clone> Message<SetSceneResolution> for BridgeActor<E> {
             .set_scene_resolution(scene_resolution(msg.resolution))
             .map_err(|error| BridgeError::engine(error.to_string()))?;
         self.apply_effective_render_scale().await?;
+        self.invalidate_operations();
+        Ok(self.all_snapshots())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetSceneQuality> for BridgeActor<E> {
+    type Reply = messages::SetSceneQualityReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetSceneQuality,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if self.state.app_config.quality.scene == msg.quality {
+            return Ok(self.all_snapshots());
+        }
+        self.state.app_config.quality.scene = msg.quality;
+        if let Some(store) = &self.config_store {
+            store.save_app_config(&self.state.app_config)?;
+        }
+        // Shadows, volumetrics, reflection and post-processing change how a
+        // scene is parsed, so each running scene loads once more: the new
+        // quality makes its description differ. Videos and web pages carry no
+        // scene quality and are left as they are.
+        let app_config = self.state.app_config.clone();
+        let wallpaper_configs = self.state.wallpaper_configs.clone();
+        let result = self
+            .reconcile_snapshot_operation(app_config, wallpaper_configs, false)
+            .await;
+        self.refresh_mouse_polling_policy();
+        let scenes = result?;
+        self.state.set_active_ids_from_scenes(&scenes);
         self.invalidate_operations();
         Ok(self.all_snapshots())
     }
@@ -3446,7 +3565,7 @@ impl<E: EngineFacade + Clone> Message<PreviewWallpaperProperties> for BridgeActo
         msg: PreviewWallpaperProperties,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.show_wallpaper_properties(&msg.wallpaper_id, msg.show, msg.pending)
+        self.show_wallpaper_properties(&msg.wallpaper_id, msg.show, msg.pending, msg.pending_engine_options)
             .await
     }
 }
@@ -3550,6 +3669,77 @@ impl<E: EngineFacade + Clone> Message<RestoreAllPropertyDefaults> for BridgeActo
         self.state
             .wallpaper_draft_mut(&msg.wallpaper_id)?
             .restore_all_property_defaults(&keep);
+        self.invalidate_operations();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<EditEngineOption> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    async fn handle(
+        &mut self,
+        msg: EditEngineOption,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.refresh_engine_option_inputs(&msg.wallpaper_id);
+        let edits = self.state.checked_engine_edits(
+            &msg.wallpaper_id,
+            vec![BridgeEngineOptionEdit { option: msg.option, value: msg.value }],
+        )?;
+        let draft = self.state.wallpaper_draft_mut(&msg.wallpaper_id)?;
+        for (option, value) in &edits {
+            draft.edit_engine_option(*option, value);
+        }
+        self.invalidate_operations();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<RestoreEngineOptionDefault> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    async fn handle(
+        &mut self,
+        msg: RestoreEngineOptionDefault,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.refresh_engine_option_inputs(&msg.wallpaper_id);
+        let kind = self.state.wallpaper_kind(&msg.wallpaper_id)?;
+        let option = crate::config::EngineOptionId::from(msg.option);
+        if !super::engine_options::offered(kind, self.state.scene_traits.get(&msg.wallpaper_id))
+            .contains(&option)
+        {
+            return Err(BridgeError::invalid_input(format!(
+                "{:?} is not a Wallpaper Engine option of this wallpaper",
+                msg.option
+            )));
+        }
+        self.state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .restore_engine_option_default(option);
+        self.invalidate_operations();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<RestoreAllEngineOptionDefaults> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    async fn handle(
+        &mut self,
+        msg: RestoreAllEngineOptionDefaults,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let kind = self.state.wallpaper_kind(&msg.wallpaper_id)?;
+        if !matches!(kind, BridgeWallpaperKind::ProjectScene | BridgeWallpaperKind::Video) {
+            return Err(BridgeError::invalid_input(
+                "only scene and video wallpapers have Wallpaper Engine options",
+            ));
+        }
+        self.state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .restore_all_engine_option_defaults();
         self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)
     }

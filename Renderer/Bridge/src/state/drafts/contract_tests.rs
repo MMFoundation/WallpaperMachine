@@ -2131,3 +2131,61 @@ fn retained_documents_include_required_host_defaults_and_explicit_values_take_pr
     assert_eq!(draft.property_documents(&model), initial);
     status(&draft, &[], false, false);
 }
+
+#[test]
+fn engine_option_edits_are_pending_until_apply_need_a_reconcile_and_revert_undoes_them() {
+    use crate::config::{EngineOptionId, EngineOptionsCfg};
+    let mut draft = WallpaperOptionsDraft::from_committed(WallpaperConfig::new_for("w", "scene"));
+    assert!(!draft.requires_reconcile(&[]));
+
+    draft.edit_engine_option(EngineOptionId::FlipHorizontal, &PropertyValue::Bool(true));
+    draft.edit_engine_option(EngineOptionId::Brightness, &PropertyValue::Number(70.0));
+    assert!(draft.current().engine_options.flip_horizontal);
+    assert!(!draft.committed().engine_options.flip_horizontal, "an edit waits for Apply");
+    assert!(draft.is_dirty(&[]));
+    assert!(draft.requires_reconcile(&[]), "Apply has to reach the renderers");
+
+    draft.restore_engine_option_default(EngineOptionId::Brightness);
+    assert_eq!(draft.current().engine_options.brightness, 50.0);
+    assert!(draft.current().engine_options.flip_horizontal);
+
+    draft.edit_engine_option(EngineOptionId::PlaybackRate, &PropertyValue::Number(150.0));
+    draft.restore_all_engine_option_defaults();
+    assert_eq!(draft.current().engine_options, EngineOptionsCfg::default());
+    assert!(!draft.requires_reconcile(&[]));
+
+    draft.edit_engine_option(EngineOptionId::ImageFilter, &PropertyValue::String("amber".into()));
+    let saved = draft.apply();
+    assert_eq!(saved.engine_options.image_filter, "amber");
+    assert!(!draft.requires_reconcile(&[]));
+
+    draft.edit_engine_option(EngineOptionId::ImageFilter, &PropertyValue::String(String::new()));
+    draft.cancel();
+    assert_eq!(draft.current().engine_options.image_filter, "amber");
+}
+
+#[test]
+fn engine_option_values_being_shown_leave_the_draft_alone() {
+    use crate::config::EngineOptionId;
+    let draft = WallpaperOptionsDraft::from_committed(WallpaperConfig::new_for("w", "scene"));
+    let shown = draft.with_engine_edits(&[
+        (EngineOptionId::ColorEnabled, PropertyValue::Bool(true)),
+        (EngineOptionId::Saturation, PropertyValue::Number(20.0)),
+        (EngineOptionId::Saturation, PropertyValue::Number(30.0)),
+    ]);
+    assert!(shown.current().engine_options.color_enabled);
+    assert_eq!(shown.current().engine_options.saturation, 30.0);
+    assert!(!draft.current().engine_options.color_enabled);
+    assert!(!draft.is_dirty(&[]));
+}
+
+#[test]
+fn restoring_every_engine_option_leaves_the_properties_alone() {
+    use crate::config::EngineOptionId;
+    let mut committed = WallpaperConfig::new_for("w", "scene");
+    committed.property_overrides.insert("glow".into(), json!(true));
+    let mut draft = WallpaperOptionsDraft::from_committed(committed);
+    draft.edit_engine_option(EngineOptionId::HueShift, &PropertyValue::Number(10.0));
+    draft.restore_all_engine_option_defaults();
+    assert_eq!(draft.current().property_overrides.get("glow"), Some(&json!(true)));
+}

@@ -301,9 +301,11 @@ canvas, drawn with an orthographic camera.
   Wallpaper Engine does. The 1920×1080 canvas of a scene on a 3456×2234 panel is drawn
   into a 3972×2234 image (Fill crops the part that overhangs the panel, but it is
   rasterized) instead of 1920×1080 stretched to that size at the last step, so edges
-  and grain keep the panel's own pixels. Text layers are still laid out and
-  rasterized at the canvas's size, so text gains no detail from it. At the Low and Medium presets the render
-  scale then applies to that size (50% is half of it in each direction).
+  and grain keep the panel's own pixels. Text layout and atlas sizes stay in canvas
+  units, while glyph shaders draw at the target resolution. Coverage atlases gain
+  no source detail; MSDF edges are evaluated at that resolution. At the Low and
+  Medium presets the render scale then applies to that size (50% is half of it in
+  each direction).
 - **Canvas size** rasterizes at the size the author made the canvas, as the app did
   before this setting existed, and stretches the picture to the display when it is
   presented. It costs the least GPU time and memory and is the softest on a display
@@ -355,6 +357,65 @@ CPU time per frame did not move, and the energy effect has not been measured: th
 whole-GPU energy figures of the probe are not usable on a machine that is also doing
 other work. Peak footprint carries about ±30 MB of run-to-run noise. The Canvas figures
 are what the app drew before the setting; choose **Canvas size** to keep them.
+
+### Scene quality
+
+Five rows under **Quality** are Wallpaper Engine's own scene settings, with its words in
+`config.toml` under `[quality.scene]`:
+
+| Row | Key | Choices (saved words) | Default |
+| --- | --- | --- | --- |
+| **Antialiasing (MSAA)** | `msaa` | Off, 2×, 4×, 8× (`none`, `x2`, `x4`, `x8`) | Off |
+| **Shadows** | `shadows` | Off, Low, Medium, High, Ultra (`disabled` … `ultra`) | Medium |
+| **Volumetrics** | `volumetrics` | as Shadows | Medium |
+| **Reflections** | `reflection` | on or off | on |
+| **Post-processing** | `post_processing` | Disabled, Enabled, Ultra, Display HDR (`disabled`, `enabled`, `ultra`, `displayhdr`) | Enabled |
+
+The defaults are Wallpaper Engine's first-run **Medium** preset (its welcome dialog
+selects Medium; its preset table writes msaa `none`, post-processing `enabled`, shadows
+and volumetrics `medium`, reflection on). A word this build does not know reads the way
+Wallpaper Engine reads it (`wallpaper64.exe` `sub_14010DF40`): MSAA none, lighting
+medium, post-processing enabled; the file still loads and the word is logged.
+
+- **Post-processing.** Disabled draws no bloom. Enabled draws LDR bloom only. HDR bloom
+  (a scene with `bloom` and `hdr`) needs Ultra or Display HDR; Display HDR also asks for
+  HDR output: an EDR-capable display gets an extended-range surface (see
+  [scene rendering](scene-rendering.md)), any other display stays SDR. Before this
+  setting HDR scenes always drew HDR bloom; at the default they now draw LDR bloom, as
+  Wallpaper Engine does at Medium.
+- **Reflections.** Off stops refreshing the frame copy reflective materials read
+  (`_rt_MipMappedFrameBuffer`); it keeps its first, cleared contents. A model whose
+  active material samples `_rt_Reflection` also gets a planar reflection: the scene
+  drawn once more through the camera mirrored across `y = 0` into a raster-sized RGB
+  picture (about 32 MiB at 3840 × 2160, 64 MiB with the depth it needs while
+  Reflections is on) and one extra render pass per changed frame. Off keeps that
+  picture cleared and draws no reflected pass; a scene without such a material
+  allocates nothing for it.
+- **Shadows.** Point, spot and directional lights cast model shadows. Low and Medium
+  use 256-pixel tiles, High 512, and Ultra 1024. Off, a scene without a visible shadow
+  light, or a scene without a visible model caster allocates no shadow atlas and draws
+  no shadow pass. **Quality in force** reports the requested level while shadows are
+  drawn, and follows live visibility and `castshadow` changes back to Off.
+- **Volumetrics.** Point and spot lights that cast volumes draw light shafts, including
+  spot cookies and model shadows. Low and Medium use one-eighth-size accumulation
+  with two blur passes; High and Ultra use one-quarter-size accumulation without
+  blur. Off or no active casting light adds no volume targets or passes. **Quality
+  in force** follows activation and removal. Enabled volumes add bounded targets and
+  two geometry draws per light; a static volume does not demand continuous frames.
+  When the scene writes multisampled depth, volumes additionally need one resolved
+  full-resolution 32-bit depth image (about 31.6 MiB at 3840×2160, before allocator
+  alignment). The existing scene encoder resolves it without a separate copy pass.
+- **Antialiasing** is saved and sent to the renderer; **Quality in force** reports
+  the sample count negotiated for the scene's model target.
+
+A change reloads each running scene wallpaper once (these settings change how a scene is
+built), and its shaders compile again: the shader cache is keyed by the quality. Videos
+and web wallpapers are untouched. Reduced quality (battery, Low Power Mode, heat, low
+battery) never changes these settings; Reset all settings returns them to the defaults.
+**Quality in force** under Advanced › Scene wallpapers › Live diagnostics lists, per
+running scene, what the renderer actually applies, and exported diagnostics append
+`quality msaa=… shadows=… volumetrics=… reflection=… post=…` to each running scene line.
+The lock screen and screen saver use the saved quality.
 
 ### Default per-display frame rate
 
@@ -733,6 +794,29 @@ display is reported as failed with the reason (below) and keeps the picture it h
 and screen saver do the same: a clip their own players cannot play is held on its last frame with the
 reason as a note ([lock screen](lock-screen.md#plain-video-wallpapers)).
 
+**Wallpaper Engine options on a video.** The inspector's **Wallpaper Engine options** reach both
+players, the desktop, the preview and the lock screen (which shows the saved values). The
+**Playback rate** is the player's rate (`rate` / 100, `wallpaper64.exe` `sub_1400FFCB0`;
+`AVPlayer.defaultRate`, the WebM player's synchronizer rate). **Flip horizontally** mirrors the
+picture's layer about its centre and the poster with it. The colour adjustments and the image
+filter run Wallpaper Engine's `ccsimple` formulas in Core Image (`Shared/VideoColorPipeline.swift`,
+the `wallpaperEngineColor` kernel in `Shared/WallpaperEngineColor.ci.metal`; the `.tex` LUT is
+decoded once per file by the renderer). They cost nothing at the identity: no composition is
+attached and the WebM layer is fed the compressed samples. Otherwise AVFoundation runs a
+per-frame `AVVideoComposition`, and the WebM player decodes each sample itself
+(`VTDecompressionSession`) and filters it before handing it to its layer — a CPU/GPU cost per
+frame for as long as the options are not the identity. The colour kernel unpremultiplies before
+adjusting RGB and premultiplies afterward; LUT sampling and strength mixing operate on the
+explicitly encoded RGB values without a second colour-space conversion. Moving a slider changes the next frame;
+switching the colour options or the filter on or off reopens the item at its current time, which
+does not count against the repair allowance. In Fit and Original size the room around the
+picture takes the project's `schemecolor` property (Wallpaper Engine's border colour), black when
+the project has none; Fill and Stretch stay black. Desktop posters and lock-screen snapshots keep
+those same borders. A preview at the identity has no video composition, and edits received while
+an item is being prepared are reconciled before it starts. Filtered WebM samples use the decoder's
+presentation timestamps; invisible reference frames update the decoder without being displayed.
+Decode or filter failures are reported through the player's recovery path instead of passing an
+unfiltered packet to the display.
 A mirror display plays its source's clip with a player of its own, and each mirror group is
 heard from one member (`MirrorAudioOwnership`, the rule [web pages](web-wallpapers.md) follow):
 the source while it is in sight and not paused or muted, otherwise the lowest-numbered mirror that

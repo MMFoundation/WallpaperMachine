@@ -32,7 +32,8 @@ final class SceneDrawVerdictsTests: XCTestCase {
   {
     BridgeSceneBackendReport(
       displayId: 1, displayName: "Main", wallpaperId: id, wallpaperTitle: id, backend: backend,
-      failureStage: stage, failureReason: reason, videoPath: "none", optimizationApplied: nil)
+      failureStage: stage, failureReason: reason, videoPath: "none", optimizationApplied: nil,
+      qualityInForce: nil)
   }
 
   func testADrawnSceneIsRememberedAcrossLaunchesForTheSameBuildAndFiles() async throws {

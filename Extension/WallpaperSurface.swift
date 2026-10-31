@@ -146,6 +146,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     }
     try check(owe_scene_wallpaper_new(&renderer))
     try check(owe_scene_wallpaper_init(renderer))
+    // Lock-screen output stays SDR; the saved HDR processing quality is preserved.
+    try check(owe_scene_wallpaper_set_display_hdr_output_allowed(renderer, false))
     try check(
       owe_scene_wallpaper_init_metal(
         renderer, Unmanaged.passUnretained(metal).toOpaque(), UInt32(metal.drawableSize.width),
@@ -154,6 +156,18 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     try check(
       owe_scene_wallpaper_set_property_bool(
         renderer, owe_property_audio_response_enabled(), false))
+    // The scripts' localStorage as published with this revision, read-only (plan decision I3).
+    if let path = scene.sceneStoragePath, let key = scene.sceneStorageScreenKey {
+      let storage = try WallpaperRuntime.asset(path)
+      try check(owe_scene_wallpaper_set_storage(renderer, storage.path, key, true))
+    }
+    // The saved scene quality and Wallpaper Engine options, in force for the first frame.
+    if let quality = scene.sceneQuality, let renderer {
+      try check(SceneEngineOptionsBinding.apply(quality, to: renderer))
+    }
+    if let options = scene.engineOptions, let renderer {
+      try check(SceneEngineOptionsBinding.apply(options, to: renderer))
+    }
     try check(
       owe_scene_wallpaper_apply_config(
         renderer, project.path, assets.path, cache.path, scene.fps, false, 1, true, false,
@@ -364,15 +378,18 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     let mode = NativeVideoScalingMode(rendererValue: scene.scalingMode) ?? .fill
     let pan = NativeVideoLayout.Pan(x: framing.panX, y: framing.panY)
     let player: LockScreenVideoPlaying
+    let options = scene.engineOptions ?? .identity
+    let lut = scene.lutFile.flatMap { try? WallpaperRuntime.asset($0) }.flatMap(VideoLutLoader.load)
+    let border = scene.borderCGColor
     switch path {
     case .avFoundation(let url):
       player = LockScreenVideoPlayer(
         url: url, mode: mode, factor: scene.scalingFactor, pan: pan, viewport: size,
-        backingScale: self.scale)
+        backingScale: self.scale, options: options, lut: lut, borderColor: border)
     case .webM(_, let file):
       player = LockScreenWebMPlayer(
         file: file, mode: mode, factor: scene.scalingFactor, pan: pan, viewport: size,
-        backingScale: self.scale)
+        backingScale: self.scale, options: options, lut: lut, borderColor: border)
     case .unplayable(let reason):
       return .unplayable(reason: reason)
     }

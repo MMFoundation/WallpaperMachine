@@ -36,6 +36,14 @@ struct InspectorOptions: Equatable {
   /// listed. Group and description rows can still have no words: the inspector's label renderer
   /// decides that and leaves them out.
   let properties: [PropertyRow]
+  /// Wallpaper Engine's per-wallpaper options (colour adjustments, image filter, flip, mouse
+  /// parallax, playback rate), the enabled ones in Wallpaper Engine's order; nil for a wallpaper
+  /// that has none (a web page).
+  var engineOptions: [EngineOptionRow]? = nil
+  /// A modified option whose row is not listed because its switch is off (a colour slider with
+  /// the colour adjustments off, the filter strength with no filter): its value is saved, so
+  /// Restore all defaults has to know of it.
+  var engineHiddenModified = false
 
   /// Whether Apply changes and Revert have anything to act on.
   var hasChanges: Bool { isDirty || hasUnsentChanges }
@@ -48,6 +56,13 @@ struct InspectorOptions: Equatable {
     guard !isLocked, isSupported else { return false }
     return hasUnsentChanges || hiddenModified
       || properties.contains { $0.isDirty && !$0.control.isChosenPath }
+  }
+
+  /// The Wallpaper Engine options' own Restore all defaults: a modified option, listed or not, or a
+  /// value on its way.
+  var canRestoreAllEngineOptions: Bool {
+    guard !isLocked, isSupported, let engineOptions else { return false }
+    return hasUnsentChanges || engineHiddenModified || engineOptions.contains { $0.row.isModified }
   }
 
   /// Scene and video wallpapers can be moved on a display; a still image page is a web wallpaper and
@@ -311,6 +326,8 @@ extension InspectorOptions {
     var textDrafts: [String: String] = [:]
     /// Values just chosen that the bridge has not taken yet, by property id.
     var pendingValues: [String: BridgePropertyValue] = [:]
+    /// Wallpaper Engine option values just chosen that the bridge has not taken yet.
+    var pendingEngineValues: [BridgeEngineOptionId: BridgePropertyValue] = [:]
     var delivery: WebWallpaperHost.DeliveryStatus?
     var sceneMedia: SystemMediaAvailability?
     /// Physical display ids macOS's native video player draws this wallpaper on.
@@ -329,7 +346,8 @@ extension InspectorOptions {
     let id = value.wallpaperId
     return InspectorOptions(
       wallpaperID: id, kind: value.kind, isSupported: value.supported, isDirty: value.dirty,
-      hasUnsentChanges: !inputs.textDrafts.isEmpty || !inputs.pendingValues.isEmpty,
+      hasUnsentChanges: !inputs.textDrafts.isEmpty || !inputs.pendingValues.isEmpty
+        || !inputs.pendingEngineValues.isEmpty,
       isLocked: inputs.isLocked, volume: Double(value.volume), isMuted: value.muted,
       audioResponseEnabled: value.audioResponseEnabled,
       mediaIntegrationEnabled: value.mediaIntegrationEnabled,
@@ -341,7 +359,11 @@ extension InspectorOptions {
       displays: value.displayConfigurations.map { displayRow($0, inputs: inputs) },
       properties: value.properties.filter(\.enabled).map {
         propertyRow($0, wallpaperID: id, inputs: inputs)
-      })
+      },
+      engineOptions: value.engineOptions.map { options in
+        options.rows.filter(\.enabled).map { engineRow($0, filters: options.imageFilters, inputs: inputs) }
+      },
+      engineHiddenModified: value.engineOptions?.rows.contains { !$0.enabled && $0.modified } ?? false)
   }
 
   private static func displayRow(_ row: BridgeDisplayConfigRow, inputs: Inputs) -> DisplayRow {
@@ -439,5 +461,89 @@ extension InspectorOptions {
 
   private static func string(_ value: BridgePropertyValue) -> String {
     if case .string(let text) = value { text } else { "" }
+  }
+}
+
+// MARK: - Wallpaper Engine options
+
+extension InspectorOptions {
+  /// One of Wallpaper Engine's per-wallpaper options, drawn as a property row (`PropertyRowView`
+  /// with the `.engineOption` scope). Its words are the app's own.
+  struct EngineOptionRow: Equatable, Identifiable {
+    let option: BridgeEngineOptionId
+    let row: PropertyRow
+
+    var id: String { row.id }
+  }
+
+  /// The words of an image filter's file name, which is the only name a filter has: a leading
+  /// `lutx<digits>_` is dropped, underscores become spaces and the first letter is capitalised.
+  /// The name is never translated.
+  static func imageFilterLabel(_ name: String) -> String {
+    var words = Substring(name)
+    let lower = name.lowercased()
+    if lower.hasPrefix("lutx"), let underscore = name.firstIndex(of: "_") {
+      let digits = name[name.index(name.startIndex, offsetBy: 4)..<underscore]
+      if !digits.isEmpty, digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber) {
+        words = name[name.index(after: underscore)...]
+      }
+    }
+    let spaced = words.replacingOccurrences(of: "_", with: " ")
+    guard let first = spaced.first else { return name }
+    return first.uppercased() + spaced.dropFirst()
+  }
+
+  /// The app's name for an option, in the panel's language.
+  @MainActor
+  static func engineOptionTitle(_ option: BridgeEngineOptionId, locale: PanelLocale) -> String {
+    switch option {
+    case .colorEnabled: locale.string("Color adjustments")
+    case .brightness: locale.string("Brightness")
+    case .contrast: locale.string("Contrast")
+    case .saturation: locale.string("Saturation")
+    case .hueShift: locale.string("Hue shift")
+    case .imageFilter: locale.string("Image filter")
+    case .filterStrength: locale.string("Filter strength")
+    case .flipHorizontal: locale.string("Flip horizontally")
+    case .mouseParallax: locale.string("Mouse parallax")
+    case .playbackRate: locale.string("Playback rate")
+    }
+  }
+
+  @MainActor
+  private static func engineRow(
+    _ option: BridgeEngineOptionRow, filters: [String], inputs: Inputs
+  ) -> EngineOptionRow {
+    let locale = inputs.locale ?? .shared
+    let name = engineOptionTitle(option.id, locale: locale)
+    let pending = inputs.pendingEngineValues[option.id]
+    let shown = pending ?? option.value
+    let control: PropertyRow.Control
+    switch option.id {
+    case .colorEnabled, .flipHorizontal, .mouseParallax:
+      if case .bool(let isOn) = shown { control = .toggle(isOn: isOn) } else { control = .toggle(isOn: false) }
+    case .imageFilter:
+      var choices = [PropertyRow.Choice(id: 0, label: locale.string("No filter"), value: .string(value: ""))]
+      for (index, filter) in filters.enumerated() {
+        choices.append(.init(id: index + 1, label: imageFilterLabel(filter), value: .string(value: filter)))
+      }
+      control = .choice(selection: choices.first { $0.value == shown }?.value, choices: choices)
+    case .brightness, .contrast, .saturation, .hueShift, .filterStrength, .playbackRate:
+      let minimum = option.slider?.min ?? 0
+      let number: Double
+      if case .number(let value) = shown { number = value } else { number = minimum }
+      control = .slider(
+        PropertyRow.Slider(
+          value: number, minimum: minimum, maximum: option.slider?.max ?? 100,
+          step: option.slider.map { $0.step > 0 ? $0.step : 1 } ?? 1,
+          precision: Int(option.slider?.precision ?? 0)))
+    }
+    return EngineOptionRow(
+      option: option.id,
+      row: PropertyRow(
+        id: "engine.\(option.id)", control: control, name: name,
+        label: PropertyLabels.Presentation(text: name, markup: nil, images: [:]),
+        isModified: option.modified || pending != nil, isDirty: option.modified,
+        canRestoreDefault: true))
   }
 }

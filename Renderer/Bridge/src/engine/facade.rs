@@ -140,6 +140,26 @@ pub trait EngineFacade: Send + Sync + 'static {
         scene_path: String,
         flat_json: String,
     ) -> EngineFuture<PropertyPreview>;
+    /// Shows Wallpaper Engine's per-wallpaper options on a scene while an edit
+    /// is under way, like [`Self::preview_property_override`]: the renderer
+    /// follows, the engine's stored state does not, a scene that draws another
+    /// wallpaper than `scene_path` is answered
+    /// [`PropertyPreview::OtherWallpaper`] and options a scene already shows
+    /// are not sent again.
+    fn preview_user_options(
+        &self,
+        handle: SceneHandle,
+        scene_path: String,
+        options: wallpaper_core::project::SceneUserOptions,
+    ) -> EngineFuture<PropertyPreview>;
+    /// Reads what scene `project_json` says about the per-wallpaper options
+    /// Wallpaper Engine offers for it, without loading it. Required, with no
+    /// default: a facade that answered "nothing offered" by default would hide
+    /// the mouse-parallax switch without anyone noticing.
+    fn read_scene_traits(
+        &self,
+        project_json: &std::path::Path,
+    ) -> Result<wallpaper_core::SceneTraits, EngineError>;
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()>;
     /// Live-updates one scene's internal rasterization scale. Resizes render
     /// targets in place; it must not reparse the project or reopen video.
@@ -763,6 +783,23 @@ impl EngineFacade for RealEngineFacade {
         .boxed()
     }
 
+    fn preview_user_options(
+        &self,
+        handle: SceneHandle,
+        scene_path: String,
+        options: wallpaper_core::project::SceneUserOptions,
+    ) -> EngineFuture<PropertyPreview> {
+        let engine = self.engine.clone();
+        async move { engine.preview_user_options(handle, scene_path, options).await }.boxed()
+    }
+
+    fn read_scene_traits(
+        &self,
+        project_json: &std::path::Path,
+    ) -> Result<wallpaper_core::SceneTraits, EngineError> {
+        wallpaper_core::read_scene_traits(project_json)
+    }
+
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()> {
         let engine = self.engine.clone();
         async move { engine.set_fps(handle, fps).await }.boxed()
@@ -1226,6 +1263,14 @@ pub struct FakeEngineFacade {
     /// display, like the real renderer's own record: gone when a reconcile opens
     /// the display's scene afresh or loads it again.
     shown_property_documents: Arc<std::sync::Mutex<std::collections::HashMap<u32, String>>>,
+    /// Per-wallpaper options the fake renderers were told to show while an
+    /// edit is under way. Unlike property documents the fake sends them every
+    /// time; the real engine skips options a scene already shows.
+    preview_user_options_calls: Observation<(SceneHandle, wallpaper_core::project::SceneUserOptions)>,
+    /// What `read_scene_traits` answers, by project file; not offered for one
+    /// not listed.
+    scene_traits: Reading<std::collections::BTreeMap<std::path::PathBuf, wallpaper_core::SceneTraits>>,
+    scene_traits_reads: Observation<std::path::PathBuf>,
     fps_calls: Observation<(SceneHandle, u32)>,
     render_scale_calls: Observation<(SceneHandle, f32)>,
     scene_optimization_calls: Observation<bool>,
@@ -1429,6 +1474,9 @@ impl Default for FakeEngineFacade {
             preview_property_calls: Observation::new(),
             declined_property_previews: Observation::new(),
             shown_property_documents: Default::default(),
+            preview_user_options_calls: Observation::new(),
+            scene_traits: Reading::new(Default::default()),
+            scene_traits_reads: Observation::new(),
             fps_calls: Observation::new(),
             render_scale_calls: Observation::new(),
             scene_optimization_calls: Observation::new(),
@@ -1945,6 +1993,27 @@ impl FakeEngineFacade {
     #[must_use]
     pub fn declined_property_previews(&self) -> Vec<(SceneHandle, String)> {
         self.declined_property_previews.snapshot()
+    }
+
+    /// Every set of per-wallpaper options the fake renderers were shown while
+    /// an edit was under way, in order.
+    #[must_use]
+    pub fn preview_user_options_calls(&self) -> Vec<(SceneHandle, wallpaper_core::project::SceneUserOptions)> {
+        self.preview_user_options_calls.snapshot()
+    }
+
+    /// Makes `read_scene_traits` answer `traits` for the project file
+    /// `project_json`.
+    pub fn set_scene_traits(&self, project_json: std::path::PathBuf, traits: wallpaper_core::SceneTraits) {
+        let mut all = self.scene_traits.read();
+        all.insert(project_json, traits);
+        self.scene_traits.set(all);
+    }
+
+    /// Every project file `read_scene_traits` was asked about, in order.
+    #[must_use]
+    pub fn scene_traits_reads(&self) -> Vec<std::path::PathBuf> {
+        self.scene_traits_reads.snapshot()
     }
 
     #[must_use]
@@ -2467,6 +2536,35 @@ impl EngineFacade for FakeEngineFacade {
             Ok(PropertyPreview::Shown)
         }
         .boxed()
+    }
+
+    fn preview_user_options(
+        &self,
+        handle: SceneHandle,
+        scene_path: String,
+        options: wallpaper_core::project::SceneUserOptions,
+    ) -> EngineFuture<PropertyPreview> {
+        let fake = self.clone();
+        async move {
+            options.validate()?;
+            let drawn = fake.scene_behind(handle).ok_or_else(|| {
+                EngineError::InvalidInput(format!("unknown scene handle {}", handle.raw()))
+            })?;
+            if drawn.scene_path != scene_path {
+                return Ok(PropertyPreview::OtherWallpaper);
+            }
+            fake.preview_user_options_calls.record((handle, options));
+            Ok(PropertyPreview::Shown)
+        }
+        .boxed()
+    }
+
+    fn read_scene_traits(
+        &self,
+        project_json: &std::path::Path,
+    ) -> Result<wallpaper_core::SceneTraits, EngineError> {
+        self.scene_traits_reads.record(project_json.to_path_buf());
+        Ok(self.scene_traits.read().get(project_json).copied().unwrap_or_default())
     }
 
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()> {

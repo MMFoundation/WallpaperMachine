@@ -89,6 +89,15 @@ final class NativeVideoPlayer {
     private var presentationSize: CGSize?
     /// Follows the playing item's `presentationSize`, re-pointed with it.
     private var sizeObservation: NSKeyValueObservation?
+    /// Wallpaper Engine's colour adjustments and image filter, read per frame by the item's
+    /// composition; attached only while they change the picture.
+    private let colorPipeline = VideoColorPipeline()
+    private let configureComposition: @MainActor (VideoColorPipeline, AVPlayerItem) async throws -> Void
+    private var flipHorizontal = false
+    private var playbackRate: Float = 1
+    /// The project's `schemecolor`, shown around the picture in Fit-style modes (I2).
+    private var borderColor: CGColor?
+    private weak var container: NSView?
     /// Reported when the clip keeps playing without its audio, with the
     /// failure that caused it, so the host can log it against its load.
     var onAudioDropped: (@MainActor (String) -> Void)?
@@ -124,7 +133,10 @@ final class NativeVideoPlayer {
         recovery: NativeVideoRecoveryBudget.Policy = .init(),
         health: NativeVideoHealthSupervisor.Policy = .init(),
         now: @escaping @MainActor () -> ContinuousClock.Instant = { .now },
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        configureComposition: @escaping @MainActor (VideoColorPipeline, AVPlayerItem) async throws -> Void = {
+            try await $0.configure($1)
+        }
     ) {
         self.surface = surface
         self.counters = counters
@@ -132,6 +144,7 @@ final class NativeVideoPlayer {
         self.recovery = NativeVideoRecoveryBudget(policy: recovery)
         self.now = now
         self.healthPolicy = health
+        self.configureComposition = configureComposition
         self.supervisor = NativeVideoHealthSupervisor(policy: health, sleep: sleep)
         player.actionAtItemEnd = .advance
         // Nothing here needs the system's "now playing" treatment, and taking
@@ -150,6 +163,7 @@ final class NativeVideoPlayer {
         // window or the desktop around it.
         view.layer?.masksToBounds = true
         view.layer?.addSublayer(layer)
+        container = view
         relayout(bounds: view.bounds, backingScale: view.window?.backingScaleFactor ?? 1)
     }
 
@@ -177,20 +191,107 @@ final class NativeVideoPlayer {
         switch placement {
         case .gravity(let gravity):
             layer.videoGravity = gravity
-            layer.frame = viewportBounds
+            setLayerRect(viewportBounds)
         case .frame(let rect):
             // The rectangle already has the picture's own aspect; anything but
             // a plain stretch would re-apply an aspect rule to it.
             layer.videoGravity = .resize
             // The layout measures from the top edge and the container's layer
             // grows upward, so the rectangle is flipped into it.
-            layer.frame = NativeVideoLayout.layerFrame(
+            setLayerRect(NativeVideoLayout.layerFrame(
                 rect, viewportHeight: viewportBounds.height
-            ).offsetBy(dx: viewportBounds.minX, dy: viewportBounds.minY)
+            ).offsetBy(dx: viewportBounds.minX, dy: viewportBounds.minY))
         case .pending:
             break
         }
+        // Wallpaper Engine draws a Fit-style video over its scheme colour; Fill and Stretch
+        // cover the display and stay black (`sub_1400FFCB0`).
+        let border = Self.borderShows(for: scalingMode) ? borderColor : nil
+        let background = border ?? CGColor(gray: 0, alpha: 1)
+        layer.backgroundColor = background
+        container?.layer?.backgroundColor = background
     }
+
+    /// Whether `mode` leaves room around the picture that the border colour fills.
+    nonisolated static func borderShows(for mode: BridgeScalingMode) -> Bool {
+        mode != .fill && mode != .stretch
+    }
+
+    /// Places the layer by bounds and position rather than `frame`, which is undefined once
+    /// the layer carries a transform, and mirrors it about its centre for Flip horizontally.
+    private func setLayerRect(_ rect: CGRect) {
+        layer.setAffineTransform(.identity)
+        layer.bounds = CGRect(origin: .zero, size: rect.size)
+        layer.position = CGPoint(x: rect.midX, y: rect.midY)
+        layer.setAffineTransform(flipHorizontal ? CGAffineTransform(scaleX: -1, y: 1) : .identity)
+    }
+
+    /// Wallpaper Engine's per-wallpaper options for this clip: the playback rate, the
+    /// horizontal flip, the colour adjustments and the image filter (`lut`, already decoded).
+    /// Values change in place; only switching the colour pipeline on or off rebuilds the item,
+    /// keeping its time and without spending a recovery rebuild.
+    func setEngineOptions(_ options: WallpaperEngineOptions, lut: VideoLut?, borderColor: CGColor?) {
+        let rate = Float(max(10, min(options.playbackRate, 200)) / 100)
+        if rate != playbackRate {
+            playbackRate = rate
+            player.defaultRate = rate
+            if player.rate > 0 { player.rate = rate }
+        }
+        let parameters = VideoColorPipeline.Parameters(options: options, lut: lut)
+        let wasFiltered = VideoColorPipeline.needsComposition(colorPipeline.current)
+        colorPipeline.update(parameters)
+        let placementChanged = options.flipHorizontal != flipHorizontal || borderColor != self.borderColor
+        flipHorizontal = options.flipHorizontal
+        self.borderColor = borderColor
+        if placementChanged { applyPlacement() }
+        if wasFiltered != VideoColorPipeline.needsComposition(parameters), looper != nil {
+            reloadItem(reason: "the colour options were switched")
+        }
+    }
+
+    /// The item rebuilt from the file at the time it was playing, with or without the colour
+    /// composition. Not a repair, so the recovery allowance is not spent.
+    private func reloadItem(reason: String) {
+        guard !stopped, !failureReported, let mediaURL, rebuild == nil else { return }
+        let silent = audioDropped
+        AppLog.debug("native video: reloading the item (\(reason))")
+        rebuild = Task { @MainActor [weak self] in
+            let item = silent ? await Self.videoOnlyItem(url: mediaURL) : AVPlayerItem(url: mediaURL)
+            var range = CMTimeRange.invalid
+            if let item { range = await Self.loopRange(of: item.asset) }
+            guard let self, !self.stopped, !Task.isCancelled else { return }
+            if let item, !(await self.attachComposition(to: item)) { self.rebuild = nil; return }
+            guard !self.stopped, !Task.isCancelled else { return }
+            self.rebuild = nil
+            guard let item else { return }
+            // Preparation leaves the old item usable: playback and seeks during its awaits
+            // must carry over. `start` also reads the current pause/suspension state.
+            let time = self.player.currentItem?.currentTime() ?? .zero
+            self.releaseItem()
+            self.start(item, looping: range)
+            if time.isNumeric { self.player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: { _ in }) }
+        }
+    }
+
+    /// Sets the colour composition on an item before it plays; none at the identity.
+    private func attachComposition(to item: AVPlayerItem) async -> Bool {
+        do {
+            try await configureComposition(colorPipeline, item)
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            reportPreparationFailure(error.localizedDescription, settled: false)
+            return false
+        }
+    }
+
+    var playerDefaultRateForTest: Float { player.defaultRate }
+    var layerTransformForTest: CGAffineTransform { layer.affineTransform() }
+    var layerBoundsForTest: CGRect { layer.bounds }
+    var layerPositionForTest: CGPoint { layer.position }
+    var layerBackgroundForTest: CGColor? { layer.backgroundColor }
+    var hasColorCompositionForTest: Bool { player.currentItem?.videoComposition != nil }
 
     func load(url: URL) {
         mediaURL = url
@@ -200,6 +301,8 @@ final class NativeVideoPlayer {
         rebuild = Task { @MainActor [weak self] in
             let range = await Self.loopRange(of: item.asset)
             guard let self, !self.stopped, !Task.isCancelled else { return }
+            guard await self.attachComposition(to: item) else { self.rebuild = nil; return }
+            guard !self.stopped, !Task.isCancelled else { return }
             self.rebuild = nil
             self.start(item, looping: range)
         }
@@ -355,6 +458,8 @@ final class NativeVideoPlayer {
             var range = CMTimeRange.invalid
             if let silent { range = await Self.loopRange(of: silent.asset) }
             guard let self, !self.stopped else { return }
+            if let silent, !(await self.attachComposition(to: silent)) { self.rebuild = nil; return }
+            guard !self.stopped, !Task.isCancelled else { return }
             self.rebuild = nil
             guard let silent else {
                 self.reportPreparationFailure(detail)
@@ -430,6 +535,8 @@ final class NativeVideoPlayer {
             var range = CMTimeRange.invalid
             if let item { range = await Self.loopRange(of: item.asset) }
             guard let self, !self.stopped, !Task.isCancelled else { return }
+            if let item, !(await self.attachComposition(to: item)) { self.rebuild = nil; return }
+            guard !self.stopped, !Task.isCancelled else { return }
             self.rebuild = nil
             guard let item else {
                 self.reportPreparationFailure("the clip could not be reopened for a restart")
@@ -596,14 +703,33 @@ final class NativeVideoPlayer {
     /// the read fails.
     func posterImage() async -> CGImage? {
         guard !stopped else { return nil }
-        if let posterRequest { return await posterRequest.value }
-        let request = Task { @MainActor [weak self] in
-            await self?.producePoster() ?? nil
+        let request: Task<CGImage?, Never>
+        if let posterRequest {
+            request = posterRequest
+        } else {
+            request = Task { @MainActor [weak self] in
+                await self?.producePoster() ?? nil
+            }
+            posterRequest = request
         }
-        posterRequest = request
         let image = await request.value
         if posterRequest == request { posterRequest = nil }
-        return image
+        // Every caller applies the layer's flip to the shared, unflipped source frame.
+        // Keeping it out of the cached image lets later requests change the option.
+        return flipHorizontal ? image.flatMap(Self.mirrored) : image
+    }
+
+    nonisolated static func mirrored(_ image: CGImage) -> CGImage? {
+        guard
+            let context = CGContext(
+                data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+                bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.translateBy(x: CGFloat(image.width), y: 0)
+        context.scaleBy(x: -1, y: 1)
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage()
     }
 
     /// How far from the playing position a poster's frame may be. Unbounded,
@@ -622,6 +748,10 @@ final class NativeVideoPlayer {
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = Self.posterTolerance
         generator.requestedTimeToleranceAfter = Self.posterTolerance
+        // The colour options reach the poster too, as they reach the playing item's frames
+        // (its `videoComposition`, plan check P0-5).
+        do { generator.videoComposition = try await colorPipeline.videoComposition(for: generator.asset) }
+        catch { return stopped ? nil : lastPoster }
         counters.record(.nativeVideoPosterDecode, for: surface)
         let requested = item.currentTime()
         guard let (image, actual) = try? await generator.image(at: requested),

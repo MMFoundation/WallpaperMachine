@@ -249,6 +249,9 @@ struct PerformanceSettings: Equatable {
   var activePreset: QualityPreset?
   var videoBackends: [VideoBackendReport]
   var sceneResolution: SceneResolutionMode
+  /// The saved scene quality; `sceneQualityInForce` is what the renderer draws.
+  var sceneQuality: BridgeSceneQuality
+  var sceneQualityInForce: [SceneQualityInForceReport]
   var sceneOptimization: Bool
   var sceneOnDemand: Bool
   var sceneVideoPlaneSampling: Bool

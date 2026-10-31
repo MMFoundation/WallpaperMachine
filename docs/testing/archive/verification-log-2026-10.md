@@ -9,6 +9,77 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-28 — WE parity: cookies, cursor, particle axes, IK links, HDR and dynamic sorting
+
+- `python3 scripts/check_rust.py --output <task>/integration/rust` — exit 0; 2,410 passed, five desktop-window tests excluded; desktop/media/network opt-ins disabled.
+- `python3 scripts/check_renderer.py` — final exit 0; 3,192 passed, seven explicit local-asset/corpus/energy skips across 106 binaries. Twelve generated pooled/isolated pairs match expected pixels; reload and GPU/cadence checks passed. Initial compile failed on a missing test-library particle dependency; corrected and retried once.
+- `python3 scripts/build.py --renderer-only` — exit 0; current renderer library and generated Swift bindings. No Release application build or delivery.
+- `python3 scripts/test.py` — final exit 0; 464 Python tests and 4,150 native passed, zero failed, 50 skipped. Initial native attempt executed no tests because Debug extension signing rejected Finder/resource-fork metadata; cleaned only Debug product attributes using the documented repair and retried. One runtime warning remains in the result summary.
+- Spot cookies: actual last-packed texture selection, projection and cone replacement, including hidden/budget changes. WE controls match 48/48 samples; ROI mean error 31.42773 to 0.001556, maximum channel difference one. Unused and projection-only consumers have separate bounded work demands.
+- Cursor: pixel localPosition, current parallax and named puppet hitBox; startup input waits for script readiness without advancing clock/pose twice. One explicitly authorized Windows-reference click produced CursorBone at (100,50,0), button 0. No macOS desktop/UI run.
+- Particle renderer axes: screen/upright/fixed/worldspace controls match 144/144 canvas and 72/72 explicit-3D basis samples; original data layout size is unchanged. Ordinary IK links pass 93 pose and 69 MDL cases; zero-weight picture is unchanged, linked arm moves toward the WE control, with existing pose residuals retained.
+- Dynamic sorting and ordered composite history: 48/48 ordering cells and 8/8 current/history relationships match WE; independent and dependent draws retain prepared resources, MSAA/load/cache behavior and direct NV12 variants. Static sorting-off control confirms later-source history as well. Cyclic and runtime-toggle crash captures are excluded.
+- HDR: physical sizing, linear post-processing, explicit-display EDR routing and notification-driven surface ownership. Full-resolution phase-0 mean error 7.116 to 1.261; fade 67.714 to 0.017 Ultra / 0.036 DisplayHDR, central RGB160/116/83 exact. The user approved necessary batch/FBO, conversion/copy/intermediate and EDR precision costs; actual HDR display visuals and remaining bloom-halo shape differences are unverified.
+- ModelData same-format/material/count event replacement has a valid two-frame geometric control; broader replacement remains unverified. Author matrix*vector and scalar-splat rejection gaps are documented. Pure-simulation probe pacing was accelerated only after full-frame pixel-hash equivalence; Date/media-dependent puppet comparisons remained paced.
+
+## 2026-10-28 — Updater: public GitHub proxy fallback and resumable downloads
+
+- Change: when GitHub is unreachable the update check and download go through ghfast.top, gh-proxy.com, gh.llkk.cc; downloads resume across sources with Range; installer refuses a copy not newer than the running one; release page opened only on github.com.
+- python3 scripts/test.py --only AppUpdateTests: 62 passed.
+- python3 scripts/test.py: 4193 passed, 0 failed, 49 skipped.
+- Live probe (curl, this Mac's network): the three proxies served the v1.6.5 manifest (200) and a ranged image request (206); ghproxy.net failed TLS. URLSession fetched the manifest through ghfast.top.
+- Renderer libraries rebuilt with scripts/build.py --renderer-only (stale after the MetalFX commit); generated bindings unchanged.
+- Not checked: an end-to-end update from mainland China without a VPN; no Release build.
+
+## 2026-10-27 — SceneScript ModelData, particle controls, hierarchy and scene forces
+
+- `CARGO_BUILD_JOBS=2 python3 scripts/check_rust.py --output <task>/integration/rust` — exit 0; 2,408 reported passing tests. Five desktop-window tests excluded; desktop/media/network opt-ins disabled.
+- `CARGO_BUILD_JOBS=2 python3 scripts/check_renderer.py` — exit 0; 3,088 passed, seven asset/corpus/energy opt-in skips, all 106 targets successful. Twelve pooled/isolated generated pairs match; eight projects reload twice; GPU and cadence checks executed.
+- `python3 scripts/build.py --renderer-only` — exit 0; current renderer library and Swift bindings regenerated. No Release app was built or delivered.
+- `python3 scripts/test.py` — the single routine run passed: 464 Python tests; native 4,150 passed, zero failed, 50 skipped. The result bundle reports one runtime warning.
+- Touched-domain combined regression: 723 passed plus two particle-corpus skips. Initial compose/fullscreen and raw-depth regressions were repaired; existing MVP/pixel assertions remain, and a real zero-uniform Metal draw covers attachment projection publication.
+- WE particle controls: 34 state cells at two capture times agree (68/68); pause keeps existing particles moving, instance edits apply at the next simulation step, and same-frame stop/emit reaches the host draw.
+- WE parenting/attachments: valid attachment controls match both frames inside the reported ROI; mirrored-parent mean absolute error falls from 0.0586802 to 0.000464406. Raw parallax depth and last-draw offsets are separate; SceneNode size remains 928 bytes.
+- WE ModelData: dynamic apply moves the geometry and reduces mean frame error from 3.38 to 0.71; numeric-token deferred lifetime is confirmed. replaceData/multiple shapes lack a valid WE visual positive control despite local CPU/GPU coverage.
+- WE image-rope scene forces: the no-force control is unchanged; gravity/wind affected-region correlation improves from 0.7234/0.7074 to 0.7787/0.7547. These controls do not establish complete rope trajectories or constraints.
+- Final parallax poster centers are within 0.387 canvas units of both WE frames; bounding boxes/full frames are not claimed equal. Native first/settled numeric messages were unavailable; CPU regressions cover the measured WE values. No macOS desktop/UI run. Remaining feature gaps stay in the owning renderer docs.
+
+## 2026-10-27 — MetalFX upscaling for a lowered render scale (issue 96)
+
+- python3 scripts/check_renderer.py: exit 0, passed; metalfx_upscale_test (5 tests) ran on the GPU and passed: upscaled 50% is closer to the 100% picture than the bilinear stretch, one extra full-size image in the upscaled 50% draw, released on the first drawn frame after it is turned off in a running scene and made again when turned on, a GPU without the scaler (simulated) composes the stretch byte for byte with no extra memory, no change at 100%.
+- python3 scripts/check_rust.py: exit 0, passed, including metalfx_upscaling_defaults_off_and_survives_a_restart and the config contract default.
+- python3 scripts/build.py --renderer-only: exit 0, bindings regenerated with no change.
+- python3 scripts/test.py: exit 0 on the second run, 4186 passed, 0 failed, 49 skipped, after merging main; the first run failed only EnergyUsageMonitorTests.testKernelCountersForThisProcessAdvanceWithGPUWork (a real GPU power reading of 4.6 mW under its 10 mW floor), which passed alone and in the rerun.
+- Measured: on a real machine about 50% more power with it on at the same scale, and about 1.1 ms (3024×1964) to 2.6 ms (5K) of extra GPU per frame on an M2 Pro in a headless probe. Not checked: a comparison against Wallpaper Engine (WE has no MetalFX equivalent). Release app not rebuilt.
+
+## 2026-10-27 — Play a collection from Installed and Now Playing's playlist
+
+- Added: playPlaylist action; Play/Shuffle at the end of Installed's view chips and in a collection's context menu; Now Playing names the rotation and gains a Playlist button/popover (Change now, Stop, Settings…).
+- python3 scripts/test.py --only PanelPlaylistActionsTests: 18 passed (two new tests: source/order/interval kept, change at once, emptied display filled; refusals change nothing).
+- python3 scripts/test.py: 4112 passed, 0 failed, 47 skipped.
+- Catalog checks (test_localization_catalogs, test_panel_localization) pass; 7 new strings in all 5 languages.
+- Gap: no desktop run; layout of the scope-bar buttons, the bar's fifth control and the popover is not visually checked. App not rebuilt.
+
+## 2026-10-27 — Halloween look
+
+Settings › Appearance gains a Halloween look (Halloween week, the default, October 24 to November 1; Always; Off): its own palettes and pumpkin accent, a jack-o'-lantern in the title-bar mark and the Dock icon, and a Victorian papercut horizon (silhouettes cut from a sheet generated with GPT Image 2.5 on fal.ai) standing on the Now Playing bar, at the top of Appearance and in the empty states.
+
+- `python3 scripts/test.py` — exit 0; Python stage all OK; native 4232: 4185 passed, 0 failed, 47 skipped; 2 runtime warnings without a source location ("should not be called on the main thread"), not traced to this change
+- `python3 scripts/brand.py --seasonal` — wrote AppIconHalloween; `scripts/tests/test_brand.py` 8 passed, the Halloween icon render test included
+- Offscreen renders (temporary tests drawing `HostedPanel` in a never-shown window, since deleted), two rounds: Library at 1240 and 760 pt, Settings › Appearance, the empty and no-match states, light and dark. Fixed from them: held rows dimmed twice, a weak dark backlight, a moon lost in the light dusk
+- Offscreen capture draws the Settings list's selection material black in either appearance; a plain system sidebar list does the same, so it is the capture, not the panel
+- Not checked: the real Dock, title bar and window on the desktop, a Release build, and a live midnight change on a running app (covered by a unit test posting `NSCalendarDayChanged`)
+
+## 2026-10-27 — Crowdin open to community translators; add-language import
+
+Issue #106. Crowdin project 941177 made open-join (languageAccessPolicy open, task-based access off) with ru added as a target; crowdin_sync.py gains add-language to write a finished language into the three catalogs; docs, CONTRIBUTING and the three READMEs point translators to Crowdin.
+
+- `python3 scripts/tests/test_crowdin_sync.py`: 26 tests OK (9 new: in-place insertion, all-or-nothing, dry run, registered/unexported language)
+- Real catalogs, Crowdin export with ru forced translated: 2226+16+61 units inserted, rest of each catalog unchanged, values exact
+- `python3 scripts/crowdin_sync.py add-language ru --dry-run` (live): 2304 strings missing, nothing written; `pull --dry-run`: catalogs match Crowdin
+- `python3 scripts/test.py`: exit 0; 4205 tests: 4158 passed, 0 failed, 47 skipped (after `scripts/build.py --renderer-only`; bindings unchanged)
+- App not rebuilt
+
 ## 2026-10-27 — Crowdin integration: GitHub and Crowdin setup
 
 Follows the Crowdin integration entry; those entry's open items were set up afterwards.
@@ -29,6 +100,66 @@ Tooling and CI change: crowdin.yml, scripts/crowdin_sync.py (push/pull), scripts
 - End to end on a throwaway Crowdin branch: 3 translator edits flowed into 3 of 366 cells with the one-line layout kept; a %@ to %d edit was refused
 - Conflict probes on throwaway branches: an approved translation survives a plain re-push; unapproved ones do not outrank a newer value; --auto-approve-imported overwrites (documented in docs/localization.md#crowdin)
 - Not verified: the workflow has never run on GitHub and was only parsed as YAML (no actionlint); PR creation (the repo setting "Allow GitHub Actions to create and approve pull requests" is off); the CROWDIN_PERSONAL_TOKEN secret is not set
+
+## 2026-10-26 — WE scene parity: MSAA, morph, SceneGeneral and camera paths
+
+- `CARGO_BUILD_JOBS=2 python3 scripts/check_rust.py` — exit 0; 2408 passed. Five desktop-window cases excluded; desktop/media/network opt-ins disabled.
+- `CARGO_BUILD_JOBS=2 python3 scripts/check_renderer.py` — exit 0; 3023 passed, seven asset/opt-in cases skipped. All 12 generated pooled/isolated comparisons matched; eight projects completed two reload cycles each.
+- `python3 scripts/build.py --renderer-only` — exit 0; current renderer library and Swift bindings generated before the native gate. No Release app build or installation.
+- `python3 scripts/test.py` — exit 0; 464 Python tests and 4150 native tests passed, zero failed, 50 skipped. The same unattributed main-thread runtime warning remains (see the testing guide).
+- WE 2.8.0.42 references: T13 44/44 cells; MSAA 120/120 samples including cold model/card routing, resolved backbuffer reads and alpha coverage.
+- Morph/IK references confirm image-puppet IK, model FK, model morph bone gating, signed weights and missing-weight zero. Model marker error is at most 0.216 scene units; image morph still has local pose residuals, so no whole-frame pixel-parity claim.
+- WE controls confirm static camera startup/zoom semantics, wrapper lifetime, image/model +Z and camera -Z look-at axes, custom draw order and global camera.paths-only fades. Global fade comparison uses fixed 15 Hz phase matching; static marker position differs by 1–4 pixels at 4112-pixel width and red by at most 2/255.
+- SceneGeneral references confirm lazy Bloom, live HDR scalar/tint and iteration edits; changing raw HDR/fog leaves loaded shader/target variants intact. Targeted tests cover retired resources, failure rollback, same-value writes, text setters and camera queue/canvas transitions.
+- No macOS desktop/UI run. Remaining scope includes force-service members, ModelData, public parent/attachment APIs, dynamic transparent sorting, display HDR, cookie/volumetric/planar-reflection rendering and remaining particle/advanced-IK behavior.
+
+## 2026-10-26 — Wallpaper Engine parity integration: effects, glyph text, particles, video and shadows
+
+Continuation on we-parity; this batch is verified, while the wider parity plan remains incomplete.
+
+- `CARGO_BUILD_JOBS=2 WM_SHADER_METAL_COMPILE=1 python3 scripts/check_rust.py` — exit 0; 2,391 passed, five desktop-window cases explicitly excluded; desktop/media/network opt-ins disabled.
+- `CARGO_BUILD_JOBS=2 python3 scripts/check_renderer.py` — exit 0 on the corrected combined tree; 2,919 passed, seven local-asset/corpus/energy checks skipped. Twelve generated scenes match pooled versus isolated output; eight projects reload twice successfully.
+- `python3 scripts/test.py` — exit 0; 464 Python tests passed; native 4,150 passed, zero failed, 50 skipped. One generic main-thread runtime warning remains unlocalized by the result summary.
+- The first renderer gate failed six targets on obsolete text fixtures/card-atlas expectations and an unmeasured exact-half alpha-to-coverage test input. Fixtures now mount font materials; tests verify glyph-chain inputs, both atlas retirements and independent display updates; covered/rejected fragments separately verify depth writes. Targeted reruns and the full renderer rerun pass.
+- Wallpaper Engine reference probes: effect buffers improved from 12/28 to 28/28 exact sampled cells; effect scripting from 30/70 to 70/70. Opposite-winding shadow casters match all four WE controls; mean absolute work-area difference falls from 7.01849 to 0.03924 without a bias change.
+- Glyph/MSDF text, image/text particle donors, shader math and point/spot/directional shadows have component before/after WE comparisons. Captures are scoped snapshots, not proof of complete scene parity; shader cells and shadow lit-side/edge differences remain.
+- Final hidden-text mutation/target-resize integration fixes have CPU/private-GPU regressions without new WE capture. Real-video WE comparison and puppet dragging comparison were not run; IK/morph, HDR, volumetrics/reflection and additional script/shader behavior remain incomplete.
+- `python3 scripts/build.py --renderer-only` regenerated the bridge and renderer library; no Release app build, install, Mac desktop/UI test, commit or push. Owning documentation and 232 local links checked; handwritten `git diff --check` passed, generated binding whitespace excluded.
+
+## 2026-10-25 — Puppet animation layer lifecycle and live perspective hit testing
+
+Recovered the pending animation-layer API and perspective hit-test changes, then repaired repeating-clip callbacks, authored fade-out, object identity, unnamed-layer deletion and preservation of the completed pose.
+
+- Observed failing regressions before the corresponding fixes for loop/mirror callbacks, repeating-clip fade-out, serial-like names, unnamed-layer deletion and the completed pose.
+- script_runtime_compat_test: 204 passed; puppet_pose_tests: 36 passed; mouse_input_test: 26 passed.
+- python3 scripts/tests/test_check_renderer.py CoveragePixelTests: 2 passed; corrected the stale source-over fixture and explicitly rejected its obsolete alpha values.
+- python3 scripts/check_renderer.py: exit 0; GPU and real-time checks executed, all registered binaries succeeded, 12 generated pooled/isolated pixel pairs matched, and 8 projects reloaded twice.
+- Renderer skips: 7 opt-in local video, particle/library, poster and energy checks were not enabled.
+- python3 scripts/build.py --renderer-only regenerated the renderer static library and Swift bindings; stale library symbols had blocked native linking. Debug product xattrs were cleared using the documented codesign repair.
+- python3 scripts/test.py: exit 0; Python modules passed; 4131 native tests passed, 0 failed, 47 skipped (44 real-media and 3 live Steam/Workshop tests). One runtime warning reported a main-thread method call.
+- Not compared with Wallpaper Engine frames in this batch. Desktop presentation and live input were not exercised. No Release app was built.
+
+## 2026-10-25 — Scene script APIs, puppet bone opacity, colour emoji, Workshop presets, Steam subscriptions and comments
+
+Particle-layer script API, camera transforms, setParent with adjustTransforms, bone getters, single-play and created animation layers, per-bone puppet opacity (g_BonesAlpha), colour emoji from Apple Color Emoji, Workshop preset marks, a preset base's name, size and free-space check, base updates reaching installed presets, subscribe/unsubscribe with subscribed marks, and read-only comments. Engine tests were run failing before each fix except the particle API, built together with its tests. C10 (transform effect intermediate passes), C12 (reflections, declined) and D13/D16 (SteamCMD session reuse and delta updates) were not done.
+
+- `python3 scripts/test.py` — exit 0; 4168 tests: 4121 passed, 47 skipped
+- `python3 scripts/check_renderer.py` — exit 0; corpus-dependent cases skipped: no local corpus
+- Not compared with Wallpaper Engine frames: this Mac has no Parallels VM, Wallpaper Engine assets or local corpus
+- Subscribe, unsubscribe and comments pinned against fixtures only: steamcommunity.com is not reachable from this Mac
+- D13/D16 not attempted: no SteamCMD setup or saved Steam sign-in here; C10 left for a reference capture, since it changes every effect pass
+- App not rebuilt; nothing checked on a live desktop
+
+## 2026-10-25 — Audio exclusions, update signatures, click on release, material reads
+
+System feedback sounds no longer count as another app playing, in-app updates must carry an intact signature that meets the release requirement when replacing a release, scene scripts get cursorClick on release over the pressed layer, and scripts read a material constant's authored or default value. Each was written test first; nine existing engine tests that treated a lone press as a click now tap. A Window menu written alongside was dropped in favour of the one main added in the meantime, so `ApplicationMenuTests` below no longer exists.
+
+- `python3 scripts/test.py --only OtherAudioMonitorTests --only ApplicationMenuTests --only AppUpdateTests` — 68 passed
+- `python3 scripts/test.py` — exit 0; 4162 tests: 4115 passed, 47 skipped; Swift linked the renderer library built before the engine changes, which check_renderer covers
+- `python3 scripts/check_renderer.py` — exit 0 after fixing `ClickScripts.OnlyTheHitOneOfThreeSameNamedLayersPlaysItsOwnSound` (first run failed it); corpus-dependent cases skipped: no local corpus
+- Update signature logic checked by hand against the published 1.6.3 disk image: release requirement met, strict deep check 0.17 s, a wrong certificate hash refused (-67050)
+- Not compared with Wallpaper Engine frames (no VM run); the order of cursorUp before cursorClick was not read from Wallpaper Engine
+- Not checked: the Window menu and hiding on a live desktop, the audio exclusions against real Siri or volume sounds; app not rebuilt
 
 ## 2026-10-25 — Updates, web, downloads, Workshop, scene and panel improvements
 

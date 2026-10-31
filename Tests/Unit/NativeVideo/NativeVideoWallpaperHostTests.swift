@@ -23,6 +23,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         scalingFactor: Double = 1.0,
         mediaPath: String = "/tmp/does-not-need-to-exist/clip.mp4",
         framing: BridgeFraming = BridgeFraming(panX: 0.5, panY: 0.5),
+        engineOptions: BridgeEngineOptionValues = BridgeSnapshotFixtures.engineOptionValues(),
+        borderColor: BridgeRgb? = nil,
         audioSource: UInt32? = nil
     ) -> BridgeNativeVideoWallpaper {
         BridgeNativeVideoWallpaper(
@@ -38,7 +40,10 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             volume: volume,
             muted: muted,
             scalingMode: scalingMode,
-            scalingFactor: scalingFactor)
+            scalingFactor: scalingFactor,
+            engineOptions: engineOptions,
+            lutPath: nil,
+            borderColor: borderColor)
     }
 
     /// A clip the injected admission refuses, where a test needs one wallpaper refused and another not.
@@ -162,6 +167,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         /// Every health check the host asked this surface for, with its reason.
         private(set) var verifyReasons: [String] = []
         func verifyPlayback(reason: String) { verifyReasons.append(reason) }
+        /// Every option set the host handed this surface, in order.
+        private(set) var engineOptionCalls: [(options: WallpaperEngineOptions, border: CGColor?)] = []
+        func setEngineOptions(_ options: WallpaperEngineOptions, lut: VideoLut?, borderColor: CGColor?) {
+            engineOptionCalls.append((options, borderColor))
+        }
         func setUserPaused(_ paused: Bool) { userPaused = paused }
         func setPresentationSuspended(_ suspended: Bool) { self.suspended = suspended }
         var isPlaying: Bool { !isStopped && !userPaused && !suspended }
@@ -2524,6 +2534,26 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertEqual(host.surfaceGenerationForTest, generation)
         XCTAssertEqual(recorder.stopped, 0)
         XCTAssertTrue(surface.isPlaying)
+    }
+
+    func testTheEngineOptionsAndSchemeBorderReachTheSurfaceWithoutReopeningIt() async throws {
+        let recorder = Recorder()
+        let plain = wallpaper()
+        let host = makeHost(wallpapers: [plain], recorder: recorder)
+        defer { host.shutdown() }
+        await host.apply([plain])
+        let surface = try XCTUnwrap(surfacesMade[7])
+        XCTAssertEqual(surface.engineOptionCalls.last?.options, .identity)
+        XCTAssertNil(surface.engineOptionCalls.last?.border)
+
+        let options = BridgeSnapshotFixtures.engineOptionValues(flipHorizontal: true, playbackRate: 150)
+        await host.apply([wallpaper(engineOptions: options, borderColor: BridgeRgb(red: 1, green: 0, blue: 0))])
+        XCTAssertTrue(surfacesMade[7] === surface)
+        let last = try XCTUnwrap(surface.engineOptionCalls.last)
+        XCTAssertEqual(last.options.playbackRate, 150)
+        XCTAssertTrue(last.options.flipHorizontal)
+        XCTAssertEqual(last.border?.components?.prefix(3).map { Double($0) }, [1, 0, 0])
+        XCTAssertEqual(recorder.stopped, 0)
     }
 
     func testTheUsersPositionReachesTheSurfaceWithoutReopeningIt() async throws {

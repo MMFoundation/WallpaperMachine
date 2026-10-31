@@ -307,11 +307,11 @@ final class PanelLibraryStateTests: PanelTestCase {
         BridgeSceneBackendReport(
           displayId: 1, displayName: "Main", wallpaperId: "ghost", wallpaperTitle: "Ghost",
           backend: "native_metal", failureStage: nil, failureReason: nil, videoPath: "none",
-          optimizationApplied: nil),
+          optimizationApplied: nil, qualityInForce: nil),
         BridgeSceneBackendReport(
           displayId: 2, displayName: "Side", wallpaperId: "ghost", wallpaperTitle: "Ghost",
           backend: "native_metal", failureStage: nil, failureReason: nil, videoPath: "none",
-          optimizationApplied: nil),
+          optimizationApplied: nil, qualityInForce: nil),
       ]
       func fields(_ url: URL?) throws -> [String: String] {
         let components = try XCTUnwrap(URLComponents(url: XCTUnwrap(url), resolvingAgainstBaseURL: false))
@@ -347,7 +347,7 @@ final class PanelLibraryStateTests: PanelTestCase {
         BridgeSceneBackendReport(
           displayId: 1, displayName: "Main", wallpaperId: "ghost", wallpaperTitle: "Ghost",
           backend: "unknown", failureStage: "unsupported",
-          failureReason: "the scene uses a puppet", videoPath: "none", optimizationApplied: nil)
+          failureReason: "the scene uses a puppet", videoPath: "none", optimizationApplied: nil, qualityInForce: nil)
       ]
       let held = try details(panel.controller.issueReportURL(for: "ghost"))
       XCTAssertTrue(

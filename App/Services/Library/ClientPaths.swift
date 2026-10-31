@@ -54,6 +54,8 @@ enum ClientPaths {
     /// Steam workshop tree, so deleting or re-downloading a wallpaper cannot take
     /// the user's imported files with it.
     static var userAssetsURL: URL { supportURL.appendingPathComponent("UserAssets", isDirectory: true) }
+    /// Scene scripts' `localStorage`, one folder per wallpaper ID (user data, never a cache).
+    static var sceneStorageURL: URL { supportURL.appendingPathComponent("SceneStorage", isDirectory: true) }
     static var assetsURL: URL {
         if let chosen = ClientPreferences.defaults.string(forKey: "WallpaperMachineAssetsPath"), !chosen.isEmpty {
             let url = URL(fileURLWithPath: chosen, isDirectory: true)

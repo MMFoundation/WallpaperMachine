@@ -986,6 +986,12 @@ final class NativeVideoWallpaperHost {
         surface.setScaling(
             wallpaper.scalingMode, factor: wallpaper.scalingFactor,
             pan: .init(x: wallpaper.framing.panX, y: wallpaper.framing.panY))
+        // Wallpaper Engine's options and the project's scheme colour change the running
+        // surface in place; the filter file is decoded once and cached.
+        surface.setEngineOptions(
+            WallpaperEngineOptions(wallpaper.engineOptions),
+            lut: wallpaper.lutPath.flatMap { VideoLutLoader.load(URL(fileURLWithPath: $0)) },
+            borderColor: wallpaper.borderColor.map(\.cgColor))
         // The descriptor's paused flag already carries the user's own choice
         // and this display's suspension, as the activation rules combined them.
         surface.setUserPaused(wallpaper.paused)
