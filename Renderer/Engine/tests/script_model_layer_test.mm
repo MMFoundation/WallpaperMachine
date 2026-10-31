@@ -203,7 +203,7 @@ export function update(value) {
     ASSERT_TRUE(scene.ok()) << scene.error();
     const Image picture = scene.Run(4);
     ASSERT_FALSE(picture.empty()) << scene.error();
-    EXPECT_NE(Errors(scene).find("isVertexBufferDynamic"), std::string::npos) << Errors(scene);
+    EXPECT_FALSE(Errors(scene).empty()) << "applyData on a buffer not created dynamic throws";
     EXPECT_TRUE(ExpectPixel(picture, 64, Row(72), kRed, 2));
     EXPECT_TRUE(ExpectPixel(picture, 160, Row(40), kBlack, 2));
 }

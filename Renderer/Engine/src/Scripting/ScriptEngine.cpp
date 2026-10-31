@@ -1,5 +1,6 @@
 // Clean-room implementation from the WallpaperMachine spec e3-scripting.md; written without access to the original source.
 #include "Scripting/ScriptEngine.hpp"
+#include "Scripting/ModelDataInput.hpp"
 #include "Scripting/ScriptLibraryCore.hpp"
 #include "Scripting/ScriptLibraryPrograms.hpp"
 #include "Scripting/ScriptLibraryScene.hpp"
@@ -1057,6 +1058,7 @@ enum LibFn : int
     kLibResetTransient,
     kLibRunInit,
     kLibUserNotices,
+    kLibNotifyVideoEnded,
     kLibFnCount,
 };
 
@@ -1065,6 +1067,7 @@ constexpr const char* kLibFnNames[kLibFnCount] = {
     "tickScene",     "cursorEvent",    "animationEvent", "animationListeners", "mediaJson",
     "mediaThumbnail", "resizeProgram", "resizeListeners", "applyProps",     "destroyProgram",
     "notifyEnded",   "noticeLanguage", "resetTransient", "runInit",      "userNotices",
+    "notifyVideoEnded",
 };
 
 #define SCRIPT_NATIVE_LIST(X)                                                                      \
@@ -1072,16 +1075,19 @@ constexpr const char* kLibFnNames[kLibFnCount] = {
     X(layerById) X(authoredName) X(requestConfig) X(initialConfig) X(visible) X(setVisible)       \
     X(origin) X(setOrigin) X(scale) X(setScale) X(rotation) X(setRotation) X(size) X(color)       \
     X(setColor) X(alpha) X(setAlpha) X(text) X(setText) X(setAlignment) X(textStyle)              \
-    X(setTextStyle) X(parent) X(setParent) X(setSize) X(parallax) X(setParallax) X(matrix)        \
-    X(createFromTemplate) X(createText) X(nameLayer) X(destroyLayer) X(hasSound) X(soundPlay)     \
+    X(setTextStyle) X(parent) X(setParent) X(attachmentIndex) X(attachmentMatrix) X(attachmentTexture) \
+    X(setSize) X(parallax) X(setParallax) X(matrix)                                             \
+    X(createFromTemplate) X(createText) X(renameLayer) X(destroyLayer) X(hasSound) X(soundPlay)     \
     X(soundPause) X(soundStop) X(soundPlaying) X(soundVolume) X(soundSetVolume) X(soundMuted)     \
-    X(soundSetMuted) X(puppet) X(puppetName) X(timeline) X(sheet) X(sheetInfo) X(video)           \
+    X(soundSetMuted) X(puppet) X(puppetName) X(puppetCreate) X(timeline) X(sheet) X(sheetInfo) X(video) \
     X(audioMark) X(audioGeneration) X(audio) X(shortcutValue) X(requestShortcut) X(timeOfDay)       \
-    X(effectVisible) X(setEffectVisible) X(effectCount) X(effectAt) X(effectByName)                 \
-    X(effectName) X(effectMaterialCount) X(materialConstant) X(setMaterialConstant)                 \
-    X(rotateObjectSpace) X(hasParticles) X(particleControl) X(emitParticles) X(particleInstance)      \
-    X(setParticleInstance) X(cameraTransforms) X(setCameraTransforms) X(puppetAddLayer) X(bone)    \
-    X(createModel) X(applyModel) X(destroyModel) X(createModelLayer)
+    X(effectVisible) X(setEffectVisible) X(effectExists) X(effectCount) X(effectAt) X(effectByName) \
+    X(effectName) X(effectMaterialCount) X(effectMaterialByName) X(setMaterialConstant) X(setMaterialProperty) \
+    X(executeMaterialFunction) X(rotateObjectSpace) X(isCamera) X(storage) X(bone)                \
+    X(layerFlag) X(setLayerFlag) X(cursorTarget) X(setCursorTarget) X(sortOrder) X(setSortOrder) \
+    X(light) X(setLight) X(soundMember) X(setSoundMember) X(cameraTransforms) X(setCameraTransforms) \
+    X(sceneGeneral) X(setSceneGeneral) X(hasParticles) X(particle) X(particleInstance) X(setParticleInstance) \
+    X(modelDataCreate) X(modelDataUpdate) X(modelDataDestroy) X(modelDataLayer) X(cursorData) X(materialConstant)
 
 enum NativeId : int
 {
@@ -1095,103 +1101,6 @@ constexpr const char* kNativeNames[] = {
     SCRIPT_NATIVE_LIST(SCRIPT_NATIVE_NAME)
 #undef SCRIPT_NATIVE_NAME
 };
-
-// The elements of a typed array a script passed: its kind (`JSTypedArrayEnum`) and where
-// they lie; kind -1 for anything else or a detached buffer. The bytes stay the script's.
-struct TypedArrayView {
-    int            kind { -1 };
-    const uint8_t* bytes { nullptr };
-    std::size_t    count { 0 };
-};
-
-TypedArrayView ViewTypedArray(JSContext* ctx, JSValueConst value) {
-    TypedArrayView view;
-    const int      kind = JS_GetTypedArrayType(value);
-    if (kind < 0) return view;
-    std::size_t offset = 0, length = 0, element = 0;
-    JSValue     buffer = JS_GetTypedArrayBuffer(ctx, value, &offset, &length, &element);
-    if (JS_IsException(buffer)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        return view;
-    }
-    std::size_t size = 0;
-    uint8_t*    data = JS_GetArrayBuffer(ctx, &size, buffer);
-    JS_FreeValue(ctx, buffer);
-    if (JS_HasException(ctx)) JS_FreeValue(ctx, JS_GetException(ctx));
-    if (data == nullptr || element == 0 || offset > size || length > size - offset) return view;
-    view.kind  = kind;
-    view.bytes = data + offset;
-    view.count = length / element;
-    return view;
-}
-
-// One shape object as the script library hands it over (`vertexBuffer` a Float32Array,
-// `indexBuffer` a Uint16Array or Uint32Array, `vertexFormat` the flag words, `material`, the
-// two dynamic flags). The buffers are borrowed from the object, which the caller holds for as
-// long as `shape` is used. Empty, or what the script got wrong.
-std::string ReadModelShape(JSContext* ctx, JSValueConst object, ScriptModelShapeInput& shape) {
-    const auto member = [&](const char* name) { return JS_GetPropertyStr(ctx, object, name); };
-    const auto truthy = [&](const char* name) {
-        JSValue    value = member(name);
-        const bool on    = JS_ToBool(ctx, value) > 0;
-        JS_FreeValue(ctx, value);
-        return on;
-    };
-
-    JSValue vertices = member("vertexBuffer");
-    if (! JS_IsUndefined(vertices) && ! JS_IsNull(vertices)) {
-        const auto view = ViewTypedArray(ctx, vertices);
-        if (view.kind != JS_TYPED_ARRAY_FLOAT32) {
-            JS_FreeValue(ctx, vertices);
-            return "vertexBuffer must be a Float32Array";
-        }
-        shape.has_vertices = true;
-        shape.vertices     = std::span<const float>(reinterpret_cast<const float*>(view.bytes), view.count);
-    }
-    JS_FreeValue(ctx, vertices);
-
-    JSValue indices = member("indexBuffer");
-    if (! JS_IsUndefined(indices) && ! JS_IsNull(indices)) {
-        const auto view = ViewTypedArray(ctx, indices);
-        if (view.kind != JS_TYPED_ARRAY_UINT16 && view.kind != JS_TYPED_ARRAY_UINT32) {
-            JS_FreeValue(ctx, indices);
-            return "indexBuffer must be a Uint16Array or a Uint32Array";
-        }
-        shape.has_indices = true;
-        shape.indices     = { view.bytes, view.count, view.kind == JS_TYPED_ARRAY_UINT32 };
-    }
-    JS_FreeValue(ctx, indices);
-
-    JSValue format = member("vertexFormat");
-    if (JS_IsArray(format)) {
-        JSValue  length_value = JS_GetPropertyStr(ctx, format, "length");
-        uint32_t length       = 0;
-        JS_ToUint32(ctx, &length, length_value);
-        JS_FreeValue(ctx, length_value);
-        for (uint32_t i = 0; i < length && i < 16; ++i) {
-            JSValue     word  = JS_GetPropertyUint32(ctx, format, i);
-            const char* chars = JS_ToCString(ctx, word);
-            shape.format.emplace_back(chars != nullptr ? chars : "");
-            if (chars != nullptr) JS_FreeCString(ctx, chars);
-            JS_FreeValue(ctx, word);
-        }
-    }
-    JS_FreeValue(ctx, format);
-
-    JSValue material = member("material");
-    if (JS_IsString(material)) {
-        const char* chars = JS_ToCString(ctx, material);
-        if (chars != nullptr) {
-            shape.material = chars;
-            JS_FreeCString(ctx, chars);
-        }
-    }
-    JS_FreeValue(ctx, material);
-    shape.dynamic_vertices = truthy("isVertexBufferDynamic");
-    shape.dynamic_indices  = truthy("isIndexBufferDynamic");
-    if (JS_HasException(ctx)) JS_FreeValue(ctx, JS_GetException(ctx));
-    return {};
-}
 
 thread_local ScriptStartupMetrics g_startup_metrics;
 
@@ -1262,6 +1171,7 @@ struct ScriptEngineContext : std::enable_shared_from_this<ScriptEngineContext> {
     bool                                      interrupted { false };
     // How many call scopes are open on this context; the outermost one is the host's entry.
     int                                       call_depth { 0 };
+    LibFn                                     active_call { kLibFnCount };
     struct LogRecord {
         int    logged { 0 };
         int    suppressed { 0 };
@@ -1269,6 +1179,8 @@ struct ScriptEngineContext : std::enable_shared_from_this<ScriptEngineContext> {
         bool   summarized { false };
     };
     std::unordered_map<std::string, LogRecord> log_records;
+    // localStorage of an engine that runs without a scene runtime: memory only.
+    SceneScriptStorage                         detached_storage;
 
     explicit ScriptEngineContext(const ScriptLimits& configured);
     ~ScriptEngineContext();
@@ -1613,6 +1525,12 @@ bool ScriptEngineContext::Call(ScriptGuard* guard, const char* entry, LibFn fn,
     bool    expired = false;
     {
         CallScope scope(*this, nullptr, budget_ms);
+        const auto previous_call = std::exchange(active_call, fn);
+        struct RestoreCall {
+            LibFn& current;
+            LibFn previous;
+            ~RestoreCall() { current = previous; }
+        } restore_call {active_call, previous_call};
         answer = JS_Call(ctx, lib[fn], JS_UNDEFINED, argc, argv);
         if (! JS_IsException(answer) && PumpJobs()) {
             // The call itself finished, but a job it queued did not: the call counts as
@@ -1941,9 +1859,95 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
     case kNative_error: ReportError(str(0), str(1), str(2)); return JS_UNDEFINED;
     case kNative_resolve: {
         const auto name = str(0);
-        return text(rt_ != nullptr ? rt_->ResolveLayerName(name) : name);
+        return text(rt_ != nullptr ? rt_->ResolveScriptLayerName(name) : name);
     }
     case kNative_hasNode: return boolean(node_known());
+    case kNative_modelDataCreate:
+    case kNative_modelDataUpdate: {
+      try {
+        const bool create = id == kNative_modelDataCreate;
+        const bool replace = !create && flag(2);
+        if (!rt_) return JS_UNDEFINED;
+        if (create && (active_call == kLibMake || active_call == kLibFnCount))
+            return JS_ThrowSyntaxError(ctx, "createModelData cannot be called from global scope.");
+        if (replace && (active_call == kLibEvaluate || active_call == kLibTickScene))
+            return JS_ThrowSyntaxError(ctx, "IModelData.replace cannot be called in update.");
+        const int input = create ? 0 : 1;
+        if (argc <= input || (create && !JS_IsObject(argv[input]))) return JS_UNDEFINED;
+        ModelDataInput data(ctx);
+        const auto continuing = [&] {
+            if (deadline_ns && NowNanoseconds() > deadline_ns) { interrupted = true; return false; }
+            return true;
+        };
+        if (!data.Read(argv[input], create, continuing)) {
+            if (JS_HasException(ctx)) return JS_EXCEPTION;
+            return JS_ThrowSyntaxError(ctx, "%s", data.error.c_str());
+        }
+        std::string error;
+        if (create) {
+            const auto token = rt_->CreateModelData(data.update, error);
+            if (!error.empty()) return JS_ThrowSyntaxError(ctx, "%s", error.c_str());
+            return token ? JS_NewUint32(ctx, token) : JS_UNDEFINED;
+        }
+        uint32_t token = 0;
+        if (JS_ToUint32(ctx, &token, argv[0]) < 0) return JS_EXCEPTION;
+        if (!rt_->UpdateModelData(token, data.update, replace, error))
+            return JS_ThrowSyntaxError(ctx, "%s", error.c_str());
+        return JS_UNDEFINED;
+      } catch (const std::exception& error) {
+        return JS_ThrowInternalError(ctx, "%s", error.what());
+      }
+    }
+    case kNative_modelDataDestroy: {
+        if (!rt_) return JS_UNDEFINED;
+        if (active_call == kLibMake || active_call == kLibFnCount)
+            return JS_ThrowSyntaxError(ctx, "destroyModelData cannot be called from global scope.");
+        if (argc && JS_IsNumber(argv[0])) {
+            const double token = num(0);
+            if (std::isfinite(token) && token >= 0 && token <= 4294967295.0 && token == std::trunc(token))
+                rt_->DestroyModelData(static_cast<uint32_t>(token));
+        }
+        return JS_UNDEFINED;
+    }
+    case kNative_modelDataLayer: {
+        if (!rt_ || argc < 2) return text({});
+        uint32_t token = 0;
+        if (JS_ToUint32(ctx, &token, argv[0]) < 0) return JS_EXCEPTION;
+        ModelDataLayerOptions options;
+        options.perspective = flag(2);
+        options.castshadow = !has(3) || flag(3);
+        options.solid = !has(4) || flag(4);
+        options.disablepropagation = flag(5);
+        options.reflected = !has(6) || flag(6);
+        return text(rt_->CreateModelDataLayer(token, options, str(1)));
+    }
+    case kNative_sceneGeneral: {
+        if (rt_ == nullptr || argc < 1) return JS_UNDEFINED;
+        const auto value = rt_->SceneGeneralValue(str(0));
+        if (!value) return JS_UNDEFINED;
+        JSValue out = JS_NewArray(ctx);
+        for (uint32_t i = 0; i < value->size(); ++i) JS_SetPropertyUint32(ctx, out, i, number((*value)[i]));
+        return out;
+    }
+    case kNative_setSceneGeneral: {
+        if (rt_ == nullptr || argc < 2 || argc > 4) return boolean(false);
+        std::array<float, 3> values {};
+        for (int i = 1; i < argc; ++i) values[i - 1] = static_cast<float>(num(i));
+        return boolean(rt_->SetSceneGeneralValue(str(0), std::span(values.data(), std::size_t(argc - 1))));
+    }
+    case kNative_cameraTransforms: {
+        if (rt_ == nullptr) return JS_UNDEFINED;
+        const auto values = rt_->GetStaticCameraTransforms();
+        JSValue out = JS_NewArray(ctx);
+        for (uint32_t i = 0; i < values.size(); ++i) JS_SetPropertyUint32(ctx, out, i, number(values[i]));
+        return out;
+    }
+    case kNative_setCameraTransforms: {
+        if (rt_ == nullptr || argc < 11) return boolean(false);
+        SceneRuntimeContext::StaticCameraTransforms value;
+        for (int i = 0; i < 10; ++i) value[i] = num(i + 1);
+        return boolean(rt_->SetStaticCameraTransforms(value, static_cast<uint32_t>(num(0)) & 15u));
+    }
     case kNative_layerCount: return number(rt_ != nullptr ? static_cast<double>(rt_->LayerCount()) : 0.0);
     case kNative_layerNameAt: {
         const double index = num(0);
@@ -2026,7 +2030,102 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
     case kNative_setTextStyle:
         return boolean(rt_ != nullptr && rt_->SetNodeTextStyle(str(0), str(1), str(2)));
     case kNative_parent: return text(rt_ != nullptr ? rt_->NodeParentName(str(0)) : std::string());
-    case kNative_setParent: return boolean(rt_ != nullptr && rt_->SetNodeParent(str(0), str(1), flag(2)));
+    case kNative_setParent: {
+        const double anchor=has(2) ? num(2) : -1;
+        const auto index=std::isfinite(anchor) && anchor>=0 && anchor<=INT32_MAX
+            ? static_cast<int32_t>(anchor) : -1;
+        return boolean(rt_ != nullptr && rt_->SetNodeParent(str(0),str(1),index,flag(3)));
+    }
+    case kNative_attachmentIndex:
+        return number(rt_ ? rt_->NodeAttachmentIndex(str(0),str(1)) : -1);
+    case kNative_attachmentMatrix: {
+        const double anchor=num(1);
+        const auto index=std::isfinite(anchor) && anchor>=0 && anchor<=INT32_MAX
+            ? static_cast<int32_t>(anchor) : -1;
+        const auto matrix=rt_ ? rt_->NodeAttachmentMatrix(str(0),index) : linalg::Matrix4d::Identity();
+        JSValue result=JS_NewArray(ctx);
+        for (uint32_t i=0;i<16;++i) JS_SetPropertyUint32(ctx,result,i,JS_NewFloat64(ctx,matrix.data()[i]));
+        return result;
+    }
+    case kNative_attachmentTexture: {
+        const double value=num(2);
+        const auto index=std::isfinite(value) && value>=0 && value<=INT32_MAX
+            ? static_cast<int32_t>(value) : -1;
+        const auto matrix=rt_ ? rt_->AttachmentToTexture(str(0),str(1),index) : std::nullopt;
+        if (!matrix) return JS_NULL;
+        JSValue result=JS_NewArray(ctx);
+        for (uint32_t i=0;i<9;++i) JS_SetPropertyUint32(ctx,result,i,JS_NewFloat64(ctx,matrix->data()[i]));
+        return result;
+    }
+    case kNative_layerFlag: {
+        if (rt_ == nullptr) return JS_UNDEFINED;
+        const auto value = rt_->NodeLayerFlag(str(0), str(1));
+        return value.has_value() ? number(*value) : JS_UNDEFINED;
+    }
+    case kNative_setLayerFlag: return boolean(rt_ != nullptr && rt_->SetNodeLayerFlag(str(0), str(1), num(2)));
+    case kNative_cursorTarget: {
+        const auto target = rt_ != nullptr ? rt_->NodeCursorTargetOf(str(0)) : std::nullopt;
+        if (! target.has_value()) return JS_UNDEFINED;
+        return array({ target->hittable ? 1.0 : 0.0, target->solid ? 1.0 : 0.0, target->blocks ? 1.0 : 0.0 });
+    }
+    case kNative_setCursorTarget: {
+        const auto key    = str(0);
+        const auto target = rt_ != nullptr ? rt_->NodeCursorTargetOf(key) : std::nullopt;
+        if (! target.has_value()) return boolean(false);
+        rt_->SetNodeCursorTarget(key, target->hittable, flag(1), flag(2));
+        return boolean(true);
+    }
+    case kNative_sortOrder: {
+        const auto order = rt_ != nullptr ? rt_->NodeSortOrder(str(0)) : std::nullopt;
+        return order.has_value() ? number(static_cast<double>(*order)) : JS_UNDEFINED;
+    }
+    case kNative_setSortOrder: {
+        const double value = num(1);
+        if (rt_ == nullptr || ! std::isfinite(value)) return boolean(false);
+        return boolean(rt_->SetNodeSortOrder(
+            str(0), static_cast<int32_t>(std::clamp(std::trunc(value), -2147483648.0, 2147483647.0))));
+    }
+    case kNative_light: {
+        if (rt_ == nullptr) return JS_UNDEFINED;
+        const auto key    = str(0);
+        const auto member = str(1);
+        if (member == "light") {
+            const auto kind = rt_->NodeLightKind(key);
+            return kind.has_value() ? text(*kind) : JS_UNDEFINED;
+        }
+        const auto values = rt_->NodeLightMember(key, member);
+        if (! values.has_value()) return JS_UNDEFINED;
+        JSValue  out   = JS_NewArray(ctx);
+        uint32_t index = 0;
+        for (const double d : *values) JS_SetPropertyUint32(ctx, out, index++, JS_NewFloat64(ctx, d));
+        return out;
+    }
+    case kNative_setLight: {
+        if (rt_ == nullptr) return boolean(false);
+        const auto key    = str(0);
+        const auto member = str(1);
+        if (member == "light") return boolean(rt_->SetNodeLightKind(key, str(2)));
+        std::array<double, 3> values {};
+        const int             count = std::clamp(argc - 2, 0, 3);
+        for (int i = 0; i < count; ++i) values[static_cast<std::size_t>(i)] = num(2 + i);
+        return boolean(rt_->SetNodeLightMember(key, member, std::span<const double>(values.data(), static_cast<std::size_t>(count))));
+    }
+    case kNative_soundMember: {
+        if (rt_ == nullptr) return JS_UNDEFINED;
+        const auto key = str(0), member = str(1);
+        if (member == "playbackmode") {
+            const auto mode = rt_->SoundLayerPlaybackMode(key);
+            return mode.has_value() ? text(*mode) : JS_UNDEFINED;
+        }
+        const auto value = rt_->SoundLayerMember(key, member);
+        return value.has_value() ? number(*value) : JS_UNDEFINED;
+    }
+    case kNative_setSoundMember: {
+        if (rt_ == nullptr) return boolean(false);
+        const auto key = str(0), member = str(1);
+        if (member == "playbackmode") return boolean(rt_->SetSoundLayerPlaybackMode(key, str(2)));
+        return boolean(rt_->SetSoundLayerMember(key, member, num(2)));
+    }
     case kNative_setSize:
         return boolean(rt_ != nullptr &&
                        rt_->SetNodeSize(str(0), linalg::Vector2f(static_cast<float>(num(1)),
@@ -2051,44 +2150,7 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         return text(rt_ != nullptr ? rt_->CreateLayerFromTemplate(str(0), str(1), str(2)) : std::string());
     case kNative_createText:
         return text(rt_ != nullptr ? rt_->CreateTextLayer(str(0), str(1)) : std::string());
-    case kNative_createModel: {
-        // [shape objects] -> the model's id, or the error.
-        if (rt_ == nullptr || argc < 1 || ! JS_IsArray(argv[0])) return text("createModelData needs shapes");
-        JSValue  length_value = JS_GetPropertyStr(ctx, argv[0], "length");
-        uint32_t length       = 0;
-        JS_ToUint32(ctx, &length, length_value);
-        JS_FreeValue(ctx, length_value);
-        // Read before anything is sized from it: an array's length is the script's to claim.
-        if (length > 1024) return text("createModelData takes at most 1024 shapes");
-        std::vector<ScriptModelShapeInput> shapes(length);
-        std::string                        error;
-        for (uint32_t i = 0; i < length && error.empty(); ++i) {
-            JSValue shape = JS_GetPropertyUint32(ctx, argv[0], i);
-            // The array the script library built holds every shape object for the whole call.
-            error = ReadModelShape(ctx, shape, shapes[i]);
-            if (! error.empty()) error = "shape " + std::to_string(i) + ": " + error;
-            JS_FreeValue(ctx, shape);
-        }
-        if (! error.empty()) return text(error);
-        const int32_t model = rt_->CreateScriptModel(shapes, error);
-        return model > 0 ? number(model) : text(error);
-    }
-    case kNative_applyModel: {
-        // (id, shape index, shape object) -> '' or the error.
-        if (rt_ == nullptr || argc < 3) return text("applyData needs a shape");
-        ScriptModelShapeInput shape;
-        std::string           error = ReadModelShape(ctx, argv[2], shape);
-        if (error.empty()) {
-            error = rt_->ApplyScriptModel(static_cast<int32_t>(num(0)), static_cast<std::size_t>(num(1)), shape);
-        }
-        return text(error);
-    }
-    case kNative_destroyModel:
-        return boolean(rt_ != nullptr && rt_->DestroyScriptModel(static_cast<int32_t>(num(0))));
-    case kNative_createModelLayer:
-        return text(rt_ != nullptr ? rt_->CreateModelLayer(static_cast<int32_t>(num(0)), flag(1), str(2))
-                                   : std::string());
-    case kNative_nameLayer: return boolean(rt_ != nullptr && rt_->NameLayer(str(0), str(1)));
+    case kNative_renameLayer: return boolean(rt_ != nullptr && rt_->RenameLayer(str(0), str(1)));
     case kNative_destroyLayer: {
         std::vector<std::string> destroyed;
         const bool               ok = rt_ != nullptr && rt_->DestroyLayer(str(0), &destroyed);
@@ -2098,78 +2160,35 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         for (const auto& name : destroyed) JS_SetPropertyUint32(ctx, out, index++, text(name));
         return out;
     }
+    case kNative_hasParticles: return boolean(rt_ != nullptr && rt_->HasParticleLayer(str(0)));
+    case kNative_particle: {
+        int32_t count = 0;
+        if (argc > 2 && JS_ToInt32(ctx, &count, argv[2]) < 0) return JS_EXCEPTION;
+        return boolean(rt_ != nullptr && rt_->ParticlePlayback(str(0), str(1), count));
+    }
+    case kNative_particleInstance: {
+        if (rt_ == nullptr) return JS_UNDEFINED;
+        const auto values = rt_->ParticleInstanceValue(str(0), str(1));
+        if (!values) return JS_UNDEFINED;
+        if (values->size() == 1) return number(values->front());
+        JSValue out = JS_NewArray(ctx);
+        uint32_t index = 0;
+        for (double value : *values) JS_SetPropertyUint32(ctx, out, index++, number(value));
+        return out;
+    }
+    case kNative_setParticleInstance: {
+        if (rt_ == nullptr) return boolean(false);
+        std::array<double, 3> values {};
+        const int count = std::clamp(argc - 2, 0, 3);
+        for (int i = 0; i < count; ++i) values[static_cast<std::size_t>(i)] = num(2 + i);
+        return boolean(rt_->SetParticleInstanceValue(str(0), str(1),
+            std::span<const double>(values.data(), static_cast<std::size_t>(count))));
+    }
     case kNative_hasSound: return boolean(rt_ != nullptr && rt_->HasSoundLayer(str(0)));
     case kNative_soundPlay: return boolean(rt_ != nullptr && rt_->PlaySoundLayer(str(0)));
     case kNative_soundPause: return boolean(rt_ != nullptr && rt_->PauseSoundLayer(str(0)));
     case kNative_soundStop: return boolean(rt_ != nullptr && rt_->StopSoundLayer(str(0)));
     case kNative_soundPlaying: return boolean(rt_ != nullptr && rt_->SoundLayerPlaying(str(0)));
-    case kNative_cameraTransforms: {
-        JSValue out = JS_NewArray(ctx);
-        if (rt_ == nullptr) return out;
-        const auto t = rt_->CameraTransforms();
-        const double values[10] = { t.eye.x(), t.eye.y(), t.eye.z(), t.center.x(), t.center.y(),
-                                    t.center.z(), t.up.x(), t.up.y(), t.up.z(), t.zoom };
-        for (uint32_t i = 0; i < 10; ++i) JS_SetPropertyUint32(ctx, out, i, JS_NewFloat64(ctx, values[i]));
-        return out;
-    }
-    case kNative_setCameraTransforms: {
-        if (rt_ == nullptr || argc < 1 || ! JS_IsArray(argv[0])) return JS_UNDEFINED;
-        double values[10];
-        for (uint32_t i = 0; i < 10; ++i) {
-            JSValue item = JS_GetPropertyUint32(ctx, argv[0], i);
-            values[i]    = std::numeric_limits<double>::quiet_NaN();
-            if (JS_ToFloat64(ctx, &values[i], item) < 0 && JS_HasException(ctx)) {
-                JS_FreeValue(ctx, JS_GetException(ctx));
-            }
-            JS_FreeValue(ctx, item);
-        }
-        SceneRuntimeContext::SceneCameraTransforms t;
-        t.eye    = { values[0], values[1], values[2] };
-        t.center = { values[3], values[4], values[5] };
-        t.up     = { values[6], values[7], values[8] };
-        t.zoom   = values[9];
-        rt_->SetCameraTransforms(t);
-        return JS_UNDEFINED;
-    }
-    case kNative_hasParticles: return boolean(rt_ != nullptr && rt_->HasParticleLayer(str(0)));
-    case kNative_particleControl: {
-        if (rt_ == nullptr) return boolean(false);
-        const auto op = str(1);
-        if (op == "play") return boolean(rt_->PlayParticleLayer(str(0)));
-        if (op == "pause") return boolean(rt_->PauseParticleLayer(str(0)));
-        if (op == "stop") return boolean(rt_->StopParticleLayer(str(0)));
-        if (op == "playing") return boolean(rt_->ParticleLayerPlaying(str(0)));
-        return boolean(false);
-    }
-    case kNative_emitParticles: {
-        const double count = num(1);
-        if (rt_ == nullptr || ! std::isfinite(count) || count < 1.0) return boolean(false);
-        return boolean(rt_->EmitParticles(str(0), static_cast<uint32_t>(std::min(count, 20000.0))));
-    }
-    case kNative_particleInstance: {
-        const auto values = rt_ != nullptr ? rt_->ParticleInstanceValue(str(0), str(1)) : std::vector<float> {};
-        if (values.empty()) return JS_UNDEFINED;
-        JSValue out = JS_NewArray(ctx);
-        for (uint32_t i = 0; i < values.size(); ++i) JS_SetPropertyUint32(ctx, out, i, JS_NewFloat64(ctx, values[i]));
-        return out;
-    }
-    case kNative_setParticleInstance: {
-        if (rt_ == nullptr || argc < 3 || ! JS_IsArray(argv[2])) return boolean(false);
-        JSValue  length_val = JS_GetPropertyStr(ctx, argv[2], "length");
-        uint32_t length     = 0;
-        JS_ToUint32(ctx, &length, length_val);
-        JS_FreeValue(ctx, length_val);
-        if (length == 0 || length > 3) return boolean(false);
-        std::vector<float> values(length, 0.0f);
-        for (uint32_t i = 0; i < length; ++i) {
-            JSValue item = JS_GetPropertyUint32(ctx, argv[2], i);
-            double  d    = 0.0;
-            if (JS_ToFloat64(ctx, &d, item) < 0 && JS_HasException(ctx)) JS_FreeValue(ctx, JS_GetException(ctx));
-            JS_FreeValue(ctx, item);
-            values[i] = static_cast<float>(d);
-        }
-        return boolean(rt_->SetParticleInstanceValue(str(0), str(1), values));
-    }
     case kNative_soundVolume:
         return number(rt_ != nullptr ? static_cast<double>(rt_->SoundLayerVolume(str(0))) : 0.0);
     case kNative_soundSetVolume:
@@ -2180,32 +2199,12 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         if (rt_ != nullptr) rt_->SetSoundLayerMuted(str(0), flag(1));
         return JS_UNDEFINED;
     case kNative_puppet:
-        return number(rt_ != nullptr ? rt_->PuppetAnimationControl(str(0), str(1), str(2), num(3), has(3))
+        return number(rt_ != nullptr ? rt_->PuppetAnimationControl(str(0), str(1), str(2), num(3), has(3), flag(4))
                                      : 0.0);
-    case kNative_puppetAddLayer:
-        return number(rt_ != nullptr ? rt_->AddPuppetAnimationLayer(str(0), str(1), flag(2)) : -1);
-    case kNative_bone: {
-        // bone(layer, question, bone): `bone` is a name or an index.
-        if (rt_ == nullptr) return JS_UNDEFINED;
-        const auto layer    = str(0);
-        const auto question = str(1);
-        if (question == "count") return number(rt_->PuppetBoneCount(layer));
-        int index = -1;
-        if (argc > 2 && JS_IsString(argv[2])) {
-            index = rt_->PuppetBoneIndex(layer, str(2));
-        } else if (const double at = num(2); std::isfinite(at) && at >= 0.0 && at < 1.0e9) {
-            index = static_cast<int>(at);
-        }
-        if (question == "index") return number(index);
-        if (question == "parent") return number(index < 0 ? -1 : rt_->PuppetBoneParent(layer, index));
-        if (question != "world" && question != "local") return JS_UNDEFINED;
-        const auto matrix = rt_->PuppetBoneMatrix(layer, index, question == "world");
-        if (! matrix) return JS_UNDEFINED;
-        JSValue out = JS_NewArray(ctx);
-        for (uint32_t i = 0; i < 16; ++i) JS_SetPropertyUint32(ctx, out, i, JS_NewFloat64(ctx, matrix->data()[i]));
-        return out;
-    }
-    case kNative_puppetName: return text(rt_ != nullptr ? rt_->PuppetAnimationLayerName(str(0), str(1)) : std::string());
+    case kNative_puppetName: return text(rt_ != nullptr ? rt_->PuppetAnimationLayerName(str(0), str(1), flag(2)) : std::string());
+    // puppetCreate(layer, isObject, animation, configText, single): the new layer's serial, -1 for none.
+    case kNative_puppetCreate:
+        return number(rt_ != nullptr ? rt_->CreatePuppetAnimationLayer(str(0), flag(1), str(2), str(3), flag(4)) : -1);
     case kNative_timeline: {
         if (rt_ == nullptr) return number(0);
         const auto layer = str(0);
@@ -2216,6 +2215,7 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
                                                                 : rt_->FindScalarAnimation(layer, name);
         if (playback == nullptr) return number(0);
         const auto op = str(2);
+        if (op == "exists") return number(1);
         if (op == "fps") return number(playback->animation.fps);
         if (op == "frameCount") return number(playback->animation.FrameCount());
         if (op == "rate") return number(playback->rate);
@@ -2232,9 +2232,11 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         if (rt_ == nullptr) return number(0);
         const auto key = str(0);
         const auto op  = str(1);
+        if (op == "exists") return number(rt_->NodeTextureAnimation(key).has_value() ? 1 : 0);
         if (op == "play") return number(rt_->PlayNodeTextureAnimation(key) ? 1 : 0);
         if (op == "pause") return number(rt_->PauseNodeTextureAnimation(key) ? 1 : 0);
         if (op == "stop") return number(rt_->StopNodeTextureAnimation(key) ? 1 : 0);
+        if (op == "join") return number(rt_->JoinNodeTextureAnimation(key) ? 1 : 0);
         if (op == "isPlaying") return number(rt_->NodeTextureAnimationPlaying(key) ? 1 : 0);
         if (op == "rate") return number(rt_->NodeTextureAnimationRate(key));
         if (op == "setRate") return number(rt_->SetNodeTextureAnimationRate(key, num(2)) ? 1 : 0);
@@ -2253,11 +2255,27 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         JS_SetPropertyUint32(ctx, out, 3, number(info->fps));
         return out;
     }
+    case kNative_storage: {
+        // localStorage: op, location ('global' | 'screen'), key, text.
+        auto&      storage = rt_ != nullptr ? rt_->ScriptStorage() : detached_storage;
+        const auto op      = str(0);
+        const bool global  = str(1) == "global";
+        if (op == "get") {
+            const auto value = storage.Get(global, str(2));
+            return value.has_value() ? text(*value) : JS_UNDEFINED;
+        }
+        if (op == "set") return number(storage.Set(global, str(2), str(3)) ? 1 : 0);
+        if (op == "delete") return number(storage.Delete(global, str(2)) ? 1 : 0);
+        if (op == "clear") { storage.Clear(global); return number(1); }
+        return JS_UNDEFINED;
+    }
     case kNative_video: {
         const auto key = str(0);
         const auto op  = str(1);
         const bool present = rt_ != nullptr && rt_->NodeHasVideoTexture(key);
+        if (op == "exists") return number(present ? 1 : 0);
         if (op == "rate") return number(present ? static_cast<double>(rt_->NodeVideoTextureRate(key)) : 1.0);
+        if (op == "loop") return number(! present || rt_->NodeVideoTextureLoop(key) ? 1 : 0);
         if (! present) return number(0);
         if (op == "play") return number(rt_->PlayNodeVideoTexture(key) ? 1 : 0);
         if (op == "pause") return number(rt_->PauseNodeVideoTexture(key) ? 1 : 0);
@@ -2270,6 +2288,7 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         if (op == "setTime") return number(rt_->SetNodeVideoTextureCurrentTime(key, num(2)) ? 1 : 0);
         if (op == "duration") return number(rt_->NodeVideoTextureDuration(key));
         if (op == "setRate") return number(rt_->SetNodeVideoTextureRate(key, static_cast<float>(num(2))) ? 1 : 0);
+        if (op == "setLoop") return number(rt_->SetNodeVideoTextureLoop(key, num(2) != 0.0) ? 1 : 0);
         return number(0);
     }
     case kNative_audioMark:
@@ -2313,10 +2332,95 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         LOG_INFO("script asked for the user shortcut '%s' (bound to '%s')", name.c_str(), value.c_str());
         return JS_UNDEFINED;
     }
+    case kNative_bone: {
+        // bone(layer, op, ref, values): the puppet bone methods (B-D8). `ref` is an index or a
+        // bone name (its first exact match); matrices travel as 16 column-major numbers.
+        if (rt_ == nullptr) return JS_NULL;
+        const auto layer = str(0);
+        const auto op    = str(1);
+        const auto bone_of = [&](int i) -> int32_t {
+            if (i < argc && JS_IsString(argv[i])) return rt_->PuppetBoneIndex(layer, str(i));
+            const double d = num(i);
+            return std::isfinite(d) && d >= -2147483648.0 && d <= 2147483647.0 ? static_cast<int32_t>(d) : -1;
+        };
+        const auto values = [&](int i, uint32_t want, std::vector<double>& out) {
+            out.assign(want, 0.0);
+            if (i >= argc || ! JS_IsArray(argv[i])) return false;
+            for (uint32_t k = 0; k < want; ++k) {
+                JSValue item = JS_GetPropertyUint32(ctx, argv[i], k);
+                double  d    = 0.0;
+                if (JS_ToFloat64(ctx, &d, item) < 0 && JS_HasException(ctx)) JS_FreeValue(ctx, JS_GetException(ctx));
+                out[k] = d;
+                JS_FreeValue(ctx, item);
+            }
+            return true;
+        };
+        if (op == "count") return number(rt_->PuppetBoneCount(layer));
+        // getBoneIndex 0x140210790 takes a name only.
+        if (op == "index") return number(argc > 2 && JS_IsString(argv[2]) ? rt_->PuppetBoneIndex(layer, str(2)) : -1);
+        if (op == "parent") return number(rt_->PuppetBoneParentIndex(layer, bone_of(2)));
+        if (op == "world" || op == "local") {
+            const auto space = op == "world" ? SceneRuntimeContext::PuppetBoneSpace::World
+                                             : SceneRuntimeContext::PuppetBoneSpace::Local;
+            const auto m = rt_->PuppetBoneTransform(layer, bone_of(2), space);
+            if (! m.has_value()) return JS_NULL;
+            JSValue out = JS_NewArray(ctx);
+            for (uint32_t i = 0; i < 16; ++i) JS_SetPropertyUint32(ctx, out, i, JS_NewFloat64(ctx, m->data()[i]));
+            return out;
+        }
+        if (op == "setWorld" || op == "setLocal") {
+            std::vector<double> m;
+            if (! values(3, 16, m)) return boolean(false);
+            linalg::Matrix4d matrix;
+            for (uint32_t i = 0; i < 16; ++i) matrix.data()[i] = m[i];
+            const auto space = op == "setWorld" ? SceneRuntimeContext::PuppetBoneSpace::World
+                                                : SceneRuntimeContext::PuppetBoneSpace::Local;
+            return boolean(rt_->SetPuppetBoneTransform(layer, bone_of(2), space, matrix));
+        }
+        if (op == "impulse") {
+            std::vector<double> v;
+            values(3, 6, v);
+            return boolean(rt_->ApplyPuppetBoneImpulse(layer, bone_of(2), linalg::Vector3d(v[0], v[1], v[2]),
+                                                       linalg::Vector3d(v[3], v[4], v[5])));
+        }
+        // With no bone named nothing is reset (resetBonePhysicsSimulation 0x140210E10, B-D2.3).
+        if (op == "reset") return boolean(rt_->ResetPuppetBoneSimulation(layer, has(2) ? bone_of(2) : -1));
+        if (op == "shapeIndex") return number(argc > 2 && JS_IsString(argv[2])
+            ? rt_->PuppetBlendShapeIndex(layer, str(2)) : -1);
+        if (op == "shapeWeight" || op == "setShapeWeight") {
+            int32_t shape = -1;
+            if (argc > 2 && JS_IsString(argv[2])) shape = rt_->PuppetBlendShapeIndex(layer, str(2));
+            else if (argc > 2 && JS_IsNumber(argv[2])) {
+                const double index = num(2);
+                if (std::isfinite(index) && index >= 0 && index <= std::numeric_limits<int32_t>::max())
+                    shape = static_cast<int32_t>(index);
+            }
+            if (op == "shapeWeight") {
+                const auto weight = rt_->PuppetBlendShapeWeight(layer, shape);
+                // D6 leaves the native float return slot untouched for an unknown
+                // index/name; the wrapper's numeric default is zero (WE probe).
+                return number(weight.value_or(0.0f));
+            }
+            if (argc <= 3 || !JS_IsArray(argv[3])) return boolean(false);
+            JSValue item = JS_GetPropertyUint32(ctx, argv[3], 0);
+            double weight = 0;
+            const int result = JS_ToFloat64(ctx, &weight, item);
+            JS_FreeValue(ctx, item);
+            if (result < 0) {
+                if (JS_HasException(ctx)) JS_FreeValue(ctx, JS_GetException(ctx));
+                return boolean(false);
+            }
+            return boolean(rt_->SetPuppetBlendShapeWeight(layer, shape, float(weight)));
+        }
+        return JS_NULL;
+    }
+    case kNative_isCamera:
+        return boolean(rt_ != nullptr && rt_->IsCameraLayer(str(0)));
     case kNative_rotateObjectSpace:
         if (rt_ != nullptr) rt_->RotateNodeObjectSpace(str(0), vec3(1));
         return JS_UNDEFINED;
     case kNative_effectVisible: return boolean(rt_ != nullptr && rt_->EffectObjectVisible(str(0)));
+    case kNative_effectExists: return boolean(rt_ != nullptr && rt_->HasEffectObject(str(0)));
     case kNative_setEffectVisible:
         if (rt_ != nullptr) rt_->SetEffectObjectVisible(str(0), flag(1));
         return JS_UNDEFINED;
@@ -2344,16 +2448,23 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         for (uint32_t i = 0; i < values.size(); ++i) JS_SetPropertyUint32(ctx, out, i, JS_NewFloat64(ctx, values[i]));
         return out;
     }
+    case kNative_effectMaterialByName:
+        return number(rt_ != nullptr ? rt_->EffectMaterialIndexByName(str(0), str(1)) : -1);
+    case kNative_executeMaterialFunction:
+        return boolean(rt_ != nullptr && rt_->RunEffectFunction(str(0), str(1)));
+    case kNative_setMaterialProperty:
     case kNative_setMaterialConstant: {
-        if (rt_ == nullptr || argc < 4 || ! JS_IsArray(argv[3])) return boolean(false);
-        JSValue  length_val = JS_GetPropertyStr(ctx, argv[3], "length");
+        const bool property = id == kNative_setMaterialProperty;
+        const int array_index = property ? 2 : 3;
+        if (rt_ == nullptr || argc <= array_index || ! JS_IsArray(argv[array_index])) return boolean(false);
+        JSValue  length_val = JS_GetPropertyStr(ctx, argv[array_index], "length");
         uint32_t length     = 0;
         JS_ToUint32(ctx, &length, length_val);
         JS_FreeValue(ctx, length_val);
-        if (length == 0 || length > 16) return boolean(false);
-        std::vector<float> values(length, 0.0f);
+        if (length == 0 || length > (property ? 4u : 16u)) return boolean(false);
+        std::array<float, 16> values {};
         for (uint32_t i = 0; i < length; ++i) {
-            JSValue item = JS_GetPropertyUint32(ctx, argv[3], i);
+            JSValue item = JS_GetPropertyUint32(ctx, argv[array_index], i);
             double  d    = 0.0;
             if (JS_ToFloat64(ctx, &d, item) >= 0 && std::isfinite(d)) {
                 values[i] = static_cast<float>(d);
@@ -2362,10 +2473,20 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
             }
             JS_FreeValue(ctx, item);
         }
+        const std::span<const float> lanes(values.data(), length);
+        if (property) return boolean(rt_->SetEffectMaterialProperty(str(0), str(1), lanes, flag(3)));
         const double index = num(1);
         return boolean(index >= 0 &&
                        rt_->SetEffectMaterialConstant(
-                           str(0), static_cast<std::size_t>(index), str(2), values));
+                           str(0), static_cast<std::size_t>(index), str(2), lanes));
+    }
+    case kNative_cursorData: {
+        const auto event = rt_ != nullptr ? rt_->CursorEventForLayer(str(0),flag(1))
+                                           : SceneRuntimeContext::CursorEventData {};
+        const auto& value = event.local_position;
+        JSValue out = array({value.x(), value.y(), value.z()});
+        if (event.hit_box) JS_SetPropertyUint32(ctx,out,3,text(*event.hit_box));
+        return out;
     }
     case kNative_timeOfDay: {
         const auto value = LocalTimeOfDay(std::chrono::system_clock::now());
@@ -2518,11 +2639,8 @@ void DispatchCursor(ProgramCore& core, const ScriptProgramCapabilities& caps, Sc
     auto& e = *core.engine;
     CallScope scope(e, core.runtime, e.limits.call_budget_ms);
     e.RefreshHost(host);
-    const auto& local = host.cursor_local_position;
     e.Call(&core.guard, kCursorEntries[index], kLibCursorEvent,
-           { core.Prog(), JS_NewInt32(e.ctx, index), JS_NewInt32(e.ctx, host.cursor_button),
-             JS_NewBool(e.ctx, local.has_value()), JS_NewFloat64(e.ctx, local ? local->x() : 0.0),
-             JS_NewFloat64(e.ctx, local ? local->y() : 0.0) },
+           { core.Prog(), JS_NewInt32(e.ctx, index), JS_NewInt32(e.ctx, host.cursor_button) },
            e.limits.call_budget_ms);
 }
 
@@ -2972,16 +3090,25 @@ void ScriptEngine::RunResizeScreenCallbacks(const ScriptHostContext& host_contex
     e.Call(nullptr, "resizeScreen", kLibResizeListeners, {}, e.limits.call_budget_ms);
 }
 
-void ScriptEngine::NotifyAnimationLayerEnded(const ScriptHostContext& host_context,
-                                             std::string_view layer_name, int animation_layer_index) {
+void ScriptEngine::NotifyAnimationLayerEnded(const ScriptHostContext& host_context, std::string_view layer_name,
+                                             int animation_layer_serial, bool removed) {
     if (m_context == nullptr || ! m_context->ready) return;
     auto&     e = *m_context;
     CallScope scope(e, nullptr, e.limits.call_budget_ms);
     e.RefreshHost(host_context);
     e.Call(nullptr, "layer-ended notice", kLibNotifyEnded,
            { JS_NewStringLen(e.ctx, layer_name.data(), layer_name.size()),
-             JS_NewInt32(e.ctx, animation_layer_index) },
+             JS_NewInt32(e.ctx, animation_layer_serial), JS_NewBool(e.ctx, removed) },
            e.limits.call_budget_ms);
+}
+
+void ScriptEngine::NotifyVideoEnded(const ScriptHostContext& host_context, std::string_view layer_name) {
+    if (m_context == nullptr || ! m_context->ready) return;
+    auto&     e = *m_context;
+    CallScope scope(e, nullptr, e.limits.call_budget_ms);
+    e.RefreshHost(host_context);
+    e.Call(nullptr, "video-ended notice", kLibNotifyVideoEnded,
+           { JS_NewStringLen(e.ctx, layer_name.data(), layer_name.size()) }, e.limits.call_budget_ms);
 }
 
 } // namespace wallpaper
