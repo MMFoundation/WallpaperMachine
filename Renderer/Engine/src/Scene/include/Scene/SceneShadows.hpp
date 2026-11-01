@@ -42,8 +42,9 @@ inline constexpr std::string_view kShadowAtlas = "_rt_shadowAtlas";
 inline const std::string kLightCookieAlias = "_alias_lightCookie";
 /// A submesh of a shadow-casting node that has no caster material.
 inline constexpr uint32_t kNoShadowCasterSlot = UINT32_MAX;
-/// A caster's slope-scaled depth bias and its clamp, in depth units. Negative: toward the
-/// far plane of the atlas's reversed depth, away from the light.
+/// A caster's depth bias: the slope-scale factor that multiplies the primitive's depth
+/// slope, and the clamp on the resulting bias, in depth units. Negative: toward the far
+/// plane of the atlas's reversed depth, away from the light.
 inline constexpr float kShadowCasterSlopeBias = -2.0f;
 inline constexpr float kShadowCasterBiasClamp = -0.01f;
 
