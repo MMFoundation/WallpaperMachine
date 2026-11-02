@@ -16373,6 +16373,8 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                     encodes.blit_passes += counts.blit_passes;
                     encodes.loaded_passes += counts.loaded_passes;
                     encodes.opening_copies += counts.opening_copies;
+                    encodes.stored_depth_attachments += counts.stored_depth_attachments;
+                    encodes.stored_multisample_attachments += counts.stored_multisample_attachments;
                     draw_cpu_ms += cpu_after - cpu_before;
                     ++measured;
                 }
@@ -16391,11 +16393,14 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             char encode_line[384];
             std::snprintf(encode_line, sizeof(encode_line),
                           "%.1f render passes/frame (%.1f on the scene output, %.1f loading their target, "
-                          "%.1f opening with a copy), %.1f blits/frame, %.2f ms CPU per drawFrame",
+                          "%.1f opening with a copy; %.1f storing depth, %.1f storing samples), "
+                          "%.1f blits/frame, %.2f ms CPU per drawFrame",
                           double(encodes.render_passes) / measured,
                           double(encodes.scene_output_passes) / measured,
                           double(encodes.loaded_passes) / measured,
                           double(encodes.opening_copies) / measured,
+                          double(encodes.stored_depth_attachments) / measured,
+                          double(encodes.stored_multisample_attachments) / measured,
                           double(encodes.blit_passes) / measured, draw_cpu_ms / measured);
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << encode_line << std::endl;
             // How often the host would have built the render graph again, and which kind of
@@ -18637,10 +18642,14 @@ void main() {
 namespace
 {
 
-/// Restores the load elision, whatever a test set it to.
+/// Restores both attachment switches, whatever a test set them to.
 struct RestoreAttachmentSwitches
 {
-    ~RestoreAttachmentSwitches() { MetalRender::SetOverwriteLoadElisionForTests(true); }
+    ~RestoreAttachmentSwitches()
+    {
+        MetalRender::SetOverwriteLoadElisionForTests(true);
+        MetalRender::SetAttachmentStoreElisionForTests(true);
+    }
 };
 
 /// Every frame's scene output of one run and its last frame's encode counts.
@@ -18650,13 +18659,14 @@ struct AttachmentRun
     MetalRender::FrameEncodeCountsForTests counts;
 };
 
-/// Draws `frames` production frames of `project` with the load elision as given, on a fresh
-/// parse and renderer, so two runs differ only by the switch.
+/// Draws `frames` production frames of `project` with the two switches as given, on a fresh
+/// parse and renderer, so two runs differ only by the switches.
 AttachmentRun DrawWithAttachmentSwitches(const std::filesystem::path& project, const std::filesystem::path& cache,
-                                         bool elide_loads, int frames,
+                                         bool elide_loads, bool elide_stores, int frames,
                                          const std::function<void(Scene&)>& adjust = {})
 {
     MetalRender::SetOverwriteLoadElisionForTests(elide_loads);
+    MetalRender::SetAttachmentStoreElisionForTests(elide_stores);
     AttachmentRun run;
     LoadedScene   loaded;
     std::string   error;
@@ -18691,14 +18701,14 @@ AttachmentRun DrawWithAttachmentSwitches(const std::filesystem::path& project, c
     return run;
 }
 
-/// Draws a fixture with the switch off and then on, and checks that every frame is the same.
+/// Draws a fixture with one switch off and then on, and checks that every frame is the same.
 void ExpectSameFramesEitherWay(const std::filesystem::path& project, const std::filesystem::path& root,
-                               AttachmentRun& off, AttachmentRun& on,
+                               bool stores, AttachmentRun& off, AttachmentRun& on,
                                const std::function<void(Scene&)>& adjust = {})
 {
     constexpr int kFrames = 3;
-    off = DrawWithAttachmentSwitches(project, root / "cache-off", false, kFrames, adjust);
-    on  = DrawWithAttachmentSwitches(project, root / "cache-on", true, kFrames, adjust);
+    off = DrawWithAttachmentSwitches(project, root / "cache-off", stores, ! stores, kFrames, adjust);
+    on  = DrawWithAttachmentSwitches(project, root / "cache-on", true, true, kFrames, adjust);
     ASSERT_EQ(off.frames.size(), std::size_t(kFrames));
     ASSERT_EQ(on.frames.size(), std::size_t(kFrames));
     for (int frame = 0; frame < kFrames; ++frame) {
@@ -18787,7 +18797,7 @@ TEST_F(MetalSceneDraw, AnEffectChainThatOverwritesItsBuffersOpensThemWithAClearA
         ChainEffect {},
     });
     AttachmentRun off, on;
-    ExpectSameFramesEitherWay(project, root, off, on);
+    ExpectSameFramesEitherWay(project, root, false, off, on);
     EXPECT_GE(off.counts.loaded_passes, 2u) << "the chain's later buffer writes were expected to load";
     EXPECT_EQ(on.counts.loaded_passes + 2u, off.counts.loaded_passes)
         << "the two overwriting effect passes still load their buffers";
@@ -18813,7 +18823,7 @@ TEST_F(MetalSceneDraw, AnEffectPassThatMayLeaveTexelsAloneKeepsLoadingItsBuffer)
         const auto root    = root_ / ("overwrite-negative-" + name);
         const auto project = WriteEffectChainFixture(root, { ChainEffect {}, second, ChainEffect {}, ChainEffect {} });
         AttachmentRun off, on;
-        ExpectSameFramesEitherWay(project, root, off, on);
+        ExpectSameFramesEitherWay(project, root, false, off, on);
         EXPECT_GE(off.counts.loaded_passes, 2u);
         EXPECT_EQ(on.counts.loaded_passes + 1u, off.counts.loaded_passes) << "only the third effect may skip its load";
     }
@@ -18861,7 +18871,7 @@ TEST_F(MetalSceneDraw, ABlendedOverwriteOfAFloatBufferKeepsItsLoad)
         layout["objects"][0]["effects"] = { { { "file", "effects/twice.json" }, { "visible", true } } };
         std::ofstream(root / "layout.json") << layout;
         AttachmentRun off, on;
-        ExpectSameFramesEitherWay(project, root, off, on);
+        ExpectSameFramesEitherWay(project, root, false, off, on);
         EXPECT_GE(off.counts.loaded_passes, 1u);
         ASSERT_GE(off.counts.loaded_passes, on.counts.loaded_passes);
         cleared[format] = off.counts.loaded_passes - on.counts.loaded_passes;
@@ -18893,8 +18903,66 @@ TEST_F(MetalSceneDraw, ATradedReaderThatOverwritesTheSceneNeedsNoOpeningCopy)
                                   { "angles", { 0, 0, 0 } }, { "visible", true } });
     std::ofstream(root / "layout.json") << layout;
     AttachmentRun off, on;
-    ExpectSameFramesEitherWay(project, root, off, on);
+    ExpectSameFramesEitherWay(project, root, false, off, on);
     EXPECT_EQ(off.counts.blit_passes, 0u) << "the copy was expected to trade textures, not blit";
     EXPECT_EQ(off.counts.opening_copies, 1u);
     EXPECT_EQ(on.counts.opening_copies, 0u) << "the overwriting reader still opened with a copy";
+}
+
+TEST_F(MetalSceneDraw, AttachmentsNothingReadsAgainAreLeftUnstoredAndDrawTheSamePicture)
+{
+    // Depth: two depth-tested models with a card drawn between them, so the second model's
+    // render pass loads the depth the first left; only that first render pass stores it.
+    // Multisampled colour: lenses that read the scene split its render passes; every one but
+    // the last keeps its samples for the next, the last (whose samples the next frame clears)
+    // only resolves. Every frame must be the same with the stores elided or not.
+    RestoreAttachmentSwitches restore;
+    {
+        SCOPED_TRACE("depth");
+        const auto root    = root_ / "store-depth";
+        const auto project = WriteSpotShadowFixture(root, false);
+        auto material = nlohmann::json::parse(std::ifstream(root / "materials/caster.json"));
+        material["passes"][0]["depthtest"]  = "enabled";
+        material["passes"][0]["depthwrite"] = "enabled";
+        std::ofstream(root / "materials/caster.json") << material;
+        std::ofstream(root / "shaders/caster.frag")
+            << "uniform float g_Time;\nvoid main() { gl_FragColor = vec4(0.5, frac(g_Time), 0.0, 1.0); }\n";
+        auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+        auto first  = layout["objects"][1];
+        auto second = first;
+        first["origin"]  = { 160, 128, 150 };
+        second["id"]     = 4;
+        second["name"]   = "far caster";
+        second["origin"] = { 176, 128, 100 };
+        // The card between the two models has no depth, so the second starts a render pass.
+        layout["objects"] = nlohmann::json::array({ first, layout["objects"][0], second, layout["objects"][2] });
+        std::ofstream(root / "layout.json") << layout;
+        AttachmentRun off, on;
+        ExpectSameFramesEitherWay(project, root, true, off, on);
+        EXPECT_EQ(off.counts.stored_depth_attachments, 2u);
+        EXPECT_EQ(on.counts.stored_depth_attachments, 1u)
+            << "the first model's depth is read by the second and must be stored; the second's is read by nothing";
+        EXPECT_EQ(on.counts.render_passes, off.counts.render_passes);
+    }
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (device == nil || ! [device supportsTextureSampleCount:4]) GTEST_SKIP() << "4x MSAA unavailable";
+    {
+        SCOPED_TRACE("multisampled colour");
+        const auto root    = root_ / "store-msaa";
+        const auto project = WriteFeedbackFixture(root);
+        auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+        layout["general"]["bloom"] = false;
+        std::ofstream(root / "layout.json") << layout;
+        std::ofstream(root / "shaders/feedback_lens.frag")
+            << TimedFragment("vec4(1.0 - c.r, frac(c.g + g_Time), 1.0 - c.b, 1.0)");
+        const auto multisample = [](Scene& scene) {
+            scene.renderTargets[std::string(SpecTex_Default)].sample_count = 4;
+        };
+        AttachmentRun off, on;
+        ExpectSameFramesEitherWay(project, root, true, off, on, multisample);
+        ASSERT_GE(off.counts.stored_multisample_attachments, 2u) << "the lenses were expected to split the scene's render passes";
+        EXPECT_EQ(off.counts.stored_multisample_attachments, off.counts.scene_output_passes);
+        EXPECT_EQ(on.counts.stored_multisample_attachments + 1u, off.counts.stored_multisample_attachments)
+            << "only the scene's last render pass may leave its samples unstored";
+    }
 }

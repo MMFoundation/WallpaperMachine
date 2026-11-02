@@ -1453,6 +1453,18 @@ std::atomic<bool>& OverwriteLoadElisionSwitch()
     return enabled;
 }
 
+/// Whether a depth or multisampled colour attachment is left unstored when no later pass of the
+/// frame, nor the next frame, reads what it holds. On by default;
+/// `WALLPAPER_MACHINE_ATTACHMENT_STORE_ELISION=0` stores them all, for an A/B in one binary.
+std::atomic<bool>& AttachmentStoreElisionSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_ATTACHMENT_STORE_ELISION");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
 /// Colour formats every texel of which is finite, so a blend factor of zero times what a texel
 /// held is zero. A float format may hold an infinity or NaN that zero does not cancel.
 bool HoldsOnlyFiniteValues(MTLPixelFormat format)
@@ -1984,10 +1996,32 @@ struct MetalRender::Impl
         uint32_t loaded_passes { 0 };
         /// Render passes that open with the copy of a traded feedback image.
         uint32_t opening_copies { 0 };
+        /// Render passes that store their depth attachment, and their multisampled colour.
+        uint32_t stored_depth_attachments { 0 };
+        uint32_t stored_multisample_attachments { 0 };
     };
     EncodeCounts frame_encodes;
     EncodeCounts last_frame_encodes;
 
+    // ---- attachment lifetimes in a frame
+    /// Per depth attachment, the last execution position of a pass that attaches it, and the
+    /// depth images that are also named targets something may sample.
+    std::unordered_map<const void*, std::size_t> depth_last_use;
+    std::unordered_set<const void*>              sampled_depths;
+    /// Per multisampled colour attachment, the last execution position of a pass that renders
+    /// into it, and whether its samples can be read by the next frame: its first pass in the
+    /// frame does anything but clear it.
+    struct MultisampleUse
+    {
+        std::size_t last { 0 };
+        bool        carried { true };
+    };
+    std::unordered_map<const void*, MultisampleUse> multisample_use;
+    void planAttachmentStores();
+    /// Whether a later pass, or the next frame, reads what the attachment holds after the
+    /// render pass whose last pass is at execution `position`.
+    bool depthNeededAfter(id<MTLTexture> depth, std::size_t position) const;
+    bool multisampleNeededAfter(id<MTLTexture> attachment, std::size_t position) const;
 
     // ---- per-pass encode inputs
     /// Each description's colour target and, when it depth-tests, its depth
@@ -3439,6 +3473,54 @@ void MetalRender::Impl::refreshPassTargets(Scene& scene)
     }
     scene_output_key    = scene.ResolveRenderTargetName(SpecTex_Default);
     scene_output_target = lookup(targets, scene_output_key);
+    planAttachmentStores();
+}
+
+void MetalRender::Impl::planAttachmentStores()
+{
+    depth_last_use.clear();
+    sampled_depths.clear();
+    multisample_use.clear();
+    // Every pass counts, drawn this frame or not: a hidden or reused later user still has to
+    // find what the earlier ones left.
+    for (std::size_t position = 0; position < descriptions.size(); ++position) {
+        const auto  i    = passAt(position);
+        const auto& desc = descriptions[i];
+        if (i < pass_depths.size() && pass_depths[i] != nil)
+            depth_last_use[(__bridge const void*)pass_depths[i]] = position;
+        if (desc.samples <= 1 || desc.depth_only || desc.target_key.empty()) continue;
+        const auto ms = ms_targets.find(desc.target_key);
+        if (ms == ms_targets.end() || ms->second == nil) continue;
+        const auto [use, first] = multisample_use.try_emplace((__bridge const void*)ms->second);
+        use->second.last = position;
+        if (! first) continue;
+        // The next frame's first pass on these samples clears them only when it is a clear that
+        // always runs: a conditional clear, or a draw with no input, may not.
+        const bool clears = desc.load_action == MetalLoadAction::Clear && ! desc.conditional_scene_clear &&
+                            (i >= prepared.size() || ! prepared[i].unproduced_input);
+        use->second.carried = ! clears;
+    }
+    // A depth image a pass may also sample (the volumetrics depth) is kept whatever the passes do.
+    for (const auto& [key, texture] : targets) {
+        (void)key;
+        if (texture != nil && depth_last_use.contains((__bridge const void*)texture))
+            sampled_depths.insert((__bridge const void*)texture);
+    }
+}
+
+bool MetalRender::Impl::depthNeededAfter(id<MTLTexture> depth, std::size_t position) const
+{
+    const auto* key = (__bridge const void*)depth;
+    if (sampled_depths.contains(key)) return true;
+    const auto last = depth_last_use.find(key);
+    // Each frame's first render pass on a depth attachment clears it, so nothing carries over.
+    return last == depth_last_use.end() || last->second > position;
+}
+
+bool MetalRender::Impl::multisampleNeededAfter(id<MTLTexture> attachment, std::size_t position) const
+{
+    const auto use = multisample_use.find((__bridge const void*)attachment);
+    return use == multisample_use.end() || use->second.last > position || use->second.carried;
 }
 
 void MetalRender::Impl::prepareOverwriteProof(const ScenePassDescription& desc, PreparedPass& out,
@@ -6741,10 +6823,33 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             MetalCullMode               cull_mode { kSceneCullMode };
             /// A new encoder starts with no depth bias.
             std::array<float, 2>        depth_bias {};
+            /// The execution position of the last pass encoded into it.
+            std::size_t                 last_position { 0 };
+            /// Store actions left open (`MTLStoreActionUnknown`) until the render pass ends,
+            /// when it is known whether anything reads the depth or the samples afterwards.
+            bool                        depth_store_open { false };
+            bool                        depth_resolves { false };
+            bool                        multisample_store_open { false };
         };
         OpenRenderPass open;
-        const auto close_pass = [&open]() {
-            if (open.encoder != nil) [open.encoder endEncoding];
+        const auto close_pass = [&open, &impl]() {
+            if (open.encoder != nil) {
+                if (open.depth_store_open) {
+                    const bool keep = impl.depthNeededAfter(open.depth, open.last_position);
+                    [open.encoder setDepthStoreAction:open.depth_resolves
+                        ? (keep ? MTLStoreActionStoreAndMultisampleResolve : MTLStoreActionMultisampleResolve)
+                        : (keep ? MTLStoreActionStore : MTLStoreActionDontCare)];
+                    if (keep) ++impl.frame_encodes.stored_depth_attachments;
+                }
+                if (open.multisample_store_open) {
+                    const bool keep = impl.multisampleNeededAfter(open.target, open.last_position);
+                    [open.encoder setColorStoreAction:keep ? MTLStoreActionStoreAndMultisampleResolve
+                                                           : MTLStoreActionMultisampleResolve
+                                              atIndex:0];
+                    if (keep) ++impl.frame_encodes.stored_multisample_attachments;
+                }
+                [open.encoder endEncoding];
+            }
             open = OpenRenderPass {};
         };
         // Depth attachments already cleared this frame; a later render pass
@@ -6921,6 +7026,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 const bool overwrites = ! opens_with_copy && ! desc.depth_only &&
                                         desc.load_action == MetalLoadAction::Load &&
                                         impl.passOverwritesTarget(i, attachment, uniform_base);
+                const bool defer_stores = AttachmentStoreElisionSwitch().load(std::memory_order_relaxed);
                 MTLRenderPassDescriptor* descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
                 if (desc.depth_only) {
                     // A shadow caster: its target is the depth attachment, no colour.
@@ -6934,11 +7040,19 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                         opens_with_copy ? MTLLoadActionDontCare
                         : overwrites    ? MTLLoadActionClear
                                         : static_cast<MTLLoadAction>(desc.load_action);
-                    // Always stored: a later pass, the presentation blit or a poster
-                    // capture reads this target after the pass ends.
-                    descriptor.colorAttachments[0].storeAction = desc.samples > 1
-                        ? MTLStoreActionStoreAndMultisampleResolve : MTLStoreActionStore;
-                    if (desc.samples > 1) descriptor.colorAttachments[0].resolveTexture = target;
+                    // The resolved image is always stored: a later pass, the presentation blit
+                    // or a poster capture reads this target after the pass ends. The samples
+                    // of a multisampled one only while something reads them again, which is
+                    // known when the render pass ends.
+                    if (desc.samples > 1) {
+                        descriptor.colorAttachments[0].storeAction =
+                            defer_stores ? MTLStoreActionUnknown : MTLStoreActionStoreAndMultisampleResolve;
+                        descriptor.colorAttachments[0].resolveTexture = target;
+                        open.multisample_store_open = defer_stores;
+                        if (! defer_stores) ++impl.frame_encodes.stored_multisample_attachments;
+                    } else {
+                        descriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+                    }
                     const auto& clear = overwrites ? std::array<float, 4> {} : desc.clear_color;
                     descriptor.colorAttachments[0].clearColor =
                         MTLClearColorMake(clear[0], clear[1], clear[2], clear[3]);
@@ -6954,17 +7068,26 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                     descriptor.depthAttachment.texture     = depth;
                     descriptor.depthAttachment.loadAction  =
                         first ? MTLLoadActionClear : MTLLoadActionLoad;
-                    descriptor.depthAttachment.storeAction = MTLStoreActionStore;
                     descriptor.depthAttachment.clearDepth  = 1.0;
-                    if (desc.samples > 1 && desc.target_key == std::string(SpecTex_Default) &&
-                        impl.targets.contains("_rt_volumetricsBack")) {
+                    const bool resolves = desc.samples > 1 && desc.target_key == std::string(SpecTex_Default) &&
+                                          impl.targets.contains("_rt_volumetricsBack");
+                    if (resolves) {
                         descriptor.depthAttachment.resolveTexture = impl.targets.at("_rt_volumetricsBack");
-                        descriptor.depthAttachment.storeAction = MTLStoreActionStoreAndMultisampleResolve;
                         descriptor.depthAttachment.depthResolveFilter = MTLMultisampleDepthResolveFilterMin;
                     }
+                    // Each frame's first render pass on a depth attachment clears it, so its
+                    // contents only matter to a later render pass of the same frame.
+                    descriptor.depthAttachment.storeAction = defer_stores ? MTLStoreActionUnknown
+                        : resolves ? MTLStoreActionStoreAndMultisampleResolve : MTLStoreActionStore;
+                    open.depth_store_open = defer_stores;
+                    open.depth_resolves   = resolves;
+                    if (! defer_stores) ++impl.frame_encodes.stored_depth_attachments;
                 }
                 open.encoder = [command renderCommandEncoderWithDescriptor:descriptor];
-                if (open.encoder == nil) return abandon_frame("a render pass could not be started");
+                if (open.encoder == nil) {
+                    open.depth_store_open = open.multisample_store_open = false;
+                    return abandon_frame("a render pass could not be started");
+                }
                 open.target           = attachment;
                 open.resolved         = target;
                 open.depth            = depth;
@@ -6997,6 +7120,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                     ++impl.frame_encodes.opening_copies;
                 }
             }
+            open.last_position = position;
 
             if (draws) {
                 id<MTLRenderCommandEncoder> encoder = open.encoder;
@@ -7508,8 +7632,9 @@ MetalRender::FrameEncodeCountsForTests MetalRender::LastFrameEncodeCountsForTest
 {
     if (pImpl == nullptr) return {};
     const auto& last = pImpl->last_frame_encodes;
-    return { last.render_passes, last.scene_output_passes, last.blit_passes, last.loaded_passes,
-             last.opening_copies };
+    return { last.render_passes,  last.scene_output_passes,      last.blit_passes,
+             last.loaded_passes, last.opening_copies,            last.stored_depth_attachments,
+             last.stored_multisample_attachments };
 }
 
 void MetalRender::SetTargetSharingForTests(bool enabled) { TargetSharingSwitch().store(enabled); }
@@ -7517,6 +7642,11 @@ void MetalRender::SetTargetSharingForTests(bool enabled) { TargetSharingSwitch()
 void MetalRender::SetOverwriteLoadElisionForTests(bool enabled)
 {
     OverwriteLoadElisionSwitch().store(enabled);
+}
+
+void MetalRender::SetAttachmentStoreElisionForTests(bool enabled)
+{
+    AttachmentStoreElisionSwitch().store(enabled);
 }
 
 uint64_t MetalRender::RenderTargetBytesForTests() const

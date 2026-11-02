@@ -164,6 +164,14 @@ device.
   `MetalOverwrite.*` (`metal_backend_test`). On a real scene, `WE_TEST_METAL_PROJECTS`
   prints render passes loading their target per frame, and
   `WALLPAPER_MACHINE_OVERWRITE_LOAD_ELISION=0` must give the same poster PPM.
+- **Depth and multisampled stores** — `MetalSceneDraw.AttachmentsNothingReadsAgainAreLeftUnstoredAndDrawTheSamePicture`:
+  two depth-tested models with a card between them store depth only from the first
+  model's render pass, which the second loads; with 4x MSAA, lenses that split the
+  scene's render passes keep their samples for the next one and only the last render
+  pass leaves them unstored. Frames match `MetalRender::SetAttachmentStoreElisionForTests(false)`.
+  A depth image something samples (the volumetrics depth) is always stored, a hidden
+  or reused later user counts as a user, and samples the next frame may load (its
+  first pass on them does not clear) are kept.
 - **Per-frame geometry upload** — `MetalSceneDraw.GeometryRebuiltEveryFrameIsUploadedAndDrawnFromItsOwnSlot`,
   across more frames than there are in-flight slots. Zero live particles must
   draw nothing rather than fail.

@@ -281,6 +281,9 @@ public:
         /// caster's depth image), and those that opened with a traded feedback image's copy.
         uint32_t loaded_passes { 0 };
         uint32_t opening_copies { 0 };
+        /// Render passes that stored their depth attachment, and their colour samples.
+        uint32_t stored_depth_attachments { 0 };
+        uint32_t stored_multisample_attachments { 0 };
     };
     [[nodiscard]] FrameEncodeCountsForTests LastFrameEncodeCountsForTests() const;
 
@@ -310,6 +313,10 @@ public:
     /// target clears it instead of loading it, from the next frame on. On unless
     /// `WALLPAPER_MACHINE_OVERWRITE_LOAD_ELISION=0`; process-wide, test-only.
     static void SetOverwriteLoadElisionForTests(bool enabled);
+    /// Whether depth and multisampled colour attachments are left unstored when nothing
+    /// reads them again, from the next frame on. On unless
+    /// `WALLPAPER_MACHINE_ATTACHMENT_STORE_ELISION=0`; process-wide, test-only.
+    static void SetAttachmentStoreElisionForTests(bool enabled);
 
     /// How many shader sources this process has handed to the Metal compiler.
     ///

@@ -2512,7 +2512,9 @@ render scale, animation speed or audio-response subscription:
   every channel written and blending that replaces the texel (an 8-bit target when it
   is `One`/`Zero` rather than off). A traded copy's reader that passes the same test
   also skips the copy it opened with. Anything unproven keeps its load, and the clear
-  is to transparent black, so the picture is the same byte for byte. The switch is in
+  is to transparent black, so the picture is the same byte for byte. Depth and
+  multisampled colour attachments are no longer stored after the last render pass of
+  the frame that uses them (each frame's first one clears them). The switches are in
   [power benchmarking](../testing/power-benchmark.md#ab-comparison-entry-points).
 
 The contracts and tests behind each item are in
