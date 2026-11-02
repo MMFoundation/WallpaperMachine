@@ -2503,8 +2503,9 @@ render scale, animation speed or audio-response subscription:
   measurement. This affects storage statistics only.
 - On Native Metal, a render pass opened by a draw that provably writes every texel of
   its target clears the target instead of loading it from memory. Effect passes
-  alternate between two buffers, so from the third effect of a layer on every pass
-  used to read its whole buffer back before drawing over all of it. The proof is
+  alternate between two buffers, so every effect but a layer's first and last (and
+  a multi-pass effect writing its own buffer again) used to read its whole buffer
+  back before drawing over all of it. The proof is
   general: the shader compiler reports that the fragment shader never discards and
   that the vertex position is the mesh's own position, as given or through one
   matrix uniform; the draw's two triangles, through this frame's matrix, must cover
