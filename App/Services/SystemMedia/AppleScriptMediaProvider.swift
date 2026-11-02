@@ -274,7 +274,7 @@ final class NSAppleScriptNowPlayingRunner: AppleScriptRunning {
     /// script that contacts no application.
     init(
         session: URLSession = .shared,
-        compile: @escaping @Sendable (String) -> NSAppleScript? = NSAppleScriptNowPlayingRunner.compile
+        compile: @escaping @Sendable (String) -> NSAppleScript? = { NSAppleScriptNowPlayingRunner.compile($0) }
     ) {
         self.session = session
         scripts = AppleScriptCache(compile: compile)
