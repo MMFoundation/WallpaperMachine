@@ -271,8 +271,9 @@ the build changed) or a build with a reference from outside the harness, such as
 Wallpaper Engine's own frames. With `WE_TEST_COMPARE_HASH_EVERY` or
 `WE_TEST_COMPARE_HASH_FRAMES` it hashes the final composition of sampled draws as
 well, at the render scale and scaling mode the host pushes
-(`WE_TEST_COMPARE_RENDER_SCALE`, `WE_TEST_COMPARE_SCALING`), so two builds can be held
-to byte identity at the picture the user sees. A difference found by comparing
+(`WE_TEST_COMPARE_RENDER_SCALE`, `WE_TEST_COMPARE_SCALING`): that is the pixel-identity
+check `scripts/perf_bench.py identity` runs (see
+[power benchmarking](power-benchmark.md#headless-ab-driver)). A difference found by comparing
 `offscreen_scene_probe` with the poster harness is not yet a renderer
 difference: the two harnesses differ in the ways below.
 
@@ -940,7 +941,9 @@ before and after. `EnergyAccounting.*` pins the coalition differencing, the
 histogram quantiles and the surface list. Counting is off unless asked for and
 scene optimisation on, as shipped; `WE_TEST_ENERGY_CACHE` keeps the shader and
 pipeline caches between runs. Run one scene per process, warm the caches with an
-unmeasured run first and alternate the settings under comparison. A process launched from
+unmeasured run first and alternate the settings under comparison:
+`scripts/perf_bench.py cost` does all of that
+([power benchmarking](power-benchmark.md#headless-ab-driver)). A process launched from
 a terminal shares a coalition with that terminal, so its coalition figures are the
 terminal's; one launched as an app of its own has its own. GPU time is workload, not
 energy. It changes nothing on

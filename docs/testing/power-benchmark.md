@@ -282,6 +282,86 @@ cost 29.4 W GPU against Ultra's 25.1 W in the same session (about 3,620 frames
 each, both windows marked contended, one window each), the extended-range surface
 and its linear combine included.
 
+## Headless A/B driver
+
+`python3 scripts/perf_bench.py` turns the headless harnesses into repeatable
+before/after numbers for scene wallpapers at the user's own settings. It needs no
+privileges, sets no wallpaper, opens no window and writes nothing under the user's
+wallpaper library, so it is safe to run unattended. It measures the renderer's own
+work, not a desktop: WindowServer, the panel and the display are not in it.
+
+- **Builds and variants.** `--bin LABEL=DIR` names the
+  `artifacts/renderer/bin/tests` directory `scripts/check_renderer.py` built in any
+  worktree (it needs `unchanged_present_test` and `metal_scene_draw_smoke`).
+  `--variant LABEL=BIN_LABEL:ENV=VALUE,...` is that set run with extra environment,
+  so a switch from [A/B comparison entry points](#ab-comparison-entry-points) is
+  measured within one binary. Each set is copied into scratch bundles under
+  `artifacts/perf-bench/bin/<label>/` with the bundle id
+  `dev.wallpapermachine.perfbench.<label>.<binary>` (a UI element with App Nap off),
+  so every set compiles its Metal source once into a cache of its own.
+  `perf_bench.py clean` deletes the bundles, the scene caches and those ids'
+  Metal cache folders.
+- **Settings.** Read from `~/Library/Application Support/WallpaperMachine`:
+  `config.toml`'s render scale, frame-rate cap, 2D scene resolution and scene
+  quality, and `wallpapers/<id>.json`'s property overrides and per-display scaling,
+  matched to the surfaces as the app matches them: the first surface is the main
+  display, and an entry saved for a display's identity applies to the connected
+  display of that surface's size with the same vendor, model and serial number.
+  `--surfaces` defaults to `3840x2160@2+3456x2234@2`, drawn at once. A setting the harness does not apply (MetalFX upscaling, on-demand
+  rendering, video plane sampling, the system audio an audio-reactive scene hears, a
+  scaling factor other than 1) is printed and recorded. Video and web wallpapers are
+  skipped with their reason: only a desktop run measures them.
+- **`identity A B`.** Each wallpaper on each surface goes through the poster
+  harness at those settings, seeded, with text settled and 40 warm-up ticks, and
+  every 60th of 600 draws is hashed (`--frames`, `--hash-every`). A runs twice:
+  frames that differ between A's two runs are excluded as nondeterministic (scripts
+  and particles that read the wall clock), and B must match A on every other one.
+  The first frame that differs is drawn again by both, its differing pixels and
+  largest channel difference are counted, and the pictures are deleted.
+- **`cost A B`.** The energy test runs on all surfaces at once as fresh processes:
+  one unmeasured warm run per condition, then `--pairs` pairs (default 5) in ABBA
+  order, each with an 8 s warm-up and a 30 s window (`--warmup`, `--window`), at
+  least 20 s apart (`--cooldown`) and only once `pmset -g therm` reports no warning.
+  Each run is launched with `open -W -n -g` as an app of its own, so its coalition
+  figures are its own; `--launch direct` runs it as a foreground child instead,
+  sharing this terminal's coalition. `--saturated` adds, per surface, the timed
+  back-to-back draws of `WE_TEST_METAL_TIMING` (`sat_*` metrics: GPU and CPU ms per
+  draw, passes, blits and target bytes), and `--counters` turns the renderer
+  counters on in both conditions.
+- **Rejected runs.** A test that failed, failed frames, a held scene, other
+  coalitions keeping the GPU busy for more than 25 % of the window, a thermal state
+  above nominal, or a frame rate more than 1 % off its condition's median: the run
+  and its pair are left out and listed with the reason.
+- **Statistics and verdicts.** Per metric, the median and IQR of each condition,
+  and the paired difference B − A of each pair with its median and a 95 % bootstrap
+  interval (10,000 resamples, seeded). The verdict is `saving` or `regression` only
+  with at least three pairs, an interval that excludes zero and a median difference
+  larger than the A/A floor; a change in frame rate is `throughput up` or `down`,
+  never a saving.
+- **`aa A`.** A against a copy of itself in another folder; the 95th percentile of
+  |A − A′| per wallpaper and metric is recorded as `aa_noise_floor`, which
+  `cost --noise-floor <report.json>` uses.
+- **Output.** `artifacts/perf-bench/<time>-<kind>/report.json` (the
+  [manifest](#configuration-manifest), each build's source tree, commit, SHA-256
+  and Homebrew libraries, the conditions, the resolved settings, every run's record
+  and metrics, identity results, rejected runs and skips) and `report.csv` with one
+  row per wallpaper, surfaces, condition and metric (median, IQR, paired delta,
+  interval, verdict) for charting. `perf_bench.py report <dir>` prints the table and
+  writes the CSV again.
+
+The metrics are `cpu_mw` (the process's CPU energy), `cpu_p_mw` (on performance
+cores), `cpu_ms_per_s`, idle and interrupt wakeups per second, `gpu_own_busy_pct`,
+`gpu_ms_per_frame`, `cb_ms_p95`, `gpu_coalition_mw` (the process's own coalition,
+absent when it shares one), `gpu_all_mw`, peak and end footprint, and frames
+completed and presented per second.
+
+An app launched this way runs every thread at the QoS it asks for; a bundle marked
+`LSBackgroundOnly` instead had every thread clamped to legacy QoS, render threads
+included, which is why the bundles are UI elements. In a session with several
+compilers running, the windowless probe launched as an app ran on efficiency cores
+only, where the same probe started from a terminal also used performance cores:
+compare CPU figures only between runs of one launch method, never with the app's.
+
 ## Runtime counters
 
 Two counter surfaces answer two different questions, and a power claim needs
@@ -354,7 +434,9 @@ decode-correctness defect.
 | `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` | Native Metal lets targets never alive together share images, and traded copies share a small set | Every target keeps an image of its own; the picture is byte-identical either way, the target memory is not |
 | Settings → Performance → Quality → 2D scene resolution (`scene_resolution` under `[quality]`) | Display resolution: a 2D scene is rasterized at the size it is presented at | Canvas size: rasterized at the authored canvas and stretched; less GPU time and memory |
 
-Changes that are not switchable
+`scripts/perf_bench.py` measures such a switch within one binary: `cost on off
+--bin on=<dir> --variant off=on:WALLPAPER_MACHINE_FEEDBACK_COPIES=1` (see
+[Headless A/B driver](#headless-ab-driver)). Changes that are not switchable
 (correctness and resource-lifetime fixes) need a separate build directory or
 worktree. Whichever way two versions are compared, they need isolated
 `WALLPAPER_MACHINE_HOME` directories and must be measured serially, never
@@ -425,7 +507,9 @@ saving                    = (old incremental - new incremental) / old incrementa
 The general rule is in [README.md](README.md#authorization-boundary). Without
 `--powermetrics`, `scripts/power_benchmark.py` is safe to run: it reads
 configuration and the counters of processes that are already running, and
-changes nothing. Everything else that produces an actual power number is out of
+changes nothing. `scripts/perf_bench.py` is safe too: it launches its own scratch
+bundles in the background, draws only into layers no window owns, and reads the
+user's settings without writing them. Everything else that produces an actual power number is out of
 scope for routine verification and needs explicit authorization, because it
 requires controlling the desktop, changing the user's wallpaper, or elevated
 sampling:
