@@ -2355,6 +2355,21 @@ unloads. Confirming a match reads the shared texture back once while the scene
 loads; nothing is added per frame. Render targets, pictures a script writes and
 video frames stay per display.
 
+A picture is written into its texture by the CPU, in a layout the GPU reads uncompressed;
+on Apple GPUs only a texture laid out by the GPU itself is losslessly compressed. So every
+newly uploaded plain 2D picture (not a block-compressed one, which is compressed already, and
+not one a script rewrites) is rearranged for sampling once, by one blit queued ahead of the
+first frame that samples it (`optimizeContentsForGPUAccess`). The values sampled do not
+change, and a display that compares its own bytes with the texture (above) waits for the
+blit and reads back the bytes written. Sampling an illustrated 4068x1979 layer at three
+quarters of its size took 0.042 instead of 0.125 ms of GPU time on an M5 Pro, a picture of
+random noise, which does not compress, the same either way; a scene loading 65 pictures
+costs 65 such blits once, and nothing per frame. `WALLPAPER_MACHINE_OPTIMIZE_IMAGES=0`
+leaves pictures as written, for an A/B ([power benchmarking](../testing/power-benchmark.md#ab-comparison-entry-points));
+`MetalImageLevels.ANewUploadIsOptimizedForSamplingOnceAndStillComparesEqual`,
+`.OnlyAPlainPictureUploadedWithAQueueAndTheSwitchOnIsOptimized` and
+`SharedPictures.AnOptimizedPictureDrawsTheSameBytesAsOneLeftAsWritten` cover it.
+
 An authored `hdr` scene with bloom on selects the HDR path on either scene backend
 when post-processing is Ultra or Display HDR: overbright color is preserved in
 half-float targets and bloom is HDR. Enabled uses LDR bloom and Disabled draws none;

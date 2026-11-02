@@ -16761,6 +16761,8 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
                     }
                 };
             }
+            const uint64_t uploads_before   = MetalRender::ImageUploadsForTests();
+            const uint64_t optimized_before = MetalRender::ImagesOptimizedForTests();
             RendererCounters counters;
             auto picture = DrawWithRenderer(scene, width, height, frame_count, frame_step,
                                             pace, scale_factor, &input,
@@ -16771,6 +16773,13 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
                             picture.width, picture.height, watch.last_draw,
                             Sha256Hex(picture.rgb).c_str());
             }
+            // What loading the pictures cost the GPU besides the draws: one blit for each
+            // picture rearranged for sampling (`WALLPAPER_MACHINE_OPTIMIZE_IMAGES`).
+            std::printf("[ COMPARE  ] %s: %llu picture upload(s), %llu optimized for sampling\n",
+                        scene_id.c_str(),
+                        static_cast<unsigned long long>(MetalRender::ImageUploadsForTests() - uploads_before),
+                        static_cast<unsigned long long>(MetalRender::ImagesOptimizedForTests() -
+                                                        optimized_before));
             std::fflush(stdout);
             if (counted) {
                 // Reports still on their way when the renderer closed are not

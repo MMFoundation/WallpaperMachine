@@ -345,6 +345,11 @@ public:
     [[nodiscard]] static std::size_t SharedImageEntriesForTests();
     /// Picture slots uploaded to a GPU by any renderer since the process started.
     [[nodiscard]] static uint64_t ImageUploadsForTests();
+    /// Of those, the ones rearranged for sampling (`optimizeContentsForGPUAccess`).
+    [[nodiscard]] static uint64_t ImagesOptimizedForTests();
+    /// Whether uploads from now on are rearranged for sampling. On unless
+    /// `WALLPAPER_MACHINE_OPTIMIZE_IMAGES=0`; process-wide, test-only.
+    static void SetImageOptimizationForTests(bool enabled);
 
     /// Whether the pipeline archive can supply every pipeline this process has
     /// created so far, asked strictly.

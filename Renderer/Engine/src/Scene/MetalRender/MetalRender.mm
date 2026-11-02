@@ -3088,6 +3088,7 @@ id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string
         request.bytes_per_pixel = bytes_per_pixel;
         request.block_bytes     = block_bytes;
         request.depth           = static_cast<uint32_t>(std::max(slot.depth, 1));
+        request.queue           = queue;
         id<MTLTexture> texture = SharedImageCache::shared().import(request, [&]() -> id<MTLTexture> {
             return MakeImageTexture(device, format, slot, bytes_per_pixel, block_bytes);
         });
@@ -7732,6 +7733,11 @@ const void* MetalRender::ImportedImageForTests(const std::string& key, std::size
 uint64_t MetalRender::SharedImageBytesForTests() { return SharedImageCache::shared().liveBytes(); }
 std::size_t MetalRender::SharedImageEntriesForTests() { return SharedImageCache::shared().entries(); }
 uint64_t MetalRender::ImageUploadsForTests() { return SharedImageCache::shared().uploads(); }
+uint64_t MetalRender::ImagesOptimizedForTests() { return SharedImageCache::shared().optimized(); }
+void MetalRender::SetImageOptimizationForTests(bool enabled)
+{
+    SharedImageCache::setOptimizationForTests(enabled);
+}
 
 bool MetalRender::PipelineArchiveServesEverySeenPipelineForTests()
 {
