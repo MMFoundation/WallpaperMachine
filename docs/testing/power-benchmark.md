@@ -96,9 +96,19 @@ start while more than one copy runs. `--app-pid PID` names the copy to measure a
 refuses while any other runs; a copy that starts during the window is listed under
 `measurement.app_guard.appeared_during_window`, and the window is to be rejected.
 
+`--home DIR`, the measured copy's `WALLPAPER_MACHINE_HOME`, attaches the diagnostics
+report that copy logged under `DIR/Logs/<launch>/` (the launch folder named at the
+process start; with `--app-pid`, never another launch's) as `measurement.diagnostics`:
+the report's own `window elapsed_ms` and, per renderer surface, its counters with draws,
+present requests and shown frames per second over that measured window. It waits up to
+`--home-wait` seconds (60) after the window for the report, because the two windows
+start independently. `--output FILE` writes the document there instead of a new file
+under `artifacts/power/`.
+
 A desktop run (which needs authorization, see [Authorization
 boundary](#authorization-boundary)) is taken serially, with the display set and
-power source unchanged across a comparison: quit the app with an Apple Event and
+power source unchanged across a comparison; [Desktop A/B runs](#desktop-ab-runs)
+automates the procedure below. By hand: quit the app with an Apple Event and
 wait until it has exited (`open` can fail with `-600` for a few seconds after
 that; `kill -TERM <pid>` quits it the same way, but a second signal ends it at once,
 perhaps before the desktop picture is restored, so wait for the exit), launch with
@@ -490,6 +500,52 @@ the framework, so they are reported as unavailable rather than invented.
 `AVPlayerLooper` keeps more than one copy of its template item queued to make
 the loop seam gapless, so the queued-item count is reported as the system gives
 it and is never claimed to be one with no pre-buffering.
+
+## Desktop A/B runs
+
+`scripts/power_ab.py` runs the desktop procedure above for two arms: two copies of
+the app (`--arm A <old>.app --arm B <new>.app`, built once and never moved, since
+compiled Metal is cached per app location), or one copy with a switch from the
+table above (`--arm A <app> --arm B <app> --arm-env B KEY=VALUE`). It is an
+authorized desktop run: it quits the running app, plays a wallpaper on the real
+displays and, with a password, runs `powermetrics`. `--dry-run` prints every
+command, path and the generated `config.toml` and executes nothing; read it first.
+
+- **Preconditions**: AC power, Low Power Mode off and no thermal CPU limit, or it
+  refuses before changing anything. A running Parallels VM is refused unless
+  `--suspend-vm` suspends it; an open Chrome is warned about. Brightness, hidden
+  windows and a still pointer remain the operator's.
+- **Isolated homes**: each arm gets its own home and preferences under one temporary
+  folder on the same volume: APFS clones (`cp -c`) of `Library/<id>` and
+  `SceneAssets`, a copy of `wallpapers/<id>.json` (saved properties and scaling),
+  `Library/.starter-installed`, and a `config.toml` with the user's `[quality]`
+  (and its subtables), `[power]`, `[experimental]`, `[primary_display]` and
+  `[[monitors]]`, the wallpaper set on the displays asked for (`--display-uuid`,
+  default all) and `""` elsewhere. A path-backed defaults suite sets `welcomeSeen`,
+  English and `writeDesktopPicture` off, so the user's desktop picture is never
+  rewritten. Nothing is written under the user's app-support folder.
+- **Order**: the running app is quit (one SIGTERM, then a wait for the exit; never a
+  second signal), each arm gets one unmeasured warm launch of `--settle` seconds,
+  then `B0, A, B, B0, B, A, B0, ...` for `--pairs` pairs (3). Every launch is `open
+  -n -g -a <app>` with the home, the suite and `WALLPAPER_MACHINE_PANEL_AT_LAUNCH=0`;
+  a measured one adds `WALLPAPER_MACHINE_DIAGNOSTICS=<window>` and `_DELAY=<settle>`,
+  and `power_benchmark.py --measure <window> --app-pid <pid> --home <home>` starts at
+  launch plus `--settle` (120 s; window 60 s). A `B0` window has every copy quit.
+- **Password**: read once from `--sudo-password-file` or stdin, checked with `sudo -S
+  -v`, kept in memory and given only to sudo's stdin; never in arguments, the
+  environment, the output or the results. Without one, package power is not sampled.
+- **Results** in `artifacts/power-ab/<timestamp>/`: each window's document,
+  `config.toml`, `plan.json` and `summary.json`, where each arm window's WindowServer,
+  all-coalition, package and system figures are taken minus the mean of the `B0`
+  windows around its pair (the app's coalition is its own), with per-arm medians
+  and the paired `B - A` differences. Read them by the [comparison
+  rules](#comparison-rules): an A/A run of one app is the noise floor.
+- **Afterwards**, also after a failure: any copy it started is quit, the app that was
+  running is opened again from where it was found (`open -g -a <app> --env
+  WALLPAPER_MACHINE_PANEL_AT_LAUNCH=0`) and the temporary folder is deleted.
+
+A fresh home has no Workshop cache, so the first launch can fetch metadata; it is the
+same for both arms, and the warm launch absorbs most of it.
 
 ## Condition matrix
 

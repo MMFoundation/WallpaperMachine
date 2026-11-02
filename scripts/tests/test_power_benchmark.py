@@ -465,7 +465,115 @@ class AppSelectionTests(unittest.TestCase):
         self.assertIn("--app-pid", completed.stderr)
 
 
+FIXTURE_LOG = Path(__file__).resolve().parent / "fixtures/diagnostics-launch-log.txt"
+
+
+class DiagnosticsIngestionTests(unittest.TestCase):
+    """The measured copy's own diagnostics report, read from its home's log."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name)
+
+    def launch(self, name, text=None):
+        directory = self.home / "Logs" / name
+        directory.mkdir(parents=True)
+        if text is not None:
+            (directory / "0.log").write_text(text)
+        return directory
+
+    @staticmethod
+    def epoch(stamp):
+        return time.mktime(time.strptime(stamp, power_benchmark.LAUNCH_LOG_STAMP))
+
+    def test_the_report_is_read_from_the_log(self):
+        reports = power_benchmark.diagnostics_reports(FIXTURE_LOG.read_text())
+        self.assertEqual(len(reports), 1)
+        report = power_benchmark.parse_diagnostics(reports[0])
+        self.assertEqual(report["window_elapsed_ms"], 60012)
+        self.assertTrue(report["presentation_feedback"])
+        self.assertEqual([surface["surface"] for surface in report["surfaces"]],
+                         ["scene/1/handle1/gen1", "scene/4/handle2/gen1"],
+                         "the application's own decision rows are not renderer surfaces")
+        first = report["surfaces"][0]
+        self.assertEqual((first["draws_executed"], first["present_requests"], first["presented_frames"]),
+                         (3600, 3598, 3590))
+        self.assertEqual(first["present_gaps_2_vsync"], 3580)
+        self.assertEqual(first["draws_per_second"], 59.99)
+        self.assertEqual(first["presented_frames_per_second"], 59.82)
+        self.assertEqual(report["lines"][-1], "presented_frames=available")
+
+    def test_an_unfinished_report_is_not_taken_for_one(self):
+        text = FIXTURE_LOG.read_text()
+        cut = text.index("diagnostics process")
+        self.assertEqual(power_benchmark.diagnostics_reports(text[:cut]), [])
+        # A report cut short and then a complete one: only the complete one counts.
+        reports = power_benchmark.diagnostics_reports(text[:cut] + text)
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0][0], "window elapsed_ms=60012")
+
+    def test_a_report_without_feedback_has_no_shown_rate(self):
+        report = power_benchmark.parse_diagnostics([
+            "window elapsed_ms=30000",
+            "surface=scene/1/handle1/gen1 draws_executed=900 present_requests=900",
+            "presented_frames=unavailable",
+        ])
+        self.assertFalse(report["presentation_feedback"])
+        self.assertNotIn("presented_frames_per_second", report["surfaces"][0])
+        self.assertEqual(report["surfaces"][0]["present_requests_per_second"], 30.0)
+
+    def test_the_launch_log_is_the_one_the_measured_process_started(self):
+        self.launch("20261103-100000")
+        measured = self.launch("20261103-100501")
+        self.launch("20261103-101500")
+        self.launch("not-a-launch")
+        self.assertEqual(power_benchmark.launch_log_directory(self.home, self.epoch("20261103-100500")), measured)
+        self.assertEqual(power_benchmark.launch_log_directory(self.home).name, "20261103-101500")
+        self.assertIsNone(power_benchmark.launch_log_directory(self.home, self.epoch("20261103-120000")),
+                          "no launch of that process means no report, not another launch's")
+
+    def test_the_report_is_waited_for(self):
+        directory = self.launch("20261103-100501")
+        clock = SimpleNamespace(now=0.0, slept=0)
+
+        def sleep(seconds):
+            clock.now += seconds
+            clock.slept += 1
+            if clock.slept == 3:
+                (directory / "0.log").write_text(FIXTURE_LOG.read_text())
+
+        found = power_benchmark.home_diagnostics(self.home, self.epoch("20261103-100500"), 60,
+                                                 clock=lambda: clock.now, sleep=sleep)
+        self.assertTrue(found["measured"])
+        self.assertEqual(found["log_directory"], str(directory))
+        self.assertEqual(clock.slept, 3)
+
+    def test_a_report_that_never_arrives_is_reported_missing(self):
+        self.launch("20261103-100501", "2026-11-03T10:05:01 INFO x: nothing here\n")
+        clock = SimpleNamespace(now=0.0)
+        found = power_benchmark.home_diagnostics(
+            self.home, None, 10, clock=lambda: clock.now,
+            sleep=lambda seconds: setattr(clock, "now", clock.now + seconds))
+        self.assertFalse(found["measured"])
+        self.assertIn("20261103-100501", found["reason"])
+        self.assertGreaterEqual(clock.now, 10)
+
+
 class InvocationTests(unittest.TestCase):
+    def test_output_writes_the_document_where_it_is_asked_to(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "nested/window.json"
+            document = {"schema_version": 2, "workspace": {"dirty": False},
+                        "build": {"status": "unknown", "processes": {}}, "conditions": []}
+            with mock.patch.object(sys, "argv", ["power_benchmark.py", "--output", str(target)]), \
+                    mock.patch.object(power_benchmark, "manifest", return_value=document), \
+                    mock.patch.object(power_benchmark, "POWER_ARTIFACTS", Path(directory) / "unused"), \
+                    mock.patch("builtins.print"):
+                self.assertEqual(power_benchmark.main(), 0)
+            self.assertEqual(json.loads(target.read_text()), document)
+            self.assertFalse((Path(directory) / "unused").exists())
+
     def test_print_only_writes_no_artifact_and_emits_the_manifest(self):
         before = set(power_benchmark.POWER_ARTIFACTS.glob("*.json")) \
             if power_benchmark.POWER_ARTIFACTS.is_dir() else set()

@@ -24,7 +24,9 @@ from this process's stdin to sudo's stdin.
 The `app` role is every process named WallpaperMachine, so a second copy running
 beside the build under test would be summed into it. A window refuses to start
 when more than one runs, and `--app-pid PID` names the one to measure and
-refuses when any other runs. See docs/testing/power-benchmark.md.
+refuses when any other runs. `--home DIR` attaches the runtime diagnostics
+report that copy wrote under DIR/Logs for the same window. See
+docs/testing/power-benchmark.md.
 """
 from __future__ import annotations
 
@@ -112,6 +114,13 @@ PROC_PIDCOALITIONINFO = 20
 LIST_SINGLE_TYPE = 2
 RESOURCE_COALITION = 0
 GPU_CONTENTION_SHARE = 0.25
+# The diagnostics report `RuntimeDiagnosticsSession` logs when its window ends:
+# each line is logged as "diagnostics <line>", headed by the measured window and
+# closed by the presentation-feedback line.
+DIAGNOSTICS_MARKER = " diagnostics "
+DIAGNOSTICS_FIRST = "window elapsed_ms="
+DIAGNOSTICS_LAST = "presented_frames="
+LAUNCH_LOG_STAMP = "%Y%m%d-%H%M%S"
 
 
 class AppSelectionError(Exception):
@@ -686,6 +695,110 @@ def measure(seconds: int, use_powermetrics: bool, sudo_password: str | None,
     }
 
 
+def launch_log_directory(home: Path, started_epoch: float | None = None) -> Path | None:
+    """The `Logs/<launch>` folder a run of the app with this home writes.
+
+    Each launch writes its own folder, named by its local start time. With the
+    process start time known, the folder of that launch: the first one named at
+    or after it, within a minute. Without it, the newest folder.
+    """
+    stamped = []
+    for entry in (home / "Logs").glob("*"):
+        if not entry.is_dir():
+            continue
+        try:
+            stamped.append((time.mktime(time.strptime(entry.name, LAUNCH_LOG_STAMP)), entry))
+        except ValueError:
+            continue
+    if not stamped:
+        return None
+    stamped.sort()
+    if started_epoch is None:
+        return stamped[-1][1]
+    after = [entry for stamp, entry in stamped if started_epoch - 1 <= stamp <= started_epoch + 60]
+    return after[0] if after else None
+
+
+def diagnostics_reports(text: str) -> list[list[str]]:
+    """Every complete diagnostics report in a log, oldest first, as its report lines."""
+    reports, current = [], None
+    for line in text.splitlines():
+        marker = line.find(DIAGNOSTICS_MARKER)
+        if marker < 0:
+            continue
+        body = line[marker + len(DIAGNOSTICS_MARKER):].strip()
+        if body.startswith(DIAGNOSTICS_FIRST):
+            current = [body]
+        elif current is not None:
+            current.append(body)
+            # The per-surface rows carry presented_frames= too; only the
+            # report's own closing line is that field alone.
+            if body.startswith(DIAGNOSTICS_LAST) and " " not in body:
+                reports.append(current)
+                current = None
+    return reports
+
+
+def report_fields(line: str) -> dict:
+    """`key=value` pairs of one report line; numbers are read as integers."""
+    fields = {}
+    for token in line.split():
+        key, separator, value = token.partition("=")
+        if not separator:
+            continue
+        fields[key] = int(value) if value.isdigit() else value
+    return fields
+
+
+def parse_diagnostics(lines: list[str]) -> dict:
+    """The structured content of one diagnostics report.
+
+    `surfaces` are the renderer's rows (`surface=<backend>/<display>/handle<n>/gen<n>`),
+    with rates over the report's own measured window; the application's decision
+    rows (`surface=<kind>/<display>/gen<n>`) stay in `lines`.
+    """
+    window = report_fields(lines[0]).get("elapsed_ms")
+    surfaces = [report_fields(line) for line in lines
+                if line.startswith("surface=") and "/handle" in line.split(" ", 1)[0]]
+    seconds = window / 1000 if isinstance(window, int) and window > 0 else None
+    for surface in surfaces:
+        if seconds is None:
+            continue
+        for key, rate in (("draws_executed", "draws_per_second"),
+                          ("present_requests", "present_requests_per_second"),
+                          ("presented_frames", "presented_frames_per_second")):
+            if isinstance(surface.get(key), int):
+                surface[rate] = round(surface[key] / seconds, 2)
+    closing = report_fields(lines[-1]).get("presented_frames")
+    return {"window_elapsed_ms": window, "presentation_feedback": closing == "available",
+            "surfaces": surfaces, "lines": lines}
+
+
+def home_diagnostics(home: Path, started_epoch: float | None, wait_seconds: float,
+                     clock=time.monotonic, sleep=time.sleep) -> dict:
+    """The diagnostics report of the measured launch, waiting for it to be written.
+
+    The app's diagnostics window and this script's window start independently,
+    so the report can land a few seconds after this window ends.
+    """
+    deadline = clock() + wait_seconds
+    while True:
+        directory = launch_log_directory(home, started_epoch)
+        if directory is not None:
+            reports = []
+            for log in sorted(directory.glob("*.log")):
+                try:
+                    reports += diagnostics_reports(log.read_text(errors="replace"))
+                except OSError:
+                    continue
+            if reports:
+                return {"measured": True, "log_directory": str(directory), **parse_diagnostics(reports[-1])}
+        if clock() >= deadline:
+            where = str(directory) if directory else str(home / "Logs")
+            return {"measured": False, "reason": f"no complete diagnostics report in {where}"}
+        sleep(min(2.0, max(0.0, deadline - clock())))
+
+
 def positive_seconds(text: str) -> int:
     value = int(text)
     if value <= 0:
@@ -724,7 +837,7 @@ def attach_measurement(document: dict, condition: str, seconds: int, measurement
         "system_power": measurement["system_power"],
         "package_power": measurement["package_power"],
     }
-    for optional in ("app_guard",):
+    for optional in ("app_guard", "diagnostics"):
         if optional in measurement:
             document["measurement"][optional] = measurement[optional]
 
@@ -744,10 +857,16 @@ def main():
                         help="Read the sudo password for powermetrics from one line of stdin.")
     parser.add_argument("--app-pid", type=int, metavar="PID",
                         help="Measure this WallpaperMachine process as the app; refuse if any other runs.")
+    parser.add_argument("--home", type=Path, metavar="DIR",
+                        help="WALLPAPER_MACHINE_HOME of the measured app: attach its diagnostics report.")
+    parser.add_argument("--home-wait", type=positive_seconds, default=60, metavar="SECONDS",
+                        help="How long to wait after the window for that report (default 60).")
+    parser.add_argument("--output", type=Path, metavar="FILE",
+                        help="Write the document here instead of a new file under artifacts/power/.")
     args = parser.parse_args()
     if args.measure is None:
-        if args.condition or args.powermetrics or args.sudo_password_stdin or args.app_pid:
-            parser.error("--condition, --powermetrics, --sudo-password-stdin and --app-pid need --measure")
+        if args.condition or args.powermetrics or args.sudo_password_stdin or args.app_pid or args.home:
+            parser.error("--condition, --powermetrics, --sudo-password-stdin, --app-pid and --home need --measure")
     elif args.condition is None:
         parser.error("--measure needs --condition")
     if args.sudo_password_stdin and not args.powermetrics:
@@ -761,14 +880,22 @@ def main():
         except AppSelectionError as error:
             print(f"{MARK.missing} Not measured: {error}", file=sys.stderr)
             return 2
+        if args.home is not None:
+            stamp = process_stamp(args.app_pid) if args.app_pid is not None else None
+            measurement["diagnostics"] = home_diagnostics(
+                args.home, stamp["started_epoch"] if stamp else None, args.home_wait)
         attach_measurement(document, args.condition, args.measure, measurement)
     if args.print_only:
         print(json.dumps(document, indent=2))
         return 0
 
-    POWER_ARTIFACTS.mkdir(parents=True, exist_ok=True)
-    stem = "measure" if args.measure is not None else "manifest"
-    path = POWER_ARTIFACTS / (datetime.now().strftime(f"{stem}-%Y%m%d-%H%M%S") + ".json")
+    if args.output is not None:
+        path = args.output
+        path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        POWER_ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        stem = "measure" if args.measure is not None else "manifest"
+        path = POWER_ARTIFACTS / (datetime.now().strftime(f"{stem}-%Y%m%d-%H%M%S") + ".json")
     path.write_text(json.dumps(document, indent=2))
     if args.measure is None:
         print(f"{MARK.step} Configuration manifest: {path}")
@@ -802,6 +929,17 @@ def main():
                   f"GPU {power['gpu_mw']}, ANE {power['ane_mw']}) over {power['samples']} samples")
         else:
             print(f"{MARK.warn} Package power not measured: {power['reason']}")
+        diagnostics = report.get("diagnostics")
+        if diagnostics is not None and diagnostics["measured"]:
+            for surface in diagnostics["surfaces"]:
+                shown = surface.get("presented_frames_per_second")
+                print(f"{MARK.step} diagnostics {surface.get('surface')}: "
+                      f"{surface.get('draws_per_second')} draws/s, "
+                      f"{surface.get('present_requests_per_second')} presents requested/s, "
+                      f"{'n/a' if shown is None else shown} shown/s over "
+                      f"{diagnostics['window_elapsed_ms']} ms")
+        elif diagnostics is not None:
+            print(f"{MARK.warn} Diagnostics not attached: {diagnostics['reason']}")
         appeared = report.get("app_guard", {}).get("appeared_during_window", [])
         if appeared:
             print(f"{MARK.missing} Reject this window: WallpaperMachine {', '.join(map(str, appeared))} "
