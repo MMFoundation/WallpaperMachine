@@ -456,6 +456,12 @@ device.
   the one second of slack fixed, a seek on its way was asked for again each second, and the
   600 frame clip did not land at 5 s in six seconds (six requests) and took three requests and
   3.2 to 3.7 s from 9.9 s on.
+  `VideoSourceClockSlowSeek.AClockSentBackKeepsThePictureShownUntilTheSeekDelivers` sends a clock
+  at 3 s back to the start of a decoder that takes 600 ms to deliver after a seek, then draws
+  every few milliseconds: no draw may take 100 ms, the picture at 3 s stays on offer until the
+  seek delivers, the start replaces it then, with one request and no pass counted. Before the
+  fix the clock going back emptied the display and the next draw waited out the whole seek
+  (600 ms here, two seconds at most).
 - **Consumption decided before import** — `MetalVideoTexture.PlanesOnlyDemandEncodesNoConversion`,
   `.MixedDemandConvertsOnceAndStillPublishesThePlanes` and
   `.ADemandChangeReImportsTheSameGenerationInsteadOfWaiting`: a frame every

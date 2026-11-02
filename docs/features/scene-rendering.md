@@ -954,10 +954,11 @@ length to the draw that opens it (0.3 to 0.6 s on the 1080p clip, 0.5 to 1.1 s o
 1.4 to 1.5 s on the 60 frame one) and fail once it passed the two seconds an open waits for a
 first frame, as the 4K 60 frame clip's did at 9.9 s and at 19.9 s.
 
-A clock that jumps, as when a script sets a time, is one seek to the new time. A jump forward
-leaves the frame the video had on screen until the seek lands; a jump back by more than two
-frames clears it, and the draw that follows waits, for two seconds at most, for the seek's first
-frame. A seek that is on its way is not made again, because that restarts the decode from the
+A clock that jumps, as when a script sets a time, is one seek to the new time. Either way the
+frame the video had stays on screen until the seek lands, and no draw waits for it. A jump back
+by more than two frames (a script restarting its clip) has the seek's first frame replace that
+frame as soon as it is decoded; a draw that waited for it instead held every layer of the scene
+still for as long as the seek took, up to two seconds. A seek that is on its way is not made again, because that restarts the decode from the
 keyframe and drops what it had decoded: asked for on every draw, a seek that takes longer than a
 draw would never land. It is made again only when the clock goes back before its target, or jumps
 on past it by more than a second beyond the time the seek has been made for, a clock that only
