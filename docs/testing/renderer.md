@@ -176,6 +176,8 @@ Frames, time and surfaces:
 | `WE_TEST_COMPARE_RESOLUTION` | the same test | `display` rasterizes a 2D scene at the size it is presented at on the layer; `canvas`, the default, at the size it was authored at. Perspective scenes and videos ignore it |
 | `WE_TEST_COMPARE_SCALE_FACTOR` | the same test | The layer's backing scale, `1`–`4` (default `1`); with `WE_TEST_COMPARE_SURFACE` it makes a laptop-panel-sized layer |
 | `WE_TEST_COMPARE_SCALING` | the same test | The scaling mode the host pushes: `fill` (the default), `fit`, `fit_blurred`, `stretch` or `none`; anything else fails the test |
+| `WE_TEST_COMPARE_RENDER_SCALE` | the same test | The render scale the host pushes, `0.25`–`1` (default `1`), set on the scene before its graph is built, where the scene wallpaper sets it: the picture the app's render scale setting gives |
+| `WE_TEST_COMPARE_HASH_FRAMES`, `WE_TEST_COMPARE_HASH_EVERY` | the same test | Draws whose final composition is hashed: a JSON array of draw indices, or every k-th draw counting from one (`60` hashes draws 59, 119, …). Each is captured through the poster path (a draw that left the picture as it was is served from that picture, as the host serves an idle wallpaper's) and printed as `[ HASH     ] <scene> <W>x<H> frame=<n> sha256=<hex>`, the last draw too; `<scene>-frame-<n>.ppm` is written only under `WE_TEST_OUTPUT`. Asking for posters changes no picture: the last frame hashes the same with and without it |
 | `WE_TEST_COMPARE_REALTIME` | the same test | Set (any value) to pace the frames in real time, so a script that reads the wall clock (`Date.now()`) sees as much time pass as the scene does on a desktop; unset, the frames run as fast as they draw |
 | `WE_TEST_COMPARE_STOP_AFTER_REBUILD` | the same test | `<n>`: the run ends `n` draws after the first time the host would build the graph again (a script that shows a layer the graph left out does), `WE_TEST_METAL_FRAMES` bounding the wait, and prints the draw the rebuild came before, so a run without one can be drawn to the same scene time. A scene's own scripts cause rebuilds as it starts; `WE_TEST_COMPARE_REBUILD_FROM=<m>` leaves out those before draw `m` |
 | `WE_TEST_COMPARE_REBUILD_AT` | the same test | `<k>`: builds the graph again before draw `k` whether or not the scene asked, as the host does for any change of the graph, so what a rebuild leaves behind (a video's frame, the draw's length) is looked at on a scene that would not rebuild by itself at a draw of your choosing |
@@ -185,6 +187,8 @@ Frames, time and surfaces:
 | `WE_TEST_TEXTURE_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` opts into the production display-sized texture mip policy (a leading mip is dropped only while the next is still at least as long as the surface's longest side, so the level kept covers the surface) without changing raster extent; unset retains all source levels for before/after image and allocation comparisons. Native Metal uses its surface size automatically |
 | `WE_TEST_METAL_SURFACE` | `metal_scene_draw_smoke` | `<width>x<height>` for the surface the native backend rasterizes; defaults to `960x540`. Screen-space shader inputs follow it, so comparing this backend's output with another's is only meaningful when both rasterize the same extent |
 | `WE_TEST_METAL_RESOLUTION`, `WE_TEST_METAL_SCALE_FACTOR` | `metal_scene_draw_smoke` | `display` rasterizes a 2D scene at the size it is presented at on that surface, `canvas` (the default) at the size it was authored at; the scale factor (`1`–`4`, default `1`) is the surface's backing scale. The `render target bytes` line and `WE_TEST_METAL_DUMP_TARGETS=*` then show what the choice costs |
+| `WE_TEST_METAL_RENDER_SCALE` | `metal_scene_draw_smoke` local-project run | The render scale, `0.25`–`1` (default `1`), set before the graph is built; at 0.75 a display-resolution scene's render target bytes fall to about 0.57 of 1's (targets that do not follow the screen keep their size) |
+| `WE_TEST_METAL_TIMING` | the same | Set (not `0`): each draw's command buffers are timed on the GPU from their own start and end, and one `[ COST     ] <scene> {json}` line reports draws after the first: `gpu_ms_p50`, `gpu_ms_p95`, `gpu_ms_mean` (a draw that committed nothing counts 0), `cpu_ms_mean`, command buffers, render passes and blits per draw, render target and device bytes. The draws run back to back, so the GPU stays near its top clock: a work figure, not paced energy |
 
 Allocation, optimisation and dumps:
 
@@ -264,7 +268,11 @@ and is written as `<scene id>.ppm` under `WE_TEST_OUTPUT`. It asserts nothing ab
 the picture: it is a diagnostic for comparing two builds (two runs with the same
 seed, clock and properties give byte-identical pictures, so a difference is what
 the build changed) or a build with a reference from outside the harness, such as
-Wallpaper Engine's own frames. A difference found by comparing
+Wallpaper Engine's own frames. With `WE_TEST_COMPARE_HASH_EVERY` or
+`WE_TEST_COMPARE_HASH_FRAMES` it hashes the final composition of sampled draws as
+well, at the render scale and scaling mode the host pushes
+(`WE_TEST_COMPARE_RENDER_SCALE`, `WE_TEST_COMPARE_SCALING`), so two builds can be held
+to byte identity at the picture the user sees. A difference found by comparing
 `offscreen_scene_probe` with the poster harness is not yet a renderer
 difference: the two harnesses differ in the ways below.
 

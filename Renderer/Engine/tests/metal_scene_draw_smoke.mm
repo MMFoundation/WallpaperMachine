@@ -13,6 +13,7 @@
 /// Creates only private GPU textures and an offscreen layer. No window, no
 /// desktop, no audio device, no screen capture.
 
+#include "support/command_buffer_gpu_time.hpp"
 #include "support/font_assets.hpp"
 #include "support/scene_quality_environment.hpp"
 #include "Runtime/RuntimeImageSource.hpp"
@@ -47,6 +48,7 @@
 #include "WPShaderValueUpdater.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "RenderCommon/ScenePass.hpp"
+#include "RenderCommon/SceneRaster.hpp"
 #include "RenderCommon/SceneToRenderGraph.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
 #include "Shader/SceneMetalVariants.hpp"
@@ -64,6 +66,7 @@
 
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
+#include <CommonCrypto/CommonDigest.h>
 
 
 #include <gtest/gtest.h>
@@ -89,6 +92,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -378,6 +382,13 @@ struct RebuildWatch
     /// one, `rebuilt_at` only the first) and render target resizes.
     int rebuilds { 0 };
     int resizes { 0 };
+    /// Draws whose final composition is wanted on their own, whatever the rest of the run
+    /// does: each draw `sample_at` says yes to is captured through the poster path, waited
+    /// for before the next draw begins, and handed to `sampled` with its index. A draw that
+    /// left the picture as it was has its poster served from that picture, as the host's
+    /// mailbox serves an idle wallpaper's.
+    std::function<bool(int)>                          sample_at;
+    std::function<void(int, const RendererPicture&)> sampled;
 };
 
 /// Draws `scene` with Native Metal on a layer no
@@ -399,7 +410,8 @@ RendererPicture DrawWithRenderer(Scene& scene, uint32_t width, uint32_t height,
                                  double display_scale_factor = 1.0,
                                  tests::SceneProbeControls* input = nullptr,
                                  RendererCounters* counters = nullptr,
-                                 RebuildWatch* watch = nullptr)
+                                 RebuildWatch* watch = nullptr,
+                                 WallpaperScalingMode scaling = WallpaperScalingMode::FILL)
 {
     RendererPicture picture;
     @autoreleasepool {
@@ -454,10 +466,11 @@ RendererPicture DrawWithRenderer(Scene& scene, uint32_t width, uint32_t height,
             return picture;
         }
         // As the host presents a wallpaper: the scaling layout crops the
-        // finished picture to the surface; the camera keeps the canvas's shape,
-        // since the host changes it only for an explicit fill mode, which the
-        // app never sends. Narrowing it too would crop twice.
-        render.SetWallpaperScalingMode(WallpaperScalingMode::FILL);
+        // finished picture to the surface (fill, unless the caller pushes another
+        // mode); the camera keeps the canvas's shape, since the host changes it
+        // only for an explicit fill mode, which the app never sends. Narrowing it
+        // too would crop twice.
+        render.SetWallpaperScalingMode(scaling);
         render.SetWallpaperScalingFactor(1.0);
         render.SetWallpaperFraming(WallpaperFraming {});
         render.SetWallpaperHorizontalFlip(false);
@@ -517,6 +530,8 @@ RendererPicture DrawWithRenderer(Scene& scene, uint32_t width, uint32_t height,
             }
             const bool looking = watch != nullptr && watch->shown && watch->accepted_at < 0 &&
                                  frame >= watch->look_from;
+            const bool sampling =
+                watch != nullptr && watch->sample_at && watch->sampled && watch->sample_at(frame);
             uint64_t   posters_before = 0;
             {
                 std::lock_guard lock(poster_mutex);
@@ -526,7 +541,7 @@ RendererPicture DrawWithRenderer(Scene& scene, uint32_t width, uint32_t height,
                 final_requested      = true;
                 final_posters_before = posters_before;
             }
-            if (frame == last_frame || looking) wanted = true;
+            if (frame == last_frame || looking || sampling) wanted = true;
             // The host does this after scripts: visibility and explicit particle
             // emission/clearing may have changed since the ordinary simulation.
             scene.paritileSys->RebuildVisibleMeshes();
@@ -551,8 +566,28 @@ RendererPicture DrawWithRenderer(Scene& scene, uint32_t width, uint32_t height,
                 }
                 if (! seen.rgb.empty() && watch->shown(seen)) watch->accepted_at = frame;
             }
+            if (sampling && picture.error.empty()) {
+                // A draw that encoded nothing new left the request pending: the host serves
+                // that from the picture already made, and so does this.
+                if (wanted.load()) (void)render.ServicePosterRequest(scene);
+                RendererPicture seen;
+                {
+                    std::unique_lock lock(poster_mutex);
+                    if (poster_arrived.wait_for(lock, std::chrono::seconds(30),
+                                                [&] { return posters > posters_before; })) {
+                        seen.rgb    = picture.rgb;
+                        seen.width  = picture.width;
+                        seen.height = picture.height;
+                    }
+                }
+                if (seen.rgb.empty()) {
+                    picture.error = "draw " + std::to_string(frame) + " delivered no picture";
+                } else {
+                    watch->sampled(frame, seen);
+                }
+            }
         }
-        if (final_requested && watch != nullptr && watch->shown) {
+        if (final_requested && watch != nullptr && (watch->shown || watch->sample_at)) {
             // Earlier posters filled the picture already: the last one is waited for, or the
             // run has no picture rather than an old one.
             std::unique_lock lock(poster_mutex);
@@ -15707,6 +15742,97 @@ SceneQuality QualityFromEnvironment()
     return tests::SceneQualityFromEnvironment();
 }
 
+/// `WE_TEST_METAL_RENDER_SCALE` / `WE_TEST_COMPARE_RENDER_SCALE`: the render
+/// scale the host would push, clamped as the scene wallpaper clamps it. Unset is
+/// 1, the full raster.
+double RenderScaleFromEnvironment(const char* name)
+{
+    const char* text = std::getenv(name);
+    if (text == nullptr) return 1.0;
+    char*        end   = nullptr;
+    const double value = std::strtod(text, &end);
+    if (end == text || *end != '\0' || ! std::isfinite(value) || value <= 0.0) {
+        throw std::runtime_error(std::string(name) + " must be a number above 0");
+    }
+    return std::clamp(value, render::kMinRenderScale, 1.0);
+}
+
+/// The draws the poster harness hashes: `WE_TEST_COMPARE_HASH_FRAMES`, a JSON
+/// array of draw indices, and `WE_TEST_COMPARE_HASH_EVERY=<k>`, every k-th draw
+/// counting from one (draws k-1, 2k-1, ...). Empty when neither is set.
+std::set<int> HashFramesFromEnvironment(int frame_count)
+{
+    std::set<int> frames;
+    if (const char* text = std::getenv("WE_TEST_COMPARE_HASH_FRAMES")) {
+        const auto parsed = nlohmann::json::parse(text, nullptr, false);
+        if (! parsed.is_array()) {
+            throw std::runtime_error("WE_TEST_COMPARE_HASH_FRAMES must be a JSON array of draws");
+        }
+        for (const auto& value : parsed) {
+            if (! value.is_number_integer() || value.get<int>() < 0 ||
+                value.get<int>() >= frame_count) {
+                throw std::runtime_error("WE_TEST_COMPARE_HASH_FRAMES names a draw outside 0.." +
+                                         std::to_string(frame_count - 1));
+            }
+            frames.insert(value.get<int>());
+        }
+    }
+    if (const char* text = std::getenv("WE_TEST_COMPARE_HASH_EVERY")) {
+        char*      end   = nullptr;
+        const long every = std::strtol(text, &end, 10);
+        if (end == text || *end != '\0' || every < 1 || every > 3600) {
+            throw std::runtime_error("WE_TEST_COMPARE_HASH_EVERY must be 1..3600");
+        }
+        for (long frame = every - 1; frame < frame_count; frame += every) {
+            frames.insert(static_cast<int>(frame));
+        }
+    }
+    return frames;
+}
+
+/// `WE_TEST_COMPARE_SCALING`: the scaling mode the host pushes, fill when unset.
+WallpaperScalingMode CompareScalingFromEnvironment()
+{
+    const char* text = std::getenv("WE_TEST_COMPARE_SCALING");
+    if (text == nullptr) return WallpaperScalingMode::FILL;
+    const std::map<std::string_view, WallpaperScalingMode> modes {
+        { "none", WallpaperScalingMode::NONE },
+        { "stretch", WallpaperScalingMode::STRETCH },
+        { "fit", WallpaperScalingMode::FIT },
+        { "fill", WallpaperScalingMode::FILL },
+        { "fit_blurred", WallpaperScalingMode::FIT_BLURRED },
+    };
+    const auto found = modes.find(text);
+    if (found == modes.end()) {
+        throw std::runtime_error(std::string("WE_TEST_COMPARE_SCALING has no mode ") + text);
+    }
+    return found->second;
+}
+
+/// SHA-256 of a picture's bytes, in lowercase hex.
+std::string Sha256Hex(const std::vector<uint8_t>& bytes)
+{
+    std::array<unsigned char, CC_SHA256_DIGEST_LENGTH> digest {};
+    CC_SHA256(bytes.data(), static_cast<CC_LONG>(bytes.size()), digest.data());
+    std::string hex;
+    hex.reserve(digest.size() * 2);
+    constexpr char kDigits[] = "0123456789abcdef";
+    for (const unsigned char byte : digest) {
+        hex.push_back(kDigits[byte >> 4]);
+        hex.push_back(kDigits[byte & 15]);
+    }
+    return hex;
+}
+
+void WritePpm(const std::filesystem::path& path, const RendererPicture& picture)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream image(path, std::ios::binary);
+    image << "P6\n" << picture.width << " " << picture.height << "\n255\n";
+    image.write(reinterpret_cast<const char*>(picture.rgb.data()),
+                std::streamsize(picture.rgb.size()));
+}
+
 /// Wallpaper Engine's per-wallpaper options for a local or compare run, from
 /// `WE_TEST_USER_OPTIONS`: a JSON object in WE's own property names (`wec_e`, `wec_brs`,
 /// `wec_con`, `wec_sa`, `wec_hue`, `wcc_v`, `wcc_amt`, `alignmentfliph`, `cameraparallax`,
@@ -15949,8 +16075,27 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             scale_factor = std::strtod(value, nullptr);
             ASSERT_TRUE(scale_factor >= 1.0 && scale_factor <= 4.0) << value;
         }
+        // The render scale the host pushes, set where the scene wallpaper sets it:
+        // before the graph is built, so targets are allocated at the size they keep.
+        loaded.scene->render_scale = RenderScaleFromEnvironment("WE_TEST_METAL_RENDER_SCALE");
+        // `WE_TEST_METAL_TIMING`: each draw's command buffers are timed on the GPU from
+        // their own start and end, and one `[ COST     ]` line reports them. The draws
+        // run back to back, so the GPU stays near its top clock: a work figure, not a
+        // paced energy one.
+        const bool timing = std::getenv("WE_TEST_METAL_TIMING") != nullptr &&
+                            std::string_view(std::getenv("WE_TEST_METAL_TIMING")) != "0";
         @autoreleasepool {
             id<MTLDevice> device       = MTLCreateSystemDefaultDevice();
+            if (timing) {
+                ASSERT_TRUE(tests::CountCommandBufferGpuTime(device))
+                    << "this GPU's command buffers could not be timed";
+                auto& gpu = tests::GpuTimeCounters();
+                gpu.tag   = -1;
+                ASSERT_TRUE(gpu.WaitForCompletion(std::chrono::seconds(10)));
+                std::scoped_lock lock(gpu.tagged_mutex);
+                gpu.tagged_ns.clear();
+                gpu.tagged_buffers.clear();
+            }
             CAMetalLayer* layer        = [CAMetalLayer layer];
             layer.device               = device;
             layer.pixelFormat          = MTLPixelFormatBGRA8Unorm;
@@ -16063,10 +16208,12 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                 if (loaded.scene->shaderValueUpdater != nullptr) {
                     loaded.scene->shaderValueUpdater->FrameBegin();
                 }
+                if (timing) tests::GpuTimeCounters().tag = frame;
                 const double cpu_before = ThreadCpuMilliseconds();
-                ASSERT_TRUE(render.drawFrame(*loaded.scene))
-                    << "frame " << frame << ": " << render.lastError();
+                const bool   drew       = render.drawFrame(*loaded.scene);
                 const double cpu_after = ThreadCpuMilliseconds();
+                if (timing) tests::GpuTimeCounters().tag = -1;
+                ASSERT_TRUE(drew) << "frame " << frame << ": " << render.lastError();
                 if (frame > 0) {
                     const auto counts = render.LastFrameEncodeCountsForTests();
                     encodes.render_passes += counts.render_passes;
@@ -16126,6 +16273,50 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             std::cout << "[ LOCAL    ] " << paths.scene_id
                       << ": render target bytes=" << render.RenderTargetBytesForTests()
                       << " device allocated bytes=" << device.currentAllocatedSize << std::endl;
+            if (timing) {
+                // Every draw after the first, which compiles and uploads; a draw's GPU time
+                // is the sum over the command buffers committed while it ran, and a draw
+                // that committed none (nothing changed) cost the GPU nothing.
+                auto& gpu = tests::GpuTimeCounters();
+                ASSERT_TRUE(gpu.WaitForCompletion(std::chrono::seconds(10)))
+                    << "the GPU did not finish the draws";
+                std::vector<double> gpu_ms;
+                uint64_t            buffers = 0;
+                {
+                    std::scoped_lock lock(gpu.tagged_mutex);
+                    for (std::size_t frame = 1; frame < std::size_t(frame_count); ++frame) {
+                        const bool seen = frame < gpu.tagged_ns.size();
+                        gpu_ms.push_back(seen ? double(gpu.tagged_ns[frame]) / 1e6 : 0.0);
+                        buffers += seen ? gpu.tagged_buffers[frame] : 0;
+                    }
+                }
+                double total = 0.0;
+                for (const double value : gpu_ms) total += value;
+                std::sort(gpu_ms.begin(), gpu_ms.end());
+                const auto quantile = [&](double p) {
+                    const auto rank = std::size_t(std::ceil(p * double(gpu_ms.size())));
+                    return gpu_ms[std::min(gpu_ms.size() - 1, rank == 0 ? 0 : rank - 1)];
+                };
+                std::printf("[ COST     ] %s {\"surface\":\"%ux%u@%g\",\"render_scale\":%g,"
+                            "\"resolution\":\"%s\",\"draws\":%zu,\"gpu_ms_p50\":%.4f,"
+                            "\"gpu_ms_p95\":%.4f,\"gpu_ms_mean\":%.4f,\"cpu_ms_mean\":%.4f,"
+                            "\"command_buffers_per_draw\":%.3f,\"render_passes_per_draw\":%.3f,"
+                            "\"scene_output_passes_per_draw\":%.3f,\"blits_per_draw\":%.3f,"
+                            "\"render_target_bytes\":%llu,\"device_allocated_bytes\":%llu}\n",
+                            paths.scene_id.c_str(), surface_width, surface_height, scale_factor,
+                            loaded.scene->render_scale,
+                            loaded.scene->resolution == SceneResolution::Display ? "display"
+                                                                                 : "canvas",
+                            gpu_ms.size(), quantile(0.5), quantile(0.95),
+                            total / double(gpu_ms.size()), draw_cpu_ms / measured,
+                            double(buffers) / double(gpu_ms.size()),
+                            double(encodes.render_passes) / measured,
+                            double(encodes.scene_output_passes) / measured,
+                            double(encodes.blit_passes) / measured,
+                            (unsigned long long)render.RenderTargetBytesForTests(),
+                            (unsigned long long)device.currentAllocatedSize);
+                std::fflush(stdout);
+            }
 
             capture("metal-" + label + ".ppm");
 
@@ -16287,6 +16478,16 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
         scale_factor = std::strtod(value, nullptr);
         ASSERT_TRUE(scale_factor >= 1.0 && scale_factor <= 4.0);
     }
+    // The render scale the host pushes (`WE_TEST_COMPARE_RENDER_SCALE`), the scaling
+    // mode (`WE_TEST_COMPARE_SCALING`), and the draws whose final composition is
+    // hashed (`WE_TEST_COMPARE_HASH_FRAMES`, `WE_TEST_COMPARE_HASH_EVERY`): each
+    // prints `[ HASH     ] <scene> <W>x<H> frame=<n> sha256=<hex>`, the last draw
+    // too, and is written as `<scene>-frame-<n>.ppm` only under `WE_TEST_OUTPUT`.
+    const double               render_scale = RenderScaleFromEnvironment("WE_TEST_COMPARE_RENDER_SCALE");
+    const WallpaperScalingMode scaling      = CompareScalingFromEnvironment();
+    const std::set<int>        hash_frames  = HashFramesFromEnvironment(frame_count);
+    const bool                 hashing      = std::getenv("WE_TEST_COMPARE_HASH_FRAMES") != nullptr ||
+                                std::getenv("WE_TEST_COMPARE_HASH_EVERY") != nullptr;
 
     std::vector<std::string> projects;
     for (std::string_view rest = listed; ! rest.empty();) {
@@ -16348,6 +16549,9 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
 
             auto& scene = *loaded.scene;
             scene.resolution = resolution;
+            // What the scene wallpaper sets before it compiles: targets are
+            // allocated once, at the size they keep.
+            scene.render_scale = render_scale;
             if (scene.runtime != nullptr) {
                 for (int tick = 0; tick < warmup; ++tick) {
                     scene.runtime->Tick(1.0 / 60.0);
@@ -16370,8 +16574,28 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
             watch.stop_after = stop_after_rebuild;
             watch.from       = rebuild_from;
             watch.force_at   = rebuild_at;
+            if (hashing) {
+                watch.sample_at = [&](int frame) { return hash_frames.contains(frame); };
+                watch.sampled   = [&](int frame, const RendererPicture& seen) {
+                    std::printf("[ HASH     ] %s %ux%u frame=%d sha256=%s\n", scene_id.c_str(),
+                                seen.width, seen.height, frame, Sha256Hex(seen.rgb).c_str());
+                    if (output != nullptr && *output != '\0') {
+                        WritePpm(std::filesystem::path(output) /
+                                     (scene_id + "-frame-" + std::to_string(frame) + ".ppm"),
+                                 seen);
+                    }
+                };
+            }
             auto picture = DrawWithRenderer(scene, width, height, frame_count, frame_step,
-                                            pace, scale_factor, &input, nullptr, &watch);
+                                            pace, scale_factor, &input, nullptr, &watch,
+                                            scaling);
+            if (hashing && picture.error.empty() && ! picture.rgb.empty() &&
+                ! hash_frames.contains(watch.last_draw)) {
+                std::printf("[ HASH     ] %s %ux%u frame=%d sha256=%s\n", scene_id.c_str(),
+                            picture.width, picture.height, watch.last_draw,
+                            Sha256Hex(picture.rgb).c_str());
+            }
+            std::fflush(stdout);
             if (stop_after_rebuild >= 0) {
                 const std::string rebuilt =
                     watch.rebuilt_at < 0
@@ -16389,12 +16613,7 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
         }
         if (drawn.rgb.empty()) continue;
         if (output != nullptr && *output != '\0') {
-            std::filesystem::create_directories(output);
-            std::ofstream image(std::filesystem::path(output) / (scene_id + ".ppm"),
-                                std::ios::binary);
-            image << "P6\n" << drawn.width << " " << drawn.height << "\n255\n";
-            image.write(reinterpret_cast<const char*>(drawn.rgb.data()),
-                        std::streamsize(drawn.rgb.size()));
+            WritePpm(std::filesystem::path(output) / (scene_id + ".ppm"), drawn);
         }
     }
 }
