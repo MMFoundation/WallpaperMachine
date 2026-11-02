@@ -1428,18 +1428,6 @@ bool PresentFeedbackEnabled()
     return enabled;
 }
 
-/// Seconds between refreshes of the display `display_id` names, 0 when the
-/// display or its rate is not known (a variable-rate panel reports its top rate).
-double DisplayRefreshPeriod(uint32_t display_id)
-{
-    if (display_id == 0) return 0.0;
-    CGDisplayModeRef mode = CGDisplayCopyDisplayMode(display_id);
-    if (mode == nullptr) return 0.0;
-    const double rate = CGDisplayModeGetRefreshRate(mode);
-    CGDisplayModeRelease(mode);
-    return rate > 0.0 ? 1.0 / rate : 0.0;
-}
-
 /// Whether a render pass opened by a draw that provably writes every texel of its target
 /// clears the target instead of loading it. On by default;
 /// `WALLPAPER_MACHINE_OVERWRITE_LOAD_ELISION=0` keeps every load, so a power comparison can
@@ -7466,7 +7454,9 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         // never was. Counting off, nothing is asked for: one relaxed load.
         if (RendererCounters::Enabled() && impl.counters != nullptr && PresentFeedbackEnabled()) {
             if (! impl.present_feedback_armed || impl.present_feedback_display != impl.display_id) {
-                impl.present_feedback->Restart(impl.counters, DisplayRefreshPeriod(impl.display_id));
+                impl.present_feedback->Restart(
+                    impl.counters,
+                    std::chrono::duration<double>(DisplayRefreshPeriod(impl.display_id)).count());
                 impl.present_feedback_armed   = true;
                 impl.present_feedback_display = impl.display_id;
             }

@@ -2154,6 +2154,16 @@ of that: it stays outstanding until a draw consumes it, so a tick dropped becaus
 draw was still in flight loses the tick and not the update, and the end of that draw
 re-arms the clock — one wake at that edge, not a retry per frame period.
 
+The frame period is the configured rate's to the nanosecond, rounded up so the clock never
+runs faster than asked (16 666 667 ns at 60), and never shorter than the period of the
+display the scene is on, read from the display's current mode. A 59.94 Hz display is a 60 Hz
+one wherever a whole number of hertz is wanted, including its rate ceiling, so frames at 60 a
+second would outrun it; they come at its own 59.94. Whole microseconds (16 666 µs) made 60.0024
+frames a second, one more than a 60 Hz display shows every seven minutes. Either way the
+drawable queue ahead of the display then filled and stayed full, adding two frames of latency
+and a wait for a drawable to every frame (`FrameTimerTest.TheCadenceIsTheExactPeriodOfTheRequiredFps`,
+`.TheCadenceNeverOutrunsTheDisplay`).
+
 Both renderers implement this. The status line reports what each running scene is
 doing right now — updating continuously and why, waiting for events, paused by you,
 suspended by the system, stopped after a rendering failure, or that the state could

@@ -26,6 +26,13 @@ public:
 
     void SetRequiredFps(u16);
 
+    /// The display's own refresh period, which no cadence runs faster than: the
+    /// required FPS is a whole number, so a 59.94 Hz display's ceiling reads 60,
+    /// and frames made at 60 a second would outrun it and fill the drawable queue
+    /// ahead of it. Zero (the default) when the display is unknown or reports no
+    /// fixed rate, which leaves the cadence to the required FPS alone.
+    void SetDisplayRefreshPeriod(std::chrono::nanoseconds);
+
     /// How often the content itself can change.
     ///
     /// The required FPS is a ceiling chosen by the user and the display; it says
@@ -75,7 +82,7 @@ public:
     [[nodiscard]] bool Idle() const;
 
     /// Interval the next tick will use, for diagnostics and tests.
-    [[nodiscard]] std::chrono::microseconds TickInterval() const;
+    [[nodiscard]] std::chrono::nanoseconds TickInterval() const;
 
     /// Gap above which a frame boundary is read as the process having been
     /// suspended rather than as the content simply not having changed yet.
@@ -102,16 +109,23 @@ private:
     void UpdateFrametime();
     void FrameBegin(std::chrono::steady_clock::time_point now);
     void FrameEnd(std::chrono::steady_clock::time_point now);
-    std::chrono::microseconds ResolveInterval();
+    std::chrono::nanoseconds ResolveInterval();
+    /// The ideal period from the required FPS and the display's refresh period.
+    void ApplyIdealPeriod();
+    /// The ideal period as one simulation step, in the microseconds frame times are counted in.
+    std::chrono::microseconds IdealStep() const;
     /// The thread timer's tick, on the timer thread: asks for a draw unless one is in flight.
     void OnTick();
 
     std::atomic<RendererCounters*>        m_counters { nullptr };
 
     std::atomic<u16>                        m_req_fps;
-    std::atomic<std::chrono::microseconds> m_ideatime;
+    std::atomic<std::chrono::nanoseconds>  m_refresh_period { std::chrono::nanoseconds::zero() };
+    std::mutex                             m_period_mutex;
+    /// The period of the required FPS, to the nanosecond, never below the refresh period.
+    std::atomic<std::chrono::nanoseconds>  m_ideatime;
     std::atomic<std::chrono::microseconds> m_elapsed_frametime;
-    std::atomic<std::chrono::microseconds> m_tick_interval;
+    std::atomic<std::chrono::nanoseconds>  m_tick_interval;
     /// Zero means unknown, which keeps the fixed cadence.
     std::atomic<std::chrono::microseconds> m_content_period { std::chrono::microseconds::zero() };
     std::atomic<FrameDemand::Kind>         m_demand_kind { FrameDemand::Kind::Continuous };

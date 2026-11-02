@@ -8,7 +8,7 @@
 #include <pthread.h>
 
 using namespace wallpaper;
-using micros = std::chrono::microseconds;
+using nanos = std::chrono::nanoseconds;
 
 ThreadTimer::ThreadTimer(std::function<void()> cb) : m_callback(std::move(cb)) {}
 
@@ -16,19 +16,19 @@ ThreadTimer::~ThreadTimer() { Stop(); }
 
 bool ThreadTimer::Running() const { return m_running.load(std::memory_order_acquire); }
 
-void ThreadTimer::SetInterval(micros v) {
+void ThreadTimer::SetInterval(nanos v) {
     {
         std::lock_guard lock(m_mutex);
-        m_interval = std::max(v, micros(1));
+        m_interval = std::max(v, nanos(1));
     }
     // The wait in progress was computed from the old period.
     m_wake.notify_all();
 }
 
-void ThreadTimer::SetMinInterval(micros v) {
+void ThreadTimer::SetMinInterval(nanos v) {
     {
         std::lock_guard lock(m_mutex);
-        m_min_interval = std::max(v, micros::zero());
+        m_min_interval = std::max(v, nanos::zero());
     }
     m_wake.notify_all();
 }

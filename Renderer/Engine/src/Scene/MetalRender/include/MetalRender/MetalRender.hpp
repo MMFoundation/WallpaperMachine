@@ -6,6 +6,7 @@
 #include "Scene/include/Scene/SceneResolution.hpp"
 #include "Type.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -35,6 +36,11 @@ struct MetalDisplayCharacteristics {
     float current_headroom {1.0f};
     float potential_headroom {1.0f};
 };
+
+/// The refresh period of the current mode of display `display_id`, exact rather than the
+/// whole number of hertz the host is told (59.94 Hz is 16 683 351 ns, not 60 Hz's 16 666 667),
+/// or zero for no display, an unknown one or one that reports no fixed rate.
+std::chrono::nanoseconds DisplayRefreshPeriod(uint32_t display_id);
 
 struct MetalRenderInitInfo
 {

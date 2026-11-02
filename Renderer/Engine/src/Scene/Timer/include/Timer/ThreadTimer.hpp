@@ -45,7 +45,7 @@ public:
     ///
     /// Zero disables the floor, which is the behaviour of a timer whose owner
     /// never states a ceiling.
-    void SetMinInterval(std::chrono::microseconds);
+    void SetMinInterval(std::chrono::nanoseconds);
 
     /// Suspends the periodic deadline entirely.
     ///
@@ -108,8 +108,8 @@ private:
     // Everything below is guarded by `m_mutex`, the lock the waiting thread re-checks.
     mutable std::mutex      m_mutex;
     std::condition_variable m_wake;
-    std::chrono::microseconds m_interval { 33'333 };
-    std::chrono::microseconds m_min_interval { 0 };
+    std::chrono::nanoseconds  m_interval { 33'333'334 };
+    std::chrono::nanoseconds  m_min_interval { 0 };
     bool                      m_idle { false };
     // One-shot request: a latch, with the moment the first request of the batch was made.
     bool                      m_request { false };

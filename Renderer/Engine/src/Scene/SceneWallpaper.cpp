@@ -907,6 +907,7 @@ private:
             m_still.Hide();
         }
         m_render_init_info = std::move(info);
+        frame_timer.SetDisplayRefreshPeriod(metal::DisplayRefreshPeriod(m_render_init_info->display_id));
         std::weak_ptr<looper::Handler> weak_self = weak_from_this();
         // Surface-color events use the existing coalescing frame clock. A
         // paused scene stays paused; no timer or direct draw is introduced.
@@ -1162,6 +1163,9 @@ private:
         const auto identity=static_cast<uint32_t>(value);
         if (m_render_init_info) m_render_init_info->display_id=identity;
         if (m_render->hasBackend()) m_render->SetDisplayId(identity);
+        // The host sends the display again with every surface reconfiguration, which is when
+        // its refresh rate is read again.
+        frame_timer.SetDisplayRefreshPeriod(metal::DisplayRefreshPeriod(identity));
     }
     MHANDLER_CMD(DISPLAY_OUTPUT_CHANGED) {
         (void)msg;
