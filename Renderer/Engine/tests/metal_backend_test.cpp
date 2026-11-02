@@ -1046,3 +1046,154 @@ TEST(MetalMultisampling, ChoosesTheBestSupportedCountWithoutIncreasingTheRequest
     EXPECT_EQ(SelectSceneSampleCount(4, 1 | 8), 1u);
     EXPECT_EQ(SelectSceneSampleCount(8, 1), 1u);
 }
+
+// ---- a draw that writes every texel of its target
+
+namespace
+{
+
+/// The effect card as the parser builds it: corners bottom-left, top-left, bottom-right,
+/// top-right, two triangles sharing the top-left to bottom-right diagonal.
+MetalQuad EffectCard(float half = 1.0f, float z = 0.0f)
+{
+    MetalQuad quad;
+    quad.corners   = { { { -half, -half, z }, { -half, half, z }, { half, -half, z }, { half, half, z } } };
+    quad.triangles = { { { 0, 2, 1 }, { 1, 2, 3 } } };
+    return quad;
+}
+
+constexpr std::array<float, 16> kIdentity { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+
+} // namespace
+
+TEST(MetalOverwrite, TheReflectionCarriesTheCoverageFactsOnlyWhenTheyAreThere)
+{
+    MetalShaderReflection reflection;
+    std::string           error;
+    ASSERT_TRUE(ParseMetalShaderReflection(
+        R"({"descriptor_bindings":[],"uniform_blocks":[],"vertex_inputs":[],"active_texture_slots":[],)"
+        R"("vertex_position":{"input":"a_Position","matrix":"g_ModelViewProjectionMatrix"},"fragment_always_writes":true})",
+        reflection, &error))
+        << error;
+    ASSERT_TRUE(reflection.vertex_position.has_value());
+    EXPECT_EQ(reflection.vertex_position->input, "a_Position");
+    EXPECT_EQ(reflection.vertex_position->matrix, "g_ModelViewProjectionMatrix");
+    EXPECT_TRUE(reflection.fragment_always_writes);
+
+    ASSERT_TRUE(ParseMetalShaderReflection(
+        R"({"descriptor_bindings":[],"uniform_blocks":[],"vertex_inputs":[],"active_texture_slots":[],)"
+        R"("vertex_position":{"input":"a_Position"}})",
+        reflection, &error))
+        << error;
+    ASSERT_TRUE(reflection.vertex_position.has_value());
+    EXPECT_TRUE(reflection.vertex_position->matrix.empty());
+    EXPECT_FALSE(reflection.fragment_always_writes);
+
+    // A document of a compiler that knows nothing of them proves nothing.
+    ASSERT_TRUE(ParseMetalShaderReflection(
+        R"({"descriptor_bindings":[],"uniform_blocks":[],"vertex_inputs":[],"active_texture_slots":[]})", reflection,
+        &error))
+        << error;
+    EXPECT_FALSE(reflection.vertex_position.has_value());
+    EXPECT_FALSE(reflection.fragment_always_writes);
+
+    // Facts of the wrong shape prove nothing either, and do not fail the shader.
+    ASSERT_TRUE(ParseMetalShaderReflection(
+        R"({"descriptor_bindings":[],"uniform_blocks":[],"vertex_inputs":[],"active_texture_slots":[],)"
+        R"("vertex_position":{"input":7,"matrix":"g_ModelViewProjectionMatrix"},"fragment_always_writes":"yes"})",
+        reflection, &error))
+        << error;
+    EXPECT_FALSE(reflection.vertex_position.has_value());
+    EXPECT_FALSE(reflection.fragment_always_writes);
+    ASSERT_TRUE(ParseMetalShaderReflection(
+        R"({"descriptor_bindings":[],"uniform_blocks":[],"vertex_inputs":[],"active_texture_slots":[],)"
+        R"("vertex_position":{"matrix":"g_ModelViewProjectionMatrix"}})",
+        reflection, &error))
+        << error;
+    EXPECT_FALSE(reflection.vertex_position.has_value());
+}
+
+TEST(MetalOverwrite, OnlyBlendingThatReplacesTheTexelLetsADrawOverwriteIt)
+{
+    EXPECT_TRUE(BlendReplacesDestination(ToMetalBlendState(BlendMode::Disable, AlphaBlendRule::Material, 1)));
+    EXPECT_TRUE(BlendReplacesDestination(ToMetalBlendState(BlendMode::Normal, AlphaBlendRule::Material, 1)));
+    EXPECT_TRUE(BlendReplacesDestination(ToMetalBlendState(BlendMode::Normal, AlphaBlendRule::Max, 1)));
+    for (const auto mode : { BlendMode::Translucent, BlendMode::Additive, BlendMode::Multiply,
+                             BlendMode::AlphaToCoverage }) {
+        EXPECT_FALSE(BlendReplacesDestination(ToMetalBlendState(mode, AlphaBlendRule::Material, 1)))
+            << static_cast<int>(mode);
+    }
+    auto subtract          = ToMetalBlendState(BlendMode::Normal, AlphaBlendRule::Material, 1);
+    subtract.rgb_operation = MetalBlendOperation::ReverseSubtract;
+    EXPECT_FALSE(BlendReplacesDestination(subtract));
+}
+
+TEST(MetalOverwrite, TheEffectCardCoversEveryTexelCentreHoweverItIsFolded)
+{
+    for (const auto [width, height] : { std::pair { 1u, 1u }, { 7u, 5u }, { 3840u, 2160u }, { 16384u, 16384u } }) {
+        SCOPED_TRACE(::testing::Message() << width << "x" << height);
+        EXPECT_TRUE(QuadCoversViewport(EffectCard(), kIdentity, width, height));
+        // Metal's clip-space fold mirrors y; the card covers the same square.
+        auto folded = kIdentity;
+        folded[5]   = -1.0f;
+        EXPECT_TRUE(QuadCoversViewport(EffectCard(), folded, width, height));
+        // The same card drawn as a strip, and as a larger card the viewport clips.
+        auto strip      = EffectCard();
+        strip.triangles = { { { 0, 1, 2 }, { 1, 2, 3 } } };
+        EXPECT_TRUE(QuadCoversViewport(strip, kIdentity, width, height));
+        EXPECT_TRUE(QuadCoversViewport(EffectCard(4.0f), kIdentity, width, height));
+    }
+    // A layer's card through an orthographic matrix that maps it onto the whole canvas.
+    std::array<float, 16> ortho {};
+    ortho[0]  = 2.0f / 384.0f;
+    ortho[5]  = 2.0f / 256.0f;
+    ortho[10] = -2.0f / 10000.0f;
+    ortho[14] = 0.5f;
+    ortho[15] = 1.0f;
+    EXPECT_TRUE(QuadCoversViewport(EffectCard(192.0f), ortho, 384, 256)) << "x and y scale differently";
+    auto wide = EffectCard(192.0f);
+    for (auto& corner : wide.corners) corner[1] *= 256.0f / 384.0f;
+    EXPECT_TRUE(QuadCoversViewport(wide, ortho, 384, 256));
+}
+
+TEST(MetalOverwrite, ACardThatMayMissATexelCentreIsNotACover)
+{
+    constexpr uint32_t width = 1000, height = 600;
+    // Shrunk, moved, or pulled in by less than a texel: the outermost centres are at
+    // 1 - 1/1000, so a card ending at 1 - 0.6/1000 still covers them, but the proof keeps a
+    // quarter-texel margin and gives up.
+    EXPECT_FALSE(QuadCoversViewport(EffectCard(0.5f), kIdentity, width, height));
+    EXPECT_FALSE(QuadCoversViewport(EffectCard(1.0f - 0.6f / width), kIdentity, width, height));
+    auto moved = kIdentity;
+    moved[12]  = 0.01f;
+    EXPECT_FALSE(QuadCoversViewport(EffectCard(), moved, width, height));
+    // Clipped by depth: in front of the near plane, past the far one, or on it but not exactly.
+    EXPECT_FALSE(QuadCoversViewport(EffectCard(1.0f, -0.5f), kIdentity, width, height));
+    EXPECT_FALSE(QuadCoversViewport(EffectCard(1.0f, 2.0f), kIdentity, width, height));
+    auto skewed = kIdentity;
+    skewed[2]   = 1e-7f;     // z picks up x: rounding could put a corner behind the near plane
+    EXPECT_FALSE(QuadCoversViewport(EffectCard(), skewed, width, height));
+    EXPECT_TRUE(QuadCoversViewport(EffectCard(1.0f, 0.5f), kIdentity, width, height));
+    // Behind the eye, or a matrix that is not finite.
+    auto behind = kIdentity;
+    behind[15]  = -1.0f;
+    EXPECT_FALSE(QuadCoversViewport(EffectCard(), behind, width, height));
+    auto broken = kIdentity;
+    broken[0]   = std::nanf("");
+    EXPECT_FALSE(QuadCoversViewport(EffectCard(), broken, width, height));
+    // Triangles that do not tile the quad: both on one side of their shared edge, the same
+    // triangle twice, or a degenerate one. The other diagonal tiles it as well as the first.
+    auto diagonal      = EffectCard();
+    diagonal.triangles = { { { 0, 1, 3 }, { 0, 3, 2 } } };
+    EXPECT_TRUE(QuadCoversViewport(diagonal, kIdentity, width, height));
+    auto one_side      = EffectCard();
+    one_side.triangles = { { { 0, 2, 3 }, { 0, 2, 1 } } };
+    EXPECT_FALSE(QuadCoversViewport(one_side, kIdentity, width, height)) << "both stand on the bottom edge";
+    auto twice      = EffectCard();
+    twice.triangles = { { { 0, 2, 1 }, { 0, 2, 1 } } };
+    EXPECT_FALSE(QuadCoversViewport(twice, kIdentity, width, height));
+    auto flat        = EffectCard();
+    flat.corners[3]  = flat.corners[2];
+    EXPECT_FALSE(QuadCoversViewport(flat, kIdentity, width, height));
+    EXPECT_FALSE(QuadCoversViewport(EffectCard(), kIdentity, 0, height));
+}

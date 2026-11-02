@@ -254,6 +254,28 @@ impl VertexInput {
     }
 }
 
+/// Where the vertex stage's clip-space position comes from, when the module proves it is one of
+/// the two forms a host can evaluate itself: `vec4(input.xyz, 1.0)`, or that vector multiplied
+/// by a `mat4` uniform with the matrix on the left (`mul(vec4(input, 1.0), matrix)` in the
+/// author's dialect).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PositionSource {
+    /// The vertex input, under its author's name (R58), whose x, y and z the position carries.
+    pub input: String,
+    /// The uniform block member the vector is multiplied by; `None` for the input itself.
+    pub matrix: Option<String>,
+}
+
+impl PositionSource {
+    pub fn to_json(&self) -> String {
+        let mut fields = vec![("input", json::string(&self.input))];
+        if let Some(matrix) = &self.matrix {
+            fields.push(("matrix", json::string(matrix)));
+        }
+        json::object(&fields)
+    }
+}
+
 /// What the engine has to supply for a program, or for one of its stages.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Reflection {
@@ -262,6 +284,13 @@ pub struct Reflection {
     pub vertex_inputs: Vec<VertexInput>,
     /// Ascending, no duplicates by construction; identical in the metadata document (R52).
     pub active_texture_slots: BTreeSet<u8>,
+    /// Vertex stage: the position's source, when it is proven (`"vertex_position"`, written
+    /// only when present).
+    pub vertex_position: Option<PositionSource>,
+    /// Fragment stage: every fragment the rasterizer produces writes colour 0: nothing
+    /// discards and no sample mask is written (`"fragment_always_writes":true`, written only
+    /// when proven).
+    pub fragment_always_writes: bool,
 }
 
 /// A problem found while building or merging reflection.
@@ -420,6 +449,9 @@ impl Reflection {
         let mut blocks: BTreeMap<(u32, u32, &str), &UniformBlock> = BTreeMap::new();
         let mut inputs: BTreeMap<u32, VertexInput> = BTreeMap::new();
         let mut slots = BTreeSet::new();
+        // Each fact belongs to one stage, so the stage that reflected it decides.
+        let vertex_position = parts.iter().find_map(|p| p.vertex_position.clone());
+        let fragment_always_writes = parts.iter().any(|p| p.fragment_always_writes);
 
         for part in parts {
             for d in &part.descriptor_bindings {
@@ -457,19 +489,29 @@ impl Reflection {
             uniform_blocks: blocks.into_values().cloned().collect(),
             vertex_inputs: inputs.into_values().collect(),
             active_texture_slots: slots,
+            vertex_position,
+            fragment_always_writes,
         };
         merged.check_limits()?;
         Ok(merged)
     }
 
-    /// The reflection document, keys in the order of spec 2.6.3.
+    /// The reflection document, keys in the order of spec 2.6.3. The two coverage facts follow,
+    /// each only when it holds, so a document without them reads as "not proven".
     pub fn to_json(&self) -> String {
-        json::object(&[
+        let mut fields = vec![
             ("descriptor_bindings", json::array(self.descriptor_bindings.iter().map(DescriptorBinding::to_json))),
             ("uniform_blocks", json::array(self.uniform_blocks.iter().map(UniformBlock::to_json))),
             ("vertex_inputs", json::array(self.vertex_inputs.iter().map(VertexInput::to_json))),
             ("active_texture_slots", json::array(self.active_texture_slots.iter().map(u8::to_string))),
-        ])
+        ];
+        if let Some(position) = &self.vertex_position {
+            fields.push(("vertex_position", position.to_json()));
+        }
+        if self.fragment_always_writes {
+            fields.push(("fragment_always_writes", json::boolean(true)));
+        }
+        json::object(&fields)
     }
 }
 
@@ -719,6 +761,7 @@ mod tests {
             uniform_blocks: vec![block("GlobalUniforms", 1, 0)],
             vertex_inputs: vec![input("a_Position", 0)],
             active_texture_slots: BTreeSet::from([0]),
+            ..Reflection::default()
         };
         let text = r.to_json();
         assert!(!text.contains(' ') && !text.contains('\n'));

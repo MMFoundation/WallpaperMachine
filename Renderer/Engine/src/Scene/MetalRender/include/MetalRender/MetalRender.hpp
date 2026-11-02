@@ -277,6 +277,10 @@ public:
         uint32_t render_passes { 0 };
         uint32_t scene_output_passes { 0 };
         uint32_t blit_passes { 0 };
+        /// Render passes that loaded their target from memory (colour, or a shadow
+        /// caster's depth image), and those that opened with a traded feedback image's copy.
+        uint32_t loaded_passes { 0 };
+        uint32_t opening_copies { 0 };
     };
     [[nodiscard]] FrameEncodeCountsForTests LastFrameEncodeCountsForTests() const;
 
@@ -301,6 +305,11 @@ public:
     /// one image, for graphs compiled from now on. On unless
     /// `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0`; process-wide, test-only.
     static void SetTargetSharingForTests(bool enabled);
+
+    /// Whether a render pass opened by a draw that provably writes every texel of its
+    /// target clears it instead of loading it, from the next frame on. On unless
+    /// `WALLPAPER_MACHINE_OVERWRITE_LOAD_ELISION=0`; process-wide, test-only.
+    static void SetOverwriteLoadElisionForTests(bool enabled);
 
     /// How many shader sources this process has handed to the Metal compiler.
     ///

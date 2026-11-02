@@ -16371,6 +16371,8 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                     encodes.render_passes += counts.render_passes;
                     encodes.scene_output_passes += counts.scene_output_passes;
                     encodes.blit_passes += counts.blit_passes;
+                    encodes.loaded_passes += counts.loaded_passes;
+                    encodes.opening_copies += counts.opening_copies;
                     draw_cpu_ms += cpu_after - cpu_before;
                     ++measured;
                 }
@@ -16386,12 +16388,14 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": Native Metal, " << frame_count << " frames drawn, "
                       << DifferingBytes(first, last) << " bytes differ between the first and the last"
                       << std::endl;
-            char encode_line[256];
+            char encode_line[384];
             std::snprintf(encode_line, sizeof(encode_line),
-                          "%.1f render passes/frame (%.1f on the scene output), %.1f blits/frame, "
-                          "%.2f ms CPU per drawFrame",
+                          "%.1f render passes/frame (%.1f on the scene output, %.1f loading their target, "
+                          "%.1f opening with a copy), %.1f blits/frame, %.2f ms CPU per drawFrame",
                           double(encodes.render_passes) / measured,
                           double(encodes.scene_output_passes) / measured,
+                          double(encodes.loaded_passes) / measured,
+                          double(encodes.opening_copies) / measured,
                           double(encodes.blit_passes) / measured, draw_cpu_ms / measured);
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << encode_line << std::endl;
             // How often the host would have built the render graph again, and which kind of
@@ -18625,4 +18629,272 @@ void main() {
         EXPECT_LE(pixel[0],2);EXPECT_LE(pixel[2],2);
         EXPECT_NEAR(pixel[1],index==2?0:255,2)<<index;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Render passes that need not load or store what no draw reads
+
+namespace
+{
+
+/// Restores the load elision, whatever a test set it to.
+struct RestoreAttachmentSwitches
+{
+    ~RestoreAttachmentSwitches() { MetalRender::SetOverwriteLoadElisionForTests(true); }
+};
+
+/// Every frame's scene output of one run and its last frame's encode counts.
+struct AttachmentRun
+{
+    std::vector<std::vector<uint8_t>>      frames;
+    MetalRender::FrameEncodeCountsForTests counts;
+};
+
+/// Draws `frames` production frames of `project` with the load elision as given, on a fresh
+/// parse and renderer, so two runs differ only by the switch.
+AttachmentRun DrawWithAttachmentSwitches(const std::filesystem::path& project, const std::filesystem::path& cache,
+                                         bool elide_loads, int frames,
+                                         const std::function<void(Scene&)>& adjust = {})
+{
+    MetalRender::SetOverwriteLoadElisionForTests(elide_loads);
+    AttachmentRun run;
+    LoadedScene   loaded;
+    std::string   error;
+    std::filesystem::remove_all(cache);
+    EXPECT_TRUE(LoadScene(project, cache, loaded, error)) << error;
+    if (loaded.scene == nullptr) return run;
+    if (adjust) adjust(*loaded.scene);
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(384, 256);
+        layer.framebufferOnly = NO;
+        MetalRender render;
+        EXPECT_TRUE(render.init(MetalRenderInitInfo {
+            .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+            .render_width = 384, .render_height = 256, .display_scale_factor = 1.0 }))
+            << render.lastError();
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        if (graph == nullptr || ! render.compileRenderGraph(*loaded.scene, *graph)) {
+            ADD_FAILURE() << render.lastError();
+            return run;
+        }
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+        for (int frame = 0; frame < frames; ++frame) {
+            AdvanceSceneFrame(render, *loaded.scene);
+            run.frames.push_back(ReadOutput(render, *loaded.scene));
+        }
+        run.counts = render.LastFrameEncodeCountsForTests();
+        render.destroy();
+    }
+    return run;
+}
+
+/// Draws a fixture with the switch off and then on, and checks that every frame is the same.
+void ExpectSameFramesEitherWay(const std::filesystem::path& project, const std::filesystem::path& root,
+                               AttachmentRun& off, AttachmentRun& on,
+                               const std::function<void(Scene&)>& adjust = {})
+{
+    constexpr int kFrames = 3;
+    off = DrawWithAttachmentSwitches(project, root / "cache-off", false, kFrames, adjust);
+    on  = DrawWithAttachmentSwitches(project, root / "cache-on", true, kFrames, adjust);
+    ASSERT_EQ(off.frames.size(), std::size_t(kFrames));
+    ASSERT_EQ(on.frames.size(), std::size_t(kFrames));
+    for (int frame = 0; frame < kFrames; ++frame) {
+        ASSERT_FALSE(off.frames[frame].empty());
+        EXPECT_EQ(on.frames[frame], off.frames[frame]) << "frame " << frame << " changed with the elision";
+    }
+    EXPECT_NE(off.frames.front(), off.frames.back()) << "the scene did not animate";
+}
+
+/// One effect of a chain: how its vertex shader places the card, a statement its fragment
+/// shader runs before writing, and the keys of its material's pass after the shader.
+struct ChainEffect
+{
+    std::string position { "gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);" };
+    std::string before_write;
+    std::string material_keys { R"("blending":"normal","cullmode":"nocull")" };
+};
+
+/// The fixture's card through a chain of one-pass effects, each of which changes every channel
+/// of what it reads by the scene time, so each frame redraws the chain and a texel a pass
+/// leaves alone shows another colour than one it writes.
+std::filesystem::path WriteEffectChainFixture(const std::filesystem::path& root,
+                                              const std::vector<ChainEffect>& chain)
+{
+    const auto project = WriteFixture(root);
+    auto       layout  = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+    layout["general"]["bloom"] = false;
+    auto effects = nlohmann::json::array();
+    std::filesystem::create_directories(root / "effects");
+    for (std::size_t k = 0; k < chain.size(); ++k) {
+        const auto name = "fx" + std::to_string(k);
+        std::ofstream(root / ("effects/" + name + ".json"))
+            << R"({"name":")" << name << R"(","passes":[{"material":"materials/)" << name << R"(.json"}]})";
+        std::ofstream(root / ("materials/" + name + ".json"))
+            << R"({"passes":[{"shader":")" << name << R"(","textures":[null],)" << chain[k].material_keys
+            << R"(,"depthtest":"disabled","depthwrite":"disabled"}]})";
+        std::ofstream(root / ("shaders/" + name + ".vert"))
+            << "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+               "varying vec2 v_TexCoord;\nvoid main() {\n  "
+            << chain[k].position << "\n  v_TexCoord = a_TexCoord;\n}\n";
+        std::ofstream(root / ("shaders/" + name + ".frag"))
+            << "uniform sampler2D g_Texture0;\nuniform float g_Time;\nvarying vec2 v_TexCoord;\nvoid main() {\n"
+               "  vec4 c = texSample2D(g_Texture0, v_TexCoord);\n  "
+            << chain[k].before_write << "\n  gl_FragColor = vec4(frac(c.g + 0.13 * " << (k + 1)
+            << ".0 + g_Time), frac(c.b + 0.07), frac(c.r + 0.29), 1.0);\n}\n";
+        effects.push_back({ { "file", "effects/" + name + ".json" }, { "visible", true } });
+    }
+    layout["objects"][0]["effects"] = effects;
+    std::ofstream(root / "layout.json") << layout;
+    return project;
+}
+
+void WriteFiles(const std::filesystem::path& root, const std::map<std::string, std::string>& files)
+{
+    for (const auto& [file, contents] : files) {
+        std::filesystem::create_directories((root / file).parent_path());
+        std::ofstream(root / file) << contents;
+    }
+}
+
+constexpr const char* kTimedCopyVertex =
+    "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+    "varying vec2 v_TexCoord;\nvoid main(){ gl_Position=mul(vec4(a_Position,1.0),g_ModelViewProjectionMatrix);"
+    " v_TexCoord=a_TexCoord; }\n";
+
+std::string TimedFragment(const std::string& colour)
+{
+    return "uniform sampler2D g_Texture0;\nuniform float g_Time;\nvarying vec2 v_TexCoord;\n"
+           "void main(){ vec4 c=texSample2D(g_Texture0,v_TexCoord); gl_FragColor=" + colour + "; }\n";
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, AnEffectChainThatOverwritesItsBuffersOpensThemWithAClearAndDrawsTheSamePicture)
+{
+    // The card drawn into one buffer, then four effects that alternate between two: the second
+    // and third write a buffer that already holds this frame's picture, so the graph asks to
+    // load it. Each draws the whole card unmoved (through the matrix, as given, through a copy
+    // of the input) and never discards, so nothing loaded can show: the loads become clears.
+    RestoreAttachmentSwitches restore;
+    const auto root    = root_ / "overwrite-chain";
+    const auto project = WriteEffectChainFixture(root, {
+        ChainEffect {},
+        ChainEffect { .position = "gl_Position = vec4(a_Position, 1.0);" },
+        ChainEffect { .position = "vec3 position = a_Position;\n  gl_Position = mul(vec4(position, 1.0), g_ModelViewProjectionMatrix);" },
+        ChainEffect {},
+    });
+    AttachmentRun off, on;
+    ExpectSameFramesEitherWay(project, root, off, on);
+    EXPECT_GE(off.counts.loaded_passes, 2u) << "the chain's later buffer writes were expected to load";
+    EXPECT_EQ(on.counts.loaded_passes + 2u, off.counts.loaded_passes)
+        << "the two overwriting effect passes still load their buffers";
+    EXPECT_EQ(on.counts.render_passes, off.counts.render_passes) << "the elision changed how passes share render passes";
+}
+
+TEST_F(MetalSceneDraw, AnEffectPassThatMayLeaveTexelsAloneKeepsLoadingItsBuffer)
+{
+    // The second effect of the chain cannot be proven to write every texel, or to write every
+    // channel of one as its fragment says: it keeps its load, and the texels and channels it
+    // leaves keep what the buffer held. The third effect still clears.
+    RestoreAttachmentSwitches restore;
+    const std::vector<std::pair<std::string, ChainEffect>> cases {
+        { "scaled", ChainEffect { .position = "gl_Position = mul(vec4(a_Position * 0.5, 1.0), g_ModelViewProjectionMatrix);" } },
+        { "moved", ChainEffect { .position = "vec3 position = a_Position;\n  position.x += 0.25;\n  gl_Position = vec4(position, 1.0);" } },
+        { "discards", ChainEffect { .before_write = "if (v_TexCoord.x < 0.3) discard;" } },
+        { "clips", ChainEffect { .before_write = "clip(v_TexCoord.y - 0.4);" } },
+        { "culls", ChainEffect { .material_keys = R"("blending":"normal","cullmode":"normal")" } },
+        { "keeps-alpha", ChainEffect { .material_keys = R"("blending":"normal","cullmode":"nocull","alphawriting":"disabled")" } },
+    };
+    for (const auto& [name, second] : cases) {
+        SCOPED_TRACE(name);
+        const auto root    = root_ / ("overwrite-negative-" + name);
+        const auto project = WriteEffectChainFixture(root, { ChainEffect {}, second, ChainEffect {}, ChainEffect {} });
+        AttachmentRun off, on;
+        ExpectSameFramesEitherWay(project, root, off, on);
+        EXPECT_GE(off.counts.loaded_passes, 2u);
+        EXPECT_EQ(on.counts.loaded_passes + 1u, off.counts.loaded_passes) << "only the third effect may skip its load";
+    }
+}
+
+TEST_F(MetalSceneDraw, ABlendedOverwriteOfAFloatBufferKeepsItsLoad)
+{
+    // An effect writes its own buffer, reads it into another, and writes it again, so the
+    // second write starts a render pass that loads it. `normal` blending multiplies what the buffer held by
+    // zero, which cancels it only when it is finite: an 8-bit buffer is cleared instead, a
+    // half-float one (which can hold an infinity) keeps its load.
+    RestoreAttachmentSwitches restore;
+    std::map<std::string, uint32_t> cleared;
+    for (const std::string format : { "rgba8888", "rgba16161616f" }) {
+        SCOPED_TRACE(format);
+        const auto root    = root_ / ("overwrite-format-" + format);
+        const auto project = WriteFixture(root);
+        const auto pass    = [](const std::string& shader) {
+            return R"({"passes":[{"shader":")" + shader +
+                   R"(","textures":[null],"blending":"normal","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled"}]})";
+        };
+        WriteFiles(root, {
+            { "effects/twice.json",
+              R"({"name":"twice","fbos":[{"name":"_rt_Twice","fit":64,"format":")" + format +
+                  R"("},{"name":"_rt_Between","fit":64,"format":"rgba8888"}],"passes":[)"
+                  R"({"material":"materials/twice_a.json","target":"_rt_Twice"},)"
+                  R"({"material":"materials/twice_b.json","target":"_rt_Between","bind":[{"name":"_rt_Twice","index":0}]},)"
+                  R"({"material":"materials/twice_c.json","target":"_rt_Twice","bind":[{"name":"_rt_Between","index":0}]},)"
+                  R"({"material":"materials/twice_show.json","bind":[{"name":"_rt_Twice","index":0}]}]})" },
+            { "materials/twice_a.json", pass("twice_a") },
+            { "materials/twice_b.json", pass("twice_b") },
+            { "materials/twice_c.json", pass("twice_c") },
+            { "materials/twice_show.json", pass("twice_show") },
+            { "shaders/twice_a.vert", kTimedCopyVertex },
+            { "shaders/twice_b.vert", kTimedCopyVertex },
+            { "shaders/twice_c.vert", kTimedCopyVertex },
+            { "shaders/twice_show.vert", kTimedCopyVertex },
+            { "shaders/twice_a.frag", TimedFragment("vec4(c.g, c.r, frac(g_Time), 1.0)") },
+            { "shaders/twice_b.frag", TimedFragment("vec4(frac(c.b + g_Time), c.g, c.r, 1.0)") },
+            { "shaders/twice_c.frag", TimedFragment("vec4(c.r, frac(c.g + 0.5), c.b, 1.0)") },
+            { "shaders/twice_show.frag", TimedFragment("vec4(c.rgb, 1.0)") },
+        });
+        auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+        layout["general"]["bloom"] = false;
+        layout["objects"][0]["effects"] = { { { "file", "effects/twice.json" }, { "visible", true } } };
+        std::ofstream(root / "layout.json") << layout;
+        AttachmentRun off, on;
+        ExpectSameFramesEitherWay(project, root, off, on);
+        EXPECT_GE(off.counts.loaded_passes, 1u);
+        ASSERT_GE(off.counts.loaded_passes, on.counts.loaded_passes);
+        cleared[format] = off.counts.loaded_passes - on.counts.loaded_passes;
+    }
+    EXPECT_EQ(cleared["rgba8888"], cleared["rgba16161616f"] + 1u)
+        << "the second write of the 8-bit buffer, and only that, was expected to clear instead of load";
+}
+
+TEST_F(MetalSceneDraw, ATradedReaderThatOverwritesTheSceneNeedsNoOpeningCopy)
+{
+    // A layer as large as the canvas reads the scene beneath it and writes every texel of it,
+    // alpha included. Its copy of the scene trades textures with the scene (scene optimisation
+    // on), so its render pass opened with a copy of the image; it needs neither that nor a load.
+    RestoreAttachmentSwitches restore;
+    const auto root    = root_ / "overwrite-feedback";
+    const auto project = WriteFixture(root);
+    WriteFiles(root, {
+        { "models/cover.json", R"({"width":384,"height":256,"material":"materials/cover.json"})" },
+        { "materials/cover.json",
+          R"({"passes":[{"shader":"cover","blending":"normal","alphawriting":"enabled","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":["_rt_FullFrameBuffer"]}]})" },
+        { "shaders/cover.vert", kTimedCopyVertex },
+        { "shaders/cover.frag", TimedFragment("vec4(1.0 - c.r, frac(c.g + g_Time), 1.0 - c.b, 1.0)") },
+    });
+    auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+    layout["general"]["bloom"] = false;
+    layout["objects"].push_back({ { "id", 2 }, { "name", "cover" }, { "image", "models/cover.json" },
+                                  { "origin", { 192, 128, 0 } }, { "scale", { 1, 1, 1 } },
+                                  { "angles", { 0, 0, 0 } }, { "visible", true } });
+    std::ofstream(root / "layout.json") << layout;
+    AttachmentRun off, on;
+    ExpectSameFramesEitherWay(project, root, off, on);
+    EXPECT_EQ(off.counts.blit_passes, 0u) << "the copy was expected to trade textures, not blit";
+    EXPECT_EQ(off.counts.opening_copies, 1u);
+    EXPECT_EQ(on.counts.opening_copies, 0u) << "the overwriting reader still opened with a copy";
 }

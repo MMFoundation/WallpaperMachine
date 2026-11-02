@@ -1440,6 +1440,41 @@ double DisplayRefreshPeriod(uint32_t display_id)
     return rate > 0.0 ? 1.0 / rate : 0.0;
 }
 
+/// Whether a render pass opened by a draw that provably writes every texel of its target
+/// clears the target instead of loading it. On by default;
+/// `WALLPAPER_MACHINE_OVERWRITE_LOAD_ELISION=0` keeps every load, so a power comparison can
+/// measure the saving in one binary. Both ways draw the same bytes.
+std::atomic<bool>& OverwriteLoadElisionSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_OVERWRITE_LOAD_ELISION");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
+/// Colour formats every texel of which is finite, so a blend factor of zero times what a texel
+/// held is zero. A float format may hold an infinity or NaN that zero does not cancel.
+bool HoldsOnlyFiniteValues(MTLPixelFormat format)
+{
+    switch (format) {
+    case MTLPixelFormatR8Unorm:
+    case MTLPixelFormatRG8Unorm:
+    case MTLPixelFormatRGBA8Unorm:
+    case MTLPixelFormatRGBA8Unorm_sRGB:
+    case MTLPixelFormatBGRA8Unorm:
+    case MTLPixelFormatBGRA8Unorm_sRGB:
+    case MTLPixelFormatRGB10A2Unorm:
+    case MTLPixelFormatBGR10A2Unorm:
+    case MTLPixelFormatR16Unorm:
+    case MTLPixelFormatRG16Unorm:
+    case MTLPixelFormatRGBA16Unorm:
+        return true;
+    default:
+        return false;
+    }
+}
+
 } // namespace
 
 MetalPipelineArchiveStatus MetalPipelineArchiveStatusForDiagnostics()
@@ -1739,7 +1774,45 @@ struct MetalRender::Impl
         id<MTLDepthStencilState>           depth_stencil { nil };
         bool                               depth_test { false };
         bool                               depth_write { false };
+
+        /// What can be proven when the graph is prepared that this pass's one draw writes
+        /// every texel of its target: the shader's coverage facts, the quad it draws, its
+        /// blending, culling and depth. The matrix the quad goes through and the image it
+        /// lands on are checked when the pass is encoded (`passOverwritesTarget`), with the
+        /// last answer kept for the matrix and size it was given.
+        struct OverwriteProof
+        {
+            bool                  candidate { false };
+            /// `One`/`Zero` blending rather than none: the target must hold finite values.
+            bool                  blends { false };
+            /// Byte offset of the position's matrix in this pass's uniform block; -1 when the
+            /// position is the vertex input itself.
+            int32_t               matrix_offset { -1 };
+            MetalQuad             quad {};
+            std::array<float, 16> memo_matrix {};
+            uint32_t              memo_width { 0 };
+            uint32_t              memo_height { 0 };
+            bool                  memo_valid { false };
+            bool                  memo_covers { false };
+        };
+        OverwriteProof                     overwrite;
     };
+
+    /// Where the mesh carries the input a shader's proven position reads, for the proof above.
+    struct PositionAttribute
+    {
+        bool        provided { false };
+        std::size_t buffer { 0 };
+        std::size_t offset { 0 };
+        std::size_t stride { 0 };
+        std::string format;
+    };
+    void prepareOverwriteProof(const ScenePassDescription& desc, PreparedPass& out,
+                               const PositionAttribute& position) const;
+    /// Whether pass `index`, encoded into `attachment` this frame with its uniforms at
+    /// `uniform_base`, writes every texel of it, so its render pass can open with a clear in
+    /// place of a load. False whenever any part of the proof is missing.
+    bool passOverwritesTarget(std::size_t index, id<MTLTexture> attachment, const uint8_t* uniform_base);
 
     std::vector<ScenePassDescription>                   descriptions;
     std::vector<PreparedPass>                           prepared;
@@ -1907,9 +1980,14 @@ struct MetalRender::Impl
         uint32_t render_passes { 0 };
         uint32_t scene_output_passes { 0 };
         uint32_t blit_passes { 0 };
+        /// Render passes that load their target (colour, or a depth-only pass's depth image).
+        uint32_t loaded_passes { 0 };
+        /// Render passes that open with the copy of a traded feedback image.
+        uint32_t opening_copies { 0 };
     };
     EncodeCounts frame_encodes;
     EncodeCounts last_frame_encodes;
+
 
     // ---- per-pass encode inputs
     /// Each description's colour target and, when it depth-tests, its depth
@@ -3363,6 +3441,123 @@ void MetalRender::Impl::refreshPassTargets(Scene& scene)
     scene_output_target = lookup(targets, scene_output_key);
 }
 
+void MetalRender::Impl::prepareOverwriteProof(const ScenePassDescription& desc, PreparedPass& out,
+                                              const PositionAttribute& position) const
+{
+    auto& proof = out.overwrite;
+    proof       = {};
+    const auto& reflection = out.reflection;
+    if (! reflection.fragment_always_writes || ! reflection.vertex_position.has_value()) return;
+    // Nothing but the draw's own geometry may decide which texels it writes, and every channel
+    // of each one it writes is its fragment's.
+    if (desc.depth_only || desc.depth_test || desc.depth_write || desc.scene_depth_attachment ||
+        ! desc.write_alpha || desc.cull_mode != MetalCullMode::None ||
+        desc.viewport != std::array<float, 4> { 0.0f, 0.0f, 1.0f, 1.0f }) {
+        return;
+    }
+    const auto blend = ToMetalBlendState(desc.blend, desc.alpha_rule, 1);
+    if (! BlendReplacesDestination(blend)) return;
+    if (out.dynamic_mesh || ! position.provided || position.stride == 0) return;
+    if (position.format != "r32g32b32_sfloat" && position.format != "r32g32b32a32_sfloat") return;
+    if (const auto& matrix = reflection.vertex_position->matrix; ! matrix.empty()) {
+        const auto* block  = reflection.uniformBlock();
+        const auto* member = reflection.member(matrix);
+        if (block == nullptr || member == nullptr || member->element_count != 16 ||
+            member->array_count != 0 || member->size < 64 || member->offset + 64 > block->size) {
+            return;
+        }
+        proof.matrix_offset = static_cast<int32_t>(member->offset);
+    }
+
+    // The two triangles the draw issues, exactly as the encode loop draws them.
+    std::array<uint32_t, 6> indices {};
+    if (out.index_buffer != nil && out.index_count > 0) {
+        if (out.index_count != 6) return;
+        if (! out.draw_ranges.empty() &&
+            (out.draw_ranges.size() != 1 || out.draw_ranges[0].indexOffset != 0 ||
+             out.draw_ranges[0].indexCount != 6)) {
+            return;
+        }
+        if (out.index_buffer.length < 6 * out.index_element_size) return;
+        const auto* bytes = static_cast<const uint8_t*>(out.index_buffer.contents);
+        for (std::size_t k = 0; k < 6; ++k) {
+            if (out.index_type == MTLIndexTypeUInt16) {
+                uint16_t value = 0;
+                std::memcpy(&value, bytes + k * sizeof(uint16_t), sizeof(value));
+                indices[k] = value;
+            } else {
+                std::memcpy(&indices[k], bytes + k * sizeof(uint32_t), sizeof(uint32_t));
+            }
+        }
+    } else if (out.index_buffer == nil && out.vertex_count == 4) {
+        indices = { 0, 1, 2, 1, 2, 3 };
+    } else {
+        return;
+    }
+    std::vector<uint32_t> corners;
+    for (std::size_t k = 0; k < 6; ++k) {
+        auto found = std::find(corners.begin(), corners.end(), indices[k]);
+        if (found == corners.end()) {
+            if (corners.size() == 4) return;
+            corners.push_back(indices[k]);
+            found = corners.end() - 1;
+        }
+        proof.quad.triangles[k / 3][k % 3] = static_cast<uint8_t>(found - corners.begin());
+    }
+    if (corners.size() != 4 || position.buffer >= out.vertex_buffers.size()) return;
+    id<MTLBuffer> vertices = out.vertex_buffers[position.buffer];
+    if (vertices == nil) return;
+    const auto* bytes = static_cast<const uint8_t*>(vertices.contents);
+    for (std::size_t c = 0; c < 4; ++c) {
+        const std::size_t at = std::size_t(corners[c]) * position.stride + position.offset;
+        if (at + 3 * sizeof(float) > vertices.length) return;
+        std::memcpy(proof.quad.corners[c].data(), bytes + at, 3 * sizeof(float));
+    }
+    proof.blends    = blend.blending_enabled;
+    proof.candidate = true;
+}
+
+bool MetalRender::Impl::passOverwritesTarget(std::size_t index, id<MTLTexture> attachment,
+                                             const uint8_t* uniform_base)
+{
+    if (! OverwriteLoadElisionSwitch().load(std::memory_order_relaxed)) return false;
+    if (index >= prepared.size() || attachment == nil) return false;
+    auto&       pass  = prepared[index];
+    auto&       proof = pass.overwrite;
+    const auto& desc  = descriptions[index];
+    if (! proof.candidate || ! passDraws(index)) return false;
+    // One sample, no depth, the ordinary program, and not sampling the image it draws into.
+    if (desc.samples != 1 || attachment.sampleCount != 1) return false;
+    if (index < pass_depths.size() && pass_depths[index] != nil) return false;
+    if (index < pass_reads_own_target.size() && pass_reads_own_target[index] != 0) return false;
+    if (index < video_plane_active.size() && video_plane_active[index] != 0) return false;
+    if (proof.blends && ! HoldsOnlyFiniteValues(attachment.pixelFormat)) return false;
+    // The viewport the encode loop sets is the whole image.
+    const auto width  = static_cast<uint32_t>(attachment.width);
+    const auto height = static_cast<uint32_t>(attachment.height);
+    if (std::lround(desc.viewport[0] * desc.target_width) != 0 ||
+        std::lround(desc.viewport[1] * desc.target_height) != 0 ||
+        std::lround(desc.viewport[2] * desc.target_width) != static_cast<long>(width) ||
+        std::lround(desc.viewport[3] * desc.target_height) != static_cast<long>(height)) {
+        return false;
+    }
+    // This frame's matrix, as the GPU will read it: the uniforms were written before the loop.
+    std::array<float, 16> matrix { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+    if (proof.matrix_offset >= 0) {
+        if (uniform_base == nullptr || pass.uniform_size == 0) return false;
+        std::memcpy(matrix.data(), uniform_base + pass.uniform_offset + proof.matrix_offset, sizeof(matrix));
+    }
+    if (! proof.memo_valid || proof.memo_width != width || proof.memo_height != height ||
+        std::memcmp(proof.memo_matrix.data(), matrix.data(), sizeof(matrix)) != 0) {
+        proof.memo_covers = QuadCoversViewport(proof.quad, matrix, width, height);
+        proof.memo_matrix = matrix;
+        proof.memo_width  = width;
+        proof.memo_height = height;
+        proof.memo_valid  = true;
+    }
+    return proof.memo_covers;
+}
+
 bool MetalRender::Impl::passDraws(std::size_t index) const
 {
     const auto& pass = prepared[index];
@@ -4070,6 +4265,7 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
         layout_id = layout_id * 1099511628211ULL + vertex.OneSizeOf();
     }
 
+    PositionAttribute position_attribute;
     for (const auto& input : out.reflection.inputs) {
         const auto format = ToMetalVertexFormat(input.format);
         if (format == MTLVertexFormatInvalid) {
@@ -4094,6 +4290,16 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
         // zero they index the bone array with a position's bit pattern.
         if (! provided && (input.name == WE_IN_BLENDINDICES || input.name == WE_IN_BLENDWEIGHTS)) {
             return fail("a puppet shader is bound to a mesh without bone weights");
+        }
+        if (out.reflection.vertex_position.has_value() &&
+            input.name == out.reflection.vertex_position->input) {
+            position_attribute = PositionAttribute {
+                .provided = provided,
+                .buffer   = source,
+                .offset   = offset,
+                .stride   = submesh.GetVertexArray(source).OneSizeOf(),
+                .format   = input.format,
+            };
         }
         vertex_descriptor.attributes[input.location].format      = format;
         vertex_descriptor.attributes[input.location].offset      = offset;
@@ -4242,6 +4448,7 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
     // mutates it afterwards.
     out.vertex_descriptor = vertex_descriptor;
     out.vertex_layout_id  = layout_id;
+    prepareOverwriteProof(desc, out, position_attribute);
 
     // ---- uniform initial state
     auto* updater = scene.shaderValueUpdater.get();
@@ -6598,7 +6805,11 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                         if (group.source_key == impl.scene_output_key) {
                             impl.scene_output_target = next;
                         }
-                        if (impl.feedback_swaps[i].prefix) impl.opening_copies.emplace_back(next, image);
+                        // A reader that writes every texel needs none of the image first.
+                        if (impl.feedback_swaps[i].prefix &&
+                            ! impl.passOverwritesTarget(impl.feedback_swaps[i].reader, next, uniform_base)) {
+                            impl.opening_copies.emplace_back(next, image);
+                        }
                     } else {
                         // Nothing redraws the source before it is read again,
                         // so the copy is made into a free image.
@@ -6626,7 +6837,10 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                     id<MTLTexture> image = source->second;
                     impl.tradeFeedbackTextures(i);
                     impl.frame_swaps.push_back(i);
-                    if (impl.feedback_swaps[i].prefix) impl.opening_copies.emplace_back(target, image);
+                    if (impl.feedback_swaps[i].prefix &&
+                        ! impl.passOverwritesTarget(impl.feedback_swaps[i].reader, target, uniform_base)) {
+                        impl.opening_copies.emplace_back(target, image);
+                    }
                     continue;
                 }
                 const bool identical = source->second.width == target.width &&
@@ -6699,6 +6913,14 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 // A feedback trade changes the resolve image, not the MS samples already
                 // held by this target. Loading those samples keeps their coverage intact.
                 const bool opens_with_copy = opening != nil && desc.samples == 1;
+                // A draw proven to write every texel of its target makes what the target held
+                // irrelevant: the render pass opens with a clear, which costs no memory traffic,
+                // instead of loading the whole image. Transparent black rather than "don't care",
+                // so even a wrong proof would draw the same picture every time. The pass's own
+                // load action stays what the graph decided, for everything else that reads it.
+                const bool overwrites = ! opens_with_copy && ! desc.depth_only &&
+                                        desc.load_action == MetalLoadAction::Load &&
+                                        impl.passOverwritesTarget(i, attachment, uniform_base);
                 MTLRenderPassDescriptor* descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
                 if (desc.depth_only) {
                     // A shadow caster: its target is the depth attachment, no colour.
@@ -6709,15 +6931,21 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 } else {
                     descriptor.colorAttachments[0].texture    = attachment;
                     descriptor.colorAttachments[0].loadAction =
-                        opens_with_copy ? MTLLoadActionDontCare : static_cast<MTLLoadAction>(desc.load_action);
+                        opens_with_copy ? MTLLoadActionDontCare
+                        : overwrites    ? MTLLoadActionClear
+                                        : static_cast<MTLLoadAction>(desc.load_action);
                     // Always stored: a later pass, the presentation blit or a poster
                     // capture reads this target after the pass ends.
                     descriptor.colorAttachments[0].storeAction = desc.samples > 1
                         ? MTLStoreActionStoreAndMultisampleResolve : MTLStoreActionStore;
                     if (desc.samples > 1) descriptor.colorAttachments[0].resolveTexture = target;
-                    descriptor.colorAttachments[0].clearColor  = MTLClearColorMake(
-                        desc.clear_color[0], desc.clear_color[1], desc.clear_color[2],
-                        desc.clear_color[3]);
+                    const auto& clear = overwrites ? std::array<float, 4> {} : desc.clear_color;
+                    descriptor.colorAttachments[0].clearColor =
+                        MTLClearColorMake(clear[0], clear[1], clear[2], clear[3]);
+                }
+                if (descriptor.colorAttachments[0].loadAction == MTLLoadActionLoad ||
+                    (desc.depth_only && descriptor.depthAttachment.loadAction == MTLLoadActionLoad)) {
+                    ++impl.frame_encodes.loaded_passes;
                 }
                 if (depth != nil) {
                     const bool first = std::find(depth_cleared.begin(), depth_cleared.end(),
@@ -6766,6 +6994,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                     open.pipeline = copy_pipeline;
                     open.viewport = { 0, 0, static_cast<uint32_t>(target.width),
                                       static_cast<uint32_t>(target.height) };
+                    ++impl.frame_encodes.opening_copies;
                 }
             }
 
@@ -7279,10 +7508,16 @@ MetalRender::FrameEncodeCountsForTests MetalRender::LastFrameEncodeCountsForTest
 {
     if (pImpl == nullptr) return {};
     const auto& last = pImpl->last_frame_encodes;
-    return { last.render_passes, last.scene_output_passes, last.blit_passes };
+    return { last.render_passes, last.scene_output_passes, last.blit_passes, last.loaded_passes,
+             last.opening_copies };
 }
 
 void MetalRender::SetTargetSharingForTests(bool enabled) { TargetSharingSwitch().store(enabled); }
+
+void MetalRender::SetOverwriteLoadElisionForTests(bool enabled)
+{
+    OverwriteLoadElisionSwitch().store(enabled);
+}
 
 uint64_t MetalRender::RenderTargetBytesForTests() const
 {

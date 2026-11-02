@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -59,12 +60,26 @@ struct MetalDescriptorBinding
     bool comparison { false };
 };
 
+/// Where the vertex stage's clip-space position comes from, as the shader compiler proved it
+/// (`"vertex_position"`): `vec4(input.xyz, 1.0)`, multiplied by the `mat4` uniform `matrix`
+/// (matrix on the left) unless `matrix` is empty.
+struct MetalVertexPosition
+{
+    std::string input;
+    std::string matrix;
+};
+
 struct MetalShaderReflection
 {
     std::vector<MetalUniformBlock>      blocks;
     std::vector<MetalVertexInput>       inputs;
     std::vector<MetalDescriptorBinding> descriptors;
     std::vector<uint32_t>               active_texture_slots;
+    /// Absent when the compiler could not prove it, which is every form it does not recognise.
+    std::optional<MetalVertexPosition>  vertex_position;
+    /// The fragment stage writes colour 0 for every fragment it runs for: nothing discards and
+    /// no sample mask is written (`"fragment_always_writes"`). False when not proven.
+    bool                                fragment_always_writes { false };
 
     [[nodiscard]] const MetalUniformBlock* uniformBlock() const
     {

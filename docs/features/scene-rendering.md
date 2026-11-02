@@ -2501,6 +2501,19 @@ render scale, animation speed or audio-response subscription:
   seconds instead of walking its directory for every property or playback update;
   explicit settings-snapshot requests and cache clearing force a fresh
   measurement. This affects storage statistics only.
+- On Native Metal, a render pass opened by a draw that provably writes every texel of
+  its target clears the target instead of loading it from memory. Effect passes
+  alternate between two buffers, so from the third effect of a layer on every pass
+  used to read its whole buffer back before drawing over all of it. The proof is
+  general: the shader compiler reports that the fragment shader never discards and
+  that the vertex position is the mesh's own position, as given or through one
+  matrix uniform; the draw's two triangles, through this frame's matrix, must cover
+  the whole target with a quarter-texel margin, with nothing culled or depth-tested,
+  every channel written and blending that replaces the texel (an 8-bit target when it
+  is `One`/`Zero` rather than off). A traded copy's reader that passes the same test
+  also skips the copy it opened with. Anything unproven keeps its load, and the clear
+  is to transparent black, so the picture is the same byte for byte. The switch is in
+  [power benchmarking](../testing/power-benchmark.md#ab-comparison-entry-points).
 
 The contracts and tests behind each item are in
 [renderer verification](../testing/runtime-regressions.md#continuous-playback-work-contracts).

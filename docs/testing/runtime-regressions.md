@@ -144,6 +144,26 @@ device.
   the blit path over four frames with both blits removed. Opening copies are
   retained separately by destination texture, not in one overwritable pending
   slot, and graph release and abandoned frames clear that state.
+- **Overwriting render passes skip their load** — `MetalSceneDraw.AnEffectChainThatOverwritesItsBuffersOpensThemWithAClearAndDrawsTheSamePicture`:
+  a card through four effects (the position through the matrix, as given, and
+  through a copy of the input) is drawn with `MetalRender::SetOverwriteLoadElisionForTests`
+  off and on; every frame must be byte-identical and the second and third effects,
+  which write a buffer already drawn this frame, must stop loading it (two fewer
+  loading render passes, the same number of render passes).
+  `.AnEffectPassThatMayLeaveTexelsAloneKeepsLoadingItsBuffer` gives the second effect a
+  scaled or moved card, a `discard`, a `clip`, back-face culling or
+  `alphawriting: disabled`: it keeps its load and the frames match; clearing every
+  loading pass without the proof changes the frames of the first four.
+  `.ABlendedOverwriteOfAFloatBufferKeepsItsLoad`: `One`/`Zero` blending over a
+  half-float buffer keeps its load (zero times an infinity it may hold is not zero),
+  over an 8-bit one it clears. `.ATradedReaderThatOverwritesTheSceneNeedsNoOpeningCopy`:
+  a canvas-sized layer with `alphawriting: enabled` reading `_rt_FullFrameBuffer`
+  needs no opening copy. The shader compiler's facts are pinned in
+  `Renderer/Shader/src/reflect/coverage/tests.rs` (spin's copy, gaussian's `#if`
+  kernels, skew/transform/foliagesway `MODE` 1 moving the corners), the geometry in
+  `MetalOverwrite.*` (`metal_backend_test`). On a real scene, `WE_TEST_METAL_PROJECTS`
+  prints render passes loading their target per frame, and
+  `WALLPAPER_MACHINE_OVERWRITE_LOAD_ELISION=0` must give the same poster PPM.
 - **Per-frame geometry upload** — `MetalSceneDraw.GeometryRebuiltEveryFrameIsUploadedAndDrawnFromItsOwnSlot`,
   across more frames than there are in-flight slots. Zero live particles must
   draw nothing rather than fail.

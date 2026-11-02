@@ -123,6 +123,24 @@ bool ParseMetalShaderReflection(std::string_view json, MetalShaderReflection& ou
         for (const auto& slot : document.value("active_texture_slots", nlohmann::json::array())) {
             out.active_texture_slots.push_back(slot.get<uint32_t>());
         }
+
+        // The coverage facts: absent or malformed means not proven, never an error.
+        if (const auto position = document.find("vertex_position");
+            position != document.end() && position->is_object()) {
+            const auto input  = position->find("input");
+            const auto matrix = position->find("matrix");
+            if (input != position->end() && input->is_string() &&
+                (matrix == position->end() || matrix->is_string())) {
+                out.vertex_position = MetalVertexPosition {
+                    .input  = input->get<std::string>(),
+                    .matrix = matrix == position->end() ? std::string {} : matrix->get<std::string>(),
+                };
+            }
+        }
+        if (const auto writes = document.find("fragment_always_writes");
+            writes != document.end() && writes->is_boolean()) {
+            out.fragment_always_writes = writes->get<bool>();
+        }
     } catch (const std::exception& e) {
         if (error != nullptr) {
             *error = std::string("unexpected shader reflection contents: ") + e.what();

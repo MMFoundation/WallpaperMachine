@@ -174,6 +174,30 @@ struct MetalPipelineKey
 /// the sample-count bits 1, 2, 4 and 8; single-sample is always the fallback.
 [[nodiscard]] uint32_t SelectSceneSampleCount(uint32_t requested, uint32_t supported_mask);
 
+/// Four corners and the two triangles over them, in the order a draw issues them: the
+/// geometry of a draw that may write every texel of its target (an effect pass's card).
+struct MetalQuad
+{
+    std::array<std::array<float, 3>, 4> corners {};
+    std::array<std::array<uint8_t, 3>, 2> triangles {};
+};
+
+/// Whether what a draw with `blend` leaves in a texel it covers is its fragment's output alone,
+/// whatever the texel held: blending off without alpha to coverage, or `One`/`Zero` added. With
+/// `One`/`Zero` the held value is still multiplied by zero, which is zero only when it is finite;
+/// the caller decides whether the target's format can hold anything else.
+[[nodiscard]] bool BlendReplacesDestination(const MetalBlendState& blend);
+
+/// Whether drawing `quad` with its corners at clip position `matrix * vec4(corner, 1.0)`
+/// (`matrix` column-major, as the shader's `float4x4` reads it) covers the centre of every texel
+/// of a full `width` x `height` viewport. Every corner must be in front (w > 0) and inside the
+/// depth range, so nothing is clipped away, and the two triangles must tile one convex
+/// quadrilateral that contains the viewport shrunk by a quarter texel on each side: the GPU's
+/// own float rounding of the corners is far smaller than that, so no texel centre can fall
+/// outside. Anything else is "not covered", which only costs the caller the load it keeps.
+[[nodiscard]] bool QuadCoversViewport(const MetalQuad& quad, const std::array<float, 16>& matrix,
+                                      uint32_t width, uint32_t height);
+
 struct MetalPipelineKeyHash
 {
     std::size_t operator()(const MetalPipelineKey& key) const noexcept;

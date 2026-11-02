@@ -20,6 +20,8 @@ const SHIPPED: &[(&str, &str)] = &[
     ("6:naga-29.0.3-msl2.0-untransformed", "81d5f272f54deb9007775fa53bda918b9a6656b2773cc935d54c91a992d1c453"),
     ("7:naga-29.0.3-msl2.0-untransformed", "81d5f272f54deb9007775fa53bda918b9a6656b2773cc935d54c91a992d1c453"),
     ("8:naga-29.0.3-msl2.0-untransformed", "81d5f272f54deb9007775fa53bda918b9a6656b2773cc935d54c91a992d1c453"),
+    // 9: the reflection document gains the coverage facts; the Metal text is unchanged.
+    ("9:naga-29.0.3-msl2.0-untransformed", "81d5f272f54deb9007775fa53bda918b9a6656b2773cc935d54c91a992d1c453"),
 ];
 
 fn programs() -> Vec<crate::pipeline::CompiledProgram> {
