@@ -942,9 +942,8 @@ Outside the clock's own box the picture after either rebuild is the picture of a
 not rebuild, pixel for pixel: the seeks of this wallpaper's clips land while the later videos
 are still opening, so the head of a clip is not seen on it, only the wait.
 
-A video that is opened while the clock is already some way into the clip (a scene that falls
-back to the other renderer, a surface split off a shared decoder with shared decode on) opens
-at the head of the clip, as any open does, and the first call that gives it the clock seeks it
+A video that is opened while the clock is already some way into the clip (a scene that is
+rebuilt after a failure) opens at the head of the clip, as any open does, and the first call that gives it the clock seeks it
 there. The open waits for no seek, so it costs what opening at the head costs. The head of the
 clip is on screen until the seek has landed and the decoder has caught up with the clock, which
 kept running while the seek was made: 0.35 to 0.75 s for a 1080p clip and 0.7 to 1.5 s for a
@@ -2031,14 +2030,12 @@ The only scene control that ships on. It reuses the result of scene subgraphs wh
 inputs have not changed and removes render passes proven redundant, inside the scene
 renderer's own render graph. It is not a quality tier: the same pixels are
 produced, and resolution, frame rate and animation speed are untouched. It reaches
-wallpapers the scene engine draws — scenes on either renderer, and video wallpapers
-on Compatibility, which the engine draws as a one-texture scene; native video and
-web wallpapers do not go through it. It is on the
+the wallpapers the scene engine draws, which are scenes only: video and web
+wallpapers have players of their own and do not go through it. It is on the
 [Performance page](performance.md#advanced) so it can be turned off and on for an
 A/B comparison without an environment variable.
 
-Unlike [content pacing and shared video decode](performance.md#experimental-switches),
-which are read back from the renderer, its row reports the saved preference: the renderer publishes no query for
+Its row reports the saved preference: the renderer publishes no query for
 it. The engine applies a change to a running scene in place, on that scene's next
 frame in either direction — the copy plan, the targets it governs and the reuse
 table are rebuilt over the graph that is already compiled, without reparsing the
@@ -2096,20 +2093,15 @@ bloom scene pays more than one with author-sized buffers, is under
 
 With scene render optimisation on, a frame that would put back exactly the picture
 already on screen is not drawn, submitted or presented, and the surface keeps
-showing the last frame. Two cases qualify:
-
-- a Compatibility video wallpaper whose playback clock selected the same decoded
-  frame as the last present, which is most ticks of a 24 or 30 fps clip under a 60
-  or 120 fps limit;
-- a scene, on either renderer, whose every pass was reused from the previous frame,
-  leaving only the final composition to redo.
+showing the last frame. That is a scene whose every pass was reused from the
+previous frame or drew nothing, with nothing else to encode, leaving only the final
+composition to redo; a scene with a video texture to import that frame never
+qualifies.
 
 The frame clock still ticks at the configured rate, and the scene still runs its
 scripts, timeline, sound and events on every tick; only drawing an identical
-picture is left out. A newly decoded video frame is presented on the tick that
-selects it, so this is neither content pacing (an
-[experimental switch](performance.md#experimental-switches)) nor updating only when
-the scene changes, and no drawable is held to keep the picture. A resize, fill, scaling,
+picture is left out. This is not updating only when the scene changes, and no
+drawable is held to keep the picture. A resize, fill, scaling,
 position or flip change, a render-scale or scene-optimisation change, a rebuilt graph or
 surface, a resumed wallpaper, a failed frame or a poster request makes the next
 frame present. The renderer counters report these frames as
@@ -2351,7 +2343,7 @@ gets its own, and so does a display that keeps a different mip range (above). Th
 cache holds the textures weakly: a picture is freed when the last display showing it
 unloads. Confirming a match reads the shared texture back once while the scene
 loads; nothing is added per frame. Render targets, pictures a script writes and
-video frames stay per display, and the Compatibility backend does not share.
+video frames stay per display.
 
 An authored `hdr` scene with bloom on selects the HDR path on either scene backend
 when post-processing is Ultra or Display HDR: overbright color is preserved in

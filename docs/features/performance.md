@@ -1075,27 +1075,18 @@ and the app's own players play every plain video now; a configuration file that
 still holds `content_pacing` or `shared_video_decode` loads, and the keys are not
 written back.
 
-Scene videos packed into `.tex` mip payloads participate too: when the switch is
-on, opening a source first resolves its bytes to the existing content-named
-temporary file, then uses the same file-based session registry as ordinary video
-files. Identical payloads can share even under different texture names; different
-payloads do not share just because their names or sizes match. Extraction and
-identity lookup happen when the source opens, not per frame.
-
 Memory a running wallpaper holds is kept to what it shows. Displays showing one scene
 share the pictures they have in common instead of each holding a copy, a destroyed
 layer's script state and a let-go pipeline-archive store are released, and a scene's
-video is opened from its file (or a content-named cache file) instead of being read
-whole into memory; the details are in [renderer
+video is decoded from its file where it lies instead of being read whole into memory (a
+clip packed into the scene's package is read where the package left it, and a large
+one moved into an unnamed file); the details are in [renderer
 memory](scene-rendering.md#renderer-memory). None of it adds per-frame work, a render
 pass or render-target memory, and the pictures are unchanged.
 
-Consumers share one driving playback clock. Each surface still owns its pause
-and retained frame; an incompatible playback rate splits that consumer onto a
-private decoder, reopened from the same file even after the packed image is gone.
-With the switch off, each source keeps its own decoder as before. The switch stays
-off by default: reducing duplicate queues does not establish that one shared
-clock is suitable for every scene or independently timed display.
+A scene's video texture, a file or a clip packed into a `.tex` payload, is decoded
+once for each surface that shows it: every display's scene opens its own decoder on its
+own playback clock, and two displays never share one.
 
 ### Direct video plane sampling
 
