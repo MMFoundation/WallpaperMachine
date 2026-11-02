@@ -14,6 +14,7 @@
 /// desktop, no audio device, no screen capture.
 
 #include "support/font_assets.hpp"
+#include "support/scene_quality_environment.hpp"
 #include "Runtime/RuntimeImageSource.hpp"
 #include "MetalRender/MetalBackendRouter.hpp"
 #include "MetalRender/MetalCapability.hpp"
@@ -15698,36 +15699,12 @@ uint16_t PackageVersionOf(const std::string& path)
                : SceneParseRequest::kUnknownPkgVersion;
 }
 
-/// Requested quality for a native local/compare probe. The parser and device
-/// still decide which pipeline and sample count can be drawn.
+/// Requested quality for a native local/compare probe, read as the energy test
+/// reads it. The parser and device still decide which pipeline and sample count
+/// can be drawn.
 SceneQuality QualityFromEnvironment()
 {
-    SceneQuality quality;
-    if (const char* text = std::getenv("WE_TEST_REFLECTION")) {
-        const std::string_view value(text);
-        if (value != "0" && value != "1")
-            throw std::runtime_error("WE_TEST_REFLECTION must be 0 or 1");
-        quality.reflection = value == "1";
-    }
-    if (const char* text = std::getenv("WE_TEST_MSAA")) {
-        char* end = nullptr;
-        const long samples = std::strtol(text, &end, 10);
-        if (end == text || *end != '\0' ||
-            (samples != 0 && samples != 2 && samples != 4 && samples != 8)) {
-            throw std::runtime_error("WE_TEST_MSAA must be 0, 2, 4 or 8");
-        }
-        quality.msaa = static_cast<int>(samples);
-    }
-    if (const char* text = std::getenv("WE_TEST_POSTPROCESSING")) {
-        char* end = nullptr;
-        const long level = std::strtol(text, &end, 10);
-        if (end == text || *end != '\0' ||
-            (level != 0 && level != 2 && level != 4 && level != 5)) {
-            throw std::runtime_error("WE_TEST_POSTPROCESSING must be 0, 2, 4 or 5");
-        }
-        quality.post_processing = static_cast<int>(level);
-    }
-    return quality;
+    return tests::SceneQualityFromEnvironment();
 }
 
 /// Wallpaper Engine's per-wallpaper options for a local or compare run, from

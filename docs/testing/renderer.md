@@ -153,7 +153,7 @@ Inputs and outputs:
 | `WE_TEST_OUTPUT` | probes | Output/cache directory (disposable) |
 | `WE_TEST_CACHE` | `text_object_runtime_test` | Disposable shader cache directory |
 | `WE_TEST_CYCLES` | `scene_reload_cycle_probe` | Reload cycles per project |
-| `WE_TEST_PROPERTIES` | `offscreen_scene_probe`, `metal_scene_draw_smoke` | Flat JSON property overrides, in memory only. A layer gated on a saved property draws nothing without this, so both harnesses have to be driven with the same overrides to compare one |
+| `WE_TEST_PROPERTIES` | `offscreen_scene_probe`, `metal_scene_draw_smoke`, the energy test | Flat JSON property overrides, in memory only (the energy test hands them to the scene wallpaper as the app's saved overrides). A layer gated on a saved property draws nothing without this, so both harnesses have to be driven with the same overrides to compare one |
 | `WE_TEST_RANDOM_SEED` | both scene probes | Seeds the particle random source before the scene is parsed, so the same project simulates the same particles in both harnesses and across builds |
 
 Frames, time and surfaces:
@@ -166,9 +166,10 @@ Frames, time and surfaces:
 | `WE_TEST_SAMPLE_FRAMES` | both scene probes | JSON array of frame indices. Saves each frame and `state-N.json` with live transforms, material values, text and script-error count |
 | `WE_TEST_METAL_FRAMES` | `metal_scene_draw_smoke` | Frames the local-project Metal test draws, 1/60 s apart: 120 by default, 2–3600 accepted. Its own knob, so the probe's `WE_TEST_FRAMES` in the same environment cannot move the Metal frame's scene time. The last frame is the output; the test also prints the bytes of this scene's render targets and, separately, the device-wide Metal allocation, which includes the layer's drawables and varies between runs |
 | `WE_TEST_METAL_FRAME_STEP` | `metal_scene_draw_smoke` | Simulation delta in seconds; default `1/60`. Use `1/120` and twice as many frames for a matched-duration 120 FPS scenario |
-| `WE_TEST_MSAA` | native local/compare probes in `metal_scene_draw_smoke` | Requested sample count: `0` (default), `2`, `4` or `8`. The normal model eligibility and device capability checks apply; it does not force unsupported samples |
-| `WE_TEST_REFLECTION` | native local/compare probes in `metal_scene_draw_smoke` | Reflection quality: `0` disabled or `1` enabled (default), for matching Wallpaper Engine's quality setting without changing installed preferences |
-| `WE_TEST_POSTPROCESSING` | native local/compare probes in `metal_scene_draw_smoke` | Requested post-processing quality: Disabled `0`, Enabled `2` (default), Ultra `4`, or Display HDR `5`. HDR still requires authored HDR and bloom; the setting does not force a pipeline |
+| `WE_TEST_MSAA` | native local/compare probes in `metal_scene_draw_smoke`, the energy test | Requested sample count: `0` (default), `2`, `4` or `8`. The normal model eligibility and device capability checks apply; it does not force unsupported samples |
+| `WE_TEST_REFLECTION` | native local/compare probes in `metal_scene_draw_smoke`, the energy test | Reflection quality: `0` disabled or `1` enabled (default), for matching Wallpaper Engine's quality setting without changing installed preferences |
+| `WE_TEST_POSTPROCESSING` | native local/compare probes in `metal_scene_draw_smoke`, the energy test | Requested post-processing quality: Disabled `0`, Enabled `2` (default), Ultra `4`, or Display HDR `5`. HDR still requires authored HDR and bloom; the setting does not force a pipeline |
+| `WE_TEST_SHADOWS`, `WE_TEST_VOLUMETRICS` | the same | Shadow and volumetric quality, `0`–`4` (default `2`, medium). All five quality variables are read by one parser (`tests/support/scene_quality_environment.hpp`); a value out of range fails the test |
 | `WE_TEST_METAL_WARMUP_TICKS` | `metal_scene_draw_smoke` | Runtime ticks of 1/60 s before the graph is built, as `offscreen_scene_probe` takes 40; `0..3600`. Unset, none. The scene clock is not advanced by them, here or there |
 | `WE_TEST_COMPARE_PROJECTS` | `metal_scene_draw_smoke --gtest_filter='*LocalProjectsDrawAPosterPicture*'` | Colon-separated `project.json` paths drawn through `SceneRendererHandle` on a layer no window owns, the last frame's final composition written as `<scene id>.ppm` under `WE_TEST_OUTPUT` (see below). Unset, the test skips |
 | `WE_TEST_COMPARE_SURFACE` | the same test | `<width>x<height>` of the layer drawn into; default `960x540` |
@@ -891,28 +892,49 @@ produced.
 energy measurement: it skips unless `WE_TEST_ENERGY_PROJECT` names a local
 `project.json` (with `WE_TEST_ASSETS`), then runs the production
 `SceneWallpaper` (Native Metal, the only renderer; `WE_TEST_ENERGY_RENDERER` is no
-longer read) with its own 60 FPS clock into an unattached layer
-of `WE_TEST_ENERGY_WIDTH` x `WE_TEST_ENERGY_HEIGHT` (default 1920x1080), waits
-`WE_TEST_ENERGY_WARMUP` seconds (default 5) after the first frame and samples a
-`WE_TEST_ENERGY_SECONDS` window (default 20). `WE_TEST_ENERGY_RESOLUTION`
-(`canvas`, the default, or `display`) picks the 2D scene resolution the run draws
-at and `WE_TEST_ENERGY_SCALE_FACTOR` (default 1) the surface's backing scale, so a
-3456 x 2234 surface at 2 is a laptop panel. `WE_TEST_ENERGY_SCALING` (`fill`, `fit`,
-`fit_blurred`, `stretch` or `none`) is pushed as the host's scaling mode; unset, none is
-pushed and the scene keeps the renderer's own (Fit), as before the variable existed. It prints one `ENERGY {...}` line:
-the backend actually used, this process's CPU seconds and CPU energy
-(`ri_energy_nj`), the GPU time of this process's own Metal command buffers and
+longer read) with its own frame clock into unattached layers, waits
+`WE_TEST_ENERGY_WARMUP` seconds (default 5) after every surface's first frame and
+samples a `WE_TEST_ENERGY_SECONDS` window (default 20). It takes the settings the app
+applies, in the app's order: `WE_TEST_ENERGY_SURFACES` (`3840x2160@2,3456x2234@2`)
+draws one scene wallpaper per display in the one process, each on a layer of that
+pixel size and backing scale (unset, one surface of `WE_TEST_ENERGY_WIDTH` x
+`WE_TEST_ENERGY_HEIGHT`, default 1920x1080, at `WE_TEST_ENERGY_SCALE_FACTOR`, default 1);
+`WE_TEST_ENERGY_SCALING` (`fill`, `fit`, `fit_blurred`, `stretch` or `none`, one for all
+surfaces or one per surface, comma-separated) is pushed as the host's scaling mode
+(unset, none is pushed and the scene keeps the renderer's own, Fit);
+`WE_TEST_ENERGY_RESOLUTION` (`canvas`, the default, or `display`) picks the 2D scene
+resolution; `WE_TEST_ENERGY_FPS` (default 60) is the frame rate;
+`WE_TEST_PROPERTIES` are the saved property overrides; the five quality variables
+above are set before the configuration; and `WE_TEST_ENERGY_RENDER_SCALE` is sent
+after it, as the app sends any scale below 1 (unset, none is sent). It prints one
+`ENERGY {...}` line: the backend actually used, this process's CPU seconds and CPU
+energy (`ri_energy_nj`), the GPU time of this process's own Metal command buffers and
 how many there were (`gpu_own_s`, `command_buffers`: the test wraps the device's
-command-buffer `commit` to read each buffer's GPU start and end, which counts
-every buffer the process commits), the whole GPU's energy and
-busy time over all resource coalitions (other processes included), frames
-completed and presented, and the physical footprint. Counting is off and scene
-optimisation on, as shipped; `WE_TEST_ENERGY_CACHE` keeps the shader and pipeline
-caches between runs. Run one renderer per process, warm the caches with an
-unmeasured run first and alternate the settings under comparison. The whole-GPU figures are only
-usable against an idle window of the same length on an otherwise quiet machine:
-a process launched from a terminal shares a coalition with that terminal, and
-any other process drawing at the time is in them. GPU time is workload, not
+command-buffer `commit`, `tests/support/command_buffer_gpu_time.hpp`, to read each
+buffer's GPU start and end, which counts every buffer the process commits), the whole
+GPU's energy and busy time over all resource coalitions (other processes included;
+only coalitions present at both ends of the window are differenced, and one whose
+counters went down is left out, so a coalition that ends during the window can no
+longer make the figure wrap), frames completed and presented summed over surfaces,
+and the physical footprint. `WE_TEST_ENERGY_OUTPUT=<path>` also writes the run's
+schema-2 record there: the settings; per surface its size, scaling, backend, frames
+and failures (and, with `WE_TEST_ENERGY_COUNTERS=1`, the renderer counters' timer
+wakeups, draws, presents and presents skipped as unchanged, counted the same in both
+builds compared); `cpu` from `RUSAGE_INFO_V6` (user, system and P-core seconds
+normalized from Mach ticks, CPU and P-core energy, package-idle and interrupt
+wakeups per second, instructions, cycles, milliseconds per QoS class); `gpu` (own
+busy seconds, command buffers, ms per frame, the 50th/95th/99th percentile of the
+per-buffer GPU time from a 0.1 ms histogram, the process's own coalition's GPU and
+CPU energy and busy time with `coalition_shared` when the parent process is in the
+same coalition, the all-coalition figures and `other_busy_share`, the GPU busy share
+of every other coalition); end and lifetime-peak footprint; and the thermal state
+before and after. `EnergyAccounting.*` pins the coalition differencing, the
+histogram quantiles and the surface list. Counting is off unless asked for and
+scene optimisation on, as shipped; `WE_TEST_ENERGY_CACHE` keeps the shader and
+pipeline caches between runs. Run one scene per process, warm the caches with an
+unmeasured run first and alternate the settings under comparison. A process launched from
+a terminal shares a coalition with that terminal, so its coalition figures are the
+terminal's; one launched as an app of its own has its own. GPU time is workload, not
 energy. It changes nothing on
 the desktop and needs no privileges; it is not a power measurement in the
 sense of [power benchmarking](power-benchmark.md), which observes the app and
