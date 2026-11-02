@@ -546,6 +546,56 @@ TEST(ShaderUpdaterAudio, ReadingAudioInOneSlotDoesNotChangeAnotherSlotsUniforms)
     }
 }
 
+// Wallpaper Engine gives a frame one spectrum. The analysis publishes 30 a second on a thread of
+// its own, so passes, particle operators and scripts that each took the newest one could draw
+// some bars of a frame from one window and the rest from the next. The first read of a frame
+// takes the spectrum for the whole frame; the next frame takes the newest again.
+TEST(ShaderUpdaterAudio, AFrameReadsOneSpectrumWhateverTheAnalysisPublishesMeanwhile)
+{
+    AudioServiceGuard guard;
+    auto first = SnapshotWith({ 0.125f, 0.25f, 0.375f, 0.5f, 0.625f, 0.75f });
+    auto second = SnapshotWith({ 0.875f, 0.75f, 0.625f, 0.5f, 0.375f, 0.25f });
+    first.generation = 17;
+    second.generation = 18;
+    audio::SetAudioSpectrumSnapshotForTesting(first);
+
+    Stage f;
+    auto& runtime = *f.scene.runtime;
+    runtime.SetAudioResponseEnabled(true);
+    f.updater.InitUniforms(f.node.get(), 0, Declares(SpectrumNames()));
+    f.updater.InitUniforms(f.node.get(), 1, Declares(SpectrumNames()));
+    auto script = runtime.scriptEngine().CreatePropertyScriptProgram(
+        &runtime, "const b = engine.registerAudioBuffers(16); export function update() { return b.left[0]; }",
+        "", {}, DynamicValue(0.0f), runtime.hostContext());
+    ASSERT_NE(script, nullptr);
+    ASSERT_TRUE(script->Valid());
+    const auto script_reads = [&] {
+        const auto value = script->Evaluate(runtime.hostContext(), DynamicValue(0.0f));
+        return value != nullptr ? value->getFloat() : -1.0f;
+    };
+
+    f.updater.FrameBegin();
+    ExpectSpectrum(f.Update(0), &first);
+    // The analysis publishes a newer spectrum while the frame is being drawn.
+    audio::SetAudioSpectrumSnapshotForTesting(second);
+    ExpectSpectrum(f.Update(1), &first);
+    EXPECT_FLOAT_EQ(script_reads(), first.left16[0]) << "a script read another spectrum than the passes";
+    EXPECT_EQ(runtime.CurrentAudioSpectrumSnapshot().generation, 17u)
+        << "what particle operators read is another spectrum than the passes'";
+
+    f.updater.FrameBegin();
+    EXPECT_FLOAT_EQ(script_reads(), second.left16[0]);
+    ExpectSpectrum(f.Update(0), &second);
+    ExpectSpectrum(f.Update(1), &second);
+
+    // Turning audio response off takes effect with the next frame, for every reader at once.
+    runtime.SetAudioResponseEnabled(false);
+    ExpectSpectrum(f.Update(0), &second);
+    f.updater.FrameBegin();
+    ExpectSpectrum(f.Update(0), nullptr);
+    EXPECT_FLOAT_EQ(script_reads(), 0.0f);
+}
+
 // ---- puppet bone alpha --------------------------------------------------------------------------
 
 // A shader that declares `g_BonesAlpha` gets one opacity per bone of the node's puppet.

@@ -286,6 +286,8 @@ uint64_t HashFloats(uint64_t hash, const float* values, std::size_t count) {
 } // namespace
 
 void WPShaderValueUpdater::FrameBegin() {
+    // Every audio read of this frame (passes, particle operators, scripts) sees one spectrum.
+    if (m_scene != nullptr && m_scene->runtime != nullptr) m_scene->runtime->BeginAudioFrame();
     // The runtime supplies the layer world before stepping its puppet. Advancing
     // it here would consume this frame with the previous world and make merely
     // adding a visual child change its parent's simulation. Texture channels are
@@ -1033,8 +1035,9 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
     if (info->has_AudioSpectrum16Left || info->has_AudioSpectrum16Right ||
         info->has_AudioSpectrum32Left || info->has_AudioSpectrum32Right ||
         info->has_AudioSpectrum64Left || info->has_AudioSpectrum64Right) {
-        audio::AudioSpectrumSnapshot snapshot;
-        if (m_scene->runtime != nullptr) snapshot = m_scene->runtime->CurrentAudioSpectrumSnapshot();
+        static const audio::AudioSpectrumSnapshot silence {};
+        const audio::AudioSpectrumSnapshot& snapshot =
+            m_scene->runtime != nullptr ? m_scene->runtime->CurrentAudioSpectrumSnapshot() : silence;
         const auto put = [&](std::string_view name, const auto& bands) {
             m_audioPack.assign(bands.size() * 4, 0.0f);
             for (std::size_t i = 0; i < bands.size(); ++i) m_audioPack[i * 4] = bands[i];

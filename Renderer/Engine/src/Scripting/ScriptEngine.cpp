@@ -2299,8 +2299,8 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
                                      : 0.0);
     case kNative_audio: {
         const auto size = static_cast<int>(num(0));
-        audio::AudioSpectrumSnapshot snapshot;
-        if (rt_ != nullptr) snapshot = rt_->CurrentAudioSpectrumSnapshot();
+        static const audio::AudioSpectrumSnapshot silence {};
+        const audio::AudioSpectrumSnapshot& snapshot = rt_ != nullptr ? rt_->CurrentAudioSpectrumSnapshot() : silence;
         const float* bands[3] = { snapshot.left64.data(), snapshot.right64.data(), snapshot.average64.data() };
         if (size == 16) {
             bands[0] = snapshot.left16.data(); bands[1] = snapshot.right16.data(); bands[2] = snapshot.average16.data();
