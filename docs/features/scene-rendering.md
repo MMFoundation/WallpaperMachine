@@ -179,6 +179,13 @@ Wallpaper Engine, which registers each script while it parses the object list an
 dispatches `update` down that list (`sub_1401A4DB0`, `sub_140177AD0`). What `init`
 returns is the property's value from then on, as what `update` returns is: a drag
 handle hides itself there, and a typing text starts empty.
+A property script without `update` (an `init` that plays an animation, a click handler)
+costs no call into the script runtime on a tick where no timer is due and no audio
+buffer is registered: that call would only have run those. Its parameters and the
+`engine` values are still refreshed in its place in the order, so a handler, a later
+timer or another script's closure sees what it saw before, and a timer that comes due,
+or one an earlier script sets for now, runs at the same point of the same tick.
+`WALLPAPER_MACHINE_SCRIPT_TICK_SKIP=0` makes every tick call it, for a comparison.
 `engine.isObjectValid(value)` checks a native wrapper's current lifetime. Removed
 layers, their effects and removed animation layers become invalid; hiding a layer
 does not destroy it. Plain objects, vectors and objects inheriting a wrapper do not

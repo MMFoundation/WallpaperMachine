@@ -34,6 +34,7 @@
 #include "Project/ProjectProperties.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Runtime/VirtualAssetRegistry.hpp"
+#include "Scripting/ScriptEngine.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneBackendSelection.hpp"
 #include "Scene/SceneUpdateDemand.hpp"
@@ -16315,6 +16316,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             int                                     resizes     = 0;
             double                                  rebuild_ms  = 0.0;
             for (int frame = 0; frame < frame_count; ++frame) {
+                if (frame == 1) ScriptEngine::ResetCallCounts();
                 if (audio_hz != nullptr) {
                     // Synthetic PCM only, analysed by the same service the
                     // desktop tap feeds.
@@ -16405,6 +16407,19 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                           double(encodes.stored_multisample_attachments) / measured,
                           double(encodes.blit_passes) / measured, draw_cpu_ms / measured);
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << encode_line << std::endl;
+            // Work on the scene thread that is the same in every run of the same scene and
+            // clock: crossings into the scripts.
+            {
+                const auto calls = ScriptEngine::GetCallCounts();
+                char work_line[320];
+                std::snprintf(work_line, sizeof(work_line),
+                              "%.1f script calls/frame, %.1f calls from scripts/frame, %.1f idle "
+                              "program frames left out/frame",
+                              double(calls.library_calls) / measured,
+                              double(calls.native_calls) / measured,
+                              double(calls.skipped_evaluations) / measured);
+                std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << work_line << std::endl;
+            }
             // How often the host would have built the render graph again, and which kind of
             // change asked for it: a scene that rebuilds every few draws repeats its texture
             // decodes and uploads each time.

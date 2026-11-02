@@ -502,6 +502,18 @@ device.
   uniforms borrow an owning packing buffer synchronously and read a fresh spectrum
   on every call; particle mouse inverses are skipped only when all current
   controlpoint link flags are off.
+- **Script frames that would change nothing** — `ScriptIdleFrames.*` and
+  `ScriptHostLimits.AFrameBetweenInterruptedHandlersClearsTheirStrikesEvenWhenItIsLeftOut`
+  (`script_runtime_compat_test`, each case run with `ScriptEngine::SetIdleEvaluationSkipForTests`
+  on and off). A property script without `update` makes no call into the script runtime
+  on a tick where no timer is due and no audio buffer is registered (five such scripts
+  over ten ticks are fifty calls fewer and nothing else). A timer set in `init`, or set for
+  now by an earlier script's `update`, fires at the same point of the same tick; registered
+  audio buffers keep every call; the left-out frame still writes the script's parameters
+  over what `init` left and clears an interrupted handler's strikes, as the completed call
+  did. The library tells the host the earliest due time of its live timers
+  (`n.waiting`) whenever it may have moved earlier and after every pass that ran or
+  dropped one; the host checks it before each script, never once per tick.
 - **A destroyed layer's script state** — `ScriptLayerRelease.*` in `scenescript_behavior_test`
   (no device). A script makes a layer and one below it, registers an animation-ended callback
   on each and keeps a weak reference to each callback and each layer object; the test gives the
