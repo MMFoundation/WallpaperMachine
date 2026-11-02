@@ -153,9 +153,15 @@ delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings`:
   playback.
 - **Conditions.** The context records the displays showing it, the frame-rate
   ceiling in force (the reduced-quality one included, whichever reason holds it,
-  read from the engine's `effectiveFrameRateCap`) and the effective render scale. A
-  measurement under other conditions replaces the rating rather than being averaged
-  in, so the line always names the settings it describes. A Mac that moves in and
+  read from the engine's `effectiveFrameRateCap`) and the effective render scale,
+  and for a scene (or a wallpaper of unknown kind) the scene settings that change
+  what drawing it costs (`WallpaperEnergySceneSettings`): the 2D scene resolution
+  (display or canvas), the saved scene quality (MSAA, shadows, volumetrics,
+  reflections and post-processing, levels the renderer does not draw yet included)
+  and MetalFX upscaling. A video or web page leaves them out, since they change
+  nothing it draws. A measurement under other conditions replaces the rating rather
+  than being averaged in, so the line always names the settings it describes; the
+  line itself names only the displays, frame rate and render scale. A Mac that moves in and
   out of Reduced quality therefore replaces a wallpaper's rating each time, as
   unplugging does.
 - **Averaging.** Intervals combine as a time-weighted mean. History is weighted as
@@ -169,10 +175,13 @@ delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings`:
 - **Storage.** `<support>/EnergyRatings.json`, keyed by wallpaper id. It is saved
   when a rating first appears or changes grade, at most every ten minutes
   otherwise, and on quit. An unreadable file is logged and starts empty. Each
-  rating carries `version` (`WallpaperEnergyRating.currentVersion`); one from
-  another version is replaced by the next measurement, not averaged with it.
-  Ratings saved without a version may have credited native video playback, so a
-  video wallpaper's is not shown.
+  rating carries `version` (`WallpaperEnergyRating.currentVersion`, 3); one from
+  another version is still read and shown, and is replaced by the next measurement,
+  not averaged with it. Ratings saved without a version (1) may have credited native
+  video playback, so a video wallpaper's is not shown. Versions 1 and 2 left the
+  scene settings out of the conditions, so a scene's rating may average measurements
+  taken at different scene resolutions, qualities and upscaling; telemetry sends only
+  ratings of the current version.
 - **Cost.** One coalition sample (about 3 ms of kernel calls) every 30 seconds while
   a single wallpaper plays; only a state check otherwise.
 - **What it is not.** The figure includes everything in the app's coalition at the

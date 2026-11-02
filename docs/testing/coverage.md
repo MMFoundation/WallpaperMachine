@@ -448,8 +448,10 @@ per-Space assignments; see
   pages already charged to the host; its 32 MB growth margin and bounded attempts
   stay unchanged. A real pressure transition is not provoked.
 - `EnergyUsageMonitorTests` and `WallpaperEnergyRatingsTests` — coalition
-  readings, contention, before/after comparisons, grades, battery share and the
-  rating recorder; two `testKernelCounters…` cases read the test process's real
+  readings, contention, before/after comparisons, grades, battery share, the scene
+  settings (2D scene resolution, scene quality, MetalFX) as conditions of a scene's
+  rating and not of a video's, older-version ratings still read and replaced rather
+  than averaged and the rating recorder; two `testKernelCounters…` cases read the test process's real
   kernel counters.
 
 Log line format, retention and the verbose setting are covered in Rust; see

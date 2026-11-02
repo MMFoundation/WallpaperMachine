@@ -941,6 +941,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             ResolvedDisplayTitles.liveDisplayID(row.displayId, title: row.title)
                 .flatMap { connected.contains($0) ? (row.displayId, $0) : nil }
         }, uniquingKeysWith: { first, _ in first })
+        let library = store.librarySnapshot.wallpapers
         return WallpaperEnergyContext.resolve(
             assignments: store.monitorInformationSnapshot.rows.map {
                 (display: $0.displayId, wallpaper: $0.wallpaperId)
@@ -948,6 +949,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             suspendedDisplays: policy.suspendedDisplayIDs,
             nativeVideoDisplays: nativeVideoHost?.activeDisplayIDs ?? [],
             frameRateCap: settings.effectiveFrameRateCap, renderScale: settings.renderScale,
+            scene: WallpaperEnergySceneSettings(
+                resolution: settings.sceneResolution, quality: settings.sceneQuality,
+                metalFXUpscaling: settings.metalfxUpscalingEnabled),
+            // A wallpaper of unknown kind keeps the scene settings: rating it apart costs a
+            // new measurement, rating it together could mix two costs.
+            isScene: { id in
+                let kind = library.first { $0.id == id }?.kind
+                return kind != .video && kind != .webpage
+            },
             resolveDisplay: { liveDisplays[$0] })
     }
 
