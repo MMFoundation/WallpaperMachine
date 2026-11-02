@@ -554,9 +554,12 @@ device.
   `video_frames_selected`, `video_frames_reused` and `video_frames_skipped`: a gap
   between two displayed generations is exactly the number of decoded frames that
   never reached the screen, which is how a pacing regression is falsified while
-  the picture still moves. `present_requests` counts requests; this backend has
-  no presentation-feedback source, so the frames a compositor actually displayed
-  are reported as unavailable and never approximated by the request count.
+  the picture still moves. `present_requests` counts requests; what the display
+  did with them comes from each drawable's own report (`presented_frames`,
+  `presents_dropped`, the present gaps), never from the request count:
+  `PresentFeedbackTest.*` in `timer_tests` pins the arithmetic and
+  `MetalSceneDraw.EveryPresentedDrawableReportsWhetherItWasShownOnlyWhileCounting`
+  that every present reports exactly once while counting and none does otherwise.
 - **A scene with nothing left to do** — `MetalSceneDraw.AStaticTextSceneRunsOutOfWorkToDo`,
   `.AStaticTextLayerUnderAnEffectChainAlsoRunsOutOfWork` and
   `.TextBoundToAUserPropertyIsEventDrivenRatherThanContinuous`: a static caption

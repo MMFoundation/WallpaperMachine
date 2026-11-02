@@ -7794,6 +7794,88 @@ TEST_F(MetalSceneDraw, AFrameThatCannotBeComposedIsNeitherPresentedNorRemembered
     RendererCounters::SetEnabled(false);
 }
 
+TEST_F(MetalSceneDraw, EveryPresentedDrawableReportsWhetherItWasShownOnlyWhileCounting)
+{
+    // Each present asks its drawable to report back: shown, or dropped before
+    // any refresh showed it. A layer no window owns is never shown, so every
+    // report here is a drop, and every requested present reports exactly once.
+    // With counting off nothing is asked for, so frames presented then never
+    // report into a later window.
+    const auto  project = WriteFixture(root_ / "project");
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
+
+    RendererCounters counters;
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(640, 360);
+
+        MetalRender         render;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = 640,
+            .height               = 360,
+            .render_width         = 640,
+            .render_height        = 360,
+            .display_scale_factor = 1.0,
+        };
+        ASSERT_TRUE(render.init(info)) << render.lastError();
+        render.SetCounters(&counters);
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+
+        const auto present = [&](int frames) {
+            for (int frame = 0; frame < frames; ++frame) {
+                render.InvalidatePresentedFrame();
+                bool presented = false;
+                ASSERT_TRUE(render.drawFrame(*loaded.scene, &presented)) << render.lastError();
+                ASSERT_TRUE(presented);
+            }
+        };
+        const auto reports = [&]() {
+            return counters.Get(OWE_RC_PRESENTED_FRAMES) + counters.Get(OWE_RC_PRESENTS_DROPPED);
+        };
+        const auto settle = [&](uint64_t expected) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (reports() < expected && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            // Anything beyond the expected count would arrive by now as well.
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        };
+
+        ASSERT_FALSE(RendererCounters::Enabled());
+        present(4);
+        RendererCounters::SetEnabled(true);
+        // Longer than the reports of the frames below take to arrive.
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        EXPECT_EQ(reports(), 0u) << "a frame presented while counting was off reported into the window";
+
+        present(6);
+        EXPECT_EQ(counters.Get(OWE_RC_PRESENT_REQUESTS), 6u);
+        settle(6);
+        EXPECT_EQ(reports(), 6u) << "every requested present reports exactly once";
+        EXPECT_EQ(counters.Get(OWE_RC_PRESENTED_FRAMES), 0u) << "a layer no window owns showed a frame";
+        EXPECT_EQ(counters.Get(OWE_RC_PRESENTS_DROPPED), 6u);
+        // No display: its refresh is unknown, so no gap is guessed.
+        EXPECT_EQ(counters.Get(OWE_RC_VSYNC_PERIOD_MICROS), 0u);
+        EXPECT_EQ(counters.Get(OWE_RC_PRESENT_GAPS_1_VSYNC) + counters.Get(OWE_RC_PRESENT_GAPS_2_VSYNC) +
+                      counters.Get(OWE_RC_PRESENT_GAPS_3PLUS_VSYNC),
+                  0u);
+
+        render.destroy();
+    }
+    // Destroyed with reports possibly still on their way: none may reach the
+    // counters afterwards, and none does with counting off again either.
+    RendererCounters::SetEnabled(false);
+}
+
 TEST_F(MetalSceneDraw, APannedWallpaperIsComposedAtTheChosenPositionInTheDrawableAndThePoster)
 {
     // A 3:2 scene fitted into a square layer leaves bars above and below. The
@@ -16499,7 +16581,10 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
     // `WE_TEST_COMPARE_REBUILD_AT=<k>` builds the graph again before draw `k`
     // whether or not the scene asked: the picture is then what a rebuild leaves
     // behind, whenever it comes, and the draw it came before is printed so a run
-    // that did not rebuild can be drawn to the same time.
+    // that did not rebuild can be drawn to the same time. `WE_TEST_COMPARE_COUNTERS`
+    // (set, not `0`) turns the renderer counters on for the run, the way a
+    // diagnostics window does, so the picture is drawn through the counted
+    // paths, and prints the present counts.
     const char* listed = std::getenv("WE_TEST_COMPARE_PROJECTS");
     const auto  assets = LocalSceneAssetsRoot();
     if (listed == nullptr || *listed == '\0' || assets.empty() ||
@@ -16558,6 +16643,15 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
     const std::set<int>        hash_frames  = HashFramesFromEnvironment(frame_count);
     const bool                 hashing      = std::getenv("WE_TEST_COMPARE_HASH_FRAMES") != nullptr ||
                                 std::getenv("WE_TEST_COMPARE_HASH_EVERY") != nullptr;
+    const bool counted = [] {
+        const char* value = std::getenv("WE_TEST_COMPARE_COUNTERS");
+        return value != nullptr && std::string_view(value) != "0";
+    }();
+    struct CountersOff
+    {
+        ~CountersOff() { RendererCounters::SetEnabled(false); }
+    } counters_off;
+    if (counted) RendererCounters::SetEnabled(true);
 
     std::vector<std::string> projects;
     for (std::string_view rest = listed; ! rest.empty();) {
@@ -16656,9 +16750,10 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
                     }
                 };
             }
+            RendererCounters counters;
             auto picture = DrawWithRenderer(scene, width, height, frame_count, frame_step,
-                                            pace, scale_factor, &input, nullptr, &watch,
-                                            scaling);
+                                            pace, scale_factor, &input,
+                                            counted ? &counters : nullptr, &watch, scaling);
             if (hashing && picture.error.empty() && ! picture.rgb.empty() &&
                 ! hash_frames.contains(watch.last_draw)) {
                 std::printf("[ HASH     ] %s %ux%u frame=%d sha256=%s\n", scene_id.c_str(),
@@ -16666,6 +16761,17 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
                             Sha256Hex(picture.rgb).c_str());
             }
             std::fflush(stdout);
+            if (counted) {
+                // Reports still on their way when the renderer closed are not
+                // counted, so the reported total can trail the requests.
+                std::printf("[ COUNTERS ] %s: present_requests=%llu presents_skipped_unchanged=%llu "
+                            "presents_reported=%llu\n",
+                            scene_id.c_str(),
+                            (unsigned long long)counters.Get(OWE_RC_PRESENT_REQUESTS),
+                            (unsigned long long)counters.Get(OWE_RC_PRESENTS_SKIPPED_UNCHANGED),
+                            (unsigned long long)(counters.Get(OWE_RC_PRESENTED_FRAMES) +
+                                                 counters.Get(OWE_RC_PRESENTS_DROPPED)));
+            }
             if (stop_after_rebuild >= 0) {
                 const std::string rebuilt =
                     watch.rebuilt_at < 0

@@ -6709,9 +6709,9 @@ public struct BridgeRendererCountersReport {
      */
     public var audioActiveConsumers: UInt32
     /**
-     * Whether the platform can report which frames were actually displayed.
-     * This backend cannot, so present requests are never reported as
-     * presented frames.
+     * Whether the surfaces' `presented_frames`, `presents_dropped` and present
+     * gaps come from the display's own reports. Present requests are never
+     * reported as presented frames either way.
      */
     public var presentationFeedbackAvailable: Bool
 
@@ -6729,9 +6729,9 @@ public struct BridgeRendererCountersReport {
          * display. Zero means the capture tap has no consumer.
          */audioActiveConsumers: UInt32, 
         /**
-         * Whether the platform can report which frames were actually displayed.
-         * This backend cannot, so present requests are never reported as
-         * presented frames.
+         * Whether the surfaces' `presented_frames`, `presents_dropped` and present
+         * gaps come from the display's own reports. Present requests are never
+         * reported as presented frames either way.
          */presentationFeedbackAvailable: Bool) {
         self.recording = recording
         self.surfaces = surfaces
@@ -6824,7 +6824,7 @@ public func FfiConverterTypeBridgeRendererCountersReport_lower(_ value: BridgeRe
  * Renderer work counters for one wallpaper surface.
  *
  * The fields are split on purpose. `timer_wakeups` through
- * `presents_skipped_unchanged` are work this surface alone performs and must
+ * `present_gaps_3plus_vsync` are work this surface alone performs and must
  * stop when nobody can see it.
  * The `video_*` fields describe the decoded source, which may legitimately keep
  * running while one of its consumers is hidden as long as another consumer
@@ -6885,11 +6885,34 @@ public struct BridgeRendererSurfaceCounters {
      * back. Neither a dropped draw nor a present request.
      */
     public var presentsSkippedUnchanged: UInt64
+    /**
+     * Presented drawables the display reported as shown. Reports arrive a
+     * refresh or two after the request, so a window's count trails
+     * `present_requests` by the frames still in flight.
+     */
+    public var presentedFrames: UInt64
+    /**
+     * Presented drawables the display reported as never shown: replaced by a
+     * newer frame or discarded before any refresh showed them.
+     */
+    public var presentsDropped: UInt64
+    /**
+     * Time from one shown frame to the next, in refreshes of the display:
+     * one, two, three or more. Zero while `vsync_period_micros` is unknown.
+     */
+    public var presentGaps1Vsync: UInt64
+    public var presentGaps2Vsync: UInt64
+    public var presentGaps3plusVsync: UInt64
     public var tickIntervalMicros: UInt64
     /**
      * 0 when the content cannot prove how often it changes.
      */
     public var contentPeriodMicros: UInt64
+    /**
+     * Refresh period of the display the present gaps are measured in; 0 when
+     * the renderer could not read it.
+     */
+    public var vsyncPeriodMicros: UInt64
     public var videoDecodeOutputs: UInt64
     public var videoSeeks: UInt64
     public var videoFramesSelected: UInt64
@@ -6946,10 +6969,27 @@ public struct BridgeRendererSurfaceCounters {
          * Frames that ran (the scene ticked) but were not drawn or presented,
          * because they would have put exactly the pixels already on the surface
          * back. Neither a dropped draw nor a present request.
-         */presentsSkippedUnchanged: UInt64, tickIntervalMicros: UInt64, 
+         */presentsSkippedUnchanged: UInt64, 
+        /**
+         * Presented drawables the display reported as shown. Reports arrive a
+         * refresh or two after the request, so a window's count trails
+         * `present_requests` by the frames still in flight.
+         */presentedFrames: UInt64, 
+        /**
+         * Presented drawables the display reported as never shown: replaced by a
+         * newer frame or discarded before any refresh showed them.
+         */presentsDropped: UInt64, 
+        /**
+         * Time from one shown frame to the next, in refreshes of the display:
+         * one, two, three or more. Zero while `vsync_period_micros` is unknown.
+         */presentGaps1Vsync: UInt64, presentGaps2Vsync: UInt64, presentGaps3plusVsync: UInt64, tickIntervalMicros: UInt64, 
         /**
          * 0 when the content cannot prove how often it changes.
-         */contentPeriodMicros: UInt64, videoDecodeOutputs: UInt64, videoSeeks: UInt64, videoFramesSelected: UInt64, videoFramesReused: UInt64, 
+         */contentPeriodMicros: UInt64, 
+        /**
+         * Refresh period of the display the present gaps are measured in; 0 when
+         * the renderer could not read it.
+         */vsyncPeriodMicros: UInt64, videoDecodeOutputs: UInt64, videoSeeks: UInt64, videoFramesSelected: UInt64, videoFramesReused: UInt64, 
         /**
          * Decoded frames superseded before they were ever displayed. A rising
          * count is how a demand-driven clock is falsified.
@@ -6982,8 +7022,14 @@ public struct BridgeRendererSurfaceCounters {
         self.gpuCompletions = gpuCompletions
         self.simulationTicks = simulationTicks
         self.presentsSkippedUnchanged = presentsSkippedUnchanged
+        self.presentedFrames = presentedFrames
+        self.presentsDropped = presentsDropped
+        self.presentGaps1Vsync = presentGaps1Vsync
+        self.presentGaps2Vsync = presentGaps2Vsync
+        self.presentGaps3plusVsync = presentGaps3plusVsync
         self.tickIntervalMicros = tickIntervalMicros
         self.contentPeriodMicros = contentPeriodMicros
+        self.vsyncPeriodMicros = vsyncPeriodMicros
         self.videoDecodeOutputs = videoDecodeOutputs
         self.videoSeeks = videoSeeks
         self.videoFramesSelected = videoFramesSelected
@@ -7061,10 +7107,28 @@ extension BridgeRendererSurfaceCounters: Equatable, Hashable {
         if lhs.presentsSkippedUnchanged != rhs.presentsSkippedUnchanged {
             return false
         }
+        if lhs.presentedFrames != rhs.presentedFrames {
+            return false
+        }
+        if lhs.presentsDropped != rhs.presentsDropped {
+            return false
+        }
+        if lhs.presentGaps1Vsync != rhs.presentGaps1Vsync {
+            return false
+        }
+        if lhs.presentGaps2Vsync != rhs.presentGaps2Vsync {
+            return false
+        }
+        if lhs.presentGaps3plusVsync != rhs.presentGaps3plusVsync {
+            return false
+        }
         if lhs.tickIntervalMicros != rhs.tickIntervalMicros {
             return false
         }
         if lhs.contentPeriodMicros != rhs.contentPeriodMicros {
+            return false
+        }
+        if lhs.vsyncPeriodMicros != rhs.vsyncPeriodMicros {
             return false
         }
         if lhs.videoDecodeOutputs != rhs.videoDecodeOutputs {
@@ -7121,8 +7185,14 @@ extension BridgeRendererSurfaceCounters: Equatable, Hashable {
         hasher.combine(gpuCompletions)
         hasher.combine(simulationTicks)
         hasher.combine(presentsSkippedUnchanged)
+        hasher.combine(presentedFrames)
+        hasher.combine(presentsDropped)
+        hasher.combine(presentGaps1Vsync)
+        hasher.combine(presentGaps2Vsync)
+        hasher.combine(presentGaps3plusVsync)
         hasher.combine(tickIntervalMicros)
         hasher.combine(contentPeriodMicros)
+        hasher.combine(vsyncPeriodMicros)
         hasher.combine(videoDecodeOutputs)
         hasher.combine(videoSeeks)
         hasher.combine(videoFramesSelected)
@@ -7164,8 +7234,14 @@ public struct FfiConverterTypeBridgeRendererSurfaceCounters: FfiConverterRustBuf
                 gpuCompletions: FfiConverterUInt64.read(from: &buf), 
                 simulationTicks: FfiConverterUInt64.read(from: &buf), 
                 presentsSkippedUnchanged: FfiConverterUInt64.read(from: &buf), 
+                presentedFrames: FfiConverterUInt64.read(from: &buf), 
+                presentsDropped: FfiConverterUInt64.read(from: &buf), 
+                presentGaps1Vsync: FfiConverterUInt64.read(from: &buf), 
+                presentGaps2Vsync: FfiConverterUInt64.read(from: &buf), 
+                presentGaps3plusVsync: FfiConverterUInt64.read(from: &buf), 
                 tickIntervalMicros: FfiConverterUInt64.read(from: &buf), 
                 contentPeriodMicros: FfiConverterUInt64.read(from: &buf), 
+                vsyncPeriodMicros: FfiConverterUInt64.read(from: &buf), 
                 videoDecodeOutputs: FfiConverterUInt64.read(from: &buf), 
                 videoSeeks: FfiConverterUInt64.read(from: &buf), 
                 videoFramesSelected: FfiConverterUInt64.read(from: &buf), 
@@ -7200,8 +7276,14 @@ public struct FfiConverterTypeBridgeRendererSurfaceCounters: FfiConverterRustBuf
         FfiConverterUInt64.write(value.gpuCompletions, into: &buf)
         FfiConverterUInt64.write(value.simulationTicks, into: &buf)
         FfiConverterUInt64.write(value.presentsSkippedUnchanged, into: &buf)
+        FfiConverterUInt64.write(value.presentedFrames, into: &buf)
+        FfiConverterUInt64.write(value.presentsDropped, into: &buf)
+        FfiConverterUInt64.write(value.presentGaps1Vsync, into: &buf)
+        FfiConverterUInt64.write(value.presentGaps2Vsync, into: &buf)
+        FfiConverterUInt64.write(value.presentGaps3plusVsync, into: &buf)
         FfiConverterUInt64.write(value.tickIntervalMicros, into: &buf)
         FfiConverterUInt64.write(value.contentPeriodMicros, into: &buf)
+        FfiConverterUInt64.write(value.vsyncPeriodMicros, into: &buf)
         FfiConverterUInt64.write(value.videoDecodeOutputs, into: &buf)
         FfiConverterUInt64.write(value.videoSeeks, into: &buf)
         FfiConverterUInt64.write(value.videoFramesSelected, into: &buf)

@@ -103,7 +103,9 @@ the delay alone does not synchronize their boundaries. The diagnostics report's
 by that duration is diagnostic-window draw throughput, not displayed FPS. A
 same-throughput power claim needs timestamped counter deltas aligned to the
 actual power window. Neither the configured ceiling nor timer-wakeup counts
-provide elapsed time or displayed-frame counts.
+provide elapsed time or displayed-frame counts; `presented_frames` over the same
+duration is the rate the display showed the wallpaper's frames at (see [Present
+feedback](#present-feedback)).
 
 The app opens its control panel at launch, so each such run includes it, and
 animated previews add frame decoding in the app and WindowServer work (Discover animates the
@@ -146,8 +148,10 @@ This acceptance change leaves production scheduling, recovery, backpressure,
 atomics and process policy unchanged. It does not diagnose or retroactively pass
 the historical 42–60 throughput-check failures, nor establish an energy improvement.
 
-This is measured delivery, not presentation: whether and when those frames were
-displayed is not observable. Measurements recorded before 2026-09-28, when the
+This is measured delivery, not presentation. Whether and when a presented frame
+reached the display is the renderer's present feedback (see [Runtime
+counters](#runtime-counters)), which a diagnostics window reports per surface; the
+benchmark above has no display. Measurements recorded before 2026-09-28, when the
 cadence was anchored, describe fewer delivered frames at a given ceiling and are
 not comparable with later ones.
 
@@ -255,7 +259,11 @@ negligible.
   60 fps wallpaper. Single 6-second traces disagreed, and about 30 composited
   frames a second had no attributed process even with nothing running. Panel
   power is outside coalition energy and `powermetrics`, and battery-telemetry
-  system power was too noisy to settle it.
+  system power was too noisy to settle it. The renderer's present gaps (see
+  [Runtime counters](#runtime-counters)) now show, without a trace, how many
+  refreshes of the display's top rate lie between two shown wallpaper frames, and
+  how many presented frames were never shown; they say when the wallpaper's own
+  frames reached the panel, not at what rate the panel itself refreshed.
 
 Two traps: with the user active an idle WindowServer drew 141–762 mW, so compare
 only quiet windows; and Chrome left open triggered about 60 composites a second
@@ -381,15 +389,15 @@ rather than growing without limit.
 The renderer counts its own work: the frame clock's wakeups and draw requests,
 draws executed and dropped, queue submissions, present requests, frame-fence
 completions, simulation ticks, frames left undrawn because they would have
-repeated the picture on screen (`presents_skipped_unchanged`), the effective
-pause reasons as independent bits,
+repeated the picture on screen (`presents_skipped_unchanged`), what the display
+did with the presented frames (below), the effective pause reasons as independent bits,
 and the decoder's outputs, seeks, selected/reused/skipped frames, conversions
 and imports. Those are also **off by default** — one relaxed atomic load gates
 each increment — and reading them is a pull: nothing is pushed to the UI, logged
 per frame or written to disk, and enabling starts no thread and no timer.
 
 The two groups inside a renderer row are deliberately separate.
-`timer_wakeups` through `presents_skipped_unchanged` are work a surface performs alone and
+`timer_wakeups` through `present_gaps_3plus_vsync` are work a surface performs alone and
 must stop when nobody can see it. The `video_*` values describe the decoded
 source, which may legitimately keep running while one of its consumers is
 hidden, provided another consumer still presents it. Collapsing them would make
@@ -414,13 +422,34 @@ The counters exist to answer one question per condition: did the work for a
 surface nobody can see actually stop? A count that keeps rising for an occluded
 surface falsifies the change regardless of what a CPU graph shows.
 
-### What the platform cannot report
+### Present feedback
 
-`present_requests` counts requests to present. Whether the compositor ever put
-a frame on a display is a different measurement, and this renderer, drawing into a
-`CAMetalLayer`, has no presentation-feedback source for it.
-The report says `presented_frames=unavailable`; the request count is never
-relabelled as displayed frames, and no frame-rate claim may be derived from it.
+`present_requests` counts requests to present. Whether the display ever showed
+the frame is a different measurement: while counting is on, each present asks its
+drawable to report when it was shown (`MTLDrawable` `presentedTime`, delivered on a
+framework thread, possibly after the renderer is gone, so a report only ever reaches
+the counters while the renderer that asked still holds them). A report of 0 is a
+drawable that was presented but never shown, replaced or discarded before any refresh
+(`presents_dropped`); any other is `presented_frames`, and the time since the
+surface's previous shown frame, rounded to refreshes of its display, lands in
+`present_gaps_1_vsync`, `present_gaps_2_vsync` or `present_gaps_3plus_vsync`
+(1.5 and 2.5 refreshes are the boundaries; a still scene that presented nothing in
+between lands in the last). The refresh period is the display mode's rate
+(`CGDisplayModeGetRefreshRate`, the top rate of a variable-rate panel), reported as
+`vsync_period_us`; while it is unknown (no display id, as for a layer no window
+owns) gaps are not counted rather than guessed. A gap is never measured across a
+time nothing was counted, and the reports trail the requests by the frames still in
+flight when a window closes. With counting off no report is asked for: the present
+path keeps its one relaxed load.
+
+The diagnostics report carries these per surface and ends with
+`presented_frames=available`; a renderer without the reports ends with
+`presented_frames=unavailable` and its surfaces carry no shown-frame count. The
+request count is never relabelled as shown frames, and a frame-rate claim about the
+display comes from `presented_frames` over the window, never from requests. A layer
+no window owns shows nothing, so in the headless tests every report is a drop
+(`MetalSceneDraw.EveryPresentedDrawableReportsWhetherItWasShownOnlyWhileCounting`);
+the gap and drop arithmetic is pinned in `timer_tests` (`PresentFeedbackTest.*`).
 
 ### A/B comparison entry points
 
@@ -432,6 +461,7 @@ decode-correctness defect.
 |---|---|---|
 | `WALLPAPER_MACHINE_FEEDBACK_COPIES=1` | Native Metal trades textures for a copy a layer only makes to read the image it draws into | Every such copy is made as a copy; the picture is byte-identical either way |
 | `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` | Native Metal lets targets never alive together share images, and traded copies share a small set | Every target keeps an image of its own; the picture is byte-identical either way, the target memory is not |
+| `WALLPAPER_MACHINE_PRESENT_FEEDBACK=0` | While counting is on, every present asks its drawable to report when it was shown | No report is asked for and the present-feedback counters stay 0: what the reports themselves cost in a diagnostics or telemetry window. Counting off, nothing differs |
 | Settings → Performance → Quality → 2D scene resolution (`scene_resolution` under `[quality]`) | Display resolution: a 2D scene is rasterized at the size it is presented at | Canvas size: rasterized at the authored canvas and stretched; less GPU time and memory |
 
 `scripts/perf_bench.py` measures such a switch within one binary: `cost on off

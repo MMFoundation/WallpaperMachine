@@ -3,6 +3,7 @@
 #include "Runtime/RuntimeImageSource.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 
+#import <CoreGraphics/CoreGraphics.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
@@ -34,6 +35,7 @@
 #include "RenderCommon/StaticSubgraphCache.hpp"
 #include "RenderCommon/UnchangedPresent.hpp"
 
+#include "Core/PresentFeedback.hpp"
 #include "Image.hpp"
 #include "Interface/IImageParser.h"
 #include "Interface/IShaderValueUpdater.h"
@@ -1413,6 +1415,31 @@ bool FeedbackCopiesForcedByEnvironment()
     return forced;
 }
 
+/// Whether a present asks its drawable to report when it was shown, while the
+/// renderer counters are on. On by default; `WALLPAPER_MACHINE_PRESENT_FEEDBACK=0`
+/// leaves the reports out, so a comparison can measure what they cost. Counting
+/// off, no report is asked for either way. Read once, like the other switches.
+bool PresentFeedbackEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_PRESENT_FEEDBACK");
+        return value == nullptr || std::string_view(value) != "0";
+    }();
+    return enabled;
+}
+
+/// Seconds between refreshes of the display `display_id` names, 0 when the
+/// display or its rate is not known (a variable-rate panel reports its top rate).
+double DisplayRefreshPeriod(uint32_t display_id)
+{
+    if (display_id == 0) return 0.0;
+    CGDisplayModeRef mode = CGDisplayCopyDisplayMode(display_id);
+    if (mode == nullptr) return 0.0;
+    const double rate = CGDisplayModeGetRefreshRate(mode);
+    CGDisplayModeRelease(mode);
+    return rate > 0.0 ? 1.0 / rate : 0.0;
+}
+
 } // namespace
 
 MetalPipelineArchiveStatus MetalPipelineArchiveStatusForDiagnostics()
@@ -1503,6 +1530,12 @@ struct MetalRender::Impl
     bool                 video_paused { false };
     float                video_rate { 1.0f };
     RendererCounters*    counters { nullptr };
+    /// Counts what the display did with the frames presented while counting is
+    /// on. Shared with every drawable's report, which can arrive after this
+    /// renderer is gone; `armed` and `feedback_display` belong to the render thread.
+    std::shared_ptr<PresentFeedback> present_feedback { std::make_shared<PresentFeedback>() };
+    bool                 present_feedback_armed { false };
+    uint32_t             present_feedback_display { 0 };
     /// The raster extent the last size resolve produced: the authored canvas
     /// through the internal render scale, which is what screen-space shader
     /// inputs have to describe.
@@ -6032,6 +6065,10 @@ void MetalRender::destroy()
         pImpl->queue  = nil;
         pImpl->device = nil;
         pImpl->inited = false;
+        // The drained frames may still report their presentation later; the
+        // counters they would count into can be destroyed once this returns.
+        pImpl->present_feedback->Detach();
+        pImpl->present_feedback_armed = false;
     }
 }
 
@@ -6238,6 +6275,9 @@ uint32_t MetalRender::ShaderUpdateDemandReasons() const
 
 void MetalRender::SetCounters(RendererCounters* counters)
 {
+    // A report still in flight must not reach the counters being replaced.
+    pImpl->present_feedback->Detach();
+    pImpl->present_feedback_armed = false;
     pImpl->counters = counters;
     pImpl->video.setCounters(counters);
 }
@@ -7048,6 +7088,21 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         [command addCompletedHandler:^(id<MTLCommandBuffer>) {
           dispatch_semaphore_signal(semaphore);
         }];
+        // While counting, the drawable reports when it was shown, or that it
+        // never was. Counting off, nothing is asked for: one relaxed load.
+        if (RendererCounters::Enabled() && impl.counters != nullptr && PresentFeedbackEnabled()) {
+            if (! impl.present_feedback_armed || impl.present_feedback_display != impl.display_id) {
+                impl.present_feedback->Restart(impl.counters, DisplayRefreshPeriod(impl.display_id));
+                impl.present_feedback_armed   = true;
+                impl.present_feedback_display = impl.display_id;
+            }
+            std::shared_ptr<PresentFeedback> feedback = impl.present_feedback;
+            [drawable addPresentedHandler:^(id<MTLDrawable> shown) {
+              feedback->Record(shown.presentedTime);
+            }];
+        } else {
+            impl.present_feedback_armed = false;
+        }
         [command presentDrawable:drawable];
         [command commit];
         // Committed, so the clears of a resize have run ahead of everything else in it.
