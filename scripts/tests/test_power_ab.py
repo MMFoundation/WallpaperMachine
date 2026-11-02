@@ -306,6 +306,64 @@ class DryRunTests(unittest.TestCase):
             self.assertIn("--app-pid '<pid>'", text)
 
 
+class RestoreTests(unittest.TestCase):
+    def interrupted_run(self, root: Path, exits: bool):
+        """Ctrl-C while the user's app is still closing; it finishes closing during the
+        clean-up when `exits`. Returns the signals sent, the waits and the commands run."""
+        source = source_home(root)
+        app = root / "A/WallpaperMachine.app"
+        (app / "Contents/MacOS").mkdir(parents=True)
+        (app / "Contents/MacOS/WallpaperMachine").write_text("")
+        user = root / "Applications/WallpaperMachine.app"
+        (user / "Contents/MacOS").mkdir(parents=True)
+        user_executable = user / "Contents/MacOS/WallpaperMachine"
+        user_executable.write_text("")
+        alive = {"user": True}
+        signals, waits, commands = [], [], []
+
+        def wait_for_exit(pid, stamp, **_):
+            waits.append(pid)
+            if len(waits) == 1:
+                raise KeyboardInterrupt  # while the app puts the desktop picture back
+            alive["user"] = not exits
+            return exits
+
+        with mock.patch.object(power_ab, "preconditions", return_value=[]), \
+                mock.patch.object(power_ab, "running_apps",
+                                  lambda: {99: user_executable} if alive["user"] else {}), \
+                mock.patch.object(power_ab.os, "kill", lambda pid, sig: signals.append((pid, sig))), \
+                mock.patch.object(power_ab, "wait_for_exit", wait_for_exit), \
+                mock.patch.object(power_ab, "start_stamp", return_value="launched once"), \
+                mock.patch.object(power_ab, "SIGNALLED", set()), \
+                mock.patch.object(power_ab.subprocess, "run",
+                                  lambda command, **_: commands.append(command)), \
+                mock.patch.object(power_ab.tempfile, "mkdtemp", return_value=str(root / "tmp")), \
+                mock.patch.object(power_ab, "RESULTS", root / "results"), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            (root / "tmp").mkdir()
+            with self.assertRaises(KeyboardInterrupt):
+                power_ab.main(["--arm", "A", str(app), "--arm", "B", str(app),
+                               "--arm-env", "B", "WALLPAPER_MACHINE_FEEDBACK_COPIES=1",
+                               "--wallpaper", WALLPAPER, "--source-home", str(source), "--pairs", "1"])
+        self.assertFalse((root / "tmp").exists(), "the temporary homes are deleted")
+        reopened = [command for command in commands if command[:3] == ["open", "-g", "-a"]]
+        return signals, waits, reopened, user
+
+    def test_an_interruption_while_the_users_app_closes_reopens_it_once_it_has_gone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signals, waits, reopened, user = self.interrupted_run(Path(directory), exits=True)
+        self.assertEqual(signals, [(99, signal.SIGTERM)], "one signal, and no second one in the clean-up")
+        self.assertEqual(waits, [99, 99], "the clean-up waits for it to finish closing")
+        self.assertEqual(len(reopened), 1)
+        self.assertEqual(Path(reopened[0][3]).resolve(), user.resolve())
+
+    def test_an_app_that_never_finishes_closing_is_neither_signalled_again_nor_reopened(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signals, waits, reopened, _ = self.interrupted_run(Path(directory), exits=False)
+        self.assertEqual(signals, [(99, signal.SIGTERM)])
+        self.assertEqual(reopened, [], "a second copy would start beside the one still running")
+
+
 class QuitTests(unittest.TestCase):
     def test_a_quit_sends_one_sigterm_and_waits_for_the_exit(self):
         signals = []
@@ -338,6 +396,21 @@ class QuitTests(unittest.TestCase):
         with mock.patch.object(power_ab.os, "kill", lambda pid, sig: None), \
                 mock.patch.object(power_ab, "start_stamp", lambda pid: next(stamps)):
             power_ab.quit_app(42, clock=lambda: 0.0, sleep=lambda seconds: None)
+
+    def test_the_launched_copy_is_the_new_process_of_that_arms_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "real.app/Contents/MacOS").mkdir(parents=True)
+            (root / "real.app/Contents/MacOS/WallpaperMachine").write_text("")
+            (root / "linked.app").symlink_to(root / "real.app")
+            arm = power_ab.Arm("A", root / "linked.app")
+            found = {10: root / "real.app/Contents/MacOS/WallpaperMachine",
+                     11: root / "real.app/Contents/MacOS/WallpaperMachine",
+                     12: Path("/Applications/WallpaperMachine.app/Contents/MacOS/WallpaperMachine")}
+            with mock.patch.object(power_ab, "running_apps", return_value=found):
+                self.assertEqual(power_ab.resolve_pid(arm, {10}, clock=lambda: 0.0, sleep=lambda s: None), 11)
+                with self.assertRaises(RuntimeError):
+                    power_ab.resolve_pid(arm, set(), clock=lambda: 0.0, sleep=lambda s: None)
 
     def test_the_app_bundle_is_found_from_its_executable(self):
         self.assertEqual(power_ab.app_bundle(Path("/Applications/WallpaperMachine.app/Contents/MacOS/WallpaperMachine")),

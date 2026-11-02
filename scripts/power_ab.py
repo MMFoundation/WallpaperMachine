@@ -304,6 +304,25 @@ def preconditions(suspend_vm: bool) -> list[str]:
     return problems
 
 
+# Every PID this run has sent its one SIGTERM; the clean-up only waits for these.
+SIGNALLED: set[int] = set()
+
+
+def wait_for_exit(pid: int, stamp: str | None, clock=time.monotonic, sleep=time.sleep) -> bool:
+    """Waits up to QUIT_TIMEOUT for `pid` to exit, sending nothing; True once it has
+    (or its PID now belongs to another process)."""
+    deadline = clock() + QUIT_TIMEOUT
+    while clock() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        if start_stamp(pid) != stamp:
+            return True  # exited, and the PID already belongs to another process
+        sleep(0.5)
+    return False
+
+
 def quit_app(pid: int, clock=time.monotonic, sleep=time.sleep) -> None:
     """One SIGTERM and a wait for the exit. A second signal would end the app at once,
     perhaps before it put the desktop picture back, so it is never sent."""
@@ -312,19 +331,17 @@ def quit_app(pid: int, clock=time.monotonic, sleep=time.sleep) -> None:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         return
-    deadline = clock() + QUIT_TIMEOUT
-    while clock() < deadline:
-        sleep(0.5)
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            break
-        if start_stamp(pid) != stamp:
-            break  # exited, and the PID already belongs to another process
-    else:
+    SIGNALLED.add(pid)
+    if not wait_for_exit(pid, stamp, clock=clock, sleep=sleep):
         raise RuntimeError(f"WallpaperMachine {pid} did not exit within {QUIT_TIMEOUT:.0f} s; "
                            "no second signal was sent")
     sleep(AFTER_QUIT)
+
+
+def _interrupted(number, frame) -> None:
+    """SIGTERM or SIGHUP to this script: unwind through the clean-up, which reopens the
+    user's app and deletes the temporary homes, as Ctrl-C does."""
+    raise KeyboardInterrupt(f"signal {number}")
 
 
 def resolve_pid(arm: Arm, before: set[int], clock=time.monotonic, sleep=time.sleep) -> int:
@@ -332,7 +349,7 @@ def resolve_pid(arm: Arm, before: set[int], clock=time.monotonic, sleep=time.sle
     deadline = clock() + 30
     while clock() < deadline:
         started = [pid for pid, executable in running_apps().items()
-                   if pid not in before and executable == arm.executable]
+                   if pid not in before and executable.resolve() == arm.executable.resolve()]
         if len(started) == 1:
             return started[0]
         if len(started) > 1:
@@ -570,6 +587,11 @@ def execute(run: Run, layout: Layout, config: str, password: str | None) -> int:
                     raise RuntimeError(f"the {step['label']} window was not measured "
                                        f"(power_benchmark exit {completed.returncode})")
                 document = json.loads(result.read_text())
+                appeared = (document.get("measurement", {}).get("app_guard", {})
+                            .get("appeared_during_window") or [])
+                if appeared:
+                    raise RuntimeError(f"another WallpaperMachine started during the {step['label']} "
+                                       f"window ({appeared}); the window is not comparable")
                 windows.append({"label": step["label"], "result": str(result),
                                 "metrics": window_metrics(document)})
         finally:
@@ -673,31 +695,48 @@ def main(argv=None) -> int:
             print(f"{MARK.missing} {problem}", file=sys.stderr)
         return 2
 
-    layout = Layout(Path(tempfile.mkdtemp(prefix="wallpapermachine-power-ab-")), RESULTS / stamp)
+    previous = {number: signal.signal(number, _interrupted) for number in (signal.SIGTERM, signal.SIGHUP)}
+    layout = None
     user_app = None
+    user_pid = None
+    user_stamp = None
     try:
+        layout = Layout(Path(tempfile.mkdtemp(prefix="wallpapermachine-power-ab-")), RESULTS / stamp)
         if found:
-            pid, executable = next(iter(found.items()))
-            print(f"{MARK.step} quitting WallpaperMachine {pid} ({app_bundle(executable)})", flush=True)
-            # Raises when it does not exit; it is still running then, so nothing is reopened.
-            quit_app(pid)
+            user_pid, executable = next(iter(found.items()))
+            # Known before the signal: an interruption while it quits still reopens it.
             user_app = app_bundle(executable)
+            user_stamp = start_stamp(user_pid)
+            print(f"{MARK.step} quitting WallpaperMachine {user_pid} ({user_app})", flush=True)
+            quit_app(user_pid)
         return execute(run, layout, config, secret)
     finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
         for pid, executable in running_apps().items():
-            if any(executable == arm.executable for arm in run.arms):
+            if pid == user_pid or pid in SIGNALLED:
+                # It has had its one signal and may still be closing: wait, never signal again.
+                if not wait_for_exit(pid, user_stamp if pid == user_pid else start_stamp(pid)):
+                    print(f"{MARK.warn} WallpaperMachine {pid} has not exited; no second signal was sent",
+                          file=sys.stderr)
+                continue
+            if any(executable.resolve() == arm.executable.resolve() for arm in run.arms):
                 try:
                     quit_app(pid)
                 except RuntimeError as error:
                     print(f"{MARK.warn} {error}", file=sys.stderr)
         if user_app is not None:
-            subprocess.run(["open", "-g", "-a", str(user_app), "--env", "WALLPAPER_MACHINE_PANEL_AT_LAUNCH=0"],
-                           check=False)
-            print(f"{MARK.step} reopened {user_app}")
-        for arm in run.arms:
-            subprocess.run(["defaults", "delete", str(layout.suite(arm))], capture_output=True, check=False)
-        shutil.rmtree(layout.root, ignore_errors=True)
-        print(f"{MARK.step} removed {layout.root}")
+            if user_pid in running_apps():
+                print(f"{MARK.warn} {user_app} is still running and was not reopened", file=sys.stderr)
+            else:
+                subprocess.run(["open", "-g", "-a", str(user_app), "--env",
+                                "WALLPAPER_MACHINE_PANEL_AT_LAUNCH=0"], check=False)
+                print(f"{MARK.step} reopened {user_app}")
+        if layout is not None:
+            for arm in run.arms:
+                subprocess.run(["defaults", "delete", str(layout.suite(arm))], capture_output=True, check=False)
+            shutil.rmtree(layout.root, ignore_errors=True)
+            print(f"{MARK.step} removed {layout.root}")
 
 
 if __name__ == "__main__":
