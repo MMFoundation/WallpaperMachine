@@ -1406,6 +1406,19 @@ std::atomic<bool>& TargetSharingSwitch()
     return enabled;
 }
 
+/// Whether a frame's copy of rewritten geometry into its slot leaves out what the slot holds
+/// already (see `uploadDynamicMesh`). On by default;
+/// `WALLPAPER_MACHINE_PARTICLE_UPLOAD_DELTA=0` copies everything every frame, for an A/B in one
+/// binary. Both ways the draw reads the same bytes. Read once, like the other A/B switches.
+std::atomic<bool>& DynamicUploadDeltaSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_PARTICLE_UPLOAD_DELTA");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
 bool FeedbackCopiesForcedByEnvironment()
 {
     static const bool forced = [] {
@@ -1706,6 +1719,13 @@ struct MetalRender::Impl
         Refused = 3,
     };
 
+    /// What one frame slot's index storage holds: the first `bytes` of the index array whose
+    /// content revision is `revision` (see `SceneIndexArray::ContentRevision`).
+    struct IndexSlotContent {
+        uint64_t    revision { 0 };
+        std::size_t bytes { 0 };
+    };
+
     struct SharedGeometry {
         std::shared_ptr<const void> owner;
         std::vector<id<MTLBuffer>> vertices;
@@ -1713,6 +1733,7 @@ struct MetalRender::Impl
         id<MTLBuffer> index {nil};
         std::vector<id<MTLBuffer>> index_ring;
         std::vector<uint64_t> uploaded_generation;
+        std::vector<IndexSlotContent> index_content;
     };
     using GeometryKey = std::tuple<uintptr_t, std::size_t, bool, bool>;
     std::map<GeometryKey, std::weak_ptr<SharedGeometry>> shared_geometry;
@@ -1774,6 +1795,9 @@ struct MetalRender::Impl
         /// The mesh revision each frame slot's storage was filled from, so an
         /// unchanged simulation re-uses what is already there.
         std::vector<uint64_t>              dynamic_uploaded_generation;
+        /// The index bytes each frame slot's storage holds, so a pattern that is only ever
+        /// extended (particles) is copied once per slot rather than every frame.
+        std::vector<IndexSlotContent>      dynamic_index_content;
         /// The layout the pipeline was built against, re-checked on every
         /// upload. A mesh that changes shape after preparation fails the frame
         /// rather than being reinterpreted against the old pipeline.
@@ -1833,6 +1857,8 @@ struct MetalRender::Impl
     std::vector<ScenePassDescription>                   descriptions;
     std::vector<PreparedPass>                           prepared;
     uint64_t model_data_upload_bytes {0};
+    uint64_t dynamic_vertex_upload_bytes {0};
+    uint64_t dynamic_index_upload_bytes {0};
     std::unordered_map<std::string, id<MTLTexture>>     targets;
     // Logical targets remain the single-sample images consumed by copies and shaders.
     // These attachments exist only for targets that actually have an MS writer.
@@ -4885,6 +4911,14 @@ bool MetalRender::Impl::uploadDynamicMesh(PreparedPass& pass, const ScenePassDes
         uploaded_generation[slot] == generation && generation != 0) {
         return true;
     }
+    // Only what the draw reads and the slot does not hold yet is copied: an indexed draw reads
+    // the vertices its writer says it filled this frame, not the array's high-water mark, and
+    // index bytes this slot already holds of the same content stay. Particles rewrite their
+    // vertices from the first one every frame and only ever extend their index pattern.
+    const bool delta = DynamicUploadDeltaSwitch().load(std::memory_order_relaxed);
+    auto& index_content = pass.shared_geometry
+        ? pass.shared_geometry->index_content : pass.dynamic_index_content;
+    if (index_content.size() < kFramesInFlight) index_content.resize(kFramesInFlight);
 
     for (std::size_t i = 0; i < submesh.VertexCount(); ++i) {
         const auto& vertex = submesh.GetVertexArray(i);
@@ -4917,9 +4951,11 @@ bool MetalRender::Impl::uploadDynamicMesh(PreparedPass& pass, const ScenePassDes
         }
         if (vertex.DataSizeOf() == 0) continue;
         if (pass.dynamic_vertex_rings[i].empty()) continue;
-        std::memcpy(pass.dynamic_vertex_rings[i][slot].contents, vertex.Data(),
-                    vertex.DataSizeOf());
-        if (mesh->SharesGeometryUpdates()) model_data_upload_bytes += vertex.DataSizeOf();
+        const std::size_t vertex_bytes = delta && indexed ? vertex.DrawnSizeOf() : vertex.DataSizeOf();
+        if (vertex_bytes == 0) continue;
+        std::memcpy(pass.dynamic_vertex_rings[i][slot].contents, vertex.Data(), vertex_bytes);
+        dynamic_vertex_upload_bytes += vertex_bytes;
+        if (mesh->SharesGeometryUpdates()) model_data_upload_bytes += vertex_bytes;
     }
 
     if (indexed && !pass.dynamic_index_ring.empty()) {
@@ -4937,13 +4973,28 @@ bool MetalRender::Impl::uploadDynamicMesh(PreparedPass& pass, const ScenePassDes
                 if (buffer == nil) return set_error("an index buffer could not be allocated");
             }
             pass.dynamic_index_capacity = capacity;
+            std::fill(index_content.begin(), index_content.end(), IndexSlotContent {});
         }
         if (pass.index_count > 0 && index_bytes == 0) {
             return set_error("a dynamic mesh's index byte capacity overflowed");
         }
         if (index_bytes > 0) {
-            std::memcpy(pass.dynamic_index_ring[slot].contents, live_indices.Data(), index_bytes);
-            if (mesh->SharesGeometryUpdates()) model_data_upload_bytes += index_bytes;
+            auto&          held     = index_content[slot];
+            const uint64_t revision = live_indices.ContentRevision();
+            const bool     same     = delta && held.revision == revision;
+            const std::size_t from  = same ? std::min(held.bytes, index_bytes) : 0;
+            if (index_bytes > from) {
+                std::memcpy(static_cast<uint8_t*>(pass.dynamic_index_ring[slot].contents) + from,
+                            reinterpret_cast<const uint8_t*>(live_indices.Data()) + from,
+                            index_bytes - from);
+                dynamic_index_upload_bytes += index_bytes - from;
+                if (mesh->SharesGeometryUpdates()) model_data_upload_bytes += index_bytes - from;
+            }
+            // Bytes past what any write reached are still zero and may be written later under
+            // the same revision, so they are not counted as held.
+            held.revision = revision;
+            held.bytes    = std::min(std::max(same ? held.bytes : std::size_t { 0 }, index_bytes),
+                                     static_cast<std::size_t>(live_indices.WrittenBytes()));
         }
     }
     if (slot < uploaded_generation.size()) {
@@ -7704,6 +7755,15 @@ uint64_t MetalRender::GeometryBufferBytesForTests() const {
 
 uint64_t MetalRender::ModelDataUploadBytesForTests() const {
     return pImpl ? pImpl->model_data_upload_bytes : 0;
+}
+
+MetalRender::DynamicUploadBytesForTests MetalRender::DynamicGeometryUploadBytesForTests() const {
+    if (! pImpl) return {};
+    return { .vertex = pImpl->dynamic_vertex_upload_bytes, .index = pImpl->dynamic_index_upload_bytes };
+}
+
+bool MetalRender::SetDynamicUploadDeltaForTests(bool enabled) {
+    return DynamicUploadDeltaSwitch().exchange(enabled);
 }
 
 std::vector<uint32_t> MetalRender::MultisampleCountsForTests() const

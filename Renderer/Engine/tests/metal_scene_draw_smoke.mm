@@ -16315,8 +16315,12 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             int                                     rebuilds    = 0;
             int                                     resizes     = 0;
             double                                  rebuild_ms  = 0.0;
+            MetalRender::DynamicUploadBytesForTests  uploads_before;
             for (int frame = 0; frame < frame_count; ++frame) {
-                if (frame == 1) ScriptEngine::ResetCallCounts();
+                if (frame == 1) {
+                    ScriptEngine::ResetCallCounts();
+                    uploads_before = render.DynamicGeometryUploadBytesForTests();
+                }
                 if (audio_hz != nullptr) {
                     // Synthetic PCM only, analysed by the same service the
                     // desktop tap feeds.
@@ -16408,16 +16412,20 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                           double(encodes.blit_passes) / measured, draw_cpu_ms / measured);
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << encode_line << std::endl;
             // Work on the scene thread that is the same in every run of the same scene and
-            // clock: crossings into the scripts.
+            // clock: crossings into the scripts, and rewritten geometry copied for the GPU.
             {
-                const auto calls = ScriptEngine::GetCallCounts();
+                const auto calls   = ScriptEngine::GetCallCounts();
+                const auto uploads = render.DynamicGeometryUploadBytesForTests();
                 char work_line[320];
                 std::snprintf(work_line, sizeof(work_line),
                               "%.1f script calls/frame, %.1f calls from scripts/frame, %.1f idle "
-                              "program frames left out/frame",
+                              "program frames left out/frame; %.0f vertex + %.0f index bytes of "
+                              "rewritten geometry copied/frame",
                               double(calls.library_calls) / measured,
                               double(calls.native_calls) / measured,
-                              double(calls.skipped_evaluations) / measured);
+                              double(calls.skipped_evaluations) / measured,
+                              double(uploads.vertex - uploads_before.vertex) / measured,
+                              double(uploads.index - uploads_before.index) / measured);
                 std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << work_line << std::endl;
             }
             // How often the host would have built the render graph again, and which kind of
@@ -18992,4 +19000,107 @@ TEST_F(MetalSceneDraw, AttachmentsNothingReadsAgainAreLeftUnstoredAndDrawTheSame
         EXPECT_EQ(on.counts.stored_multisample_attachments + 1u, off.counts.stored_multisample_attachments)
             << "only the scene's last render pass may leave its samples unstored";
     }
+}
+
+TEST_F(MetalSceneDraw, ParticleGeometryCopiesOnlyWhatTheFrameDrawsAndTheSlotLacks)
+{
+    // A burst of sprites that die over a few frames: the mesh's high-water mark stays at the
+    // burst while fewer and then no quads are drawn, and the index pattern stops growing.
+    const auto directory = root_ / "particle-upload-delta";
+    const auto project   = WriteParticleKindFixture(directory, R"([{"name":"sprite"}])", 32);
+    auto particle = nlohmann::json::parse(std::ifstream(directory / "particles/kind.json"));
+    particle["emitter"] = nlohmann::json::array({
+        {{"name", "boxrandom"}, {"id", 1}, {"rate", 0}, {"instantaneous", 24},
+         {"distancemin", {-120, -80, 0}}, {"distancemax", {120, 80, 0}},
+         {"speedmin", 0}, {"speedmax", 0}}});
+    particle["initializer"] = nlohmann::json::array({
+        {{"name", "lifetimerandom"}, {"min", 0.05}, {"max", 0.3}},
+        {{"name", "sizerandom"}, {"min", 12}, {"max", 12}},
+        {{"name", "colorrandom"}, {"min", {255, 255, 255}}, {"max", {255, 255, 255}}}});
+    std::ofstream(directory / "particles/kind.json") << particle;
+
+    constexpr int kFrames = 24;
+    struct Run
+    {
+        std::vector<std::vector<uint8_t>> pictures;
+        std::vector<uint64_t>             vertex, index;              // copied in each frame
+        std::vector<uint64_t>             drawn, filled, index_bytes; // what the mesh held
+    };
+    const auto run = [&](bool delta, const char* cache) {
+        const bool previous = MetalRender::SetDynamicUploadDeltaForTests(delta);
+        Run         out;
+        LoadedScene loaded;
+        std::string error;
+        Random::seed(1);
+        EXPECT_TRUE(LoadScene(project, directory / cache, loaded, error)) << error;
+        if (loaded.scene == nullptr) return out;
+        @autoreleasepool {
+            CAMetalLayer* layer   = [CAMetalLayer layer];
+            layer.device          = MTLCreateSystemDefaultDevice();
+            layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize    = CGSizeMake(384, 256);
+            layer.framebufferOnly = NO;
+            MetalRender         render;
+            MetalRenderInitInfo info {
+                .metal_layer          = (__bridge void*)layer,
+                .width                = 384,
+                .height               = 256,
+                .render_width         = 384,
+                .render_height        = 256,
+                .display_scale_factor = 1.0,
+            };
+            EXPECT_TRUE(render.init(info)) << render.lastError();
+            auto graph = sceneToRenderGraph(*loaded.scene);
+            EXPECT_NE(graph, nullptr);
+            EXPECT_TRUE(graph != nullptr && render.compileRenderGraph(*loaded.scene, *graph))
+                << render.lastError();
+            SceneMesh* mesh = nullptr;
+            ForEachPerFrameMesh(*loaded.scene,
+                                [&mesh](const std::string&, SceneMesh& found) { mesh = &found; });
+            EXPECT_NE(mesh, nullptr);
+            for (int frame = 0; frame < kFrames && mesh != nullptr; ++frame) {
+                loaded.scene->targetFps = 60;
+                loaded.scene->paritileSys->Emitt();
+                if (loaded.scene->runtime != nullptr) loaded.scene->runtime->Tick(1.0 / 60.0);
+                const auto& vertices = mesh->GetVertexArray(0);
+                out.drawn.push_back(vertices.DrawnSizeOf());
+                out.filled.push_back(vertices.DataSizeOf());
+                out.index_bytes.push_back(mesh->GetIndexArray(0).DrawIndexBytes());
+                const auto before = render.DynamicGeometryUploadBytesForTests();
+                EXPECT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+                const auto after = render.DynamicGeometryUploadBytesForTests();
+                out.vertex.push_back(after.vertex - before.vertex);
+                out.index.push_back(after.index - before.index);
+                out.pictures.push_back(ReadOutput(render, *loaded.scene));
+                loaded.scene->PassFrameTime(1.0 / 60.0);
+            }
+            render.destroy();
+        }
+        MetalRender::SetDynamicUploadDeltaForTests(previous);
+        return out;
+    };
+    const Run on  = run(true, "cache-on");
+    const Run off = run(false, "cache-off");
+    ASSERT_EQ(on.vertex.size(), std::size_t(kFrames));
+    ASSERT_EQ(off.vertex.size(), std::size_t(kFrames));
+
+    bool fewer_than_peak = false, none_left = false;
+    for (int frame = 0; frame < kFrames; ++frame) {
+        SCOPED_TRACE(frame);
+        EXPECT_EQ(on.pictures[frame], off.pictures[frame]) << "the copies differ in what is drawn";
+        EXPECT_EQ(on.drawn[frame], off.drawn[frame]);
+        // Off: the high-water mark of the vertices and every drawn index, every frame.
+        EXPECT_EQ(off.vertex[frame], off.filled[frame]);
+        EXPECT_EQ(off.index[frame], off.index_bytes[frame]);
+        // On: only the vertices this frame wrote.
+        EXPECT_EQ(on.vertex[frame], on.drawn[frame]);
+        fewer_than_peak = fewer_than_peak || (on.drawn[frame] > 0 && on.drawn[frame] < on.filled[frame]);
+        none_left       = none_left || (on.drawn[frame] == 0 && on.filled[frame] > 0);
+        // Each frame slot takes the burst's pattern once; a pattern that only shrinks after
+        // that is never copied again.
+        if (frame >= 4) EXPECT_EQ(on.index[frame], 0u);
+    }
+    EXPECT_GT(on.index[0], 0u) << "the first frame copies the pattern it draws";
+    EXPECT_TRUE(fewer_than_peak) << "the burst never thinned out; the fixture tests nothing";
+    EXPECT_TRUE(none_left) << "the burst never died out; the fixture tests nothing";
 }

@@ -209,6 +209,14 @@ replacement before publishing it and is rejected during `update`; use an event
 callback such as `applyUserProperties`. Explicit model bounds can cover animated
 vertices without rescanning them on every upload.
 
+Geometry the CPU rewrites (particles, text glyphs, script-made models) is copied into a
+frame slot's GPU storage only as far as the draw reads it and the slot lacks it. A
+particle system copies the quads it drew this frame, not the most it ever held, and its
+index pattern, which only ever grows, reaches each frame slot once; indices written over
+(a text relayout, `applyData`) are copied whole again. The draw reads the same bytes
+either way. `WALLPAPER_MACHINE_PARTICLE_UPLOAD_DELTA=0` copies everything every frame,
+for a comparison.
+
 WE 2.8.0.42's ModelData object is a token wrapper: `engine.isObjectValid(data)`
 returns false even while its model draws. Its `toConfigString()` returns the numeric
 token. Destruction uses `thisScene.destroyModelData(data.toConfigString())`; the

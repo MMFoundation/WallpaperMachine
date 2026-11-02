@@ -309,6 +309,18 @@ public:
     /// Load operation of the first enabled scene-output pass in execution order.
     [[nodiscard]] MetalLoadAction FirstSceneOutputLoadForTests() const;
     [[nodiscard]] uint64_t ModelDataUploadBytesForTests() const;
+    /// Bytes of geometry the CPU rewrites (particles, text glyphs, script-made models) copied
+    /// into the frame slots' storage since this renderer was made, vertices and indices apart.
+    struct DynamicUploadBytesForTests {
+        uint64_t vertex { 0 };
+        uint64_t index { 0 };
+    };
+    [[nodiscard]] DynamicUploadBytesForTests DynamicGeometryUploadBytesForTests() const;
+    /// Whether that copy leaves out what the slot already holds: index bytes it holds of the
+    /// same content, and vertices past the ones an indexed draw reads. On unless
+    /// `WALLPAPER_MACHINE_PARTICLE_UPLOAD_DELTA=0`; process-wide, test-only. Answers the
+    /// setting it replaced.
+    static bool SetDynamicUploadDeltaForTests(bool enabled);
     /// Actual GPU sample counts of live MS color/depth attachments; empty while Off.
     [[nodiscard]] std::vector<uint32_t> MultisampleCountsForTests() const;
 

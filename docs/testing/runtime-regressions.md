@@ -175,6 +175,17 @@ device.
 - **Per-frame geometry upload** — `MetalSceneDraw.GeometryRebuiltEveryFrameIsUploadedAndDrawnFromItsOwnSlot`,
   across more frames than there are in-flight slots. Zero live particles must
   draw nothing rather than fail.
+  `MetalSceneDraw.ParticleGeometryCopiesOnlyWhatTheFrameDrawsAndTheSlotLacks`: a burst
+  that thins out and dies copies only the vertices each frame wrote (the mesh's
+  `DrawnSizeOf`, not its high-water mark) and copies its index pattern into each frame
+  slot once, with every picture byte-identical to
+  `MetalRender::SetDynamicUploadDeltaForTests(false)`, which copies the high-water mark
+  and every drawn index each frame. `SceneIndexArray.AppendingKeepsTheContentRevisionAndRewritingRenewsIt`
+  and `SceneVertexArray.TheDrawnSizeHoldsUntilTheNextWrite` (`scene_mesh_tests`) hold the
+  two facts the skip relies on: an index write over earlier bytes (a text relayout, a
+  model's `applyData`) renews the revision, so the slot is copied whole, and any vertex
+  write forgets the drawn size, so a writer other than the particle generator copies
+  everything it filled.
 - **Skinning** — `MetalSceneDraw.APuppetIsSkinnedByItsOwnShaderFromThePoseTheRuntimeProduces`:
   a 64-byte reflected bone stride, the skinned quad translating by the distance
   its bone did with its width unchanged (what rules out a transposed matrix), the
