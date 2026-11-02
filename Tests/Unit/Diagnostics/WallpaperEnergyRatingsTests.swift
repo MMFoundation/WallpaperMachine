@@ -302,6 +302,41 @@ final class WallpaperEnergyRatingsTests: XCTestCase {
     XCTAssertEqual(ratings.entries["a"]?.seconds ?? 0, 60, accuracy: 0.001)
   }
 
+  /// While presentation is suspended nothing can be credited, so the loop does not run and
+  /// asks nothing; it runs again once presentation does.
+  func testAParkedRecorderDoesNotWake() async throws {
+    let ratings = WallpaperEnergyRatings(file: file)
+    var asked = 0
+    let recorder = WallpaperEnergyRecorder(
+      source: UnchangingSource(), ratings: ratings, interval: .milliseconds(5), tolerance: .zero
+    ) {
+      asked += 1
+      return nil
+    }
+    recorder.setParked(true)
+    recorder.start()
+    XCTAssertFalse(recorder.isRunning, "parked before it started")
+    try await Task.sleep(for: .milliseconds(80))
+    XCTAssertEqual(asked, 0)
+
+    recorder.setParked(false)
+    XCTAssertTrue(recorder.isRunning)
+    let deadline = Date().addingTimeInterval(2)
+    while asked < 3, Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+    XCTAssertGreaterThanOrEqual(asked, 3, "running again, it asks every interval")
+
+    recorder.setParked(true)
+    XCTAssertFalse(recorder.isRunning)
+    try await Task.sleep(for: .milliseconds(20))
+    let parkedAt = asked
+    try await Task.sleep(for: .milliseconds(80))
+    XCTAssertEqual(asked, parkedAt, "parked, it asks nothing")
+
+    recorder.stop()
+    recorder.setParked(false)
+    XCTAssertFalse(recorder.isRunning, "a stopped recorder stays stopped")
+  }
+
   func testRecorderLetsAWallpaperFinishLoadingBeforeAnIntervalStarts() {
     let ratings = WallpaperEnergyRatings(file: file)
     let recorder = WallpaperEnergyRecorder(source: nil, ratings: ratings) { nil }
@@ -314,5 +349,12 @@ final class WallpaperEnergyRatingsTests: XCTestCase {
 
     recorder.record(sample(at: 62, joules: 45), context: a)
     XCTAssertEqual(ratings.entries["a"]?.milliwatts ?? 0, 500, accuracy: 0.001)
+  }
+}
+
+/// Counters that read the same every time; the parking test only counts the loop's ticks.
+private struct UnchangingSource: EnergyUsageSource {
+  func sample() -> EnergyUsageSample? {
+    EnergyUsageSample(uptimeNanoseconds: 0, own: [:], otherGPUTime: [:])
   }
 }

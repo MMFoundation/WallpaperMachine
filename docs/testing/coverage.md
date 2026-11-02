@@ -454,7 +454,7 @@ per-Space assignments; see
   readings, contention, before/after comparisons, grades, battery share, the scene
   settings (2D scene resolution, scene quality, MetalFX) as conditions of a scene's
   rating and not of a video's, older-version ratings still read and replaced rather
-  than averaged and the rating recorder; two `testKernelCounters…` cases read the test process's real
+  than averaged, the rating recorder, and the recorder asking nothing while parked; two `testKernelCounters…` cases read the test process's real
   kernel counters.
 
 Log line format, retention and the verbose setting are covered in Rust; see
@@ -723,7 +723,8 @@ or depend on a second physical monitor.
   picture, and an out-of-range or non-finite position is invalid.
 - `LockScreenWallpaperServiceTests` — activation failure hands the Desktop back
   to the poster provider; surviving lock screens are not cleared by topology
-  changes; screen-saver-only, lock-only and both modes disable and roll back
+  changes, and a display that leaves while the Mac is away keeps its lock screen while
+  steady monitor ticks never ask whether the Mac is away; screen-saver-only, lock-only and both modes disable and roll back
   independently; shared-extension and Idle-only publication failures roll back;
   stale failure reports are ignored while a current renderer failure restores the
   selection; one bounded automatic retry repairs a wrong extension copy; shutdown

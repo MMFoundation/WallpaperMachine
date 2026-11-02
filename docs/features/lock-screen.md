@@ -518,7 +518,10 @@ monitoring the retained screen saver, and those checks never restart the failed
 lock-screen attempt; disabling the screen saver in that state stops the monitor until
 either mode is explicitly reactivated. A pending display-identity lookup does not
 clear an error and does not by itself start the monitor; with no error, the same timer
-retries an unchanged scene set when the identity resolves.
+retries an unchanged scene set when the identity resolves. Whether the Mac is locked,
+switched away from or dark (`displaysAreAway`, a window-server round trip) is asked only
+when a committed display is missing from the scenes, so the steady ticks that find every
+display still named do not ask it.
 
 A library refresh, explicit wallpaper reload or managed-asset change invalidates the
 content check even when project paths and options stayed identical. The publisher

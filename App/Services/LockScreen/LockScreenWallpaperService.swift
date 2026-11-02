@@ -399,11 +399,13 @@ final class LockScreenWallpaperService {
       try Task.checkCancellation()
       guard generation == revision else { return }
       // A display that sleeps or drops off while the Mac is locked or dark is not removed:
-      // that would hand its lock screen back to macOS just before the user wakes it.
-      if let lastInputs, displaysAreAway() {
+      // that would hand its lock screen back to macOS just before the user wakes it. Asked
+      // only when a display left: the session's state is a window-server round trip, and
+      // the monitor's steady ticks find every display still named.
+      if let lastInputs {
         let named = Set(records.map(\.displayId))
         let departed = lastInputs.map(\.displayID).filter { !named.contains($0) }
-        if !departed.isEmpty {
+        if !departed.isEmpty, displaysAreAway() {
           AppLog.debug("Native wallpaper topology held: display(s) \(departed) left while the Mac is locked or its displays sleep")
           return
         }

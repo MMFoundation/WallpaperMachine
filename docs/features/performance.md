@@ -130,8 +130,12 @@ background by `WallpaperEnergyRecorder` and kept by `WallpaperEnergyRatings` (bo
 in `App/Services/Diagnostics/WallpaperEnergyRatings.swift`), owned by the app
 delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings`:
 
-- **When a sample is credited.** Every 30 seconds the recorder asks the app
-  delegate for a `WallpaperEnergyContext`. There is none, and no sample is taken,
+- **When a sample is credited.** Every 30 seconds (a tick may come up to 5 s late,
+  so the system can share the wakeup) the recorder asks the app delegate for a
+  `WallpaperEnergyContext`. While presentation is suspended or unloaded the app
+  delegate parks it (`setParked`): no tick runs at all, so a locked Mac or sleeping
+  displays get no wakeup from it, and the first interval after the resume starts a
+  full interval later. There is none, and no sample is taken,
   unless presentation is running and playback is playing (no display sleep, lock,
   app rule, other-audio, Focus-filter or battery pause, and no Low Power Mode, heat or
   low-battery pause or stop: choosing Reduced quality for those three keeps the

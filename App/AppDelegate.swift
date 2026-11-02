@@ -443,6 +443,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                         && presentation != .unloaded
                     let resuming = presentation == .running && self.appliedGlobalPresentation != .running
                     self.wallpaperEnergy?.invalidate()
+                    // Nothing is rated while presentation is not running, so its ticks would only
+                    // wake an unattended Mac.
+                    self.wallpaperEnergy?.setParked(hostsSuspended)
                     self.telemetry?.invalidateFrames()
                     Task {
                         // Whether the bridge took it or not: it folds presentation
@@ -861,6 +864,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             source: CoalitionEnergySource(), ratings: ratings
         ) { [weak self] in self?.wallpaperEnergyContext() }
         wallpaperEnergy = recorder
+        // The policy started first and may already have suspended presentation.
+        recorder.setParked(presentationPolicy.map { $0.globalPresentation != .running } ?? false)
         recorder.start()
     }
 

@@ -218,10 +218,18 @@ final class WallpaperEnergyRatings {
 /// interval whose two ends saw the same context and whose GPU was not contended is
 /// recorded. Anything that changes presentation in between should call `invalidate()`,
 /// since a pause and resume inside one interval leaves both ends looking the same.
+///
+/// While presentation is suspended or unloaded (`setParked(true)`) every tick would find no
+/// context, so the loop is not run at all: an unattended Mac (locked, displays asleep) gets
+/// no wakeup from it. The ticks may also come up to `tolerance` late, so the system can share
+/// the wakeup; an interval is measured between its samples, not assumed.
 @MainActor
 final class WallpaperEnergyRecorder {
   /// One sample costs about 3 ms of kernel calls; every 30 s that is 0.01 % of a core.
   nonisolated static let defaultInterval: Duration = .seconds(30)
+  /// How late a tick may come. A sixth of the interval, so an interval stays within 25 to
+  /// 35 s and is never cut short.
+  nonisolated static let defaultTolerance: Duration = .seconds(5)
   /// How long after a presentation change no interval starts. On an M5 Pro a scene's
   /// first load drew 6–7 W for 2–4 s while its shaders compiled (10–22 J); a load with
   /// every cache warm cost about 1.5 J.
@@ -230,31 +238,56 @@ final class WallpaperEnergyRecorder {
   private let source: EnergyUsageSource?
   private let ratings: WallpaperEnergyRatings
   private let interval: Duration
+  private let tolerance: Duration
   private let context: @MainActor () -> WallpaperEnergyContext?
   private var previous: (sample: EnergyUsageSample, context: WallpaperEnergyContext)?
   /// Uptime of the last presentation change, on the samples' clock.
   private var changedAt: UInt64?
   private var task: Task<Void, Never>?
+  private var started = false
+  private var parked = false
 
   var isRunning: Bool { task != nil }
 
   init(
     source: EnergyUsageSource?, ratings: WallpaperEnergyRatings,
-    interval: Duration = defaultInterval,
+    interval: Duration = defaultInterval, tolerance: Duration = defaultTolerance,
     context: @escaping @MainActor () -> WallpaperEnergyContext?
   ) {
     self.source = source
     self.ratings = ratings
     self.interval = interval
+    self.tolerance = tolerance
     self.context = context
   }
 
   func start() {
-    guard task == nil, let source else { return }
+    started = true
+    runIfWanted()
+  }
+
+  /// Parked while presentation is not running, when `context` has nothing to credit. A
+  /// parked recorder keeps no interval open; leaving it starts a new one a full interval
+  /// later, as a resume's `invalidate()` already makes the first one wait.
+  func setParked(_ parked: Bool) {
+    guard parked != self.parked else { return }
+    self.parked = parked
+    if parked {
+      task?.cancel()
+      task = nil
+      previous = nil
+    } else {
+      runIfWanted()
+    }
+  }
+
+  private func runIfWanted() {
+    guard started, !parked, task == nil, let source else { return }
     let interval = interval
+    let tolerance = tolerance
     task = Task { @MainActor [weak self] in
       while !Task.isCancelled {
-        try? await Task.sleep(for: interval)
+        try? await Task.sleep(for: interval, tolerance: tolerance)
         guard !Task.isCancelled, let self else { return }
         guard let context = self.context() else {
           self.previous = nil
@@ -268,6 +301,7 @@ final class WallpaperEnergyRecorder {
   }
 
   func stop() {
+    started = false
     task?.cancel()
     task = nil
     previous = nil
