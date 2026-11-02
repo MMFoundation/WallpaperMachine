@@ -284,6 +284,8 @@ public:
         /// Render passes that stored their depth attachment, and their colour samples.
         uint32_t stored_depth_attachments { 0 };
         uint32_t stored_multisample_attachments { 0 };
+        /// The bytes the loading render passes read (texels times samples times texel size).
+        uint64_t loaded_bytes { 0 };
     };
     [[nodiscard]] FrameEncodeCountsForTests LastFrameEncodeCountsForTests() const;
 

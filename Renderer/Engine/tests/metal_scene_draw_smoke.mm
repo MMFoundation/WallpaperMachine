@@ -16372,6 +16372,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                     encodes.scene_output_passes += counts.scene_output_passes;
                     encodes.blit_passes += counts.blit_passes;
                     encodes.loaded_passes += counts.loaded_passes;
+                    encodes.loaded_bytes += counts.loaded_bytes;
                     encodes.opening_copies += counts.opening_copies;
                     encodes.stored_depth_attachments += counts.stored_depth_attachments;
                     encodes.stored_multisample_attachments += counts.stored_multisample_attachments;
@@ -16392,12 +16393,13 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                       << std::endl;
             char encode_line[384];
             std::snprintf(encode_line, sizeof(encode_line),
-                          "%.1f render passes/frame (%.1f on the scene output, %.1f loading their target, "
-                          "%.1f opening with a copy; %.1f storing depth, %.1f storing samples), "
+                          "%.1f render passes/frame (%.1f on the scene output, %.1f loading their target "
+                          "(%.1f MB), %.1f opening with a copy; %.1f storing depth, %.1f storing samples), "
                           "%.1f blits/frame, %.2f ms CPU per drawFrame",
                           double(encodes.render_passes) / measured,
                           double(encodes.scene_output_passes) / measured,
                           double(encodes.loaded_passes) / measured,
+                          double(encodes.loaded_bytes) / measured / 1e6,
                           double(encodes.opening_copies) / measured,
                           double(encodes.stored_depth_attachments) / measured,
                           double(encodes.stored_multisample_attachments) / measured,
@@ -18801,6 +18803,7 @@ TEST_F(MetalSceneDraw, AnEffectChainThatOverwritesItsBuffersOpensThemWithAClearA
     EXPECT_GE(off.counts.loaded_passes, 2u) << "the chain's later buffer writes were expected to load";
     EXPECT_EQ(on.counts.loaded_passes + 2u, off.counts.loaded_passes)
         << "the two overwriting effect passes still load their buffers";
+    EXPECT_LT(on.counts.loaded_bytes, off.counts.loaded_bytes);
     EXPECT_EQ(on.counts.render_passes, off.counts.render_passes) << "the elision changed how passes share render passes";
 }
 

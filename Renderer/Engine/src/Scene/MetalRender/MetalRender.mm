@@ -1465,6 +1465,22 @@ std::atomic<bool>& AttachmentStoreElisionSwitch()
     return enabled;
 }
 
+/// Bytes one texel of a render target takes, for the encode counters.
+uint64_t TexelBytes(MTLPixelFormat format)
+{
+    switch (format) {
+    case MTLPixelFormatR8Unorm: return 1;
+    case MTLPixelFormatRG8Unorm:
+    case MTLPixelFormatR16Float:
+    case MTLPixelFormatR16Unorm: return 2;
+    case MTLPixelFormatRGBA16Float:
+    case MTLPixelFormatRGBA16Unorm:
+    case MTLPixelFormatRG32Float: return 8;
+    case MTLPixelFormatRGBA32Float: return 16;
+    default: return 4;
+    }
+}
+
 /// Colour formats every texel of which is finite, so a blend factor of zero times what a texel
 /// held is zero. A float format may hold an infinity or NaN that zero does not cancel.
 bool HoldsOnlyFiniteValues(MTLPixelFormat format)
@@ -1992,8 +2008,10 @@ struct MetalRender::Impl
         uint32_t render_passes { 0 };
         uint32_t scene_output_passes { 0 };
         uint32_t blit_passes { 0 };
-        /// Render passes that load their target (colour, or a depth-only pass's depth image).
+        /// Render passes that load their target (colour, or a depth-only pass's depth image),
+        /// and the bytes those loads read.
         uint32_t loaded_passes { 0 };
+        uint64_t loaded_bytes { 0 };
         /// Render passes that open with the copy of a traded feedback image.
         uint32_t opening_copies { 0 };
         /// Render passes that store their depth attachment, and their multisampled colour.
@@ -7059,7 +7077,10 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 }
                 if (descriptor.colorAttachments[0].loadAction == MTLLoadActionLoad ||
                     (desc.depth_only && descriptor.depthAttachment.loadAction == MTLLoadActionLoad)) {
+                    id<MTLTexture> loaded = desc.depth_only ? target : attachment;
                     ++impl.frame_encodes.loaded_passes;
+                    impl.frame_encodes.loaded_bytes += uint64_t(loaded.width) * loaded.height *
+                                                       loaded.sampleCount * TexelBytes(loaded.pixelFormat);
                 }
                 if (depth != nil) {
                     const bool first = std::find(depth_cleared.begin(), depth_cleared.end(),
@@ -7634,7 +7655,7 @@ MetalRender::FrameEncodeCountsForTests MetalRender::LastFrameEncodeCountsForTest
     const auto& last = pImpl->last_frame_encodes;
     return { last.render_passes,  last.scene_output_passes,      last.blit_passes,
              last.loaded_passes, last.opening_copies,            last.stored_depth_attachments,
-             last.stored_multisample_attachments };
+             last.stored_multisample_attachments, last.loaded_bytes };
 }
 
 void MetalRender::SetTargetSharingForTests(bool enabled) { TargetSharingSwitch().store(enabled); }
