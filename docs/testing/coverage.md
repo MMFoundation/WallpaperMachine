@@ -844,7 +844,12 @@ need an authorized runtime check
   wraps, repositioning to the key frame before a time and dropping sound the clock has passed, a turned
   clip's axes), and the player on a layer that is not in a window: first picture, running and looping,
   pause and resume, start paused, a restart that spends its allowance, an upright poster, a decoder
-  that refuses the frames. `LockScreenWebMPlayerTests` (the lock screen's WebM player: the first frame composed at the display's size, pause with a frame still readable, a stop before the first picture ending `prepare`, a held failure delivered once) and the planner's WebM cases (`LockScreenVideoPlannerTests`: an unplayable answer goes to the reader, only that answer, and a file the reader refuses keeps AVFoundation's reason). `WebMVideoWallpaperWindowTests` — the desktop surface for WebM: ready and
+  that refuses the frames; a clip with sound that cannot be heard (muted, or at zero volume) decodes
+  no audio buffer while its picture plays and loops, being heard feeds the sound from the buffer that
+  covers the clock in the clock's pass without moving the clock or losing the picture, and silencing it
+  again stops the decoding; with `WALLPAPER_MACHINE_MUTED_VIDEO_AUDIO=1` a muted clip still decodes
+  its sound. The sound goes to an output device that does not exist, and is fed only while the clip is
+  held, so no real output plays it. `LockScreenWebMPlayerTests` (the lock screen's WebM player: the first frame composed at the display's size, pause with a frame still readable, a stop before the first picture ending `prepare`, a held failure delivered once) and the planner's WebM cases (`LockScreenVideoPlannerTests`: an unplayable answer goes to the reader, only that answer, and a file the reader refuses keeps AVFoundation's reason). `WebMVideoWallpaperWindowTests` — the desktop surface for WebM: ready and
   playing, user pause and suspension as separate reasons, the scaling choice and position moving the
   picture, a file that cannot be opened failing as a verdict (held until a handler arrives), a window
   opening its own file, the poster at the display's size, stopping.
@@ -862,8 +867,18 @@ need an authorized runtime check
   `AppDelegate` makes the call after each delivery is not run by any test),
   posters from replaced surfaces not published, and the switch hold (see
   [Wallpaper switching](#wallpaper-switching)). `NativeVideoPlaybackFailureTests` — the
-  reported failure keeps the codes under the localized message and a clip with
-  sound is rebuilt with its picture alone.
+  reported failure keeps the codes under the localized message, a clip with
+  sound is rebuilt with its picture alone, and the audio track switched off while a clip
+  cannot be heard is its one track the file marks enabled (none for a clip with two
+  enabled tracks, only disabled ones or no audio). `NativeVideoPlayerMediaTests` (opt-in) play
+  it: a muted or zero-volume clip whose audio goes to an output that does not exist plays
+  and loops, its recycled copies included, with every copy's audio track off and without
+  the failure that output gives a clip that starts its audio; a muted clip with the switch
+  off, an audible clip and a clip that becomes audible (the same item, its picture kept,
+  every copy's audio track back on) do start it, a rebuilt silent clip keeps its audio off,
+  and a muted clip with two enabled tracks keeps the platform's own choice. Whether
+  switching the track on a playing clip disturbs its picture on a real output is not
+  checked.
 - The metadata-read bound, in the host suite with a hand-fired clock
   (`ManualSleeper`) and a read held open by a gate: a read that never returns is
   abandoned after the limit for its storage (8, 30 or 60 seconds, per class) and the

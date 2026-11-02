@@ -840,6 +840,15 @@ is, at that display's own volume. The others play silently, so the sound is neve
 and a covered source hands the sound to a mirror still in sight. The same clip chosen for two
 independent displays is two wallpapers, and both are heard.
 
+A plain video that cannot be heard does not decode its sound at all ([below](#background-work-only-while-it-has-a-consumer)):
+one that is muted or at volume 0, muted by **Mute all wallpapers** or a rule (another app in front,
+other-app sound, Focus), or a mirror member that does not carry its group's sound. The
+AVFoundation player switches the clip's audio track off on every copy of the item the loop
+plays, before the platform prepares it; the WebM player stops feeding its audio renderer and takes
+it off the clock. Being heard again switches the same track back on, or feeds the WebM sound from
+where the clock is, without reopening the clip. A clip with several audio tracks the file marks
+enabled keeps its sound running muted, because which of them the platform plays is its own choice.
+
 Applying a video checks that its entry is a readable, nonempty file. A file that is
 missing or empty fails with the usual error. It also checks that the format can be played,
 on both **Apply** and **Apply changes** (and on Reapply), before any display changes. A
@@ -880,7 +889,8 @@ file the reader goes back to the first key frame and its times rise by one durat
 the clock runs on with no flush; the sound wraps the same way and is cut where the picture
 wraps. A single-frame file is shown and held. Opus, Vorbis, AAC and MP3 are played (Opus
 above stereo and more than two channels in the others are left out, with a log line); the
-sound follows the wallpaper's volume and mute. The player handles scaling, scale factor,
+sound follows the wallpaper's volume and mute, and is not decoded while it cannot be heard
+(above). The player handles scaling, scale factor,
 position and the file's own orientation with the same layout rule as the AVFoundation
 player, pauses by stopping the clock (the renderers fill and stop asking for samples), and
 keeps a poster for the desktop-picture sync from one decoded key frame. Its health check
@@ -1055,8 +1065,11 @@ lid produce the disagreement has not been checked on a desktop
 ([display layouts](display-layouts.md#mirror-sets-airplay-and-a-closed-lid)).
 
 When the clip's audio output cannot start (no output device, or one that will not
-start), AVFoundation fails the whole clip, muted or not, and reports only
-`AVErrorUnknown`. Native playback then rebuilds the clip from its video track alone
+start), AVFoundation fails the whole clip and reports only `AVErrorUnknown`; muting the
+player does not prevent it, and neither does pausing it, because the output is started when
+an item with an audio track switched on is prepared. A clip that cannot be heard has its
+audio track switched off before that (above), so it starts no output and this cannot happen
+to it until it is heard again. Native playback then rebuilds the clip from its video track alone
 and keeps playing it natively without sound, logging the original failure against
 the wallpaper's load. A clip without audio, or one whose picture fails too, is reported as failed. Failure
 reasons include each error's domain and code, so a report shows which part of playback failed.
@@ -1142,6 +1155,14 @@ nothing could see or hear.
   wallpaper that arrives paused, and the lock-screen extension (always muted) start
   no output, so Core Audio runs no output cycle for them and holds no idle-sleep
   assertion on their behalf. Resuming or unmuting costs one device start.
+- **Plain video sound.** A plain video that cannot be heard (muted, at volume 0, muted by
+  **Mute all wallpapers** or a rule, or a mirror member that does not carry its group's
+  sound) decodes no sound and starts no audio output: muting the platform player only
+  turned the decoded sound down. See [Video playback](#video-playback). Being heard again
+  restarts the output without reopening the clip. A WebM clip that opens silent may decode
+  its first audio buffers before the host's mute reaches it. No power measurement has been
+  taken; `WALLPAPER_MACHINE_MUTED_VIDEO_AUDIO=1` restores the old behaviour for a comparison
+  ([power benchmark](../testing/power-benchmark.md#ab-comparison-entry-points)).
 - **System audio capture.** Runs only for a presenting wallpaper that actually reads
   the sound; see [audio response](audio-response.md). A wallpaper that reads audio
   still runs the tap, and no drop in coreaudiod cost is claimed for it.
