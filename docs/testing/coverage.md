@@ -1083,7 +1083,8 @@ never to `.shared`.
   visible, a failure falls back without looping, a stale or cancelled read never overwrites a newer
   one), `EnergyReadoutTests` and `PanelEnergyRestartTests` (each rendering setting restarts the
   comparison once, other settings and refused changes do not).
-- Window and shell: `ControlPanelLaunchTests` (a login launch keeps the panel closed once set up),
+- Window and shell: `ControlPanelLaunchTests` (a login launch, or one with
+  `WALLPAPER_MACHINE_PANEL_AT_LAUNCH=0`, keeps the panel closed once set up),
   `ControlPanelViewTests` (the hosted root starts its controller and stops it when the window
   closes), `ControlPanelWindowSizingTests` (the 760×560 floor in a hosted window, the key-view
   loop, moving to the active Space while keeping full-screen capability, fronting that

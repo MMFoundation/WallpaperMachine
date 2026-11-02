@@ -114,11 +114,15 @@ provide elapsed time or displayed-frame counts; `presented_frames` over the same
 duration is the rate the display showed the wallpaper's frames at (see [Present
 feedback](#present-feedback)).
 
-The app opens its control panel at launch, so each such run includes it, and
-animated previews add frame decoding in the app and WindowServer work (Discover animates the
-tiles on screen; Installed shows still covers and animates only the tile under
-the pointer or keyboard focus, see [control panel](../features/control-panel.md));
-say whether the panel was open and on which page. The saving from Installed's
+The app opens its control panel at launch, and animated previews add frame decoding
+in the app and WindowServer work (Discover animates the tiles on screen; Installed
+shows still covers and animates only the tile under the pointer or keyboard focus, see
+[control panel](../features/control-panel.md)). Launch with `--env
+WALLPAPER_MACHINE_PANEL_AT_LAUNCH=0` to keep it closed, as a login launch does (read
+once at launch; an unfinished welcome guide or a failed start still opens it), so the
+window measures the wallpaper alone; otherwise say whether the panel was open and on
+which page. With the panel closed the app's own energy recorder samples too (its
+`EnergyRatings.json` in that home is a third readout). The saving from Installed's
 still covers has not been measured: compare a run with the panel open on
 Installed against a build before the change. System power includes every other application,
 so it is only comparable against a paired baseline taken minutes from the run;

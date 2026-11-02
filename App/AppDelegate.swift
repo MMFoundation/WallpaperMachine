@@ -683,8 +683,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         let opensPanel = ControlPanelLaunch.opensPanel(
             launchEvent: launchEvent,
             welcomeSeen: PanelPreferences.welcomeSeen(),
-            startupFailed: store == nil)
-        if !opensPanel { AppLog.info("startup: launched at login; control panel stays closed") }
+            startupFailed: store == nil,
+            environment: ProcessInfo.processInfo.environment)
+        if !opensPanel {
+            let reason = ControlPanelLaunch.isLoginItemLaunch(launchEvent)
+                ? "launched at login" : "\(ControlPanelLaunch.panelAtLaunchKey)=0"
+            AppLog.info("startup: \(reason); control panel stays closed")
+        }
         DispatchQueue.main.async { [weak self] in
             if opensPanel { self?.showControlPanel(selection: .wallpaper) }
             if !opened.isEmpty { self?.importOpenedFiles(opened) }
