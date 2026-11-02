@@ -55,6 +55,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
     private var spaceParking: WallpaperSpaceParking?
     /// The last poster of each wallpaper a desktop Space is set to, for the desktops not on screen.
     private let spacePosters = DesktopSpacePosterCache()
+    /// The settled poster each wallpaper last had on each display, given back when it returns.
+    /// Made when the first poster sync starts (`makeSettledPosters`), which empties what an
+    /// earlier run left.
+    private var settledPosters: DesktopSettledPosterStore?
+    /// The library the settled posters were last trimmed to.
+    private var settledPosterLibrary: Set<String>?
     private var retainedSpacePosters: Set<DesktopSpacePosterCache.Key>?
     private var wakeRevalidator: SystemWakeRevalidator?
     private var memoryPressureMonitor: MemoryPressureMonitor?
@@ -379,6 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
                 if let lockScreen, lockScreen.canRefreshAutomatically {
                     lockScreen.refresh()
                 }
+                self.retainSettledPosters()
                 // Posters keep the desktop unless the native provider has it or an animated lock
                 // screen is on its way to taking it; a screen saver chosen on its own leaves it here.
                 if lockScreen?.claimsDesktopPicture != true {
@@ -1560,6 +1567,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
             guard case .desktop = scope else { return }
             self?.keepSpacePoster(poster, display: display)
         }
+        // A wallpaper that comes back with the same look gets its settled poster back.
+        sync.settledPosters = makeSettledPosters()
+        sync.posterLook = { [weak self] surface in self?.desktopPosterLook(surface) }
         sync.refreshesPeriodically = PlaybackPreferences.shared.refreshesDesktopPicturePeriodically
         sync.start()
         sync.snapshotApplied(desktopPosterLayout())
@@ -1782,6 +1792,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenu
         guard keys != retainedSpacePosters else { return }
         retainedSpacePosters = keys
         spacePosters.retain(keys)
+    }
+
+    /// What `surface`'s poster would show now, for giving a wallpaper's settled poster back
+    /// (`DesktopPosterLook.resolve`). Nil when the window's wallpaper is unknown.
+    private func desktopPosterLook(_ surface: DesktopPosterSurface) -> DesktopPosterLook? {
+        guard let store, let window = surface.window, let wallpaper = wallpaperIDsByWindow()[window],
+              !wallpaper.isEmpty, !wallpaper.contains("/"), !wallpaper.hasPrefix(".") else { return nil }
+        let kind = store.librarySnapshot.wallpapers.first { $0.id == wallpaper }?.kind
+        let host: HostWallpaperState.Kind? = kind == .webpage ? .web : kind == .video ? .nativeVideo : nil
+        let hostPhase = host.flatMap { host in
+            store.hostWallpaperStates["\(host.rawValue):\(surface.display)"]
+                .flatMap { $0.wallpaperID == wallpaper ? $0.phase : nil }
+        }
+        let physical = { (row: BridgeDisplaySettingsRow) in
+            ResolvedDisplayTitles.liveDisplayID(row.displayId, title: row.title).map(String.init)
+        }
+        var extras = [
+            "appearance": NSApp.effectiveAppearance.name.rawValue,
+            "labelLanguages": AppLanguageStore.shared.effective.labelLocales.joined(separator: ","),
+        ]
+        if kind == .webpage, let row = store.settingsSnapshot.displays.first(where: { physical($0) == surface.display }) {
+            let placement = StillImagePlacementStore.shared
+            extras["stillImage"] = String(describing: placement.placement(wallpaperID: wallpaper, displayID: row.displayId))
+                + " " + (placement.generatedImage(wallpaperID: wallpaper)?.imageFile ?? "")
+        }
+        let screen = NSScreen.screens.first { SystemDesktopPictureWorkspace.id($0) == surface.display }
+        let settingsFile = ClientPaths.supportURL.appendingPathComponent("wallpapers", isDirectory: true)
+            .appendingPathComponent(wallpaper + ".json")
+        return DesktopPosterLook.resolve(
+            display: surface.display, wallpaperID: wallpaper, kind: kind, settings: store.settingsSnapshot,
+            monitors: store.monitorInformationSnapshot.rows, hostPhase: hostPhase,
+            screen: screen.map { .init(frame: $0.frame, scale: $0.backingScaleFactor) },
+            contentRevision: store.wallpaperContentRevision,
+            wallpaperSettings: try? Data(contentsOf: settingsFile), extras: extras, physicalDisplay: physical)
+    }
+
+    /// Nil with `WALLPAPER_MACHINE_DESKTOP_POSTER_REUSE=0`, which takes every return again as
+    /// before, for an A/B comparison ([power benchmark](docs/testing/power-benchmark.md)).
+    private func makeSettledPosters() -> DesktopSettledPosterStore? {
+        if let settledPosters { return settledPosters }
+        guard ProcessInfo.processInfo.environment["WALLPAPER_MACHINE_DESKTOP_POSTER_REUSE"] != "0" else { return nil }
+        let posters = DesktopSettledPosterStore()
+        settledPosters = posters
+        return posters
+    }
+
+    /// Lets go of the settled posters of wallpapers that left the library.
+    private func retainSettledPosters() {
+        guard let store, let posters = settledPosters, store.libraryLoadState == .loaded else { return }
+        let library = Set(store.librarySnapshot.wallpapers.map(\.id))
+        guard library != settledPosterLibrary else { return }
+        settledPosterLibrary = library
+        posters.retain(wallpaperIDs: library)
     }
 
     /// What the current snapshot shows on the displays, as far as desktop posters are concerned.

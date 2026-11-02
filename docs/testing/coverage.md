@@ -83,6 +83,22 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
   own picture back at once and a pass with the same windows asks for nothing and
   does not look at the desktops, unless a picture could not be put back; periodic captures only while enabled; later captures skip displays that
   are not presenting.
+- Settled posters given back: a wallpaper that comes back with the same look gets
+  the same poster file with nothing asked, now or as it settles, and keeps it through
+  an unasked frame, a resume and a Space change; a changed look or one that cannot
+  be told is taken again, and each display and wallpaper keeps only its newest
+  settled poster; a frame whose look changed between its request and its arrival is
+  kept under neither; a periodic capture replaces a poster given back; a poster
+  scoped to a desktop is neither kept nor given back. `DesktopSettledPosterStoreTests`:
+  one file per display and wallpaper, only the same look given back, the least
+  recently used going past the capacity, a wallpaper that left the library forgotten
+  on disk, an earlier run's posters emptied, a file changed on disk not given back;
+  the look changing with saved settings, files, scaling, screen size and scale,
+  render scale, 2D scene resolution, post-processing, MetalFX and appearance but not
+  the frame rate, and no look for another wallpaper, a mirror, a disabled display, a
+  scene still being read or held in a failure, or a host page or video not ready.
+  Not covered: which wallpaper the app's windows report, and the real readback; the
+  `AppDelegate` wiring is not unit-tested.
 - Unsaved looks: a display that draws property edits nobody applied is asked for
   nothing by a new wallpaper, a settle capture or a Space change, a frame already on
   its way is dropped, the poster stays the saved look, and it is retaken once the
