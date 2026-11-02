@@ -19,7 +19,12 @@ CPU and GPU cores; and, with `--powermetrics`, the CPU + GPU + ANE package power
 `powermetrics` reports. powermetrics needs root: the script runs it directly as
 root, through `sudo -S` with the password read from one stdin line
 (`--sudo-password-stdin`), or through `sudo -n`. The password only ever travels
-from this process's stdin to sudo's stdin. See docs/testing/power-benchmark.md.
+from this process's stdin to sudo's stdin.
+
+The `app` role is every process named WallpaperMachine, so a second copy running
+beside the build under test would be summed into it. A window refuses to start
+when more than one runs, and `--app-pid PID` names the one to measure and
+refuses when any other runs. See docs/testing/power-benchmark.md.
 """
 from __future__ import annotations
 
@@ -107,6 +112,10 @@ PROC_PIDCOALITIONINFO = 20
 LIST_SINGLE_TYPE = 2
 RESOURCE_COALITION = 0
 GPU_CONTENTION_SHARE = 0.25
+
+
+class AppSelectionError(Exception):
+    """The window would not measure exactly one copy of the app."""
 
 
 def command_output(command):
@@ -345,6 +354,31 @@ def role_pids() -> dict[str, list[int]]:
         if role is not None:
             found[role].append(int(fields[0]))
     return found
+
+
+def select_app(roles: dict[str, list[int]], app_pid: int | None) -> dict[str, list[int]]:
+    """The roles with the app limited to the one copy a window may measure.
+
+    Every process named WallpaperMachine matches the app role, and its CPU, GPU and
+    coalition energy are summed, so a second copy (the installed app beside a
+    build under test, or a copy left over from an earlier run) would be measured
+    as part of the first without any sign of it.
+    """
+    running = sorted(roles.get("app", []))
+    if app_pid is None:
+        if len(running) > 1:
+            raise AppSelectionError(
+                f"{len(running)} WallpaperMachine processes are running ({', '.join(map(str, running))}); "
+                "quit all but one, or name the one to measure with --app-pid")
+        return roles
+    if app_pid not in running:
+        raise AppSelectionError(f"PID {app_pid} is not a running WallpaperMachine process")
+    others = [pid for pid in running if pid != app_pid]
+    if others:
+        raise AppSelectionError(
+            f"other WallpaperMachine processes are running besides PID {app_pid} "
+            f"({', '.join(map(str, others))}); quit them first")
+    return {**roles, "app": [app_pid]}
 
 
 def cpu_seconds(pids: list[int]) -> dict[int, float]:
@@ -594,9 +628,10 @@ def role_usage(pids, cpu_before, cpu_after, gpu_before, gpu_after, elapsed) -> d
     return usage
 
 
-def measure(seconds: int, use_powermetrics: bool, sudo_password: str | None) -> dict:
+def measure(seconds: int, use_powermetrics: bool, sudo_password: str | None,
+            app_pid: int | None = None) -> dict:
     """Sample every role and the machine before and after the window, package power across it."""
-    roles = role_pids()
+    roles = select_app(role_pids(), app_pid)
     # Hashing belongs before the sampling window, so it is not charged as app work.
     builds = {role: [process_build_identity(pid) for pid in roles.get(role, [])]
               for role in ("app", "extension")}
@@ -621,6 +656,9 @@ def measure(seconds: int, use_powermetrics: bool, sudo_password: str | None) -> 
     gpu_after = gpu_times()
     coalitions = coalition_usage(coalitions_before, coalition_snapshot(reader, roles), elapsed)
     system = system_power(telemetry_before, power_telemetry())
+    # A copy that started during the window was not sampled at its start, but
+    # its work still reached the WindowServer, package and system figures.
+    appeared = sorted(set(role_pids().get("app", [])) - set(roles.get("app", [])))
     tools = ["ps accumulated CPU time"]
     if gpu_before is not None and gpu_after is not None:
         tools.append("ioreg AGXDeviceUserClient accumulatedGPUTime")
@@ -633,6 +671,8 @@ def measure(seconds: int, use_powermetrics: bool, sudo_password: str | None) -> 
     return {
         "process_builds": {role: [verify_process_build(identity) for identity in identities]
                            for role, identities in builds.items()},
+        "app_guard": {"app_pid": app_pid, "app_pids": roles.get("app", []),
+                      "appeared_during_window": appeared},
         "tools": tools,
         "elapsed_seconds": round(elapsed, 2),
         "processes": {
@@ -684,6 +724,9 @@ def attach_measurement(document: dict, condition: str, seconds: int, measurement
         "system_power": measurement["system_power"],
         "package_power": measurement["package_power"],
     }
+    for optional in ("app_guard",):
+        if optional in measurement:
+            document["measurement"][optional] = measurement[optional]
 
 
 def main():
@@ -699,10 +742,12 @@ def main():
                         help="Also record package power with powermetrics (needs root or sudo).")
     parser.add_argument("--sudo-password-stdin", action="store_true",
                         help="Read the sudo password for powermetrics from one line of stdin.")
+    parser.add_argument("--app-pid", type=int, metavar="PID",
+                        help="Measure this WallpaperMachine process as the app; refuse if any other runs.")
     args = parser.parse_args()
     if args.measure is None:
-        if args.condition or args.powermetrics or args.sudo_password_stdin:
-            parser.error("--condition, --powermetrics and --sudo-password-stdin need --measure")
+        if args.condition or args.powermetrics or args.sudo_password_stdin or args.app_pid:
+            parser.error("--condition, --powermetrics, --sudo-password-stdin and --app-pid need --measure")
     elif args.condition is None:
         parser.error("--measure needs --condition")
     if args.sudo_password_stdin and not args.powermetrics:
@@ -711,7 +756,11 @@ def main():
     password = sys.stdin.readline().rstrip("\r\n") if args.sudo_password_stdin else None
     document = manifest(args)
     if args.measure is not None:
-        measurement = measure(args.measure, args.powermetrics, password)
+        try:
+            measurement = measure(args.measure, args.powermetrics, password, args.app_pid)
+        except AppSelectionError as error:
+            print(f"{MARK.missing} Not measured: {error}", file=sys.stderr)
+            return 2
         attach_measurement(document, args.condition, args.measure, measurement)
     if args.print_only:
         print(json.dumps(document, indent=2))
@@ -753,6 +802,10 @@ def main():
                   f"GPU {power['gpu_mw']}, ANE {power['ane_mw']}) over {power['samples']} samples")
         else:
             print(f"{MARK.warn} Package power not measured: {power['reason']}")
+        appeared = report.get("app_guard", {}).get("appeared_during_window", [])
+        if appeared:
+            print(f"{MARK.missing} Reject this window: WallpaperMachine {', '.join(map(str, appeared))} "
+                  "started during it")
     if document["workspace"]["dirty"]:
         print(f"{MARK.warn} Working tree is dirty; the commit alone does not identify this build.")
     return 0

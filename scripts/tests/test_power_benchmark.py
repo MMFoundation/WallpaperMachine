@@ -403,6 +403,68 @@ class MeasureWindowTests(unittest.TestCase):
         self.assertIn("incorrect password", measurement["package_power"]["reason"])
 
 
+class AppSelectionTests(unittest.TestCase):
+    """A window measures exactly one copy of the app, or none for a baseline."""
+
+    def roles(self, *app):
+        return {"app": list(app), "window_server": [443]}
+
+    def test_two_copies_without_a_pid_are_refused(self):
+        with self.assertRaises(power_benchmark.AppSelectionError) as refused:
+            power_benchmark.select_app(self.roles(7, 8), None)
+        self.assertIn("--app-pid", str(refused.exception))
+
+    def test_a_named_pid_is_refused_while_another_copy_runs(self):
+        with self.assertRaises(power_benchmark.AppSelectionError) as refused:
+            power_benchmark.select_app(self.roles(7, 8), 7)
+        self.assertIn("8", str(refused.exception))
+
+    def test_a_named_pid_that_is_not_running_is_refused(self):
+        with self.assertRaises(power_benchmark.AppSelectionError):
+            power_benchmark.select_app(self.roles(7), 9)
+
+    def test_the_named_copy_alone_is_the_app(self):
+        self.assertEqual(power_benchmark.select_app(self.roles(7), 7), self.roles(7))
+
+    def test_one_copy_or_none_needs_no_pid(self):
+        self.assertEqual(power_benchmark.select_app(self.roles(7), None), self.roles(7))
+        self.assertEqual(power_benchmark.select_app(self.roles(), None), self.roles(),
+                         "a baseline window with the app quit is still measured")
+
+    def test_a_refused_window_samples_nothing(self):
+        sampled = []
+        with mock.patch.object(power_benchmark, "role_pids", lambda: self.roles(7, 8)), \
+                mock.patch.object(power_benchmark, "cpu_seconds", lambda pids: sampled.append(pids) or {}), \
+                mock.patch.object(power_benchmark, "package_power", lambda *a: sampled.append(a)):
+            with self.assertRaises(power_benchmark.AppSelectionError):
+                power_benchmark.measure(60, True, None, 7)
+        self.assertEqual(sampled, [])
+
+    def test_a_copy_that_starts_during_the_window_is_reported(self):
+        clock = SimpleNamespace(now=0.0)
+        found = iter([self.roles(7), self.roles(7, 8)])
+        cpu = iter([{7: 1.0, 443: 1.0}, {7: 2.0, 443: 1.5}])
+        with mock.patch.object(power_benchmark, "time",
+                               SimpleNamespace(monotonic=lambda: clock.now,
+                                               sleep=lambda s: setattr(clock, "now", clock.now + s))), \
+                mock.patch.object(power_benchmark, "role_pids", lambda: next(found)), \
+                mock.patch.object(power_benchmark, "process_build_identity", lambda pid: {"pid": pid, "status": "unknown"}), \
+                mock.patch.object(power_benchmark, "cpu_seconds", lambda pids: next(cpu)), \
+                mock.patch.object(power_benchmark, "gpu_times", lambda: None), \
+                mock.patch.object(power_benchmark, "coalition_snapshot", lambda reader, roles: None), \
+                mock.patch.object(power_benchmark, "power_telemetry", lambda: None):
+            measurement = power_benchmark.measure(10, False, None, 7)
+        self.assertEqual(measurement["app_guard"], {"app_pid": 7, "app_pids": [7], "appeared_during_window": [8]})
+        self.assertEqual(measurement["processes"]["app"]["pids"], [7], "the late copy is not summed in")
+
+    def test_the_app_pid_needs_a_window(self):
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPTS / "power_benchmark.py"), "--app-pid", "7", "--print-only"],
+            capture_output=True, text=True, check=False)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("--app-pid", completed.stderr)
+
+
 class InvocationTests(unittest.TestCase):
     def test_print_only_writes_no_artifact_and_emits_the_manifest(self):
         before = set(power_benchmark.POWER_ARTIFACTS.glob("*.json")) \

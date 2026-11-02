@@ -89,6 +89,13 @@ powermetrics that fails or is refused at once does not shorten it.
   refusal is recorded as `package_power.measured = false` with sudo's reason,
   and the other rows are still written.
 
+The `app` role is every process named WallpaperMachine, and its figures are summed,
+so a second copy (the installed app beside a build under test, or a copy left from an
+earlier run) would be measured as part of the first. A window therefore refuses to
+start while more than one copy runs. `--app-pid PID` names the copy to measure and
+refuses while any other runs; a copy that starts during the window is listed under
+`measurement.app_guard.appeared_during_window`, and the window is to be rejected.
+
 A desktop run (which needs authorization, see [Authorization
 boundary](#authorization-boundary)) is taken serially, with the display set and
 power source unchanged across a comparison: quit the app with an Apple Event and
