@@ -1434,9 +1434,10 @@ Not covered: the live website endpoint, and the energy cost of a frame window
 against fake streams, injected script results and a manual timer scheduler. They
 cover fragmented messages and timeline
 interpolation, consumer lifetime and late callbacks, unexpected exit without a
-restart loop, the adapter-to-AppleScript fallback, artwork caching and
-downscaling, the cleared cover reaching scenes before metadata, and the wire
-format. Not covered: a real player or OS version publishing every field
+restart loop, the adapter-to-AppleScript fallback, each fallback script compiled
+once however often it runs (with a stand-in script that contacts no application),
+artwork caching and downscaling, the cleared cover reaching scenes before metadata,
+and the wire format. Not covered: a real player or OS version publishing every field
 ([media integration](../features/media-integration.md#verification)).
 
 ## UserAssets
