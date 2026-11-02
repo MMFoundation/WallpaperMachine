@@ -358,9 +358,9 @@ MTLSamplerMinMagFilter ToMetalFilter(TextureFilter filter)
     return MTLSamplerMinMagFilterLinear;
 }
 
-/// Uncompressed formats only. Block-compressed source images are rejected
-/// rather than decoded here: silently expanding them would change memory use
-/// and filtering behaviour.
+/// The Metal format a source image is uploaded in, as stored. A block-compressed (BC) image keeps
+/// its blocks in the matching native BC format when the device has them (`block_compression`) and
+/// is refused otherwise; it is never decoded here, which would change memory use and filtering.
 /// `block_bytes` is non-zero for a block-compressed format, where a row is
 /// counted in 4x4 blocks rather than pixels and `bytes_per_pixel` means nothing.
 bool ToMetalImageFormat(TextureFormat format, bool block_compression, MTLPixelFormat& out,
@@ -384,7 +384,7 @@ bool ToMetalImageFormat(TextureFormat format, bool block_compression, MTLPixelFo
         out             = MTLPixelFormatR8Unorm;
         bytes_per_pixel = 1;
         return true;
-    // The three block-compressed formats, uploaded as the blocks the file already holds. A device
+    // The four block-compressed formats, uploaded as the blocks the file already holds. A device
     // without them refuses the image, and with it the scene, rather than
     // decoding on the CPU into a texture four to eight times the size.
     case TextureFormat::BC1:
