@@ -842,15 +842,26 @@ engine to redo, and when.
 - **The lock state is not asked per evaluation** — `WallpaperPresentationPolicyTests.testTheLockStateIsAskedOnlyWhenItCanHaveChanged`,
   `.testASessionLockedBeforeStartIsSuspendedFromTheStart`,
   `.testWakingDisplaysAskForTheLockStateAgain`,
-  `.testSwitchingUsersAsksForTheLockStateAgain` and
-  `.testAMissedUnlockClearsAtTheNextEvaluation`, plus
+  `.testSwitchingUsersAsksForTheLockStateAgain`,
+  `.testAMissedUnlockClearsAtTheNextEvaluation` and
+  `.testAMissedReturnToTheConsoleClearsAtTheNextEvaluation`, plus
   `.testUnlockIsReportedOnceWhenTheLockClears` and
   `.testAMissedUnlockIsStillReportedAtTheNextEvaluation` for the edge the playlists
   answer. Every snapshot the engine applies
   runs the presentation policy, and `CGSessionCopyCurrentDictionary` is a
   synchronous window-server round trip. It is asked again only at start, on a lock
   or unlock, on display wake, on a user switch and while the session counts as
-  locked, so a missed unlock still clears at the next evaluation.
+  locked or switched away, so a missed unlock or return still clears at the next
+  evaluation.
+- **A switched-away session does not render for nobody** —
+  `WallpaperPresentationPolicyTests.testASessionSwitchedAwayWithoutALockSuspendsUntilItIsBack`,
+  `.testASessionOffTheConsoleAtStartIsSuspendedFromTheStart` and
+  `WallpaperPresentationAuthorityTests.testASessionSwitchedAwayHasNobodyWatchingItsLockScreenSurfaces`.
+  The renderer runs its own frame clock, so nothing else stops a wallpaper whose
+  session fast user switching moved off the screens without a lock: the policy
+  suspends presentation and the extension's lock-screen surfaces have no consumer
+  until the session is on the console again. Not exercised live: it needs a second
+  account.
 - **No folder probe per panel snapshot** — `WorkshopDownloadIntentTests.testSceneAssetsAreFoundAgainOnlyOnRefresh`.
   Resolving `ClientPaths.assetsURL` probes up to four folders, which is a large
   share of building the page snapshot while a property slider is dragged. The

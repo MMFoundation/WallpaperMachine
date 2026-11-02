@@ -158,14 +158,12 @@ final class LockScreenWallpaperService {
     return CFUUIDCreateString(nil, uuid) as String
   }
 
-  /// The session is locked, or no display is awake. Core Graphics lists no sleeping display as
-  /// active, so the bridge names none while they sleep.
+  /// The session is locked or switched away from (another user has the screens), or no
+  /// display is awake. Core Graphics lists no sleeping display as active, so the bridge names
+  /// none while they sleep.
   nonisolated static func displaysAreAway() -> Bool {
-    if (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool
-      == true
-    {
-      return true
-    }
+    let session = WallpaperPresentationAuthority.SessionState.current()
+    if session.locked || !session.onConsole { return true }
     var count: UInt32 = 0
     return CGGetActiveDisplayList(0, nil, &count) == .success && count == 0
   }

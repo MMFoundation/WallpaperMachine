@@ -226,7 +226,10 @@ picture shows between a window closing and the web page's window opening.
 
 - `WallpaperPresentationPolicyTests` — display sleep and wake, session lock
   (asked only when it can have changed, re-asked on wake and user switch, a
-  missed unlock clearing at the next evaluation), the unlock reported once to
+  missed unlock clearing at the next evaluation), a session switched away from
+  without a lock (suspended and unattended until it is back on the console, also
+  from the start, a missed return clearing at the next evaluation, no unlock
+  reported, and a session dictionary without the key read as on the console), the unlock reported once to
   `onSessionUnlocked` (also when missed, after a wake or a user switch, never at start
   while locked or at stop), full occlusion and a covered
   working area suspending after the settle delay, per-display independence,
@@ -800,8 +803,9 @@ or depend on a second physical monitor.
   the sleeping schedule running each check once and not running a cancelled one.
 - `WallpaperPresentationAuthorityTests` — both display/host wake orders, user
   pause surviving sleep and wake, a lock-screen surface presenting only while
-  locked, and an unlocked one settling for `desktopSettleBudget` before it holds
-  a frame.
+  locked, an unlocked one settling for `desktopSettleBudget` before it holds
+  a frame, and no lock-screen surface presenting (or settling) while fast user
+  switching has another session on the screens.
 
 Not covered: the extension drawing a moved picture at its position, real lock-screen
 visual timing, private XPC snapshot transport, the wallpaper service's wake and

@@ -390,11 +390,16 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   wallpaper pixel can reach a display, without altering the user's play/pause choice. The
   strongest global condition wins: display sleep pauses (`setPresentationSuspended`) or stops
   and frees renderer memory (`setPresentationUnloaded`) per
-  `PlaybackPreferences.displaySleepAction`; session lock, an active pause rule, or other-app
-  audio set to pause suspend; an active stop rule unloads. The lock state comes from
-  `CGSessionCopyCurrentDictionary`, a synchronous window-server round trip, so the policy asks
+  `PlaybackPreferences.displaySleepAction`; session lock, a session switched away from (fast
+  user switching put another user's session or the login window on the screens, read as
+  `kCGSessionOnConsoleKey` false; a dictionary without the key counts as on the console), an
+  active pause rule, or other-app audio set to pause suspend; an active stop rule unloads. A
+  locked or switched-away session also counts as unattended. The lock and console state come
+  from `CGSessionCopyCurrentDictionary` (`WallpaperPresentationAuthority.SessionState`, shared
+  with the extension), a synchronous window-server round trip, so the policy asks
   only at start, on `com.apple.screenIsLocked`/`Unlocked`, on display wake and on a user
-  switch, and at every evaluation while the session counts as locked; the evaluation that finds
+  switch, and at every evaluation while the session counts as locked or switched away; returning
+  to the console resumes at once and is not an unlock. The evaluation that finds
   it went from locked to unlocked calls `onSessionUnlocked` once, after the presentation it
   settles, which the app delegate hands to `PlaylistScheduler.noteUnlock()` for playlists set
   to change when the Mac is unlocked ([playlists](features/playlists.md#each-time-the-mac-is-unlocked)).
