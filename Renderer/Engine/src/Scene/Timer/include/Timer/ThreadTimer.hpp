@@ -21,11 +21,15 @@ public:
     ~ThreadTimer();
 
     void Start();
+    /// Safe from the timer's own tick: the loop then ends when the tick returns,
+    /// unless the tick starts the timer again, in which case it carries on. The
+    /// next `Start`, `Stop` or destruction on another thread joins it, so one loop
+    /// at most ever runs.
     void Stop();
 
     bool Running() const;
 
-    void SetInterval(std::chrono::microseconds);
+    void SetInterval(std::chrono::nanoseconds);
 
     /// Shortest gap allowed between two callbacks, whatever asked for them.
     ///
