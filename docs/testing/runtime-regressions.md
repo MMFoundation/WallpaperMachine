@@ -622,9 +622,11 @@ device.
   that a rejected registration hands the callback back to be dropped exactly once and that
   a panicking callback does not unwind into C++. In the renderer,
   `UnchangedPresent.ADrawFailureAfterTheFirstFrameIsReportedOnceAndASurfaceRebuildHealsIt`
-  and `...BeforeTheFirstFrameIsCountedButNotReported`. The engine's reaction to a report
-  on a live scene needs a real window and is not covered by an automated test, and no
-  genuine presentation failure is produced anywhere.
+  and `...BeforeTheFirstFrameIsCountedButNotReported`; a frame whose composition
+  fails is such a failure, presenting nothing and leaving nothing recorded as shown
+  (`MetalSceneDraw.AFrameThatCannotBeComposedIsNeitherPresentedNorRememberedAsShown`).
+  The engine's reaction to a report on a live scene needs a real window and is not
+  covered by an automated test, and no genuine presentation failure is produced anywhere.
 
 ## Audio
 

@@ -259,6 +259,11 @@ public:
     [[nodiscard]] uint64_t RuntimeImageUploadsForTests() const;
     /// Draw-time light projection/packing updates, for demand regressions.
     [[nodiscard]] uint64_t LightFeatureUpdatesForTests() const;
+    /// The next frame that takes a drawable fails to compose onto it, the way a
+    /// present pipeline that cannot be built for a new drawable format fails.
+    /// Test-only: no real composition failure can be produced without breaking
+    /// the GPU, and what matters is what the frame does after one.
+    void RefuseNextCompositionForTests();
 
     /// Encoders the pass loop of the last drawn frame opened: render passes,
     /// how many of them rendered into the scene's output image, and blits.

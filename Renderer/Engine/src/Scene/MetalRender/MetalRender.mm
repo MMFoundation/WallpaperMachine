@@ -1739,6 +1739,8 @@ struct MetalRender::Impl
     bool cookie_sources_ready { false }, cookie_binding_ready { false }, cookie_projection_read { false };
 #ifdef WESCENE_BUILD_TESTS
     uint64_t light_feature_updates { 0 };
+    /// The next drawn frame's composition fails, as a failed present pipeline would.
+    bool refuse_next_composition { false };
 #endif
     const SceneLight* bound_cookie_light { nullptr };
     id<MTLTexture> light_cookie_texture { nil };
@@ -7016,7 +7018,19 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             impl.frame_drawn = true;
             return true;
         }
-        impl.encodeComposition(command, drawable.texture, scene, true);
+#ifdef WESCENE_BUILD_TESTS
+        const bool composition_refused = std::exchange(impl.refuse_next_composition, false);
+#else
+        constexpr bool composition_refused = false;
+#endif
+        if (composition_refused || ! impl.encodeComposition(command, drawable.texture, scene, true)) {
+            // Nothing wrote the drawable. Presenting it would show what it held
+            // frames ago, or nothing at all when it is new, and recording the
+            // present would then keep that picture up as unchanged. The frame
+            // fails like any other encode failure: nothing is committed, and the
+            // host's failure and recovery path runs.
+            return abandon_frame("the frame could not be composed onto the surface");
+        }
 
         // The poster draws the same composition into a texture this process
         // owns. It costs nothing unless a request is pending, and it never
@@ -7275,6 +7289,7 @@ std::vector<uint32_t> MetalRender::MultisampleCountsForTests() const
 uint64_t MetalRender::ProgramCompilesForTests() { return MetalProgramCache::shared().compileCount(); }
 
 uint64_t MetalRender::LightFeatureUpdatesForTests() const { return pImpl->light_feature_updates; }
+void MetalRender::RefuseNextCompositionForTests() { pImpl->refuse_next_composition = true; }
 
 const void* MetalRender::ImportedImageForTests(const std::string& key, std::size_t slot) const
 {

@@ -895,7 +895,12 @@ count kept, and the next failure reports again.
 `ADrawFailureBeforeTheFirstFrameIsCountedButNotReported` pins that a scene that
 has not presented yet counts the failure and does not call back. The seam
 replaces only the failure, not its consequences; a real swapchain failure is not
-produced.
+produced. A frame whose final composition fails (no output target, no present
+pipeline for a new drawable format, no encoder) is such a failure: it presents
+nothing, counts no present request and records nothing as shown, so the next
+frame draws the picture again rather than skipping it as unchanged
+(`MetalSceneDraw.AFrameThatCannotBeComposedIsNeitherPresentedNorRememberedAsShown`,
+through the test-only `RefuseNextCompositionForTests`).
 
 `LocalProjectEnergyIsMeasuredHeadlessly`, in the same binary, is the headless
 energy measurement: it skips unless `WE_TEST_ENERGY_PROJECT` names a local

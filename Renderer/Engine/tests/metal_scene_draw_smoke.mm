@@ -7724,6 +7724,76 @@ TEST_F(MetalSceneDraw, AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresents
     RendererCounters::SetEnabled(false);
 }
 
+TEST_F(MetalSceneDraw, AFrameThatCannotBeComposedIsNeitherPresentedNorRememberedAsShown)
+{
+    // A drawable nothing composed into holds whatever it held frames ago, or
+    // nothing when it is new. Presenting it shows that, and remembering the
+    // present as the picture on the layer would then keep it there: a still
+    // scene's next frames match the record and present nothing. The frame has
+    // to fail instead, with nothing presented and nothing remembered, so the
+    // frame after it draws the picture again.
+    const auto  project = WriteFixture(root_ / "project");
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
+
+    RendererCounters::SetEnabled(true);
+    RendererCounters counters;
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(640, 360);
+
+        MetalRender         render;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = 640,
+            .height               = 360,
+            .render_width         = 640,
+            .render_height        = 360,
+            .display_scale_factor = 1.0,
+        };
+        ASSERT_TRUE(render.init(info)) << render.lastError();
+        render.SetCounters(&counters);
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+
+        const auto requests = [&]() { return counters.Get(OWE_RC_PRESENT_REQUESTS); };
+        bool presented = false;
+        ASSERT_TRUE(render.drawFrame(*loaded.scene, &presented)) << render.lastError();
+        ASSERT_TRUE(presented);
+        ASSERT_TRUE(render.drawFrame(*loaded.scene, &presented)) << render.lastError();
+        ASSERT_FALSE(presented) << "the still scene's second frame repeats the first";
+        ASSERT_EQ(requests(), 1u);
+
+        // Something the composition reads changed, so this frame takes a
+        // drawable and composes; the composition fails.
+        render.InvalidatePresentedFrame();
+        render.RefuseNextCompositionForTests();
+        presented = true;
+        EXPECT_FALSE(render.drawFrame(*loaded.scene, &presented))
+            << "a frame that composed nothing reported success";
+        EXPECT_FALSE(presented) << "a drawable nothing was composed into was presented";
+        EXPECT_EQ(requests(), 1u) << "an uncomposed drawable was counted as a present request";
+        EXPECT_FALSE(render.lastError().empty()) << "the failure carries no reason";
+
+        // Nothing of the failed frame is remembered: the next one draws and
+        // presents the picture, and only the one after that repeats it.
+        EXPECT_TRUE(render.drawFrame(*loaded.scene, &presented)) << render.lastError();
+        EXPECT_TRUE(presented) << "the failed frame's present was remembered as the picture on the layer";
+        EXPECT_EQ(requests(), 2u);
+        EXPECT_TRUE(render.drawFrame(*loaded.scene, &presented)) << render.lastError();
+        EXPECT_FALSE(presented) << "the recovered picture is not recognised as unchanged";
+
+        render.destroy();
+    }
+    RendererCounters::SetEnabled(false);
+}
+
 TEST_F(MetalSceneDraw, APannedWallpaperIsComposedAtTheChosenPositionInTheDrawableAndThePoster)
 {
     // A 3:2 scene fitted into a square layer leaves bars above and below. The
