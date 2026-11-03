@@ -301,7 +301,7 @@ class WebRenderTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         command, env = calls[0]
         self.assertIn("WebWallpaperReferenceRenderTests", command)
-        self.assertTrue(Path(command[1]).name == "test.py")
+        self.assertEqual(Path(command[1]).name, "test.py")
 
 
 class ImageTests(unittest.TestCase):
