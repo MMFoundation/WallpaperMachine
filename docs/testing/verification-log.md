@@ -25,6 +25,14 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-03 — Moving-layer effect reuse on by default
+
+Developer decision: accept rare one-level texel differences from joined render passes for the GPU time layer-local reuse saves (WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES, now on unless =0). Supersedes the opt-in line of the power and performance entry.
+
+- `python3 scripts/check_renderer.py` — exit 0, including MetalSceneDraw.AMovingLayerBetweenTwoCardsIsReusedAndJoinsTheCardsRenderPasses
+- `python3 scripts/perf_bench.py identity` =0 against the default, 240 draws hashed every 30, both surfaces — identical on 3796026374 and 3624257712; 3808922316 at 3456x2234@2 differs in frame 149 (2 pixels, max channel 1), identical at 3840x2160@2
+- Saving (earlier Metal System Trace, 3808922316 at 3840x2160@2): 17 passes a frame left out, about 0.4 ms or 8 % of its GPU time
+
 ## 2026-11-03 — Experimental switch: draw only the visible part of cropped scenes
 
 SDR display framing behind `scene_display_framing` under `[experimental]`, off by default; `WALLPAPER_MACHINE_SDR_FRAMING=1`/`=0` overrides it. Measured on an M5 Pro.
@@ -111,12 +119,3 @@ A fifth one-time prompt, Join us on Discord?, invites once to MMFoundation's Dis
 - `python3 scripts/test.py` — 4268 passed, 0 failed, 52 skipped
 - `python3 scripts/build.py --swift-only --configuration Release` — OK
 - Sheet (en, zh-Hans) and Settings › About (en, zh-Hans) rendered offscreen from a never-shown window to check the layout; the app was not launched and the Help menu item was not opened by hand
-
-## 2026-11-01 — MMFoundation link in Settings › About
-
-Settings › About gains an MMFoundation button beside the GPL link, opening https://mmfoundation.dev/ through ExternalLink's allowlist (mmfoundation.dev added); READMEs in all four languages name MMFoundation with a link. Run while another task's uncommitted Spaces/desktop-picture edits were in the same checkout.
-
-- `python3 scripts/test.py --only ExternalLinkTests` — 5 passed (after `xattr -cr build/Build/Products/Debug`, docs/build.md)
-- `python3 scripts/test.py --only SettingsSectionsLocalizationTests` — 2 passed; MMFoundation added to its same-everywhere names
-- `python3 scripts/test.py` — first run 2 failed: the localization test above (fixed) and EnergyUsageMonitorTests.testKernelCountersForThisProcessAdvanceWithGPUWork (3.4 mW, hardware counter); rerun 4258 passed, 0 failed, 52 skipped
-- Not checked: the button on screen (no desktop run requested); no Release build
