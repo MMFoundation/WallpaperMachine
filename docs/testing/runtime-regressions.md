@@ -616,6 +616,17 @@ device.
     loop seam or a seek are discarded; and repeated, rewound or non-finite
     timestamps are not counted as evidence at all. Rational rates keep their
     exact period (`24000/1001`, not `1/24`).
+- **Presents held to an even number of refreshes** — `PresentPacingTest.*` in
+  `timer_tests` pins the hold a present asks for (whole refreshes of the ceiling's
+  period less a quarter refresh, never more refreshes than the period covers, zero
+  at or above the display's rate or with no known rate), that the frame clock
+  publishes it for its ceiling rather than its content-paced cadence, and, in a model
+  of fixed-rate and ProMotion panels, that held frames near a refresh boundary are
+  shown two refreshes apart where plain presents alternate one and three.
+  `MetalSceneDraw.APresentHoldsTheFrameOnlyWhilePacing` checks that the present asks
+  for the hold only while `WALLPAPER_MACHINE_VSYNC_PACING` is on and that held
+  presents neither stall the next drawable nor lose their reports. When the display
+  showed them is not observable headlessly.
 - **Pointer-driven clock wakes** — `FrameTimerTest.ABurstOfWakeOnceAtTheCeilingDoesNotAddCallbacks`
   and `.AnIdleBurstOfWakeOnceProducesOneCallback` in `timer_tests`. Two hundred
   `WakeOnce` calls in one second at 30 fps stay inside about one callback per

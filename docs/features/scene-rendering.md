@@ -2191,6 +2191,26 @@ drawable queue ahead of the display then filled and stayed full, adding two fram
 and a wait for a drawable to every frame (`FrameTimerTest.TheCadenceIsTheExactPeriodOfTheRequiredFps`,
 `.TheCadenceNeverOutrunsTheDisplay`).
 
+A frame rate below the display's reaches it an even number of refreshes apart. The frame clock
+is not driven by the display, so a 60 fps cadence on a 120 Hz panel can sit within a
+millisecond or two of a refresh boundary for minutes, and the render time's jitter then shows
+neighbouring frames one and three refreshes apart instead of two and two: a stutter on slow
+pans, parallax and drifting particles. When the frame period spans two or more refreshes,
+Native Metal presents each frame with `presentDrawable:afterMinimumDuration:` and a hold of
+those whole refreshes less a quarter refresh (14.58 ms at 60 on 120 Hz): the frame shows no
+sooner than the refresh the cadence aims at, on a fixed-rate panel and on a ProMotion one, which
+can also refresh at the half-steps between. A frame that is late still shows at the next
+refresh, and the frames after it are held from it, so one late frame costs one longer gap
+instead of a run of uneven ones. The hold counts whole refreshes rounding down, so frames never
+reach the display more slowly than the clock makes them: a ceiling at or above the display's
+rate (one refresh or less), a display of unknown or variable rate, and a frame period just
+short of two refreshes (30 fps on 59.94 Hz) present at the next refresh as before. The pixels of
+every frame are the same either way; what changes is when a frame is shown, and a frame that
+would have been shown a refresh early is shown a refresh later, which can add up to one refresh
+of latency to a pointer-reactive scene. Content pacing and events do not lengthen the hold: it
+follows the ceiling. `WALLPAPER_MACHINE_VSYNC_PACING=0` presents every frame at the next refresh
+(`PresentPacingTest.*`, `MetalSceneDraw.APresentHoldsTheFrameOnlyWhilePacing`).
+
 Both renderers implement this. The status line reports what each running scene is
 doing right now — updating continuously and why, waiting for events, paused by you,
 suspended by the system, stopped after a rendering failure, or that the state could

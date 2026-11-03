@@ -1455,6 +1455,20 @@ bool PresentFeedbackEnabled()
     return enabled;
 }
 
+/// Whether a present holds the frame on screen for the frame clock's hold
+/// (`SetPresentHold`) before the next one replaces it, so a ceiling below the
+/// display's rate shows its frames an even number of refreshes apart. On by
+/// default; `WALLPAPER_MACHINE_VSYNC_PACING=0` presents every frame at the next
+/// refresh, for an A/B in one binary. Either way the frames hold the same pixels.
+std::atomic<bool>& PresentPacingSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_VSYNC_PACING");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
 /// Whether a render pass opened by a draw that provably writes every texel of its target
 /// clears the target instead of loading it. On by default;
 /// `WALLPAPER_MACHINE_OVERWRITE_LOAD_ELISION=0` keeps every load, so a power comparison can
@@ -1759,6 +1773,14 @@ struct MetalRender::Impl
     std::shared_ptr<PresentFeedback> present_feedback { std::make_shared<PresentFeedback>() };
     bool                 present_feedback_armed { false };
     uint32_t             present_feedback_display { 0 };
+    /// How long the frame on screen stays before the next present replaces it,
+    /// in seconds; 0 presents at the next refresh. Set by the frame clock's owner.
+    double               present_hold { 0.0 };
+#ifdef WESCENE_BUILD_TESTS
+    /// What the last present asked for, and how many presents held.
+    double               last_present_hold { 0.0 };
+    uint64_t             held_presents { 0 };
+#endif
     /// The raster extent the last size resolve produced: the authored canvas
     /// through the internal render scale, which is what screen-space shader
     /// inputs have to describe.
@@ -7062,6 +7084,10 @@ void MetalRender::SetDisplayId(uint32_t identity) {
     pImpl->display_id=identity;
     if (pImpl->display_output) pImpl->display_output->SetDisplayId(identity);
 }
+void MetalRender::SetPresentHold(std::chrono::nanoseconds hold) {
+    if (pImpl) pImpl->present_hold = hold > std::chrono::nanoseconds::zero()
+                                         ? std::chrono::duration<double>(hold).count() : 0.0;
+}
 void MetalRender::RefreshDisplayOutput(Scene& scene) {
     if (pImpl && pImpl->inited) pImpl->refreshDisplayOutput(scene);
 }
@@ -8214,7 +8240,20 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         } else {
             impl.present_feedback_armed = false;
         }
-        [command presentDrawable:drawable];
+        // Held, the frame shows no sooner than the hold after the one on screen
+        // was shown: at the refresh the clock's cadence aims at rather than one
+        // early when this frame happened to be ready just before a refresh.
+        // Ready late, it still shows at the next refresh.
+        const double hold = PresentPacingSwitch().load(std::memory_order_relaxed) ? impl.present_hold : 0.0;
+        if (hold > 0.0) {
+            [command presentDrawable:drawable afterMinimumDuration:hold];
+        } else {
+            [command presentDrawable:drawable];
+        }
+#ifdef WESCENE_BUILD_TESTS
+        impl.last_present_hold = hold;
+        if (hold > 0.0) ++impl.held_presents;
+#endif
         [command commit];
         // Committed, so the clears of a resize have run ahead of everything else in it.
         impl.pending_target_clears.clear();
@@ -8492,6 +8531,16 @@ uint64_t MetalRender::ProgramCompilesForTests() { return MetalProgramCache::shar
 
 uint64_t MetalRender::LightFeatureUpdatesForTests() const { return pImpl->light_feature_updates; }
 void MetalRender::RefuseNextCompositionForTests() { pImpl->refuse_next_composition = true; }
+
+std::chrono::nanoseconds MetalRender::LastPresentHoldForTests() const
+{
+    return std::chrono::round<std::chrono::nanoseconds>(
+        std::chrono::duration<double>(pImpl->last_present_hold));
+}
+
+uint64_t MetalRender::HeldPresentsForTests() const { return pImpl->held_presents; }
+
+bool MetalRender::SetPresentPacingForTests(bool enabled) { return PresentPacingSwitch().exchange(enabled); }
 
 const void* MetalRender::ImportedImageForTests(const std::string& key, std::size_t slot) const
 {

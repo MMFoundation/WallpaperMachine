@@ -7795,6 +7795,96 @@ TEST_F(MetalSceneDraw, AFrameThatCannotBeComposedIsNeitherPresentedNorRemembered
     RendererCounters::SetEnabled(false);
 }
 
+TEST_F(MetalSceneDraw, APresentHoldsTheFrameOnlyWhilePacing)
+{
+    // The frame clock's hold reaches the present as a minimum time the frame
+    // on screen stays, and only while pacing is on; a zero hold is a plain
+    // present. A layer no window owns shows nothing, so when a held frame was
+    // shown cannot be seen here, only that the present asked for the hold, that
+    // held presents neither stall the next drawable nor lose their reports.
+    const auto  project = WriteFixture(root_ / "project");
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
+
+    const bool pacing = MetalRender::SetPresentPacingForTests(true);
+    RendererCounters counters;
+    RendererCounters::SetEnabled(true);
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(640, 360);
+
+        MetalRender         render;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = 640,
+            .height               = 360,
+            .render_width         = 640,
+            .render_height        = 360,
+            .display_scale_factor = 1.0,
+        };
+        ASSERT_TRUE(render.init(info)) << render.lastError();
+        render.SetCounters(&counters);
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+
+        const auto present = [&](int frames) {
+            for (int frame = 0; frame < frames; ++frame) {
+                render.InvalidatePresentedFrame();
+                bool presented = false;
+                ASSERT_TRUE(render.drawFrame(*loaded.scene, &presented)) << render.lastError();
+                ASSERT_TRUE(presented);
+            }
+        };
+
+        present(2);
+        EXPECT_EQ(render.HeldPresentsForTests(), 0u) << "no hold was set";
+        EXPECT_EQ(render.LastPresentHoldForTests(), std::chrono::nanoseconds::zero());
+
+        // 60 fps on a 120 Hz display.
+        const auto hold = std::chrono::nanoseconds(14'583'335);
+        render.SetPresentHold(hold);
+        const auto started = std::chrono::steady_clock::now();
+        present(8);
+        const auto took = std::chrono::steady_clock::now() - started;
+        EXPECT_EQ(render.HeldPresentsForTests(), 8u);
+        EXPECT_EQ(render.LastPresentHoldForTests(), hold);
+        // Eight held frames on a layer that shows none: a drawable a held frame
+        // kept would make each later frame wait a second for the next.
+        EXPECT_LT(took, std::chrono::seconds(2)) << "held presents stalled the drawable queue";
+
+        MetalRender::SetPresentPacingForTests(false);
+        present(2);
+        EXPECT_EQ(render.HeldPresentsForTests(), 8u) << "pacing off still held a present";
+        EXPECT_EQ(render.LastPresentHoldForTests(), std::chrono::nanoseconds::zero());
+        MetalRender::SetPresentPacingForTests(true);
+
+        render.SetPresentHold(std::chrono::nanoseconds::zero());
+        present(1);
+        EXPECT_EQ(render.HeldPresentsForTests(), 8u) << "a zero hold is a plain present";
+
+        // Every present still reports, held or not: here, as dropped.
+        const auto reports = [&]() {
+            return counters.Get(OWE_RC_PRESENTED_FRAMES) + counters.Get(OWE_RC_PRESENTS_DROPPED);
+        };
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (reports() < 13u && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        EXPECT_EQ(reports(), 13u);
+        EXPECT_EQ(counters.Get(OWE_RC_PRESENT_REQUESTS), 13u);
+
+        render.destroy();
+    }
+    RendererCounters::SetEnabled(false);
+    MetalRender::SetPresentPacingForTests(pacing);
+}
+
 TEST_F(MetalSceneDraw, EveryPresentedDrawableReportsWhetherItWasShownOnlyWhileCounting)
 {
     // Each present asks its drawable to report back: shown, or dropped before

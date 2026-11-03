@@ -156,6 +156,11 @@ public:
     /// Applies an event-delivered surface color/headroom snapshot on the render thread.
     void RefreshDisplayOutput(Scene& scene);
     void SetDisplayId(uint32_t identity);
+    /// How long the frame on screen stays before the next present replaces it
+    /// (`FrameTimer::PresentHold`), for the presents that follow. Zero, the
+    /// default, presents at the next refresh. A hold changes when a frame is
+    /// shown, never what it shows.
+    void SetPresentHold(std::chrono::nanoseconds hold);
     /// Applies a new internal rasterization scale, and the resolution the scene
     /// is rasterized at, to an already compiled graph. Render targets and the
     /// pipelines attached to them are rebuilt, and only when one of the two
@@ -270,6 +275,14 @@ public:
     /// Test-only: no real composition failure can be produced without breaking
     /// the GPU, and what matters is what the frame does after one.
     void RefuseNextCompositionForTests();
+    /// The hold the last present asked for, zero for a plain present, and the
+    /// presents that asked for one. Test-only: a layer no window owns is never
+    /// shown, so when a held frame would have been shown cannot be observed.
+    [[nodiscard]] std::chrono::nanoseconds LastPresentHoldForTests() const;
+    [[nodiscard]] uint64_t HeldPresentsForTests() const;
+    /// Turns present pacing (`WALLPAPER_MACHINE_VSYNC_PACING`) on or off for the
+    /// whole process; returns the previous state.
+    static bool SetPresentPacingForTests(bool enabled);
 
     /// Encoders the pass loop of the last drawn frame opened: render passes,
     /// how many of them rendered into the scene's output image, and blits.

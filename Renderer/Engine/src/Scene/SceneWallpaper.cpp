@@ -1082,6 +1082,8 @@ private:
         // Visibility is final only after the runtime tick, so a skipped rebuild is made up now.
         if (scene.paritileSys != nullptr) scene.paritileSys->RebuildVisibleMeshes();
 
+        // Follows the ceiling and the display, which change between frames on other threads.
+        m_render->SetPresentHold(frame_timer.PresentHold());
         bool presented = false;
         if (! m_render->drawFrame(scene, &presented)) {
             reportFailure(SceneFailureStage::Frame, m_render->lastError());

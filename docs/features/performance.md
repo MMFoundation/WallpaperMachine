@@ -440,6 +440,9 @@ scene's cost follows its frame rate, and so does WindowServer's compositing shar
 rate is one choice away: the per-display slider still goes up to the display's
 refresh. Web wallpapers draw near 60 fps below that refresh and at the full
 refresh once the rate reaches it ([frame rate](web-wallpapers.md#runtime-shape)).
+A scene at 60 on a 120 Hz display shows each frame two refreshes after the last
+rather than one or three when its frames are ready near a refresh boundary
+([scene rendering](scene-rendering.md#update-only-when-the-scene-changes)).
 
 The wallpaper config stores the rate as `frame_rate` in each `monitors` entry, and
 a mirror display stores it as `frame_rate` in its `[[monitor_settings]]` table. The

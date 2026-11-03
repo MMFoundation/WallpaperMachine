@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/RendererCounters.hpp"
+#include "PresentPacing.hpp"
 #include "ThreadTimer.hpp"
 #include <deque>
 #include <limits>
@@ -32,6 +33,14 @@ public:
     /// ahead of it. Zero (the default) when the display is unknown or reports no
     /// fixed rate, which leaves the cadence to the required FPS alone.
     void SetDisplayRefreshPeriod(std::chrono::nanoseconds);
+
+    /// How long a presented frame should stay on screen before the next one replaces it, so the
+    /// ceiling's frames reach the display an even number of refreshes apart
+    /// (`PresentHoldFor` of the ceiling's period and the display's). Zero when the ceiling
+    /// spans less than two refreshes or the display's rate is unknown: the frame is then shown
+    /// at the next refresh, as a plain present does. Follows the ceiling, never the content
+    /// pacing: a frame an event asks for may come one ceiling period after the last.
+    [[nodiscard]] std::chrono::nanoseconds PresentHold() const;
 
     /// How often the content itself can change.
     ///
@@ -124,6 +133,8 @@ private:
     std::mutex                             m_period_mutex;
     /// The period of the required FPS, to the nanosecond, never below the refresh period.
     std::atomic<std::chrono::nanoseconds>  m_ideatime;
+    /// `PresentHoldFor(m_ideatime, m_refresh_period)`, written with the ideal period.
+    std::atomic<std::chrono::nanoseconds>  m_present_hold { std::chrono::nanoseconds::zero() };
     std::atomic<std::chrono::microseconds> m_elapsed_frametime;
     std::atomic<std::chrono::nanoseconds>  m_tick_interval;
     /// Zero means unknown, which keeps the fixed cadence.

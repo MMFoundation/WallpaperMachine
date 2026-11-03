@@ -80,12 +80,15 @@ void FrameTimer::SetDisplayRefreshPeriod(nanoseconds period) {
     ApplyIdealPeriod();
 }
 
+nanoseconds FrameTimer::PresentHold() const { return m_present_hold.load(); }
+
 void FrameTimer::ApplyIdealPeriod() {
     // The rate and the display arrive on different threads; the period follows the later of both.
     std::lock_guard lock(m_period_mutex);
     // Never shorter than the display's own period: a ceiling of 60 on a 59.94 Hz display (whose
     // rate is rounded to 60 everywhere a whole number is wanted) would otherwise outrun it.
     m_ideatime = std::max(PeriodOf(m_req_fps.load()), m_refresh_period.load());
+    m_present_hold = PresentHoldFor(m_ideatime.load(), m_refresh_period.load());
     // The ceiling is a hard floor on the gap between frames, separate from the
     // cadence: content pacing lengthens the cadence past the ceiling, and a
     // one-shot request has no cadence at all, so both would otherwise be

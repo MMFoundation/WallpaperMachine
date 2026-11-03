@@ -156,6 +156,24 @@ comparison across a clock change reports throughput separately from power.
   substituted for the suppression observation. The admission-contract tests cover
   the inclusive boundary, one nanosecond beyond it, and actual observation-time
   anchoring; other real-thread integration checks remain.
+- A ceiling that spans two or more refreshes of its display presents each frame
+  with `presentDrawable:afterMinimumDuration:` and the frame clock's hold (whole
+  refreshes less a quarter refresh, 14.58 ms at 60 fps on 120 Hz), so frames
+  reach the display an even number of refreshes apart
+  ([scene rendering](../features/scene-rendering.md#update-only-when-the-scene-changes));
+  `WALLPAPER_MACHINE_VSYNC_PACING=0` restores plain presents. It moves no frame
+  of the cadence and changes no pixel, only when a frame is shown, and was
+  power-neutral in the probe below ([WindowServer's share](#windowservers-share)).
+  Headless, only the requested hold is observable (`PresentPacingTest.*` pins
+  the hold and a model of fixed-rate and ProMotion panels honouring it,
+  `MetalSceneDraw.APresentHoldsTheFrameOnlyWhilePacing` the present that asks
+  for it); a layer no window owns is never shown. Whether the display honours it
+  is the present gaps of a diagnostics window on the desktop: at 60 fps on a
+  120 Hz panel, `present_gaps_1_vsync` should fall to about zero and
+  `present_gaps_3plus_vsync` to the frames that were really late, against
+  `WALLPAPER_MACHINE_VSYNC_PACING=0` in the same binary. On ProMotion a 12.5 ms
+  gap is counted as two refreshes (the buckets split at 1.5 and 2.5), so there
+  the three-plus bucket, not the one-refresh one, shows the uneven gaps.
 
 `timer_delivery_benchmark`, run by `scripts/check_renderer.py`, reports a separate
 single-consumer measurement: requested 60 Hz ceiling, 18 ms of steady-clock busy
@@ -484,6 +502,7 @@ decode-correctness defect.
 | `WALLPAPER_MACHINE_DESKTOP_POSTER_REUSE=0` | A wallpaper that comes back with the same look gets its settled desktop poster back: no readback, encode or new poster file ([desktop picture](../features/desktop-picture.md#when-a-poster-is-taken)) | Every return is captured again at once, after 3 s and after 15 s; the wallpaper's own frames are identical either way, only the still Mission Control shows differs |
 | `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` | Native Metal lets targets never alive together share images, and traded copies share a small set | Every target keeps an image of its own; the picture is byte-identical either way, the target memory is not |
 | `WALLPAPER_MACHINE_PRESENT_FEEDBACK=0` | While counting is on, every present asks its drawable to report when it was shown | No report is asked for and the present-feedback counters stay 0: what the reports themselves cost in a diagnostics or telemetry window. Counting off, nothing differs |
+| `WALLPAPER_MACHINE_VSYNC_PACING=0` | Native Metal holds each presented frame for the frame clock's hold when the ceiling spans two or more refreshes of the display, so a 60 fps wallpaper on a 120 Hz panel shows every frame two refreshes after the last | Every frame is presented at the next refresh, which shows frames ready near a refresh boundary one and three refreshes apart; the pixels are the same either way. Compare the present gaps of a diagnostics window ([Frame delivery](#frame-delivery)) |
 | `WALLPAPER_MACHINE_OVERWRITE_LOAD_ELISION=0` | Native Metal opens a render pass whose draw provably writes every texel of its target (an effect pass over its buffer) with a clear, and skips a traded reader's opening copy under the same proof | Every such render pass loads its target and every traded reader opens with its copy; the picture is byte-identical either way. `WE_TEST_METAL_PROJECTS` prints render passes loading their target and opening with a copy per frame |
 | `WALLPAPER_MACHINE_COPY_TRADES=0` | Native Metal leaves out a copy whose source is afterwards only read until it is written afresh (a motion blur's history copy, the bloom or colour-option result copied back into the scene's image) and trades the two images' names after the source's last reader | Every such copy is a blit again; byte-identical. `WE_TEST_METAL_PROJECTS` prints blits, MB copied and copies traded per frame |
 | `WALLPAPER_MACHINE_ATTACHMENT_STORE_ELISION=0` | Native Metal stores a depth or multisampled colour attachment only while a later render pass of the frame (or, for samples, the next frame) reads it | Every render pass stores them; byte-identical. Scenes without 3D models or MSAA have none |
