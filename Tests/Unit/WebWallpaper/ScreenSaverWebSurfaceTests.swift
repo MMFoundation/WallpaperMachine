@@ -416,9 +416,6 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
     XCTAssertEqual(main as? String, "object")
   }
 
-  /// Wallpaper Engine calls an audio listener on its cadence through silence too, and some pages
-  /// start their idle animation only once it has been called. A playing page is fed silence on the
-  /// desktop's quiet-stretch spacing, and again once it is resumed after a pause.
   /// Wallpaper Engine lays a page out in the display's device pixels, and the desktop does too
   /// (`WebWallpaperDeviceLayoutTests`); the lock screen draws at the display's scale and lays the
   /// page out the same way, so the wallpaper keeps its layout when the Mac locks.
@@ -437,6 +434,9 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
     XCTAssertEqual(layout["screen"] as? Double, (layout["nativeScreen"] as? Double).map { $0 * 2 })
   }
 
+  /// Wallpaper Engine calls an audio listener on its cadence through silence too, and some pages
+  /// start their idle animation only once it has been called. A playing page is fed silence on the
+  /// desktop's quiet-stretch spacing, and again once it is resumed after a pause.
   func testASubscribedPageHearsSilenceWhilePlayingAndAgainAfterAResume() async throws {
     let surface = try make()
     try await start(surface)
