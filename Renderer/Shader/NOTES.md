@@ -44,7 +44,8 @@ Step 5 (part D of the spec) is three modules and a pipeline. `backend` reads one
 naga's GLSL front end, builds the Metal binding map, validates, and runs the Metal writer
 (`StageCompiler`, `NagaBackend`, `compile_glsl`, `translate_module`). `reflect` describes the module
 that was translated (`StageReflector`, `NagaReflector`, `reflect_module`, `reflect_untranslated`);
-`reflect::coverage` proves the two coverage facts of note 140.
+`reflect::coverage` proves the two coverage facts of note 140 and `reflect::reads` the read uniforms
+of note 141.
 `nagair` holds what both need to know about the globals of a naga module. `pipeline` drives a request
 through `prepare`, `legalize`, the compiler and the reflector, merges the stage reflections, and
 computes the key (`Pipeline`, `compile`, `CompiledProgram`). The compiler and the reflector are the two
@@ -1083,6 +1084,27 @@ complete coverage of all remaining builtin names, constructor syntax or builtin 
     foliagesway in `MODE` 0 are proven; the last three in `MODE` 1 move the corners and are
     not. Revision 9 appends cache-key, converted-text and MSL rows with the MSL and
     converted digests unchanged; the parity goldens gained the two keys and nothing else.
+141. **Read uniforms; pipeline revision 10.** The reflection document gains
+    `"read_uniforms":[…]`, the names of the uniform block members anything the program
+    produces can depend on, ascending, written only when every stage answered so a reader
+    takes its absence as "every declared member is read" (`src/reflect/reads.rs`). A
+    declaration, and even a name in the translated text, is not a read: Wallpaper Engine's
+    `genericimage4.vert` forms `g_EyePosition - worldPos` in every variant and uses it only
+    when lit or fogged. The engine leaves a layer's world transform and the active camera out
+    of a reuse sample when no read uniform derives from them. The analysis is a backward
+    liveness over the module that is translated: the entry point's returned value and every
+    `If`, `Switch` and `break_if` condition of a reached function are used; a used expression
+    uses its operands; a used load of a variable (local, private, or a parameter) uses every
+    store into it in any reached function, its initializer and the stored element's indices;
+    a used `CallResult` uses the callee's returned values; a used parameter uses the argument
+    at every call; a pointer argument joins the caller's variable and the parameter both
+    ways; a member is read when a used `AccessIndex` selects it from a `Uniform` global, every
+    member when the global is used otherwise. It iterates to a fixed point and only ever
+    over-states the reads. Atomics, image stores, workgroup loads, subgroup, ray-query and
+    cooperative forms, or a store through a pointer not rooted in a variable or parameter,
+    leave the key out. Every shipped program of the sweep answers (161, 243 declared members
+    unread). Revision 10 appends cache-key, converted-text and MSL rows with the MSL and
+    converted digests unchanged; the parity goldens gained the key and nothing else.
 
 The shipped sweeps now include `volumetricsfront` (167 programs legalized and compiled, 1 failing
 as before: `shadowcasterfoliage4`'s undeclared `g_Texture1Texel`); every `SHADOW`, `POINTLIGHT`

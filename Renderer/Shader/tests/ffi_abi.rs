@@ -326,7 +326,7 @@ fn the_response_documents_are_compact_and_keyed_in_the_documented_order() {
         ["combos", "aliases", "default_uniforms", "default_textures", "active_texture_slots"]
     );
     // The textured quad draws its card unmoved through the matrix and never discards, so both
-    // coverage facts follow the four documented keys.
+    // coverage facts follow the four documented keys, and what it reads is known.
     #[cfg(not(feature = "observer-uniform-layout"))]
     assert_eq!(
         keys(&c.reflection()),
@@ -336,7 +336,8 @@ fn the_response_documents_are_compact_and_keyed_in_the_documented_order() {
             "vertex_inputs",
             "active_texture_slots",
             "vertex_position",
-            "fragment_always_writes"
+            "fragment_always_writes",
+            "read_uniforms"
         ]
     );
     #[cfg(feature = "observer-uniform-layout")]
@@ -349,6 +350,7 @@ fn the_response_documents_are_compact_and_keyed_in_the_documented_order() {
             "active_texture_slots",
             "vertex_position",
             "fragment_always_writes",
+            "read_uniforms",
             "observer_uniform_layout"
         ]
     );

@@ -201,7 +201,7 @@ fn each_fact_belongs_to_its_own_stage_and_reaches_the_document() {
     let p = program(&vertex_with("  gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);"), PLAIN_FRAGMENT);
     let text = p.reflection.to_json();
     assert!(
-        text.ends_with(r#","vertex_position":{"input":"a_Position","matrix":"g_ModelViewProjectionMatrix"},"fragment_always_writes":true}"#),
+        text.contains(r#","vertex_position":{"input":"a_Position","matrix":"g_ModelViewProjectionMatrix"},"fragment_always_writes":true,"#),
         "{text}"
     );
     let itself = program(&vertex_with("  gl_Position = vec4(a_Position, 1.0);"), PLAIN_FRAGMENT).reflection.to_json();

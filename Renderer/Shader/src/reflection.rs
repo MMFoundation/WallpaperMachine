@@ -291,6 +291,11 @@ pub struct Reflection {
     /// discards and no sample mask is written (`"fragment_always_writes":true`, written only
     /// when proven).
     pub fragment_always_writes: bool,
+    /// The uniform block members the stage's output can depend on (`"read_uniforms"`, written
+    /// only when the analysis answered for every stage): a member a stage declares and even
+    /// names, but only in values nothing it produces uses, is left out. `None` when unknown,
+    /// which a host reads as "every declared member is read".
+    pub read_uniforms: Option<BTreeSet<String>>,
 }
 
 /// A problem found while building or merging reflection.
@@ -452,6 +457,15 @@ impl Reflection {
         // Each fact belongs to one stage, so the stage that reflected it decides.
         let vertex_position = parts.iter().find_map(|p| p.vertex_position.clone());
         let fragment_always_writes = parts.iter().any(|p| p.fragment_always_writes);
+        // What the program reads is what any stage reads, known only when every stage is known.
+        let read_uniforms = if parts.is_empty() {
+            None
+        } else {
+            parts.iter().try_fold(BTreeSet::new(), |mut all, p| {
+                all.extend(p.read_uniforms.as_ref()?.iter().cloned());
+                Some(all)
+            })
+        };
 
         for part in parts {
             for d in &part.descriptor_bindings {
@@ -491,13 +505,15 @@ impl Reflection {
             active_texture_slots: slots,
             vertex_position,
             fragment_always_writes,
+            read_uniforms,
         };
         merged.check_limits()?;
         Ok(merged)
     }
 
     /// The reflection document, keys in the order of spec 2.6.3. The two coverage facts follow,
-    /// each only when it holds, so a document without them reads as "not proven".
+    /// each only when it holds, so a document without them reads as "not proven", then the read
+    /// uniforms when they are known.
     pub fn to_json(&self) -> String {
         let mut fields = vec![
             ("descriptor_bindings", json::array(self.descriptor_bindings.iter().map(DescriptorBinding::to_json))),
@@ -510,6 +526,9 @@ impl Reflection {
         }
         if self.fragment_always_writes {
             fields.push(("fragment_always_writes", json::boolean(true)));
+        }
+        if let Some(read) = &self.read_uniforms {
+            fields.push(("read_uniforms", json::array(read.iter().map(|name| json::string(name)))));
         }
         json::object(&fields)
     }
