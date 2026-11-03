@@ -505,6 +505,16 @@ values may occasionally exceed 1.0 and tells pages to clamp themselves, so this 
 documented deviation. How the spectrum is computed is in
 [audio-response.md](audio-response.md#what-wallpapers-receive).
 
+**A listener with Audio response off.** Wallpaper Engine calls a page's audio listener on its
+cadence whether or not anything plays, and pages are written for that: a visualiser that turns
+its lights or its idle animation on only once its listener has been called stayed dark here,
+because with the setting off nothing reached the listener at all. A registered listener that
+no audio reaches is therefore called with silence, 128 zeros, once a second while the page
+plays (not while it is paused or suspended), the spacing below; nothing is captured for it, no
+tap opens, and **Audio and media status** does not count it as delivery. With the setting on,
+the audio pump feeds the page, silence included, and this stays off. The lock screen feeds a
+subscribed page the same way ([lock screen](lock-screen.md)).
+
 **Silence.** When the sound stops, the analyser publishes one all-zero spectrum and
 then no more, so a visualizer that smooths in its callback would freeze part-way
 through its decay. The pump therefore repeats an all-zero spectrum
@@ -654,7 +664,8 @@ hand-moved clock, the inspection switch on running, new and preview pages,
 `WebWallpaperDeviceLayoutTests` (a page in a window is laid out in its display's device pixels
 from its first line with `screen` in device pixels, a scale change relays out the running
 document without a reload and 1 restores WebKit's own `screen`, a reload starts at the
-committed scale), `WebWallpaperIdleCallbackTests` (a page that asks for an idle callback before its first
+committed scale), the silence a listener with Audio response off hears
+(`WebWallpaperAuthorAPITests`), `WebWallpaperIdleCallbackTests` (a page that asks for an idle callback before its first
 frame gets to its frame, a self-repeating callback runs once per 50 ms period, order,
 cancellation, a throwing callback and the timeout, a native function kept, and every frame
 of every surface given the script), `WebWallpaperErrorStackTests` (a logger built at start-up

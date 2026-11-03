@@ -220,6 +220,11 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     private var audioResponseEnabled = false
     private var mediaIntegrationEnabled = false
     private var audioDemand = false
+    /// Feeds silence to a listener that no audio reaches; see `refreshSilence()`.
+    private var silenceTask: Task<Void, Never>?
+    /// How often a listener that no audio reaches is called with silence: the
+    /// spacing the audio pump keeps a quiet stretch fed at.
+    static let silenceInterval: Duration = .seconds(1)
     private var mediaDemand = MediaDemand()
     private var pendingRandomFileRequests: Set<String> = []
     /// Answers and directory deltas that arrived while the page was suspended.
@@ -1001,6 +1006,36 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         if media != mediaDemand {
             mediaDemand = media
             onMediaDemandChanged?(media)
+        }
+        refreshSilence()
+    }
+
+    /// Wallpaper Engine calls a page's audio listener on its fixed cadence whether
+    /// or not anything is playing, and pages are written for that: a visualiser that
+    /// starts its idle animation, or turns its lights on, only once the listener has
+    /// been called stayed dark here while the user had not turned Audio response on,
+    /// because nothing reached the listener at all. A registered listener that no
+    /// audio reaches (Audio response is off for this wallpaper) is therefore called
+    /// with silence, 128 zeros, once a second while the page plays: the spacing the
+    /// audio pump keeps a quiet stretch fed at. Nothing is captured for it, and the
+    /// inspector's audio status does not count it as delivery. With Audio response on,
+    /// the pump feeds the page, silence included, and this stays off.
+    private func refreshSilence() {
+        let wanted = isLoaded && !hostSuspended && !committed.userPaused
+            && audioListenerRegistered && !audioResponseEnabled
+        guard wanted != (silenceTask != nil) else { return }
+        silenceTask?.cancel()
+        silenceTask = nil
+        guard wanted else { return }
+        let generation = documentGeneration
+        silenceTask = Task { @MainActor [weak self, wait] in
+            while !Task.isCancelled {
+                guard let page = self, page.documentGeneration == generation else { return }
+                _ = try? await page.webView.callAsyncJavaScript(
+                    "return window.__mweWallpaperHost.deliverAudio(bins)",
+                    arguments: ["bins": [Double](repeating: 0, count: 128)], in: nil, contentWorld: .page)
+                do { try await wait(WebWallpaperPage.silenceInterval) } catch { return }
+            }
         }
     }
 

@@ -1483,7 +1483,8 @@ with no desktop window. It covers the page contract (`WebWallpaperPageTests`,
 `WebWallpaperLocalRequestTests`, which also covers the file-request fixes in iframe,
 `srcdoc` and script-created frames), property payloads and file staging
 (`WebWallpaperPropertyPayloadTests`), the author API (`WebWallpaperAuthorAPITests`:
-audio, media, random-file and directory listeners), audio delivery, output and
+audio, the silence a listener with Audio response off hears, media, random-file and
+directory listeners), audio delivery, output and
 single-owner rules (`WebWallpaperAudioMediaTests`, `WebWallpaperAudioOutputTests`,
 `MirrorAudioOwnershipTests`), host lifecycle, crash budget and reload
 recovery (`WebWallpaperHostLifecycleTests`, `WebWallpaperRecoveryTests`),
