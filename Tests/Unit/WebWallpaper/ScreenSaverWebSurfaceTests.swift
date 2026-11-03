@@ -61,10 +61,11 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
   }
 
   private func make(
-    entry: String = "index.html", properties: String = "{}", fps: UInt32 = 30, paused: Bool = false
+    entry: String = "index.html", properties: String = "{}", fps: UInt32 = 30, paused: Bool = false,
+    scale: CGFloat = 1
   ) throws -> ScreenSaverWebSurface {
     let surface = try ScreenSaverWebSurface(projectURL: project, entryFile: entry,
-      readAccessURL: rootURL, size: CGSize(width: 128, height: 96), scale: 1,
+      readAccessURL: rootURL, size: CGSize(width: 128, height: 96), scale: scale,
       propertiesJSON: properties, fps: fps, paused: paused)
     surfaces.append(surface)
     let layer = CALayer()
@@ -418,6 +419,24 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
   /// Wallpaper Engine calls an audio listener on its cadence through silence too, and some pages
   /// start their idle animation only once it has been called. A playing page is fed silence on the
   /// desktop's quiet-stretch spacing, and again once it is resumed after a pause.
+  /// Wallpaper Engine lays a page out in the display's device pixels, and the desktop does too
+  /// (`WebWallpaperDeviceLayoutTests`); the lock screen draws at the display's scale and lays the
+  /// page out the same way, so the wallpaper keeps its layout when the Mac locks.
+  func testAPageIsLaidOutInTheDevicePixelsOfTheScaleItDrawsAt() async throws {
+    let surface = try make(scale: 2)
+    try await start(surface)
+    let value = try await surface.webView.callAsyncJavaScript(
+      """
+      return { width: innerWidth, height: innerHeight, ratio: devicePixelRatio, screen: screen.width,
+               nativeScreen: Object.getOwnPropertyDescriptor(Screen.prototype, "width").get.call(screen) };
+      """, arguments: [:], in: nil, contentWorld: .page)
+    let layout = try XCTUnwrap(value as? [String: Any])
+    XCTAssertEqual(layout["width"] as? Double, 256)
+    XCTAssertEqual(layout["height"] as? Double, 192)
+    XCTAssertEqual(layout["ratio"] as? Double, 1)
+    XCTAssertEqual(layout["screen"] as? Double, (layout["nativeScreen"] as? Double).map { $0 * 2 })
+  }
+
   func testASubscribedPageHearsSilenceWhilePlayingAndAgainAfterAResume() async throws {
     let surface = try make()
     try await start(surface)

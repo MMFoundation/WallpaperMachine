@@ -117,6 +117,34 @@ final class WebWallpaperDeviceLayoutTests: XCTestCase {
     XCTAssertEqual(resizes, 0, "a document that starts at the scale is not resized")
   }
 
+  /// Forwarded pointer events arrive in the window's points; the page reads them in its own
+  /// device-pixel coordinates.
+  func testAForwardedClickLandsWhereThePointerIsInTheZoomedPage() async throws {
+    try """
+      <!doctype html><html><body style="margin:0"><script>
+      window.__clicks = [];
+      addEventListener("click", event => window.__clicks.push([event.clientX, event.clientY]));
+      </script></body></html>
+      """.write(to: project.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+    let page = WebWallpaperPage(projectURL: project, entryFile: "index.html", persistentData: false)
+    page.webView.setFrameSize(NSSize(width: 320, height: 200))
+    defer { page.stop() }
+    page.applyBackingScale(2)
+    page.load()
+    try await waitUntilLoaded(page)
+    // AppKit points, origin bottom-left: (100, 150) is 50 points from the top.
+    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+      page.deliverMouse(
+        NSEvent.mouseEvent(
+          with: type, location: NSPoint(x: 100, y: 150), modifierFlags: [],
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil, eventNumber: 1,
+          clickCount: 1, pressure: 0)!)
+    }
+    try await waitUntil(page, "window.__clicks.length === 1")
+    let click = try await page.webView.evaluateJavaScript("window.__clicks[0]") as? [Double]
+    XCTAssertEqual(click, [200, 100], "one point is two CSS pixels at a backing scale of 2")
+  }
+
   func testTheProtocolZoomsOutByTheBackingScaleAndIgnoresNonsense() {
     XCTAssertEqual(WebWallpaperProtocol.pageZoom(forBackingScale: 2), 0.5)
     XCTAssertEqual(WebWallpaperProtocol.pageZoom(forBackingScale: 3), 1.0 / 3)
