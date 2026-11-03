@@ -41,8 +41,11 @@ public:
     /// predecessor to measure a gap from, so a gap never spans a time nothing
     /// was counted. `refresh_period` is in seconds; 0 when the display's is not
     /// known, and gaps are then not counted at all rather than guessed.
-    void Restart(RendererCounters* counters, double refresh_period) noexcept {
+    /// Returns the new sequence's number, which a report names (`Record`) so that a
+    /// drawable presented under an earlier sequence never counts in this one.
+    uint64_t Restart(RendererCounters* counters, double refresh_period) noexcept {
         std::scoped_lock lock(m_mutex);
+        ++m_sequence;
         m_counters        = counters;
         m_refresh_period  = refresh_period > 0.0 && std::isfinite(refresh_period) ? refresh_period : 0.0;
         m_previous_shown  = 0.0;
@@ -50,6 +53,13 @@ public:
             m_counters->Set(OWE_RC_VSYNC_PERIOD_MICROS,
                             static_cast<uint64_t>(std::llround(m_refresh_period * 1e6)));
         }
+        return m_sequence;
+    }
+
+    /// The current sequence's number, for a drawable about to be presented.
+    uint64_t Sequence() noexcept {
+        std::scoped_lock lock(m_mutex);
+        return m_sequence;
     }
 
     /// No report counts from here on. Called before the counters it was given
@@ -60,9 +70,13 @@ public:
     }
 
     /// One drawable's report: the host time it was shown at, 0 when it never was.
-    void Record(double presented_time) noexcept {
+    /// `sequence` is the number the drawable was presented under; a report from an
+    /// earlier sequence (counters detached and attached again, another display) is
+    /// left out. 0 reports into the current sequence.
+    void Record(double presented_time, uint64_t sequence = 0) noexcept {
         std::scoped_lock lock(m_mutex);
         if (m_counters == nullptr) return;
+        if (sequence != 0 && sequence != m_sequence) return;
         if (! (presented_time > 0.0)) {
             m_counters->Add(OWE_RC_PRESENTS_DROPPED);
             return;
@@ -85,6 +99,7 @@ private:
     RendererCounters* m_counters { nullptr };
     double            m_refresh_period { 0.0 };
     double            m_previous_shown { 0.0 };
+    uint64_t          m_sequence { 0 };
 };
 
 } // namespace wallpaper

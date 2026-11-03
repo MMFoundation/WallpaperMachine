@@ -138,3 +138,21 @@ TEST_F(PresentFeedbackTest, CountingOffRecordsNothing)
     feedback.Record(0.0);
     EXPECT_EQ(counters.Get(OWE_RC_PRESENTED_FRAMES) + counters.Get(OWE_RC_PRESENTS_DROPPED) + Gaps(), 0u);
 }
+
+TEST_F(PresentFeedbackTest, AReportFromAnEarlierSequenceCountsNowhere)
+{
+    const uint64_t first = feedback.Restart(&counters, kRefresh120);
+    feedback.Record(1000.0, first);
+    RendererCounters next;
+    feedback.Detach();
+    const uint64_t second = feedback.Restart(&next, kRefresh120);
+    EXPECT_NE(second, first);
+    // A drawable presented before the counters changed reports late.
+    feedback.Record(1000.0 + 2 * kRefresh120, first);
+    EXPECT_EQ(next.Get(OWE_RC_PRESENTED_FRAMES), 0u);
+    feedback.Record(1001.0, second);
+    feedback.Record(1001.0 + 2 * kRefresh120, second);
+    EXPECT_EQ(next.Get(OWE_RC_PRESENTED_FRAMES), 2u);
+    EXPECT_EQ(next.Get(OWE_RC_PRESENT_GAPS_2_VSYNC), 1u) << "the late report must not open a gap";
+    EXPECT_EQ(counters.Get(OWE_RC_PRESENTED_FRAMES), 1u);
+}

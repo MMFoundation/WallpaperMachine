@@ -8718,8 +8718,9 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 impl.present_feedback_display = impl.display_id;
             }
             std::shared_ptr<PresentFeedback> feedback = impl.present_feedback;
+            const uint64_t                   sequence = feedback->Sequence();
             [drawable addPresentedHandler:^(id<MTLDrawable> shown) {
-              feedback->Record(shown.presentedTime);
+              feedback->Record(shown.presentedTime, sequence);
             }];
         } else {
             impl.present_feedback_armed = false;
