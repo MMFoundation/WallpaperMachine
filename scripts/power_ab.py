@@ -276,12 +276,16 @@ def app_bundle(executable: Path) -> Path | None:
     return executable.parents[2] if executable.parent.name == "MacOS" and len(executable.parents) > 2 else None
 
 
-def preconditions(suspend_vm: bool) -> list[str]:
+def preconditions(suspend_vm: bool, allow_battery: bool = False) -> list[str]:
     """Problems that make a desktop window meaningless; suspends running VMs when asked."""
     problems = []
     source = output(["pmset", "-g", "ps"]) or ""
     if "AC Power" not in source:
-        problems.append("not on AC power")
+        if allow_battery:
+            # Both arms and every baseline then run on the battery; each window records it.
+            print(f"{MARK.warn} on battery power: every window of this run measures on it")
+        else:
+            problems.append("not on AC power (pass --allow-battery to measure on battery)")
     if re.search(r"^\s*lowpowermode\s+1\b", output(["pmset", "-g"]) or "", re.MULTILINE):
         problems.append("Low Power Mode is on")
     therm = output(["pmset", "-g", "therm"]) or ""
@@ -652,6 +656,8 @@ def main(argv=None) -> int:
     password.add_argument("--sudo-password-stdin", action="store_true",
                           help="Read the sudo password for powermetrics from stdin.")
     parser.add_argument("--suspend-vm", action="store_true", help="Suspend a running Parallels VM first.")
+    parser.add_argument("--allow-battery", action="store_true",
+                        help="Measure on battery power instead of refusing; the whole run must stay on it.")
     parser.add_argument("--note", default="", help="Free text added to every window's note.")
     parser.add_argument("--dry-run", action="store_true", help="Print the plan; execute nothing.")
     args = parser.parse_args(argv)
@@ -676,7 +682,7 @@ def main(argv=None) -> int:
         print_plan(run, layout, config)
         return 0
 
-    problems = preconditions(args.suspend_vm)
+    problems = preconditions(args.suspend_vm, args.allow_battery)
     secret = read_password(args.sudo_password_file) if run.powermetrics else None
     if secret is not None:
         checked = subprocess.run(["sudo", "-S", "-p", "", "-v"], input=secret + "\n", text=True,

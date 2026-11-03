@@ -364,6 +364,25 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(reopened, [], "a second copy would start beside the one still running")
 
 
+class PreconditionTests(unittest.TestCase):
+    def outputs(self, power_source):
+        listing = {"pmset -g ps": power_source, "pmset -g": "", "pmset -g therm": ""}
+        return lambda command: listing.get(" ".join(command), "")
+
+    def test_battery_power_is_refused_unless_allowed(self):
+        with mock.patch.object(power_ab, "output", self.outputs("Now drawing from 'Battery Power'")), \
+                mock.patch.object(power_ab.shutil, "which", return_value=None), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(any("AC power" in problem for problem in power_ab.preconditions(False)))
+            self.assertEqual(power_ab.preconditions(False, allow_battery=True), [])
+
+    def test_ac_power_needs_no_permission(self):
+        with mock.patch.object(power_ab, "output", self.outputs("Now drawing from 'AC Power'")), \
+                mock.patch.object(power_ab.shutil, "which", return_value=None), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(power_ab.preconditions(False), [])
+
+
 class QuitTests(unittest.TestCase):
     def test_a_quit_sends_one_sigterm_and_waits_for_the_exit(self):
         signals = []

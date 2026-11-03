@@ -519,7 +519,9 @@ displays and, with a password, runs `powermetrics`. `--dry-run` prints every
 command, path and the generated `config.toml` and executes nothing; read it first.
 
 - **Preconditions**: AC power, Low Power Mode off and no thermal CPU limit, or it
-  refuses before changing anything. A running Parallels VM is refused unless
+  refuses before changing anything. `--allow-battery` measures on battery instead:
+  every window of the run then draws from it (the system figure is the battery's own
+  load), so keep the Mac unplugged throughout and compare only with runs on battery. A running Parallels VM is refused unless
   `--suspend-vm` suspends it; an open Chrome is warned about. Brightness, hidden
   windows and a still pointer remain the operator's.
 - **Isolated homes**: each arm gets its own home and preferences under one temporary
