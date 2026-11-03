@@ -206,6 +206,7 @@ Allocation, optimisation and dumps:
 | `WE_TEST_DUMP_ALPHA=1` | both scene probes | Writes each dumped target's alpha channel separately as grey. Effects that weight by coverage (the bokeh downsample divides by the sum of its taps' alpha) make different color from the same RGB when alpha differs |
 | `WE_TEST_DUMP_POSES=1` | `wpdump` | Dump sampled bone transforms |
 | `WE_TEST_EXPECT_WARM=1` | `text_object_runtime_test` | Assert zero shader compilations on a second run |
+| `WALLPAPER_MACHINE_GPU_LABELS` | Native Metal, in the app and every harness | `1`: names every command buffer and encoder after what it runs, for [GPU time per pass](#gpu-time-per-pass); `split` as well gives each pass a render pass of its own. Read once; unset or `0`, no label is built |
 
 Synthetic input, media and audio (none reads the desktop, a media player or an
 audio device):
@@ -293,6 +294,51 @@ each parse on a fresh thread with fresh VFS mounts, the way a wallpaper switch
 builds a new `SceneWallpaper`. It catches per-process state that survives a
 scene teardown and stalls the next load; a stall is reported as a probe timeout.
 It covers scene parsing and script compilation only, not presentation.
+
+### GPU time per pass
+
+`WALLPAPER_MACHINE_GPU_LABELS=1` makes Native Metal name each frame's command buffer
+(`scene frame <scene image WxH> on <surface WxH>`) and every render and blit encoder the
+renderer makes in it (the video conversion and the blurred backdrop always carry fixed names;
+MetalFX encodes its own, unnamed), so Instruments' Metal System Trace shows the GPU time of
+each pass. A pass
+reads `<shader or step> -> <target> <WxH> <format>[ x<samples>] [<layer name> #<id>]
+{load|clear|dontcare|opening copy}`: an effect pass names the layer whose chain it is in, a
+copy `copy <source> -> <target>`, and the composition `composition <scene image> -> <surface>`.
+Draws that share one render pass (consecutive draws into one target) show as
+`[<n> passes] <first> + <shader> [<layer>] x<count>, ...`, cut at 250 characters; with
+`WALLPAPER_MACHINE_GPU_LABELS=split` each pass gets a render pass of its own instead, so each
+is timed apart (the picture is the same; the total rises by the loads and stores the split
+adds). Instruments records no label that holds a character outside ASCII, so each run of
+such characters in a layer name becomes `?`. Unset (the default), nothing is named and no
+label string is built.
+
+A recording of the local-project run at the user's settings (any `WE_TEST_*` variable from
+the tables above can be added the same way):
+
+```sh
+xcrun xctrace record --template 'Metal System Trace' --output artifacts/<task>/<id>.trace \
+  --env WALLPAPER_MACHINE_GPU_LABELS=1 \
+  --env WE_TEST_METAL_PROJECTS="$HOME/Library/Application Support/WallpaperMachine/Library/<id>/project.json" \
+  --env WE_TEST_ASSETS="$HOME/Library/Application Support/WallpaperMachine/SceneAssets" \
+  --env WE_TEST_METAL_SURFACE=3840x2160 --env WE_TEST_METAL_SCALE_FACTOR=2 \
+  --env WE_TEST_METAL_RESOLUTION=display --env WE_TEST_METAL_RENDER_SCALE=0.75 \
+  --env WE_TEST_METAL_FRAMES=240 --env WE_TEST_METAL_WARMUP_TICKS=40 --env WE_TEST_RANDOM_SEED=1 \
+  --launch -- artifacts/renderer/bin/tests/metal_scene_draw_smoke \
+  --gtest_filter='*LocalProjectsNamedByTheEnvironment*'
+xcrun xctrace export --input artifacts/<task>/<id>.trace \
+  --xpath '/trace-toc/run[@number="1"]/data/table[@schema="metal-gpu-intervals"]' > intervals.xml
+```
+
+Each row of `metal-gpu-intervals` is one encoder's work on one GPU channel (`Vertex`,
+`Fragment`, `Compute`; blits run on `Compute`) with its start, duration, command buffer id
+and `event-label` (`<command buffer label>:<encoder label>  (<process>) <id>`); the export
+writes repeated values once and refers back to them by `ref`. The draws run back to back, so
+a frame's command buffer is about as long as its GPU work. Render passes of one frame overlap
+on the GPU, so their durations add up to more than the frame: share each instant among the
+intervals running then to attribute a frame's time. A scene with an intro (a layer whose
+animation plays once) needs enough frames to be past it. Keep traces under `artifacts/`;
+they hold the scene's layer names.
 
 ### Metal compile across processes
 

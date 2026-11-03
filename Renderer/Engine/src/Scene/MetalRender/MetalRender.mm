@@ -1504,6 +1504,129 @@ bool HoldsOnlyFiniteValues(MTLPixelFormat format)
     }
 }
 
+/// GPU labels (`WALLPAPER_MACHINE_GPU_LABELS`): off (unset or `0`), on (any other value), or
+/// `split`, which also gives every pass a render pass of its own.
+enum class GpuLabelMode : uint8_t
+{
+    Off,
+    On,
+    Split,
+};
+
+std::atomic<GpuLabelMode>& GpuLabelSwitch()
+{
+    static std::atomic<GpuLabelMode> mode { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_GPU_LABELS");
+        if (value == nullptr || value[0] == '\0' || std::string_view(value) == "0") return GpuLabelMode::Off;
+        return std::string_view(value) == "split" ? GpuLabelMode::Split : GpuLabelMode::On;
+    }() };
+    return mode;
+}
+
+/// Whether the frame's command buffer and every encoder in it are named after the passes they
+/// run, so Instruments' Metal System Trace attributes GPU time to a pass, its target and the
+/// layer it draws. A diagnostic, off by default and read once: off, no label is built or set.
+bool GpuLabelsEnabled() { return GpuLabelSwitch().load(std::memory_order_relaxed) != GpuLabelMode::Off; }
+
+/// With `split`, passes that would share a render pass each get their own, so the trace times
+/// every draw apart; each then loads and stores its target, which the total includes. The
+/// pictures are the same either way.
+bool GpuLabelsSplitPasses()
+{
+    return GpuLabelSwitch().load(std::memory_order_relaxed) == GpuLabelMode::Split;
+}
+
+/// A short name of a render target format, for the GPU labels.
+std::string PixelFormatLabel(MTLPixelFormat format)
+{
+    switch (format) {
+    case MTLPixelFormatR8Unorm: return "r8";
+    case MTLPixelFormatRG8Unorm: return "rg8";
+    case MTLPixelFormatRGBA8Unorm: return "rgba8";
+    case MTLPixelFormatRGBA8Unorm_sRGB: return "rgba8srgb";
+    case MTLPixelFormatBGRA8Unorm: return "bgra8";
+    case MTLPixelFormatBGRA8Unorm_sRGB: return "bgra8srgb";
+    case MTLPixelFormatR16Float: return "r16f";
+    case MTLPixelFormatRG16Float: return "rg16f";
+    case MTLPixelFormatRGBA16Float: return "rgba16f";
+    case MTLPixelFormatRGB10A2Unorm: return "rgb10a2";
+    case MTLPixelFormatDepth32Float: return "d32f";
+    default: return "fmt" + std::to_string(static_cast<unsigned long>(format));
+    }
+}
+
+/// The layer a pass belongs to, " [<layer name> #<id>]" (an effect pass names the layer whose
+/// chain it is in), or nothing when it has none.
+std::string GpuPassOwnerLabel(const ScenePassDescription& desc)
+{
+    SceneNode* owner = desc.visibility_node != nullptr ? desc.visibility_node
+                       : desc.node != nullptr          ? desc.node
+                                                       : desc.sort_owner;
+    if (owner == nullptr) return {};
+    return " [" + owner->Name() + " #" + std::to_string(owner->ID()) + "]";
+}
+
+/// "<shader or step> -> <target key> <W>x<H> <format>[ x<samples>] [<layer name> #<id>]": what
+/// a pass draws, where, and for which layer. Built when the pass table changes, never per frame.
+std::string GpuPassLabel(const ScenePassDescription& desc, id<MTLTexture> target)
+{
+    std::string label = desc.kind == MetalPassKind::Copy
+                            ? "copy " + desc.source_key + " -> " + desc.target_key
+                            : desc.name + " -> " + desc.target_key;
+    if (target != nil) {
+        label += " " + std::to_string(target.width) + "x" + std::to_string(target.height) + " " +
+                 PixelFormatLabel(target.pixelFormat);
+        if (desc.samples > 1) label += " x" + std::to_string(desc.samples);
+    }
+    return label + GpuPassOwnerLabel(desc);
+}
+
+/// Where the label of a render pass that many draws share is cut, so a trace's rows stay
+/// readable (thirty particle systems on the scene would otherwise name them all).
+constexpr std::size_t kGpuLabelLimit = 250;
+
+/// The label of a render pass that `first` opened and the passes `joined` (indices into
+/// `short_labels`, each "<shader> [<layer>]") were drawn into after it: "[<n> passes] <first>
+/// + <shader> [<layer>] x<count>, ...", runs of one draw counted, cut at `kGpuLabelLimit`.
+std::string GpuJoinedLabel(const std::string& first, const std::vector<std::size_t>& joined,
+                           const std::vector<std::string>& short_labels)
+{
+    std::string label = "[" + std::to_string(joined.size() + 1) + " passes] " + first + " +";
+    for (std::size_t k = 0; k < joined.size();) {
+        const std::string& name = joined[k] < short_labels.size() ? short_labels[joined[k]] : first;
+        std::size_t run = 1;
+        while (k + run < joined.size() && joined[k + run] < short_labels.size() &&
+               short_labels[joined[k + run]] == name)
+            ++run;
+        std::string entry = " " + name + (run > 1 ? " x" + std::to_string(run) : "");
+        if (label.size() + entry.size() > kGpuLabelLimit) {
+            label += " ... " + std::to_string(joined.size() - k) + " more";
+            break;
+        }
+        label += entry + (k + run < joined.size() ? "," : "");
+        k += run;
+    }
+    return label;
+}
+
+/// `text` as an encoder or command buffer label. Instruments records no label that holds a
+/// character outside ASCII (it shows "Render Command <n>" instead), and layer names often do,
+/// so each run of other bytes becomes one '?'.
+NSString* GpuLabel(std::string text)
+{
+    std::size_t out = 0;
+    for (std::size_t in = 0; in < text.size(); ++in) {
+        const auto byte = static_cast<unsigned char>(text[in]);
+        if (byte < 0x80) {
+            text[out++] = static_cast<char>(byte);
+        } else if (out == 0 || text[out - 1] != '?') {
+            text[out++] = '?';
+        }
+    }
+    text.resize(out);
+    return [NSString stringWithUTF8String:text.c_str()];
+}
+
 } // namespace
 
 MetalPipelineArchiveStatus MetalPipelineArchiveStatusForDiagnostics()
@@ -1855,6 +1978,10 @@ struct MetalRender::Impl
     bool passOverwritesTarget(std::size_t index, id<MTLTexture> attachment, const uint8_t* uniform_base);
 
     std::vector<ScenePassDescription>                   descriptions;
+    /// Per pass, its `GpuPassLabel` and its "<shader> [<layer>]"; both empty unless
+    /// `GpuLabelsEnabled()`.
+    std::vector<std::string>                            pass_labels;
+    std::vector<std::string>                            pass_short_labels;
     std::vector<PreparedPass>                           prepared;
     uint64_t model_data_upload_bytes {0};
     uint64_t dynamic_vertex_upload_bytes {0};
@@ -2178,8 +2305,9 @@ struct MetalRender::Impl
     /// scene is drawn below full resolution. `frame` as for `encodeComposition`.
     id<MTLTexture> upscaledPicture(id<MTLCommandBuffer> command, id<MTLTexture> output,
                                    const Scene& scene, bool frame);
+    /// `label` names its encoder (GPU labels on), nil leaves it unnamed.
     bool encodeScaledCopy(id<MTLCommandBuffer> command, id<MTLTexture> source,
-                          id<MTLTexture> destination);
+                          id<MTLTexture> destination, NSString* label = nil);
     bool compile(Scene& scene, rg::RenderGraph& graph);
     /// Gives the compiled graph the render target sizes the scene holds now, keeping
     /// everything else of it: the prepared passes, their pipelines and vertex buffers, the
@@ -2577,7 +2705,7 @@ bool MetalRender::Impl::ensurePresentPipeline(MTLPixelFormat format, PresentTran
 /// left the destination holding the previous frame while every later pass read
 /// it as if it were fresh.
 bool MetalRender::Impl::encodeScaledCopy(id<MTLCommandBuffer> command, id<MTLTexture> source,
-                                         id<MTLTexture> destination)
+                                         id<MTLTexture> destination, NSString* label)
 {
     if (command == nil || source == nil || destination == nil) return false;
     id<MTLRenderPipelineState> pipeline = presentPipelineFor(destination.pixelFormat);
@@ -2591,6 +2719,7 @@ bool MetalRender::Impl::encodeScaledCopy(id<MTLCommandBuffer> command, id<MTLTex
 
     id<MTLRenderCommandEncoder> encoder = [command renderCommandEncoderWithDescriptor:descriptor];
     if (encoder == nil) return false;
+    if (label != nil) encoder.label = label;
     [encoder setViewport:(MTLViewport) { 0.0, 0.0, (double)destination.width,
                                          (double)destination.height, 0.0, 1.0 }];
     [encoder setScissorRect:(MTLScissorRect) { 0, 0, destination.width, destination.height }];
@@ -2674,6 +2803,13 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
 
     id<MTLRenderCommandEncoder> encoder = [command renderCommandEncoderWithDescriptor:present];
     if (encoder == nil) return false;
+    if (GpuLabelsEnabled() && ! draw_backdrop) {
+        encoder.label = GpuLabel(std::string(frame ? "composition " : "offscreen composition ") +
+                                 std::to_string(picture.width) + "x" + std::to_string(picture.height) +
+                                 " -> " + std::to_string(destination.width) + "x" +
+                                 std::to_string(destination.height) + " " +
+                                 PixelFormatLabel(destination.pixelFormat));
+    }
     if (draw_backdrop) {
         encoder.label = @"Wallpaper composition with blurred backdrop";
         // Only the room around the picture: its own pixels are the ones Fit draws.
@@ -3507,6 +3643,16 @@ void MetalRender::Impl::refreshPassTargets(Scene& scene)
     scene_output_key    = scene.ResolveRenderTargetName(SpecTex_Default);
     scene_output_target = lookup(targets, scene_output_key);
     planAttachmentStores();
+    pass_labels.clear();
+    pass_short_labels.clear();
+    if (GpuLabelsEnabled()) {
+        pass_labels.reserve(descriptions.size());
+        pass_short_labels.reserve(descriptions.size());
+        for (std::size_t i = 0; i < descriptions.size(); ++i) {
+            pass_labels.push_back(GpuPassLabel(descriptions[i], pass_targets[i]));
+            pass_short_labels.push_back(descriptions[i].name + GpuPassOwnerLabel(descriptions[i]));
+        }
+    }
 }
 
 void MetalRender::Impl::planAttachmentStores()
@@ -4113,6 +4259,7 @@ bool MetalRender::Impl::clearTargetsOnce(const Scene& scene)
         id<MTLRenderCommandEncoder> encoder =
             [command renderCommandEncoderWithDescriptor:descriptor];
         if (encoder == nil) return fail("a render target could not be cleared");
+        if (GpuLabelsEnabled()) encoder.label = GpuLabel("clear new target " + name);
         [encoder endEncoding];
     }
     [command commit];
@@ -5432,6 +5579,7 @@ bool MetalRender::Impl::applySceneOptimizationSetting(Scene& scene, id<MTLComman
         id<MTLRenderCommandEncoder> encoder =
             [command renderCommandEncoderWithDescriptor:descriptor];
         if (encoder == nil) return fail("a reallocated render target could not be cleared");
+        if (GpuLabelsEnabled()) encoder.label = [@"clear new target " stringByAppendingString:texture.label ?: @""];
         [encoder endEncoding];
     }
 
@@ -6684,6 +6832,23 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             dispatch_semaphore_signal(impl.inflight);
             return impl.fail("a Metal command buffer could not be created");
         }
+        const bool gpu_labels   = GpuLabelsEnabled();
+        const bool split_passes = GpuLabelsSplitPasses();
+        const auto pass_label = [&impl](std::size_t index) -> const std::string& {
+            static const std::string none;
+            return index < impl.pass_labels.size() ? impl.pass_labels[index] : none;
+        };
+        if (gpu_labels) {
+            // The scene's own image and the surface it is composed onto.
+            const CGSize   surface = impl.layer.drawableSize;
+            id<MTLTexture> output  = impl.scene_output_target;
+            command.label = GpuLabel(
+                "scene frame " +
+                (output != nil ? std::to_string(output.width) + "x" + std::to_string(output.height)
+                               : std::string("?")) +
+                " on " + std::to_string(static_cast<uint32_t>(surface.width)) + "x" +
+                std::to_string(static_cast<uint32_t>(surface.height)));
+        }
 
         // At the frame boundary, before anything else in this buffer: the copy
         // plan and the target table are what the setting really controls, and
@@ -6717,6 +6882,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 dispatch_semaphore_signal(impl.inflight);
                 return impl.fail("a render target could not be cleared");
             }
+            if (gpu_labels) encoder.label = [@"clear new target " stringByAppendingString:texture.label ?: @""];
             [encoder endEncoding];
         }
 
@@ -6847,9 +7013,11 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
 
         // Encodes the smaller levels of a mip-mapped target, once its last
         // writer before a reader has finished with level 0.
-        const auto generate_mipmaps = [&command, &impl](id<MTLTexture> texture) {
+        const auto generate_mipmaps = [&command, &impl, gpu_labels, &pass_label](id<MTLTexture> texture,
+                                                                                std::size_t index) {
             if (texture == nil || texture.mipmapLevelCount <= 1) return;
             id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
+            if (gpu_labels) blit.label = GpuLabel("mipmaps after " + pass_label(index));
             [blit generateMipmapsForTexture:texture];
             [blit endEncoding];
             ++impl.frame_encodes.blit_passes;
@@ -6888,10 +7056,19 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             bool                        depth_store_open { false };
             bool                        depth_resolves { false };
             bool                        multisample_store_open { false };
+            /// With GPU labels on: the label of the pass that opened it and the passes that
+            /// joined it, set once as the render pass ends.
+            std::string                 label;
+            std::vector<std::size_t>    joined;
         };
         OpenRenderPass open;
-        const auto close_pass = [&open, &impl]() {
+        const auto close_pass = [&open, &impl, gpu_labels]() {
             if (open.encoder != nil) {
+                if (gpu_labels) {
+                    open.encoder.label = GpuLabel(
+                        open.joined.empty() ? open.label
+                                            : GpuJoinedLabel(open.label, open.joined, impl.pass_short_labels));
+                }
                 if (open.depth_store_open) {
                     const bool keep = impl.depthNeededAfter(open.depth, open.last_position);
                     [open.encoder setDepthStoreAction:open.depth_resolves
@@ -6979,6 +7156,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                         *copy.slot          = next;
                         impl.pass_targets[i] = next;
                         id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
+                        if (gpu_labels) blit.label = GpuLabel("pooled " + pass_label(i));
                         [blit copyFromTexture:image
                                   sourceSlice:0
                                   sourceLevel:0
@@ -7011,6 +7189,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                                        source->second.pixelFormat == target.pixelFormat;
                 if (identical) {
                     id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
+                    if (gpu_labels) blit.label = GpuLabel(pass_label(i));
                     [blit copyFromTexture:source->second
                               sourceSlice:0
                               sourceLevel:0
@@ -7021,7 +7200,8 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                                levelCount:1];
                     [blit endEncoding];
                     ++impl.frame_encodes.blit_passes;
-                } else if (impl.encodeScaledCopy(command, source->second, target)) {
+                } else if (impl.encodeScaledCopy(command, source->second, target,
+                                                 gpu_labels ? GpuLabel("scaled " + pass_label(i)) : nil)) {
                     ++impl.frame_encodes.render_passes;
                     if (target == impl.scene_output_target) {
                         ++impl.frame_encodes.scene_output_passes;
@@ -7031,7 +7211,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                     // previous frame while the graph says it was refreshed.
                     return abandon_frame("an effect image could not be resampled");
                 }
-                if (desc.generate_mipmaps) generate_mipmaps(target);
+                if (desc.generate_mipmaps) generate_mipmaps(target, i);
                 continue;
             }
 
@@ -7044,7 +7224,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             if (! draws && ! clears) {
                 if (desc.generate_mipmaps) {
                     close_pass();
-                    generate_mipmaps(target);
+                    generate_mipmaps(target, i);
                 }
                 continue;
             }
@@ -7058,7 +7238,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             id<MTLTexture> depth = i < impl.pass_depths.size() ? impl.pass_depths[i] : nil;
             const bool     joins =
                 open.encoder != nil && open.target == attachment && open.resolved == target && open.depth == depth &&
-                impl.pass_reads_own_target[i] == 0 &&
+                impl.pass_reads_own_target[i] == 0 && ! split_passes &&
                 (! clears ||
                  (! open.drew && open.began_with_clear && open.clear_color == desc.clear_color));
             if (! joins) {
@@ -7149,6 +7329,16 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                     open.depth_store_open = open.multisample_store_open = false;
                     return abandon_frame("a render pass could not be started");
                 }
+                if (gpu_labels) {
+                    // How the render pass opens, which is what its memory traffic depends on.
+                    const auto load = desc.depth_only ? descriptor.depthAttachment.loadAction
+                                                      : descriptor.colorAttachments[0].loadAction;
+                    open.label = pass_label(i) +
+                                 (opens_with_copy               ? " {opening copy}"
+                                  : load == MTLLoadActionLoad  ? " {load}"
+                                  : load == MTLLoadActionClear ? " {clear}"
+                                                               : " {dontcare}");
+                }
                 open.target           = attachment;
                 open.resolved         = target;
                 open.depth            = depth;
@@ -7180,6 +7370,8 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                                       static_cast<uint32_t>(target.height) };
                     ++impl.frame_encodes.opening_copies;
                 }
+            } else if (gpu_labels) {
+                open.joined.push_back(i);
             }
             open.last_position = position;
 
@@ -7386,7 +7578,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             }
             if (desc.generate_mipmaps) {
                 close_pass();
-                generate_mipmaps(target);
+                generate_mipmaps(target, i);
             }
         }
         close_pass();
@@ -7710,6 +7902,18 @@ void MetalRender::SetOverwriteLoadElisionForTests(bool enabled)
 void MetalRender::SetAttachmentStoreElisionForTests(bool enabled)
 {
     AttachmentStoreElisionSwitch().store(enabled);
+}
+
+void MetalRender::SetGpuLabelsForTests(int mode)
+{
+    GpuLabelSwitch().store(mode == 0   ? GpuLabelMode::Off
+                           : mode == 2 ? GpuLabelMode::Split
+                                       : GpuLabelMode::On);
+}
+
+std::vector<std::string> MetalRender::GpuPassLabelsForTests() const
+{
+    return pImpl != nullptr ? pImpl->pass_labels : std::vector<std::string> {};
 }
 
 uint64_t MetalRender::RenderTargetBytesForTests() const

@@ -19111,3 +19111,265 @@ TEST_F(MetalSceneDraw, ParticleGeometryCopiesOnlyWhatTheFrameDrawsAndTheSlotLack
     EXPECT_TRUE(fewer_than_peak) << "the burst never thinned out; the fixture tests nothing";
     EXPECT_TRUE(none_left) << "the burst never died out; the fixture tests nothing";
 }
+
+// ---------------------------------------------------------------------------
+// GPU labels for Metal System Trace
+
+namespace
+{
+
+/// The labels Metal sees on every command buffer committed and every render and blit encoder
+/// ended while recording: `endEncoding` and `commit` of the device's classes are wrapped for
+/// the life of this object and restored afterwards.
+class GpuLabelRecorder
+{
+public:
+    explicit GpuLabelRecorder(id<MTLDevice> device)
+    {
+        @autoreleasepool {
+            id<MTLCommandQueue>   queue      = [device newCommandQueue];
+            id<MTLCommandBuffer>  command    = [queue commandBuffer];
+            MTLTextureDescriptor* descriptor =
+                [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                   width:4
+                                                                  height:4
+                                                               mipmapped:NO];
+            descriptor.usage       = MTLTextureUsageRenderTarget;
+            descriptor.storageMode = MTLStorageModePrivate;
+            MTLRenderPassDescriptor* pass        = [MTLRenderPassDescriptor renderPassDescriptor];
+            pass.colorAttachments[0].texture     = [device newTextureWithDescriptor:descriptor];
+            pass.colorAttachments[0].loadAction  = MTLLoadActionDontCare;
+            pass.colorAttachments[0].storeAction = MTLStoreActionDontCare;
+            id<MTLRenderCommandEncoder> render = [command renderCommandEncoderWithDescriptor:pass];
+            Wrap([render class], @selector(endEncoding), reinterpret_cast<IMP>(&Ended));
+            [render endEncoding];
+            id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
+            Wrap([blit class], @selector(endEncoding), reinterpret_cast<IMP>(&Ended));
+            [blit endEncoding];
+            Wrap([command class], @selector(commit), reinterpret_cast<IMP>(&Committed));
+        }
+    }
+    ~GpuLabelRecorder()
+    {
+        State().recording = false;
+        for (const auto& [method, original] : State().originals) method_setImplementation(method, original);
+        State().originals.clear();
+    }
+    GpuLabelRecorder(const GpuLabelRecorder&)            = delete;
+    GpuLabelRecorder& operator=(const GpuLabelRecorder&) = delete;
+
+    /// Starts recording from nothing.
+    void Start()
+    {
+        std::scoped_lock lock(State().mutex);
+        State().encoders.clear();
+        State().command_buffers.clear();
+        State().recording = true;
+    }
+    void Stop() { State().recording = false; }
+    std::vector<std::string> Encoders() const
+    {
+        std::scoped_lock lock(State().mutex);
+        return State().encoders;
+    }
+    std::vector<std::string> CommandBuffers() const
+    {
+        std::scoped_lock lock(State().mutex);
+        return State().command_buffers;
+    }
+
+private:
+    struct Shared
+    {
+        std::mutex               mutex;
+        std::atomic<bool>        recording { false };
+        std::map<Method, IMP>    originals;
+        std::vector<std::string> encoders;
+        std::vector<std::string> command_buffers;
+    };
+    static Shared& State()
+    {
+        static Shared state;
+        return state;
+    }
+    static std::string Text(NSString* label) { return label != nil ? std::string(label.UTF8String) : std::string(); }
+    static IMP Original(id self, SEL command)
+    {
+        return State().originals.at(class_getInstanceMethod(object_getClass(self), command));
+    }
+    static void Ended(id self, SEL command)
+    {
+        if (State().recording) {
+            std::scoped_lock lock(State().mutex);
+            State().encoders.push_back(Text([(id<MTLCommandEncoder>)self label]));
+        }
+        reinterpret_cast<void (*)(id, SEL)>(Original(self, command))(self, command);
+    }
+    static void Committed(id self, SEL command)
+    {
+        if (State().recording) {
+            std::scoped_lock lock(State().mutex);
+            State().command_buffers.push_back(Text([(id<MTLCommandBuffer>)self label]));
+        }
+        reinterpret_cast<void (*)(id, SEL)>(Original(self, command))(self, command);
+    }
+    static void Wrap(Class cls, SEL selector, IMP replacement)
+    {
+        Method method = class_getInstanceMethod(cls, selector);
+        if (method == nullptr || State().originals.contains(method)) return;
+        State().originals.emplace(method, method_setImplementation(method, replacement));
+    }
+};
+
+/// Restores the GPU labels to off, whatever a test set them to.
+struct RestoreGpuLabels
+{
+    ~RestoreGpuLabels() { MetalRender::SetGpuLabelsForTests(0); }
+};
+
+/// What one run with the labels in `mode` drew and labelled: the first frame's scene output,
+/// its encode counts, the pass labels and what Metal saw labelled while that frame was drawn.
+struct LabelledRun
+{
+    std::vector<uint8_t>                   picture;
+    MetalRender::FrameEncodeCountsForTests counts;
+    std::vector<std::string>               pass_labels;
+    std::vector<std::string>               encoders;
+    std::vector<std::string>               command_buffers;
+};
+
+LabelledRun DrawWithGpuLabels(const std::filesystem::path& project, const std::filesystem::path& cache, int mode)
+{
+    MetalRender::SetGpuLabelsForTests(mode);
+    LabelledRun run;
+    LoadedScene loaded;
+    std::string error;
+    std::filesystem::remove_all(cache);
+    EXPECT_TRUE(LoadScene(project, cache, loaded, error)) << error;
+    if (loaded.scene == nullptr) return run;
+    @autoreleasepool {
+        id<MTLDevice>    device = MTLCreateSystemDefaultDevice();
+        GpuLabelRecorder recorder(device);
+        CAMetalLayer*    layer  = [CAMetalLayer layer];
+        layer.device            = device;
+        layer.pixelFormat       = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize      = CGSizeMake(384, 256);
+        layer.framebufferOnly   = NO;
+        MetalRender render;
+        EXPECT_TRUE(render.init(MetalRenderInitInfo {
+            .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+            .render_width = 384, .render_height = 256, .display_scale_factor = 1.0 }))
+            << render.lastError();
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        if (graph == nullptr || ! render.compileRenderGraph(*loaded.scene, *graph)) {
+            ADD_FAILURE() << render.lastError();
+            return run;
+        }
+        // The first frame, which draws every pass: a later one may reuse what did not change.
+        recorder.Start();
+        AdvanceSceneFrame(render, *loaded.scene);
+        recorder.Stop();
+        run.picture         = ReadOutput(render, *loaded.scene);
+        run.counts          = render.LastFrameEncodeCountsForTests();
+        run.pass_labels     = render.GpuPassLabelsForTests();
+        run.encoders        = recorder.Encoders();
+        run.command_buffers = recorder.CommandBuffers();
+        render.destroy();
+    }
+    return run;
+}
+
+bool AnyContains(const std::vector<std::string>& labels, std::string_view text)
+{
+    return std::any_of(labels.begin(), labels.end(),
+                       [text](const std::string& label) { return label.find(text) != std::string::npos; });
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, GpuLabelsNameEachPassItsTargetAndItsLayerOnlyWhenAskedFor)
+{
+    // The card through two effects: the card and the effects into the chain's buffers, the
+    // chain's last pass onto the scene, and the composition onto the surface.
+    RestoreGpuLabels restore;
+    const auto root    = root_ / "gpu-labels";
+    const auto project = WriteEffectChainFixture(root, { ChainEffect {}, ChainEffect {} });
+
+    const auto on = DrawWithGpuLabels(project, root / "cache-on", 1);
+    ASSERT_FALSE(on.picture.empty());
+    ASSERT_FALSE(on.pass_labels.empty());
+    ASSERT_EQ(on.command_buffers.size(), 1u) << "one frame commits one command buffer";
+    EXPECT_EQ(on.command_buffers.front().rfind("scene frame 384x256 on 384x256", 0), 0u)
+        << on.command_buffers.front();
+    // Every encoder of the frame says what it runs.
+    ASSERT_FALSE(on.encoders.empty());
+    for (const auto& label : on.encoders) EXPECT_FALSE(label.empty()) << "an encoder of the frame has no label";
+    EXPECT_TRUE(AnyContains(on.encoders, "fx0 -> _rt_effect_pingpong_")) << "the first effect's pass is not named";
+    EXPECT_TRUE(AnyContains(on.encoders, "fx1 -> " + std::string(SpecTex_Default) + " 384x256 rgba8 [tile #1]"))
+        << "the chain's last pass, onto the scene, is not named";
+    for (const auto& label : on.encoders) {
+        if (label.rfind("fx0 -> ", 0) != 0) continue;
+        EXPECT_NE(label.find(" rgba8 [tile #1] {"), std::string::npos) << label;
+    }
+    EXPECT_TRUE(AnyContains(on.encoders, "composition 384x256 -> 384x256 bgra8"));
+
+    // Off: Metal sees no label at all, and no label was ever built.
+    const auto off = DrawWithGpuLabels(project, root / "cache-off", 0);
+    ASSERT_FALSE(off.encoders.empty());
+    for (const auto& label : off.encoders) EXPECT_TRUE(label.empty()) << label;
+    for (const auto& label : off.command_buffers) EXPECT_TRUE(label.empty()) << label;
+    EXPECT_TRUE(off.pass_labels.empty());
+    EXPECT_EQ(off.picture, on.picture) << "the labels changed the picture";
+    EXPECT_EQ(off.counts.render_passes, on.counts.render_passes);
+}
+
+TEST_F(MetalSceneDraw, GpuLabelsSplitTheDrawsThatShareARenderPassWithoutChangingThePicture)
+{
+    // Twelve cards with long names, all drawn straight onto the scene: one render pass, whose
+    // label names the first card in full and counts the rest within the length Instruments
+    // keeps. `split` gives each its own render pass, and its own label.
+    RestoreGpuLabels restore;
+    const auto root    = root_ / "gpu-labels-split";
+    const auto project = WriteFixture(root);
+    auto       layout  = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+    layout["objects"]  = nlohmann::json::array();
+    constexpr int kCards = 12;
+    for (int index = 0; index < kCards; ++index) {
+        layout["objects"].push_back({ { "id", index + 1 },
+                                      { "name", "a card whose name is long enough to matter " + std::to_string(index) },
+                                      { "image", "models/tile.json" },
+                                      { "origin", { 60 + 24 * index, 128, 0 } },
+                                      { "scale", { 0.2, 0.2, 1 } },
+                                      { "angles", { 0, 0, 0 } },
+                                      { "visible", true } });
+    }
+    // A name outside ASCII, which Instruments would not record.
+    layout["objects"][1]["name"] = "\xE7\xBD\xAE\xE4\xBA\x8E/before";
+    std::ofstream(root / "layout.json") << layout;
+
+    const auto joined = DrawWithGpuLabels(project, root / "cache-joined", 1);
+    const auto split  = DrawWithGpuLabels(project, root / "cache-split", 2);
+    ASSERT_FALSE(joined.picture.empty());
+    EXPECT_EQ(split.picture, joined.picture) << "splitting the render pass changed the picture";
+    EXPECT_EQ(split.counts.render_passes, joined.counts.render_passes + kCards - 1);
+
+    const std::string scene_prefix = "metal_probe -> " + std::string(SpecTex_Default);
+    const auto shared = std::find_if(joined.encoders.begin(), joined.encoders.end(), [&](const std::string& label) {
+        return label.rfind("[12 passes] " + scene_prefix, 0) == 0;
+    });
+    ASSERT_NE(shared, joined.encoders.end()) << "no label counts the twelve draws of one render pass";
+    EXPECT_NE(shared->find("[a card whose name is long enough to matter 0 #1]"), std::string::npos) << *shared;
+    EXPECT_NE(shared->find(" more"), std::string::npos) << "the label was not cut: " << *shared;
+    EXPECT_LE(shared->size(), 270u) << *shared;
+    for (const auto& label : joined.encoders) {
+        for (const unsigned char c : label) EXPECT_LT(c, 0x80) << label;
+    }
+
+    int own = 0;
+    for (const auto& label : split.encoders) {
+        if (label.rfind(scene_prefix, 0) == 0) ++own;
+        EXPECT_EQ(label.find("passes]"), std::string::npos) << label;
+    }
+    EXPECT_EQ(own, kCards) << "each card should have a render pass of its own";
+    EXPECT_TRUE(AnyContains(split.encoders, "[?/before #2]")) << "the name outside ASCII was not replaced";
+}

@@ -337,6 +337,12 @@ public:
     /// reads them again, from the next frame on. On unless
     /// `WALLPAPER_MACHINE_ATTACHMENT_STORE_ELISION=0`; process-wide, test-only.
     static void SetAttachmentStoreElisionForTests(bool enabled);
+    /// GPU labels (`WALLPAPER_MACHINE_GPU_LABELS`) for pass tables built and frames drawn from
+    /// now on: 0 off, 1 on, 2 on with every pass in a render pass of its own (`split`).
+    /// Process-wide, test-only.
+    static void SetGpuLabelsForTests(int mode);
+    /// Each pass's GPU label, in pass order; empty while the labels are off.
+    [[nodiscard]] std::vector<std::string> GpuPassLabelsForTests() const;
 
     /// How many shader sources this process has handed to the Metal compiler.
     ///
