@@ -137,7 +137,8 @@ final class WebWallpaperAuthorAPITests: XCTestCase {
     try await waitUntilLoaded(page)
     try await eval(page, """
       window.__frames = [];
-      window.wallpaperRegisterAudioListener(b => window.__frames.push({ length: b.length, sum: b.reduce((a, v) => a + v, 0) }));
+      window.wallpaperRegisterAudioListener(b => window.__frames.push({
+        length: b.length, sum: b.reduce((a, v) => a + v, 0), at: performance.now() }));
       """)
     let first = try await pollFrames(page) { $0.count >= 1 }
     XCTAssertEqual(first.first?["length"], 128)
@@ -145,6 +146,9 @@ final class WebWallpaperAuthorAPITests: XCTestCase {
     XCTAssertTrue(demands.isEmpty, "nothing is captured for it")
     let second = try await pollFrames(page, timeout: 3) { $0.count >= 2 }
     XCTAssertLessThanOrEqual(second.count, 3, "once a second, not at the audio pump's rate")
+    let gap = try XCTUnwrap(second[1]["at"]) - XCTUnwrap(second[0]["at"])
+    let interval = Double(WebWallpaperPage.silenceInterval.components.seconds) * 1000
+    XCTAssertGreaterThanOrEqual(gap, interval * 0.9, "the silence is spaced by its interval, not faster")
 
     // Paused, the page hears nothing, as captured audio stops for a paused wallpaper.
     page.setPaused(true)
