@@ -1505,7 +1505,8 @@ following (`WebWallpaperRenderScaleTests`, plus the render-scale cases of
 (`WebWallpaperIdleCallbackTests`), V8's `Error().stack` format for the errors a page
 builds (`WebWallpaperErrorStackTests`), the Windows font names a page asks for drawn in macOS
 faces (`WebWallpaperFontAliasTests`) and the screen-saver surface
-(`ScreenSaverWebSurfaceTests`). Detail and limits:
+(`ScreenSaverWebSurfaceTests`). `WebWallpaperReferenceRenderTests` is not a check: it skips
+unless `scripts/we_reference.py render` hands it real pages to draw. Detail and limits:
 [web wallpapers](../features/web-wallpapers.md#verification).
 
 ## Workshop
