@@ -15943,11 +15943,14 @@ std::set<int> HashFramesFromEnvironment(int frame_count)
     return frames;
 }
 
-/// `WE_TEST_COMPARE_SCALING`: the scaling mode the host pushes, fill when unset.
-WallpaperScalingMode CompareScalingFromEnvironment()
+/// `WE_TEST_COMPARE_SCALING` (or another variable): the scaling mode the host pushes,
+/// `fallback` when unset.
+WallpaperScalingMode CompareScalingFromEnvironment(
+    const char* variable = "WE_TEST_COMPARE_SCALING",
+    WallpaperScalingMode fallback = WallpaperScalingMode::FILL)
 {
-    const char* text = std::getenv("WE_TEST_COMPARE_SCALING");
-    if (text == nullptr) return WallpaperScalingMode::FILL;
+    const char* text = std::getenv(variable);
+    if (text == nullptr) return fallback;
     const std::map<std::string_view, WallpaperScalingMode> modes {
         { "none", WallpaperScalingMode::NONE },
         { "stretch", WallpaperScalingMode::STRETCH },
@@ -15957,7 +15960,7 @@ WallpaperScalingMode CompareScalingFromEnvironment()
     };
     const auto found = modes.find(text);
     if (found == modes.end()) {
-        throw std::runtime_error(std::string("WE_TEST_COMPARE_SCALING has no mode ") + text);
+        throw std::runtime_error(std::string(variable) + " has no mode " + text);
     }
     return found->second;
 }
@@ -16265,6 +16268,10 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                 .display_scale_factor = scale_factor,
             };
             ASSERT_TRUE(render.init(info)) << render.lastError();
+            // `WE_TEST_METAL_SCALING`: the scaling mode the host would push before the graph
+            // is built (`fill`, `fit`, ...); unset, the renderer's own default, original size.
+            render.SetWallpaperScalingMode(
+                CompareScalingFromEnvironment("WE_TEST_METAL_SCALING", WallpaperScalingMode::NONE));
             auto graph = sceneToRenderGraph(*loaded.scene);
             ASSERT_NE(graph, nullptr);
             // Layers that read a composite before the frame has made it: a nonzero count is a
