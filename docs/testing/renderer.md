@@ -223,9 +223,9 @@ audio device):
 | `WE_TEST_MEDIA_EVENTS` | both scene probes | JSON array of SceneScript media event objects, dispatched in order after the warm-up ticks. Enables media integration for the run, so a wallpaper that only draws its player while something is playing can be rendered without a system media source or Automation permission. Without events a scene hears no media event, as in the app with no player |
 | `WE_TEST_MEDIA_ARTWORK` | both scene probes | `<width>x<height>:<rrggbb>`; publishes one opaque cover through the same path the app uses, so `$mediaThumbnail` and `$mediaPreviousThumbnail` carry a color that is legible in the rendered frame. Without it a background drawn from the current cover renders flat grey and a comparison says nothing |
 | `WE_TEST_MEDIA_JSON` | `offscreen_scene_probe` | A JSON array of media events dispatched right after the parse, before the warm-up ticks |
-| `WE_TEST_AUDIO_HZ` | both scene probes | Synthetic PCM at `0..24000` Hz; `0` means silence. Each frame submits one analysis window (1,600 frames at 48 kHz) through the same service the desktop tap feeds, and the Metal gate enables audio response for the run. The 64 bands follow Wallpaper Engine's layout: one ~23 Hz bin each up to about 400 Hz (band 0 ≈ 23 Hz, band 3 ≈ 95 Hz), then widening to ~15 kHz, so a shader reading only the lowest bands needs a bass tone, not 440 Hz |
-| `WE_TEST_AUDIO_FILE` | both scene probes | Raw float32 mono PCM at 48 kHz played instead of the synthetic tone, continuing across frames and looping; `WE_TEST_AUDIO_HZ` must still be set to enable audio. A music-like signal is the only way to judge a visualizer's look: a tone lights one band and white noise lights all of them |
-| `WE_TEST_AUDIO_AMPLITUDE`, `WE_TEST_AUDIO_NOISE=1` | both scene probes | Amplitude `0..1` (default `.025`) and optional deterministic broadband PCM instead of a sine, with `WE_TEST_AUDIO_HZ` set. A single tone cannot exercise scripts averaging several frequency bands |
+| `WE_TEST_AUDIO_HZ` | both scene probes and the poster harness (`*LocalProjectsDrawAPosterPicture*`) | Synthetic PCM at `0..24000` Hz; `0` means silence. Each frame submits one analysis window (1,600 frames at 48 kHz) through the same service the desktop tap feeds, and the Metal gate enables audio response for the run. The 64 bands follow Wallpaper Engine's layout: one ~23 Hz bin each up to about 400 Hz (band 0 ≈ 23 Hz, band 3 ≈ 95 Hz), then widening to ~15 kHz, so a shader reading only the lowest bands needs a bass tone, not 440 Hz |
+| `WE_TEST_AUDIO_FILE` | both scene probes and the poster harness | Raw float32 mono PCM at 48 kHz played instead of the synthetic tone, continuing across frames and looping; `WE_TEST_AUDIO_HZ` must still be set to enable audio. A music-like signal is the only way to judge a visualizer's look: a tone lights one band and white noise lights all of them |
+| `WE_TEST_AUDIO_AMPLITUDE`, `WE_TEST_AUDIO_NOISE=1` | both scene probes and the poster harness | Amplitude `0..1` (default `.025`) and optional deterministic broadband PCM instead of a sine, with `WE_TEST_AUDIO_HZ` set. A single tone cannot exercise scripts averaging several frequency bands |
 | `WE_TEST_AUDIO_ENABLED=0` | `offscreen_scene_probe` | Exercise the disabled audio gate |
 
 Audio is submitted after GPU setup so shader compilation cannot expire its
@@ -276,7 +276,11 @@ Wallpaper Engine's own frames. With `WE_TEST_COMPARE_HASH_EVERY` or
 well, at the render scale and scaling mode the host pushes
 (`WE_TEST_COMPARE_RENDER_SCALE`, `WE_TEST_COMPARE_SCALING`): that is the pixel-identity
 check `scripts/perf_bench.py identity` runs (see
-[power benchmarking](power-benchmark.md#headless-ab-driver)). A difference found by comparing
+[power benchmarking](power-benchmark.md#headless-ab-driver)). It hears nothing unless
+`WE_TEST_AUDIO_HZ` is set: then audio response is on and one window of synthetic sound is
+analysed before every draw, as in the local-project run, so an audio-reactive scene can be
+compared with a tone or noise playing (a `perf_bench.py identity` variant passes it, e.g.
+`--variant tone=new:WE_TEST_AUDIO_HZ=60,WE_TEST_AUDIO_AMPLITUDE=0.5`). A difference found by comparing
 `offscreen_scene_probe` with the poster harness is not yet a renderer
 difference: the two harnesses differ in the ways below.
 

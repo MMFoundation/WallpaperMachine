@@ -16449,6 +16449,27 @@ double ThreadCpuMilliseconds()
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now);
     return double(now.tv_sec) * 1000.0 + double(now.tv_nsec) / 1.0e6;
 }
+
+/// One frame's synthetic audio (`WE_TEST_AUDIO_HZ` at `hz`, or what `controls` plays instead):
+/// one analysis window submitted through the service the desktop tap feeds, waited for until
+/// its spectrum is published, so the frame drawn next reads it. False with `error` filled when
+/// the service refused it.
+bool SubmitProbeAudioFrame(tests::SceneProbeControls& controls, double hz, std::string* error)
+{
+    std::array<float, audio::kAudioResponseWindowFrames> pcm {};
+    for (std::size_t i = 0; i < pcm.size(); ++i) pcm[i] = controls.audioSample(i, hz);
+    const auto generation = audio::CurrentAudioSpectrumSnapshot().generation;
+    if (! audio::SubmitMonoAudioFrames(audio::kAudioResponseSampleRate, uint32_t(pcm.size()),
+                                       pcm.data(), error)) {
+        return false;
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (audio::CurrentAudioSpectrumSnapshot().generation <= generation &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
 } // namespace
 
 TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBackend)
@@ -16702,24 +16723,10 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                 if (audio_hz != nullptr) {
                     // Synthetic PCM only, analysed by the same service the
                     // desktop tap feeds.
-                    std::array<float, audio::kAudioResponseWindowFrames> pcm {};
-                    const double hz = std::strtod(audio_hz, nullptr);
-                    for (std::size_t i = 0; i < pcm.size(); ++i) {
-                        pcm[i] = controls.audioSample(i, hz);
-                    }
-                    const auto generation = audio::CurrentAudioSpectrumSnapshot().generation;
                     std::string audio_error;
-                    ASSERT_TRUE(audio::SubmitMonoAudioFrames(audio::kAudioResponseSampleRate,
-                                                             uint32_t(pcm.size()),
-                                                             pcm.data(),
-                                                             &audio_error))
+                    ASSERT_TRUE(SubmitProbeAudioFrame(controls, std::strtod(audio_hz, nullptr),
+                                                      &audio_error))
                         << audio_error;
-                    const auto deadline =
-                        std::chrono::steady_clock::now() + std::chrono::seconds(2);
-                    while (audio::CurrentAudioSpectrumSnapshot().generation <= generation &&
-                           std::chrono::steady_clock::now() < deadline) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    }
                 }
                 if (controls.hasInput())
                     controls.input(*loaded.scene, frame, render.CursorMapping(*loaded.scene));
@@ -17007,7 +17014,10 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
     // that did not rebuild can be drawn to the same time. `WE_TEST_COMPARE_COUNTERS`
     // (set, not `0`) turns the renderer counters on for the run, the way a
     // diagnostics window does, so the picture is drawn through the counted
-    // paths, and prints the present counts.
+    // paths, and prints the present counts. `WE_TEST_AUDIO_HZ` (with
+    // `WE_TEST_AUDIO_AMPLITUDE`, `WE_TEST_AUDIO_NOISE` and `WE_TEST_AUDIO_FILE`)
+    // turns audio response on and submits one window of synthetic sound before
+    // every draw, as the local-project run does; unset, the scene hears nothing.
     const char* listed = std::getenv("WE_TEST_COMPARE_PROJECTS");
     const auto  assets = LocalSceneAssetsRoot();
     if (listed == nullptr || *listed == '\0' || assets.empty() ||
@@ -17150,8 +17160,17 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
             }
 
             tests::SceneProbeControls input;
+            const char* audio_hz = std::getenv("WE_TEST_AUDIO_HZ");
+            if (audio_hz != nullptr && scene.runtime != nullptr) {
+                scene.runtime->SetAudioResponseEnabled(true);
+            }
+            std::string audio_error;
             const auto start = std::chrono::steady_clock::now();
             const auto pace  = [&](int frame) {
+                if (audio_hz != nullptr && audio_error.empty() &&
+                    ! SubmitProbeAudioFrame(input, std::strtod(audio_hz, nullptr), &audio_error)) {
+                    ADD_FAILURE() << "synthetic audio was refused: " << audio_error;
+                }
                 if (! realtime) return;
                 std::this_thread::sleep_until(
                     start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
