@@ -1551,6 +1551,20 @@ std::atomic<bool>& NoopDrawSkipSwitch()
     return enabled;
 }
 
+/// Whether a clear only hidden passes would read (a layer a script hides keeps its effect buffers
+/// in the graph), and a copy made only for draws after it (a hidden lens's copy of the scene), is
+/// left out while no pass that reads it draws. On by default;
+/// `WALLPAPER_MACHINE_HIDDEN_LAYER_WORK=0` makes them every frame, for an A/B in one binary.
+/// Both ways draw the same bytes. Read when a plan is built.
+std::atomic<bool>& HiddenLayerWorkSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_HIDDEN_LAYER_WORK");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
 /// Colour formats a blend that keeps the destination (`Cs * 0 + Cd * 1`) gives back bit for bit:
 /// eight bits per channel, linear. Every stored value survives the trip through the blender's
 /// arithmetic and back; an sRGB format's decode and encode, a wider format's precision and a
@@ -2313,8 +2327,11 @@ struct MetalRender::Impl
         /// copies replaced by a trade of textures, which write nothing.
         uint64_t copied_bytes { 0 };
         uint32_t traded_copies { 0 };
-        /// Draws left out because they leave their target as it is.
+        /// Draws left out because they leave their target as it is, and clears and copies left
+        /// out because nothing drawn reads what they leave.
         uint32_t noop_draws { 0 };
+        uint32_t skipped_clears { 0 };
+        uint32_t skipped_copies { 0 };
     };
     EncodeCounts frame_encodes;
     EncodeCounts last_frame_encodes;
@@ -2450,6 +2467,8 @@ struct MetalRender::Impl
     std::vector<std::pair<__strong id<MTLTexture>*, id<MTLTexture>>> pooled_snapshot;
     /// Pooled copies run this frame; a frame that ran one is not a repeat.
     uint32_t pooled_moves { 0 };
+    /// Pooled copies left out this frame because nothing drawn reads them (`hiddenCopyUnread`).
+    std::vector<std::pair<int, int>> pooled_skipped;
 
     bool fail(std::string message)
     {
@@ -2532,6 +2551,43 @@ struct MetalRender::Impl
     bool passLeavesTargetAsIs(std::size_t index, const uint8_t* uniform_base) const;
     void markNoopDraws(const uint8_t* uniform_base);
 
+    /// A clear that only a hidden layer's passes would see this frame: the clear of an effect
+    /// buffer, or a hidden draw's first-use clear, of a name no other name shares a trade,
+    /// alias, pin or attachment with. `readers` are the passes after it, up to the next pass
+    /// that clears the name again, that sample it or draw into it without clearing; the
+    /// next frame's passes before it read none of it, whatever they draw then. While none of
+    /// `readers` draws, the clear changes nothing any drawn pass or the next frame sees.
+    struct HiddenClear
+    {
+        std::vector<std::size_t> readers;
+    };
+    /// Per description, its entry in `hidden_clears`, or -1.
+    std::vector<int32_t>     hidden_clear_at;
+    std::vector<HiddenClear> hidden_clears;
+    /// Likewise for a copy all of whose readers are draws after it, of a name only it writes:
+    /// while none of them draws, nothing reads what it would leave before the next frame's copy
+    /// replaces it. Names a rebuild carries over (composites, layer links) are left alone.
+    std::vector<int32_t>     hidden_copy_at;
+    std::vector<HiddenClear> hidden_copies;
+    /// Builds `hidden_clear_at` and `hidden_copy_at` for the current plan; called whenever the
+    /// pass targets are.
+    void planHiddenWork(const Scene& scene);
+    /// Whether no reader of hidden clear, or copy, `index` draws this frame.
+    bool hiddenClearUnread(std::size_t index) const;
+    bool hiddenCopyUnread(std::size_t index) const;
+    /// Images a left-out clear left as they were, with the colour the clear would have left in
+    /// them: what they hold is read by nothing before a pass clears them again, but an image
+    /// carried into another plan or graph is given that colour first (`settleHiddenClears`).
+    /// An image a frame writes is no longer one of them.
+    std::vector<std::pair<id<MTLTexture>, MTLClearColor>> hidden_stale;
+    std::vector<std::pair<id<MTLTexture>, MTLClearColor>> hidden_stale_at_frame_start;
+    void forgetHiddenStale(id<MTLTexture> written)
+    {
+        if (hidden_stale.empty()) return;
+        std::erase_if(hidden_stale, [written](const auto& entry) { return entry.first == written; });
+    }
+    /// Clears every image a left-out clear left as it was to that clear's colour, into `command`.
+    void settleHiddenClears(id<MTLCommandBuffer> command);
     /// Decides which copies are replaced by a trade of textures. Called after
     /// the reuse table is built, because a reused image must keep its texture.
     void planFeedbackSwaps();
@@ -2752,6 +2808,12 @@ void MetalRender::Impl::releaseGraph()
     pooled_snapshot.clear();
     noop_draws.clear();
     noop_candidates.clear();
+    hidden_clear_at.clear();
+    hidden_clears.clear();
+    hidden_copy_at.clear();
+    hidden_copies.clear();
+    hidden_stale.clear();
+    hidden_stale_at_frame_start.clear();
     images.clear();
     cookie_sources_ready = cookie_binding_ready = cookie_projection_read = false;
     bound_cookie_light = nullptr;
@@ -3641,11 +3703,14 @@ void MetalRender::Impl::holdTargetsForRebuild()
     // A copy trade's source left stale for the next frame's first pass on it: a graph that
     // carried it over would start from that. One the plan can restore is restored, ahead of
     // the next frame on this queue; one whose first pass always clears it is not held.
-    if (std::any_of(feedback_swaps.begin(), feedback_swaps.end(), [](const FeedbackSwap& swap) {
+    // An image a left-out clear left as it was is given that clear, the same way.
+    if (! hidden_stale.empty() ||
+        std::any_of(feedback_swaps.begin(), feedback_swaps.end(), [](const FeedbackSwap& swap) {
             return swap.valid && swap.stale;
         })) {
         id<MTLCommandBuffer> command = [queue commandBuffer];
         settleCopyTrades(command);
+        settleHiddenClears(command);
         [command commit];
     }
     for (const auto& swap : feedback_swaps) {
@@ -3878,6 +3943,12 @@ void MetalRender::Impl::refreshPassTargets(Scene& scene)
     for (std::size_t i = 0; i < prepared.size() && i < descriptions.size(); ++i) {
         if (prepared[i].noop.candidate) noop_candidates.push_back(i);
     }
+    planHiddenWork(scene);
+    // An image no name holds any more is nobody's to settle.
+    std::erase_if(hidden_stale, [this](const auto& entry) {
+        return std::none_of(targets.begin(), targets.end(),
+                            [&entry](const auto& target) { return target.second == entry.first; });
+    });
     pass_labels.clear();
     pass_short_labels.clear();
     if (GpuLabelsEnabled()) {
@@ -4140,6 +4211,133 @@ void MetalRender::Impl::markNoopDraws(const uint8_t* uniform_base)
     for (const auto index : noop_candidates) {
         if (index < noop_draws.size() && passLeavesTargetAsIs(index, uniform_base)) noop_draws[index] = 1;
     }
+}
+
+void MetalRender::Impl::planHiddenWork(const Scene& scene)
+{
+    hidden_clear_at.assign(descriptions.size(), -1);
+    hidden_clears.clear();
+    hidden_copy_at.assign(descriptions.size(), -1);
+    hidden_copies.clear();
+    if (! HiddenLayerWorkSwitch().load(std::memory_order_relaxed)) return;
+    // A sorted scene orders its passes anew as it runs; it keeps its clears.
+    if (! sorted_draws.empty()) return;
+    // Names whose image another name may hold, trade or pin, that a copy writes whole whatever
+    // is visible, that carry depth or samples, or that anything outside the pass list reads:
+    // left alone.
+    std::unordered_set<std::string> excluded { scene_output_key };
+    excluded.insert(pinned_target_keys.begin(), pinned_target_keys.end());
+    for (const auto& [alias, key] : target_aliases) {
+        excluded.insert(alias);
+        excluded.insert(key);
+    }
+    for (const auto& swap : feedback_swaps) {
+        if (! swap.valid) continue;
+        excluded.insert(swap.source_key);
+        excluded.insert(swap.copy_key);
+    }
+    for (const auto& group : pooled_trades) {
+        excluded.insert(group.source_key);
+        for (const auto& copy : group.copies) excluded.insert(copy.key);
+    }
+    for (const auto* table : { &ms_targets, &depth_targets, &ms_depth_targets }) {
+        for (const auto& [key, texture] : *table) {
+            (void)texture;
+            excluded.insert(key);
+        }
+    }
+    for (const auto& desc : descriptions) {
+        if (desc.enabled && desc.kind == MetalPassKind::Copy) excluded.insert(desc.target_key);
+    }
+    const auto considered = [&](std::size_t i) {
+        const auto& desc = descriptions[i];
+        if (excluded.contains(desc.target_key)) return false;
+        if (desc.samples != 1 || desc.generate_mipmaps || desc.scene_depth_attachment) return false;
+        if (i < pass_depths.size() && pass_depths[i] != nil) return false;
+        id<MTLTexture> target = i < pass_targets.size() ? pass_targets[i] : nil;
+        return target != nil && target.mipmapLevelCount == 1 && target.sampleCount == 1;
+    };
+    const auto produced = [this](std::size_t j) { return j >= prepared.size() || ! prepared[j].unproduced_input; };
+    auto plan = PlanUnreadClears(descriptions, execution_order, considered, produced);
+    for (std::size_t i = 0; i < plan.size(); ++i) {
+        if (! plan[i].has_value()) continue;
+        hidden_clear_at[i] = static_cast<int32_t>(hidden_clears.size());
+        hidden_clears.push_back({ std::move(*plan[i]) });
+    }
+
+    // A copy made as a copy: not removed by the copy plan, not traded after its source's last
+    // reader, not one of a pooled set. Its destination is no other trade's name, not pinned,
+    // aliased, multisampled or mip-mapped, not the scene output, and not a name a new graph
+    // takes over with its pixels (a layer composite, a layer link read before it is filled).
+    const auto copy_considered = [&](std::size_t i) {
+        const auto& desc = descriptions[i];
+        if (i < copy_elision.size() && copy_elision[i] != render::CopyElision::None) return false;
+        if (i < feedback_swaps.size() && feedback_swaps[i].valid && feedback_swaps[i].deferred) return false;
+        if (desc.generate_mipmaps) return false;
+        const auto& key = desc.target_key;
+        if (key == scene_output_key || pinned_target_keys.contains(key) || target_aliases.contains(key) ||
+            std::any_of(target_aliases.begin(), target_aliases.end(), [&key](const auto& a) { return a.second == key; }) ||
+            ms_targets.contains(key) || depth_targets.contains(key) ||
+            std::string_view(key).starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX)) {
+            return false;
+        }
+        if (const auto* target = scene.FindRenderTarget(key); target == nullptr || target->carriesPreviousFrame) return false;
+        for (std::size_t k = 0; k < feedback_swaps.size(); ++k) {
+            const auto& swap = feedback_swaps[k];
+            if (swap.valid && k != i && (swap.source_key == key || swap.copy_key == key)) return false;
+        }
+        // A pooled copy's own name is its own: one left out takes no image from the set and
+        // gives none back (`pooled_skipped`).
+        for (const auto& group : pooled_trades) {
+            if (group.source_key == key) return false;
+            for (const auto& copy : group.copies)
+                if (copy.key == key && copy.index != i) return false;
+        }
+        id<MTLTexture> target = i < pass_targets.size() ? pass_targets[i] : nil;
+        return target != nil && target.mipmapLevelCount == 1 && target.sampleCount == 1;
+    };
+    auto copies = PlanUnreadCopies(descriptions, execution_order, copy_considered);
+    for (std::size_t i = 0; i < copies.size(); ++i) {
+        if (! copies[i].has_value()) continue;
+        hidden_copy_at[i] = static_cast<int32_t>(hidden_copies.size());
+        hidden_copies.push_back({ std::move(*copies[i]) });
+    }
+}
+
+bool MetalRender::Impl::hiddenClearUnread(std::size_t index) const
+{
+    if (index >= hidden_clear_at.size() || hidden_clear_at[index] < 0) return false;
+    for (const auto reader : hidden_clears[static_cast<std::size_t>(hidden_clear_at[index])].readers) {
+        if (reader < static_skip.size() && static_skip[reader] != 0) continue;
+        if (passDraws(reader)) return false;
+    }
+    return true;
+}
+
+bool MetalRender::Impl::hiddenCopyUnread(std::size_t index) const
+{
+    if (index >= hidden_copy_at.size() || hidden_copy_at[index] < 0) return false;
+    for (const auto reader : hidden_copies[static_cast<std::size_t>(hidden_copy_at[index])].readers) {
+        if (reader < static_skip.size() && static_skip[reader] != 0) continue;
+        if (passDraws(reader)) return false;
+    }
+    return true;
+}
+
+void MetalRender::Impl::settleHiddenClears(id<MTLCommandBuffer> command)
+{
+    if (hidden_stale.empty()) return;
+    for (const auto& [texture, color] : hidden_stale) {
+        if (command == nil || texture == nil) continue;
+        MTLRenderPassDescriptor* descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
+        AttachForClear(descriptor, texture, color);
+        id<MTLRenderCommandEncoder> encoder = [command renderCommandEncoderWithDescriptor:descriptor];
+        if (encoder == nil) continue;
+        if (GpuLabelsEnabled()) encoder.label = GpuLabel("settle left-out clear");
+        [encoder endEncoding];
+    }
+    hidden_stale.clear();
+    hidden_stale_at_frame_start.clear();
 }
 
 bool MetalRender::Impl::ensureSceneCopyPipeline(MTLPixelFormat format)
@@ -6111,8 +6309,10 @@ bool MetalRender::Impl::applySceneOptimizationSetting(Scene& scene, id<MTLComman
     // The whole plan, not just the flag: the copy plan decides which targets
     // exist at all, so turning the setting back on with only `enabled = true`
     // would leave elided copies unexecuted and aliased images unallocated.
-    // A stale copy-trade source gets its image back first, ahead of this frame.
+    // A stale copy-trade source gets its image back first, ahead of this frame, and an image a
+    // left-out clear left as it was gets that clear.
     settleCopyTrades(command);
+    settleHiddenClears(command);
     releasePooledTrades();
     releaseSceneOptimization();
     planCopyElision(scene);
@@ -7657,7 +7857,15 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             (void)position;
             if (impl.feedback_swaps[index].stale) impl.stale_at_frame_start.push_back(index);
         }
+        // The images left-out clears left as they were, as the frame finds them; the clears this
+        // buffer opened with have given theirs a colour of their own.
+        impl.hidden_stale_at_frame_start = impl.hidden_stale;
+        for (const auto& [texture, color] : impl.pending_target_clears) {
+            (void)color;
+            impl.forgetHiddenStale(texture);
+        }
         impl.beginPooledTrades();
+        impl.pooled_skipped.clear();
         const auto abandon_frame = [&impl, &scene](std::string message) {
             // Its command buffer never runs, so every texture still holds what
             // it held when the frame began, and every name has to point back at
@@ -7675,6 +7883,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 impl.feedback_swaps[index].stale = false;
             }
             for (const auto index : impl.stale_at_frame_start) impl.feedback_swaps[index].stale = true;
+            impl.hidden_stale = impl.hidden_stale_at_frame_start;
             impl.static_cache.InvalidateAll();
             dispatch_semaphore_signal(impl.inflight);
             return impl.fail(std::move(message));
@@ -7853,6 +8062,12 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             // render pass first, and the GPU runs this command buffer in order.
             if (position < impl.pooled_release_at.size()) {
                 for (const auto& [g, k] : impl.pooled_release_at[position]) {
+                    // A copy left out this frame took no image to give back.
+                    if (! impl.pooled_skipped.empty() &&
+                        std::find(impl.pooled_skipped.begin(), impl.pooled_skipped.end(), std::pair { g, k }) !=
+                            impl.pooled_skipped.end()) {
+                        continue;
+                    }
                     auto& group = impl.pooled_trades[static_cast<std::size_t>(g)];
                     group.free.push_back(*group.copies[static_cast<std::size_t>(k)].slot);
                 }
@@ -7876,6 +8091,14 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 }
                 const auto source = impl.targets.find(desc.source_key);
                 if (source == impl.targets.end()) continue;
+                // A copy for draws none of which draws this frame: what it would leave is read
+                // by nothing before the next frame's copy replaces it.
+                if (impl.hiddenCopyUnread(i)) {
+                    if (i < impl.pooled_copy_at.size() && impl.pooled_copy_at[i].first >= 0)
+                        impl.pooled_skipped.push_back(impl.pooled_copy_at[i]);
+                    ++impl.frame_encodes.skipped_copies;
+                    continue;
+                }
                 // A copy trade whose source's next writer replaces it this frame (or the next
                 // frame's first pass on it does) runs nothing here; the names trade after the
                 // source's last reader. Otherwise the copy is made below.
@@ -7951,6 +8174,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 const bool identical = source->second.width == target.width &&
                                        source->second.height == target.height &&
                                        source->second.pixelFormat == target.pixelFormat;
+                impl.forgetHiddenStale(target);
                 if (identical) {
                     id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
                     if (gpu_labels) blit.label = GpuLabel(pass_label(i));
@@ -7995,6 +8219,16 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 }
                 continue;
             }
+            // A clear only passes that draw nothing this frame would read: the image keeps what
+            // it holds, which nothing reads before a pass clears it again, and is given the
+            // clear's colour should it be carried into another plan first.
+            if (! draws && clears && impl.hiddenClearUnread(i)) {
+                const auto& c = desc.clear_color;
+                impl.forgetHiddenStale(target);
+                impl.hidden_stale.emplace_back(target, MTLClearColorMake(c[0], c[1], c[2], c[3]));
+                ++impl.frame_encodes.skipped_clears;
+                continue;
+            }
 
             id<MTLTexture> attachment = target;
             if (desc.samples > 1) {
@@ -8010,6 +8244,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                  (! open.drew && open.began_with_clear && open.clear_color == desc.clear_color));
             if (! joins) {
                 close_pass();
+                impl.forgetHiddenStale(target);
                 // Every texel is written by the copy that opens it, so there is
                 // nothing to load.
                 id<MTLTexture> opening = nil;
@@ -8675,7 +8910,7 @@ MetalRender::FrameEncodeCountsForTests MetalRender::LastFrameEncodeCountsForTest
     return { last.render_passes,  last.scene_output_passes,      last.blit_passes,
              last.loaded_passes, last.opening_copies,            last.stored_depth_attachments,
              last.stored_multisample_attachments, last.loaded_bytes, last.copied_bytes,
-             last.traded_copies, last.noop_draws };
+             last.traded_copies, last.noop_draws, last.skipped_clears, last.skipped_copies };
 }
 
 void MetalRender::SetTargetSharingForTests(bool enabled) { TargetSharingSwitch().store(enabled); }
@@ -8703,6 +8938,7 @@ std::vector<std::string> MetalRender::GpuPassLabelsForTests() const
 }
 void MetalRender::SetCopyTradesForTests(bool enabled) { CopyTradesSwitch().store(enabled); }
 void MetalRender::SetSkipNoopDrawsForTests(bool enabled) { NoopDrawSkipSwitch().store(enabled); }
+void MetalRender::SetHiddenLayerWorkForTests(bool enabled) { HiddenLayerWorkSwitch().store(enabled); }
 void MetalRender::SetVideoReuseForTests(bool enabled) { VideoReuseSwitch().store(enabled); }
 void MetalRender::SetLayerLocalSignaturesForTests(bool enabled)
 {

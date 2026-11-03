@@ -54,6 +54,102 @@ bool BlendKeepsDestinationAtZeroAlpha(const MetalBlendState& blend)
     }
 }
 
+std::vector<std::optional<std::vector<std::size_t>>> PlanUnreadClears(
+    const std::vector<ScenePassDescription>& descriptions, const std::vector<std::size_t>& order,
+    const std::function<bool(std::size_t)>& considered, const std::function<bool(std::size_t)>& produced)
+{
+    const std::size_t count = descriptions.size();
+    std::vector<std::optional<std::vector<std::size_t>>> plan(count);
+    if (! order.empty() && order.size() != count) return plan;
+    const auto at = [&order](std::size_t position) { return order.empty() ? position : order[position]; };
+    // Clears its target whatever is visible, in every frame it is not itself left out.
+    const auto resets = [&](std::size_t j, const std::string& key) {
+        const auto& d = descriptions[j];
+        return d.enabled && d.target_key == key && d.load_action == MetalLoadAction::Clear &&
+               ! d.conditional_scene_clear && ! d.depth_only &&
+               (d.kind == MetalPassKind::Clear || d.kind == MetalPassKind::CustomShader) &&
+               (d.kind != MetalPassKind::CustomShader || produced(j));
+    };
+    // Sees what the target holds: a copy of it always, a draw sampling it or drawing onto it
+    // without clearing it when it draws.
+    enum class Read : uint8_t { None, Draw, Always };
+    const auto reads = [&](std::size_t j, const std::string& key) {
+        const auto& d = descriptions[j];
+        if (! d.enabled) return Read::None;
+        if (d.kind == MetalPassKind::Copy) return d.source_key == key ? Read::Always : Read::None;
+        if (d.kind != MetalPassKind::CustomShader) return Read::None;
+        if (std::find(d.texture_keys.begin(), d.texture_keys.end(), key) != d.texture_keys.end() ||
+            (d.target_key == key && d.load_action != MetalLoadAction::Clear)) {
+            return Read::Draw;
+        }
+        return Read::None;
+    };
+    for (std::size_t position = 0; position < count; ++position) {
+        const std::size_t i   = at(position);
+        const auto&       key = descriptions[i].target_key;
+        if (i >= count || key.empty() || ! resets(i, key) || ! considered(i)) continue;
+        std::vector<std::size_t> readers;
+        bool                     ends = false;
+        bool                     seen = false;
+        for (std::size_t later = position + 1; later < count && ! seen; ++later) {
+            const std::size_t j = at(later);
+            if (resets(j, key)) {
+                ends = true;
+                break;
+            }
+            const auto read = reads(j, key);
+            if (read == Read::Always) seen = true;
+            else if (read == Read::Draw) readers.push_back(j);
+        }
+        // Through the end of the frame: the next frame's passes ahead of this one, whatever they
+        // draw then, until one clears the target (this one, at the latest).
+        for (std::size_t earlier = 0; earlier < position && ! seen && ! ends; ++earlier) {
+            const std::size_t j = at(earlier);
+            if (resets(j, key)) break;
+            if (reads(j, key) != Read::None) seen = true;
+        }
+        if (! seen) plan[i] = std::move(readers);
+    }
+    return plan;
+}
+
+std::vector<std::optional<std::vector<std::size_t>>> PlanUnreadCopies(
+    const std::vector<ScenePassDescription>& descriptions, const std::vector<std::size_t>& order,
+    const std::function<bool(std::size_t)>& considered)
+{
+    const std::size_t count = descriptions.size();
+    std::vector<std::optional<std::vector<std::size_t>>> plan(count);
+    if (! order.empty() && order.size() != count) return plan;
+    const auto at = [&order](std::size_t position) { return order.empty() ? position : order[position]; };
+    for (std::size_t position = 0; position < count; ++position) {
+        const std::size_t i    = at(position);
+        const auto&       copy = descriptions[i];
+        if (i >= count || ! copy.enabled || copy.kind != MetalPassKind::Copy || copy.target_key.empty() ||
+            ! considered(i)) {
+            continue;
+        }
+        const auto&              key = copy.target_key;
+        std::vector<std::size_t> readers;
+        bool                     alone = true;
+        for (std::size_t other = 0; other < count && alone; ++other) {
+            const std::size_t j = at(other);
+            const auto&       d = descriptions[j];
+            if (j == i || ! d.enabled) continue;
+            // Another writer, a copy of it, or a reader of the frame before.
+            if (d.target_key == key || (d.kind == MetalPassKind::Copy && d.source_key == key)) {
+                alone = false;
+            } else if (std::find(d.texture_keys.begin(), d.texture_keys.end(), key) != d.texture_keys.end()) {
+                if (d.kind != MetalPassKind::CustomShader || other < position) alone = false;
+                else readers.push_back(j);
+            }
+        }
+        // A copy nothing samples at all is the copy plan's to remove, while scene optimisation
+        // is on; with it off every such copy is made, so its image can be looked at.
+        if (alone && ! readers.empty()) plan[i] = std::move(readers);
+    }
+    return plan;
+}
+
 bool QuadCoversViewport(const MetalQuad& quad, const std::array<float, 16>& matrix, uint32_t width,
                         uint32_t height)
 {

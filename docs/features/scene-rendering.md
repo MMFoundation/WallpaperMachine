@@ -2633,7 +2633,19 @@ render scale, animation speed or audio-response subscription:
   (source over or additive, not a replace or a multiply), into an 8-bit linear image,
   with no depth written and one sample, changes no texel, so its draw is not made.
   Anything unproven is drawn, and the frame the alpha is no longer 0 draws it again.
-  The switch is in [power benchmarking](../testing/power-benchmark.md#ab-comparison-entry-points).
+- On Native Metal, as on Compatibility, a clear only hidden passes would read is left
+  out. A layer a script hides stays in the graph, and its effect buffers were still
+  cleared every frame, each in a render pass of its own, and the copy a hidden lens
+  reads was still made. A clear (or a copy made for draws after it alone) is left out
+  while none of the passes that read what it leaves draws this frame, up to the next
+  pass that clears the image again; the next frame's passes ahead of it may read none
+  of it, whatever they draw then. A copy nothing samples at all stays the copy plan's to
+  remove, so with scene optimisation off it is still made. Images another name holds,
+  trades or pins, the scene output, depth, multisampled and mip-mapped images are left
+  alone, and a sorted scene keeps them. An image a left-out clear left as it was is given that clear's colour
+  before another plan or graph takes it over, so the frame a layer is shown again, and
+  the first frame of a new graph, are the same byte for byte. Both switches are in
+  [power benchmarking](../testing/power-benchmark.md#ab-comparison-entry-points).
 
 The contracts and tests behind each item are in
 [renderer verification](../testing/runtime-regressions.md#continuous-playback-work-contracts).

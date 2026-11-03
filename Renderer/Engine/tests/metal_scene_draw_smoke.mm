@@ -17031,6 +17031,8 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                     encodes.copied_bytes += counts.copied_bytes;
                     encodes.traded_copies += counts.traded_copies;
                     encodes.noop_draws += counts.noop_draws;
+                    encodes.skipped_clears += counts.skipped_clears;
+                    encodes.skipped_copies += counts.skipped_copies;
                     draw_cpu_ms += cpu_after - cpu_before;
                     ++measured;
                 }
@@ -17051,7 +17053,8 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                           "%.1f render passes/frame (%.1f on the scene output, %.1f loading their target "
                           "(%.1f MB), %.1f opening with a copy; %.1f storing depth, %.1f storing samples), "
                           "%.1f blits/frame, %.1f MB copied/frame, %.1f copies traded/frame, "
-                          "%.1f draws left out as no-ops/frame, "
+                          "%.1f draws left out as no-ops/frame, %.1f unread clears and %.1f unread copies "
+                          "left out/frame, "
                           "%.2f ms CPU per drawFrame",
                           double(encodes.render_passes) / measured,
                           double(encodes.scene_output_passes) / measured,
@@ -17063,7 +17066,9 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                           double(encodes.blit_passes) / measured,
                           double(encodes.copied_bytes) / measured / 1e6,
                           double(encodes.traded_copies) / measured,
-                          double(encodes.noop_draws) / measured, draw_cpu_ms / measured);
+                          double(encodes.noop_draws) / measured,
+                          double(encodes.skipped_clears) / measured,
+                          double(encodes.skipped_copies) / measured, draw_cpu_ms / measured);
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << encode_line << std::endl;
             // Work on the scene thread that is the same in every run of the same scene and
             // clock: crossings into the scripts, and rewritten geometry copied for the GPU.
@@ -17146,7 +17151,8 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                             "\"command_buffers_per_draw\":%.3f,\"render_passes_per_draw\":%.3f,"
                             "\"scene_output_passes_per_draw\":%.3f,\"blits_per_draw\":%.3f,"
                             "\"copied_bytes_per_draw\":%.0f,\"traded_copies_per_draw\":%.3f,"
-                            "\"noop_draws_per_draw\":%.3f,"
+                            "\"noop_draws_per_draw\":%.3f,\"skipped_clears_per_draw\":%.3f,"
+                            "\"skipped_copies_per_draw\":%.3f,"
                             "\"render_target_bytes\":%llu,\"device_allocated_bytes\":%llu}\n",
                             paths.scene_id.c_str(), surface_width, surface_height, scale_factor,
                             loaded.scene->render_scale,
@@ -17161,6 +17167,8 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                             double(encodes.copied_bytes) / measured,
                             double(encodes.traded_copies) / measured,
                             double(encodes.noop_draws) / measured,
+                            double(encodes.skipped_clears) / measured,
+                            double(encodes.skipped_copies) / measured,
                             (unsigned long long)render.RenderTargetBytesForTests(),
                             (unsigned long long)device.currentAllocatedSize);
                 std::fflush(stdout);
@@ -20358,30 +20366,44 @@ TEST_F(MetalSceneDraw, APostProcessResultCopiedIntoTheSceneTradesTexturesAndDraw
 }
 
 // ---------------------------------------------------------------------------
-// Draws that leave their target as it is
+// Work nothing visible can see: a draw that leaves its target as it is, and a clear only hidden
+// passes would read
 
 namespace
 {
 
-/// Restores the switch, whatever a test set it to.
+/// Restores both switches and target sharing, whatever a test set them to.
 struct RestoreInvisibleWorkSwitches
 {
-    ~RestoreInvisibleWorkSwitches() { MetalRender::SetSkipNoopDrawsForTests(true); }
+    ~RestoreInvisibleWorkSwitches()
+    {
+        MetalRender::SetSkipNoopDrawsForTests(true);
+        MetalRender::SetHiddenLayerWorkForTests(true);
+        MetalRender::SetTargetSharingForTests(true);
+    }
 };
 
 struct InvisibleWorkRun
 {
     std::vector<std::vector<uint8_t>>                   frames;
     std::vector<MetalRender::FrameEncodeCountsForTests> counts;
+    /// The targets whose names contain the inspected text, read right after the forced graph
+    /// rebuild, before any frame draws into the new graph.
+    std::map<std::string, std::vector<uint8_t>>         held;
 };
 
-/// Draws `frames` frames of `project` with the switch as given, on a fresh parse and renderer,
+/// Draws `frames` frames of `project` with the switches as given, on a fresh parse and renderer,
 /// the way the wallpaper's own draw runs them: the tick, a new graph if the tick asked for one,
-/// then the frame.
+/// then the frame. With `rebuild_at` >= 0 the graph is built again before that frame whatever the
+/// scene asked, as the host does for any change of it, and the targets whose names contain
+/// `inspect` are read back right after. `refuse` frames have their composition refused, so they
+/// are abandoned.
 InvisibleWorkRun DrawWithInvisibleWorkSwitches(const std::filesystem::path& project, const std::filesystem::path& cache,
-                                               bool skip_noop, int frames)
+                                               bool skip_noop, bool hidden_work, int frames, int rebuild_at = -1,
+                                               const std::string& inspect = {}, const std::set<int>& refuse = {})
 {
     MetalRender::SetSkipNoopDrawsForTests(skip_noop);
+    MetalRender::SetHiddenLayerWorkForTests(hidden_work);
     InvisibleWorkRun run;
     LoadedScene      loaded;
     std::string      error;
@@ -20414,8 +20436,26 @@ InvisibleWorkRun DrawWithInvisibleWorkSwitches(const std::filesystem::path& proj
                 (void)tests::ApplyRuntimeSceneChanges(render, scene, graph, false, &change_error);
                 EXPECT_TRUE(change_error.empty()) << change_error;
             }
+            if (frame == rebuild_at) {
+                EXPECT_TRUE(render.clearLastRenderGraphForRebuild());
+                graph = sceneToRenderGraph(scene);
+                EXPECT_TRUE(graph != nullptr && render.compileRenderGraph(scene, *graph)) << render.lastError();
+                render.UpdateCameraFillMode(scene, FillMode::ASPECTFIT);
+                for (const auto& [name, target] : scene.renderTargets) {
+                    (void)target;
+                    if (inspect.empty() || name.find(inspect) == std::string::npos) continue;
+                    std::vector<uint8_t> pixels;
+                    uint32_t             width = 0, height = 0;
+                    if (render.ReadRenderTargetForTests(name, pixels, width, height)) run.held[name] = pixels;
+                }
+            }
             if (scene.shaderValueUpdater != nullptr) scene.shaderValueUpdater->FrameBegin();
-            EXPECT_TRUE(render.drawFrame(scene)) << render.lastError();
+            if (refuse.contains(frame)) {
+                render.RefuseNextCompositionForTests();
+                EXPECT_FALSE(render.drawFrame(scene)) << "frame " << frame << " was expected to be abandoned";
+            } else {
+                EXPECT_TRUE(render.drawFrame(scene)) << render.lastError();
+            }
             scene.PassFrameTime(1.0 / 60.0);
             run.frames.push_back(ReadOutput(render, scene));
             run.counts.push_back(render.LastFrameEncodeCountsForTests());
@@ -20493,8 +20533,8 @@ TEST_F(MetalSceneDraw, ALayerFadedOutToNothingIsLeftOutAndEveryFrameStaysTheSame
         SCOPED_TRACE(blending);
         const auto root    = root_ / ("fade-" + blending);
         const auto project = WriteFadeFixture(root, "vec4(g_Color, g_Alpha)", blending, "0.2 0.4 0.6", FadeScript("0.0"));
-        const auto off = DrawWithInvisibleWorkSwitches(project, root / "cache-off", false, kFrames);
-        const auto on  = DrawWithInvisibleWorkSwitches(project, root / "cache-on", true, kFrames);
+        const auto off = DrawWithInvisibleWorkSwitches(project, root / "cache-off", false, true, kFrames);
+        const auto on  = DrawWithInvisibleWorkSwitches(project, root / "cache-on", true, true, kFrames);
         ExpectSameFrames(off, on, kFrames);
         ASSERT_EQ(on.counts.size(), std::size_t(kFrames));
         EXPECT_NE(off.frames[1], off.frames[2]) << "the faded frame looks like the covered one";
@@ -20532,9 +20572,195 @@ TEST_F(MetalSceneDraw, ADrawThatIsNotProvenToLeaveItsTargetAsItIsIsDrawn)
         const auto root    = root_ / ("unproven-fade-" + std::to_string(k));
         const auto project = WriteFadeFixture(root, variant.fragment, variant.blending, variant.color,
                                               FadeScript(variant.faded));
-        const auto off = DrawWithInvisibleWorkSwitches(project, root / "cache-off", false, kFrames);
-        const auto on  = DrawWithInvisibleWorkSwitches(project, root / "cache-on", true, kFrames);
+        const auto off = DrawWithInvisibleWorkSwitches(project, root / "cache-off", false, true, kFrames);
+        const auto on  = DrawWithInvisibleWorkSwitches(project, root / "cache-on", true, true, kFrames);
         ExpectSameFrames(off, on, kFrames);
         for (const auto& counts : on.counts) EXPECT_EQ(counts.noop_draws, 0u);
+    }
+}
+
+namespace
+{
+
+/// The fixture's card and, beside it, a panel through a chain of two effects that move with the
+/// scene time, whose visibility a script decides: shown for frames 0 and 1, hidden for frames 2
+/// to 5, shown again from frame 6 (the tick before frame k leaves `engine.runtime` at
+/// (k + 1) / 60 s). A layer whose visibility a script writes stays in the graph, so while it is
+/// hidden its chain's clears are all that runs of it.
+std::filesystem::path WriteHiddenChainFixture(const std::filesystem::path& root)
+{
+    const auto project = WriteEffectChainFixture(root, { ChainEffect {}, ChainEffect {} });
+    auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+    auto panel  = layout["objects"][0];
+    panel["id"]      = 2;
+    panel["name"]    = "panel";
+    panel["origin"]  = { 288, 128, 0 };
+    panel["scale"]   = { 0.5, 0.5, 1 };
+    panel["visible"] = { { "value", true },
+                         { "script", "export function update(value) { return !(engine.runtime > 0.04 && "
+                                     "engine.runtime < 0.11); }" } };
+    layout["objects"][0].erase("effects");
+    layout["objects"][0]["origin"] = { 96, 128, 0 };
+    layout["objects"][0]["scale"]  = { 0.5, 0.5, 1 };
+    layout["objects"].push_back(panel);
+    std::ofstream(root / "layout.json") << layout;
+    return project;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, AHiddenLayersClearsAreLeftOutAndItsPictureComesBackAsItWas)
+{
+    // While the panel is hidden nothing that draws reads its effect buffers before they are
+    // cleared again, so their clears are left out, with the render passes they opened. The
+    // frames are the same either way, the first one shown again included, and a frame
+    // abandoned while it is hidden leaves nothing behind either.
+    RestoreInvisibleWorkSwitches restore;
+    constexpr int kFrames = 8;
+    for (const bool sharing : { true, false }) {
+        SCOPED_TRACE(sharing ? "targets shared" : "targets of their own");
+        MetalRender::SetTargetSharingForTests(sharing);
+        const auto root    = root_ / (std::string("hidden-chain-") + (sharing ? "shared" : "own"));
+        const auto project = WriteHiddenChainFixture(root);
+        const auto off = DrawWithInvisibleWorkSwitches(project, root / "cache-off", true, false, kFrames, -1, {}, { 4 });
+        const auto on  = DrawWithInvisibleWorkSwitches(project, root / "cache-on", true, true, kFrames, -1, {}, { 4 });
+        ExpectSameFrames(off, on, kFrames);
+        EXPECT_NE(off.frames[1], off.frames[2]) << "hiding the panel changed nothing";
+        for (int frame = 0; frame < kFrames; ++frame) {
+            SCOPED_TRACE(frame);
+            const bool hidden = frame >= 2 && frame <= 5;
+            EXPECT_EQ(off.counts[frame].skipped_clears, 0u);
+            if (frame == 4) continue;
+            if (hidden) {
+                // The effect's buffer at least; the card's own is pinned for reuse, and one the
+                // reuse table holds keeps its clear.
+                EXPECT_GE(on.counts[frame].skipped_clears, 1u) << "the hidden chain's clears still ran";
+                EXPECT_EQ(on.counts[frame].render_passes + on.counts[frame].skipped_clears,
+                          off.counts[frame].render_passes)
+                    << "a left-out clear did not take its render pass with it";
+            } else {
+                EXPECT_EQ(on.counts[frame].skipped_clears, 0u);
+                EXPECT_EQ(on.counts[frame].render_passes, off.counts[frame].render_passes);
+            }
+        }
+    }
+}
+
+namespace
+{
+
+/// A small solid layer another layer samples: the viewer covers the canvas with the source's
+/// composite. The source fades out to nothing from frame 2 on; the viewer is shown for frames 0
+/// and 1, hidden for frames 2 to 5 and shown again from frame 6. While both are hidden the
+/// source's composite is cleared for nobody: the source draws nothing into it and the viewer
+/// draws nothing out of it.
+std::filesystem::path WriteFadedSourceFixture(const std::filesystem::path& root)
+{
+    // Its alpha follows the scene time as well, so the reuse table cannot keep its composite.
+    const auto project = WriteFadeFixture(root, "vec4(g_Color, g_Alpha * (g_Time * 30.0))", "translucent", "0.2 0.4 0.6",
+                                          "export function update(value) { return engine.runtime > 0.04 ? 0.0 : 1.0; }");
+    std::ofstream(root / "shaders/fade.frag")
+        << "uniform float g_Alpha;\nuniform float g_Time;\nuniform vec3 g_Color;\nvoid main() {\n"
+           "  gl_FragColor = vec4(g_Color, g_Alpha * (g_Time * 30.0));\n}\n";
+    WriteFiles(root, {
+        { "models/viewer.json", R"({"width":384,"height":256,"material":"materials/viewer.json"})" },
+        { "materials/viewer.json",
+          R"({"passes":[{"shader":"viewer","blending":"translucent","cullmode":"nocull","depthtest":"disabled",)"
+          R"("depthwrite":"disabled","textures":["_rt_imageLayerComposite_2_a"]}]})" },
+        { "shaders/viewer.vert",
+          "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+          "varying vec2 v_TexCoord;\nvoid main() {\n"
+          "  gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n  v_TexCoord = a_TexCoord;\n}\n" },
+        { "shaders/viewer.frag",
+          "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+          "void main() { gl_FragColor = vec4(texSample2D(g_Texture0, v_TexCoord).rgb, 1.0); }\n" },
+    });
+    auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+    layout["objects"][1]["scale"] = { 0.25, 0.25, 1 };
+    layout["objects"].push_back(
+        { { "id", 3 }, { "name", "viewer" }, { "image", "models/viewer.json" }, { "origin", { 192, 128, 0 } },
+          { "scale", { 1, 1, 1 } }, { "angles", { 0, 0, 0 } }, { "dependencies", { 2 } },
+          { "visible", { { "value", true },
+                         { "script", "export function update(value) { return !(engine.runtime > 0.04 && "
+                                     "engine.runtime < 0.11); }" } } } });
+    std::ofstream(root / "layout.json") << layout;
+    return project;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, AClearALayerShownAgainReadsRunsAndANewGraphGetsWhatTheClearsLeft)
+{
+    // While the viewer is hidden the source's composite is cleared for nobody, and the clear is
+    // left out; the frame the viewer is shown again, it reads the composite, so the clear runs
+    // again and the viewer shows what it would have. A graph built again while both are hidden
+    // takes over the composite as it is: the left-out clear's colour is put into it first, so
+    // the new graph starts from what the run that kept the clears holds.
+    RestoreInvisibleWorkSwitches restore;
+    MetalRender::SetTargetSharingForTests(false);
+    constexpr int kFrames = 8;
+    for (const int rebuild_at : { -1, 4 }) {
+        SCOPED_TRACE(rebuild_at < 0 ? "one graph" : "graph built again while hidden");
+        const auto root    = root_ / ("faded-source-" + std::to_string(rebuild_at + 1));
+        const auto project = WriteFadedSourceFixture(root);
+        const auto off = DrawWithInvisibleWorkSwitches(project, root / "cache-off", true, false, kFrames, rebuild_at,
+                                                       "_rt_imageLayerComposite_");
+        const auto on  = DrawWithInvisibleWorkSwitches(project, root / "cache-on", true, true, kFrames, rebuild_at,
+                                                       "_rt_imageLayerComposite_");
+        ExpectSameFrames(off, on, kFrames);
+        EXPECT_NE(off.frames[1], off.frames[2]) << "hiding the viewer changed nothing";
+        EXPECT_NE(off.frames[1], off.frames[6]) << "the viewer shown again shows the faded source as it was";
+        ASSERT_EQ(on.counts.size(), std::size_t(kFrames));
+        for (const int frame : { 2, 3, 5 }) {
+            EXPECT_GE(on.counts[frame].skipped_clears, 1u) << "frame " << frame << ": no clear was left out";
+            EXPECT_GE(on.counts[frame].noop_draws, 1u) << "frame " << frame;
+        }
+        for (const int frame : { 6, 7 }) EXPECT_EQ(on.counts[frame].skipped_clears, 0u) << "frame " << frame;
+        if (rebuild_at < 0) continue;
+        ASSERT_FALSE(off.held.empty()) << "the fixture has no composite to carry over";
+        EXPECT_EQ(on.held, off.held) << "a composite carried into the new graph kept what a left-out clear left";
+    }
+}
+
+TEST_F(MetalSceneDraw, ACopyOfTheSceneForAHiddenLensIsLeftOutUntilTheLensIsShownAgain)
+{
+    // A lens reads the scene beneath it through a copy the graph makes for it alone. While a
+    // script hides the lens nothing reads that copy, so it is not made; the frame the lens is
+    // shown again its copy is made first, and every frame looks the same either way. With a
+    // second lens shown all along, the two copies share their images, and the one left out takes
+    // none from the set nor gives one back.
+    RestoreInvisibleWorkSwitches restore;
+    constexpr int kFrames = 8;
+    for (const bool both : { false, true }) {
+        SCOPED_TRACE(both ? "a second lens shown" : "one lens");
+        const auto root    = root_ / (std::string("hidden-lens-") + (both ? "two" : "one"));
+        const auto project = WriteFeedbackFixture(root);
+        std::ofstream(root / "shaders/metal_probe.frag")
+            << "uniform float g_Time;\nvarying vec2 v_TexCoord;\n"
+               "void main() { gl_FragColor = vec4(v_TexCoord.x, frac(v_TexCoord.y + g_Time), 0.25, 1.0); }\n";
+        auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+        if (! both) layout["objects"].erase(2);
+        layout["objects"][1]["visible"] = {
+            { "value", true },
+            { "script", "export function update(value) { return !(engine.runtime > 0.04 && engine.runtime < 0.11); }" }
+        };
+        std::ofstream(root / "layout.json") << layout;
+        const auto off = DrawWithInvisibleWorkSwitches(project, root / "cache-off", true, false, kFrames, -1, {}, { 4 });
+        const auto on  = DrawWithInvisibleWorkSwitches(project, root / "cache-on", true, true, kFrames, -1, {}, { 4 });
+        ExpectSameFrames(off, on, kFrames);
+        EXPECT_NE(off.frames[1], off.frames[2]) << "hiding the lens changed nothing";
+        ASSERT_EQ(on.counts.size(), std::size_t(kFrames));
+        for (int frame = 0; frame < kFrames; ++frame) {
+            SCOPED_TRACE(frame);
+            const bool hidden = frame >= 2 && frame <= 5;
+            EXPECT_EQ(off.counts[frame].skipped_copies, 0u);
+            if (frame == 4) continue;
+            EXPECT_EQ(on.counts[frame].skipped_copies, hidden ? 1u : 0u);
+            if (hidden) {
+                EXPECT_GT(off.counts[frame].blit_passes + off.counts[frame].traded_copies,
+                          on.counts[frame].blit_passes + on.counts[frame].traded_copies)
+                    << "the hidden lens's copy was still made";
+            }
+        }
     }
 }

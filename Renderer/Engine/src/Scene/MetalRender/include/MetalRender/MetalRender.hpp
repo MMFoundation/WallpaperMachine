@@ -310,8 +310,11 @@ public:
         uint64_t copied_bytes { 0 };
         uint32_t traded_copies { 0 };
         /// Draws left out because, with the frame's uniforms, they leave their target exactly as
-        /// it is (alpha 0 under a blend that keeps the destination).
+        /// it is (alpha 0 under a blend that keeps the destination), and clears and copies left
+        /// out because no pass drawn in the frame reads what they leave (a hidden layer's).
         uint32_t noop_draws { 0 };
+        uint32_t skipped_clears { 0 };
+        uint32_t skipped_copies { 0 };
     };
     [[nodiscard]] FrameEncodeCountsForTests LastFrameEncodeCountsForTests() const;
 
@@ -385,6 +388,9 @@ public:
     /// from the next frame on. On unless `WALLPAPER_MACHINE_SKIP_NOOP_DRAWS=0`; process-wide,
     /// test-only.
     static void SetSkipNoopDrawsForTests(bool enabled);
+    /// Whether a clear or copy nothing drawn reads is left out, for graphs compiled from now on.
+    /// On unless `WALLPAPER_MACHINE_HIDDEN_LAYER_WORK=0`; process-wide, test-only.
+    static void SetHiddenLayerWorkForTests(bool enabled);
 
     /// How many shader sources this process has handed to the Metal compiler.
     ///

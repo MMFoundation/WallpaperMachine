@@ -194,7 +194,7 @@ device.
   A depth image something samples (the volumetrics depth) is always stored, a hidden
   or reused later user counts as a user, and samples the next frame may load (its
   first pass on them does not clear) are kept.
-- **Draws that change nothing** — `MetalSceneDraw.ALayerFadedOutToNothingIsLeftOutAndEveryFrameStaysTheSame`:
+- **Work nothing visible can see** — `MetalSceneDraw.ALayerFadedOutToNothingIsLeftOutAndEveryFrameStaysTheSame`:
   a screen-filling `vec4(g_Color, g_Alpha)` layer (the solid layer's shape) over a
   moving card fades 1, 0, 1 by script, source over and additive: the two frames at
   alpha 0 leave the draw out, the others draw it, and six frames match
@@ -203,9 +203,22 @@ device.
   `multiply` blend, a colour or alpha from a varying and a colour of 1e60 are all
   drawn, frames identical; letting a replacing blend through changes the frames, and
   dropping the product bound leaves out the infinite colour.
-  The blends are pinned in `MetalNoopDraw.*` (`metal_backend_test`); the shader's colour fact in
+  `.AHiddenLayersClearsAreLeftOutAndItsPictureComesBackAsItWas`: a panel through two
+  effects hidden by script for four frames (one of them abandoned), targets shared and
+  apart: each left-out clear takes its render pass with it and every frame matches
+  `MetalRender::SetHiddenLayerWorkForTests(false)`, the panel's first frame back included.
+  `.AClearALayerShownAgainReadsRunsAndANewGraphGetsWhatTheClearsLeft`: a faded solid
+  layer another layer samples, with the sampler hidden: its composite's clear is left
+  out until the sampler is shown again, and a graph built again while both are hidden
+  takes the composite over cleared (`clearLastRenderGraphForRebuild`); dropping the
+  reader check or the settle changes the frames or the carried composite.
+  `.ACopyOfTheSceneForAHiddenLensIsLeftOutUntilTheLensIsShownAgain`: the copy a hidden
+  lens reads is not made, alone and pooled with a second, shown lens. The plans are
+  pinned in `MetalHiddenClears.*` (readers up to the next clear, the next frame's
+  readers ahead of it, copies, conditional and dropped clears) and the blends in
+  `MetalNoopDraw.*` (`metal_backend_test`); the shader's colour fact in
   `Renderer/Shader/src/reflect/coverage/tests.rs`. On a real scene,
-  `WE_TEST_METAL_PROJECTS` prints them per frame and the switch must give the same
+  `WE_TEST_METAL_PROJECTS` prints both per frame and the switches must give the same
   poster hashes.
 - **Per-frame geometry upload** — `MetalSceneDraw.GeometryRebuiltEveryFrameIsUploadedAndDrawnFromItsOwnSlot`,
   across more frames than there are in-flight slots. Zero live particles must

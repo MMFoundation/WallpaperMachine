@@ -1230,6 +1230,146 @@ TEST(MetalNoopDraw, TheFragmentColourFactsAreReadAndAMalformedChannelProvesNothi
     for (const auto& channel : reflection.fragment_colour) EXPECT_FALSE(channel.has_value());
 }
 
+namespace
+{
+
+ScenePassDescription ClearStep(const std::string& target)
+{
+    ScenePassDescription d;
+    d.kind        = MetalPassKind::Clear;
+    d.name        = "clear " + target;
+    d.target_key  = target;
+    d.load_action = MetalLoadAction::Clear;
+    return d;
+}
+
+ScenePassDescription DrawStep(const std::string& target, MetalLoadAction load, std::vector<std::string> samples = {})
+{
+    ScenePassDescription d;
+    d.kind         = MetalPassKind::CustomShader;
+    d.name         = "draw " + target;
+    d.target_key   = target;
+    d.load_action  = load;
+    d.texture_keys = std::move(samples);
+    return d;
+}
+
+std::vector<std::optional<std::vector<std::size_t>>> Plan(const std::vector<ScenePassDescription>& passes,
+                                                          const std::vector<std::size_t>& order = {})
+{
+    return PlanUnreadClears(passes, order, [](std::size_t) { return true; }, [](std::size_t) { return true; });
+}
+
+} // namespace
+
+TEST(MetalHiddenClears, AClearIsSeenOnlyByTheDrawsUpToTheTargetsNextClear)
+{
+    // A hidden layer's chain: its card clears A, the effect reads A into B (clearing B first),
+    // the next effect draws back onto A, the layer goes onto the scene; the next layer clears A
+    // again, and a draw after that reads A for itself.
+    const std::vector<ScenePassDescription> passes {
+        DrawStep("A", MetalLoadAction::Clear),                 // 0 card
+        DrawStep("B", MetalLoadAction::Clear, { "A" }),        // 1 effect
+        DrawStep("A", MetalLoadAction::Load, { "B" }),         // 2 effect onto A
+        DrawStep("scene", MetalLoadAction::Load, { "A" }),     // 3 composite
+        ClearStep("A"),                                        // 4 the next layer's clear
+        DrawStep("scene", MetalLoadAction::Load, { "A" }),     // 5 reads the next layer's A
+    };
+    const auto plan = Plan(passes);
+    ASSERT_TRUE(plan[0].has_value());
+    EXPECT_EQ(*plan[0], (std::vector<std::size_t> { 1, 2, 3 })) << "the readers stop at the next clear of A";
+    ASSERT_TRUE(plan[1].has_value());
+    EXPECT_EQ(*plan[1], (std::vector<std::size_t> { 2 }));
+    ASSERT_TRUE(plan[4].has_value());
+    EXPECT_EQ(*plan[4], (std::vector<std::size_t> { 5 }));
+    for (const auto index : { 2, 3, 5 }) EXPECT_FALSE(plan[index].has_value()) << index << " clears nothing";
+}
+
+TEST(MetalHiddenClears, AClearTheNextFrameReadsBeforeItIsClearedAgainIsAlwaysSeen)
+{
+    // The scene's first pass reads A as the frame before left it; A's only clear comes later.
+    // Whatever that pass draws then, the clear is what it reads: never left out.
+    std::vector<ScenePassDescription> passes {
+        DrawStep("scene", MetalLoadAction::Clear, { "A" }), // 0 reads last frame's A
+        DrawStep("A", MetalLoadAction::Clear),              // 1 hidden card
+        DrawStep("scene", MetalLoadAction::Load, { "A" }),  // 2
+    };
+    EXPECT_FALSE(Plan(passes)[1].has_value());
+    // A draw onto A before the clear reads it too; one that clears A first ends the span.
+    passes[0] = DrawStep("A", MetalLoadAction::Load);
+    EXPECT_FALSE(Plan(passes)[1].has_value());
+    passes[0] = DrawStep("A", MetalLoadAction::Clear);
+    ASSERT_TRUE(Plan(passes)[1].has_value());
+    EXPECT_EQ(*Plan(passes)[1], (std::vector<std::size_t> { 2 }));
+    // In another execution order the reader runs first again.
+    passes[0] = DrawStep("scene", MetalLoadAction::Clear, { "A" });
+    EXPECT_TRUE(Plan(passes, { 1, 2, 0 })[1].has_value());
+    EXPECT_FALSE(Plan(passes, { 0, 1, 2 })[1].has_value());
+}
+
+TEST(MetalHiddenClears, ACopyOfTheTargetOrAClearThatMayNotApplyKeepsTheClear)
+{
+    // A copy runs whatever is visible, so a clear it reads is always seen.
+    ScenePassDescription copy;
+    copy.kind       = MetalPassKind::Copy;
+    copy.source_key = "A";
+    copy.target_key = "C";
+    std::vector<ScenePassDescription> passes { DrawStep("A", MetalLoadAction::Clear), copy };
+    EXPECT_FALSE(Plan(passes)[0].has_value());
+
+    // A later clear that is switched with the order, or a draw dropped for an input nothing
+    // produces, does not end the span: the readers past it count, and with none past it the
+    // next frame's passes ahead of the clear do.
+    auto conditional                    = ClearStep("A");
+    conditional.conditional_scene_clear = true;
+    passes = { DrawStep("A", MetalLoadAction::Clear), conditional, DrawStep("scene", MetalLoadAction::Load, { "A" }) };
+    ASSERT_TRUE(Plan(passes)[0].has_value());
+    EXPECT_EQ(*Plan(passes)[0], (std::vector<std::size_t> { 2 }));
+    passes = { DrawStep("scene", MetalLoadAction::Load, { "A" }), DrawStep("A", MetalLoadAction::Clear),
+               DrawStep("A", MetalLoadAction::Clear) };
+    const auto unproduced = PlanUnreadClears(
+        passes, {}, [](std::size_t) { return true; }, [](std::size_t j) { return j != 2; });
+    EXPECT_FALSE(unproduced[1].has_value()) << "a dropped draw cleared nothing, so the next frame's reader sees it";
+    EXPECT_TRUE(Plan(passes)[1].has_value());
+    // A clear its caller does not consider is never planned.
+    EXPECT_FALSE(PlanUnreadClears(passes, {}, [](std::size_t) { return false; },
+                                  [](std::size_t) { return true; })[1]
+                     .has_value());
+}
+
+TEST(MetalHiddenClears, ACopyIsForTheDrawsAfterItThatSampleItsResultAlone)
+{
+    ScenePassDescription copy;
+    copy.kind       = MetalPassKind::Copy;
+    copy.source_key = "scene";
+    copy.target_key = "C";
+    // A lens copies the scene so far and samples the copy while drawing into the scene.
+    std::vector<ScenePassDescription> passes {
+        DrawStep("scene", MetalLoadAction::Clear), copy, DrawStep("scene", MetalLoadAction::Load, { "C" }),
+        DrawStep("scene", MetalLoadAction::Load, { "C" }),
+    };
+    const auto all = [](std::size_t) { return true; };
+    ASSERT_TRUE(PlanUnreadCopies(passes, {}, all)[1].has_value());
+    EXPECT_EQ(*PlanUnreadCopies(passes, {}, all)[1], (std::vector<std::size_t> { 2, 3 }));
+    EXPECT_FALSE(PlanUnreadCopies(passes, {}, [](std::size_t) { return false; })[1].has_value());
+    // A reader ahead of it sees the frame before's copy.
+    EXPECT_FALSE(PlanUnreadCopies(passes, { 2, 0, 1, 3 }, all)[1].has_value());
+    // Another pass that writes the copy's name, or a copy of the copy, sees or changes it otherwise.
+    auto other = passes;
+    other.push_back(DrawStep("C", MetalLoadAction::Load));
+    EXPECT_FALSE(PlanUnreadCopies(other, {}, all)[1].has_value());
+    other = passes;
+    auto onward       = copy;
+    onward.source_key = "C";
+    onward.target_key = "D";
+    other.push_back(onward);
+    EXPECT_FALSE(PlanUnreadCopies(other, {}, all)[1].has_value());
+    // A copy nobody samples is the copy plan's to remove, which keeps it while scene
+    // optimisation is off.
+    passes.resize(2);
+    EXPECT_FALSE(PlanUnreadCopies(passes, {}, all)[1].has_value());
+}
+
 TEST(MetalOverwrite, TheEffectCardCoversEveryTexelCentreHoweverItIsFolded)
 {
     for (const auto [width, height] : { std::pair { 1u, 1u }, { 7u, 5u }, { 3840u, 2160u }, { 16384u, 16384u } }) {
