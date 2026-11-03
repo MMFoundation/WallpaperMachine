@@ -1420,6 +1420,20 @@ std::atomic<bool>& VideoReuseSwitch()
     return enabled;
 }
 
+/// Whether a pass that reads the audio spectrum may be reused while the spectrum arrays it
+/// binds hold the bands it drew (silence, above all, which is all zeros). On by default;
+/// `WALLPAPER_MACHINE_AUDIO_REUSE=0` redraws every such pass on every frame, for an A/B in one
+/// binary. Both ways draw the same bytes. Read once, like the other A/B switches; a graph takes
+/// the value it was compiled with.
+std::atomic<bool>& AudioReuseSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_AUDIO_REUSE");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
 /// Whether a frame's copy of rewritten geometry into its slot leaves out what the slot holds
 /// already (see `uploadDynamicMesh`). On by default;
 /// `WALLPAPER_MACHINE_PARTICLE_UPLOAD_DELTA=0` copies everything every frame, for an A/B in one
@@ -2180,6 +2194,13 @@ struct MetalRender::Impl
     /// instead of always redrawn. The table and the present gate read this one
     /// value, so they cannot disagree.
     bool                       video_reuse { false };
+    /// Per description, whether its sample folds the audio spectrum its uniforms carry
+    /// (`AudioReuseSwitch` as the reuse table was built) instead of the pass counting as
+    /// changing on every frame.
+    std::vector<uint8_t>       audio_sampled;
+    /// Advanced once per reuse plan. Folded into the sample of an audio pass whose spectrum
+    /// cannot be told this frame, so that pass is redrawn rather than reused.
+    uint64_t                   audio_unknown_serial { 0 };
 
     // ---- scene optimisation
     /// The static-reuse analysis, over this backend's own pass list. It is a
@@ -5998,6 +6019,8 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
     }
     optimization_compiled = false;
     video_reuse = VideoReuseSwitch().load(std::memory_order_relaxed);
+    const bool audio_reuse = AudioReuseSwitch().load(std::memory_order_relaxed);
+    audio_sampled.assign(descriptions.size(), uint8_t { 0 });
     if (! render::SceneOptimizationEnabled() && execution_order.empty()) return;
 
     const auto* updater = scene.shaderValueUpdater.get();
@@ -6044,8 +6067,16 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
                     : frame_varying_uniform::kAll;
             if ((varying & (frame_varying_uniform::kTime | frame_varying_uniform::kDayTime)) != 0)
                 reasons |= render::DynamicReason::TimeUniform;
-            if ((varying & frame_varying_uniform::kAudio) != 0)
-                reasons |= render::DynamicReason::AudioUniform;
+            if ((varying & frame_varying_uniform::kAudio) != 0) {
+                // The spectrum this frame's uniforms carry is folded into the
+                // sample instead (`frameSample`), so the pass is redrawn exactly
+                // when a band it reads changed. The scene clock does not depend
+                // on this: `computeDemandReasons` still reports the audio.
+                if (audio_reuse && updater != nullptr)
+                    audio_sampled[i] = 1;
+                else
+                    reasons |= render::DynamicReason::AudioUniform;
+            }
             if ((varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax)) !=
                 0)
                 reasons |= render::DynamicReason::PointerUniform;
@@ -6198,6 +6229,13 @@ render::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
             if (static_cache.HasDelayedInputs())
                 hash = render::StaticHashMix(hash,
                     updater->PointerStateHash(desc.node, desc.material_slot, desc.camera_override));
+            if (index < audio_sampled.size() && audio_sampled[index] != 0) {
+                // The bands its uniforms were given this frame. A spectrum the
+                // updater cannot vouch for is a new one every frame.
+                const auto audio = updater->AudioStateHash(desc.node, desc.material_slot);
+                hash = render::StaticHashMix(hash, audio.has_value() ? 1u : 2u);
+                hash = render::StaticHashMix(hash, audio.value_or(audio_unknown_serial));
+            }
         }
     }
 
@@ -6316,6 +6354,7 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
         static_samples.assign(descriptions.size(), render::StaticPassSample {});
     }
     camera_digests.clear();
+    ++audio_unknown_serial;
     // Only the writers of a cacheable target fold into a signature; the rest
     // execute whatever their sample would say.
     // Keep the implicit depth producer in the existing signature traversal.
@@ -8460,6 +8499,8 @@ std::vector<std::string> MetalRender::GpuPassLabelsForTests() const
 }
 void MetalRender::SetCopyTradesForTests(bool enabled) { CopyTradesSwitch().store(enabled); }
 void MetalRender::SetVideoReuseForTests(bool enabled) { VideoReuseSwitch().store(enabled); }
+
+void MetalRender::SetAudioReuseForTests(bool enabled) { AudioReuseSwitch().store(enabled); }
 
 uint64_t MetalRender::RenderTargetBytesForTests() const
 {

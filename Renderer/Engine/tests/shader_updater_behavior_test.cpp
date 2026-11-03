@@ -596,6 +596,82 @@ TEST(ShaderUpdaterAudio, AFrameReadsOneSpectrumWhateverTheAnalysisPublishesMeanw
     EXPECT_FLOAT_EQ(script_reads(), 0.0f);
 }
 
+// The reuse cache redraws an audio pass exactly when what its uniforms carry changed, so the
+// hash must follow every band of every array the material binds, and only those, and must
+// never vouch for a spectrum the uniforms of the same frame might not have been given.
+TEST(ShaderUpdaterAudio, TheAudioStateHashFollowsExactlyTheArraysTheMaterialBinds)
+{
+    AudioServiceGuard guard;
+    audio::AudioSpectrumSnapshot spectrum;
+    spectrum.generation = 3;
+    spectrum.left64.fill(0.25f);
+    audio::SetAudioSpectrumSnapshotForTesting(spectrum);
+
+    Stage f;
+    auto& runtime = *f.scene.runtime;
+    runtime.SetAudioResponseEnabled(true);
+    f.updater.InitUniforms(f.node.get(), 0, Declares({ "g_AudioSpectrum64Left", "g_AudioSpectrum16Right" }));
+    f.updater.InitUniforms(f.node.get(), 1, Declares({ kTime }));
+
+    // Before the host's first frame, reads are not held to one spectrum.
+    EXPECT_FALSE(f.updater.AudioStateHash(f.node.get(), 0).has_value());
+    struct Untracked final : IShaderValueUpdater {
+        using IShaderValueUpdater::InitUniforms;
+        using IShaderValueUpdater::UpdateUniforms;
+        void FrameBegin() override {}
+        void InitUniforms(SceneNode*, const ExistsUniformOp&) override {}
+        void UpdateUniforms(SceneNode*, sprite_map_t&, const UpdateUniformOp&) override {}
+        void FrameEnd() override {}
+        void MouseInput(double, double) override {}
+        void SetTexelSize(float, float) override {}
+        void SetScreenSize(i32, i32) override {}
+    };
+    EXPECT_FALSE(Untracked {}.AudioStateHash(f.node.get(), 0).has_value())
+        << "an updater that does not track audio must not vouch for a spectrum";
+
+    const auto hash_of_frame = [&](const audio::AudioSpectrumSnapshot& next) {
+        audio::SetAudioSpectrumSnapshotForTesting(next);
+        f.updater.FrameBegin();
+        (void)f.Update(0);
+        const auto hash = f.updater.AudioStateHash(f.node.get(), 0);
+        EXPECT_TRUE(hash.has_value());
+        return hash.value_or(0);
+    };
+    const auto first = hash_of_frame(spectrum);
+    EXPECT_EQ(hash_of_frame(spectrum), first) << "the same bands on the next frame";
+    EXPECT_EQ(f.updater.AudioStateHash(f.node.get(), 1), std::optional<uint64_t>(0))
+        << "a material that binds no spectrum";
+
+    auto changed = spectrum;
+    changed.left64[63] = 0.5f;
+    EXPECT_NE(hash_of_frame(changed), first) << "the last band of a bound array";
+    changed = spectrum;
+    changed.right16[0] = 0.5f;
+    EXPECT_NE(hash_of_frame(changed), first) << "the first band of the other bound array";
+    changed = spectrum;
+    changed.right64.fill(0.75f);
+    changed.left16.fill(0.75f);
+    changed.average64.fill(0.75f);
+    changed.generation = 99;
+    EXPECT_EQ(hash_of_frame(changed), first) << "only arrays the material does not bind changed";
+
+    // A frame reads the spectrum it began with, whatever the analysis publishes meanwhile.
+    audio::SetAudioSpectrumSnapshotForTesting(spectrum);
+    f.updater.FrameBegin();
+    (void)f.Update(0);
+    changed = spectrum;
+    changed.left64[0] = 1.0f;
+    audio::SetAudioSpectrumSnapshotForTesting(changed);
+    EXPECT_EQ(f.updater.AudioStateHash(f.node.get(), 0), std::optional<uint64_t>(first));
+
+    // Silence, whether audio response is off or the spectrum is all zeros, is one spectrum.
+    runtime.SetAudioResponseEnabled(false);
+    const auto off = hash_of_frame(spectrum);
+    runtime.SetAudioResponseEnabled(true);
+    EXPECT_EQ(hash_of_frame(audio::AudioSpectrumSnapshot {}), off);
+    EXPECT_NE(off, first);
+}
+
 // ---- puppet bone alpha --------------------------------------------------------------------------
 
 // A shader that declares `g_BonesAlpha` gets one opacity per bone of the node's puppet.

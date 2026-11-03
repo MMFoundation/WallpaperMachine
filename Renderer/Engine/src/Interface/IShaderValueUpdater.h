@@ -5,6 +5,7 @@
 
 #include <array>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -101,6 +102,18 @@ public:
         (void)material_slot;
         (void)camera_override;
         return 0;
+    }
+    /// The audio spectrum this frame's uniforms give this node's material, hashed: every
+    /// `g_AudioSpectrum*` array it binds, as `UpdateUniforms` writes them, and 0 when it binds
+    /// none. Silence is a spectrum of zeros, so it hashes the same on every frame.
+    ///
+    /// `std::nullopt` when the updater cannot say which spectrum the uniforms carry -- the
+    /// default, and a frame whose spectrum is not fixed yet -- so a pass that folds this into
+    /// its static sample is redrawn instead of reused by omission.
+    virtual std::optional<uint64_t> AudioStateHash(SceneNode* node, uint32_t material_slot) const {
+        (void)node;
+        (void)material_slot;
+        return std::nullopt;
     }
     /// Drops what was recorded for a node that is about to be freed, so a
     /// later node allocated at the same address starts from nothing.

@@ -369,6 +369,10 @@ public:
     /// graphs compiled from now on. On unless `WALLPAPER_MACHINE_VIDEO_REUSE=0`;
     /// process-wide, test-only.
     static void SetVideoReuseForTests(bool enabled);
+    /// Whether a pass that reads the audio spectrum is reused while the bands its uniforms
+    /// carry are the ones it drew, for graphs compiled from now on. On unless
+    /// `WALLPAPER_MACHINE_AUDIO_REUSE=0`; process-wide, test-only.
+    static void SetAudioReuseForTests(bool enabled);
 
     /// How many shader sources this process has handed to the Metal compiler.
     ///

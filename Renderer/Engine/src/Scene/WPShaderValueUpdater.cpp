@@ -283,6 +283,41 @@ uint64_t HashFloats(uint64_t hash, const float* values, std::size_t count) {
     return hash;
 }
 
+bool ReadsAudioSpectrum(const WPUniformInfo& info) {
+    return info.has_AudioSpectrum16Left || info.has_AudioSpectrum16Right ||
+           info.has_AudioSpectrum32Left || info.has_AudioSpectrum32Right ||
+           info.has_AudioSpectrum64Left || info.has_AudioSpectrum64Right;
+}
+
+/// Each spectrum array the material binds, with the bands of `snapshot` it carries, in one
+/// fixed order. The uniform write and the reuse hash both go through here, so what a pass is
+/// redrawn for is exactly what its uniforms hold.
+template <typename Op>
+void ForEachBoundSpectrum(const WPUniformInfo& info, const audio::AudioSpectrumSnapshot& snapshot,
+                          Op&& op) {
+    if (info.has_AudioSpectrum16Left) op(G_AUDIO16_LEFT, std::span<const float>(snapshot.left16));
+    if (info.has_AudioSpectrum16Right) op(G_AUDIO16_RIGHT, std::span<const float>(snapshot.right16));
+    if (info.has_AudioSpectrum32Left) op(G_AUDIO32_LEFT, std::span<const float>(snapshot.left32));
+    if (info.has_AudioSpectrum32Right) op(G_AUDIO32_RIGHT, std::span<const float>(snapshot.right32));
+    if (info.has_AudioSpectrum64Left) op(G_AUDIO64_LEFT, std::span<const float>(snapshot.left64));
+    if (info.has_AudioSpectrum64Right) op(G_AUDIO64_RIGHT, std::span<const float>(snapshot.right64));
+}
+
+/// Folds the bands two at a time: each 64-bit word goes into the state through the SplitMix64
+/// finalizer, a bijection, so two runs that differ in one word always end differently. 64 bands
+/// cost 32 steps, where `HashFloats` takes 256.
+uint64_t HashBands(uint64_t hash, std::span<const float> bands) {
+    for (std::size_t at = 0; at < bands.size(); at += 2) {
+        uint64_t word = 0;
+        std::memcpy(&word, bands.data() + at, std::min<std::size_t>(2, bands.size() - at) * sizeof(float));
+        uint64_t x = hash ^ word;
+        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+        hash = x ^ (x >> 31);
+    }
+    return hash;
+}
+
 } // namespace
 
 void WPShaderValueUpdater::FrameBegin() {
@@ -422,11 +457,7 @@ uint32_t WPShaderValueUpdater::FrameVaryingUniforms(SceneNode* node, uint32_t ma
     // A puppet's animation moves its bones and weighs its texture channels alike.
     if (info->has_BONES || info->has_BONESALPHA || info->has_MORPH || info->has_BLENDMAP)
         bits |= frame_varying_uniform::kBones;
-    if (info->has_AudioSpectrum16Left || info->has_AudioSpectrum16Right ||
-        info->has_AudioSpectrum32Left || info->has_AudioSpectrum32Right ||
-        info->has_AudioSpectrum64Left || info->has_AudioSpectrum64Right) {
-        bits |= frame_varying_uniform::kAudio;
-    }
+    if (ReadsAudioSpectrum(*info)) bits |= frame_varying_uniform::kAudio;
     // Parallax that moves the draw through its model matrix, which no uniform reveals.
     const std::string& camera_name = camera_override.empty() ? node->Camera() : camera_override;
     const SceneMaterial* material =
@@ -646,10 +677,7 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* node, uint32_t material_slot,
         info.texs[slot].has_mipmap     = exists(WE_GLTEX_MIPMAPINFO_NAMES[slot]);
         info.texs[slot].has_texel      = exists(WE_GLTEX_TEXEL_NAMES[slot]);
     }
-    const bool reads_audio = info.has_AudioSpectrum16Left || info.has_AudioSpectrum16Right ||
-                             info.has_AudioSpectrum32Left || info.has_AudioSpectrum32Right ||
-                             info.has_AudioSpectrum64Left || info.has_AudioSpectrum64Right;
-    if (reads_audio && m_scene != nullptr && m_scene->runtime != nullptr) {
+    if (ReadsAudioSpectrum(info) && m_scene != nullptr && m_scene->runtime != nullptr) {
         m_scene->runtime->MarkSceneRequiresAudioResponse();
     }
     m_nodeUniformInfoMap[node][material_slot] = info;
@@ -1032,24 +1060,37 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
     }
 
     // ---- audio spectrum, one value per vec4 element
-    if (info->has_AudioSpectrum16Left || info->has_AudioSpectrum16Right ||
-        info->has_AudioSpectrum32Left || info->has_AudioSpectrum32Right ||
-        info->has_AudioSpectrum64Left || info->has_AudioSpectrum64Right) {
+    if (ReadsAudioSpectrum(*info)) {
         static const audio::AudioSpectrumSnapshot silence {};
         const audio::AudioSpectrumSnapshot& snapshot =
             m_scene->runtime != nullptr ? m_scene->runtime->CurrentAudioSpectrumSnapshot() : silence;
-        const auto put = [&](std::string_view name, const auto& bands) {
+        ForEachBoundSpectrum(*info, snapshot, [&](std::string_view name, std::span<const float> bands) {
             m_audioPack.assign(bands.size() * 4, 0.0f);
             for (std::size_t i = 0; i < bands.size(); ++i) m_audioPack[i * 4] = bands[i];
             write(name, ShaderValue(m_audioPack.data(), m_audioPack.size()));
-        };
-        if (info->has_AudioSpectrum16Left) put(G_AUDIO16_LEFT, snapshot.left16);
-        if (info->has_AudioSpectrum16Right) put(G_AUDIO16_RIGHT, snapshot.right16);
-        if (info->has_AudioSpectrum32Left) put(G_AUDIO32_LEFT, snapshot.left32);
-        if (info->has_AudioSpectrum32Right) put(G_AUDIO32_RIGHT, snapshot.right32);
-        if (info->has_AudioSpectrum64Left) put(G_AUDIO64_LEFT, snapshot.left64);
-        if (info->has_AudioSpectrum64Right) put(G_AUDIO64_RIGHT, snapshot.right64);
+        });
     }
+}
+
+std::optional<uint64_t> WPShaderValueUpdater::AudioStateHash(SceneNode* node,
+                                                             uint32_t material_slot) const {
+    if (m_scene == nullptr || node == nullptr) return std::nullopt;
+    const WPUniformInfo* info = FindUniformInfo(node, material_slot);
+    // No record is no evidence that it reads no audio.
+    if (info == nullptr) return std::nullopt;
+    if (! ReadsAudioSpectrum(*info)) return 0;
+    const auto* runtime = m_scene->runtime.get();
+    // Before the host's first frame every read takes the newest analysis, so this one need
+    // not be the one the uniforms were given.
+    if (runtime != nullptr && ! runtime->AudioSpectrumHeldPerFrame()) return std::nullopt;
+    static const audio::AudioSpectrumSnapshot silence {};
+    const audio::AudioSpectrumSnapshot& snapshot =
+        runtime != nullptr ? runtime->CurrentAudioSpectrumSnapshot() : silence;
+    uint64_t hash = 0xcbf29ce484222325ULL;
+    ForEachBoundSpectrum(*info, snapshot, [&hash](std::string_view, std::span<const float> bands) {
+        hash = HashBands(hash, bands);
+    });
+    return hash;
 }
 
 void WPShaderValueUpdater::UpdateSprites(SceneNode* node, sprite_map_t& sprites,

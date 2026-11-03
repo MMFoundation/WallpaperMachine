@@ -1000,6 +1000,10 @@ public:
     /// in that frame reads the spectrum. Takes nothing itself, so a frame that reads no audio
     /// costs nothing.
     void BeginAudioFrame();
+    /// Whether every read of `CurrentAudioSpectrumSnapshot` returns one spectrum until the next
+    /// `BeginAudioFrame`: true from the first `BeginAudioFrame` on. Before it, two reads can
+    /// return two analyses, so what one read saw says nothing about another.
+    bool AudioSpectrumHeldPerFrame() const { return m_audio_frames_begun; }
     /// Runs `destroy()` in every script that started, once, while everything
     /// the scripts could reach still exists. `Scene` calls it first thing in its
     /// destructor, before any of its members die: the runtime is declared above

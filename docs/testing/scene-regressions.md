@@ -2838,6 +2838,18 @@ texture entrances are not decoded-image or native-rendering evidence.
   video is reused only while the import its frame came from is the one it drew: every
   import, a re-import for a changed demand and a directly sampled plane frame included,
   redraws it, and a frame that imported a video frame always presents.
+- **Audio-spectrum reuse** — `StaticReuseInputs.*` in `metal_scene_draw_smoke` and
+  `ShaderUpdaterAudio.TheAudioStateHashFollowsExactlyTheArraysTheMaterialBinds` in
+  `shader_updater_behavior_test`. An audio visualizer under an effect that rewrites its
+  chain's first buffer every frame is reused exactly on the frames whose spectrum, in
+  every array it binds, equals the frame before's (silence repeated, a repeated
+  spectrum, a change only in an array it does not bind) and redrawn on every other,
+  each picture byte-equal to scene optimisation off; with
+  `WALLPAPER_MACHINE_AUDIO_REUSE=0` it is redrawn every frame. An audio pass that samples
+  the changing buffer, directly, in the combo variant that reads it or through an array
+  element, is never reused; the variant whose combo compiles the read out is. The hash
+  answers "unknown" before the host's first frame and for an updater that does not track
+  audio, which redraws the pass.
 - **Sprite-sheet stepping and reuse** — `MetalSceneDraw.ASpriteSheetAdvancesOnItsOwnClockAndRedrawsOnlyWhenTheFrameChanges`.
   A sheet between frame changes may be reused, but its clock must keep running or
   the animation never reaches the next frame. `sprite_animation_test` checks

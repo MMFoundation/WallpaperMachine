@@ -2067,6 +2067,22 @@ than the frame rate, or a paused one, therefore leaves its chain and everything
 downstream that nothing else moves undrawn on the frames it repeats; a playing video
 still keeps the scene's clock running.
 
+A pass that reads the audio spectrum is reusable in the same way while the spectrum
+arrays its shader binds (`g_AudioSpectrum16Left` to `g_AudioSpectrum64Right`) hold the
+bands it drew: the frame's one spectrum, as its uniforms are given it, is part of what
+decides it, every band of every array it binds and no array it does not bind. Silence
+is a spectrum of zeros, so an audio visualizer and everything downstream that nothing
+else moves stays undrawn while nothing plays (or audio response is off), and so does a
+spectrum that repeats; any band changing redraws it on that frame. A frame drawn before
+the host's first frame, when two reads may see two analyses, redraws it. An
+audio-reactive shader still keeps the scene's clock running. A material slot the shader
+never samples was already left empty when the scene was parsed, so an effect that
+declares the layer's picture and draws without it (a visualizer built from the spectrum
+alone) does not depend on the buffer named there either. Being reusable, such a pass keeps
+its buffer to itself instead of sharing it with other targets, inside the same reuse memory
+budget as any other reused pass (on 3784370784, two 768x768 buffers, about 2.4 MB); while
+music plays it is redrawn on most frames all the same.
+
 Reuse needs a target that is both cacheable and holding a pinned allocation,
 because the render-target pool may otherwise hand that image to another key.
 Pinning is bounded by a memory budget; when a graph's targets do not fit at the
