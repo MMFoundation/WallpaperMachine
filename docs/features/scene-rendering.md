@@ -2092,8 +2092,8 @@ coordinates also update those baked scene UVs when placement changes: moving car
 use their existing geometry upload, fixed cards request the existing graph rebuild.
 A compose layer's card (`composelayer`, such as a project layer over the whole
 canvas) finds the screen position it samples through the framed projection, and its
-texture coordinates only place it in its own buffer, so they are left as they are. These updates run at layout events; idle frames add no card
-scan or relayout. Crossing into or out of Fit with blurred backdrop rebuilds the
+texture coordinates only place it in its own buffer, so they are left as they are.
+These updates run at layout events; idle frames add no card scan or relayout. Crossing into or out of Fit with blurred backdrop rebuilds the
 raster before the next draw. The change adds no rendering pass or target and usually
 reduces the HDR framebuffer area compared with the canvas-cover raster.
 
