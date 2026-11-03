@@ -20,6 +20,7 @@
 
 #include <array>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -926,6 +927,183 @@ TEST(ShaderUpdaterPointerHash, ADelayedLastPositionReaderIdlesAfterBothVersionsC
     EXPECT_TRUE(frame()) << "the last-position uniform still has its old value";
     EXPECT_TRUE(frame()) << "the retained reader still has the uniform's old value";
     EXPECT_FALSE(frame());
+}
+
+// ---- what a reuse sample folds ----------------------------------------------------------------
+
+// A layer under a moving parent, its card drawn through a layer-local camera, one effect pass of it
+// drawn through the effect camera, and a perspective scene camera that can shake.
+struct ChainFixture {
+    Scene                        scene;
+    std::shared_ptr<SceneCamera> screen = std::make_shared<SceneCamera>(16.0f / 9.0f, 0.01f, 1000.0f, 50.0f);
+    std::shared_ptr<SceneNode>   parent = std::make_shared<SceneNode>();
+    std::shared_ptr<SceneNode>   layer  = std::make_shared<SceneNode>();
+    std::shared_ptr<SceneNode>   pass   = std::make_shared<SceneNode>();
+    WPShaderValueUpdater         updater { &scene };
+    sprite_map_t                 sprites;
+
+    explicit ChainFixture(const char* cardMaterial = "card")
+    {
+        scene.activeCamera = screen.get();
+        scene.cameras["global"] = screen;
+        auto local = std::make_shared<SceneCamera>(64, 32, -1.0f, 1.0f);
+        local->SetLayerLocal(true);
+        scene.cameras["layer-local"] = local;
+        scene.cameras["effect"] = std::make_shared<SceneCamera>(2, 2, -1.0f, 1.0f);
+        parent->SetTranslate({ 200.0f, 100.0f, 0.0f });
+        layer->SetTranslate({ 10.0f, 20.0f, 0.0f });
+        layer->SetCamera("layer-local");
+        layer->SetRenderTransformOverride(linalg::Matrix4d::Identity());
+        pass->SetCamera("effect");
+        for (auto* node : { layer.get(), pass.get() }) {
+            auto          mesh = std::make_shared<SceneMesh>();
+            SceneMaterial material;
+            material.name = node == layer.get() ? cardMaterial : "pass";
+            mesh->AddMaterial(std::move(material));
+            node->AddMesh(mesh);
+        }
+        parent->AppendChild(layer);
+        scene.sceneGraph->AppendChild(parent);
+        scene.sceneGraph->AppendChild(pass);
+        WPShaderValueData data;
+        data.effect_owner   = layer.get();
+        data.effect_extent  = { 64.0f, 32.0f };
+        data.parallax_layer = layer.get();
+        updater.SetNodeData(pass.get(), data);
+    }
+    ~ChainFixture() { scene.activeCamera = nullptr; }
+
+    DrawTransformInputs Inputs(SceneNode* node, std::vector<std::string> reads, const std::string& camera = "")
+    {
+        return updater.TransformInputs(node, 0, camera, Declares(std::move(reads)));
+    }
+};
+
+constexpr DrawTransformInputs kNothingMoving { .node_transform = false, .active_camera = false, .owner = nullptr };
+
+TEST(ShaderUpdaterSignatures, ALayerLocalCardReadingItsOwnMatricesDependsOnNothingThatMoves)
+{
+    ChainFixture f;
+    // Through the layer-local camera the model matrix is the identity and the view projection is
+    // that camera's, which every sample folds anyway.
+    EXPECT_EQ(f.Inputs(f.layer.get(), { kMvp, kModel, "g_ModelMatrixInverse", "g_ViewProjectionMatrix",
+                                        "g_ModelViewProjectionMatrixInverse", kTime, "g_Texture0Resolution",
+                                        "g_Screen", "g_TexelSize", "g_Color4" }),
+              kNothingMoving);
+    // Through the effect camera the model matrix is the pass node's own transform.
+    EXPECT_EQ(f.Inputs(f.pass.get(), { "g_ViewProjectionMatrix", "g_Texture0Resolution" }), kNothingMoving);
+    EXPECT_EQ(f.Inputs(f.pass.get(), { kMvp }),
+              (DrawTransformInputs { .node_transform = true, .active_camera = false, .owner = nullptr }));
+    EXPECT_EQ(f.Inputs(f.pass.get(), { kModel }),
+              (DrawTransformInputs { .node_transform = true, .active_camera = false, .owner = nullptr }));
+}
+
+TEST(ShaderUpdaterSignatures, AnEffectPassReadingItsLayersMatricesFoldsTheLayerAndTheCamera)
+{
+    ChainFixture f;
+    for (const char* name : { "g_EffectModelViewProjectionMatrix", "g_EffectModelViewProjectionMatrixInverse",
+                              "g_EffectModelMatrix", "g_LayerModelMatrix", "g_EffectTextureProjectionMatrix",
+                              "g_EffectTextureProjectionMatrixInverse" }) {
+        SCOPED_TRACE(name);
+        EXPECT_EQ(f.Inputs(f.pass.get(), { name }),
+                  (DrawTransformInputs { .node_transform = false, .active_camera = true, .owner = f.layer.get() }));
+        // A card has no effect owner: its own transform is the layer's.
+        EXPECT_EQ(f.Inputs(f.layer.get(), { name }),
+                  (DrawTransformInputs { .node_transform = true, .active_camera = true, .owner = nullptr }));
+    }
+}
+
+TEST(ShaderUpdaterSignatures, EverythingElseAboutTheWorldOrTheCameraKeepsTheWholeSample)
+{
+    ChainFixture              f;
+    const DrawTransformInputs all {};
+    // The eye and view axes, particle orientation, the lights, puppets and the cursor.
+    for (const char* name : { "g_EyePosition", "g_ViewForward", "g_ViewUp", "g_ViewRight", "g_OrientationUp",
+                              "g_OrientationRight", "g_OrientationForward", "g_LightsPosition",
+                              "g_LightsColorPremultiplied", "g_LightsColorRadius", "g_LPoint_Origin",
+                              "g_LFeature_ShadowProjection", "g_Bones", "g_BonesAlpha", "g_MorphWeights",
+                              "g_BlendMap", "g_PointerPosition", "g_PointerPositionLast", "g_PointerState",
+                              "g_ParallaxPosition" }) {
+        SCOPED_TRACE(name);
+        EXPECT_EQ(f.Inputs(f.layer.get(), { kMvp, name }), all);
+        EXPECT_EQ(f.Inputs(f.pass.get(), { name }), all);
+    }
+    // A draw through a scene camera is placed by its transform, the camera and parallax.
+    EXPECT_EQ(f.Inputs(f.layer.get(), { kMvp }, "global"), all);
+    f.pass->SetCamera("global");
+    EXPECT_EQ(f.Inputs(f.pass.get(), { "g_Texture0Resolution" }), all);
+    // A volumetric light's pass is written from the light.
+    SceneVolumetricLight volume;
+    WPShaderValueData    lit;
+    lit.volumetric_light = &volume;
+    f.updater.SetNodeData(f.layer.get(), lit);
+    EXPECT_EQ(f.Inputs(f.layer.get(), { kMvp }), all);
+    // Nothing known about what the program reads is no evidence that it reads nothing.
+    EXPECT_EQ(f.updater.TransformInputs(f.layer.get(), 0, "", ExistsUniformOp {}), all);
+}
+
+TEST(ShaderUpdaterSignatures, AComposeLayersFirstPassKeepsTheWholeSample)
+{
+    // It reads the screen behind the layer through its full model matrix and the scene camera.
+    ChainFixture f("composelayer");
+    EXPECT_EQ(f.Inputs(f.layer.get(), { kMvp }), DrawTransformInputs {});
+    EXPECT_EQ(f.Inputs(f.layer.get(), {}), DrawTransformInputs {});
+}
+
+// The drift guard: every uniform `UpdateUniforms` writes for a chain draw changes, when a node or
+// the camera moves, only if the sample `TransformInputs` asks for folds what moved. A uniform added
+// later that derives from a transform or the camera without being taught to `TransformInputs`
+// fails here rather than on a wallpaper.
+TEST(ShaderUpdaterSignatures, EveryWrittenUniformThatMovesIsOneTheSampleFolds)
+{
+    ChainFixture f;
+    const auto   every = [](std::string_view) { return true; };
+    for (auto* node : { f.layer.get(), f.pass.get() }) f.updater.InitUniforms(node, every);
+
+    enum class Moved { Parent, PassNode, Camera };
+    struct Move {
+        Moved                 what;
+        const char*           name;
+        std::function<void()> apply;
+        std::function<void()> undo;
+    };
+    const std::vector<Move> moves {
+        { Moved::Parent, "the layer's parent", [&] { f.parent->SetTranslate({ 260.0f, 80.0f, 5.0f }); },
+          [&] { f.parent->SetTranslate({ 200.0f, 100.0f, 0.0f }); } },
+        { Moved::PassNode, "the pass node", [&] { f.pass->SetTranslate({ 3.0f, -4.0f, 1.0f }); },
+          [&] { f.pass->SetTranslate({ 0.0f, 0.0f, 0.0f }); } },
+        { Moved::Camera, "the camera shake", [&] { f.screen->SetShakeOffset({ 7.0, -3.0, 2.0 }); },
+          [&] { f.screen->SetShakeOffset({ 0.0, 0.0, 0.0 }); } },
+    };
+    std::size_t written = 0;
+    std::size_t moved   = 0;
+    for (auto* node : { f.layer.get(), f.pass.get() }) {
+        const bool card = node == f.layer.get();
+        for (const auto& move : moves) {
+            Captured before, after;
+            f.updater.UpdateUniforms(node, f.sprites, Collect(before));
+            move.apply();
+            f.updater.UpdateUniforms(node, f.sprites, Collect(after));
+            move.undo();
+            written = std::max(written, before.size());
+            for (const auto& [name, value] : before) {
+                if (after.at(name) == value) continue;
+                ++moved;
+                SCOPED_TRACE(std::string(card ? "card " : "pass ") + name + " moved with " + move.name);
+                const auto inputs = f.updater.TransformInputs(node, 0, "", Declares({ name }));
+                switch (move.what) {
+                case Moved::Camera: EXPECT_TRUE(inputs.active_camera); break;
+                case Moved::Parent:
+                    // The card is the layer; an effect pass reads the layer as its owner.
+                    EXPECT_TRUE(card ? inputs.node_transform : inputs.owner == f.layer.get());
+                    break;
+                case Moved::PassNode: EXPECT_TRUE(! card && inputs.node_transform); break;
+                }
+            }
+        }
+    }
+    EXPECT_GT(written, 30u) << "the updater wrote fewer uniforms than it knows";
+    EXPECT_GT(moved, 0u) << "nothing moved: the guard checked nothing";
 }
 
 } // namespace

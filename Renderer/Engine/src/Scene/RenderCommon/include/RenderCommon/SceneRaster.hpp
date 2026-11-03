@@ -416,7 +416,9 @@ inline uint64_t CameraSampleDigest(const wallpaper::SceneCamera& camera) {
 /// Neither is covered by the node transform, and both move without a graph
 /// rebuild: a fill-mode change, a camera layer's zoom or pan, a script. Every
 /// caller shares this one definition, so caches invalidate on the same camera
-/// changes.
+/// changes. `active_camera` false leaves the active camera out, for a pass whose
+/// uniforms are proven not to read it (`IShaderValueUpdater::TransformInputs`);
+/// the camera it draws through is folded either way.
 ///
 /// `digest` gives each camera's `CameraSampleDigest`. A caller sampling many
 /// passes of one frame may remember it per camera for that frame, since nearly
@@ -425,7 +427,8 @@ inline uint64_t CameraSampleDigest(const wallpaper::SceneCamera& camera) {
 template <typename Digest>
 inline uint64_t FoldPassCameras(uint64_t hash, const wallpaper::Scene& scene,
                                 const std::string& camera_override,
-                                const wallpaper::SceneNode* node, Digest&& digest) {
+                                const wallpaper::SceneNode* node, Digest&& digest,
+                                bool active_camera = true) {
     const auto fold = [&hash, &digest](const wallpaper::SceneCamera* camera) {
         if (camera == nullptr) return;
         hash = StaticHashMix(hash, digest(*camera));
@@ -437,7 +440,7 @@ inline uint64_t FoldPassCameras(uint64_t hash, const wallpaper::Scene& scene,
         const auto found = scene.cameras.find(camera_name);
         fold(found != scene.cameras.end() ? found->second.get() : nullptr);
     }
-    fold(scene.activeCamera);
+    if (active_camera) fold(scene.activeCamera);
     return hash;
 }
 

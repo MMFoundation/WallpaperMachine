@@ -609,9 +609,10 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp&
     InitUniforms(pNode, 0, existsOp);
 }
 
-void WPShaderValueUpdater::InitUniforms(SceneNode* node, uint32_t material_slot,
-                                        const ExistsUniformOp& exists) {
-    if (node == nullptr || ! exists) return;
+/// Which of the uniforms this updater writes a program has, as `exists` answers for each name.
+/// One table for the declared members (`InitUniforms`) and the read ones (`TransformInputs`), so
+/// the two cannot name a uniform differently.
+static WPUniformInfo UniformInfoOf(const ExistsUniformOp& exists) {
     WPUniformInfo info;
     for (std::size_t i=0;i<info.has_render_var.size();++i)
         info.has_render_var[i]=exists(kRenderVariables[i]);
@@ -677,10 +678,80 @@ void WPShaderValueUpdater::InitUniforms(SceneNode* node, uint32_t material_slot,
         info.texs[slot].has_mipmap     = exists(WE_GLTEX_MIPMAPINFO_NAMES[slot]);
         info.texs[slot].has_texel      = exists(WE_GLTEX_TEXEL_NAMES[slot]);
     }
+    return info;
+}
+
+void WPShaderValueUpdater::InitUniforms(SceneNode* node, uint32_t material_slot,
+                                        const ExistsUniformOp& exists) {
+    if (node == nullptr || ! exists) return;
+    const WPUniformInfo info = UniformInfoOf(exists);
     if (ReadsAudioSpectrum(info) && m_scene != nullptr && m_scene->runtime != nullptr) {
         m_scene->runtime->MarkSceneRequiresAudioResponse();
     }
     m_nodeUniformInfoMap[node][material_slot] = info;
+}
+
+// Every uniform `UpdateUniforms` derives from a node's world transform, another node's or the
+// scene's active camera, for a draw that is neither a compose layer's first pass nor drawn
+// through a scene-space camera (those keep everything):
+//
+// - the model matrices (`g_ModelMatrix`, its inverse, `g_ModelViewProjectionMatrix`, its inverse,
+//   the normal and Alt matrices): the identity through a layer-local camera, the node's own
+//   transform through the effect camera;
+// - the effect matrices (`g_LayerModelMatrix`, `g_EffectModelMatrix`,
+//   `g_EffectModelViewProjectionMatrix` and `g_EffectTextureProjectionMatrix` with their
+//   inverses): the effect's layer (or the node) and the active camera;
+// - the eye and view axes, which fall back to the active camera; particle orientation, which
+//   carries the node; the lights, whose packing sorts along the active camera; a volumetric
+//   light's matrices; bones, morphs and texture channels, which a puppet poses in its layer's
+//   world; and the cursor and parallax values: none of these is proven, so they keep everything.
+//
+// The view-projection matrices are the draw camera's, which a sample always folds. Parallax moves
+// no draw through a layer-local or effect camera (`ParallaxMovesDraw`).
+//
+// A uniform `UpdateUniforms` comes to derive from a transform or a camera must be added here, to
+// what a sample folds or to the unproven list, in the same change: the drift test
+// (`ShaderUpdaterSignatures.EveryWrittenUniformThatMovesIsOneTheSampleFolds`) moves only parents,
+// nodes and the camera, not lights, puppets, particles or volumetrics.
+DrawTransformInputs WPShaderValueUpdater::TransformInputs(SceneNode* node, uint32_t material_slot,
+                                                          const std::string& camera_override,
+                                                          const ExistsUniformOp& reads) const {
+    const DrawTransformInputs all {};
+    if (m_scene == nullptr || node == nullptr || ! reads) return all;
+    const SceneMaterial* material =
+        node->Mesh() != nullptr ? node->Mesh()->MaterialForSlot(material_slot) : nullptr;
+    if (material == nullptr || SamplesScreenBackground(*material)) return all;
+    const std::string& camera_name = camera_override.empty() ? node->Camera() : camera_override;
+    const SceneCamera* camera      = CameraNamed(camera_name);
+    if (camera == nullptr) return all;
+    const bool layer_local = camera->IsLayerLocal();
+    if (! layer_local && camera_name != "effect") return all;
+    const WPShaderValueData* data = FindNodeData(node, material_slot);
+    if (data != nullptr && data->volumetric_light != nullptr) return all;
+
+    const WPUniformInfo info = UniformInfoOf(reads);
+    const bool unproven =
+        info.has_EYE || info.has_VIEWFORWARD || info.has_VIEWUP || info.has_VIEWRIGHT ||
+        info.has_ORIENTATIONUP || info.has_ORIENTATIONRIGHT || info.has_ORIENTATIONFORWARD ||
+        info.has_LP || info.has_LCP || info.has_LCR || info.has_LIGHTS_V1 ||
+        info.has_SHADOW_FEATURES || info.has_BONES || info.has_BONESALPHA || info.has_MORPH ||
+        info.has_BLENDMAP || info.has_POINTERPOSITION || info.has_POINTERPOSITIONLAST ||
+        info.has_POINTERSTATE || info.has_PARALLAXPOSITION;
+    if (unproven) return all;
+
+    DrawTransformInputs inputs { .node_transform = false, .active_camera = false, .owner = nullptr };
+    const bool model = info.has_M || info.has_AM || info.has_ANM || info.has_MI || info.has_MVP ||
+                       info.has_MVPI || info.has_NORMALMODEL;
+    if (model && ! layer_local) inputs.node_transform = true;
+    const bool effect = info.has_layer_model || info.has_effect_model || info.has_effect_mvp ||
+                        info.has_effect_mvpi || info.has_ETVP || info.has_ETVPI;
+    if (effect) {
+        SceneNode* owner = data != nullptr && data->effect_owner != nullptr ? data->effect_owner : node;
+        if (owner == node) inputs.node_transform = true;
+        else inputs.owner = owner;
+        inputs.active_camera = true;
+    }
+    return inputs;
 }
 
 void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites,

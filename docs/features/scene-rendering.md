@@ -2083,6 +2083,21 @@ its buffer to itself instead of sharing it with other targets, inside the same r
 budget as any other reused pass (on 3784370784, two 768x768 buffers, about 2.4 MB); while
 music plays it is redrawn on most frames all the same.
 
+A layer's own picture and its effects up to the last are drawn into the layer's own
+buffers, through a camera local to the layer, so where the layer sits and where the
+scene camera looks reach them only through the uniforms that say so: the effect
+matrices (`g_EffectModelViewProjectionMatrix` and its kind), the eye and view axes,
+lights, puppet bones and the cursor. Such a pass is reused while the layer moves (an
+animated parent, a bone it is attached to, a script) or the camera shakes, unless its
+shader reads one of those uniforms. What it reads is what the shader compiler proved
+can reach the picture, not what it declares: Wallpaper Engine's image shader computes
+a view direction from `g_EyePosition` in every variant but uses it only when lit. The
+last pass, which puts the layer on the scene, follows the layer and the camera and is
+drawn again as before, and so is a composition layer's first pass, which reads the
+screen behind the layer. The pixels are the same either way;
+`WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=0` draws such passes again whenever the layer
+or the camera moves, for comparison.
+
 Reuse needs a target that is both cacheable and holding a pinned allocation,
 because the render-target pool may otherwise hand that image to another key.
 Pinning is bounded by a memory budget; when a graph's targets do not fit at the

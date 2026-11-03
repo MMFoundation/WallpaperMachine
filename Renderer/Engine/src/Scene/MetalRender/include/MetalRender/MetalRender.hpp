@@ -373,6 +373,11 @@ public:
     /// carry are the ones it drew, for graphs compiled from now on. On unless
     /// `WALLPAPER_MACHINE_AUDIO_REUSE=0`; process-wide, test-only.
     static void SetAudioReuseForTests(bool enabled);
+    /// Whether a pass drawn through a layer-local or effect camera leaves out of its reuse sample
+    /// the node's world transform and the active camera when no uniform its program reads is
+    /// derived from them, for graphs compiled from now on. On unless
+    /// `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=0`; process-wide, test-only.
+    static void SetLayerLocalSignaturesForTests(bool enabled);
 
     /// How many shader sources this process has handed to the Metal compiler.
     ///

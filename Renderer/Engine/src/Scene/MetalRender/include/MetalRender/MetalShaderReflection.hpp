@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace wallpaper::metal
@@ -80,6 +81,11 @@ struct MetalShaderReflection
     /// The fragment stage writes colour 0 for every fragment it runs for: nothing discards and
     /// no sample mask is written (`"fragment_always_writes"`). False when not proven.
     bool                                fragment_always_writes { false };
+    /// The uniform block members anything the program produces can depend on
+    /// (`"read_uniforms"`): a member it declares, and may even name, only in values nothing it
+    /// produces uses is not among them. Absent when the compiler could not say, which is read as
+    /// "every declared member is read".
+    std::optional<std::unordered_set<std::string>> read_uniforms;
 
     [[nodiscard]] const MetalUniformBlock* uniformBlock() const
     {
@@ -89,6 +95,13 @@ struct MetalShaderReflection
     [[nodiscard]] bool                      hasMember(std::string_view name) const
     {
         return member(name) != nullptr;
+    }
+    /// Whether the program can read member `name`: it declares it, and the compiler did not
+    /// prove that nothing the program produces depends on it.
+    [[nodiscard]] bool readsMember(std::string_view name) const
+    {
+        return hasMember(name) &&
+               (! read_uniforms.has_value() || read_uniforms->contains(std::string(name)));
     }
 };
 

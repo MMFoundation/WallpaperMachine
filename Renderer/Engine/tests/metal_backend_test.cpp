@@ -1113,6 +1113,35 @@ TEST(MetalOverwrite, TheReflectionCarriesTheCoverageFactsOnlyWhenTheyAreThere)
     EXPECT_FALSE(reflection.vertex_position.has_value());
 }
 
+TEST(MetalReflection, AMemberIsUnreadOnlyWhenTheCompilerSaysWhatIsRead)
+{
+    const std::string block =
+        R"({"descriptor_bindings":[],"uniform_blocks":[{"name":"GlobalUniforms","size":80,"binding":1,)"
+        R"("members":[{"name":"g_ModelViewProjectionMatrix","offset":0,"size":64},)"
+        R"({"name":"g_EyePosition","offset":64,"size":12}]}],"vertex_inputs":[],"active_texture_slots":[])";
+    MetalShaderReflection reflection;
+    std::string           error;
+    ASSERT_TRUE(ParseMetalShaderReflection(block + R"(,"read_uniforms":["g_ModelViewProjectionMatrix"]})",
+                                           reflection, &error))
+        << error;
+    EXPECT_TRUE(reflection.hasMember("g_EyePosition"));
+    EXPECT_FALSE(reflection.readsMember("g_EyePosition"));
+    EXPECT_TRUE(reflection.readsMember("g_ModelViewProjectionMatrix"));
+    // A name the block does not declare is not read, whatever the list says.
+    ASSERT_TRUE(ParseMetalShaderReflection(block + R"(,"read_uniforms":["g_Time"]})", reflection, &error)) << error;
+    EXPECT_FALSE(reflection.readsMember("g_Time"));
+
+    // Without the list, and with a list that is not one of names, every declared member is read.
+    for (const std::string tail : { std::string("}"), std::string(R"(,"read_uniforms":["g_ModelViewProjectionMatrix",7]})"),
+                                    std::string(R"(,"read_uniforms":"g_ModelViewProjectionMatrix"})") }) {
+        SCOPED_TRACE(tail);
+        ASSERT_TRUE(ParseMetalShaderReflection(block + tail, reflection, &error)) << error;
+        EXPECT_FALSE(reflection.read_uniforms.has_value());
+        EXPECT_TRUE(reflection.readsMember("g_EyePosition"));
+        EXPECT_TRUE(reflection.readsMember("g_ModelViewProjectionMatrix"));
+    }
+}
+
 TEST(MetalOverwrite, OnlyBlendingThatReplacesTheTexelLetsADrawOverwriteIt)
 {
     EXPECT_TRUE(BlendReplacesDestination(ToMetalBlendState(BlendMode::Disable, AlphaBlendRule::Material, 1)));

@@ -9688,6 +9688,267 @@ void AdvanceSceneFrame(MetalRender& render, Scene& scene)
 
 } // namespace
 
+// ---------------------------------------------------------------------------
+// Layer-local reuse samples: a moving layer or a shaking camera and a still chain
+
+namespace
+{
+
+constexpr const char* kStillCard =
+    "varying vec2 v_TexCoord;\n"
+    "void main() { gl_FragColor = vec4(v_TexCoord.x, v_TexCoord.y, 0.25, 1.0); }\n";
+constexpr const char* kStillEffect =
+    "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+    "void main() { vec4 c = texSample2D(g_Texture0, v_TexCoord);\n"
+    "  gl_FragColor = vec4(c.g, c.r, c.b * 2.0, c.a); }\n";
+
+/// A layer under a group, drawn through two effects: its card (`card_fragment`) and the first
+/// effect (`first_fragment`) fill the layer's own buffers, the second effect puts the picture on
+/// the scene where the layer sits. With `shake` the scene camera shakes.
+std::filesystem::path WriteStillChainFixture(const std::filesystem::path& root, bool shake,
+                                             const std::string& card_fragment,
+                                             const std::string& first_fragment)
+{
+    const auto        project = WriteFixture(root);
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+        "void main() { gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n"
+        "  v_TexCoord = a_TexCoord; }\n";
+    const auto material = [](std::string_view shader) {
+        return R"({"passes":[{"shader":")" + std::string(shader) +
+               R"(","textures":[null],"blending":"normal","cullmode":"nocull",)"
+               R"("depthtest":"disabled","depthwrite":"disabled"}]})";
+    };
+    const std::map<std::string, std::string> files {
+        { "shaders/metal_probe.frag", card_fragment },
+        { "effects/first/effect.json", R"({"name":"first","passes":[{"material":"materials/first.json"}]})" },
+        { "materials/first.json", material("chain_first") },
+        { "shaders/chain_first.vert", vertex },
+        { "shaders/chain_first.frag", first_fragment },
+        { "effects/second/effect.json", R"({"name":"second","passes":[{"material":"materials/second.json"}]})" },
+        { "materials/second.json", material("chain_second") },
+        { "shaders/chain_second.vert", vertex },
+        { "shaders/chain_second.frag",
+          "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+          "void main() { gl_FragColor = texSample2D(g_Texture0, v_TexCoord); }\n" },
+    };
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+    if (shake) {
+        layout["general"]["camerashake"]          = true;
+        layout["general"]["camerashakeamplitude"] = 4.0;
+        layout["general"]["camerashakespeed"]     = 3.0;
+        layout["general"]["camerashakeroughness"] = 1.0;
+    }
+    auto card       = layout["objects"][0];
+    card["parent"]  = 2;
+    card["origin"]  = { 0, 0, 0 };
+    card["effects"] = nlohmann::json::array({ { { "file", "effects/first/effect.json" }, { "visible", true } },
+                                              { { "file", "effects/second/effect.json" }, { "visible", true } } });
+    layout["objects"] = nlohmann::json::array(
+        { card, { { "id", 2 }, { "name", "group" }, { "origin", { 192, 128, 0 } } } });
+    std::ofstream(root / "layout.json") << layout;
+    return project;
+}
+
+SceneNode* NodeNamed(SceneNode* node, std::string_view name)
+{
+    if (node == nullptr) return nullptr;
+    if (node->Name() == name) return node;
+    for (const auto& child : node->GetChildren()) {
+        if (auto* found = NodeNamed(child.get(), name)) return found;
+    }
+    return nullptr;
+}
+
+/// Every frame of one run of the still chain, and how many passes each frame reused.
+struct ChainRun
+{
+    std::vector<std::vector<uint8_t>> frames;
+    std::vector<uint64_t>             reused;
+};
+
+/// Draws `frames` production frames of `project` with scene optimisation `optimise` and
+/// layer-local samples `layer_local`, moving the layer's group a little every frame when
+/// `move_group`. Both switches are put back on.
+ChainRun RunStillChain(const std::filesystem::path& project, const std::filesystem::path& cache,
+                       bool optimise, bool layer_local, bool move_group, int frames)
+{
+    ChainRun    run;
+    LoadedScene loaded;
+    std::string error;
+    EXPECT_TRUE(LoadScene(project, cache, loaded, error)) << error;
+    if (loaded.scene == nullptr) return run;
+    auto&      scene = *loaded.scene;
+    SceneNode* group = NodeNamed(scene.sceneGraph.get(), "group");
+    EXPECT_NE(group, nullptr);
+    if (group == nullptr) return run;
+    wallpaper::render::SetSceneOptimizationEnabled(optimise);
+    MetalRender::SetLayerLocalSignaturesForTests(layer_local);
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(384, 256);
+        layer.framebufferOnly = NO;
+        MetalRender render;
+        EXPECT_TRUE(render.init(MetalRenderInitInfo {
+            .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+            .render_width = 384, .render_height = 256, .display_scale_factor = 1.0,
+        }));
+        const auto graph = sceneToRenderGraph(scene);
+        EXPECT_NE(graph, nullptr);
+        if (graph != nullptr && render.compileRenderGraph(scene, *graph)) {
+            for (int frame = 0; frame < frames; ++frame) {
+                if (move_group) {
+                    group->SetTranslate({ 192.0f + 5.0f * std::sin(0.9f * float(frame)),
+                                          128.0f + 0.5f * float(frame), 0.0f });
+                }
+                const auto before = wallpaper::render::CurrentSceneOptimizationTotals();
+                AdvanceSceneFrame(render, scene);
+                const auto after = wallpaper::render::CurrentSceneOptimizationTotals();
+                run.reused.push_back(after.skipped_passes - before.skipped_passes);
+                run.frames.push_back(ReadOutput(render, scene));
+            }
+        } else {
+            ADD_FAILURE() << render.lastError();
+        }
+        render.destroy();
+    }
+    MetalRender::SetLayerLocalSignaturesForTests(true);
+    wallpaper::render::SetSceneOptimizationEnabled(true);
+    return run;
+}
+
+/// The three runs of one fixture: reuse with layer-local samples, reuse without them, and every
+/// pass drawn every frame. Each frame of the first two must be the third's, byte for byte.
+struct ChainComparison
+{
+    ChainRun local, folded, drawn;
+};
+
+ChainComparison CompareStillChain(const std::filesystem::path& root, bool shake, bool move_group,
+                                  const std::string& card_fragment, const std::string& first_fragment)
+{
+    constexpr int frames  = 24;
+    const auto    project = WriteStillChainFixture(root, shake, card_fragment, first_fragment);
+    ChainComparison runs {
+        .local  = RunStillChain(project, root / "cache-local", true, true, move_group, frames),
+        .folded = RunStillChain(project, root / "cache-folded", true, false, move_group, frames),
+        .drawn  = RunStillChain(project, root / "cache-drawn", false, true, move_group, frames),
+    };
+    for (const auto* run : { &runs.local, &runs.folded, &runs.drawn }) {
+        EXPECT_EQ(run->frames.size(), std::size_t(frames));
+    }
+    if (runs.drawn.frames.size() != std::size_t(frames)) return runs;
+    for (int frame = 0; frame < frames; ++frame) {
+        SCOPED_TRACE("frame " + std::to_string(frame));
+        EXPECT_FALSE(runs.drawn.frames[frame].empty());
+        if (std::size_t(frame) < runs.local.frames.size())
+            EXPECT_TRUE(runs.local.frames[frame] == runs.drawn.frames[frame])
+                << "a reused pass held other pixels than drawing it again gives";
+        if (std::size_t(frame) < runs.folded.frames.size())
+            EXPECT_TRUE(runs.folded.frames[frame] == runs.drawn.frames[frame]);
+    }
+    // The fixture moves: the picture on the scene is not the same every frame.
+    EXPECT_NE(runs.drawn.frames.front(), runs.drawn.frames.back()) << "nothing moved";
+    return runs;
+}
+
+uint64_t ReusedAfterTheFirstFrame(const ChainRun& run)
+{
+    uint64_t reused = 0;
+    for (std::size_t i = 1; i < run.reused.size(); ++i) reused += run.reused[i];
+    return reused;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, AStillEffectChainIsReusedWhileTheCameraShakesOrItsLayerMoves)
+{
+    for (const auto [shake, move_group] : { std::pair { true, false }, std::pair { false, true },
+                                            std::pair { true, true } }) {
+        SCOPED_TRACE(std::string(shake ? "camera shake" : "") + (move_group ? " moving group" : ""));
+        const auto runs = CompareStillChain(
+            root_ / ("still-chain" + std::to_string(shake) + std::to_string(move_group)), shake, move_group,
+            kStillCard, kStillEffect);
+        if (HasFailure()) return;
+        // The card and the first effect read nothing that moves: from the second frame on both
+        // are reused every frame, while the second effect follows the layer onto the scene.
+        for (std::size_t frame = 1; frame < runs.local.reused.size(); ++frame) {
+            EXPECT_GE(runs.local.reused[frame], 2u) << "frame " << frame;
+        }
+        // Folding the layer's place and the camera into every sample reused nothing.
+        EXPECT_EQ(ReusedAfterTheFirstFrame(runs.folded), 0u);
+        EXPECT_EQ(ReusedAfterTheFirstFrame(runs.drawn), 0u);
+    }
+}
+
+TEST_F(MetalSceneDraw, AnEffectReadingWhereItsLayerIsIsRedrawnWhenTheCameraShakesOrTheLayerMoves)
+{
+    const std::string effect_mvp =
+        "uniform sampler2D g_Texture0;\nuniform mat4 g_EffectModelViewProjectionMatrix;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main() { vec4 c = texSample2D(g_Texture0, v_TexCoord);\n"
+        "  vec4 p = mul(vec4(0.25, 0.5, 0.0, 1.0), g_EffectModelViewProjectionMatrix);\n"
+        "  gl_FragColor = vec4(frac(p.x * 3.0), c.g, frac(p.y * 3.0), c.a); }\n";
+    const std::string effect_model =
+        "uniform sampler2D g_Texture0;\nuniform mat4 g_EffectModelMatrix;\nvarying vec2 v_TexCoord;\n"
+        "void main() { vec4 c = texSample2D(g_Texture0, v_TexCoord);\n"
+        "  vec4 p = mul(vec4(0.0, 0.0, 0.0, 1.0), g_EffectModelMatrix);\n"
+        "  gl_FragColor = vec4(frac(p.x / 7.0), c.g, frac(p.y / 5.0), c.a); }\n";
+    const std::string card_mvp =
+        "uniform mat4 g_EffectModelViewProjectionMatrix;\nvarying vec2 v_TexCoord;\n"
+        "void main() { vec4 p = mul(vec4(0.25, 0.5, 0.0, 1.0), g_EffectModelViewProjectionMatrix);\n"
+        "  gl_FragColor = vec4(v_TexCoord.x, frac(p.x * 3.0), frac(p.y * 3.0), 1.0); }\n";
+    struct Case
+    {
+        const char* name;
+        bool        shake;
+        bool        move_group;
+        std::string card;
+        std::string first;
+        /// Passes the layer-local samples still reuse every frame: the card, or nothing.
+        bool        card_still;
+    };
+    const std::vector<Case> cases {
+        { "effect matrix, shake", true, false, kStillCard, effect_mvp, true },
+        { "effect matrix, moving group", false, true, kStillCard, effect_mvp, true },
+        { "effect model, moving group", false, true, kStillCard, effect_model, true },
+        { "card reading the effect matrix, shake", true, false, card_mvp, kStillEffect, false },
+        { "card reading the effect matrix, moving group", false, true, card_mvp, kStillEffect, false },
+    };
+    // What the same chain reuses when nothing in it reads where the layer is, per motion.
+    std::map<std::pair<bool, bool>, uint64_t> still_reuse;
+    int                                       index = 0;
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.name);
+        const auto runs = CompareStillChain(root_ / ("moving-reader-" + std::to_string(index++)), c.shake,
+                                            c.move_group, c.card, c.first);
+        if (HasFailure()) return;
+        // The card, when it reads nothing that moves, is still reused...
+        for (std::size_t frame = 1; frame < runs.local.reused.size(); ++frame) {
+            if (c.card_still) EXPECT_GE(runs.local.reused[frame], 1u) << "frame " << frame;
+            else EXPECT_EQ(runs.local.reused[frame], 0u) << "frame " << frame;
+        }
+        // ...but the pass that reads where the layer is, and everything after it, is drawn again.
+        if (c.card_still) {
+            const auto key = std::pair { c.shake, c.move_group };
+            if (! still_reuse.contains(key)) {
+                const auto still = CompareStillChain(root_ / ("moving-reader-still-" + std::to_string(index)),
+                                                     c.shake, c.move_group, kStillCard, kStillEffect);
+                still_reuse[key] = ReusedAfterTheFirstFrame(still.local);
+            }
+            EXPECT_LT(ReusedAfterTheFirstFrame(runs.local), still_reuse[key]);
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainText)
 {
     // An effect that is off builds nothing, so a text layer whose every effect

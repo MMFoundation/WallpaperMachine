@@ -145,6 +145,9 @@ public:
     std::optional<uint64_t> AudioStateHash(SceneNode*, uint32_t material_slot) const override;
     uint32_t FrameVaryingUniforms(SceneNode*, uint32_t material_slot,
                                   const std::string& camera_override) const override;
+    DrawTransformInputs TransformInputs(SceneNode*, uint32_t material_slot,
+                                        const std::string& camera_override,
+                                        const ExistsUniformOp& reads) const override;
     void MouseInput(double, double) override;
     // Called once per frame with that frame's buttons; the previous frame's
     // are kept for the press edge `g_PointerState.z` shows.

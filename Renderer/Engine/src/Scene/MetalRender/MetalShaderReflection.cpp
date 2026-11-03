@@ -141,6 +141,20 @@ bool ParseMetalShaderReflection(std::string_view json, MetalShaderReflection& ou
             writes != document.end() && writes->is_boolean()) {
             out.fragment_always_writes = writes->get<bool>();
         }
+        // The same for the read members: a list of anything but names says nothing.
+        if (const auto read = document.find("read_uniforms");
+            read != document.end() && read->is_array()) {
+            std::unordered_set<std::string> names;
+            bool                            names_only = true;
+            for (const auto& name : *read) {
+                if (! name.is_string()) {
+                    names_only = false;
+                    break;
+                }
+                names.insert(name.get<std::string>());
+            }
+            if (names_only) out.read_uniforms = std::move(names);
+        }
     } catch (const std::exception& e) {
         if (error != nullptr) {
             *error = std::string("unexpected shader reflection contents: ") + e.what();

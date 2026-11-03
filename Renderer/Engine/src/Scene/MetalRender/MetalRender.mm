@@ -1434,6 +1434,22 @@ std::atomic<bool>& AudioReuseSwitch()
     return enabled;
 }
 
+/// Whether a pass drawn through a layer-local or effect camera folds into its reuse sample only
+/// the transforms and cameras its program's read uniforms are derived from
+/// (`IShaderValueUpdater::TransformInputs`), so a layer that moves or a camera that shakes
+/// leaves a still effect chain reusable. On by default;
+/// `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=0` folds the node's world transform and the active
+/// camera into every sample again, for an A/B in one binary. Both ways draw the same bytes.
+/// Read once, like the other A/B switches; a graph takes the value it was compiled with.
+std::atomic<bool>& LayerLocalSignaturesSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
 /// Whether a frame's copy of rewritten geometry into its slot leaves out what the slot holds
 /// already (see `uploadDynamicMesh`). On by default;
 /// `WALLPAPER_MACHINE_PARTICLE_UPLOAD_DELTA=0` copies everything every frame, for an A/B in one
@@ -2213,6 +2229,10 @@ struct MetalRender::Impl
     /// of a frame draws through the same one or two cameras. Emptied at the start
     /// of every plan, so no frame folds a camera with an earlier frame's matrix.
     mutable std::vector<std::pair<const SceneCamera*, uint64_t>> camera_digests;
+    /// Per description, what of the scene's moving state its sample folds besides its own camera
+    /// (`LayerLocalSignaturesSwitch`): everything for any pass the updater could not prove
+    /// otherwise for, and for every pass while the switch is off.
+    std::vector<DrawTransformInputs>      transform_inputs;
     /// One entry per description, in the same order. `None` for anything that
     /// is not a copy.
     std::vector<render::CopyElision>      copy_elision;
@@ -6135,6 +6155,22 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
     if (!execution_order.empty()) static_cache.SetExecutionOrder(execution_order);
     static_samples.assign(descriptions.size(), render::StaticPassSample {});
 
+    // What each sample folds besides the pass's own camera, decided from the uniforms its
+    // program reads. A reflection pass draws through a camera that is swapped in for it.
+    transform_inputs.assign(descriptions.size(), DrawTransformInputs {});
+    if (LayerLocalSignaturesSwitch().load(std::memory_order_relaxed) && updater != nullptr) {
+        for (std::size_t i = 0; i < descriptions.size() && i < prepared.size(); ++i) {
+            const auto& desc = descriptions[i];
+            if (desc.kind != MetalPassKind::CustomShader || desc.node == nullptr ||
+                desc.reflection_pass)
+                continue;
+            const auto& reflection = prepared[i].reflection;
+            transform_inputs[i] = updater->TransformInputs(
+                desc.node, desc.material_slot, desc.camera_override,
+                [&reflection](std::string_view name) { return reflection.readsMember(name); });
+        }
+    }
+
     pinned_target_keys.clear();
     std::unordered_map<const void*, uint32_t> keys_per_image;
     for (const auto& [key, texture] : targets) {
@@ -6198,18 +6234,34 @@ render::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
     if (desc.uses_scene_clear_color) {
         hash = render::StaticHashBytes(hash, desc.clear_color.data(), sizeof(float) * desc.clear_color.size());
     }
+    // What of the scene's moving state this pass's uniforms are derived from. The variant that
+    // samples a video's planes is another program, whose reads were never asked: everything.
+    static const DrawTransformInputs kEveryInput {};
+    const bool planes_drawn = index < video_plane_active.size() && video_plane_active[index] != 0;
+    const DrawTransformInputs& inputs =
+        index < transform_inputs.size() && ! planes_drawn ? transform_inputs[index] : kEveryInput;
     if (desc.node != nullptr) {
-        // Idempotent, and the transform has to be current before it is
-        // compared: a parent moved by a script updates lazily.
-        desc.node->UpdateTrans();
-        const auto model = desc.node->ModelTrans();
-        hash = render::StaticHashBytes(hash, model.data(), sizeof(double) * 16);
-        // Where the node is drawn, when that is not where its world matrix puts it: a
-        // layer a screen anchor shifts, or a final card drawn through an override that
-        // carries the shift.
-        if (desc.node->HasRenderTransformOverride() || ! desc.node->DrawOffset().isZero()) {
-            const auto drawn = desc.node->RenderTrans();
-            hash = render::StaticHashBytes(hash, drawn.data(), sizeof(double) * 16);
+        if (inputs.node_transform) {
+            // Idempotent, and the transform has to be current before it is
+            // compared: a parent moved by a script updates lazily.
+            desc.node->UpdateTrans();
+            const auto model = desc.node->ModelTrans();
+            hash = render::StaticHashBytes(hash, model.data(), sizeof(double) * 16);
+            // Where the node is drawn, when that is not where its world matrix puts it: a
+            // layer a screen anchor shifts, or a final card drawn through an override that
+            // carries the shift.
+            if (desc.node->HasRenderTransformOverride() || ! desc.node->DrawOffset().isZero()) {
+                const auto drawn = desc.node->RenderTrans();
+                hash = render::StaticHashBytes(hash, drawn.data(), sizeof(double) * 16);
+            }
+        }
+        // An effect pass reading its layer's matrices reads the layer where it is drawn.
+        if (inputs.owner != nullptr && inputs.owner != desc.node) {
+            inputs.owner->UpdateTrans();
+            const auto layer = inputs.owner->ModelTrans();
+            hash = render::StaticHashBytes(hash, layer.data(), sizeof(double) * 16);
+            const linalg::Vector3f offset = inputs.owner->DrawOffset();
+            hash = render::StaticHashBytes(hash, offset.data(), sizeof(float) * 3);
         }
         if (auto* mesh = desc.node->Mesh(); mesh != nullptr) {
             hash = render::StaticHashMix(hash, mesh->DirtyGeneration());
@@ -6247,7 +6299,8 @@ render::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
                                        const auto digest = render::CameraSampleDigest(camera);
                                        camera_digests.emplace_back(&camera, digest);
                                        return digest;
-                                   });
+                                   },
+                                   inputs.active_camera);
     if (cookie_sources_ready && desc.light_cookie_slots != 0) {
         // Direct alias readers need this even when their program reads no light uniform.
         hash = render::StaticHashMix(hash, reinterpret_cast<uintptr_t>((__bridge void*)light_cookie_texture));
@@ -8499,6 +8552,10 @@ std::vector<std::string> MetalRender::GpuPassLabelsForTests() const
 }
 void MetalRender::SetCopyTradesForTests(bool enabled) { CopyTradesSwitch().store(enabled); }
 void MetalRender::SetVideoReuseForTests(bool enabled) { VideoReuseSwitch().store(enabled); }
+void MetalRender::SetLayerLocalSignaturesForTests(bool enabled)
+{
+    LayerLocalSignaturesSwitch().store(enabled);
+}
 
 void MetalRender::SetAudioReuseForTests(bool enabled) { AudioReuseSwitch().store(enabled); }
 
