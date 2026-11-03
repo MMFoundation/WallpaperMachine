@@ -402,21 +402,33 @@ inline void ApplyCameraFillMode(wallpaper::Scene& scene, wallpaper::FillMode mod
     perspective->Update();
 }
 
+/// What a static-reuse sample folds of one camera: a digest of its
+/// view-projection matrix, which carries the camera's position and visible
+/// extent alike.
+inline uint64_t CameraSampleDigest(const wallpaper::SceneCamera& camera) {
+    const linalg::Matrix4d matrix = camera.GetViewProjectionMatrix();
+    return StaticHashBytes(0xcbf29ce484222325ULL, matrix.data(), sizeof(double) * 16);
+}
+
 /// Folds into a static-reuse sample the cameras a pass depends on: the one it
 /// draws through -- `camera_override` when the graph set one, else its node's --
 /// and the scene's active camera, which a compose layer samples the screen with.
 /// Neither is covered by the node transform, and both move without a graph
-/// rebuild: a fill-mode change, a camera layer's zoom or pan, a script. The
-/// view-projection matrix carries the camera's position and visible extent
-/// alike. Every caller shares this one definition, so caches invalidate on
-/// the same camera changes.
+/// rebuild: a fill-mode change, a camera layer's zoom or pan, a script. Every
+/// caller shares this one definition, so caches invalidate on the same camera
+/// changes.
+///
+/// `digest` gives each camera's `CameraSampleDigest`. A caller sampling many
+/// passes of one frame may remember it per camera for that frame, since nearly
+/// every pass draws through the same one or two cameras, but never across
+/// frames.
+template <typename Digest>
 inline uint64_t FoldPassCameras(uint64_t hash, const wallpaper::Scene& scene,
                                 const std::string& camera_override,
-                                const wallpaper::SceneNode* node) {
-    const auto fold = [&hash](const wallpaper::SceneCamera* camera) {
+                                const wallpaper::SceneNode* node, Digest&& digest) {
+    const auto fold = [&hash, &digest](const wallpaper::SceneCamera* camera) {
         if (camera == nullptr) return;
-        const linalg::Matrix4d matrix = camera->GetViewProjectionMatrix();
-        hash = StaticHashBytes(hash, matrix.data(), sizeof(double) * 16);
+        hash = StaticHashMix(hash, digest(*camera));
     };
     const std::string& camera_name =
         ! camera_override.empty() ? camera_override
@@ -427,6 +439,15 @@ inline uint64_t FoldPassCameras(uint64_t hash, const wallpaper::Scene& scene,
     }
     fold(scene.activeCamera);
     return hash;
+}
+
+inline uint64_t FoldPassCameras(uint64_t hash, const wallpaper::Scene& scene,
+                                const std::string& camera_override,
+                                const wallpaper::SceneNode* node) {
+    return FoldPassCameras(hash, scene, camera_override, node,
+                           [](const wallpaper::SceneCamera& camera) {
+                               return CameraSampleDigest(camera);
+                           });
 }
 
 } // namespace render

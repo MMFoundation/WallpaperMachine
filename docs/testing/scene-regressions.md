@@ -2827,7 +2827,12 @@ texture entrances are not decoded-image or native-rendering evidence.
   image another target still draws into is never pinned, because that key's prepared
   passes still draw into the image every frame; pinning it lets a skipped layer read
   another layer's picture from the second frame on, which the pooled/isolated
-  comparison in `check_renderer.py` shows as a divergence.
+  comparison in `check_renderer.py` shows as a divergence. The sample hash decides
+  nothing of its own: `StaticSampleHash.ReuseDecisionsAreThoseOfComparingEveryInputExactly`
+  plans random graphs under random edits (a bit, a value, two values swapped, a change
+  undone) against an oracle that compares the inputs themselves, and the other
+  `StaticSampleHash.*` cases pin that every byte, the order of values and the split
+  between two runs count.
 - **Scene video reuse** — `MetalSceneDraw.AVideoFrameShownAgainIsReusedAndANewOneRedraws*`
   and `.APausedVideoSceneStopsDrawingOnlyWhileVideoReuseIsOn`. A pass that samples a
   video is reused only while the import its frame came from is the one it drew: every

@@ -2166,6 +2166,10 @@ struct MetalRender::Impl
     render::StaticSubgraphCache           static_cache;
     std::vector<render::StaticPassSample> static_samples;
     std::vector<uint8_t>                  static_skip;
+    /// Each camera's sample digest, taken once per reuse plan: nearly every pass
+    /// of a frame draws through the same one or two cameras. Emptied at the start
+    /// of every plan, so no frame folds a camera with an earlier frame's matrix.
+    mutable std::vector<std::pair<const SceneCamera*, uint64_t>> camera_digests;
     /// One entry per description, in the same order. `None` for anything that
     /// is not a copy.
     std::vector<render::CopyElision>      copy_elision;
@@ -6175,7 +6179,15 @@ render::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
         }
     }
 
-    hash = render::FoldPassCameras(hash, scene, desc.camera_override, desc.node);
+    hash = render::FoldPassCameras(hash, scene, desc.camera_override, desc.node,
+                                   [this](const SceneCamera& camera) {
+                                       for (const auto& [known, digest] : camera_digests) {
+                                           if (known == &camera) return digest;
+                                       }
+                                       const auto digest = render::CameraSampleDigest(camera);
+                                       camera_digests.emplace_back(&camera, digest);
+                                       return digest;
+                                   });
     if (cookie_sources_ready && desc.light_cookie_slots != 0) {
         // Direct alias readers need this even when their program reads no light uniform.
         hash = render::StaticHashMix(hash, reinterpret_cast<uintptr_t>((__bridge void*)light_cookie_texture));
@@ -6281,6 +6293,7 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
     if (static_samples.size() != descriptions.size()) {
         static_samples.assign(descriptions.size(), render::StaticPassSample {});
     }
+    camera_digests.clear();
     // Only the writers of a cacheable target fold into a signature; the rest
     // execute whatever their sample would say.
     // Keep the implicit depth producer in the existing signature traversal.
