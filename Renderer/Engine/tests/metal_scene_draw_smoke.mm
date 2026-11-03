@@ -9704,10 +9704,11 @@ constexpr const char* kStillEffect =
 
 /// A layer under a group, drawn through two effects: its card (`card_fragment`) and the first
 /// effect (`first_fragment`) fill the layer's own buffers, the second effect puts the picture on
-/// the scene where the layer sits. With `shake` the scene camera shakes.
+/// the scene where the layer sits. With `shake` the scene camera shakes. With `framed` two plain
+/// cards are drawn straight into the scene's image, one before the layer and one after it.
 std::filesystem::path WriteStillChainFixture(const std::filesystem::path& root, bool shake,
                                              const std::string& card_fragment,
-                                             const std::string& first_fragment)
+                                             const std::string& first_fragment, bool framed = false)
 {
     const auto        project = WriteFixture(root);
     const std::string vertex =
@@ -9752,6 +9753,33 @@ std::filesystem::path WriteStillChainFixture(const std::filesystem::path& root, 
                                               { { "file", "effects/second/effect.json" }, { "visible", true } } });
     layout["objects"] = nlohmann::json::array(
         { card, { { "id", 2 }, { "name", "group" }, { "origin", { 192, 128, 0 } } } });
+    if (framed) {
+        // The second card samples the first, plain card's composite, so the scene's objects are
+        // drawn in their own order, and the moving layer's own buffers fall between the two cards'
+        // draws into the scene image, as Wallpaper Engine orders them.
+        const std::map<std::string, std::string> link {
+            { "models/link.json", R"({"width":256,"height":192,"material":"materials/link.json"})" },
+            { "materials/link.json",
+              R"({"passes":[{"shader":"chain_second","blending":"translucent","cullmode":"nocull",)"
+              R"("depthtest":"disabled","depthwrite":"disabled","textures":["_rt_imageLayerComposite_3_a"]}]})" },
+        };
+        for (const auto& [name, contents] : link) std::ofstream(root / name) << contents;
+        const auto plain = [&layout](int id, std::string_view name, int x) {
+            auto object      = layout["objects"][0];
+            object["id"]     = id;
+            object["name"]   = name;
+            object["origin"] = { x, 128, 0 };
+            object["scale"]  = { 0.5, 0.5, 1 };
+            object.erase("parent");
+            object.erase("effects");
+            return object;
+        };
+        auto after            = plain(4, "after", 264);
+        after["image"]        = "models/link.json";
+        after["dependencies"] = { 3 };
+        layout["objects"].insert(layout["objects"].begin(), plain(3, "before", 120));
+        layout["objects"].push_back(after);
+    }
     std::ofstream(root / "layout.json") << layout;
     return project;
 }
@@ -9766,18 +9794,20 @@ SceneNode* NodeNamed(SceneNode* node, std::string_view name)
     return nullptr;
 }
 
-/// Every frame of one run of the still chain, and how many passes each frame reused.
+/// Every frame of one run of the still chain, how many passes each frame reused, and how many
+/// render passes it encoded into the scene's own image.
 struct ChainRun
 {
     std::vector<std::vector<uint8_t>> frames;
     std::vector<uint64_t>             reused;
+    std::vector<uint64_t>             scene_passes;
 };
 
 /// Draws `frames` production frames of `project` with scene optimisation `optimise` and
-/// layer-local samples `layer_local`, moving the layer's group a little every frame when
-/// `move_group`. Both switches are put back on.
+/// layer-local samples `layer_local` (unset: as the renderer has them), moving the layer's group a
+/// little every frame when `move_group`. Both switches are put back as they were.
 ChainRun RunStillChain(const std::filesystem::path& project, const std::filesystem::path& cache,
-                       bool optimise, bool layer_local, bool move_group, int frames)
+                       bool optimise, std::optional<bool> layer_local, bool move_group, int frames)
 {
     ChainRun    run;
     LoadedScene loaded;
@@ -9788,8 +9818,11 @@ ChainRun RunStillChain(const std::filesystem::path& project, const std::filesyst
     SceneNode* group = NodeNamed(scene.sceneGraph.get(), "group");
     EXPECT_NE(group, nullptr);
     if (group == nullptr) return run;
+    const bool optimised = wallpaper::render::SceneOptimizationEnabled();
     wallpaper::render::SetSceneOptimizationEnabled(optimise);
-    MetalRender::SetLayerLocalSignaturesForTests(layer_local);
+    // The setter answers what the switch was; the run then gets what it asks for, or that.
+    const bool layer_local_before = MetalRender::SetLayerLocalSignaturesForTests(false);
+    MetalRender::SetLayerLocalSignaturesForTests(layer_local.value_or(layer_local_before));
     @autoreleasepool {
         CAMetalLayer* layer   = [CAMetalLayer layer];
         layer.device          = MTLCreateSystemDefaultDevice();
@@ -9813,6 +9846,7 @@ ChainRun RunStillChain(const std::filesystem::path& project, const std::filesyst
                 AdvanceSceneFrame(render, scene);
                 const auto after = wallpaper::render::CurrentSceneOptimizationTotals();
                 run.reused.push_back(after.skipped_passes - before.skipped_passes);
+                run.scene_passes.push_back(render.LastFrameEncodeCountsForTests().scene_output_passes);
                 run.frames.push_back(ReadOutput(render, scene));
             }
         } else {
@@ -9820,8 +9854,8 @@ ChainRun RunStillChain(const std::filesystem::path& project, const std::filesyst
         }
         render.destroy();
     }
-    MetalRender::SetLayerLocalSignaturesForTests(true);
-    wallpaper::render::SetSceneOptimizationEnabled(true);
+    MetalRender::SetLayerLocalSignaturesForTests(layer_local_before);
+    wallpaper::render::SetSceneOptimizationEnabled(optimised);
     return run;
 }
 
@@ -9947,6 +9981,41 @@ TEST_F(MetalSceneDraw, AnEffectReadingWhereItsLayerIsIsRedrawnWhenTheCameraShake
             EXPECT_LT(ReusedAfterTheFirstFrame(runs.local), still_reuse[key]);
         }
     }
+}
+
+TEST_F(MetalSceneDraw, AMovingLayerBetweenTwoCardsIsEncodedAsDrawingEveryPassEncodesIt)
+{
+    // The layer's own buffers sit between two draws into the scene's image. Drawing them closes
+    // the scene's render pass in between; leaving them out lets the cards and the layer's last
+    // pass share one, and an Apple GPU can then blend a later draw one level apart in a texel
+    // (an M5 Pro did, on a scene with bone-attached layers). So the frame the renderer encodes
+    // for a moving layer has to be the one drawing every pass encodes, render pass for render
+    // pass and byte for byte.
+    if (const char* value = std::getenv("WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES");
+        value != nullptr && std::string_view(value) == "1") {
+        GTEST_SKIP() << "WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=1 turns on the reuse this checks is off";
+    }
+    constexpr int frames  = 12;
+    const auto    project = WriteStillChainFixture(root_ / "framed-chain", false, kStillCard, kStillEffect, true);
+    const auto    shipped = RunStillChain(project, root_ / "framed-shipped", true, std::nullopt, true, frames);
+    const auto    drawn   = RunStillChain(project, root_ / "framed-drawn", false, std::nullopt, true, frames);
+    const auto    local   = RunStillChain(project, root_ / "framed-local", true, true, true, frames);
+    for (const auto* run : { &shipped, &drawn, &local }) {
+        ASSERT_EQ(run->frames.size(), std::size_t(frames));
+        ASSERT_EQ(run->scene_passes.size(), std::size_t(frames));
+    }
+    for (int frame = 1; frame < frames; ++frame) {
+        SCOPED_TRACE("frame " + std::to_string(frame));
+        EXPECT_EQ(shipped.scene_passes[frame], drawn.scene_passes[frame])
+            << "the cards around the moving layer were drawn in other render passes than drawing every "
+               "pass draws them in";
+        EXPECT_TRUE(shipped.frames[frame] == drawn.frames[frame]);
+        // Asked for, layer-local reuse leaves the layer's buffers out, and with them the render
+        // pass boundary between the cards: the change that can move a blended texel.
+        EXPECT_GE(local.reused[frame], 2u);
+        EXPECT_LT(local.scene_passes[frame], drawn.scene_passes[frame]);
+    }
+    EXPECT_NE(drawn.frames.front(), drawn.frames.back()) << "nothing moved";
 }
 
 TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainText)

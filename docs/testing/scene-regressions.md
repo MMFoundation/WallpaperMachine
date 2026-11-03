@@ -81,8 +81,9 @@ Playback, backend, host and startup areas are in
     cameras are not layer-local (children draw through them at their place inside
     the layer), and the static-result cache folds each pass's camera and the
     active camera into its sample (`FoldPassCameras` in `RenderCommon/SceneRaster.hpp`);
-    the active camera is left out only for a pass whose read uniforms are proven not
-    to depend on it (see **Layer-local reuse samples**).
+    with `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=1` the active camera is left out for
+    a pass whose read uniforms are proven not to depend on it (see **Layer-local reuse
+    samples**).
 - **Camera-object zoom in 2D scenes** — `CanvasShots.ZoomTightensTheOrthographicFrustumWithoutChangingTheAuthoredExtent`
   and `ZoomOutsideTheUsableRange.FramesTheWholeCanvas` in
   `scene_schema_part02_test`, `MouseInput.HitTestingFollowsACameraObjectZoomAcrossAResize`
@@ -2856,12 +2857,13 @@ texture entrances are not decoded-image or native-rendering evidence.
   and `.AnEffectReadingWhereItsLayerIsIsRedrawnWhenTheCameraShakesOrTheLayerMoves` in
   `metal_scene_draw_smoke`, `ShaderUpdaterSignatures.*` in `shader_updater_behavior_test`,
   `MetalReflection.AMemberIsUnreadOnlyWhenTheCompilerSaysWhatIsRead` in
-  `metal_backend_test` and `reflect::reads::tests` (Rust). A pass drawn through a
+  `metal_backend_test` and `reflect::reads::tests` (Rust). With
+  `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=1` (off by default) a pass drawn through a
   layer-local or the effect camera folds the node's world transform, its effect's layer
   and the active camera only when a uniform its program reads (the compiler's
   `read_uniforms`, not its declarations) is derived from them, so a still chain under
-  a shaking camera or a moving parent is reused frame after frame and stays
-  byte-identical to drawing every pass, while an effect or a card that reads
+  a shaking camera or a moving parent is reused frame after frame and holds the pixels
+  drawing it gives, while an effect or a card that reads
   `g_EffectModelViewProjectionMatrix` or `g_EffectModelMatrix` is drawn again.
   `ShaderUpdaterSignatures.EveryWrittenUniformThatMovesIsOneTheSampleFolds` is the
   guard against drift: it moves the parent, the pass node and the camera under every
@@ -2869,6 +2871,14 @@ texture entrances are not decoded-image or native-rendering evidence.
   `TransformInputs` folding what moved. Compose layers, scene-space draws, reflection
   passes, plane-sampling video variants and readers of the eye, view axes, particle
   orientation, lights, puppets and the cursor keep the whole sample.
+  `MetalSceneDraw.AMovingLayerBetweenTwoCardsIsEncodedAsDrawingEveryPassEncodesIt` is why
+  it is off: in a scene drawn in object order (a card reads another's picture) the moving
+  layer's buffers sit between two draws into the scene's image, and leaving them out joins
+  those draws into one render pass, which on 3808922316 at 3456x2234@2 left one texel of a
+  few frames one level apart on an M5 Pro. The renderer as shipped must encode such a
+  frame render pass for render pass as drawing every pass does; replicas of a joined and a
+  split render pass with synthetic draws were byte-identical, so the GPU-side trigger is
+  not pinned down and the check is on the encoding.
 - **Sprite-sheet stepping and reuse** — `MetalSceneDraw.ASpriteSheetAdvancesOnItsOwnClockAndRedrawsOnlyWhenTheFrameChanges`.
   A sheet between frame changes may be reused, but its clock must keep running or
   the animation never reaches the next frame. `sprite_animation_test` checks

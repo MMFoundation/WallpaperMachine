@@ -2087,16 +2087,22 @@ A layer's own picture and its effects up to the last are drawn into the layer's 
 buffers, through a camera local to the layer, so where the layer sits and where the
 scene camera looks reach them only through the uniforms that say so: the effect
 matrices (`g_EffectModelViewProjectionMatrix` and its kind), the eye and view axes,
-lights, puppet bones and the cursor. Such a pass is reused while the layer moves (an
-animated parent, a bone it is attached to, a script) or the camera shakes, unless its
-shader reads one of those uniforms. What it reads is what the shader compiler proved
-can reach the picture, not what it declares: Wallpaper Engine's image shader computes
-a view direction from `g_EyePosition` in every variant but uses it only when lit. The
-last pass, which puts the layer on the scene, follows the layer and the camera and is
-drawn again as before, and so is a composition layer's first pass, which reads the
-screen behind the layer. The pixels are the same either way;
-`WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=0` draws such passes again whenever the layer
-or the camera moves, for comparison.
+lights, puppet bones and the cursor. They are nevertheless drawn again whenever the
+layer moves (an animated parent, a bone it is attached to, a script) or the camera
+shakes. With `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=1` such a pass is reused then,
+unless its shader reads one of those uniforms. What it reads is what the shader
+compiler proved can reach the picture, not what it declares: Wallpaper Engine's image
+shader computes a view direction from `g_EyePosition` in every variant but uses it
+only when lit. The last pass, which puts the layer on the scene, follows the layer and
+the camera and is drawn again either way, and so is a composition layer's first pass,
+which reads the screen behind the layer. The reused buffers hold the same pixels, but
+the frame is not the same: in a scene whose objects are drawn in their own order (a
+layer reads another layer's picture, sorted transparency) a layer's buffers are drawn
+between two draws into the scene's image, and leaving them out lets those draws share
+one render pass that drawing them splits in two. An Apple GPU can then blend a later
+draw one level apart in a texel (an M5 Pro did in a few frames of 3808922316 at
+3456x2234@2, where the reuse left out 17 passes a frame), which is why the switch is
+off until leaving such a pass out keeps the render passes around it as they were.
 
 Reuse needs a target that is both cacheable and holding a pinned allocation,
 because the render-target pool may otherwise hand that image to another key.
