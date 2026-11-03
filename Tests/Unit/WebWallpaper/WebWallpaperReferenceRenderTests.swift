@@ -69,7 +69,7 @@ final class WebWallpaperReferenceRenderTests: XCTestCase {
   }
 
   private func render(_ job: Job) async throws {
-    // The display the page would be on: a window that is never shown reports 1.
+    // The display the page would be on, which the window below takes its backing scale from.
     let backing = max(1, NSScreen.main?.backingScaleFactor ?? 2)
     let size = NSSize(width: CGFloat(job.pixels[0]) / backing, height: CGFloat(job.pixels[1]) / backing)
     let container = NSView(frame: NSRect(origin: .zero, size: size))
