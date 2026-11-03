@@ -724,6 +724,7 @@ def main(argv=None) -> int:
         interrupt = signal.getsignal(signal.SIGINT)
         for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             signal.signal(number, signal.SIG_IGN)
+        print(f"{MARK.step} cleaning up; interrupts are ignored until it finishes", flush=True)
         try:
             clean_up(run, layout, user_app, user_pid, user_stamp)
         finally:
