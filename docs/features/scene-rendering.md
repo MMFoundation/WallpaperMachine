@@ -2087,9 +2087,12 @@ perspective scene and a plain video do not read this resolution choice.
 The HDR placement uses a lazily cached shader projection for each camera that needs
 one; script coordinates and cursor queries keep the authored camera. Local effect
 buffers stay local, while scene-sampling matrices and their inverses use the framed
-projection. Pass-through layers also update their baked scene UVs when placement
-changes: moving cards use their existing geometry upload, fixed cards request the
-existing graph rebuild. These updates run at layout events; idle frames add no card
+projection. Pass-through layers whose shader samples the screen at their texture
+coordinates also update those baked scene UVs when placement changes: moving cards
+use their existing geometry upload, fixed cards request the existing graph rebuild.
+A compose layer's card (`composelayer`, such as a project layer over the whole
+canvas) finds the screen position it samples through the framed projection, and its
+texture coordinates only place it in its own buffer, so they are left as they are. These updates run at layout events; idle frames add no card
 scan or relayout. Crossing into or out of Fit with blurred backdrop rebuilds the
 raster before the next draw. The change adds no rendering pass or target and usually
 reduces the HDR framebuffer area compared with the canvas-cover raster.

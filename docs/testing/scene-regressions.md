@@ -2730,8 +2730,10 @@ texture entrances are not decoded-image or native-rendering evidence.
   checks cursor mapping and authored-camera stability, and verifies that a
   FitBlur round trip restores the target bytes.
   `.DisplayFramingPreservesFullscreenAndLocalScreenCopies` keeps camera and
-  clip-space fullscreen effects and local pass-through copies aligned through
-  live layout changes; repeated frames do not relayout their cards.
+  clip-space fullscreen effects, local pass-through copies and a compose layer over
+  the whole canvas (which samples through the framed projection, so its card is not
+  moved again) aligned through live layout changes; repeated frames do not relayout
+  their cards.
   `ShaderUpdaterMatrices.DisplayFramingKeepsComposeSamplingAndItsInverseTogether`,
   `.LocalGeometryStaysLocalWhileEffectScreenCoordinatesAreFramed` and
   `.ExplicitShadowProjectionKeepsItsOwnViewport` cover scene/local sampling,

@@ -159,9 +159,29 @@ void MakeFramingPattern(ScenePackage& package, bool hdr, int sampling_layer = 0)
                 "void main(){gl_FragColor=texSample2D(g_Texture0,v_TexCoord); }\n");
             model_options.shader="passthrough";
         }
+        if (sampling_layer == 4) {
+            // A compose layer's shader: its texture coordinates place the card in its own
+            // buffer, and the screen position it samples comes through the projection.
+            package.AddShader("composelayer",
+                "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\n"
+                "attribute vec2 a_TexCoord;\nvarying vec3 v_ScreenCoord;\n"
+                "void main(){v_ScreenCoord=mul(vec4(a_Position,1.0),g_ModelViewProjectionMatrix).xyw;\n"
+                "vec3 position=vec3(a_TexCoord,0.0);\n"
+                "#ifdef HLSL\nposition.y=1.0-position.y;v_ScreenCoord.y=-v_ScreenCoord.y;\n#endif\n"
+                "gl_Position=vec4(position.xy*2.0-1.0,0.0,1.0);}\n",
+                "uniform sampler2D g_Texture0;\nvarying vec3 v_ScreenCoord;\n"
+                "void main(){vec2 uv=v_ScreenCoord.xy/v_ScreenCoord.z*vec2(0.5,0.5)+0.5;\n"
+                "gl_FragColor=texSample2D(g_Texture0,uv);}\n");
+            model_options.shader="composelayer";
+        }
         const auto model=package.AddImageModel("screen","_rt_FullFrameBuffer",model_options);
-        package.PutJson(model,{{"material","materials/screen.json"},{"passthrough",true},
-            {"fullscreen",sampling_layer != 3},{"projectlayer",sampling_layer == 3}});
+        if (sampling_layer == 4) {
+            package.PutJson(model,{{"material","materials/screen.json"},{"passthrough",true},
+                {"autosize",true},{"projectlayer",true}});
+        } else {
+            package.PutJson(model,{{"material","materials/screen.json"},{"passthrough",true},
+                {"fullscreen",sampling_layer != 3},{"projectlayer",sampling_layer == 3}});
+        }
         ImageLayer screen;
         screen.id=2;screen.model=model;screen.origin={32,32,0};screen.size={64,64};
         if (sampling_layer == 3) { screen.origin={24,28,0};screen.size={40,32}; }
@@ -261,7 +281,9 @@ TEST(HdrOutputGpu, DisplayFramingPreservesFullscreenAndLocalScreenCopies) {
     MakeFramingPattern(reference_package,true);
     GpuScene reference(reference_package,options);
     ASSERT_TRUE(reference.ok()) << reference.error();
-    for (int kind : {1,2,3}) {
+    // 4: a compose layer over the whole canvas, which samples the screen through the framed
+    // projection; its card is not moved again by the framing.
+    for (int kind : {1,2,3,4}) {
         SCOPED_TRACE(kind);
         ScenePackage package;
         MakeFramingPattern(package,true,kind);
