@@ -1059,6 +1059,8 @@ struct EnergySample
     NSProcessInfoThermalState              thermal { NSProcessInfoThermalStateNominal };
     std::vector<SurfaceHealthSnapshot>     health;
     std::vector<Counters>                  counters;
+    /// Passes drawn and reused by scene optimisation, every surface together.
+    render::SceneOptimizationTotals        scene_passes {};
 };
 
 EnergySample SampleEnergy(const std::vector<std::unique_ptr<SceneWallpaper>>& wallpapers)
@@ -1085,6 +1087,7 @@ EnergySample SampleEnergy(const std::vector<std::unique_ptr<SceneWallpaper>>& wa
         sample.footprint = vm.phys_footprint;
     }
     sample.thermal = [NSProcessInfo processInfo].thermalState;
+    sample.scene_passes = render::CurrentSceneOptimizationTotals();
     for (const auto& wallpaper : wallpapers) {
         sample.health.push_back(wallpaper->surfaceHealth());
         Counters values {};
@@ -1391,6 +1394,10 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
               << ",\"gpu_all_mj\":" << double(all.gpu_energy_nj) / 1e6
               << ",\"gpu_all_busy_s\":" << double(all.gpu_ns) / 1e9
               << ",\"frames_completed\":" << completed << ",\"frames_presented\":" << presented
+              << ",\"passes_executed\":"
+              << (after.scene_passes.executed_passes - before.scene_passes.executed_passes)
+              << ",\"passes_skipped\":"
+              << (after.scene_passes.skipped_passes - before.scene_passes.skipped_passes)
               << ",\"footprint_mb\":" << double(after.footprint) / 1048576.0
               << ",\"failed_frames\":" << failed << "}" << std::endl;
 
@@ -1519,6 +1526,14 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
               }) },
             { "thermal", JsonObject({ { "before", JsonString(ThermalName(before.thermal)) },
                                       { "after", JsonString(ThermalName(after.thermal)) } }) },
+            // What scene optimisation drew and reused, every surface together.
+            { "scene_passes",
+              JsonObject({
+                  { "executed", JsonNumber(after.scene_passes.executed_passes -
+                                           before.scene_passes.executed_passes) },
+                  { "skipped", JsonNumber(after.scene_passes.skipped_passes -
+                                          before.scene_passes.skipped_passes) },
+              }) },
         });
         std::ofstream file(output);
         file << record << "\n";

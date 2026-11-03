@@ -16323,10 +16323,12 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             int                                     resizes     = 0;
             double                                  rebuild_ms  = 0.0;
             MetalRender::DynamicUploadBytesForTests  uploads_before;
+            wallpaper::render::SceneOptimizationTotals passes_before;
             for (int frame = 0; frame < frame_count; ++frame) {
                 if (frame == 1) {
                     ScriptEngine::ResetCallCounts();
                     uploads_before = render.DynamicGeometryUploadBytesForTests();
+                    passes_before  = wallpaper::render::CurrentSceneOptimizationTotals();
                 }
                 if (audio_hz != nullptr) {
                     // Synthetic PCM only, analysed by the same service the
@@ -16428,16 +16430,19 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             {
                 const auto calls   = ScriptEngine::GetCallCounts();
                 const auto uploads = render.DynamicGeometryUploadBytesForTests();
-                char work_line[320];
+                const auto passes  = wallpaper::render::CurrentSceneOptimizationTotals();
+                char work_line[416];
                 std::snprintf(work_line, sizeof(work_line),
                               "%.1f script calls/frame, %.1f calls from scripts/frame, %.1f idle "
                               "program frames left out/frame; %.0f vertex + %.0f index bytes of "
-                              "rewritten geometry copied/frame",
+                              "rewritten geometry copied/frame; %.1f passes drawn + %.1f reused/frame",
                               double(calls.library_calls) / measured,
                               double(calls.native_calls) / measured,
                               double(calls.skipped_evaluations) / measured,
                               double(uploads.vertex - uploads_before.vertex) / measured,
-                              double(uploads.index - uploads_before.index) / measured);
+                              double(uploads.index - uploads_before.index) / measured,
+                              double(passes.executed_passes - passes_before.executed_passes) / measured,
+                              double(passes.skipped_passes - passes_before.skipped_passes) / measured);
                 std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << work_line << std::endl;
             }
             // How often the host would have built the render graph again, and which kind of
