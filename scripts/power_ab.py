@@ -331,11 +331,13 @@ def quit_app(pid: int, clock=time.monotonic, sleep=time.sleep) -> None:
     """One SIGTERM and a wait for the exit. A second signal would end the app at once,
     perhaps before it put the desktop picture back, so it is never sent."""
     stamp = start_stamp(pid)
+    # Recorded before the signal, so an interruption in between cannot lead to a second one.
+    SIGNALLED.add(pid)
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
+        SIGNALLED.discard(pid)
         return
-    SIGNALLED.add(pid)
     if not wait_for_exit(pid, stamp, clock=clock, sleep=sleep):
         raise RuntimeError(f"WallpaperMachine {pid} did not exit within {QUIT_TIMEOUT:.0f} s; "
                            "no second signal was sent")
@@ -717,8 +719,24 @@ def main(argv=None) -> int:
             quit_app(user_pid)
         return execute(run, layout, config, secret)
     finally:
-        for number, handler in previous.items():
-            signal.signal(number, handler)
+        # The clean-up itself is not interruptible: a second Ctrl-C or signal while it waits
+        # for a closing app would leave the user's app closed and the homes behind.
+        interrupt = signal.getsignal(signal.SIGINT)
+        for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(number, signal.SIG_IGN)
+        try:
+            clean_up(run, layout, user_app, user_pid, user_stamp)
+        finally:
+            signal.signal(signal.SIGINT, interrupt)
+            for number, handler in previous.items():
+                signal.signal(number, handler)
+
+
+def clean_up(run: Run, layout: Layout | None, user_app: Path | None, user_pid: int | None,
+             user_stamp: str | None) -> None:
+    """Quits what this run started, reopens the user's app once its copy has gone, and
+    deletes the temporary homes, each step whether or not the one before it worked."""
+    try:
         for pid, executable in running_apps().items():
             if pid == user_pid or pid in SIGNALLED:
                 # It has had its one signal and may still be closing: wait, never signal again.
@@ -731,18 +749,22 @@ def main(argv=None) -> int:
                     quit_app(pid)
                 except RuntimeError as error:
                     print(f"{MARK.warn} {error}", file=sys.stderr)
-        if user_app is not None:
-            if user_pid in running_apps():
-                print(f"{MARK.warn} {user_app} is still running and was not reopened", file=sys.stderr)
-            else:
-                subprocess.run(["open", "-g", "-a", str(user_app), "--env",
-                                "WALLPAPER_MACHINE_PANEL_AT_LAUNCH=0"], check=False)
-                print(f"{MARK.step} reopened {user_app}")
-        if layout is not None:
-            for arm in run.arms:
-                subprocess.run(["defaults", "delete", str(layout.suite(arm))], capture_output=True, check=False)
-            shutil.rmtree(layout.root, ignore_errors=True)
-            print(f"{MARK.step} removed {layout.root}")
+    finally:
+        try:
+            if user_app is not None:
+                if user_pid in running_apps():
+                    print(f"{MARK.warn} {user_app} is still running and was not reopened", file=sys.stderr)
+                else:
+                    subprocess.run(["open", "-g", "-a", str(user_app), "--env",
+                                    "WALLPAPER_MACHINE_PANEL_AT_LAUNCH=0"], check=False)
+                    print(f"{MARK.step} reopened {user_app}")
+        finally:
+            if layout is not None:
+                for arm in run.arms:
+                    subprocess.run(["defaults", "delete", str(layout.suite(arm))], capture_output=True,
+                                   check=False)
+                shutil.rmtree(layout.root, ignore_errors=True)
+                print(f"{MARK.step} removed {layout.root}")
 
 
 if __name__ == "__main__":

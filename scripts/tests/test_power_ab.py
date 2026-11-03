@@ -364,6 +364,70 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(reopened, [], "a second copy would start beside the one still running")
 
 
+class CleanUpTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.arm_app = self.root / "A/WallpaperMachine.app"
+        (self.arm_app / "Contents/MacOS").mkdir(parents=True)
+        self.arm_executable = self.arm_app / "Contents/MacOS/WallpaperMachine"
+        self.arm_executable.write_text("")
+        self.run_ = power_ab.Run(arms=[power_ab.Arm("A", self.arm_app), power_ab.Arm("B", self.arm_app)],
+                                 wallpaper=WALLPAPER, display_uuids=None, condition="T3", pairs=1, settle=1,
+                                 window=1, source=self.root, password_file=None, password_stdin=False,
+                                 suspend_vm=False, note="")
+        (self.root / "tmp").mkdir()
+        self.layout = power_ab.Layout(self.root / "tmp", self.root / "results")
+
+    def test_an_arms_copy_is_quit_once_and_one_already_signalled_is_only_waited_for(self):
+        quits, waits = [], []
+        listing = {7: self.arm_executable, 8: self.arm_executable}
+        with mock.patch.object(power_ab, "running_apps", lambda: dict(listing)), \
+                mock.patch.object(power_ab, "SIGNALLED", {8}), \
+                mock.patch.object(power_ab, "quit_app", lambda pid, **_: quits.append(pid)), \
+                mock.patch.object(power_ab, "wait_for_exit", lambda pid, stamp, **_: waits.append(pid) or True), \
+                mock.patch.object(power_ab, "start_stamp", return_value="once"), \
+                mock.patch.object(power_ab.subprocess, "run", lambda command, **_: None), \
+                contextlib.redirect_stdout(io.StringIO()):
+            power_ab.clean_up(self.run_, self.layout, None, None, None)
+        self.assertEqual(quits, [7], "the copy not yet signalled gets its one signal")
+        self.assertEqual(waits, [8], "the copy already signalled is only waited for")
+        self.assertFalse((self.root / "tmp").exists())
+
+    def test_the_homes_are_deleted_even_when_waiting_for_a_copy_fails(self):
+        def wait_for_exit(pid, stamp, **_):
+            raise KeyboardInterrupt
+        with mock.patch.object(power_ab, "running_apps", lambda: {9: self.arm_executable}), \
+                mock.patch.object(power_ab, "SIGNALLED", {9}), \
+                mock.patch.object(power_ab, "wait_for_exit", wait_for_exit), \
+                mock.patch.object(power_ab, "start_stamp", return_value="once"), \
+                mock.patch.object(power_ab.subprocess, "run", lambda command, **_: None), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(KeyboardInterrupt):
+                power_ab.clean_up(self.run_, self.layout, None, None, None)
+        self.assertFalse((self.root / "tmp").exists(), "the temporary homes are deleted whatever happened")
+
+    def test_the_clean_up_ignores_further_interrupts_and_restores_the_handlers(self):
+        seen = []
+        with mock.patch.object(power_ab, "clean_up",
+                               lambda *args: seen.append(power_ab.signal.getsignal(power_ab.signal.SIGINT))), \
+                mock.patch.object(power_ab, "preconditions", return_value=[]), \
+                mock.patch.object(power_ab, "running_apps", return_value={}), \
+                mock.patch.object(power_ab, "execute", return_value=0), \
+                mock.patch.object(power_ab.tempfile, "mkdtemp", return_value=str(self.root / "tmp")), \
+                mock.patch.object(power_ab, "RESULTS", self.root / "results"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            before = power_ab.signal.getsignal(power_ab.signal.SIGINT)
+            power_ab.main(["--arm", "A", str(self.arm_app), "--arm", "B", str(self.arm_app),
+                           "--arm-env", "B", "WALLPAPER_MACHINE_FEEDBACK_COPIES=1",
+                           "--wallpaper", WALLPAPER, "--source-home", str(source_home(self.root / "src")),
+                           "--pairs", "1"])
+            after = power_ab.signal.getsignal(power_ab.signal.SIGINT)
+        self.assertEqual(seen, [power_ab.signal.SIG_IGN])
+        self.assertEqual(after, before)
+
+
 class PreconditionTests(unittest.TestCase):
     def outputs(self, power_source):
         listing = {"pmset -g ps": power_source, "pmset -g": "", "pmset -g therm": ""}
