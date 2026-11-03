@@ -292,6 +292,10 @@ public:
         uint32_t stored_multisample_attachments { 0 };
         /// The bytes the loading render passes read (texels times samples times texel size).
         uint64_t loaded_bytes { 0 };
+        /// The bytes the copies made by the GPU wrote, and the copies a trade of textures
+        /// replaced, which wrote none.
+        uint64_t copied_bytes { 0 };
+        uint32_t traded_copies { 0 };
     };
     [[nodiscard]] FrameEncodeCountsForTests LastFrameEncodeCountsForTests() const;
 
@@ -343,6 +347,10 @@ public:
     static void SetGpuLabelsForTests(int mode);
     /// Each pass's GPU label, in pass order; empty while the labels are off.
     [[nodiscard]] std::vector<std::string> GpuPassLabelsForTests() const;
+    /// Whether a copy whose source is only read afterwards, until it is written afresh, gives
+    /// way to a trade of textures after its last reader, for graphs compiled from now on. On
+    /// unless `WALLPAPER_MACHINE_COPY_TRADES=0`; process-wide, test-only.
+    static void SetCopyTradesForTests(bool enabled);
 
     /// How many shader sources this process has handed to the Metal compiler.
     ///

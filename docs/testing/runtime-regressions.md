@@ -139,6 +139,28 @@ device.
   abandoned frame undoes its trades. On a real scene,
   `WALLPAPER_MACHINE_FEEDBACK_COPIES=1` makes the copies again, and the harness
   PPM must match either way.
+  `.AHistoryCopyIsTradedAndDrawsTheSamePicture`: a motion-blur-shaped effect
+  (accumulate into `_rt_FullCompoBuffer2`, copy it to the history, draw from the
+  accumulation) on one, two and three same-size cards sharing the accumulation, drawn
+  with `MetalRender::SetCopyTradesForTests` off and on: six byte-identical frames, no
+  blit and no copied byte when on, one trade per copy; a second accumulation that
+  discards texels opens with the copy. `.AHiddenOrAbandonedHistoryKeepsItsPictureAcrossCopyTrades`:
+  the first card hidden for three frames (its stale accumulation is restored from the
+  history, one blit instead of two) and two abandoned frames (refused compositions)
+  must match the copies frame for frame; dropping the restore or the abandoned frame's
+  undo changes every frame after it. `.AHistoryCopyWhoseImageIsReadBeforeItsSourceIsDoneStaysACopy`:
+  a draw reading the history before the trade keeps the blit.
+  `.APostProcessResultCopiedIntoTheSceneTradesTexturesAndDrawsTheSamePicture`: bloom,
+  bloom with `clearenabled: false`, bloom and colour options (two copies), colour
+  options alone, HDR bloom, bloom over lenses (the scene's image a pooled trade's
+  source, whose image set follows the trade) and 4x MSAA: same frames, no blits.
+  The copy trade's source must be single-sampled, in no pooled trade and not a layer
+  composite, the copy's name at most a pooled source; nothing may touch the copy's
+  name between the copy and the trade, and the source's next writer is a draw or
+  clear of it alone that the reuse table never skips, rendering that frame when it
+  is later in the frame. On a real scene, `WALLPAPER_MACHINE_COPY_TRADES=0` makes the
+  copies again and `WE_TEST_METAL_PROJECTS` prints blits, MB copied and copies traded
+  per frame; the poster hashes must match either way.
   `.InterleavedFeedbackCopiesPreserveEachReadersImage`: `copy A→Ac`, unrelated B
   work, `copy B→Bc`, then B's reader before A's reader; both target images match
   the blit path over four frames with both blits removed. Opening copies are

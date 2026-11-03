@@ -1454,6 +1454,20 @@ std::atomic<bool>& OverwriteLoadElisionSwitch()
     return enabled;
 }
 
+/// Whether a copy whose source is afterwards only read, and then written afresh, gives way to a
+/// trade of the two names' textures once the source's last reader has been encoded (a motion
+/// blur's history copy, the bloom result copied back into the scene's image). On by default;
+/// `WALLPAPER_MACHINE_COPY_TRADES=0` makes every such copy as a copy, for an A/B in one binary.
+/// Both ways draw the same bytes. Read when a graph is compiled.
+std::atomic<bool>& CopyTradesSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_COPY_TRADES");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
 /// Whether a depth or multisampled colour attachment is left unstored when no later pass of the
 /// frame, nor the next frame, reads what it holds. On by default;
 /// `WALLPAPER_MACHINE_ATTACHMENT_STORE_ELISION=0` stores them all, for an A/B in one binary.
@@ -1480,6 +1494,14 @@ uint64_t TexelBytes(MTLPixelFormat format)
     case MTLPixelFormatRGBA32Float: return 16;
     default: return 4;
     }
+}
+
+/// Bytes of an image's first level, every sample counted, for the encode counters.
+uint64_t ImageLevelBytes(id<MTLTexture> texture)
+{
+    if (texture == nil) return 0;
+    return uint64_t(texture.width) * texture.height * std::max<NSUInteger>(1, texture.sampleCount) *
+           TexelBytes(texture.pixelFormat);
 }
 
 /// Colour formats every texel of which is finite, so a blend factor of zero times what a texel
@@ -2158,6 +2180,10 @@ struct MetalRender::Impl
         /// Render passes that store their depth attachment, and their multisampled colour.
         uint32_t stored_depth_attachments { 0 };
         uint32_t stored_multisample_attachments { 0 };
+        /// Copies made by the GPU (blits and resampling passes) and the bytes they wrote, and
+        /// copies replaced by a trade of textures, which write nothing.
+        uint64_t copied_bytes { 0 };
+        uint32_t traded_copies { 0 };
     };
     EncodeCounts frame_encodes;
     EncodeCounts last_frame_encodes;
@@ -2226,9 +2252,32 @@ struct MetalRender::Impl
         /// the trade.
         std::vector<std::size_t> source_passes;
         std::vector<std::size_t> copy_passes;
+        /// A copy trade (`planCopyTrades`): later passes read the source before
+        /// anything writes it, so the copy is left out and the names trade
+        /// textures only after the last of them, at execution position
+        /// `trade_after`. The source's texture is then stale until `reader`,
+        /// its next writer, replaces it: in this frame (`reader_in_frame`),
+        /// opening with the copy when it loads (`prefix`), or as the next
+        /// frame's first pass on it. When that pass may leave the source as it
+        /// is (`restores`: a hidden layer's draw, a load nothing proves it
+        /// overwrites), the source is copied back from the copy's name before
+        /// it while `stale`; nothing but the copy writes that name.
+        bool                     deferred { false };
+        bool                     reader_in_frame { true };
+        bool                     restores { false };
+        bool                     stale { false };
+        std::size_t              trade_after { 0 };
     };
     /// One entry per description; meaningful only for copies.
     std::vector<FeedbackSwap>   feedback_swaps;
+    /// Copy trades whose copy step has run in this frame and whose names trade
+    /// once their `trade_after` position has been encoded.
+    std::vector<std::size_t>    pending_copy_trades;
+    /// The copy trades that may restore their source, by the execution
+    /// position of the pass the restore comes before; and those stale when
+    /// the frame began, stale again if it is abandoned.
+    std::vector<std::pair<std::size_t, std::size_t>> copy_restores;
+    std::vector<std::size_t>    stale_at_frame_start;
     /// The trades made while encoding this frame, undone if it is abandoned:
     /// its command buffer never runs, so the textures still hold what they
     /// held when the frame began.
@@ -2345,6 +2394,20 @@ struct MetalRender::Impl
     /// Turns the traded copies of a source into a pooled trade where every
     /// one of them qualifies. Called after the trades are planned.
     void planPooledTrades(Scene& scene);
+    /// Replaces copies the feedback trades leave alone with a trade made after
+    /// the source's last reader (`FeedbackSwap::deferred`). Called after the
+    /// pooled trades are planned, whose names it leaves alone.
+    void planCopyTrades(Scene& scene);
+    /// Whether copy trade `index`'s next writer of the source replaces it this
+    /// frame; otherwise the copy is made as a copy.
+    bool copyTradeWriterRenders(std::size_t index) const;
+    /// Whether the next frame's first pass on copy trade `index`'s source writes
+    /// all of it in this frame without reading it, so a stale source needs no
+    /// restore.
+    bool copyTradeWriterReplaces(std::size_t index, const uint8_t* uniform_base);
+    /// Copies every stale source back from its copy's name into `command`, before
+    /// the plan that knows it is stale is dropped.
+    void settleCopyTrades(id<MTLCommandBuffer> command);
     /// Gives every pooled copy an image of its own again, before a change of
     /// plan, so nothing is left sharing outside a pooled trade.
     void releasePooledTrades();
@@ -2532,6 +2595,9 @@ void MetalRender::Impl::releaseGraph()
     feedback_swaps.clear();
     frame_swaps.clear();
     opening_copies.clear();
+    pending_copy_trades.clear();
+    copy_restores.clear();
+    stale_at_frame_start.clear();
     pooled_trades.clear();
     pooled_copy_at.clear();
     pooled_release_at.clear();
@@ -3422,6 +3488,20 @@ void MetalRender::Impl::holdTargetsForRebuild()
         if (owned_per_texture[(__bridge const void*)found->second] != 1) continue;
         held_targets.emplace(name, found->second);
     }
+    // A copy trade's source left stale for the next frame's first pass on it: a graph that
+    // carried it over would start from that. One the plan can restore is restored, ahead of
+    // the next frame on this queue; one whose first pass always clears it is not held.
+    if (std::any_of(feedback_swaps.begin(), feedback_swaps.end(), [](const FeedbackSwap& swap) {
+            return swap.valid && swap.stale;
+        })) {
+        id<MTLCommandBuffer> command = [queue commandBuffer];
+        settleCopyTrades(command);
+        [command commit];
+    }
+    for (const auto& swap : feedback_swaps) {
+        if (swap.valid && swap.deferred && ! swap.reader_in_frame && ! swap.restores)
+            held_targets.erase(swap.source_key);
+    }
 }
 
 void MetalRender::Impl::selectSampleCounts(Scene& scene)
@@ -3981,7 +4061,8 @@ void MetalRender::Impl::planPooledTrades(Scene& scene)
     // Every traded copy, grouped by the source it copies.
     std::map<std::string, std::vector<std::size_t>> by_source;
     for (std::size_t i = 0; i < feedback_swaps.size(); ++i) {
-        if (feedback_swaps[i].valid) by_source[feedback_swaps[i].source_key].push_back(i);
+        if (feedback_swaps[i].valid && ! feedback_swaps[i].deferred)
+            by_source[feedback_swaps[i].source_key].push_back(i);
     }
     const auto reads = [](const ScenePassDescription& desc, const std::string& key) {
         if (desc.kind == MetalPassKind::Copy) return desc.source_key == key;
@@ -4056,7 +4137,8 @@ void MetalRender::Impl::planPooledTrades(Scene& scene)
 void MetalRender::Impl::refreshTradeOrder()
 {
     for (auto& swap : feedback_swaps)
-        if (swap.valid) swap.prefix = descriptions[swap.reader].load_action == MetalLoadAction::Load;
+        if (swap.valid && ! swap.deferred)
+            swap.prefix = descriptions[swap.reader].load_action == MetalLoadAction::Load;
     for (auto& releases : pooled_release_at) releases.clear();
     for (std::size_t g = 0; g < pooled_trades.size(); ++g) {
         const auto& group = pooled_trades[g];
@@ -4220,6 +4302,261 @@ void MetalRender::Impl::tradeFeedbackTextures(std::size_t index)
     for (const auto k : swap.copy_passes) pass_targets[k] = copy->second;
     if (swap.source_key == scene_output_key) scene_output_target = source->second;
     if (swap.copy_key == scene_output_key) scene_output_target = copy->second;
+    // A pooled source's set of images follows its name: the image it gave up
+    // leaves the set and the one it took joins it, so the next frame's free
+    // images are never one another name holds.
+    for (auto& group : pooled_trades) {
+        if (group.source_key != swap.source_key && group.source_key != swap.copy_key) continue;
+        for (auto& image : group.images) {
+            if (image == source->second) image = copy->second;
+            else if (image == copy->second) image = source->second;
+        }
+    }
+}
+
+/// A copy the feedback trades cannot take, because passes after it read the source before
+/// anything writes it again: a motion blur's history copy (accumulate into one buffer, copy it
+/// to the history, combine from the buffer) or the bloom and colour-option results copied back
+/// into the scene's image. Leaving the copy out and trading the two names' textures after the
+/// source's last reader gives every later reader of either name the pixels it reads now: the
+/// copy's name holds the source's image, untouched since the copy, and the source's name a
+/// stale image that its next writer replaces before anything reads it.
+///
+/// Planned only where that holds in every frame. Both textures private to their one name, of
+/// one shape, format and usage, one sample and one mip level, neither a depth image nor pinned
+/// by the reuse table; the source single-sampled and in no pooled trade, the copy's name at most
+/// a pooled trade's source (whose image set then follows the trade); a sorted scene not at all,
+/// because its order changes from frame to frame. Between the copy and the trade nothing
+/// touches the copy's name and no other copy reads the source. The source's next writer is a
+/// draw or clear of it alone that the reuse table never skips. Later in the frame, it renders
+/// in the frame the trade is made, or the copy is made as a copy; one that loads opens with the
+/// copy as a traded feedback reader does, and nothing writes the copy's name before it.
+/// Otherwise it is the next frame's first pass on the source, and the source is not the scene's
+/// output, which the composition reads after the frame. Unless that pass always clears, it may
+/// leave the source as it is (a hidden layer, a load nothing proves it overwrites): the source
+/// is then copied back from the copy's name before it, which only this copy writes and no other
+/// trade moves.
+void MetalRender::Impl::planCopyTrades(Scene& scene)
+{
+    pending_copy_trades.clear();
+    copy_restores.clear();
+    if (! CopyTradesSwitch().load(std::memory_order_relaxed) || ! render::SceneOptimizationEnabled()) return;
+    if (! sorted_draws.empty() || feedback_swaps.size() != descriptions.size()) return;
+
+    std::unordered_map<const void*, uint32_t> names_per_texture;
+    for (const auto& [key, texture] : targets) {
+        (void)key;
+        if (texture != nil) ++names_per_texture[(__bridge const void*)texture];
+    }
+    std::unordered_set<const void*> depth_images;
+    for (const auto* table : { &depth_targets, &ms_depth_targets }) {
+        for (const auto& [key, texture] : *table) {
+            (void)key;
+            if (texture != nil) depth_images.insert((__bridge const void*)texture);
+        }
+    }
+    const auto exclusive = [&](const std::string& key) -> id<MTLTexture> {
+        const auto found = targets.find(key);
+        if (found == targets.end() || found->second == nil) return nil;
+        const auto* image = (__bridge const void*)found->second;
+        return names_per_texture[image] == 1 && ! depth_images.contains(image) ? found->second : nil;
+    };
+    // A pooled source may take the copy's place (its image set follows the trade), not the
+    // source's; a pooled copy's image changes every frame.
+    std::unordered_set<std::string> pooled, pooled_sources;
+    for (const auto& group : pooled_trades) {
+        pooled_sources.insert(group.source_key);
+        for (const auto& copy : group.copies) pooled.insert(copy.key);
+    }
+    const auto reads = [](const ScenePassDescription& desc, const std::string& key) {
+        if (desc.kind == MetalPassKind::Copy) return desc.source_key == key;
+        return std::find(desc.texture_keys.begin(), desc.texture_keys.end(), key) !=
+               desc.texture_keys.end();
+    };
+    // A pass that replaces every texel of its target in every frame without reading it.
+    const auto always_clears = [this](std::size_t k) {
+        const auto& desc = descriptions[k];
+        if (! desc.enabled || desc.conditional_scene_clear || desc.depth_only || desc.samples > 1 ||
+            desc.load_action != MetalLoadAction::Clear) {
+            return false;
+        }
+        if (desc.kind == MetalPassKind::Clear) return true;
+        return desc.kind == MetalPassKind::CustomShader && (k >= prepared.size() || ! prepared[k].unproduced_input);
+    };
+    const auto output = scene.ResolveRenderTargetName(SpecTex_Default);
+
+    for (std::size_t i = 0; i < descriptions.size(); ++i) {
+        const auto& copy = descriptions[i];
+        if (copy.kind != MetalPassKind::Copy || ! copy.enabled || copy.generate_mipmaps ||
+            copy.source_key.empty() || copy.source_key == copy.target_key || feedback_swaps[i].valid) {
+            continue;
+        }
+        if (i < copy_elision.size() && copy_elision[i] != render::CopyElision::None) continue;
+        const auto& source_key = copy.source_key;
+        const auto& copy_key   = copy.target_key;
+        if (pooled.contains(source_key) || pooled_sources.contains(source_key) || pooled.contains(copy_key) ||
+            pinned_target_keys.contains(source_key) ||
+            pinned_target_keys.contains(copy_key) || target_samples.contains(source_key) ||
+            static_cache.PassSampled(i)) {
+            continue;
+        }
+        id<MTLTexture> source      = exclusive(source_key);
+        id<MTLTexture> destination = exclusive(copy_key);
+        if (source == nil || destination == nil) continue;
+        if (source.width != destination.width || source.height != destination.height ||
+            source.pixelFormat != destination.pixelFormat || source.usage != destination.usage ||
+            source.storageMode != destination.storageMode || source.textureType != MTLTextureType2D ||
+            destination.textureType != MTLTextureType2D || source.mipmapLevelCount != 1 ||
+            destination.mipmapLevelCount != 1) {
+            continue;
+        }
+        // A layer's composite is handed to a rebuilt graph whatever it carries.
+        if (std::string_view(source_key).starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX)) continue;
+
+        // The source's readers after the copy, up to its next writer, in the order the passes run.
+        std::size_t trade_after  = rankOf(i);
+        std::size_t writer       = descriptions.size();
+        bool        copy_touched = false;
+        bool        copy_written = false;
+        bool        refused      = false;
+        for (std::size_t position = rankOf(i) + 1; position < descriptions.size() && ! refused; ++position) {
+            const auto  j              = passAt(position);
+            const auto& next           = descriptions[j];
+            const bool  writes_source  = next.target_key == source_key;
+            const bool  reads_source   = reads(next, source_key);
+            const bool  touches_copy   = next.target_key == copy_key || reads(next, copy_key);
+            if (! next.enabled && (writes_source || reads_source || touches_copy)) {
+                refused = true;
+            } else if (writes_source) {
+                refused = reads_source;
+                writer  = j;
+                break;
+            } else if (reads_source) {
+                refused     = next.kind == MetalPassKind::Copy || copy_touched || touches_copy;
+                trade_after = position;
+            }
+            if (touches_copy) {
+                copy_touched = true;
+                copy_written = copy_written || next.target_key == copy_key;
+            }
+        }
+        if (refused) continue;
+
+        FeedbackSwap swap;
+        // The source's next writer: a draw or clear of it alone, which the reuse table never skips.
+        const auto writes_alone = [&](std::size_t k) {
+            const auto& draw = descriptions[k];
+            return draw.enabled && ! draw.conditional_scene_clear && ! draw.depth_only && draw.samples <= 1 &&
+                   (draw.kind == MetalPassKind::CustomShader || draw.kind == MetalPassKind::Clear) &&
+                   ! static_cache.PassSampled(k);
+        };
+        if (writer < descriptions.size()) {
+            if (! writes_alone(writer)) continue;
+            const auto& draw = descriptions[writer];
+            swap.prefix = draw.load_action == MetalLoadAction::Load;
+            if (swap.prefix && (draw.kind != MetalPassKind::CustomShader || copy_written ||
+                                (writer < pass_reads_own_target.size() && pass_reads_own_target[writer] != 0) ||
+                                ! ensureSceneCopyPipeline(destination.pixelFormat))) {
+                continue;
+            }
+        } else {
+            if (source_key == output) continue;
+            std::size_t first = i;
+            for (std::size_t position = 0; position < rankOf(i); ++position) {
+                const auto k = passAt(position);
+                if (descriptions[k].target_key == source_key || reads(descriptions[k], source_key)) {
+                    first = k;
+                    break;
+                }
+            }
+            if (first == i || descriptions[first].target_key != source_key ||
+                reads(descriptions[first], source_key) || ! writes_alone(first)) {
+                continue;
+            }
+            writer               = first;
+            swap.reader_in_frame = false;
+            swap.restores        = ! always_clears(first);
+        }
+        for (std::size_t k = 0; k < descriptions.size(); ++k) {
+            if (descriptions[k].target_key == source_key) swap.source_passes.push_back(k);
+            if (descriptions[k].target_key == copy_key) swap.copy_passes.push_back(k);
+        }
+        // The opening copy is built for a colour attachment alone.
+        if (swap.prefix && std::any_of(swap.source_passes.begin(), swap.source_passes.end(), [this](std::size_t k) {
+                return k < pass_depths.size() && pass_depths[k] != nil;
+            })) {
+            continue;
+        }
+        // A restore reads the copy's name: nothing but this copy may write it.
+        if (swap.restores && swap.copy_passes != std::vector<std::size_t> { i }) continue;
+        swap.valid        = true;
+        swap.deferred     = true;
+        swap.reader       = writer;
+        swap.trade_after  = trade_after;
+        swap.source_key   = source_key;
+        swap.copy_key     = copy_key;
+        feedback_swaps[i] = std::move(swap);
+    }
+
+    // Nor may any other trade move the image a restore reads, or the one an opening copy takes
+    // from the copy's name.
+    for (std::size_t i = 0; i < feedback_swaps.size(); ++i) {
+        auto& swap = feedback_swaps[i];
+        if (! swap.valid || ! swap.deferred || ! (swap.restores || swap.prefix)) continue;
+        for (std::size_t k = 0; k < feedback_swaps.size() && swap.valid; ++k) {
+            const auto& other = feedback_swaps[k];
+            if (k != i && other.valid && (other.source_key == swap.copy_key || other.copy_key == swap.copy_key)) {
+                swap = FeedbackSwap {};
+            }
+        }
+        if (swap.valid && swap.restores) copy_restores.emplace_back(rankOf(swap.reader), i);
+    }
+    std::sort(copy_restores.begin(), copy_restores.end());
+}
+
+bool MetalRender::Impl::copyTradeWriterReplaces(std::size_t index, const uint8_t* uniform_base)
+{
+    const auto  writer = feedback_swaps[index].reader;
+    const auto& desc   = descriptions[writer];
+    if (writer < static_skip.size() && static_skip[writer] != 0) return false;
+    if (passClears(writer)) return true;
+    if (! passDraws(writer)) return false;
+    // A writer that does not load still leaves whatever it does not cover, so only a proven
+    // full overwrite replaces the source; otherwise the source is restored first, as the copy
+    // would have left it.
+    const auto source = targets.find(feedback_swaps[index].source_key);
+    return (desc.load_action == MetalLoadAction::Load || desc.load_action == MetalLoadAction::DontCare) &&
+           source != targets.end() && passOverwritesTarget(writer, source->second, uniform_base);
+}
+
+void MetalRender::Impl::settleCopyTrades(id<MTLCommandBuffer> command)
+{
+    for (auto& swap : feedback_swaps) {
+        if (! swap.valid || ! swap.stale) continue;
+        swap.stale        = false;
+        const auto source = targets.find(swap.source_key);
+        const auto copy   = targets.find(swap.copy_key);
+        if (command == nil || source == targets.end() || copy == targets.end()) continue;
+        id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
+        [blit copyFromTexture:copy->second
+                  sourceSlice:0
+                  sourceLevel:0
+                    toTexture:source->second
+             destinationSlice:0
+             destinationLevel:0
+                   sliceCount:1
+                   levelCount:1];
+        [blit endEncoding];
+    }
+}
+
+bool MetalRender::Impl::copyTradeWriterRenders(std::size_t index) const
+{
+    const auto& swap = feedback_swaps[index];
+    // The next frame's first pass on the source clears it whatever happens to be visible.
+    if (! swap.reader_in_frame) return true;
+    if (swap.reader < static_skip.size() && static_skip[swap.reader] != 0) return false;
+    return passDraws(swap.reader) || passClears(swap.reader);
 }
 
 id<MTLDepthStencilState> MetalRender::Impl::depthStencilFor(bool test, bool write,
@@ -5541,6 +5878,8 @@ bool MetalRender::Impl::applySceneOptimizationSetting(Scene& scene, id<MTLComman
     // The whole plan, not just the flag: the copy plan decides which targets
     // exist at all, so turning the setting back on with only `enabled = true`
     // would leave elided copies unexecuted and aliased images unallocated.
+    // A stale copy-trade source gets its image back first, ahead of this frame.
+    settleCopyTrades(command);
     releasePooledTrades();
     releaseSceneOptimization();
     planCopyElision(scene);
@@ -5591,6 +5930,7 @@ bool MetalRender::Impl::applySceneOptimizationSetting(Scene& scene, id<MTLComman
     compileStaticCache(scene);
     planFeedbackSwaps();
     planPooledTrades(scene);
+    planCopyTrades(scene);
     refreshPassTargets(scene);
     optimization_applied = enabled;
     return true;
@@ -6077,6 +6417,7 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
     refreshPassTargets(scene);
     planFeedbackSwaps();
     planPooledTrades(scene);
+    planCopyTrades(scene);
     refreshPassTargets(scene);
     optimization_applied = render::SceneOptimizationEnabled();
     graph_ready = true;
@@ -6374,6 +6715,9 @@ bool MetalRender::Impl::resizeTargets(Scene& scene)
     feedback_swaps.clear();
     frame_swaps.clear();
     opening_copies.clear();
+    pending_copy_trades.clear();
+    copy_restores.clear();
+    stale_at_frame_start.clear();
     pooled_trades.clear();
     pooled_copy_at.clear();
     pooled_release_at.clear();
@@ -6420,6 +6764,7 @@ bool MetalRender::Impl::resizeTargets(Scene& scene)
     refreshPassTargets(scene);
     planFeedbackSwaps();
     planPooledTrades(scene);
+    planCopyTrades(scene);
     refreshPassTargets(scene);
 
     // Every image the frame will touch starts from a defined state, as a compile leaves
@@ -6977,17 +7322,30 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         // would reuse a target the GPU never wrote.
         impl.frame_swaps.clear();
         impl.opening_copies.clear();
+        impl.pending_copy_trades.clear();
+        impl.stale_at_frame_start.clear();
+        for (const auto& [position, index] : impl.copy_restores) {
+            (void)position;
+            if (impl.feedback_swaps[index].stale) impl.stale_at_frame_start.push_back(index);
+        }
         impl.beginPooledTrades();
         const auto abandon_frame = [&impl, &scene](std::string message) {
             // Its command buffer never runs, so every texture still holds what
             // it held when the frame began, and every name has to point back at
-            // it.
+            // it. A copy trade still waiting for its position has moved nothing,
+            // and a source restored in it is as stale as it was.
             for (auto swap = impl.frame_swaps.rbegin(); swap != impl.frame_swaps.rend(); ++swap) {
                 impl.tradeFeedbackTextures(*swap);
             }
             impl.abandonPooledTrades(scene);
             impl.frame_swaps.clear();
             impl.opening_copies.clear();
+            impl.pending_copy_trades.clear();
+            for (const auto& [position, index] : impl.copy_restores) {
+                (void)position;
+                impl.feedback_swaps[index].stale = false;
+            }
+            for (const auto index : impl.stale_at_frame_start) impl.feedback_swaps[index].stale = true;
             impl.static_cache.InvalidateAll();
             dispatch_semaphore_signal(impl.inflight);
             return impl.fail(std::move(message));
@@ -7091,11 +7449,75 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         // that uses one again loads it.
         std::vector<id<MTLTexture>> depth_cleared;
 
+        // A copy trade's two names exchange textures once the source's last reader has been
+        // encoded. A render pass still open on either image would otherwise carry on under the
+        // other name; and the source's next writer, if it loads, opens with the copy unless it
+        // writes every texel.
+        const auto trade_copy = [&impl, &open, &close_pass, uniform_base](std::size_t index) {
+            auto&      swap   = impl.feedback_swaps[index];
+            const auto source = impl.targets.find(swap.source_key);
+            const auto copy   = impl.targets.find(swap.copy_key);
+            if (source == impl.targets.end() || copy == impl.targets.end()) return;
+            for (id<MTLTexture> image : { source->second, copy->second }) {
+                if (open.encoder != nil && (open.target == image || open.resolved == image)) close_pass();
+            }
+            impl.tradeFeedbackTextures(index);
+            impl.frame_swaps.push_back(index);
+            swap.stale = swap.restores;
+            if (swap.reader_in_frame && swap.prefix &&
+                ! impl.passOverwritesTarget(swap.reader, source->second, uniform_base)) {
+                impl.opening_copies.emplace_back(source->second, copy->second);
+            }
+        };
+        const auto trade_copies_before = [&impl, &trade_copy](std::size_t position) {
+            for (auto pending = impl.pending_copy_trades.begin(); pending != impl.pending_copy_trades.end();) {
+                if (impl.feedback_swaps[*pending].trade_after >= position) {
+                    ++pending;
+                    continue;
+                }
+                trade_copy(*pending);
+                pending = impl.pending_copy_trades.erase(pending);
+            }
+        };
+
+        // A stale copy-trade source whose first pass this frame would not replace all of it is
+        // copied back from the copy's name first, which holds what the source held when the
+        // names traded: nothing has written that name since.
+        std::size_t next_restore = 0;
+        const auto restore_sources_at = [&](std::size_t position) {
+            for (; next_restore < impl.copy_restores.size() && impl.copy_restores[next_restore].first <= position;
+                 ++next_restore) {
+                const auto index = impl.copy_restores[next_restore].second;
+                auto&      swap  = impl.feedback_swaps[index];
+                if (impl.copy_restores[next_restore].first != position || ! swap.stale) continue;
+                swap.stale = false;
+                if (impl.copyTradeWriterReplaces(index, uniform_base)) continue;
+                const auto source = impl.targets.find(swap.source_key);
+                const auto copy   = impl.targets.find(swap.copy_key);
+                if (source == impl.targets.end() || copy == impl.targets.end()) continue;
+                close_pass();
+                id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
+                [blit copyFromTexture:copy->second
+                          sourceSlice:0
+                          sourceLevel:0
+                            toTexture:source->second
+                     destinationSlice:0
+                     destinationLevel:0
+                           sliceCount:1
+                           levelCount:1];
+                [blit endEncoding];
+                ++impl.frame_encodes.blit_passes;
+                impl.frame_encodes.copied_bytes += ImageLevelBytes(source->second);
+            }
+        };
+
         impl.frame_encodes = {};
         for (std::size_t position = 0; position < impl.prepared.size(); ++position) {
             const std::size_t i = impl.execution_order.empty() ? position : impl.execution_order[position];
             auto&       pass = impl.prepared[i];
             const auto& desc = impl.descriptions[i];
+            if (! impl.pending_copy_trades.empty()) trade_copies_before(position);
+            if (! impl.copy_restores.empty()) restore_sources_at(position);
             if (!desc.enabled) continue;
             // A pooled copy whose last reader has been encoded gives its image
             // back. Any later use of it is a copy step, which ends the open
@@ -7125,6 +7547,16 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 }
                 const auto source = impl.targets.find(desc.source_key);
                 if (source == impl.targets.end()) continue;
+                // A copy trade whose source's next writer replaces it this frame (or the next
+                // frame's first pass on it does) runs nothing here; the names trade after the
+                // source's last reader. Otherwise the copy is made below.
+                if (i < impl.feedback_swaps.size() && impl.feedback_swaps[i].valid &&
+                    impl.feedback_swaps[i].deferred && impl.copyTradeWriterRenders(i)) {
+                    ++impl.frame_encodes.traded_copies;
+                    if (impl.feedback_swaps[i].trade_after <= position) trade_copy(i);
+                    else impl.pending_copy_trades.push_back(i);
+                    continue;
+                }
                 close_pass();
                 if (i < impl.pooled_copy_at.size() && impl.pooled_copy_at[i].first >= 0) {
                     auto& group =
@@ -7141,6 +7573,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                         // reader fills first when it loads.
                         *copy.slot         = image;
                         *group.source_slot = next;
+                        ++impl.frame_encodes.traded_copies;
                         for (const auto k : group.source_passes) impl.pass_targets[k] = next;
                         if (group.source_key == impl.scene_output_key) {
                             impl.scene_output_target = next;
@@ -7167,17 +7600,19 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                                    levelCount:1];
                         [blit endEncoding];
                         ++impl.frame_encodes.blit_passes;
+                        impl.frame_encodes.copied_bytes += ImageLevelBytes(next);
                     }
                     continue;
                 }
                 if (i < impl.feedback_swaps.size() && impl.feedback_swaps[i].valid &&
-                    impl.feedbackReaderRenders(i)) {
+                    ! impl.feedback_swaps[i].deferred && impl.feedbackReaderRenders(i)) {
                     // The copy's name takes the image as it stands; the source's
                     // name takes the texture the copy would have been made in,
                     // which the reader fills first.
                     id<MTLTexture> image = source->second;
                     impl.tradeFeedbackTextures(i);
                     impl.frame_swaps.push_back(i);
+                    ++impl.frame_encodes.traded_copies;
                     if (impl.feedback_swaps[i].prefix &&
                         ! impl.passOverwritesTarget(impl.feedback_swaps[i].reader, target, uniform_base)) {
                         impl.opening_copies.emplace_back(target, image);
@@ -7200,9 +7635,11 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                                levelCount:1];
                     [blit endEncoding];
                     ++impl.frame_encodes.blit_passes;
+                    impl.frame_encodes.copied_bytes += ImageLevelBytes(target);
                 } else if (impl.encodeScaledCopy(command, source->second, target,
                                                  gpu_labels ? GpuLabel("scaled " + pass_label(i)) : nil)) {
                     ++impl.frame_encodes.render_passes;
+                    impl.frame_encodes.copied_bytes += ImageLevelBytes(target);
                     if (target == impl.scene_output_target) {
                         ++impl.frame_encodes.scene_output_passes;
                     }
@@ -7581,6 +8018,8 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 generate_mipmaps(target, i);
             }
         }
+        // A source whose last reader was the frame's last pass trades now.
+        trade_copies_before(impl.descriptions.size());
         close_pass();
         impl.last_frame_encodes = impl.frame_encodes;
 
@@ -7889,7 +8328,8 @@ MetalRender::FrameEncodeCountsForTests MetalRender::LastFrameEncodeCountsForTest
     const auto& last = pImpl->last_frame_encodes;
     return { last.render_passes,  last.scene_output_passes,      last.blit_passes,
              last.loaded_passes, last.opening_copies,            last.stored_depth_attachments,
-             last.stored_multisample_attachments, last.loaded_bytes };
+             last.stored_multisample_attachments, last.loaded_bytes, last.copied_bytes,
+             last.traded_copies };
 }
 
 void MetalRender::SetTargetSharingForTests(bool enabled) { TargetSharingSwitch().store(enabled); }
@@ -7915,6 +8355,7 @@ std::vector<std::string> MetalRender::GpuPassLabelsForTests() const
 {
     return pImpl != nullptr ? pImpl->pass_labels : std::vector<std::string> {};
 }
+void MetalRender::SetCopyTradesForTests(bool enabled) { CopyTradesSwitch().store(enabled); }
 
 uint64_t MetalRender::RenderTargetBytesForTests() const
 {

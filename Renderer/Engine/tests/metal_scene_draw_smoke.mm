@@ -16389,6 +16389,8 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                     encodes.opening_copies += counts.opening_copies;
                     encodes.stored_depth_attachments += counts.stored_depth_attachments;
                     encodes.stored_multisample_attachments += counts.stored_multisample_attachments;
+                    encodes.copied_bytes += counts.copied_bytes;
+                    encodes.traded_copies += counts.traded_copies;
                     draw_cpu_ms += cpu_after - cpu_before;
                     ++measured;
                 }
@@ -16404,11 +16406,12 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": Native Metal, " << frame_count << " frames drawn, "
                       << DifferingBytes(first, last) << " bytes differ between the first and the last"
                       << std::endl;
-            char encode_line[384];
+            char encode_line[448];
             std::snprintf(encode_line, sizeof(encode_line),
                           "%.1f render passes/frame (%.1f on the scene output, %.1f loading their target "
                           "(%.1f MB), %.1f opening with a copy; %.1f storing depth, %.1f storing samples), "
-                          "%.1f blits/frame, %.2f ms CPU per drawFrame",
+                          "%.1f blits/frame, %.1f MB copied/frame, %.1f copies traded/frame, "
+                          "%.2f ms CPU per drawFrame",
                           double(encodes.render_passes) / measured,
                           double(encodes.scene_output_passes) / measured,
                           double(encodes.loaded_passes) / measured,
@@ -16416,7 +16419,9 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                           double(encodes.opening_copies) / measured,
                           double(encodes.stored_depth_attachments) / measured,
                           double(encodes.stored_multisample_attachments) / measured,
-                          double(encodes.blit_passes) / measured, draw_cpu_ms / measured);
+                          double(encodes.blit_passes) / measured,
+                          double(encodes.copied_bytes) / measured / 1e6,
+                          double(encodes.traded_copies) / measured, draw_cpu_ms / measured);
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << encode_line << std::endl;
             // Work on the scene thread that is the same in every run of the same scene and
             // clock: crossings into the scripts, and rewritten geometry copied for the GPU.
@@ -16495,6 +16500,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                             "\"gpu_ms_p95\":%.4f,\"gpu_ms_mean\":%.4f,\"cpu_ms_mean\":%.4f,"
                             "\"command_buffers_per_draw\":%.3f,\"render_passes_per_draw\":%.3f,"
                             "\"scene_output_passes_per_draw\":%.3f,\"blits_per_draw\":%.3f,"
+                            "\"copied_bytes_per_draw\":%.0f,\"traded_copies_per_draw\":%.3f,"
                             "\"render_target_bytes\":%llu,\"device_allocated_bytes\":%llu}\n",
                             paths.scene_id.c_str(), surface_width, surface_height, scale_factor,
                             loaded.scene->render_scale,
@@ -16506,6 +16512,8 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                             double(encodes.render_passes) / measured,
                             double(encodes.scene_output_passes) / measured,
                             double(encodes.blit_passes) / measured,
+                            double(encodes.copied_bytes) / measured,
+                            double(encodes.traded_copies) / measured,
                             (unsigned long long)render.RenderTargetBytesForTests(),
                             (unsigned long long)device.currentAllocatedSize);
                 std::fflush(stdout);
@@ -19372,4 +19380,320 @@ TEST_F(MetalSceneDraw, GpuLabelsSplitTheDrawsThatShareARenderPassWithoutChanging
     }
     EXPECT_EQ(own, kCards) << "each card should have a render pass of its own";
     EXPECT_TRUE(AnyContains(split.encoders, "[?/before #2]")) << "the name outside ASCII was not replaced";
+}
+
+namespace
+{
+
+struct RestoreCopyTrades
+{
+    ~RestoreCopyTrades() { MetalRender::SetCopyTradesForTests(true); }
+};
+
+/// Every frame's scene output of one run and each frame's encode counts.
+struct CopyTradeRun
+{
+    std::vector<std::vector<uint8_t>>                   frames;
+    std::vector<MetalRender::FrameEncodeCountsForTests> counts;
+};
+
+/// Draws `frames` production frames of `project` with copy trades on or off, on a fresh parse and
+/// renderer, so two runs differ only by the switch. `before(frame, scene)` runs ahead of each
+/// frame; when it answers false that frame's composition is refused, so the frame is abandoned
+/// after every pass of it has been encoded.
+CopyTradeRun DrawWithCopyTrades(const std::filesystem::path& project, const std::filesystem::path& cache,
+                                bool trades, int frames, const WeUserOptions& options = {},
+                                const std::function<void(Scene&)>&      adjust = {},
+                                const std::function<bool(int, Scene&)>& before = {})
+{
+    MetalRender::SetCopyTradesForTests(trades);
+    CopyTradeRun run;
+    LoadedScene  loaded;
+    std::string  error;
+    std::filesystem::remove_all(cache);
+    EXPECT_TRUE(LoadScene(project, cache, loaded, error, options)) << error;
+    if (loaded.scene == nullptr) return run;
+    if (adjust) adjust(*loaded.scene);
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(384, 256);
+        layer.framebufferOnly = NO;
+        MetalRender render;
+        EXPECT_TRUE(render.init(MetalRenderInitInfo {
+            .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+            .render_width = 384, .render_height = 256, .display_scale_factor = 1.0 }))
+            << render.lastError();
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        if (graph == nullptr || ! render.compileRenderGraph(*loaded.scene, *graph)) {
+            ADD_FAILURE() << render.lastError();
+            return run;
+        }
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+        for (int frame = 0; frame < frames; ++frame) {
+            auto& scene = *loaded.scene;
+            if (before && ! before(frame, scene)) {
+                if (scene.runtime != nullptr) scene.runtime->Tick(1.0 / 60.0);
+                if (scene.shaderValueUpdater != nullptr) scene.shaderValueUpdater->FrameBegin();
+                render.RefuseNextCompositionForTests();
+                EXPECT_FALSE(render.drawFrame(scene)) << "frame " << frame << " was expected to be abandoned";
+                scene.PassFrameTime(1.0 / 60.0);
+            } else {
+                AdvanceSceneFrame(render, scene);
+            }
+            EXPECT_FALSE(scene.runtime != nullptr && scene.runtime->ConsumeSceneGraphMutationFlag())
+                << "frame " << frame << " asked for a new graph";
+            run.frames.push_back(ReadOutput(render, scene));
+            run.counts.push_back(render.LastFrameEncodeCountsForTests());
+        }
+        render.destroy();
+    }
+    return run;
+}
+
+/// Both runs drew every frame alike.
+void ExpectSameFrames(const CopyTradeRun& off, const CopyTradeRun& on, std::size_t frames)
+{
+    ASSERT_EQ(off.frames.size(), frames);
+    ASSERT_EQ(on.frames.size(), frames);
+    for (std::size_t frame = 0; frame < frames; ++frame) {
+        ASSERT_FALSE(off.frames[frame].empty());
+        EXPECT_EQ(on.frames[frame], off.frames[frame]) << "frame " << frame << " changed with the copy trades";
+    }
+    EXPECT_NE(off.frames.front(), off.frames.back()) << "the scene did not animate";
+}
+
+/// A motion blur of the shape Wallpaper Engine's has (an original stand-in): accumulate the
+/// layer's picture with its history into `_rt_FullCompoBuffer2`, copy that to the history
+/// `_rt_FullCompoBuffer1` (the effect's own), and draw the layer from `_rt_FullCompoBuffer2`.
+/// Every frame moves each channel of the picture, so the history shows in every frame after the
+/// first. `before_write` runs in the accumulation before it writes.
+void WriteHistoryEffect(const std::filesystem::path& root, const std::string& name,
+                        const std::string& before_write = {})
+{
+    WriteFiles(root, {
+        { "effects/" + name + ".json",
+          R"({"name":")" + name + R"(","passes":[)"
+          R"({"material":"materials/)" + name + R"(_accumulate.json","target":"_rt_FullCompoBuffer2",)"
+          R"("bind":[{"name":"previous","index":0},{"name":"_rt_FullCompoBuffer1","index":1}]},)"
+          R"({"command":"copy","target":"_rt_FullCompoBuffer1","source":"_rt_FullCompoBuffer2"},)"
+          R"({"material":"materials/)" + name + R"(_combine.json","bind":[{"name":"_rt_FullCompoBuffer2","index":0}]}],)"
+          R"("fbos":[{"name":"_rt_FullCompoBuffer1","scale":1,"format":"rgba_backbuffer","unique":true},)"
+          R"({"name":"_rt_FullCompoBuffer2","scale":1,"format":"rgba_backbuffer"}]})" },
+        { "materials/" + name + "_accumulate.json",
+          R"({"passes":[{"shader":")" + name +
+              R"(_accumulate","blending":"normal","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","textures":[null,null]}]})" },
+        { "materials/" + name + "_combine.json",
+          R"({"passes":[{"shader":")" + name + R"(_combine","blending":"normal","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})" },
+        { "shaders/" + name + "_accumulate.vert",
+          "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n"
+          "void main(){ gl_Position=vec4(a_Position,1.0); v_TexCoord=a_TexCoord; }\n" },
+        { "shaders/" + name + "_accumulate.frag",
+          "uniform sampler2D g_Texture0;\nuniform sampler2D g_Texture1;\nuniform float g_Time;\n"
+          "varying vec2 v_TexCoord;\nvoid main(){ vec4 albedo=texSample2D(g_Texture0,v_TexCoord);"
+          " albedo.rgb=frac(albedo.rgb+g_Time*vec3(3.7,5.3,7.1)); " + before_write +
+          " gl_FragColor=mix(texSample2D(g_Texture1,v_TexCoord),albedo,0.5); }\n" },
+        { "shaders/" + name + "_combine.vert", kTimedCopyVertex },
+        { "shaders/" + name + "_combine.frag", TimedFragment("c") },
+    });
+}
+
+/// One card of the fixture's size per entry of `effects`, side by side, each through the effect
+/// named there, so the cards share the effects' `_rt_FullCompoBuffer2`.
+std::filesystem::path WriteHistoryFixture(const std::filesystem::path& root, const std::vector<std::string>& effects)
+{
+    const auto project = WriteFixture(root);
+    WriteHistoryEffect(root, "history");
+    WriteHistoryEffect(root, "history_partial", "if (v_TexCoord.x < 0.25) discard;");
+    auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+    layout["general"]["bloom"] = false;
+    auto objects = nlohmann::json::array();
+    for (std::size_t k = 0; k < effects.size(); ++k) {
+        auto card       = layout["objects"][0];
+        card["id"]      = int(k + 1);
+        card["name"]    = "card" + std::to_string(k);
+        card["origin"]  = { 96 + 96 * int(k), 128, 0 };
+        card["effects"] = { { { "file", "effects/" + effects[k] + ".json" }, { "visible", true } } };
+        objects.push_back(card);
+    }
+    layout["objects"] = objects;
+    std::ofstream(root / "layout.json") << layout;
+    return project;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, AHistoryCopyIsTradedAndDrawsTheSamePicture)
+{
+    // A motion blur copies its accumulation into its history every frame, then draws the layer
+    // from the accumulation. With the copy trades on, the copy is left out and the two buffers
+    // trade textures after the draw that reads the accumulation: the history then holds this
+    // frame's accumulation and the accumulation a stale image, which the next accumulation
+    // replaces. Cards of one size share the accumulation, so the next one to replace it is the
+    // next card's, later in the frame (which loads it: proven to write every texel, or opened
+    // with the copy when it may leave some alone), or the first card's in the next frame.
+    RestoreCopyTrades restore;
+    struct Case
+    {
+        std::string              name;
+        std::vector<std::string> effects;
+        uint32_t                 opening_copies;
+    };
+    for (const auto& item : { Case { "one card", { "history" }, 0 },
+                              Case { "two cards sharing a buffer", { "history", "history" }, 0 },
+                              Case { "a second accumulation that leaves texels", { "history", "history_partial" }, 1 },
+                              Case { "three cards", { "history", "history", "history" }, 0 } }) {
+        SCOPED_TRACE(item.name);
+        const auto root    = root_ / ("history-" + std::to_string(item.effects.size()) + "-" + item.effects.back());
+        const auto project = WriteHistoryFixture(root, item.effects);
+        constexpr int kFrames = 6;
+        const auto off = DrawWithCopyTrades(project, root / "cache-off", false, kFrames);
+        const auto on  = DrawWithCopyTrades(project, root / "cache-on", true, kFrames);
+        ExpectSameFrames(off, on, kFrames);
+        const auto copies = uint32_t(item.effects.size());
+        for (int frame = 1; frame < kFrames; ++frame) {
+            SCOPED_TRACE(frame);
+            EXPECT_EQ(off.counts[frame].blit_passes, copies) << "the fixture no longer copies its history";
+            EXPECT_GT(off.counts[frame].copied_bytes, 0u);
+            EXPECT_EQ(on.counts[frame].blit_passes, 0u) << "a history copy was still made";
+            EXPECT_EQ(on.counts[frame].copied_bytes, 0u);
+            EXPECT_EQ(on.counts[frame].traded_copies, off.counts[frame].traded_copies + copies);
+            EXPECT_EQ(on.counts[frame].opening_copies, off.counts[frame].opening_copies + item.opening_copies);
+            EXPECT_EQ(on.counts[frame].render_passes, off.counts[frame].render_passes);
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AHiddenOrAbandonedHistoryKeepsItsPictureAcrossCopyTrades)
+{
+    // The first card's accumulation is left stale by its trade until the next frame's first
+    // accumulation replaces it. While that card is hidden nothing does: the accumulation gets
+    // its picture back from the history before anything reads it, so the history is the one it
+    // had when the card comes back. A frame abandoned after its trades were made moves the names
+    // back, and the frame after it draws what it would have.
+    RestoreCopyTrades restore;
+    const auto root    = root_ / "history-hidden";
+    const auto project = WriteHistoryFixture(root, { "history", "history" });
+    constexpr int kFrames = 12;
+    const auto before = [](int frame, Scene& scene) {
+        if (frame == 3) EXPECT_TRUE(scene.runtime->SetNodeVisible("card0", false));
+        if (frame == 6) EXPECT_TRUE(scene.runtime->SetNodeVisible("card0", true));
+        return frame != 5 && frame != 9;
+    };
+    const auto off = DrawWithCopyTrades(project, root / "cache-off", false, kFrames, {}, {}, before);
+    const auto on  = DrawWithCopyTrades(project, root / "cache-on", true, kFrames, {}, {}, before);
+    ExpectSameFrames(off, on, kFrames);
+    for (const int frame : { 3, 4 }) {
+        SCOPED_TRACE(frame);
+        // The hidden card's copy and the shown card's: one restore of the shared accumulation
+        // takes their place, before the shown card's accumulation, which then loads it.
+        EXPECT_EQ(off.counts[frame].blit_passes, 2u);
+        EXPECT_EQ(on.counts[frame].blit_passes, 1u) << "the stale accumulation was not restored";
+    }
+    for (const int frame : { 7, 8, 10, 11 }) {
+        SCOPED_TRACE(frame);
+        EXPECT_EQ(on.counts[frame].blit_passes, 0u);
+        EXPECT_EQ(on.counts[frame].traded_copies, off.counts[frame].traded_copies + 2u);
+    }
+}
+
+TEST_F(MetalSceneDraw, AHistoryCopyWhoseImageIsReadBeforeItsSourceIsDoneStaysACopy)
+{
+    // The layer's draw reads the history as well as the accumulation after the copy: deferring
+    // the copy to after that draw would show it the history from before the copy. It stays a
+    // copy, and the picture is the same either way.
+    RestoreCopyTrades restore;
+    const auto root    = root_ / "history-read-early";
+    const auto project = WriteHistoryFixture(root, { "history" });
+    auto effect = nlohmann::json::parse(std::ifstream(root / "effects/history.json"));
+    effect["passes"][2]["bind"].push_back({ { "name", "_rt_FullCompoBuffer1" }, { "index", 1 } });
+    std::ofstream(root / "effects/history.json") << effect;
+    auto material = nlohmann::json::parse(std::ifstream(root / "materials/history_combine.json"));
+    material["passes"][0]["textures"] = { nullptr, nullptr };
+    std::ofstream(root / "materials/history_combine.json") << material;
+    std::ofstream(root / "shaders/history_combine.frag")
+        << "uniform sampler2D g_Texture0;\nuniform sampler2D g_Texture1;\nvarying vec2 v_TexCoord;\n"
+           "void main(){ gl_FragColor=vec4(texSample2D(g_Texture0,v_TexCoord).rg,"
+           "texSample2D(g_Texture1,v_TexCoord).b,1.0); }\n";
+    constexpr int kFrames = 4;
+    const auto off = DrawWithCopyTrades(project, root / "cache-off", false, kFrames);
+    const auto on  = DrawWithCopyTrades(project, root / "cache-on", true, kFrames);
+    ExpectSameFrames(off, on, kFrames);
+    EXPECT_EQ(off.counts.back().blit_passes, 1u);
+    EXPECT_EQ(on.counts.back().blit_passes, 1u) << "a copy whose destination is read before the trade was traded";
+    EXPECT_EQ(on.counts.back().traded_copies, off.counts.back().traded_copies);
+}
+
+TEST_F(MetalSceneDraw, APostProcessResultCopiedIntoTheSceneTradesTexturesAndDrawsTheSamePicture)
+{
+    // Bloom's combine and the colour options each draw into a buffer of the scene's size and
+    // copy it back into the scene's image. Nothing reads the buffer after the copy, and its next
+    // writer, the next frame's combine, clears it, so the two names trade textures instead. Also
+    // with the scene not cleared between frames (it starts from what the copy left), with layers
+    // that copy the scene to read it (the scene's image is then a pooled trade's source), and
+    // multisampled.
+    RestoreCopyTrades restore;
+    WeUserOptions colour;
+    colour.color_enabled = true;
+    colour.brightness    = 60.0f;
+    struct Case
+    {
+        std::string name;
+        bool        bloom { true };
+        bool        hdr { false };
+        bool        clear { true };
+        bool        lenses { false };
+        bool        colour { false };
+        uint32_t    samples { 1 };
+        uint32_t    copies { 1 };
+    };
+    std::vector<Case> cases {
+        { .name = "bloom" },
+        { .name = "bloom, not cleared", .clear = false },
+        { .name = "bloom and colour options", .colour = true, .copies = 2 },
+        { .name = "colour options", .bloom = false, .colour = true },
+        { .name = "hdr bloom", .hdr = true },
+        { .name = "bloom over lenses", .lenses = true },
+    };
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (device != nil && [device supportsTextureSampleCount:4])
+        cases.push_back({ .name = "bloom, multisampled", .samples = 4 });
+    for (std::size_t index = 0; index < cases.size(); ++index) {
+        const auto& item = cases[index];
+        SCOPED_TRACE(item.name);
+        const auto root    = root_ / ("post-trade-" + std::to_string(index));
+        const auto project = item.lenses ? WriteFeedbackFixture(root) : WriteFixture(root);
+        WriteBloomStandIns(root);
+        std::ofstream(root / "shaders/ccsimple_standin.vert") << kStandInVertexShader;
+        std::ofstream(root / "shaders/ccsimple_standin.frag") << kCcsimpleStandIn;
+        WriteStandInMaterial(root, "materials/util/ccsimple.json", "ccsimple_standin", { "_rt_FullFrameBuffer" });
+        std::ofstream(root / "shaders/metal_probe.frag")
+            << "uniform float g_Time;\nvarying vec2 v_TexCoord;\n"
+               "void main(){ gl_FragColor=vec4(v_TexCoord.x,frac(g_Time*3.1),0.75,0.5); }\n";
+        auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+        layout["general"]["bloom"]          = item.bloom;
+        layout["general"]["hdr"]            = item.hdr;
+        layout["general"]["bloomstrength"]  = 1.0;
+        layout["general"]["bloomthreshold"] = 0.25;
+        layout["general"]["clearenabled"]   = item.clear;
+        std::ofstream(root / "layout.json") << layout;
+        const auto adjust = [&item](Scene& scene) {
+            if (item.samples > 1) scene.renderTargets[std::string(SpecTex_Default)].sample_count = item.samples;
+        };
+        constexpr int kFrames = 5;
+        const auto options = item.colour ? colour : WeUserOptions {};
+        const auto off = DrawWithCopyTrades(project, root / "cache-off", false, kFrames, options, adjust);
+        const auto on  = DrawWithCopyTrades(project, root / "cache-on", true, kFrames, options, adjust);
+        ExpectSameFrames(off, on, kFrames);
+        for (int frame = 1; frame < kFrames; ++frame) {
+            SCOPED_TRACE(frame);
+            EXPECT_EQ(off.counts[frame].blit_passes, item.copies) << "the fixture no longer copies its result back";
+            EXPECT_EQ(on.counts[frame].blit_passes, 0u) << "a result was still copied into the scene";
+            EXPECT_EQ(on.counts[frame].copied_bytes, 0u);
+            EXPECT_EQ(on.counts[frame].traded_copies, off.counts[frame].traded_copies + item.copies);
+        }
+        if (item.lenses) EXPECT_GE(off.counts.back().traded_copies, 2u) << "the lenses' copies were expected to trade";
+    }
 }

@@ -2553,6 +2553,17 @@ render scale, animation speed or audio-response subscription:
   multisampled colour attachments are no longer stored after the last render pass of
   the frame that uses them (each frame's first one clears them). The switches are in
   [power benchmarking](../testing/power-benchmark.md#ab-comparison-entry-points).
+- On Native Metal, a copy whose source is afterwards only read until it is drawn
+  afresh is no longer made: the two images trade names once the source's last reader
+  is encoded. That is a motion blur's copy of its accumulation into its history every
+  frame, and bloom's and the colour options' result copied back into the scene's
+  image, each a full-size blit per frame (14 of them, 17 MB written, in a scene with 14
+  blurred layers at 4K and render scale 0.75). The source then holds a stale image
+  until its next writer replaces it: later in the frame (a load that cannot be proven
+  to overwrite opens with the copy, as a traded feedback copy's reader does), or as the
+  next frame's first pass on it. When that pass may leave the image alone (a hidden
+  layer), the image is copied back from the copy's name first, so the picture is the
+  same byte for byte; a sorted scene keeps its copies.
 
 The contracts and tests behind each item are in
 [renderer verification](../testing/runtime-regressions.md#continuous-playback-work-contracts).

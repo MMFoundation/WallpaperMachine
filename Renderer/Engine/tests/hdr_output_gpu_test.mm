@@ -345,7 +345,9 @@ TEST(HdrOutputGpu, BloomToggleKeepsGrayAndConvertsBeforePresentationFiltering) {
         }
         const auto counts=scene.LastFramePasses();
         EXPECT_EQ(counts.render_passes,2u);
-        EXPECT_EQ(counts.blit_passes,1u);
+        // The sRGB conversion's result goes back into the scene's image: a copy, or with scene
+        // optimisation a trade of textures that copies nothing.
+        EXPECT_EQ(counts.blit_passes,optimize?0u:1u);
         const auto resident=scene.renderer().RenderTargetBytesForTests();
         ASSERT_TRUE(scene.Step(2));
         const auto steady=scene.LastFramePasses();
