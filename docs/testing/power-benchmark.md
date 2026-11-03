@@ -355,8 +355,9 @@ work, not a desktop: WindowServer, the panel and the display are not in it.
   display, and an entry saved for a display's identity applies to the connected
   display of that surface's size with the same vendor, model and serial number.
   `--surfaces` defaults to `3840x2160@2+3456x2234@2`, drawn at once. A setting the harness does not apply (MetalFX upscaling, on-demand
-  rendering, video plane sampling, the system audio an audio-reactive scene hears, a
-  scaling factor other than 1) is printed and recorded. Video and web wallpapers are
+  rendering, video plane sampling, drawing only the visible part of cropped scenes, the
+  system audio an audio-reactive scene hears, a scaling factor other than 1) is printed
+  and recorded. Video and web wallpapers are
   skipped with their reason: only a desktop run measures them.
 - **`identity A B`.** Each wallpaper on each surface goes through the poster
   harness at those settings, seeded, with text settled and 40 warm-up ticks, and

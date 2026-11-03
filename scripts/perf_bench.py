@@ -244,6 +244,8 @@ def user_config(home: Path) -> dict:
         "metalfx_upscaling_enabled": quality.get("metalfx_upscaling_enabled", False),
         "scene_video_plane_sampling": (config.get("experimental") or {}).get(
             "scene_video_plane_sampling", False),
+        "scene_display_framing": (config.get("experimental") or {}).get(
+            "scene_display_framing", False),
     }
 
 
@@ -344,6 +346,9 @@ def wallpaper_settings(home: Path, wallpaper: str, surfaces: list[dict], display
     for key in ("scene_on_demand_enabled", "metalfx_upscaling_enabled", "scene_video_plane_sampling"):
         if config.get(key):
             notes.append(f"{key} is on in the app; the harness runs it off")
+    if config.get("scene_display_framing"):
+        notes.append("scene_display_framing is on in the app; the harness runs it off "
+                     "unless a --variant sets WALLPAPER_MACHINE_SDR_FRAMING=1")
     audio = saved.get("audio") or {}
     if audio.get("response_enabled") and not audio.get("muted"):
         notes.append("audio response is on in the app; the harness hears no system audio")

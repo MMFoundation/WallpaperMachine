@@ -175,6 +175,22 @@ class SettingsTests(unittest.TestCase):
         empty = perf_bench.user_config(Path(self.directory.name) / "nowhere")
         self.assertEqual((empty["render_scale"], empty["resolution"], empty["quality"]["msaa"]), (1.0, "display", 0))
 
+    def test_an_experimental_switch_on_in_the_app_is_recorded_and_flagged(self):
+        config = perf_bench.user_config(self.home)
+        self.assertFalse(config["scene_display_framing"])
+        settings = perf_bench.wallpaper_settings(self.home, "111", self.surfaces, self.displays, config)
+        self.assertFalse(any("scene_display_framing" in note for note in settings["notes"]))
+        with (self.home / "config.toml").open("a") as stream:
+            stream.write("[experimental]\nscene_display_framing = true\n")
+        config = perf_bench.user_config(self.home)
+        self.assertTrue(config["scene_display_framing"])
+        settings = perf_bench.wallpaper_settings(self.home, "111", self.surfaces, self.displays, config)
+        self.assertTrue(any("scene_display_framing" in note and "WALLPAPER_MACHINE_SDR_FRAMING=1" in note
+                            for note in settings["notes"]))
+        # The note says the harness runs it off: no inherited switch reaches a probe.
+        with mock.patch.dict(os.environ, {"WALLPAPER_MACHINE_SDR_FRAMING": "1"}):
+            self.assertNotIn("WALLPAPER_MACHINE_SDR_FRAMING", perf_bench.base_environment())
+
     def test_displays_are_read_with_their_identity_and_main_first(self):
         self.assertEqual([(d["width"], d["scale"], d["main"]) for d in self.displays],
                          [(3840, 2.0, True), (3456, 2.0, False)])
