@@ -925,10 +925,18 @@ once and that an on-demand scene wakes for exactly one frame. See
 would repeat the picture, through the real frame clock and drawable loop on a
 `CAMetalLayer` no window owns (the counters it reads are draws executed, presents
 requested and presents skipped). The engine is never given a
-plain video, and Native Metal's repeat-frame behaviour for a scene's video layer
-is pinned in `metal_scene_draw_smoke`
-(`AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresentsNothing` and its
-neighbours). In
+plain video, and Native Metal's repeat-frame behaviour is pinned in
+`metal_scene_draw_smoke` (`AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresentsNothing`
+and its neighbours); for a scene's video layer by
+`AVideoFrameShownAgainIsReusedAndANewOneRedrawsOnTheConvertedPath` and
+`...OnTheDirectPlanePath` (a 30 fps clip on a 60 Hz clock, drawn beside a renderer with
+scene optimisation off: every tick that took no video frame draws and presents nothing,
+every tick that took one draws and presents, and every picture equals the other
+renderer's for the same decoded frame) and `APausedVideoSceneStopsDrawingOnlyWhileVideoReuseIsOn`
+(`WALLPAPER_MACHINE_VIDEO_REUSE=0` keeps drawing and presenting a paused video's frame).
+`MetalVideoTexture.AFrameSaysWhetherItTookAVideoFrameAndEveryImportIsNumberedAnew`
+pins what that rests on: a frame that imported nothing says so, and every import, a
+re-import for a changed demand and a directly sampled one included, is numbered anew. In
 `AStaticSceneStopsPresentingOnceEveryPassIsReused` it also reads
 `surfaceHealth()` across the 1000 ms window: with the skip on, frames completed
 tracks the draws that ran while frames presented stays flat and no stop is

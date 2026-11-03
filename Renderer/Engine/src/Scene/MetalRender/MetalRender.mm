@@ -1406,6 +1406,20 @@ std::atomic<bool>& TargetSharingSwitch()
     return enabled;
 }
 
+/// Whether a pass that samples a scene video may be reused while the video's frame is the
+/// one it drew, and a frame that imported no video frame may skip its present. On by
+/// default; `WALLPAPER_MACHINE_VIDEO_REUSE=0` redraws every such pass and presents every
+/// frame of a scene with a video, for an A/B in one binary. Both ways draw the same bytes.
+/// Read once, like the other A/B switches; a graph takes the value it was compiled with.
+std::atomic<bool>& VideoReuseSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_VIDEO_REUSE");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
 /// Whether a frame's copy of rewritten geometry into its slot leaves out what the slot holds
 /// already (see `uploadDynamicMesh`). On by default;
 /// `WALLPAPER_MACHINE_PARTICLE_UPLOAD_DELTA=0` copies everything every frame, for an A/B in one
@@ -2136,6 +2150,14 @@ struct MetalRender::Impl
     /// Filled after the frame's import, because it depends on the format the
     /// decoder actually produced.
     std::vector<uint8_t>       video_plane_active;
+    /// Whether this frame's import took any video frame. A frame that took
+    /// none encoded no conversion and changed nothing a video consumer reads.
+    bool                       video_imported { false };
+    /// `VideoReuseSwitch` as it stood when the reuse table was built: a pass
+    /// that samples a video is then reusable while its frame is unchanged,
+    /// instead of always redrawn. The table and the present gate read this one
+    /// value, so they cannot disagree.
+    bool                       video_reuse { false };
 
     // ---- scene optimisation
     /// The static-reuse analysis, over this backend's own pass list. It is a
@@ -5949,6 +5971,7 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
         static_pinned_bytes = 0;
     }
     optimization_compiled = false;
+    video_reuse = VideoReuseSwitch().load(std::memory_order_relaxed);
     if (! render::SceneOptimizationEnabled() && execution_order.empty()) return;
 
     const auto* updater = scene.shaderValueUpdater.get();
@@ -6004,7 +6027,12 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
                 reasons |= render::DynamicReason::BoneUniform;
             for (const auto& key : desc.texture_keys) {
                 if (key.empty()) continue;
-                if (video.owns(key)) reasons |= render::DynamicReason::VideoInput;
+                // A video's frame is folded into the pass's per-frame sample
+                // instead (`frameSample`), so the pass is redrawn exactly when
+                // it would sample another frame. The scene clock does not
+                // depend on this: a playing video keeps it running through
+                // `ShaderUpdateDemandReasons`.
+                if (! video_reuse && video.owns(key)) reasons |= render::DynamicReason::VideoInput;
                 if (runtime_images != nullptr && runtime_images->IsRuntimeImage(key))
                     reasons |= render::DynamicReason::RuntimeImage;
             }
@@ -6176,6 +6204,26 @@ render::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
             hash = render::StaticHashBytes(hash, key.data(), key.size());
             hash = render::StaticHashMix(hash, ring->second.version);
             hash = render::StaticHashMix(hash, coverShown(desc, slot) ? 1u : 0u);
+        }
+    }
+
+    // Which import of each video the pass samples, and whether it samples it
+    // through its plane variant. Everything it reads of a video frame -- the
+    // image or the planes, their colour constants and display transform, the
+    // frame's size -- belongs to one import, so a frame shown again (a 30 fps
+    // clip on a 60 Hz clock, a paused one) samples the same input, and every
+    // import, a re-import for a changed demand included, is a new one.
+    if (video_reuse && ! video.empty()) {
+        bool samples_video = false;
+        for (const auto& key : desc.texture_keys) {
+            if (key.empty() || ! video.owns(key)) continue;
+            samples_video = true;
+            hash = render::StaticHashBytes(hash, key.data(), key.size());
+            hash = render::StaticHashMix(hash, video.importSerial(key));
+        }
+        if (samples_video) {
+            const bool planes = index < video_plane_active.size() && video_plane_active[index] != 0;
+            hash = render::StaticHashMix(hash, planes ? 1u : 0u);
         }
     }
 
@@ -7256,7 +7304,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         // them. A failure here is a failed frame, not a black one drawn as if
         // it had succeeded.
         std::string video_error;
-        if (! impl.video.beginFrame(scene, command, &video_error)) {
+        if (! impl.video.beginFrame(scene, command, &video_error, &impl.video_imported)) {
             dispatch_semaphore_signal(impl.inflight);
             return impl.fail(std::move(video_error));
         }
@@ -8067,13 +8115,16 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         impl.present_key.Add(layout.backdrop ? static_cast<uint64_t>(static_cast<uint32_t>(layout.backdrop_px.height)) : 0u);
 
         // Every pass reused or drawing nothing, no feedback trade and no video
-        // to import: the scene output holds exactly the pixels the last
+        // frame imported: the scene output holds exactly the pixels the last
         // composition read. With identical composition inputs, composing and
-        // presenting again would put the same picture back.
+        // presenting again would put the same picture back. An import is never
+        // dropped with its buffer: it may have encoded a conversion the next
+        // frame's passes would then sample unwritten.
+        const bool video_still = impl.video_reuse ? ! impl.video_imported : impl.video.empty();
         const bool nothing_encoded = impl.frame_encodes.render_passes == 0 &&
                                      impl.frame_encodes.blit_passes == 0 &&
                                      impl.frame_swaps.empty() && impl.pooled_moves == 0 &&
-                                     impl.video.empty() && impl.pending_target_clears.empty();
+                                     video_still && impl.pending_target_clears.empty();
         if (render::SceneOptimizationEnabled() && nothing_encoded &&
             impl.present_gate.Matches(impl.present_key, {})) {
             // The buffer holds nothing and is dropped uncommitted, so the slot
@@ -8356,6 +8407,7 @@ std::vector<std::string> MetalRender::GpuPassLabelsForTests() const
     return pImpl != nullptr ? pImpl->pass_labels : std::vector<std::string> {};
 }
 void MetalRender::SetCopyTradesForTests(bool enabled) { CopyTradesSwitch().store(enabled); }
+void MetalRender::SetVideoReuseForTests(bool enabled) { VideoReuseSwitch().store(enabled); }
 
 uint64_t MetalRender::RenderTargetBytesForTests() const
 {

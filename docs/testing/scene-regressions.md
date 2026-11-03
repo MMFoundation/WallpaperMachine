@@ -2828,6 +2828,11 @@ texture entrances are not decoded-image or native-rendering evidence.
   passes still draw into the image every frame; pinning it lets a skipped layer read
   another layer's picture from the second frame on, which the pooled/isolated
   comparison in `check_renderer.py` shows as a divergence.
+- **Scene video reuse** — `MetalSceneDraw.AVideoFrameShownAgainIsReusedAndANewOneRedraws*`
+  and `.APausedVideoSceneStopsDrawingOnlyWhileVideoReuseIsOn`. A pass that samples a
+  video is reused only while the import its frame came from is the one it drew: every
+  import, a re-import for a changed demand and a directly sampled plane frame included,
+  redraws it, and a frame that imported a video frame always presents.
 - **Sprite-sheet stepping and reuse** — `MetalSceneDraw.ASpriteSheetAdvancesOnItsOwnClockAndRedrawsOnlyWhenTheFrameChanges`.
   A sheet between frame changes may be reused, but its clock must keep running or
   the animation never reaches the next frame. `sprite_animation_test` checks

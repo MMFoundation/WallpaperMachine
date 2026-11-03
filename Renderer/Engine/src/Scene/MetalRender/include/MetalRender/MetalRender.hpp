@@ -351,6 +351,11 @@ public:
     /// way to a trade of textures after its last reader, for graphs compiled from now on. On
     /// unless `WALLPAPER_MACHINE_COPY_TRADES=0`; process-wide, test-only.
     static void SetCopyTradesForTests(bool enabled);
+    /// Whether a pass that samples a scene video is reused while the video shows the
+    /// frame it drew, and a frame that imported no video frame may skip its present, for
+    /// graphs compiled from now on. On unless `WALLPAPER_MACHINE_VIDEO_REUSE=0`;
+    /// process-wide, test-only.
+    static void SetVideoReuseForTests(bool enabled);
 
     /// How many shader sources this process has handed to the Metal compiler.
     ///

@@ -8825,6 +8825,285 @@ TEST_F(MetalSceneDraw, AVideoLayerKeepsConvertingWhileTheSettingIsOff)
 namespace
 {
 
+/// What one renderer did on one tick of the video comparisons below.
+struct VideoTick
+{
+    bool                 presented { false };
+    uint64_t             executed { 0 };
+    uint64_t             skipped { 0 };
+    uint64_t             imports { 0 };
+    uint64_t             generation { 0 };
+    std::vector<uint8_t> pixels;
+};
+
+/// One video scene on an offscreen layer of its own, with counters of its own.
+struct CountedVideoScene
+{
+    LoadedScene                      loaded;
+    CAMetalLayer*                    layer { nil };
+    /// Ahead of the renderer, which reports into it until it is gone.
+    RendererCounters                 counters;
+    MetalRender                      render;
+    std::unique_ptr<rg::RenderGraph> graph;
+    /// The scene optimisation setting this scene is drawn under. The setting
+    /// is process-wide, so it is set around each of this scene's draws.
+    bool                             optimised { true };
+
+    bool Open(const std::filesystem::path& project, const std::filesystem::path& cache, bool planes,
+              std::string* error)
+    {
+        if (! LoadScene(project, cache, loaded, *error)) return false;
+        if (planes && ! SettleVariantTranslation(*loaded.scene, error)) return false;
+        if (SelectSceneBackend(*loaded.scene).failed()) {
+            *error = "the scene was not given to native Metal";
+            return false;
+        }
+        layer                 = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(kVideoWidth, kVideoHeight);
+        layer.framebufferOnly = NO;
+        if (! render.init(MetalRenderInitInfo {
+                .metal_layer = (__bridge void*)layer, .width = kVideoWidth, .height = kVideoHeight,
+                .render_width = kVideoWidth, .render_height = kVideoHeight,
+                .display_scale_factor = 1.0 })) {
+            *error = render.lastError();
+            return false;
+        }
+        render.SetCounters(&counters);
+        graph = sceneToRenderGraph(*loaded.scene);
+        if (graph == nullptr || ! render.compileRenderGraph(*loaded.scene, *graph)) {
+            *error = render.lastError();
+            return false;
+        }
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+        return true;
+    }
+
+    VideoTick Tick()
+    {
+        wallpaper::render::SetSceneOptimizationEnabled(optimised);
+        VideoTick tick;
+        const auto imports = counters.Get(OWE_RC_VIDEO_IMPORTS);
+        const auto before  = wallpaper::render::CurrentSceneOptimizationTotals();
+        EXPECT_TRUE(render.drawFrame(*loaded.scene, &tick.presented)) << render.lastError();
+        const auto after = wallpaper::render::CurrentSceneOptimizationTotals();
+        wallpaper::render::SetSceneOptimizationEnabled(true);
+        tick.executed   = after.executed_passes - before.executed_passes;
+        tick.skipped    = after.skipped_passes - before.skipped_passes;
+        tick.imports    = counters.Get(OWE_RC_VIDEO_IMPORTS) - imports;
+        tick.generation = counters.Get(OWE_RC_VIDEO_SELECTED_GENERATION);
+        tick.pixels     = ReadOutput(render, *loaded.scene);
+        return tick;
+    }
+
+    /// One tick of the scene's clock, in the wallpaper's order: the runtime's
+    /// clocks (a video's among them) before the draw, the frame time after.
+    void Advance()
+    {
+        if (loaded.scene->runtime != nullptr) loaded.scene->runtime->Tick(1.0 / 60.0);
+        loaded.scene->PassFrameTime(1.0 / 60.0);
+    }
+
+    bool DrawUntilPath(SceneVideoPath wanted)
+    {
+        wallpaper::render::SetSceneOptimizationEnabled(optimised);
+        const bool reached = DrawUntilVideoPath(render, *loaded.scene, wanted);
+        wallpaper::render::SetSceneOptimizationEnabled(true);
+        return reached;
+    }
+};
+
+/// A 30 fps clip on a 60 Hz scene clock, drawn by two renderers side by side:
+/// one with scene optimisation on, one with it off. The clip's frames each
+/// differ, and the scene has nothing else that moves.
+///
+/// On every tick that took no video frame, the optimised renderer must draw
+/// nothing and present nothing; on every tick that took one, it must draw and
+/// present. Every picture it holds must be byte for byte the one the other
+/// renderer drew for the same decoded frame.
+void ExpectVideoFramesShownAgainToBeReused(const std::filesystem::path& root, bool planes)
+{
+    const auto directory = root / (planes ? "video-reuse-planes" : "video-reuse-converted");
+    // Three seconds, so the two seconds drawn below never reach the loop.
+    const auto project = WriteVideoFixture(
+        directory, kVideoWidth, kVideoHeight, std::nullopt, [](const std::filesystem::path& media) {
+            return video::testing_media::WriteSyntheticVideo(media, 3, "metal-video-reuse");
+        });
+    if (project.empty()) GTEST_SKIP() << "no hardware H.264 encoder here, so no decodable media";
+
+    const CountersOn          counting;
+    const ScopedPlaneSampling sampling(planes);
+    @autoreleasepool {
+        CountedVideoScene optimised;
+        CountedVideoScene plain;
+        plain.optimised = false;
+        std::string error;
+        ASSERT_TRUE(optimised.Open(project, directory / "cache-optimised", planes, &error)) << error;
+        ASSERT_TRUE(plain.Open(project, directory / "cache-plain", planes, &error)) << error;
+
+        const auto wanted = planes ? SceneVideoPath::Nv12Direct : SceneVideoPath::Nv12Converted;
+        const bool reached = optimised.DrawUntilPath(wanted) && plain.DrawUntilPath(wanted);
+        if (! reached && optimised.render.VideoPath() == SceneVideoPath::Bgra) {
+            GTEST_SKIP() << "the decoder produced BGRA, so the NV12 paths were not exercised";
+        }
+        ASSERT_TRUE(reached) << "the scenes never settled on " << SceneVideoPathName(wanted) << ": "
+                             << SceneVideoPathName(optimised.render.VideoPath());
+
+        auto previous = optimised.Tick();
+        (void)plain.Tick();
+        const auto seeks =
+            optimised.counters.Get(OWE_RC_VIDEO_SEEKS) + plain.counters.Get(OWE_RC_VIDEO_SEEKS);
+        const auto presents_skipped = optimised.counters.Get(OWE_RC_PRESENTS_SKIPPED_UNCHANGED);
+
+        // The decoders run on their own threads; paced at the scene's rate,
+        // each has its next frame ready when the clock reaches it.
+        std::map<uint64_t, std::vector<uint8_t>>               drawn_plain;
+        std::vector<std::pair<uint64_t, std::vector<uint8_t>>> drawn_optimised;
+        uint64_t   reused  = 0;
+        uint64_t   redrawn = 0;
+        const auto start   = std::chrono::steady_clock::now();
+        for (int frame = 1; frame <= 120; ++frame) {
+            std::this_thread::sleep_until(start + std::chrono::microseconds(frame * 1000000 / 60));
+            optimised.Advance();
+            plain.Advance();
+            auto with    = optimised.Tick();
+            auto without = plain.Tick();
+            EXPECT_TRUE(without.presented)
+                << "frame " << frame << ": optimisation off skipped a present";
+            if (with.imports == 0) {
+                ++reused;
+                EXPECT_EQ(with.executed, 0u)
+                    << "frame " << frame << ": a video frame shown again was drawn again";
+                EXPECT_GT(with.skipped, 0u) << "frame " << frame;
+                EXPECT_FALSE(with.presented)
+                    << "frame " << frame << ": a frame that repeats the picture was presented";
+                EXPECT_EQ(with.generation, previous.generation) << "frame " << frame;
+                EXPECT_TRUE(with.pixels == previous.pixels)
+                    << "frame " << frame << ": reuse changed the picture";
+            } else {
+                ++redrawn;
+                EXPECT_GT(with.executed, 0u)
+                    << "frame " << frame << ": a new video frame was not drawn";
+                EXPECT_TRUE(with.presented)
+                    << "frame " << frame << ": a new video frame was not presented";
+            }
+            drawn_plain[without.generation] = std::move(without.pixels);
+            drawn_optimised.emplace_back(with.generation, with.pixels);
+            previous = std::move(with);
+        }
+        EXPECT_GT(reused, 0u) << "no tick repeated a frame of a 30 fps clip on a 60 Hz clock";
+        EXPECT_GT(redrawn, 0u) << "the clip never advanced";
+        EXPECT_EQ(optimised.counters.Get(OWE_RC_PRESENTS_SKIPPED_UNCHANGED) - presents_skipped,
+                  reused)
+            << "every tick that took no video frame repeats the picture and presents nothing";
+
+        // Generations count decoded frames, so the two decoders agree on what
+        // each one is until either seeks, which the pacing is there to avoid.
+        if (optimised.counters.Get(OWE_RC_VIDEO_SEEKS) + plain.counters.Get(OWE_RC_VIDEO_SEEKS) !=
+            seeks) {
+            GTEST_SKIP() << "a decoder fell behind and seeked, so its generations no longer name "
+                            "the same frames as the other's; reuse itself was checked";
+        }
+        std::size_t compared = 0;
+        for (const auto& [generation, pixels] : drawn_optimised) {
+            const auto found = drawn_plain.find(generation);
+            if (found == drawn_plain.end()) continue;
+            ++compared;
+            EXPECT_TRUE(pixels == found->second)
+                << "generation " << generation
+                << " differs from the picture drawn with scene optimisation off";
+        }
+        EXPECT_GT(compared, drawn_optimised.size() / 2)
+            << "too few frames were shown by both renderers to compare them";
+        std::cout << "[ VIDEO REUSE ] ticks=" << drawn_optimised.size() << " reused=" << reused
+                  << " redrawn=" << redrawn << " compared_with_optimisation_off=" << compared
+                  << std::endl;
+
+        optimised.render.destroy();
+        plain.render.destroy();
+    }
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, AVideoFrameShownAgainIsReusedAndANewOneRedrawsOnTheConvertedPath)
+{
+    ExpectVideoFramesShownAgainToBeReused(root_, false);
+}
+
+TEST_F(MetalSceneDraw, AVideoFrameShownAgainIsReusedAndANewOneRedrawsOnTheDirectPlanePath)
+{
+    ExpectVideoFramesShownAgainToBeReused(root_, true);
+}
+
+TEST_F(MetalSceneDraw, APausedVideoSceneStopsDrawingOnlyWhileVideoReuseIsOn)
+{
+    // The negative half: with the switch off a pass that samples a video is
+    // redrawn and presented every frame, as before, even with nothing to show
+    // that it has not shown. On, the same paused scene settles at once.
+    const auto directory = root_ / "video-reuse-paused";
+    const auto project   = WriteVideoFixture(directory, kVideoWidth, kVideoHeight);
+    if (project.empty()) GTEST_SKIP() << "no hardware H.264 encoder here, so no decodable media";
+
+    const CountersOn          counting;
+    const ScopedPlaneSampling sampling(false);
+    for (const bool reuse : { false, true }) {
+        SCOPED_TRACE(reuse ? "video reuse on" : "video reuse off");
+        MetalRender::SetVideoReuseForTests(reuse);
+        @autoreleasepool {
+            CountedVideoScene scene;
+            std::string       error;
+            ASSERT_TRUE(scene.Open(project, directory / (reuse ? "cache-on" : "cache-off"), false,
+                                   &error))
+                << error;
+            // Paused, with the video's clock held: once the frames the
+            // decoder had due at the start are taken, none follows.
+            scene.render.SetVideoPlaybackPaused(true);
+            VideoTick held;
+            bool      settled = false;
+            for (int frame = 0; frame < 32 && ! settled; ++frame) {
+                held    = scene.Tick();
+                settled = frame > 0 && held.imports == 0;
+            }
+            ASSERT_TRUE(settled) << "the paused video kept taking frames";
+            for (int frame = 0; frame < 5; ++frame) {
+                scene.loaded.scene->PassFrameTime(1.0 / 60.0);
+                const auto tick = scene.Tick();
+                EXPECT_EQ(tick.imports, 0u) << "a paused video took a frame";
+                EXPECT_TRUE(tick.pixels == held.pixels);
+                if (reuse) {
+                    EXPECT_EQ(tick.executed, 0u) << "frame " << frame;
+                    EXPECT_FALSE(tick.presented) << "frame " << frame;
+                } else {
+                    EXPECT_GT(tick.executed, 0u) << "frame " << frame;
+                    EXPECT_EQ(tick.skipped, 0u) << "frame " << frame;
+                    EXPECT_TRUE(tick.presented) << "frame " << frame;
+                }
+            }
+            // Playing again, the next frame the clock reaches is drawn.
+            scene.render.SetVideoPlaybackPaused(false);
+            bool advanced = false;
+            for (int frame = 0; frame < 30 && ! advanced; ++frame) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                scene.Advance();
+                const auto tick = scene.Tick();
+                if (tick.imports == 0) continue;
+                advanced = true;
+                EXPECT_GT(tick.executed, 0u);
+                EXPECT_TRUE(tick.presented);
+                EXPECT_FALSE(tick.pixels == held.pixels) << "the new frame did not reach the picture";
+            }
+            EXPECT_TRUE(advanced) << "the resumed video never took a frame";
+            scene.render.destroy();
+        }
+    }
+    MetalRender::SetVideoReuseForTests(true);
+}
+
+namespace
+{
+
 /// Draws one decoded frame twice -- once pre-converted, once sampled directly --
 /// and returns the per-channel differences.
 ///

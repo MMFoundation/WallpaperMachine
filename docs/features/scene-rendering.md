@@ -2059,6 +2059,14 @@ wallpaper reloads. The **In force now** row beneath the switch reports what each
 running scene is actually under, so a preference that has not reached a scene yet is
 visible as such.
 
+A pass that samples a scene video is reusable like any other while the video
+shows the frame the pass drew: which import of the video it samples (a new frame,
+or the same one taken again for a consumer that changed what it reads), and whether
+it reads it through its plane variant, are part of what decides it. A clip slower
+than the frame rate, or a paused one, therefore leaves its chain and everything
+downstream that nothing else moves undrawn on the frames it repeats; a playing video
+still keeps the scene's clock running.
+
 Reuse needs a target that is both cacheable and holding a pinned allocation,
 because the render-target pool may otherwise hand that image to another key.
 Pinning is bounded by a memory budget; when a graph's targets do not fit at the
@@ -2113,8 +2121,9 @@ With scene render optimisation on, a frame that would put back exactly the pictu
 already on screen is not drawn, submitted or presented, and the surface keeps
 showing the last frame. That is a scene whose every pass was reused from the
 previous frame or drew nothing, with nothing else to encode, leaving only the final
-composition to redo; a scene with a video texture to import that frame never
-qualifies.
+composition to redo. A frame that imports a video frame never qualifies; one whose
+videos all show the frame they showed before (a 24 or 30 fps clip on a 60 Hz clock,
+a paused video) can, since the passes that sample them are reused too.
 
 The frame clock still ticks at the configured rate, and the scene still runs its
 scripts, timeline, sound and events on every tick; only drawing an identical
