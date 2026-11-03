@@ -376,9 +376,12 @@ class StatisticsTests(unittest.TestCase):
             run("A", 4, 5.0, frames=58.0, record=recorded()),
             run("A", 5, 5.0, frames=60.1, record=recorded()),
             run("A", 6, 5.0, record=None, reasons=["no energy record"]),
+            run("A", 7, 5.0, record=recorded(), thermal_wait={"waited_s": 300.0, "throttled": True}),
         ]
         perf_bench.reject_runs(runs)
-        self.assertEqual([entry["accepted"] for entry in runs], [True, False, False, False, False, True, False])
+        self.assertEqual([entry["accepted"] for entry in runs],
+                         [True, False, False, False, False, True, False, False])
+        self.assertIn("thermally limited", runs[7]["reasons"][0])
         self.assertIn("contended", runs[1]["reasons"][0])
         self.assertIn("thermal", runs[2]["reasons"][0])
         self.assertIn("failed frames", runs[3]["reasons"][0])
@@ -415,6 +418,15 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(perf_bench.compare_ppm(first, second),
                          {"same_size": True, "differing_pixels": 2, "max_channel_diff": 7})
         self.assertEqual(perf_bench.compare_ppm(first, b"P6\n1 1\n255\n\0\0\0"), {"same_size": False})
+
+    def test_pixel_bytes_that_are_whitespace_stay_pixels(self):
+        # A newline (10) and a space (32) open the pixel data; a header split on runs of
+        # whitespace would swallow them and misalign every pixel after.
+        header = b"P6\n2 1\n255\n"
+        first = header + bytes([10, 32, 9, 1, 2, 3])
+        second = header + bytes([10, 32, 9, 1, 2, 4])
+        self.assertEqual(perf_bench.compare_ppm(first, second),
+                         {"same_size": True, "differing_pixels": 1, "max_channel_diff": 1})
 
 
 class ReportTests(unittest.TestCase):

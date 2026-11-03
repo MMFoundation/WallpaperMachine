@@ -636,6 +636,10 @@ def reject_runs(runs: list[dict]) -> None:
     for run in runs:
         record = run.get("record")
         reasons = list(run.get("reasons", []))
+        # The thermal wait gave up: the window would be measured on a speed-limited CPU,
+        # which the process's own thermal state does not always show.
+        if (run.get("thermal_wait") or {}).get("throttled"):
+            reasons.append("CPU still thermally limited after the cooling wait")
         if record is not None:
             if any(surface["failed_frames"] for surface in record["surfaces"]):
                 reasons.append("failed frames")
@@ -671,8 +675,18 @@ def noise_floor(results: dict) -> dict[str, dict[str, float]]:
 def compare_ppm(first: bytes, second: bytes) -> dict:
     """Differing pixels and the largest channel difference of two binary PPMs."""
     def body(data: bytes):
-        parts = data.split(maxsplit=4)
-        return (int(parts[1]), int(parts[2])), parts[4]
+        # P6, width, height and maxval are separated by whitespace runs, and exactly one
+        # whitespace byte follows the maxval: pixel bytes may themselves be whitespace.
+        fields, position = [], 0
+        while len(fields) < 4:
+            while data[position:position + 1].isspace():
+                position += 1
+            end = position
+            while end < len(data) and not data[end:end + 1].isspace():
+                end += 1
+            fields.append(data[position:end])
+            position = end
+        return (int(fields[1]), int(fields[2])), data[position + 1:]
 
     (size_a, pixels_a), (size_b, pixels_b) = body(first), body(second)
     if size_a != size_b or len(pixels_a) != len(pixels_b):
@@ -829,6 +843,9 @@ def run_identity(args) -> int:
             print(f"{MARK.step} {key}: {entry['verdict']} ({len(entry['comparable_frames'])} comparable, "
                   f"{len(entry['nondeterministic_frames'])} nondeterministic)")
     session.write()
+    if not results:
+        print(f"{MARK.missing} No wallpaper was compared", file=sys.stderr)
+        return 1
     return 0 if all(entry["verdict"] in ("identical", "nondeterministic") for entry in results.values()) else 1
 
 
