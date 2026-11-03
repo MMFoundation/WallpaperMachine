@@ -381,8 +381,8 @@ public:
     static void SetAudioReuseForTests(bool enabled);
     /// Whether a pass drawn through a layer-local or effect camera leaves out of its reuse sample
     /// the node's world transform and the active camera when no uniform its program reads is
-    /// derived from them, for graphs compiled from now on. Off unless
-    /// `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=1`; process-wide, test-only. Returns what it was,
+    /// derived from them, for graphs compiled from now on. On unless
+    /// `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=0`; process-wide, test-only. Returns what it was,
     /// for the caller to put back.
     static bool SetLayerLocalSignaturesForTests(bool enabled);
     /// Whether a draw that leaves its target as it is with the frame's uniforms is left out,

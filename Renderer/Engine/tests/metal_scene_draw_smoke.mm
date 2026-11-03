@@ -9983,37 +9983,34 @@ TEST_F(MetalSceneDraw, AnEffectReadingWhereItsLayerIsIsRedrawnWhenTheCameraShake
     }
 }
 
-TEST_F(MetalSceneDraw, AMovingLayerBetweenTwoCardsIsEncodedAsDrawingEveryPassEncodesIt)
+TEST_F(MetalSceneDraw, AMovingLayerBetweenTwoCardsIsReusedAndJoinsTheCardsRenderPasses)
 {
     // The layer's own buffers sit between two draws into the scene's image. Drawing them closes
-    // the scene's render pass in between; leaving them out lets the cards and the layer's last
-    // pass share one, and an Apple GPU can then blend a later draw one level apart in a texel
-    // (an M5 Pro did, on a scene with bone-attached layers). So the frame the renderer encodes
-    // for a moving layer has to be the one drawing every pass encodes, render pass for render
-    // pass and byte for byte.
-    if (const char* value = std::getenv("WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES");
-        value != nullptr && std::string_view(value) == "1") {
-        GTEST_SKIP() << "WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=1 turns on the reuse this checks is off";
+    // the scene's render pass in between; the renderer as shipped reuses them while the layer
+    // moves, which lets the cards and the layer's last pass share one render pass. An Apple GPU
+    // can then blend a later draw one level apart in a texel (an M5 Pro did, in a few frames of
+    // a scene with bone-attached layers): accepted for the GPU time saved. This pins what the
+    // shipped renderer does, and that `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=0` encodes the
+    // frame as drawing every pass does.
+    if (std::getenv("WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES") != nullptr) {
+        GTEST_SKIP() << "WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES chooses the reuse this checks";
     }
     constexpr int frames  = 12;
     const auto    project = WriteStillChainFixture(root_ / "framed-chain", false, kStillCard, kStillEffect, true);
     const auto    shipped = RunStillChain(project, root_ / "framed-shipped", true, std::nullopt, true, frames);
     const auto    drawn   = RunStillChain(project, root_ / "framed-drawn", false, std::nullopt, true, frames);
-    const auto    local   = RunStillChain(project, root_ / "framed-local", true, true, true, frames);
-    for (const auto* run : { &shipped, &drawn, &local }) {
+    const auto    off     = RunStillChain(project, root_ / "framed-off", true, false, true, frames);
+    for (const auto* run : { &shipped, &drawn, &off }) {
         ASSERT_EQ(run->frames.size(), std::size_t(frames));
         ASSERT_EQ(run->scene_passes.size(), std::size_t(frames));
     }
     for (int frame = 1; frame < frames; ++frame) {
         SCOPED_TRACE("frame " + std::to_string(frame));
-        EXPECT_EQ(shipped.scene_passes[frame], drawn.scene_passes[frame])
-            << "the cards around the moving layer were drawn in other render passes than drawing every "
-               "pass draws them in";
-        EXPECT_TRUE(shipped.frames[frame] == drawn.frames[frame]);
-        // Asked for, layer-local reuse leaves the layer's buffers out, and with them the render
-        // pass boundary between the cards: the change that can move a blended texel.
-        EXPECT_GE(local.reused[frame], 2u);
-        EXPECT_LT(local.scene_passes[frame], drawn.scene_passes[frame]);
+        EXPECT_GE(shipped.reused[frame], 2u) << "the still chain of the moving layer was drawn again";
+        EXPECT_LT(shipped.scene_passes[frame], drawn.scene_passes[frame]);
+        // Switched off, the frame is encoded render pass for render pass as drawing every pass.
+        EXPECT_EQ(off.scene_passes[frame], drawn.scene_passes[frame]);
+        EXPECT_TRUE(off.frames[frame] == drawn.frames[frame]);
     }
     EXPECT_NE(drawn.frames.front(), drawn.frames.back()) << "nothing moved";
 }

@@ -1437,21 +1437,20 @@ std::atomic<bool>& AudioReuseSwitch()
 /// Whether a pass drawn through a layer-local or effect camera folds into its reuse sample only
 /// the transforms and cameras its program's read uniforms are derived from
 /// (`IShaderValueUpdater::TransformInputs`), so a layer that moves or a camera that shakes
-/// leaves a still effect chain reusable. Off unless `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=1`.
+/// leaves a still effect chain reusable. On unless `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=0`.
 ///
 /// A pass reused that way holds exactly the pixels drawing it gives, but where the scene's objects
 /// are drawn in their own order (a layer reads another's picture, sorted transparency) its layer's
 /// buffers sit between two draws into the scene's image. Left out, they let those draws share one
 /// render pass that drawing them splits in two, and an Apple GPU can then blend a later draw one
 /// level apart in a texel (an M5 Pro did, in a few frames of a scene with bone-attached layers).
-/// So the reuse stays off until leaving such a pass out keeps the render passes around it as
-/// drawing it does. Read once, like the other A/B switches; a graph takes the value it was
-/// compiled with.
+/// That one-level difference is accepted for the GPU time the reuse saves. Read once, like the
+/// other A/B switches; a graph takes the value it was compiled with.
 std::atomic<bool>& LayerLocalSignaturesSwitch()
 {
     static std::atomic<bool> enabled { [] {
         const char* value = std::getenv("WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES");
-        return value != nullptr && std::string_view(value) == "1";
+        return value == nullptr || std::string_view(value) != "0";
     }() };
     return enabled;
 }
