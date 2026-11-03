@@ -424,7 +424,7 @@ class IdentityTests(unittest.TestCase):
         # whitespace would swallow them and misalign every pixel after.
         header = b"P6\n2 1\n255\n"
         first = header + bytes([10, 32, 9, 1, 2, 3])
-        second = header + bytes([10, 32, 9, 1, 2, 4])
+        second = header + bytes([10, 33, 9, 1, 2, 3])
         self.assertEqual(perf_bench.compare_ppm(first, second),
                          {"same_size": True, "differing_pixels": 1, "max_channel_diff": 1})
 
