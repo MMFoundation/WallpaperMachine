@@ -186,7 +186,8 @@ final class WebWallpaperAuthorAPITests: XCTestCase {
       try await Task.sleep(for: .milliseconds(50))
     }
     XCTFail("timed out; the page heard \(latest.count) frame(s)")
-    return latest
+    // Thrown rather than returned, so a caller never indexes frames that did not arrive.
+    throw CancellationError()
   }
 
   // MARK: - media
