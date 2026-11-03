@@ -179,10 +179,13 @@ extension DesktopPosterLook {
         inputs["sceneResolution"] = settings.sceneResolution
         inputs["sceneQuality"] =
             "\(quality.msaa) \(quality.shadows) \(quality.volumetrics) \(quality.reflections) \(quality.postProcessing)"
-        inputs["sceneSwitches"] = [
+        // Display framing joins the key only while it is on, so a key saved before the switch
+        // existed still matches with it off and no poster is captured again for it.
+        inputs["sceneSwitches"] = ([
             settings.metalfxUpscalingEnabled, settings.sceneOptimizationEnabled,
             settings.sceneOnDemandEnabled, settings.sceneVideoPlaneSamplingEnabled,
-        ].map(String.init(describing:)).joined(separator: " ")
+        ].map(String.init(describing:)) + (settings.sceneDisplayFramingEnabled ? ["framed"] : []))
+            .joined(separator: " ")
         inputs["contentRevision"] = String(contentRevision)
         inputs["wallpaperSettings"] = wallpaperSettings.map { data in
             SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()

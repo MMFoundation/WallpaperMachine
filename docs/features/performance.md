@@ -313,8 +313,10 @@ canvas, drawn with an orthographic camera.
   display: the Fill layout's scale times the display's backing scale, which is what
   Wallpaper Engine does. The 1920×1080 canvas of a scene on a 3456×2234 panel is drawn
   into a 3972×2234 image (Fill crops the part that overhangs the panel, but it is
-  rasterized) instead of 1920×1080 stretched to that size at the last step, so edges
-  and grain keep the panel's own pixels. Text layout and atlas sizes stay in canvas
+  rasterized unless the experimental [**Draw only the visible part of cropped
+  scenes**](#draw-only-the-visible-part-of-cropped-scenes) is on) instead of 1920×1080
+  stretched to that size at the last step, so edges and grain keep the panel's own
+  pixels. Text layout and atlas sizes stay in canvas
   units, while glyph shaders draw at the target resolution. Coverage atlases gain
   no source detail; MSDF edges are evaluated at that resolution. At the Low and
   Medium presets the render scale then applies to that size (50% is half of it in
@@ -1092,11 +1094,12 @@ reasons include each error's domain and code, so a report shows which part of pl
 
 ## Experimental switches
 
-The one experimental switch is off by default.
+Both experimental switches are off by default.
 
 | Setting | Notes |
 | --- | --- |
 | Direct video plane sampling | Lets a Native Metal scene's own shader read the decoder's two video planes instead of a colour image converted for it each frame |
+| Draw only the visible part of cropped scenes | Lets an SDR 2D scene at Display resolution whose canvas the display crops draw only the part the display shows, instead of its whole layout |
 
 Content pacing and Shared video decode, the two other switches this page once
 listed, are gone. Both only reached a plain video that the scene engine played,
@@ -1159,6 +1162,49 @@ excursion that clamp removes, at most 24 code values for 8-bit limited range. Th
 a real difference, not floating-point noise, and it is why the setting is opt-in.
 No power measurement has been taken: what is claimed is only that a conversion is not
 encoded and its destination is not allocated when nothing asks for one.
+
+### Draw only the visible part of cropped scenes
+
+At [Display resolution](#2d-scene-resolution) a 2D scene whose canvas is not the
+display's shape is laid out to cover the display, and **Fill** (or **Original size**,
+for a canvas larger than the display) crops what overhangs it. By default that overhang
+is still drawn, effects and all, and thrown away when the picture is composed. Wallpaper
+Engine's frame is the window's size, so it never draws that part. With this switch on
+(`scene_display_framing` under `[experimental]` in `config.toml`), Native Metal draws an
+SDR scene only over the part of its layout the display shows, on the same pixel grid,
+and composes it where the whole layout would have put it. Off, every scene draws
+exactly as it did before the switch existed.
+
+It applies only to an SDR scene at Display resolution with a zoom of 1 or more, under
+Fill or Original size, and only when the scene is not upscaled by
+[MetalFX](#metalfx-upscaling): MetalFX would upscale the visible part on another grid
+than the whole layout's, and its filter reads across that part's edge, so a scene it
+upscales keeps drawing its whole layout. Fit, Stretch and Fit with blurred backdrop
+show the whole canvas and are untouched; an HDR scene is already drawn over the
+display's own rectangle. A scene whose layout cannot be cut on the grid of its
+screen-sized buffers (a quarter-size bloom buffer needs cuts at multiples of 4; a
+mip-mapped one, or a layout that is not a multiple of that grid, cannot be cut) is
+not framed either. A running scene takes the switch at its next frame by sizing its
+render targets again in place: nothing is reloaded. A paused wallpaper, or one waiting
+for events with **Update only when the scene changes**, takes it when it next draws, and
+until then its Mission Control picture is not captured again. The mechanism is under
+[scene rendering](scene-rendering.md#2d-scene-resolution).
+
+**What it saves.** Measured on an M5 Pro: Hoshimi Miyabi (3784370784, a 5120×2160
+canvas) on a 3840×2160 display at backing scale 2 and render scale 0.75 held 437 MB of
+render targets instead of 508.5 MB (−14%), with GPU time about 6 to 16% lower. A 16:9
+scene on the 3456×2234 built-in panel held 3 to 5.5% less render-target memory, with GPU
+time within noise. A scene the display does not crop saves nothing.
+
+**What it changes.** The picture is not byte-identical to drawing the whole layout,
+which is why the switch is opt-in. The GPU does not rasterize the shifted picture to the
+same sub-pixel positions: up to 0.6% of interior pixels move by one level, and thin
+geometry such as rain streaks can differ more, in a few dozen to about 140 pixels of a
+frame. A screen-space effect that reaches across the edge of the screen (bloom, a blur)
+now stops at that edge, as in Wallpaper Engine; near the edges the picture comes about
+0.4% closer to Wallpaper Engine's own frame. No power measurement has been taken.
+`WALLPAPER_MACHINE_SDR_FRAMING=1` or `=0` overrides the setting either way for a
+comparison in one build ([power benchmark](../testing/power-benchmark.md#ab-comparison-entry-points)).
 
 ## Background work only while it has a consumer
 

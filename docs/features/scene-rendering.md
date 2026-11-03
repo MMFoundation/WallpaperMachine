@@ -2122,7 +2122,36 @@ size their render targets from one shared function
 follows the screen come from the raster, a target the author sized keeps scaling
 with the render scale alone, and the canvas stays the source extent of layout,
 cursor mapping and scripts. SDR uses the Fill layout of the canvas over the
-output in whole points, at the display's backing scale. Native HDR Display output
+output in whole points, at the display's backing scale, and draws that whole
+canvas-cover raster. With the experimental SDR display framing on
+([**Draw only the visible part of cropped scenes**](performance.md#draw-only-the-visible-part-of-cropped-scenes),
+`scene_display_framing`; off by default), an SDR scene draws only the window of that
+raster the composition reads (`SceneRasterWindow`): the
+bilinear pairs under the output's pixels, rounded out to whole texels of the cover
+raster and to the grid of every screen-sized target the graph names at a fraction
+of it (a quarter-size buffer needs a window cut at multiples of 4). The window is
+drawn at the cover raster's pitch and phase and the composition lays it where its
+texels sit in that raster, so the visible picture is the whole raster's except
+within a screen-space effect's reach of the window's edge, which then clamps there
+as Wallpaper Engine's window-sized frame does. It is not byte-identical: the GPU
+does not rasterize a translated projection to the same sub-pixel positions, which
+leaves single-level differences on a fraction of a percent of pixels at content
+edges in some frames, and more on thin geometry. A cover raster that is not a multiple
+of that grid, a mip-mapped screen-sized target, a capped raster, a zoom below 1, Fit,
+Stretch, original size showing the whole canvas, Fit with blurred backdrop and a scene
+MetalFX upscales (render scale below 1 with MetalFX upscaling on: it would upscale the
+window on another grid and its filter reads across the window's edge) draw the whole
+cover raster. The window is sized for a
+zoom of 1, so the Zoom slider moves it without a resize; the first move of the
+picture off the centre sizes it once with room for any position, and a layout it no
+longer holds, the switch turned on or off, or MetalFX taking or leaving the upscale
+sizes the targets again before the next draw (`ResizeRenderTargets` semantics, no
+graph rebuild); a poster is not composed from a window the layout no longer holds.
+With the switch off a draw only reads the switch (the compile still notes the
+window's grid), and the frames are byte-identical to those of a build without the
+window (`perf_bench.py identity`).
+`WALLPAPER_MACHINE_SDR_FRAMING=1` or `=0` overrides the setting either way, read once
+at launch. Native HDR Display output
 uses the physical output rectangle: placement and clipping happen before bloom,
 so its edge samples see the same boundary as Wallpaper Engine. Fit with blurred
 backdrop keeps the full canvas-cover raster that the backdrop samples. Canvas size

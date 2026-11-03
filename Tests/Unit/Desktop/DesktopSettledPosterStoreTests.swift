@@ -88,6 +88,7 @@ final class DesktopSettledPosterStoreTests: XCTestCase {
         scaling: BridgeScalingMode = .fill, enabled: Bool = true, mode: BridgeDisplayMode = .standalone,
         fps: UInt32 = 30, renderScale: Float = 0.75, sceneResolution: String = "display",
         postProcessing: BridgePostProcessing = .enabled, metalFX: Bool = false,
+        displayFraming: Bool = false,
         scene: (backend: String, failure: String?, wallpaper: String)? = ("native_metal", nil, "a")
     ) -> BridgeSettingsSnapshot {
         var quality = BridgeSceneQuality.wallpaperEngineDefault
@@ -97,7 +98,8 @@ final class DesktopSettledPosterStoreTests: XCTestCase {
                 displayId: "primary", title: "Built-in (1 - Primary)", enabled: enabled, mode: mode,
                 mirrorTargets: [], selectedMirrorTarget: nil, scalingMode: scaling, scalingFactor: 1,
                 targetFps: fps, maxFps: 120, muted: false, volume: 1)],
-            metalfxUpscalingEnabled: metalFX, sceneResolution: sceneResolution, sceneQuality: quality,
+            metalfxUpscalingEnabled: metalFX, sceneDisplayFramingEnabled: displayFraming,
+            sceneResolution: sceneResolution, sceneQuality: quality,
             sceneRenderers: scene.map {
                 [BridgeSceneBackendReport(
                     displayId: 1, displayName: "Built-in", wallpaperId: $0.wallpaper, wallpaperTitle: "",
@@ -142,6 +144,7 @@ final class DesktopSettledPosterStoreTests: XCTestCase {
             ("2D scene resolution", resolve(settings: settings(sceneResolution: "canvas"))),
             ("post-processing", resolve(settings: settings(postProcessing: .ultra))),
             ("MetalFX", resolve(settings: settings(metalFX: true))),
+            ("display framing", resolve(settings: settings(displayFraming: true))),
             ("appearance", resolve(extras: ["appearance": "dark"])),
         ]
         for (name, look) in changed {

@@ -2740,6 +2740,24 @@ texture entrances are not decoded-image or native-rendering evidence.
   `.LocalGeometryStaysLocalWhileEffectScreenCoordinatesAreFramed` and
   `.ExplicitShadowProjectionKeepsItsOwnViewport` cover scene/local sampling,
   inverse matrices, camera movement, layout-generation invalidation and shadow views.
+- **SDR display framing** (experimental, off by default) — `RasterWindow.*` in
+  `render_scale_test` plans the window of the canvas-cover raster an SDR
+  Display-resolution scene draws with the switch on: the bilinear pairs the composition
+  reads (3972→2979 texels at render scale 0.75 keeps texels 193–2785), cuts on the grid
+  of screen-sized targets drawn at a fraction of the raster (none for a cover that is
+  not a multiple of it), an odd crop offset, headroom for a pan, zooms above 1 inside
+  the zoom-1 window, Fit and Stretch unframed, the flipped footprint and the target
+  sizes the window gives. `SdrDisplayFraming.*` in `metal_scene_draw_smoke` composes
+  the framed scene through the poster path against the same scene drawn whole
+  (`SetSdrFramingOverrideForTests` forces either): Fill with and without bloom (only
+  bloom's reach across the window's edge differs), an odd crop offset, Stretch, Fit,
+  Fit with blurred backdrop and original size sizing the targets again before their
+  first draw, and zoom, pan and flip moving the window, sizing it at most once.
+  `.IsOffByDefaultAndARunningSceneTakesTheSettingAtItsNextFrame` keeps the setting off
+  until it is turned on, frames a running scene at its next frame, and turned off again
+  draws the whole raster and the very picture it drew before;
+  `.MetalFxUpscalingKeepsTheWholeRaster` leaves a scene MetalFX upscales unframed and
+  frames or unframes it at its next frame as upscaling goes and comes.
 - **HDR output color and display capability** — `HdrOutputGpu` covers linear HDR
   camera fade (sRGB 160/116/83) alongside unchanged SDR fade (89/45/22), runtime
   bloom toggles, and a black/white edge whose linear quarter sample encodes to 137.

@@ -392,6 +392,22 @@ public:
     /// Whether a clear or copy nothing drawn reads is left out, for graphs compiled from now on.
     /// On unless `WALLPAPER_MACHINE_HIDDEN_LAYER_WORK=0`; process-wide, test-only.
     static void SetHiddenLayerWorkForTests(bool enabled);
+    /// SDR display framing's override (`WALLPAPER_MACHINE_SDR_FRAMING`), from the next draw
+    /// on: 1 frames, 0 never frames, -1 follows `SetMetalSceneDisplayFramingEnabled`.
+    /// Process-wide, test-only. Answers the override it replaced.
+    static int SetSdrFramingOverrideForTests(int forced);
+    /// The window of its canvas-cover raster an SDR scene is drawn into, in that raster's
+    /// pixels; `framed` false when the whole raster is drawn
+    /// (`SetMetalSceneDisplayFramingEnabled`).
+    struct RasterWindowForTests {
+        uint32_t cover_width { 0 }, cover_height { 0 };
+        uint32_t x { 0 }, y { 0 };
+        uint32_t width { 0 }, height { 0 };
+        bool     framed { false };
+        /// A layout change left the window short: the next draw sizes the targets again.
+        bool     stale { false };
+    };
+    [[nodiscard]] RasterWindowForTests RasterWindowStateForTests() const;
 
     /// How many shader sources this process has handed to the Metal compiler.
     ///

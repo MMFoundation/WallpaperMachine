@@ -913,6 +913,13 @@ pub struct BridgeSettingsSnapshot {
     /// the `video_path` of each `scene_renderers` row is what actually
     /// happened.
     pub scene_video_plane_sampling_enabled: bool,
+    /// The saved preference for SDR display framing: an SDR scene at Display
+    /// resolution draws only the part of its canvas-cover layout the display
+    /// shows. Off by default, experimental. A preference, not a read-back:
+    /// `WALLPAPER_MACHINE_SDR_FRAMING` can override it, and a scene that
+    /// cannot be framed (Fit, a zoom below 1, one MetalFX upscales) draws the
+    /// whole layout whatever this says.
+    pub scene_display_framing_enabled: bool,
     /// `"display"` or `"canvas"`: how many pixels a 2D scene is rasterized
     /// with before the render scale divides them. The saved preference, which
     /// every running 2D scene follows; perspective scenes and plain videos

@@ -1380,6 +1380,28 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func setScalingMode(wallpaperId: String, displayId: String, mode: BridgeScalingMode) async throws  -> BridgeWallpaperMutationBundle
     
     /**
+     * Lets an SDR scene at Display resolution whose canvas overhangs the
+     * display (Fill, or original size, crops it) draw only the part the
+     * display shows, instead of its whole layout cropped.
+     *
+     * Off by default, and experimental: it saves GPU work and memory on a
+     * scene whose shape differs from the display's, but the picture is not
+     * byte-identical to the whole layout's. A running scene picks it up at
+     * its next frame by sizing its render targets again in place; nothing is
+     * reparsed or restarted. Fit, Stretch, Fit with blurred backdrop, a zoom
+     * below 1 and a scene MetalFX upscales draw the whole layout whatever
+     * this says; an HDR scene keeps its own framing to the display.
+     * `WALLPAPER_MACHINE_SDR_FRAMING=1` or `=0` overrides it in the renderer
+     * for a measurement.
+     *
+     * # Errors
+     *
+     * Returns an error when the setting cannot be saved or the renderer
+     * rejects the call.
+     */
+    func setSceneDisplayFramingEnabled(enabled: Bool) async throws  -> BridgeSnapshotBundle
+    
+    /**
      * Turns whole-scene on-demand updating on or off for the renderer
      * process.
      *
@@ -3470,6 +3492,43 @@ open func setScalingMode(wallpaperId: String, displayId: String, mode: BridgeSca
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+    
+    /**
+     * Lets an SDR scene at Display resolution whose canvas overhangs the
+     * display (Fill, or original size, crops it) draw only the part the
+     * display shows, instead of its whole layout cropped.
+     *
+     * Off by default, and experimental: it saves GPU work and memory on a
+     * scene whose shape differs from the display's, but the picture is not
+     * byte-identical to the whole layout's. A running scene picks it up at
+     * its next frame by sizing its render targets again in place; nothing is
+     * reparsed or restarted. Fit, Stretch, Fit with blurred backdrop, a zoom
+     * below 1 and a scene MetalFX upscales draw the whole layout whatever
+     * this says; an HDR scene keeps its own framing to the display.
+     * `WALLPAPER_MACHINE_SDR_FRAMING=1` or `=0` overrides it in the renderer
+     * for a measurement.
+     *
+     * # Errors
+     *
+     * Returns an error when the setting cannot be saved or the renderer
+     * rejects the call.
+     */
+open func setSceneDisplayFramingEnabled(enabled: Bool)async throws  -> BridgeSnapshotBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_scene_display_framing_enabled(
+                    self.uniffiClonePointer(),
+                    FfiConverterBool.lower(enabled)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -8149,6 +8208,15 @@ public struct BridgeSettingsSnapshot {
      */
     public var sceneVideoPlaneSamplingEnabled: Bool
     /**
+     * The saved preference for SDR display framing: an SDR scene at Display
+     * resolution draws only the part of its canvas-cover layout the display
+     * shows. Off by default, experimental. A preference, not a read-back:
+     * `WALLPAPER_MACHINE_SDR_FRAMING` can override it, and a scene that
+     * cannot be framed (Fit, a zoom below 1, one MetalFX upscales) draws the
+     * whole layout whatever this says.
+     */
+    public var sceneDisplayFramingEnabled: Bool
+    /**
      * `"display"` or `"canvas"`: how many pixels a 2D scene is rasterized
      * with before the render scale divides them. The saved preference, which
      * every running 2D scene follows; perspective scenes and plain videos
@@ -8243,6 +8311,14 @@ public struct BridgeSettingsSnapshot {
          * happened.
          */sceneVideoPlaneSamplingEnabled: Bool, 
         /**
+         * The saved preference for SDR display framing: an SDR scene at Display
+         * resolution draws only the part of its canvas-cover layout the display
+         * shows. Off by default, experimental. A preference, not a read-back:
+         * `WALLPAPER_MACHINE_SDR_FRAMING` can override it, and a scene that
+         * cannot be framed (Fit, a zoom below 1, one MetalFX upscales) draws the
+         * whole layout whatever this says.
+         */sceneDisplayFramingEnabled: Bool, 
+        /**
          * `"display"` or `"canvas"`: how many pixels a 2D scene is rasterized
          * with before the render scale divides them. The saved preference, which
          * every running 2D scene follows; perspective scenes and plain videos
@@ -8303,6 +8379,7 @@ public struct BridgeSettingsSnapshot {
         self.sceneOnDemandEnabled = sceneOnDemandEnabled
         self.metalfxUpscalingEnabled = metalfxUpscalingEnabled
         self.sceneVideoPlaneSamplingEnabled = sceneVideoPlaneSamplingEnabled
+        self.sceneDisplayFramingEnabled = sceneDisplayFramingEnabled
         self.sceneResolution = sceneResolution
         self.sceneQuality = sceneQuality
         self.sceneUpdateModes = sceneUpdateModes
@@ -8372,6 +8449,9 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         if lhs.sceneVideoPlaneSamplingEnabled != rhs.sceneVideoPlaneSamplingEnabled {
             return false
         }
+        if lhs.sceneDisplayFramingEnabled != rhs.sceneDisplayFramingEnabled {
+            return false
+        }
         if lhs.sceneResolution != rhs.sceneResolution {
             return false
         }
@@ -8434,6 +8514,7 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         hasher.combine(sceneOnDemandEnabled)
         hasher.combine(metalfxUpscalingEnabled)
         hasher.combine(sceneVideoPlaneSamplingEnabled)
+        hasher.combine(sceneDisplayFramingEnabled)
         hasher.combine(sceneResolution)
         hasher.combine(sceneQuality)
         hasher.combine(sceneUpdateModes)
@@ -8475,6 +8556,7 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
                 sceneOnDemandEnabled: FfiConverterBool.read(from: &buf), 
                 metalfxUpscalingEnabled: FfiConverterBool.read(from: &buf), 
                 sceneVideoPlaneSamplingEnabled: FfiConverterBool.read(from: &buf), 
+                sceneDisplayFramingEnabled: FfiConverterBool.read(from: &buf), 
                 sceneResolution: FfiConverterString.read(from: &buf), 
                 sceneQuality: FfiConverterTypeBridgeSceneQuality.read(from: &buf), 
                 sceneUpdateModes: FfiConverterSequenceTypeBridgeSceneUpdateModeReport.read(from: &buf), 
@@ -8509,6 +8591,7 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
         FfiConverterBool.write(value.sceneOnDemandEnabled, into: &buf)
         FfiConverterBool.write(value.metalfxUpscalingEnabled, into: &buf)
         FfiConverterBool.write(value.sceneVideoPlaneSamplingEnabled, into: &buf)
+        FfiConverterBool.write(value.sceneDisplayFramingEnabled, into: &buf)
         FfiConverterString.write(value.sceneResolution, into: &buf)
         FfiConverterTypeBridgeSceneQuality.write(value.sceneQuality, into: &buf)
         FfiConverterSequenceTypeBridgeSceneUpdateModeReport.write(value.sceneUpdateModes, into: &buf)
@@ -12605,6 +12688,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scaling_mode() != 14052) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_display_framing_enabled() != 55184) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_on_demand_enabled() != 64117) {

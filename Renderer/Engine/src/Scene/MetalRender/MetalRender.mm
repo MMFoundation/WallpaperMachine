@@ -17,6 +17,7 @@
 
 #include "MetalRender/MetalBlend.hpp"
 #include "MetalRender/MetalCapability.hpp"
+#include "MetalRender/MetalDisplayFraming.hpp"
 #include "MetalRender/MetalUpscaling.hpp"
 #include "MetalRender/MetalVideoSupport.hpp"
 #include "MetalRender/MetalProjection.hpp"
@@ -1556,6 +1557,35 @@ std::atomic<bool>& NoopDrawSkipSwitch()
     return enabled;
 }
 
+/// SDR display framing's saved setting (`SetMetalSceneDisplayFramingEnabled`), as the host last
+/// set it. Off by default: drawing the whole canvas-cover raster is what every SDR scene has
+/// drawn, and the window is not byte-identical to it.
+std::atomic<bool> g_sdr_display_framing { false };
+
+/// `WALLPAPER_MACHINE_SDR_FRAMING`, read once: `1` frames whatever the setting says, `0` never
+/// frames, anything else (-1) follows the setting. For an A/B in one binary.
+std::atomic<int>& SdrDisplayFramingOverride()
+{
+    static std::atomic<int> forced { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_SDR_FRAMING");
+        if (value == nullptr) return -1;
+        const std::string_view text(value);
+        return text == "1" ? 1 : text == "0" ? 0 : -1;
+    }() };
+    return forced;
+}
+
+/// Whether an SDR Display-resolution scene draws only the window of its canvas-cover raster
+/// the composition reads (`render::SceneRasterWindow`): the override, else the setting. The
+/// picture differs from the whole raster's within a screen-space effect's reach of the
+/// output's edges, and by single levels where the GPU rasterizes the shifted picture to other
+/// sub-pixel positions. A running scene takes a change at its next draw.
+bool SdrRasterWindowEnabled()
+{
+    const int forced = SdrDisplayFramingOverride().load(std::memory_order_relaxed);
+    return forced >= 0 ? forced == 1 : g_sdr_display_framing.load(std::memory_order_relaxed);
+}
+
 /// Whether a clear only hidden passes would read (a layer a script hides keeps its effect buffers
 /// in the graph), and a copy made only for draws after it (a hidden lens's copy of the scene), is
 /// left out while no pass that reads it draws. On by default;
@@ -1577,6 +1607,31 @@ std::atomic<bool>& HiddenLayerWorkSwitch()
 bool BlendKeepsTexelsExactly(MTLPixelFormat format)
 {
     return format == MTLPixelFormatRGBA8Unorm || format == MTLPixelFormatBGRA8Unorm;
+}
+
+/// Every render-target key the graph's passes name, read or written, resolved through the
+/// alias table: what `ReferencedRenderTargets` gives once the graph is lowered, known before
+/// the targets are sized.
+std::unordered_set<std::string> GraphRenderTargets(const Scene& scene, const rg::RenderGraph& graph)
+{
+    std::unordered_set<std::string> keys;
+    keys.insert(scene.ResolveRenderTargetName(SpecTex_Default));
+    const auto add = [&](const std::string& name) {
+        if (! name.empty()) keys.insert(scene.ResolveRenderTargetName(name));
+    };
+    for (const auto id : graph.topologicalOrder()) {
+        const auto* pass = graph.getPass(id);
+        if (const auto* draw = dynamic_cast<const rg::DrawPass*>(pass)) {
+            add(draw->desc().output);
+            for (const auto& texture : draw->desc().textures) add(texture);
+        } else if (const auto* copy = dynamic_cast<const rg::CopyPass*>(pass)) {
+            add(copy->desc().src);
+            add(copy->desc().dst);
+        } else if (const auto* clear = dynamic_cast<const rg::ClearPass*>(pass)) {
+            add(clear->desc().result);
+        }
+    }
+    return keys;
 }
 
 /// Bytes one texel of a render target takes, for the encode counters.
@@ -1750,6 +1805,16 @@ NSString* GpuLabel(std::string text)
 
 } // namespace
 
+void SetMetalSceneDisplayFramingEnabled(bool enabled)
+{
+    g_sdr_display_framing.store(enabled, std::memory_order_relaxed);
+}
+
+bool MetalSceneDisplayFramingEnabled()
+{
+    return g_sdr_display_framing.load(std::memory_order_relaxed);
+}
+
 MetalPipelineArchiveStatus MetalPipelineArchiveStatusForDiagnostics()
 {
     return MetalProgramCache::shared().archiveStatus();
@@ -1857,6 +1922,25 @@ struct MetalRender::Impl
     /// inputs have to describe.
     uint32_t             raster_width { 0 };
     uint32_t             raster_height { 0 };
+    /// SDR display framing: the window of its canvas-cover raster a framed SDR scene draws
+    /// (`render::SceneRasterWindow`), which its targets are sized from and the composition
+    /// places. Empty for an unframed or HDR scene.
+    render::SceneRasterWindow raster_window {};
+    /// The multiple the window keeps (`render::ScreenBoundWindowAlignment`) for the
+    /// screen-sized targets the compiled graph names; zero frames nothing.
+    uint32_t             raster_window_alignment { 0 };
+    /// A layout the window no longer holds, or one that would frame an unframed scene or
+    /// unframe a framed one: the next draw sizes the targets again before it draws.
+    bool                 raster_window_stale { false };
+    /// Set once the picture has been moved off the centre: windows planned from then on
+    /// leave room for any further move, so a drag does not resize the targets every step.
+    bool                 raster_window_headroom { false };
+    /// `sdrRasterWindowApplies` when the window was last planned or moved. A draw that finds
+    /// it changed (the setting, or MetalFX taking the upscale) plans the window again.
+    bool                 raster_window_applies { false };
+    /// The SDR framing setting as this compile or draw read it, once: the setting can flip
+    /// on another thread, and every decision of one plan must see the same value.
+    bool                 sdr_window_enabled { false };
 
     struct SortedDraw {
         SceneNode* owner { nullptr };
@@ -2522,6 +2606,17 @@ struct MetalRender::Impl
     void resolveTargetSizes(Scene& scene);
     bool usesDisplayFraming(const Scene& scene) const;
     void refreshRasterFraming(Scene& scene);
+    /// Whether an SDR scene can be framed to a window of its cover raster under the setting,
+    /// the current scaling mode and zoom, and the upscale (`raster_window`).
+    bool sdrRasterWindowApplies(const Scene& scene) const;
+    /// The window `resolveTargetSizes` sizes an SDR scene's targets from; empty when it
+    /// stays unframed.
+    render::SceneRasterWindow planRasterWindow(const Scene& scene, const Extent2D& fallback,
+                                               const render::SceneRasterSurface& surface) const;
+    /// How the unframed composition lays the cover raster on the output, per axis, mirrored
+    /// for a flipped output. `zoom` stands in for the user's scaling factor.
+    std::pair<render::RasterAxisPlacement, render::RasterAxisPlacement>
+    coverPlacement(const Scene& scene, double zoom) const;
     void selectSampleCounts(Scene& scene);
     bool prepareTargets(Scene& scene);
     /// One scene target's image, labelled with its key; nil if Metal refuses it.
@@ -3041,7 +3136,22 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
 
     auto layout =
         scalingLayout(scene, (uint32_t)destination.width, (uint32_t)destination.height);
-    if (scene.display_framed) {
+    // Where the picture goes, in destination pixels: the layout's viewport, unless the scene
+    // draws a window of its cover raster.
+    double picture_x = layout.viewport_px.x, picture_y = layout.viewport_px.y;
+    double picture_w = layout.viewport_px.width, picture_h = layout.viewport_px.height;
+    if (scene.display_framed && raster_window.Framed()) {
+        // The window goes where its texels sit in the cover raster the layout's viewport
+        // holds, so every destination pixel samples the very position the whole raster
+        // would give it. The bars and scissor are the unframed composition's.
+        const auto& window = raster_window;
+        std::tie(picture_x, picture_w) = render::RasterWindowFootprint(
+            window.cover.width, window.x, window.size.width, layout.viewport_px.x,
+            layout.viewport_px.width, horizontal_flip);
+        std::tie(picture_y, picture_h) = render::RasterWindowFootprint(
+            window.cover.height, window.y, window.size.height, layout.viewport_px.y,
+            layout.viewport_px.height, false);
+    } else if (scene.display_framed) {
         // The image has already been placed before bloom. Preserve the old
         // scheme-colour bands, and flip the full output only after the
         // pre-raster layout has reflected its placement when requested.
@@ -3054,6 +3164,7 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
         layout.viewport_px = {0, 0, width, height};
         layout.scissor_px = {left, top, std::max(0, right-left), std::max(0, bottom-top)};
         layout.backdrop = false;
+        picture_x = 0.0, picture_y = 0.0, picture_w = width, picture_h = height;
     }
 
     // Before the pass below opens: MetalFX encodes its own work into the command buffer.
@@ -3111,10 +3222,10 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
                              horizontal_flip);
     }
     const FlippedViewportBox viewport {
-        .x      = (double)layout.viewport_px.x,
-        .y      = (double)(layout.viewport_px.y + std::max(1, layout.viewport_px.height)),
-        .width  = (double)std::max(1, layout.viewport_px.width),
-        .height = -(double)std::max(1, layout.viewport_px.height),
+        .x      = picture_x,
+        .y      = picture_y + std::max(1.0, picture_h),
+        .width  = std::max(1.0, picture_w),
+        .height = -std::max(1.0, picture_h),
     };
     const auto metal_viewport = ToMetalViewport(viewport);
     [encoder setViewport:(MTLViewport) { metal_viewport.origin_x, metal_viewport.origin_y,
@@ -3580,14 +3691,22 @@ void MetalRender::SetPipelineArchivePath(std::string_view path)
 /// of one overwriting the other.
 void MetalRender::Impl::resolveTargetSizes(Scene& scene)
 {
-    scene.display_framed = usesDisplayFraming(scene);
-    refreshRasterFraming(scene);
     const Extent2D fallback { std::max<uint32_t>(1, output_width),
                               std::max<uint32_t>(1, output_height) };
-    const auto extents      = render::ResolveScreenBoundRenderTargetSizes(
-        scene, fallback,
-        render::SceneRasterSurface { .display_scale_factor = NormalizeScaleFactor(display_scale_factor),
-                                     .max_dimension        = MaxTextureDimension(device) });
+    render::SceneRasterSurface surface {
+        .display_scale_factor = NormalizeScaleFactor(display_scale_factor),
+        .max_dimension        = MaxTextureDimension(device),
+    };
+    // HDR frames to the output rectangle; SDR to the window of its cover raster that the
+    // composition reads, or not at all.
+    raster_window         = scene.hdr ? render::SceneRasterWindow {}
+                                      : planRasterWindow(scene, fallback, surface);
+    raster_window_stale   = false;
+    raster_window_applies = sdrRasterWindowApplies(scene);
+    scene.display_framed  = scene.hdr ? usesDisplayFraming(scene) : raster_window.Framed();
+    refreshRasterFraming(scene);
+    if (raster_window.Framed()) surface.window = raster_window.size;
+    const auto extents = render::ResolveScreenBoundRenderTargetSizes(scene, fallback, surface);
     const auto render_scale = render::ResolveSceneRenderScale(scene);
     raster_width            = std::max(1u, extents.raster.width);
     raster_height           = std::max(1u, extents.raster.height);
@@ -6811,6 +6930,11 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
         scene.imageParser->SetTextureSurfaceSize(cap_width, cap_height);
     }
 
+    // Which screen-sized targets the graph names decides the grid an SDR scene's window
+    // keeps; known from the graph before anything is sized, so the window is planned once.
+    raster_window_alignment =
+        scene.hdr ? 0u : render::ScreenBoundWindowAlignment(scene, GraphRenderTargets(scene, graph));
+    sdr_window_enabled = SdrRasterWindowEnabled();
     resolveTargetSizes(scene);
     if (scene.hdr && scene.runtime && scene.runtime->RefreshSceneGeneralPostProcesses()) {
         // Bloom's effective level count is a property of this physical raster.
@@ -7247,7 +7371,16 @@ bool MetalRender::Impl::resizeTargets(Scene& scene)
     pooled_release_at.clear();
     pooled_snapshot.clear();
 
+    const bool was_windowed = raster_window.Framed();
     resolveTargetSizes(scene);
+    // An SDR window that was or is drawn changes the raster that screen-space inputs
+    // describe. Nothing else a resize answers changes the raster.
+    if (scene.shaderValueUpdater != nullptr && (was_windowed || raster_window.Framed())) {
+        scene.shaderValueUpdater->SetScreenSize(static_cast<int32_t>(raster_width),
+                                                static_cast<int32_t>(raster_height));
+        scene.shaderValueUpdater->SetTexelSize(1.0f / static_cast<float>(raster_width),
+                                               1.0f / static_cast<float>(raster_height));
+    }
     // A changed HDR chain needs the caller's normal graph-rebuild path rather
     // than reusing descriptions whose level nodes were just retired.
     if (scene.hdr && scene.runtime && scene.runtime->RefreshSceneGeneralPostProcesses()) return false;
@@ -7325,19 +7458,115 @@ bool MetalRender::Impl::usesDisplayFraming(const Scene& scene) const
            scaling_mode != WallpaperScalingMode::FIT_BLURRED;
 }
 
+bool MetalRender::Impl::sdrRasterWindowApplies(const Scene& scene) const
+{
+    // Fit with the blurred backdrop samples the whole raster for its bands. A zoom below 1
+    // shows more of the canvas with every step, so it keeps the whole raster rather than
+    // sizing the targets again on each one. MetalFX would upscale the window on another grid
+    // than the whole raster's, and its filter reads across the window's edge: an upscaled
+    // scene keeps the whole raster too.
+    return sdr_window_enabled && ! scene.hdr && ! scene.display_sized &&
+           scene.resolution == SceneResolution::Display &&
+           scaling_mode != WallpaperScalingMode::FIT_BLURRED && scaling_factor >= 1.0 &&
+           ! (MetalUpscalingEnabled() && render::ResolveSceneRenderScale(scene) < 1.0) &&
+           output_width > 0 && output_height > 0;
+}
+
+std::pair<render::RasterAxisPlacement, render::RasterAxisPlacement>
+MetalRender::Impl::coverPlacement(const Scene& scene, double zoom) const
+{
+    const double scale_factor = NormalizeScaleFactor(display_scale_factor);
+    const auto   source =
+        render::ResolveSceneSourceExtent(scene, { std::max(1u, output_width), std::max(1u, output_height) });
+    const auto logical = [scale_factor](uint32_t pixels) {
+        return std::max(1u, static_cast<uint32_t>(
+                                std::lround(static_cast<double>(pixels) / scale_factor)));
+    };
+    const auto layout = ComputeWallpaperScalingLayout(
+        scaling_mode, source.width, source.height, logical(output_width), logical(output_height),
+        scale_factor, zoom, framing.pan_x, framing.pan_y);
+    double x = layout.viewport_px.x;
+    // A flipped composition reads the raster right to left: what it shows of it is what an
+    // unflipped one shows with the viewport mirrored about the output.
+    if (horizontal_flip)
+        x = static_cast<double>(output_width) - layout.viewport_px.x - layout.viewport_px.width;
+    return {
+        render::RasterAxisPlacement { .origin = x,
+                                      .extent = static_cast<double>(layout.viewport_px.width),
+                                      .output = output_width },
+        render::RasterAxisPlacement { .origin = static_cast<double>(layout.viewport_px.y),
+                                      .extent = static_cast<double>(layout.viewport_px.height),
+                                      .output = output_height },
+    };
+}
+
+render::SceneRasterWindow MetalRender::Impl::planRasterWindow(
+    const Scene& scene, const Extent2D& fallback, const render::SceneRasterSurface& surface) const
+{
+    if (! sdrRasterWindowApplies(scene) || raster_window_alignment == 0) return {};
+    bool capped = false;
+    const Extent2D cover = render::ResolveSceneCoverRaster(scene, fallback, surface, &capped);
+    // A capped raster is not drawn at the pitch the composition lays it at.
+    if (capped) return {};
+    // Sized for a zoom of 1, which every larger zoom shows a part of, so the zoom slider
+    // moves the window instead of resizing the targets. Off the centre, or once moved, it
+    // leaves room for any position.
+    const bool headroom = raster_window_headroom || framing.pan_x != 0.5 || framing.pan_y != 0.5;
+    const auto [x, y] = coverPlacement(scene, 1.0);
+    auto window = render::PlanSceneRasterWindow(cover, x, y, raster_window_alignment, headroom);
+    if (! window.Framed()) return {};
+    // Then put where the current zoom and position read it.
+    const auto [zoomed_x, zoomed_y] = coverPlacement(scene, scaling_factor);
+    if (! render::PlaceSceneRasterWindow(window, zoomed_x, zoomed_y, raster_window_alignment))
+        return {};
+    return window;
+}
+
 void MetalRender::Impl::refreshRasterFraming(Scene& scene)
 {
     if (output_width == 0 || output_height == 0) return;
-    auto layout = scalingLayout(scene, output_width, output_height);
-    if (horizontal_flip)
-        layout.viewport_px.x = static_cast<int32_t>(output_width) -
-                               layout.viewport_px.x - layout.viewport_px.width;
-    const double width = output_width, height = output_height;
-    const std::array<double,4> clip = scene.display_framed ? std::array<double,4>{
-        layout.viewport_px.width / width, layout.viewport_px.height / height,
-        (2.0 * layout.viewport_px.x + layout.viewport_px.width) / width - 1.0,
-        1.0 - (2.0 * layout.viewport_px.y + layout.viewport_px.height) / height,
-    } : std::array<double,4>{1.0,1.0,0.0,0.0};
+    std::array<double, 4> clip { 1.0, 1.0, 0.0, 0.0 };
+    if (! scene.hdr && graph_ready) {
+        // An SDR scene's window follows the layout while it still holds what the composition
+        // reads; otherwise, or when the layout would frame an unframed scene, the targets are
+        // sized again before the next draw. Until then the window stays where it was drawn.
+        raster_window_applies = sdrRasterWindowApplies(scene);
+        if (raster_window.Framed()) {
+            auto       moved = raster_window;
+            const auto [x, y] = coverPlacement(scene, scaling_factor);
+            if (sdrRasterWindowApplies(scene) &&
+                render::PlaceSceneRasterWindow(moved, x, y, raster_window_alignment)) {
+                raster_window = moved;
+            } else {
+                raster_window_headroom =
+                    raster_window_headroom || framing.pan_x != 0.5 || framing.pan_y != 0.5;
+                raster_window_stale = true;
+            }
+        } else if (sdrRasterWindowApplies(scene) && raster_window_alignment != 0) {
+            const Extent2D fallback { std::max<uint32_t>(1, output_width),
+                                      std::max<uint32_t>(1, output_height) };
+            if (planRasterWindow(scene, fallback,
+                                 render::SceneRasterSurface {
+                                     .display_scale_factor = NormalizeScaleFactor(display_scale_factor),
+                                     .max_dimension        = MaxTextureDimension(device) })
+                    .Framed())
+                raster_window_stale = true;
+        }
+    }
+    if (scene.display_framed && raster_window.Framed()) {
+        clip = render::SceneRasterWindowClip(raster_window);
+    } else if (scene.display_framed) {
+        auto layout = scalingLayout(scene, output_width, output_height);
+        if (horizontal_flip)
+            layout.viewport_px.x = static_cast<int32_t>(output_width) -
+                                   layout.viewport_px.x - layout.viewport_px.width;
+        const double width = output_width, height = output_height;
+        clip = {
+            layout.viewport_px.width / width, layout.viewport_px.height / height,
+            (2.0 * layout.viewport_px.x + layout.viewport_px.width) / width - 1.0,
+            1.0 - (2.0 * layout.viewport_px.y + layout.viewport_px.height) / height,
+        };
+    }
     if (scene.display_clip != clip || (scene.display_framed && scene.display_clip_generation == 0)) {
         scene.display_clip = clip;
         ++scene.display_clip_generation;
@@ -7584,7 +7813,8 @@ bool MetalRender::SetWallpaperScalingMode(WallpaperScalingMode mode)
     pImpl->present_gate.Invalidate();
     if (pImpl->graph_ready && pImpl->framing_scene != nullptr) {
         auto& scene = *pImpl->framing_scene;
-        if (scene.display_framed != pImpl->usesDisplayFraming(scene)) return true;
+        // HDR framing is built into the graph; an SDR window is sized again by the next draw.
+        if (scene.hdr && scene.display_framed != pImpl->usesDisplayFraming(scene)) return true;
         pImpl->refreshRasterFraming(scene);
     }
     return false;
@@ -7660,7 +7890,8 @@ WallpaperCursorMapping MetalRender::CursorMapping(const Scene& scene) const
     auto layout = pImpl->scalingLayout(scene, pImpl->output_width, pImpl->output_height);
     // The host mirrors the input about the window before mapping it. Match
     // the reflected pre-raster placement, so a pan is not mirrored twice.
-    if (scene.display_framed && pImpl->horizontal_flip)
+    // An SDR window composes exactly as the whole raster does, so only HDR framing moves it.
+    if (scene.display_framed && ! pImpl->raster_window.Framed() && pImpl->horizontal_flip)
         layout.viewport_px.x = static_cast<int32_t>(pImpl->output_width) -
                                layout.viewport_px.x - layout.viewport_px.width;
     return ComputeWallpaperCursorMapping(
@@ -7675,6 +7906,18 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
 {
     if (presented != nullptr) *presented = false;
     if (! pImpl->inited || ! pImpl->graph_ready || pImpl->layer == nil) return false;
+    // SDR display framing turned on or off, or MetalFX taking or leaving the upscale, since
+    // the window was planned: plan it again, which marks it stale if the targets change.
+    pImpl->sdr_window_enabled = SdrRasterWindowEnabled();
+    if (! scene.hdr && pImpl->sdrRasterWindowApplies(scene) != pImpl->raster_window_applies)
+        pImpl->refreshRasterFraming(scene);
+    // A layout the SDR window no longer holds (or would now frame): the targets are sized
+    // for it before anything is drawn, in place, as for a text card that grew. A resize that
+    // fails is tried again on the next draw rather than left half done.
+    if (pImpl->raster_window_stale && ! pImpl->resizeTargets(scene)) {
+        pImpl->raster_window_stale = true;
+        return false;
+    }
     UpdateSceneReflection(scene);
     // The host calls FrameBegin before scripts tick. Shadow cameras must see the
     // resulting transforms in this draw, before the static-cache keys are read.
@@ -8619,6 +8862,9 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         impl.present_key.Add(static_cast<uint64_t>(static_cast<uint32_t>(layout.scissor_px.width)));
         impl.present_key.Add(static_cast<uint64_t>(static_cast<uint32_t>(layout.scissor_px.height)));
         impl.present_key.Add(impl.horizontal_flip ? 1u : 0u);
+        // Where an SDR window sits in its cover raster, which places the picture.
+        impl.present_key.Add((static_cast<uint64_t>(impl.raster_window.x) << 32) |
+                             impl.raster_window.y);
         {
             // The bars' colour, in two words of the key.
             const auto bars = impl.BorderColorFor(scene);
@@ -8771,6 +9017,8 @@ PosterServiceResult MetalRender::ServicePosterRequest(Scene& scene)
     // Composing the output image before the compiled graph has ever been drawn
     // would publish an empty picture as the wallpaper.
     if (! pImpl->frame_drawn) return PosterServiceResult::NoFrameYet;
+    // The window drawn last does not hold the layout the poster would be composed with.
+    if (pImpl->raster_window_stale) return PosterServiceResult::NoFrameYet;
 
     @autoreleasepool {
         auto& impl = *pImpl;
@@ -8952,6 +9200,19 @@ bool MetalRender::SetLayerLocalSignaturesForTests(bool enabled)
 }
 
 void MetalRender::SetAudioReuseForTests(bool enabled) { AudioReuseSwitch().store(enabled); }
+
+int MetalRender::SetSdrFramingOverrideForTests(int forced)
+{
+    return SdrDisplayFramingOverride().exchange(forced < 0 ? -1 : forced == 0 ? 0 : 1);
+}
+
+MetalRender::RasterWindowForTests MetalRender::RasterWindowStateForTests() const
+{
+    if (pImpl == nullptr) return {};
+    const auto& window = pImpl->raster_window;
+    return { window.cover.width, window.cover.height, window.x, window.y, window.size.width,
+             window.size.height, window.Framed(), pImpl->raster_window_stale };
+}
 
 uint64_t MetalRender::RenderTargetBytesForTests() const
 {

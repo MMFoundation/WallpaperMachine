@@ -58,7 +58,7 @@ use crate::{
             SetMetalFxUpscalingEnabled, SetRenderScale,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneQuality,
-            SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
+            SetSceneDisplayFramingEnabled, SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
             SetTargetFps, SetVerboseLogging, SetVolume, SetWebAudioSubscribed,
             Shutdown,
         },
@@ -1652,6 +1652,12 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
         {
             self.state.errors.push(error.to_string());
         }
+        if let Err(error) = self
+            .engine
+            .set_scene_display_framing_enabled(experimental.scene_display_framing)
+        {
+            self.state.errors.push(error.to_string());
+        }
         if let Err(error) = self.engine.set_metalfx_upscaling_enabled(
             self.state.app_config.quality.metalfx_upscaling_enabled,
         ) {
@@ -2585,6 +2591,30 @@ impl<E: EngineFacade + Clone> Message<SetSceneVideoPlaneSamplingEnabled> for Bri
         // anything.
         self.engine
             .set_scene_video_plane_sampling_enabled(msg.enabled)
+            .map_err(|error| BridgeError::engine(error.to_string()))?;
+        self.invalidate_operations();
+        Ok(self.all_snapshots())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetSceneDisplayFramingEnabled> for BridgeActor<E> {
+    type Reply = messages::SetSceneDisplayFramingEnabledReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetSceneDisplayFramingEnabled,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.app_config.experimental.scene_display_framing = msg.enabled;
+        if let Some(store) = &self.config_store {
+            store.save_app_config(&self.state.app_config)?;
+        }
+        // How much of a scene's layout is drawn, not what a scene is: a
+        // running scene picks the change up at its next frame by sizing its
+        // render targets again in place, so nothing here rebuilds, reparses
+        // or reopens anything.
+        self.engine
+            .set_scene_display_framing_enabled(msg.enabled)
             .map_err(|error| BridgeError::engine(error.to_string()))?;
         self.invalidate_operations();
         Ok(self.all_snapshots())
