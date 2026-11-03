@@ -2624,6 +2624,16 @@ render scale, animation speed or audio-response subscription:
   next frame's first pass on it. When that pass may leave the image alone (a hidden
   layer), the image is copied back from the copy's name first, so the picture is the
   same byte for byte; a sorted scene keeps its copies.
+- On Native Metal, a draw that leaves its image exactly as it was is left out. Wallpaper
+  Engine's common intro is a black screen that fades out and then sits at alpha 0 for
+  the rest of the run, and it was drawn over the whole screen every frame. The shader
+  compiler proves which channels of a shader's colour are a product of uniforms and
+  constants (a solid layer's `vec4(g_Color, g_Alpha)`); a frame whose values make the
+  alpha 0 and every factor finite, under a blend that keeps the destination there
+  (source over or additive, not a replace or a multiply), into an 8-bit linear image,
+  with no depth written and one sample, changes no texel, so its draw is not made.
+  Anything unproven is drawn, and the frame the alpha is no longer 0 draws it again.
+  The switch is in [power benchmarking](../testing/power-benchmark.md#ab-comparison-entry-points).
 
 The contracts and tests behind each item are in
 [renderer verification](../testing/runtime-regressions.md#continuous-playback-work-contracts).

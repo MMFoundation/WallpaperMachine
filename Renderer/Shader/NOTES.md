@@ -44,8 +44,8 @@ Step 5 (part D of the spec) is three modules and a pipeline. `backend` reads one
 naga's GLSL front end, builds the Metal binding map, validates, and runs the Metal writer
 (`StageCompiler`, `NagaBackend`, `compile_glsl`, `translate_module`). `reflect` describes the module
 that was translated (`StageReflector`, `NagaReflector`, `reflect_module`, `reflect_untranslated`);
-`reflect::coverage` proves the two coverage facts of note 140 and `reflect::reads` the read uniforms
-of note 141.
+`reflect::coverage` proves the two coverage facts of note 140 and the fragment colour of note 142,
+and `reflect::reads` the read uniforms of note 141.
 `nagair` holds what both need to know about the globals of a naga module. `pipeline` drives a request
 through `prepare`, `legalize`, the compiler and the reflector, merges the stage reflections, and
 computes the key (`Pipeline`, `compile`, `CompiledProgram`). The compiler and the reflector are the two
@@ -1105,6 +1105,23 @@ complete coverage of all remaining builtin names, constructor syntax or builtin 
     leave the key out. Every shipped program of the sweep answers (161, 243 declared members
     unread). Revision 10 appends cache-key, converted-text and MSL rows with the MSL and
     converted digests unchanged; the parity goldens gained the key and nothing else.
+142. **Fragment colour; pipeline revision 10.** The reflection document gains
+    `"fragment_colour"`, an array of four channels (red, green, blue, alpha), each `null` or
+    the factors whose product the channel is: `{"uniform":member,"component":k}` for a
+    32-bit float uniform block member (a scalar's component is 0) and
+    `{"constant_bits":bits}` for a float constant, its bits so NaN and infinity survive. It
+    is written only when the alpha channel is proven. The analysis (`Prover::colour` in
+    `src/reflect/coverage.rs`) starts at the location-0 output of the entry point's single
+    final `return` (no dual-source output) and follows compositions, splats, swizzles,
+    component accesses, `*` of scalars and vectors channel by channel, float literals and
+    constants, loads of uniform block members (whole or one component) and the same
+    once-written private and local variables as the vertex fact; it needs the validated
+    module's expression types for the channel counts. Anything else (a texture sample, a
+    varying, a sum, a function call, a matrix, an array element, a second write) leaves that
+    channel `null`. The engine leaves out a draw whose frame's uniforms make the alpha 0 and
+    every factor finite, under a blend that keeps the destination at alpha 0. Wallpaper
+    Engine's `flat.frag` (the solid layer) without `VERTEXCOLOR` is proven. It shares
+    revision 10 with note 141.
 
 The shipped sweeps now include `volumetricsfront` (167 programs legalized and compiled, 1 failing
 as before: `shadowcasterfoliage4`'s undeclared `g_Texture1Texel`); every `SHADOW`, `POINTLIGHT`

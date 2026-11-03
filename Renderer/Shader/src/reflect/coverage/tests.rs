@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::dialect::tests::corpus::{Layered, engine_combos, present_textures, shaders_root};
 use crate::pipeline::tests::support::{Req, texture};
 use crate::pipeline::{CompiledProgram, compile};
-use crate::reflection::PositionSource;
+use crate::reflection::{ColourFactor, FragmentColour, PositionSource};
 use crate::request::{Combo, ShaderRequest, Stage, StageKind};
 
 const PLAIN_FRAGMENT: &str = "\
@@ -225,6 +225,120 @@ fn a_renamed_input_is_reported_under_its_authors_name() {
     let p = program(vertex, PLAIN_FRAGMENT);
     assert_eq!(p.reflection.vertex_position, itself());
     assert!(p.reflection.vertex_inputs.iter().any(|i| i.name == "a_Position"));
+}
+
+// ---- the fragment colour ----
+
+fn colour(fragment: &str) -> Option<FragmentColour> {
+    program(&vertex_with("  gl_Position = vec4(a_Position, 1.0);"), fragment).reflection.fragment_colour
+}
+
+fn u(member: &str, component: u32) -> ColourFactor {
+    ColourFactor::Uniform { member: member.into(), component }
+}
+
+fn k(value: f32) -> ColourFactor {
+    ColourFactor::Constant { bits: value.to_bits() }
+}
+
+/// Wallpaper Engine's `flat.frag`, the shader of a solid layer, without `VERTEXCOLOR`.
+const FLAT: &str = "\
+uniform mediump float g_Alpha;
+uniform mediump vec3 g_Color;
+varying vec4 v_Color;
+void main() {
+	gl_FragColor = vec4(g_Color, g_Alpha);
+#ifdef VERTEXCOLOR
+	gl_FragColor *= v_Color.rgba;
+#endif
+}
+";
+
+#[test]
+fn a_solid_layers_colour_is_its_uniforms() {
+    let c = colour(FLAT).expect("flat.frag's colour is its two uniforms");
+    assert_eq!(
+        c.channels,
+        [Some(vec![u("g_Color", 0)]), Some(vec![u("g_Color", 1)]), Some(vec![u("g_Color", 2)]), Some(vec![u("g_Alpha", 0)])]
+    );
+    let text = program(&vertex_with("  gl_Position = vec4(a_Position, 1.0);"), FLAT).reflection.to_json();
+    assert!(
+        text.contains(r#""fragment_colour":[[{"uniform":"g_Color","component":0}],[{"uniform":"g_Color","component":1}],[{"uniform":"g_Color","component":2}],[{"uniform":"g_Alpha","component":0}]]"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn products_splats_swizzles_and_constants_are_followed() {
+    let fragment = "uniform float g_Alpha;\nuniform vec4 g_Color4;\nuniform float g_Brightness;\n\
+                    void main() { vec4 c = g_Color4.bgra * vec4(CAST3(g_Brightness), 0.5); gl_FragColor = c * g_Alpha; }\n";
+    let c = colour(fragment).expect("a product of uniforms and constants");
+    assert_eq!(c.channels[0], Some(vec![u("g_Color4", 2), u("g_Brightness", 0), u("g_Alpha", 0)]));
+    assert_eq!(c.channels[2], Some(vec![u("g_Color4", 0), u("g_Brightness", 0), u("g_Alpha", 0)]));
+    assert_eq!(c.channels[3], Some(vec![u("g_Color4", 3), k(0.5), u("g_Alpha", 0)]));
+    // One component of a once-written local, and a literal channel.
+    let c = colour("uniform vec4 g_Color4;\nvoid main() { vec4 c = g_Color4; gl_FragColor = vec4(c.r, 1.0, 0.0, c.a); }\n")
+        .expect("components of a copy");
+    assert_eq!(c.channels, [Some(vec![u("g_Color4", 0)]), Some(vec![k(1.0)]), Some(vec![k(0.0)]), Some(vec![u("g_Color4", 3)])]);
+}
+
+#[test]
+fn a_channel_that_is_not_a_product_is_not_proven() {
+    // Vertex colour, a texture, a sum, a function of a uniform: the alpha is not proven, so the
+    // fact is absent.
+    for fragment in [
+        "uniform float g_Alpha;\nvarying vec4 v_Color;\nvoid main() { gl_FragColor = vec4(1.0, 1.0, 1.0, g_Alpha) * v_Color; }\n",
+        "uniform float g_Alpha;\nvarying vec2 v_TexCoord;\nuniform sampler2D g_Texture0;\n\
+         void main() { vec4 c = texSample2D(g_Texture0, v_TexCoord); gl_FragColor = vec4(c.rgb, c.a * g_Alpha); }\n",
+        "uniform float g_Alpha;\nvoid main() { gl_FragColor = vec4(0.0, 0.0, 0.0, g_Alpha + 0.0); }\n",
+        "uniform float g_Alpha;\nvoid main() { gl_FragColor = vec4(0.0, 0.0, 0.0, abs(g_Alpha)); }\n",
+        // Written twice (flat.frag with VERTEXCOLOR), or conditionally.
+        "uniform float g_Alpha;\nuniform vec3 g_Color;\nvarying vec4 v_Color;\n\
+         void main() { gl_FragColor = vec4(g_Color, g_Alpha); gl_FragColor *= v_Color; }\n",
+        "uniform float g_Alpha;\nuniform float g_Edge;\n\
+         void main() { gl_FragColor = vec4(0.0, 0.0, 0.0, g_Alpha); if (g_Edge > 0.5) gl_FragColor.a = 1.0; }\n",
+        // An array element is not one member.
+        "uniform vec4 g_Colors[2];\nvoid main() { gl_FragColor = g_Colors[0]; }\n",
+    ] {
+        assert_eq!(colour(fragment), None, "{fragment}");
+    }
+    // The alpha alone decides whether the fact is written: an unproven colour channel stays
+    // `None` beside a proven alpha.
+    let c = colour("uniform float g_Alpha;\nvarying vec4 v_Color;\nvoid main() { gl_FragColor = vec4(v_Color.rgb, g_Alpha); }\n")
+        .expect("the alpha is a uniform");
+    assert_eq!(c.channels, [None, None, None, Some(vec![u("g_Alpha", 0)])]);
+    let text = program(
+        &vertex_with("  gl_Position = vec4(a_Position, 1.0);"),
+        "varying vec4 v_Color;\nvoid main() { gl_FragColor = v_Color; }\n",
+    )
+    .reflection
+    .to_json();
+    assert!(!text.contains("fragment_colour"), "{text}");
+}
+
+#[test]
+fn the_installed_solid_layer_shader_is_proven() {
+    let Some(root) = shaders_root() else {
+        eprintln!("skipped: the shipped shaders folder is absent (set WALLPAPER_MACHINE_ASSETS_ROOT)");
+        return;
+    };
+    let read = |ext: &str| std::fs::read_to_string(root.join(format!("flat.{ext}"))).ok();
+    let (Some(vertex), Some(fragment)) = (read("vert"), read("frag")) else {
+        eprintln!("skipped: flat.vert or flat.frag is absent");
+        return;
+    };
+    let request = ShaderRequest {
+        shader_name: "flat".into(),
+        stages: vec![Stage { kind: StageKind::Vertex, source: vertex }, Stage { kind: StageKind::Fragment, source: fragment }],
+        combos: engine_combos(),
+        textures: present_textures(),
+        ..ShaderRequest::default()
+    }
+    .validate()
+    .expect("a valid request");
+    let includes = Layered { dirs: vec![root.clone()] };
+    let p = compile(&request, &includes).expect("flat compiles");
+    assert_eq!(p.reflection.fragment_colour.map(|c| c.channels[3].clone()), Some(Some(vec![u("g_Alpha", 0)])));
 }
 
 // ---- Wallpaper Engine's own effects, when installed ----

@@ -1157,6 +1157,79 @@ TEST(MetalOverwrite, OnlyBlendingThatReplacesTheTexelLetsADrawOverwriteIt)
     EXPECT_FALSE(BlendReplacesDestination(subtract));
 }
 
+TEST(MetalNoopDraw, OnlyBlendingThatKeepsTheTexelAtZeroAlphaLetsADrawBeLeftOut)
+{
+    // Source over (alpha by the colour's factors or by source-over coverage), additive, and both
+    // under the maximum alpha rule: Cs * 0 + Cd * 1, and an alpha of As * As, As or max(As, Ad).
+    for (const auto rule : { AlphaBlendRule::Material, AlphaBlendRule::SourceOver, AlphaBlendRule::Max }) {
+        for (const auto mode : { BlendMode::Translucent, BlendMode::Additive }) {
+            EXPECT_TRUE(BlendKeepsDestinationAtZeroAlpha(ToMetalBlendState(mode, rule, 1)))
+                << static_cast<int>(mode) << " " << static_cast<int>(rule);
+        }
+        // Blending off and `normal` (One/Zero) write the fragment; multiply scales the held
+        // colour by the fragment's; alpha to coverage decides coverage, not a blend.
+        for (const auto mode : { BlendMode::Disable, BlendMode::Normal, BlendMode::Multiply,
+                                 BlendMode::AlphaToCoverage }) {
+            EXPECT_FALSE(BlendKeepsDestinationAtZeroAlpha(ToMetalBlendState(mode, rule, 1)))
+                << static_cast<int>(mode) << " " << static_cast<int>(rule);
+        }
+    }
+    const auto translucent = ToMetalBlendState(BlendMode::Translucent, AlphaBlendRule::Material, 1);
+    // Factors and operations that do not give the held texel back whole.
+    auto subtract          = translucent;
+    subtract.rgb_operation = MetalBlendOperation::ReverseSubtract;
+    EXPECT_FALSE(BlendKeepsDestinationAtZeroAlpha(subtract));
+    auto source_colour       = translucent;
+    source_colour.source_rgb = MetalBlendFactor::One;
+    EXPECT_FALSE(BlendKeepsDestinationAtZeroAlpha(source_colour)) << "Cs * 1 is the fragment's colour";
+    auto destination_colour            = translucent;
+    destination_colour.destination_rgb = MetalBlendFactor::SourceColor;
+    EXPECT_FALSE(BlendKeepsDestinationAtZeroAlpha(destination_colour));
+    auto destination_alpha              = translucent;
+    destination_alpha.destination_alpha = MetalBlendFactor::Zero;
+    EXPECT_FALSE(BlendKeepsDestinationAtZeroAlpha(destination_alpha)) << "Ad * 0 drops the held alpha";
+    auto minimum            = translucent;
+    minimum.alpha_operation = MetalBlendOperation::Min;
+    EXPECT_FALSE(BlendKeepsDestinationAtZeroAlpha(minimum)) << "min(0, Ad) is 0";
+    auto coverage              = translucent;
+    coverage.alpha_to_coverage = true;
+    EXPECT_FALSE(BlendKeepsDestinationAtZeroAlpha(coverage));
+}
+
+TEST(MetalNoopDraw, TheFragmentColourFactsAreReadAndAMalformedChannelProvesNothing)
+{
+    MetalShaderReflection reflection;
+    std::string           error;
+    ASSERT_TRUE(ParseMetalShaderReflection(
+        R"({"descriptor_bindings":[],"uniform_blocks":[],"vertex_inputs":[],"active_texture_slots":[],)"
+        R"("fragment_colour":[[{"uniform":"g_Color","component":0}],[{"uniform":"g_Color","component":1},)"
+        R"({"constant_bits":1056964608}],null,[{"uniform":"g_Alpha","component":0}]]})",
+        reflection, &error))
+        << error;
+    ASSERT_TRUE(reflection.fragment_colour[0].has_value());
+    EXPECT_EQ((*reflection.fragment_colour[0])[0].member, "g_Color");
+    ASSERT_TRUE(reflection.fragment_colour[1].has_value());
+    ASSERT_EQ(reflection.fragment_colour[1]->size(), 2u);
+    EXPECT_EQ((*reflection.fragment_colour[1])[1].member, "");
+    EXPECT_EQ((*reflection.fragment_colour[1])[1].constant, 0.5f);
+    EXPECT_FALSE(reflection.fragment_colour[2].has_value()) << "an unproven channel stays unproven";
+    ASSERT_TRUE(reflection.fragment_colour[3].has_value());
+    EXPECT_EQ((*reflection.fragment_colour[3])[0].member, "g_Alpha");
+
+    // A factor of an unknown shape, a component beyond a vector, or a document without the fact.
+    ASSERT_TRUE(ParseMetalShaderReflection(
+        R"({"descriptor_bindings":[],"uniform_blocks":[],"vertex_inputs":[],"active_texture_slots":[],)"
+        R"("fragment_colour":[[{"uniform":"g_Color"}],[{"uniform":"g_Color","component":7}],[{"texture":0}],[]]})",
+        reflection, &error))
+        << error;
+    for (const auto& channel : reflection.fragment_colour) EXPECT_FALSE(channel.has_value());
+    ASSERT_TRUE(ParseMetalShaderReflection(
+        R"({"descriptor_bindings":[],"uniform_blocks":[],"vertex_inputs":[],"active_texture_slots":[]})", reflection,
+        &error))
+        << error;
+    for (const auto& channel : reflection.fragment_colour) EXPECT_FALSE(channel.has_value());
+}
+
 TEST(MetalOverwrite, TheEffectCardCoversEveryTexelCentreHoweverItIsFolded)
 {
     for (const auto [width, height] : { std::pair { 1u, 1u }, { 7u, 5u }, { 3840u, 2160u }, { 16384u, 16384u } }) {

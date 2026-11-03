@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -70,6 +71,16 @@ struct MetalVertexPosition
     std::string matrix;
 };
 
+/// One factor of a fragment colour channel the shader compiler proved to be a product
+/// (`"fragment_colour"`): component `component` of the float uniform member `member`, or, with
+/// `member` empty, the constant `constant`.
+struct MetalColourFactor
+{
+    std::string member;
+    uint32_t    component { 0 };
+    float       constant { 0.0f };
+};
+
 struct MetalShaderReflection
 {
     std::vector<MetalUniformBlock>      blocks;
@@ -86,6 +97,10 @@ struct MetalShaderReflection
     /// produces uses is not among them. Absent when the compiler could not say, which is read as
     /// "every declared member is read".
     std::optional<std::unordered_set<std::string>> read_uniforms;
+    /// The channels of colour 0 (red, green, blue, alpha) proven to be the product of their
+    /// factors (`"fragment_colour"`); a channel left empty is not proven. Every channel is
+    /// empty when the document has no such fact.
+    std::array<std::optional<std::vector<MetalColourFactor>>, 4> fragment_colour {};
 
     [[nodiscard]] const MetalUniformBlock* uniformBlock() const
     {

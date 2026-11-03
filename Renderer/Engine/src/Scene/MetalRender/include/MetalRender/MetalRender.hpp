@@ -309,6 +309,9 @@ public:
         /// replaced, which wrote none.
         uint64_t copied_bytes { 0 };
         uint32_t traded_copies { 0 };
+        /// Draws left out because, with the frame's uniforms, they leave their target exactly as
+        /// it is (alpha 0 under a blend that keeps the destination).
+        uint32_t noop_draws { 0 };
     };
     [[nodiscard]] FrameEncodeCountsForTests LastFrameEncodeCountsForTests() const;
 
@@ -378,6 +381,10 @@ public:
     /// derived from them, for graphs compiled from now on. On unless
     /// `WALLPAPER_MACHINE_LAYER_LOCAL_SIGNATURES=0`; process-wide, test-only.
     static void SetLayerLocalSignaturesForTests(bool enabled);
+    /// Whether a draw that leaves its target as it is with the frame's uniforms is left out,
+    /// from the next frame on. On unless `WALLPAPER_MACHINE_SKIP_NOOP_DRAWS=0`; process-wide,
+    /// test-only.
+    static void SetSkipNoopDrawsForTests(bool enabled);
 
     /// How many shader sources this process has handed to the Metal compiler.
     ///

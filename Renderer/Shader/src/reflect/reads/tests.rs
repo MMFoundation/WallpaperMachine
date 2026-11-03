@@ -110,7 +110,7 @@ fn the_program_reads_what_either_stage_reads_and_the_document_carries_it() {
     let p = program(&vertex, fragment);
     assert_eq!(p.reflection.read_uniforms, Some(names(&["g_Amount", "g_ModelViewProjectionMatrix"])));
     let text = p.reflection.to_json();
-    assert!(text.ends_with(r#","read_uniforms":["g_Amount","g_ModelViewProjectionMatrix"]}"#), "{text}");
+    assert!(text.contains(r#","read_uniforms":["g_Amount","g_ModelViewProjectionMatrix"]"#), "{text}");
     // Every read member is a declared member of the block.
     let declared: BTreeSet<String> =
         p.reflection.uniform_blocks.iter().flat_map(|b| b.members.iter().map(|m| m.name.clone())).collect();

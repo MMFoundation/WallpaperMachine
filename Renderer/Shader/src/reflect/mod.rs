@@ -193,6 +193,7 @@ pub fn reflect_module(
         vertex_position: if kind == StageKind::Vertex { coverage::vertex_position(module, index, names) } else { None },
         fragment_always_writes: kind == StageKind::Fragment && coverage::fragment_always_writes(module, index),
         read_uniforms: reads::read_members(module, index),
+        fragment_colour: if kind == StageKind::Fragment { coverage::fragment_colour(module, info, index) } else { None },
     };
     reflection.check_limits()?;
     Ok(reflection)

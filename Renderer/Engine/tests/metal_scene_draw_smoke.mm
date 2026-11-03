@@ -17030,6 +17030,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                     encodes.stored_multisample_attachments += counts.stored_multisample_attachments;
                     encodes.copied_bytes += counts.copied_bytes;
                     encodes.traded_copies += counts.traded_copies;
+                    encodes.noop_draws += counts.noop_draws;
                     draw_cpu_ms += cpu_after - cpu_before;
                     ++measured;
                 }
@@ -17045,11 +17046,12 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": Native Metal, " << frame_count << " frames drawn, "
                       << DifferingBytes(first, last) << " bytes differ between the first and the last"
                       << std::endl;
-            char encode_line[448];
+            char encode_line[576];
             std::snprintf(encode_line, sizeof(encode_line),
                           "%.1f render passes/frame (%.1f on the scene output, %.1f loading their target "
                           "(%.1f MB), %.1f opening with a copy; %.1f storing depth, %.1f storing samples), "
                           "%.1f blits/frame, %.1f MB copied/frame, %.1f copies traded/frame, "
+                          "%.1f draws left out as no-ops/frame, "
                           "%.2f ms CPU per drawFrame",
                           double(encodes.render_passes) / measured,
                           double(encodes.scene_output_passes) / measured,
@@ -17060,7 +17062,8 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                           double(encodes.stored_multisample_attachments) / measured,
                           double(encodes.blit_passes) / measured,
                           double(encodes.copied_bytes) / measured / 1e6,
-                          double(encodes.traded_copies) / measured, draw_cpu_ms / measured);
+                          double(encodes.traded_copies) / measured,
+                          double(encodes.noop_draws) / measured, draw_cpu_ms / measured);
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << encode_line << std::endl;
             // Work on the scene thread that is the same in every run of the same scene and
             // clock: crossings into the scripts, and rewritten geometry copied for the GPU.
@@ -17143,6 +17146,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                             "\"command_buffers_per_draw\":%.3f,\"render_passes_per_draw\":%.3f,"
                             "\"scene_output_passes_per_draw\":%.3f,\"blits_per_draw\":%.3f,"
                             "\"copied_bytes_per_draw\":%.0f,\"traded_copies_per_draw\":%.3f,"
+                            "\"noop_draws_per_draw\":%.3f,"
                             "\"render_target_bytes\":%llu,\"device_allocated_bytes\":%llu}\n",
                             paths.scene_id.c_str(), surface_width, surface_height, scale_factor,
                             loaded.scene->render_scale,
@@ -17156,6 +17160,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                             double(encodes.blit_passes) / measured,
                             double(encodes.copied_bytes) / measured,
                             double(encodes.traded_copies) / measured,
+                            double(encodes.noop_draws) / measured,
                             (unsigned long long)render.RenderTargetBytesForTests(),
                             (unsigned long long)device.currentAllocatedSize);
                 std::fflush(stdout);
@@ -20349,5 +20354,187 @@ TEST_F(MetalSceneDraw, APostProcessResultCopiedIntoTheSceneTradesTexturesAndDraw
             EXPECT_EQ(on.counts[frame].traded_copies, off.counts[frame].traded_copies + item.copies);
         }
         if (item.lenses) EXPECT_GE(off.counts.back().traded_copies, 2u) << "the lenses' copies were expected to trade";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Draws that leave their target as it is
+
+namespace
+{
+
+/// Restores the switch, whatever a test set it to.
+struct RestoreInvisibleWorkSwitches
+{
+    ~RestoreInvisibleWorkSwitches() { MetalRender::SetSkipNoopDrawsForTests(true); }
+};
+
+struct InvisibleWorkRun
+{
+    std::vector<std::vector<uint8_t>>                   frames;
+    std::vector<MetalRender::FrameEncodeCountsForTests> counts;
+};
+
+/// Draws `frames` frames of `project` with the switch as given, on a fresh parse and renderer,
+/// the way the wallpaper's own draw runs them: the tick, a new graph if the tick asked for one,
+/// then the frame.
+InvisibleWorkRun DrawWithInvisibleWorkSwitches(const std::filesystem::path& project, const std::filesystem::path& cache,
+                                               bool skip_noop, int frames)
+{
+    MetalRender::SetSkipNoopDrawsForTests(skip_noop);
+    InvisibleWorkRun run;
+    LoadedScene      loaded;
+    std::string      error;
+    std::filesystem::remove_all(cache);
+    EXPECT_TRUE(LoadScene(project, cache, loaded, error)) << error;
+    if (loaded.scene == nullptr) return run;
+    @autoreleasepool {
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(384, 256);
+        layer.framebufferOnly = NO;
+        MetalRender render;
+        EXPECT_TRUE(render.init(MetalRenderInitInfo {
+            .metal_layer = (__bridge void*)layer, .width = 384, .height = 256,
+            .render_width = 384, .render_height = 256, .display_scale_factor = 1.0 }))
+            << render.lastError();
+        auto& scene = *loaded.scene;
+        auto  graph = sceneToRenderGraph(scene);
+        if (graph == nullptr || ! render.compileRenderGraph(scene, *graph)) {
+            ADD_FAILURE() << render.lastError();
+            return run;
+        }
+        render.UpdateCameraFillMode(scene, FillMode::ASPECTFIT);
+        for (int frame = 0; frame < frames; ++frame) {
+            if (scene.runtime != nullptr) {
+                scene.runtime->Tick(1.0 / 60.0);
+                scene.runtime->PumpTextLayerCache();
+                std::string change_error;
+                (void)tests::ApplyRuntimeSceneChanges(render, scene, graph, false, &change_error);
+                EXPECT_TRUE(change_error.empty()) << change_error;
+            }
+            if (scene.shaderValueUpdater != nullptr) scene.shaderValueUpdater->FrameBegin();
+            EXPECT_TRUE(render.drawFrame(scene)) << render.lastError();
+            scene.PassFrameTime(1.0 / 60.0);
+            run.frames.push_back(ReadOutput(render, scene));
+            run.counts.push_back(render.LastFrameEncodeCountsForTests());
+        }
+        render.destroy();
+    }
+    return run;
+}
+
+void ExpectSameFrames(const InvisibleWorkRun& off, const InvisibleWorkRun& on, std::size_t frames)
+{
+    ASSERT_EQ(off.frames.size(), frames);
+    ASSERT_EQ(on.frames.size(), frames);
+    for (std::size_t frame = 0; frame < frames; ++frame) {
+        ASSERT_FALSE(off.frames[frame].empty());
+        EXPECT_EQ(on.frames[frame], off.frames[frame]) << "frame " << frame << " changed with the work left out";
+    }
+}
+
+/// The fixture's card under a screen-filling layer of the solid layer's shape: `fragment` writes
+/// its colour from `g_Color` and `g_Alpha` (Wallpaper Engine's `flat.frag` is
+/// `vec4(g_Color, g_Alpha)`), blended as `blending`, coloured `color`, its alpha following
+/// `alpha_script` (an `update` that returns it), so the layer fades out and back in.
+std::filesystem::path WriteFadeFixture(const std::filesystem::path& root, const std::string& fragment,
+                                       const std::string& blending, const std::string& color,
+                                       const std::string& alpha_script)
+{
+    const auto project = WriteFixture(root);
+    WriteFiles(root, {
+        { "models/screen.json", R"({"width":384,"height":256,"material":"materials/screen.json"})" },
+        { "materials/screen.json",
+          R"({"passes":[{"shader":"fade","blending":")" + blending +
+              R"(","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled"}]})" },
+        { "shaders/fade.vert",
+          "uniform mat4 g_ModelViewProjectionMatrix;\nattribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+          "varying vec2 v_TexCoord;\nvoid main() {\n"
+          "  gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);\n  v_TexCoord = a_TexCoord;\n}\n" },
+        { "shaders/fade.frag",
+          "uniform float g_Alpha;\nuniform vec3 g_Color;\nvarying vec2 v_TexCoord;\nvoid main() {\n  gl_FragColor = " +
+              fragment + ";\n}\n" },
+    });
+    // The card behind moves with the scene time, so each frame is drawn afresh.
+    std::ofstream(root / "shaders/metal_probe.frag")
+        << "uniform float g_Time;\nvarying vec2 v_TexCoord;\n"
+           "void main() { gl_FragColor = vec4(v_TexCoord.x, frac(v_TexCoord.y + g_Time), 0.25, 1.0); }\n";
+    auto layout = nlohmann::json::parse(std::ifstream(root / "layout.json"));
+    layout["general"]["bloom"] = false;
+    layout["objects"].push_back({ { "id", 2 }, { "name", "black screen" }, { "image", "models/screen.json" },
+                                  { "origin", { 192, 128, 0 } }, { "scale", { 1, 1, 1 } }, { "angles", { 0, 0, 0 } },
+                                  { "color", color }, { "visible", true },
+                                  { "alpha", { { "value", 1.0 }, { "script", alpha_script } } } });
+    std::ofstream(root / "layout.json") << layout;
+    return project;
+}
+
+/// Alpha 1 for frames 0 and 1, `faded` for frames 2 and 3, 1 again from frame 4 on (the tick
+/// before frame k leaves `engine.runtime` at (k + 1) / 60 s).
+std::string FadeScript(const std::string& faded)
+{
+    return "export function update(value) { return engine.runtime > 0.04 && engine.runtime < 0.075 ? " + faded +
+           " : 1.0; }";
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, ALayerFadedOutToNothingIsLeftOutAndEveryFrameStaysTheSame)
+{
+    // A black screen that fades out after an intro is Wallpaper Engine's common fade pattern;
+    // at alpha 0 its source-over blend leaves every texel as it was, so the draw is left out,
+    // and it is drawn again the frame its alpha is no longer 0. Additive blending keeps the
+    // texel at alpha 0 as well.
+    RestoreInvisibleWorkSwitches restore;
+    constexpr int kFrames = 6;
+    for (const std::string blending : { "translucent", "additive" }) {
+        SCOPED_TRACE(blending);
+        const auto root    = root_ / ("fade-" + blending);
+        const auto project = WriteFadeFixture(root, "vec4(g_Color, g_Alpha)", blending, "0.2 0.4 0.6", FadeScript("0.0"));
+        const auto off = DrawWithInvisibleWorkSwitches(project, root / "cache-off", false, kFrames);
+        const auto on  = DrawWithInvisibleWorkSwitches(project, root / "cache-on", true, kFrames);
+        ExpectSameFrames(off, on, kFrames);
+        ASSERT_EQ(on.counts.size(), std::size_t(kFrames));
+        EXPECT_NE(off.frames[1], off.frames[2]) << "the faded frame looks like the covered one";
+        for (int frame = 0; frame < kFrames; ++frame) {
+            SCOPED_TRACE(frame);
+            const bool faded = frame == 2 || frame == 3;
+            EXPECT_EQ(on.counts[frame].noop_draws, faded ? 1u : 0u);
+            EXPECT_EQ(off.counts[frame].noop_draws, 0u);
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, ADrawThatIsNotProvenToLeaveItsTargetAsItIsIsDrawn)
+{
+    // Each variant would at best leave the picture as it is; none is proven to, so every one is
+    // drawn, and the frames are the same either way. A colour of 1e60 is infinite in a float,
+    // and infinity times an alpha of 0 is not 0.
+    RestoreInvisibleWorkSwitches restore;
+    constexpr int kFrames = 4;
+    struct Variant
+    {
+        std::string name, fragment, blending, color, faded;
+    };
+    const Variant variants[] = {
+        { "half alpha", "vec4(g_Color, g_Alpha)", "translucent", "0.2 0.4 0.6", "0.5" },
+        { "replacing blend", "vec4(g_Color, g_Alpha)", "normal", "0.2 0.4 0.6", "0.0" },
+        { "multiplying blend", "vec4(g_Color, g_Alpha)", "multiply", "0.2 0.4 0.6", "0.0" },
+        { "colour from a varying", "vec4(g_Color * v_TexCoord.x, g_Alpha)", "translucent", "0.2 0.4 0.6", "0.0" },
+        { "alpha from a varying", "vec4(g_Color, g_Alpha * v_TexCoord.y)", "translucent", "0.2 0.4 0.6", "0.0" },
+        { "infinite colour", "vec4(g_Color * 1e30 * 1e30, g_Alpha)", "translucent", "1 1 1", "0.0" },
+    };
+    for (std::size_t k = 0; k < std::size(variants); ++k) {
+        const auto& variant = variants[k];
+        SCOPED_TRACE(variant.name);
+        const auto root    = root_ / ("unproven-fade-" + std::to_string(k));
+        const auto project = WriteFadeFixture(root, variant.fragment, variant.blending, variant.color,
+                                              FadeScript(variant.faded));
+        const auto off = DrawWithInvisibleWorkSwitches(project, root / "cache-off", false, kFrames);
+        const auto on  = DrawWithInvisibleWorkSwitches(project, root / "cache-on", true, kFrames);
+        ExpectSameFrames(off, on, kFrames);
+        for (const auto& counts : on.counts) EXPECT_EQ(counts.noop_draws, 0u);
     }
 }

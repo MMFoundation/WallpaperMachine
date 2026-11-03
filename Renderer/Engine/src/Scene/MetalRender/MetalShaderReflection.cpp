@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <bit>
+
 namespace wallpaper::metal
 {
 namespace
@@ -154,6 +156,34 @@ bool ParseMetalShaderReflection(std::string_view json, MetalShaderReflection& ou
                 names.insert(name.get<std::string>());
             }
             if (names_only) out.read_uniforms = std::move(names);
+        }
+        // Likewise for the fragment colour: a channel whose factors are not all readable is
+        // left unproven, never guessed.
+        if (const auto colour = document.find("fragment_colour");
+            colour != document.end() && colour->is_array() && colour->size() == 4) {
+            for (std::size_t channel = 0; channel < 4; ++channel) {
+                const auto& factors = (*colour)[channel];
+                if (! factors.is_array() || factors.empty()) continue;
+                std::vector<MetalColourFactor> parsed;
+                bool                           readable = true;
+                for (const auto& factor : factors) {
+                    const auto uniform   = factor.is_object() ? factor.find("uniform") : factor.end();
+                    const auto component = factor.is_object() ? factor.find("component") : factor.end();
+                    const auto bits      = factor.is_object() ? factor.find("constant_bits") : factor.end();
+                    if (uniform != factor.end() && uniform->is_string() && component != factor.end() &&
+                        component->is_number_unsigned() && component->get<uint64_t>() < 4) {
+                        parsed.push_back({ .member    = uniform->get<std::string>(),
+                                           .component = component->get<uint32_t>() });
+                    } else if (bits != factor.end() && bits->is_number_unsigned() &&
+                               bits->get<uint64_t>() <= 0xffffffffull) {
+                        parsed.push_back({ .constant = std::bit_cast<float>(bits->get<uint32_t>()) });
+                    } else {
+                        readable = false;
+                        break;
+                    }
+                }
+                if (readable) out.fragment_colour[channel] = std::move(parsed);
+            }
         }
     } catch (const std::exception& e) {
         if (error != nullptr) {

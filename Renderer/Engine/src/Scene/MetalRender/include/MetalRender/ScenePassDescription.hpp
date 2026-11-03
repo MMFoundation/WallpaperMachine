@@ -188,6 +188,15 @@ struct MetalQuad
 /// the caller decides whether the target's format can hold anything else.
 [[nodiscard]] bool BlendReplacesDestination(const MetalBlendState& blend);
 
+/// Whether what a draw with `blend` leaves in a texel is exactly what the texel held whenever
+/// the fragment's alpha is 0 and its colour finite: the colour is added scaled by its own alpha
+/// (`SourceAlpha`) onto the held colour kept whole (`One` or `OneMinusSourceAlpha`), and the
+/// alpha is added as `As * As` or `As * 1` onto the held alpha kept whole, or is the larger of
+/// the two (`Max`, which is the held alpha only where alpha is never negative). Blending off and
+/// alpha to coverage write the fragment; a multiply scales the held colour by the fragment's.
+/// The caller decides whether the target's format brings the held value back unchanged.
+[[nodiscard]] bool BlendKeepsDestinationAtZeroAlpha(const MetalBlendState& blend);
+
 /// Whether drawing `quad` with its corners at clip position `matrix * vec4(corner, 1.0)`
 /// (`matrix` column-major, as the shader's `float4x4` reads it) covers the centre of every texel
 /// of a full `width` x `height` viewport. Every corner must be in front (w > 0) and inside the

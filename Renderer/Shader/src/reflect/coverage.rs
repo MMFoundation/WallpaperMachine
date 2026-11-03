@@ -16,18 +16,26 @@
 //!   `vec3 position = a_Position;` is seen through, and a second write (`position.x += ...`)
 //!   leaves the fact unproven. Clip and cull distances also leave it unproven.
 //!
+//! A third fact serves a different saving:
+//!
+//! - **What the fragment colour is.** Each channel of colour 0 that is the product of 32-bit float
+//!   uniform block members and constants, followed through compositions, swizzles, splats and the
+//!   same once-written variables, is reported as its factors. A host that reads the uniforms of a
+//!   frame can then tell that a draw writes alpha 0 over finite colour.
+//!
 //! The analysis is deliberately narrow: any statement or expression form it does not model makes
 //! the answer "not proven", which costs a host nothing but the saving.
 
 use std::collections::HashMap;
 
+use naga::valid::ModuleInfo;
 use naga::{
     AddressSpace, BinaryOperator, Binding, BuiltIn, Expression, Function, GlobalVariable, Handle, Literal,
     LocalVariable, Module, ScalarKind, Statement, TypeInner, VectorSize,
 };
 
 use super::InputNames;
-use crate::reflection::PositionSource;
+use crate::reflection::{ColourFactor, FragmentColour, PositionSource};
 
 /// Deepest chain of variable loads, compositions and accesses followed.
 const MAX_DEPTH: usize = 64;
@@ -69,9 +77,22 @@ fn block_kills(block: &naga::Block) -> bool {
 
 /// The proven source of the vertex entry point's position, or `None`.
 pub(crate) fn vertex_position(module: &Module, entry: usize, names: &InputNames) -> Option<PositionSource> {
-    let prover = Prover::new(module, entry, names)?;
+    let prover = Prover::new(module, entry, names, None)?;
     prover.position()
 }
+
+/// The proven channels of the fragment entry point `entry`'s colour 0, or `None` when its alpha is
+/// not proven. `info` is the validated module's, which gives every expression its type.
+pub(crate) fn fragment_colour(module: &Module, info: &ModuleInfo, entry: usize) -> Option<FragmentColour> {
+    let names = InputNames::none();
+    let prover = Prover::new(module, entry, &names, Some(info))?;
+    let channels = prover.colour()?;
+    channels[3].as_ref()?;
+    Some(FragmentColour { channels })
+}
+
+/// One channel of a value as a product of factors; `None` when it is not proven to be one.
+type Term = Option<Vec<ColourFactor>>;
 
 /// The number of components of a 32-bit float scalar (1) or vector, or `None`.
 fn float_vector_len(inner: &TypeInner) -> Option<u32> {
@@ -130,7 +151,11 @@ enum Component {
 struct Prover<'a> {
     module: &'a Module,
     entry: &'a naga::EntryPoint,
+    entry_index: usize,
     names: &'a InputNames,
+    /// The validated module's information, for the type of an expression; only the colour fact
+    /// needs it.
+    info: Option<&'a ModuleInfo>,
     writes: HashMap<Var, Vec<Write>>,
     calls: HashMap<Handle<Function>, Vec<CallSite>>,
     /// Per function, the first top-level statement that is or contains a `return` or `discard`.
@@ -143,11 +168,13 @@ struct Prover<'a> {
 
 impl<'a> Prover<'a> {
     /// Walks every function once; `None` when a statement the proof does not model appears.
-    fn new(module: &'a Module, entry: usize, names: &'a InputNames) -> Option<Prover<'a>> {
+    fn new(module: &'a Module, entry: usize, names: &'a InputNames, info: Option<&'a ModuleInfo>) -> Option<Prover<'a>> {
         let mut prover = Prover {
             module,
             entry: &module.entry_points[entry],
+            entry_index: entry,
             names,
+            info,
             writes: HashMap::new(),
             calls: HashMap::new(),
             first_exit: HashMap::new(),
@@ -446,6 +473,175 @@ impl<'a> Prover<'a> {
             .find(|a| matches!(a.binding, Some(Binding::Location { location: l, .. }) if l == *location))?;
         let input = self.names.author(argument.name.as_deref()?).to_string();
         Some(PositionSource { input, matrix })
+    }
+}
+
+impl Prover<'_> {
+    /// The number of channels of an expression's value when it is a 32-bit float scalar or vector.
+    fn width(&self, func: Func, handle: Handle<Expression>) -> Option<usize> {
+        let info = self.info?;
+        let function = match func {
+            Func::Entry => info.get_entry_point(self.entry_index),
+            Func::Function(h) => &info[h],
+        };
+        float_vector_len(function[handle].ty.inner_with(&self.module.types)).map(|n| n as usize)
+    }
+
+    /// The colour 0 the entry point returns, channel by channel.
+    fn colour(&self) -> Option<[Term; 4]> {
+        let entry = &self.entry.function;
+        let result = entry.result.as_ref()?;
+        let colour =
+            |binding: &Option<Binding>| matches!(binding, Some(Binding::Location { location: 0, blend_src: None, .. }));
+        let member = match &result.binding {
+            Some(_) if colour(&result.binding) => None,
+            Some(_) => return None,
+            None => {
+                let TypeInner::Struct { members, .. } = &self.module.types[result.ty].inner else { return None };
+                // The second source of a dual-source blend is a factor of the shader's own.
+                if members.iter().any(|m| matches!(m.binding, Some(Binding::Location { blend_src: Some(_), .. }))) {
+                    return None;
+                }
+                Some(members.iter().position(|m| colour(&m.binding))?)
+            }
+        };
+        // One `return`, the entry point's last top-level statement.
+        let [(Some(at), Some(value))] = self.entry_returns.as_slice() else { return None };
+        if *at + 1 != entry.body.len() {
+            return None;
+        }
+        let value = match member {
+            None => *value,
+            Some(m) => {
+                let (func, composed) = self.resolve(Func::Entry, *value, 0)?;
+                let Expression::Compose { components, .. } = &self.function(func).expressions[composed] else {
+                    return None;
+                };
+                if func != Func::Entry {
+                    return None;
+                }
+                *components.get(m)?
+            }
+        };
+        <[Term; 4]>::try_from(self.terms(Func::Entry, value, 0)?).ok()
+    }
+
+    /// The channels of a float scalar or vector expression, each a product where that is proven;
+    /// `None` when the expression is not a float scalar or vector.
+    fn terms(&self, func: Func, handle: Handle<Expression>, depth: usize) -> Option<Vec<Term>> {
+        let width = self.width(func, handle)?;
+        let unknown = || Some(vec![None; width]);
+        if depth > MAX_DEPTH {
+            return unknown();
+        }
+        let Some((func, handle)) = self.resolve(func, handle, depth + 1) else { return unknown() };
+        let f = self.function(func);
+        let constant = |bits: u32| Some(vec![ColourFactor::Constant { bits }]);
+        let out: Vec<Term> = match &f.expressions[handle] {
+            Expression::Literal(Literal::F32(v)) => vec![constant(v.to_bits())],
+            Expression::Constant(c) => match self.module.global_expressions[self.module.constants[*c].init] {
+                Expression::Literal(Literal::F32(v)) => vec![constant(v.to_bits())],
+                _ => return unknown(),
+            },
+            Expression::ZeroValue(_) => vec![constant(0); width],
+            Expression::Splat { value, .. } => match self.terms(func, *value, depth + 1).as_deref() {
+                Some([one]) => vec![one.clone(); width],
+                _ => return unknown(),
+            },
+            Expression::Compose { components, .. } => {
+                let mut out = Vec::new();
+                for c in components {
+                    let Some(part) = self.terms(func, *c, depth + 1) else { return unknown() };
+                    out.extend(part);
+                }
+                out
+            }
+            Expression::AccessIndex { base, index } => {
+                let Some(all) = self.terms(func, *base, depth + 1) else { return unknown() };
+                match all.get(*index as usize) {
+                    Some(t) => vec![t.clone()],
+                    None => return unknown(),
+                }
+            }
+            Expression::Swizzle { size, vector, pattern } => {
+                let Some(all) = self.terms(func, *vector, depth + 1) else { return unknown() };
+                let mut out = Vec::new();
+                for p in &pattern[..*size as usize] {
+                    let Some(t) = all.get(*p as usize) else { return unknown() };
+                    out.push(t.clone());
+                }
+                out
+            }
+            Expression::Binary { op: BinaryOperator::Multiply, left, right } => {
+                // Scalars and vectors only, channel by channel: a matrix has no width here.
+                let (Some(l), Some(r)) = (self.terms(func, *left, depth + 1), self.terms(func, *right, depth + 1))
+                else {
+                    return unknown();
+                };
+                if !(l.len() == r.len() || l.len() == 1 || r.len() == 1) {
+                    return unknown();
+                }
+                let at = |t: &[Term], k: usize| if t.len() == 1 { t[0].clone() } else { t.get(k).cloned().flatten() };
+                (0..width)
+                    .map(|k| match (at(&l, k), at(&r, k)) {
+                        (Some(mut a), Some(b)) => {
+                            a.extend(b);
+                            Some(a)
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            }
+            Expression::Load { pointer } => match self.load_terms(func, handle, *pointer, width, depth) {
+                Some(out) => out,
+                None => return unknown(),
+            },
+            _ => return unknown(),
+        };
+        if out.len() != width {
+            return unknown();
+        }
+        Some(out)
+    }
+
+    /// A load of a float uniform block member or one of its components, or of one component of a
+    /// variable written once.
+    fn load_terms(
+        &self,
+        func: Func,
+        load: Handle<Expression>,
+        pointer: Handle<Expression>,
+        width: usize,
+        depth: usize,
+    ) -> Option<Vec<Term>> {
+        let f = self.function(func);
+        let member_of = |member_pointer: Handle<Expression>| -> Option<(String, u32)> {
+            let Expression::AccessIndex { base, index } = f.expressions[member_pointer] else { return None };
+            let Expression::GlobalVariable(g) = f.expressions[base] else { return None };
+            let var = &self.module.global_variables[g];
+            if var.space != AddressSpace::Uniform {
+                return None;
+            }
+            let TypeInner::Struct { members, .. } = &self.module.types[var.ty].inner else { return None };
+            let member = members.get(index as usize)?;
+            let n = float_vector_len(&self.module.types[member.ty].inner)?;
+            Some((member.name.clone()?, n))
+        };
+        let uniform =
+            |member: &str, component: u32| Some(vec![ColourFactor::Uniform { member: member.into(), component }]);
+        if let Some((member, n)) = member_of(pointer) {
+            return (n as usize == width).then(|| (0..n).map(|k| uniform(&member, k)).collect());
+        }
+        let Expression::AccessIndex { base, index } = f.expressions[pointer] else { return None };
+        if let Some((member, n)) = member_of(base) {
+            return (width == 1 && index < n).then(|| vec![uniform(&member, index)]);
+        }
+        // One component of a variable written once: `colour.a`.
+        let var = self.variable(func, base)?;
+        let at = self.emitted_at(func, load)?;
+        let (writer, value) = self.stored(func, at, var)?;
+        let all = self.terms(writer, value, depth + 1)?;
+        Some(vec![all.get(index as usize)?.clone()])
     }
 }
 

@@ -1538,6 +1538,28 @@ std::atomic<bool>& AttachmentStoreElisionSwitch()
     return enabled;
 }
 
+/// Whether a draw that, with the frame's uniforms, writes alpha 0 over finite colour under a blend
+/// that keeps the destination there is left out (a layer faded out to nothing). On by default;
+/// `WALLPAPER_MACHINE_SKIP_NOOP_DRAWS=0` draws it, for an A/B in one binary. Both ways draw the
+/// same bytes.
+std::atomic<bool>& NoopDrawSkipSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_SKIP_NOOP_DRAWS");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
+/// Colour formats a blend that keeps the destination (`Cs * 0 + Cd * 1`) gives back bit for bit:
+/// eight bits per channel, linear. Every stored value survives the trip through the blender's
+/// arithmetic and back; an sRGB format's decode and encode, a wider format's precision and a
+/// float format's signed zeros and NaNs are not relied on.
+bool BlendKeepsTexelsExactly(MTLPixelFormat format)
+{
+    return format == MTLPixelFormatRGBA8Unorm || format == MTLPixelFormatBGRA8Unorm;
+}
+
 /// Bytes one texel of a render target takes, for the encode counters.
 uint64_t TexelBytes(MTLPixelFormat format)
 {
@@ -2047,6 +2069,24 @@ struct MetalRender::Impl
             bool                  memo_covers { false };
         };
         OverwriteProof                     overwrite;
+
+        /// What can be proven when the graph is prepared that this pass's draw leaves its
+        /// target as it is whenever a frame's uniforms make its colour's alpha 0: each channel
+        /// of the colour, as the shader compiler proved it, a product of uniform members
+        /// (`offset` into this pass's uniform block) and constants (`offset` -1), under a blend
+        /// that keeps the destination at alpha 0, with no depth write, one sample and the
+        /// ordinary program. The values are read each frame (`passLeavesTargetAsIs`).
+        struct NoopFactor
+        {
+            int32_t offset { -1 };
+            float   constant { 0.0f };
+        };
+        struct NoopProof
+        {
+            bool                                   candidate { false };
+            std::array<std::vector<NoopFactor>, 4> channels {};
+        };
+        NoopProof                          noop;
     };
 
     /// Where the mesh carries the input a shader's proven position reads, for the proof above.
@@ -2273,6 +2313,8 @@ struct MetalRender::Impl
         /// copies replaced by a trade of textures, which write nothing.
         uint64_t copied_bytes { 0 };
         uint32_t traded_copies { 0 };
+        /// Draws left out because they leave their target as it is.
+        uint32_t noop_draws { 0 };
     };
     EncodeCounts frame_encodes;
     EncodeCounts last_frame_encodes;
@@ -2473,6 +2515,23 @@ struct MetalRender::Impl
     /// Whether the step's clear applies this frame. A step dropped for an input
     /// nothing produces drops its clear with it.
     bool passClears(std::size_t index) const;
+
+    // ---- work nothing visible can see
+    /// Per description, whether its draw leaves its target exactly as it is this frame
+    /// (`markNoopDraws`): set once this frame's uniforms are written, after which `passDraws`
+    /// answers false for it, and cleared again before the next frame writes them.
+    std::vector<uint8_t>     noop_draws;
+    /// The passes whose draw `prepareNoopProof` made a candidate, in pass order.
+    std::vector<std::size_t> noop_candidates;
+    /// Proves, when the pass is prepared, what this frame's uniforms then decide: the shader's
+    /// colour is a product of uniforms and constants on every channel, and its blend keeps the
+    /// destination wherever alpha is 0.
+    void prepareNoopProof(const ScenePassDescription& desc, PreparedPass& out) const;
+    /// Whether pass `index`'s draw, with this frame's uniforms at `uniform_base`, writes alpha 0
+    /// over finite colour into an image whose texels its blend gives back unchanged.
+    bool passLeavesTargetAsIs(std::size_t index, const uint8_t* uniform_base) const;
+    void markNoopDraws(const uint8_t* uniform_base);
+
     /// Decides which copies are replaced by a trade of textures. Called after
     /// the reuse table is built, because a reused image must keep its texture.
     void planFeedbackSwaps();
@@ -2691,6 +2750,8 @@ void MetalRender::Impl::releaseGraph()
     pooled_copy_at.clear();
     pooled_release_at.clear();
     pooled_snapshot.clear();
+    noop_draws.clear();
+    noop_candidates.clear();
     images.clear();
     cookie_sources_ready = cookie_binding_ready = cookie_projection_read = false;
     bound_cookie_light = nullptr;
@@ -3812,6 +3873,11 @@ void MetalRender::Impl::refreshPassTargets(Scene& scene)
     scene_output_key    = scene.ResolveRenderTargetName(SpecTex_Default);
     scene_output_target = lookup(targets, scene_output_key);
     planAttachmentStores();
+    noop_draws.assign(descriptions.size(), uint8_t { 0 });
+    noop_candidates.clear();
+    for (std::size_t i = 0; i < prepared.size() && i < descriptions.size(); ++i) {
+        if (prepared[i].noop.candidate) noop_candidates.push_back(i);
+    }
     pass_labels.clear();
     pass_short_labels.clear();
     if (GpuLabelsEnabled()) {
@@ -3993,10 +4059,87 @@ bool MetalRender::Impl::passDraws(std::size_t index) const
     const auto& pass = prepared[index];
     if (!descriptions[index].enabled || pass.kind != MetalPassKind::CustomShader || pass.pipeline == nil) return false;
     if (pass.unproduced_input) return false;
+    if (index < noop_draws.size() && noop_draws[index] != 0) return false;
     const auto& desc = descriptions[index];
     return desc.visibility_node == nullptr || desc.visibility_node->EffectiveVisible() ||
            (desc.visibility_node->MustProduce() && ! desc.target_key.empty() &&
             desc.target_key != wallpaper::SpecTex_Default);
+}
+
+void MetalRender::Impl::prepareNoopProof(const ScenePassDescription& desc, PreparedPass& out) const
+{
+    auto& proof = out.noop;
+    proof       = {};
+    // Nothing but the colour may reach the target: no depth written, one sample, no resolve of
+    // the scene's depth that the render pass would otherwise carry out.
+    if (desc.kind != MetalPassKind::CustomShader || desc.depth_only || desc.depth_write ||
+        desc.samples != 1 || desc.scene_depth_attachment) {
+        return;
+    }
+    if (! BlendKeepsDestinationAtZeroAlpha(ToMetalBlendState(desc.blend, desc.alpha_rule, 1))) return;
+    const auto& reflection = out.reflection;
+    // The members are looked up in the one block the passes bind.
+    if (reflection.blocks.size() > 1) return;
+    const auto* block = reflection.uniformBlock();
+    for (std::size_t channel = 0; channel < 4; ++channel) {
+        const auto& factors = reflection.fragment_colour[channel];
+        if (! factors.has_value() || factors->empty()) return;
+        for (const auto& factor : *factors) {
+            if (factor.member.empty()) {
+                proof.channels[channel].push_back({ .offset = -1, .constant = factor.constant });
+                continue;
+            }
+            const auto* member = reflection.member(factor.member);
+            if (block == nullptr || member == nullptr || member->array_count != 0 ||
+                factor.component >= member->element_count ||
+                uint64_t(member->offset) + 4u * (uint64_t(factor.component) + 1u) > block->size) {
+                proof = {};
+                return;
+            }
+            proof.channels[channel].push_back(
+                { .offset = static_cast<int32_t>(member->offset + 4u * factor.component) });
+        }
+    }
+    proof.candidate = true;
+}
+
+bool MetalRender::Impl::passLeavesTargetAsIs(std::size_t index, const uint8_t* uniform_base) const
+{
+    const auto& pass  = prepared[index];
+    const auto& proof = pass.noop;
+    if (! proof.candidate || ! passDraws(index)) return false;
+    // The variant program reads its own uniforms.
+    if (index < video_plane_active.size() && video_plane_active[index] != 0) return false;
+    id<MTLTexture> target = index < pass_targets.size() ? pass_targets[index] : nil;
+    if (target == nil || target.sampleCount != 1 || ! BlendKeepsTexelsExactly(target.pixelFormat)) return false;
+    // The bytes the GPU reads for this draw: written before the plan, never after it.
+    const uint8_t* uniforms = uniform_base != nullptr ? uniform_base + pass.uniform_offset : nullptr;
+    bool zero_alpha = false;
+    for (std::size_t channel = 0; channel < 4; ++channel) {
+        // Finite factors whose magnitudes multiply to well within a float's range: the product
+        // is finite in whatever order the shader multiplies, and zero when a factor is.
+        double bound = 1.0;
+        for (const auto& factor : proof.channels[channel]) {
+            float value = factor.constant;
+            if (factor.offset >= 0) {
+                if (uniforms == nullptr || uint32_t(factor.offset) + sizeof(float) > pass.uniform_size) return false;
+                std::memcpy(&value, uniforms + factor.offset, sizeof(value));
+            }
+            if (! std::isfinite(value)) return false;
+            bound *= std::max(1.0, std::fabs(double(value)));
+            if (channel == 3 && value == 0.0f) zero_alpha = true;
+        }
+        if (! (bound < 1e30)) return false;
+    }
+    return zero_alpha;
+}
+
+void MetalRender::Impl::markNoopDraws(const uint8_t* uniform_base)
+{
+    if (noop_candidates.empty() || ! NoopDrawSkipSwitch().load(std::memory_order_relaxed)) return;
+    for (const auto index : noop_candidates) {
+        if (index < noop_draws.size() && passLeavesTargetAsIs(index, uniform_base)) noop_draws[index] = 1;
+    }
 }
 
 bool MetalRender::Impl::ensureSceneCopyPipeline(MTLPixelFormat format)
@@ -5137,6 +5280,7 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
     out.vertex_descriptor = vertex_descriptor;
     out.vertex_layout_id  = layout_id;
     prepareOverwriteProof(desc, out, position_attribute);
+    prepareNoopProof(desc, out);
 
     // ---- uniform initial state
     auto* updater = scene.shaderValueUpdater.get();
@@ -7446,6 +7590,9 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         id<MTLBuffer> uniforms = impl.uniform_rings[impl.frame_slot];
         auto*         uniform_base = static_cast<uint8_t*>(uniforms.contents);
 
+        // Every visible draw writes its uniforms; which of them then leave their target as it
+        // is follows from what they wrote (`markNoopDraws`, below).
+        std::fill(impl.noop_draws.begin(), impl.noop_draws.end(), uint8_t { 0 });
         // `FrameBegin` is the host's, once per frame before it draws: it steps the parallax cursor's smoothing
         // by the frame time and places puppet attachments. Calling it here as
         // well stepped the smoothing twice per frame, so the parallax on this
@@ -7484,6 +7631,9 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             dispatch_semaphore_signal(impl.inflight);
             return impl.fail(std::exchange(impl.uniform_error, {}));
         }
+        // From here on `passDraws` leaves out a draw whose uniforms make it write nothing: the
+        // geometry upload, the reuse plan's readers, the trades and the encoder all ask it.
+        impl.markNoopDraws(uniform_base);
 
         // After the uniform pass, never before it: the sprite clock and the
         // node transforms advance in there, and a sample taken first would
@@ -7837,6 +7987,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             // and the target keeps what the passes before it left there.
             const bool draws  = impl.passDraws(i);
             const bool clears = impl.passClears(i);
+            if (i < impl.noop_draws.size() && impl.noop_draws[i] != 0) ++impl.frame_encodes.noop_draws;
             if (! draws && ! clears) {
                 if (desc.generate_mipmaps) {
                     close_pass();
@@ -8524,7 +8675,7 @@ MetalRender::FrameEncodeCountsForTests MetalRender::LastFrameEncodeCountsForTest
     return { last.render_passes,  last.scene_output_passes,      last.blit_passes,
              last.loaded_passes, last.opening_copies,            last.stored_depth_attachments,
              last.stored_multisample_attachments, last.loaded_bytes, last.copied_bytes,
-             last.traded_copies };
+             last.traded_copies, last.noop_draws };
 }
 
 void MetalRender::SetTargetSharingForTests(bool enabled) { TargetSharingSwitch().store(enabled); }
@@ -8551,6 +8702,7 @@ std::vector<std::string> MetalRender::GpuPassLabelsForTests() const
     return pImpl != nullptr ? pImpl->pass_labels : std::vector<std::string> {};
 }
 void MetalRender::SetCopyTradesForTests(bool enabled) { CopyTradesSwitch().store(enabled); }
+void MetalRender::SetSkipNoopDrawsForTests(bool enabled) { NoopDrawSkipSwitch().store(enabled); }
 void MetalRender::SetVideoReuseForTests(bool enabled) { VideoReuseSwitch().store(enabled); }
 void MetalRender::SetLayerLocalSignaturesForTests(bool enabled)
 {

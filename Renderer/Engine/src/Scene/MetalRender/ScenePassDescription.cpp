@@ -31,6 +31,29 @@ bool BlendReplacesDestination(const MetalBlendState& blend)
            blend.destination_alpha == MetalBlendFactor::Zero;
 }
 
+bool BlendKeepsDestinationAtZeroAlpha(const MetalBlendState& blend)
+{
+    if (blend.alpha_to_coverage || ! blend.blending_enabled) return false;
+    // Cs * As + Cd * k with As = 0 and Cs finite: Cd * k, and k must be 1.
+    if (blend.rgb_operation != MetalBlendOperation::Add || blend.source_rgb != MetalBlendFactor::SourceAlpha) return false;
+    if (blend.destination_rgb != MetalBlendFactor::One &&
+        blend.destination_rgb != MetalBlendFactor::OneMinusSourceAlpha) {
+        return false;
+    }
+    switch (blend.alpha_operation) {
+    case MetalBlendOperation::Add:
+        return (blend.source_alpha == MetalBlendFactor::SourceAlpha || blend.source_alpha == MetalBlendFactor::One ||
+                blend.source_alpha == MetalBlendFactor::Zero) &&
+               (blend.destination_alpha == MetalBlendFactor::One ||
+                blend.destination_alpha == MetalBlendFactor::OneMinusSourceAlpha);
+    case MetalBlendOperation::Max:
+        // max(As, Ad) = max(0, Ad), whether or not the factors are applied, with `One` for both.
+        return blend.source_alpha == MetalBlendFactor::One && blend.destination_alpha == MetalBlendFactor::One;
+    default:
+        return false;
+    }
+}
+
 bool QuadCoversViewport(const MetalQuad& quad, const std::array<float, 16>& matrix, uint32_t width,
                         uint32_t height)
 {
