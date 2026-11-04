@@ -1240,6 +1240,12 @@ nothing could see or hear.
   nothing and writes nothing. The system-wide device-change listener is registered the
   first time a watcher starts and stays registered; between watchers it finds nobody to
   wake.
+- **Tap stall check.** While a tap runs and capture is wanted, the audio worker wakes
+  once a second to read the tap's callback count, one atomic load; the tap's own
+  callback adds one atomic increment per call. It asks whether the output device is
+  running only while calls are missing. Without a running tap, while suspended, or once
+  the check has given up, the worker sleeps without a timer
+  ([audio response](audio-response.md#output-device-changes)).
 - **Pointer sampling.** Scenes receive the cursor from a sampler that runs when
   macOS reports pointer motion or a button, when an interactive scene appears or
   resumes, or when its pointer delivery is reset, at most once per 16 ms, with a
