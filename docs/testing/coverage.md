@@ -334,6 +334,29 @@ picture shows between a window closing and the web page's window opening.
   that moves while this app is active is found by the timer with no event, becoming or
   resigning active reads it once, and the timer and the activity observers end with tracking.
   One case runs the real policy from the tracker's changes.
+- `UserInactivityMonitorTests` drive the inactivity watch through an injected input count,
+  timers the test fires and a pointer monitor it feeds (`ManualInactivityInput`): nothing is
+  armed or observed before a timeout is chosen, the one deadline is the timeout less the time
+  already gone without input and is armed again for the time left when input came, never
+  sooner than a second; the timeout makes the Mac inactive and installs the pointer monitors and
+  the two-second read; a pointer event, typing seen by that read, a wake, an unlock or a return
+  to the session ends it and leaves only the deadline; the read waits while the displays sleep or
+  the session is away, as injected display and session readers answer when it is armed rather than
+  as the last notice said (watching that starts while the displays sleep or the session is away
+  arms no read, displays that sleep or wake with no notice are found at the next decision); a
+  sleep, wake, session or unlock notice arms one read whatever the readers say then, and that read
+  asks again, so a wake or return the readers had not yet shown still lets typing end the
+  inactivity and a real sleep stops the read after one turn; each turn asks the displays and only
+  a run's first read asks the session; a new timeout starts over and switching off leaves nothing
+  behind.
+  `SystemConditionMonitorTests` add that the rule is watched only once an action is chosen,
+  follows the chosen action and time, joins the other conditions (named last among equals) and is
+  released by `stop()`; `PlaybackPolicyCompositionTests` run the real policy from it (every
+  display suspends beside a covered one that keeps its own pause, Stop unloads, an inactive Mac
+  is not unattended), and `InactivitySettingsTests` the panel's side (the time row only once
+  the rule does something, only offered times, the row's In effect now line, the On battery
+  naming). Real input, the system count and the real display power and session reads are not
+  exercised.
 - `DisplayRefreshCoalescerTests` — a burst during a refresh is answered by one
   more; screen changes that leave the displays as they were refresh nothing; a
   failed refresh is retried. A display missing from the screen list waits one

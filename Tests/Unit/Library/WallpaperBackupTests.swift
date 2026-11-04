@@ -747,6 +747,31 @@ final class WallpaperBackupTests: XCTestCase {
         }
     }
 
+    func testInactivityChoicesAreBackedUpAndOnlyOfferedValuesRestore() throws {
+        let preferences = try defaults()
+        let playback = PlaybackPreferences(defaults: preferences)
+        playback.inactivityAction = .stop
+        playback.inactivityMinutes = 30
+        let export = try WallpaperBackupPreferences(defaults: preferences, domainName: domainName(for: preferences))
+        for (key, expected) in [(PlaybackPreferences.inactivityActionKey, "stop"), (PlaybackPreferences.inactivityMinutesKey, "30")] {
+            let stored = try WallpaperBackupPreferences.decode(XCTUnwrap(export.values[key], key))
+            try WallpaperBackupPreferences.validate(stored, forKey: key)
+            XCTAssertEqual("\(stored)", expected)
+        }
+        for action in ["keepRunning", "pause", "stop"] {
+            XCTAssertNoThrow(try WallpaperBackupPreferences.validate(action, forKey: PlaybackPreferences.inactivityActionKey))
+        }
+        for action: Any in ["reduceQuality", "nap", "", 1, true] {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(action, forKey: PlaybackPreferences.inactivityActionKey), "\(action)")
+        }
+        for minutes in [5, 10, 15, 30, 60] {
+            XCTAssertNoThrow(try WallpaperBackupPreferences.validate(NSNumber(value: minutes), forKey: PlaybackPreferences.inactivityMinutesKey))
+        }
+        for minutes: Any in [0, 7, 20, 61, -5, 10.5, "10", true, NSNumber(value: 1e30)] {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(minutes, forKey: PlaybackPreferences.inactivityMinutesKey), "\(minutes)")
+        }
+    }
+
     func testTileZoomIsBackedUpAndOnlyAZoomStepRestores() throws {
         let preferences = try defaults()
         PanelPreferences.setTileZoom(2, in: preferences)

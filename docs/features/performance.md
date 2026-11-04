@@ -483,6 +483,7 @@ wins. There is no timer and no per-frame check (bridge `tests::playback_reconcil
 | When another app plays sound | **Keep running**, **Mute**, **Pause** | Keep running |
 | When another app is in front | **Keep running**, **Mute**, **Pause** | Keep running |
 | When displays sleep | **Pause**, **Stop (free memory)** | Pause |
+| When the Mac is inactive | **Keep running**, **Pause**, **Stop (free memory)**; inactive after **5**, **10**, **15** or **30 minutes** or **1 hour** without input | Keep running, 10 minutes |
 | Only play on the display I’m using | On, Off; shown with two or more displays | Off |
 | On battery | **Keep running**, **Reduced quality**, **Pause** | Keep running |
 | When the battery is low | **Keep running**, **Reduced quality**, **Pause**, **Stop (free memory)**; the level is **10%**, **20%** or **30%** | Keep running, 20% |
@@ -597,6 +598,49 @@ display already pauses because the wallpaper cannot be seen.
 **Stop** on display sleep frees renderer memory. The wallpaper is reloaded when the
 display wakes. **Pause** keeps it loaded.
 
+**When the Mac is inactive** pauses or stops every wallpaper once the Mac has had no
+keyboard, mouse or trackpad input for the time chosen under **Inactive after**, and
+resumes them at the next input. It covers the time between walking away and the
+displays going to sleep, which many people set long or never. The time row appears
+once an action other than **Keep running** is chosen. Input is what macOS counts for
+the whole login session (`CGEventSource.secondsSinceLastEventType` with the combined
+session state): typing, the pointer, clicks and scrolling, and the events other apps
+post into the session too. Reading it needs no permission. **Pause** keeps the last frame; **Stop (free memory)** unloads
+the wallpapers and reloads them at the next input, as the other Stop choices do. Like
+the other conditions of the Mac it never changes your own Play/Pause, a playlist
+change that falls due meanwhile waits for the wallpapers to play again
+([Playlists](playlists.md#when-a-change-happens)), and an inactive Mac does not count
+as nobody being at it, so an automatic update still waits for the displays to sleep or
+the session to lock ([Updates](updates.md#automatic-updates)). The row adds `In effect
+now. Wallpapers are paused.` (or stopped) while the rule holds, and Quick Settings' **On
+battery** module names it as it names the other conditions below.
+
+`UserInactivityMonitor` watches only while an action other than **Keep running** is
+chosen. While the Mac is in use its only work is one one-shot timer, armed for the
+moment the time runs out if no input comes; when it fires the count is read again,
+and input since then arms it again for the time left. Once the Mac is inactive it
+waits for the first input with one global and one local event monitor for the
+pointer, clicks and scrolling, which need no Accessibility or Input Monitoring grant,
+and a read of the count every two seconds on a timer that tolerates a second's delay,
+which is what notices typing alone: a global keyboard monitor would need
+Accessibility, so there is none. That read waits while the displays sleep or another
+user's session has the screens, since no input can reach this session then. Both are
+asked of the system, not remembered from the last notice: the displays
+(`DisplayPowerProbe`) each time the read would be armed, and the session's console
+state, a window-server round trip, only when a run of reads begins (watching starting,
+the deadline, a pointer event, the read after a notice), since the session cannot
+leave or return without a notice. So an app relaunched by an automatic update while
+the displays sleep arms no read at all. The displays sleeping or waking, the session
+leaving or returning, the Mac's wake and an unlock read the count at once and arm one
+read whatever the system says then, because a notice can come before the state it
+announces has settled; that read asks both again, so a real sleep stops it after one
+turn and a wake or return the system had not yet shown still lets typing end the
+inactivity. The first input removes the monitors and the timer and arms the deadline
+again. While this app is the
+active one the global monitor sees no pointer events and the local one only those its
+own windows receive, so a pointer moved over the desktop then is noticed by the
+two-second read.
+
 A display with a [different wallpaper for each desktop](spaces.md#keeping-each-desktops-wallpaper)
 keeps the wallpaper of each desktop the person visited loaded and paused, so coming back runs it
 on instead of loading it again. A kept wallpaper draws nothing; its cost is the memory it holds,
@@ -691,7 +735,8 @@ condition holds and what its rule does (`EngagedSystemConditions`) to
 `SystemConditionState`, which the control panel reads; the panel never works the
 conditions out again. While the Mac runs on battery, Quick Settings' **On battery**
 module names the strongest of them that pauses or stops wallpapers: a stop before a
-pause, and heat, then Low Power Mode, then a low battery among equals, for example
+pause, and heat, then Low Power Mode, then a low battery, then an inactive Mac among
+equals, for example
 `Low Power Mode is on. Wallpapers are stopped.` What the choice already does is not an
 override, so **Pause** beside a rule that pauses says nothing, while one that stops is
 named. Plugged in, the choice does nothing and nothing is said. Heat on Reduced quality
@@ -770,7 +815,9 @@ and scale ([architecture](../architecture.md)). Heat is the one exception, since
 critical thermal state also contributes a pause.
 It only observes notifications (`NSProcessInfoPowerStateDidChange`,
 `ProcessInfo.thermalStateDidChangeNotification`, the preferences and the Focus
-filter); nothing is polled. The battery adds IOKit's power-source notification
+filter); nothing is polled. An inactive Mac is reported by `UserInactivityMonitor`
+(above), which runs only while its rule is chosen.
+The battery adds IOKit's power-source notification
 (`IOPSNotificationCreateRunLoopSource`, wrapped by `SystemBatteryLevel`), registered
 only while a low-battery action is chosen and removed when it is not, and read again
 when the Mac wakes in case a plug or unplug during sleep was never reported. The
@@ -1338,6 +1385,15 @@ nothing could see or hear.
   change instead of being dropped. The app can also ask it to read again when the Mac
   wakes ([Playback](#playback)), which wakes the thread once before it sleeps again.
   No power saving is claimed.
+- **Inactivity watch.** Nothing runs while **When the Mac is inactive** keeps running.
+  Chosen, it costs one one-shot timer while the Mac is in use, armed again only when it
+  fires and finds that input came meanwhile; the pointer monitors and the two-second read of the
+  input count exist only while the Mac counts as inactive, and that read waits while
+  the displays sleep or another session has the screens. Each turn asks whether the
+  displays sleep (`CGGetOnlineDisplayList` and `CGDisplayIsAsleep`); the session's
+  console state (`CGSessionCopyCurrentDictionary`) is asked only when a run of reads
+  begins, including the one read a sleep, wake, session or unlock notice arms
+  ([Playback](#playback)). No power saving is claimed.
 - **Renderer counters.** They count only inside a bounded window: a
   [diagnostic window](../testing/power-benchmark.md#runtime-counters) asked for
   through the environment, or, when **Send performance data** is on, one 60 s

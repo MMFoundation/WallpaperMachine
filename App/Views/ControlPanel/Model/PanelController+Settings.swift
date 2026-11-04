@@ -230,6 +230,19 @@ extension PanelController {
     try await change { playback.lowBatteryThreshold = percent }
   }
 
+  /// `inactivityAction`.
+  func setInactivityAction(_ action: InactivityAction) async throws {
+    try await change { playback.inactivityAction = action }
+  }
+
+  /// `inactivityMinutes`: only a time the menu offers (`PlaybackPreferences.inactivityMinuteChoices`).
+  func setInactivityMinutes(_ minutes: Int) async throws {
+    guard PlaybackPreferences.inactivityMinuteChoices.contains(minutes) else {
+      throw InvalidControlValue()
+    }
+    try await change { playback.inactivityMinutes = minutes }
+  }
+
   /// `batteryRenderScale`. The engine owns the battery scale and frame rate as one value, so this
   /// is merged with the frame rate as the engine currently reports it, read when the change runs.
   func setBatteryRenderScale(_ scale: Double) async throws {

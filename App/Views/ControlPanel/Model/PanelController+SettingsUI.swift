@@ -165,6 +165,21 @@ extension SystemConditionAction {
   }
 }
 
+extension InactivityAction {
+  @MainActor var title: String {
+    switch self {
+    case .keepRunning: L("Keep running")
+    case .pause: L("Pause")
+    case .stop: L("Stop (free memory)")
+    }
+  }
+
+  /// An entry of the Inactive after menu: "10 minutes", or "1 hour".
+  @MainActor static func timeTitle(minutes: Int) -> String {
+    minutes == 60 ? L("1 hour") : L("\(minutes) minutes")
+  }
+}
+
 extension BridgeBatteryMode {
   @MainActor var title: String {
     switch self {

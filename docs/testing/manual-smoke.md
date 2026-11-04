@@ -73,6 +73,12 @@ was run.
       battery is low row adds "In effect now. Wallpapers are paused.". Set On battery to
       Pause: the module's line goes away; set the rule to Stop: it reads "… Wallpapers are
       stopped." again. Plug in: the line and the row's In effect now go away.
+- [ ] Set **When the Mac is inactive** to Pause and **Inactive after** to 5 minutes, with
+      display sleep set longer, and leave the Mac alone: after five minutes every wallpaper
+      holds its last frame and the log reads "the Mac counts as inactive". Move the mouse:
+      they play again at once. Wait again and press only a key: they play again within about
+      two seconds. Repeat with Stop (free memory): the wallpapers reload at the first input.
+      Your own Pause from the menu bar stays as you left it throughout.
 
 ## Appearance
 
