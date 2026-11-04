@@ -210,14 +210,14 @@ jobs:
           artifacts="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?name=${ARTIFACT}"
           jobs="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100"
           for _ in $(seq 1 180); do
-            # A failed lookup counts as not yet, and is asked again.
-            count="$(gh api "${artifacts}" --jq '.total_count' || echo 0)"
-            if [ "${count}" -gt 0 ]; then
+            # A failed lookup counts as not yet, and is asked again. Only gh's exit status
+            # says so: on an HTTP error it prints the error body, not the --jq result.
+            if count="$(gh api "${artifacts}" --jq '.total_count')" && [ "${count}" -gt 0 ]; then
               echo "${ARTIFACT} is ready."
               exit 0
             fi
-            conclusion="$(gh api "${jobs}" --jq "[.jobs[] | select(.name | endswith(\"${ICON_JOB}\")) | .conclusion // empty] | last // empty" || true)"
-            if [ -n "${conclusion}" ] && [ "${conclusion}" != success ]; then
+            if conclusion="$(gh api "${jobs}" --jq "[.jobs[] | select(.name | endswith(\"${ICON_JOB}\")) | .conclusion // empty] | last // empty")" \
+                && [ -n "${conclusion}" ] && [ "${conclusion}" != success ]; then
               echo "::error::The ${ICON_JOB} job ended ${conclusion}, so there is no icon to build with."
               exit 1
             fi
