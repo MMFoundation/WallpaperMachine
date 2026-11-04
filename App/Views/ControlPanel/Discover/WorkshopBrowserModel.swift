@@ -129,6 +129,19 @@ final class WorkshopBrowserModel {
   /// Whether a pause is running before the typed text searches.
   var hasPendingSearch: Bool { pendingSearch != nil }
 
+  /// **Search “…” instead**, beside a search that was sent in English: searches the words as they
+  /// were typed, and keeps doing so for a sort or a filter until the text changes.
+  @discardableResult
+  func searchAsTyped(_ translation: WorkshopSearchTranslation) -> Task<Void, Never> {
+    pendingSearch?.cancel()
+    pendingSearch = nil
+    let original = translation.original
+    return controller.launch(PanelActionCoordinator.key("workshopSearch"), policy: .latestWins) {
+      [controller] in
+      try await controller.searchWorkshopAsTyped(original)
+    }
+  }
+
   func choose(sort new: WorkshopSort) {
     sort = new
     search()

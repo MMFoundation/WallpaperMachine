@@ -764,6 +764,16 @@ language choice. The Python catalog checks
 built-in label table translated in every catalog; see
 [localization](../localization.md).
 
+`TranslationSessionHostTests` cover how translation work borrows the sessions the panel's
+`.translationTask` lends, with a fake session and a clock the test fires: a job asks for a
+session for its languages, another pair waits until that session has served every job for
+its own, the same pair asked again gets a fresh session, a translation no session serves
+gives up in time and the next job asks again, a download prompt waits with no timeout, and a
+session lent while the view goes away serves nothing. Not covered: a real
+`TranslationSession`, which only SwiftUI makes, so neither the framework's answers nor how
+long its first session takes to arrive (against the five-second timeout) on macOS 15, nor what
+it throws when the person declines a download.
+
 ## LockScreen
 
 The native-selection and service suites run against a synthetic store and injected
@@ -1344,7 +1354,17 @@ never to `.shared`.
   rejected account, late failures, the first-run guide keeping its own sign-in), and
   `WorkshopBrowserRenderTests` (the page, inspector, empty states, dialog stages and Downloads list
   in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label, a
-  download that resumes or pauses with the Downloads list open redrawn in place).
+  download that resumes or pauses with the Downloads list open redrawn in place), and
+  `WorkshopSearchTranslationTests` (a search typed in Chinese sent in English while the field keeps
+  it, **Search “…” instead** kept for a sort and by a reopened panel and the text translated
+  again once another was searched, a click on a replaced line ignored, the page and the
+  window's subtitle searching while the words are translated, the line fitting the smallest
+  window in every language, English untouched, the switch off sending searches and the lists
+  the Workshop reads again by itself as typed while the line on show still searches as typed,
+  Reset all settings, and the Settings row's languages read when shown, after a reset and after
+  another app language, with only the picked one downloaded). The panel fixtures give every
+  controller a `FakeTranslation`, so no panel test asks this Mac's Translation framework; the real
+  framework, a real download prompt and the translations it gives are not covered.
 - Lazy lists: `scripts/tests/test_panel_lazy_lists.py` fails for a `LazyVStack`, `LazyHStack`,
   `LazyVGrid`, `LazyHGrid` or `List` that draws more than one top-level `ForEach`, the shape that
   kept a resumed download's row stale; a `ForEach` inside a separate subview is not seen by it.
@@ -1647,6 +1667,21 @@ unless `scripts/we_reference.py render` hands it real pages to draw. Detail and 
   served from cache, capped at Steam's page limit, with the next page prefetched;
   the sidebar defaults match Wallpaper Engine's; Recently updated reaches Steam as
   `lastupdated` with the search text and tags.
+- `WorkshopSearchLanguageTests` — which language a search reads as: Simplified and
+  Traditional Chinese told apart by their characters, Japanese from kana and from kanji the
+  recognizer is sure of, Korean from Hangul, mixed text read by its CJK characters, English
+  and text with no language left alone, and Portuguese only while the app is in Portuguese.
+  They rely on the NaturalLanguage model of the Mac they run on; whether its confidence for a
+  short Han text (桜, 宇宙) is the same on every macOS release is not established.
+- `WorkshopSearchTranslatorTests` (a `FakeTranslation`, never the Translation framework) — a
+  search translated into English only from a downloaded language, and a language that is not
+  downloaded never asked to translate or download; English, links, ids, empty text and
+  anything while the switch is off never reaching the translator, and the switch kept and
+  reset; answers kept up to the limit; a translation that changes nothing or fails searched
+  as typed and a failure not kept; the search shown as translating only while it waits for
+  the translator; Portuguese only while the app is in Portuguese; and Settings' language read
+  (one per app language, again after the language changes or a reset) and a download of only
+  the language picked.
 - `WorkshopLinkTests` — which pasted text names a Workshop item: bare ids from six
   digits, item page and `steam://` links in their accepted spellings, and the
   look-alikes that must stay searches (other hosts, user info or ports, bad ids,

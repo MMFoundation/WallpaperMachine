@@ -14,6 +14,8 @@ enum SettingsSwitchKey: String, CaseIterable, Sendable {
   /// Different wallpaper for each desktop, on the display the Library applies wallpapers to: the
   /// same switch as that display's card in Settings › Displays and the toolbar's display menu.
   case desktopWallpapers
+  /// Settings › General: a Workshop search typed in another language is sent in English.
+  case translateWorkshopSearches
 }
 
 /// What the Settings views read and send beyond the typed values: the saved state of a switch, the
@@ -43,6 +45,7 @@ extension PanelController {
     case .sceneDisplayFraming: store.settingsSnapshot.sceneDisplayFramingEnabled
     case .sceneReflections: store.settingsSnapshot.sceneQuality.reflections
     case .desktopWallpapers: automationState(for: targetDisplayID).mode == .spaces
+    case .translateWorkshopSearches: searchTranslation.isEnabled
     }
   }
 
@@ -91,6 +94,7 @@ extension PanelController {
     case .sceneVideoPlaneSampling: try await setSceneVideoPlaneSampling(on)
     case .sceneDisplayFraming: try await setSceneDisplayFraming(on)
     case .sceneReflections: try await setSceneReflections(on)
+    case .translateWorkshopSearches: try await setTranslatesWorkshopSearches(on)
     }
   }
 }

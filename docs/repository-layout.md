@@ -53,7 +53,8 @@ App/                               WallpaperMachine application target sources o
                                    ProcessSignals makes a broken pipe a write error;
                                    the one-copy-per-library lock and the second launch's hand-over
                                    (InstanceLock, SingleInstance)
-    Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
+    Localization/                  AppLanguage.swift: shipped-language registry and the language preference store;
+                                   on-device translation (OnDeviceTranslating, SystemTranslation, TranslationSessionHost)
     LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
     NativeVideo/                   native video backend: the AVFoundation player and the WebM player's window, the
                                    host, the format check Apply uses (the admission rule, the layout rules
@@ -77,13 +78,16 @@ App/                               WallpaperMachine application target sources o
                                    owns the app's copies under <support>/UserAssets/ and the derived,
                                    regenerable <project>/.mwe-user-assets/ bridge a page can read
     WebWallpaper/                  WKWebView host windows and page protocol for web wallpapers
-    Workshop/                      Workshop query model and sources, browse store, downloader and queue
+    Workshop/                      Workshop query model and sources, browse store, downloader and queue,
+                                   searches typed in another language sent in English (WorkshopSearchTranslator,
+                                   WorkshopSearchLanguage)
   ViewModels/                      BridgeStore and editor draft state; observable, no view code
   Views/ControlPanel/              the SwiftUI control panel: root view, navigation types, window factory and
                                    reopen state, and the AppKit sign-in, preview and what's-new windows
     Model/                         PanelController, its typed actions and derived state (PanelController+<Group>.swift),
                                    presentation, store revisions, error banner, action coordinator, dialogs, links
-    Shell/                         root view, tabs, detail column (router, toolbar, banners, Filters sidebar, inspector), Now Playing bar
+    Shell/                         root view, tabs, detail column (router, toolbar, banners, Filters sidebar, inspector), Now Playing bar,
+                                   the .translationTask that lends translation sessions (TranslationTaskHost)
     Library/ Inspector/            the Installed page and the installed wallpaper's inspector
     Discover/ Downloads/           the Steam Workshop page and its inspector; the downloads button, list and dialog
     Pixiv/                         the pixiv page, its inspector and toolbar pill

@@ -117,6 +117,7 @@ struct WallpaperBackupPreferences: Sendable {
         PlaybackPreferences.playOnlyOnActiveDisplayKey,
         PanelPreferences.hideAfterActivatingKey, PanelPreferences.tileZoomKey,
         PanelPreferences.libraryPreviewsOnHoverKey,
+        WorkshopSearchTranslator.enabledKey,
         WorkshopStore.concurrentDownloadsKey,
         WorkshopUpdateStore.automaticKey, ClientPaths.assetsPathKey,
         // No longer read since filters became a popover; still accepted so that backups made

@@ -3974,6 +3974,12 @@
     "Search Workshop or paste a link" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Buscar no Workshop ou colar um link"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "창작마당 검색 또는 링크 붙여넣기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ワークショップを検索、またはリンクを貼り付け"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "搜索创意工坊，或粘贴链接"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "搜尋工作坊，或貼上連結"}}}
     },
+    "Searched in English for “%@”" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Busca feita em inglês: “%@”"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "영어로 검색함: “%@”"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "英語の「%@」で検索しました"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已用英文搜索“%@”"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已用英文搜尋「%@」"}}}
+    },
+    "Search “%@” instead" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Buscar “%@” em vez disso"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "대신 “%@” 검색"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "代わりに「%@」で検索"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "改为搜索“%@”"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "改為搜尋「%@」"}}}
+    },
     "Search wallpapers" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Buscar papéis de parede"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 검색"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙を検索"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "搜索壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "搜尋桌布"}}}
     },
@@ -7657,6 +7663,33 @@
     },
     "More about %@" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Mais sobre %@"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "%@에 관하여 더 알아보기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "「%@」の詳細"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "关于“%@”的更多说明"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "關於「%@」的更多說明"}}}
+    },
+    "Translation" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Tradução"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "번역"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "翻訳"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "翻译"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "翻譯"}}}
+    },
+    "Translate Workshop searches into English" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Traduzir as buscas no Workshop para o inglês"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "창작마당 검색어를 영어로 번역"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ワークショップの検索を英語に翻訳"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "将创意工坊搜索翻译成英文"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "將工作坊搜尋翻譯成英文"}}}
+    },
+    "Steam Workshop titles and tags are mostly in English, so a search typed in Chinese, Japanese or Korean is translated on this Mac and sent in English. The Steam Workshop page shows the English words, with a way to search what you typed instead." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Os títulos e as tags do Workshop da Steam estão quase todos em inglês, então uma busca digitada em chinês, japonês ou coreano é traduzida neste Mac e enviada em inglês. A página do Workshop da Steam mostra as palavras em inglês, com uma opção para buscar o que você digitou."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam 창작마당의 제목과 태그는 대부분 영어이므로, 중국어, 일본어, 한국어로 입력한 검색어는 이 Mac에서 번역되어 영어로 전송됩니다. Steam 창작마당 페이지에 영어 단어가 표시되며, 입력한 그대로 검색할 수도 있습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamワークショップのタイトルやタグはほとんどが英語のため、中国語、日本語、韓国語で入力した検索はこのMac上で翻訳され、英語で送信されます。Steamワークショップのページには英語の語句が表示され、入力したとおりに検索し直すこともできます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Steam 创意工坊的标题和标签大多是英文，因此用中文、日语或韩语输入的搜索会在这台 Mac 上翻译后以英文发送。Steam 创意工坊页面会显示这些英文词语，并可改为搜索你输入的原文。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Steam 工作坊的標題與標籤大多是英文，因此以中文、日文或韓文輸入的搜尋會在這台 Mac 上翻譯後以英文送出。Steam 工作坊頁面會顯示這些英文字詞，並可改為搜尋你輸入的原文。"}}}
+    },
+    "Portuguese searches are translated while the app is in Portuguese. Links and item ids are never translated." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Buscas em português são traduzidas enquanto o app está em português. Links e IDs de itens nunca são traduzidos."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "앱이 포르투갈어로 표시될 때는 포르투갈어 검색어도 번역됩니다. 링크와 항목 ID는 번역되지 않습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Appがポルトガル語のときは、ポルトガル語の検索も翻訳されます。リンクとアイテムIDは翻訳されません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "当应用使用葡萄牙语时，葡萄牙语的搜索也会被翻译。链接和物品 ID 从不翻译。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "當 App 使用葡萄牙文時，葡萄牙文的搜尋也會被翻譯。連結與項目 ID 一律不翻譯。"}}}
+    },
+    "A language is used only once it is downloaded for translation, and nothing is downloaded until you choose one from the Download… menu. A downloaded language serves every app on this Mac." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Um idioma só é usado depois de baixado para tradução, e nada é baixado até você escolher um no menu “Baixar…”. Um idioma baixado serve a todos os apps deste Mac."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "언어는 번역용으로 다운로드된 후에만 사용되며, ‘다운로드…’ 메뉴에서 선택하기 전에는 아무것도 다운로드되지 않습니다. 다운로드한 언어는 이 Mac의 모든 앱에서 사용할 수 있습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "言語は翻訳用にダウンロードされてから使われます。「ダウンロード…」メニューで選ぶまで、何もダウンロードされません。ダウンロードした言語はこのMacのすべてのAppで使えます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "语言只有在下载用于翻译后才会使用；在你从“下载…”菜单中选择之前，不会下载任何内容。下载的语言可供这台 Mac 上的所有应用使用。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "語言只有在下載用於翻譯後才會使用；在你從「下載…」選單中選擇之前，不會下載任何內容。下載的語言可供這台 Mac 上的所有 App 使用。"}}}
+    },
+    "Download…" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Baixar…"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다운로드…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロード…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "下载…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "下載…"}}}
+    },
+    "Download a language for translating searches" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Baixar um idioma para traduzir buscas"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "검색어 번역에 사용할 언어 다운로드"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "検索の翻訳に使う言語をダウンロード"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "下载用于翻译搜索的语言"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "下載用於翻譯搜尋的語言"}}}
+    },
+    "No language is downloaded for translation yet, so searches are sent as typed." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Nenhum idioma foi baixado para tradução ainda, então as buscas são enviadas como foram digitadas."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "번역용 언어가 아직 다운로드되지 않아 검색어가 입력한 그대로 전송됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "翻訳用の言語がまだダウンロードされていないため、検索は入力したとおりに送信されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "尚未下载用于翻译的语言，因此搜索会按输入原样发送。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "尚未下載用於翻譯的語言，因此搜尋會照輸入原樣送出。"}}}
+    },
+    "Ready for searches typed in %@." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Pronto para buscas digitadas em %@."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "%@ 검색어를 번역할 수 있습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%@で入力した検索を翻訳できます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "可翻译以%@输入的搜索。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "可翻譯以%@輸入的搜尋。"}}}
     },
     "Mute All" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Silenciar Tudo"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "모두 음소거"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "すべて消音"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "全部静音"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "全部靜音"}}}

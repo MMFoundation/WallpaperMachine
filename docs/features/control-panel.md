@@ -35,6 +35,10 @@ macOS language list) and every shipped language under its own name.
   language, also in an inspector that is already open (see
   [Properties](wallpaper-properties.md#properties)). Steam filter
   values and identifiers do not change when labels are translated.
+- A Steam Workshop search typed in Chinese, Japanese or Korean (or Portuguese while
+  the app is in Portuguese) can be sent to Steam in English, translated on this Mac;
+  the search field keeps what was typed
+  ([Searching in another language](workshop-downloads.md#searching-in-another-language)).
 
 How the language is resolved, how the layers fit together and how to add a
 language: [Localization](../localization.md).
@@ -214,7 +218,9 @@ the rest opens in a popover from the ⓘ beside the title.
   wallpapers, and that rule's Playback & Power row says **In effect now**; Focus
   filters and app rules keep to their own rows
   ([performance](performance.md#low-battery-low-power-mode-heat-and-focus)).
-- **General** starts with the [Language](#language) picker (Interface), then Startup
+- **General** starts with the [Language](#language) picker (Interface), then Translation
+  (**Translate Workshop searches into English**, see
+  [Workshop](workshop-downloads.md#searching-in-another-language)), then Startup
   (**Launch at login** and **Hide window after applying a wallpaper**), Help (the
   [welcome guide](first-run.md), **Show again**) and Reset (**Reset all settings**,
   **Reset…**). Reset asks first; once confirmed, every setting the Settings pages

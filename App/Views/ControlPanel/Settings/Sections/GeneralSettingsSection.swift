@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Settings › General: the interface language, how the Library plays its previews, what happens at login and after applying a
-/// wallpaper, the way back to the welcome guide, and resetting every setting.
+/// wallpaper, the way back to the welcome guide, resetting every setting, and translating Workshop searches into English.
 struct GeneralSettingsSection: View {
   private static let interface = SettingsItem.Group("interface", title: "Interface")
   private static let startup = SettingsItem.Group("startup", title: "Startup")
@@ -39,7 +39,7 @@ struct GeneralSettingsSection: View {
       "Returns every setting to its default. Your library, playlists, collections, displays and sign-ins are kept.",
     keywords: ["Reset…", "Restore defaults"])
 
-  static let items = [language, libraryPreviewsOnHover, launchAtLogin, hideAfterApplying, welcomeGuide, resetAll]
+  static let items = [language, libraryPreviewsOnHover, translateSearches, launchAtLogin, hideAfterApplying, welcomeGuide, resetAll]
 
   @Environment(PanelController.self) private var controller
 
@@ -52,6 +52,7 @@ struct GeneralSettingsSection: View {
           SettingsSwitchControl(key: .libraryPreviewsOnHover)
         }
       }
+      SettingsGroup(Self.translation, in: .general) { SearchTranslationSettingsRow() }
       SettingsGroup(Self.startup, in: .general) {
         SettingsRow(Self.launchAtLogin, note: login.note) {
           HStack(spacing: 10) {

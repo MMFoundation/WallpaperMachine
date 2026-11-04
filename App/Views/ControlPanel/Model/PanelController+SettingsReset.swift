@@ -62,6 +62,7 @@ extension PanelController {
     defaults.removeObject(forKey: PanelPreferences.hideAfterActivatingKey)
     defaults.removeObject(forKey: PanelPreferences.libraryPreviewsOnHoverKey)
     library.previewModeChanged()
+    searchTranslation.resetPreference()
     setTileZoom(0)
     if appLanguage.preference != AppLanguageStore.systemChoice {
       await attempt { try await setLanguage(nil) }
