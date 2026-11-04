@@ -1,6 +1,7 @@
 #include "MetalRender/ScenePassDescription.hpp"
 
 #include "RenderCommon/ScenePass.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 #include "RenderGraph/Pass.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "Scene/Scene.h"
@@ -585,7 +586,45 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
         }
     }
     PlaceMipmapGeneration(scene, out);
+    if (ScenePassMergeEnabled()) ShareDepthAttachments(out, scene.transparent_sorting);
     return true;
+}
+
+void ShareDepthAttachments(std::vector<ScenePassDescription>& descriptions, bool sorted_by_depth)
+{
+    // A scene sorted by depth puts its objects in a new order whenever the camera or a layer
+    // moves, so "between two depth-tested draws" in build order would not hold at run time: a
+    // shared draw that ends up outside them would split the pass it was meant to join.
+    if (sorted_by_depth) return;
+    const auto draws = [](const ScenePassDescription& desc) {
+        return desc.kind == MetalPassKind::CustomShader && ! desc.depth_only && ! desc.target_key.empty();
+    };
+    // Per target: whether every draw into it is single-sample, and where its first and last
+    // depth-tested draw are.
+    struct Span {
+        bool        single_sample { true };
+        std::size_t first { 0 };
+        std::size_t last { 0 };
+        bool        tested { false };
+    };
+    std::unordered_map<std::string, Span> spans;
+    for (std::size_t i = 0; i < descriptions.size(); ++i) {
+        const auto& desc = descriptions[i];
+        if (! draws(desc)) continue;
+        auto& span = spans[desc.target_key];
+        span.single_sample = span.single_sample && desc.samples == 1;
+        if (! desc.depth_test) continue;
+        if (! span.tested) span.first = i;
+        span.last   = i;
+        span.tested = true;
+    }
+    for (std::size_t i = 0; i < descriptions.size(); ++i) {
+        auto& desc = descriptions[i];
+        if (! draws(desc) || desc.depth_test || desc.scene_depth_attachment) continue;
+        const auto span = spans.find(desc.target_key);
+        if (span == spans.end() || ! span->second.tested || ! span->second.single_sample) continue;
+        desc.shares_depth_attachment = span->second.first < i && i < span->second.last;
+    }
 }
 
 } // namespace wallpaper::metal
