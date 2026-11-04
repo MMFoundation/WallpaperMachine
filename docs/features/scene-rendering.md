@@ -2143,8 +2143,10 @@ between two draws into the scene's image):
   colour and depth were stored and loaded back each time (22 splits, in 2 scenes). Such
   a draw now takes that image's depth attachment, with depth testing off. That holds only
   for an image all of whose draws are single-sample, and only for a draw between the
-  image's first and last depth-tested draw: the flat layers before a scene's first model
-  or after its last take no depth attachment. A scene that sorts transparency by depth
+  image's first and last depth-tested draw that reaches one of them through draws into the
+  same image alone: the flat layers before a scene's first model or after its last take no
+  depth attachment, and neither does one that passes on other images cut off from both models,
+  which would only load and store the depth. A scene that sorts transparency by depth
   puts its objects in a new order as it runs, so its draws keep their own render passes.
 
 Sharing the depth attachment leaves the picture byte for byte the same. Drawing a layer's
@@ -2169,7 +2171,7 @@ not comparable). Per frame, at 3456x2234@2:
 | 3255418892 | 6 → 4 | 13 → 11 | 143 → 72 |
 | 3276911872, 3610485014, 3589454154 | one fewer | one fewer | 35.5 or 31 less |
 
-3662790108 also stores its depth 4 times a frame instead of 14. Paced at 60 fps on the
+3662790108 also stores its depth 3 times a frame instead of 14. Paced at 60 fps on the
 built-in panel's surface alone (`perf_bench.py cost`, a build without the change against
 one with it, 5 pairs in ABBA order on an M5 Pro, the app's own coalition), the GPU drew the
 same frames for less power: 3808922316 from 4.36 to 3.84 W (-12 %, every pair, the 95 %

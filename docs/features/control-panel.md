@@ -560,7 +560,7 @@ there, and choosing the item replaces it with **Pause on battery**
 ([Pause on battery](performance.md#playback)). A Mac without a battery shows the submenu only
 while one of the two choices is not its default, so a choice a restored backup brought can be
 undone. A choice made there counts as having answered the
-[battery question](first-run.md#the-battery-question). With two or more
+[battery question](first-run.md#the-battery-question). With two or more displays
 (enabled, independent and connected; a mirror or a disabled display is not
 listed) the menu has one submenu per display, named as the panel names it and ordered
 the main display first, then left to right as the screens sit; screens with the same

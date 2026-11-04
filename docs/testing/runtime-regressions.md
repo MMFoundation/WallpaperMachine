@@ -125,11 +125,11 @@ device.
   depth-sorted scene keeps each object's passes together, and
   `SetScenePassMergeForTests(false)` restores the object order.
   `MetalDepthSharing.*` (`metal_backend_test`): only a draw that does not depth-test
-  between two depth-tested draws into one single-sample target takes the attachment.
+  between two depth-tested draws into one single-sample target, and joined to one of them by
+  draws into that target alone, takes the attachment, and none does in a scene sorted by depth.
   `MetalSceneDraw.AFlatLayerBetweenTwoDepthTestedLayersSharesTheirRenderPass`: a red
   layer without depth testing between two depth-tested cards draws the scene in one
-  render pass instead of three, byte for byte the same picture, and a scene sorted by
-  depth draws the same render passes and picture with the merge on as with it off.
+  render pass instead of three, byte for byte the same picture.
   `MetalSceneDraw.AMovingLayerBetweenTwoCardsIsReusedAndJoinsTheCardsRenderPasses`:
   a layer chain between two cards no longer splits the scene's render pass, drawn or
   reused, and with the merge off the old split and reuse behaviour is pinned; the joined

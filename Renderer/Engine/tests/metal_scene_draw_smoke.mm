@@ -10070,17 +10070,16 @@ TEST_F(MetalSceneDraw, AFlatLayerBetweenTwoDepthTestedLayersSharesTheirRenderPas
     std::map<int, std::vector<uint8_t>> pixels;
     std::map<int, uint32_t>             scene_passes;
     std::map<int, bool>                 shared;
-    // 1: merged; 0: switched off; 2 and 3: the same with the scene sorted by depth, whose objects
-    // change order at run time, so nothing shares the attachment and the two draw alike.
-    for (const int run : { 1, 0, 2, 3 }) {
-        const bool merge = run == 1 || run == 2;
-        SCOPED_TRACE(run == 1 ? "merged" : run == 0 ? "switched off" : run == 2 ? "sorted, merged" : "sorted, off");
+    // 1: merged; 0: switched off. That a scene sorted by depth shares nothing is
+    // MetalDepthSharing's (`metal_backend_test`).
+    for (const int run : { 1, 0 }) {
+        const bool merge = run == 1;
+        SCOPED_TRACE(merge ? "merged" : "switched off");
         wallpaper::SetScenePassMergeForTests(merge);
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / ("depth-sandwich-" + std::to_string(run)), loaded, error)) << error;
         loaded.scene->FindRenderTarget(std::string(SpecTex_Default))->withDepth = true;
-        if (run >= 2) loaded.scene->transparent_sorting = true;
         ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
         @autoreleasepool {
             CAMetalLayer* layer   = [CAMetalLayer layer];
@@ -10111,12 +10110,8 @@ TEST_F(MetalSceneDraw, AFlatLayerBetweenTwoDepthTestedLayersSharesTheirRenderPas
     EXPECT_EQ(scene_passes[0], 3u);
     EXPECT_TRUE(shared[1]);
     EXPECT_FALSE(shared[0]);
-    EXPECT_FALSE(shared[2]) << "a scene sorted by depth shared the depth attachment";
-    EXPECT_EQ(scene_passes[2], scene_passes[3]);
     ASSERT_FALSE(pixels[0].empty());
-    ASSERT_FALSE(pixels[3].empty());
     EXPECT_TRUE(pixels[1] == pixels[0]) << "sharing the depth attachment changed the picture";
-    EXPECT_TRUE(pixels[2] == pixels[3]) << "the merge changed a scene sorted by depth";
 }
 
 TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainText)

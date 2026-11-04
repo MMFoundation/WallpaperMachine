@@ -192,7 +192,7 @@ GitHub**. A Workshop wallpaper's details offer **Share…**; see
 
 **Save battery when your Mac is unplugged?** asks once, on a Mac with an internal battery
 (a UPS is not one), how wallpapers should behave on battery, because nobody who has not
-opened Settings → Playback & Power knows they keep running at full quality there. It comes
+opened Settings → Playback & Power knows that by default the battery changes nothing about them. It comes
 up only when all of these hold: the welcome guide was finished; the Mac runs on battery
 now, or a wallpaper played on battery since the app started (the app notes it when the
 power source changes to or from battery while a wallpaper plays; nothing is saved across
@@ -201,7 +201,7 @@ is in front** are both still **Keep running**; and the question was never answer
 priority is right after the performance data question, with the same one-a-day and
 one-pending rules.
 
-Its lead says that wallpapers keep running at full quality on battery and that nothing
+Its lead says that wallpapers play on battery just as they do plugged in and that nothing
 changes unless a choice is made. When one wallpaper plays and it has an
 [energy rating](performance.md#per-wallpaper-energy-rating) with a share of the battery, a
 sentence names it the way the inspector does: `The wallpaper playing now uses about 9% of a
@@ -210,7 +210,9 @@ with different wallpapers on the displays, there is no figure. The choices each 
 setting of Playback & Power through its Settings setter and open nothing:
 
 - **Pause while I use other apps** sets **When another app is in front** to **Pause on
-  battery**; the wallpaper animates on battery only while the desktop is in view.
+  battery**; on battery the wallpaper animates only while the desktop is in front: Finder
+  (which clicking the desktop brings forward, so a Finder window in front counts too) or this
+  app, and holds its last frame while any other app is.
 - **Lower quality on battery** sets **On battery** to **Reduced quality**; its note names
   the reduced frame rate and render scale the engine reports now (for example
   `30 fps and 75% render scale`).

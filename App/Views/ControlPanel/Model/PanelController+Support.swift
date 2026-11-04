@@ -47,7 +47,7 @@ struct BatteryQuestionFacts: Equatable {
   /// The question's lead: nothing changes until a choice is made, and the energy line when there is one.
   @MainActor var lead: String {
     let lead = L(
-      "Wallpapers now keep running at full quality on battery. Nothing changes unless you choose.")
+      "Wallpapers now play on battery just as they do plugged in. Nothing changes unless you choose.")
     return energyLine.map { lead + " " + $0 } ?? lead
   }
 

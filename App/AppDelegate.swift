@@ -1460,11 +1460,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// A wallpaper is on a display and drawing: not paused by the user, nor by the presentation
-    /// policy for every display.
+    /// A wallpaper is on a display and drawing: not paused by the user or by the presentation
+    /// policy for every display, and its display is not suspended on its own (covered, behind a
+    /// full-screen app, not the display in use).
     private func wallpaperIsPresenting(_ store: BridgeStore) -> Bool {
-        !store.appSnapshot.activeWallpaperIds.isEmpty && store.appSnapshot.playbackState != .paused
-            && presentationPolicy?.globalPresentation == .running
+        store.settingsSnapshot.displays.contains { row in
+            store.shownWallpaperID(on: row.displayId) != nil
+                && ownSuspension(ofDisplay: row.displayId, store: store) == false
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

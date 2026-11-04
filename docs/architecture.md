@@ -80,9 +80,9 @@ belong to the `AppUpdateCoordinator` it owns (`App/Services/GitHub/`).
   the menu opens, so it needs no timer); choosing it opens Discover. **Mute Wallpapers**
   is one ticked item after Play/Pause in both layouts: it flips `PlaybackPreferences.wallpapersMuted`
   (`AutomationCommand.toggleMute`) and takes no queue turn, since the presentation policy
-  hears the preference change and delivers it. On a Mac with an internal battery
-  (`StatusMenuModel.Battery.offered`, read with `BatteryReading` when the menu opens) an **On
-  Battery** submenu follows it in both layouts: the engine's battery mode, set through
+  hears the preference change and delivers it. On a Mac with an internal battery (read with
+  `BatteryReading` when the menu opens), or on any Mac while either of its choices is not the
+  default (`StatusMenuModel.Battery.offered`), an **On Battery** submenu follows it in both layouts: the engine's battery mode, set through
   `BridgeStore.setBatteryModeAsync` in a turn of `BridgeStore.commands` as Settings does, and
   **Pause While Using Other Apps**, which writes `PlaybackPreferences.otherAppInFrontAction`
   (Pause on battery or Keep running) with no queue turn, like the mute. Random Wallpaper

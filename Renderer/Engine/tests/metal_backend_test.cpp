@@ -1363,6 +1363,20 @@ TEST(MetalDepthSharing, AFlatDrawBetweenTwoDepthTestedDrawsJoinsTheirDepthAttach
         EXPECT_EQ(passes[i].shares_depth_attachment, i == 2 || i == 4);
     }
 
+    // A flat draw that passes on another target cut off from both models joins neither of them,
+    // so it takes no attachment: it would only load and store the depth.
+    std::vector<ScenePassDescription> isolated {
+        tested("scene"), DrawStep("effect", MetalLoadAction::Load), DrawStep("scene", MetalLoadAction::Load),
+        DrawStep("effect", MetalLoadAction::Load), tested("scene"),
+    };
+    ShareDepthAttachments(isolated);
+    for (const auto& pass : isolated) EXPECT_FALSE(pass.shares_depth_attachment);
+    // Joined to one of them on either side, it does.
+    isolated[3].target_key = "scene";
+    ShareDepthAttachments(isolated);
+    EXPECT_TRUE(isolated[2].shares_depth_attachment);
+    EXPECT_TRUE(isolated[3].shares_depth_attachment);
+
     // A scene sorted by depth reorders its objects as it runs, so build order says nothing about
     // which draws end up between the models: none is marked.
     auto sorted = passes;

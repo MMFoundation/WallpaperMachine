@@ -177,7 +177,7 @@ final class PanelBatteryQuestionTests: PanelTestCase {
     try await withBatteryPanel { panel, _, _, _ in
       let controller = panel.controller
       let plain = L(
-        "Wallpapers now keep running at full quality on battery. Nothing changes unless you choose.")
+        "Wallpapers now play on battery just as they do plugged in. Nothing changes unless you choose.")
       XCTAssertEqual(controller.batteryQuestionFacts.lead, plain, "No rating yet: no figure")
       XCTAssertEqual(
         controller.batteryQuestionFacts.reducedQualityNote,

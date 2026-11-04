@@ -236,8 +236,10 @@ struct MetalQuad
 /// render pass, and with it the target's colour and depth are stored and loaded back (a 3D
 /// model, then a flat layer or text over it, then another model). The draw then takes the
 /// attachment with depth testing off: what it draws is the same, and the three share one render
-/// pass. A draw before the first or after the last depth-tested one is left alone, so a render
-/// pass that holds no depth-tested draw never carries the attachment. A scene `sorted_by_depth`
+/// pass. A draw before the first or after the last depth-tested one is left alone, and so is one
+/// that passes on other targets cut off from every depth-tested draw (it would load and store
+/// the depth without joining anything), so a render pass that holds no depth-tested draw never
+/// carries the attachment. A scene `sorted_by_depth`
 /// (transparent sorting) changes its objects' order at run time, so none of its draws is marked.
 void ShareDepthAttachments(std::vector<ScenePassDescription>& descriptions, bool sorted_by_depth = false);
 
