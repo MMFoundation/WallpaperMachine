@@ -574,7 +574,10 @@ on [manual-smoke.md](manual-smoke.md).
   reload, rename and deletion; invalid names apply nothing. `NextWallpaperTests`
   — library order, skipping unsupported wallpapers, wrapping.
   `WallpaperHistoryStoreTests` — per-display persistence, bounded recent lists,
-  repeated Previous, removal and clearing.
+  repeated Previous, removal and clearing, each wallpaper's last use (newest across
+  displays, bounded, and history saved before uses were dated loading, dated once in the
+  order of its recent list). Not covered: real history from an older release, only a
+  hand-written blob of its shape.
 - `WallpaperPresetStoreTests` — typed applied-property snapshots (the listed
   properties only, with a rule-hidden one still known to a preset that names it),
   portable managed attachments, size limits, alias rejection, draft and
@@ -619,7 +622,8 @@ on [manual-smoke.md](manual-smoke.md).
   looks on a real display, nor real wallpapers with burnt-in subtitles, fades or
   anamorphic pixels.
 - `LibraryMetricsTests`, `ClientPreferencesTests` — folder size and date measured
-  off the snapshot path, manifest approval and tags, and an explicit defaults
+  off the snapshot path, manifest approval and tags, the author and capped
+  description the search reads, folded in the background, and an explicit defaults
   suite staying independent of the application's own preferences.
 - `LibraryCoverStampsTests` — preview stamps read after the snapshot answered and
   announced once per pass, a rescan that replaced nothing announcing nothing, a
@@ -1244,12 +1248,20 @@ never to `.shared`.
   replaced no preview leaves every row alone, 10,000 rows built once whatever else changes),
   `PanelLibraryStateTests` (Now Playing, the target menu, display names, history, library counts,
   the update dot, the issue report's facts, the changed properties it lists without typed text
-  or paths and capped, and the files a check found missing), `PanelCollectionActionsTests`, `LibrarySortTests`,
-  `LibraryFilterTests`, `LibrarySelectionTests` (ticks, ranges and the hold-and-sweep gesture),
-  `LibraryGridGeometryTests`, `LibraryTileRulesTests`, `TileGridLayoutTests` (at least three
+  or paths and capped, and the files a check found missing), `PanelCollectionActionsTests`,
+  `LibrarySortTests` (Last used with never-used wallpapers last either way),
+  `LibraryFilterTests` (search folding case, accents and width; author and description; a
+  Workshop link, or an installed id, matching only that id, and a number no wallpaper has
+  for its id searched as words; a collection's name), `LibrarySelectionTests`
+  (ticks, ranges and the hold-and-sweep gesture),
+  `LibraryGridGeometryTests`, `LibraryTileRulesTests` (which empty state names what hides the
+  tiles, a Workshop link or id that is not installed among them, but not an id being typed or one
+  too short for Discover to look up), `TileGridLayoutTests` (at least three
   columns, arrow keys held at the ends), `InstalledBrowserModelTests` (the reopen state and its
   cadence, Favorites and collections as views, a 10,000-wallpaper library filtered as the user
-  types, covers, the selection's life, clicks, keys, Delete, batch actions and notices, the sweep
+  types, Last used following the history and the search reading descriptions, links and
+  collection names, each empty state and its recovery, a typed id saying it is not installed only
+  once pasted, confirmed with Return or restored, covers, the selection's life, clicks, keys, Delete, batch actions and notices, the sweep
   and edge scrolling, every tile on screen playing its preview and the hover-only setting, the
   import popover and pill) and
   `InstalledPageRenderTests` (the page, footer, empty states and popovers in every language and
@@ -1591,7 +1603,8 @@ unless `scripts/we_reference.py render` hands it real pages to draw. Detail and 
 - `WorkshopLinkTests` — which pasted text names a Workshop item: bare ids from six
   digits, item page and `steam://` links in their accepted spellings, and the
   look-alikes that must stay searches (other hosts, user info or ports, bad ids,
-  free text holding an id or a link); only the wallpapers list reads an id.
+  free text holding an id or a link), and which ids name their item alone; only the wallpapers
+  list reads an id.
 - `WorkshopTests` — query and tag encoding, sort mapping, the details request and
   its answers (served, withdrawn and other apps' items), the single-item lookup
   with a distinct reason for a removed, foreign, Application or unreadable row, the
@@ -1621,8 +1634,9 @@ unless `scripts/we_reference.py render` hands it real pages to draw. Detail and 
   original failure when no item can be listed or Steam failed its own query, and
   collections left alone. `PanelWorkshopActionsTests` (Panel) cover the panel's source
   actions, sign-in through an injected window, opening a collection rather than
-  downloading it, and the state's flags for an item looked up from a pasted link and a
-  list found on a page Steam changed. Steam's real sign-in
+  downloading it, the state's flags for an item looked up from a pasted link and a
+  list found on a page Steam changed, and Installed's **Show in Steam Workshop** looking an
+  item up on the wallpapers list from another list, its id in the search field. Steam's real sign-in
   window, a real lookup against Steam and a real changed page (the markup is
   fixture-built) are not covered.
 - `WorkshopThumbnailCacheTests` — one download per URL under concurrent requests,

@@ -568,8 +568,15 @@ Workshop downloads run a line under **Control Panel** counts them and opens Disc
 `WallpaperHistoryStore` saves per-display history in the
 `WallpaperMachine.wallpaperHistory` preference. It survives relaunch, is pruned
 when wallpapers are deleted in the app, and remains local to this Mac (it is not
-included in [backup packages](backup-restore.md)). History records successful assignment and saving; it
-does not certify every frame a wallpaper subsequently displays.
+included in [backup packages](backup-restore.md)). Beside the two lists, each display
+keeps when each of its last 1,000 distinct wallpapers was put on it, which Installed's
+**Last used** sort reads ([Filtering](#filtering)); **Clear history** clears those
+dates for the display too. History saved before dates were kept is dated once, when it
+first loads: each display's recent list keeps its order, its newest dated at that moment
+and each older one a second before, so the wallpaper on screen and those used before it
+sort ahead of the never-used ones and behind anything put on a display afterwards.
+History records successful assignment and saving; it does not certify every frame a
+wallpaper subsequently displays.
 
 ## Deleting wallpapers
 
@@ -727,15 +734,31 @@ tags are not claimed to be represented by the sum of visible group counts.
   carries no resolution or Workshop category, so those boxes are Discover-only.
   The Show only boxes start unticked and a ticked one requires its tag; Type and Age
   rating are boxes that start ticked (a library hides nothing by default) and an unticked box hides
-  every wallpaper carrying that tag, case-insensitively. Search matches titles and
-  tags, and filtering never activates a wallpaper. The header's sort menu offers
-  Name, Type, Favorites, File size and Date added, with a direction button beside
-  it; choosing a key starts in the direction people ask for it (names A→Z;
-  favorites, largest and newest first), and names break ties. File size is the
-  wallpaper folder's total and Date added is when the folder entered the library
-  (download or import), both measured off the main thread by
-  `LibraryMetricsService` and re-checked only after a library reload; wallpapers
-  not yet measured sort last.
+  every wallpaper carrying that tag, case-insensitively. Search matches the title
+  and tags (as one text, joined by a space), the author the manifest names (its
+  `author`, or the one a [pixiv](pixiv.md) save records; a Workshop manifest names
+  none) and the first 8,000 characters of its `description`, ignoring case, accents
+  and character width (`cafe` finds *Café*, half-width katakana finds full-width;
+  kana keep their voicing marks). The manifest's words are read and folded off the
+  main thread by `LibraryMetricsService` (`LibrarySearchText`) and are only
+  searched, never shown. A Workshop link (a `steamcommunity.com` page or a
+  `steam://` link) finds that wallpaper by its id alone, never by a description
+  that mentions it, and so does a bare id of six digits or more that an installed
+  wallpaper has; a number no installed wallpaper has for its id is searched as
+  words (without the spaces around it), so a saved [pixiv](pixiv.md) work's artwork
+  id finds it through its description. A search that is a local collection's whole
+  name (case, accents and surrounding spaces aside) also shows that collection's
+  wallpapers. Filtering never activates a wallpaper. The header's
+  sort menu offers Name, Type, Favorites, File size, Date added and Last used, with
+  a direction button beside it; choosing a key starts in the direction people ask
+  for it (names A→Z; favorites, largest, newest and most recently used first), and
+  names break ties. File size is the wallpaper folder's total and Date added is when
+  the folder entered the library (download or import), both measured off the main
+  thread by `LibraryMetricsService` and re-checked only after a library reload;
+  wallpapers not yet measured sort last. Last used is when the wallpaper was last
+  put on a display, the newest across displays ([history](#previous-next-and-recently-used));
+  a wallpaper never used since that was recorded sorts last either way, and the
+  list sorts again when a wallpaper is applied.
 - **Discover:** the sidebar is Wallpaper Engine's own filter list — Show only
   (required tags), then Type, Age rating and Resolution as tick boxes whose
   unticked entries are excluded, and the Tags chips (see [workshop-downloads](workshop-downloads.md)).
@@ -750,7 +773,17 @@ tags are not claimed to be represented by the sum of visible group counts.
 
 An empty result offers recovery for the actual restriction: **Clear search**,
 **Clear filters** (plus **Show filters** while the sidebar is closed), or **Clear search and
-filters**. A Workshop response with no restrictions offers Refresh instead of an
+filters**; on Installed a search alone says no wallpaper matches it. A Workshop link
+whose item is not installed says so whatever the filters, and so does a bare id while no
+filter applies (under filters it may be words they hide) once it arrived whole: pasted,
+dropped, confirmed with Return or restored with the window. An id being typed stays an
+ordinary search, so its prefixes from six digits on never claim to be items. Either way it
+offers **Show in Steam Workshop** beside **Clear search**: Discover's wallpapers list with
+that item and its id in the search field, as pasting it there does
+([opening an item from a link or id](workshop-downloads.md#opening-an-item-from-a-link-or-id)).
+A link to an id shorter than six digits is an ordinary search, since Discover's field
+looks up no bare id that short.
+A Workshop response with no restrictions offers Refresh instead of an
 ineffective Clear. First loading, Workshop failure/Retry and an empty local library
 keep their own states; a refresh can leave existing results visible.
 

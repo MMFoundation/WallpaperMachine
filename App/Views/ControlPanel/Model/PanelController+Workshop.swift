@@ -132,6 +132,23 @@ extension PanelController {
     try await run(.immediate) { workshop.open(.collection(id: id, title: title)) }
   }
 
+  /// Installed's **Show in Steam Workshop**, for a Workshop link or id that is not installed:
+  /// Discover with the wallpapers list showing that one item, as pasting its link into the search
+  /// field does. The sort and the filters stay as they were; an item asked for by name ignores
+  /// them. `id` is a Workshop id that names its item alone (`WorkshopLink.isBareItemID(_:)`),
+  /// since the search field it is put in looks up nothing shorter; Installed offers no other.
+  func lookUpWorkshopItem(id: String) async throws {
+    guard WorkshopLink.isBareItemID(id) else { throw InvalidControlValue() }
+    try await run(.immediate) {
+      workshop.searchText = id
+      workshop.searchTranslation = nil
+      workshop.kind = .all
+      workshop.open(.browse)
+    }
+    // Opened after the search has started, so a first visit does not load the browse list too.
+    try await navigate(.workshop)
+  }
+
   /// Returns to the source the shown one was opened from; nothing when it was not opened from one.
   func workshopGoBack() async throws {
     try await run(.immediate) { workshop.back() }

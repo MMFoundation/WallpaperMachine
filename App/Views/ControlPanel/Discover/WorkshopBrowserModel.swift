@@ -210,6 +210,22 @@ final class WorkshopBrowserModel {
     }
   }
 
+  /// Installed's **Show in Steam Workshop**, for a Workshop link or id that is not installed:
+  /// the search field takes the id and the page shows that item on the wallpapers list, as a link
+  /// pasted here does. Any typing still waiting for its pause is superseded.
+  @discardableResult
+  func lookUp(itemID id: String) -> Task<Void, Never> {
+    pendingSearch?.cancel()
+    pendingSearch = nil
+    text = id
+    scrollToTop()
+    return controller.launch(
+      PanelActionCoordinator.key("workshopSearch"), policy: .latestWins
+    ) { [controller] in
+      try await controller.lookUpWorkshopItem(id: id)
+    }
+  }
+
   /// **More by this author**: the author's wallpapers, with Back returning here. Needs an author
   /// whose SteamID is known.
   func openAuthor(of item: WorkshopItem) {

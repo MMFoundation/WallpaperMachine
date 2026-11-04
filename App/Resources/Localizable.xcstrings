@@ -4010,8 +4010,17 @@
     "Clear filters" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Limpar filtros"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "필터 지우기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "フィルタをクリア"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "清除筛选"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "清除篩選"}}}
     },
-    "No wallpaper title or tag contains “%@”." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Nenhum título ou etiqueta de papel de parede contém “%@”."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "제목이나 태그에 ‘%@’이 포함된 배경화면이 없습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "タイトルまたはタグに「%@」を含む壁紙はありません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "没有壁纸的标题或标签包含“%@”。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "沒有任何桌布的標題或標籤包含「%@」。"}}}
+    "No wallpaper matches “%@”." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Nenhum papel de parede corresponde a “%@”."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "‘%@’과(와) 일치하는 배경화면이 없습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "「%@」に一致する壁紙はありません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "没有与“%@”匹配的壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "沒有符合「%@」的桌布。"}}}
+    },
+    "Not in your library" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Não está na sua biblioteca"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "보관함에 없음"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ライブラリにありません"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "不在壁纸库中"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "不在桌布庫中"}}}
+    },
+    "Workshop item %@ is not installed." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O item do Workshop %@ não está instalado."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "창작마당 항목 %@이(가) 설치되어 있지 않습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ワークショップアイテム %@ はインストールされていません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "创意工坊项目 %@ 尚未安装。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "工作坊項目 %@ 尚未安裝。"}}}
+    },
+    "Show in Steam Workshop" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Mostrar no Workshop da Steam"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam 창작마당 탭에서 보기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "「Steamワークショップ」に表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在 Steam 创意工坊中显示"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在 Steam 工作坊中顯示"}}}
     },
     "The active filter hides every wallpaper." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O filtro ativo oculta todos os papéis de parede."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "적용 중인 필터가 모든 배경화면을 가리고 있습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "適用中のフィルタによってすべての壁紙が非表示になっています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "当前的筛选条件隐藏了所有壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "目前的篩選條件隱藏了所有桌布。"}}}
@@ -4208,6 +4217,9 @@
     },
     "Date added" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Data de adição"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "추가한 날짜"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "追加日"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "添加日期"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "加入日期"}}}
+    },
+    "Last used" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Último uso"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "마지막으로 사용한 날짜"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "最終使用日"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "上次使用时间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "上次使用時間"}}}
     },
     "%lld wallpaper" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "%lld papel de parede"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 %lld개"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%lld枚の壁紙"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%lld 张壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%lld 張桌布"}}}

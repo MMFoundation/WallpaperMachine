@@ -88,6 +88,11 @@ it is an Application wallpaper, which runs Windows programs and is never offered
 (`WorkshopService.lookup`). The panel looks a link up as soon as it is pasted and a bare
 id (six digits or more) when Return or Search is pressed, so typing an id never looks up
 its prefixes; a link typed by hand and ordinary words wait for the usual short pause.
+Installed's search, given a link or id whose item is not installed, offers **Show in
+Steam Workshop**, which opens the wallpapers list with that item and puts its id in the
+search field (`PanelController.lookUpWorkshopItem(id:)`), from whatever list was on show
+([filtering](control-panel.md#filtering)). It is offered only for an id the field looks up
+by itself, six digits or more (`WorkshopLink.isBareItemID(_:)`).
 
 ### When Steam changes the page's markup
 
