@@ -1073,6 +1073,28 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         print("[media] corrupt -> \(refusal?.reason ?? "ACCEPTED")")
     }
 
+    func testAnHev1ClipReachesAFirstFrameFromItsRetaggedCopy() async throws {
+        // The clip the stall cases below use, through the host's own route: the format check
+        // makes the copy and the player is given it.
+        let url = try Hev1Fixture.write(name: "hev1-retag", into: directory)
+        let folder = directory.appendingPathComponent("DerivedVideos", isDirectory: true)
+        let derived = DerivedVideoCache(folder: { folder })
+        let refusal = await VideoFormatSupport.refusal(url: url, derived: derived)
+        XCTAssertNil(refusal, "\(refusal?.reason ?? "")")
+        guard case let .copy(lease) = derived.playableFile(for: url) else {
+            throw XCTSkip("this macOS plays hev1 itself, so nothing needs a copy")
+        }
+        defer { lease.release() }
+        let player = makePlayer(url: lease.url)
+        var failures: [String] = []
+        player.onPreparationFailure = { _, detail, _ in failures.append(detail) }
+        let shown = await wait { player.layerIsReadyForDisplayForTest }
+        XCTAssertTrue(shown, "no first frame: \(player.stateSummary)")
+        XCTAssertNotEqual(player.presentationSizeForTest ?? .zero, .zero, "the picture has a size")
+        XCTAssertTrue(failures.isEmpty, "\(failures)")
+        print("[media] hev1 retagged copy: first frame, state: \(player.stateSummary)")
+    }
+
     // MARK: Restart
 
     /// The number of items this player has created, and released.

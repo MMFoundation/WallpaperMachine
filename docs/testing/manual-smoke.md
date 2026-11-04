@@ -681,6 +681,27 @@ closed lid has not been seen on a desktop
       check after the wake. If there is one, measure it with the power harness before
       changing anything; the cost of the check's video output on a 4K clip is unmeasured.
 
+### HEVC tagged hev1
+
+- [ ] Apply an MP4 whose HEVC is tagged `hev1` with its parameter sets in `hvcC` (FFmpeg's
+      `-tag:v hev1` writes one): it plays on the desktop, in the preview and on the lock screen,
+      and the log says it plays from a clone retagged `hvc1`; the file in the library keeps its
+      size, date and bytes. If the Windows VM is available, compare a frame with Wallpaper
+      Engine's (`scripts/we_reference.py`).
+- [ ] With the library on an external drive, apply it again: the inspector reads **Loading
+      wallpaper content…** with the message that the corrected copy is being made, the clip opens
+      when the log says a full copy was made (a clip over 2 GB fails saying it is too large for
+      one), and other displays open meanwhile without waiting for it. Import the same clip from
+      that drive: its library tile gets a picture, and the inspector's black-bar check reads it.
+- [ ] Rotate a playlist of `hev1` clips from that drive past 2 GB in total: each one plays, the
+      copies of clips no longer shown making room for it. Eject the drive while one plays, press
+      **Clear unused caches…**, reconnect: the clip plays again (from a copy made again, never
+      stalling on its file).
+- [ ] Eject that drive while a full copy is being made: the log says the copy was not made, the
+      inspector shows the wallpaper failed with the read error, and the log shows no new copy
+      until a wallpaper is applied again. Delete an `hev1` wallpaper, put it back from the
+      Trash and apply it: it plays from a copy made again.
+
 ## Audio responsiveness
 
 - [ ] Use an authored audio-reactive scene, leave Audio response enabled, and

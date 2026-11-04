@@ -886,7 +886,9 @@ take on. Matroska and WebM, which AVFoundation never opens, are opened with the 
 reader and played by the WebM player (below) when it plays them (H.264, HEVC and VP9 in them,
 and AV1 on a Mac with hardware AV1 decoding); every other codec in them (VP8, an encrypted
 track, 4:2:2 or 4:4:4 pictures) and a damaged file are refused with the container and codec
-named ("WebM (VP8)"). A file that could not be read at that moment (a busy volume, a file
+named ("WebM (VP8)"). An MP4 or MOV whose HEVC is tagged `hev1` is not refused when its sample
+descriptions carry the parameter sets: it plays from a copy retagged `hvc1` ([below](#hevc-tagged-hev1)).
+A file that could not be read at that moment (a busy volume, a file
 still being written) says nothing about its format, so the apply goes on and the host tries
 it. Importing never checks the format: an `avi` or a VP8 file is imported and refused only
 when it is applied. Decoder failures after this check still go through the engine's apply
@@ -898,6 +900,55 @@ config) is refused the same way. The display keeps the picture it
 had, no window covers it, and the wallpaper's state in the panel reads **Wallpaper
 could not load** with the same message. The verdict is kept under the file's key, so
 the file is not read again until it changes, and a replaced file is judged afresh.
+
+<a id="hevc-tagged-hev1"></a>**HEVC tagged `hev1`.** macOS decodes HEVC in an MP4 or MOV only when
+its sample entry is tagged `hvc1`; for `hev1`, which says the parameter sets (VPS, SPS, PPS) may
+also come inside the stream, AVFoundation calls the track not playable. Encoders such as FFmpeg
+write `hev1` files that still carry all three in the `hvcC` record, so the four characters of the
+tag are all that stand in the way. When AVFoundation refuses the `hev1` track of an MP4 or MOV, the
+format check reads the file's sample descriptions (`HevcSampleEntryRetag`: box headers and `stsd`
+only, wherever `moov` lies) and, when every `hev1` entry's record carries a VPS, an SPS and a PPS,
+the wallpaper plays from a copy whose entries say `hvc1`; nothing is decoded or re-encoded. A clip
+whose `hev1` entries lack one of them has its parameter sets only in the stream, and is refused
+with the usual message as before. The file in the library is never written (a Workshop update
+would undo it, and its hash, its backup and the update check would see another file). The copy
+(`DerivedVideoCache`, in `Cache/DerivedVideos` in the app's support folder) is an APFS clone of
+the clip, which costs the one block that differs and is made at once. When the library is on
+another drive than this Mac's startup disk (where the app keeps its caches), or on a volume that
+cannot clone, it is a full copy. That copy is made in the background, outside the metadata read's
+time limit and outside the pass that opens the displays: meanwhile the wallpaper's state reads
+**Loading wallpaper content…** with a message that the corrected copy is being made, and the clip
+opens when the copy is done. A copy that fails (a read error on the library's drive, a file that
+changed while it was copied) is logged, and the wallpaper fails with that reason as a read that did
+not finish: it is copied again on the next offer of the clip (from any apply or reconcile, which
+carries a newer startup revision), never on its own. A full copy is made only while the full copies
+stay within 2 GB together and the startup disk keeps 5 GB free, both checked before any other copy
+is removed to make room. A clip larger than 2 GB is refused for good, with a message that it is too
+large for a full copy; one that does not fit now (the copies of clips playing on other displays fill
+the 2 GB, or the startup disk is nearly full) fails with a message that there is no room for it now,
+and opens by itself when copies are let go or cleared. It is asked again whenever copies change, and
+an answer that has not changed is not logged or counted again. Both messages suggest moving the
+library to this Mac. The copy is kept only after AVFoundation says it plays (one that does not is
+refused with the usual message, and is not copied again for the same file). It is named after the
+file's path, size, modification date and identity, so a replaced file gets a new copy and the old
+one goes when the new one is made.
+
+A copy is held for as long as something reads it: a desktop window (a rebuild or a poster opens
+the file again), the wallpaper preview, the library's poster of an imported clip and the
+inspector's black-bar check. Only deleting its wallpaper removes a copy that is held, which stays
+even while its file cannot be read (a library drive that was ejected). Any other copy may go:
+**Clear unused caches…** in Settings → Storage removes every copy nothing holds, a
+full copy makes room for itself by removing the least recently used full copies nothing holds,
+and beyond eight copies the least recently used go first. A clip that played from a copy is never
+played from its file: when its copy has gone (cleared, made room for, removed with its wallpaper
+that was then put back from the Trash, or its file changed), the next time it opens it is judged
+again and the copy made again. The desktop, the preview, the poster and the black-bar check read
+the copy (the poster and the check only when AVFoundation refuses the file as it is, as the
+format check decides); the lock screen and the screen saver play the same
+retag, written on the project's copy in their exchange folder
+([lock screen](lock-screen.md#plain-video-wallpapers)). A diagnostic recording counts each desktop
+surface opened from such a copy as `nativeVideoHev1Retagged`, and the log says when a copy was
+made and whether it is a clone or a full copy.
 
 **WebM and Matroska.** AVFoundation does not open them, so the desktop plays them with
 `WebMPlayer` (`Shared/WebMPlayer.swift`) in a window of its own (`WebMVideoWallpaperWindow`,
@@ -980,9 +1031,10 @@ stuck file never holds more than one blocked call. A diagnostic recording counts
 share or a cloud file it may only be slow. The same bound applies to a read that fails and is retried: each of the
 three attempts gets the whole limit.
 
-A clip that never shows a picture is reported as failed too. A file the platform calls
-playable can reach ready with its clock running and still produce no frame (an HEVC
-clip tagged `hev1` does this on macOS 27), and nothing reports a failure, so the
+A clip that never shows a picture is reported as failed too. A player can reach ready with
+its clock running and still produce no frame (an HEVC clip tagged `hev1`, handed to the player
+as it is, does this on macOS 27; the app plays such a clip from its [retagged copy](#hevc-tagged-hev1)),
+and nothing reports a failure, so the
 display would stay black and the wallpaper's startup never finish. Playback therefore waits
 for the first picture: 10 seconds on the internal drive, 30 seconds on an external drive or
 when the volume cannot be identified, and 90 seconds on a network volume or a cloud-backed

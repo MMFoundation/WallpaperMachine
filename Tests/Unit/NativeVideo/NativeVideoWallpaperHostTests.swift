@@ -203,6 +203,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
     }
 
     private var surfacesMade: [UInt32: FakeSurface] = [:]
+    /// Folders a test made, removed when it ends.
+    private var temporaryFolders: [URL] = []
     private let counters = RuntimeCounters()
     private let sleeper = ManualSleeper()
     /// Gates a test left closed, opened again when it ends so no probe task is
@@ -235,7 +237,12 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         /// need it get the real clock, whose timer is cancelled as each read
         /// returns.
         manualLimits: Bool = false,
-        switchHold: WallpaperSwitchHold? = nil
+        switchHold: WallpaperSwitchHold? = nil,
+        /// Decides after the stubs above run out, in place of `refusal`: the real format check.
+        decide: (@MainActor (URL) async -> NativeVideoRefusal?)? = nil,
+        /// The corrected copies the host asks about. A cache of its own by default, so no test
+        /// touches the app's.
+        derivedVideos: DerivedVideoCache? = nil
     ) -> NativeVideoWallpaperHost {
         recorder.refusalSequence = refusalSequence
         let limits: @Sendable (Duration) async throws -> Void
@@ -264,6 +271,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
                 if !recorder.refusalSequence.isEmpty {
                     return recorder.refusalSequence.removeFirst()
                 }
+                if let decide { return await decide(url) }
                 return refusalByPath[url.path] ?? refusal
             },
             makeSurface: { [weak self] url, frame, key, paused in
@@ -285,9 +293,18 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
                 recorder.storageQueries.append(url.path)
                 return storage(url)
             },
-            switchHold: switchHold)
+            switchHold: switchHold,
+            derivedVideos: derivedVideos ?? isolatedDerivedVideos())
         host.onStateChanged = { recorder.states.append($0) }
         return host
+    }
+
+    /// A cache of corrected copies in a folder of this test's own, made only if a copy is.
+    private func isolatedDerivedVideos() -> DerivedVideoCache {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("host-derived-videos-\(UUID().uuidString)", isDirectory: true)
+        temporaryFolders.append(folder)
+        return DerivedVideoCache(folder: { folder })
     }
 
     func testAMirrorGroupIsHeardFromOneMemberAndAHiddenSourceHandsItsSoundOn() async throws {
@@ -490,6 +507,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         // otherwise outlive the test.
         openedAtTeardown.forEach { $0.open() }
         sleeper.fireAll()
+        temporaryFolders.forEach { try? FileManager.default.removeItem(at: $0) }
+        temporaryFolders = []
         try await super.tearDown()
     }
 
@@ -743,6 +762,178 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertEqual(recorder.rejected.count, 1, "the second offer restates the same failed state")
         XCTAssertTrue(host.isEmpty)
         host.shutdown()
+    }
+
+    func testAClipWaitingForItsCorrectedCopyLoadsAndOpensWhenTheCopyIsMade() async {
+        // A full copy of an hev1 clip on another drive is made in the background, so no metadata
+        // deadline and no pass waits for it. Meanwhile the display is loading, not failed.
+        let recorder = Recorder()
+        let derived = isolatedDerivedVideos()
+        let offer = wallpaper(admissionKey: 8)
+        let host = makeHost(
+            wallpapers: [offer], refusalSequence: [.awaitingCopy("making the corrected copy", making: true)],
+            recorder: recorder, derivedVideos: derived)
+        host.start()
+        defer { host.shutdown() }
+        counters.startSession(duration: .seconds(60))
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+
+        await host.apply([offer])
+        await host.apply([offer])
+        XCTAssertTrue(host.isEmpty, "no window before the copy exists")
+        XCTAssertEqual(recorder.states.last?.phase, .loading)
+        XCTAssertEqual(recorder.states.last?.message, "making the corrected copy")
+        XCTAssertTrue(recorder.rejected.isEmpty, "a copy being made is not a failure")
+        XCTAssertEqual(counters.snapshot().total(.nativeVideoRefused), 0)
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "neither retried at once nor read again per offer")
+
+        NotificationCenter.default.post(name: DerivedVideoCache.copiesChanged, object: derived)
+        await passes.wait(for: 3)
+        XCTAssertEqual(host.activeDisplayIDs, [7], "the clip opens once the copy is there")
+        XCTAssertEqual(recorder.admissionProbes.count, 2)
+        XCTAssertEqual(recorder.states.last?.phase, .loading, "and waits for its first picture as usual")
+    }
+
+    func testAClipWhoseCorrectedCopyWentIsAdmittedAgainAndNeverOpenedFromItsFile() async throws {
+        // Clear unused caches, an ejected drive or room made for another copy took the copy while
+        // the verdict that the clip plays was still remembered.
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("host-hev1-\(UUID().uuidString)", isDirectory: true)
+        temporaryFolders.append(folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = try Hev1Fixture.write(name: "clip", into: folder)
+        if case .supported = await VideoFormatSupport.inspect(url: url) {
+            throw XCTSkip("this macOS plays hev1 itself, so nothing needs a copy")
+        }
+        let derived = DerivedVideoCache(folder: { folder.appendingPathComponent("DerivedVideos", isDirectory: true) })
+        let recorder = Recorder()
+        let host = makeHost(
+            wallpapers: [], recorder: recorder,
+            decide: { await VideoFormatSupport.refusal(url: $0, derived: derived) }, derivedVideos: derived)
+        defer { host.shutdown() }
+        let offer = wallpaper(admissionKey: 9, mediaPath: url.path)
+
+        await host.apply([offer])
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+        await host.apply([])
+        XCTAssertTrue(host.isEmpty)
+        derived.removeUnused()
+        guard case .gone = derived.playableFile(for: url) else { return XCTFail("the copy was cleared") }
+
+        await host.apply([offer])
+        XCTAssertEqual(host.activeDisplayIDs, [7])
+        XCTAssertEqual(recorder.admissionProbes.count, 2, "the clip is judged again, which makes the copy again")
+        guard case let .copy(lease) = derived.playableFile(for: url) else {
+            return XCTFail("its surface opens on a copy, not on the file")
+        }
+        lease.release()
+    }
+
+    func testAClipWaitingForRoomIsAskedAgainWhenCopiesChangeWithoutBeingReportedAgain() async {
+        // Any copy let go anywhere (a preview, a poster, a window) asks again; an unchanged answer
+        // is neither counted again nor turned into loading and back.
+        let recorder = Recorder()
+        let derived = isolatedDerivedVideos()
+        let offer = wallpaper(admissionKey: 8)
+        let noRoom = NativeVideoRefusal.awaitingCopy("no room for the corrected copy now", making: false)
+        let host = makeHost(
+            wallpapers: [offer], refusalSequence: [noRoom, noRoom, nil], recorder: recorder,
+            derivedVideos: derived)
+        host.start()
+        defer { host.shutdown() }
+        counters.startSession(duration: .seconds(60))
+        let passes = PassCounter()
+        host.onSurfacesChanged = { passes.record() }
+
+        await host.apply([offer])
+        XCTAssertEqual(recorder.states.last?.phase, .failed)
+        XCTAssertEqual(counters.snapshot().total(.nativeVideoRefused), 1)
+        let reported = recorder.states.count
+
+        NotificationCenter.default.post(name: DerivedVideoCache.copiesChanged, object: derived)
+        await passes.wait(for: 2)
+        XCTAssertEqual(recorder.admissionProbes.count, 2, "asked again")
+        XCTAssertEqual(recorder.states.count, reported, "the state stays what it was")
+        XCTAssertEqual(counters.snapshot().total(.nativeVideoRefused), 1, "and is not counted again")
+        XCTAssertTrue(host.isEmpty)
+
+        NotificationCenter.default.post(name: DerivedVideoCache.copiesChanged, object: derived)
+        await passes.wait(for: 3)
+        XCTAssertEqual(host.activeDisplayIDs, [7], "it opens once there is room")
+        XCTAssertEqual(recorder.states.last?.phase, .loading)
+    }
+
+    func testAClipWhoseFullCopyFailedHasFailedForItsRevisionAndIsNotCopiedAgainWhenCopiesChange() async throws {
+        // A read error on the library's drive ends the copy. Copying again whenever copies change
+        // would read the clip again and again; it is tried again under a newer revision only.
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("host-hev1-\(UUID().uuidString)", isDirectory: true)
+        temporaryFolders.append(folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = try Hev1Fixture.write(name: "clip", into: folder)
+        if case .supported = await VideoFormatSupport.inspect(url: url) {
+            throw XCTSkip("this macOS plays hev1 itself, so nothing needs a copy")
+        }
+        let copies = CopyAttempts()
+        let derived = DerivedVideoCache(
+            folder: { folder.appendingPathComponent("DerivedVideos", isDirectory: true) },
+            freeSpaceReserve: 1 << 20, clone: { _, _ in EXDEV }, availableCapacity: { _ in 1 << 40 },
+            verify: { _ in try copies.fail() })
+        let recorder = Recorder()
+        let offer = wallpaper(admissionKey: 9, mediaPath: url.path)
+        let host = makeHost(
+            wallpapers: [offer], recorder: recorder,
+            decide: { await VideoFormatSupport.refusal(url: $0, derived: derived) }, derivedVideos: derived)
+        host.start()
+        defer { host.shutdown() }
+        counters.startSession(duration: .seconds(60))
+        let failed = expectation(description: "the copy failed")
+        let failedAgain = expectation(description: "the copy failed again")
+        host.onStateChanged = { state in
+            recorder.states.append(state)
+            guard state.phase == .failed else { return }
+            (recorder.rejected.count == 1 ? failed : failedAgain).fulfill()
+        }
+
+        await host.apply([offer])
+        await fulfillment(of: [failed], timeout: 10)
+        XCTAssertTrue(host.isEmpty)
+        XCTAssertTrue(
+            recorder.states.last?.message?.contains(DriveStoppedAnswering.detail) == true,
+            "the display says why: \(recorder.states.last?.message ?? "nothing")")
+        XCTAssertEqual(counters.snapshot().total(.nativeVideoRefused), 1)
+
+        // Copies change elsewhere: nothing waits now, so nothing is copied again.
+        NotificationCenter.default.post(name: DerivedVideoCache.copiesChanged, object: derived)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(copies.count, 1, "the clip was copied once")
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "and not judged again")
+
+        // A newer revision tries it again.
+        var newer = offer
+        newer.startupRevision = 1
+        recorder.offered = [newer]
+        await host.apply([newer])
+        await fulfillment(of: [failedAgain], timeout: 10)
+        XCTAssertEqual(copies.count, 2)
+        XCTAssertEqual(recorder.admissionProbes.count, 2)
+    }
+
+    /// Counts the full copies checked, each of which fails as a read error would.
+    private final class CopyAttempts: @unchecked Sendable {
+        private let lock = NSLock()
+        private var attempts = 0
+        var count: Int { lock.withLock { attempts } }
+        func fail() throws -> Bool {
+            lock.withLock { attempts += 1 }
+            throw DriveStoppedAnswering()
+        }
+    }
+
+    private struct DriveStoppedAnswering: LocalizedError {
+        static let detail = "the drive stopped answering"
+        var errorDescription: String? { Self.detail }
     }
 
     /// Counts finished reconcile passes and lets a test wait for the nth one

@@ -609,7 +609,8 @@ on [manual-smoke.md](manual-smoke.md).
   [README](README.md#opt-in-layers)): small generated H.264 clips with bars painted
   at known rows are decoded through `AVAssetImageGenerator` (a few frames, no
   player, window or audio) for letterboxed, pillarboxed, top-only, full-bleed and
-  all-black pictures; skipped in the routine gate, so the bar edges measured on real
+  all-black pictures, and the embedded `hev1` clip is checked on its corrected copy; skipped in the
+  routine gate, so the bar edges measured on real
   decoder output are not covered unless it is run.
   `VideoLetterboxStoreTests` — results per library revision, one probe at a time,
   cancellation writing nothing, the 16-entry bound, and confirming a result against
@@ -859,7 +860,66 @@ need an authorized runtime check
   rest are left to the scene engine), an unreadable file refuses nothing; real files: an H.264 clip supported, garbage
   named by its extension, an audio-only file refused, H.264 in Matroska supported by the WebM player, VP8 left to the scene engine. `WallpaperActivationRecoveryTests`
   checks Apply, Apply changes and an AV1 verdict refuse before the renderer is reached with the
-  format named, and the same wallpaper applies once its file plays.
+  format named, and the same wallpaper applies once its file plays. The same suite covers HEVC
+  tagged `hev1`: AVFoundation's refusal of the track plays after a retag only when the sample
+  descriptions carry the parameter sets (not when they are only in the stream, not for an `hvc1`
+  track that does not play, and not at all on an OS that plays `hev1`); the embedded `Hev1Fixture`
+  is `playableAfterRetag`, the host is told to play it and the surface is handed a copy AVFoundation
+  plays; a clip too large for a full copy is a settled refusal, while one with no room for it now and
+  one whose full copy is being made wait for the copy unsettled, and the clip plays once the copy is
+  made. The cases with the embedded clip skip themselves on a macOS that plays `hev1` itself.
+- `HevcSampleEntryRetagTests` — the sample-description walk over box trees built in the test:
+  `moov` before or after a 64-bit `mdat`, `udta/meta` full boxes beside the tracks, every `hev1`
+  entry of every track planned and `avc1`/`hvc1` left alone, a VPS, SPS or PPS missing or of no
+  length in any `hev1` entry refusing the whole file, no movie or no `hev1` planning nothing, and a
+  damaged tree (a box or entry larger than its parent, a record cut short) ending the walk without
+  reading past it; the plan of the embedded clip; writing it changes only the planned types, can be
+  repeated, and is refused on a file it was not made for. Not covered: a real FFmpeg `hev1` file other
+  than the embedded one, a fragmented file, and a file whose `moov` holds more than the walk's bound.
+- `DerivedVideoCacheTests` — with the embedded clip in a temporary library: the copy plays (skipped on
+  a macOS that plays `hev1` itself) and the library's file keeps its bytes and date; a copy is reused
+  (not checked again) while the file is unchanged and made again, the old one removed, once it
+  changes, the changed file being played neither from the old copy nor as it is; only a file this
+  session prepared, and did not judge again as needing none, is played from a copy; a copy that
+  still does not play is not kept and not made again; a file that cannot be cloned (an injected
+  `EXDEV`) is fully copied in the background (the request answered at once, a second request
+  sharing the one copy, the copy handed out only when done, `copiesChanged` posted then), a waiter
+  whose task is cancelled let go while the copy goes on, a clip larger than the budget told apart
+  from one that does not fit now, a full copy nothing holds making room for another in the same
+  session while a held one does not, until it is let go, and one that the startup disk has no room
+  for removing no other copy first; a full copy that fails is told as failed (being made until
+  then), leaves nothing and is made again only when asked for again; any other clone failure says
+  nothing about the format; beyond the capacity the least recently used copy goes, but none being
+  read does; deleting a wallpaper removes the copies of its files only, and its clip, put back, is
+  not played as it is but has its copy made again; clearing removes every copy
+  nothing holds (this session's included), copies whose file is gone, files with no record and
+  leftovers of an interrupted copy, reports only full copies' bytes and posts `copiesChanged`,
+  and a cleared clip is not played as it is but has its copy made again; a copy being read stays
+  through clearing and a sweep while its file is away (an ejected drive) and is handed out again
+  when the file is back; a read is given the copy of an `hev1` clip (removed after it when made for
+  that read alone), the file itself when AVFoundation plays it as it is, and any other file itself.
+  `DeletionTests` checks that deleting a wallpaper
+  removes its copies; `LockScreenWallpaperServiceTests` that an `hev1` clip is staged retagged and
+  playable while the project's file is untouched, and anything else is staged as it is;
+  `NativeVideoWallpaperHostTests` that a clip waiting for its copy is loading (not failed, not
+  counted as refused, neither retried at once nor read again per offer) and opens when the copies
+  change; that one waiting for room is asked again when copies change with its state, count and
+  log left as they were while the answer stays the same, and opens once there is room; that one
+  whose full copy failed (an injected read error) has failed with that reason for its revision, is
+  neither copied nor judged again when copies change, and is copied again under a newer revision;
+  and that a clip whose copy went after it was admitted is judged again and opened on a new copy;
+  `NativeVideoPlayerMediaTests` (opt-in) that the retagged copy reaches a first frame with a
+  picture size and no failure, `VideoPosterMediaTests` (opt-in) that the clip's library poster comes
+  from a copy that is removed after it, and `VideoLetterboxProbeMediaTests` (opt-in) that the
+  black-bar check reads the copy. Not covered: a real external, HFS+ or exFAT volume (the full copy runs
+  only after an injected clone failure, the free space is injected), a race of a sweep with a copy
+  moved into place (the sweep reads one listing, which only its structure shows), the default
+  desktop surface holding and letting go of its copy (it opens a window), the poster and the
+  black-bar check on a copy in the routine gate (they decode, so only the opt-in layer runs them),
+  a real read error on a library drive (the failure is injected into the check of the copy), a
+  copy that ends between the host's answer and its record of the wait (the host asks again then,
+  which no test times), and the file identity changing when a volume is mounted again or the Mac
+  restarts, which makes a new copy.
 - `WebMOpeningTests` — the WebM reader through Swift: the properties of a VP9 file, the sample
   buffers (decode order, key frames, seeking), Opus audio as float buffers, VP8 named and refused, junk
   and a cut-off file and a missing file told apart, and the poster. `WebMPlayerTests` — the feeder over
@@ -936,8 +996,9 @@ need an authorized runtime check
   after that, the allowance returning as old rebuilds leave the window, a stable run
   forgiving the history (measured from its first frame, interrupted only by a
   permitted rebuild, not by a refusal), and a reset.
-  `NativeVideoPlayerMediaTests` (opt-in) add the real stall: an `hev1` clip
-  (`Hev1Fixture`, skipped when an OS decodes it or rejects it outright) reaches
+  `NativeVideoPlayerMediaTests` (opt-in) add the real stall: an `hev1` clip handed to the
+  player as it is, not through its retagged copy
+  (`Hev1Fixture`, skipped when an OS decodes it or rejects it outright), reaches
   ready with no picture size and no layer frame, is restarted twice and then refused,
   with every replaced item released; a healthy clip restarts and plays again, its
   stable run earning the allowance back through the injected clock; and a restart
@@ -1066,11 +1127,16 @@ covered, and the frame-less clip by the opt-in `hev1` test, but no test blocks a
 whether a real long suspension, sleep, lock or covered desktop (hours, display sleep, Low
 Power Mode) ever costs a clip its decoder on this Mac, and whether a kick or a rebuild
 brings one back. The check and the ladder are covered, and so is the dead pipeline they
-must recognise (`hev1`, which a kick and a rebuild cannot repair, so it always ends in the
-failure), but nothing here reclaims a decoder and no test shows a repair that works on
-a stuck pipeline. Those premises are answered by the `nativeVideoPlaybackStalled`,
+must recognise (`hev1` handed over as it is, which a kick and a rebuild cannot repair, so it
+always ends in the failure), but nothing here reclaims a decoder and no test shows a repair that
+works on a stuck pipeline. Those premises are answered by the `nativeVideoPlaybackStalled`,
 `nativeVideoPlaybackKick` and `nativeVideoPlaybackRebuild` counters on a real machine, and
 by the sleep, lock and unlock rows in [manual-smoke](manual-smoke.md#native-video-backend).
+Nor is an `hev1` Workshop clip played on a real display, compared with Wallpaper Engine's frame,
+shown on a real lock screen or in the wallpaper preview, or copied from a library on a drive that
+cannot clone, nor a playlist of such clips or an ejected drive with one: the retag, the copy rules,
+the waits for a copy and the first frame of the copy are covered with the embedded clip and an
+injected clone failure only.
 Most of the rest of this list has rows there too: a rapid switch, the menu bar's tint, Fit,
 Original size and a scale factor against Compatibility, the Mission Control picture of a
 rotated clip, a real hot-plug, mirror set, AirPlay screen or closed lid, and a slow

@@ -54,8 +54,9 @@ App/                               WallpaperMachine application target sources o
     Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
     LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
     NativeVideo/                   native video backend: the AVFoundation player and the WebM player's window, the
-                                   host, and the format check Apply uses (the admission rule, the layout rules
-                                   and the WebM player itself are in Shared/)
+                                   host, the format check Apply uses (the admission rule, the layout rules
+                                   and the WebM player itself are in Shared/), and the hev1 retag with its
+                                   cache of corrected copies (HevcSampleEntryRetag, DerivedVideoCache)
     Network/                       ConnectionInterrupted: a connection the network cut off or refused (TLS handshake,
                                    reset, refused, timed out, unresolved name), explained as a proxy routing problem
                                    for pixiv, the Workshop and the sign-in windows

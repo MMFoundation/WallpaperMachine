@@ -90,6 +90,9 @@ protocol NativeVideoSurface: AnyObject {
 @objc(MWENativeVideoDesktopWindow)
 final class NativeVideoWallpaperWindow: NSWindow {
     let player: NativeVideoPlayer
+    /// The corrected copy the player reads instead of the clip (`DerivedVideoCache`), held until
+    /// the window stops: a rebuild or a poster opens the file again.
+    var copyLease: DerivedVideoCache.Lease?
     private var scalingMode: BridgeScalingMode = .fill
     private var scalingFactor = 1.0
     private var scalingPan = NativeVideoLayout.Pan.centered
@@ -199,6 +202,8 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
     func present() { orderFrontRegardless() }
     func stop() {
         player.stop()
+        copyLease?.release()
+        copyLease = nil
         orderOut(nil)
         close()
     }

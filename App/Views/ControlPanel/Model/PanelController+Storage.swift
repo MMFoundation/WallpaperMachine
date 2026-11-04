@@ -110,8 +110,9 @@ extension PanelController {
     ) { try store.clearLogsAsync() }
   }
 
-  /// `purgeUnreferencedUserAssets`: removes the caches no manifest lists, after a confirmation, and
-  /// remembers how much that released.
+  /// `purgeUnreferencedUserAssets`: removes the caches no manifest lists and the playable video
+  /// copies nothing is reading now (`DerivedVideoCache`), after a confirmation, and remembers
+  /// how much that released.
   ///
   /// Named for what it does: the manifest's files are user-imported originals that nothing can
   /// regenerate, so the confirmation says what is kept, not only what goes.
@@ -122,7 +123,8 @@ extension PanelController {
         "Only caches that can be rebuilt are removed. Files you chose in wallpaper settings are kept."),
       button: L("Clear Caches")
     ) {
-      let released = try await UserAssetStorage.purgeUnreferencedDerivedCaches()
+      let copies = await Task.detached { DerivedVideoCache.shared.removeUnused() }.value
+      let released = try await UserAssetStorage.purgeUnreferencedDerivedCaches() + copies
       // A negative figure would be a bug in the accounting, not a real amount, so it is reported as
       // nothing released rather than wrapped.
       userAssetsReleasedBytes = UInt64(max(0, released))

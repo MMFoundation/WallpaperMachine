@@ -314,6 +314,12 @@ final class NativeVideoPlayer {
     var layerBackgroundForTest: CGColor? { layer.backgroundColor }
     var hasColorCompositionForTest: Bool { player.currentItem?.videoComposition != nil }
 
+    /// Fails without loading anything, unsettled: for a file the player must not be given (an
+    /// `hev1` clip whose corrected copy has gone). Delivered like any preparation failure.
+    func refuse(_ detail: String) {
+        reportPreparationFailure(detail, settled: false)
+    }
+
     func load(url: URL) {
         mediaURL = url
         let item = AVPlayerItem(url: url)
