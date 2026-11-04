@@ -988,6 +988,17 @@ with the last frame. Left unbounded, a pass ends where the item ends, which for 
 with sound is only once its audio has drained: even muted, and with both tracks the same
 length, a 4K clip held its last frame for about a quarter of a second at every seam.
 
+The end of a pass is reported only to a playlist that
+[waits for the video to finish](playlists.md#waiting-for-a-video-to-finish), and only while
+its change waits: `NativeVideoWallpaperHost.watchClipEnd` asks the display's own surface
+(`watchNextLoop`), never a mirror's copy. The AVFoundation player observes the looper's
+`loopCount`, which rises each time it starts the item again, and observes the looper of a
+rebuilt item afresh; the WebM player puts one boundary observer on its synchronizer at the end
+of the pass the clock is in, which a held clock never reaches. Each is told once and removed.
+A clip that fails, or leaves the display for another wallpaper or desktop, ends the wait as
+well, so a broken clip cannot hold a playlist. Nothing is sampled, and without a waiting
+change nothing is observed.
+
 Playback honours the wallpaper's scaling mode and scale factor by the renderer's own
 layout rule, so a clip sits where the scene engine used to put it: **Fill**,
 **Fit** and **Stretch** scale it to the display, **Fit with blurred backdrop** places

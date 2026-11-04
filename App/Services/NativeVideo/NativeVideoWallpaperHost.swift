@@ -130,6 +130,14 @@ final class NativeVideoWallpaperHost {
         let load: UInt64?
     }
     private var kept: [UInt32: [String: KeptClip]] = [:]
+    /// A playlist waiting for a display's clip to reach its end (`watchClipEnd`), at most one per
+    /// display. `serial` tells a watch from the one that replaced it.
+    private struct ClipEndWatch {
+        let serial: UInt64
+        let ended: @MainActor () -> Void
+    }
+    private var clipEndWatches: [UInt32: ClipEndWatch] = [:]
+    private var clipEndSerial: UInt64 = 0
 
     init(
         fetch: @escaping @MainActor () async throws -> [BridgeNativeVideoWallpaper],
@@ -250,6 +258,51 @@ final class NativeVideoWallpaperHost {
     /// rules are argued from: a decision delivered is not a player stopped.
     func isPlaying(displayID: UInt32) -> Bool? {
         surfaces[displayID]?.isPlaying
+    }
+
+    // MARK: Clip end
+
+    /// Calls `ended` once, later, when the clip `wallpaperID` on `displayID` reaches the end of
+    /// the pass it is in and starts over, or when it stops playing there first: it failed, the
+    /// display moved on to another wallpaper or desktop, or the host shut down. Only this
+    /// display's own clip is watched, so a mirror's copy of it never answers. Answers nil, and
+    /// never calls `ended`, when the display does not play that wallpaper here or its clip has no
+    /// end to wait for (a still picture, a file still being opened); otherwise a closure that ends
+    /// the watch without calling it. A newer watch on the display replaces the older one.
+    func watchClipEnd(
+        displayID: UInt32, wallpaperID: String, ended: @escaping @MainActor () -> Void
+    ) -> (@MainActor () -> Void)? {
+        guard !stopped, let surface = surfaces[displayID], descriptors[displayID]?.wallpaperId == wallpaperID
+        else { return nil }
+        cancelClipEndWatch(displayID)
+        clipEndSerial &+= 1
+        let serial = clipEndSerial
+        guard surface.watchNextLoop({ [weak self] in self?.clipEndReached(displayID, serial: serial) })
+        else { return nil }
+        clipEndWatches[displayID] = ClipEndWatch(serial: serial, ended: ended)
+        return { [weak self] in
+            guard let self, self.clipEndWatches[displayID]?.serial == serial else { return }
+            self.cancelClipEndWatch(displayID)
+        }
+    }
+
+    private func clipEndReached(_ displayID: UInt32, serial: UInt64) {
+        guard let watch = clipEndWatches[displayID], watch.serial == serial else { return }
+        clipEndWatches[displayID] = nil
+        watch.ended()
+    }
+
+    private func cancelClipEndWatch(_ displayID: UInt32) {
+        guard clipEndWatches.removeValue(forKey: displayID) != nil else { return }
+        surfaces[displayID]?.cancelLoopWatch()
+    }
+
+    /// The clip a watch waits for is leaving `displayID`, so its wait is over. Told on the next
+    /// turn of the main actor, never from inside the pass that closes the window.
+    private func clipLeft(_ displayID: UInt32, surface: NativeVideoSurface) {
+        guard let watch = clipEndWatches.removeValue(forKey: displayID) else { return }
+        surface.cancelLoopWatch()
+        Task { @MainActor in watch.ended() }
     }
 
     var surfaceGenerationForTest: UInt64 { surfaceGeneration }
@@ -1169,6 +1222,7 @@ final class NativeVideoWallpaperHost {
               keepPlan[displayID]?.contains(descriptor.wallpaperId) == true else { return false }
         let load = logLoads[displayID]
         cancelFirstFrameWatch(displayID)
+        clipLeft(displayID, surface: surface)
         recordState(descriptor, phase: .closed)
         states.removeValue(forKey: displayID)
         surface.setUserPaused(true)
@@ -1223,6 +1277,7 @@ final class NativeVideoWallpaperHost {
 
     private func close(displayID: UInt32, surface: NativeVideoSurface) {
         cancelFirstFrameWatch(displayID)
+        clipLeft(displayID, surface: surface)
         if let wallpaper = descriptors[displayID] { recordState(wallpaper, phase: .closed) }
         states.removeValue(forKey: displayID)
         surface.stop()
@@ -1297,6 +1352,7 @@ final class NativeVideoWallpaperHost {
         }
         surfaces.removeAll()
         descriptors.removeAll()
+        clipEndWatches.removeAll()
         for clip in kept.values.flatMap(\.values) { clip.surface.stop() }
         kept.removeAll()
         keepPlan.removeAll()

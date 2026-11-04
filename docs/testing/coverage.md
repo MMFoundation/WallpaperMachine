@@ -1381,15 +1381,23 @@ outranking a failed automatic switch, a rotation yielding to a waiting Apply, a 
 due rotation, a display the user emptied staying empty until a wallpaper, Change now or Resume,
 a relaunch finishing its shuffle round without a repeat, an unlock changing an
 unlock rotation once, waiting for a display that cannot play yet for 30 seconds at
-most, and leaving timed rotations, cleared displays and a hand-chosen wallpaper alone),
+most, and leaving timed rotations, cleared displays and a hand-chosen wallpaper alone;
+a rotation that waits for videos, against a fake video host: the change made when the clip
+starts over, the limit reached on the scheduler's own timer fired by hand, the wait noted for
+the panel, a pause, a display out of sight, a hand-chosen wallpaper and Change now, and one
+change per display for one end),
 and in Panel `PanelPlaylistActionsTests` and `PanelPlanActionsTests` (settings reach the
 named display's playlist, values no control offers are refused, button and drag sorting
 with a stale drag refused, Resume, Change now, clearing only the named display's history,
-saved playlists), `PanelLibraryActionsTests` (Now Playing's Next wallpaper: a rotating
+Next change while a change waits for a video, saved playlists), `PanelLibraryActionsTests`
+(Now Playing's Next wallpaper: a rotating
 playlist moves along, a display without one takes the library's next wallpaper),
 `DisplaysSettingsModelTests` (the Custom interval field, the Resume row, announced moves),
 `PlaylistEditTests` (the How often menu's unlock choice and named times) and
-`ShellModelTests` (Recently used clearing only the target display).
+`ShellModelTests` (Recently used clearing only the target display). The video host's side of
+the wait is in `NativeVideoWallpaperHostTests` (a fake surface) and `WebMPlayerTests`; only the
+opt-in `NativeVideoPlayerMediaTests` see the real looper start the clip over, and when the change
+lands against the visible seam, and how that switch looks, are not covered.
 What each covers: [playlists](../features/playlists.md#verification).
 
 ## Preview

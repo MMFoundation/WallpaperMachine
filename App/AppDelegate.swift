@@ -774,6 +774,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             current: { store.shownWallpaperID(on: $0) },
             isRunning: { outOfSight($0) == false },
             isUnseen: { outOfSight($0) == true },
+            // Only a plain video has an end to wait for, and only the video host plays one.
+            watchClipEnd: { [weak self] display, wallpaper, ended in
+                guard let host = self?.nativeVideoHost,
+                      let row = store.settingsSnapshot.displays.first(where: { $0.displayId == display }),
+                      let physical = ResolvedDisplayTitles.liveDisplayID(display, title: row.title) else { return nil }
+                return host.watchClipEnd(displayID: physical, wallpaperID: wallpaper, ended: ended)
+            },
             activate: { display, choose in
                 var applied: String?
                 try await store.commands.run(slot: BridgeStore.activationSlot(displayId: display), origin: .playlist) {

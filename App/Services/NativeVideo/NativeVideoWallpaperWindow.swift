@@ -75,6 +75,14 @@ protocol NativeVideoSurface: AnyObject {
     /// gives the wallpaper up instead. Never changes the user's pause, the
     /// volume or the placement.
     func restartPlayback(reason: String) -> Bool
+    /// Calls `handler` once, later, when the clip reaches the end of the pass it is
+    /// in and starts over. False, and the handler is never called, when there is
+    /// no such end to wait for: the surface is stopped or has failed, its clip is
+    /// a still picture, or its file is still being opened. A later call replaces
+    /// the earlier watch; `cancelLoopWatch()` and `stop()` end it without a call.
+    /// Nothing is observed while no watch is set.
+    func watchNextLoop(_ handler: @escaping @MainActor () -> Void) -> Bool
+    func cancelLoopWatch()
     /// Puts the surface on the desktop. Separate from construction so the
     /// caller decides when a surface becomes visible.
     func present()
@@ -199,6 +207,8 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
     var stateSummary: String { player.stateSummary }
     func restartPlayback(reason: String) -> Bool { player.restartPlayback(reason: reason) }
     func verifyPlayback(reason: String) { player.verifyPlayback(reason: reason) }
+    func watchNextLoop(_ handler: @escaping @MainActor () -> Void) -> Bool { player.watchNextLoop(handler) }
+    func cancelLoopWatch() { player.cancelLoopWatch() }
     func present() { orderFrontRegardless() }
     func stop() {
         player.stop()

@@ -172,6 +172,22 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         func setEngineOptions(_ options: WallpaperEngineOptions, lut: VideoLut?, borderColor: CGColor?) {
             engineOptionCalls.append((options, borderColor))
         }
+        /// Whether the clip has an end to wait for, as a still picture or a file still opening has not.
+        var hasLoopEnd = true
+        /// The watch for the clip starting over, while one is set.
+        private(set) var loopWatch: (@MainActor () -> Void)?
+        func watchNextLoop(_ handler: @escaping @MainActor () -> Void) -> Bool {
+            guard !isStopped, hasLoopEnd else { return false }
+            loopWatch = handler
+            return true
+        }
+        func cancelLoopWatch() { loopWatch = nil }
+        /// Stands in for the looper starting the clip over: the watch, if any, is told once.
+        func startOver() {
+            let handler = loopWatch
+            loopWatch = nil
+            handler?()
+        }
         func setUserPaused(_ paused: Bool) { userPaused = paused }
         func setPresentationSuspended(_ suspended: Bool) { self.suspended = suspended }
         var isPlaying: Bool { !isStopped && !userPaused && !suspended }
@@ -186,6 +202,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         }
         func stop() {
             isStopped = true
+            loopWatch = nil
             recorder.stopped += 1
             recorder.events.append("stop")
         }
@@ -333,6 +350,67 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
 
         host.setPresentationSuspended(true)
         XCTAssertTrue(heard.muted && copy.muted, "nothing in sight, nothing heard")
+    }
+
+    // MARK: Clip end
+
+    func testAWatchHearsTheDisplaysOwnClipStartOverOnceAndNotItsMirror() async throws {
+        let source = wallpaper(displayID: 7)
+        let mirror = wallpaper(displayID: 9, audioSource: 7)
+        let host = makeHost(wallpapers: [], recorder: Recorder())
+        defer { host.shutdown() }
+        await host.apply([source, mirror])
+        var ended = 0
+        XCTAssertNotNil(host.watchClipEnd(displayID: 7, wallpaperID: "300") { ended += 1 })
+
+        try XCTUnwrap(surfacesMade[9]).startOver()
+        XCTAssertEqual(ended, 0, "the mirror's copy of the clip is not the one waited for")
+        let clip = try XCTUnwrap(surfacesMade[7])
+        clip.startOver()
+        XCTAssertEqual(ended, 1)
+        clip.startOver()
+        XCTAssertEqual(ended, 1, "a watch answers once")
+    }
+
+    func testAWatchNeedsTheWallpaperPlayingThereWithAnEndToWaitFor() async throws {
+        let host = makeHost(wallpapers: [], recorder: Recorder())
+        defer { host.shutdown() }
+        await host.apply([wallpaper(displayID: 7, id: "300")])
+        XCTAssertNil(host.watchClipEnd(displayID: 7, wallpaperID: "301") {}, "another wallpaper plays there")
+        XCTAssertNil(host.watchClipEnd(displayID: 9, wallpaperID: "300") {}, "no clip plays on that display")
+        try XCTUnwrap(surfacesMade[7]).hasLoopEnd = false
+        XCTAssertNil(host.watchClipEnd(displayID: 7, wallpaperID: "300") {}, "a clip with no end to wait for")
+    }
+
+    func testACancelledWatchIsNeverAnswered() async throws {
+        let host = makeHost(wallpapers: [], recorder: Recorder())
+        defer { host.shutdown() }
+        await host.apply([wallpaper(displayID: 7)])
+        var ended = 0
+        let cancel = try XCTUnwrap(host.watchClipEnd(displayID: 7, wallpaperID: "300") { ended += 1 })
+        cancel()
+        let clip = try XCTUnwrap(surfacesMade[7])
+        XCTAssertNil(clip.loopWatch, "the clip is no longer watched")
+        clip.startOver()
+        XCTAssertEqual(ended, 0)
+    }
+
+    func testAWatchEndsWhenItsClipFailsOrTheDisplayMovesOn() async throws {
+        let host = makeHost(wallpapers: [], recorder: Recorder())
+        defer { host.shutdown() }
+        await host.apply([wallpaper(displayID: 7, id: "300", admissionKey: 1)])
+        var failedEnds = 0
+        XCTAssertNotNil(host.watchClipEnd(displayID: 7, wallpaperID: "300") { failedEnds += 1 })
+        try XCTUnwrap(surfacesMade[7]).failPreparation("decoder could not open the track")
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(failedEnds, 1, "a broken clip cannot hold a playlist")
+
+        await host.apply([wallpaper(displayID: 7, id: "301", admissionKey: 2)])
+        var movedEnds = 0
+        XCTAssertNotNil(host.watchClipEnd(displayID: 7, wallpaperID: "301") { movedEnds += 1 })
+        await host.apply([wallpaper(displayID: 7, id: "302", admissionKey: 3)])
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(movedEnds, 1, "the clip waited for left the display")
     }
 
     func testIndependentAssignmentsOfTheSameClipAreEachHeard() async throws {

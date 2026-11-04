@@ -6779,6 +6779,12 @@
     "Any whole number of minutes, up to %lld." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Qualquer número inteiro de minutos, até %lld."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "%lld분 이하의 정수로 입력하세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%lld分までの範囲で、分単位の整数を入力できます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "可输入任意整数分钟，最多 %lld 分钟。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "可輸入任意整數分鐘，最多 %lld 分鐘。"}}}
     },
+    "Wait for the video to finish" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Esperar o vídeo terminar"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "동영상이 끝날 때까지 기다리기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "動画の終わりまで待つ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "等待视频播完"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "等待影片播完"}}}
+    },
+    "A change that falls due while a video wallpaper plays waits until the video reaches its end, for up to an hour. Other wallpapers change on time." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Uma troca prevista para quando um papel de parede de vídeo estiver em reprodução espera o vídeo chegar ao fim, por até uma hora. Os outros papéis de parede trocam na hora prevista."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "동영상 배경화면이 재생 중일 때 예정된 변경은 동영상이 끝날 때까지 최대 1시간 기다립니다. 다른 배경화면은 예정된 시간에 변경됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "動画壁紙の再生中に予定時刻になった切り替えは、動画が最後まで再生されるまで最長1時間待ちます。ほかの壁紙は予定どおりに切り替わります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频壁纸播放时到期的更换，会等到视频播到结尾再进行，最多等待一小时。其他壁纸按时更换。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片桌布播放時到期的更換，會等到影片播到結尾再進行，最多等待一小時。其他桌布按時更換。"}}}
+    },
     "The list is empty. In Installed, select wallpapers and choose Add to playlist, or use the list button in a wallpaper’s details." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "A lista está vazia. Em Instalados, selecione papéis de parede e escolha Adicionar à playlist, ou use o botão de lista nos detalhes de um papel de parede."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "목록이 비어 있습니다. ‘설치됨’에서 배경화면을 선택하고 ‘재생목록에 추가’를 선택하거나 배경화면 세부사항의 목록 버튼을 사용하세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "リストは空です。「インストール済み」で壁紙を選択して「プレイリストに追加」を選ぶか、壁紙の詳細にあるリストボタンを使用してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "列表为空。在“已安装”中选择壁纸后点按“加入播放列表”，或使用壁纸详情中的列表按钮。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "列表是空的。請在「已安裝」中選取桌布並選擇「加入播放列表」，或使用桌布詳細資訊中的列表按鈕。"}}}
     },
@@ -6790,6 +6796,9 @@
     },
     "Around %@, if wallpapers are playing then." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Por volta de %@, se os papéis de parede estiverem em reprodução nesse momento."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "해당 시점에 배경화면이 재생 중이면 %@쯤에 변경됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%@ごろ（その時点で壁紙が再生中の場合）。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "约 %@（届时壁纸需在播放）。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "約 %@（若屆時桌布正在播放）。"}}}
+    },
+    "When the video finishes, by %@ at the latest." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Quando o vídeo terminar, até %@ no máximo."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "동영상이 끝나면 변경되며, 늦어도 %@에는 변경됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "動画が終わったとき（遅くとも%@）。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频播完时，最迟 %@。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片播完時，最遲 %@。"}}}
     },
     "Starts counting once wallpapers play." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "A contagem começa quando os papéis de parede forem reproduzidos."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 재생이 시작되면 시간을 세기 시작합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙の再生が始まるとカウントを開始します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "壁纸开始播放后开始计时。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "桌布開始播放後才會開始計時。"}}}
