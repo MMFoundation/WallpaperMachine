@@ -57,6 +57,10 @@ struct DesktopSettings: Equatable, Sendable {
   var refreshesDesktopPicture: Bool
   /// The inverse of macOS's "Click wallpaper to reveal desktop".
   var keepsWindowsOnWallpaperClick: Bool
+  /// The inverse of Finder's own "show icons on the desktop", read from Finder each time.
+  var hidesDesktopIcons: Bool
+  /// A black strip behind the menu bar of displays with a camera notch. Off until turned on.
+  var hidesNotch: Bool
   /// The displays follow property edits before Apply.
   var livePropertyEdits: Bool
 

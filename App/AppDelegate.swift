@@ -63,6 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Keeps the previous picture on screen while a switched wallpaper loads.
     private var switchHold: WallpaperSwitchHold?
     private var windowAuditor: WallpaperWindowAuditor?
+    /// Settings › Desktop & Lock Screen › Hide the notch.
+    private var notchMask: NotchMaskController?
     /// Keeps the windows of a display that follows desktop Spaces on its current desktop only.
     private(set) var spacePinning: WallpaperSpacePinning?
     private var spaceParking: WallpaperSpaceParking?
@@ -237,6 +239,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         startLibraryDriveMonitor()
         installApplicationMenu()
         AppLog.info("startup: application menu installed")
+        // Keeps no window and does no work until Hide the notch is turned on.
+        let notchMask = NotchMaskController()
+        self.notchMask = notchMask
+        notchMask.start()
     }
 
     /// Starts every service that works over the opened library, then loads it: at launch, and
@@ -1263,6 +1269,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         presentationPolicy = nil
         windowAuditor?.stop()
         windowAuditor = nil
+        notchMask?.stop()
+        notchMask = nil
         wakeRevalidator?.stop()
         wakeRevalidator = nil
         memoryPressureMonitor?.stop()

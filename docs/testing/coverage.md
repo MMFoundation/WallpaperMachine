@@ -443,6 +443,32 @@ Not covered: real WindowServer transitions, visible appearance and separate
 per-Space assignments; see
 [display layouts](../features/display-layouts.md#code-and-verification).
 
+### Desktop icons and the notch
+
+- `FinderDesktopIconsTests` — Finder's `CreateDesktop` read as Finder reads it (nothing
+  stored, a Boolean, a number, `true`/`yes`/`false`/`no` in any case, a whole-number string,
+  a value of another kind); a change written once and Finder restarted once, through a
+  stand-in Finder; a choice Finder already has, or a refused write, restarting nothing; a
+  Finder that cannot be ended reported, with the choice kept for its next start; and the live
+  restart's decisions apart from the real processes: no Finder running ends and opens nothing,
+  a running one is ended and checked on once, one that had already quit counts as ended, one
+  that will not end fails the restart.
+- `NotchMaskControllerTests` — the strip over fake screen geometries (a notched display's menu
+  bar from edge to edge; nothing on a display without a notch or under a menu bar that hides
+  itself), outside the working area the coverage probes watch, off until the switch is on and
+  then only on notched displays, a choice made before launch shown at start, strips following
+  display and menu bar changes, `stop()` taking every strip down, and the strip's level between
+  the wallpaper windows and Finder's icons with a class `wallpaperWindows()` never returns.
+- The Settings switches are `PanelDesktopDeclutterTests` (Panel); the menu item's tick is
+  `StatusMenuModelTests` (Automation).
+
+Not covered: a real Finder (that `SIGTERM` brings it back, how long that takes, whether its
+windows reopen, the 5-second fallback) and a real notched display: menu bar text over the strip
+in Light appearance with a bright wallpaper, a menu bar that hides itself there, whether macOS
+reports a menu bar change as a screen-parameter change, and the strip in Mission Control and
+across Spaces (needs a desktop run); see
+[desktop icons and the notch](../features/desktop-picture.md#desktop-icons-and-the-notch).
+
 ## Diagnostics
 
 - `AppLogRouterTests` — lines logged before the bridge keep their time and order
@@ -1377,7 +1403,10 @@ never to `.shared`.
   and the scroll position), `SettingsEntryControlsTests`, `QuickSettingsTileTests`,
   `AppearanceSettingsTests`, `PanelGeneralSettingsTests`, `PanelPerformanceSettingsTests` (values
   refused or clamped as their controls are, the condition choices, app rules, a mute from the menu
-  bar reaching the open panel), `PanelSettingsValuesTests`, `QualityPresetTests`,
+  bar reaching the open panel), `PanelSettingsValuesTests`, `PanelDesktopDeclutterTests` (Hide
+  desktop icons asks before Finder restarts, Cancel or a choice Finder already has changes
+  nothing, a refused write or a Finder that cannot be ended is reported; Hide the notch takes
+  effect at once; Reset turns the notch off and leaves Finder's choice alone), `QualityPresetTests`,
   `QualityReportTests`, `ConditionOverrideTests` (On battery names the strongest rule that
   pauses or stops wallpapers on battery and nothing plugged in or already done by the choice,
   each rule's row says In effect now, the published state reaches the panel's readers),

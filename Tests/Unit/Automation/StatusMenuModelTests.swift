@@ -127,6 +127,30 @@ final class StatusMenuModelTests: XCTestCase {
         ])
     }
 
+    func testHideDesktopIconsSitsBeforeLockScreenAndIsTickedWhileTheyAreHidden() {
+        var shown = input(displays: [display("primary", next: true)])
+        shown.desktopIconsHidden = false
+        XCTAssertEqual(shape(StatusMenuModel.entries(for: shown)), [
+            .command(.openControlPanel, checked: false), .separator,
+            .command(.playPause, checked: false), .command(.toggleMute, checked: false),
+            .command(.next(display: "primary"), checked: false),
+            .command(.toggleDesktopIcons, checked: false), .command(.lockScreen, checked: false),
+        ])
+
+        var hidden = input(displays: [], active: false, canLock: false)
+        hidden.desktopIconsHidden = true
+        XCTAssertEqual(shape(StatusMenuModel.entries(for: hidden)), [
+            .command(.openControlPanel, checked: false), .separator, .command(.toggleDesktopIcons, checked: true),
+        ], "Finder's icons can be brought back whatever is playing")
+        XCTAssertEqual(shape(StatusMenuModel.wallpaperMenuEntries(for: hidden)), [
+            .command(.toggleDesktopIcons, checked: true),
+        ], "and from the Wallpaper menu while the panel is in front")
+
+        XCTAssertFalse(
+            commands(in: StatusMenuModel.entries(for: input(displays: []))).contains(.toggleDesktopIcons),
+            "left out while the app quits")
+    }
+
     func testSeveralDisplaysGetOneSubmenuEachWithTheirOwnCommands() {
         let entries = StatusMenuModel.entries(for: input(displays: [
             display("primary", title: "Main", shows: "a", previous: true, next: true, recent: ["a", "c"]),
@@ -172,7 +196,7 @@ final class StatusMenuModelTests: XCTestCase {
             switch command {
             case .previous(let id), .next(let id), .random(let id), .remove(let id), .openInPanel(let id),
                  .apply(_, let id), .startAgain(_, let id): return id
-            case .openControlPanel, .openDownloads, .playPause, .toggleMute, .lockScreen: return nil
+            case .openControlPanel, .openDownloads, .playPause, .toggleMute, .toggleDesktopIcons, .lockScreen: return nil
             }
         }
         func allCommands(_ entries: [Entry]) -> [Command] {

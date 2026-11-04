@@ -24,6 +24,8 @@ extension PanelController {
       desktopPictureLocked: store.lockScreenWallpaper?.locksDesktopPictureChoice ?? false,
       refreshesDesktopPicture: playback.refreshesDesktopPicturePeriodically,
       keepsWindowsOnWallpaperClick: !DesktopClickRevealPreference.isEnabled,
+      hidesDesktopIcons: !FinderDesktopIcons().areShown,
+      hidesNotch: NotchMaskController.isEnabled(defaults: defaults),
       livePropertyEdits: LivePropertyEditing.isEnabled(defaults: defaults))
   }
 

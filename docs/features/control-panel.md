@@ -229,8 +229,9 @@ the rest opens in a popover from the ⓘ beside the title.
   engine's performance and scene choices, logging, web inspection, Steam update checks
   and download count, and performance data. Content is kept: the library, favorites,
   playlists, collections, presets, displays and their wallpapers, the storage location
-  and sign-ins, as is macOS's own "Click wallpaper to reveal desktop". A setting that
-  fails to reset does not stop the others; the first failure goes to the banner.
+  and sign-ins, as are macOS's own "Click wallpaper to reveal desktop" and Finder's desktop
+  icons. A setting that fails to reset does not stop the others; the first failure goes to
+  the banner.
   **Launch at login** is disabled with its reason while the app is outside
   Applications. When the user has switched WallpaperMachine off in System Settings →
   General → Login Items, macOS keeps it off however often the app registers it
@@ -250,8 +251,10 @@ the rest opens in a popover from the ⓘ beside the title.
   see [a different wallpaper for each desktop](spaces.md); the switch for using the
   wallpaper as the macOS desktop picture and the optional five-minute Mission Control
   picture update; see [desktop picture](desktop-picture.md#leaving-macoss-own-wallpaper-alone);
-  keeping windows in place when clicking the wallpaper; and the off-by-default switch
-  that lets the displays follow a wallpaper's pending property edits as they are made;
+  keeping windows in place when clicking the wallpaper; **Hide desktop icons** and **Hide
+  the notch**; see [desktop icons and the notch](desktop-picture.md#desktop-icons-and-the-notch);
+  and the off-by-default switch that lets the displays follow a wallpaper's pending property
+  edits as they are made;
   see [edits on the desktop](wallpaper-properties.md#showing-edits-on-the-desktop)),
   then the Lock screen and Screen saver groups.
 - **Playback & Power** holds the Playback group (mute all, occlusion, other-app
@@ -574,7 +577,11 @@ display empty ([a display you cleared](playlists.md#a-display-you-cleared)); it 
 menu-only command and has no `wallpapermachine://` link. Choosing an item acts on the
 display named by its submenu, never on the panel's target display. Whichever layout, while
 Workshop downloads run a line under **Control Panel** counts them and opens Discover
-([the download queue](workshop-downloads.md#the-download-queue)).
+([the download queue](workshop-downloads.md#the-download-queue)). Whichever layout, **Hide
+Desktop Icons** comes just before Lock Screen: it hides Finder's desktop icons, or shows them
+again, after asking, since Finder restarts to apply it, and it is ticked while they are hidden,
+as Finder reports each time the menu opens
+([desktop icons and the notch](desktop-picture.md#desktop-icons-and-the-notch)).
 
 `WallpaperHistoryStore` saves per-display history in the
 `WallpaperMachine.wallpaperHistory` preference. It survives relaunch, is pruned

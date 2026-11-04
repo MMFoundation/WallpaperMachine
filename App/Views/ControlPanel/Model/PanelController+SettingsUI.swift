@@ -6,6 +6,7 @@ import Foundation
 enum SettingsSwitchKey: String, CaseIterable, Sendable {
   case launchAtLogin, hideAfterActivating, libraryPreviewsOnHover
   case writeDesktopPicture, refreshDesktopPicture, keepWindowsOnWallpaperClick, livePropertyEdits
+  case hideDesktopIcons, hideNotch
   case lockScreenEnabled, screenSaverEnabled
   case wallpapersMuted, playOnlyOnActiveDisplay
   case metalFXUpscaling
@@ -31,6 +32,8 @@ extension PanelController {
     case .writeDesktopPicture: desktopSettings.writesDesktopPicture
     case .refreshDesktopPicture: desktopSettings.refreshesDesktopPicture
     case .keepWindowsOnWallpaperClick: desktopSettings.keepsWindowsOnWallpaperClick
+    case .hideDesktopIcons: desktopSettings.hidesDesktopIcons
+    case .hideNotch: desktopSettings.hidesNotch
     case .livePropertyEdits: desktopSettings.livePropertyEdits
     case .lockScreenEnabled: lockScreenState.isRequested
     case .screenSaverEnabled: screenSaverState.isRequested
@@ -82,6 +85,8 @@ extension PanelController {
     case .writeDesktopPicture: try await setWritesDesktopPicture(on)
     case .refreshDesktopPicture: try await setRefreshesDesktopPicture(on)
     case .keepWindowsOnWallpaperClick: try await setKeepsWindowsOnWallpaperClick(on)
+    case .hideDesktopIcons: try await setHidesDesktopIcons(on)
+    case .hideNotch: try await setHidesNotch(on)
     case .livePropertyEdits: try await setLivePropertyEdits(on)
     case .lockScreenEnabled: try await setLockScreenEnabled(on)
     case .screenSaverEnabled: try await setScreenSaverEnabled(on)

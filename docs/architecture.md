@@ -255,7 +255,8 @@ It has no web view, and renderer content is never drawn into it. Coding rules fo
   backgrounds). `AppDelegate` alone sets `NSApp.appearance`; the panel only reads the result
   ([features/appearance.md](features/appearance.md)).
 - **Reaching the desktop.** Opening an address, revealing files in Finder, opening System
-  Settings → Login Items and hiding the app go through `DesktopActions.current`
+  Settings → Login Items, hiding the app and changing Finder's desktop icons (which restarts
+  Finder) go through `DesktopActions.current`
   (`App/Services/Lifecycle/DesktopActions.swift`). Every link goes through `ExternalLink`, whose
   allowlist takes https only, an exact host from its list, no credentials and no port; a link
   built from remote data (an author's label, a profile, a work) is checked the same way.
@@ -292,7 +293,7 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 |---|---|---|
 | `Appearance/` | `AppThemePreferences`, `AppThemeStore` | Mode/accent/tone/icon preferences shared by AppKit and the panel |
 | `Automation/` | `AutomationCommand`, `AppAutomation`, `HotKeyPreferences`, `GlobalHotKeys`, `WallpaperFocusFilter`, `WallpaperAutomationStore/Planner/Scheduler/Controller`, `WallpaperSolarTimes`, App Intents in `WallpaperIntents.swift` and `WallpaperConfigurationIntents.swift` | Explicit commands through `AppDelegate.performAutomation`; per-display weekday/solar/appearance rules and temporary Focus choices through the shared command queue; see [features/automation.md](features/automation.md) |
-| `Desktop/` | `DesktopSpaceWallpaperAPI`, `DesktopWallpaperLedger`, `DesktopWallpaperStoreRestoration`, `DesktopWallpaperSync`, `DesktopSpacePosterCache`, `DesktopSettledPosterStore`, `WallpaperSpaceMonitor`, `WallpaperSpacePinning`, `WallpaperSpaceParking`, `WallpaperPresentationPolicy`, `WallpaperCoverageProbes`, `WallpaperWindowAuditor`, `DesktopWindowObservation`, `SystemWakeRevalidator`, `PlaybackPreferences`, `AppRuleMonitor`, `OtherAudioMonitor`, `ActiveDisplayTracker`, `SystemConditionMonitor`, `UserInactivityMonitor`, `SystemBatteryLevel`, `PowerSourceMonitor`, `PowerSourceResampler`, `DisplayConfiguration`, `DisplayGeometry`, `WallpaperDisplayTransfer` | Per-Space desktop picture control, original-wallpaper journal, still-poster sync, saved posters, windows kept on their desktops and wallpapers kept paused for a wallpaper per desktop, playback rules, per-display renderer suspension, display refresh, the screen and shape of a renderer display id, and multi-display copy/swap |
+| `Desktop/` | `DesktopSpaceWallpaperAPI`, `DesktopWallpaperLedger`, `DesktopWallpaperStoreRestoration`, `DesktopWallpaperSync`, `DesktopSpacePosterCache`, `DesktopSettledPosterStore`, `WallpaperSpaceMonitor`, `WallpaperSpacePinning`, `WallpaperSpaceParking`, `WallpaperPresentationPolicy`, `WallpaperCoverageProbes`, `WallpaperWindowAuditor`, `DesktopWindowObservation`, `FinderDesktopIcons`, `NotchMaskController`, `SystemWakeRevalidator`, `PlaybackPreferences`, `AppRuleMonitor`, `OtherAudioMonitor`, `ActiveDisplayTracker`, `SystemConditionMonitor`, `UserInactivityMonitor`, `SystemBatteryLevel`, `PowerSourceMonitor`, `PowerSourceResampler`, `DisplayConfiguration`, `DisplayGeometry`, `WallpaperDisplayTransfer` | Per-Space desktop picture control, original-wallpaper journal, still-poster sync, saved posters, windows kept on their desktops and wallpapers kept paused for a wallpaper per desktop, playback rules, per-display renderer suspension, display refresh, the screen and shape of a renderer display id, Finder's desktop icons, the notch strip, and multi-display copy/swap |
 | `Diagnostics/` | `RuntimeDiagnosticsSession`, `DiagnosticsBundle`, `SessionLedger`, `EnergyUsageMonitor`, `WallpaperEnergyRecorder`, `MemoryPressureMonitor`, `ProcessFootprint` | Runtime counters, the diagnostics report, how the previous session ended, energy readout, per-wallpaper ratings and memory-pressure logging; see [features/diagnostics.md](features/diagnostics.md) |
 | `GitHub/` | `GitHubReleaseClient`, `AppUpdateStore`, `AppUpdateInstaller`, `UpdatePromptGate`, `AppReleaseHistory` | GitHub Releases update check, download, in-place install; when the unattended update window may appear; the manifest's changelog the window shows |
 | `Library/` | `ClientPaths`, `StorageVolumeMonitor`, `WallpaperImportService`, `LibraryImportStore`, `LibraryCoverStamps`, `LibrarySearchText`, `WallpaperDeletionService`, `StillImageWallpaper`, `WallpaperBackupService`, `WallpaperCollectionStore`, `WallpaperPresetStore`, `WallpaperHistoryStore` | App-support layout and the drive of a library moved to another disk ([library location](features/library-location.md#a-drive-that-is-not-connected)), non-destructive import (run for the app, not the panel window, so Finder and Dock drops import too), still pictures packaged as `web` wallpapers, guarded deletion, the folding Installed's search compares text in, collections, presets, history, backup and restore |
@@ -527,6 +528,11 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   desktop windows are legitimately off screen. A fault is logged with its diagnostics line;
   repairing it is off unless a hidden preference is set
   ([desktop window audit](features/diagnostics.md#desktop-window-audit)).
+- **Notch mask.** With Hide the notch on, `NotchMaskController` keeps one opaque black
+  `MWENotchMaskWindow` behind the menu bar of each notched display, at the coverage probes'
+  level and outside the working area they watch. It is not a wallpaper window class, so the
+  policy, the auditor and the posters ignore it, and it exists only while the switch is on
+  ([desktop icons and the notch](features/desktop-picture.md#desktop-icons-and-the-notch)).
 - **Wake check.** `SystemWakeRevalidator` asks the bridge, once per wake, whether every scene
   that should be drawing still is (`WallpaperBridge.revalidate_scene_presentation`). The bridge
   reads each continuous, unpaused scene's always-on `frames_completed`, waits three seconds on

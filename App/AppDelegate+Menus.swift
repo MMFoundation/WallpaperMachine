@@ -279,7 +279,9 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
             paused: store?.appSnapshot.playbackState == .paused,
             wallpapersMuted: PlaybackPreferences.shared.wallpapersMuted,
             downloads: downloads,
-            displays: displays, canLockScreen: ScreenLock.isAvailable)
+            displays: displays, canLockScreen: ScreenLock.isAvailable,
+            // Read again for every build, so a change made in Terminal or elsewhere shows.
+            desktopIconsHidden: shutdownInProgress || shutdownComplete ? nil : !FinderDesktopIcons().areShown)
     }
 
     private func statusMenuItems(for entries: [StatusMenuModel.Entry]) -> [NSMenuItem] {
@@ -341,6 +343,8 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
                 controlPanelNavigation.targetDisplayID = display
             }
             showControlPanel(selection: .wallpaper)
+        case .toggleDesktopIcons:
+            toggleDesktopIcons()
         case .lockScreen:
             lockScreen()
         }
@@ -411,6 +415,27 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
 
     @objc private func lockScreen() {
         ScreenLock.lock()
+    }
+
+    /// Hide Desktop Icons: hides Finder's desktop icons, or shows them again. Finder restarts to
+    /// apply it, so the menu asks first, as Settings does; Cancel changes nothing.
+    private func toggleDesktopIcons() {
+        guard !shutdownInProgress, !shutdownComplete else { return }
+        let icons = FinderDesktopIcons()
+        let hiding = icons.areShown
+        // An accessory app's alert opens behind the active app unless it is brought forward.
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = hiding ? String(localized: "Hide desktop icons?") : String(localized: "Show desktop icons?")
+        alert.informativeText = String(localized: "Finder restarts to apply this. Let any copy or move in Finder finish first.")
+        alert.addButton(withTitle: String(localized: "Restart Finder"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try icons.setShown(!hiding)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
     }
 
     @objc private func exitApplication() {

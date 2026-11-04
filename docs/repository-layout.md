@@ -37,7 +37,8 @@ App/                               WallpaperMachine application target sources o
                                    (StatusMenuModel: flat for one display, a submenu per display for more)
     Desktop/                       multi-display copy/swap and recovery, desktop picture APIs, original-wallpaper ledger,
                                    scoped poster sync, read-only Space topology, presentation policy, playback rules,
-                                   system conditions, display refresh and the screen shape of a display id
+                                   system conditions, display refresh and the screen shape of a display id,
+                                   Finder's desktop icons (FinderDesktopIcons) and the notch strip (NotchMaskController)
     Diagnostics/                   runtime diagnostics session, diagnostics report, session ledger, counter sampling, energy readout,
                                    memory-pressure log and per-wallpaper energy ratings
     GitHub/                        GitHub release client, update models, update store, installer, what's-new records,
