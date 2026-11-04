@@ -153,6 +153,11 @@ Dismiss; it goes away when the wallpaper is retried or applied, and a retry the 
 refuses shows the reason in the error line and keeps the row. The menu-bar menu repeats
 the state as a disabled line. See [crash recovery](crash-recovery.md).
 
+While the drive of a library kept on another disk is ejected or unplugged, a warning
+row under the error line names the library's folder and says its wallpapers come back
+when the drive is connected again; it has no button and goes once they play again
+([library location](library-location.md#a-drive-that-is-not-connected)).
+
 ## Pages and Settings
 
 The tabs open the pages:

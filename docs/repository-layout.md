@@ -45,7 +45,8 @@ App/                               WallpaperMachine application target sources o
     Library/                       ClientPaths (owns the app-support layout), import/deletion, still-image wallpapers,
                                    collections, presets, history, compatibility checks, the video black-bar check, backup and restore,
                                    the search's text folding (LibrarySearchText),
-                                   the panel's persisted choices (PanelPreferences, TileZoom) and the playback preflight
+                                   the panel's persisted choices (PanelPreferences, TileZoom), the playback preflight
+                                   and the drive of a library moved to another disk (StorageVolumeMonitor)
     Lifecycle/                     why the app is quitting (QuitReason, the power-off notice), how long each quit stage takes
                                    (QuitTimings), the deadline each stage gets (QuitSupervisor, QuitMode, the exit fuse)
                                    and SIGTERM/SIGHUP as a quit (TerminationSignalRelay);

@@ -81,6 +81,16 @@ extension PanelController {
     try await run(.immediate) { try libraryLocation.cancelPending() }
   }
 
+  /// The banner line while the library's drive is disconnected and its wallpapers are stopped; nil
+  /// while it is connected.
+  var libraryDriveMessage: String? {
+    libraryLocation.disconnectedRoot.map { root in
+      L(
+        "Wallpaper library unavailable: the drive that holds “\(root.path)” was disconnected, so its wallpapers stopped. They come back when you connect it again."
+      )
+    }
+  }
+
   // MARK: Clearing
 
   /// Asks, then queues `operation`. Returns whether the user agreed.

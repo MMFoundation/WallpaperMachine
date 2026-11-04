@@ -333,6 +333,7 @@
 		4FBA9A8E92D0D5DDDFD50621 /* test.m in Sources */ = {isa = PBXBuildFile; fileRef = DCD3C9B5CD51E7A6C7EB9541 /* test.m */; };
 		5029C5393EAA5C33139AF835 /* TemporaryDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 544EACE206B53CE527D7E61E /* TemporaryDefaults.swift */; };
 		503693F8E337A3C7440055EF /* InstalledEmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDE43E1EDFE9A9949A28525 /* InstalledEmptyState.swift */; };
+		50BF9EFD8742F16552422AE1 /* StorageVolumeMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22CE18BBAB8050018613C340 /* StorageVolumeMonitorTests.swift */; };
 		5153DBB6588F64ABE656BB48 /* NativeVideoLiveness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183F2A41E5DEAE38DFF03528 /* NativeVideoLiveness.swift */; };
 		515901721D770A5E4E21AE80 /* EnergyUsageMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE0BE70E8DF0312EDF325B /* EnergyUsageMonitor.swift */; };
 		5221131A70ABE74DEDE4FA3B /* NativeVideoWallpaperWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CA4109F19BB249E08288C98 /* NativeVideoWallpaperWindow.swift */; };
@@ -901,6 +902,7 @@
 		D98A488CDA34D495F0A46865 /* SteamCMDSetupStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D9942D37F042F22D20BF2A4 /* SteamCMDSetupStore.swift */; };
 		D9E92C62F65C29C072A51CB1 /* PixivBrowserPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E814A4AA934E1F9D8A32ED9 /* PixivBrowserPage.swift */; };
 		DA1D8B718D6188C1511C9800 /* TelemetryPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4605658F48904A0C3B50A2 /* TelemetryPreferences.swift */; };
+		DA1ED3DEEFBAC477C23B0794 /* StorageVolumeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3F035060BE767AF2B9442D /* StorageVolumeMonitor.swift */; };
 		DA2CF3305F0E25ABF22DC7B5 /* LockScreenReevaluationBurstTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 799C72D91F2740AB14F02846 /* LockScreenReevaluationBurstTests.swift */; };
 		DA3568BDE96A31F0022ACDE3 /* WorkshopPreviewCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3C48DFFAE665F5A35E89F19 /* WorkshopPreviewCoordinatorTests.swift */; };
 		DA47FC4B047ECEFE064DE1F0 /* MediaRemote.m in Sources */ = {isa = PBXBuildFile; fileRef = 52B0EDE62E0082E34BB3EF18 /* MediaRemote.m */; };
@@ -1271,6 +1273,7 @@
 		216CBC4F0357929618A844D1 /* PixivSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixivSessionStore.swift; sourceTree = "<group>"; };
 		22514FC3057D62B106284FFA /* PlaylistStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistStoreTests.swift; sourceTree = "<group>"; };
 		22A2C9F17AFAFE0829FEC04B /* TelemetryReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryReport.swift; sourceTree = "<group>"; };
+		22CE18BBAB8050018613C340 /* StorageVolumeMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageVolumeMonitorTests.swift; sourceTree = "<group>"; };
 		22CFAD108EBE791CEBF5C027 /* InspectorChecksCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorChecksCards.swift; sourceTree = "<group>"; };
 		22F52819098A0217799FD9A2 /* LibraryImportState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryImportState.swift; sourceTree = "<group>"; };
 		2355AF62D8F73F518630AAC9 /* CollectionsFilterGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectionsFilterGroup.swift; sourceTree = "<group>"; };
@@ -2026,6 +2029,7 @@
 		DCD3C9B5CD51E7A6C7EB9541 /* test.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = test.m; sourceTree = "<group>"; };
 		DD1A7AC8124AA2EB49687810 /* InspectorInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorInputTests.swift; sourceTree = "<group>"; };
 		DD1EDE652E69E06265483667 /* StarterWallpaper */ = {isa = PBXFileReference; lastKnownFileType = folder; name = StarterWallpaper; path = Resources/StarterWallpaper; sourceTree = SOURCE_ROOT; };
+		DD3F035060BE767AF2B9442D /* StorageVolumeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageVolumeMonitor.swift; sourceTree = "<group>"; };
 		DD3F4C0FCA9D5D34EB48518F /* DownloadDialogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadDialogView.swift; sourceTree = "<group>"; };
 		DD684BC2EFD7A1E6F524BFF7 /* PixivDownloadRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixivDownloadRow.swift; sourceTree = "<group>"; };
 		DD9240C537230C52B035EA78 /* PanelWorkshopSubscriptionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelWorkshopSubscriptionsTests.swift; sourceTree = "<group>"; };
@@ -2916,6 +2920,7 @@
 				2F261DE06DE6C82A13CBCDA2 /* StorageCopierTests.swift */,
 				484338F5F148E06E3E39E5EF /* StorageLocationTests.swift */,
 				9C67F42EA71A50D0E5D90BAE /* StorageMoveServiceTests.swift */,
+				22CE18BBAB8050018613C340 /* StorageVolumeMonitorTests.swift */,
 				AA0191D9FF7E92D9FEF9260D /* VideoImportPreviewTests.swift */,
 				63CAFB3AB1EFD82A4FFCFFF5 /* VideoLetterboxProbeMediaTests.swift */,
 				1B070CDFC5561092A2CB2331 /* VideoLetterboxProbeTests.swift */,
@@ -3620,6 +3625,7 @@
 				0249ABA446AA96C92B314BC6 /* StorageLocation.swift */,
 				151A83FA85C51306659A8FFF /* StorageLocationStore.swift */,
 				8138BC21C8D97FA659D0F19B /* StorageMoveService.swift */,
+				DD3F035060BE767AF2B9442D /* StorageVolumeMonitor.swift */,
 				69767D6D7F019E06A721BEE4 /* TileZoom.swift */,
 				F388D689963F30E7ACE38A61 /* VideoFileStamp.swift */,
 				7685EC41A95A26ED76C2B57B /* VideoLetterboxProbe.swift */,
@@ -4453,6 +4459,7 @@
 				766889CEE977448A0174994E /* StorageLocationTests.swift in Sources */,
 				7A49B118B4FD811230585249 /* StorageMoveServiceTests.swift in Sources */,
 				1F9AEBDF94FC8AAD54B208DD /* StorageSettingsModelTests.swift in Sources */,
+				50BF9EFD8742F16552422AE1 /* StorageVolumeMonitorTests.swift in Sources */,
 				46D36B53633BB9D710BDEE0B /* SupportPromptPresenterTests.swift in Sources */,
 				9BA0AE779B3F4363CFD8A031 /* SupportPromptStoreTests.swift in Sources */,
 				C8FE8C44666137CCE5584E67 /* SurfacePaletteTests.swift in Sources */,
@@ -4999,6 +5006,7 @@
 				DF738111439E6D0F924ED0F4 /* StorageLocationStore.swift in Sources */,
 				4E2312AF1D7709C8066FCB98 /* StorageMoveService.swift in Sources */,
 				9911EFC4B44921C84B0D0C9A /* StorageSettingsSection.swift in Sources */,
+				DA1ED3DEEFBAC477C23B0794 /* StorageVolumeMonitor.swift in Sources */,
 				495EDF4EFB4CDA8F967DB571 /* SupportPromptPresenter.swift in Sources */,
 				B21819A77C5493F1229C5A35 /* SupportPromptStore.swift in Sources */,
 				C41021174C48226F0A1D34E8 /* SurfacePalette.swift in Sources */,

@@ -611,6 +611,22 @@ on [manual-smoke.md](manual-smoke.md).
   full-size preset archives and manifest preflight. `PanelStorageActionsTests` and
   `StorageSettingsModelTests` (Panel) turn the Storage page's choices into the
   requested pending restore and open no file panels.
+- `StorageVolumeMonitorTests` — the drive of a library kept on another disk, as a
+  folder under a temporary `WALLPAPER_MACHINE_HOME` whose mount notifications go to a
+  private center: ejecting or unplugging it stops every wallpaper through the
+  presentation policy, connecting it again rescans before they play, an eject no
+  unmount follows plays them again after the grace (an eject repeated within it counts
+  the grace from the new attempt, with a hand-released sleep), and another drive, or
+  another library's marker under the same name, changes nothing. A library on the
+  startup disk or on this Mac adds no observer. A library missing at launch opens once
+  its drive is connected, also when it mounted before the monitor started (found on the
+  startup disk then, it opens and its observers are removed), unless a backup restore
+  waits for a reopen. `PanelStorageActionsTests` shows the banner row
+  while the drive is away. Not covered: real volumes (whether macOS posts these
+  notifications for a Finder eject or an unplug, and with which volume URLs), whether
+  the first eject succeeds while a video plays, and the app opening the library in
+  place (`openLibraryAfterLaunch`: the services, the staging sweep and the window's
+  page), which hosted tests never launch.
 - `WallpaperCompatibilityTests` — target, content and configuration generations
   and truthful unknown states; the scene row from a remembered verdict and read again
   each check, a check that reads the scene through an injected renderer probe (a refusal
