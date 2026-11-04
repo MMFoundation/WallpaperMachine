@@ -68,7 +68,13 @@ belong to the `AppUpdateCoordinator` it owns (`App/Services/GitHub/`).
   their all-Spaces behavior. `ControlPanelWindow.bringForward` restores a minimized panel
   before fronting it; `showControlPanel` (menu bar, Dock click, Command-comma) and
   `applicationDidBecomeActive` use it.
-- **Menus.** The status item (`rebuildMenu`) offers Control Panel, playback and
+- **Menus.** A left click on the status item opens the menu bar panel (`StatusPanelPopover`, an
+  `NSPopover` built at each opening and torn down at its close, [control
+  panel](features/control-panel.md#menu-bar-panel)) unless Settings › General chooses the menu;
+  a right click or a Control-click opens the menu either way (`AppDelegate+StatusPanel`). The
+  panel's buttons carry the menu's own `StatusMenuModel.Command`s, run through the same
+  `AppAutomation` path; `StatusPanelModel` decides what it shows and `StatusItemClick` what a
+  click opens (both `App/Services/Automation/`). The status item's menu (`rebuildMenu`) offers Control Panel, playback and
   wallpaper-navigation actions, **Lock Screen** and Exit. `StatusMenuModel`
   (`App/Services/Automation/`) decides the layout without AppKit: one display that can show
   its own wallpaper keeps the flat Previous / Next / Recently used, and two or more get a
@@ -166,6 +172,7 @@ It has no web view, and renderer content is never drawn into it. Coding rules fo
 | `Model/` | `PanelController` and its `PanelController+<Group>.swift` extensions (typed actions and derived state), `PanelPresentation`, `PanelStoreRevisions`, `PanelErrorState`, `PanelActionCoordinator`, `PanelDialogs`, `ExternalLink`, `TransferFormat`, `DisplayOptionsLoader`, `DragStepPump`, and the typed values several areas read (`LibraryRow`, `UpdatePresentation`, `TileDownloadState`, ...) |
 | `Shell/` | `PanelRootView` (theme, language, the page over the Now Playing bar, the guide overlay, and `TranslationTaskHost`, the `.translationTask` that lends translation sessions), `PanelTabs`, `PanelDetail` (page router, banners, the full-width host of the page, its Filters sidebar and its `InspectorColumn`, title, toolbar), `FilterSidebar`, the Now Playing bar, and `ShellModel` (navigation, inspector state, popovers, Escape, Command-F) |
 | `Library/`, `Inspector/`, `Discover/`, `Downloads/`, `Pixiv/`, `Settings/`, `Welcome/` | One area each: its views and its `@Observable` view model, which hangs off the controller as a lazy property (`library`, `inspector`, `workshopBrowser`, `downloads`, `pixivBrowser`, `settings`, `displaysSettings`, `welcome`, `supportPrompt`, and `shell`). The typed values only one area shows live beside its views (`PixivTile`, `WorkshopTile`, `DownloadQueue`, `InspectorOptions`, `AutomationState`, ...); `Model/` keeps those several areas share |
+| `MenuBar/` | The menu bar panel, outside the window: `StatusPanelPopover` (the `NSPopover` a click on the status item opens, built at each opening and dropped at its close), `StatusPanelController` (its `@Observable` state and typed actions over a `StatusPanelSource`, which `AppDelegate+StatusPanel` answers) and `StatusPanelView`; what it shows is `StatusPanelModel`'s (`App/Services/Automation/`) |
 | `Components/`, `Theme/`, `Localization/`, `Images/` | Shared views (`TileGrid`, `WallpaperTile`, `ProgressRing`, `Equalizer`, `FilterPanel`, `InspectorCard`, `PanelEmptyState`, `SymbolTile`, the button styles), the palettes, `PanelLocale` and `L()`, the image pipeline |
 | `WebSignInWindow.swift` | Separate sign-in window for pixiv and Steam: a private website data store, of which the app reads only the session cookie; a page that fails to load is covered by its reason and Retry |
 | `WallpaperPreviewWindow.swift`, `UpdateWindow.swift` | AppKit preview window; the update window (SwiftUI in its own `NSWindow`) with the notes of every version since the running one |

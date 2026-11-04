@@ -527,4 +527,60 @@ final class StatusMenuModelTests: XCTestCase {
         XCTAssertEqual(ordered.map(\.title), ["LG UltraFine", "LG UltraFine (2)", "LG UltraFine (3)", "LG UltraFine (2) (2)"])
         XCTAssertEqual(Set(ordered.map(\.title)).count, ordered.count)
     }
+
+    // MARK: What each item runs
+
+    /// One per `Command` case. `kind(of:)` switches over every command and `sample(_:)` over every
+    /// kind, so a new command does not compile until it has a kind, and its kind does not compile
+    /// until its sample says what it runs; `allCases` then puts that sample in the test below.
+    private enum Kind: CaseIterable {
+        case openControlPanel, openDownloads, playPause, toggleMute, previous, next, random, apply,
+             remove, startAgain, openInPanel, toggleDesktopIcons, lockScreen
+    }
+
+    private func kind(of command: Command) -> Kind {
+        switch command {
+        case .openControlPanel: .openControlPanel
+        case .openDownloads: .openDownloads
+        case .playPause: .playPause
+        case .toggleMute: .toggleMute
+        case .previous: .previous
+        case .next: .next
+        case .random: .random
+        case .apply: .apply
+        case .remove: .remove
+        case .startAgain: .startAgain
+        case .openInPanel: .openInPanel
+        case .toggleDesktopIcons: .toggleDesktopIcons
+        case .lockScreen: .lockScreen
+        }
+    }
+
+    /// A command of the kind and what it runs: nil for the items that open something instead.
+    private func sample(_ kind: Kind) -> (Command, AutomationCommand?) {
+        switch kind {
+        case .openControlPanel: (.openControlPanel, nil)
+        case .openDownloads: (.openDownloads, nil)
+        case .playPause: (.playPause, .togglePlayback)
+        case .toggleMute: (.toggleMute, .toggleMute)
+        case .previous: (.previous(display: "2"), .previous(display: "2"))
+        case .next: (.next(display: "2"), .next(display: "2"))
+        case .random: (.random(display: "2"), .random(display: "2", pool: .all))
+        case .apply: (.apply(wallpaper: "w", display: "2"), .apply(wallpaperID: "w", display: "2"))
+        case .remove: (.remove(display: "2"), .removeWallpaper(display: "2"))
+        case .startAgain: (.startAgain(wallpaper: "w", display: "2"), .apply(wallpaperID: "w", display: "2"))
+        case .openInPanel: (.openInPanel(display: "2"), nil)
+        case .toggleDesktopIcons: (.toggleDesktopIcons, nil)
+        case .lockScreen: (.lockScreen, nil)
+        }
+    }
+
+    /// The menu and the menu bar panel both run what `automation` says, so this is what either does.
+    func testEveryItemRunsItsOwnAutomationCommandOrOpensSomethingInstead() {
+        for kind in Kind.allCases {
+            let (command, automation) = sample(kind)
+            XCTAssertEqual(self.kind(of: command), kind, "The sample for \(kind) is a command of that kind")
+            XCTAssertEqual(command.automation, automation, "\(command)")
+        }
+    }
 }

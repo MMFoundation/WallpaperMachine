@@ -261,3 +261,21 @@ enum StatusMenuModel {
         return entries
     }
 }
+
+extension StatusMenuModel.Command {
+    /// What the item runs through `AppAutomation`, the path a link or a keyboard shortcut takes
+    /// too; nil for the items that open a window or lock the screen. The menu bar panel's buttons
+    /// carry the same commands, so they act as these items do.
+    var automation: AutomationCommand? {
+        switch self {
+        case .playPause: .togglePlayback
+        case .toggleMute: .toggleMute
+        case .previous(let display): .previous(display: display)
+        case .next(let display): .next(display: display)
+        case .random(let display): .random(display: display, pool: .all)
+        case .apply(let id, let display), .startAgain(let id, let display): .apply(wallpaperID: id, display: display)
+        case .remove(let display): .removeWallpaper(display: display)
+        case .openControlPanel, .openDownloads, .openInPanel, .lockScreen, .toggleDesktopIcons: nil
+        }
+    }
+}

@@ -44,7 +44,14 @@ display, ordering and titles, Remove or Start Again, Random Wallpaper where some
 can be chosen, Mute Wallpapers after Play/Pause, ticked while muted and offered then with
 nothing playing, the Workshop downloads line right under Control Panel and absent when idle,
 its byte-weighted percent left out when a job cannot say and never reaching 100, which displays
-are listed), the `random` link and its pools, the
+are listed, and the automation command each item runs, which the menu bar panel's buttons run
+too), the menu bar panel's model (`StatusPanelModelTests`: the state line's order, with a
+disconnected library drive named before any rule and each hold in its own words; the display
+picker and its fallbacks; Recently used without the shown wallpaper; the quick switcher's seeded
+draw, the shown wallpaper first, eight at most, the last batch avoided while there are enough,
+favorites until none but the shown one can play, the caption naming the batch's own pool, and
+another batch offered when the next draw takes another pool),
+the `random` link and its pools, the
 `mute`, `unmute` and `togglemute` links (which take no query) and the shortcut keys for them.
 `WallpaperBackupTests` covers rule merging and local recovery-state rollback, and that the
 mute of every wallpaper is neither exported nor accepted from a package. What each covers, and what
@@ -1433,6 +1440,20 @@ never to `.shared`.
 - Sharing: `PanelSharingTests` (a Workshop wallpaper shares its Workshop page with the website,
   any other id has no Share, the app is shared with the website in the panel's language, **Star on
   GitHub** in About and in the star prompt open the repository and answer the star prompt).
+- Menu bar panel: `StatusPanelControllerTests` (over a fixture `StatusPanelSource`: the buttons
+  send the menu's own commands for the chosen display, the heart and the sound act on the shown
+  wallpaper, an empty display refuses them, window actions close the panel before they act, a
+  failure shows until an action succeeds; nothing is read before `start()` or after `stop()`, the
+  volume is read once per snapshot, the batch stays while open and the next opening avoids it, the
+  caption stays with the batch on show, only covers on show are stamped; the Settings choice of
+  what a click opens is saved and reset, a favorite saved from the menu bar reaches an open
+  control panel, and a sound edit of another wallpaper leaves the inspector's options and drag in
+  place) and `StatusPanelRenderTests` (every control reachable by VoiceOver, the display picker
+  only with two displays, the width in every language and a height under 820 pt). The pure model
+  is `StatusPanelModelTests` (Automation). Not covered: the real status item and popover (click
+  routing, the closing click, the first click while the app is inactive, Escape and Tab, VoiceOver's
+  Show Menu action), `AppDelegate+StatusPanel`'s answers over the live stores, and how the panel
+  fits under the menu bar of a real screen; those need a desktop run.
 
 Not covered: the Settings section list's selection highlight, the toolbar's glass and the tabs
 on it, popover placement, sheets on a real window, hover,

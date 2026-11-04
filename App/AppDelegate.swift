@@ -5,6 +5,12 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var statusItem: NSStatusItem?
+    /// The status item's menu, filled from `StatusMenuModel` each time it opens. A right click or a
+    /// Control-click on the icon opens it, and a left click too when Settings › General says so.
+    var statusMenu: NSMenu?
+    /// The panel a left click on the status item opens (`AppDelegate+StatusPanel`).
+    private(set) lazy var statusPanel = StatusPanelPopover(source: self)
+    var statusItemClickObserver: NSObjectProtocol?
     /// The menu bar's Wallpaper menu, filled from `StatusMenuModel` each time it opens.
     var wallpaperMenu: NSMenu?
     private(set) var controlPanelWindow: NSWindow?

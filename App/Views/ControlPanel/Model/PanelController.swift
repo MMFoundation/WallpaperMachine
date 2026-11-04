@@ -116,6 +116,8 @@ final class PanelController {
   /// The status read that follows the user's return to the panel while a Login Items note is
   /// showing; one at a time, so repeated focus changes do not stack bridge round trips.
   @ObservationIgnored var loginItemRefresh: Task<Void, Never>?
+  /// Reads the favorites again when the menu bar panel saved them, while the panel is started.
+  @ObservationIgnored private var favoritesObserver: NSObjectProtocol?
   /// `start()` has run and `stop()` has not.
   private(set) var isStarted = false
   /// `stop()` has run: the panel is closing or closed, so an action that needs a window it no
@@ -399,6 +401,15 @@ final class PanelController {
     errors.reconcile()
     errorLoop?.start()
     lifecycleLoop?.start()
+    favoritesObserver = NotificationCenter.default.addObserver(
+      forName: PanelPreferences.favoritesDidChangeNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        let saved = PanelPreferences.favorites(in: self.defaults)
+        if saved != self.favoriteIDs { self.favoriteIDs = saved }
+      }
+    }
     refreshVisibilityGatedWork()
   }
 
@@ -413,6 +424,8 @@ final class PanelController {
     energyUsage.setActive(false)
     loginItemRefresh?.cancel()
     loginItemRefresh = nil
+    if let favoritesObserver { NotificationCenter.default.removeObserver(favoritesObserver) }
+    favoritesObserver = nil
     displayOptions.cancel()
     letterbox.cancelAll()
     revisions.stop()

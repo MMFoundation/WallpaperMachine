@@ -61,6 +61,7 @@ extension PanelController {
     }
     defaults.removeObject(forKey: PanelPreferences.hideAfterActivatingKey)
     defaults.removeObject(forKey: PanelPreferences.libraryPreviewsOnHoverKey)
+    StatusItemClick.save(.panel, in: defaults)
     library.previewModeChanged()
     searchTranslation.resetPreference()
     setTileZoom(0)

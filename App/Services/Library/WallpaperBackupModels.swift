@@ -116,7 +116,7 @@ struct WallpaperBackupPreferences: Sendable {
         PlaybackPreferences.inactivityActionKey, PlaybackPreferences.inactivityMinutesKey,
         PlaybackPreferences.playOnlyOnActiveDisplayKey,
         PanelPreferences.hideAfterActivatingKey, PanelPreferences.tileZoomKey,
-        PanelPreferences.libraryPreviewsOnHoverKey,
+        PanelPreferences.libraryPreviewsOnHoverKey, StatusItemClick.defaultsKey,
         WorkshopSearchTranslator.enabledKey,
         WorkshopStore.concurrentDownloadsKey,
         WorkshopUpdateStore.automaticKey, ClientPaths.assetsPathKey,
@@ -278,6 +278,7 @@ struct WallpaperBackupPreferences: Sendable {
         case PanelPreferences.tileZoomKey:
             guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue == Double(number.intValue),
                   TileZoom.steps.contains(number.intValue) else { throw invalid() }
+        case StatusItemClick.defaultsKey: guard let raw = value as? String, StatusItemClick(rawValue: raw) != nil else { throw invalid() }
         case ClientPaths.assetsPathKey: guard let path = value as? String, !path.contains("\0"), path.utf8.count <= 1024 else { throw invalid() }
         default: guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { throw invalid() }
         }

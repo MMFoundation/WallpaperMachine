@@ -3412,6 +3412,9 @@
     "Mute Wallpapers" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Silenciar Papéis de Parede"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 음소거"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Mute Wallpapers"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙を消音"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "壁纸静音"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "桌布靜音"}}}
     },
+    "Show Menu" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Mostrar Menu"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "메뉴 보기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "メニューを表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "显示菜单"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示選單"}}}
+    },
     "Unmute Wallpapers" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ativar Som dos Papéis de Parede"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 소리 켜기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Unmute Wallpapers"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙の消音を解除"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "取消壁纸静音"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "取消桌布靜音"}}}
     },
@@ -4573,6 +4576,27 @@
     "Mute All is on, so every wallpaper is silent." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Silenciar Tudo está ativado, então todos os papéis de parede estão sem som."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "모두 음소거가 켜져 있어 모든 배경화면이 무음입니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "「すべて消音」がオンのため、すべての壁紙が消音されています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "“全部静音”已开启，所有壁纸均已静音。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "「全部靜音」已開啟，所有桌布均已靜音。"}}}
     },
+    "Changing wallpaper…" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Trocando o papel de parede…"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 변경 중…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙を切り替えています…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在更换壁纸…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在更換桌布…"}}}
+    },
+    "Choose a wallpaper below to show it here." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Escolha um papel de parede abaixo para mostrá-lo aqui."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "아래에서 배경화면을 선택하면 여기에 표시됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "下で壁紙を選ぶと、ここに表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在下方选择一张壁纸，它就会显示在这里。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在下方選擇一張桌布，它就會顯示在這裡。"}}}
+    },
+    "On battery. Wallpapers are paused." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Na bateria. Os papéis de parede estão pausados."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배터리를 사용 중입니다. 배경화면이 일시 정지되었습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "バッテリー駆動中です。壁紙を一時停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在使用电池，壁纸已暂停。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在使用電池，桌布已暫停。"}}}
+    },
+    "A playback rule is in effect. Wallpapers are paused." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Uma regra de reprodução está em vigor. Os papéis de parede estão pausados."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "재생 규칙이 적용 중입니다. 배경화면이 일시 정지되었습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "再生ルールが適用されています。壁紙を一時停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "播放规则正在生效，壁纸已暂停。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "播放規則正在生效，桌布已暫停。"}}}
+    },
+    "The wallpaper library’s drive is disconnected. Wallpapers are stopped." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O disco da biblioteca de papéis de parede está desconectado. Os papéis de parede estão parados."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 보관함이 있는 드라이브의 연결이 해제되었습니다. 배경화면이 정지되었습니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "The wallpaper library’s drive is disconnected. Wallpapers are stopped."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙ライブラリのドライブの接続が解除されています。壁紙を停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "壁纸库所在的磁盘已断开连接，壁纸已停止。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "桌布庫所在的磁碟已中斷連線，桌布已停止。"}}}
+    },
+    "A playback rule is in effect. Wallpapers are stopped." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Uma regra de reprodução está em vigor. Os papéis de parede estão parados."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "재생 규칙이 적용 중입니다. 배경화면이 정지되었습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "再生ルールが適用されています。壁紙を停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "播放规则正在生效，壁纸已停止。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "播放規則正在生效，桌布已停止。"}}}
+    },
+    "Show other wallpapers" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Mostrar outros papéis de parede"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다른 배경화면 보기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ほかの壁紙を表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "显示其他壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示其他桌布"}}}
+    },
     "%lld muted separately" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "%lld silenciados à parte"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "%lld개 개별 음소거"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%lld件を個別に消音"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%lld 个单独静音"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%lld 個單獨靜音"}}}
     },
@@ -5471,6 +5495,18 @@
     },
     "Play Library previews only on hover" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reproduzir as pré-visualizações da Biblioteca só ao passar o ponteiro"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "포인터를 올렸을 때만 보관함 미리보기 재생"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ポインタを重ねたときだけライブラリのプレビューを再生"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "仅在指针悬停时播放壁纸库预览"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "僅在游標停留時播放桌布庫預覽"}}}
+    },
+    "Clicking the menu bar icon" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ao clicar no ícone da barra de menus"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "메뉴 막대 아이콘을 클릭하면"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "メニューバーのアイコンをクリックしたとき"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "点按菜单栏图标时"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "按一下選單列圖像時"}}}
+    },
+    "The panel shows what is playing on each display, its controls and a quick switcher. Right-click or Control-click the icon for the menu either way." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O painel mostra o que está sendo reproduzido em cada monitor, os controles e uma troca rápida. Em qualquer caso, clique no ícone com o botão direito ou com a tecla Control pressionada para abrir o menu."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "패널에는 각 디스플레이에서 재생 중인 항목과 재생 제어기, 빠른 전환 목록이 표시됩니다. 어느 쪽을 선택하든 아이콘을 오른쪽 클릭하거나 Control-클릭하면 메뉴가 열립니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "パネルには、各ディスプレイで再生中の壁紙とその操作ボタン、クイック切り替えが表示されます。どちらを選んでも、アイコンを右クリックするかControlキーを押しながらクリックするとメニューが開きます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "面板显示每台显示器正在播放的内容、播放控制和快速切换栏。无论选择哪一项，右键点按或按住 Control 键点按图标都会打开菜单。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "面板會顯示每部顯示器正在播放的內容、播放控制項目和快速切換列。無論選擇哪一項，按一下右鍵或按住 Control 鍵並按一下圖像，都會打開選單。"}}}
+    },
+    "Shows the panel" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Mostra o painel"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "패널 표시"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "パネルを表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "显示面板"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示面板"}}}
+    },
+    "Shows the menu" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Mostra o menu"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "메뉴 표시"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "メニューを表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "显示菜单"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示選單"}}}
     },
     "When this is off, every Library tile on screen plays its animated preview, as in the Steam Workshop. When it is on, a tile plays only while the pointer rests on it." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Quando desativado, cada item da Biblioteca na tela reproduz sua pré-visualização animada, como no Workshop da Steam. Quando ativado, um item só a reproduz enquanto o ponteiro estiver sobre ele."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "끄면 화면에 보이는 모든 보관함 타일이 Steam 창작마당처럼 움직이는 미리보기를 재생합니다. 켜면 포인터를 올려 둔 타일만 재생합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "オフのときは、Steamワークショップと同じように、画面に表示されているライブラリのすべてのタイルがアニメーションプレビューを再生します。オンのときは、ポインタを重ねている間だけタイルが再生されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "关闭时，壁纸库中屏幕上的每个图块都会播放动态预览，就像 Steam 创意工坊一样。打开后，只有指针停留在图块上时才会播放。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "關閉時，桌布庫中畫面上的每個方塊都會播放動態預覽，就像 Steam 工作坊一樣。開啟後，只有游標停留在方塊上時才會播放。"}}}

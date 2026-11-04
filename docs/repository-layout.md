@@ -27,6 +27,7 @@ App/                               WallpaperMachine application target sources o
   AppDelegate.swift                lifecycle, window and shutdown ordering
   AppDelegate+Menus.swift          status item, application menu and their actions
   AppDelegate+DesktopPosters.swift desktop poster sync, the desktop-picture switch, Spaces posters and pins
+  AppDelegate+StatusPanel.swift    what a click on the status item opens, and the menu bar panel's input and commands
   Bridge/                          WallpaperPreviewBridge.h (scene C API for previews)
                                    and Generated/ (uniffi output; not hand-edited)
   Logging/                         AppLog.swift (the only Swift logging entry point) and its router
@@ -34,7 +35,9 @@ App/                               WallpaperMachine application target sources o
     Appearance/                    AppTheme.swift: theme preference model and store
     Automation/                    keyboard shortcuts, App Intents, links, weekday/solar/appearance selection rules,
                                    temporary Focus choices with restoration, and the menu bar menu's layout
-                                   (StatusMenuModel: flat for one display, a submenu per display for more)
+                                   (StatusMenuModel: flat for one display, a submenu per display for more),
+                                   the menu bar panel's (StatusPanelModel, its quick-switcher draw) and what a
+                                   click on the icon opens (StatusItemClick)
     Desktop/                       multi-display copy/swap and recovery, desktop picture APIs, original-wallpaper ledger,
                                    scoped poster sync, read-only Space topology, presentation policy, playback rules,
                                    system conditions, display refresh and the screen shape of a display id,
@@ -94,6 +97,7 @@ App/                               WallpaperMachine application target sources o
     Pixiv/                         the pixiv page, its inspector and toolbar pill
     Settings/                      Settings infrastructure (rows, groups, search) and the eleven sections
     Welcome/                       the first-run guide and the support prompt
+    MenuBar/                       the menu bar panel: its popover, controller and view
     Components/ Theme/             shared views; accent and surface palettes
     Localization/ Images/          PanelLocale and L(); the image pipeline and animated preview
   Resources/                       Info.plist, string catalogs, Assets.xcassets (tray icon, Dock icon image sets),

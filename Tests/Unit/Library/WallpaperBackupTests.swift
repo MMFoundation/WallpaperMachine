@@ -772,6 +772,24 @@ final class WallpaperBackupTests: XCTestCase {
         }
     }
 
+    func testWhatAClickOnTheMenuBarIconOpensIsBackedUpAndOnlyAChoiceRestores() throws {
+        let preferences = try defaults()
+        // A center of its own: the running app's status item must not follow the test's choice.
+        StatusItemClick.save(.menu, in: preferences, center: NotificationCenter())
+        let export = try WallpaperBackupPreferences(defaults: preferences, domainName: domainName(for: preferences))
+        let key = StatusItemClick.defaultsKey
+
+        let stored = try WallpaperBackupPreferences.decode(XCTUnwrap(export.values[key], key))
+        try WallpaperBackupPreferences.validate(stored, forKey: key)
+        XCTAssertEqual(stored as? String, "menu")
+        for click in StatusItemClick.allCases {
+            XCTAssertNoThrow(try WallpaperBackupPreferences.validate(click.rawValue, forKey: key), click.rawValue)
+        }
+        for value: Any in ["popover", "", "Menu", true, 1, NSNull(), ["menu"]] {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(value, forKey: key), "\(value)")
+        }
+    }
+
     func testTileZoomIsBackedUpAndOnlyAZoomStepRestores() throws {
         let preferences = try defaults()
         PanelPreferences.setTileZoom(2, in: preferences)
