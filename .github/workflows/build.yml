@@ -200,7 +200,9 @@ jobs:
         # The icon job started with this one and needs about a minute against this job's
         # ten, so its artifact is normally there already. It is looked up by name, which
         # also finds the artifact of an earlier attempt when only this job is re-run; an
-        # icon job that ended without one fails this job.
+        # icon job that ended without one fails this job. The timeout also bounds a hung
+        # lookup, which the loop's own count of sleeps cannot.
+        timeout-minutes: 30
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT: app-icon-${{ inputs.tag }}
