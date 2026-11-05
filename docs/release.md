@@ -497,8 +497,8 @@ on the hotfix branch rather than `main`.
 
 ## Workflows
 
-Version, Build, Release, Warm caches and Supporters are the release workflows in
-`.github/workflows/`; Supporters shares only `main` with the others.
+Version, Build, Release, Rehearsal, Warm caches and Supporters are the release workflows
+in `.github/workflows/`; Supporters shares only `main` with the others.
 `claude.yml` and `claude-code-review.yml` are pull-request automation, described
 in [CONTRIBUTING.md](../CONTRIBUTING.md#automated-review). `checks.yml` runs
 `python3 scripts/test.py --python-only` on Linux for every pull request into `main` or a
@@ -506,9 +506,11 @@ in [CONTRIBUTING.md](../CONTRIBUTING.md#automated-review). `checks.yml` runs
 described [below](#codeql-codeqlyml).
 
 Version, Build and Release grant `contents: write`; Build's publish job also needs
-`id-token: write` and `attestations: write` for its provenance attestation, and
-both callers pass those through, together with the repository's secrets (`secrets:
-inherit`). Warm caches only reads. Supporters writes only `README.md`,
+`id-token: write` and `attestations: write` for its provenance attestation, and its
+build job `actions: read` to find the app icon among the run's jobs and artifacts. All
+three callers (Version, Release, Rehearsal) pass those through, together with the
+repository's secrets (`secrets: inherit`); Rehearsal must grant what the skipped publish
+job declares. Warm caches only reads. Supporters writes only `README.md`,
 `README.zh-CN.md`, `README.pt-BR.md` and `README.ko.md`, with `contents: write`, and reads Version's runs with
 `actions: read`. The macOS setup Build and Warm caches share lives in one
 composite action,
@@ -573,10 +575,14 @@ protection must allow GitHub Actions.
 
 `workflow_call` only, with a required `tag` input. It is the single place a
 publishable artifact is produced, called by Version for CI-produced tags and by
-Release for hand-pushed ones. It runs three jobs. `app-icon` compiles the app icon
-on a `macos-26` runner. `build` then runs on `macos-15` (the oldest runner that
-carries Xcode 26, whose Homebrew bottles set the published app's minimum macOS),
-with a 150-minute timeout. `publish` runs on `ubuntu-latest` once it succeeds.
+Release for hand-pushed ones; [Rehearsal](#rehearsal-rehearsalyml) calls it with
+`rehearsal: true` and a `ref`. It runs three jobs. `app-icon` ("App icon (macOS 26)")
+compiles the app icon on a `macos-26` runner. `build` ("Build, sign and notarize
+(macOS 15)") starts at the same time on `macos-15` (the oldest runner that carries
+Xcode 26, whose Homebrew bottles set the published app's minimum macOS), with a
+150-minute timeout, and takes the icon only once the app is compiled, so the icon job,
+about a minute, is never what a release waits for. `publish` ("Publish the release")
+runs on `ubuntu-latest` once `build` succeeds.
 
 The test gate is not part of a release. Every change passes `python3 scripts/test.py`
 before it is committed, and on hosted VMs the gate failed 1.5.0 through 1.5.4 only on
@@ -592,7 +598,9 @@ artifact.
 
 **`build`**
 
-1. checks out the tag with full history, which the notes need;
+1. checks out the tag with full history, which the notes need (a rehearsal checks out
+   its `ref` and applies the rehearsed version with `scripts/bump_version.py --spec
+   <version> --apply`, as the bump commit would);
 2. writes the release body with `scripts/release_notes.py --release-body --ai
    --built-from "$(git rev-parse HEAD)"` before anything is built. The current
    section must already have every required language and is reused without
@@ -600,13 +608,23 @@ artifact.
    the working-tree `CHANGELOG.md`. A copy of that `CHANGELOG.md` goes to `publish`
    with the notes, so the update manifest carries every translation of the new
    section. Missing translations or malformed source history fail here, in seconds,
-   rather than after the macOS build;
-3. runs `prepare-build` (below) and downloads the `app-icon-<tag>` artifact;
-4. runs `python3 scripts/build.py --configuration Release --app-icon DIR`, which
-   leaves `AppIcon.icon` out of the Xcode build, puts the compiled icon and catalog
-   into the bundle with their Info.plist keys and re-signs it;
-5. imports the Developer ID certificate and the notary API key from the signing
-   secrets into a temporary keychain ([build.md](build.md#release-signing)), then runs
+   rather than after the macOS build. A rehearsal writes no notes;
+3. imports the Developer ID certificate and the notary API key from the signing
+   secrets into a temporary keychain ([build.md](build.md#release-signing)), also
+   before anything is built: a missing secret, a certificate that does not import
+   (1.9.0's failure, which then came after the whole build) or a key Apple refuses
+   fails in about a minute. Xcode signs ad hoc, so the identity changes nothing there;
+4. runs `prepare-build` (below), restoring both caches and reusing the renderer build
+   for every source unchanged since it (`reuse-renderer-build`);
+5. runs `python3 scripts/build.py --configuration Release --no-app-icon`, which
+   leaves `AppIcon.icon` out of the Xcode build;
+6. waits until `app-icon` has uploaded `app-icon-<tag>`, which it normally has, looking
+   the artifact up by name so a re-run of only this job finds an earlier attempt's,
+   and fails if that job ended without one; downloads it and runs
+   `python3 scripts/build.py --configuration Release --install-app-icon DIR`, which
+   puts the compiled icon and catalog into the bundle with their Info.plist keys and
+   re-signs it;
+7. runs
    `python3 scripts/package.py --configuration Release --require-deployment-target
    --sign-identity "Developer ID Application" --notarize "WallpaperMachine Notary"
    --notary-keychain <that keychain>`, which fails if a bundled library needs a newer
@@ -627,13 +645,14 @@ artifact.
    contract](build.md#bundle-contract)), the `Applications` link and the window
    layout, then writes the `.sha256` sidecar
    ([build.md](build.md#packaging-and-installing));
-6. matches the image to the tag: it must be named
+8. matches the image to the tag: it must be named
    `WallpaperMachine-<tag without v>-arm64.dmg`, and its checksum is echoed into the
    job summary;
-7. hands the image, its sidecar, the notes and that `CHANGELOG.md` to `publish` as
-   the `release-<tag>` artifact.
+9. hands the image, its sidecar, the notes and that `CHANGELOG.md` to `publish` as
+   the `release-<tag>` artifact (a rehearsal keeps its image three days as
+   `rehearsal-<tag>`, and skips `publish`).
 
-Step 6 is the guard that the bump actually reached the build:
+Step 8 is the guard that the bump actually reached the build:
 `scripts/package.py` names the image from the bundle's
 `CFBundleShortVersionString`, so a mismatch means the published tag and the
 built version disagree and the job fails instead of publishing the wrong binary.
@@ -663,10 +682,10 @@ XcodeGen/CMake/renderer package set with `ccache`, and restores two
 `macos-15` or `macos-26`), because bottles and compiled objects
 differ between releases; `build` and the Test workflow therefore keep separate entries.
 
-| Cache | Path | Key | What a hit saves |
-|---|---|---|---|
-| C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects. Test's three jobs share a run's key, so only `renderer`, which compiles the engine and its C++ tests, saves it; `rust` and `native` pass `save-object-cache: "false"` and only restore it |
-| Renderer | `~/.cargo/registry`, `~/.cargo/git`, `Renderer/target` | `renderer-ccache-<os>-<hash of rust-toolchain.toml>-<hash of Cargo.lock, provenance.json>`, restored only from entries with the same toolchain hash | crate downloads, and Rust compilation |
+| Cache | Path | Key | Saved by | What a hit saves |
+|---|---|---|---|---|
+| C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | `save-object-cache` (default on): Warm caches and Test's `renderer` job. Test's three jobs share a run's key, so `rust` and `native` pass `"false"`; so do CodeQL, which runs on every push and saved 147 MB each time, and Build, whose release would wait for the upload | compiling a C++ file the build tree has to rebuild: ccache hashes content and returns the previous object |
+| Renderer | `~/.cargo/registry`, `~/.cargo/git`, `Renderer/target` | `renderer-ccache-<os>-<hash of rust-toolchain.toml>-<hash of Cargo.lock, provenance.json>-<run>`, restored by the prefix without the run, then by the toolchain prefix alone | `save-renderer-cache` (default off): Warm caches, daily | crate downloads, and, with `reuse-renderer-build`, every Rust crate and C++ file unchanged since the restored build |
 
 The `CMAKE_<LANG>_COMPILER_LAUNCHER=ccache` variables only take effect on a build
 tree's first CMake configure, so change the renderer key's prefix whenever the
@@ -676,13 +695,39 @@ the evidence the cache worked. The toolchain is a pinned stable release
 (`Renderer/rust-toolchain.toml`); raising the pin changes the renderer key's
 toolchain hash, so the next build compiles every crate once and starts a new entry.
 
-Only runs on `main` save either cache; every other ref (pull requests, branches,
-hand-pushed tags) restores and never saves. An entry saved under another ref is
-readable by that ref alone, and those entries pushed the repository past GitHub's
-10 GB cache limit, which evicts the `main` entries releases need. Version calls Build
-directly for each tag it creates, so a release cut by a `release:` push to `main`
-still saves; a Version run dispatched by hand from another branch builds its tag
-without saving.
+Only runs on `main` save either cache, and only the callers that opt in; every other
+ref (pull requests, branches, hand-pushed tags) restores and never saves. An entry saved
+under another ref is readable by that ref alone, and those entries pushed the repository
+past GitHub's 10 GB cache limit, which evicts the `main` entries releases need; on
+2026-11-04 CodeQL's per-push C++ object caches did the same (10.5 GB in 108 entries,
+most of them CodeQL's). A release only restores: [Warm caches](#warm-caches-warm-cachesyml)
+writes the entries it reads, once a day, so they are at most a day behind `main`.
+
+**Reusing the renderer build.** A checkout gives every file the current time, and cargo
+and CMake decide what to rebuild by comparing times, so a restored `Renderer/target`
+looked older than all its sources: every release recompiled the four workspace crates
+(vendored naga, `wm-shader`, `wallpaper-core`, `wallpaper-bridge`), reran the core
+crate's build script and recompiled the C++ engine through ccache (214 compiler calls,
+54 misses, for 1.9.1), 3m30s of the macOS 15 runner although the cache held them
+built. With `reuse-renderer-build: "true"`, `prepare-build` runs
+`python3 scripts/source_times.py restore` and then `record` after the cache restore.
+`record` writes `Renderer/target/source-times.json`, which travels with the build in
+the cache: the blob id of every tracked file under `Renderer/` and `ThirdParty/`, the
+entries of every directory there, and the toolchain (the `rustc`, Apple clang, SDK,
+CMake and Homebrew library versions, the cargo manifests and the compiler flags in the
+environment). `restore` gives every file whose blob id is unchanged, and every directory
+whose entries are unchanged, a time older than any build output, but only when the
+toolchain is the recorded one; changed, added and removed files keep the checkout's time.
+Cargo and CMake then rebuild exactly what changed: a release whose renderer sources are
+unchanged rebuilds only `wallpaper-bridge`, which `GIT_SHORT_COMMIT` stamps with the new
+revision (about half the old time), and one C++ file changed compiles that one file.
+Removing or adding a file changes its directory's entries, so a build script watching the
+directory (and CMake's `file(GLOB)`) runs again. The record vouches for the whole target
+directory only while every job that keeps it builds the same thing, `scripts/build.py`'s
+renderer stage (`cargo build --workspace --release`): Build, Warm caches and CodeQL pass
+the input. Every other job (Test's, which also build test profiles) runs
+`source_times.py forget`, so a cache it saved would never be trusted. The first run
+after a change of toolchain, or without a record, rebuilds everything once, as before.
 
 **What the attestation does and does not say.** Its SLSA predicate is built from
 the run's OIDC claims: `resolvedDependencies[0]` is `git+<repo>@<claims.ref>` with
@@ -755,13 +800,17 @@ days.
 
 ### Warm caches (`warm-caches.yml`)
 
-GitHub evicts a cache entry nobody has read for seven days. Twice a week (and on
-demand from **Actions -> Warm caches -> Run workflow**) this runs `prepare-build`
-and `python3 scripts/build.py --renderer-only` on `main`, once on `macos-15` and
-once on `macos-26`, which reads every entry Build and Test use and saves a fresh C++
-object cache for each, so a release or a Test run after a quiet week still starts warm. Caches saved on
-`main` are readable from every ref, including the tags Release builds. It
-publishes nothing.
+Every day at 03:17 UTC (and on demand from **Actions -> Warm caches -> Run workflow**)
+this runs `prepare-build` with `save-renderer-cache` and `reuse-renderer-build` and
+then `python3 scripts/build.py --renderer-only` on `main`, once on `macos-15` and once
+on `macos-26`, and saves a new renderer build and C++ object cache for each. They are
+the entries a release restores (Build saves none, so a release never waits for an
+upload), so its renderer build is at most a day behind `main` and it rebuilds only
+what changed since. Reading every entry also keeps GitHub from evicting one nobody
+read for seven days. Caches saved on `main` are readable from every ref, including
+the tags Release builds. It publishes nothing. After a change to the caches or to
+`scripts/source_times.py` reaches `main`, run it once by hand, so the next release
+does not rebuild the renderer from an entry without a record.
 
 ### Supporters (`supporters.yml`)
 
@@ -789,7 +838,8 @@ findings were mostly false positives, so new alerts surface after the merge inst
 It replaces GitHub's default setup, which can only autobuild Swift and
 fails at the extension's link because the renderer library and the Homebrew
 libraries do not exist yet. Actions, Python and Rust are analyzed without a build
-on Linux. Swift runs on `macos-26`: `prepare-build` and
+on Linux. Swift runs on `macos-26`: `prepare-build` (restoring the caches without
+saving the C++ object cache, and reusing the renderer build) and
 `python3 scripts/build.py --renderer-only` first, untraced, then CodeQL traces
 `scripts/build.py --swift-only` with the `--xcode-setting` overrides CodeQL's own
 Swift autobuild uses (no signing, no compilation cache, no integrated driver), so
@@ -812,6 +862,29 @@ there (the configuration's **⋯ -> Delete configuration**) once no alert in it 
 keeping.
 Default setup must stay off under **Settings -> Code security -> CodeQL
 analysis**; while it is on, GitHub rejects this workflow's results.
+
+### Rehearsal (`rehearsal.yml`)
+
+A release is tagged before it is built, and a tag is never taken back
+([Recovering a failed release](#recovering-a-failed-release)), so a build or packaging
+failure burns the version: 1.7.0 (a bundled library packaging could not relocate) and
+1.9.0 (the Developer ID certificate's import) were each replaced by the next patch,
+with the changelog and banners moved by hand. Rehearsal runs the release path without
+a version to lose. Dispatched on any branch (**Actions -> Rehearsal -> Run workflow**,
+or `gh workflow run rehearsal.yml --ref <branch> -f spec=patch`), its `plan` job turns
+the `spec` input into the version a release of that branch would get, with
+`scripts/bump_version.py --spec` and nothing written, and calls Build with
+`rehearsal: true`, the branch's commit as `ref` and that version as `tag`. Build then
+runs its usual jobs, runners, caches and signing secrets: it applies the version to the
+checkout as the bump commit would, imports the certificate and the notary key, builds,
+adds the icon, signs, notarizes and staples the app and the image, and verifies the
+mounted image. It writes no notes and skips `publish`, and keeps the disk image for three
+days as the run's `rehearsal-<tag>` artifact, to try before releasing. A newer rehearsal
+of the same branch cancels a running one.
+
+Rehearse before landing a change to the release path (the workflows, `prepare-build`,
+`scripts/build.py`, `scripts/package.py` and `scripts/lib/`, `project.yml`'s bundle or
+signing settings, the Homebrew libraries), and before a release that must not slip.
 
 ### Release (`release.yml`)
 
@@ -891,6 +964,13 @@ image.
 
 ## Recovering a failed release
 
+A failure the tag's code did not cause (Apple's notary or ticket service, a runner, a
+secret replaced since) is retried with **Re-run failed jobs** in the same run: only
+`build` and `publish` run again, and they publish the same version. A failure that needs
+a change to the code costs the version, as below; a
+[rehearsal](#rehearsal-rehearsalyml) of the branch before releasing it finds that kind
+without taking one.
+
 A tag the Version workflow pushed stays when its Build run fails; only Build's
 `publish` job makes a release public. If a tag was created but its release never
 passed the publication gate, preserve that tag and fix the failed checks on
@@ -919,8 +999,11 @@ carries `CHANGELOG.md` as it is at the patch's tag, and that copy is not rewritt
 
 ## Checklist for a release
 
-1. Land the change on `main` with a `release:` spec line, or run the Version
-   workflow with a spec. An urgent fix goes on a `hotfix/<x.y.z>` branch from the
+1. When the release includes a change to the release path (the workflows,
+   `prepare-build`, `scripts/build.py`, `scripts/package.py`, `scripts/lib/`, signing,
+   bundled libraries), [rehearse](#rehearsal-rehearsalyml) it first and wait for a
+   green run. Then land the change on `main` with a `release:` spec line, or run the
+   Version workflow with a spec. An urgent fix goes on a `hotfix/<x.y.z>` branch from the
    newest tag instead ([Hotfix releases](#hotfix-releases)); afterwards also confirm
    `chore: merge hotfix x.y.z into main` reached `main`, or that its issue is handled.
 2. Confirm the Version run committed `chore: bump version to x.y.z` with the new
