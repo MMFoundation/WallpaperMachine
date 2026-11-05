@@ -282,12 +282,19 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
         // Not while the app starts or quits, when opening Discover would not be wanted.
         let downloads = includingDownloads && store != nil && !shutdownInProgress && !shutdownComplete
             ? StatusMenuModel.DownloadActivity.make(workshopStore.downloader.inProgressTransfers) : nil
+        // The battery choice is the engine's, so it waits for the renderer like the displays.
+        var battery: StatusMenuModel.Battery?
+        if let store, !shutdownInProgress, !shutdownComplete {
+            battery = .offered(
+                hasBattery: BatteryReading.read() != nil, mode: store.settingsSnapshot.batteryMode,
+                otherAppInFront: PlaybackPreferences.shared.otherAppInFrontAction)
+        }
         return StatusMenuModel.Input(
             playbackIsCurrent: playbackSnapshotCurrent,
             hasActiveWallpapers: !(store?.appSnapshot.activeWallpaperIds.isEmpty ?? true),
             paused: store?.appSnapshot.playbackState == .paused,
             wallpapersMuted: PlaybackPreferences.shared.wallpapersMuted,
-            downloads: downloads,
+            downloads: downloads, battery: battery,
             displays: displays, canLockScreen: ScreenLock.isAvailable,
             // Read again for every build, so a change made in Terminal or elsewhere shows.
             desktopIconsHidden: shutdownInProgress || shutdownComplete ? nil : !FinderDesktopIcons().areShown)
@@ -343,13 +350,22 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
         }
     }
 
-    /// The items that open a window or lock the screen rather than run an automation command.
+    /// The items that open a window, lock the screen or change a battery choice rather than run an
+    /// automation command.
     func openStatusMenuDestination(_ command: StatusMenuModel.Command) {
         switch command {
         case .openControlPanel:
             openControlPanel()
         case .openDownloads:
             showDiscover()
+        case .batteryMode(let mode):
+            chooseBatteryMode(mode)
+        case .otherAppInFront(let action):
+            // A preference, like Mute Wallpapers: the rule monitor hears the change itself. A
+            // choice made here answers the one-time battery question.
+            store?.supportPrompt?.recordBatteryAsked()
+            PlaybackPreferences.shared.otherAppInFrontAction = action
+            AppLog.info("when another app is in front: \(action.rawValue), from the menu bar")
         case .openInPanel(let display):
             // The panel's own target check, since the display may have changed since the menu opened.
             if let store, store.settingsSnapshot.displays.contains(where: {
@@ -369,6 +385,26 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
 
     @objc private func openControlPanel() {
         showControlPanel(selection: .wallpaper)
+    }
+
+    /// The menu bar's On Battery choice, through the same engine setter as Settings › Playback &
+    /// Power, in its turn behind a running command. A failure shows at the foot of the menu. A
+    /// choice made here answers the one-time battery question.
+    private func chooseBatteryMode(_ mode: BridgeBatteryMode) {
+        guard let store, !shutdownInProgress, !shutdownComplete else { return }
+        store.supportPrompt?.recordBatteryAsked()
+        Task {
+            do {
+                _ = try await store.commands.run { try await store.setBatteryModeAsync(mode) }
+                store.onRenderingSettingAppliedElsewhere?()
+                lastError = nil
+                AppLog.info("on battery: \(mode), from the menu bar")
+            } catch {
+                lastError = error
+                AppLog.warn("on battery \(mode) could not be set: \(error.localizedDescription)")
+            }
+            rebuildMenu()
+        }
     }
 
     @objc private func showPage(_ sender: NSMenuItem) {

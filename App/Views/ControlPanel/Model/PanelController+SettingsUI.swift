@@ -150,6 +150,7 @@ extension OtherAppInFrontAction {
     case .keepRunning: L("Keep running")
     case .mute: L("Mute")
     case .pause: L("Pause")
+    case .pauseOnBattery: L("Pause on battery")
     }
   }
 }

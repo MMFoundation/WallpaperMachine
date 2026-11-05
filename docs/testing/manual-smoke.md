@@ -79,6 +79,16 @@ was run.
       they play again at once. Wait again and press only a key: they play again within about
       two seconds. Repeat with Stop (free memory): the wallpapers reload at the first input.
       Your own Pause from the menu bar stays as you left it throughout.
+- [ ] On a laptop, set **When another app is in front** to Pause on battery and leave a
+      non-maximized window of another app in front of an animated wallpaper. Plugged in, the
+      wallpaper keeps animating in the gaps; unplug: it holds its frame at once; click the
+      desktop: it plays; click the other app: it holds again; plug in: it plays without a
+      click. The menu bar's **On Battery** submenu shows **Pause While Using Other Apps**
+      ticked, and unticking it there turns the row back to Keep running.
+- [ ] On a laptop that never answered it, with both battery choices on Keep running, unplug
+      while a wallpaper plays and open the panel: **Save battery when your Mac is unplugged?**
+      appears once (not on the same day as another prompt). Each of its three choices sets only
+      its own row of Playback & Power; **Keep running** changes nothing; it does not return.
 
 ## Appearance
 
