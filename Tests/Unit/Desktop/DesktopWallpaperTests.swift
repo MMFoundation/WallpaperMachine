@@ -1312,6 +1312,38 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
+    func testRefreshCancelsPreviousPosterSettleSequence() async throws {
+        let finalDelay = Duration.milliseconds(1_100)
+        let rig = try PosterRig(root: root, settleDelays: [.milliseconds(350), finalDelay])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        try await postFrame(Data([0]), on: rig)
+
+        try await waitUntil { rig.total >= 2 }
+        post(Data([1]), layer: rig.layers[0], center: rig.frames)
+
+        let replacementStarted = ContinuousClock.now
+        rig.sync.refresh()
+        XCTAssertEqual(rig.total, 2, "the second refresh coalesces its explicit capture")
+        try await waitUntil { rig.total >= 3 }
+        try await postFrame(Data([2]), on: rig)
+        let replacement = try XCTUnwrap(rig.workspace.pictures[one]?.url)
+
+        try await waitUntil { rig.total >= 4 }
+        post(Data([3]), layer: rig.layers[0], center: rig.frames)
+
+        // By the replacement's deadline, the old final pass would already have fired.
+        try await Task.sleep(until: replacementStarted.advanced(by: finalDelay), clock: .continuous)
+        try await waitUntil { rig.total >= 5 }
+        XCTAssertEqual(rig.total, 5, "only the replacement sequence makes a final request")
+        XCTAssertEqual(rig.workspace.pictures[one]?.url, replacement)
+
+        try await postFrame(Data([4]), on: rig)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([4]))
+    }
+
+    @MainActor
     func testAnAnimatedWallpaperGetsNewPosterFilesOnlyWhenItsLookChanges() async throws {
         // Each frame of an animated wallpaper is a new image file, and macOS keeps a full-size
         // copy of every file a desktop has shown. Hours of Space changes, wakes, resumes,
