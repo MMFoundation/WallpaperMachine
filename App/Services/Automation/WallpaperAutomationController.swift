@@ -9,7 +9,7 @@ final class WallpaperAutomationController {
          focus: FocusFilterState, displays: @escaping @MainActor () -> [String],
          targetDisplay: @escaping @MainActor () -> String, canRun: @escaping @MainActor (String) -> Bool,
          playlistScheduler: PlaylistScheduler, spaceMonitor: WallpaperSpaceMonitor? = nil,
-         onInputsChanged: @escaping @MainActor () -> Void,
+         onInputsChanged: @escaping @MainActor (Notification.Name) -> Void,
          onSettled: @escaping @MainActor () -> Void) {
         scheduler = WallpaperAutomationScheduler(store: rules, focus: focus,
             displays: displays, targetDisplay: targetDisplay, canRun: canRun,

@@ -1294,6 +1294,24 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
+    func testFinalSettleFrameReplacesBlackStartupPoster() async throws {
+        let rig = try PosterRig(root: root, settleDelays: [.milliseconds(150), .milliseconds(500)])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        try await postFrame(Data([0]), on: rig)
+        let startup = try XCTUnwrap(rig.workspace.pictures[one]?.url)
+
+        try await waitUntil { rig.total == 2 }
+        post(Data([1]), layer: rig.layers[0], center: rig.frames)
+        try await waitUntil { rig.total == 3 }
+        XCTAssertEqual(rig.workspace.pictures[one]?.url, startup)
+
+        try await postFrame(Data([2]), on: rig)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([2]))
+    }
+
+    @MainActor
     func testAnAnimatedWallpaperGetsNewPosterFilesOnlyWhenItsLookChanges() async throws {
         // Each frame of an animated wallpaper is a new image file, and macOS keeps a full-size
         // copy of every file a desktop has shown. Hours of Space changes, wakes, resumes,
@@ -1302,9 +1320,8 @@ final class DesktopWallpaperTests: XCTestCase {
         defer { rig.finish() }
         rig.workspace.pictures = [one: original("one")]
         rig.sync.refresh()
-        try await waitUntil { rig.total >= 3 && !rig.posterFiles.isEmpty }
+        try await waitUntil { rig.total == 3 && rig.posterFiles.count == 2 }
         let settled = rig.posterFiles
-        XCTAssertEqual(settled.count, 1)
 
         for _ in 0..<5 {
             rig.clock.advance(.seconds(3600))
@@ -1320,15 +1337,13 @@ final class DesktopWallpaperTests: XCTestCase {
         XCTAssertEqual(rig.total, 3, "nothing was asked for")
         XCTAssertEqual(rig.posterFiles, settled, "no desktop was given a new file")
 
-        // A new or changed wallpaper gets a new poster, which also stays while it settles.
+        // A new or changed wallpaper publishes its first frame and its final settled frame.
         rig.sync.refresh()
-        try await waitUntil { rig.total >= 6 && rig.posterFiles.count > settled.count }
-        XCTAssertEqual(rig.posterFiles.count, settled.count + 1)
+        try await waitUntil { rig.total == 6 && rig.posterFiles.count == settled.count + 2 }
     }
 
     /// A playlist turning back to a wallpaper, or a switch back, used to take its poster three
     /// times again. With the same look it gets its last settled poster back without a readback.
-    /// The background stays on its first frame during settling even as the cache is updated.
     @MainActor
     func testAWallpaperThatComesBackWithTheSameLookGetsItsSettledPosterBack() async throws {
         let rig = try PosterRig(root: root, settleDelays: [.milliseconds(150), .milliseconds(300)], answers: true)
@@ -1341,22 +1356,19 @@ final class DesktopWallpaperTests: XCTestCase {
 
         // Refreshes stay 500 ms apart, so none waits behind the last while its settle captures run.
         rig.sync.refresh()
-        try await waitUntil { rig.total >= 3 && store.writes >= 1 }
-        XCTAssertEqual(rig.posterFiles.count, 1)
-        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([1]))
+        try await waitUntil { rig.total == 3 && store.writes == 1 && rig.posterFiles.count == 2 }
+        let settledA = try XCTUnwrap(rig.workspace.pictures[one]?.url)
+        XCTAssertEqual(try Data(contentsOf: settledA), Data([3]))
         try await Task.sleep(for: .milliseconds(600))
 
         wallpaper = "b"
         rig.sync.refresh()
-        try await waitUntil { rig.total >= 6 && store.writes >= 2 }
-        XCTAssertEqual(rig.posterFiles.count, 2)
+        try await waitUntil { rig.total == 6 && store.writes == 2 && rig.posterFiles.count == 4 }
         try await Task.sleep(for: .milliseconds(600))
 
         wallpaper = "a"
         rig.sync.refresh()
-        try await waitUntil { rig.posterFiles.count == 3 }
-        let settledA = try XCTUnwrap(rig.workspace.pictures[one]?.url)
-        XCTAssertEqual(try Data(contentsOf: settledA), Data([3]), "the cache kept the final settle frame")
+        try await waitUntil { rig.workspace.pictures[one]?.url == settledA }
         try await Task.sleep(for: .milliseconds(600))
         let files = rig.posterFiles
         XCTAssertEqual(rig.total, 6, "nothing was asked for, now or as it settles")
@@ -1567,12 +1579,12 @@ final class DesktopWallpaperTests: XCTestCase {
         rig.sync.presentationResumed()
         try await waitUntil { rig.total == 3 }
 
-        // A frame taken while it presents settles the poster without replacing it.
-        post(Data([2]), layer: rig.layers[0], center: rig.frames)
+        // A frame taken while it presents replaces the paused startup poster.
+        try await postFrame(Data([2]), on: rig)
         rig.sync.presentationResumed()
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertEqual(rig.total, 3, "a presenting surface's frame settles the poster")
-        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([1]))
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([2]))
     }
 
     @MainActor

@@ -151,11 +151,9 @@ Each poster is a second decode of a few frames and is counted as
   `DesktopWallpaperSync.settleCaptureDelays` (3 s and 15 s), because intros, fades and
   settings that fade in are missed by the first frame. A wallpaper that resumes after
   a pause, a cover or display sleep settles the same way (`presentationResumed`),
-  unless its poster has settled (below). With periodic updates off, a display that
-  uses the same wallpaper across Spaces keeps its first poster. The final settle
-  frame can update the cache for the wallpaper's next return without replacing the
-  image macOS is already showing. A display that has yet to publish a poster can
-  still publish one during settling.
+  unless its poster has settled (below). With periodic updates off, a wallpaper
+  shared across Spaces keeps its installed picture through intermediate samples.
+  The final sample can replace the first frame after an intro or fade.
 - **A wallpaper is moved on a display.** The inspector's Position sliders and **Center**
   change what the final pixels show, so a committed move requests the same capture as a
   new wallpaper (`BridgeStore.onDisplayFramingChanged`); moves that arrive close together

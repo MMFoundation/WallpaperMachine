@@ -879,7 +879,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             targetDisplay: { [weak self] in self?.controlPanelNavigation.targetDisplayID ?? "primary" },
             canRun: { [weak self] display in self?.ownSuspension(ofDisplay: display, store: store) == false },
             playlistScheduler: playlistScheduler, spaceMonitor: spaces,
-            onInputsChanged: { [weak self] in self?.updateAutomaticWallpaperContext(capture: .missingPoster) },
+            onInputsChanged: { [weak self] name in
+                let capture: DesktopWallpaperSync.CaptureRequest =
+                    name == WallpaperSpaceMonitor.didChangeNotification ? .missingPoster : .all
+                self?.updateAutomaticWallpaperContext(capture: capture)
+            },
             onSettled: { [weak self] in self?.updateAutomaticWallpaperContext(capture: .all) })
         automaticWallpapers = controller
         store.onUserWallpaperChoice = { [weak self, weak controller] wallpaper, display in
