@@ -189,6 +189,8 @@ final class DesktopWallpaperSync {
     /// What a refresh asks the surfaces for. Coalesced calls keep the largest request.
     enum CaptureRequest: Comparable {
         case none
+        /// Only surfaces without a poster for the current scope.
+        case missingPoster
         /// Only surfaces without a settled poster.
         case unsettled
         /// Every surface, taken again as the wallpaper settles: what a new or changed wallpaper needs.
@@ -242,6 +244,11 @@ final class DesktopWallpaperSync {
     /// answers each request separately sends a second answer that counts as unasked, which
     /// is ignored once the poster has settled; it is no newer than the first.
     private var awaitingFrames = Set<ObjectIdentifier>()
+    /// An explicit or periodic request wins when a renderer combines it with a settle request.
+    private var settlingFrames = Set<ObjectIdentifier>()
+    /// Layers with an installed poster since the last full refresh.
+    private var currentPosters = Set<ObjectIdentifier>()
+    private var publishedLooks: [ObjectIdentifier: DesktopPosterLook] = [:]
     /// Surfaces whose poster is a settled one `settledPosters` gave back, with the look it was
     /// given for. Such a poster counts as settled: settle captures skip the surface, and only a
     /// frame that could itself be kept as settled replaces it, not a renderer's first (often an
@@ -347,7 +354,10 @@ final class DesktopWallpaperSync {
         if let center = workspaceCenter {
             for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didWakeNotification] {
                 workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.refreshAfterDesktopChange() }
+                    MainActor.assumeIsolated {
+                        self?.refreshAfterDesktopChange(capture: name == NSWorkspace.didWakeNotification
+                                                        ? .unsettled : .missingPoster)
+                    }
                 })
             }
         }
@@ -357,16 +367,17 @@ final class DesktopWallpaperSync {
     /// Brings every desktop up to date with the current poster, after asking the
     /// surfaces `capture` names for a fresh frame. `.all` is what a new or changed
     /// wallpaper needs and also takes the poster again as the wallpaper settles;
-    /// `.unsettled` suits a change that leaves every wallpaper as it was.
+    /// `.missingPoster` reuses the current image across Space changes, even while
+    /// it settles; `.unsettled` can retake it after events such as wake.
     func refresh(capture: CaptureRequest = .all) {
         refresh(capture, settle: capture == .all)
     }
 
     /// An engine snapshot was applied. One that changes the layout since the last snapshot this
     /// sync saw, or the first one, takes every poster again as a new wallpaper does; any other
-    /// keeps the posters that have settled.
+    /// keeps the posters already installed.
     func snapshotApplied(_ layout: DesktopPosterLayout) {
-        let capture: CaptureRequest = layout == lastLayout ? .unsettled : .all
+        let capture: CaptureRequest = layout == lastLayout ? .missingPoster : .all
         lastLayout = layout
         refresh(capture: capture)
     }
@@ -447,6 +458,7 @@ final class DesktopWallpaperSync {
         // Before the settle captures are scheduled, so the last of them lands after it.
         if request == .all {
             lastFullRequest = clock()
+            currentPosters.removeAll()
             restartLookBaselines()
         }
         if settle { scheduleSettleCaptures(staleOnly: false) }
@@ -469,12 +481,12 @@ final class DesktopWallpaperSync {
     }
 
     /// A Space change or wake shows a desktop the poster may not be on yet: the
-    /// current poster is applied at once. A fresh frame is asked for only where
-    /// the poster has not settled. Desktops that kept refusing posters are tried again.
-    private func refreshAfterDesktopChange() {
+    /// current poster is applied at once. Desktops that kept refusing posters
+    /// are tried again.
+    private func refreshAfterDesktopChange(capture: CaptureRequest) {
         beforeDesktopChange()
         ledger.retryRefusedDesktops()
-        refresh(.unsettled, settle: false)
+        refresh(capture, settle: false)
     }
 
     /// Whether a refresh that is not for a new or changed wallpaper leaves the
@@ -522,7 +534,7 @@ final class DesktopWallpaperSync {
                 do { try await Task.sleep(for: delay - elapsed) } catch { return }
                 elapsed = delay
                 guard let self, !self.stopped else { return }
-                self.requestPresentingFrames(only: only, skippingReused: true)
+                self.requestPresentingFrames(only: only, settling: true)
             }
             // A replacement cancels this sequence before it starts its own.
             guard !Task.isCancelled else { return }
@@ -548,10 +560,10 @@ final class DesktopWallpaperSync {
 
     /// Asks only presenting surfaces: a suspended one would draw the frame its
     /// poster already shows. Settle captures skip a surface showing a reused settled poster.
-    private func requestPresentingFrames(only layers: Set<ObjectIdentifier>? = nil, skippingReused: Bool = false) {
+    private func requestPresentingFrames(only layers: Set<ObjectIdentifier>? = nil, settling: Bool = false) {
         for surface in surfaces() where canCapture(surface) && layers?.contains(ObjectIdentifier(surface.layer)) != false {
-            if skippingReused, reusedLooks[ObjectIdentifier(surface.layer)] != nil { continue }
-            requestFrame(for: surface)
+            if settling, reusedLooks[ObjectIdentifier(surface.layer)] != nil { continue }
+            requestFrame(for: surface, settling: settling)
         }
     }
 
@@ -564,25 +576,35 @@ final class DesktopWallpaperSync {
         let key = ObjectIdentifier(surface.layer)
         // Already showing it: nothing to read again.
         if reusedLooks[key] == look, posters[key] != nil { return true }
-        guard let poster = store.poster(for: look) else { return false }
+        guard let cached = store.poster(for: look) else { return false }
+        let poster = publishedLooks[key] == look ? posters[key] ?? cached : cached
         // A frame on its way, or an encode still running, is older than this poster.
         revisions[key] = (revisions[key] ?? 0) &+ 1
         awaitingFrames.remove(key)
+        settlingFrames.remove(key)
         pendingLooks[key] = nil
         arrivalCount &+= 1
         arrivals[key] = arrivalCount
         posters[key] = poster
+        currentPosters.insert(key)
+        publishedLooks[key] = look
         posterScopes[key] = .all
         frameDigests[key] = nil
         reusedLooks[key] = look
         return true
     }
 
-    private func requestFrame(for surface: DesktopPosterSurface) {
+    private func requestFrame(for surface: DesktopPosterSurface, settling: Bool = false) {
         let scope = scope(surface.display)
         guard scope != .hold, !showsUnsavedLook(surface) else { return }
+        let key = ObjectIdentifier(surface.layer)
+        if settling {
+            if !awaitingFrames.contains(key) { settlingFrames.insert(key) }
+        } else {
+            settlingFrames.remove(key)
+        }
         noteRequestLook(surface, scope: scope)
-        awaitingFrames.insert(ObjectIdentifier(surface.layer))
+        awaitingFrames.insert(key)
         frameCenter.post(name: DesktopPosterNotification.request, object: surface.layer,
                          userInfo: [DesktopPosterNotification.Key.context: scope.context ?? ""])
     }
@@ -599,14 +621,19 @@ final class DesktopWallpaperSync {
             var kept: [String] = []
             var reused: [String] = []
             for surface in surfaces() {
-                if request == .unsettled, keepsPoster(of: surface) { kept.append(surface.display) }
-                else if reuseSettledPoster(for: surface) { reused.append(surface.display) }
-                else {
-                    reusedLooks[ObjectIdentifier(surface.layer)] = nil
+                let key = ObjectIdentifier(surface.layer)
+                let hasCurrentPoster = posters[key] != nil && posterScopes[key] == scope(surface.display)
+                if (request == .missingPoster && hasCurrentPoster)
+                    || (request == .unsettled && keepsPoster(of: surface)) {
+                    kept.append(surface.display)
+                } else if reuseSettledPoster(for: surface) {
+                    reused.append(surface.display)
+                } else {
+                    reusedLooks[key] = nil
                     requestFrame(for: surface)
                 }
             }
-            if !kept.isEmpty { AppLog.debug("desktop poster: kept the settled poster on display \(kept.joined(separator: ", "))") }
+            if !kept.isEmpty { AppLog.debug("desktop poster: kept the current poster on display \(kept.joined(separator: ", "))") }
             if !reused.isEmpty {
                 AppLog.debug("desktop poster: gave back the settled poster of the same look on display \(reused.joined(separator: ", "))")
             }
@@ -645,6 +672,9 @@ final class DesktopWallpaperSync {
         reusedLooks.removeAll()
         lookBaselines.removeAll()
         pendingLooks.removeAll()
+        settlingFrames.removeAll()
+        currentPosters.removeAll()
+        publishedLooks.removeAll()
         synchronizedSurfaces = nil
         knownDisplays.removeAll()
         frameDigests.removeAll()
@@ -693,6 +723,7 @@ final class DesktopWallpaperSync {
         // Before anything drops the frame: one frame answering piled-up requests can carry
         // another request's context, such as a switch hold's, and still answers this one.
         let asked = awaitingFrames.remove(key) != nil
+        let settling = settlingFrames.remove(key) != nil
         let pending = pendingLooks.removeValue(forKey: key)
         guard let values = notification.userInfo,
               let frame = DesktopPosterFrame(userInfo: values),
@@ -711,6 +742,26 @@ final class DesktopWallpaperSync {
         // surface, so a frame that is not settled (a renderer's first, often an intro, or a
         // periodic one while the wallpaper starts again) would stay; it is dropped.
         if reusedLooks[key] != nil, keepable == nil { return }
+        // With automatic updates off, keep the first poster of this look on the desktop.
+        // Settling frames can still improve the cached poster for the wallpaper's next visit.
+        if settling, !refreshesPeriodically, receivedScope == .all, currentPosters.contains(key),
+           posterScopes[key] == receivedScope {
+            if canCapture(surface) { capturedAt[key] = clock() }
+            if let keepable {
+                let revision = revisions[key] ?? 0
+                let encode = self.encode
+                Task(priority: .utility) { [weak self, weak layer] in
+                    do {
+                        let poster = try await encode(frame)
+                        guard let self, let layer, self.isNewest(revision, of: layer) else { return }
+                        self.keepSettled(poster, keepable, surface: surface)
+                    } catch {
+                        self?.report(error)
+                    }
+                }
+            }
+            return
+        }
         if !asked, receivedScope == .all, !settlesAgain(surface) {
             // A renderer sends its first frame unasked, often an intro. One started again in the
             // same window draws the same wallpaper (a new wallpaper, a move or a new screen size
@@ -743,6 +794,8 @@ final class DesktopWallpaperSync {
                 // The same pixels can belong to a new Space visit. Reuse their encoding
                 // only after a fresh response validates the new context, then publish there.
                 self.posterScopes[key] = receivedScope
+                self.currentPosters.insert(key)
+                self.publishedLooks[key] = pending?.look
                 self.arrivals[key] = arrival
                 if let poster = self.posters[key] {
                     self.onPosterAccepted?(surface.display, receivedScope, poster)
@@ -756,6 +809,8 @@ final class DesktopWallpaperSync {
                 guard self.isNewest(revision, of: layer),
                       self.scope(surface.display) == receivedScope else { return }
                 self.posters[key] = image
+                self.currentPosters.insert(key)
+                self.publishedLooks[key] = pending?.look
                 self.posterScopes[key] = receivedScope
                 self.frameDigests[key] = digest
                 self.arrivals[key] = arrival
@@ -798,6 +853,9 @@ final class DesktopWallpaperSync {
         reusedLooks = reusedLooks.filter { keys.contains($0.key) }
         lookBaselines = lookBaselines.filter { keys.contains($0.key) }
         awaitingFrames.formIntersection(keys)
+        settlingFrames.formIntersection(keys)
+        currentPosters.formIntersection(keys)
+        publishedLooks = publishedLooks.filter { keys.contains($0.key) }
         pendingLooks = pendingLooks.filter { awaitingFrames.contains($0.key) }
         var byDisplay: [String: Data] = [:]
         var newest: [String: UInt64] = [:]
