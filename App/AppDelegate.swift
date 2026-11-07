@@ -861,9 +861,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return policy.suspendedDisplayIDs.contains(physical)
     }
 
-    private func updateAutomaticWallpaperContext(capture: DesktopWallpaperSync.CaptureRequest) {
+    /// Reconciles cached posters and window placement after automatic-selection inputs or results change.
+    private func updateAutomaticWallpaperContext() {
         retainSpacePosters()
-        schedulePosterRefresh(capture: capture)
         spacePinning?.update()
         spaceParking?.update()
     }
@@ -879,12 +879,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             targetDisplay: { [weak self] in self?.controlPanelNavigation.targetDisplayID ?? "primary" },
             canRun: { [weak self] display in self?.ownSuspension(ofDisplay: display, store: store) == false },
             playlistScheduler: playlistScheduler, spaceMonitor: spaces,
-            onInputsChanged: { [weak self] name in
-                let capture: DesktopWallpaperSync.CaptureRequest =
-                    name == WallpaperSpaceMonitor.didChangeNotification ? .missingPoster : .all
-                self?.updateAutomaticWallpaperContext(capture: capture)
+            onInputsChanged: { [weak self] notification in
+                self?.updateAutomaticWallpaperContext()
+                self?.schedulePosterRefresh(after: notification)
             },
-            onSettled: { [weak self] in self?.updateAutomaticWallpaperContext(capture: .all) })
+            onSettled: { [weak self] in
+                self?.updateAutomaticWallpaperContext()
+                self?.schedulePosterRefresh()
+            })
         automaticWallpapers = controller
         store.onUserWallpaperChoice = { [weak self, weak controller] wallpaper, display in
             controller?.scheduler.noteManualChoice(display, wallpaperID: wallpaper)

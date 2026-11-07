@@ -226,6 +226,7 @@ final class DesktopWallpaperSync {
     private var coalesced: Task<Void, Never>?
     private static let refreshInterval: Duration = .milliseconds(500)
     private let settleDelays: [Duration]
+    private let settleSleep: @Sendable (Duration) async throws -> Void
     private let periodicInterval: Duration
     private let clock: @MainActor () -> ContinuousClock.Instant
     /// When each layer's latest accepted frame arrived while its wallpaper was presenting.
@@ -337,6 +338,7 @@ final class DesktopWallpaperSync {
              }.value
          },
          settleDelays: [Duration] = DesktopWallpaperSync.settleCaptureDelays,
+         settleSleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
          periodicInterval: Duration = DesktopWallpaperSync.periodicRefreshInterval,
          confirmationDelay: Duration = DesktopWallpaperLedger.confirmationWindow,
          clock: @escaping @MainActor () -> ContinuousClock.Instant = { ContinuousClock.now }) throws {
@@ -351,6 +353,7 @@ final class DesktopWallpaperSync {
         self.retainedDisplays = retainedDisplays
         self.encode = encode
         self.settleDelays = settleDelays.sorted()
+        self.settleSleep = settleSleep
         self.periodicInterval = periodicInterval
         self.clock = clock
     }
@@ -541,13 +544,14 @@ final class DesktopWallpaperSync {
         settlingLayers = .all
         guard !stopped, frameObserver != nil, !settleDelays.isEmpty else { return }
         let delays = settleDelays
+        let sleep = settleSleep
         settlingLayers = selection
         settling = Task { [weak self] in
             var elapsed = Duration.zero
             for (index, delay) in delays.enumerated() {
-                do { try await Task.sleep(for: delay - elapsed) } catch { return }
+                do { try await sleep(delay - elapsed) } catch { return }
                 elapsed = delay
-                guard let self, !self.stopped else { return }
+                guard !Task.isCancelled, let self, !self.stopped else { return }
                 self.requestPresentingFrames(selection, settlePass: index == delays.count - 1 ? .final : .intermediate)
             }
             // A replacement cancels this sequence before it starts its own.
@@ -566,7 +570,7 @@ final class DesktopWallpaperSync {
             while true {
                 // The poster only has to be roughly this old, so let the system coalesce it.
                 do { try await Task.sleep(for: interval, tolerance: interval / 10) } catch { return }
-                guard let self, !self.stopped else { return }
+                guard !Task.isCancelled, let self, !self.stopped, self.refreshesPeriodically else { return }
                 self.requestPresentingFrames()
             }
         }
