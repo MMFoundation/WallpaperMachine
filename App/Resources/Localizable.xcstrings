@@ -4621,6 +4621,9 @@
     "Choose a wallpaper below to show it here." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Escolha um papel de parede abaixo para mostrá-lo aqui."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "아래에서 배경화면을 선택하면 여기에 표시됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "下で壁紙を選ぶと、ここに表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在下方选择一张壁纸，它就会显示在这里。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在下方選擇一張桌布，它就會顯示在這裡。"}}}
     },
+    "Open the Control Panel to find a wallpaper and apply it." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Abra o Painel de Controle para encontrar um papel de parede e aplicá-lo."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "제어판을 열어 배경화면을 찾아 적용하세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "コントロールパネルを開いて、壁紙を探して適用してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "打开控制面板，找到壁纸并应用它。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "打開控制面板，找到桌布並套用。"}}}
+    },
     "On battery. Wallpapers are paused." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Na bateria. Os papéis de parede estão pausados."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배터리를 사용 중입니다. 배경화면이 일시 정지되었습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "バッテリー駆動中です。壁紙を一時停止しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在使用电池，壁纸已暂停。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在使用電池，桌布已暫停。"}}}
     },
@@ -7880,8 +7883,8 @@
     "Open %@" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Abrir %@"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "%@ 열기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "「%@」を開く"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "打开“%@”"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "打開「%@」"}}}
     },
-    "Pick a wallpaper and press Play to show it here." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Escolha um papel de parede e pressione Reproduzir para mostrá-lo aqui."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면을 선택하고 ‘재생’을 누르면 여기에 표시됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙を選んで再生ボタンを押すと、ここに表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "选好壁纸后点按播放，它就会出现在这里。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "選好桌布後按下播放，它就會出現在這裡。"}}}
+    "Double-click a wallpaper or choose Apply wallpaper." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Clique duas vezes em um papel de parede ou escolha Aplicar."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면을 이중 클릭하거나 ‘배경화면 적용’을 선택하세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙をダブルクリックするか、「壁紙を適用」を選んでください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "双击壁纸，或选择“应用壁纸”。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "按兩下桌布，或選擇「套用桌布」。"}}}
     },
     "Playback & Power" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reprodução e Energia"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "재생 및 전원"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "再生と電源"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "播放与电源"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "播放與電源"}}}

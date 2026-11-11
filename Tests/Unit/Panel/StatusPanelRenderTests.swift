@@ -59,6 +59,32 @@ final class StatusPanelRenderTests: PanelTestCase {
                    "One display needs no picker")
   }
 
+  /// An empty display says what to do: pick from the switcher below it, or, with nothing in the
+  /// switcher, look in the Control Panel the footer opens. It never points at a switcher that is
+  /// not there.
+  func testAnEmptyDisplaySaysWhereToFindAWallpaperWithOrWithoutTheSwitcher() throws {
+    try pinPanelLanguageToEnglish()
+    func panel(library: [String]) -> StatusPanelModel.Panel {
+      let display = StatusMenuModel.Display(
+        id: "primary", title: "Studio Display (1 - Role)", wallpaperID: nil, canPrevious: false,
+        canNext: false, canRandom: false, recent: [])
+      let input = StatusPanelModel.Input(
+        menu: .init(playbackIsCurrent: true, hasActiveWallpapers: false, paused: false, wallpapersMuted: false,
+                    displays: [display], canLockScreen: true),
+        library: library.map { .init(id: $0, title: $0, kind: .scene, previewFile: nil, isPlayable: true) })
+      return StatusPanelModel.make(input, display: nil, strip: library)
+    }
+    let unstocked = panel(library: [])
+    let stocked = panel(library: ["a", "b"])
+    XCTAssertEqual(unstocked.state, .empty)
+    XCTAssertEqual(stocked.state, .empty)
+    XCTAssertTrue(unstocked.strip.isEmpty)
+    XCTAssertFalse(stocked.strip.isEmpty)
+    XCTAssertFalse(unstocked.stateLine.isEmpty)
+    XCTAssertFalse(stocked.stateLine.isEmpty)
+    XCTAssertNotEqual(unstocked.stateLine, stocked.stateLine, "with no switcher, the line points elsewhere")
+  }
+
   func testThePanelKeepsItsWidthInEveryLanguage() throws {
     let languages = AppLanguageStore(
       defaults: try TemporaryDefaults.make(for: self).defaults, systemLanguages: ["en"])

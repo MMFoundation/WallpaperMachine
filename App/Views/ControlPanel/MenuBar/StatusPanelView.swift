@@ -420,7 +420,8 @@ private struct StatusPanelFooter: View {
 
 extension StatusPanelModel.Panel {
   /// The line under the title: the wallpaper's kind and what holds it, or what to do with an empty
-  /// display.
+  /// display: pick from the switcher below, or, with nothing in it to pick, find one in the
+  /// Control Panel, which the footer opens.
   @MainActor var stateLine: String {
     let status: String =
       switch state {
@@ -428,7 +429,7 @@ extension StatusPanelModel.Panel {
       case .switching: L("Changing wallpaper…")
       case .empty:
         strip.isEmpty
-          ? L("Pick a wallpaper and press Play to show it here.")
+          ? L("Open the Control Panel to find a wallpaper and apply it.")
           : L("Choose a wallpaper below to show it here.")
       case .paused: L("Playback paused")
       case .held(let hold): hold.text

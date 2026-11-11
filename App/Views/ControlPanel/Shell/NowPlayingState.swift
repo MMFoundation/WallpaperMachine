@@ -18,7 +18,7 @@ struct NowPlayingState: Equatable {
   var title: String
   /// "No wallpaper playing", "Playback paused" or "Playback running".
   var status: String
-  /// The line under the title: the status, or what to do when nothing plays anywhere.
+  /// The line under the title: the status, or how to apply a wallpaper when nothing plays anywhere.
   var detail: String
   /// The title bar tooltip of the card.
   var help: String
@@ -60,7 +60,7 @@ struct NowPlayingState: Equatable {
     return NowPlayingState(
       displayTitle: display, item: item, hasWallpaper: hasWallpaper, isPaused: isPaused,
       title: item?.title ?? L("Nothing on this display"), status: status,
-      detail: hasWallpaper ? status : L("Pick a wallpaper and press Play to show it here."),
+      detail: hasWallpaper ? status : L("Double-click a wallpaper or choose Apply wallpaper."),
       help: item == nil ? status : "\(display) · \(status)",
       accessibilityLabel: L("Now playing on \(display)"),
       showInLibraryLabel: item.map { L("Show \($0.title) in your library") },

@@ -1497,7 +1497,8 @@ never to `.shared`.
   place; the real `AppDelegate` quit route with no renderer closes the panel before termination
   and lets main-actor cleanup run inside an injected, bounded termination wait) and
   `StatusPanelRenderTests` (every control reachable by VoiceOver, the display picker
-  only with two displays, the width in every language and a height under 820 pt). The pure model
+  only with two displays, an empty display's line not pointing at a switcher that is empty, the
+  width in every language and a height under 820 pt). The pure model
   is `StatusPanelModelTests` (Automation). Not covered: the real status item and popover (click
   routing, the closing click, the first click while the app is inactive, Escape and Tab, VoiceOver's
   Show Menu action), actual process termination, `AppDelegate+StatusPanel`'s answers over the live

@@ -61,7 +61,8 @@ final class PanelLibraryStateTests: PanelTestCase {
         target: target(wallpaper: nil), item: nil, hasWallpaper: false, hasOtherWallpaper: true,
         previousID: nil, isPaused: paused, isBusy: false)
       XCTAssertEqual(idle.status, L("No wallpaper playing"), "no assignments must not read as running or paused")
-      XCTAssertEqual(idle.detail, L("Pick a wallpaper and press Play to show it here."))
+      XCTAssertFalse(idle.detail.isEmpty)
+      XCTAssertNotEqual(idle.detail, idle.status, "the line says how to apply one, not the status again")
       XCTAssertEqual(idle.title, L("Nothing on this display"))
       XCTAssertEqual(idle.help, idle.status)
       XCTAssertNil(idle.showInLibraryLabel)

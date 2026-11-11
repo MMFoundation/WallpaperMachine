@@ -565,12 +565,15 @@ The bar along the bottom of the window shows the target display's wallpaper: its
 still, its title, and the display's name beside a small equalizer that moves only
 while playback runs and the window is on screen; while the display rotates, the name is
 followed by what it rotates through (All wallpapers, Favorites, its list or a collection). When the target display is empty it
-says **Nothing on this display** and the hint to pick a wallpaper; VoiceOver reads the
+says **Nothing on this display** and the playback state; while no display shows a wallpaper,
+the line under it says how to apply one instead (double-click a wallpaper or choose **Apply
+wallpaper**); VoiceOver reads the
 global playback state (**Playback running** or **Playback paused**) as the bar's
 value. The wallpaper's part of the bar lights on hover and, clicked, opens its details
 above it: the still at 16:9, a *Now Playing* caption, the title (selectable), its kind,
-the display's full name, the playback state and **Show in library**, which shows the
-wallpaper selected on Installed. Its controls:
+the display's full name, the playback state (while no display shows a wallpaper, how to
+apply one, beside Apply's symbol rather than a playback one) and **Show in library**, which
+shows the wallpaper selected on Installed. Its controls:
 
 - **Previous wallpaper**, play/pause, **Next wallpaper**, **Playlist** and **Recently used**
   (below). Play/pause acts on every wallpaper and is enabled whenever any display
@@ -697,7 +700,9 @@ last, else the control panel's target display, else the main one. Below the pick
   paused.** (or **stopped**) for an app rule, another app's sound or a Focus filter. While the
   panel is open the line follows the drive and the condition rules at once; an app rule, another
   app's sound or a Focus filter that starts then shows with the next change the panel sees. An
-  empty display says **Nothing on this display**. The heart adds the wallpaper to the favorites
+  empty display says **Nothing on this display**, and its line says to choose a wallpaper from
+  the switcher below or, with nothing in the switcher, to open the Control Panel to find one and
+  apply it. The heart adds the wallpaper to the favorites
   or takes it out: the same favorites as Installed's, and an open control panel shows the change
   at once.
 - **Previous wallpaper**, play/pause, **Next wallpaper** and **Random wallpaper**: the commands

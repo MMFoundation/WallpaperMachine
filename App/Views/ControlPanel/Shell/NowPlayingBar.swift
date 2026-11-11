@@ -258,6 +258,9 @@ struct NowPlayingDetails: View {
             Equalizer(isPlaying: state.isEqualizerRunning, barWidth: 2, height: 10)
               .foregroundStyle(theme.accent.accent.color)
               .opacity(state.isEqualizerRunning ? 1 : 0.45)
+          } else if !state.hasWallpaper {
+            // The line says how to apply a wallpaper, so it wears Apply's symbol, not playback's.
+            Image(systemName: ApplyOffer.symbol)
           } else {
             Image(systemName: "pause.circle")
           }
