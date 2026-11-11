@@ -51,8 +51,8 @@ struct WelcomeOverlayHost: View {
   }
 }
 
-/// The one-time prompts, one at a time: after the first downloaded wallpaper, star the project or
-/// become a supporter; later, a GitHub star; for someone who finished the guide before it offered
+/// The one-time prompts, one at a time: a day after the first downloaded wallpaper is applied, star
+/// the project or become a supporter; later, a GitHub star; for someone who finished the guide before it offered
 /// the switch, whether to send performance data; on a Mac playing a wallpaper on battery with
 /// nothing chosen to save it, how to save battery; for someone signed in to Steam who never met the
 /// import, importing their subscriptions; later still, MMFoundation's Discord. Links open only when
@@ -141,9 +141,8 @@ struct SupportPromptSheet: View {
   private func lead(_ prompt: SupportPromptStore.Prompt) -> Text {
     switch prompt {
     case .support:
-      Text(
-        "Your first downloaded wallpaper is up and running. Enjoying WallpaperMachine? You can help it grow."
-      )
+      // A day or more after the apply that earned it, so it does not speak of that apply.
+      Text("If you like the wallpapers you downloaded, you can help WallpaperMachine grow.")
     case .star: Text("A star on GitHub helps other Mac users find it.")
     case .telemetry:
       Text(

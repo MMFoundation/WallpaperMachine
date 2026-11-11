@@ -1,7 +1,7 @@
 # First-run guide and one-time prompts
 
 One-time offers on a Mac that has not seen them: the welcome guide that covers the
-first window, a single request to star or support the project after the first
+first window, a single request to star or support the project a day after the first
 downloaded wallpaper is applied, a later request for a GitHub star, one question
 about [performance data](telemetry.md) for someone who finished the guide before it
 had that switch, one question about saving battery for someone whose wallpaper plays on
@@ -135,8 +135,15 @@ be selected and copied.
 ## First wallpaper support prompt
 
 After a wallpaper downloaded through Steam Workshop or pixiv is successfully applied by
-the user, the panel offers **Feeling good?** once, in a sheet on the panel window.
-**Star on GitHub** opens the project repository; **Sponsor on Open Collective** opens
+the user, the panel offers **Feeling good?** once, in a sheet on the panel window, but
+not right away: the offer waits at least a day (`SupportPromptStore.supportDelay`)
+after the apply that earned it, and comes the first time the panel window is shown
+after that: opened, brought back from the Dock, or shown again after the app was hidden.
+A window left open across that mark is not interrupted, even when it is covered and
+uncovered, on another Space or behind a screen lock; the offer waits until the window is
+shown again (`PanelPresentation.shownSince`). A later apply
+does not restart the wait, and an offer earned under a build that did not record the
+time of the apply is due at once. **Star on GitHub** opens the project repository; **Sponsor on Open Collective** opens
 MMFoundation's Open Collective (https://opencollective.com/mmfoundation), the same
 page in every app language. Priority Support is a paid service, not a way to give, so
 the prompt does not offer it ([SPONSORS.md](../../SPONSORS.md)). Both require a click.
@@ -151,11 +158,14 @@ qualifies when it first enables the downloaded wallpaper on a display, and so do
 [Download and apply](workshop-downloads.md#download-and-apply) once its wallpaper
 has arrived, because it applies as the user's own choice.
 
-Eligibility survives quitting between download and apply. If the panel is hidden,
+Eligibility, and the day's wait, survive quitting between download and apply and
+between apply and offer. If the panel is hidden,
 the [welcome guide](#first-run) or sign-in is open, the download dialog or one of the
-panel's popovers is open, or a wallpaper switch is running or waiting, the offer waits; **Hide window after applying a
+panel's popovers is open, or a wallpaper switch is running or waiting, the offer waits.
+The offer is never due on the apply that earns it, so **Hide window after applying a
 wallpaper** (see [Selection versus apply](control-panel.md#selection-versus-apply))
-defers hiding for this first offer. Only a displayed offer consumes the one-time
+hides the window after the first downloaded wallpaper as after any other; only a
+prompt that is already due keeps the window up. Only a displayed offer consumes the one-time
 flag; after that it never returns automatically, including after quitting or
 updating. Opening a link neither stars the repository nor makes a payment; the user
 finishes that action in their browser. See [Supporter details](../../SPONSORS.md).
@@ -168,8 +178,10 @@ waiting rules as above (`SupportPromptSheet`). When several are due, the order i
 performance data question, then the [battery question](#the-battery-question), then the
 subscriptions offer, then the support prompt, then the star prompt, then the
 [Discord invitation](#discord-invitation), and no
-prompt appears on the same calendar day as another. Once one has been answered or
-dismissed, no other appears in that window.
+prompt appears on the same calendar day as another, nor on the day the first-run guide
+ended: the guide was that day's question (a guide replayed from Settings does not
+count). Once one has been answered or dismissed, no other appears in
+that window.
 
 - **Send performance data?** asks once someone who finished the welcome guide before
   it had the switch. **Send performance data** turns it on and opens nothing; **What is

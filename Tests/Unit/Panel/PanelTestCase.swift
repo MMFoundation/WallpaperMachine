@@ -518,8 +518,12 @@ final class PanelFixture {
     return try XCTUnwrap(workshop.downloader.signIn)
   }
 
-  /// Shows the panel to everything gated on visibility, as a window ordered front would.
-  func show() { presentation.show(); controller.refreshVisibilityGatedWork() }
+  /// Shows the panel to everything gated on visibility, as a window ordered front would. `date` is
+  /// when it was shown, for a window that has been open a while.
+  func show(at date: Date = Date()) {
+    presentation.show(at: date)
+    controller.refreshVisibilityGatedWork()
+  }
   func hide() { presentation.hide(); controller.refreshVisibilityGatedWork() }
 
   /// Waits for a state, never a duration: the deadline only matters when the machine is slow (the

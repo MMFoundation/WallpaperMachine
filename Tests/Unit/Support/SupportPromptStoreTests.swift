@@ -142,13 +142,63 @@ final class SupportPromptStoreTests: XCTestCase {
     func testOnlyOnePromptADayInPriorityOrder() {
         let store = SupportPromptStore(defaults: defaults, calendar: calendar)
         store.recordDownload(wallpaperID: "downloaded")
-        store.recordSuccessfulActivation(wallpaperID: "downloaded")
+        store.recordSuccessfulActivation(wallpaperID: "downloaded", now: start)
         XCTAssertEqual(store.pendingPrompt(welcomeSeen: true, telemetryOn: false, now: start), .telemetry)
 
         store.markPresented(.telemetry, now: start)
         XCTAssertNil(store.pendingPrompt(welcomeSeen: true, telemetryOn: false, now: start + 60),
                      "a second prompt waits for another day")
         XCTAssertEqual(store.pendingPrompt(welcomeSeen: true, telemetryOn: false, now: start + day), .support)
+    }
+
+    /// The support offer waits a day after the apply that earns it, a relaunch included, and a
+    /// panel window shown before that mark keeps it back until it is shown again.
+    func testTheSupportOfferWaitsADayAfterTheApplyThatEarnsIt() {
+        let store = SupportPromptStore(defaults: defaults, calendar: calendar)
+        store.recordDownload(wallpaperID: "downloaded")
+        store.recordSuccessfulActivation(wallpaperID: "downloaded", now: start)
+        XCTAssertTrue(store.isPending, "Earned")
+        XCTAssertNil(store.pendingPrompt(welcomeSeen: true, telemetryOn: true, now: start), "but not offered right away")
+        XCTAssertNil(store.pendingPrompt(welcomeSeen: true, telemetryOn: true, now: start + day - 60),
+                     "nor a minute short of a day later")
+        XCTAssertEqual(store.pendingPrompt(welcomeSeen: true, telemetryOn: true, now: start + day), .support)
+        XCTAssertEqual(SupportPromptStore(defaults: defaults, calendar: calendar)
+            .pendingPrompt(welcomeSeen: true, telemetryOn: true, now: start + day), .support,
+                       "a relaunch keeps the clock")
+
+        XCTAssertNil(store.pendingPrompt(
+            welcomeSeen: true, telemetryOn: true, now: start + 2 * day, shownSince: start + day - 60),
+                     "a window shown before the mark and still open is not interrupted")
+        XCTAssertEqual(store.pendingPrompt(
+            welcomeSeen: true, telemetryOn: true, now: start + 2 * day, shownSince: start + day), .support,
+                       "the next time it is shown")
+        XCTAssertTrue(store.isPending)
+    }
+
+    func testALaterApplyDoesNotRestartTheWait() {
+        let store = SupportPromptStore(defaults: defaults, calendar: calendar)
+        store.recordDownload(wallpaperID: "first")
+        store.recordSuccessfulActivation(wallpaperID: "first", now: start)
+        store.recordDownload(wallpaperID: "second")
+        store.recordSuccessfulActivation(wallpaperID: "second", now: start + day - 60)
+        XCTAssertEqual(store.pendingPrompt(welcomeSeen: true, telemetryOn: true, now: start + day), .support)
+    }
+
+    /// The first-run guide was the day's question: nothing follows it that day, a relaunch
+    /// included, and the next day the prompts resume in their order.
+    func testNoPromptComesOnTheDayTheFirstRunGuideEnded() {
+        let store = SupportPromptStore(defaults: defaults, calendar: calendar)
+        store.recordWelcomeGuideEnded(now: start)
+        XCTAssertNil(store.pendingPrompt(welcomeSeen: true, telemetryOn: false, now: start + 60))
+        XCTAssertNil(SupportPromptStore(defaults: defaults, calendar: calendar)
+            .pendingPrompt(welcomeSeen: true, telemetryOn: false, now: start + 60), "a relaunch the same day")
+        XCTAssertEqual(SupportPromptStore(defaults: defaults, calendar: calendar)
+            .pendingPrompt(welcomeSeen: true, telemetryOn: false, now: start + day), .telemetry)
+
+        store.markPresented(.telemetry, now: start + day)
+        store.recordWelcomeGuideEnded(now: start)
+        XCTAssertNil(store.pendingPrompt(welcomeSeen: true, telemetryOn: false, battery: unplugged, now: start + day + 60),
+                     "an earlier end does not give back the day of a later prompt")
     }
 
     func testTelemetryPromptIsForThoseWhoFinishedTheGuideWithoutIt() {
@@ -240,7 +290,7 @@ final class SupportPromptStoreTests: XCTestCase {
     func testTheDiscordInvitationComesAfterEveryOtherPromptOnADayOfItsOwn() {
         let store = SupportPromptStore(defaults: defaults, calendar: calendar)
         store.recordDownload(wallpaperID: "downloaded")
-        store.recordSuccessfulActivation(wallpaperID: "downloaded")
+        store.recordSuccessfulActivation(wallpaperID: "downloaded", now: start)
         useOnDays(store, 8)
         var now = start + 30 * day
         var shown = [SupportPromptStore.Prompt]()
@@ -332,7 +382,7 @@ final class SupportPromptStoreTests: XCTestCase {
     func testTheBatteryQuestionComesRightAfterThePerformanceDataQuestion() {
         let store = SupportPromptStore(defaults: defaults, calendar: calendar)
         store.recordDownload(wallpaperID: "downloaded")
-        store.recordSuccessfulActivation(wallpaperID: "downloaded")
+        store.recordSuccessfulActivation(wallpaperID: "downloaded", now: start)
         useOnDays(store, 8)
         var now = start + 30 * day
         var shown = [SupportPromptStore.Prompt]()
@@ -384,6 +434,7 @@ final class SupportPromptStoreTests: XCTestCase {
         defaults.set(earlier, forKey: "WallpaperMachine.supportPrompt.state")
         let store = SupportPromptStore(defaults: defaults, calendar: calendar)
         XCTAssertTrue(store.isPending)
+        // Earned under a build that did not record when: it already waited, so it is due at once.
         XCTAssertEqual(store.pendingPrompt(welcomeSeen: false, telemetryOn: true, now: start), .support)
     }
 }

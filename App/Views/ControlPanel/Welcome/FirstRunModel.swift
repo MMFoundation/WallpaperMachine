@@ -141,9 +141,13 @@ final class FirstRunModel {
   }
 
   /// Ends the guide: the first-run flag is set unless it already is (a guide replayed from Settings
-  /// leaves it alone), and the guide is no longer requested.
+  /// leaves it alone), and the guide is no longer requested. A first run's guide was the day's
+  /// question, so no one-time prompt follows it that day.
   func finish() {
-    if !controller.welcomeSeen { controller.markWelcomeSeen() }
+    if !controller.welcomeSeen {
+      controller.markWelcomeSeen()
+      controller.store.supportPrompt?.recordWelcomeGuideEnded()
+    }
     controller.shell.isWelcomeRequested = false
     close()
   }

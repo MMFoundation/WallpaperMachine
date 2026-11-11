@@ -3,7 +3,10 @@ import Observation
 
 /// The panel's six one-time prompts and when each may appear.
 ///
-/// - `support` asks for support once a successfully downloaded wallpaper has been applied.
+/// - `support` asks for support once a successfully downloaded wallpaper has been applied, but not
+///   then: it waits at least `supportDelay` (a day) after that apply, and comes the first time the
+///   panel window is shown after that (opened, brought back from the Dock, or shown again after
+///   the app was hidden), so a window left open across the mark does not interrupt.
 /// - `star` asks for a GitHub star, once, from someone who did not choose it in the support
 ///   prompt, after 14 days and on at least 5 different days of opening the panel. Someone who
 ///   never downloads a wallpaper, and so never sees the support prompt, gets it too.
@@ -24,10 +27,10 @@ import Observation
 ///   Settings › About or the Help menu spends it.
 ///
 /// At most one is pending at a time, in that order of priority (telemetry, battery, subscriptions,
-/// support, star, discord), and
-/// none appears on the same day as another. "First use" for the star and Discord prompts is the
-/// first day the panel was opened with a build that counts it, so an existing user's clock starts
-/// at the update that brought the star prompt.
+/// support, star, discord), and none appears on the same day as another, or on the day the
+/// first-run guide ended: the guide was that day's question. "First use" for the star and Discord
+/// prompts is the first day the panel was opened with a build that counts it, so an existing
+/// user's clock starts at the update that brought the star prompt.
 @MainActor
 @Observable
 final class SupportPromptStore {
@@ -51,6 +54,8 @@ final class SupportPromptStore {
         var keepsRunning: Bool { batteryMode == .keepRunning && otherAppInFront == .keepRunning }
     }
 
+    /// How long the support offer waits after the apply that earned it.
+    static let supportDelay: TimeInterval = 24 * 60 * 60
     static let starDelay: TimeInterval = 14 * 24 * 60 * 60
     static let starUseDays = 5
     static let discordDelay: TimeInterval = 21 * 24 * 60 * 60
@@ -60,6 +65,9 @@ final class SupportPromptStore {
         var downloadedWallpaperIDs: Set<String> = []
         var pending = false
         var presented = false
+        /// When the apply that earned the support offer happened; nil for an offer earned under a
+        /// build that did not record it, which is due at once.
+        var qualifiedAt: Date?
         var starChosen = false
         var starPresented = false
         var telemetryAsked = false
@@ -80,6 +88,7 @@ final class SupportPromptStore {
             downloadedWallpaperIDs = try container.decodeIfPresent(Set<String>.self, forKey: .downloadedWallpaperIDs) ?? []
             pending = try container.decodeIfPresent(Bool.self, forKey: .pending) ?? false
             presented = try container.decodeIfPresent(Bool.self, forKey: .presented) ?? false
+            qualifiedAt = try container.decodeIfPresent(Date.self, forKey: .qualifiedAt)
             starChosen = try container.decodeIfPresent(Bool.self, forKey: .starChosen) ?? false
             starPresented = try container.decodeIfPresent(Bool.self, forKey: .starPresented) ?? false
             telemetryAsked = try container.decodeIfPresent(Bool.self, forKey: .telemetryAsked) ?? false
@@ -123,16 +132,19 @@ final class SupportPromptStore {
     /// The prompt to show now, if any. `welcomeSeen` is whether the welcome guide had been
     /// finished; `telemetryOn` whether sending performance data is already on; `steamSignedIn`
     /// whether a Steam account is signed in for downloads; `battery` what the battery question
-    /// depends on, read only while that question can still come up.
+    /// depends on, read only while that question can still come up; `shownSince` when the panel
+    /// window was last shown (nil reads as `now`), which the support offer needs to be at least
+    /// `supportDelay` after the apply that earned it.
     func pendingPrompt(
         welcomeSeen: Bool, telemetryOn: Bool, steamSignedIn: Bool = false,
-        battery: @autoclosure () -> BatteryFacts = BatteryFacts(), now: Date = Date()
+        battery: @autoclosure () -> BatteryFacts = BatteryFacts(), now: Date = Date(),
+        shownSince: Date? = nil
     ) -> Prompt? {
         if let last = state.lastPromptAt, calendar.isDate(last, inSameDayAs: now) { return nil }
         if welcomeSeen, !telemetryOn, !state.telemetryAsked { return .telemetry }
         if welcomeSeen, !state.batteryAsked, asksAboutBattery(battery()) { return .battery }
         if welcomeSeen, steamSignedIn, !state.subscriptionsOffered { return .subscriptions }
-        if isPending { return .support }
+        if isPending, supportIsDue(shownAt: shownSince ?? now) { return .support }
         if !state.starChosen, !state.starPresented, let first = state.firstUseAt,
            now.timeIntervalSince(first) >= Self.starDelay, state.useDays >= Self.starUseDays {
             return .star
@@ -142,6 +154,13 @@ final class SupportPromptStore {
             return .discord
         }
         return nil
+    }
+
+    /// The support offer waited long enough: the panel window was shown at least `supportDelay` after
+    /// the apply that earned it. An offer earned before builds recorded that apply is due at once.
+    private func supportIsDue(shownAt: Date) -> Bool {
+        guard let qualifiedAt = state.qualifiedAt else { return true }
+        return shownAt.timeIntervalSince(qualifiedAt) >= Self.supportDelay
     }
 
     /// The battery question applies: a Mac with a battery that runs on it now or has with a
@@ -174,12 +193,15 @@ final class SupportPromptStore {
         persist(next)
     }
 
-    func recordSuccessfulActivation(wallpaperID: String) {
+    /// A downloaded wallpaper was applied: the support offer is earned, and its wait starts now. A
+    /// later apply does not restart the wait.
+    func recordSuccessfulActivation(wallpaperID: String, now: Date = Date()) {
         guard !wallpaperID.isEmpty, !state.pending, !state.presented,
               state.downloadedWallpaperIDs.contains(wallpaperID) else { return }
         var next = state
         next.downloadedWallpaperIDs.removeAll()
         next.pending = true
+        next.qualifiedAt = now
         persist(next)
     }
 
@@ -198,6 +220,15 @@ final class SupportPromptStore {
         next.lastUseDay = day
         next.useDays += 1
         if next.firstUseAt == nil { next.firstUseAt = now }
+        persist(next)
+    }
+
+    /// The first-run guide ended. It was that day's question, so no one-time
+    /// prompt follows it on the same day.
+    func recordWelcomeGuideEnded(now: Date = Date()) {
+        guard state.lastPromptAt.map({ $0 < now }) ?? true else { return }
+        var next = state
+        next.lastPromptAt = now
         persist(next)
     }
 

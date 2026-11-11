@@ -173,7 +173,7 @@ final class PanelLibraryActionsTests: PanelTestCase {
     }
   }
 
-  func testApplyingHidesTheAppOnlyWhenTheSettingIsOnNothingWaitsAndNoPromptIsPending() async throws {
+  func testApplyingHidesTheAppOnlyWhenTheSettingIsOnNothingWaitsAndNoPromptIsDue() async throws {
     let prompt = SupportPromptStore(defaults: try TemporaryDefaults.make(for: self).defaults)
     try await withApplyingPanel(supportPrompt: prompt) { panel, bridge, _ in
       let controller = panel.controller
@@ -207,11 +207,19 @@ final class PanelLibraryActionsTests: PanelTestCase {
       XCTAssertEqual(bridge.assignments["primary"], "b")
       XCTAssertEqual(hidden, 2, "the first of the two did not hide the app, the last did")
 
-      // The support prompt is waiting for the user to see the app, so applying keeps it open.
+      // The first downloaded wallpaper hides the app like any other: the support offer it earns
+      // waits a day.
       prompt.recordDownload(wallpaperID: "c")
       try await controller.activate("c")
       XCTAssertTrue(prompt.isPending)
-      XCTAssertEqual(hidden, 2)
+      XCTAssertNil(controller.duePrompt)
+      XCTAssertEqual(hidden, 3)
+
+      // A prompt that is due waits for the user to see the app, so applying keeps it open.
+      prompt.qualifyForDiscordInvitation()
+      try await controller.activate("a")
+      XCTAssertEqual(controller.duePrompt, .discord)
+      XCTAssertEqual(hidden, 3)
     }
   }
 

@@ -8,11 +8,6 @@ import XCTest
 /// it; only a visible sheet spends it; a link that fails keeps it; leaving always works.
 @MainActor
 final class SupportPromptPresenterTests: PanelTestCase {
-  private func qualify(_ prompt: SupportPromptStore) {
-    prompt.recordDownload(wallpaperID: "downloaded")
-    prompt.recordSuccessfulActivation(wallpaperID: "downloaded")
-  }
-
   private func withPresenter(
     welcomeSeen: Bool = true,
     _ body: (PanelFixture, SupportPromptPresenter, SupportPromptStore, UserDefaults) async throws -> Void
@@ -49,11 +44,13 @@ final class SupportPromptPresenterTests: PanelTestCase {
 
   // MARK: What holds the offer
 
-  /// While the guide is open the offer stays pending, and shows when the guide ends.
-  func testTheGuideHoldsTheOfferUntilItEnds() async throws {
-    try await withPresenter(welcomeSeen: false) { panel, presenter, prompt, _ in
-      qualify(prompt)
+  /// While a guide replayed from Settings is open the offer stays pending, and shows when the
+  /// guide ends.
+  func testAReplayedGuideHoldsTheOfferUntilItEnds() async throws {
+    try await withPresenter { panel, presenter, prompt, _ in
+      prompt.qualifyForSupportOffer()
       panel.show()
+      panel.controller.shell.isWelcomeRequested = true
       XCTAssertTrue(panel.controller.supportPromptPending)
       XCTAssertFalse(presenter.wantsPresentation, "The guide keeps priority")
       XCTAssertTrue(prompt.isPending, "and the offer stays pending")
@@ -64,11 +61,32 @@ final class SupportPromptPresenterTests: PanelTestCase {
     }
   }
 
+  /// The first-run guide was the day's question: ending it holds every prompt until a later day,
+  /// the offer included, which stays pending.
+  func testEndingTheFirstRunGuideHoldsEveryPromptUntilALaterDay() async throws {
+    try await withPresenter(welcomeSeen: false) { panel, presenter, prompt, defaults in
+      prompt.qualifyForSupportOffer()
+      prompt.qualifyForDiscordInvitation()
+      panel.show()
+      XCTAssertTrue(panel.controller.supportPromptPending)
+      XCTAssertFalse(presenter.wantsPresentation, "The guide keeps priority")
+
+      panel.controller.welcome.open()
+      panel.controller.welcome.finish()
+      XCTAssertNil(panel.controller.duePrompt, "Nothing follows the guide that day")
+      XCTAssertFalse(presenter.wantsPresentation)
+      XCTAssertTrue(prompt.isPending, "The offer is kept for a later day")
+      XCTAssertEqual(
+        SupportPromptStore(defaults: defaults).pendingPrompt(
+          welcomeSeen: true, telemetryOn: true, now: Date() + 2 * 86_400), .support)
+    }
+  }
+
   /// Another popover, the download dialog, a wallpaper switch or a Steam sign-in each hold the offer;
   /// it resumes, unspent, when they are over.
   func testAnotherModalOrASwitchHoldsTheOfferAndItResumes() async throws {
     try await withPresenter { panel, presenter, prompt, _ in
-      qualify(prompt)
+      prompt.qualifyForSupportOffer()
       panel.show()
       XCTAssertTrue(presenter.wantsPresentation)
 
@@ -95,7 +113,7 @@ final class SupportPromptPresenterTests: PanelTestCase {
   func testTheDownloadDialogHoldsTheOfferUntilItCloses() async throws {
     try await withPresenter { panel, presenter, prompt, _ in
       let downloads = panel.controller.downloads
-      qualify(prompt)
+      prompt.qualifyForSupportOffer()
       panel.show()
       XCTAssertTrue(presenter.wantsPresentation)
 
@@ -114,14 +132,14 @@ final class SupportPromptPresenterTests: PanelTestCase {
   /// A hidden window reports no offer and shows none, so nobody who cannot see it spends it.
   func testAHiddenWindowNeitherShowsNorSpendsTheOffer() async throws {
     try await withPresenter { panel, presenter, prompt, defaults in
-      qualify(prompt)
+      prompt.qualifyForSupportOffer()
       XCTAssertFalse(presenter.wantsPresentation, "The window is not on screen")
       presenter.sheetDidAppear()
       XCTAssertTrue(prompt.isPending, "A sheet nobody could see does not spend the offer")
       XCTAssertTrue(SupportPromptStore(defaults: defaults).isPending)
     }
     try await withPresenter { panel, presenter, prompt, _ in
-      qualify(prompt)
+      prompt.qualifyForSupportOffer()
       panel.show()
       XCTAssertTrue(presenter.wantsPresentation)
       panel.hide()
@@ -141,7 +159,7 @@ final class SupportPromptPresenterTests: PanelTestCase {
       prompt.recordSuccessfulActivation(wallpaperID: "local-import")
       panel.show()
       XCTAssertFalse(presenter.wantsPresentation, "A local import never qualifies")
-      qualify(prompt)
+      prompt.qualifyForSupportOffer()
       XCTAssertTrue(presenter.wantsPresentation)
       XCTAssertTrue(prompt.isPending, "Wanting is not showing")
 
@@ -195,7 +213,7 @@ final class SupportPromptPresenterTests: PanelTestCase {
         panel.controller.openSupportURL = { opened.append($0); return true }
         try panel.controller.appLanguage.set(language)
         panel.show()
-        qualify(prompt)
+        prompt.qualifyForSupportOffer()
         presenter.sheetDidAppear()
         await presenter.choose(choice)
         XCTAssertEqual(opened.map(\.absoluteString), [destination], "\(choice) in \(language)")
@@ -216,7 +234,7 @@ final class SupportPromptPresenterTests: PanelTestCase {
         var opened = [URL]()
         panel.controller.openSupportURL = { opened.append($0); return allowsOpening }
         panel.show()
-        qualify(prompt)
+        prompt.qualifyForSupportOffer()
         presenter.sheetDidAppear()
 
         await presenter.choose(.star)
@@ -248,7 +266,7 @@ final class SupportPromptPresenterTests: PanelTestCase {
       var opened = 0
       panel.controller.openSupportURL = { _ in opened += 1; return true }
       panel.show()
-      qualify(prompt)
+      prompt.qualifyForSupportOffer()
       presenter.sheetDidAppear()
       await presenter.dismiss().value
       await presenter.choose(.star)

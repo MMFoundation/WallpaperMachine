@@ -7,11 +7,6 @@ import XCTest
 /// the welcome guide, a popover or a download dialog is the presenter's.
 @MainActor
 final class PanelSupportPromptTests: PanelTestCase {
-  private func qualify(_ prompt: SupportPromptStore) {
-    prompt.recordDownload(wallpaperID: "downloaded")
-    prompt.recordSuccessfulActivation(wallpaperID: "downloaded")
-  }
-
   private func withPromptPanel(
     _ body: (PanelFixture, SupportPromptStore, UserDefaults) async throws -> Void
   ) async throws {
@@ -32,15 +27,16 @@ final class PanelSupportPromptTests: PanelTestCase {
     try await withPromptPanel { panel, prompt, defaults in
       panel.show()
       let controller = panel.controller
+      let dayAgo = Date() - SupportPromptStore.supportDelay - 3_600
 
-      prompt.recordSuccessfulActivation(wallpaperID: "local-import")
+      prompt.recordSuccessfulActivation(wallpaperID: "local-import", now: dayAgo)
       XCTAssertFalse(controller.supportPromptPending, "A local import does not qualify")
 
       prompt.recordDownload(wallpaperID: "downloaded")
-      prompt.recordSuccessfulActivation(wallpaperID: "another-wallpaper")
+      prompt.recordSuccessfulActivation(wallpaperID: "another-wallpaper", now: dayAgo)
       XCTAssertFalse(controller.supportPromptPending, "Another wallpaper than the downloaded one does not qualify")
 
-      prompt.recordSuccessfulActivation(wallpaperID: "downloaded")
+      prompt.recordSuccessfulActivation(wallpaperID: "downloaded", now: dayAgo)
       XCTAssertTrue(controller.supportPromptPending)
 
       controller.supportPromptShown()
@@ -58,12 +54,37 @@ final class PanelSupportPromptTests: PanelTestCase {
     }
   }
 
+  /// The apply that earns the offer does not bring it up: it waits a day, and then for the window
+  /// to be shown again, so a window left open across the mark is not interrupted.
+  func testTheOfferWaitsADayAndThenForTheWindowToBeShownAgain() async throws {
+    try await withPromptPanel { panel, prompt, _ in
+      let controller = panel.controller
+      panel.show()
+      prompt.recordDownload(wallpaperID: "downloaded")
+      prompt.recordSuccessfulActivation(wallpaperID: "downloaded")
+      XCTAssertTrue(prompt.isPending, "Earned")
+      XCTAssertNil(controller.duePrompt, "but not offered on the apply that earned it")
+      XCTAssertFalse(controller.supportPromptPending)
+    }
+    try await withPromptPanel { panel, prompt, _ in
+      let controller = panel.controller
+      // Earned a day and an hour ago; the window was shown two hours ago and is still open.
+      prompt.qualifyForSupportOffer()
+      panel.show(at: Date() - 7_200)
+      XCTAssertNil(controller.duePrompt, "The day passed while the window stayed open")
+      XCTAssertFalse(controller.supportPromptPending)
+      panel.hide()
+      panel.show()
+      XCTAssertEqual(controller.pendingPrompt, .support, "Shown again, it offers")
+    }
+  }
+
   /// A hidden, minimised or covered panel must not report the offer, and showing it spends it, so a
   /// panel nobody can see never consumes it.
   func testAHiddenPanelDoesNotConsumeThePendingOffer() async throws {
     try await withPromptPanel { panel, prompt, defaults in
       let controller = panel.controller
-      qualify(prompt)
+      prompt.qualifyForSupportOffer()
 
       XCTAssertFalse(controller.supportPromptPending, "The window is not presented")
       controller.supportPromptShown()
@@ -82,7 +103,7 @@ final class PanelSupportPromptTests: PanelTestCase {
 
   func testTheOfferWaitsWhileAWallpaperSwitchRunsOrIsQueued() async throws {
     try await withPromptPanel { panel, prompt, _ in
-      qualify(prompt)
+      prompt.qualifyForSupportOffer()
       panel.show()
       XCTAssertFalse(panel.controller.supportPromptDeferredBySwitch)
       var release: CheckedContinuation<Void, Never>?
@@ -112,7 +133,7 @@ final class PanelSupportPromptTests: PanelTestCase {
         panel.controller.openSupportURL = { opened.append($0); return true }
         try panel.controller.appLanguage.set(language)
         panel.show()
-        qualify(prompt)
+        prompt.qualifyForSupportOffer()
         try await panel.controller.supportPromptChoice(choice)
         XCTAssertEqual(opened.map(\.absoluteString), [destination], "\(choice) in \(language)")
         XCTAssertFalse(prompt.isPending)
@@ -123,7 +144,7 @@ final class PanelSupportPromptTests: PanelTestCase {
   func testNotNowSpendsTheOfferAndOpensNothing() async throws {
     try await withPromptPanel { panel, prompt, _ in
       panel.show()
-      qualify(prompt)
+      prompt.qualifyForSupportOffer()
       try await panel.controller.supportPromptChoice(.dismiss)
       XCTAssertFalse(prompt.isPending)
     }
@@ -138,7 +159,7 @@ final class PanelSupportPromptTests: PanelTestCase {
         var opened = [URL]()
         panel.controller.openSupportURL = { opened.append($0); return allowsOpening }
         panel.show()
-        qualify(prompt)
+        prompt.qualifyForSupportOffer()
 
         do {
           try await panel.controller.supportPromptChoice(.star)
@@ -224,6 +245,14 @@ final class PanelSupportPromptTests: PanelTestCase {
 }
 
 extension SupportPromptStore {
+  /// A downloaded wallpaper applied a day and an hour before `now`: the support offer is due on a
+  /// window shown since then. The hour keeps a window shown a moment before the call from landing
+  /// before the mark on a slow machine.
+  func qualifyForSupportOffer(now: Date = Date()) {
+    recordDownload(wallpaperID: "downloaded")
+    recordSuccessfulActivation(wallpaperID: "downloaded", now: now - Self.supportDelay - 3_600)
+  }
+
   /// Seven days of use over the last four weeks, with the star already chosen and the performance
   /// data question answered: the Discord invitation is due today.
   func qualifyForDiscordInvitation(now: Date = Date()) {

@@ -62,17 +62,20 @@ struct BatteryQuestionFacts: Equatable {
 ///
 /// Whether a prompt may appear, and which, is the store's (`SupportPromptStore`: the performance
 /// data question, the battery question, the offer to import the Steam subscriptions, the support
-/// offer after a downloaded wallpaper is applied, the later star request, the still later Discord
-/// invitation, one a day).
+/// offer a day after a downloaded wallpaper is applied, the later star request, the still later
+/// Discord invitation, one a day).
 /// Whether it is on screen is the panel's: a hidden or minimised panel must not report
 /// one, because showing it spends it.
 extension PanelController {
   /// The prompt the store names now, whether or not anyone can see the panel. Without a telemetry
-  /// service there is nothing to offer, so the performance data question never comes up.
+  /// service there is nothing to offer, so the performance data question never comes up. The
+  /// support offer reads when the window was shown, so it waits for the window to be opened or
+  /// shown again rather than coming up in the middle of something.
   var duePrompt: SupportPromptStore.Prompt? {
     store.supportPrompt?.pendingPrompt(
       welcomeSeen: welcomeSeen, telemetryOn: store.telemetry?.isEnabled ?? true,
-      steamSignedIn: workshop.downloader.savedAccount != nil, battery: batteryPromptFacts)
+      steamSignedIn: workshop.downloader.savedAccount != nil, battery: batteryPromptFacts,
+      shownSince: presentation.shownSince)
   }
 
   /// What the battery question depends on: the battery the panel last read, the engine's power

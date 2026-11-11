@@ -1292,7 +1292,9 @@ never to `.shared`.
   `PanelErrorStateTests` (precedence, a cancellation is not shown, a bridge error dismissed by
   revision returns when it happens again, library and download failures stay dismissed until they
   recur, a cleared source re-arms its dismissal); `PanelPresentationTests` (injected and real
-  window visibility, the key and close hooks, a view losing its window counts as closing);
+  window visibility, the time the window was shown kept while it is covered and uncovered and
+  reset when it is ordered out, minimized or its app hidden, the key and close hooks, a view losing its window
+  counts as closing);
   `PanelStoreRevisionsTests` (each store's notification bumps only its own counter, posts from
   another instance or a background thread, nothing counted outside `start()`/`stop()`, a reader is
   told); `PanelInspectorObservationTests`; `PanelPreferencesTests` (the keys earlier builds wrote,
@@ -1351,7 +1353,8 @@ never to `.shared`.
   `LivePreviewSchedulerTests`.
 - Installed and the library: `PanelLibraryActionsTests` (favorites, Show in Finder, selection
   slots, only Reapply restarting what the target shows, the target display taken when the user
-  asked, hiding after an apply, Apply to all displays and its rollback, the question before
+  asked, hiding after an apply (the first downloaded one included, unless a prompt is already
+  due), Apply to all displays and its rollback, the question before
   applying a scene Native Metal refused (the scene read again first: a refusal that no longer
   holds asks nothing, an unreadable scene asks with the remembered reason; Cancel keeps the
   displays, Reapply and the shown scene ask nothing), previous and next,
@@ -1477,7 +1480,11 @@ never to `.shared`.
   report it would send, the performance data question asked once of someone who finished the
   guide earlier and answered from the presenter, the guide answering it only once its
   Preferences page was shown and committing its switch as a draft). `PanelSupportPromptTests`
-  and `SupportPromptPresenterTests` also cover the Discord invitation: **Join Discord** opens
+  and `SupportPromptPresenterTests` cover the support offer waiting a day after the apply that
+  earned it and then for the window to be shown again (a window shown before the mark
+  is not interrupted), a replayed guide holding it until it ends, and the end of a first-run
+  guide holding every prompt until a later day while the offer stays pending. They
+  also cover the Discord invitation: **Join Discord** opens
   https://mmfoundation.dev/discord in English and Chinese and ends it, **Not now** spends it
   without opening anything, a refused link keeps the sheet up, and **Join Discord** in About
   answers it; `WelcomeRenderTests` lays its sheet out in every language.
@@ -1670,8 +1677,11 @@ install and a no-login smoke run (see [README.md](README.md#opt-in-layers)).
 
 `SupportPromptStoreTests` — a downloaded wallpaper qualifies only after a
 successful activation, a pending prompt survives relaunch and further downloads,
-and a presented prompt never returns. Across the six prompts: one a day in
-priority order, the performance data question only for someone who finished the
+and a presented prompt never returns. The support offer waits a day after the apply
+that earned it (a relaunch keeps the clock, a later apply does not restart it, a
+window shown before the mark waits to be shown again, and an offer saved
+by an earlier build without the time is due at once). Across the six prompts: one a day
+in priority order and none on the day the first-run guide ended, the performance data question only for someone who finished the
 guide without it, the battery question right after it, only with a battery, a battery use
 now or since launch (not saved across launches), a wallpaper playing and nothing chosen,
 once for good and spent by the guide or a choice elsewhere, the subscriptions offer only for someone signed in to Steam who
