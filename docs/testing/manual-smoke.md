@@ -284,8 +284,14 @@ reuse, or visual behavior, which is why these items are manual.
       act as labelled, and with the target display empty it says "Nothing on this
       display" while still reporting the global playback state.
 - [ ] Leave invalid scaling text, refresh or change routes, then return: the
-      text is preserved and Apply changes is disabled. Return stages only that
+      text is preserved and, with nothing else waiting, no Revert / Apply changes
+      footer is drawn (invalid text is never staged). Return stages only that
       field, not unrelated properties.
+- [ ] Stage an edit: the footer with Revert and Apply changes fades in, Apply
+      changes takes the accent and Apply wallpaper turns plain; Apply changes or
+      Revert hides the footer and gives the accent back. A switch at the bottom of
+      the visible inspector stays clear of the footer its edit brings in, and a
+      quick double click on it never reaches Apply changes or Revert.
 - [ ] Check immediate audio/FPS/scaling-mode/position semantics versus pending
       Apply/Revert.
 - [ ] Check the Language, Clock Location and Bar Style property menus, and that

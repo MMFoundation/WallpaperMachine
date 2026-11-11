@@ -4,6 +4,10 @@ import SwiftUI
 /// tags.
 struct InspectorHeader: View {
   let row: LibraryRow
+  /// Whether Apply wallpaper is the inspector's accent action (`InspectorPolicy.primaryAction`).
+  let applyIsPrimary: Bool
+  /// Apply wallpaper takes the keyboard and VoiceOver focus each time this grows.
+  var applyFocusRequests = 0
 
   @Environment(\.panelTheme) private var theme
 
@@ -33,7 +37,7 @@ struct InspectorHeader: View {
             .padding(.top, 2)
         }
       }
-      InspectorActionRow(row: row)
+      InspectorActionRow(row: row, applyIsPrimary: applyIsPrimary, applyFocusRequests: applyFocusRequests)
       if !row.tags.isEmpty {
         TagFlow(spacing: 6) {
           ForEach(Array(row.tags.enumerated()), id: \.offset) { _, tag in TagChip(text: tag) }
@@ -117,6 +121,8 @@ struct InspectorWash: View {
 /// Apply, favorite and the menu of everything else.
 struct InspectorActionRow: View {
   let row: LibraryRow
+  let applyIsPrimary: Bool
+  var applyFocusRequests = 0
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
@@ -130,7 +136,9 @@ struct InspectorActionRow: View {
     let isFavorite = controller.favoriteIDs.contains(row.id)
     let favoriteKey = PanelActionCoordinator.key("favorite", id: row.id)
     HStack(spacing: 8) {
-      InspectorApplyButton(offer: offer, identifier: "inspector.apply")
+      InspectorApplyButton(
+        offer: offer, identifier: "inspector.apply", isPrimary: applyIsPrimary,
+        focusRequests: applyFocusRequests)
 
       Button {
         controller.launch(favoriteKey) { try await controller.toggleFavorite(row.id) }
@@ -158,20 +166,18 @@ struct InspectorApplyButton: View {
   let offer: ApplyOffer
   let identifier: String
   /// Drawn as the inspector's accent action, unless staged edits take the accent (Installed only);
-  /// then it is the quiet secondary button.
+  /// then it is the quiet secondary button. The look changes under the same button
+  /// (`InspectorActionButtonStyle`), which keeps its keyboard focus, VoiceOver focus and hover.
   var isPrimary = true
+  /// The button takes the keyboard and VoiceOver focus each time this grows: the Installed
+  /// inspector hands it the focus Apply changes or Revert held when it went away.
+  var focusRequests = 0
 
   @Environment(PanelController.self) private var controller
+  @FocusState private var isFocused: Bool
+  @AccessibilityFocusState private var isVoiceOverFocused: Bool
 
   var body: some View {
-    if isPrimary {
-      button.buttonStyle(.panelPrimary(size: .regular, expands: true))
-    } else {
-      button.buttonStyle(.panelSecondary(size: .regular, expands: true))
-    }
-  }
-
-  private var button: some View {
     Button {
       controller.launch(offer.key) { [controller, offer] in try await controller.apply(offer) }
     } label: {
@@ -179,9 +185,16 @@ struct InspectorApplyButton: View {
         // The narrowest inspector shrinks the words a little rather than cutting them off.
         .minimumScaleFactor(0.8)
     }
+    .buttonStyle(.inspectorAction(isPrimary: isPrimary, size: .regular, expands: true))
     .disabled(!offer.isEnabled)
     .help(offer.help)
+    .focused($isFocused)
+    .accessibilityFocused($isVoiceOverFocused)
     .accessibilityIdentifier(identifier)
+    .onChange(of: focusRequests) {
+      isFocused = true
+      isVoiceOverFocused = true
+    }
   }
 }
 

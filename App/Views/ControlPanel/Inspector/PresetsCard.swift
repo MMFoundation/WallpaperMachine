@@ -55,8 +55,9 @@ struct PresetsCard: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .disabled(!bar.canPick(state, isPending: pending))
           .accessibilityLabel("Presets")
+          // A plain button: the accent is Apply wallpaper's or Apply changes'.
           Button("Apply") { apply(chosen) }
-            .buttonStyle(.panelPrimary(size: .compact))
+            .buttonStyle(.inspectorSecondary)
             .disabled(!bar.canApply(state, isPending: pending))
             .help(applyHelp(chosen))
         }

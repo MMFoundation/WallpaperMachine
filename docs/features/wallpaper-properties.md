@@ -232,6 +232,16 @@ else is pending until committed:
 - **Apply changes** saves pending properties and scaling factors.
 - **Revert** discards pending changes.
 
+Both sit in a footer under the inspector that is drawn only while something is pending,
+with a line saying so and repeating which settings take effect immediately; while it is
+drawn, **Apply changes** is the inspector's accent button in place of **Apply wallpaper**
+([control panel](control-panel.md#selection-versus-apply)). The footer comes in over the
+bottom of the inspector: the row whose edit brings it in is scrolled clear of it, and it takes
+clicks only once a double click's interval has passed, so the second click of a double click
+never lands on **Revert** or **Apply changes**. Once either has done its work and the footer
+goes, VoiceOver says **Changes applied.** or **Changes reverted.**, and the keyboard or
+VoiceOver focus the button held moves to **Apply wallpaper**.
+
 Unsubmitted text stays with its wallpaper when navigating between pages. A dirty
 or unsubmitted control shows a localized **Modified** flag outside its
 author-provided label; Reset clears the flag once the property is clean.

@@ -1386,7 +1386,8 @@ never to `.shared`.
   `InstalledPageRenderTests` (the page, footer, empty states, an empty collection among them, and
   popovers in every language and appearance at the narrowest column, the first read of the
   library said by the grid with no footer and no system spinner, the scroll offset restored).
-- Inspector: `InspectorPolicyTests`, `InspectorWordingTests` (among its sentences, what draws
+- Inspector: `InspectorPolicyTests` (among its rules, the Revert and Apply changes footer and its
+  accent Apply changes only while an edit waits), `InspectorWordingTests` (among its sentences, what draws
   the wallpaper said in words, with the renderer's id kept as it is on the detail line; a reported
   problem leads the line and is never said to play; nothing named before the runtime reports it,
   and no such line promised for a web page), `InspectorInputTests`,
@@ -1396,8 +1397,10 @@ never to `.shared`.
   Play's), `InspectorSliderTests` (VoiceOver, keys and the pointer each reach the saved edit; a
   drag previews and the release saves once; colours saved after a quiet period),
   `InspectorRenderTests` (the inspector and the whole panel with it open at 760×560 in every
-  language; the Compatibility card's renderer lines, with a problem, wrap in the narrowest column
-  in every language; a slider's VoiceOver, key and pointer changes reach the bridge),
+  language, and the inspector with an edit waiting, footer included; the footer drawn and said
+  aloud only while an edit waits; the Compatibility card's renderer lines, with a problem, wrap in the narrowest column
+  in every language; a slider's VoiceOver, key and pointer changes reach the bridge; the row whose
+  edit brings the footer in scrolled clear of it, and Apply changes and Revert said aloud once done),
   `PropertyLabelDocumentTests` (the label allowlist: entities, emphasis, colours, lists, broken
   markup, scripts and controls dropped, links only to allowed hosts, registered images only,
   limits), `PlacementGeometryTests`, `PlacementDraftsTests`, `PresetsBarStateTests` and, on the

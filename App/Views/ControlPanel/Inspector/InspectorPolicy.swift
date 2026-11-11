@@ -166,6 +166,28 @@ enum InspectorPolicy {
     display.scalingMode == .matchBlurred && display.isDrawnByNativePlayer ? .nativePlayer : .none
   }
 
+  // MARK: Apply changes
+
+  /// The footer with Revert and Apply changes is drawn only while something waits to be applied:
+  /// an edit the bridge holds (a property, a Wallpaper Engine option, a display's scale factor or
+  /// its Enabled switch), text typed but not sent, or a value on its way. Revert and Apply changes
+  /// have nothing to act on otherwise, and nil (the options still loading) has no footer either.
+  static func showsFooter(_ options: InspectorOptions?) -> Bool { options?.hasChanges == true }
+
+  /// Which of Apply wallpaper and Apply changes is the Installed inspector's accent action.
+  enum PrimaryAction: Equatable {
+    /// **Apply wallpaper** (or **Reapply wallpaper**) in the header: nothing waits to be applied.
+    case applyWallpaper
+    /// **Apply changes** in the footer, while edits wait; Apply wallpaper is then drawn plain.
+    case applyChanges
+  }
+
+  /// Apply changes takes the accent exactly while the footer is drawn, so the two are never the
+  /// accent at once. A notice's call to action and an open form's submit button keep their own.
+  static func primaryAction(_ options: InspectorOptions?) -> PrimaryAction {
+    showsFooter(options) ? .applyChanges : .applyWallpaper
+  }
+
   // MARK: Sections
 
   /// Displays opens by itself once the wallpaper is on a display. The state is the person's from the

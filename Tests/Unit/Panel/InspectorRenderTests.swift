@@ -90,6 +90,35 @@ final class InspectorRenderTests: InspectorTestCase {
     await fixture.shutdown()
   }
 
+  /// The footer with Revert and Apply changes is drawn only while an edit waits, so the test above
+  /// never meets it: with one waiting, the inspector still takes the smallest window it is given in
+  /// every language and both appearances, footer included.
+  func testTheInspectorWithChangesWaitingAcceptsTheWindowInEveryLanguage() async throws {
+    let fixture = try InspectorRenderFixture()
+    try await prepare(fixture)
+    fixture.store.wallpaperOptionsSnapshot?.dirty = true
+    let size = ControlPanelWindow.minimumContentSize
+    for language in AppLanguage.supported.map(\.tag) {
+      let languages = AppLanguageStore(
+        defaults: TemporaryDefaults.makeForCurrentTest().defaults, systemLanguages: [language])
+      PanelLocale.shared.bind(to: languages)
+      for dark in [false, true] {
+        let (window, hosting) = windowHosting(fixture, size: size, dark: dark)
+        try await settle()
+        hosting.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(
+          identifiers(in: hosting.view).isSuperset(of: ["inspector.revert", "inspector.applyChanges"]),
+          "\(language): the footer is drawn while an edit waits")
+        XCTAssertLessThanOrEqual(
+          hosting.sizeThatFits(in: size).width, size.width + 1,
+          "\(language) \(dark ? "dark" : "light"): the footer must not ask for more width")
+        window.contentViewController = nil
+        window.close()
+      }
+    }
+    await fixture.shutdown()
+  }
+
   func testTheEmptyInspectorAsksForASelectionInTheWindowToo() async throws {
     let fixture = try InspectorRenderFixture()
     fixture.store.appSnapshot.selectedWallpaperId = nil
@@ -378,12 +407,52 @@ final class InspectorRenderTests: InspectorTestCase {
     return found
   }
 
-  /// The footer's sentence is a status line, as the page's was: the edit that leaves something to
-  /// apply is said aloud, not only drawn.
-  func testTheFooterSaysAloudThatAnEditLeftSomethingToApply() async throws {
+  /// Every element of the accessibility tree below `root`, read by key as `identifiers(in:)` reads
+  /// them.
+  private func accessibilityObjects(in root: NSView) -> [NSObject] {
+    var found: [NSObject] = []
+    func walk(_ element: Any?, depth: Int) {
+      guard depth < 60, let object = element as? NSObject else { return }
+      found.append(object)
+      if object.responds(to: NSSelectorFromString("accessibilityChildren")),
+        let children = object.value(forKey: "accessibilityChildren") as? [Any]
+      {
+        for child in children { walk(child, depth: depth + 1) }
+      }
+    }
+    walk(root, depth: 0)
+    return found
+  }
+
+  /// The accessibility identifiers of the controls drawn below `root`, which say which controls the
+  /// inspector really drew. SwiftUI's elements answer the informal protocol, so they are read by key.
+  private func identifiers(in root: NSView) -> Set<String> {
+    var found = Set<String>()
+    func walk(_ element: Any?, depth: Int) {
+      guard depth < 60, let object = element as? NSObject else { return }
+      if object.responds(to: NSSelectorFromString("accessibilityIdentifier")),
+        let identifier = object.value(forKey: "accessibilityIdentifier") as? String, !identifier.isEmpty
+      {
+        found.insert(identifier)
+      }
+      if object.responds(to: NSSelectorFromString("accessibilityChildren")),
+        let children = object.value(forKey: "accessibilityChildren") as? [Any]
+      {
+        for child in children { walk(child, depth: depth + 1) }
+      }
+    }
+    walk(root, depth: 0)
+    return found
+  }
+
+  /// Revert and Apply changes are drawn only while an edit waits, and the footer's sentence is a
+  /// status line, as the page's was: the edit that leaves something to apply is said aloud, not only
+  /// drawn, once each time it happens.
+  func testTheFooterIsDrawnAndSaidAloudOnlyWhileAnEditWaits() async throws {
     let fixture = try InspectorRenderFixture()
     try await prepare(fixture)
     let sentence = "You have unapplied changes."
+    let footer: Set<String> = ["inspector.revert", "inspector.applyChanges"]
     let heard = Heard()
     let (window, view) = fixture.host(size: NSSize(width: 360, height: 1400)) {
       InstalledInspector().environment(\.panelAnnouncer, PanelAnnouncer { heard.lines.append($0) })
@@ -391,14 +460,115 @@ final class InspectorRenderTests: InspectorTestCase {
     try await settle(600)
     view.layoutSubtreeIfNeeded()
     XCTAssertEqual(fixture.controller.inspectorOptions(for: InspectorRenderFixture.selected)?.hasChanges, false)
+    XCTAssertTrue(identifiers(in: view).contains("inspector.apply"), "the options and the header are drawn")
+    XCTAssertTrue(identifiers(in: view).isDisjoint(with: footer), "nothing to apply yet, so no footer")
     XCTAssertFalse(heard.lines.contains(sentence), "nothing to apply yet")
 
     fixture.store.wallpaperOptionsSnapshot?.dirty = true
     try await fixture.panel.waitUntil(timeout: 5) {
       view.layoutSubtreeIfNeeded()
-      return heard.lines.contains(sentence)
+      return heard.lines.contains(sentence) && identifiers(in: view).isSuperset(of: footer)
     }
     XCTAssertEqual(heard.lines.filter { $0 == sentence }.count, 1, "said once")
+
+    fixture.store.wallpaperOptionsSnapshot?.dirty = false
+    try await fixture.panel.waitUntil(timeout: 5) {
+      view.layoutSubtreeIfNeeded()
+      return identifiers(in: view).isDisjoint(with: footer)
+    }
+    XCTAssertEqual(heard.lines.filter { $0 == sentence }.count, 1, "applied or reverted: nothing more is said")
+
+    fixture.store.wallpaperOptionsSnapshot?.dirty = true
+    try await fixture.panel.waitUntil(timeout: 5) {
+      view.layoutSubtreeIfNeeded()
+      return heard.lines.filter { $0 == sentence }.count == 2
+    }
+    XCTAssertTrue(identifiers(in: view).isSuperset(of: footer), "the next edit brings the footer back")
+
+    // Apply changes and Revert go away with the footer once they have done their work, so that is
+    // said too.
+    for (button, said) in [("inspector.applyChanges", "Changes applied."), ("inspector.revert", "Changes reverted.")] {
+      fixture.store.wallpaperOptionsSnapshot?.dirty = true
+      try await fixture.panel.waitUntil(timeout: 5) {
+        view.layoutSubtreeIfNeeded()
+        return identifiers(in: view).isSuperset(of: footer)
+      }
+      let press = try XCTUnwrap(
+        accessibilityObjects(in: view).first { $0.value(forKey: "accessibilityIdentifier") as? String == button })
+      press.perform(NSSelectorFromString("accessibilityPerformPress"))
+      try await fixture.panel.waitUntil(timeout: 5) {
+        view.layoutSubtreeIfNeeded()
+        return heard.lines.contains(said) && identifiers(in: view).isDisjoint(with: footer)
+      }
+    }
+    window.contentView = nil
+    await fixture.shutdown()
+  }
+
+  /// The footer comes in over the bottom of the inspector. A switch flipped, or text typed, at the
+  /// bottom of what is on show is scrolled clear of it, so the footer never lands on the row whose
+  /// edit brought it in.
+  func testTheFooterNeverCoversTheRowWhoseEditBringsItIn() async throws {
+    try await footerStaysClear(of: NSAccessibility.Role.checkBox, "Show the clock") { control, _ in
+      control.perform(NSSelectorFromString("accessibilityPerformPress"))
+    }
+    try await footerStaysClear(of: NSAccessibility.Role.textField, "Caption") { _, root in
+      // The first key typed: text not yet sent brings the footer in.
+      guard let field = views(NSTextField.self, in: root).first(where: { $0.stringValue == "Good evening" })
+      else { return XCTFail("the Caption field") }
+      field.stringValue = "Good evening!"
+      field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
+    }
+  }
+
+  /// Puts the control named `label` at the bottom of the inspector, edits it with `edit`, and
+  /// requires that the footer this brings in leaves the control on show above it.
+  private func footerStaysClear(
+    of role: NSAccessibility.Role, _ label: String, edit: (NSObject, NSView) -> Void
+  ) async throws {
+    let fixture = try InspectorRenderFixture()
+    try await prepare(fixture)
+    let (window, view) = fixture.host(size: NSSize(width: 360, height: 3000))
+    try await settle(600)
+    func element(_ match: (NSObject) -> Bool) -> NSObject? {
+      view.layoutSubtreeIfNeeded()
+      return accessibilityObjects(in: view).first(where: match)
+    }
+    func frame(_ object: NSObject?) -> NSRect? {
+      (object?.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue
+    }
+    func isControl(_ object: NSObject) -> Bool {
+      object.value(forKey: "accessibilityRole") as? String == role.rawValue
+        && object.value(forKey: "accessibilityLabel") as? String == label
+    }
+    // The window ends just under the control, as when the person has scrolled it to the bottom.
+    let viewTop = { window.convertToScreen(view.convert(view.bounds, to: nil)).maxY }
+    let height = viewTop() - (try XCTUnwrap(frame(element(isControl)), label)).minY + 12
+    window.setContentSize(NSSize(width: 360, height: height))
+    view.frame = NSRect(origin: .zero, size: NSSize(width: 360, height: height))
+    try await settle(300)
+    let before = try XCTUnwrap(frame(element(isControl)), label)
+    XCTAssertLessThan(before.minY - (viewTop() - height), 40, "precondition: \(label) is at the bottom")
+
+    edit(try XCTUnwrap(element(isControl), label), view)
+    let footer: Set<String> = ["inspector.revert", "inspector.applyChanges"]
+    try await fixture.panel.waitUntil(timeout: 5) {
+      view.layoutSubtreeIfNeeded()
+      return identifiers(in: view).isSuperset(of: footer)
+    }
+    try await settle(500)
+    let after = try XCTUnwrap(frame(element(isControl)), label)
+    let footerTop = try XCTUnwrap(
+      accessibilityObjects(in: view)
+        .filter {
+          footer.contains($0.value(forKey: "accessibilityIdentifier") as? String ?? "")
+            || ($0.value(forKey: "accessibilityLabel") as? String ?? "").contains("You have unapplied changes.")
+            || ($0.value(forKey: "accessibilityValue") as? String ?? "").contains("You have unapplied changes.")
+        }
+        .compactMap { frame($0)?.maxY }
+        .max())
+    XCTAssertGreaterThanOrEqual(after.minY, footerTop, "the footer covers \(label), just edited")
+    XCTAssertLessThanOrEqual(after.maxY, viewTop(), "\(label) is still on show")
     window.contentView = nil
     await fixture.shutdown()
   }

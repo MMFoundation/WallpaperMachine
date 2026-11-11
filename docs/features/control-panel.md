@@ -512,7 +512,7 @@ double click does.
 The inspector follows Wallpaper Engine's hierarchy: preview (16:10, rounded), title,
 facts (kind and size; on Discover the creator and subscribers too), actions and tags.
 For an installed wallpaper the filled accent button is **Apply wallpaper** (or
-**Reapply wallpaper**), beside the favorite button and **More actions**, a menu with
+**Reapply wallpaper**) while no edit waits to be applied, beside the favorite button and **More actions**, a menu with
 **Preview wallpaper**, **Show in Finder**, **Share…**, **Subscribe on Steam** (signed in
 to Steam Community) and **More by this author** for a Workshop wallpaper (see
 [Collections, authors and subscriptions](workshop-downloads.md#collections-authors-and-subscriptions)),
@@ -521,14 +521,21 @@ removing it from the target display's playlist, **Reinstall from Workshop…** f
 Workshop wallpaper (see
 [Reinstall from Workshop](workshop-downloads.md#reinstall-from-workshop)), **Report this
 problem on GitHub** and **Move wallpaper to Trash**. On Discover a wallpaper in the library
-leads with the same **Apply wallpaper** (or **Reapply wallpaper**) button, enabled where a
+leads with the same **Apply wallpaper** (or **Reapply wallpaper**) button, always the accent
+button there, enabled where a
 double click on its tile would apply it, with **Preview wallpaper**, **Subscribe on Steam** (signed in),
 **View on Steam Workshop** and **Share…** below it and **Move to Trash**, drawn in red, last.
 Any other item's primary action is **Download** (with **Download and apply** where it can
 apply), with **View on Steam Workshop** below and **More by this author** beside the creator's
-name. The inspector scrolls on its own;
-**Apply changes** and **Revert** (see [Properties](wallpaper-properties.md#properties))
-stay visible in a footer while editing. Its texts can be selected and copied.
+name. The inspector scrolls on its own and its texts can be selected and copied. While an
+edit of the installed wallpaper waits to be applied, a footer below the scrolling content
+holds **Revert** and **Apply changes** (see [Properties](wallpaper-properties.md#properties))
+under a line saying so and naming the settings that take effect immediately. **Apply changes**
+is then the accent button and **Apply wallpaper**, which still applies, is drawn plain, so
+the two are never the accent at once (a notice's call to action, such as **Update**, and the
+submit button of an open form, such as **Save preset**, keep their own); with nothing waiting the footer is not
+drawn. It fades in and out, at once with Reduce Motion, and VoiceOver says **You have unapplied
+changes.** when it appears. A preset's **Apply** is a plain button.
 
 Below the compatibility note, an installed wallpaper that can run (not
 Application) shows **Not working? Report on GitHub**. It opens the repository's

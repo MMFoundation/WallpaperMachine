@@ -290,6 +290,42 @@ final class InspectorPolicyTests: InspectorTestCase {
     }
   }
 
+  // MARK: Apply changes
+
+  /// Revert and Apply changes are drawn only while something waits to be applied, and Apply
+  /// changes then takes the accent from Apply wallpaper: one accent button at a time.
+  func testTheFooterAndItsAccentApplyAppearOnlyWhileSomethingWaitsToBeApplied() {
+    func make(dirty: Bool = false, inputs: InspectorOptions.Inputs = .init()) -> InspectorOptions {
+      InspectorOptions.make(
+        BridgeSnapshotFixtures.options(
+          wallpaperId: "w", dirty: dirty,
+          properties: [property("caption", .textInput, label: "Caption", value: .string(value: "Hi"))]),
+        inputs: inputs)
+    }
+    let clean = make()
+    XCTAssertFalse(InspectorPolicy.showsFooter(clean), "nothing to apply or revert")
+    XCTAssertEqual(InspectorPolicy.primaryAction(clean), .applyWallpaper)
+    XCTAssertFalse(InspectorPolicy.showsFooter(nil), "the options are still loading")
+    XCTAssertEqual(InspectorPolicy.primaryAction(nil), .applyWallpaper)
+
+    var typed = InspectorOptions.Inputs()
+    typed.textDrafts = ["caption": "Hello"]
+    var chosen = InspectorOptions.Inputs()
+    chosen.pendingValues = ["caption": .string(value: "Hey")]
+    var engine = InspectorOptions.Inputs()
+    engine.pendingEngineValues = [.brightness: .number(value: 60)]
+    let waiting: [(String, InspectorOptions)] = [
+      ("an edit the bridge holds", make(dirty: true)), ("text typed", make(inputs: typed)),
+      ("a value on its way", make(inputs: chosen)),
+      ("an engine option on its way", make(inputs: engine)),
+    ]
+    for (what, options) in waiting {
+      XCTAssertTrue(InspectorPolicy.showsFooter(options), what)
+      XCTAssertEqual(InspectorPolicy.primaryAction(options), .applyChanges, what)
+      XCTAssertTrue(options.canRevert, "\(what): the footer's buttons have something to act on")
+    }
+  }
+
   // MARK: Frame rate
 
   func testADisplayTheNativePlayerDrawsOnHasNoFrameRateToSet() {

@@ -4675,14 +4675,20 @@
     "You have unapplied changes." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Você tem alterações não aplicadas."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "적용하지 않은 변경 사항이 있습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "適用されていない変更があります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "有尚未应用的修改。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "你有尚未套用的變更。"}}}
     },
-    "Audio, scaling mode and frame rate update immediately." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Áudio, modo de escala e taxa de quadros são atualizados imediatamente."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "오디오, 크기 조절 모드, 프레임률은 즉시 반영됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "オーディオ、スケーリングモード、フレームレートはすぐに反映されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "音频、缩放模式和帧率会立即生效。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "音訊、縮放模式和影格率會立即更新。"}}}
+    "Audio, scaling mode, position and frame rate take effect immediately." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Áudio, modo de escala, posição e taxa de quadros entram em vigor imediatamente."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "오디오, 크기 조절 모드, 위치, 프레임률은 즉시 반영됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "オーディオ、スケーリングモード、位置、フレームレートはすぐに反映されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "音频、缩放模式、位置和帧率会立即生效。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "音訊、縮放模式、位置和影格率會立即生效。"}}}
     },
     "Revert" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reverter"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "되돌리기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "元に戻す"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "还原"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "還原"}}}
     },
     "Apply changes" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Aplicar alterações"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "변경 사항 적용"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "変更を適用"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "应用修改"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "套用變更"}}}
+    },
+    "Changes applied." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Alterações aplicadas."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "변경 사항을 적용했습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "変更を適用しました。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已应用修改。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已套用變更。"}}}
+    },
+    "Changes reverted." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Alterações revertidas."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "변경 사항을 되돌렸습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "変更を元に戻しました。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已还原修改。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已還原變更。"}}}
     },
     "No folder chosen" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Nenhuma pasta escolhida"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "선택한 폴더 없음"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "フォルダが選択されていません"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "未选择文件夹"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "未選擇資料夾"}}}

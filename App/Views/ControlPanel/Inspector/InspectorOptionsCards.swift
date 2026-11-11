@@ -159,6 +159,7 @@ struct DisplayCard: View {
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.inspectorEditedRow) private var editedRow
 
   var body: some View {
     let id = options.wallpaperID
@@ -169,10 +170,12 @@ struct DisplayCard: View {
         title: "Enabled", isOn: display.isEnabled,
         isDisabled: controller.isInspectorControlDisabled(options, key: enabledKey)
       ) { enabled in
+        editedRow?.note(enabledKey)
         controller.launch(enabledKey, policy: .latestWins) {
           try await controller.setDisplayEnabled(enabled, on: display.id, for: id)
         }
       }
+      .id(enabledKey)
       InspectorRow("Scaling mode") {
         Picker(
           "",
@@ -258,6 +261,7 @@ private struct ScaleFactorRow: View {
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.inspectorEditedRow) private var editedRow
   @State private var text = ""
   @State private var issue: String?
   @FocusState private var isFocused: Bool
@@ -298,6 +302,7 @@ private struct ScaleFactorRow: View {
     .onAppear { refresh() }
     .onChange(of: display.scalingFactor) { if !isFocused { refresh() } }
     .onChange(of: isFocused) { _, focused in if !focused { commit() } }
+    .id(key)
   }
 
   private func refresh() {
@@ -314,9 +319,9 @@ private struct ScaleFactorRow: View {
     issue = nil
     guard value != display.scalingFactor else { return }
     let id = options.wallpaperID
-    controller.launch(
-      InspectorAction.displayConfig(id, display: display.id, "scalingFactor"), policy: .latestWins
-    ) {
+    let key = InspectorAction.displayConfig(id, display: display.id, "scalingFactor")
+    editedRow?.note(key)
+    controller.launch(key, policy: .latestWins) {
       try await controller.setScalingFactor(value, on: display.id, for: id)
     }
   }

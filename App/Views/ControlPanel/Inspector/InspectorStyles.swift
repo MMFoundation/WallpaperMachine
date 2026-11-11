@@ -129,6 +129,73 @@ extension ButtonStyle where Self == InspectorSecondaryButtonStyle {
   }
 }
 
+/// The inspector's lead action, Apply wallpaper: the accent fill of `PrimaryButtonStyle` while
+/// `isPrimary`, otherwise the quiet well and hairline of `.panelSecondary`, for the time staged
+/// edits give the accent to Apply changes. Both looks take `PrimaryButtonStyle.Size`'s metrics.
+///
+/// One style with one body and one hover state, so the look flips under the same button. Two
+/// buttons (or two style bodies) chosen by an if/else would give the button a new identity the
+/// moment an edit is staged or applied, and its keyboard focus, VoiceOver focus and hover would
+/// reset under the person using it.
+struct InspectorActionButtonStyle: ButtonStyle {
+  var isPrimary: Bool
+  var size: PrimaryButtonStyle.Size = .regular
+  var expands = false
+
+  func makeBody(configuration: Configuration) -> some View {
+    ActionBody(configuration: configuration, isPrimary: isPrimary, size: size, expands: expands)
+  }
+
+  private struct ActionBody: View {
+    let configuration: ButtonStyleConfiguration
+    let isPrimary: Bool
+    let size: PrimaryButtonStyle.Size
+    let expands: Bool
+    @Environment(\.panelTheme) private var theme
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    var body: some View {
+      let shape = RoundedRectangle(cornerRadius: size.cornerRadius, style: .continuous)
+      configuration.label
+        .font(.system(size: size.fontSize, weight: .medium))
+        .foregroundStyle(isPrimary ? theme.accent.onPrimary.color : theme.surface.text.color)
+        .lineLimit(1)
+        .padding(.horizontal, size.horizontalPadding)
+        .frame(maxWidth: expands ? .infinity : nil, minHeight: size.height)
+        .background(fill, in: shape)
+        .overlay { shape.fill(shade) }
+        .overlay { shape.strokeBorder(isPrimary ? Color.clear : theme.surface.divider.color, lineWidth: 0.5) }
+        .opacity(isEnabled ? 1 : 0.4)
+        .contentShape(shape)
+        .onHover { isHovering = $0 }
+    }
+
+    /// The accent and its hover and pressed fills, or the neutral well.
+    private var fill: Color {
+      guard isPrimary else { return theme.surface.well.color }
+      let accent = theme.accent
+      if configuration.isPressed { return accent.primaryActive.color }
+      return isHovering && isEnabled ? accent.primaryHover.color : accent.primary.color
+    }
+
+    /// The neutral button's hover and pressed shade over its well; none over the accent.
+    private var shade: Color {
+      guard !isPrimary else { return .clear }
+      if configuration.isPressed { return theme.surface.pressed.color }
+      return isHovering && isEnabled ? theme.surface.hover.color : .clear
+    }
+  }
+}
+
+extension ButtonStyle where Self == InspectorActionButtonStyle {
+  static func inspectorAction(
+    isPrimary: Bool, size: PrimaryButtonStyle.Size = .regular, expands: Bool = false
+  ) -> InspectorActionButtonStyle {
+    InspectorActionButtonStyle(isPrimary: isPrimary, size: size, expands: expands)
+  }
+}
+
 // MARK: - Notices
 
 /// A short status or warning in the inspector, tinted by what it says: a Workshop update, a host

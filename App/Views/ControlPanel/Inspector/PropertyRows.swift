@@ -59,6 +59,7 @@ struct PropertyRowView: View {
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.inspectorEditedRow) private var editedRow
   @State private var isHovering = false
   @FocusState private var restoreFocused: Bool
   @State private var drag = DriverBox<PumpedDrag<PropertyDragValue>>()
@@ -99,6 +100,8 @@ struct PropertyRowView: View {
           colorDriver.driver?.finish()
           drag.driver?.settle()
         }
+        // What the footer scrolls clear of itself when this row's edit brings it in.
+        .id(propertyKey)
     }
   }
 
@@ -177,7 +180,11 @@ struct PropertyRowView: View {
           "",
           text: Binding(
             get: { text },
-            set: { controller.setPropertyText($0, property: row.id, in: id) })
+            set: {
+              // Text typed and not yet sent waits too: its first key can bring the footer in.
+              editedRow?.note(propertyKey)
+              controller.setPropertyText($0, property: row.id, in: id)
+            })
         )
         .textFieldStyle(.roundedBorder)
         .controlSize(.small)
@@ -274,6 +281,7 @@ struct PropertyRowView: View {
   // MARK: Committing
 
   private func commit(_ value: BridgePropertyValue) {
+    editedRow?.note(propertyKey)
     switch scope {
     case .authored:
       controller.launch(propertyKey, policy: .latestWins) {
@@ -287,6 +295,7 @@ struct PropertyRowView: View {
   }
 
   private func restoreDefault() {
+    editedRow?.note(propertyKey)
     switch scope {
     case .authored:
       controller.launch(InspectorAction.restoreProperty(id, row.id)) {
