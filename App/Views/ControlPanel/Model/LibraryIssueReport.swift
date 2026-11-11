@@ -44,7 +44,9 @@ enum LibraryIssueReport {
 
   /// One line for each property whose value is not the author's default, so a Wallpaper Engine
   /// reference frame can be taken with the same options. Text the user typed and the paths of files
-  /// they chose are left out: the line says the property was changed, not to what.
+  /// they chose are left out: the line says the property was changed, not to what. A value that
+  /// waits for Apply changes (`staged`, not `dirty`, which only says it is not the default) is
+  /// marked not applied, since the wallpaper on screen does not use it yet.
   static func changedProperties(_ properties: [BridgePropertyDescriptor]) -> [String] {
     let lines: [String] = properties.compactMap { property in
       guard property.value != property.defaultValue else { return nil }
@@ -56,7 +58,7 @@ enum LibraryIssueReport {
       case .textInput: shown = "text the user typed"
       case .text, .group, .unknown: return nil
       }
-      return "- `\(property.id)`: \(shown)\(property.dirty ? " (not applied)" : "")"
+      return "- `\(property.id)`: \(shown)\(property.staged ? " (not applied)" : "")"
     }
     guard lines.count > changedPropertyLimit else { return lines }
     return lines.prefix(changedPropertyLimit) + ["- and \(lines.count - changedPropertyLimit) more"]

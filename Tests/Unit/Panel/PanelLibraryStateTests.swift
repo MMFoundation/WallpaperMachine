@@ -421,7 +421,9 @@ final class PanelLibraryStateTests: PanelTestCase {
       let report = try details(panel.controller.issueReportURL(for: "ghost"))
       XCTAssertTrue(report.contains("`speed`: 0.25 (default: 1)"), report)
       XCTAssertTrue(report.contains("`fine`: 0.123456789 (default: 0)"), "every digit, to reproduce it: \(report)")
-      XCTAssertTrue(report.contains("`rain`: true (default: false) (not applied)"), report)
+      XCTAssertTrue(report.contains("`rain`: true (default: false)"), report)
+      XCTAssertFalse(
+        report.contains("(not applied)"), "a changed value that is applied is what the wallpaper uses: \(report)")
       XCTAssertTrue(report.contains("`tint`: 1 0.5 0 (default: 1 1 1)"), report)
       XCTAssertFalse(report.contains("`unchanged`"), "a property at its default is not listed: \(report)")
       XCTAssertTrue(report.contains("`name`"), report)
@@ -445,6 +447,24 @@ final class PanelLibraryStateTests: PanelTestCase {
     XCTAssertTrue(details.contains("`materials/drops.json`"), details)
     XCTAssertTrue(details.contains("Drops"), "the layer that asked for it: \(details)")
     XCTAssertTrue(details.contains("`effects/glow/effect.json`"), details)
+  }
+
+  /// A property changed from its default and applied is what the wallpaper on screen uses; only a
+  /// value that still waits for Apply changes is called not applied, however far from its default.
+  func testOnlyAValueWaitingForApplyIsCalledNotAppliedInTheReport() {
+    typealias Context = PanelPropertyContext
+    let lines = LibraryIssueReport.changedProperties([
+      Context.property("applied", .bool, .bool(value: true), dirty: true, defaultValue: .bool(value: false)),
+      Context.property(
+        "waiting", .slider, .number(value: 2), dirty: true, defaultValue: .number(value: 1), staged: true),
+      Context.property(
+        "restored", .slider, .number(value: 1), dirty: false, defaultValue: .number(value: 1), staged: true),
+    ])
+    XCTAssertEqual(lines.count, 2, "a value back at its default is not a change to report: \(lines)")
+    XCTAssertTrue(lines[0].hasPrefix("- `applied`"), lines[0])
+    XCTAssertFalse(lines[0].hasSuffix("(not applied)"), lines[0])
+    XCTAssertTrue(lines[1].hasPrefix("- `waiting`"), lines[1])
+    XCTAssertTrue(lines[1].hasSuffix("(not applied)"), lines[1])
   }
 
   func testTheChangedPropertyListIsCappedAndCountsTheRest() {

@@ -1366,7 +1366,7 @@ never to `.shared`.
   `PanelLibraryStateTests` (Now Playing, the target menu, display names, the target the Apply
   help names only with two or more displays that can take a wallpaper, history, library counts,
   the update dot, the issue report's facts, the changed properties it lists without typed text
-  or paths and capped, and the files a check found missing), `PanelCollectionActionsTests`,
+  or paths and capped, marked not applied only while they wait for Apply changes, and the files a check found missing), `PanelCollectionActionsTests`,
   `LibrarySortTests` (Last used with never-used wallpapers last either way),
   `LibraryFilterTests` (search folding case, accents and width; author and description; a
   Workshop link, or an installed id, matching only that id, and a number no wallpaper has

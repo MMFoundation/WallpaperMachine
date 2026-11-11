@@ -75,13 +75,13 @@ final class PanelPropertyContext {
   nonisolated static func property(
     _ id: String, _ kind: BridgePropertyKind, _ value: BridgePropertyValue,
     slider: BridgeSliderMetadata? = nil, enabled: Bool = true, dirty: Bool = false,
-    defaultValue: BridgePropertyValue? = nil, label: String? = nil
+    defaultValue: BridgePropertyValue? = nil, label: String? = nil, staged: Bool = false
   ) -> BridgePropertyDescriptor {
     BridgePropertyDescriptor(
       id: id, kind: kind, labelHtml: label ?? id, value: value, defaultValue: defaultValue ?? value,
       slider: slider, comboOptions: [], fileFilter: nil, directoryMode: nil, dirty: dirty,
       canRestoreDefaults: true, enabled: enabled, assetManaged: false, assetMissing: false,
-      assetSourcePath: nil)
+      assetSourcePath: nil, staged: staged)
   }
 
   func shutdown() async {

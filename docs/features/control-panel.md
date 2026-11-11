@@ -544,8 +544,9 @@ Application) shows **Not working? Report on GitHub**. It opens the repository's
 bug report form in the browser with the wallpaper's title, Workshop link or id,
 type, app version, while it is on screen the backend drawing it (with the
 renderer's fallback reason) and, when its options are loaded in the inspector, the properties
-changed from the author's defaults pre-filled: each with its value and default, marked when the
-change is not applied yet, at most 20 with the rest counted. Typed text and the paths of chosen
+changed from the author's defaults pre-filled: each with its value and default, marked not
+applied only while the change still waits for **Apply changes** (a change that was applied is
+what the wallpaper uses), at most 20 with the rest counted. Typed text and the paths of chosen
 files are not included, only that they were changed. When the inspector's
 [Compatibility check](wallpaper-properties.md#compatibility-check) of the wallpaper found files
 the scene refers to that are not installed, the report lists each one's path and the layer that
