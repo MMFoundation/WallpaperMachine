@@ -182,7 +182,10 @@ struct DisplaysSettingsSection: View {
     id: "displays.scaling", section: .displays, inside: playback, title: "Scaling",
     keywords: ["No scaling", "Stretch", "Match", "Fill"])
   static let scaleFactor = SettingsItem(
-    id: "displays.scale-factor", section: .displays, inside: playback, title: "Scale factor")
+    id: "displays.scale-factor", section: .displays, inside: playback, title: "Scale factor",
+    note:
+      "Zooms the wallpaper after scaling: 1 keeps its size, more than 1 enlarges it and crops what no longer fits, less than 1 shrinks it."
+  )
   static let frameRate = SettingsItem(
     id: "displays.frame-rate", section: .displays, inside: playback, title: "Frame rate",
     keywords: [

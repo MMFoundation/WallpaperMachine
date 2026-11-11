@@ -22,6 +22,11 @@ struct CompatibilityState: Equatable {
   /// options loaded and a frame rate to certify.
   let canCheck: Bool
 
+  /// The runtime says what draws this kind of wallpaper once it plays: a scene's renderer or a
+  /// video's player. A web page runs in the app's own web view, which reports nothing, and a
+  /// wallpaper of unknown type never plays, so the card promises no such line for either.
+  var reportsWhatDrawsIt: Bool { kind == .scene || kind == .video }
+
   /// The counts the card summarizes in words, in the order it names them.
   var unavailableCount: Int { checks.filter { $0.status == .unavailable }.count }
   var warningCount: Int { checks.filter { $0.status == .warning }.count }

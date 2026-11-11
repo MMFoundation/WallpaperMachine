@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The Compatibility check card: what the app could establish about the wallpaper before it plays
-/// on the target display, and which backend draws it now. Nothing here is the card's own verdict;
-/// every line comes from the check, and an unknown stays unknown until the wallpaper runs.
+/// on the target display, and what draws it there now, in words, with the renderer's own id
+/// beneath (never for a web page, which nothing reports on). Nothing here is the card's own
+/// verdict; every line comes from the check, and an unknown stays unknown until the wallpaper runs.
 struct CompatibilityCard: View {
   let state: CompatibilityState
   let row: LibraryRow
@@ -41,15 +42,26 @@ struct CompatibilityCard: View {
           }
         }
       }
-      InspectorCardRow {
-        if let backend = InspectorWording.backendLine(state) {
-          Text(verbatim: backend)
-            .font(.system(size: 11.5))
-            .foregroundStyle(theme.surface.text.color)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
-        } else {
-          InspectorNote("Which backend draws it is known once it plays on this display.")
+      if let backend = InspectorWording.backendLine(state) {
+        InspectorCardRow {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(verbatim: backend.text)
+              .font(.system(size: 11.5))
+              .foregroundStyle(theme.surface.text.color)
+              .textSelection(.enabled)
+            if let detail = backend.detail {
+              // The renderer's own id, kept as it is for a problem report.
+              Text(verbatim: detail)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.surface.muted.color)
+                .textSelection(.enabled)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      } else if state.reportsWhatDrawsIt {
+        InspectorCardRow {
+          InspectorNote("How it’s drawn is shown here once it plays on this display.")
         }
       }
       InspectorCardRow {

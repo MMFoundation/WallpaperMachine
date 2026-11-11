@@ -1382,14 +1382,18 @@ never to `.shared`.
   import popover and pill) and
   `InstalledPageRenderTests` (the page, footer, empty states and popovers in every language and
   appearance at the narrowest column, the scroll offset restored).
-- Inspector: `InspectorPolicyTests`, `InspectorWordingTests`, `InspectorInputTests`,
+- Inspector: `InspectorPolicyTests`, `InspectorWordingTests` (among its sentences, what draws
+  the wallpaper said in words, with the renderer's id kept as it is on the detail line; a reported
+  problem leads the line and is never said to play; nothing named before the runtime reports it,
+  and no such line promised for a web page), `InspectorInputTests`,
   `InspectorFlowTests` (Preview with unsent text, Restore all defaults, sections, the app's words
   against an author's markup, host states as text, file and folder notes, every symbol drawn
   exists, and Apply, Reapply and Resume download each with a symbol of its own that is not
   Play's), `InspectorSliderTests` (VoiceOver, keys and the pointer each reach the saved edit; a
   drag previews and the release saves once; colours saved after a quiet period),
   `InspectorRenderTests` (the inspector and the whole panel with it open at 760×560 in every
-  language; a slider's VoiceOver, key and pointer changes reach the bridge),
+  language; the Compatibility card's renderer lines, with a problem, wrap in the narrowest column
+  in every language; a slider's VoiceOver, key and pointer changes reach the bridge),
   `PropertyLabelDocumentTests` (the label allowlist: entities, emphasis, colours, lists, broken
   markup, scripts and controls dropped, links only to allowed hosts, registered images only,
   limits), `PlacementGeometryTests`, `PlacementDraftsTests`, `PresetsBarStateTests` and, on the

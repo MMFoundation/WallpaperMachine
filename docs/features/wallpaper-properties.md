@@ -132,6 +132,9 @@ status** expands to show their explanations and delivery status. The presets and
 original order. **Displays** comes next with per-display playback configuration,
 open when the wallpaper is on a display and collapsed otherwise, then **Collections**
 and, for a scene or a video, [**Wallpaper Engine options**](#wallpaper-engine-options).
+A display's **Scale factor** says what it does in its help, as the same row in **Settings ›
+Displays** does in its note: it zooms the wallpaper after the scaling mode, 1 keeping its
+size, more than 1 enlarging it and cropping the edges, less than 1 shrinking it.
 General, display and property disclosures keep their state while the same
 wallpaper stays selected; another wallpaper starts at the top with its sections at their
 defaults.
@@ -526,8 +529,15 @@ scene row shows it before any check: drawn, nothing found by a check, or refused
 reason. A new app version, a Workshop update or a reinstall makes it unknown again; a
 failure a retry can clear (a frame, the surface) is never kept. Unknown Web runtime
 behavior remains **unknown**; readable files and video metadata are not proof of a
-displayed frame. The same card shows the actual running backend when the runtime reports
-it, and, for a scene Native Metal cannot draw, why it is held.
+displayed frame. The same card says what draws the wallpaper on the display once the runtime
+reports it, in words (Native Metal, the native video player, or only that it plays there for
+a renderer this version has no words for), with a selectable `Renderer:` line beneath that
+keeps the renderer's own id as a problem report quotes it. A report that carries a problem
+(today only a video whose file cannot be found, which nothing plays) leads with it instead:
+not playing on this display, and the reason. Until the runtime reports, and while the engine
+names no renderer, a scene's or a video's card says only that this is shown once the
+wallpaper plays on the display; a web page's card has no such line, since nothing reports how
+a web page is drawn. For a scene Native Metal cannot draw, it says why it is held.
 When the installed project or its entry file is unavailable and the wallpaper is
 a Workshop item, the card also offers [Reinstall from Workshop…](workshop-downloads.md#reinstall-from-workshop).
 

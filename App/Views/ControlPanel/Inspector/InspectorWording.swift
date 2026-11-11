@@ -176,18 +176,42 @@ enum InspectorWording {
     }
   }
 
-  /// "Drawn now by metal", with its fallback reason when it has one, or the held-scene sentence when
-  /// Native Metal is the only renderer and could not draw it: nothing draws it, so no backend is named.
-  static func backendLine(_ state: CompatibilityState) -> String? {
+  /// What draws the wallpaper on the target display now, as the Compatibility check card says it.
+  struct BackendLine: Equatable {
+    /// In plain words: Native Metal, the native video player, or only that it plays here; or that
+    /// it is not playing, and why, when the report carries a problem.
+    let text: String
+    /// "Renderer: native_metal", the renderer's own id as a problem report quotes it; nil for a
+    /// scene nothing draws.
+    let detail: String?
+  }
+
+  /// What draws the wallpaper on this display, in words, with the renderer's id beneath; or the
+  /// held-scene sentence when Native Metal is the only renderer and could not draw it: nothing draws
+  /// it, so no renderer is named. Nil until the runtime reports one, including the engine's
+  /// "unknown", which names nothing.
+  ///
+  /// A report with a reason (the bridge's `fallback_reason`) names the renderer that would draw it
+  /// and the problem that stops it: today only a video whose file cannot be found, which nothing
+  /// plays. The line then leads with that problem and never says the wallpaper plays.
+  static func backendLine(_ state: CompatibilityState) -> BackendLine? {
     if let failure = state.failure {
       let sentence = failure.stage.sentence(reason: failure.reason)
-      return sentence.prefix(1).uppercased() + sentence.dropFirst()
+      return BackendLine(text: sentence.prefix(1).uppercased() + sentence.dropFirst(), detail: nil)
     }
-    guard let backend = state.backend else { return nil }
-    if let reason = state.fallbackReason, !reason.isEmpty {
-      return L("Drawn now by \(backend) (fallback: \(reason))")
+    guard let id = state.backend else { return nil }
+    let reason = state.fallbackReason ?? ""
+    let text: String
+    switch SceneBackend(name: id) {
+    case .preparing: return nil
+    case _ where !reason.isEmpty: text = L("Not playing on this display (reason: \(reason)).")
+    case .nativeMetal: text = L("Drawn on this display by Native Metal, the app’s own renderer.")
+    // The bridge's word for a video the native player plays (`RUNNING_BACKEND_NATIVE`).
+    case .other("native"): text = L("Played on this display by the native video player.")
+    // A renderer this build has no words for: said only to play, named in the detail.
+    case .other: text = L("Playing on this display.")
     }
-    return L("Drawn now by \(backend)")
+    return BackendLine(text: text, detail: L("Renderer: \(id)"))
   }
 
   // MARK: Black bars

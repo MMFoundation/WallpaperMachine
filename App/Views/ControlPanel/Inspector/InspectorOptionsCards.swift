@@ -279,6 +279,11 @@ private struct ScaleFactorRow: View {
             .accessibilityLabel("Scale factor")
         }
       }
+      // What the number does, on the whole row; Settings → Displays says it as the row's note.
+      .help(
+        L(
+          "Zooms the wallpaper after scaling: 1 keeps its size, more than 1 enlarges it and crops what no longer fits, less than 1 shrinks it."
+        ))
       if let issue {
         Text(verbatim: issue)
           .font(.system(size: 11.5))

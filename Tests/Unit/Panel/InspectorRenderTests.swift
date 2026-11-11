@@ -145,6 +145,61 @@ final class InspectorRenderTests: InspectorTestCase {
     await fixture.shutdown()
   }
 
+  /// The Compatibility card once the runtime reports the video's player with a problem: the line it
+  /// leads with and the renderer's id beneath wrap inside the narrowest inspector column in every
+  /// shipped language and both appearances, rather than asking for more width.
+  func testTheCompatibilityCardsRendererLinesWrapInTheNarrowestColumnInEveryLanguage() async throws {
+    let fixture = try InspectorRenderFixture(selecting: .video)
+    try await prepare(fixture)
+    let controller = fixture.controller
+    controller.navigation.targetDisplayID = "primary"
+    let reason = "the project's video file could not be found"
+    // The bridge reports by live display id: "Studio Display (1 - Primary)" is display 1.
+    fixture.store.settingsSnapshot.videoBackends = [
+      BridgeVideoBackendReport(
+        displayId: 1, displayName: "Studio Display", wallpaperId: InspectorRenderFixture.selected,
+        wallpaperTitle: "Aurora", backend: "native", fallbackReason: reason)
+    ]
+    let state = try XCTUnwrap(controller.compatibilityState)
+    XCTAssertEqual(state.fallbackReason, reason, "precondition: the report carries its problem")
+    XCTAssertNotNil(
+      InspectorWording.backendLine(state)?.detail, "precondition: the renderer's lines, not the note")
+    let row = try XCTUnwrap(controller.libraryRows.first { $0.id == InspectorRenderFixture.selected })
+    // The inspector draws its cards 16 points in from either edge of its column.
+    let inner = InspectorColumn<EmptyView>.widths.lowerBound - 2 * 16
+    for language in AppLanguage.supported.map(\.tag) {
+      let languages = AppLanguageStore(
+        defaults: TemporaryDefaults.makeForCurrentTest().defaults, systemLanguages: [language])
+      PanelLocale.shared.bind(to: languages)
+      for dark in [false, true] {
+        let hosting = NSHostingController(
+          rootView: AnyView(
+            CompatibilityCard(state: state, row: row)
+              .environment(controller)
+              .environment(\.panelImages, controller.images)
+              .environment(\.panelIsVisible, true)
+              .panelTheme(theme: controller.theme, locale: PanelLocale.shared)))
+        hosting.sizingOptions = []
+        let window = NSWindow(
+          contentRect: NSRect(x: 0, y: 0, width: inner, height: 600), styleMask: [.titled],
+          backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = hosting
+        hosting.view.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        window.layoutIfNeeded()
+        hosting.view.layoutSubtreeIfNeeded()
+        let measured = hosting.sizeThatFits(in: NSSize(width: inner, height: 2000))
+        XCTAssertLessThanOrEqual(
+          measured.width, inner + 1,
+          "\(language) \(dark ? "dark" : "light"): the card wraps its lines in the column")
+        XCTAssertGreaterThan(measured.height, 0, "\(language): the card was drawn")
+        window.contentViewController = nil
+        window.close()
+      }
+    }
+    await fixture.shutdown()
+  }
+
   // MARK: The narrowest window
 
   /// A library too short to fill the Installed page: four wallpapers, whose grid is about as tall

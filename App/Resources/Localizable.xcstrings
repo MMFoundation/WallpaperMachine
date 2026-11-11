@@ -4678,6 +4678,9 @@
     "Scale factor" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Fator de escala"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배율 계수"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "スケール倍率"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "缩放系数"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "縮放係數"}}}
     },
+    "Zooms the wallpaper after scaling: 1 keeps its size, more than 1 enlarges it and crops what no longer fits, less than 1 shrinks it." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Aplica zoom ao papel de parede depois da escala: 1 mantém o tamanho, mais que 1 o amplia e corta o que não cabe mais, menos que 1 o reduz."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "크기 조절 후 배경화면을 확대·축소합니다: 1은 크기를 유지하고, 1보다 크면 확대되어 화면을 벗어나는 부분이 잘리며, 1보다 작으면 축소됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "拡大縮小の後に壁紙をズームします：1でそのまま、1より大きいと拡大してはみ出す部分を切り取り、1より小さいと縮小します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在缩放之后再放大或缩小壁纸：1 保持大小，大于 1 会放大并裁掉超出的部分，小于 1 会缩小。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在縮放之後再放大或縮小桌布：1 維持大小，大於 1 會放大並裁掉超出的部分，小於 1 會縮小。"}}}
+    },
     "Frame rate" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Taxa de quadros"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "프레임률"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "フレームレート"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "帧率"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影格率"}}}
     },
@@ -7433,14 +7436,23 @@
     "No problems found" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Nenhum problema encontrado"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "문제가 발견되지 않았습니다"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "問題は見つかりませんでした"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "未发现问题"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "未發現問題"}}}
     },
-    "Drawn now by %@ (fallback: %@)" : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Desenhado agora por %@ (alternativa: %@)"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "현재 %@ 방식으로 렌더링 중 (대체 방식: %@)"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "現在%1$@で描画中（フォールバック：%2$@）"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "当前由 %1$@ 绘制（回退：%2$@）"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "目前由 %1$@ 繪製（回退：%2$@）"}}}
+    "Drawn on this display by Native Metal, the app’s own renderer." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Desenhado neste monitor pelo Native Metal, o renderizador do próprio app."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "앱 자체 렌더러인 네이티브 Metal이 이 디스플레이에 그리고 있습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このディスプレイでは、アプリ独自のレンダラであるネイティブMetalで描画しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在此显示器上由本应用自己的渲染器“原生 Metal”绘制。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在此顯示器上由本 App 自己的渲染器「原生 Metal」繪製。"}}}
     },
-    "Drawn now by %@" : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Desenhado agora por %@"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "현재 %@ 방식으로 렌더링 중"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "現在%@で描画中"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "当前由 %@ 绘制"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "目前由 %@ 繪製"}}}
+    "Played on this display by the native video player." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reproduzido neste monitor pelo reprodutor de vídeo nativo."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 디스플레이에서 네이티브 동영상 플레이어로 재생 중입니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このディスプレイでは、ネイティブのビデオプレーヤーで再生しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在此显示器上由原生视频播放器播放。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在此顯示器上由原生影片播放器播放。"}}}
     },
-    "Which backend draws it is known once it plays on this display." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Qual back-end o desenha só é conhecido quando ele é reproduzido neste monitor."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 디스플레이에서 재생하면 어떤 백엔드로 그리는지 알 수 있습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "どのバックエンドで描画されるかは、このディスプレイで再生されるとわかります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在此显示器上播放后，才能知道由哪个后端绘制。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在此顯示器上播放後，才會知道由哪個後端繪製。"}}}
+    "Playing on this display." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Em reprodução neste monitor."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 디스플레이에서 재생 중입니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このディスプレイで再生中です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在此显示器上播放。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在此顯示器上播放。"}}}
+    },
+    "Not playing on this display (reason: %@)." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Não está em reprodução neste monitor (motivo: %@)."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 디스플레이에서 재생되지 않고 있습니다(이유: %@)."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このディスプレイでは再生されていません（理由：%@）。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "未在此显示器上播放（原因：%@）。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "未在此顯示器上播放（原因：%@）。"}}}
+    },
+    "Renderer: %@" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Renderizador: %@"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "렌더러: %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "レンダラ：%@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "渲染器：%@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "渲染器：%@"}}}
+    },
+    "How it’s drawn is shown here once it plays on this display." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Como ele é desenhado aparece aqui quando for reproduzido neste monitor."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 디스플레이에서 재생되면 어떻게 그려지는지 여기에 표시됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このディスプレイで再生されると、描画方法がここに表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在此显示器上播放后，这里会显示它的绘制方式。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在此顯示器上播放後，這裡會顯示它的繪製方式。"}}}
     },
     "Not checked yet on this display." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ainda não verificado neste monitor."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 디스플레이에서는 아직 확인하지 않았습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このディスプレイではまだチェックしていません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "尚未在此显示器上检查。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "尚未在此顯示器上檢查。"}}}

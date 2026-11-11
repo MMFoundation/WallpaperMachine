@@ -193,15 +193,63 @@ final class InspectorWordingTests: InspectorTestCase {
       "a check in progress replaces the counts")
   }
 
-  func testTheBackendLineNamesTheBackendAndWhyItFellBack() {
+  /// The card says in words what draws the wallpaper; the renderer's own id stays word for word on
+  /// the detail line a problem report can quote.
+  func testTheBackendLineSaysWhatDrawsItInWordsAndKeepsTheRenderersIdInTheDetail() throws {
+    let metal = try XCTUnwrap(InspectorWording.backendLine(compatibility([], backend: "native_metal")))
+    let video = try XCTUnwrap(InspectorWording.backendLine(compatibility([], backend: "native")))
+    let other = try XCTUnwrap(InspectorWording.backendLine(compatibility([], backend: "legacy")))
+    for (line, id) in [(metal, "native_metal"), (video, "native"), (other, "legacy")] {
+      XCTAssertFalse(line.text.isEmpty)
+      XCTAssertNotEqual(line.text, id, "\(id) is said in words, not as the bridge's id")
+      XCTAssertTrue(try XCTUnwrap(line.detail).contains(id), "the detail keeps \(id) as it is")
+    }
+    XCTAssertFalse(metal.text.contains("native_metal"))
+    XCTAssertFalse(other.text.contains("legacy"))
+    XCTAssertEqual(Set([metal.text, video.text, other.text]).count, 3, "each reads differently")
     XCTAssertEqual(
-      InspectorWording.backendLine(compatibility([], backend: "native")), "Drawn now by native")
-    XCTAssertEqual(
-      InspectorWording.backendLine(compatibility([], backend: "legacy", reason: "lit particles")),
-      "Drawn now by legacy (fallback: lit particles)")
+      InspectorWording.backendLine(compatibility([], backend: "native", reason: "")), video,
+      "an empty reason is no reason")
+  }
+
+  /// The only reason the bridge reports is a video whose file cannot be found, still named `native`,
+  /// which nothing plays: the card leads with that problem in the text it draws in full, never says
+  /// the video plays, and keeps only the renderer's id on the detail line.
+  func testAReportedProblemLeadsTheBackendLineAndIsNeverSaidToPlay() throws {
+    let reason = "the project's video file could not be found"
+    let plays = try ["native_metal", "native", "legacy"].map {
+      try XCTUnwrap(InspectorWording.backendLine(compatibility([], backend: $0, kind: .video))).text
+    }
+    for id in ["native", "native_metal", "legacy"] {
+      let line = try XCTUnwrap(
+        InspectorWording.backendLine(compatibility([], backend: id, reason: reason, kind: .video)))
+      XCTAssertTrue(line.text.contains(reason), "\(id): the problem is in the line the card leads with")
+      for sentence in plays {
+        XCTAssertFalse(line.text.hasPrefix(sentence.dropLast()), "\(id): not said to play")
+      }
+      XCTAssertEqual(line.detail, InspectorWording.backendLine(compatibility([], backend: id))?.detail)
+      XCTAssertFalse(try XCTUnwrap(line.detail).contains(reason), "\(id): said once, in the text")
+    }
+  }
+
+  func testNothingIsNamedBeforeTheRuntimeReportsWhatDrawsIt() {
     XCTAssertNil(
       InspectorWording.backendLine(compatibility([])),
       "the absence of a report is never read as a backend")
+    XCTAssertNil(InspectorWording.backendLine(compatibility([], backend: "")))
+    XCTAssertNil(
+      InspectorWording.backendLine(compatibility([], backend: "unknown")),
+      "the engine's unknown names nothing")
+  }
+
+  /// A scene's renderer and a video's player report what draws them once they play, so their card
+  /// says the line comes then. A web page's web view never reports, and a wallpaper of unknown type
+  /// never plays: their card promises nothing.
+  func testOnlyAScenesOrAVideosCardWaitsForTheRuntimeToSayWhatDrawsIt() {
+    XCTAssertTrue(compatibility([], kind: .scene).reportsWhatDrawsIt)
+    XCTAssertTrue(compatibility([], kind: .video).reportsWhatDrawsIt)
+    XCTAssertFalse(compatibility([], kind: .web).reportsWhatDrawsIt)
+    XCTAssertFalse(compatibility([], kind: .unknown).reportsWhatDrawsIt)
   }
 
   /// A scene held by Native Metal only has no backend drawing it, so the card says so, with the stage in
@@ -210,11 +258,12 @@ final class InspectorWordingTests: InspectorTestCase {
     var state = compatibility([], backend: "unknown")
     state.failure = SceneFailureReport(stage: .compile, reason: "the shader did not link")
     XCTAssertEqual(
-      InspectorWording.backendLine(state),
+      InspectorWording.backendLine(state)?.text,
       "Not drawn — its shaders didn't compile for Metal (reason: the shader did not link). Showing its last picture.")
+    XCTAssertNil(InspectorWording.backendLine(state)?.detail, "nothing draws it, so no renderer is named")
     state.failure = SceneFailureReport(stage: .unsupported, reason: nil)
     XCTAssertEqual(
-      InspectorWording.backendLine(state),
+      InspectorWording.backendLine(state)?.text,
       "Not drawn — it uses something Native Metal can't draw. Showing its last picture.")
   }
 
