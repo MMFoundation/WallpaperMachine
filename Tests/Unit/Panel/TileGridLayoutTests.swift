@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 
 @testable import WallpaperMachine
@@ -58,6 +59,22 @@ final class TileGridLayoutTests: XCTestCase {
     XCTAssertNil(go(2, .up), "or climb out of the first row")
     XCTAssertNil(go(7, .down), "Nothing below the short last row")
     XCTAssertNil(TileGridLayout.destination(from: 0, .last, columns: 3, count: 0))
+  }
+
+  func testReturnOrSpaceIsAClickAndCommandReturnADoubleClickWhereTheGridHasOne() {
+    func key(_ key: KeyEquivalent, _ modifiers: EventModifiers = [], canOpen: Bool = true)
+      -> TileGridLayout.Activation
+    {
+      TileGridLayout.activation(key, modifiers: modifiers, canOpen: canOpen)
+    }
+    XCTAssertEqual(key(.return), .click)
+    XCTAssertEqual(key(.space), .click)
+    XCTAssertEqual(key(.return, .command), .open)
+    XCTAssertEqual(key(.return, [.command, .shift]), .open, "other modifiers held with Command")
+    XCTAssertEqual(key(.return, .command, canOpen: false), .click, "a grid without a double click selects")
+    XCTAssertEqual(key(.space, .command), .click)
+    XCTAssertEqual(key(.return, .shift), .click)
+    XCTAssertEqual(key(.return, .option), .click)
   }
 
   func testChipsWrapOntoNewLinesAtTheWidthAndKeepTheirOrder() {

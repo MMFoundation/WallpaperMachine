@@ -435,7 +435,8 @@ subscribing, this was pinned against fixtures, not tried against live Steam.
 
 ## One decision per download
 
-Double-click a Discover tile, or choose **Download** in the inspector, once. With
+Double-click a Discover tile (or press `Command`-`Return` on a focused one), or choose
+**Download** in the inspector, once. With
 SteamCMD installed and a saved Steam sign-in, nothing else opens: the download
 starts and its tile reports it. A dialog appears only for what the download
 cannot do alone — installing SteamCMD, the first Steam account name, consent for
@@ -476,8 +477,8 @@ the last byte the full ring reads Finishing while the files are validated and
 imported. The full status sentence stays in the tooltip, the inspector and the
 downloads list.
 
-Double-clicking a tile that is already in the library applies it, as on the
-Installed page; its inspector has **Apply wallpaper** too.
+Double-clicking a tile that is already in the library, or `Command`-`Return` on it,
+applies it, as on the Installed page; its inspector has **Apply wallpaper** too.
 
 ### Transfer progress
 

@@ -79,7 +79,9 @@ private struct WorkshopGrid: View {
   var body: some View {
     let model = controller.workshopBrowser
     let tiles = previewTiles()
-    TileGrid(items, spacing: 14, onActivate: { model.select($0) }) { item in
+    TileGrid(
+      items, spacing: 14, onActivate: { model.select($0) }, onOpen: { model.doubleClick($0) }
+    ) { item in
       WorkshopTileCell(item: item)
     }
     .scrollPosition($position)

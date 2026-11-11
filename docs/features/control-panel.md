@@ -164,7 +164,10 @@ floor and `AppDelegate.windowWillResize` enforces it, because the SwiftUI hostin
 controller resets `contentMinSize` once it attaches.
 
 Arrow keys, `Home` and `End` move focus across a grid, and `Return` or `Space` on a
-focused tile acts as a click. `Escape` cancels a collection's name field, then closes an
+focused tile acts as a click. On Installed and Steam Workshop, `Command`-`Return` does what a
+double click does: on Installed it applies the wallpaper, on Steam Workshop it applies one in
+the library and otherwise downloads it (or opens a collection, or the setup a download waits
+for). On pixiv it only selects the tile, as `Return` does. `Escape` cancels a collection's name field, then closes an
 open popover, then leaves selection mode. `Command-F` puts the keyboard in the page's
 search field (on Settings, the one above its sections). Errors show in a banner at the top of the page
 with their original details, which can be selected and copied, and **Dismiss**; VoiceOver
@@ -487,6 +490,7 @@ double click does.
   close the window. On Discover, double-click downloads the tile (or applies it
   once it is in the library); see
   [Workshop downloads](workshop-downloads.md#one-decision-per-download).
+  `Command`-`Return` on a focused tile does the same on both pages.
 - Apply is unavailable when the target display is disabled, is mirroring another
   display, or when the wallpaper kind cannot be rendered (Application or Unknown).
 - Background display refreshes and automatic presentation and audio-policy updates
