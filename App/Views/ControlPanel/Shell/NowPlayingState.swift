@@ -3,8 +3,8 @@ import Foundation
 /// The window's Now Playing bar: what the target display shows and which controls work.
 ///
 /// Play and pause act on every display, so the status line reports them even when the target is
-/// empty, and the toggle works while any display has a wallpaper. Previous and Next act on the
-/// target display only.
+/// empty, and the toggle works while any display has a wallpaper. Previous, Next and Random act on
+/// the target display only.
 struct NowPlayingState: Equatable {
   /// The target display's name; empty when the target is not in the display list.
   var displayTitle: String
@@ -38,6 +38,9 @@ struct NowPlayingState: Equatable {
   var canGoPrevious: Bool
   /// Next needs such a display and a supported wallpaper other than the one it shows.
   var canGoNext: Bool
+  /// Random needs such a display and another wallpaper of the library that can play and is not
+  /// held back after a crash, the menu bar's Random Wallpaper rule.
+  var canPickRandom: Bool
 
   /// - Parameters:
   ///   - target: The display being targeted; nil if it is no longer in the display list.
@@ -45,12 +48,14 @@ struct NowPlayingState: Equatable {
   ///   - hasWallpaper: Whether any display shows a wallpaper.
   ///   - hasOtherWallpaper: Whether the library holds a supported wallpaper other than the
   ///     target's own.
+  ///   - hasRandomCandidate: Whether the library holds a supported wallpaper other than the
+  ///     target's own that is not held back after a crash, which Random may pick.
   ///   - previousID: The wallpaper Previous would apply.
   ///   - isBusy: A command runs, or a wallpaper is being applied.
   @MainActor
   static func make(
     target: TargetDisplayOption?, item: LibraryRow?, hasWallpaper: Bool, hasOtherWallpaper: Bool,
-    previousID: String?, isPaused: Bool, isBusy: Bool
+    hasRandomCandidate: Bool, previousID: String?, isPaused: Bool, isBusy: Bool
   ) -> NowPlayingState {
     let isUsable = target?.isSelectable ?? false
     let status =
@@ -69,6 +74,7 @@ struct NowPlayingState: Equatable {
         : isPaused ? L("Resume wallpaper playback") : L("Pause wallpaper playback"),
       showsPlay: !hasWallpaper || isPaused, isEqualizerRunning: item != nil && !isPaused,
       canTogglePlayback: !isBusy && hasWallpaper,
-      canGoPrevious: previousID != nil && isUsable, canGoNext: isUsable && hasOtherWallpaper)
+      canGoPrevious: previousID != nil && isUsable, canGoNext: isUsable && hasOtherWallpaper,
+      canPickRandom: isUsable && hasRandomCandidate)
   }
 }

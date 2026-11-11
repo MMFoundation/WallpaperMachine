@@ -1360,13 +1360,15 @@ never to `.shared`.
   due), Apply to all displays and its rollback, the question before
   applying a scene Native Metal refused (the scene read again first: a refusal that no longer
   holds asks nothing, an unreadable scene asks with the remembered reason; Cancel keeps the
-  displays, Reapply and the shown scene ask nothing), previous and next,
+  displays, Reapply and the shown scene ask nothing), previous and next, Now Playing's Random
+  (another wallpaper, remembered in the panel's own playlists, never a held one, a mirror refused),
   playback, refresh, the held-wallpaper sentence and **Try again**, per-display host states and
   their exact retry), `PanelLibraryImportTests`, `PanelLibraryRemovalTests` (confirmation, no
   window means no deletion, one question for a batch, partial failures named),
   `PanelLibraryRowsTests` (rows joined with measured facts, covers only once stamped, a rescan that
   replaced no preview leaves every row alone, 10,000 rows built once whatever else changes),
-  `PanelLibraryStateTests` (Now Playing, the target menu, display names, the target the Apply
+  `PanelLibraryStateTests` (Now Playing, Random needing a usable target and a wallpaper that is
+  not held back, the target menu, display names, the target the Apply
   help names only with two or more displays that can take a wallpaper, history, library counts,
   the update dot, the issue report's facts, the changed properties it lists without typed text
   or paths and capped, marked not applied only while they wait for Apply changes, and the files a check found missing), `PanelCollectionActionsTests`,

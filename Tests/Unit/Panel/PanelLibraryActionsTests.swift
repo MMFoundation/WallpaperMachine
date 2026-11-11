@@ -508,6 +508,32 @@ final class PanelLibraryActionsTests: PanelTestCase {
     }
   }
 
+  func testRandomChangesTheTargetDisplayToAnotherWallpaperAndSaysWhenThereIsNone() async throws {
+    try await withApplyingPanel { panel, bridge, _ in
+      let controller = panel.controller
+      XCTAssertEqual(bridge.assignments["primary"], "a")
+      try await controller.randomWallpaper()
+      let picked = try XCTUnwrap(bridge.assignments["primary"])
+      XCTAssertNotEqual(picked, "a", "never the wallpaper on show")
+      XCTAssertTrue(
+        panel.playlists.randomRounds.values.contains { $0.contains(picked) },
+        "the pick is remembered in the panel's own playlists, so every wallpaper comes round")
+
+      // A wallpaper held back after a crash is never picked, so holding every other one leaves none.
+      let others = panel.store.librarySnapshot.wallpapers.map(\.id).filter { $0 != picked }
+      panel.store.appSnapshot.heldWallpaperIds = others
+      let nothingElse = await banner(panel) { try await controller.randomWallpaper() }
+      XCTAssertNotNil(nothingElse, "a Random that cannot pick says why")
+      XCTAssertEqual(bridge.assignments["primary"], picked)
+      panel.store.appSnapshot.heldWallpaperIds = []
+
+      bridge.mirrors["secondary"] = "primary"
+      try await panel.store.refreshAllAsync()
+      let mirrored = await banner(panel) { try await controller.randomWallpaper(displayID: "secondary") }
+      XCTAssertNotNil(mirrored, "a mirrored display follows its source")
+    }
+  }
+
   // MARK: Refresh, playback and target
 
   func testPlaybackPausesEveryDisplayAndResumesThemAll() async throws {

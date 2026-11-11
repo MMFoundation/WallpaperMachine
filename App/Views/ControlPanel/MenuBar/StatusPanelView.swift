@@ -173,7 +173,7 @@ private struct StatusPanelTransport: View {
         controller.launch(controller.key("next")) { try await controller.next() }
       }
       NowPlayingControl(
-        systemImage: "shuffle", label: L("Random wallpaper"),
+        systemImage: "dice", label: L("Random wallpaper"),
         isEnabled: panel.canRandom && !busy("random"), identifier: "status-panel-random"
       ) {
         controller.launch(controller.key("random")) { try await controller.randomWallpaper() }

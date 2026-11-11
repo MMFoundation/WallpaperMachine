@@ -593,8 +593,8 @@ the display's full name, the playback state (while no display shows a wallpaper,
 apply one, beside Apply's symbol rather than a playback one) and **Show in library**, which
 shows the wallpaper selected on Installed. Its controls:
 
-- **Previous wallpaper**, play/pause, **Next wallpaper**, **Playlist** and **Recently used**
-  (below). Play/pause acts on every wallpaper and is enabled whenever any display
+- **Previous wallpaper**, play/pause, **Next wallpaper**, **Random wallpaper**, **Playlist** and
+  **Recently used** (below). Play/pause acts on every wallpaper and is enabled whenever any display
   has an assignment, even if the target display is empty; with no assignments it is
   disabled and reports **No wallpaper playing**. The choice outlives a quit: it is
   saved as `paused` under `[general]` in `config.toml`, and an app that quit paused
@@ -608,6 +608,12 @@ shows the wallpaper selected on Installed. Its controls:
   ([playlists](playlists.md#where-it-lives)). Otherwise it takes the library's next supported
   wallpaper, the rule of the Next wallpaper keyboard shortcut ([automation](automation.md)).
   A playlist with nothing else to change to says so.
+- **Random wallpaper** (a die, since the shuffle symbol is the playlist's Shuffle order) is the
+  menu bar's **Random Wallpaper** for the target display ([Random
+  Wallpaper](playlists.md#random-wallpaper)): a wallpaper from the whole library that can play,
+  other than the one on show and never one held back after a crash, each coming round before one
+  repeats; a rotating playlist gives way to it. It is unavailable for a mirror or a disabled
+  display and when nothing else could be picked.
 - **Playlist** is lit, with the order's symbol (repeat or shuffle), while the target
   display rotates, and is unavailable for a mirror or a disabled display. It opens the
   target display's playlist above the bar: what it rotates through, the order and how

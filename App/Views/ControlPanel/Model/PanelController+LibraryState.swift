@@ -205,16 +205,22 @@ extension PanelController {
     return target.shortLabel(among: displays)
   }
 
-  /// The Now Playing card.
+  /// The Now Playing card. The bar reads it on every redraw, so what Next and Random could pick is
+  /// asked with `contains`, never by listing the candidates.
   var nowPlaying: NowPlayingState {
     let displays = targetDisplays
     let id = targetDisplayID
     let target = displays.first { $0.id == id }
+    let wallpapers = store.librarySnapshot.wallpapers
+    let held = store.heldWallpaperIDs
     return NowPlayingState.make(
       target: target, item: target?.wallpaperID.flatMap(libraryRow(id:)),
       hasWallpaper: displays.contains { $0.wallpaperID != nil },
-      hasOtherWallpaper: store.librarySnapshot.wallpapers.contains {
-        $0.supported && $0.id != target?.wallpaperID
+      hasOtherWallpaper: wallpapers.contains { $0.supported && $0.id != target?.wallpaperID },
+      // `AutomationCommand.RandomPool.all.candidates` less the one on show: a pick never reopens a
+      // wallpaper held back after a crash.
+      hasRandomCandidate: wallpapers.contains {
+        $0.supported && $0.id != target?.wallpaperID && !held.contains($0.id)
       },
       previousID: store.previousWallpaperID(displayId: id), isPaused: isPlaybackPaused,
       isBusy: isStoreBusy)

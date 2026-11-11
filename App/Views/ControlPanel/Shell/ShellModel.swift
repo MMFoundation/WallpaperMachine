@@ -243,6 +243,15 @@ final class ShellModel {
     }
   }
 
+  @discardableResult
+  func randomWallpaper() -> Task<Void, Never> {
+    let controller = controller
+    let display = controller.targetDisplayID
+    return controller.launch(PanelActionCoordinator.key("randomWallpaper", displayID: display)) {
+      try await controller.randomWallpaper(displayID: display)
+    }
+  }
+
   /// Whether each of those is in flight, which disables its own button and no other.
   var isPlaybackBusy: Bool { controller.isBusy(PanelActionCoordinator.key("playback")) }
   var isPreviousBusy: Bool {
@@ -252,6 +261,10 @@ final class ShellModel {
   var isNextBusy: Bool {
     controller.isBusy(
       PanelActionCoordinator.key("nextWallpaper", displayID: controller.targetDisplayID))
+  }
+  var isRandomBusy: Bool {
+    controller.isBusy(
+      PanelActionCoordinator.key("randomWallpaper", displayID: controller.targetDisplayID))
   }
 
   /// Show in library: opens Installed with the wallpaper selected.

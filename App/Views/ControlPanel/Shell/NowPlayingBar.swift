@@ -1,15 +1,17 @@
 import SwiftUI
 
 /// The bar along the bottom of the window: what the target display is showing, and the previous,
-/// play or pause, next, playlist and Recently used buttons. While the target display rotates, the
-/// line under the title names what it rotates through and the playlist button is lit.
+/// play or pause, next, random, playlist and Recently used buttons. While the target display
+/// rotates, the line under the title names what it rotates through and the playlist button is lit.
 ///
 /// The wallpaper's part of the bar is a button: it lights on hover and opens the details, a wider
 /// still with the title, its kind, the display and the playback state, and Show in library.
 ///
 /// Play and pause act on every display, so the status reports them even when the target display is
-/// empty and the button works while any display has a wallpaper. Previous and next act on the target
-/// display only. The equalizer moves only while the wallpaper plays and the window is on screen.
+/// empty and the button works while any display has a wallpaper. Previous, next and random act on
+/// the target display only; random is the menu bar's Random Wallpaper, drawn with `dice` because
+/// `shuffle` is the playlist's Shuffle order beside it. The equalizer moves only while the
+/// wallpaper plays and the window is on screen.
 ///
 /// While a season is on, the bar is the ground its horizon (`SeasonHorizon`) rises from: the
 /// horizon's ink in either appearance, its contents in the season's dark palette. What it opens over
@@ -61,10 +63,14 @@ struct NowPlayingBar: View {
           systemImage: "forward.fill", label: L("Next wallpaper"),
           isEnabled: state.canGoNext && !shell.isNextBusy, identifier: "now-playing-next"
         ) { shell.nextWallpaper() }
+        NowPlayingControl(
+          systemImage: "dice", label: L("Random wallpaper"),
+          isEnabled: state.canPickRandom && !shell.isRandomBusy, identifier: "now-playing-random"
+        ) { shell.randomWallpaper() }
         NowPlayingPlaylistButton()
         history(shell)
       }
-      .frame(width: 200)
+      .frame(width: 240)
     }
     .padding(.horizontal, 10)
     .frame(height: Self.height)

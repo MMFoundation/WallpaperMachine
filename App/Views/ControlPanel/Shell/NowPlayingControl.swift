@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// One icon button of the Now Playing bar: previous, play or pause, next, the playlist, Recently
-/// used.
+/// One icon button of the Now Playing bar: previous, play or pause, next, random, the playlist,
+/// Recently used.
 ///
 /// Its label is both the tooltip and what VoiceOver reads, so a button never says one thing and does
 /// another; the play button's label changes with what pressing it does.

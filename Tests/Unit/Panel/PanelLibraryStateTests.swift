@@ -32,8 +32,8 @@ final class PanelLibraryStateTests: PanelTestCase {
 
   func testTheCardNamesTheTargetsWallpaperAndTheStatusFollowsEveryDisplayAndTheGlobalPause() {
     let playing = NowPlayingState.make(
-      target: target(), item: row("a"), hasWallpaper: true, hasOtherWallpaper: true, previousID: "b",
-      isPaused: false, isBusy: false)
+      target: target(), item: row("a"), hasWallpaper: true, hasOtherWallpaper: true,
+      hasRandomCandidate: true, previousID: "b", isPaused: false, isBusy: false)
     XCTAssertEqual(playing.title, "Title a")
     XCTAssertEqual(playing.status, L("Playback running"))
     XCTAssertEqual(playing.detail, L("Playback running"))
@@ -46,8 +46,8 @@ final class PanelLibraryStateTests: PanelTestCase {
     XCTAssertTrue(playing.canTogglePlayback && playing.canGoPrevious && playing.canGoNext)
 
     let paused = NowPlayingState.make(
-      target: target(), item: row("a"), hasWallpaper: true, hasOtherWallpaper: true, previousID: "b",
-      isPaused: true, isBusy: false)
+      target: target(), item: row("a"), hasWallpaper: true, hasOtherWallpaper: true,
+      hasRandomCandidate: true, previousID: "b", isPaused: true, isBusy: false)
     XCTAssertEqual(paused.status, L("Playback paused"))
     XCTAssertEqual(paused.playbackLabel, L("Resume wallpaper playback"))
     XCTAssertTrue(paused.showsPlay)
@@ -59,7 +59,7 @@ final class PanelLibraryStateTests: PanelTestCase {
     for paused in [false, true] {
       let idle = NowPlayingState.make(
         target: target(wallpaper: nil), item: nil, hasWallpaper: false, hasOtherWallpaper: true,
-        previousID: nil, isPaused: paused, isBusy: false)
+        hasRandomCandidate: true, previousID: nil, isPaused: paused, isBusy: false)
       XCTAssertEqual(idle.status, L("No wallpaper playing"), "no assignments must not read as running or paused")
       XCTAssertFalse(idle.detail.isEmpty)
       XCTAssertNotEqual(idle.detail, idle.status, "the line says how to apply one, not the status again")
@@ -76,26 +76,28 @@ final class PanelLibraryStateTests: PanelTestCase {
   func testAnotherDisplaysWallpaperKeepsTheTogglePlayableWhileTheTargetShowsNothing() {
     let card = NowPlayingState.make(
       target: target(wallpaper: nil), item: nil, hasWallpaper: true, hasOtherWallpaper: true,
-      previousID: nil, isPaused: false, isBusy: false)
+      hasRandomCandidate: true, previousID: nil, isPaused: false, isBusy: false)
     XCTAssertTrue(card.canTogglePlayback, "play and pause act on every display")
     XCTAssertEqual(card.status, L("Playback running"))
     XCTAssertEqual(card.detail, L("Playback running"), "the line reports it even when this display is empty")
     XCTAssertEqual(card.title, L("Nothing on this display"))
     let paused = NowPlayingState.make(
       target: target(wallpaper: nil), item: nil, hasWallpaper: true, hasOtherWallpaper: true,
-      previousID: nil, isPaused: true, isBusy: false)
+      hasRandomCandidate: true, previousID: nil, isPaused: true, isBusy: false)
     XCTAssertTrue(paused.canTogglePlayback, "paused playback stays resumable")
     XCTAssertNotEqual(paused.status, card.status)
   }
 
+  private func card(
+    _ target: TargetDisplayOption?, previous: String? = "b", other: Bool = true, random: Bool = true,
+    busy: Bool = false
+  ) -> NowPlayingState {
+    NowPlayingState.make(
+      target: target, item: nil, hasWallpaper: true, hasOtherWallpaper: other, hasRandomCandidate: random,
+      previousID: previous, isPaused: false, isBusy: busy)
+  }
+
   func testPreviousAndNextNeedADisplayThatCanShowItsOwnWallpaperAndSomethingToSwitchTo() {
-    func card(_ target: TargetDisplayOption?, previous: String? = "b", other: Bool = true, busy: Bool = false)
-      -> NowPlayingState
-    {
-      NowPlayingState.make(
-        target: target, item: nil, hasWallpaper: true, hasOtherWallpaper: other, previousID: previous,
-        isPaused: false, isBusy: busy)
-    }
     XCTAssertTrue(card(target()).canGoPrevious && card(target()).canGoNext)
     XCTAssertFalse(card(target(), previous: nil).canGoPrevious, "no previous wallpaper still in the library")
     XCTAssertFalse(card(target(), other: false).canGoNext, "nothing else supported to switch to")
@@ -106,6 +108,16 @@ final class PanelLibraryStateTests: PanelTestCase {
     }
     XCTAssertFalse(card(target(), busy: true).canTogglePlayback, "locked while a command runs")
     XCTAssertTrue(card(target(), busy: true).canGoNext, "only the toggle waits for the queue")
+  }
+
+  func testRandomNeedsADisplayThatCanShowItsOwnWallpaperAndAnotherThatIsNotHeldBack() {
+    XCTAssertTrue(card(target()).canPickRandom)
+    XCTAssertFalse(card(target(), random: false).canPickRandom, "nothing else the pick may be")
+    XCTAssertTrue(card(target(), random: false).canGoNext, "Next does not skip a held wallpaper")
+    for unusable in [target(enabled: false), target(mirror: true), nil] {
+      XCTAssertFalse(card(unusable).canPickRandom)
+    }
+    XCTAssertTrue(card(target(), busy: true).canPickRandom, "only the toggle waits for the queue")
   }
 
   func testTheControllersCardUsesEveryDisplaysAssignmentAndTheGlobalPause() async throws {
@@ -128,6 +140,11 @@ final class PanelLibraryStateTests: PanelTestCase {
       let running = card.status
 
       let runningLabel = card.playbackLabel
+      XCTAssertTrue(card.canGoNext && card.canPickRandom, "another display's wallpaper can be picked")
+      panel.store.appSnapshot.heldWallpaperIds = ["second"]
+      XCTAssertFalse(controller.nowPlaying.canPickRandom, "a pick never reopens a held wallpaper")
+      XCTAssertTrue(controller.nowPlaying.canGoNext)
+      panel.store.appSnapshot.heldWallpaperIds = []
 
       panel.store.appSnapshot.playbackState = .paused
       card = controller.nowPlaying

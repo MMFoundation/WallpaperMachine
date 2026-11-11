@@ -277,7 +277,9 @@ is forgotten, so choosing the setting later never acts on an unlock that is over
 ## Random Wallpaper
 
 **Random Wallpaper** is a command, not a playlist mode: the menu bar (after **Next
-Wallpaper**, for the display whose menu it is), a `wallpapermachine://random` link, the
+Wallpaper**, for the display whose menu it is), the control panel's Now Playing bar
+(**Random wallpaper**, for the target display, from the whole library;
+[Now Playing](control-panel.md#now-playing)), a `wallpapermachine://random` link, the
 Shortcuts app and an optional shortcut key change a display to a random wallpaper other
 than the one it shows ([automation](automation.md#commands)). It draws from every
 wallpaper that can play, or from the favorites only (`from=favorites`, **Choose from** in
@@ -295,7 +297,8 @@ chosen by hand and lifts a hold left by removing the wallpaper
 in the command queue comes, from whatever the display shows then, and the round only
 remembers a pick once it has been shown, so one that failed to load can come up again. When
 the pool holds nothing but the wallpaper on screen, the command fails with a message
-instead of changing nothing; the menu leaves **Random Wallpaper** out in that case.
+instead of changing nothing; the menu leaves **Random Wallpaper** out in that case, and the
+Now Playing bar's **Random wallpaper** is unavailable.
 
 ## Storage
 

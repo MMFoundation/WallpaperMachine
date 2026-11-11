@@ -90,6 +90,20 @@ extension PanelController {
     }
   }
 
+  /// `randomWallpaper`, the menu bar's Random Wallpaper rule: a wallpaper from the whole library
+  /// that can play, other than the one on show and never one held back after a crash, each coming
+  /// round before one repeats, picked when the display's turn comes; with nothing to pick it says
+  /// so. The store queues the pick on the display's own slot (`activateRandomWallpaperAsync`), so
+  /// this runs it directly. The favorites and the playlists are the controller's own.
+  /// `displayID` is the target display when it names none.
+  func randomWallpaper(displayID: String? = nil) async throws {
+    let displayID = try standaloneDisplayID(displayID)
+    try await run(.direct) {
+      try await store.activateRandomWallpaperAsync(
+        displayId: displayID, pool: .all, favorites: favoriteIDs, playlists: playlists)
+    }
+  }
+
   /// Applies or restarts `id` on the display targeted *now*, which is the one the user means:
   /// the command may wait behind others, and the target can change in the meantime. It is read
   /// before anything here waits (the shared resources, reading a refused scene again), so the
