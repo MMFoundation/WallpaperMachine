@@ -4377,6 +4377,9 @@
     "Try a different search or remove some filters. Every selected tag must match." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Tente outra busca ou remova alguns filtros. Todas as etiquetas selecionadas precisam corresponder."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다른 검색어를 사용하거나 일부 필터를 해제하세요. 선택한 모든 태그가 일치해야 합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "別のキーワードで検索するか、フィルタをいくつか解除してください。選択したタグはすべて一致する必要があります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "换个关键词，或减少一些筛选条件。所选标签必须全部匹配。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "請改用其他搜尋字詞或移除部分篩選條件。所選的每個標籤都必須符合。"}}}
     },
+    "Try a different search." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Tente outra busca."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다른 검색어를 사용해 보세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "別のキーワードで検索してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "换个关键词试试。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "請改用其他搜尋字詞。"}}}
+    },
     "Change your search or clear filters to see more wallpapers." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Altere sua busca ou limpe os filtros para ver mais papéis de parede."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "더 많은 배경화면을 보려면 검색 조건을 변경하거나 필터를 지우세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ほかの壁紙を表示するには、検索条件を変更するかフィルタをクリアしてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "修改搜索或清除筛选以查看更多壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "變更搜尋或清除篩選條件，即可查看更多桌布。"}}}
     },

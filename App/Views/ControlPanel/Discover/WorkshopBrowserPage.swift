@@ -230,7 +230,7 @@ struct WorkshopEmptyStateView: View {
     case .clearSearch:
       PanelEmptyState(
         verbatim: L("No wallpapers found"), systemImage: "magnifyingglass",
-        description: L("Try a different search or remove some filters. Every selected tag must match.")
+        description: L("Try a different search.")
       ) {
         Button("Clear search") { model.clearSearchAndFilters() }
           .buttonStyle(.panelSecondary)

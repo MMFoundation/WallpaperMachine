@@ -184,6 +184,26 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     let found = identifiers(in: host.hosting.view)
     XCTAssertFalse(found.contains("workshop-page-field"), "an empty state stands alone, without a pager")
     XCTAssertFalse(found.contains("workshop-next-page"))
+
+    // The same search once the filters are back at their defaults: only the search is to blame.
+    // Clearing the filters searches the id again; that search settles before the next one starts.
+    model.clearFilters()
+    try await waitFor {
+      panel.workshop.excludedTags == WorkshopStore.defaultExcludedTags && !controller.workshopBrowse.isLoading
+    }
+    model.edit(text: "aurora")
+    model.search()
+    try await waitFor {
+      WorkshopBrowseProtocol.requests.contains { WorkshopBrowseProtocol.values("searchtext", in: $0) == "aurora" }
+        && !controller.workshopBrowse.isLoading && controller.workshopBrowse.errorMessage == nil
+    }
+    XCTAssertEqual(model.filterCount, 0, "the default exclusions are no filter to remove")
+    XCTAssertEqual(
+      WorkshopEmptyState.make(
+        browse: controller.workshopBrowse, draftText: model.text, filterCount: model.filterCount),
+      .noResults(.clearSearch))
+    try await settle(host, size: size)
+    assertFits(host, size, "a search alone")
     host.close()
   }
 
