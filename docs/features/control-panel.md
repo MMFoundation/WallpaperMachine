@@ -535,7 +535,9 @@ is then the accent button and **Apply wallpaper**, which still applies, is drawn
 the two are never the accent at once (a notice's call to action, such as **Update**, and the
 submit button of an open form, such as **Save preset**, keep their own); with nothing waiting the footer is not
 drawn. It fades in and out, at once with Reduce Motion, and VoiceOver says **You have unapplied
-changes.** when it appears. A preset's **Apply** is a plain button.
+changes.** when it appears. Each setting that waits says **Not applied** beside its name, in
+place of **Modified**, and a display card with one says so under the display's name (see
+[Properties](wallpaper-properties.md#properties)). A preset's **Apply** is a plain button.
 
 Below the compatibility note, an installed wallpaper that can run (not
 Application) shows **Not working? Report on GitHub**. It opens the repository's

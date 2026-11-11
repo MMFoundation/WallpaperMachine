@@ -118,6 +118,10 @@ impl BridgeActorState {
         let overrides = model
             .map(|model| model.override_values(&config.property_overrides))
             .unwrap_or_default();
+        // The saved values, decoded the same way, say which rows wait for Apply.
+        let committed_overrides = model
+            .map(|model| model.override_values(&draft.committed().property_overrides))
+            .unwrap_or_default();
         let active_enabled_displays = self.enabled_selectors(&wallpaper_id);
         let mut snapshot = super::snapshot_projection::project_options(
             entry,
@@ -125,6 +129,7 @@ impl BridgeActorState {
             &active_enabled_displays,
             model,
             &overrides,
+            &committed_overrides,
             &self.app_config,
             displays,
             |property, value| {
@@ -240,6 +245,7 @@ impl BridgeActorState {
         snapshot.engine_options = super::engine_options::project(
             entry.kind,
             &config.engine_options,
+            &draft.committed().engine_options,
             self.scene_traits.get(&wallpaper_id),
             self.image_filters(),
         );

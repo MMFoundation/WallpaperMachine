@@ -4781,6 +4781,12 @@
     "Modified" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Modificado"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "수정됨"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "変更済み"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已修改"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已修改"}}}
     },
+    "Not applied" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Não aplicado"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "적용 안 됨"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "未適用"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "未应用"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "未套用"}}}
+    },
+    "Not applied yet. Apply changes saves it; Revert undoes it." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ainda não aplicado. Aplicar alterações salva; Reverter desfaz."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "아직 적용되지 않았습니다. ‘변경 사항 적용’으로 저장하고 ‘되돌리기’로 취소합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "まだ適用されていません。「変更を適用」で保存し、「元に戻す」で取り消します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "尚未应用。“应用修改”会保存它，“还原”可撤销。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "尚未套用。「套用變更」會儲存它，「還原」可取消。"}}}
+    },
     "Hint" : {
       "extractionState" : "manual",
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Dica"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "힌트"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ヒント"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "提示"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "提示"}}}

@@ -151,8 +151,9 @@ struct DisplaysCard: View {
 }
 
 /// One display's playback of the wallpaper: Enabled, Scaling mode and Scale factor, Frame rate,
-/// where the wallpaper sits, and Remove from display. Everything is saved at once except the Scale
-/// factor, a draft that waits for Apply changes.
+/// where the wallpaper sits, and Remove from display. Scaling mode, Frame rate and the position are
+/// saved at once; Enabled and the Scale factor are drafts that wait for Apply changes, and while
+/// one of them does the card says **Not applied** under its name.
 struct DisplayCard: View {
   let options: InspectorOptions
   let display: InspectorOptions.DisplayRow
@@ -165,7 +166,12 @@ struct DisplayCard: View {
     let id = options.wallpaperID
     let enabledKey = InspectorAction.displayConfig(id, display: display.id, "enabled")
     let modeKey = InspectorAction.displayConfig(id, display: display.id, "scalingMode")
-    InspectorSection(verbatim: display.title, nested: true) {
+    InspectorSection(
+      verbatim: display.title, nested: true,
+      accessory: {
+        if display.hasStagedChanges { ModifiedMark(kind: .notApplied).padding(.top, 2) }
+      }
+    ) {
       InspectorToggleRow(
         title: "Enabled", isOn: display.isEnabled,
         isDisabled: controller.isInspectorControlDisabled(options, key: enabledKey)

@@ -90,13 +90,20 @@ final class InspectorRenderTests: InspectorTestCase {
     await fixture.shutdown()
   }
 
-  /// The footer with Revert and Apply changes is drawn only while an edit waits, so the test above
-  /// never meets it: with one waiting, the inspector still takes the smallest window it is given in
-  /// every language and both appearances, footer included.
+  /// The footer with Revert and Apply changes and the Not applied marks are drawn only while an
+  /// edit waits, so the test above never meets them: with a property and a display's scale factor
+  /// waiting, the inspector still takes the smallest window it is given in every language and both
+  /// appearances, footer and marks included.
   func testTheInspectorWithChangesWaitingAcceptsTheWindowInEveryLanguage() async throws {
     let fixture = try InspectorRenderFixture()
     try await prepare(fixture)
     fixture.store.wallpaperOptionsSnapshot?.dirty = true
+    fixture.store.wallpaperOptionsSnapshot?.properties[1].staged = true
+    fixture.store.wallpaperOptionsSnapshot?.displayConfigurations[1].staged = true
+    let waiting = fixture.controller.inspectorOptions(for: InspectorRenderFixture.selected)
+    XCTAssertEqual(
+      waiting?.properties.first { $0.id == "clock" }?.mark, .notApplied, "precondition: the switch waits")
+    XCTAssertEqual(waiting?.displays.map(\.hasStagedChanges), [false, true], "and the second display")
     let size = ControlPanelWindow.minimumContentSize
     for language in AppLanguage.supported.map(\.tag) {
       let languages = AppLanguageStore(
@@ -384,6 +391,50 @@ final class InspectorRenderTests: InspectorTestCase {
     XCTAssertFalse(window.isVisible, "layout stays offscreen")
     window.contentViewController = nil
     window.close()
+  }
+
+  /// A switch with Restore default beside it keeps its line whichever mark its row shows, none,
+  /// Modified or Not applied: at every width of the column the row is as tall in all three, so the
+  /// first edit, an Apply or a Revert never moves the switch from beside its label to under it.
+  func testASwitchStaysOnItsLineWhetherItsRowShowsNoMarkModifiedOrNotApplied() async throws {
+    let fixture = try InspectorRenderFixture()
+    var inputs = InspectorOptions.Inputs()
+    inputs.locale = PanelLocale(language: .english, region: nil)
+    func row(dirty: Bool, staged: Bool) throws -> NSHostingController<AnyView> {
+      let options = InspectorOptions.make(
+        BridgeSnapshotFixtures.options(
+          wallpaperId: InspectorRenderFixture.selected,
+          properties: [
+            BridgePropertyDescriptor(
+              id: "clock", kind: .bool, labelHtml: "Show the clock", value: .bool(value: true),
+              defaultValue: .bool(value: false), slider: nil, comboOptions: [], fileFilter: nil,
+              directoryMode: nil, dirty: dirty, canRestoreDefaults: true, enabled: true,
+              assetManaged: false, assetMissing: false, assetSourcePath: nil, staged: staged)
+          ]), inputs: inputs)
+      let row = try XCTUnwrap(options.properties.first)
+      XCTAssertTrue(row.canRestoreDefault, "precondition: Restore default follows the mark")
+      return NSHostingController(
+        rootView: AnyView(
+          PropertyRowView(options: options, row: row)
+            .environment(fixture.controller)
+            .panelTheme(theme: fixture.controller.theme, locale: PanelLocale.shared)))
+    }
+    let states = [
+      ("no mark", try row(dirty: false, staged: false)), ("Modified", try row(dirty: true, staged: false)),
+      ("Not applied", try row(dirty: true, staged: true)),
+    ]
+    // From a column wide enough for the label to keep one line under any mark (narrower, a wider
+    // mark leaves the label less room and it wraps, which is not the switch moving).
+    var heights = Set<CGFloat>()
+    for width in stride(from: CGFloat(240), through: 420, by: 1) {
+      let measured = states.map { ($0.0, $0.1.sizeThatFits(in: CGSize(width: width, height: 2000)).height) }
+      heights.formUnion(measured.map(\.1))
+      for (name, height) in measured.dropFirst() {
+        XCTAssertEqual(height, measured[0].1, accuracy: 0.5, "\(name) at \(width) pt: the switch changed lines")
+      }
+    }
+    XCTAssertGreaterThan(heights.count, 1, "precondition: the sweep crosses the width where the switch moves")
+    await fixture.shutdown()
   }
 
   // MARK: VoiceOver

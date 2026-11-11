@@ -84,6 +84,36 @@ final class InspectorEngineOptionsTests: XCTestCase {
     XCTAssertTrue(options.hasUnsentChanges)
   }
 
+  /// An option that waits for Apply changes, staged or on its way, is marked Not applied; one saved
+  /// away from its default is marked Modified; an untouched one is not marked.
+  func testAnOptionThatWaitsIsMarkedNotAppliedAndASavedChangeModified() throws {
+    let options = make(
+      engineOptions: BridgeSnapshotFixtures.engineOptions(
+        values: [.flipHorizontal: .bool(value: true), .playbackRate: .number(value: 50)],
+        staged: [.playbackRate])
+    ) {
+      $0.pendingEngineValues = [.colorEnabled: .bool(value: true)]
+    }
+    let rows = try XCTUnwrap(options.engineOptions)
+    func mark(_ option: BridgeEngineOptionId) -> InspectorOptions.PropertyRow.Mark? {
+      rows.first { $0.option == option }?.row.mark
+    }
+    XCTAssertEqual(mark(.flipHorizontal), .modified, "saved, it differs from the default")
+    XCTAssertEqual(mark(.playbackRate), .notApplied, "staged, it waits for Apply changes")
+    XCTAssertEqual(mark(.colorEnabled), .notApplied, "a value on its way waits too")
+    XCTAssertNil(mark(.imageFilter))
+  }
+
+  /// An option set back to its default and not yet applied (Restore default or Restore all
+  /// defaults) still waits, so the section opens for it as it does for a modified one.
+  func testTheSectionOpensForAnOptionThatWaitsEvenAtItsDefault() throws {
+    let options = make(engineOptions: BridgeSnapshotFixtures.engineOptions(staged: [.flipHorizontal]))
+    let flip = try XCTUnwrap(options.engineOptions?.first { $0.option == .flipHorizontal })
+    XCTAssertFalse(flip.row.isModified, "precondition: back at its default")
+    XCTAssertEqual(flip.row.mark, .notApplied)
+    XCTAssertTrue(InspectorPolicy.engineOptionsOpenByDefault(options))
+  }
+
   // MARK: Restore all defaults
 
   func testTheSectionsRestoreAllCountsListedHiddenAndPendingValuesAndNothingElse() {

@@ -1390,14 +1390,19 @@ never to `.shared`.
   accent Apply changes only while an edit waits), `InspectorWordingTests` (among its sentences, what draws
   the wallpaper said in words, with the renderer's id kept as it is on the detail line; a reported
   problem leads the line and is never said to play; nothing named before the runtime reports it,
-  and no such line promised for a web page), `InspectorInputTests`,
+  and no such line promised for a web page), `InspectorInputTests` (among the typed numbers, the
+  Modified and Not applied pills drawn at the width a row counts for them in every language, so
+  neither moves a control), `InspectorEngineOptionsTests` (among the engine rows, the section open
+  for an option that waits even at its default, Not applied for
+  an option that waits and Modified for a saved one),
   `InspectorFlowTests` (Preview with unsent text, Restore all defaults, sections, the app's words
   against an author's markup, host states as text, file and folder notes, every symbol drawn
   exists, and Apply, Reapply and Resume download each with a symbol of its own that is not
   Play's), `InspectorSliderTests` (VoiceOver, keys and the pointer each reach the saved edit; a
   drag previews and the release saves once; colours saved after a quiet period),
   `InspectorRenderTests` (the inspector and the whole panel with it open at 760×560 in every
-  language, and the inspector with an edit waiting, footer included; the footer drawn and said
+  language, and the inspector with edits waiting, footer and Not applied marks included; a switch
+  kept on its line whichever mark its row shows, Restore default beside it; the footer drawn and said
   aloud only while an edit waits; the Compatibility card's renderer lines, with a problem, wrap in the narrowest column
   in every language; a slider's VoiceOver, key and pointer changes reach the bridge; the row whose
   edit brings the footer in scrolled clear of it, and Apply changes and Revert said aloud once done),
@@ -1405,7 +1410,8 @@ never to `.shared`.
   markup, scripts and controls dropped, links only to allowed hosts, registered images only,
   limits), `PlacementGeometryTests`, `PlacementDraftsTests`, `PresetsBarStateTests` and, on the
   controller, `PanelPropertyRowsTests` (author markup reduced to words, engine tokens as readable
-  and translated words, the curated phrases, modified marks, Restore all and Apply availability,
+  and translated words, the curated phrases, modified marks and Not applied ahead of them for a
+  value that waits, Restore all and Apply availability,
   display cards, measured folders, relabelling in a new language, audio and media delivery status),
   `PanelPropertyDraftTests`, `PanelPropertyFilesTests`, `PanelPropertyPreviewTests` (described
   under Preview), `PanelDisplayPositionTests` (one axis at a time, refused values reach no bridge

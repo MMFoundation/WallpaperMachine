@@ -78,6 +78,6 @@ extension InspectorOptions {
         id: "engine.\(option.id)", control: control, name: name,
         label: PropertyLabels.Presentation(text: name, markup: nil, images: [:]),
         isModified: option.modified || pending != nil, isDirty: option.modified,
-        canRestoreDefault: true))
+        canRestoreDefault: true, isStaged: option.staged || pending != nil))
   }
 }

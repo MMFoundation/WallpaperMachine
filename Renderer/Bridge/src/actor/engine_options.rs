@@ -35,11 +35,13 @@ pub(crate) fn offered(kind: BridgeWallpaperKind, traits: SceneTraits) -> Vec<Eng
 }
 
 /// The rows of `kind` with `current` as their values, or `None` when the kind
-/// has no per-wallpaper options.
+/// has no per-wallpaper options. A row whose value differs from `committed`,
+/// the saved options, is staged.
 #[must_use]
 pub(crate) fn project(
     kind: BridgeWallpaperKind,
     current: &EngineOptionsCfg,
+    committed: &EngineOptionsCfg,
     traits: SceneTraits,
     image_filters: &[String],
 ) -> Option<BridgeEngineOptions> {
@@ -56,6 +58,7 @@ pub(crate) fn project(
             BridgeEngineOptionRow {
                 id: option.into(),
                 modified: value != default_value,
+                staged: value != committed.get(option),
                 value: value.into(),
                 default_value: default_value.into(),
                 slider: option.range().map(|(min, max)| BridgeSliderMetadata { min, max, step: 1.0, precision: 0 }),
@@ -164,15 +167,16 @@ mod tests {
     #[test]
     fn rows_follow_the_colour_switch_and_the_chosen_filter() {
         let mut options = EngineOptionsCfg::default();
-        let rows = project(BridgeWallpaperKind::Video, &options, SceneTraits::default(), &[]).unwrap().rows;
+        let saved = EngineOptionsCfg::default();
+        let rows = project(BridgeWallpaperKind::Video, &options, &saved, SceneTraits::default(), &[]).unwrap().rows;
         let enabled = |rows: &[BridgeEngineOptionRow], id| rows.iter().find(|row| row.id == id).unwrap().enabled;
         assert!(!enabled(&rows, BridgeEngineOptionId::Brightness));
         assert!(!enabled(&rows, BridgeEngineOptionId::FilterStrength));
-        assert!(rows.iter().all(|row| !row.modified));
+        assert!(rows.iter().all(|row| !row.modified && !row.staged));
 
         options.color_enabled = true;
         options.image_filter = "amber".into();
-        let rows = project(BridgeWallpaperKind::Video, &options, SceneTraits::default(), &["amber".into()])
+        let rows = project(BridgeWallpaperKind::Video, &options, &saved, SceneTraits::default(), &["amber".into()])
             .unwrap()
             .rows;
         assert!(enabled(&rows, BridgeEngineOptionId::HueShift));
@@ -180,6 +184,19 @@ mod tests {
         let rate = rows.iter().find(|row| row.id == BridgeEngineOptionId::PlaybackRate).unwrap();
         assert_eq!(rate.slider, Some(BridgeSliderMetadata { min: 10.0, max: 200.0, step: 1.0, precision: 0 }));
         assert!(rows.iter().find(|row| row.id == BridgeEngineOptionId::ColorEnabled).unwrap().modified);
+        let staged: Vec<_> = rows.iter().filter(|row| row.staged).map(|row| row.id).collect();
+        assert_eq!(
+            staged,
+            [BridgeEngineOptionId::ColorEnabled, BridgeEngineOptionId::ImageFilter],
+            "only the two edits wait for Apply"
+        );
+
+        // Saved, they still differ from the defaults but wait for nothing.
+        let rows = project(BridgeWallpaperKind::Video, &options, &options, SceneTraits::default(), &["amber".into()])
+            .unwrap()
+            .rows;
+        assert!(rows.iter().find(|row| row.id == BridgeEngineOptionId::ColorEnabled).unwrap().modified);
+        assert!(rows.iter().all(|row| !row.staged));
     }
 
     #[test]

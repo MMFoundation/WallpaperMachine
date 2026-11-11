@@ -29,18 +29,23 @@ pub(super) struct PropertyAnnotation {
 }
 
 /// ID validation, genuine draft acquisition, manifest loading and override decoding
-/// precede this value operation and remain the caller's responsibility.
+/// precede this value operation and remain the caller's responsibility:
+/// `overrides` are the draft's current overrides and `committed_overrides` the
+/// saved ones, both decoded by the same model.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn project_options(
     entry: &BridgeWallpaperEntry,
     draft: &WallpaperOptionsDraft,
     active_enabled_displays: &[SerializedSelector],
     model: Option<&ProjectModel>,
     overrides: &BTreeMap<String, PropertyValue>,
+    committed_overrides: &BTreeMap<String, PropertyValue>,
     app: &AppConfig,
     displays: &[DisplaySnapshotEntry],
     mut annotate: impl FnMut(&ProjectProperty, &PropertyValue) -> PropertyAnnotation,
 ) -> BridgeWallpaperOptionsSnapshot {
     let current = draft.current();
+    let committed = draft.committed();
     let properties = model.map_or_else(Vec::new, |model| {
         model
             .properties
@@ -48,6 +53,9 @@ pub(super) fn project_options(
             .map(|property| {
                 let value = property.effective_value(overrides);
                 let dirty = !property.value_is_default(&value);
+                // Compared as the snapshot's own `dirty` compares the configs, so a
+                // staged row always comes with a dirty snapshot.
+                let staged = value != property.effective_value(committed_overrides);
                 let annotation = annotate(property, &value);
                 BridgePropertyDescriptor {
                     id: property.id.clone(),
@@ -65,6 +73,7 @@ pub(super) fn project_options(
                     asset_managed: annotation.asset_managed,
                     asset_missing: annotation.asset_missing,
                     asset_source_path: annotation.asset_source_path,
+                    staged,
                 }
             })
             .collect()
@@ -87,8 +96,17 @@ pub(super) fn project_options(
                 .iter()
                 .find(|render| render.selector == row.selector)
                 .unwrap_or(&default);
-            let dirty =
-                render != &default || draft.display_dirty(&row.selector, active_enabled_displays);
+            let saved = committed
+                .monitors
+                .iter()
+                .find(|render| render.selector == row.selector)
+                .unwrap_or(&default);
+            let enabled_staged = draft.display_dirty(&row.selector, active_enabled_displays);
+            // The scale factor and the Enabled switch are the display's settings that
+            // wait for Apply; scaling mode, frame rate and position are saved at once.
+            #[allow(clippy::float_cmp)]
+            let staged = render.scaling_factor != saved.scaling_factor || enabled_staged;
+            let dirty = render != &default || enabled_staged;
             let max_fps = display.desc.refresh_rate_hz.max(1);
             Some(BridgeDisplayConfigRow {
                 display_id: row.selector.id(),
@@ -103,6 +121,7 @@ pub(super) fn project_options(
                 volume: current.audio.volume,
                 dirty,
                 can_restore_defaults: dirty,
+                staged,
             })
         })
         .collect();
@@ -326,6 +345,7 @@ mod tests {
     use super::*;
     use crate::api::{BridgePropertyKind, BridgePropertyValue, BridgeWallpaperKind};
     use crate::config::{FramingCfg, MonitorCfg};
+    use wallpaper_core::project::ScalingMode;
     use wallpaper_core::{DisplayDesc, DisplayIdentity, DisplaySelector};
 
     fn display(id: u32, hz: u32) -> DisplaySnapshotEntry {
@@ -407,6 +427,7 @@ mod tests {
             .insert("level".into(), serde_json::json!(0.75));
         let mut draft = WallpaperOptionsDraft::from_committed(saved);
         let overrides = model.override_values(&draft.current().property_overrides);
+        let committed = model.override_values(&draft.committed().property_overrides);
         let app = AppConfig::default();
         let mut calls = Vec::new();
         let snapshot = project_options(
@@ -415,6 +436,7 @@ mod tests {
             &[],
             Some(&model),
             &overrides,
+            &committed,
             &app,
             &[],
             |property, value| {
@@ -440,6 +462,7 @@ mod tests {
             BridgePropertyValue::Number { value: 0.25 }
         );
         assert!(level.dirty && level.can_restore_defaults && !level.enabled);
+        assert!(!level.staged, "a saved value that differs from the default waits for nothing");
         assert_eq!(level.kind, BridgePropertyKind::Slider);
         assert_eq!(level.label_html, "<b>level</b>");
         assert_eq!(
@@ -472,12 +495,18 @@ mod tests {
             &[],
             Some(&model),
             &overrides,
+            &committed,
             &app,
             &[],
             annotation,
         );
         assert!(changed.dirty && changed.muted);
         assert!(!changed.properties[0].dirty && !changed.properties[0].can_restore_defaults);
+        assert!(
+            changed.properties[0].staged,
+            "back at its default, the edit still waits for Apply"
+        );
+        assert!(!changed.properties[1].staged, "an untouched property waits for nothing");
         assert_eq!(
             draft.committed().property_overrides.get("level"),
             Some(&serde_json::json!(0.75))
@@ -498,6 +527,7 @@ mod tests {
             &draft,
             &[],
             Some(&model),
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &AppConfig::default(),
             &[],
@@ -583,6 +613,7 @@ mod tests {
             &selectors,
             None,
             &BTreeMap::new(),
+            &BTreeMap::new(),
             &AppConfig::default(),
             &displays,
             |_, _| panic!("no model annotation"),
@@ -603,19 +634,49 @@ mod tests {
         assert_eq!((rows[2].framing.pan_x, rows[2].framing.pan_y), (0.5, 1.0));
         assert!(rows[2].dirty);
         assert!(rows.iter().all(|row| row.muted && row.volume == 0.375));
+        assert_eq!(
+            rows.iter().map(|row| row.staged).collect::<Vec<_>>(),
+            [false, true, false],
+            "only the display whose Enabled switch waits for Apply is staged; a saved factor is not"
+        );
         // A selector-matched explicit default is clean without assignment staging.
-        let clean = WallpaperOptionsDraft::from_committed(draft.committed().clone());
+        let mut clean = WallpaperOptionsDraft::from_committed(draft.committed().clone());
         let baseline = project_options(
             &entry(),
             &clean,
             &selectors,
             None,
             &BTreeMap::new(),
+            &BTreeMap::new(),
             &AppConfig::default(),
             &displays,
             |_, _| unreachable!(),
         );
         assert!(!baseline.display_configurations[1].dirty);
+        assert!(baseline.display_configurations.iter().all(|row| !row.staged));
+        // A scale factor waits for Apply; a scaling mode and a frame rate are saved at once.
+        clean.set_scaling_factor(selectors[0].clone(), 1.5).unwrap();
+        let _ = clean.set_scaling_mode_immediate(selectors[1].clone(), ScalingMode::Stretch);
+        let _ = clean.set_target_fps_immediate(selectors[2].clone(), 30, 165);
+        let edited = project_options(
+            &entry(),
+            &clean,
+            &selectors,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &AppConfig::default(),
+            &displays,
+            |_, _| unreachable!(),
+        );
+        assert_eq!(
+            edited
+                .display_configurations
+                .iter()
+                .map(|row| row.staged)
+                .collect::<Vec<_>>(),
+            [true, false, false]
+        );
     }
 
     #[test]
@@ -644,6 +705,7 @@ mod tests {
             &draft,
             &[],
             None,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &app,
             &displays,

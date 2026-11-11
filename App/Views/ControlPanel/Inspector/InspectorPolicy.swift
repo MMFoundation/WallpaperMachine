@@ -195,8 +195,10 @@ enum InspectorPolicy {
   static func displaysOpenByDefault(_ options: InspectorOptions) -> Bool { !options.displays.isEmpty }
 
   /// Wallpaper Engine options opens when one of them differs from its default.
+  /// It opens too for one that waits for Apply changes, which an option restored to its default does.
   static func engineOptionsOpenByDefault(_ options: InspectorOptions) -> Bool {
-    options.engineHiddenModified || (options.engineOptions ?? []).contains { $0.row.isModified }
+    options.engineHiddenModified
+      || (options.engineOptions ?? []).contains { $0.row.isModified || $0.row.isStaged }
   }
 
   /// Collections opens for a wallpaper that belongs to one.

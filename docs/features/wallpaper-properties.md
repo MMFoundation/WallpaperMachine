@@ -92,7 +92,7 @@ let go. The panel sends the value under the thumb (`previewProperty`, through
 `DragStepPump`) at most every 100 ms and one at a time, as a Position slider does, and the window reads the draft with
 that value on top (the `pending` list of the bridge's `wallpaper_preview`) as soon as it
 has taken the step before, without the 150 ms wait an edit gets, which a drag would
-never get to the end of. A step is not an edit: nothing becomes **Modified**, dirty or
+never get to the end of. A step is not an edit: nothing becomes **Not applied**, dirty or
 saved, and letting go of the control makes the edit that keeps the value. A step that
 fails is ignored, and a key press or a VoiceOver adjustment, which changes the value at
 once, shows no step before it is saved. The colour well opens the system colour panel,
@@ -229,7 +229,8 @@ without a `condition`, until a property document supplies that name.
 Audio, scaling mode, position and frame rate take effect immediately. Everything
 else is pending until committed:
 
-- **Apply changes** saves pending properties and scaling factors.
+- **Apply changes** saves pending properties, Wallpaper Engine options, and a
+  display's scaling factor and **Enabled** switch.
 - **Revert** discards pending changes.
 
 Both sit in a footer under the inspector that is drawn only while something is pending,
@@ -242,15 +243,27 @@ never lands on **Revert** or **Apply changes**. Once either has done its work an
 goes, VoiceOver says **Changes applied.** or **Changes reverted.**, and the keyboard or
 VoiceOver focus the button held moves to **Apply wallpaper**.
 
-Unsubmitted text stays with its wallpaper when navigating between pages. A dirty
-or unsubmitted control shows a localized **Modified** flag outside its
-author-provided label; Reset clears the flag once the property is clean.
+Unsubmitted text stays with its wallpaper when navigating between pages. Two localized
+flags sit outside a control's author-provided label, in one slot:
+
+- **Not applied** (an outline with a dot; its help says Apply changes saves it and Revert
+  undoes it) while the value differs from the saved one: a pending edit, text not yet
+  sent or a value on its way, including an edit back to the default. It goes once Apply
+  changes or Revert has run.
+- **Modified** (a filled pill) otherwise, while the value differs from the author's
+  default, saved or not; Reset clears it once the property is back at its default.
+
+The slot keeps the wider of the two flags' widths, so a control never moves from beside
+its label to under it as a flag comes, goes or changes. The bridge reports both readings
+per row (`dirty` for the default, `staged` for the saved value). A display card says
+**Not applied** under its name while its scaling factor or **Enabled** switch is pending;
+the bridge reports that per display, not per setting.
 
 **Restore all defaults**, a link at the top of the **Wallpaper properties** card, under
 the presets, stages
 the authored default of every property at once instead of one reset icon at a
-time. It is pending like any other edit: **Apply changes** keeps it and **Revert**
-brings back every value and **Modified** flag. It also drops text not yet sent and
+time. It is pending like any other edit, so the restored rows say **Not applied**: **Apply
+changes** keeps it and **Revert** brings back every value and **Modified** flag. It also drops text not yet sent and
 values behind a rule that currently hides their property, but not display
 settings, audio or presets. A chosen file or folder is left alone, because it is
 saved the moment it is picked; each keeps its own **Clear**. The link is disabled
@@ -298,11 +311,12 @@ translated. A saved filter that is no longer installed shows no selection, and t
 scene draws no filter for it.
 
 The rows work like property rows (`PropertyRowView` with the `.engineOption` scope):
-a reset icon, a **Modified** flag, and values staged until **Apply changes** keeps them
-or **Revert** undoes them. The card has its own **Restore all defaults** link, which
+a reset icon, the **Not applied** or **Modified** flag, and values staged until **Apply
+changes** keeps them or **Revert** undoes them. The card has its own **Restore all defaults** link, which
 stages every option's default, a value behind an off switch included, and touches
 neither the authored properties, display settings, audio nor presets; **Revert** undoes
-it. The section opens by itself when an option differs from its default. The bridge
+it. The section opens by itself when an option differs from its default or waits for
+**Apply changes**, an option restored to its default included. The bridge
 refuses an option the wallpaper does not offer, a switch given anything but on or off,
 a slider value outside its range, and a filter the assets do not hold
 (`edit_engine_option`, `restore_engine_option_default`,
@@ -362,7 +376,7 @@ the saved value.
   so. An edit that reveals a layer the scene left out of its render graph makes the
   scene build the graph again once, as a script revealing the layer does, so that edit
   can hitch briefly.
-- Nothing is saved. The edit stays pending and **Modified**, and the lock screen and the
+- Nothing is saved. The edit stays pending and **Not applied**, and the lock screen and the
   screen saver keep the saved look ([lock screen](lock-screen.md#use-wallpaper-as-screen-saver)).
   So does the Mission Control picture: it is not taken from a display while it shows an
   edit, whatever asks for it, and it is taken again when Revert, turning the switch off or

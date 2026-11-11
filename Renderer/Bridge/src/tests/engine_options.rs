@@ -201,6 +201,35 @@ async fn apply_loads_the_scene_with_the_options_and_revert_puts_the_saved_ones_b
 }
 
 #[tokio::test]
+async fn a_row_waits_for_apply_from_its_edit_until_apply_or_revert() {
+    use BridgeEngineOptionId as Id;
+    let engine = FakeEngineFacade::default();
+    let h = harness(&engine);
+    h.running_on_display("100", SCENE).await;
+    let staged = |options: &BridgeEngineOptions| -> Vec<BridgeEngineOptionId> {
+        options.rows.iter().filter(|row| row.staged).map(|row| row.id).collect()
+    };
+    let flip = |options: &BridgeEngineOptions| options.rows.iter().find(|row| row.id == Id::FlipHorizontal).unwrap().clone();
+    assert!(staged(&h.options("100").await.unwrap()).is_empty(), "nothing waits before an edit");
+
+    h.edit("100", Id::FlipHorizontal, on(true)).await.unwrap();
+    assert_eq!(staged(&h.options("100").await.unwrap()), [Id::FlipHorizontal], "only the edited row waits");
+    h.bridge.apply_wallpaper_options("100".into(), true).await.unwrap();
+    let applied = h.options("100").await.unwrap();
+    assert!(staged(&applied).is_empty(), "Apply saves it");
+    assert!(flip(&applied).modified, "saved away from its default, it stays modified");
+
+    h.edit("100", Id::FlipHorizontal, on(false)).await.unwrap();
+    let back = h.options("100").await.unwrap();
+    assert_eq!(staged(&back), [Id::FlipHorizontal], "set back to its default, it still waits");
+    assert!(!flip(&back).modified);
+    h.bridge.cancel_wallpaper_options("100".into()).await.unwrap();
+    let reverted = h.options("100").await.unwrap();
+    assert!(staged(&reverted).is_empty(), "Revert drops it");
+    assert_eq!(flip(&reverted).value, on(true), "and puts the saved value back");
+}
+
+#[tokio::test]
 async fn a_scene_is_shown_the_pending_options_and_the_saved_ones_when_the_preview_ends() {
     use BridgeEngineOptionId as Id;
     let engine = FakeEngineFacade::default();

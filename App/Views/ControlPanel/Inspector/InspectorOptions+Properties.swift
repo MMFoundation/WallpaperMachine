@@ -90,11 +90,26 @@ extension InspectorOptions {
     /// decoration. Never the editor's id.
     let name: String
     let label: PropertyLabels.Presentation
-    /// The bridge reports the value as changed, or there is a draft or a value on its way.
+    /// The value differs from the author's default, or there is a draft or a value on its way.
     let isModified: Bool
-    /// The bridge reports this property as changed (not counting the panel's own overlay).
+    /// The bridge reports the value as differing from the author's default (not counting the
+    /// panel's own overlay); it stays so after Apply changes saves it.
     let isDirty: Bool
     /// The author gave a default, so Restore default is offered.
     let canRestoreDefault: Bool
+    /// The value waits for Apply changes: it differs from the saved one, or there is a draft or a
+    /// value on its way. Apply changes saves it and Revert undoes it.
+    let isStaged: Bool
+
+    /// The mark beside a row's label.
+    enum Mark: Equatable {
+      /// **Modified**: the saved value differs from the author's default.
+      case modified
+      /// **Not applied**: the value waits for Apply changes.
+      case notApplied
+    }
+
+    /// Not applied wins over Modified: a value that waits says so first, even back at its default.
+    var mark: Mark? { isStaged ? .notApplied : isModified ? .modified : nil }
   }
 }

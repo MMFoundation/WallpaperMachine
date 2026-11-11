@@ -78,8 +78,8 @@ struct InspectorOptions: Equatable {
 // MARK: - Displays
 
 extension InspectorOptions {
-  /// One display's playback of this wallpaper. Enabled, Scaling mode and Frame rate are saved at
-  /// once; the Scale factor is a draft that waits for Apply changes.
+  /// One display's playback of this wallpaper. Scaling mode, Frame rate and the position are saved
+  /// at once; Enabled and the Scale factor are drafts that wait for Apply changes.
   struct DisplayRow: Equatable, Identifiable {
     let id: String
     let title: String
@@ -95,6 +95,9 @@ extension InspectorOptions {
     let isDrawnByNativePlayer: Bool
     /// The frame-rate ceiling in force, and what sets it, when it is below the saved frame rate.
     let frameRateLimit: FrameRateCeiling?
+    /// Its Enabled switch or its Scale factor differs from what is saved and waits for Apply
+    /// changes. The bridge says so for the display as a whole, not for each of the two.
+    let hasStagedChanges: Bool
   }
 
   /// Where the wallpaper sits on a display: fractions from 0 (left, top) to 1 (right, bottom) of

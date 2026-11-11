@@ -611,6 +611,7 @@ async fn restore_all_stages_every_default_until_reverted() {
         .unwrap();
     let before = bridge.wallpaper_options_snapshot(id()).await.unwrap();
     assert!(!before.dirty, "everything above is committed");
+    assert!(before.properties.iter().all(|property| !property.staged), "so nothing waits for Apply");
     let hidden = row(&before, "extra");
     assert!(!hidden.enabled && hidden.dirty, "the override behind the closed gate is reported");
     let committed_before = committed_page_values(&bridge).await;
@@ -632,6 +633,7 @@ async fn restore_all_stages_every_default_until_reverted() {
         let restored = row(&staged, property);
         assert_eq!(restored.value, default, "{property} should show its authored default");
         assert!(!restored.dirty, "{property} should no longer read as modified");
+        assert!(restored.staged, "{property} waits for Apply, back at its default");
     }
     let clip = row(&staged, "clip");
     assert_eq!(
@@ -639,6 +641,8 @@ async fn restore_all_stages_every_default_until_reverted() {
         BridgePropertyValue::String { value: "/chosen/clip.webm".into() },
         "a chosen file belongs to its own Clear, not to restore all"
     );
+    assert!(!clip.staged, "a chosen file is saved when it is picked and never waits");
+    assert!(row(&staged, "extra").staged, "the hidden override's default waits too");
     assert!(staged.dirty, "restoring is staged, so Apply and Revert are offered");
     assert_eq!(
         committed_page_values(&bridge).await,
@@ -662,12 +666,14 @@ async fn restore_all_stages_every_default_until_reverted() {
     assert_eq!(reverted.properties, before.properties);
     assert_eq!(row(&reverted, "size").value, BridgePropertyValue::Number { value: 42.0 });
     assert!(row(&reverted, "size").dirty, "the Modified state comes back with the value");
+    assert!(reverted.properties.iter().all(|property| !property.staged), "and nothing waits");
 
     bridge.restore_all_property_defaults(id()).await.unwrap();
     bridge.apply_wallpaper_options(id(), true).await.unwrap();
     let applied = bridge.wallpaper_options_snapshot(id()).await.unwrap();
     assert!(!applied.dirty);
     assert!(applied.properties.iter().filter(|property| property.id != "clip").all(|property| !property.dirty));
+    assert!(applied.properties.iter().all(|property| !property.staged), "applied, nothing waits");
     let committed = committed_page_values(&bridge).await;
     assert_eq!(committed["size"], 10.0);
     assert_eq!(committed["flag"], false);
@@ -675,6 +681,86 @@ async fn restore_all_stages_every_default_until_reverted() {
     assert_eq!(committed["title"], "hello");
     assert_eq!(committed["extra"], false);
     assert_eq!(committed["clip"], "/chosen/clip.webm");
+}
+
+/// `staged` names the values that wait for Apply: an edit stages its own row
+/// only, Revert and Apply leave nothing staged, and a saved value that differs
+/// from its default is `dirty` without being staged. A display's scale factor
+/// and Enabled switch wait for Apply; its scaling mode is saved at once.
+#[tokio::test]
+async fn staged_rows_are_the_edits_that_wait_for_apply() {
+    let home = tempfile::tempdir().expect("home");
+    let bridge = applied_restore_all_bridge(home.path()).await;
+    let id = || "100".to_string();
+    let staged = |snapshot: &BridgeWallpaperOptionsSnapshot| -> Vec<String> {
+        snapshot
+            .properties
+            .iter()
+            .filter(|property| property.staged)
+            .map(|property| property.id.clone())
+            .collect()
+    };
+    let size = || BridgePropertyValue::Number { value: 42.0 };
+
+    let before = bridge.wallpaper_options_snapshot(id()).await.unwrap();
+    assert!(staged(&before).is_empty(), "nothing is edited after Apply");
+    assert!(before.display_configurations.iter().all(|row| !row.staged));
+
+    let edited = bridge
+        .edit_property(id(), "size".into(), size())
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert_eq!(staged(&edited), ["size"], "an edit stages its own row only");
+    assert!(edited.dirty);
+
+    let reverted = bridge
+        .cancel_wallpaper_options(id())
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert!(staged(&reverted).is_empty(), "Revert leaves nothing staged");
+
+    bridge.edit_property(id(), "size".into(), size()).await.unwrap();
+    bridge.apply_wallpaper_options(id(), true).await.unwrap();
+    let applied = bridge.wallpaper_options_snapshot(id()).await.unwrap();
+    assert!(staged(&applied).is_empty(), "Apply leaves nothing staged");
+    assert!(row(&applied, "size").dirty, "while the value still differs from its default");
+
+    let display = applied.display_configurations[0].display_id.clone();
+    let mode = bridge
+        .set_scaling_mode(id(), display.clone(), crate::BridgeScalingMode::Stretch)
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert!(!mode.display_configurations[0].staged, "a scaling mode is saved at once");
+    let factor = bridge
+        .edit_scaling_factor(id(), display.clone(), 1.5)
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert!(factor.display_configurations[0].staged && factor.dirty, "a scale factor waits");
+    let reverted = bridge
+        .cancel_wallpaper_options(id())
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert!(!reverted.display_configurations[0].staged);
+    let disabled = bridge
+        .set_display_config_enabled(id(), display, false)
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert!(
+        disabled.display_configurations[0].staged && !disabled.display_configurations[0].enabled,
+        "switching a display off waits for Apply too"
+    );
+    let reverted = bridge
+        .cancel_wallpaper_options(id())
+        .await
+        .unwrap()
+        .wallpaper_options;
+    assert!(reverted.display_configurations.iter().all(|row| !row.staged));
 }
 
 #[tokio::test]

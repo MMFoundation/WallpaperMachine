@@ -67,10 +67,11 @@ enum BridgeSnapshotFixtures {
   }
 
   /// The rows the bridge reports for a scene with every option at its default, the
-  /// mouse-parallax switch included when `parallax` is set.
+  /// mouse-parallax switch included when `parallax` is set. The options in `staged` wait for
+  /// Apply changes.
   static func engineOptions(
     parallax: Bool = false, imageFilters: [String] = ["lutx32_amber", "k23_b"],
-    values: [BridgeEngineOptionId: BridgePropertyValue] = [:]
+    values: [BridgeEngineOptionId: BridgePropertyValue] = [:], staged: Set<BridgeEngineOptionId> = []
   ) -> BridgeEngineOptions {
     let slider = BridgeSliderMetadata(min: 0, max: 100, step: 1, precision: 0)
     var rows: [(BridgeEngineOptionId, BridgePropertyValue, BridgeSliderMetadata?)] = [
@@ -101,7 +102,7 @@ enum BridgeSnapshotFixtures {
           }
         return BridgeEngineOptionRow(
           id: id, value: value, defaultValue: defaultValue, slider: slider,
-          modified: value != defaultValue, enabled: enabled)
+          modified: value != defaultValue, enabled: enabled, staged: staged.contains(id))
       },
       imageFilters: imageFilters)
   }

@@ -375,8 +375,17 @@ pub struct BridgeDisplayConfigRow {
     pub max_fps: u32,
     pub muted: bool,
     pub volume: f32,
+    /// The display's playback differs from the defaults, or its Enabled switch
+    /// waits for Apply. It is not a pending marker for the other settings:
+    /// that is `staged`.
     pub dirty: bool,
     pub can_restore_defaults: bool,
+    /// One of this display's settings that wait for Apply (its scale factor or
+    /// its Enabled switch) differs from what is saved: Apply saves it and
+    /// Revert undoes it. Scaling mode, frame rate and position are saved at
+    /// once and never make it true.
+    #[uniffi(default = false)]
+    pub staged: bool,
 }
 
 /// Range and granularity of a slider property.
@@ -413,7 +422,7 @@ pub struct BridgePropertyDescriptor {
     pub label_html: String,
     /// The current value of the property.
     /// It includes edits that have not been applied yet,
-    /// which is why `dirty` exists next to it.
+    /// which is why `staged` exists next to it.
     pub value: BridgePropertyValue,
     /// The value the wallpaper's author shipped, as authored.
     /// Edits never change it; it is what the property is compared
@@ -428,7 +437,9 @@ pub struct BridgePropertyDescriptor {
     pub file_filter: Option<BridgeFileFilter>,
     /// Present on directory properties only.
     pub directory_mode: Option<BridgeDirectoryMode>,
-    /// Edited but not applied yet.
+    /// The value differs from the author's default, pending edits included.
+    /// It stays true after Apply saves a changed value; whether the value
+    /// waits for Apply is `staged`.
     pub dirty: bool,
     /// Reported for the restore-defaults control of the host's editor.
     /// The bridge decides it so that every host offers the action
@@ -447,6 +458,11 @@ pub struct BridgePropertyDescriptor {
     pub asset_missing: bool,
     /// The user's own path, for display; `None` when the property is not set.
     pub asset_source_path: Option<String>,
+    /// The value differs from the saved one: an edit waits for Apply, which
+    /// saves it, or Revert, which undoes it. A file or directory is saved the
+    /// moment it is picked and is never staged.
+    #[uniffi(default = false)]
+    pub staged: bool,
 }
 
 /// The options page of one wallpaper: its properties, where it runs, and its
@@ -509,12 +525,17 @@ pub struct BridgeEngineOptionRow {
     pub default_value: BridgePropertyValue,
     /// Present for the sliders only.
     pub slider: Option<BridgeSliderMetadata>,
-    /// The value differs from the default, like a property's `dirty`.
+    /// The value differs from the default, pending edits included, like a
+    /// property's `dirty`; whether it waits for Apply is `staged`.
     pub modified: bool,
     /// False for the colour sliders while the colour switch is off and for the
     /// filter strength while no image filter is chosen. Such a row is listed;
     /// the host decides whether to show it.
     pub enabled: bool,
+    /// The value differs from the saved one: an edit waits for Apply, which
+    /// saves it, or Revert, which undoes it.
+    #[uniffi(default = false)]
+    pub staged: bool,
 }
 
 /// The per-wallpaper options of one scene or video, and the image filters the

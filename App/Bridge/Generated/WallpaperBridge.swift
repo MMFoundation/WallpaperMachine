@@ -4528,8 +4528,20 @@ public struct BridgeDisplayConfigRow {
     public var maxFps: UInt32
     public var muted: Bool
     public var volume: Float
+    /**
+     * The display's playback differs from the defaults, or its Enabled switch
+     * waits for Apply. It is not a pending marker for the other settings:
+     * that is `staged`.
+     */
     public var dirty: Bool
     public var canRestoreDefaults: Bool
+    /**
+     * One of this display's settings that wait for Apply (its scale factor or
+     * its Enabled switch) differs from what is saved: Apply saves it and
+     * Revert undoes it. Scaling mode, frame rate and position are saved at
+     * once and never make it true.
+     */
+    public var staged: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -4537,7 +4549,18 @@ public struct BridgeDisplayConfigRow {
         /**
          * Where the wallpaper sits on this display. Unlike the scale factor it is
          * never a draft: this is what is saved and what the display shows.
-         */framing: BridgeFraming, targetFps: UInt32, maxFps: UInt32, muted: Bool, volume: Float, dirty: Bool, canRestoreDefaults: Bool) {
+         */framing: BridgeFraming, targetFps: UInt32, maxFps: UInt32, muted: Bool, volume: Float, 
+        /**
+         * The display's playback differs from the defaults, or its Enabled switch
+         * waits for Apply. It is not a pending marker for the other settings:
+         * that is `staged`.
+         */dirty: Bool, canRestoreDefaults: Bool, 
+        /**
+         * One of this display's settings that wait for Apply (its scale factor or
+         * its Enabled switch) differs from what is saved: Apply saves it and
+         * Revert undoes it. Scaling mode, frame rate and position are saved at
+         * once and never make it true.
+         */staged: Bool = false) {
         self.displayId = displayId
         self.title = title
         self.enabled = enabled
@@ -4550,6 +4573,7 @@ public struct BridgeDisplayConfigRow {
         self.volume = volume
         self.dirty = dirty
         self.canRestoreDefaults = canRestoreDefaults
+        self.staged = staged
     }
 }
 
@@ -4593,6 +4617,9 @@ extension BridgeDisplayConfigRow: Equatable, Hashable {
         if lhs.canRestoreDefaults != rhs.canRestoreDefaults {
             return false
         }
+        if lhs.staged != rhs.staged {
+            return false
+        }
         return true
     }
 
@@ -4609,6 +4636,7 @@ extension BridgeDisplayConfigRow: Equatable, Hashable {
         hasher.combine(volume)
         hasher.combine(dirty)
         hasher.combine(canRestoreDefaults)
+        hasher.combine(staged)
     }
 }
 
@@ -4631,7 +4659,8 @@ public struct FfiConverterTypeBridgeDisplayConfigRow: FfiConverterRustBuffer {
                 muted: FfiConverterBool.read(from: &buf), 
                 volume: FfiConverterFloat.read(from: &buf), 
                 dirty: FfiConverterBool.read(from: &buf), 
-                canRestoreDefaults: FfiConverterBool.read(from: &buf)
+                canRestoreDefaults: FfiConverterBool.read(from: &buf), 
+                staged: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -4648,6 +4677,7 @@ public struct FfiConverterTypeBridgeDisplayConfigRow: FfiConverterRustBuffer {
         FfiConverterFloat.write(value.volume, into: &buf)
         FfiConverterBool.write(value.dirty, into: &buf)
         FfiConverterBool.write(value.canRestoreDefaults, into: &buf)
+        FfiConverterBool.write(value.staged, into: &buf)
     }
 }
 
@@ -5052,7 +5082,8 @@ public struct BridgeEngineOptionRow {
      */
     public var slider: BridgeSliderMetadata?
     /**
-     * The value differs from the default, like a property's `dirty`.
+     * The value differs from the default, pending edits included, like a
+     * property's `dirty`; whether it waits for Apply is `staged`.
      */
     public var modified: Bool
     /**
@@ -5061,6 +5092,11 @@ public struct BridgeEngineOptionRow {
      * the host decides whether to show it.
      */
     public var enabled: Bool
+    /**
+     * The value differs from the saved one: an edit waits for Apply, which
+     * saves it, or Revert, which undoes it.
+     */
+    public var staged: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -5074,19 +5110,25 @@ public struct BridgeEngineOptionRow {
          * Present for the sliders only.
          */slider: BridgeSliderMetadata?, 
         /**
-         * The value differs from the default, like a property's `dirty`.
+         * The value differs from the default, pending edits included, like a
+         * property's `dirty`; whether it waits for Apply is `staged`.
          */modified: Bool, 
         /**
          * False for the colour sliders while the colour switch is off and for the
          * filter strength while no image filter is chosen. Such a row is listed;
          * the host decides whether to show it.
-         */enabled: Bool) {
+         */enabled: Bool, 
+        /**
+         * The value differs from the saved one: an edit waits for Apply, which
+         * saves it, or Revert, which undoes it.
+         */staged: Bool = false) {
         self.id = id
         self.value = value
         self.defaultValue = defaultValue
         self.slider = slider
         self.modified = modified
         self.enabled = enabled
+        self.staged = staged
     }
 }
 
@@ -5112,6 +5154,9 @@ extension BridgeEngineOptionRow: Equatable, Hashable {
         if lhs.enabled != rhs.enabled {
             return false
         }
+        if lhs.staged != rhs.staged {
+            return false
+        }
         return true
     }
 
@@ -5122,6 +5167,7 @@ extension BridgeEngineOptionRow: Equatable, Hashable {
         hasher.combine(slider)
         hasher.combine(modified)
         hasher.combine(enabled)
+        hasher.combine(staged)
     }
 }
 
@@ -5138,7 +5184,8 @@ public struct FfiConverterTypeBridgeEngineOptionRow: FfiConverterRustBuffer {
                 defaultValue: FfiConverterTypeBridgePropertyValue.read(from: &buf), 
                 slider: FfiConverterOptionTypeBridgeSliderMetadata.read(from: &buf), 
                 modified: FfiConverterBool.read(from: &buf), 
-                enabled: FfiConverterBool.read(from: &buf)
+                enabled: FfiConverterBool.read(from: &buf), 
+                staged: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -5149,6 +5196,7 @@ public struct FfiConverterTypeBridgeEngineOptionRow: FfiConverterRustBuffer {
         FfiConverterOptionTypeBridgeSliderMetadata.write(value.slider, into: &buf)
         FfiConverterBool.write(value.modified, into: &buf)
         FfiConverterBool.write(value.enabled, into: &buf)
+        FfiConverterBool.write(value.staged, into: &buf)
     }
 }
 
@@ -6566,7 +6614,7 @@ public struct BridgePropertyDescriptor {
     /**
      * The current value of the property.
      * It includes edits that have not been applied yet,
-     * which is why `dirty` exists next to it.
+     * which is why `staged` exists next to it.
      */
     public var value: BridgePropertyValue
     /**
@@ -6593,7 +6641,9 @@ public struct BridgePropertyDescriptor {
      */
     public var directoryMode: BridgeDirectoryMode?
     /**
-     * Edited but not applied yet.
+     * The value differs from the author's default, pending edits included.
+     * It stays true after Apply saves a changed value; whether the value
+     * waits for Apply is `staged`.
      */
     public var dirty: Bool
     /**
@@ -6623,6 +6673,12 @@ public struct BridgePropertyDescriptor {
      * The user's own path, for display; `None` when the property is not set.
      */
     public var assetSourcePath: String?
+    /**
+     * The value differs from the saved one: an edit waits for Apply, which
+     * saves it, or Revert, which undoes it. A file or directory is saved the
+     * moment it is picked and is never staged.
+     */
+    public var staged: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -6641,7 +6697,7 @@ public struct BridgePropertyDescriptor {
         /**
          * The current value of the property.
          * It includes edits that have not been applied yet,
-         * which is why `dirty` exists next to it.
+         * which is why `staged` exists next to it.
          */value: BridgePropertyValue, 
         /**
          * The value the wallpaper's author shipped, as authored.
@@ -6662,7 +6718,9 @@ public struct BridgePropertyDescriptor {
          * Present on directory properties only.
          */directoryMode: BridgeDirectoryMode?, 
         /**
-         * Edited but not applied yet.
+         * The value differs from the author's default, pending edits included.
+         * It stays true after Apply saves a changed value; whether the value
+         * waits for Apply is `staged`.
          */dirty: Bool, 
         /**
          * Reported for the restore-defaults control of the host's editor.
@@ -6685,7 +6743,12 @@ public struct BridgePropertyDescriptor {
          */assetMissing: Bool, 
         /**
          * The user's own path, for display; `None` when the property is not set.
-         */assetSourcePath: String?) {
+         */assetSourcePath: String?, 
+        /**
+         * The value differs from the saved one: an edit waits for Apply, which
+         * saves it, or Revert, which undoes it. A file or directory is saved the
+         * moment it is picked and is never staged.
+         */staged: Bool = false) {
         self.id = id
         self.kind = kind
         self.labelHtml = labelHtml
@@ -6701,6 +6764,7 @@ public struct BridgePropertyDescriptor {
         self.assetManaged = assetManaged
         self.assetMissing = assetMissing
         self.assetSourcePath = assetSourcePath
+        self.staged = staged
     }
 }
 
@@ -6753,6 +6817,9 @@ extension BridgePropertyDescriptor: Equatable, Hashable {
         if lhs.assetSourcePath != rhs.assetSourcePath {
             return false
         }
+        if lhs.staged != rhs.staged {
+            return false
+        }
         return true
     }
 
@@ -6772,6 +6839,7 @@ extension BridgePropertyDescriptor: Equatable, Hashable {
         hasher.combine(assetManaged)
         hasher.combine(assetMissing)
         hasher.combine(assetSourcePath)
+        hasher.combine(staged)
     }
 }
 
@@ -6797,7 +6865,8 @@ public struct FfiConverterTypeBridgePropertyDescriptor: FfiConverterRustBuffer {
                 enabled: FfiConverterBool.read(from: &buf), 
                 assetManaged: FfiConverterBool.read(from: &buf), 
                 assetMissing: FfiConverterBool.read(from: &buf), 
-                assetSourcePath: FfiConverterOptionString.read(from: &buf)
+                assetSourcePath: FfiConverterOptionString.read(from: &buf), 
+                staged: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -6817,6 +6886,7 @@ public struct FfiConverterTypeBridgePropertyDescriptor: FfiConverterRustBuffer {
         FfiConverterBool.write(value.assetManaged, into: &buf)
         FfiConverterBool.write(value.assetMissing, into: &buf)
         FfiConverterOptionString.write(value.assetSourcePath, into: &buf)
+        FfiConverterBool.write(value.staged, into: &buf)
     }
 }
 

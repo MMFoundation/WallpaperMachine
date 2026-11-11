@@ -240,7 +240,10 @@ struct PropertyRowView: View {
     control: Bool = false, @ViewBuilder trailing: () -> Trailing
   ) -> some View {
     if control {
-      PropertyTopLineLayout(reserve: row.isModified ? 0 : ModifiedMark.width()) {
+      PropertyTopLineLayout(
+        reserve: ModifiedMark.reserve(
+          for: row.mark, followedBy: row.canRestoreDefault ? Self.marksSpacing : 0)
+      ) {
         PropertyNameView(row: row)
           .layoutValue(key: PropertyTopLineLayout.PartKey.self, value: .label)
         marks
@@ -258,10 +261,13 @@ struct PropertyRowView: View {
     }
   }
 
-  /// The Modified mark and Restore default.
+  /// The gap between the mark and Restore default.
+  private static let marksSpacing: CGFloat = 8
+
+  /// The Modified or Not applied mark and Restore default.
   private var marks: some View {
-    HStack(alignment: .center, spacing: 8) {
-      if row.isModified { ModifiedMark() }
+    HStack(alignment: .center, spacing: Self.marksSpacing) {
+      if let mark = row.mark { ModifiedMark(kind: mark) }
       if row.canRestoreDefault {
         Button {
           restoreDefault()

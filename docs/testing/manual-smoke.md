@@ -335,7 +335,7 @@ reuse, or visual behavior, which is why these items are manual.
       scene that is on a display: the desktop does not move until **Apply changes**. Turn it
       on and drag the slider, pick a colour, flip a switch that shows a layer and pick a choice:
       the desktop follows a moment after you stop (a layer that was hidden may cause one short
-      hitch), the inspector still says **Modified**, and a picture or an option that adds an
+      hitch), the inspector still says **Not applied**, and a picture or an option that adds an
       effect waits for **Apply changes**. **Revert**, **Restore all defaults** and a preset put
       the desktop where they say. Repeat with two displays showing the wallpaper and with a
       mirror: all of them follow. Edit, then close the panel without applying: the desktop keeps

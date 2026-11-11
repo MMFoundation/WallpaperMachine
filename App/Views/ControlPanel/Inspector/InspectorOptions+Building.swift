@@ -60,7 +60,8 @@ extension InspectorOptions {
       frameRate: Int(row.targetFps), maximumFrameRate: Int(row.maxFps),
       position: Position(x: row.framing.panX, y: row.framing.panY),
       isDrawnByNativePlayer: physicalID.map { inputs.nativePlayerDisplays.contains($0) } ?? false,
-      frameRateLimit: inputs.frameRateCeiling?.limiting(saved: Int(row.targetFps)))
+      frameRateLimit: inputs.frameRateCeiling?.limiting(saved: Int(row.targetFps)),
+      hasStagedChanges: row.staged)
   }
 
   @MainActor
@@ -132,7 +133,8 @@ extension InspectorOptions {
       id: property.id, control: control,
       name: label.text.isEmpty ? locale.string("Unnamed option") : label.text, label: label,
       isModified: property.dirty || draft != nil || pending != nil, isDirty: property.dirty,
-      canRestoreDefault: property.defaultValue != .empty)
+      canRestoreDefault: property.defaultValue != .empty,
+      isStaged: property.staged || draft != nil || pending != nil)
   }
 
   private static func pathState(_ property: BridgePropertyDescriptor, inputs: Inputs)

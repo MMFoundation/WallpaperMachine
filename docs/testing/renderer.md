@@ -628,7 +628,13 @@ no assets prints `skipped: …` and is not a pass).
   no effect on a project without a table), and the staged Restore all defaults
   (every default shown but not committed, a chosen file kept, a value behind a
   hidden row reported as modified and then cleared, Revert bringing every value back, Apply persisting the
-  defaults, an unknown wallpaper refused);
+  defaults, an unknown wallpaper refused), and the `staged` flags (an edit stages its own
+  property row only, a restored default is staged but not modified, a chosen file never
+  is, Revert and Apply leave nothing staged; a display row is staged by its scale factor
+  or Enabled switch, never by its scaling mode, which `actor::snapshot_projection` pins
+  for frame rate too, as `actor::engine_options` does for the engine option rows, and
+  `tests::engine_options` through the bridge: an edit stages only its own row, a value set back
+  to its default stays staged, and Apply or Revert leaves none);
   `project::condition` also pins the input bounds (length, nesting, list size) and
   that hostile input returns an error instead of recursing, and
   `project::localization` pins the table bounds (languages, tokens, text size,
