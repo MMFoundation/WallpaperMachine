@@ -177,10 +177,15 @@ final class InstalledPageRenderTests: PanelTestCase {
     try await prepare(panel)
     let model = panel.controller.library
     PanelLocale.shared.bind(to: panel.controller.appLanguage)
+    let quiet = try panel.collections.create(name: "Quiet", wallpaperIDs: [])
     let states: [() -> Void] = [
       { model.setText("https://steamcommunity.com/sharedfiles/filedetails/?id=3632513108") },
       { model.setText("zzz") }, { model.setRequired("Customizable", true) },
       { model.setRequired("Customizable", false); model.setText("") },
+      {
+        model.show(.collection(quiet.id))
+        XCTAssertEqual(model.emptyState, .emptyCollection(name: "Quiet"))
+      },
     ]
     for language in AppLanguage.supported.map(\.tag) {
       try panel.controller.appLanguage.set(language)
@@ -191,6 +196,7 @@ final class InstalledPageRenderTests: PanelTestCase {
         assertFits(hosted, Self.sizes[0], "empty, \(language)")
         hosted.close()
       }
+      // Clears the collection too, so the next language starts from every wallpaper.
       model.clearSearchAndFilters()
     }
     let empty = try makeController()

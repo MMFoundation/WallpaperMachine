@@ -4368,6 +4368,9 @@
     "No matching wallpapers" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Nenhum papel de parede correspondente"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "일치하는 배경화면 없음"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "一致する壁紙はありません"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "没有匹配的壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "沒有符合的桌布"}}}
     },
+    "This collection is empty" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Esta coleção está vazia"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 컬렉션은 비어 있습니다"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このコレクションは空です"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "这个合集是空的"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "這個收藏集是空的"}}}
+    },
     "Your wallpaper library is empty" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Sua biblioteca de papéis de parede está vazia"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 보관함이 비어 있습니다"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙ライブラリは空です"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "壁纸库是空的"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "桌布庫是空的"}}}
     },

@@ -53,7 +53,7 @@ struct InstalledEmptyState: View {
         .seasonalArt(.emptyLibrary)
       case .emptyCollection(let name):
         PanelEmptyState(
-          "No matching wallpapers", systemImage: "folder",
+          "This collection is empty", systemImage: "folder",
           description: "“\(name)” has no wallpapers yet. Select wallpapers and choose Add to collection."
         ) {
           Button("Show all wallpapers") { model.showAllWallpapers() }

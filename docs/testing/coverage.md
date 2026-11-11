@@ -1380,8 +1380,8 @@ never to `.shared`.
   once pasted, confirmed with Return or restored, covers, the selection's life, clicks, keys, Delete, batch actions and notices, the sweep
   and edge scrolling, every tile on screen playing its preview and the hover-only setting, the
   import popover and pill) and
-  `InstalledPageRenderTests` (the page, footer, empty states and popovers in every language and
-  appearance at the narrowest column, the scroll offset restored).
+  `InstalledPageRenderTests` (the page, footer, empty states, an empty collection among them, and
+  popovers in every language and appearance at the narrowest column, the scroll offset restored).
 - Inspector: `InspectorPolicyTests`, `InspectorWordingTests` (among its sentences, what draws
   the wallpaper said in words, with the renderer's id kept as it is on the detail line; a reported
   problem leads the line and is never said to play; nothing named before the runtime reports it,

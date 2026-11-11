@@ -959,7 +959,10 @@ tags are not claimed to be represented by the sum of visible group counts.
 
 An empty result offers recovery for the actual restriction: **Clear search**,
 **Clear filters** (plus **Show filters** while the sidebar is closed), or **Clear search and
-filters**; on Installed a search alone says no wallpaper matches it. A Workshop link
+filters**; on Installed a search alone says no wallpaper matches it. An empty local
+collection says **This collection is empty**, names it and how to add wallpapers, and
+offers **Show all wallpapers**, whatever the search and filters; a collection whose
+wallpapers are all gone counts as the filter that hides them. A Workshop link
 whose item is not installed says so whatever the filters, and so does a bare id while no
 filter applies (under filters it may be words they hide) once it arrived whole: pasted,
 dropped, confirmed with Return or restored with the window. An id being typed stays an

@@ -255,6 +255,14 @@ final class InstalledBrowserModelTests: PanelTestCase {
     let empty = try panel.collections.create(name: "Quiet", wallpaperIDs: [])
     model.show(.collection(empty.id))
     XCTAssertEqual(model.emptyState, .emptyCollection(name: "Quiet"))
+    model.setText("zzz")
+    model.setRequired("Customizable", true)
+    XCTAssertEqual(
+      model.emptyState, .emptyCollection(name: "Quiet"),
+      "a search and a filter set on an empty collection are not why it shows nothing")
+    model.setText("")
+    model.setRequired("Customizable", false)
+    XCTAssertEqual(model.emptyState, .emptyCollection(name: "Quiet"))
     model.showAllWallpapers()
     XCTAssertNil(model.emptyState)
     XCTAssertEqual(titles(model).count, 3)

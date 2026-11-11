@@ -179,6 +179,12 @@ final class LibraryTileRulesTests: PanelTestCase {
     XCTAssertEqual(
       state(collection: ("Night", 0), text: "x", collectionID: "n"), .emptyCollection(name: "Night"),
       "an empty collection is empty, not filtered away")
+    XCTAssertEqual(
+      state(collection: ("Night", 0), text: "x", tags: ["Anime"], collectionID: "n"),
+      .emptyCollection(name: "Night"), "a search and filters together do not explain an empty collection")
+    XCTAssertEqual(
+      state(collection: ("Night", 2), text: "x", collectionID: "n"), .searchAndFilters,
+      "a collection holding wallpapers that the search misses is a miss, not an empty collection")
     XCTAssertEqual(state(text: "x", tags: ["Anime"]), .searchAndFilters)
     XCTAssertEqual(state(text: "x"), .search(text: "x"))
     let link = "https://steamcommunity.com/sharedfiles/filedetails/?id=3632513108"
