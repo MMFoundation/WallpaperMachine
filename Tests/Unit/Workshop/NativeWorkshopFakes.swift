@@ -14,6 +14,33 @@ final class MemorySteamTokenStore: SteamClientTokenStoring, @unchecked Sendable 
     func remove() { lock.withLock { saved = nil } }
 }
 
+/// A keychain whose read waits until `open()`: it hands back what was saved when the read
+/// began, as a read that raced a sign-out would.
+final class GatedSteamTokenStore: SteamClientTokenStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private let gate = DispatchSemaphore(value: 0)
+    private var saved: SteamRefreshToken?
+    private var reading = false
+
+    init(_ token: SteamRefreshToken?) { saved = token }
+
+    var isReading: Bool { lock.withLock { reading } }
+
+    func open() { gate.signal() }
+
+    func load() -> SteamRefreshToken? {
+        let snapshot = lock.withLock { () -> SteamRefreshToken? in
+            reading = true
+            return saved
+        }
+        gate.wait()
+        return snapshot
+    }
+
+    func save(_ token: SteamRefreshToken) throws { lock.withLock { saved = token } }
+    func remove() { lock.withLock { saved = nil } }
+}
+
 /// A whole Steam for one Workshop item: directory, logon, item details, depot key, manifest
 /// and chunks. Files are served unencrypted-named, one chunk each.
 final class FakeSteam: @unchecked Sendable {
@@ -69,11 +96,12 @@ final class FakeSteam: @unchecked Sendable {
 
     var connectionsOpened: Int { lock.withLock { opened } }
 
+    /// `timeout` is how long the connection waits for each answer, the logon's included.
     @MainActor
-    func session(store: MemorySteamTokenStore) -> SteamNativeSession {
+    func session(store: any SteamClientTokenStoring, timeout: Duration = .seconds(5)) -> SteamNativeSession {
         SteamNativeSession(
             store: store, signIn: SteamQRSignIn(api: api), deviceName: "Test Mac",
-            makeConnection: { [self] in SteamCMConnection(api: api, opener: socket(), timeout: .seconds(5)) },
+            makeConnection: { [self] in SteamCMConnection(api: api, opener: socket(), timeout: timeout) },
             makeClient: { [self] in
                 SteamContentClient(connection: $0, api: api, fetcher: fetcher, decompressor: PrefixDecompressor())
             })

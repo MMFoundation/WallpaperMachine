@@ -1004,7 +1004,10 @@ section shows the newest one, says when the phone has scanned it, and offers
 **Show a new code** once a code expires. Its buttons go through the panel's actions
 (`PanelController.startSteamQRSignIn`, `cancelSteamQRSignIn`), and closing the
 download dialog or the Settings popover stops a code that was not approved, so
-nothing signs in once no code is on screen. The dialog does not offer it for the
+nothing signs in once no code is on screen: an approval already on its way back when
+the code closes is dropped, not saved. A failed code is kept as its reason (expired,
+Steam unreachable, failed) and worded when the section shows it, so the message
+follows the panel's language. The dialog does not offer it for the
 first-run guide's SteamCMD sign-in request, which a QR sign-in would not complete.
 With a SteamCMD sign-in already saved, Settings shows that account and **Log out…**
 instead of the QR button, and downloads keep using SteamCMD without reaching the
@@ -1014,7 +1017,8 @@ The approved refresh token is kept in the login keychain as one generic password
 (`KeychainSteamClientTokenStore`, service `app.wallpapermachine.steam-client`),
 beside the Steam Community sign-in and kept the same way; it is never logged or
 written anywhere else. A launch restores it off the main thread
-(`WorkshopStore.restoreSteamQRSignIn`), and an expired one is removed instead.
+(`WorkshopStore.restoreSteamQRSignIn`), and an expired one is removed instead; a
+sign-out or new sign-in made while the keychain answers wins over what it read.
 Settings shows the account as signed in, and **Log out…** removes the token as
 well as any saved SteamCMD sign-in. Steam lists the Mac (named
 "WallpaperMachine on <Mac name>") under the account's authorized devices, where it
@@ -1030,7 +1034,8 @@ refused for the account it named (`WorkshopStore.steamQRSignInChanged`), which t
 goes again, and stays refused if the queue refuses it once more. A request refused
 while the QR sign-in exists shows the account stage as **Signed in as …** with
 **Continue** instead of SteamCMD's account form. A partial SteamCMD download kept for the item is
-discarded when the item goes to the native worker. The native worker sits in the same queue,
+discarded once the native worker has taken the item in the queue; a native job the
+queue refuses leaves it for SteamCMD. The native worker sits in the same queue,
 behind the same `WorkshopDownloadWorker` protocol, so tiles, rows, pausing,
 cancelling and **Download next** behave as for SteamCMD. It lays an item out
 exactly as SteamCMD does (`<staging>/steamapps/workshop/content/431960/<id>`, in a
@@ -1071,8 +1076,9 @@ A token Steam refuses at logon (invalid, expired or revoked) is removed from the
 keychain, and the job fails with "Steam no longer accepts this QR sign-in"; the next
 request falls back to SteamCMD unless the person scans a new code. Steam hands a
 depot key only to an account that owns Wallpaper Engine, so a key refused as
-AccessDenied, InsufficientPrivilege, Blocked or a plain Fail reports the account as
-not owning it (`NativeWorkshopDownloader.meansNotOwned`). Other failures read as one
+AccessDenied, InsufficientPrivilege or Blocked reports the account as not owning it
+(`NativeWorkshopDownloader.meansNotOwned`); a plain Fail, or a reply without a
+result, proves nothing and reads as the content servers failing. Other failures read as one
 of a few phrases in the person's language: Steam unreachable (no answer at all),
 sign-ins limited (a logon refused for its rate), sign-in failed (any other logon
 refusal), session ended (Steam logged the session off, as when the account signs in

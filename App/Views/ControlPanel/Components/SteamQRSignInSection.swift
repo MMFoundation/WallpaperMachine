@@ -43,8 +43,8 @@ struct SteamQRSignInSection: View {
             Button("Cancel") { cancel() }
           }
         }
-      case .failed(let message):
-        DownloadNotice(kind: .error, text: message)
+      case .failed(let failure):
+        DownloadNotice(kind: .error, text: Self.message(for: failure))
         Button {
           start()
         } label: {
@@ -55,6 +55,15 @@ struct SteamQRSignInSection: View {
     .fixedSize(horizontal: false, vertical: true)
     .onChange(of: session.isSignedIn) { _, signedIn in
       if signedIn { onSignedIn() }
+    }
+  }
+
+  /// Worded when shown, so it follows the panel's language even after it changes.
+  private static func message(for failure: SteamNativeSession.QRFailure) -> String {
+    switch failure {
+    case .expired: L("The QR code expired. Show a new one and scan it again.")
+    case .unreachable: L("Could not reach Steam. Check your internet connection and try again.")
+    case .failed: L("Steam sign-in failed. Try again.")
     }
   }
 

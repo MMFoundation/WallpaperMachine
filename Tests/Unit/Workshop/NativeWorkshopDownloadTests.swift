@@ -110,22 +110,99 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
   func testAPausedDownloadStopsWaitingForASilentLogOn() async throws {
     let steam = try FakeSteam(item: itemID, files: [:])
     steam.answersLogOn = false
-    let session = steam.session(store: MemorySteamTokenStore(SteamTestToken.token()))
+    // Steam never answers and the logon gives up only after a minute, far beyond `waitUntil`'s
+    // five seconds: only the cancellation can end the wait in time.
+    let session = steam.session(store: MemorySteamTokenStore(SteamTestToken.token()), timeout: .seconds(60))
     await session.restore()
 
     let waiting = Task { try await session.contentClient() }
     try await waitUntil { steam.connectionsOpened == 1 }
-    let clock = ContinuousClock()
-    let cancelled = clock.now
     waiting.cancel()
-    do {
-      _ = try await waiting.value
-      XCTFail("expected the wait to end with the cancellation")
-    } catch {
-      XCTAssertTrue(error is CancellationError, "\(error)")
-    }
-    XCTAssertLessThan(clock.now - cancelled, .seconds(2), "the scripted logon only times out after 5 seconds")
+    var outcome: Result<SteamContentClient, any Error>?
+    Task { outcome = await waiting.result }
+    try await waitUntil { outcome != nil }
+
+    XCTAssertThrowsError(try outcome?.get()) { XCTAssertTrue($0 is CancellationError, "\($0)") }
     XCTAssertTrue(session.isSignedIn, "a paused download is no reason to forget the sign-in")
+  }
+
+  func testAQRApprovalThatArrivesAfterCancellingIsNotAdopted() async throws {
+    let steam = try FakeSteam(item: itemID, files: [:])
+    steam.api.reply("BeginAuthSessionViaQR", Self.challenge())
+    var approved = SteamProto.Writer()
+    approved.string(3, SteamTestToken.jwt())
+    approved.string(6, "someone")
+    steam.api.reply("PollAuthSessionStatus", approved)
+    steam.api.hold("PollAuthSessionStatus")
+    let store = MemorySteamTokenStore()
+    let session = steam.session(store: store)
+
+    session.beginQRSignIn()
+    try await waitUntil { steam.api.isWaiting("PollAuthSessionStatus") }
+    session.cancelQRSignIn()
+    steam.api.release("PollAuthSessionStatus")
+    // The approval is on its way back; give it every chance to land.
+    try await Task.sleep(for: .milliseconds(300))
+
+    XCTAssertFalse(session.isSignedIn)
+    XCTAssertNil(store.token, "a code closed on screen never signs in")
+    XCTAssertEqual(session.qr, .idle)
+  }
+
+  func testASignOutDuringTheKeychainReadIsNotUndoneByIt() async throws {
+    let steam = try FakeSteam(item: itemID, files: [:])
+    let store = GatedSteamTokenStore(SteamTestToken.token())
+    let session = steam.session(store: store)
+
+    let restoring = Task { await session.restore() }
+    try await waitUntil { store.isReading }
+    session.signOut()
+    store.open()
+    await restoring.value
+
+    XCTAssertFalse(session.isSignedIn, "the read began before the sign-out, which is the newer word")
+  }
+
+  func testASteamCMDPartialDownloadGoesOnlyOnceTheNativeJobIsQueued() async throws {
+    let root = try makeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let steam = try FakeSteam(item: itemID, files: [
+      "project.json": Data(#"{"type":"video","file":"movie.mp4"}"#.utf8), "movie.mp4": Data("frames".utf8),
+    ])
+    let session = steam.session(store: MemorySteamTokenStore(SteamTestToken.token()))
+    await session.restore()
+    let queue = root.appendingPathComponent("Queue")
+    let checkpoint = queue.appendingPathComponent(String(itemID))
+    try FileManager.default.createDirectory(at: checkpoint, withIntermediateDirectories: true)
+    func manager() -> WorkshopDownloadManager {
+      let manager = WorkshopDownloadManager(
+        sessionDirectory: root.appendingPathComponent("SteamSession"), runtimeProvider: ShellRuntimeProvider(),
+        downloadRegion: { .steamsChoice })
+      manager.configurePersistence(at: queue)
+      return manager
+    }
+
+    // A queue that is shutting down takes no job, so SteamCMD's partial download stays.
+    let closing = manager()
+    await closing.shutdown()
+    closing.startNative(item: item(), session: session, library: root.appendingPathComponent("Library")) {}
+    XCTAssertNil(closing.download(for: String(itemID)))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: checkpoint.path))
+
+    let open = manager()
+    open.startNative(item: item(), session: session, library: root.appendingPathComponent("Library")) {}
+    XCTAssertNotNil(open.download(for: String(itemID)))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: checkpoint.path), "the native job starts over without it")
+    try await waitUntil { !open.isRunning }
+  }
+
+  private static func challenge() -> SteamProto.Writer {
+    var challenge = SteamProto.Writer()
+    challenge.varint(1, 7)
+    challenge.string(2, "https://s.team/q/1/7")
+    challenge.bytes(3, Data([1]))
+    challenge.fixed32(4, Float(1).bitPattern)
+    return challenge
   }
 
   func testAnAccountWithoutWallpaperEngineIsToldSoBeforeAnyContentIsFetched() async throws {
@@ -226,6 +303,9 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     XCTAssertFalse(NativeWorkshopDownloader.meansNotOwned(
       SteamCMConnection.Failure.requestFailed(SteamContentClient.depotKeyRequest, eresult: 84)),
       "a rate limit says nothing about ownership")
+    XCTAssertFalse(NativeWorkshopDownloader.meansNotOwned(
+      SteamCMConnection.Failure.requestFailed(SteamContentClient.depotKeyRequest, eresult: 2)),
+      "a plain Fail, or a reply without a result, proves nothing about ownership")
     XCTAssertFalse(NativeWorkshopDownloader.meansNotOwned(
       SteamCMConnection.Failure.requestFailed(SteamContentClient.itemDetailsMethod, eresult: 15)))
     XCTAssertTrue(

@@ -203,12 +203,13 @@ final class NativeWorkshopDownloader: WorkshopDownloadWorker {
     }
 
     /// Steam hands a depot key only to an account that owns the app, and the key is asked for
-    /// before anything else of the depot, so its refusal is the ownership answer: AccessDenied,
-    /// InsufficientPrivilege, Blocked, or a plain Fail with nothing else asked yet that could fail.
+    /// before anything else of the depot, so a refusal that names access is the ownership
+    /// answer: AccessDenied, InsufficientPrivilege or Blocked. A plain Fail (also what a reply
+    /// without a result reads as) proves nothing and stays a failed download.
     static func meansNotOwned(_ error: any Error) -> Bool {
         guard case SteamCMConnection.Failure.requestFailed(SteamContentClient.depotKeyRequest, let eresult)? =
                 error as? SteamCMConnection.Failure else { return false }
-        return [2, 15, 24, 40].contains(eresult)
+        return [15, 24, 40].contains(eresult)
     }
 
     /// What the person reads about a failed native download: a few phrases in their language, the

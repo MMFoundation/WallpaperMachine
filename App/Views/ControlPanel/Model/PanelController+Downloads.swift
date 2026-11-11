@@ -57,12 +57,12 @@ extension PanelController {
   /// Shows a Steam QR code to scan, replacing one already showing. The code keeps renewing until
   /// it is approved, fails, or `cancelSteamQRSignIn` stops it.
   func startSteamQRSignIn() async throws {
-    workshop.nativeSession?.beginQRSignIn()
+    try await run(.immediate) { workshop.nativeSession?.beginQRSignIn() }
   }
 
   /// Stops waiting for a QR code: the surface that showed it closed or the person cancelled.
   func cancelSteamQRSignIn() async throws {
-    workshop.nativeSession?.cancelQRSignIn()
+    try await run(.immediate) { workshop.nativeSession?.cancelQRSignIn() }
   }
 
   /// The Steam account the next download would use and what the sign-in will remember.

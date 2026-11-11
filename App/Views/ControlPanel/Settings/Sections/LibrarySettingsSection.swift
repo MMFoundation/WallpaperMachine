@@ -444,6 +444,7 @@ private struct LibraryAccountRow: View {
           SteamQRSignInSection(session: qr) { showsQRSignIn = false }
             .padding(14)
             .frame(width: 340)
+            .panelPresentationLocale()
             .onDisappear {
               guard !qr.isSignedIn else { return }
               controller.launch(PanelActionCoordinator.key("cancelSteamQRSignIn")) { try await controller.cancelSteamQRSignIn() }

@@ -26,8 +26,10 @@ final class SteamNativeLiveTests: XCTestCase {
 
     func testLiveWorkshopDownloadWithARefreshToken() async throws {
         try skipUnlessNetworkTestsEnabled()
-        let path = try XCTUnwrap(ProcessInfo.processInfo.environment["WALLPAPER_MACHINE_STEAM_TOKEN_FILE"],
-                                 "set WALLPAPER_MACHINE_STEAM_TOKEN_FILE to a file holding a refresh token")
+        // The token file is a separate opt-in: without it the account-free live checks still pass.
+        guard let path = ProcessInfo.processInfo.environment["WALLPAPER_MACHINE_STEAM_TOKEN_FILE"] else {
+            throw XCTSkip("set WALLPAPER_MACHINE_STEAM_TOKEN_FILE to a file holding a refresh token")
+        }
         executionTimeAllowance = 300
         let raw = try String(contentsOfFile: path, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
         let token = try SteamRefreshToken(raw, accountName: "live-test")

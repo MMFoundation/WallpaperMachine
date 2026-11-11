@@ -12,7 +12,16 @@ final class SteamNativeSession {
         case starting
         /// Show `url` as a QR code; `scanned` once the phone opened it.
         case waiting(url: String, scanned: Bool)
-        case failed(String)
+        case failed(QRFailure)
+    }
+
+    /// Why a QR sign-in stopped. The panel words it in its own language when it shows it.
+    enum QRFailure: Equatable {
+        /// Steam no longer knows the code: it expired or was cancelled on the phone.
+        case expired
+        /// Steam could not be reached.
+        case unreachable
+        case failed
     }
 
     enum Failure: LocalizedError, Equatable {
@@ -46,6 +55,8 @@ final class SteamNativeSession {
     @ObservationIgnored private var connecting: Task<SteamContentClient, any Error>?
     /// Counts logons; one that is no longer the latest closes its connection when it answers.
     @ObservationIgnored private var logOnAttempt = 0
+    /// Counts sign-ins and sign-outs, so a keychain read that finishes after one is dropped.
+    @ObservationIgnored private var signInChanges = 0
     @ObservationIgnored private var qrTask: Task<Void, Never>?
     @ObservationIgnored private var users = 0
     @ObservationIgnored private var idleDisconnect: Task<Void, Never>?
@@ -67,8 +78,10 @@ final class SteamNativeSession {
     /// Reads the saved sign-in off the main thread: the keychain may ask first.
     func restore() async {
         let store = store
+        let changes = signInChanges
         let saved = await Task.detached(priority: .utility) { store.load() }.value
-        guard token == nil, let saved else { return }
+        // A sign-out (or a new sign-in) made while the keychain answered is the newer word.
+        guard changes == signInChanges, token == nil, let saved else { return }
         if saved.isExpired() {
             store.remove()
             return
@@ -86,10 +99,15 @@ final class SteamNativeSession {
         qrTask = Task { [weak self, signIn, deviceName] in
             do {
                 var challenge = try await signIn.begin(deviceName: deviceName)
+                // Each answer is checked against a cancellation made while it was on its way:
+                // a code closed on screen must not show again or sign in.
+                try Task.checkCancellation()
                 self?.qr = .waiting(url: challenge.url, scanned: false)
                 while !Task.isCancelled {
                     try await Task.sleep(for: challenge.pollInterval)
-                    switch try await signIn.poll(challenge) {
+                    let progress = try await signIn.poll(challenge)
+                    try Task.checkCancellation()
+                    switch progress {
                     case .waiting(let scanned):
                         self?.qr = .waiting(url: challenge.url, scanned: scanned)
                     case .renewed(let next):
@@ -104,7 +122,7 @@ final class SteamNativeSession {
             } catch {
                 guard !Task.isCancelled else { return }
                 AppLog.warn("Steam QR sign-in failed (\(error.localizedDescription))")
-                self?.qr = .failed(Self.message(for: error))
+                self?.qr = .failed(Self.qrFailure(for: error))
             }
         }
     }
@@ -117,6 +135,7 @@ final class SteamNativeSession {
 
     private func adopt(_ newToken: SteamRefreshToken) throws {
         try store.save(newToken)
+        signInChanges += 1
         disconnect()
         token = newToken
         qr = .idle
@@ -128,6 +147,7 @@ final class SteamNativeSession {
     /// Forgets the sign-in on this Mac. Steam keeps the device listed under the account's
     /// authorized devices until the person removes it there.
     func signOut() {
+        signInChanges += 1
         cancelQRSignIn()
         disconnect()
         store.remove()
@@ -267,6 +287,7 @@ final class SteamNativeSession {
 
     private func forgetRejectedToken() {
         AppLog.warn("Steam no longer accepts the saved QR sign-in; it was removed")
+        signInChanges += 1
         disconnect()
         store.remove()
         token = nil
@@ -284,14 +305,9 @@ final class SteamNativeSession {
         client = nil
     }
 
-    static func message(for error: any Error) -> String {
-        if let failure = error as? Failure { return failure.localizedDescription }
-        if let refused = error as? SteamWebAPIError, refused.eresult == 9 || refused.eresult == 27 {
-            return String(localized: "The QR code expired. Show a new one and scan it again.")
-        }
-        if error is URLError {
-            return String(localized: "Could not reach Steam. Check your internet connection and try again.")
-        }
-        return String(localized: "Steam sign-in failed. Try again.")
+    static func qrFailure(for error: any Error) -> QRFailure {
+        if let refused = error as? SteamWebAPIError, refused.eresult == 9 || refused.eresult == 27 { return .expired }
+        if error is URLError { return .unreachable }
+        return .failed
     }
 }

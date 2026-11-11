@@ -8,6 +8,22 @@ final class FakeSteamWebAPI: SteamWebAPI, @unchecked Sendable {
     private var replies: [String: [Result<Data, any Error>]] = [:]
     private var json: [String: Data] = [:]
     private var recorded: [(method: String, request: Data)] = []
+    private var held: Set<String> = []
+    private var parked: [String: CheckedContinuation<Void, Never>] = [:]
+
+    /// Calls of `method` wait, once they arrive, until `release(_:)`.
+    func hold(_ method: String) { lock.withLock { _ = held.insert(method) } }
+
+    /// Whether a call of `method` arrived and is waiting.
+    func isWaiting(_ method: String) -> Bool { lock.withLock { parked[method] != nil } }
+
+    func release(_ method: String) {
+        let waiting = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            held.remove(method)
+            return parked.removeValue(forKey: method)
+        }
+        waiting?.resume()
+    }
 
     func reply(_ method: String, _ message: SteamProto.Writer) {
         lock.withLock { replies[method, default: []].append(.success(message.data)) }
@@ -28,6 +44,14 @@ final class FakeSteamWebAPI: SteamWebAPI, @unchecked Sendable {
     }
 
     func call(_ service: String, _ method: String, request: Data) async throws -> SteamProto.Message {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let waits = lock.withLock { () -> Bool in
+                guard held.contains(method) else { return false }
+                parked[method] = continuation
+                return true
+            }
+            if !waits { continuation.resume() }
+        }
         let next: Result<Data, any Error>? = lock.withLock {
             recorded.append((method, request))
             return replies[method]?.isEmpty == false ? replies[method]!.removeFirst() : nil
