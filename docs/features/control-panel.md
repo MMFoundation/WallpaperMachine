@@ -754,7 +754,8 @@ last, else the control panel's target display, else the main one. Below the pick
 - **Control Panel**, which opens the window with this display as its target, **Settings** and
   **Quit WallpaperMachine**.
 
-The main control panel also keeps a passive update banner above its pages. Opening
+The main control panel also keeps a passive update banner above its pages, tinted with the
+panel's own accent colour ([appearance](appearance.md)) like the rest of the window. Opening
 updates is a user action; background checks and installation results never activate
 another window. Dismiss the installed-result banner or postpone an available update;
 the menu bar and About remain reachable.

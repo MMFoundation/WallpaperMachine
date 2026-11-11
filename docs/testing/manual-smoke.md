@@ -816,6 +816,8 @@ closed lid has not been seen on a desktop
       newest changelog sections), newest first, in the app's language, with linked
       issue and commit references; **Install Update** downloads with a progress bar,
       then quits and reopens; **Skip This Version** keeps the next launch quiet.
+- [ ] With a custom accent colour in Settings → Appearance, the control panel's update banner
+      takes that colour, not the system accent, and its text stays readable in light and dark.
 - [ ] Opening the disk image shows one window without toolbar or sidebar: the
       app and Applications at their places over the background, labels readable,
       the volume icon. Dragging installs; a release (Developer ID signed and

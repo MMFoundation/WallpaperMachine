@@ -5,6 +5,7 @@ import SwiftUI
 /// crashing. Nothing is drawn, and no room is kept, while there is nothing to report.
 struct PanelBanners: View {
   @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
@@ -19,7 +20,9 @@ struct PanelBanners: View {
     let hasContent = message != nil || drive != nil || !held.isEmpty || showsUpdate
     VStack(spacing: 8) {
       if showsUpdate, let update {
-        BannerRow(systemImage: "arrow.down.circle", tint: Color.accentColor, message: update.title) {
+        // The panel's accent, as text: the row draws its message in the tint, so it takes the
+        // colour fitted for text on the surface, not the system accent.
+        BannerRow(systemImage: "arrow.down.circle", tint: theme.accent.accent.color, message: update.title) {
           Button("View update") {
             controller.launch(PanelActionCoordinator.key("openUpdates")) {
               try await controller.openSettings(.about)
