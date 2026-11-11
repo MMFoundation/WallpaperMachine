@@ -188,7 +188,10 @@ How the panel runs (controller, actions, observation, window hosting) is in
   `.fixedSize(horizontal: false, vertical: true)` on wrapping text there. Any
   minimum width beside the open inspector makes AppKit throw "needing another
   Update Constraints in Window pass" when the window shrinks to its floor; the
-  render tests that shrink the window catch it.
+  render tests that shrink the window catch it. A form whose controls line up beside
+  their labels sizes the labels with `ColumnLabel` (the widest label of the form in the
+  language on show), with `DisplaysRowLayout(keepsTextWidth:)` where the control may go
+  under its label, never with a fixed width that a longer translation wraps in.
 
 ## Python scripts
 

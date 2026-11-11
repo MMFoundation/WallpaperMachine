@@ -230,12 +230,16 @@ struct DisplaysRowLayout: Layout {
   /// Gives the control the width that is left instead of its own, for one that fills its place (a
   /// wrapping set of buttons, a field).
   var fillsControl = false
+  /// The text is a form's label column (`ColumnLabel`): it keeps its own width beside the control
+  /// instead of `textFloor`, so a long translation stays on one line, and the control goes under
+  /// it when that would leave the control less than its least.
+  var keepsTextWidth = false
 
   /// The widths a row is laid out with.
   private struct Widths {
     /// What the text keeps beside the control before the control goes under it: its own width, or
-    /// `textFloor`. A text breaks between any two letters when it is squeezed, so the least it can
-    /// take is no measure of what is readable.
+    /// `textFloor` when that is less and the text is not a label column. A text breaks between any
+    /// two letters when it is squeezed, so the least it can take is no measure of what is readable.
     let textBeside: CGFloat
     /// The least the text takes at all, which matters when the control is under it.
     let textMinimum: CGFloat
@@ -247,8 +251,9 @@ struct DisplaysRowLayout: Layout {
   private static let textFloor: CGFloat = 112
 
   private func widths(_ subviews: Subviews) -> Widths {
-    Widths(
-      textBeside: min(subviews[0].sizeThatFits(.unspecified).width, Self.textFloor),
+    let ideal = subviews[0].sizeThatFits(.unspecified).width
+    return Widths(
+      textBeside: keepsTextWidth ? ideal : min(ideal, Self.textFloor),
       textMinimum: subviews[0].sizeThatFits(ProposedViewSize(width: 0, height: nil)).width,
       controlMinimum: subviews[1].sizeThatFits(ProposedViewSize(width: 0, height: nil)).width,
       controlIdeal: subviews[1].sizeThatFits(.unspecified).width)

@@ -153,12 +153,18 @@ struct WelcomeStartPage: View {
     }
   }
 
+  /// Every label a recap row can have, so the values line up at the longest in the language on
+  /// show (`ColumnLabel`). A computed property, so no `Text` is kept in a static.
+  private var recapLabels: [Text] {
+    [Text("Language"), Text("Appearance"), Text("Steam"), Text("Performance"), Text("Preferences")]
+  }
+
   private func recapRow(_ label: Text, value: Text, action: (Text, () -> Void)?) -> some View {
     HStack(spacing: 12) {
-      label
+      ColumnLabel(text: label, column: recapLabels)
         .font(.system(size: 13))
         .foregroundStyle(theme.surface.muted.color)
-        .frame(width: 96, alignment: .leading)
+        .layoutPriority(1)
       value
         .font(.system(size: 13, weight: .medium))
         .frame(maxWidth: .infinity, alignment: .leading)

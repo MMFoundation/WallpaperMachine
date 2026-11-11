@@ -26,6 +26,26 @@ struct DividedRows<Content: View>: View {
   }
 }
 
+/// A label as wide as the widest label of its form, so the controls beside the labels line up in
+/// every language without a fixed width that a long translation would wrap in. The form's other
+/// labels are laid out hidden underneath and never read, so a row VoiceOver combines says only its
+/// own label. Font and colour come from the environment: set them on the `ColumnLabel`, so the
+/// hidden labels measure in the same font.
+struct ColumnLabel: View {
+  let text: Text
+  /// Every label of the form, this one included or not.
+  let column: [Text]
+
+  var body: some View {
+    ZStack(alignment: .leading) {
+      ForEach(column.indices, id: \.self) { index in
+        column[index].hidden().accessibilityHidden(true)
+      }
+      text
+    }
+  }
+}
+
 /// The rounded card of an inset grouped list: one surface, rows separated by hairlines.
 /// Inspector cards and Settings groups share it.
 struct PanelCard<Content: View>: View {

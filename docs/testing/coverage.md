@@ -1490,7 +1490,9 @@ never to `.shared`.
   each rule's row says In effect now, the published state reaches the panel's readers),
   `PanelStorageActionsTests`, `StorageSettingsModelTests`,
   `AboutSettingsTests`, `UpdatePresentationTests`, `PanelSupportPromptTests`,
-  `DisplaysSettingsModelTests`, `DisplaysSettingsDraftsTests`, `DisplaysRowLayoutTests`,
+  `DisplaysSettingsModelTests`, `DisplaysSettingsDraftsTests`, `DisplaysRowLayoutTests` (a label
+  column as wide as its widest label in every language, on one line beside its control and above
+  it without room),
   `PanelDisplayActionsTests`, `PanelDisplayLayoutActionsTests`, `PanelAutomationActionsTests`,
   `PanelPlaylistActionsTests`, `PanelPlanActionsTests`, `PlaylistEditTests`,
   `PanelHotKeyActionsTests`, `ShortcutsRecorderModelTests` (only the recording row takes a press, a

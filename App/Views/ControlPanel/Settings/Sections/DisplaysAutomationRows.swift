@@ -488,17 +488,24 @@ private struct DisplaysRuleEditor: View {
     .accessibilityLabel(Text(verbatim: DisplaysRuleSummary.fullName(of: day)))
   }
 
-  /// A label and what it labels: side by side while there is room, the label above otherwise.
+  /// A label and what it labels: side by side while there is room, the label above otherwise. The
+  /// labels share the width of the longest in the language on show, so the controls line up and no
+  /// label wraps. That column is `formLabels`: a new row's title goes there too, or its control
+  /// stands out of line in the languages whose label is the longest.
   private func formRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content)
     -> some View
   {
-    DisplaysRowLayout(spacing: 12, fillsControl: true) {
-      Text(verbatim: title)
+    DisplaysRowLayout(spacing: 12, fillsControl: true, keepsTextWidth: true) {
+      ColumnLabel(text: Text(verbatim: title), column: formLabels.map { Text(verbatim: $0) })
         .font(.system(size: 13))
-        .frame(width: 112, alignment: .leading)
       VStack(alignment: .leading, spacing: 0) { content() }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+  }
+
+  /// Every label `formRow` is given, whichever rows the rule shows.
+  private var formLabels: [String] {
+    [L("When"), L("Time"), L("Offset in minutes"), L("Repeat on"), L("Switch to")]
   }
 }
 
