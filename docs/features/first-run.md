@@ -114,11 +114,12 @@ have **Back**, and decision pages have **Skip**:
    Pending jobs or setup requests offer **Finish sign-in**. Unsaved performance or
    preference drafts each add a row with their count and **Review**, which returns
    to that page without discarding them; closing does not auto-save the drafts.
-   **Browse the Workshop** ends the guide and opens **Steam Workshop** (its note points
-   to Browse → Steam Workshop in the sidebar), **Import wallpapers**
-   ends it, shows Installed and opens the import picker, and **Start using the app**
-   simply closes it. A note says the guide can be opened again from Settings →
-   General.
+   **Browse the Workshop** ends the guide and opens **Steam Workshop**. It wears that
+   tab's symbol, and its note says that after the guide Steam's wallpapers are always
+   in the **Steam Workshop** tab at the top of the window (the guide hides the tabs
+   while it is open). **Import wallpapers** ends the guide, shows Installed and opens
+   the import picker, and **Start using the app** simply closes it. A note says the
+   guide can be opened again from Settings → General.
 
 Leaving the guide by any of the closing actions stores the flag in the app's defaults
 (`WallpaperMachine.welcomeSeen`, `PanelPreferences.welcomeSeenKey`), so the guide is shown

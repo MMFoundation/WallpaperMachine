@@ -80,10 +80,14 @@ struct WelcomeStartPage: View {
       }
       .welcomeSurface()
       WelcomeColumn(spacing: 8) {
+        // The guide hides the toolbar, so the note says where the tab is once it ends, and the row
+        // wears the tab's own symbol: in a narrow window the tab shows nothing else.
         WelcomeActionRow(
-          symbol: "magnifyingglass", color: theme.accent.control.color,
+          symbol: PanelTabs.symbol(of: .workshop), color: theme.accent.control.color,
           title: Text("Browse the Workshop"),
-          note: Text("Find wallpapers from Steam in Browse → Steam Workshop."),
+          note: Text(
+            "After this guide, find wallpapers from Steam any time in the Steam Workshop tab at the top of the window."
+          ),
           trailingSymbol: "chevron.right", isSuggested: true
         ) { model.browse() }
         WelcomeActionRow(
