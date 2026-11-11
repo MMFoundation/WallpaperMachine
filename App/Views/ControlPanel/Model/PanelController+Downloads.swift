@@ -365,7 +365,12 @@ extension PanelController {
       workshop.downloader.forgetSavedAccount()
       if let message = workshop.downloader.errorMessage { throw WallpaperActionError(message: message) }
       // Only once nothing runs: a download using the QR sign-in needs it until it ends.
-      workshop.nativeSession?.signOut()
+      do {
+        try workshop.nativeSession?.signOut()
+      } catch {
+        // Still signed in, as Settings keeps showing: the keychain kept the token.
+        throw WallpaperActionError(message: L("Could not log out of Steam: \(error.localizedDescription)"))
+      }
     }
   }
 

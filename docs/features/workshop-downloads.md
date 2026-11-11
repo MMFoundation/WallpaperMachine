@@ -1026,7 +1026,9 @@ written anywhere else. A launch restores it off the main thread
 sign-out, a new sign-in or a QR code started while the keychain answers wins over
 what it read.
 Settings shows the account as signed in, and **Log out…** removes the token as
-well as any saved SteamCMD sign-in. Steam lists the Mac (named
+well as any saved SteamCMD sign-in; when the keychain keeps the token (it refuses to
+delete an item another build saved), the action says it could not log out and the
+account stays signed in, since the next launch would restore it. Steam lists the Mac (named
 "WallpaperMachine on <Mac name>") under the account's authorized devices, where it
 can be revoked from any other device.
 

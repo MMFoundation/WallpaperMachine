@@ -14,6 +14,15 @@ final class MemorySteamTokenStore: SteamClientTokenStoring, @unchecked Sendable 
     func remove() { lock.withLock { saved = nil } }
 }
 
+/// A keychain that keeps the saved sign-in it is asked to delete.
+final class KeptSteamTokenStore: SteamClientTokenStoring, @unchecked Sendable {
+    private let token: SteamRefreshToken?
+    init(_ token: SteamRefreshToken?) { self.token = token }
+    func load() async -> SteamRefreshToken? { token }
+    func save(_ token: SteamRefreshToken) throws {}
+    func remove() throws { throw SteamClientTokenRemovalFailed(reason: "kept") }
+}
+
 /// A keychain whose read waits, suspended, until the test opens `gate`: it hands back what was
 /// saved when the read began, as a read that raced a sign-out would.
 final class GatedSteamTokenStore: SteamClientTokenStoring, @unchecked Sendable {

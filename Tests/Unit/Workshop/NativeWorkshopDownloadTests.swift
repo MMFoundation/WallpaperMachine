@@ -160,11 +160,25 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     // Opened however the test ends, so a failed wait never leaves the read suspended.
     defer { store.gate.open() }
     try await waitUntil { store.isReading }
-    session.signOut()
+    try session.signOut()
     store.gate.open()
     await restoring.value
 
     XCTAssertFalse(session.isSignedIn, "the read began before the sign-out, which is the newer word")
+  }
+
+  func testALogOutTheKeychainRefusesKeepsTheSignInAndSaysSo() async throws {
+    // macOS refuses to delete an item another build saved.
+    let keychain = MemoryKeychain()
+    keychain.holdItemSavedByAnotherBuild(
+      service: KeychainSteamClientTokenStore.service, account: KeychainSteamClientTokenStore.account, data: Data("{}".utf8))
+    XCTAssertThrowsError(try KeychainSteamClientTokenStore(calls: keychain).remove())
+
+    let steam = try FakeSteam(item: itemID, files: [:])
+    let session = steam.session(store: KeptSteamTokenStore(SteamTestToken.token()))
+    await session.restore()
+    XCTAssertThrowsError(try session.signOut())
+    XCTAssertTrue(session.isSignedIn, "the token the next launch would restore is still there")
   }
 
   func testAQRCodeStartedDuringTheKeychainReadIsNotOvertakenByIt() async throws {
@@ -381,7 +395,7 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     XCTAssertNil(store.steamCMDSetup.selectedRuntime)
     XCTAssertEqual(store.stage(for: request), .ready)
 
-    session.signOut()
+    try session.signOut()
     XCTAssertEqual(store.stage(for: request), .setup, "without the QR sign-in, SteamCMD is needed again")
     await store.steamCMDSetup.shutdown()
   }
@@ -410,7 +424,7 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     XCTAssertEqual(session.qr, .idle)
     XCTAssertEqual(changes, 1)
 
-    session.signOut()
+    try session.signOut()
     XCTAssertNil(store.token)
     let expired = MemorySteamTokenStore(
       try SteamRefreshToken(SteamTestToken.jwt(expires: Date(timeIntervalSinceNow: -60)), accountName: "old"))

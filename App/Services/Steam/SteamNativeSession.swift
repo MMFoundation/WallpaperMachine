@@ -86,7 +86,8 @@ final class SteamNativeSession {
         // A sign-out (or a new sign-in) made while the keychain answered is the newer word.
         guard changes == signInChanges, token == nil, let saved else { return }
         if saved.isExpired() {
-            store.remove()
+            // Best effort: a launch that cannot delete it finds it expired again.
+            try? store.remove()
             return
         }
         token = saved
@@ -151,12 +152,13 @@ final class SteamNativeSession {
     }
 
     /// Forgets the sign-in on this Mac. Steam keeps the device listed under the account's
-    /// authorized devices until the person removes it there.
-    func signOut() {
+    /// authorized devices until the person removes it there. Throws, still signed in, when the
+    /// keychain keeps the saved token: the next launch would restore it.
+    func signOut() throws {
+        try store.remove()
         signInChanges += 1
         cancelQRSignIn()
         disconnect()
-        store.remove()
         token = nil
         onChange?()
     }
@@ -295,7 +297,8 @@ final class SteamNativeSession {
         AppLog.warn("Steam no longer accepts the saved QR sign-in; it was removed")
         signInChanges += 1
         disconnect()
-        store.remove()
+        // Best effort: one the keychain keeps is refused again at the next logon.
+        try? store.remove()
         token = nil
         onChange?()
     }
