@@ -339,6 +339,31 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     host.close()
   }
 
+  /// The inspector of a wallpaper in the library leads with an Apply button VoiceOver can reach and
+  /// name (nothing inside the artwork, which VoiceOver skips), and puts Move to Trash after it.
+  func testAnInstalledItemsInspectorOffersApplyToVoiceOverAndPutsTheTrashLast() async throws {
+    let panel = try await makePanel()
+    let controller = panel.controller
+    let items = controller.workshopBrowse.items
+    panel.store.librarySnapshot.wallpapers = [
+      BridgeWallpaperEntry(
+        id: items[1].id, title: "x", kind: .video, supported: true, active: false, selected: false,
+        previewPath: nil)
+    ]
+    panel.workshop.selectedItem = items[1]
+    let host = PanelHost(controller: controller)
+    try await settle(host, size: NSSize(width: 1240, height: 800))
+    try await settle(host) { frame("workshop-inspector-apply", in: host.hosting.view) != nil }
+    let found = elements(in: host.hosting.view)
+    let apply = try XCTUnwrap(
+      found.first { $0.identifier == "workshop-inspector-apply" }, "VoiceOver reaches Apply")
+    XCTAssertFalse(apply.label.isEmpty, "and has a name to read")
+    let trash = try XCTUnwrap(found.first { $0.identifier == "workshop.moveToTrash" }?.frame)
+    // AppKit's y grows upwards: a control further down the inspector has the smaller y.
+    XCTAssertLessThanOrEqual(trash.maxY, apply.frame.minY, "Move to Trash comes after Apply")
+    host.close()
+  }
+
   func testOnlyTheTilesOnScreenLoadTheirAnimationsAndTheRestWait() async throws {
     let panel = try makeDiscoverPanel(steamImage: { _ in try DiscoverPictures.gif(frames: 3, brightness: 0.3) })
     WorkshopBrowseProtocol.serve(rows(), pages: 1, count: 30)
@@ -529,6 +554,29 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
       panel.workshop.selectedItem = panel.controller.workshopBrowse.items[3]
       let size = fittingSize(WorkshopInspector(), controller: panel.controller, width: 260)
       XCTAssertLessThanOrEqual(size.width, 261, "\(language): the inspector never asks for more than its column")
+    }
+  }
+
+  /// The button an installed wallpaper's inspector leads with keeps its whole label, Apply or the
+  /// longer Reapply, unshrunk, inside the narrowest inspector column's padding in every language.
+  func testAnInstalledItemsApplyButtonKeepsItsWholeLabelInTheNarrowestColumnInEveryLanguage() throws {
+    // The inspector draws its actions 16 points in from either edge of its column.
+    let inner = InspectorColumn<EmptyView>.widths.lowerBound - 2 * 16
+    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: .testHost) }
+    for language in AppLanguage.supported.map(\.tag) {
+      let panel = try makeDiscoverPanel(language: language)
+      PanelLocale.shared.bind(to: panel.controller.appLanguage)
+      XCTAssertEqual(PanelLocale.shared.tag, language, "precondition: drawn in \(language)")
+      for shown in [nil, "222"] {
+        let offer = ApplyOffer(wallpaperID: "222", shownID: shown, canApply: true, isBusy: { _ in false })
+        let width = idealSize(
+          InspectorApplyButton(offer: offer, identifier: "workshop-inspector-apply"),
+          controller: panel.controller
+        ).width
+        let name = offer.reapplies ? "Reapply" : "Apply"
+        XCTAssertGreaterThan(width, 2 * 14 + 40, "\(language) \(name): the label is measured, not only the padding")
+        XCTAssertLessThanOrEqual(width, inner, "\(language) \(name): \(width) points")
+      }
     }
   }
 }

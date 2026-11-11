@@ -1,7 +1,8 @@
 import Foundation
 
 /// What an inspector's apply button does for a wallpaper that is in the library, decided the same
-/// way in the Installed, Workshop and pixiv inspectors; each draws its own label, symbol and style.
+/// way in the Installed, Workshop and pixiv inspectors. Installed and Workshop draw it with
+/// `InspectorApplyButton`; pixiv draws its own.
 ///
 /// Applying what the target display already shows does nothing, so there the button reapplies,
 /// which restarts it. Either way it runs under its own key (`reapplyWallpaper` or `activate`) and

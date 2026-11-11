@@ -6,7 +6,9 @@ import SwiftUI
 /// `.bordered` draws a near-white button that disappears on a white surface; this one takes the
 /// panel's own well colour, so it reads in every tone and appearance, and has hover and pressed
 /// states. It takes its size from `PrimaryButtonStyle.Size`, and may expand to the width it is
-/// offered, as the inspector's buttons do.
+/// offered, as the inspector's buttons do. A button whose role is `.destructive` (Move to Trash)
+/// draws its title and symbol in the theme's danger colour, as the Installed footer's Move to Trash
+/// does; its fills stay the neutral ones.
 struct DiscoverSecondaryButtonStyle: ButtonStyle {
   var size: PrimaryButtonStyle.Size = .regular
   var expands = false
@@ -29,7 +31,8 @@ private struct DiscoverSecondaryButtonBody: View {
     let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
     configuration.label
       .font(.system(size: size == .regular ? 13 : 12, weight: .medium))
-      .foregroundStyle(theme.surface.text.color)
+      .foregroundStyle(
+        configuration.role == .destructive ? theme.surface.danger.color : theme.surface.text.color)
       .lineLimit(1)
       .padding(.horizontal, size == .regular ? 14 : 10)
       .frame(maxWidth: expands ? .infinity : nil, minHeight: size.height)

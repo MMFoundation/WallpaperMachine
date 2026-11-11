@@ -509,9 +509,13 @@ to Steam Community) and **More by this author** for a Workshop wallpaper (see
 removing it from the target display's playlist, **Reinstall from Workshop…** for a
 Workshop wallpaper (see
 [Reinstall from Workshop](workshop-downloads.md#reinstall-from-workshop)), **Report this
-problem on GitHub** and **Move wallpaper to Trash**. On Discover the primary action is
-**Download** (with **Download and apply** where it can apply), and **View on Steam
-Workshop** and **More by this author** sit below. The inspector scrolls on its own;
+problem on GitHub** and **Move wallpaper to Trash**. On Discover a wallpaper in the library
+leads with the same **Apply wallpaper** (or **Reapply wallpaper**) button, enabled where a
+double click on its tile would apply it, with **Preview wallpaper**, **Subscribe on Steam** (signed in),
+**View on Steam Workshop** and **Share…** below it and **Move to Trash**, drawn in red, last.
+Any other item's primary action is **Download** (with **Download and apply** where it can
+apply), with **View on Steam Workshop** below and **More by this author** beside the creator's
+name. The inspector scrolls on its own;
 **Apply changes** and **Revert** (see [Properties](wallpaper-properties.md#properties))
 stay visible in a footer while editing. Its texts can be selected and copied.
 

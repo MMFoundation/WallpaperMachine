@@ -2,6 +2,9 @@ import SwiftUI
 
 /// The buttons the inspector offers for an item's library copy or download.
 enum WorkshopInspectorButton: Equatable {
+  /// **Apply wallpaper** or **Reapply wallpaper** for an installed wallpaper
+  /// (`PanelController.workshopApplyOffer(for:)`).
+  case apply
   case moveToTrash
   case openCollection
   case resume
@@ -17,7 +20,8 @@ enum WorkshopInspectorButton: Equatable {
 
   /// The key the button's action runs under, which the button is disabled on while that action is
   /// pending, so a second click visibly does nothing; nil for the buttons that only open the
-  /// dialog or the Downloads list.
+  /// dialog or the Downloads list, and for Apply, whose `ApplyOffer` carries the key it runs under
+  /// (`activate` or `reapplyWallpaper`) and is disabled on it already.
   func actionKey(forItem id: String) -> String? {
     switch self {
     case .moveToTrash: PanelActionCoordinator.key("delete", id: id)
@@ -26,14 +30,15 @@ enum WorkshopInspectorButton: Equatable {
     case .cancel, .removeFromQueue: DownloadRowAction.cancel.key(.steam, id: id)
     case .download, .downloadAgain, .downloadAndApply:
       PanelActionCoordinator.key("requestDownload", id: id)
-    case .continueSetup, .finishSignIn, .progress: nil
+    case .apply, .continueSetup, .finishSignIn, .progress: nil
     }
   }
 
-  /// Installed wallpapers can be removed; collections are always opened.
+  /// The buttons at the top of the actions. Installed wallpapers lead with Apply, also where the
+  /// target display cannot take them (the offer disables it); collections are always opened.
   static func buttons(for download: WorkshopItemDownload) -> [WorkshopInspectorButton] {
     if download.action == .openCollection { return [.openCollection] }
-    if download.isInstalled { return [.moveToTrash] }
+    if download.isInstalled { return [.apply] }
     return switch download.action {
     case .openCollection: [.openCollection]
     case .resume: [.resume]
@@ -45,9 +50,17 @@ enum WorkshopInspectorButton: Equatable {
       [again ? .downloadAgain : .download] + (download.offersDownloadAndApply ? [.downloadAndApply] : [])
     }
   }
+
+  /// The buttons under the links: Move to Trash for an installed wallpaper, quiet and last, so the
+  /// destructive action is never the first one met. Collections never offer to delete their
+  /// wallpapers.
+  static func trailingButtons(for download: WorkshopItemDownload) -> [WorkshopInspectorButton] {
+    download.isInstalled && download.action != .openCollection ? [.moveToTrash] : []
+  }
 }
 
-/// The buttons: what to do about the download, and the links.
+/// The buttons: what to do with the library copy or about the download first (Apply for an
+/// installed wallpaper), then the preview, the subscription and the links, then Move to Trash.
 struct WorkshopItemActions: View {
   let item: WorkshopItem
   let download: WorkshopItemDownload
@@ -59,7 +72,7 @@ struct WorkshopItemActions: View {
     let model = controller.workshopBrowser
     let downloads = controller.downloads
     VStack(spacing: 8) {
-      downloadActions(model: model, downloads: downloads)
+      actionButtons(WorkshopInspectorButton.buttons(for: download), model: model, downloads: downloads)
       if download.isInstalled, controller.previewAvailable, item.canRunOnMac {
         Button {
           let id = item.id
@@ -92,6 +105,8 @@ struct WorkshopItemActions: View {
           .accessibilityLabel(L("Share…"))
         }
       }
+      actionButtons(
+        WorkshopInspectorButton.trailingButtons(for: download), model: model, downloads: downloads)
     }
   }
 
@@ -116,9 +131,10 @@ struct WorkshopItemActions: View {
   }
 
   @ViewBuilder
-  private func downloadActions(model: WorkshopBrowserModel, downloads: DownloadsModel) -> some View {
-    ForEach(Array(WorkshopInspectorButton.buttons(for: download).enumerated()), id: \.offset) {
-      _, button in
+  private func actionButtons(
+    _ buttons: [WorkshopInspectorButton], model: WorkshopBrowserModel, downloads: DownloadsModel
+  ) -> some View {
+    ForEach(Array(buttons.enumerated()), id: \.offset) { _, button in
       actionButton(button, model: model, downloads: downloads)
         .disabled(button.actionKey(forItem: item.id).map(controller.isBusy) ?? false)
     }
@@ -129,6 +145,9 @@ struct WorkshopItemActions: View {
     _ button: WorkshopInspectorButton, model: WorkshopBrowserModel, downloads: DownloadsModel
   ) -> some View {
     switch button {
+    case .apply:
+      InspectorApplyButton(
+        offer: controller.workshopApplyOffer(for: item), identifier: "workshop-inspector-apply")
     case .moveToTrash:
       Button(role: .destructive) {
         let id = item.id

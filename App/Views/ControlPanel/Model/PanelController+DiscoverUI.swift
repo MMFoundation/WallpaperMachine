@@ -1,8 +1,9 @@
 import Foundation
 
 /// Small readings the Steam Workshop page and its inspector need over the typed model: the selected
-/// item, the window's subtitle, the library's own cover for a copy that is installed, and the problem
-/// report of an item that is not installed. The rules are the page's own; nothing here changes state.
+/// item, the window's subtitle, the library's own cover and the apply offer of a copy that is
+/// installed, and the problem report of an item that is not installed. The rules are the page's
+/// own; nothing here changes state.
 extension PanelController {
   /// The item the inspector shows: the selected one, while it is on the page. Selecting something
   /// and then paging away leaves the inspector empty, as it always did.
@@ -37,6 +38,19 @@ extension PanelController {
   /// and not Steam's preview once the wallpaper is installed.
   func workshopInstalledStill(for id: String) -> PanelImageSource? {
     libraryRow(id: id)?.still
+  }
+
+  /// **Apply wallpaper** or **Reapply wallpaper** for a Workshop item in the library: enabled for a
+  /// type the library can name and that runs on a Mac, on a target display that shows a wallpaper
+  /// of its own (not a mirror, not disabled), which is where a double click on its tile applies it
+  /// too (`workshopDoubleClick(for:)`). An item that is not installed gets an offer that is never
+  /// enabled.
+  func workshopApplyOffer(for item: WorkshopItem) -> ApplyOffer {
+    // An Application, or a type the library cannot name, cannot be applied.
+    let kind = libraryRow(id: item.id)?.kind ?? .unknown
+    return ApplyOffer(
+      wallpaperID: item.id, target: mediaApplyTarget,
+      canRun: item.canRunOnMac && kind != .unknown, isBusy: { isBusy($0) })
   }
 
   /// Whether **Reinstall from Workshop…** is offered for an installed item: a Workshop wallpaper

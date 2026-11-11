@@ -63,7 +63,10 @@ treats unknown `browsesort` values as trending, so none is offered. Wallpaper En
 
 ### Removing a downloaded wallpaper
 
-An installed wallpaper's Steam Workshop inspector offers **Move to Trash**. It uses
+An installed wallpaper's Steam Workshop inspector leads with **Apply wallpaper**
+(**Reapply wallpaper** when the target display shows it already; see
+[Selection versus apply](control-panel.md#selection-versus-apply)) and ends its actions with
+**Move to Trash**, drawn in red after **View on Steam Workshop**. Move to Trash uses
 Installed's confirmation and removal action: after confirmation, the wallpaper stops
 playing, its library copy moves to the Trash, and its saved library metadata is
 removed. The Workshop page stays open and offers downloading again once the library
@@ -474,7 +477,7 @@ imported. The full status sentence stays in the tooltip, the inspector and the
 downloads list.
 
 Double-clicking a tile that is already in the library applies it, as on the
-Installed page.
+Installed page; its inspector has **Apply wallpaper** too.
 
 ### Transfer progress
 
@@ -517,8 +520,9 @@ when every running job has an estimate. The shared scene resources use SteamCMD'
 own byte counters for the same estimate.
 
 Downloads never subscribe on Steam, and a download applies nothing unless you
-chose [Download and apply](#download-and-apply). Otherwise use **Show in
-library**, then Apply — see [Control panel](control-panel.md#selection-versus-apply).
+chose [Download and apply](#download-and-apply). Otherwise use **Apply wallpaper** in
+its inspector once it is in the library, or **Show in library**, then Apply — see
+[Control panel](control-panel.md#selection-versus-apply).
 
 ### Download and apply
 

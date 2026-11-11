@@ -6,8 +6,9 @@ import SwiftUI
 /// The download controls follow one request or job (`WorkshopItemDownload`): a collection is opened;
 /// a retained request is resumed or continued; a running download is watched or cancelled; anything
 /// else is downloaded, and **Download and apply** sits beside it only where the wallpaper can run and
-/// the target display can show it. An item that is already installed trades them for what can be done
-/// with the installed copy. All of the text here can be selected and copied.
+/// the target display can show it. An item that is already installed trades them for its library
+/// copy's own: **Apply wallpaper** (or **Reapply wallpaper**), the Installed inspector's button,
+/// first, and **Move to Trash** last. All of the text here can be selected and copied.
 struct WorkshopInspector: View {
   @Environment(PanelController.self) private var controller
 
@@ -132,8 +133,7 @@ private struct ItemInspector: View {
 // MARK: - Preview
 
 /// The item's picture at 16:10, with its animation playing over it for as long as it is selected and
-/// the window is on screen. A wallpaper that is installed shows the library's own preview, with the
-/// button that applies it.
+/// the window is on screen. A wallpaper that is installed shows the library's own preview.
 private struct InspectorPreview: View {
   let item: WorkshopItem
   let isInstalled: Bool
@@ -154,9 +154,6 @@ private struct InspectorPreview: View {
             AnimatedPreview(data: animation.data, isPlaying: isVisible)
           }
         }
-      }
-      .overlay(alignment: .bottomTrailing) {
-        if isInstalled { ApplyButton(item: item).padding(10) }
       }
       .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
       .overlay {
@@ -183,38 +180,5 @@ private struct InspectorPreview: View {
     guard let data = try? await controller.images.animation(for: source) else { return }
     guard !Task.isCancelled else { return }
     animation = (item.id, data)
-  }
-}
-
-/// The round play button over an installed wallpaper's picture: Apply, or Reapply when the target
-/// display shows it already (applying what is shown does nothing, so that restarts it).
-private struct ApplyButton: View {
-  let item: WorkshopItem
-
-  @Environment(PanelController.self) private var controller
-  @Environment(\.panelTheme) private var theme
-
-  var body: some View {
-    // An Application, or a type the library cannot name, cannot be applied.
-    let kind = controller.libraryRow(id: item.id)?.kind ?? .unknown
-    let offer = ApplyOffer(
-      wallpaperID: item.id, target: controller.mediaApplyTarget,
-      canRun: item.canRunOnMac && kind != .unknown, isBusy: { controller.isBusy($0) })
-    let label = offer.reapplies ? L("Reapply wallpaper") : L("Apply wallpaper")
-    Button {
-      controller.launch(offer.key) { [controller] in try await controller.apply(offer) }
-    } label: {
-      Image(systemName: offer.reapplies ? "arrow.clockwise" : "play.fill")
-        .font(.system(size: 14, weight: .bold))
-        .foregroundStyle(theme.accent.onPrimary.color)
-        .frame(width: 38, height: 38)
-        .background(theme.accent.primary.color, in: Circle())
-        .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
-    }
-    .buttonStyle(.plain)
-    .disabled(!offer.isEnabled)
-    .help(label)
-    .accessibilityLabel(Text(verbatim: label))
-    .accessibilityIdentifier("workshop-inspector-apply")
   }
 }

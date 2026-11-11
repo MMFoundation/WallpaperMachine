@@ -1405,7 +1405,8 @@ never to `.shared`.
   `SceneReportsTests` and `WallpaperEditorStateTests` (locale scaling, invalid raw text,
   independent drafts, held drag steps).
 - Steam Workshop and downloads: `PanelWorkshopActionsTests`, `PanelWorkshopSubscriptionsTests`,
-  `PanelWorkshopTileTests`, `PanelWorkshopUpdateTests`, `PanelDownloadActionsTests` (Download and
+  `PanelWorkshopTileTests` (an installed item's Apply offered where its double click applies, and
+  Reapply where the target shows it), `PanelWorkshopUpdateTests`, `PanelDownloadActionsTests` (Download and
   apply and the display it targets, retained requests, the account stage, secrets reaching only
   the job that asks, pause, cancel, retry, clearing, logging out, locating a copy, reinstalling),
   `PanelDownloadQueueTests` (the toolbar button's ring, speed, percent and time left, pixiv saves
@@ -1413,13 +1414,15 @@ never to `.shared`.
   `WorkshopListStateTests`, `WorkshopBrowserModelTests` (the search pause, pasted links and bare ids,
   sorts and filters, lists and authors, pagination that never navigates and clamps to Steam's page
   limit, double clicks, the remembered scroll offset), `WorkshopPreviewCoordinatorTests` (stills
-  first, animations only for tiles on screen, released when hidden), `WorkshopInspectorTests`,
+  first, animations only for tiles on screen, released when hidden), `WorkshopInspectorTests` (an installed
+  wallpaper leads with Apply and ends with Move to Trash; neither for any other item),
   `WorkshopItemDownloadTests`, `TileDownloadStateTests`, `ResultPagerTests`, `DownloadsModelTests`
   and `DownloadDialogResolutionTests` (the download dialog's stages, Not now, the hand-off card, a
   rejected account, late failures, the first-run guide keeping its own sign-in), and
   `WorkshopBrowserRenderTests` (the page, inspector, empty states, dialog stages and Downloads list
-  in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label, a
-  download that resumes or pauses with the Downloads list open redrawn in place), and
+  in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label, an
+  installed item's Apply reached by VoiceOver with Move to Trash below it, the Apply and Reapply
+  buttons keeping their whole label in the narrowest column, a download that resumes or pauses with the Downloads list open redrawn in place), and
   `WorkshopSearchTranslationTests` (a search typed in Chinese sent in English while the field keeps
   it, **Search “…” instead** kept for a sort and by a reopened panel and the text translated
   again once another was searched, a click on a replaced line ignored, the page and the

@@ -130,23 +130,7 @@ struct InspectorActionRow: View {
     let isFavorite = controller.favoriteIDs.contains(row.id)
     let favoriteKey = PanelActionCoordinator.key("favorite", id: row.id)
     HStack(spacing: 8) {
-      Button {
-        controller.launch(offer.key) { try await controller.apply(offer) }
-      } label: {
-        Group {
-          if offer.reapplies {
-            Label("Reapply wallpaper", systemImage: "arrow.clockwise")
-          } else {
-            Label("Apply wallpaper", systemImage: "play.fill")
-          }
-        }
-        // The narrowest inspector shrinks the words a little rather than cutting them off.
-        .minimumScaleFactor(0.8)
-      }
-      .buttonStyle(.panelPrimary(size: .regular, expands: true))
-      .disabled(!offer.isEnabled)
-      .help(offer.reapplies ? L("Reapply wallpaper") : L("Apply wallpaper"))
-      .accessibilityIdentifier("inspector.apply")
+      InspectorApplyButton(offer: offer, identifier: "inspector.apply")
 
       Button {
         controller.launch(favoriteKey) { try await controller.toggleFavorite(row.id) }
@@ -163,6 +147,46 @@ struct InspectorActionRow: View {
 
       InspectorMoreMenu(row: row)
     }
+  }
+}
+
+/// **Apply wallpaper**, or **Reapply wallpaper** where the target display already shows it: the
+/// button the Installed and Steam Workshop inspectors lead with for a wallpaper in the library.
+/// `offer` decides which and when it is enabled; `PanelController.apply(_:)` carries it out.
+struct InspectorApplyButton: View {
+  let offer: ApplyOffer
+  let identifier: String
+  /// Drawn as the inspector's accent action, unless staged edits take the accent (Installed only);
+  /// then it is the quiet secondary button.
+  var isPrimary = true
+
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    if isPrimary {
+      button.buttonStyle(.panelPrimary(size: .regular, expands: true))
+    } else {
+      button.buttonStyle(.panelSecondary(size: .regular, expands: true))
+    }
+  }
+
+  private var button: some View {
+    Button {
+      controller.launch(offer.key) { [controller, offer] in try await controller.apply(offer) }
+    } label: {
+      Group {
+        if offer.reapplies {
+          Label("Reapply wallpaper", systemImage: "arrow.clockwise")
+        } else {
+          Label("Apply wallpaper", systemImage: "play.fill")
+        }
+      }
+      // The narrowest inspector shrinks the words a little rather than cutting them off.
+      .minimumScaleFactor(0.8)
+    }
+    .disabled(!offer.isEnabled)
+    .help(offer.reapplies ? L("Reapply wallpaper") : L("Apply wallpaper"))
+    .accessibilityIdentifier(identifier)
   }
 }
 

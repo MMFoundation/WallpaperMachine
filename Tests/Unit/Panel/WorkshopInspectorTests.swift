@@ -40,6 +40,25 @@ final class WorkshopInspectorTests: MediaPanelTestCase {
       WorkshopInspectorButton.buttons(
         for: download(item(), job: DownloadRow(id: "222", title: "T", errorMessage: "No."))),
       [.downloadAgain, .downloadAndApply], "after a failure Download says again; the plain one stays beside it")
+    XCTAssertEqual(
+      WorkshopInspectorButton.trailingButtons(for: download(item())), [],
+      "nothing to remove before it is in the library")
+  }
+
+  func testAnItemThatIsNotInstalledNeverOffersApplyOrTheTrash() {
+    let states = [
+      download(item()), download(item(), canApply: false), download(item(kind: "Application")),
+      download(item(collection: 3)),
+      download(item(), request: DownloadRequestRow(id: "222", title: "T", stage: .setup)),
+      download(item(), job: DownloadRow(id: "222", title: "T", isPending: true)),
+      download(item(), job: DownloadRow(id: "222", title: "T", isPaused: true)),
+    ]
+    for state in states {
+      let buttons = WorkshopInspectorButton.buttons(for: state)
+        + WorkshopInspectorButton.trailingButtons(for: state)
+      XCTAssertFalse(buttons.contains(.apply), "\(buttons)")
+      XCTAssertFalse(buttons.contains(.moveToTrash), "\(buttons)")
+    }
   }
 
   func testWhileADownloadIsUnderWayTheInspectorWatchesItAndOffersNoSecondRequest() {
@@ -81,6 +100,9 @@ final class WorkshopInspectorTests: MediaPanelTestCase {
     for opener in [WorkshopInspectorButton.continueSetup, .finishSignIn, .progress(label: "Downloading")] {
       XCTAssertNil(opener.actionKey(forItem: id), "\(opener) only opens the dialog or the list")
     }
+    XCTAssertNil(
+      WorkshopInspectorButton.apply.actionKey(forItem: id),
+      "Apply runs under its ApplyOffer's key, activate or reapplyWallpaper")
 
     // The keys are the ones the actions run under: busy from the click until the action is over.
     let panel = try makeDiscoverPanel()
@@ -104,17 +126,24 @@ final class WorkshopInspectorTests: MediaPanelTestCase {
     XCTAssertTrue(controller.isBusy(WorkshopInspectorButton.openCollection.actionKey(forItem: "900")!))
   }
 
-  func testAnItemThatIsAlreadyInstalledOffersNoDownloadAndTheStateSaysSo() {
+  func testAnInstalledItemLeadsWithApplyAndEndsWithTheTrash() {
     let installed = download(item(), installed: true)
     XCTAssertTrue(installed.isInstalled)
     XCTAssertFalse(installed.offersDownloadAndApply, "never for an installed wallpaper")
-    XCTAssertEqual(WorkshopInspectorButton.buttons(for: installed), [.moveToTrash])
+    XCTAssertEqual(WorkshopInspectorButton.buttons(for: installed), [.apply])
+    XCTAssertEqual(WorkshopInspectorButton.trailingButtons(for: installed), [.moveToTrash])
+    let elsewhere = download(item(), installed: true, canApply: false)
     XCTAssertEqual(
-      WorkshopInspectorButton.buttons(for: download(item(), installed: true, canApply: false)),
-      [.moveToTrash], "removal does not require a display that can apply the wallpaper")
+      WorkshopInspectorButton.buttons(for: elsewhere), [.apply],
+      "Apply stays where the target cannot take it: its offer disables it")
     XCTAssertEqual(
-      WorkshopInspectorButton.buttons(for: download(item(collection: 3), installed: true)),
-      [.openCollection], "a collection never offers to delete its wallpapers")
+      WorkshopInspectorButton.trailingButtons(for: elsewhere), [.moveToTrash],
+      "removal does not require a display that can apply the wallpaper")
+    let collection = download(item(collection: 3), installed: true)
+    XCTAssertEqual(WorkshopInspectorButton.buttons(for: collection), [.openCollection])
+    XCTAssertEqual(
+      WorkshopInspectorButton.trailingButtons(for: collection), [],
+      "a collection never offers to delete its wallpapers")
   }
 
   // MARK: Tiles
