@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// How much room the row has: with all the words, with icons only, or with icons only and closer
-/// together (the page beside an inspector in the smallest window).
-private enum HeaderTier {
+/// How much room either bar above the Library grid has (this header row and the views row,
+/// `InstalledScopeBar`): room for all the words, for fewer, or for the fewest and closer together
+/// (the page beside an inspector in the smallest window). Each bar picks its tier with a
+/// `ViewThatFits` around the whole row and says in its own documentation what each tier drops;
+/// this header row keeps only its icons from `compact` on.
+enum HeaderTier {
   case regular, compact, tight
 
   var showsLabels: Bool { self == .regular }

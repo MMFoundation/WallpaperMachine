@@ -1391,7 +1391,9 @@ never to `.shared`.
   import popover and pill) and
   `InstalledPageRenderTests` (the page, footer, empty states, an empty collection among them, and
   popovers in every language and appearance at the narrowest column, the first read of the
-  library said by the grid with no footer and no system spinner, the scroll offset restored).
+  library said by the grid with no footer and no system spinner, the scroll offset restored, the
+  views row and Play side by side inside the narrowest page column in every language with the
+  collection keeping a readable name and its whole name as the tooltip).
 - Inspector: `InspectorPolicyTests` (among its rules, the Revert and Apply changes footer and its
   accent Apply changes only while an edit waits), `InspectorWordingTests` (among its sentences, what draws
   the wallpaper said in words, with the renderer's id kept as it is on the detail line; a reported

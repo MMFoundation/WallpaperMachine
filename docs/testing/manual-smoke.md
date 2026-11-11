@@ -155,6 +155,9 @@ was run.
 - [ ] Check Discover, pixiv and Installed at 1240×800, 960×640 and 760×560 in light and
       dark mode, with the inspector open and closed. Panes resize without losing the
       target menu or the primary actions, and nothing is cut off at the window's edge.
+      With a collection on show and the inspector open at 760×560, Installed's views row keeps
+      the collection's name and Play; All wallpapers and Favorites show their names on hover, and
+      a collection name too long for its chip shows in full on hover.
 - [ ] Command-F puts the keyboard in the page's search field (Settings' too); grid arrows, Home and End, Return and Space, Delete, Escape (a name field,
       then a popover, then selection mode), text editing and VoiceOver names stay
       correctly scoped. With Reduce Motion on, no equalizer, spinner or preview animates.
