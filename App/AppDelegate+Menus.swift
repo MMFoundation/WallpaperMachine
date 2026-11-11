@@ -130,6 +130,18 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
             viewMenu.addItem(item)
         }
         viewMenu.addItem(.separator())
+        // The open panel's two side columns, in their left-to-right order, on the keys macOS gives
+        // a sidebar (Control-Command-S) and Finder and Pages an inspector (Option-Command-I).
+        // `validateMenuItem` titles them Show or Hide for what is on show.
+        let filters = menuItem("Show Filters", action: #selector(toggleFilterSidebar))
+        filters.keyEquivalent = "s"
+        filters.keyEquivalentModifierMask = [.command, .control]
+        viewMenu.addItem(filters)
+        let details = menuItem("Show Wallpaper Details", action: #selector(toggleWallpaperDetails))
+        details.keyEquivalent = "i"
+        details.keyEquivalentModifierMask = [.command, .option]
+        viewMenu.addItem(details)
+        viewMenu.addItem(.separator())
         // The tile grids' size, as Finder and Photos zoom their icons.
         let zoomIn = menuItem("Zoom In", action: #selector(zoomTilesIn))
         zoomIn.keyEquivalent = "+"
@@ -201,6 +213,11 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
     @objc private func zoomTilesIn() { controlPanelNavigation.tileZoomTarget?.zoomTiles(.zoomIn) }
     @objc private func zoomTilesOut() { controlPanelNavigation.tileZoomTarget?.zoomTiles(.zoomOut) }
     @objc private func resetTileZoom() { controlPanelNavigation.tileZoomTarget?.zoomTiles(.actualSize) }
+
+    /// View › Show/Hide Filters and Show/Hide Wallpaper Details: the open panel's Filter and
+    /// inspector buttons, including their turn-taking in a narrow window.
+    @objc func toggleFilterSidebar() { controlPanelNavigation.tileZoomTarget?.shell.toggleFilters() }
+    @objc func toggleWallpaperDetails() { controlPanelNavigation.tileZoomTarget?.shell.toggleInspector() }
 
     /// File › Import…: the library's file picker, on Installed. For an open panel, like the zoom
     /// commands: the picker is a sheet on its window.
@@ -455,13 +472,28 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
         if ExternalLink.open(ExternalLink.discord) { store?.supportPrompt?.recordDiscordChosen() }
     }
 
-    /// Ticks the View menu's page on show, and enables Zoom In, Zoom Out and Actual Size while a
-    /// panel is open and has a step to go that way.
+    /// Ticks the View menu's page on show; titles Show or Hide Filters and Wallpaper Details for what
+    /// the open panel shows, enabled on a page that has the column while the guide is closed; and
+    /// enables Zoom In, Zoom Out and Actual Size while a panel is open and has a step to go that way.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(showPage(_:)) {
             let shown = controlPanelWindow?.isVisible == true
                 && controlPanelNavigation.selection?.rawValue == item.representedObject as? String
             item.state = shown ? .on : .off
+        }
+        // A disabled item says Show, so a column the guide covers or no open panel never reads Hide.
+        let shell = controlPanelNavigation.tileZoomTarget?.shell
+        if item.action == #selector(toggleFilterSidebar) {
+            let enabled = shell?.canToggleFilters ?? false
+            item.title = enabled && shell?.areFiltersShown == true
+                ? String(localized: "Hide Filters") : String(localized: "Show Filters")
+            return enabled
+        }
+        if item.action == #selector(toggleWallpaperDetails) {
+            let enabled = shell?.canToggleInspector ?? false
+            item.title = enabled && shell?.isInspectorShown == true
+                ? String(localized: "Hide Wallpaper Details") : String(localized: "Show Wallpaper Details")
+            return enabled
         }
         let zoom: TileZoomCommand? =
             switch item.action {

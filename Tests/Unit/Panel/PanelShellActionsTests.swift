@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 import XCTest
 
@@ -32,6 +33,45 @@ final class PanelShellActionsTests: PanelTestCase {
     while controller.canZoomTiles(.zoomOut) { controller.zoomTiles(.zoomOut) }
     XCTAssertEqual(
       TileGridLayout.preferredWidth(zoom: controller.tileZoom), TileGridLayout.zoomWidths.first)
+  }
+
+  // MARK: View menu
+
+  func testTheViewMenusColumnItemsSayWhatTheyDoAndActOnTheOpenPanel() async throws {
+    try await withPanel { panel in
+      let app = AppDelegate()
+      let shell = panel.controller.shell
+      shell.windowWidthChanged(.regular)
+      let filters = NSMenuItem(title: "", action: #selector(AppDelegate.toggleFilterSidebar), keyEquivalent: "")
+      let details = NSMenuItem(title: "", action: #selector(AppDelegate.toggleWallpaperDetails), keyEquivalent: "")
+      XCTAssertFalse(app.validateMenuItem(filters), "no panel is open")
+      XCTAssertFalse(app.validateMenuItem(details))
+      XCTAssertEqual(filters.title, String(localized: "Show Filters"))
+
+      app.controlPanelNavigation.tileZoomTarget = panel.controller
+      XCTAssertTrue(app.validateMenuItem(filters))
+      XCTAssertEqual(filters.title, String(localized: "Show Filters"), "the sidebar starts closed")
+      app.toggleFilterSidebar()
+      XCTAssertTrue(shell.areFiltersShown)
+      XCTAssertTrue(app.validateMenuItem(filters))
+      XCTAssertEqual(filters.title, String(localized: "Hide Filters"))
+
+      XCTAssertTrue(app.validateMenuItem(details))
+      XCTAssertEqual(details.title, String(localized: "Hide Wallpaper Details"), "a wide window shows it")
+      app.toggleWallpaperDetails()
+      XCTAssertFalse(shell.isInspectorShown)
+      XCTAssertTrue(app.validateMenuItem(details))
+      XCTAssertEqual(details.title, String(localized: "Show Wallpaper Details"))
+
+      await shell.open(.settings).value
+      XCTAssertFalse(app.validateMenuItem(filters), "Settings has neither column")
+      XCTAssertFalse(app.validateMenuItem(details))
+      await shell.open(.wallpaper).value
+      shell.isWelcomeRequested = true
+      XCTAssertFalse(app.validateMenuItem(filters), "the guide covers both")
+      XCTAssertEqual(filters.title, String(localized: "Show Filters"), "a disabled item never says Hide")
+      XCTAssertFalse(app.validateMenuItem(details))
+    }
   }
 
   func testTheGuidesOpenInChineseForEitherChineseAndInEnglishOtherwise() {

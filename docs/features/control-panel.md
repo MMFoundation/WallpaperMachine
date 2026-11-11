@@ -170,7 +170,10 @@ the library and otherwise downloads it (or opens a collection, or the setup a do
 for). On pixiv it only selects the tile, as `Return` does. While the [welcome guide](first-run.md#first-run)
 is open `Escape` is its **Skip setup**; otherwise it cancels a collection's name field, then closes an
 open popover, then leaves selection mode. `Command-F` puts the keyboard in the page's
-search field (on Settings, the one above its sections). Errors show in a banner at the top of the page
+search field (on Settings, the one above its sections). **View → Show Filters** (⌃⌘S) and
+**Show Wallpaper Details** (⌥⌘I) open and close the Filters sidebar and the inspector as their
+buttons do, taking turns in a narrow window; the menu says Hide while the column is open, and
+both are unavailable on Settings and while the guide is open. Errors show in a banner at the top of the page
 with their original details, which can be selected and copied, and **Dismiss**; VoiceOver
 announces them.
 

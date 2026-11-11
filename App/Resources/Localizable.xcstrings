@@ -7751,6 +7751,18 @@
     "Actual Size" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Tamanho Real"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "실제 크기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "実際のサイズ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "实际大小"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "實際大小"}}}
     },
+    "Show Filters" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Mostrar Filtros"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "필터 보기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "フィルタを表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "显示筛选"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示篩選"}}}
+    },
+    "Hide Filters" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ocultar Filtros"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "필터 가리기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "フィルタを非表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "隐藏筛选"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "隱藏篩選"}}}
+    },
+    "Show Wallpaper Details" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Mostrar Detalhes do Papel de Parede"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 세부사항 보기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙の詳細を表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "显示壁纸详情"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "顯示桌布詳細資訊"}}}
+    },
+    "Hide Wallpaper Details" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ocultar Detalhes do Papel de Parede"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 세부사항 가리기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙の詳細を非表示"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "隐藏壁纸详情"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "隱藏桌布詳細資訊"}}}
+    },
     "WallpaperMachine Guides" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Guias do WallpaperMachine"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 가이드"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine ガイド"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 使用指南"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 使用指南"}}}
     },

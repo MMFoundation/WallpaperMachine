@@ -102,7 +102,9 @@ belong to the `AppUpdateCoordinator` it owns (`App/Services/GitHub/`).
   (`App/Services/Desktop/ScreenLock.swift`). The application menu holds the app menu
   (About, which opens Settings → About; Settings…, Check for Updates…, Services, Hide / Hide
   Others / Show All, Quit), **File → Close** (Command-W sends `performClose` to the key window),
-  **Edit**, **View** (the panel's tabs, Command-1 to Command-3, the one on show ticked; Zoom In,
+  **Edit**, **View** (the panel's tabs, Command-1 to Command-3, the one on show ticked; Show/Hide
+  Filters, Control-Command-S, and Show/Hide Wallpaper Details, Option-Command-I, titled for what
+  the open panel shows and enabled on a page that has the column while the guide is closed; Zoom In,
   Zoom Out and Actual Size for the tile grids, enabled while a panel is open,
   [control panel](features/control-panel.md); and Enter Full Screen), **Wallpaper** (`StatusMenuModel.wallpaperMenuEntries`: the status item's commands
   without its lines that open the panel, rebuilt when the menu opens), **Window** (Minimize, Zoom,

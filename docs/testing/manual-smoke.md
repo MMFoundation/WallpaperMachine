@@ -158,6 +158,9 @@ was run.
 - [ ] Command-F puts the keyboard in the page's search field (Settings' too); grid arrows, Home and End, Return and Space, Delete, Escape (a name field,
       then a popover, then selection mode), text editing and VoiceOver names stay
       correctly scoped. With Reduce Motion on, no equalizer, spinner or preview animates.
+- [ ] Control-Command-S and Option-Command-I open and close the Filters sidebar and the
+      inspector on Installed, Steam Workshop and pixiv (taking turns in a narrow window); the View
+      menu says Show or Hide for each to match, and both are dimmed on Settings and under the guide.
 
 ## Discover, search and filters
 

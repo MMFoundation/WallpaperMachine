@@ -1319,7 +1319,8 @@ never to `.shared`.
   closed leaves the window whole), `ShellModelTests` (quick clicks end on the last page, Back to
   library, the typed target display, Recently used per display, one popover at a time, the import
   pill's memory, the Escape order, the inspector open with room and closed below 960 points until
-  the person chooses, what the split view writes back not counted as a choice, notices announced
+  the person chooses, the View menu's column toggles enabled only on a page that has the column
+  and never under the guide, what the split view writes back not counted as a choice, notices announced
   and expiring, the support prompt waiting behind the guide, a popover or a running apply),
   `ShellRenderTests` (the shell takes any window size in every language and appearance, full
   screen, Split View and minimum sizes, the window title and subtitle, the target menu and
@@ -1332,7 +1333,9 @@ never to `.shared`.
   adopted once, disclosures, the inspector choice and the library page remembered, the guide open
   until the flag is set) and `PanelShellActionsTests` (navigation, the first visit's Workshop and
   pixiv loads, the reopen report, the first-run flags, appearance and language choices, which tell
-  the bridge and re-read the open wallpaper's options).
+  the bridge and re-read the open wallpaper's options, and View › Show/Hide Filters and Wallpaper
+  Details titled for what the open panel shows, acting on it, and disabled with no panel, on
+  Settings and under the guide).
 - Language and theme: `PanelLocaleTests` (every shipped language resolved from its own bundle,
   integer and text arguments, reordered and repeated placeholders, a literal percent, English
   fallback, unformatted runtime lookups, the system region kept, the bound store driving the

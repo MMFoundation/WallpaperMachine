@@ -124,6 +124,13 @@ final class ShellModel {
   /// Whether the Filters sidebar is on show: open, on a page that has filters.
   var areFiltersShown: Bool { hasFilters && isFiltersChoice }
 
+  /// Whether View › Show/Hide Wallpaper Details is offered: the page on show has the column and
+  /// the guide is closed. Settings has no inspector, and the guide covers it while the toolbar that
+  /// holds its button is hidden.
+  var canToggleInspector: Bool { hasInspector && !isWelcomeOpen }
+  /// Whether View › Show/Hide Filters is offered, by the same rule as `canToggleInspector`.
+  var canToggleFilters: Bool { hasFilters && !isWelcomeOpen }
+
   /// Whether the inspector is open on the pages that have one. Without a choice of the person's it
   /// follows the window: open when there is room, closed in a narrow window. A choice made in a
   /// narrow window holds when the window grows, and one made in a wide window when it shrinks.
