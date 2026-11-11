@@ -1452,7 +1452,8 @@ never to `.shared`.
   rejected account, late failures, a sign-in-only job keeping its own sign-in, the account
   requirement shown only until a Steam account is signed in), and
   `WorkshopBrowserRenderTests` (the page, inspector, empty states, dialog stages and Downloads list
-  in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label, an
+  in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label and
+  its caption's tooltip with the whole title, an
   installed item's Apply reached by VoiceOver with Move to Trash below it, the Apply and Reapply
   buttons keeping their whole label in the narrowest column, a download that resumes or pauses with the Downloads list open redrawn in place, the loading grid's ring with no system spinner), and
   `WorkshopSearchTranslationTests` (a search typed in Chinese sent in English while the field keeps

@@ -17,7 +17,8 @@ enum TileEmphasis: Equatable, Sendable {
 /// The tile only draws. It has no gestures of its own: the page that shows it decides what a click,
 /// a double click or a modifier click does, and puts its buttons in the badge slots. The artwork is
 /// whatever the page passes (a `PanelImage`, an `AnimatedPreview`). A selected tile has an accent
-/// ring set off from the artwork by a gap the colour of the surface. Hovering does not move it.
+/// ring set off from the artwork by a gap the colour of the surface. Hovering does not move it. A
+/// title too long for its line shows in full as the caption's tooltip.
 struct WallpaperTile<Artwork: View>: View {
   let title: String
   var subtitle: String?
@@ -108,6 +109,9 @@ struct WallpaperTile<Artwork: View>: View {
           .font(.system(size: 12, weight: .semibold))
           .foregroundStyle(theme.surface.text.color)
           .lineLimit(1)
+          // The whole title, for one its line cuts short. Shown on every caption: telling a cut one
+          // apart would measure each tile as the grid scrolls.
+          .help(Text(verbatim: title))
         if let subtitle {
           Text(verbatim: subtitle)
             .font(.system(size: 11))

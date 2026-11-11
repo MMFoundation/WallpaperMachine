@@ -383,6 +383,10 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
       found.contains("Wallpaper 1, Video, In your library, Approved by Wallpaper Engine, Favorite"),
       "the marks follow in the order they stack")
     XCTAssertTrue(found.contains("Wallpapers"), "the grid is a group VoiceOver names")
+    let tooltips = Set(AccessibilityElement.everything(in: host.hosting.view).map(\.help))
+    XCTAssertTrue(
+      tooltips.isSuperset(of: ["Wallpaper 0", "Wallpaper 1"]),
+      "a caption's tooltip is its whole title, for one its line cuts short")
     host.close()
   }
 

@@ -73,7 +73,7 @@ Download. Symbols are SF Symbols. Light/dark mode, surface tone and custom accen
 preferences continue to apply ([appearance](appearance.md)).
 
 Wallpapers appear as square, image-first tiles with the title (12 pt semibold) and the
-kind (11 pt) beneath. A tile stays still on hover and draws a focus ring under
+kind (11 pt) beneath; a title too long for its line shows in full as the caption's tooltip. A tile stays still on hover and draws a focus ring under
 keyboard focus; selection is an accent ring with a
 surface-coloured gap so blue artwork does not hide it. Each grid fills its width with as
 many columns as fit at a preferred tile size (140 points, 14-point gaps) that shrinks
