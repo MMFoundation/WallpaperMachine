@@ -1390,12 +1390,16 @@ never to `.shared`.
   accent Apply changes only while an edit waits), `InspectorWordingTests` (among its sentences, what draws
   the wallpaper said in words, with the renderer's id kept as it is on the detail line; a reported
   problem leads the line and is never said to play; nothing named before the runtime reports it,
-  and no such line promised for a web page), `InspectorInputTests` (among the typed numbers, the
+  and no such line promised for a web page; a collapsed display card's summary, part by part,
+  with the frame-rate limit named in place of the rate and what waits left to the Not applied
+  mark), `InspectorInputTests` (among the typed numbers, the
   Modified and Not applied pills drawn at the width a row counts for them in every language, so
   neither moves a control), `InspectorEngineOptionsTests` (among the engine rows, the section open
   for an option that waits even at its default, Not applied for
   an option that waits and Modified for a saved one),
-  `InspectorFlowTests` (Preview with unsent text, Restore all defaults, sections, the app's words
+  `InspectorFlowTests` (Preview with unsent text, Restore all defaults, sections and display cards
+  collapsed beside another display unless a value waits, which `InspectorRenderTests` also opens
+  when it is staged later from another card, the app's words
   against an author's markup, host states as text, file and folder notes, every symbol drawn
   exists, and Apply, Reapply and Resume download each with a symbol of its own that is not
   Play's), `InspectorSliderTests` (VoiceOver, keys and the pointer each reach the saved edit; a

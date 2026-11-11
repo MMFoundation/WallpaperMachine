@@ -194,6 +194,21 @@ enum InspectorPolicy {
   /// first draw on, so a later change of the rows never opens or closes it.
   static func displaysOpenByDefault(_ options: InspectorOptions) -> Bool { !options.displays.isEmpty }
 
+  /// Beside another display, each display's card shows a one-line summary under its name
+  /// (`InspectorWording.displaySummary`) and starts collapsed: two open cards of a dozen controls
+  /// each push everything after them far down. One display has nothing to choose between.
+  static func summarizesDisplays(_ options: InspectorOptions) -> Bool { options.displays.count >= 2 }
+
+  /// A display's card starts open when it is the only one, or while one of its settings waits for
+  /// Apply changes, so a staged value is never hidden when the inspector opens. As for the sections,
+  /// the state is the person's from the first draw on, except that a value staged later (the Black
+  /// bars card stages a scale factor) opens the card again (`InspectorSection`'s `opensWhen`).
+  static func displayCardOpenByDefault(
+    _ options: InspectorOptions, display: InspectorOptions.DisplayRow
+  ) -> Bool {
+    !summarizesDisplays(options) || display.hasStagedChanges
+  }
+
   /// Wallpaper Engine options opens when one of them differs from its default.
   /// It opens too for one that waits for Apply changes, which an option restored to its default does.
   static func engineOptionsOpenByDefault(_ options: InspectorOptions) -> Bool {

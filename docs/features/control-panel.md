@@ -537,7 +537,9 @@ submit button of an open form, such as **Save preset**, keep their own); with no
 drawn. It fades in and out, at once with Reduce Motion, and VoiceOver says **You have unapplied
 changes.** when it appears. Each setting that waits says **Not applied** beside its name, in
 place of **Modified**, and a display card with one says so under the display's name (see
-[Properties](wallpaper-properties.md#properties)). A preset's **Apply** is a plain button.
+[Properties](wallpaper-properties.md#properties)). With two or more displays, each display's
+card starts collapsed under a one-line summary of its settings, and opens while it holds a
+value that waits. A preset's **Apply** is a plain button.
 
 Below the compatibility note, an installed wallpaper that can run (not
 Application) shows **Not working? Report on GitHub**. It opens the repository's

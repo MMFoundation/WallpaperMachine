@@ -285,11 +285,13 @@ struct InspectorNote: View {
 /// A titled card that folds away: Compatibility check, General configuration, Wallpaper properties,
 /// Displays. The open state is the view's own, so it starts as `isOpen` says when the section
 /// first appears and then belongs to the person; the inspector keys its content by the wallpaper,
-/// so a different wallpaper starts again from the defaults.
+/// so a different wallpaper starts again from the defaults. `opensWhen` opens a closed section each
+/// time it turns true (something it holds came to need the person), and never closes one.
 struct InspectorSection<Accessory: View, Content: View>: View {
   private let title: Text
   private let usesCard: Bool
   private let isNested: Bool
+  private let opensWhen: Bool
   private let accessory: Accessory
   private let content: Content
   @State private var isOpen: Bool
@@ -304,18 +306,20 @@ struct InspectorSection<Accessory: View, Content: View>: View {
     self.title = Text(title)
     usesCard = card
     isNested = nested
+    opensWhen = false
     self.accessory = accessory()
     self.content = content()
     _isOpen = State(initialValue: isOpen)
   }
 
   init(
-    verbatim title: String, isOpen: Bool = true, card: Bool = true, nested: Bool = false,
-    @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content
+    verbatim title: String, isOpen: Bool = true, opensWhen: Bool = false, card: Bool = true,
+    nested: Bool = false, @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content
   ) {
     self.title = Text(verbatim: title)
     usesCard = card
     isNested = nested
+    self.opensWhen = opensWhen
     self.accessory = accessory()
     self.content = content()
     _isOpen = State(initialValue: isOpen)
@@ -357,6 +361,11 @@ struct InspectorSection<Accessory: View, Content: View>: View {
           }
         }
         .transition(.opacity)
+      }
+    }
+    .onChange(of: opensWhen) { _, opens in
+      if opens, !isOpen {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { isOpen = true }
       }
     }
   }

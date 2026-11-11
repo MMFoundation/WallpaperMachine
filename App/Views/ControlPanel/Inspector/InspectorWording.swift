@@ -301,6 +301,29 @@ enum InspectorWording {
     }
   }
 
+  // MARK: Displays
+
+  /// The line under a display card's name beside another display (`InspectorPolicy
+  /// .summarizesDisplays`), parts joined by " · ": the scaling mode, with its scale factor when that
+  /// is not 1; the frame rate, or the note of the ceiling that holds the display below it (a choice
+  /// says what overrides it), and none for a clip the native player plays at its own rate. A
+  /// disabled display is Disabled. A value waiting for Apply changes is the card's Not applied mark,
+  /// drawn apart from this line so that cutting the line short never hides it.
+  static func displaySummary(_ display: InspectorOptions.DisplayRow, locale: Locale? = nil) -> String {
+    var parts: [String] = []
+    if display.isEnabled {
+      let mode = scalingModeName(display.scalingMode)
+      parts.append(
+        display.scalingFactor == 1 ? mode : mode + " ×" + factor(display.scalingFactor, locale: locale))
+      if InspectorPolicy.offersFrameRate(for: display) {
+        parts.append(display.frameRateLimit?.note ?? L("\(display.frameRate) fps"))
+      }
+    } else {
+      parts.append(L("Disabled"))
+    }
+    return parts.joined(separator: " · ")
+  }
+
   /// The factor the Black bars card may stage, when there is one to set.
   static func stageableFactor(_ state: LetterboxState) -> Double? {
     guard case .bars(_, .factor(let factor)?, let stage) = state.outcome, !stage.isApplied

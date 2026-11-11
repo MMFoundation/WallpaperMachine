@@ -130,6 +130,28 @@ final class InspectorFlowTests: InspectorTestCase {
     XCTAssertTrue(InspectorPolicy.displaysOpenByDefault(withDisplays))
     XCTAssertFalse(InspectorPolicy.displaysOpenByDefault(without))
 
+    // One display's card starts open with no summary; beside another display both start collapsed
+    // under their summaries, except a card holding a value that waits for Apply changes.
+    XCTAssertFalse(InspectorPolicy.summarizesDisplays(withDisplays))
+    XCTAssertEqual(
+      withDisplays.displays.map { InspectorPolicy.displayCardOpenByDefault(withDisplays, display: $0) }, [true])
+    func two(secondStaged: Bool) -> InspectorOptions {
+      InspectorOptions.make(
+        BridgeSnapshotFixtures.options(
+          displayConfigurations: [
+            InspectorRenderFixture.config("primary", "Studio", mode: .fill, factor: 1, pan: (0.5, 0.5)),
+            InspectorRenderFixture.config(
+              "second", "LG", mode: .match, factor: 1.2, pan: (0.5, 0.5), staged: secondStaged),
+          ]), inputs: inputs)
+    }
+    for staged in [false, true] {
+      let options = two(secondStaged: staged)
+      XCTAssertTrue(InspectorPolicy.summarizesDisplays(options))
+      XCTAssertEqual(
+        options.displays.map { InspectorPolicy.displayCardOpenByDefault(options, display: $0) }, [false, staged],
+        staged ? "the card with a value waiting opens, the other stays collapsed" : "both collapsed")
+    }
+
     let rows = [
       CollectionRow(id: "c1", name: "Calm", wallpaperIDs: ["a"]),
       CollectionRow(id: "c2", name: "Loud", wallpaperIDs: []),

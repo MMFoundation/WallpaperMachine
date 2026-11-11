@@ -407,4 +407,62 @@ final class InspectorWordingTests: InspectorTestCase {
       InspectorWording.letterboxStageNote(
         letterbox(.bars(bars, suggestion: .alreadyHidden, stage: available))), .none)
   }
+
+  // MARK: Displays
+
+  /// A collapsed display card's line names its scaling mode, its scale factor only when that is not
+  /// 1, its frame rate or the ceiling that holds it below it (never both), no frame rate for a clip
+  /// the native player plays at its own rate, Not applied while a setting waits, and Disabled for a
+  /// display that does not play the wallpaper.
+  func testACollapsedDisplaySaysItsScalingAndItsFrameRateAndLeavesWhatWaitsToTheMark() {
+    func display(
+      mode: BridgeScalingMode = .fill, factor: Double = 1, enabled: Bool = true, staged: Bool = false,
+      ceiling: FrameRateCeiling? = nil, nativePlayer: Bool = false
+    ) -> InspectorOptions.DisplayRow {
+      var inputs = InspectorOptions.Inputs()
+      inputs.frameRateCeiling = ceiling
+      inputs.nativePlayerDisplays = nativePlayer ? [1] : []
+      let options = InspectorOptions.make(
+        BridgeSnapshotFixtures.options(
+          wallpaperId: "clip", kind: .video,
+          displayConfigurations: [
+            InspectorRenderFixture.config(
+              "primary", "Studio Display (1 - Primary)", mode: mode, factor: factor, pan: (0.5, 0.5),
+              enabled: enabled, staged: staged)
+          ]), inputs: inputs)
+      return options.displays[0]
+    }
+    let fps = L("\(30) fps")
+    let plain = InspectorWording.displaySummary(display(), locale: english)
+    XCTAssertTrue(plain.contains(InspectorWording.scalingModeName(.fill)), plain)
+    XCTAssertTrue(plain.contains(fps), plain)
+    XCTAssertFalse(plain.contains("×"), "a factor of 1 is not named: \(plain)")
+    XCTAssertFalse(plain.contains(L("Not applied")), plain)
+
+    let zoomed = InspectorWording.displaySummary(display(mode: .match, factor: 1.2), locale: english)
+    XCTAssertTrue(zoomed.contains(InspectorWording.scalingModeName(.match)), zoomed)
+    XCTAssertTrue(zoomed.contains(InspectorWording.factor(1.2, locale: english)), zoomed)
+
+    let ceiling = FrameRateCeiling(savedCap: 24, effectiveCap: 24, causes: [])!
+    let held = InspectorWording.displaySummary(display(ceiling: ceiling), locale: english)
+    XCTAssertTrue(held.contains(ceiling.note), "the setting that holds it is named: \(held)")
+    XCTAssertFalse(held.contains(fps), "never the frame rate the ceiling overrides: \(held)")
+
+    let native = InspectorWording.displaySummary(display(nativePlayer: true), locale: english)
+    XCTAssertTrue(native.contains(InspectorWording.scalingModeName(.fill)), native)
+    XCTAssertFalse(native.contains(fps), "the clip plays at its own rate: \(native)")
+
+    // A value that waits is the card's Not applied mark, drawn apart from the line, which can be
+    // cut short: the line stays the same.
+    let staged = display(factor: 1.5, staged: true)
+    XCTAssertTrue(staged.hasStagedChanges)
+    XCTAssertEqual(
+      InspectorWording.displaySummary(staged, locale: english),
+      InspectorWording.displaySummary(display(factor: 1.5), locale: english))
+
+    XCTAssertEqual(InspectorWording.displaySummary(display(enabled: false), locale: english), L("Disabled"))
+    let switchedOff = display(enabled: false, staged: true)
+    XCTAssertTrue(switchedOff.hasStagedChanges)
+    XCTAssertEqual(InspectorWording.displaySummary(switchedOff, locale: english), L("Disabled"))
+  }
 }

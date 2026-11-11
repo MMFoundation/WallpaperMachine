@@ -153,7 +153,13 @@ struct DisplaysCard: View {
 /// One display's playback of the wallpaper: Enabled, Scaling mode and Scale factor, Frame rate,
 /// where the wallpaper sits, and Remove from display. Scaling mode, Frame rate and the position are
 /// saved at once; Enabled and the Scale factor are drafts that wait for Apply changes, and while
-/// one of them does the card says **Not applied** under its name.
+/// one of them does the card shows the **Not applied** mark under its name, apart from any line
+/// that could be cut short.
+///
+/// Beside another display the card starts collapsed under a one-line summary of its settings
+/// (`InspectorWording.displaySummary`), with the mark under it; the only display's card starts
+/// open with the mark alone. A card opens when one of its settings is staged, even from another
+/// card (`InspectorPolicy.displayCardOpenByDefault`).
 struct DisplayCard: View {
   let options: InspectorOptions
   let display: InspectorOptions.DisplayRow
@@ -167,9 +173,23 @@ struct DisplayCard: View {
     let enabledKey = InspectorAction.displayConfig(id, display: display.id, "enabled")
     let modeKey = InspectorAction.displayConfig(id, display: display.id, "scalingMode")
     InspectorSection(
-      verbatim: display.title, nested: true,
+      verbatim: display.title, isOpen: InspectorPolicy.displayCardOpenByDefault(options, display: display),
+      opensWhen: display.hasStagedChanges, nested: true,
       accessory: {
-        if display.hasStagedChanges { ModifiedMark(kind: .notApplied).padding(.top, 2) }
+        // Part of the header button: VoiceOver reads the name, the summary and the mark, then
+        // Expanded or Collapsed.
+        if InspectorPolicy.summarizesDisplays(options) {
+          let summary = InspectorWording.displaySummary(display)
+          Text(verbatim: summary)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(theme.surface.muted.color)
+            .lineLimit(2)
+            .multilineTextAlignment(.leading)
+            .help(summary)
+        }
+        if display.hasStagedChanges {
+          ModifiedMark(kind: .notApplied).padding(.top, 2)
+        }
       }
     ) {
       InspectorToggleRow(
@@ -272,6 +292,13 @@ private struct ScaleFactorRow: View {
   @State private var issue: String?
   @FocusState private var isFocused: Bool
 
+  /// What the number does; Settings → Displays says it as the row's note.
+  private var explanation: String {
+    L(
+      "Zooms the wallpaper after scaling: 1 keeps its size, more than 1 enlarges it and crops what no longer fits, less than 1 shrinks it."
+    )
+  }
+
   var body: some View {
     let key = InspectorAction.displayConfig(options.wallpaperID, display: display.id, "scalingFactor")
     VStack(alignment: .leading, spacing: 4) {
@@ -287,13 +314,13 @@ private struct ScaleFactorRow: View {
             .focused($isFocused)
             .onSubmit(commit)
             .accessibilityLabel("Scale factor")
+            // The field is an AppKit view with its own tooltip area, so the row's help does not
+            // reach it: hovering the number itself explains it too.
+            .help(explanation)
         }
       }
-      // What the number does, on the whole row; Settings → Displays says it as the row's note.
-      .help(
-        L(
-          "Zooms the wallpaper after scaling: 1 keeps its size, more than 1 enlarges it and crops what no longer fits, less than 1 shrinks it."
-        ))
+      // On the whole row as well, so hovering its name explains it.
+      .help(explanation)
       if let issue {
         Text(verbatim: issue)
           .font(.system(size: 11.5))

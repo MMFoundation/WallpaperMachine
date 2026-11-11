@@ -132,9 +132,18 @@ status** expands to show their explanations and delivery status. The presets and
 original order. **Displays** comes next with per-display playback configuration,
 open when the wallpaper is on a display and collapsed otherwise, then **Collections**
 and, for a scene or a video, [**Wallpaper Engine options**](#wallpaper-engine-options).
-A display's **Scale factor** says what it does in its help, as the same row in **Settings ›
-Displays** does in its note: it zooms the wallpaper after the scaling mode, 1 keeping its
-size, more than 1 enlarging it and cropping the edges, less than 1 shrinking it.
+Each display has its own card. The only display's card starts open. Beside another display,
+each card starts collapsed under a one-line summary: its scaling mode, with the scale factor
+when it is not 1; its frame rate, or the limit that holds it below that rate (none for a clip
+the native video player plays at its own rate); **Disabled** for a display that does not play
+the wallpaper. While its scale factor or **Enabled** switch waits for **Apply changes**, the
+card shows the **Not applied** mark under the summary, apart from it, so a summary cut short
+never hides it. Such a card starts open when the wallpaper is selected, and a card opens by
+itself when one of its values is staged later, from the **Black bars** card for one.
+A display's **Scale factor** says what it does in its help, on its name and on the number
+itself, as the same row in **Settings › Displays** does in its note: it zooms the wallpaper
+after the scaling mode, 1 keeping its size, more than 1 enlarging it and cropping the edges,
+less than 1 shrinking it.
 General, display and property disclosures keep their state while the same
 wallpaper stays selected; another wallpaper starts at the top with its sections at their
 defaults.

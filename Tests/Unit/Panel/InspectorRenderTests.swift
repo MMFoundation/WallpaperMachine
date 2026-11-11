@@ -624,6 +624,46 @@ final class InspectorRenderTests: InspectorTestCase {
     await fixture.shutdown()
   }
 
+  /// Beside another display each card starts collapsed. A value staged later in one of them, as the
+  /// Black bars card stages a scale factor, opens that card and gives it the Not applied mark; the
+  /// other stays collapsed, and applying leaves the open card open.
+  func testADisplayCardOpensWhenOneOfItsSettingsIsStagedFromElsewhere() async throws {
+    let fixture = try InspectorRenderFixture()
+    try await prepare(fixture)
+    let (window, view) = fixture.host(size: NSSize(width: 360, height: 3000))
+    try await settle(600)
+    /// The card's header button: its words (name, summary, mark) and Expanded or Collapsed.
+    func header(_ title: String) -> (label: String, value: String)? {
+      view.layoutSubtreeIfNeeded()
+      return accessibilityObjects(in: view).lazy
+        .filter { $0.value(forKey: "accessibilityRole") as? String == NSAccessibility.Role.button.rawValue }
+        .compactMap { element -> (String, String)? in
+          guard let label = element.value(forKey: "accessibilityLabel") as? String, label.contains(title)
+          else { return nil }
+          return (label, element.value(forKey: "accessibilityValue") as? String ?? "")
+        }
+        .first
+    }
+    let first = "Studio Display (1 - Primary)"
+    let second = "LG UltraFine (2 - Secondary)"
+    XCTAssertEqual(header(first)?.value, "Collapsed")
+    XCTAssertEqual(header(second)?.value, "Collapsed")
+    XCTAssertEqual(header(second)?.label.contains("Not applied"), false)
+
+    fixture.store.wallpaperOptionsSnapshot?.dirty = true
+    fixture.store.wallpaperOptionsSnapshot?.displayConfigurations[1].staged = true
+    try await fixture.panel.waitUntil(timeout: 5) { header(second)?.value == "Expanded" }
+    XCTAssertEqual(header(second)?.label.contains("Not applied"), true, "the mark says what waits")
+    XCTAssertEqual(header(first)?.value, "Collapsed", "the other card stays as it was")
+
+    fixture.store.wallpaperOptionsSnapshot?.displayConfigurations[1].staged = false
+    fixture.store.wallpaperOptionsSnapshot?.dirty = false
+    try await fixture.panel.waitUntil(timeout: 5) { header(second)?.label.contains("Not applied") == false }
+    XCTAssertEqual(header(second)?.value, "Expanded", "applied: the card the person now sees stays open")
+    window.contentView = nil
+    await fixture.shutdown()
+  }
+
   /// VoiceOver meets the Position on screen frame as a draggable picture that says where the picture
   /// sits on which display, and its increment moves the picture a step, as an arrow key does.
   func testThePositionFrameIsADraggablePictureToVoiceOver() async throws {
