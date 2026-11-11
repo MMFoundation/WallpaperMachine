@@ -46,7 +46,7 @@ struct TileDownloadState: Equatable {
 
   let kind: Kind
   let glyph: Glyph?
-  /// A click cancels, so hovering swaps the centre for a close mark.
+  /// A click cancels, so the ring may swap its centre for a close mark (`showsClose`).
   let showsCloseOnHover: Bool
   /// The fraction drawn, 0...1, for `.progress`.
   let progress: Double?
@@ -62,6 +62,13 @@ struct TileDownloadState: Equatable {
   let label: String
   /// A retry waits for SteamCMD to be set up, or for the QR sign-in.
   let isEnabled: Bool
+
+  /// Whether the ring shows its close mark instead of its centre: a ring whose click cancels shows
+  /// it while hovered or while its tile has keyboard focus, so someone without a pointer on it
+  /// still sees what the click does. Both rings, Workshop's and pixiv's, ask this.
+  func showsClose(isHovering: Bool, isFocused: Bool) -> Bool {
+    showsCloseOnHover && (isHovering || isFocused)
+  }
 
   // MARK: Workshop
 

@@ -164,6 +164,10 @@ was run.
 - [ ] Control-Command-S and Option-Command-I open and close the Filters sidebar and the
       inspector on Installed, Steam Workshop and pixiv (taking turns in a narrow window); the View
       menu says Show or Hide for each to match, and both are dimmed on Settings and under the guide.
+- [ ] Tab to a Steam Workshop tile that is downloading: its ring shows the cross instead of the
+      percentage, as on hover and as a pixiv tile's ring does. Then click a downloading Workshop
+      tile and a downloading pixiv tile beside their rings and move the pointer away: each ring
+      shows its percentage again, not the cross.
 - [ ] The error banner's Dismiss and Recently used's close button take a click anywhere in
       their 24-point square, not only on the cross itself.
 

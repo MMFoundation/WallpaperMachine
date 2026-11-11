@@ -475,7 +475,9 @@ it (Preparing, Connecting, Updating, Signing in, Requesting) from the job's
 `phase`; a transfer without a percentage yet shows its speed instead, and after
 the last byte the full ring reads Finishing while the files are validated and
 imported. The full status sentence stays in the tooltip, the inspector and the
-downloads list.
+downloads list. A ring whose click cancels or removes the download swaps its centre for a
+cross while the pointer is over it or while its tile has keyboard focus, as pixiv's ring does
+(`TileDownloadState.showsClose`).
 
 Double-clicking a tile that is already in the library, or `Command`-`Return` on it,
 applies it, as on the Installed page; its inspector has **Apply wallpaper** too.

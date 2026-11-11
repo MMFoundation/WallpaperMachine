@@ -1450,7 +1450,7 @@ never to `.shared`.
   first, animations only for tiles on screen, released when hidden), `WorkshopInspectorTests` (an installed
   wallpaper leads with Apply and ends with Move to Trash; neither for any other item),
   `WorkshopItemDownloadTests`, `TileDownloadStateTests` (a paused ring's mark told apart from a
-  waiting one's), `ResultPagerTests`, `DownloadsModelTests`
+  waiting one's, the cross shown on hover or keyboard focus only by a ring whose click cancels), `ResultPagerTests`, `DownloadsModelTests`
   and `DownloadDialogResolutionTests` (the download dialog's stages, Not now, the hand-off card, a
   rejected account, late failures, a sign-in-only job keeping its own sign-in, the account
   requirement shown only until a Steam account is signed in), and

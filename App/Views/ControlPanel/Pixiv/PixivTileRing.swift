@@ -52,7 +52,7 @@ struct PixivTileRing: View {
     state.kind == .failed ? theme.surface.danger.color : theme.accent.base.color
   }
 
-  private var showsClose: Bool { state.showsCloseOnHover && (isHovering || isFocused) }
+  private var showsClose: Bool { state.showsClose(isHovering: isHovering, isFocused: isFocused) }
 
   @ViewBuilder
   private var center: some View {

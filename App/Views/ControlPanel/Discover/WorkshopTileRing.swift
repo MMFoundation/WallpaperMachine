@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The ring a Workshop tile wears over its picture while the wallpaper is on its way: live
 /// progress, one click to cancel, a shield when Steam needs the person, a retry mark after a
-/// failure.
+/// failure. A ring whose click cancels swaps its centre for a cross while hovered or while its tile
+/// has keyboard focus, as pixiv's does.
 ///
 /// It draws a `TileDownloadState` and nothing else; the state says what the ring is, what it reads
 /// and what a click does, and the tile passes the action on. Only a ring that has something to show
@@ -17,6 +18,8 @@ struct WorkshopTileRing: View {
   @Environment(\.panelTheme) private var theme
   @Environment(\.panelIsVisible) private var panelIsVisible
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  /// The tile's keyboard focus: the grids are `TileGrid`s, whose focus is the tile cell.
+  @Environment(\.isFocused) private var isFocused
   @State private var isHovering = false
 
   /// The most the ring grows: bigger tiles do not need a bigger ring.
@@ -28,7 +31,7 @@ struct WorkshopTileRing: View {
         Circle().fill(.black.opacity(isHovering && interactive ? 0.62 : 0.5))
         ring
         centre
-        if state.showsCloseOnHover && isHovering {
+        if showsClose {
           Image(systemName: DownloadRowAction.cancel.systemImage)
             .font(.system(size: diameter * 0.26, weight: .bold))
             .foregroundStyle(.white)
@@ -49,6 +52,8 @@ struct WorkshopTileRing: View {
   }
 
   private var interactive: Bool { state.isEnabled }
+
+  private var showsClose: Bool { state.showsClose(isHovering: isHovering, isFocused: isFocused) }
 
   /// The track and the value arc, over the backdrop.
   @ViewBuilder
@@ -84,7 +89,8 @@ struct WorkshopTileRing: View {
   /// What sits inside: the percentage or the step word, with the speed under it, or a glyph.
   @ViewBuilder
   private var centre: some View {
-    let hidden = state.showsCloseOnHover && isHovering
+    // The same rule as the close mark, so the two never draw over each other.
+    let hidden = showsClose
     Group {
       if !state.text.isEmpty || !state.speed.isEmpty {
         VStack(spacing: 0) {
