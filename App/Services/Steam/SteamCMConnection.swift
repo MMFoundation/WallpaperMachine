@@ -70,6 +70,10 @@ actor SteamCMConnection {
     private let api: any SteamWebAPI
     private let opener: any SteamCMSocketOpening
     private let timeout: Duration
+    /// The region hint SteamCMD's runs get (`SteamCMDDownloadRegion`): a mainland cell on a Mac
+    /// in mainland China, which Steam narrows to its nearest mainland cell or, from an address
+    /// abroad, replaces with its own choice.
+    private let downloadRegion: @Sendable () -> SteamCMDDownloadRegion
     private var socket: (any SteamCMSocket)?
     private var steamID: UInt64 = 0
     private var sessionID: Int32 = 0
@@ -85,16 +89,21 @@ actor SteamCMConnection {
 
     init(api: any SteamWebAPI = URLSessionSteamWebAPI(),
          opener: any SteamCMSocketOpening = URLSessionCMSocketOpener(),
-         timeout: Duration = .seconds(30)) {
+         timeout: Duration = .seconds(30),
+         downloadRegion: @escaping @Sendable () -> SteamCMDDownloadRegion = { .steamsChoice }) {
         self.api = api
         self.opener = opener
         self.timeout = timeout
+        self.downloadRegion = downloadRegion
     }
 
     /// Connects to the first reachable connection manager and logs on with the token.
     func logOn(with token: SteamRefreshToken, machineName: String) async throws {
         disconnect()
-        let endpoints = try await connectionManagers()
+        // Given as SteamCMD gives it: the cell the connection servers are listed for and the one
+        // the logon starts from. Content servers then come from the cell Steam answers with.
+        let hint = downloadRegion().cell.flatMap { UInt32(exactly: $0) }
+        let endpoints = try await connectionManagers(cell: hint ?? cellID)
         var lastError: any Error = Failure.noServers
         for endpoint in endpoints.prefix(3) {
             do {
@@ -110,7 +119,7 @@ actor SteamCMConnection {
         sessionID = 0
         startReceiving(from: socket)
         do {
-            try await completeLogOn(with: token, machineName: machineName)
+            try await completeLogOn(with: token, machineName: machineName, cellHint: hint)
         } catch {
             // Whatever went wrong, the socket and its receive loop go with the attempt.
             disconnect()
@@ -118,9 +127,10 @@ actor SteamCMConnection {
         }
     }
 
-    private func completeLogOn(with token: SteamRefreshToken, machineName: String) async throws {
+    private func completeLogOn(with token: SteamRefreshToken, machineName: String, cellHint: UInt32?) async throws {
         var body = SteamProto.Writer()
         body.varint(1, Self.protocolVersion)
+        if let cellHint { body.varint(3, UInt64(cellHint)) }
         body.string(6, "english")
         body.varint(7, Self.osType)
         body.bool(8, true)
@@ -374,9 +384,9 @@ actor SteamCMConnection {
 
     // MARK: - Directory
 
-    private func connectionManagers() async throws -> [String] {
+    private func connectionManagers(cell: UInt32) async throws -> [String] {
         let data = try await api.json("ISteamDirectory/GetCMListForConnect/v1/",
-                                      query: [URLQueryItem(name: "cellid", value: String(cellID))])
+                                      query: [URLQueryItem(name: "cellid", value: String(cell))])
         struct Directory: Decodable {
             struct Response: Decodable { let serverlist: [Server] }
             struct Server: Decodable { let endpoint: String; let type: String }

@@ -57,7 +57,8 @@ final class SteamNativeSession {
     @ObservationIgnored private var logOnAttempt = 0
     /// Counts sign-ins and sign-outs, so a keychain read that finishes after one is dropped.
     @ObservationIgnored private var signInChanges = 0
-    @ObservationIgnored private var qrTask: Task<Void, Never>?
+    /// The QR attempt under way; tests await it to see where a cancelled one ended.
+    @ObservationIgnored private(set) var qrTask: Task<Void, Never>?
     @ObservationIgnored private var users = 0
     @ObservationIgnored private var idleDisconnect: Task<Void, Never>?
     /// Called on the main actor after a QR sign-in was approved and saved, or after sign-out.
@@ -66,7 +67,9 @@ final class SteamNativeSession {
     init(store: any SteamClientTokenStoring = KeychainSteamClientTokenStore(),
          signIn: SteamQRSignIn = SteamQRSignIn(),
          deviceName: String = "WallpaperMachine on \(Host.current().localizedName ?? "Mac")",
-         makeConnection: @escaping @MainActor () -> SteamCMConnection = { SteamCMConnection() },
+         makeConnection: @escaping @MainActor () -> SteamCMConnection = {
+             SteamCMConnection(downloadRegion: { .current })
+         },
          makeClient: @escaping @MainActor (SteamCMConnection) -> SteamContentClient = { SteamContentClient(connection: $0) }) {
         self.store = store
         self.signIn = signIn
@@ -79,7 +82,7 @@ final class SteamNativeSession {
     func restore() async {
         let store = store
         let changes = signInChanges
-        let saved = await Task.detached(priority: .utility) { store.load() }.value
+        let saved = await Task.detached(priority: .utility) { await store.load() }.value
         // A sign-out (or a new sign-in) made while the keychain answered is the newer word.
         guard changes == signInChanges, token == nil, let saved else { return }
         if saved.isExpired() {

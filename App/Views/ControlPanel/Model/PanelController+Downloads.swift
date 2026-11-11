@@ -48,6 +48,10 @@ extension PanelController {
   /// The QR-code sign-in. Signed in, downloads skip SteamCMD and its password prompts.
   var steamQRSession: SteamNativeSession? { workshop.nativeSession }
 
+  /// Whether a Steam download can be tried again right now: SteamCMD is installed, or the QR
+  /// sign-in downloads without it.
+  var steamDownloadsReady: Bool { steamSetup.isReady || workshop.nativeSession?.isSignedIn == true }
+
   /// The QR sign-in to offer for the dialog's request: never for the sign-in that SteamCMD runs
   /// (the first-run guide's), which a QR sign-in would not complete.
   func steamQRSession(for target: String?) -> SteamNativeSession? {
@@ -318,7 +322,7 @@ extension PanelController {
 
   /// The downloads **Retry failed** would try again.
   var retryableDownloads: [DownloadRow] {
-    downloadQueue.unresolved.filter { $0.canRetry && ($0.source == .pixiv || steamSetup.isReady) }
+    downloadQueue.unresolved.filter { $0.canRetry && ($0.source == .pixiv || steamDownloadsReady) }
   }
 
   /// Answers the password or Steam Guard prompt of a running job.

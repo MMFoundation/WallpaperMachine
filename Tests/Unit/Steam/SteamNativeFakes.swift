@@ -9,6 +9,10 @@ final class FakeSteamWebAPI: SteamWebAPI, @unchecked Sendable {
     private var json: [String: Data] = [:]
     private var recorded: [(method: String, request: Data)] = []
     private var held: Set<String> = []
+    private var jsonRequests: [(path: String, query: [URLQueryItem])] = []
+
+    /// The JSON GETs made, with their queries, in order.
+    var jsonCalls: [(path: String, query: [URLQueryItem])] { lock.withLock { jsonRequests } }
     private var parked: [String: CheckedContinuation<Void, Never>] = [:]
 
     /// Calls of `method` wait, once they arrive, until `release(_:)`.
@@ -61,7 +65,10 @@ final class FakeSteamWebAPI: SteamWebAPI, @unchecked Sendable {
     }
 
     func json(_ path: String, query: [URLQueryItem]) async throws -> Data {
-        guard let data = lock.withLock({ json[path] }) else {
+        guard let data = lock.withLock({ () -> Data? in
+            jsonRequests.append((path, query))
+            return json[path]
+        }) else {
             throw SteamWebAPIError(method: path, status: 404, eresult: nil)
         }
         return data

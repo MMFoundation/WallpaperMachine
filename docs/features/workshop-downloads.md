@@ -709,7 +709,10 @@ Singapore proxy exit got 35 and Valve's Singapore caches), so a Mac set to a Chi
 time zone abroad, or one whose proxy carries Steam's traffic, downloads exactly as
 before. Elsewhere the config is not touched. The implementation is
 `App/Services/Steam/SteamCMDDownloadRegion.swift`, called from
-`WorkshopDownloader.run`.
+`WorkshopDownloader.run`. Downloads on the [QR sign-in](#signing-in-with-a-qr-code)
+get the same hint without a config: `SteamCMConnection` lists connection servers for
+the mainland cell and puts it in the logon (`cell_id`), and the content servers then
+come from the cell Steam answers with, narrowed or, from abroad, replaced.
 
 Where a site is reachable only through a proxy, a request that goes direct usually
 fails before the site answers: the network resets or drops the TLS handshake, which
@@ -1089,7 +1092,9 @@ elsewhere), item not offered (its details refused), content servers failed (a
 manifest code, the product info or another key refusal, or the servers themselves)
 and content did not match, with the technical detail in the log and the failure log
 (`NativeWorkshopDownloader.message(for:)`). Native jobs keep no partial download: a
-paused or interrupted one fetches the item again when it resumes.
+paused or interrupted one fetches the item again when it resumes. **Try again**,
+**Retry failed** and a tile's retry ring count the QR sign-in as ready, as they count
+an installed SteamCMD (`PanelController.steamDownloadsReady`).
 
 ## Prompt and retry handling
 

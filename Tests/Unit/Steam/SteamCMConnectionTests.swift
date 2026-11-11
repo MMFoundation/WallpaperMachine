@@ -31,6 +31,40 @@ final class SteamCMConnectionTests: XCTestCase {
         await connection.disconnect()
     }
 
+    func testAMainlandRegionHintsTheLogOnAndTheServerListAsSteamCMDDoes() async throws {
+        let token = SteamTestToken.token()
+        let socket = ScriptedCMSocket { packet in
+            packet.emsg == SteamCMConnection.EMsg.clientLogon
+                ? [ScriptedCMSocket.logOnReply(steamID: token.steamID, cellID: 202)] : []
+        }
+        let directory = api()
+        let connection = SteamCMConnection(
+            api: directory, opener: socket, timeout: .seconds(5),
+            downloadRegion: { SteamCMDDownloadRegion(cell: SteamCMDDownloadRegion.mainlandChinaCell) })
+        try await connection.logOn(with: token, machineName: "Test Mac")
+
+        let logon = try XCTUnwrap(socket.sent.first { $0.emsg == SteamCMConnection.EMsg.clientLogon })
+        XCTAssertEqual(try SteamProto.Message(logon.body).varint(3), UInt64(SteamCMDDownloadRegion.mainlandChinaCell))
+        XCTAssertEqual(directory.jsonCalls.first?.query.first { $0.name == "cellid" }?.value,
+                       String(SteamCMDDownloadRegion.mainlandChinaCell))
+        let cellID = await connection.cellID
+        XCTAssertEqual(cellID, 202, "content servers come from the cell Steam narrowed the hint to")
+        await connection.disconnect()
+    }
+
+    func testSteamsOwnRegionSendsNoHint() async throws {
+        let token = SteamTestToken.token()
+        let socket = ScriptedCMSocket { packet in
+            packet.emsg == SteamCMConnection.EMsg.clientLogon ? [ScriptedCMSocket.logOnReply(steamID: token.steamID)] : []
+        }
+        let connection = SteamCMConnection(api: api(), opener: socket, timeout: .seconds(5),
+                                           downloadRegion: { .steamsChoice })
+        try await connection.logOn(with: token, machineName: "Test Mac")
+        let logon = try XCTUnwrap(socket.sent.first { $0.emsg == SteamCMConnection.EMsg.clientLogon })
+        XCTAssertNil(try SteamProto.Message(logon.body).varint(3))
+        await connection.disconnect()
+    }
+
     func testARefusedLogOnReportsSteamsReason() async throws {
         let token = SteamTestToken.token()
         let socket = ScriptedCMSocket { _ in [ScriptedCMSocket.logOnReply(eresult: 5, steamID: token.steamID)] }

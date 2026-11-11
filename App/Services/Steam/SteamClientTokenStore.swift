@@ -2,8 +2,10 @@ import Foundation
 
 /// Keeps the QR sign-in between launches. Injected so tests never touch the keychain.
 protocol SteamClientTokenStoring: Sendable {
-    /// The saved sign-in; nil when there is none or it cannot be read.
-    func load() -> SteamRefreshToken?
+    /// The saved sign-in; nil when there is none or it cannot be read. Asynchronous so a test
+    /// can hold the answer by suspending, never by blocking a thread; the keychain's own read
+    /// is synchronous and runs off the main actor.
+    func load() async -> SteamRefreshToken?
     func save(_ token: SteamRefreshToken) throws
     func remove()
 }

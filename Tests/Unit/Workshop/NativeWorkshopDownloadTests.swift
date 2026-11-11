@@ -138,11 +138,13 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     let session = steam.session(store: store)
 
     session.beginQRSignIn()
+    let attempt = try XCTUnwrap(session.qrTask)
+    defer { steam.api.release("PollAuthSessionStatus") }
     try await waitUntil { steam.api.isWaiting("PollAuthSessionStatus") }
     session.cancelQRSignIn()
     steam.api.release("PollAuthSessionStatus")
-    // The approval is on its way back; give it every chance to land.
-    try await Task.sleep(for: .milliseconds(300))
+    // The attempt has ended once the approval came back to it.
+    await attempt.value
 
     XCTAssertFalse(session.isSignedIn)
     XCTAssertNil(store.token, "a code closed on screen never signs in")
@@ -155,9 +157,11 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     let session = steam.session(store: store)
 
     let restoring = Task { await session.restore() }
+    // Opened however the test ends, so a failed wait never leaves the read suspended.
+    defer { store.gate.open() }
     try await waitUntil { store.isReading }
     session.signOut()
-    store.open()
+    store.gate.open()
     await restoring.value
 
     XCTAssertFalse(session.isSignedIn, "the read began before the sign-out, which is the newer word")
@@ -169,9 +173,11 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     let session = steam.session(store: store)
 
     let restoring = Task { await session.restore() }
+    // Opened however the test ends, so a failed wait never leaves the read suspended.
+    defer { store.gate.open() }
     try await waitUntil { store.isReading }
     session.beginQRSignIn()
-    store.open()
+    store.gate.open()
     await restoring.value
 
     XCTAssertFalse(session.isSignedIn, "the code on screen, not the old account, decides the sign-in")

@@ -14,26 +14,20 @@ final class MemorySteamTokenStore: SteamClientTokenStoring, @unchecked Sendable 
     func remove() { lock.withLock { saved = nil } }
 }
 
-/// A keychain whose read waits until `open()`: it hands back what was saved when the read
-/// began, as a read that raced a sign-out would.
+/// A keychain whose read waits, suspended, until the test opens `gate`: it hands back what was
+/// saved when the read began, as a read that raced a sign-out would.
 final class GatedSteamTokenStore: SteamClientTokenStoring, @unchecked Sendable {
+    let gate = PixivGate()
     private let lock = NSLock()
-    private let gate = DispatchSemaphore(value: 0)
     private var saved: SteamRefreshToken?
-    private var reading = false
 
     init(_ token: SteamRefreshToken?) { saved = token }
 
-    var isReading: Bool { lock.withLock { reading } }
+    var isReading: Bool { gate.waiting > 0 }
 
-    func open() { gate.signal() }
-
-    func load() -> SteamRefreshToken? {
-        let snapshot = lock.withLock { () -> SteamRefreshToken? in
-            reading = true
-            return saved
-        }
-        gate.wait()
+    func load() async -> SteamRefreshToken? {
+        let snapshot = lock.withLock { saved }
+        try? await gate.pass()
         return snapshot
     }
 
