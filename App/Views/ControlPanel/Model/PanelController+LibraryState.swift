@@ -191,6 +191,20 @@ extension PanelController {
     return targetDisplays.first { $0.id == id }
   }
 
+  /// The target display's name as the Apply and Reapply buttons' help says it
+  /// (`ApplyOffer.targetName`), or nil when there is nothing to tell apart: fewer than two displays
+  /// can show a wallpaper of their own, or the target cannot. It is the name the toolbar's button
+  /// shows, without the renderer's `(id - Role)` group, and the rule Quick Settings' Wallpaper per
+  /// Desktop tile follows. Read once per inspector, never per tile.
+  var applyTargetName: String? {
+    let displays = targetDisplays
+    let id = targetDisplayID
+    guard displays.filter(\.isSelectable).count > 1,
+      let target = displays.first(where: { $0.id == id }), target.isSelectable
+    else { return nil }
+    return target.shortLabel(among: displays)
+  }
+
   /// The Now Playing card.
   var nowPlaying: NowPlayingState {
     let displays = targetDisplays

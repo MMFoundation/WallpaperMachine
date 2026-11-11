@@ -167,7 +167,7 @@ private struct PixivInspectorDetail: View {
   private var applyButton: some View {
     let offer = ApplyOffer(
       wallpaperID: selection.libraryID, target: controller.mediaApplyTarget,
-      isBusy: { controller.isBusy($0) })
+      targetName: controller.applyTargetName, isBusy: { controller.isBusy($0) })
     return InspectorApplyButton(offer: offer, identifier: "pixiv-apply")
   }
 

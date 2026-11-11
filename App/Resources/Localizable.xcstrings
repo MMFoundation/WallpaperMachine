@@ -4512,8 +4512,14 @@
     "Reapply wallpaper" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reaplicar papel de parede"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 다시 적용"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙を再適用"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "重新应用壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "重新套用桌布"}}}
     },
+    "Reapply wallpaper on %@" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reaplicar papel de parede em %@"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "%@에 배경화면 다시 적용"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%@で壁紙を再適用"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在“%@”上重新应用壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在「%@」上重新套用桌布"}}}
+    },
     "Apply wallpaper" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Aplicar papel de parede"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 적용"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙を適用"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "应用壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "套用桌布"}}}
+    },
+    "Apply wallpaper to %@" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Aplicar papel de parede em %@"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "%@에 배경화면 적용"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%@に壁紙を適用"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "将壁纸应用到“%@”"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "將桌布套用到「%@」"}}}
     },
     "Apply to all displays" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Aplicar a todos os monitores"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "모든 디스플레이에 적용"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "すべてのディスプレイに適用"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "应用到所有显示器"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "套用到所有顯示器"}}}

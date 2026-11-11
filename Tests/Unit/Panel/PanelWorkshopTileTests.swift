@@ -133,6 +133,27 @@ final class PanelWorkshopTileTests: MediaPanelTestCase {
     }
   }
 
+  /// With two displays that can take a wallpaper, the Workshop inspector's Apply says in its help
+  /// which one it applies to, as the Installed inspector's does; with one, it says only the verb.
+  func testAnInstalledItemsApplyNamesTheTargetOnlyWhenAnotherDisplayCouldTakeIt() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      let wanted = item()
+      panel.configureDisplays()
+      panel.store.librarySnapshot.wallpapers = [library("222")]
+      let named = controller.workshopApplyOffer(for: wanted)
+      let name = try XCTUnwrap(named.targetName)
+      XCTAssertEqual(name, controller.applyTargetName)
+      XCTAssertTrue(named.help.contains(name))
+      XCTAssertNotEqual(named.help, named.title)
+
+      panel.store.settingsSnapshot.displays[1].mode = .mirror
+      let unnamed = controller.workshopApplyOffer(for: wanted)
+      XCTAssertNil(unnamed.targetName)
+      XCTAssertEqual(unnamed.help, unnamed.title)
+    }
+  }
+
   func testADoubleClickOnADownloadUnderWayOnlySelectsIt() async throws {
     try await withPanel { panel in
       let controller = panel.controller

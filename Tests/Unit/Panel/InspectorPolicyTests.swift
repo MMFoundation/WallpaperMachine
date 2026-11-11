@@ -78,6 +78,25 @@ final class InspectorPolicyTests: InspectorTestCase {
     XCTAssertEqual(apply.help, apply.title, "with no display to name, the help is the label")
   }
 
+  /// With a display to name, the help says where the wallpaper goes; the label, which VoiceOver's
+  /// action and the UI tests read, stays the bare verb.
+  func testTheHelpNamesTheTargetDisplayOnlyWhenTheOfferHasOne() {
+    func offer(shown: String?, target: String?) -> ApplyOffer {
+      ApplyOffer(wallpaperID: "a", shownID: shown, canApply: true, targetName: target, isBusy: { _ in false })
+    }
+    let unnamed = offer(shown: nil, target: nil)
+    let named = offer(shown: nil, target: "Studio")
+    XCTAssertEqual(unnamed.help, unnamed.title)
+    XCTAssertTrue(named.help.contains("Studio"))
+    XCTAssertEqual(named.title, unnamed.title, "the label does not grow with the name")
+    XCTAssertEqual(named.systemImage, unnamed.systemImage)
+
+    let reapply = offer(shown: "a", target: "Studio")
+    XCTAssertTrue(reapply.help.contains("Studio"))
+    XCTAssertNotEqual(reapply.help, named.help, "reapplying and applying say so in the help too")
+    XCTAssertEqual(reapply.title, offer(shown: "a", target: nil).title)
+  }
+
   /// Port of `ControlPanelDisplayLayoutTests.testInspectorAppliesToEveryDisplay...` (offered with two
   /// displays that can take a wallpaper, not with one; nothing to do once all show it).
   func testApplyToAllDisplaysNeedsTwoSharedDisplaysAndAWallpaperThatCanRun() {

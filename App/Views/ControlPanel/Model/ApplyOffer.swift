@@ -22,27 +22,35 @@ struct ApplyOffer: Equatable {
   let reapplies: Bool
   /// The wallpaper and the target display can take it and its action is not already pending.
   let isEnabled: Bool
+  /// The target display's name, which the help says, or nil when there is only one display it
+  /// could be (`PanelController.applyTargetName`). The label stays the bare verb, as VoiceOver's
+  /// action and the toolbar's picker already say where.
+  let targetName: String?
 
   /// - Parameters:
   ///   - shownID: what the target display shows now.
   ///   - canApply: the wallpaper can run and the target display can take it.
+  ///   - targetName: the target display's name for the help (`PanelController.applyTargetName`).
   ///   - isBusy: whether an action key is pending (`PanelController.isBusy`).
   init(
-    wallpaperID: String, shownID: String?, canApply: Bool, isBusy: (String) -> Bool
+    wallpaperID: String, shownID: String?, canApply: Bool, targetName: String? = nil,
+    isBusy: (String) -> Bool
   ) {
     self.wallpaperID = wallpaperID
     reapplies = shownID == wallpaperID
     isEnabled = canApply && !isBusy(Self.key(wallpaperID, reapplies: reapplies))
+    self.targetName = targetName
   }
 
   /// For the Workshop and pixiv inspectors: the target must be enabled and show a wallpaper of its
   /// own (not a mirror, not disabled); `canRun` is whether the wallpaper's type can play here.
   init(
-    wallpaperID: String, target: MediaApplyTarget, canRun: Bool = true, isBusy: (String) -> Bool
+    wallpaperID: String, target: MediaApplyTarget, canRun: Bool = true, targetName: String? = nil,
+    isBusy: (String) -> Bool
   ) {
     self.init(
       wallpaperID: wallpaperID, shownID: target.wallpaperID,
-      canApply: canRun && target.canShowWallpaper, isBusy: isBusy)
+      canApply: canRun && target.canShowWallpaper, targetName: targetName, isBusy: isBusy)
   }
 
   /// The key the button's action runs under.
@@ -54,8 +62,11 @@ struct ApplyOffer: Equatable {
   /// The button's label and accessibility label: **Apply wallpaper** or **Reapply wallpaper**.
   @MainActor var title: String { reapplies ? L("Reapply wallpaper") : L("Apply wallpaper") }
 
-  /// The button's help.
-  @MainActor var help: String { title }
+  /// The button's help: the label, naming the target display when there is more than one.
+  @MainActor var help: String {
+    guard let name = targetName else { return title }
+    return reapplies ? L("Reapply wallpaper on \(name)") : L("Apply wallpaper to \(name)")
+  }
 
   private static func key(_ wallpaperID: String, reapplies: Bool) -> String {
     PanelActionCoordinator.key(reapplies ? "reapplyWallpaper" : "activate", id: wallpaperID)

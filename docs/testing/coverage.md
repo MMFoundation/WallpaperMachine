@@ -1360,7 +1360,8 @@ never to `.shared`.
   window means no deletion, one question for a batch, partial failures named),
   `PanelLibraryRowsTests` (rows joined with measured facts, covers only once stamped, a rescan that
   replaced no preview leaves every row alone, 10,000 rows built once whatever else changes),
-  `PanelLibraryStateTests` (Now Playing, the target menu, display names, history, library counts,
+  `PanelLibraryStateTests` (Now Playing, the target menu, display names, the target the Apply
+  help names only with two or more displays that can take a wallpaper, history, library counts,
   the update dot, the issue report's facts, the changed properties it lists without typed text
   or paths and capped, and the files a check found missing), `PanelCollectionActionsTests`,
   `LibrarySortTests` (Last used with never-used wallpapers last either way),
@@ -1408,7 +1409,8 @@ never to `.shared`.
   independent drafts, held drag steps).
 - Steam Workshop and downloads: `PanelWorkshopActionsTests`, `PanelWorkshopSubscriptionsTests`,
   `PanelWorkshopTileTests` (an installed item's Apply offered where its double click applies, and
-  Reapply where the target shows it), `PanelWorkshopUpdateTests`, `PanelDownloadActionsTests` (Download and
+  Reapply where the target shows it, its help naming the target only with two such displays),
+  `PanelWorkshopUpdateTests`, `PanelDownloadActionsTests` (Download and
   apply and the display it targets, retained requests, the account stage, secrets reaching only
   the job that asks, pause, cancel, retry, clearing, logging out, locating a copy, reinstalling),
   `PanelDownloadQueueTests` (the toolbar button's ring, speed, percent and time left, pixiv saves

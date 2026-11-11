@@ -126,7 +126,7 @@ struct InspectorActionRow: View {
     let offer = ApplyOffer(
       wallpaperID: row.id, shownID: target?.wallpaperID,
       canApply: InspectorPolicy.canActivate(kind: row.kind, target: target),
-      isBusy: { controller.isBusy($0) })
+      targetName: controller.applyTargetName, isBusy: { controller.isBusy($0) })
     let isFavorite = controller.favoriteIDs.contains(row.id)
     let favoriteKey = PanelActionCoordinator.key("favorite", id: row.id)
     HStack(spacing: 8) {

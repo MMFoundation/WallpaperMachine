@@ -44,13 +44,14 @@ extension PanelController {
   /// type the library can name and that runs on a Mac, on a target display that shows a wallpaper
   /// of its own (not a mirror, not disabled), which is where a double click on its tile applies it
   /// too (`workshopDoubleClick(for:)`). An item that is not installed gets an offer that is never
-  /// enabled.
+  /// enabled. With two or more displays, its help names the target (`applyTargetName`).
   func workshopApplyOffer(for item: WorkshopItem) -> ApplyOffer {
     // An Application, or a type the library cannot name, cannot be applied.
     let kind = libraryRow(id: item.id)?.kind ?? .unknown
     return ApplyOffer(
       wallpaperID: item.id, target: mediaApplyTarget,
-      canRun: item.canRunOnMac && kind != .unknown, isBusy: { isBusy($0) })
+      canRun: item.canRunOnMac && kind != .unknown, targetName: applyTargetName,
+      isBusy: { isBusy($0) })
   }
 
   /// Whether **Reinstall from Workshop…** is offered for an installed item: a Workshop wallpaper

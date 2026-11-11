@@ -200,6 +200,36 @@ final class PanelLibraryStateTests: PanelTestCase {
     }
   }
 
+  /// The Apply buttons' help names the target only while another display could take the wallpaper
+  /// instead, by the name the toolbar shows; with one such display there is nothing to tell apart.
+  func testApplyNamesTheTargetOnlyWhileAnotherDisplayCouldTakeTheWallpaper() async throws {
+    let names = DisplayTitleResolver(names: { ["primary": "Built-in Retina Display"] })
+    try await withPanel(displayTitles: names) { panel in
+      panel.configureDisplays()
+      panel.store.settingsSnapshot.displays[0].title = "Vendor 1552 - Model 41055 (primary - Primary)"
+      XCTAssertEqual(
+        panel.controller.applyTargetName, "Built-in Retina Display", "the renderer's suffix is left off")
+
+      panel.store.settingsSnapshot.displays[1].mode = .mirror
+      XCTAssertNil(panel.controller.applyTargetName, "the other display mirrors: no choice to name")
+      panel.store.settingsSnapshot.displays[1].mode = .standalone
+      panel.store.settingsSnapshot.displays[1].enabled = false
+      XCTAssertNil(panel.controller.applyTargetName, "the other display is disabled")
+      panel.store.settingsSnapshot.displays[1].enabled = true
+      XCTAssertNotNil(panel.controller.applyTargetName)
+
+      panel.store.settingsSnapshot.displays.append(
+        BridgeDisplaySettingsRow(
+          displayId: "third", title: "third", enabled: true, mode: .standalone, mirrorTargets: [],
+          selectedMirrorTarget: nil, scalingMode: .fill, scalingFactor: 1, targetFps: 30, maxFps: 60,
+          muted: false, volume: 1))
+      panel.store.settingsSnapshot.displays[0].mode = .mirror
+      XCTAssertNil(panel.controller.applyTargetName, "a mirror target takes no wallpaper of its own")
+      panel.navigation.targetDisplayID = "gone"
+      XCTAssertNil(panel.controller.applyTargetName, "a target that left the list is not named")
+    }
+  }
+
   func testDisplaysAreNamedByTheSystemWithTheRenderersSuffixKeptAndAnUnnamedOneKeepsItsLabel() async throws {
     let names = DisplayTitleResolver(names: { ["primary": "Built-in Retina Display"] })
     try await withPanel(displayTitles: names) { panel in
