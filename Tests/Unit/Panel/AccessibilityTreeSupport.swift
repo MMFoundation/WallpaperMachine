@@ -69,6 +69,24 @@ struct AccessibilityElement {
     return found
   }
 
+  /// The system's own progress indicators drawn under `view`, found as AppKit views or as
+  /// accessibility elements, each named by its class or role. They spin on in a hidden window and
+  /// with Reduce Motion; the panel's `ProgressRing` stops then and is hidden from VoiceOver, so it
+  /// is never one of them.
+  static func systemProgressIndicators(in view: NSView) -> [String] {
+    var found: [String] = []
+    func walk(_ view: NSView) {
+      if view is NSProgressIndicator, !view.isHidden { found.append(String(describing: type(of: view))) }
+      view.subviews.forEach(walk)
+    }
+    walk(view)
+    let roles: Set<String> = [
+      NSAccessibility.Role.progressIndicator.rawValue, NSAccessibility.Role.busyIndicator.rawValue,
+    ]
+    found += everything(in: view).map(\.role).filter(roles.contains)
+    return found
+  }
+
   private func attribute(_ key: String) -> Any? {
     guard object.responds(to: NSSelectorFromString(key)) else { return nil }
     return object.value(forKey: key)

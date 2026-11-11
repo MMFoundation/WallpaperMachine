@@ -325,7 +325,7 @@ private struct PixivEmptyView: View {
         "Loading pixiv", systemImage: "paintpalette",
         description: "Fetching illustrations from pixiv."
       ) {
-        ProgressView().controlSize(.small)
+        LoadingRing()
       }
     case .error(let message):
       PanelEmptyState(

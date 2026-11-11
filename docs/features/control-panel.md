@@ -976,7 +976,9 @@ A link to an id shorter than six digits is an ordinary search, since Discover's 
 looks up no bare id that short.
 A Workshop response with no restrictions offers Refresh instead of an
 ineffective Clear. First loading, Workshop failure/Retry and an empty local library
-keep their own states; a refresh can leave existing results visible.
+keep their own states; a refresh can leave existing results visible. Installed, Steam
+Workshop and pixiv show their first loading with the same small progress ring, which
+stops while the window is hidden and with Reduce Motion.
 
 ### Local collections
 

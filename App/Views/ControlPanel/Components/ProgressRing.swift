@@ -45,3 +45,12 @@ struct ProgressRing: View {
     (date.timeIntervalSinceReferenceDate * 360).truncatingRemainder(dividingBy: 360) - 90
   }
 }
+
+/// The small ring under a page's words while the page is first read or fetched. The Library, Steam
+/// Workshop and pixiv loading states all show this one, so they look alike and all stop in a hidden
+/// window and with Reduce Motion, which the system spinner does not.
+struct LoadingRing: View {
+  var body: some View {
+    ProgressRing(value: nil, lineWidth: 1.75).frame(width: 13, height: 13)
+  }
+}

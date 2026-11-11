@@ -164,7 +164,7 @@ struct WorkshopEmptyStateView: View {
         verbatim: L("Loading Workshop"), systemImage: "storefront",
         description: L("Fetching wallpapers from Steam.")
       ) {
-        ProgressView().controlSize(.small)
+        LoadingRing()
       }
     case .unavailable(let message):
       PanelEmptyState(

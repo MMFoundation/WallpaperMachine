@@ -291,6 +291,22 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
     }
   }
 
+  /// The first fetch shows the same ring as the Library's first read, which stops in a hidden
+  /// window and with Reduce Motion, never the system spinner, which keeps turning.
+  func testTheLoadingPageShowsThePanelsRingAndNoSystemSpinner() async throws {
+    let gate = PixivGate()
+    let hosted = try host(listing: .held(gate))
+    hosted.controller.launch { try await hosted.controller.navigate(.pixiv) }
+    try await hosted.layout(at: sizes[0])
+    XCTAssertEqual(
+      PixivEmptyState.make(hosted.controller.pixivBrowse), .loading, "pixiv has not answered yet")
+    XCTAssertNotNil(
+      AccessibilityElement(object: hosted.hosting.view).first(identifier: "pixiv-page"),
+      "the page is drawn, so an empty tree cannot pass")
+    XCTAssertEqual(AccessibilityElement.systemProgressIndicators(in: hosted.hosting.view), [])
+    gate.open()
+  }
+
   func testAPageListThatCannotBeReadIsSaidWithTryAgainForAWorkOfOnePageToo() async throws {
     // 301 has one page, and pixiv shows its page list to members only.
     let hosted = try host(membersOnly: [301])

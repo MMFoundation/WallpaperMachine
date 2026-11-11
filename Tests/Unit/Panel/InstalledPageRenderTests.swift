@@ -272,6 +272,9 @@ final class InstalledPageRenderTests: PanelTestCase {
       element("installed-empty", in: hosted.hosting.view), "the grid says the library is being read")
     XCTAssertNil(
       element("installed-summary", in: hosted.hosting.view), "the bar under the grid does not say it again")
+    XCTAssertEqual(
+      AccessibilityElement.systemProgressIndicators(in: hosted.hosting.view), [],
+      "the grid's ring stops in a hidden window and with Reduce Motion; a system spinner would not")
     assertFits(hosted, Self.sizes[0], "loading")
     hosted.close()
   }

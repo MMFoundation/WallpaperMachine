@@ -1382,7 +1382,7 @@ never to `.shared`.
   import popover and pill) and
   `InstalledPageRenderTests` (the page, footer, empty states, an empty collection among them, and
   popovers in every language and appearance at the narrowest column, the first read of the
-  library said by the grid with no footer, the scroll offset restored).
+  library said by the grid with no footer and no system spinner, the scroll offset restored).
 - Inspector: `InspectorPolicyTests`, `InspectorWordingTests` (among its sentences, what draws
   the wallpaper said in words, with the renderer's id kept as it is on the detail line; a reported
   problem leads the line and is never said to play; nothing named before the runtime reports it,
@@ -1432,7 +1432,7 @@ never to `.shared`.
   `WorkshopBrowserRenderTests` (the page, inspector, empty states, dialog stages and Downloads list
   in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label, an
   installed item's Apply reached by VoiceOver with Move to Trash below it, the Apply and Reapply
-  buttons keeping their whole label in the narrowest column, a download that resumes or pauses with the Downloads list open redrawn in place), and
+  buttons keeping their whole label in the narrowest column, a download that resumes or pauses with the Downloads list open redrawn in place, the loading grid's ring with no system spinner), and
   `WorkshopSearchTranslationTests` (a search typed in Chinese sent in English while the field keeps
   it, **Search “…” instead** kept for a sort and by a reopened panel and the text translated
   again once another was searched, a click on a replaced line ignored, the page and the
@@ -1528,7 +1528,8 @@ including R-18 and R-18G, request pacing, the session cookie reaching
 `https://www.pixiv.net` only, sign-in, log out, a keychain refusal and expiry
 against an in-memory store, resumable thumbnail and download transport, the
 download queue (concurrency, cancel, retry, shutdown) and packaging (sniffed
-formats, scaled display copies, staging reclaim). None of it reaches pixiv: its
+formats, scaled display copies, staging reclaim), and the loading page's ring with no
+system spinner. None of it reaches pixiv: its
 signed-in answers and the real sign-in page are not covered
 ([pixiv](../features/pixiv.md#verification)).
 

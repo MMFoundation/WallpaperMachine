@@ -207,6 +207,33 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     host.close()
   }
 
+  /// A first fetch shows the same ring as the Library's first read, which stops in a hidden window
+  /// and with Reduce Motion, never the system spinner, which keeps turning. The empty state is
+  /// hosted alone because Steam's answer here never keeps the page loading long enough to look.
+  func testTheLoadingGridShowsThePanelsRingAndNoSystemSpinner() async throws {
+    let controller = try makeDiscoverPanel().controller
+    let view = NSHostingView(
+      rootView: AnyView(
+        WorkshopEmptyStateView(state: .loading, filtersAreOpen: false)
+          .environment(controller)
+          .environment(\.panelIsVisible, true)
+          .panelTheme(theme: controller.theme, locale: PanelLocale.shared)))
+    view.sceneBridgingOptions = []
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 560, height: 420), styleMask: [.titled],
+      backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = view
+    view.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .seconds(0.3))
+    view.layoutSubtreeIfNeeded()
+    XCTAssertTrue(
+      AccessibilityElement.everything(in: view).contains { $0.text == L("Loading Workshop") },
+      "the loading state is drawn, so an empty tree cannot pass")
+    XCTAssertEqual(AccessibilityElement.systemProgressIndicators(in: view), [])
+    window.close()
+  }
+
   func testTheToolbarGainsTheDownloadsButtonOnceARequestIsWaiting() async throws {
     let panel = try await makePanel()
     let controller = panel.controller
