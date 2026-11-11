@@ -144,7 +144,7 @@ struct InstalledTile: View {
     } else if controller.queuedApplyIDs.contains(row.id) {
       ZStack {
         Color.black.opacity(0.4)
-        Image(systemName: "play.fill")
+        Image(systemName: ApplyOffer.symbol)
           .font(.system(size: 12, weight: .semibold))
           .foregroundStyle(.white)
           .frame(width: 30, height: 30)

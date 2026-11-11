@@ -164,7 +164,9 @@ struct WorkshopItemActions: View {
         model.openCollection(item)
       }
     case .resume:
-      primary(systemImage: "play.fill") { Text("Resume download") } action: {
+      primary(systemImage: DownloadRowAction.resume.systemImage) {
+        Text("Resume download")
+      } action: {
         downloads.perform(.resume, forItem: item.id)
       }
     case .continueSetup:
@@ -195,7 +197,7 @@ struct WorkshopItemActions: View {
         downloads.requestDownload(item)
       }
     case .downloadAndApply:
-      secondary(systemImage: "play.fill") { Text("Download and apply") } action: {
+      secondary(systemImage: ApplyOffer.symbol) { Text("Download and apply") } action: {
         downloads.requestDownload(item, apply: true)
       }
     }

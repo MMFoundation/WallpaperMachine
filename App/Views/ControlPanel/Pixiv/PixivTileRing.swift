@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The ring a pixiv tile wears over its picture while a page of the work is on its way: progress
-/// while it transfers, a click to cancel, a play mark when it is paused, a retry mark after a
+/// while it transfers, a click to cancel, a resume mark when it is paused, a retry mark after a
 /// failure. The state and the words come from `TileDownloadState`; this only draws them.
 ///
 /// The disc is dark whatever the appearance, since it sits over artwork. Only a ring that has no
@@ -57,7 +57,8 @@ struct PixivTileRing: View {
   @ViewBuilder
   private var center: some View {
     if showsClose {
-      Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+      Image(systemName: DownloadRowAction.cancel.systemImage)
+        .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
     } else if let glyph = state.glyph {
       Image(systemName: glyph.systemImage)
         .font(.system(size: 14, weight: .semibold))

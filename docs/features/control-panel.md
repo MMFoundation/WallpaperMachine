@@ -436,9 +436,13 @@ on the ticked selection, whose tools are in the bar under the grid. With the key
 double click does.
 
 - **Apply wallpaper** activates the selected wallpaper on the current target
-  display; for the wallpaper already active there it reads **Reapply wallpaper**.
+  display; for the wallpaper already active there it reads **Reapply wallpaper**, with a
+  circular arrow. The Installed, Steam Workshop and pixiv inspectors draw the same button.
+  Applying has a symbol of its own, a display with a down arrow, also on **Download and
+  apply** and a tile's **Apply wallpaper** item; the play symbol only ever starts a rotation
+  (**Play**) or resumes playback.
   An Installed tile shows an **Applying** spinner while its apply runs and a quiet
-  play mark while it waits behind another apply. A scene Native Metal refused with this
+  Apply mark while it waits behind another apply. A scene Native Metal refused with this
   app version and these files, when it last ran or its
   [Compatibility check](wallpaper-properties.md#compatibility-check) read it, asks first
   (**Native Metal can’t draw this scene**, with the renderer's reason): applied, it would show

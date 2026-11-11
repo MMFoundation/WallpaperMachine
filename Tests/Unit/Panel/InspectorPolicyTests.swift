@@ -65,6 +65,19 @@ final class InspectorPolicyTests: InspectorTestCase {
     XCTAssertFalse(reapplies(nil))
   }
 
+  /// The offer carries the button's words and symbol, so every inspector draws Apply and Reapply
+  /// alike: each its own label and symbol, and Apply never the Play symbol a rotation starts with.
+  func testApplyAndReapplyCarryTheirOwnLabelAndSymbolAndApplyIsNotPlay() {
+    let apply = ApplyOffer(wallpaperID: "a", shownID: "b", canApply: true, isBusy: { _ in false })
+    let reapply = ApplyOffer(wallpaperID: "a", shownID: "a", canApply: true, isBusy: { _ in false })
+    XCTAssertEqual(apply.systemImage, ApplyOffer.symbol)
+    XCTAssertEqual(reapply.systemImage, ApplyOffer.reapplySymbol)
+    XCTAssertNotEqual(apply.title, reapply.title)
+    XCTAssertFalse(apply.title.isEmpty || reapply.title.isEmpty)
+    XCTAssertNotEqual(apply.systemImage, "play.fill", "Play starts a rotation; applying is not playing")
+    XCTAssertEqual(apply.help, apply.title, "with no display to name, the help is the label")
+  }
+
   /// Port of `ControlPanelDisplayLayoutTests.testInspectorAppliesToEveryDisplay...` (offered with two
   /// displays that can take a wallpaper, not with one; nothing to do once all show it).
   func testApplyToAllDisplaysNeedsTwoSharedDisplaysAndAWallpaperThatCanRun() {

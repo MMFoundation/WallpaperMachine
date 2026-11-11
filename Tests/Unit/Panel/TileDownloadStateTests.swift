@@ -124,8 +124,22 @@ final class TileDownloadStateTests: MediaPanelTestCase {
     let restored = DownloadRequestRow(id: "a", title: "A", stage: .setup, isPaused: true)
     let resume = try XCTUnwrap(ring(request: restored, job: nil))
     XCTAssertEqual(resume.kind, .queued)
-    XCTAssertEqual(resume.glyph, .play)
+    XCTAssertEqual(resume.glyph, .resume)
     XCTAssertEqual(resume.action, .resume)
+  }
+
+  /// A paused ring and a waiting one are both dim; only their marks tell them apart, and the paused
+  /// one draws the inspector's and the Downloads list's Resume download symbol, not Play's.
+  func testAPausedRingDrawsResumeDownloadsSymbolAndIsToldApartFromAWaitingOne() throws {
+    let paused = try XCTUnwrap(ring(job: DownloadRow(id: "a", title: "A", isPaused: true)))
+    let waiting = try XCTUnwrap(ring(job: job(progress: nil, queued: true)))
+    XCTAssertEqual(paused.kind, waiting.kind, "both are drawn dim")
+    let pausedMark = try XCTUnwrap(paused.glyph).systemImage
+    XCTAssertNotEqual(pausedMark, try XCTUnwrap(waiting.glyph).systemImage)
+    XCTAssertEqual(pausedMark, DownloadRowAction.resume.systemImage)
+    XCTAssertNotEqual(pausedMark, "play.fill")
+    let failed = try XCTUnwrap(ring(job: DownloadRow(id: "a", title: "A", errorMessage: "No.")))
+    XCTAssertEqual(try XCTUnwrap(failed.glyph).systemImage, DownloadRowAction.retry.systemImage)
   }
 
   func testAFailedOrCancelledDownloadOffersRetryOnlyOnceSteamCMDIsReady() throws {

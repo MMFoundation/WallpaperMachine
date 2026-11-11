@@ -256,7 +256,7 @@ struct DownloadsPopoverRequestRow: View {
           Button {
             model.perform(.resume, forItem: request.id)
           } label: {
-            Label("Resume download", systemImage: "play.fill")
+            Label("Resume download", systemImage: DownloadRowAction.resume.systemImage)
           }
           .buttonStyle(.panelPrimary(size: .compact))
         } else {
@@ -341,7 +341,7 @@ struct DownloadsPopoverJobRow: View {
         Button {
           model.resume(row)
         } label: {
-          Label("Resume download", systemImage: "play.fill")
+          Label("Resume download", systemImage: DownloadRowAction.resume.systemImage)
         }
         .buttonStyle(.panelPrimary(size: .compact))
         .disabled(controller.isBusy(DownloadsModel.key(.resume, row: row)))
@@ -349,7 +349,7 @@ struct DownloadsPopoverJobRow: View {
         Button {
           model.retry(row)
         } label: {
-          Label("Try again", systemImage: "arrow.clockwise")
+          Label("Try again", systemImage: DownloadRowAction.retry.systemImage)
         }
         .buttonStyle(.panelPrimary(size: .compact))
         // A Steam retry needs SteamCMD or the QR sign-in; pixiv's needs neither.

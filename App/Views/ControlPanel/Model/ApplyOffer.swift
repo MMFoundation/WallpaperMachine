@@ -1,14 +1,22 @@
 import Foundation
 
 /// What an inspector's apply button does for a wallpaper that is in the library, decided the same
-/// way in the Installed, Workshop and pixiv inspectors. Installed and Workshop draw it with
-/// `InspectorApplyButton`; pixiv draws its own.
+/// way in the Installed, Workshop and pixiv inspectors, which all draw it with
+/// `InspectorApplyButton`: the offer's own label, symbol and help, so only where the button sits
+/// differs.
 ///
 /// Applying what the target display already shows does nothing, so there the button reapplies,
 /// which restarts it. Either way it runs under its own key (`reapplyWallpaper` or `activate`) and
 /// is disabled while that action is pending, or when the wallpaper or the target cannot take it.
 /// `PanelController.apply(_:)` carries it out.
 struct ApplyOffer: Equatable {
+  /// The symbol of putting a wallpaper on a display, wherever that is offered: Apply wallpaper,
+  /// Download and apply, the Apply item of a tile's menu and the mark of an apply that waits. Never
+  /// `play.fill`, which starts a rotation or resumes playback.
+  static let symbol = "display.and.arrow.down"
+  /// The symbol of Reapply wallpaper, which restarts what the target display shows.
+  static let reapplySymbol = "arrow.clockwise"
+
   let wallpaperID: String
   /// The target display shows this wallpaper now: the button restarts it instead of applying it.
   let reapplies: Bool
@@ -39,6 +47,15 @@ struct ApplyOffer: Equatable {
 
   /// The key the button's action runs under.
   var key: String { Self.key(wallpaperID, reapplies: reapplies) }
+
+  /// The button's symbol: `reapplySymbol` where it restarts the wallpaper, `symbol` otherwise.
+  var systemImage: String { reapplies ? Self.reapplySymbol : Self.symbol }
+
+  /// The button's label and accessibility label: **Apply wallpaper** or **Reapply wallpaper**.
+  @MainActor var title: String { reapplies ? L("Reapply wallpaper") : L("Apply wallpaper") }
+
+  /// The button's help.
+  @MainActor var help: String { title }
 
   private static func key(_ wallpaperID: String, reapplies: Bool) -> String {
     PanelActionCoordinator.key(reapplies ? "reapplyWallpaper" : "activate", id: wallpaperID)

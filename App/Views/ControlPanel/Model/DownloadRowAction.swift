@@ -8,6 +8,18 @@ import Foundation
 enum DownloadRowAction: Equatable, CaseIterable {
   case pause, cancel, resume, retry
 
+  /// The SF Symbol of the action's control, the same wherever it sits. Resume is a down arrow to a
+  /// line, never `play.fill`, which starts a rotation or resumes playback; it is not the plain
+  /// arrow of a download that waits its turn either, so a paused ring and a waiting one differ.
+  var systemImage: String {
+    switch self {
+    case .pause: "pause.fill"
+    case .cancel: "xmark"
+    case .resume: "arrow.down.to.line"
+    case .retry: "arrow.clockwise"
+    }
+  }
+
   /// The key the action runs under for the job `id` of `source`'s queue.
   func key(_ source: DownloadRow.Source, id: String) -> String {
     PanelActionCoordinator.key(name(source), id: id)

@@ -29,7 +29,7 @@ struct WorkshopTileRing: View {
         ring
         centre
         if state.showsCloseOnHover && isHovering {
-          Image(systemName: "xmark")
+          Image(systemName: DownloadRowAction.cancel.systemImage)
             .font(.system(size: diameter * 0.26, weight: .bold))
             .foregroundStyle(.white)
             .transition(.opacity)

@@ -258,16 +258,25 @@ final class InspectorFlowTests: InspectorTestCase {
     let dynamic =
       [WallpaperCompatibilityCheck.Status.ok, .warning, .unavailable, .unknown].map(InspectorGlyphs.compatibility)
       + [InspectorWording.LetterboxGlyph.ok, .info, .unclear, .failed].map(InspectorGlyphs.letterbox)
+    let shared = [ApplyOffer.symbol, ApplyOffer.reapplySymbol] + DownloadRowAction.allCases.map(\.systemImage)
     let fixed = [
-      "photo", "heart", "heart.fill", "ellipsis", "play.fill", "arrow.clockwise", "eye", "folder",
+      "photo", "heart", "heart.fill", "ellipsis", "arrow.clockwise", "eye", "folder",
       "display.2", "text.badge.plus", "text.badge.minus", "arrow.triangle.2.circlepath",
       "exclamationmark.bubble", "trash", "arrow.down.circle", "arrow.down.circle.fill",
       "checkmark.shield", "hourglass", "arrow.up.right.square", "minus.circle", "plus",
       "arrow.counterclockwise", "slider.horizontal.3", "chevron.right", "info.circle.fill",
       "exclamationmark.triangle.fill", "exclamationmark.octagon.fill", "checkmark.circle.fill",
     ]
-    for name in dynamic + fixed {
+    for name in dynamic + shared + fixed {
       XCTAssertNotNil(NSImage(systemSymbolName: name, accessibilityDescription: nil), "\(name) is not an SF Symbol")
     }
+  }
+
+  /// Play starts a rotation or resumes playback; applying a wallpaper, reapplying it and resuming a
+  /// download each draw a symbol of their own, so none of them reads as Play.
+  func testApplyReapplyAndResumeDownloadEachHaveTheirOwnSymbolAndNoneIsPlay() {
+    let symbols = [ApplyOffer.symbol, ApplyOffer.reapplySymbol, DownloadRowAction.resume.systemImage]
+    XCTAssertEqual(Set(symbols).count, symbols.count, "\(symbols) are told apart")
+    XCTAssertFalse(symbols.contains("play.fill"), "play.fill is only Play and resuming playback")
   }
 }

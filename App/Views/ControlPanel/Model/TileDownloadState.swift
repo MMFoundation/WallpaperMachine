@@ -24,15 +24,18 @@ struct TileDownloadState: Equatable {
 
   /// The mark in the ring's centre when it has no text.
   enum Glyph: Equatable {
-    case play, shield, download, refresh
+    /// A paused download: a click resumes it.
+    case resume
+    case shield, download, refresh
 
-    /// The SF Symbol the Workshop's and pixiv's rings draw for it.
+    /// The SF Symbol the Workshop's and pixiv's rings draw for it. Resume and retry are the
+    /// symbols of the same actions in the inspectors and the Downloads list (`DownloadRowAction`).
     var systemImage: String {
       switch self {
-      case .play: "play.fill"
+      case .resume: DownloadRowAction.resume.systemImage
       case .shield: "exclamationmark.shield.fill"
       case .download: "arrow.down"
-      case .refresh: "arrow.clockwise"
+      case .refresh: DownloadRowAction.retry.systemImage
       }
     }
   }
@@ -72,7 +75,7 @@ struct TileDownloadState: Equatable {
     if let request {
       return request.isPaused
         ? TileDownloadState(
-          kind: .queued, glyph: .play, action: .resume, label: L("Resume download"))
+          kind: .queued, glyph: .resume, action: .resume, label: L("Resume download"))
         : TileDownloadState(
           kind: .attention, glyph: .shield, action: .continueSetup,
           label: L("Continue setup to download \(title)"))
@@ -93,7 +96,7 @@ struct TileDownloadState: Equatable {
     }
     if job.isPaused {
       return TileDownloadState(
-        kind: .queued, glyph: .play, action: .resume, label: L("Resume download"))
+        kind: .queued, glyph: .resume, action: .resume, label: L("Resume download"))
     }
     if job.needsReview {
       let reason = job.hasError ? job.errorMessage ?? "" : L("Download cancelled.")
@@ -172,7 +175,7 @@ struct TileDownloadState: Equatable {
     switch job.status {
     case .paused:
       state = TileDownloadState(
-        kind: .queued, glyph: .play, action: .resume, label: L("Resume download"))
+        kind: .queued, glyph: .resume, action: .resume, label: L("Resume download"))
     case .waiting:
       state = TileDownloadState(
         kind: .queued, glyph: .download, showsCloseOnHover: true, action: .cancel,

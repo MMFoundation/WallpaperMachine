@@ -163,22 +163,12 @@ private struct PixivInspectorDetail: View {
     }
   }
 
+  /// The same button the Installed and Steam Workshop inspectors lead with.
   private var applyButton: some View {
     let offer = ApplyOffer(
       wallpaperID: selection.libraryID, target: controller.mediaApplyTarget,
       isBusy: { controller.isBusy($0) })
-    return Button {
-      controller.launch(offer.key) { try await controller.apply(offer) }
-    } label: {
-      if offer.reapplies {
-        Label("Reapply wallpaper", systemImage: "play.fill")
-      } else {
-        Label("Apply wallpaper", systemImage: "play.fill")
-      }
-    }
-    .buttonStyle(.panelPrimary(size: .regular, expands: true))
-    .disabled(!offer.isEnabled)
-    .accessibilityIdentifier("pixiv-apply")
+    return InspectorApplyButton(offer: offer, identifier: "pixiv-apply")
   }
 
   private func downloadButton(_ label: PixivSelection.Download.Label) -> some View {
@@ -203,7 +193,8 @@ private struct PixivInspectorDetail: View {
     Button {
       controller.downloads.pause(DownloadRow(job))
     } label: {
-      Label("Pause download", systemImage: "pause.fill").frame(maxWidth: .infinity)
+      Label("Pause download", systemImage: DownloadRowAction.pause.systemImage)
+        .frame(maxWidth: .infinity)
     }
     .buttonStyle(.bordered)
     .controlSize(.large)
@@ -214,7 +205,7 @@ private struct PixivInspectorDetail: View {
     Button {
       controller.downloads.resume(DownloadRow(job))
     } label: {
-      Label("Resume download", systemImage: "play.fill")
+      Label("Resume download", systemImage: DownloadRowAction.resume.systemImage)
     }
     .buttonStyle(.panelPrimary(size: .regular, expands: true))
     .accessibilityIdentifier("pixiv-resume")
@@ -224,7 +215,8 @@ private struct PixivInspectorDetail: View {
     Button {
       controller.downloads.cancel(DownloadRow(job))
     } label: {
-      Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+      Image(systemName: DownloadRowAction.cancel.systemImage)
+        .font(.system(size: 12, weight: .semibold))
     }
     .buttonStyle(.bordered)
     .controlSize(.large)

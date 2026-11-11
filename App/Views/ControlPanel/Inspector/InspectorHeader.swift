@@ -151,8 +151,9 @@ struct InspectorActionRow: View {
 }
 
 /// **Apply wallpaper**, or **Reapply wallpaper** where the target display already shows it: the
-/// button the Installed and Steam Workshop inspectors lead with for a wallpaper in the library.
-/// `offer` decides which and when it is enabled; `PanelController.apply(_:)` carries it out.
+/// button the Installed, Steam Workshop and pixiv inspectors lead with for a wallpaper in the
+/// library. `offer` decides which, its label, symbol and help, and when it is enabled;
+/// `PanelController.apply(_:)` carries it out.
 struct InspectorApplyButton: View {
   let offer: ApplyOffer
   let identifier: String
@@ -174,18 +175,12 @@ struct InspectorApplyButton: View {
     Button {
       controller.launch(offer.key) { [controller, offer] in try await controller.apply(offer) }
     } label: {
-      Group {
-        if offer.reapplies {
-          Label("Reapply wallpaper", systemImage: "arrow.clockwise")
-        } else {
-          Label("Apply wallpaper", systemImage: "play.fill")
-        }
-      }
-      // The narrowest inspector shrinks the words a little rather than cutting them off.
-      .minimumScaleFactor(0.8)
+      Label(offer.title, systemImage: offer.systemImage)
+        // The narrowest inspector shrinks the words a little rather than cutting them off.
+        .minimumScaleFactor(0.8)
     }
     .disabled(!offer.isEnabled)
-    .help(offer.reapplies ? L("Reapply wallpaper") : L("Apply wallpaper"))
+    .help(offer.help)
     .accessibilityIdentifier(identifier)
   }
 }

@@ -154,6 +154,12 @@ How the panel runs (controller, actions, observation, window hosting) is in
   Settings sections and the Quick Settings tiles draw a white filled symbol on a
   coloured rounded square (`SymbolTile`), as System Settings does. Never copy
   Apple's symbol artwork, or another icon set, into the repository.
+- **Play and Apply keep their own symbols.** `play.fill` is only Play (starting a
+  rotation) and resuming playback. Putting a wallpaper on a display (Apply wallpaper,
+  Download and apply, a tile's Apply item, the mark of an apply that waits) draws
+  `ApplyOffer.symbol`, and Reapply `ApplyOffer.reapplySymbol`; a download's pause,
+  cancel, resume and retry draw `DownloadRowAction.systemImage`, wherever the control
+  sits. Read these names instead of writing the symbol again.
 - **Colours** come from `\.panelTheme` (`AccentPalette`, `SurfacePalette`) or the
   system's semantic colours; a view never hardcodes a colour value.
 - **Accessibility.** Every icon-only control has an accessibility label

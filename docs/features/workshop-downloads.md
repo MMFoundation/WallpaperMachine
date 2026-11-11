@@ -466,7 +466,7 @@ Wallpaper Engine's own library does:
 | Spinning arc | Signing in, requesting the item, or transferring before any bytes can be measured | Cancel |
 | Dimmed download arrow | Waiting for the download ahead of it to finish | Remove from the queue |
 | Pulsing shield | Steam or setup needs you | Open the dialog |
-| Play mark | Paused, including work restored after relaunch | Resume download |
+| Dimmed arrow down to a line | Paused, including work restored after relaunch | Resume download |
 | Retry mark | Failed or cancelled | Try again |
 | Small check in the corner | Already in your library | — |
 

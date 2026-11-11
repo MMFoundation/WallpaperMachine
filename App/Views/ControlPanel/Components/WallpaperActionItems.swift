@@ -38,7 +38,7 @@ struct WallpaperActionItems: View {
       Button {
         controller.library.activate(row.id)
       } label: {
-        Label("Apply wallpaper", systemImage: "play.fill")
+        Label("Apply wallpaper", systemImage: ApplyOffer.symbol)
       }
       .disabled(!InspectorPolicy.canActivate(kind: row.kind, target: target))
       favorite

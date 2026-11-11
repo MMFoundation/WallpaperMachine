@@ -1384,7 +1384,8 @@ never to `.shared`.
 - Inspector: `InspectorPolicyTests`, `InspectorWordingTests`, `InspectorInputTests`,
   `InspectorFlowTests` (Preview with unsent text, Restore all defaults, sections, the app's words
   against an author's markup, host states as text, file and folder notes, every symbol drawn
-  exists), `InspectorSliderTests` (VoiceOver, keys and the pointer each reach the saved edit; a
+  exists, and Apply, Reapply and Resume download each with a symbol of its own that is not
+  Play's), `InspectorSliderTests` (VoiceOver, keys and the pointer each reach the saved edit; a
   drag previews and the release saves once; colours saved after a quiet period),
   `InspectorRenderTests` (the inspector and the whole panel with it open at 760×560 in every
   language; a slider's VoiceOver, key and pointer changes reach the bridge),
@@ -1417,7 +1418,8 @@ never to `.shared`.
   limit, double clicks, the remembered scroll offset), `WorkshopPreviewCoordinatorTests` (stills
   first, animations only for tiles on screen, released when hidden), `WorkshopInspectorTests` (an installed
   wallpaper leads with Apply and ends with Move to Trash; neither for any other item),
-  `WorkshopItemDownloadTests`, `TileDownloadStateTests`, `ResultPagerTests`, `DownloadsModelTests`
+  `WorkshopItemDownloadTests`, `TileDownloadStateTests` (a paused ring's mark told apart from a
+  waiting one's), `ResultPagerTests`, `DownloadsModelTests`
   and `DownloadDialogResolutionTests` (the download dialog's stages, Not now, the hand-off card, a
   rejected account, late failures, the first-run guide keeping its own sign-in), and
   `WorkshopBrowserRenderTests` (the page, inspector, empty states, dialog stages and Downloads list
