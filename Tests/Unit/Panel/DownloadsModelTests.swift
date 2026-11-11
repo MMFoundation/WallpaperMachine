@@ -253,7 +253,9 @@ final class DownloadsModelTests: MediaPanelTestCase {
     }
   }
 
-  func testTheFirstRunGuidesOwnSignInIsNotSurfacedWhileTheGuideIsOpen() async throws {
+  /// The sign-in-only job stays out of the dialog while the guide is open, a rule from when the
+  /// guide signed in to Steam itself; nothing in the panel starts that job now.
+  func testTheSignInOnlyJobIsNotSurfacedWhileTheGuideIsOpen() async throws {
     try await withPanel { panel in
       let controller = panel.controller
       panel.show()
@@ -263,7 +265,7 @@ final class DownloadsModelTests: MediaPanelTestCase {
       try await panel.waitUntil(timeout: 15) { signIn.worker.prompt == .password }
       controller.shell.isWelcomeRequested = true
       controller.downloads.reconcile()
-      XCTAssertFalse(controller.downloads.isDialogOpen, "the guide answers its own sign-in")
+      XCTAssertFalse(controller.downloads.isDialogOpen, "the sign-in-only job stays quiet in the guide")
       controller.shell.isWelcomeRequested = false
       controller.downloads.reconcile()
       XCTAssertTrue(controller.downloads.isDialogOpen, "outside the guide a password request opens it")
@@ -398,6 +400,21 @@ final class DownloadsModelTests: MediaPanelTestCase {
       seen += String(describing: Mirror(reflecting: try XCTUnwrap(downloads.session)).children.map { "\($0.value)" })
       XCTAssertFalse(seen.contains(secret), "the model holds no copy of what was typed")
       XCTAssertNil(downloads.session?.errorMessage)
+    }
+  }
+
+  /// The setup and account stages say what a Steam download needs (an account that owns Wallpaper
+  /// Engine), with where to get one, only while no Steam account is signed in on this Mac.
+  func testTheAccountRequirementIsShownOnlyUntilASteamAccountIsSaved() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      let downloads = controller.downloads
+      XCTAssertNil(controller.steamAccount.saved)
+      XCTAssertTrue(downloads.showsAccountRequirement)
+
+      try await panel.saveSteamAccount("fixture")
+      XCTAssertEqual(controller.steamAccount.saved, "fixture")
+      XCTAssertFalse(downloads.showsAccountRequirement, "Someone signed in has met it")
     }
   }
 

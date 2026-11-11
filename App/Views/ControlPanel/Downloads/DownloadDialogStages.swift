@@ -38,6 +38,38 @@ private extension View {
   }
 }
 
+/// What a Steam download needs, with where to get it, while no Steam account is signed in on this
+/// Mac (`DownloadsModel.showsAccountRequirement`). The welcome guide asks for no account, so a
+/// first download is where most people read this. Both links open Steam in the browser, so they
+/// wear the external-link symbol, as `helpLink` does.
+private struct AccountRequirementNote: View {
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    if controller.downloads.showsAccountRequirement {
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Downloading from Steam needs a Steam account that owns Wallpaper Engine.")
+          .dialogNote(theme.surface.muted.color)
+        HStack(spacing: 14) {
+          Button {
+            ExternalLink.open(ExternalLink.steamJoin)
+          } label: {
+            Label("Create a Steam account", systemImage: "arrow.up.right.square")
+          }
+          Button {
+            ExternalLink.open(ExternalLink.wallpaperEngineStore)
+          } label: {
+            Label("Buy Wallpaper Engine", systemImage: "arrow.up.right.square")
+          }
+        }
+        .buttonStyle(.panelLink)
+        .font(.system(size: 12))
+      }
+    }
+  }
+}
+
 // MARK: - Setup
 
 /// Install SteamCMD, or point at a copy that is already there.
@@ -48,6 +80,7 @@ struct DownloadSetupStage: View {
   var body: some View {
     let setup = controller.steamSetup
     VStack(alignment: .leading, spacing: 12) {
+      AccountRequirementNote()
       if let qr = controller.steamQRSession(for: controller.downloads.session?.target) {
         SteamQRSignInSection(session: qr) { controller.downloads.continueDownload(includeResources: false) }
         Divider()
@@ -204,6 +237,7 @@ struct DownloadAccountStage: View {
   private func accountForm(working: Bool) -> some View {
     let trimmed = session.account.trimmingCharacters(in: .whitespacesAndNewlines)
     return VStack(alignment: .leading, spacing: 12) {
+      AccountRequirementNote()
       if let qr = controller.steamQRSession(for: session.target) {
         SteamQRSignInSection(session: qr) { controller.downloads.continueDownload(includeResources: false) }
         Divider()

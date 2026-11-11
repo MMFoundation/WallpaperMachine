@@ -512,10 +512,29 @@ final class PanelFixture {
     try await waitUntil(timeout: 15) { !self.workshop.steamCMDSetup.isBusy }
   }
 
-  /// The sign-in-only job once the guide has started it.
+  /// The sign-in-only job once `steamSignIn` has started it.
   func waitForSignIn() async throws -> WorkshopDownload {
     try await waitUntil(timeout: 5) { self.workshop.downloader.signIn != nil }
     return try XCTUnwrap(workshop.downloader.signIn)
+  }
+
+  /// Signs `account` in to Steam through the fake SteamCMD and keeps its session, so the account
+  /// is saved on this Mac afterwards (`controller.steamAccount.saved`), as after a real sign-in.
+  func saveSteamAccount(_ account: String = "fixture") async throws {
+    workshop.steamCMDSetup.selectExisting(at: executable)
+    try await waitUntil(timeout: 15) { self.workshop.steamCMDSetup.selectedRuntime != nil }
+    try await controller.steamSignIn(account: account, remembersSession: true)
+    let signIn = try await waitForSignIn()
+    try await waitUntil(timeout: 15) { signIn.worker.prompt == .password }
+    // The fake SteamCMD keeps no session of its own; the sign-in Steam would have saved is the
+    // account file the queue reads back once the job ends.
+    let session = root.appendingPathComponent("session", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: session, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    try Data(account.utf8).write(to: session.appendingPathComponent("account"))
+    controller.downloads.openDialog(for: WorkshopStore.signInRequestID)
+    await controller.downloads.submitSecret("fixture-password", toJob: WorkshopStore.signInRequestID).value
+    try await waitUntil(timeout: 15) { !signIn.isPending }
   }
 
   /// Shows the panel to everything gated on visibility, as a window ordered front would. `date` is

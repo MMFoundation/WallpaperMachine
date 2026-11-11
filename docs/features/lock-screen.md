@@ -10,8 +10,8 @@ what the user gets and the rules that keep the two native modes consistent.
 
 Apply a scene, video, web or still wallpaper to a display, then enable **Settings → Desktop & Lock Screen →
 Animate lock screen**, or the same switch on the welcome guide's Preferences page
-(it applies at once there too; the guide's **Skip** turns it back to what it was
-when the guide opened). A status row next to the Settings switch reports the
+(it applies at once there too; the page's **Skip** turns it back to what it was
+when the guide opened, while the guide's **Skip setup** keeps it as set). A status row next to the Settings switch reports the
 current state, and a **Retry** action appears when activation failed.
 
 ### How the surface behaves

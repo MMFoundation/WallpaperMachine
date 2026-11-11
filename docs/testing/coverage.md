@@ -1431,7 +1431,8 @@ never to `.shared`.
   `WorkshopItemDownloadTests`, `TileDownloadStateTests` (a paused ring's mark told apart from a
   waiting one's), `ResultPagerTests`, `DownloadsModelTests`
   and `DownloadDialogResolutionTests` (the download dialog's stages, Not now, the hand-off card, a
-  rejected account, late failures, the first-run guide keeping its own sign-in), and
+  rejected account, late failures, a sign-in-only job keeping its own sign-in, the account
+  requirement shown only until a Steam account is signed in), and
   `WorkshopBrowserRenderTests` (the page, inspector, empty states, dialog stages and Downloads list
   in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label, an
   installed item's Apply reached by VoiceOver with Move to Trash below it, the Apply and Reapply
@@ -1474,8 +1475,14 @@ never to `.shared`.
   registered shortcut's press is read as its combination and never runs its action),
   `LibrarySettingsPresentationTests`, `SettingsSectionsRenderTests` and `SettingsBRenderTests`
   (every section in the narrowest and widest column, light and dark, in every language).
-- First-run guide and the one-time prompts: `FirstRunModelTests`, `FirstRunDraftTests`,
-  `SteamSignInPhaseTests`, `SupportPromptPresenterTests`, `WelcomeRenderTests` and
+- First-run guide and the one-time prompts: `FirstRunModelTests` (**Skip setup** ending the
+  guide from every page but Start and keeping what applied, unsaved drafts sending it to the
+  Start recap instead and saving nothing, Escape as Skip setup while the guide is open),
+  `FirstRunDraftTests` (five steps, the recap's Steam row naming a signed-in account or the
+  first download), `SupportPromptPresenterTests`, `WelcomeRenderTests` (Skip setup beside the
+  progress dots in every language and absent on Start, Escape in the window pressing it, the
+  Start lead changing while drafts are not saved, the Tips page's Steam links only while no
+  Steam account is signed in) and
   `PanelPerformanceDataTests` (the Settings switch round-trips and **Show in Finder** writes the
   report it would send, the performance data question asked once of someone who finished the
   guide earlier and answered from the presenter, the guide answering it only once its
@@ -1685,7 +1692,7 @@ in priority order and none on the day the first-run guide ended, the performance
 guide without it, the battery question right after it, only with a battery, a battery use
 now or since launch (not saved across launches), a wallpaper playing and nothing chosen,
 once for good and spent by the guide or a choice elsewhere, the subscriptions offer only for someone signed in to Steam who
-finished the guide without meeting the import (spent by the guide's card or a Steam
+finished the guide without meeting the import (spent by an earlier guide's card or a Steam
 Community sign-in), the star prompt after 14 days and 5 days of use (one day counts
 once) and not after the star was chosen, the Discord invitation after 21 days and 7 days
 of use, last of all and once for good, not after joining from About or the Help menu, and
@@ -1876,7 +1883,8 @@ and `WorkshopDownloadPersistenceTests`:
   queued work. The ceiling is clamped to 1–6, persists across relaunch and
   reaches Swift from the Settings select as a number.
 - Sign-in and ownership: per-job secrets, saved-sign-in handoff and relaunch
-  without resubmitting secrets, account switching never restoring the previous
+  without resubmitting secrets, which names are Steam login names (email addresses and a
+  leading underscore included, `anonymous` never), account switching never restoring the previous
   account's credentials, stale credential rejections not erasing a newer session,
   ownership checks (owned, missing, unconfirmed, split output), and an anonymous
   account unable to start a download.

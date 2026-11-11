@@ -377,9 +377,9 @@ with **Download the ones not in your library** as the list's main action beside
 most 1,000 pages of 30), drops what is installed, collections and Application
 items, and queues the rest as ordinary downloads, which need SteamCMD's own
 sign-in as any download does. The
-welcome guide's **Import my subscriptions** and its one-time offer to existing users
+one-time offer **Import my subscriptions**
 ([first run](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer))
-do the same, signing in first when needed.
+does the same, signing in first when needed.
 
 Signed in, the Workshop changes the account's subscriptions on Steam too. The inspector
 of an item that is not a collection offers **Subscribe on Steam** or **Unsubscribe on
@@ -924,15 +924,21 @@ the panel.
 
 ## Steam sign-in
 
-The first-run guide explains that downloads require a Steam account that owns
-Wallpaper Engine, with registration and store links ([first-run
-guide](first-run.md#first-run)); the download dialog only asks for what the
-current download still needs.
+The first-run guide asks for no Steam account: Steam is asked for at the first
+download, in the download dialog, which only asks for what the current download still
+needs. While no Steam account is signed in on this Mac, its setup and account stages
+start by saying that downloading from Steam needs a Steam account that owns Wallpaper
+Engine, with **Create a Steam account** and **Buy Wallpaper Engine**
+(`DownloadsModel.showsAccountRequirement`); the guide's Tips page says the same, and
+offers the same links by the same rule ([first-run guide](first-run.md#first-run)). Both
+links wear the external-link symbol, since they open Steam in the browser. Settings →
+Library & Steam can sign in before any download.
 
-The guide can also sign in ahead of any download. `WorkshopStore.requestSignIn`
-retains a `WorkshopDownloadRequest` with id `WorkshopStore.signInRequestID`
-(`steam-sign-in`) that climbs the same ladder as a download — SteamCMD setup, then
-the account — and never the shared-resources stage, then runs
+A sign-in-only job can also sign in ahead of any download. Nothing in the panel starts one
+since the guide stopped signing in; it stays working and tested until a follow-up removes
+it. `WorkshopStore.requestSignIn` retains a `WorkshopDownloadRequest` with id
+`WorkshopStore.signInRequestID` (`steam-sign-in`) that climbs the same ladder as a
+download — SteamCMD setup, then the account — and never the shared-resources stage, then runs
 `WorkshopDownloader.signIn`: a private SteamCMD session with `+login <account>
 +licenses_for_app 431960 +quit` and no download command (`isSigningInOnly`).
 Steam's password and Steam Guard prompts arrive on the job exactly as for a
@@ -948,13 +954,9 @@ Engine license in that same session (the command is also recommended by [Valve
 support](https://github.com/ValveSoftware/steam-for-linux/issues/6218)). An active
 license listing app 431960 confirms ownership; an explicit `No active license
 found for appID 431960` response reports no ownership. Missing or unrecognized
-output stays **unconfirmed**, never a missing purchase. The guide shows a purchase
-link for a non-owner and explains that Pixiv downloads, Workshop browsing, and
-viewing existing Wallpaper Engine wallpapers remain available. Both non-owners
-and unconfirmed accounts can continue setup or **Check ownership again**,
-including after purchasing. Ownership is scoped to the current sign-in job, not
-persisted with credentials; a saved account from a previous launch can be checked
-again. Steam still authorizes each actual download, so this advisory check cannot
+output stays **unconfirmed**, never a missing purchase. Ownership is scoped to the
+current sign-in job, not persisted with credentials; a saved account from a previous
+launch can be checked again. Steam still authorizes each actual download, so this advisory check cannot
 bypass or permanently deny it.
 
 **Keep me signed in on this Mac** is enabled by default for Workshop downloads and
@@ -990,7 +992,7 @@ prompt; a terminal cached-credential rejection clears the stale cache before an
 explicit retry. Every download still uses private temporary staging, and the child
 process is stopped before that staging is removed.
 
-The sign-in dialog and the welcome guide's Steam page show step-by-step Steam
+The sign-in dialog shows step-by-step Steam
 Guard help for whichever method Steam asked for (mobile approval, authenticator
 code or emailed code), in every shipped language; the download stays open and
 continues after verification. The help never suggests disabling Steam Guard or
@@ -1017,8 +1019,8 @@ download dialog or the Settings popover stops a code that was not approved, so
 nothing signs in once no code is on screen: an approval already on its way back when
 the code closes is dropped, not saved. A failed code is kept as its reason (expired,
 Steam unreachable, failed) and worded when the section shows it, so the message
-follows the panel's language. The dialog does not offer it for the
-first-run guide's SteamCMD sign-in request, which a QR sign-in would not complete.
+follows the panel's language. The dialog does not offer it for a SteamCMD
+sign-in-only request, which a QR sign-in would not complete.
 With a SteamCMD sign-in already saved, Settings shows that account and **Log out…**
 instead of the QR button, and downloads keep using SteamCMD without reaching the
 dialog's account stage: switching to a QR sign-in starts with logging out.

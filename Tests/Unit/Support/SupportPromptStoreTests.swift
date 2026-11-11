@@ -212,12 +212,12 @@ final class SupportPromptStoreTests: XCTestCase {
     }
 
     /// The import offer is for someone signed in to Steam who finished the guide without meeting
-    /// it; the guide's card or a Steam Community sign-in spends it, and it comes after the
-    /// performance data question.
+    /// it: a Steam Community sign-in, or the card of a guide from an earlier build, spends it, and
+    /// it comes after the performance data question.
     func testSubscriptionsOfferIsForSignedInUsersWhoNeverMetTheImport() throws {
         let store = SupportPromptStore(defaults: defaults, calendar: calendar)
         XCTAssertNil(store.pendingPrompt(welcomeSeen: false, telemetryOn: true, steamSignedIn: true, now: start),
-                     "the guide offers it to new users")
+                     "not before the guide has been seen")
         XCTAssertNil(store.pendingPrompt(welcomeSeen: true, telemetryOn: true, steamSignedIn: false, now: start),
                      "nothing to import without a Steam account")
         XCTAssertEqual(store.pendingPrompt(welcomeSeen: true, telemetryOn: false, steamSignedIn: true, now: start),

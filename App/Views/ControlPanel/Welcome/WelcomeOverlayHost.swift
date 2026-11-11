@@ -30,7 +30,7 @@ struct WelcomeOverlayHost: View {
     .onChange(of: isOpen, initial: true) { _, isOpen in
       if isOpen { model.open() } else { model.close() }
     }
-    // A closing window takes the held password with it.
+    // A closing window ends the guide's state.
     .onDisappear { model.close() }
     // The Start page's Import wallpapers waits for the window to show Installed. The page change
     // reaches the root's `onChange` in this update or an earlier one, where it closes the popovers

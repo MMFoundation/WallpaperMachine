@@ -136,9 +136,9 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
 
   // MARK: Import my subscriptions
 
-  /// The welcome guide's and the one-time offer's import signs in to Steam Community first, then
-  /// queues what the library lacks. A sign-in window closed first changes nothing and leaves the
-  /// offer open; signing in spends it, since whoever signed in found the feature.
+  /// The one-time offer's import signs in to Steam Community first, then queues what the library
+  /// lacks. A sign-in window closed first changes nothing and leaves the offer open; signing in
+  /// spends it, since whoever signed in found the feature.
   func testImportSignsInFirstThenQueuesWhatTheLibraryLacks() async throws {
     let prompt = SupportPromptStore(defaults: try TemporaryDefaults.make(for: self).defaults)
     let panel = try makePanel(subscribed: ["111": "Video", "333": "Scene"], supportPrompt: prompt)
@@ -156,23 +156,6 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     XCTAssertEqual(queued, 1)
     XCTAssertEqual(panel.workshop.downloadRequests.map(\.id), ["333"])
     XCTAssertNil(prompt.pendingPrompt(welcomeSeen: true, telemetryOn: true, steamSignedIn: true))
-  }
-
-  /// The guide's card says what the import did: how many went to Downloads, or that the library
-  /// already has them all.
-  func testTheGuideReportsWhatTheImportQueued() async throws {
-    let panel = try makePanel(subscribed: ["111": "Video", "333": "Scene"])
-    panel.store.librarySnapshot = installed(["111"])
-    let guide = panel.controller.welcome
-    XCTAssertFalse(guide.isSignedInToSteamCommunity)
-    await guide.importSubscriptions()
-    XCTAssertEqual(guide.subscriptionImport, .queued(1))
-    XCTAssertTrue(guide.isSignedInToSteamCommunity)
-    XCTAssertNil(guide.error)
-
-    panel.store.librarySnapshot = installed(["111", "333"])
-    await guide.importSubscriptions()
-    XCTAssertEqual(guide.subscriptionImport, .upToDate)
   }
 
   /// The offer to someone who never met the import: choosing it spends the offer at once, then the

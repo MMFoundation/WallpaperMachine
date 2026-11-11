@@ -17,15 +17,34 @@ the page and the Now Playing bar, with a card in the middle, 640 points wide and
 that shrinks with the window and keeps a 24-point margin
 (`App/Views/ControlPanel/Welcome/`; `WelcomeOverlayHost` over the window's content). While it is
 open the rest of the panel is disabled and hidden from VoiceOver. It is a page, not a modal
-dialog: `Escape` and a click outside do nothing, and the download dialog can still open
-over it for an unrelated job. Nothing in it animates on its own except a spinner while
-Steam works, and Reduce Motion removes its fades. The card's page scrolls on its own
-under the step indicator and above a pinned footer, so the buttons stay reachable at the
-760×560 minimum. The indicator is a row of six dots joined by a line (a check for a page
-done, a ring for the current one, an exclamation mark for one that needs attention) with
-the current step's name under it; each dot opens its page, except while language,
+dialog: a click outside the card does nothing, and the download dialog can still open
+over it for an unrelated job. Nothing in it animates on its own, and Reduce Motion removes
+its fades. The card's page scrolls on its own under the step indicator and above a pinned
+footer, so the buttons stay reachable at the 760×560 minimum. The indicator is a row of
+five dots joined by a line (a check for a page done, a ring for the current one) with the
+current step's name under it; each dot opens its page, except while language,
 appearance, the lock screen, performance or preferences are being committed. Later pages
-have **Back**, and decision pages have **Skip**:
+have **Back**, and decision pages have **Skip**, which leaves only that page.
+
+**Skip setup**, a quiet text button at the card's top right on every page but Start, ends
+the guide at once, as **Start using the app** does. `Escape` presses it: it is the button's
+cancel shortcut, and while the guide is open the shell's Escape handling
+(`ShellModel.handleEscape`) does the same before anything else. It waits, like the
+footer, while a choice is being committed, and its tooltip says the guide can be opened
+again from Settings → General. What already applied stays: the language, the appearance,
+the update mode and the lock screen. Questions of pages never reached come later as the
+one-time prompts: someone who skipped before the Preferences page is asked the
+[performance data question](#star-prompt-the-performance-data-question-and-the-subscriptions-offer)
+and the [battery question](#the-battery-question) afterwards. Drafts are never dropped or
+saved silently: with a performance or preference draft not saved, Skip setup goes to the
+Start page instead, whose recap lists it with **Review**, and the guide ends from there.
+
+The guide asks for no Steam account and holds no password. A Workshop download asks for
+what it needs when it needs it: while no Steam account is signed in on this Mac, the
+download dialog's setup and account stages say that downloading from Steam needs a Steam
+account that owns Wallpaper Engine, with **Create a Steam account** and **Buy Wallpaper
+Engine**, above the QR sign-in and SteamCMD ([Steam sign-in](workshop-downloads.md#steam-sign-in)).
+Settings → Library & Steam can sign in before that. The guide's pages:
 
 1. **Language & appearance.** The page leads with the image of the chosen Dock app
    icon ([appearance](appearance.md#app-icon)). Radio tiles for the language
@@ -35,40 +54,7 @@ have **Back**, and decision pages have **Skip**:
    at once through the same setters as Settings, so the guide redraws in the chosen
    language and theme. **Skip** puts back whatever was in force when the guide opened
    and moves on.
-2. **Steam.** Explains that browsing is free and that downloading needs a Steam
-   account that owns Wallpaper Engine, with **Create a Steam account**
-   (`store.steampowered.com/join/`) and **Buy Wallpaper Engine** beside that
-   explanation. The form takes the account name (login name, not profile name;
-   ASCII letters, digits and `_`, plus the `@`, `.` and `-` of the email addresses
-   Steam once accepted as account names, starting with a letter, digit or `_`),
-   the password (with a show/hide button) and **Keep me signed in on this Mac** (on
-   by default). **Sign in** checks the form and then sends only the account name and
-   the remember choice; the form hands the password to the guide's model, which holds
-   it until Steam's own password prompt arrives on the sign-in job, answers that
-   prompt exactly once whatever page is on show, and keeps no copy. Skipping, closing
-   the guide or closing the window drops it. Without SteamCMD the button reads
-   **Install SteamCMD and sign in** and the guide installs it first (with the
-   Gatekeeper approval and locate-a-copy paths when they apply). Steam Guard is
-   explained with the same steps as the download dialog; **Cancel** stops the
-   session. After sign-in the guide checks Wallpaper Engine ownership and shows
-   **Signed in as …** with the result and **Use a different account**, which asks
-   before signing out. Non-owners see **Buy Wallpaper Engine** and an explanation
-   that pixiv downloads, Workshop browsing and viewing existing wallpapers remain
-   available; an inconclusive result is labeled unconfirmed. Both offer **Check
-   ownership again** and allow **Continue**, and saved accounts from an earlier run
-   can also be checked. Signed in, unless the account is known not to own Wallpaper
-   Engine, the page also offers **Import my subscriptions**: the Workshop wallpapers
-   the account already subscribes to on Steam, downloaded into the library. Steam lists
-   them only behind its Steam Community sign-in, a different one from SteamCMD's, so a
-   first import opens Steam's own sign-in window ([Subscriptions](workshop-downloads.md#subscriptions));
-   that sign-in stays on this Mac. What the library lacks is queued in Downloads, behind
-   the guide, and the card then says how many, or that the library already has them all. **Skip for now** (or **Skip and cancel sign-in** while a job
-   or setup request is pending) leaves Steam for the first download to ask about. A
-   Steam Guard request arriving on another page marks the Steam step as needing
-   attention without changing pages, and keyboard focus goes to the field Steam asks
-   about when the page shows it. See [Steam sign-in](workshop-downloads.md#steam-sign-in)
-   for the session itself.
-3. **Performance.** Radio tiles for the **Low**, **Medium** and **High** quality
+2. **Performance.** Radio tiles for the **Low**, **Medium** and **High** quality
    presets (the same pairs as [Settings → Performance](performance.md#quality)),
    then the **Frame rate limit** slider, whose top reads **No limit** (see
    [Default per-display frame rate](performance.md#default-per-display-frame-rate)).
@@ -77,7 +63,7 @@ have **Back**, and decision pages have **Skip**:
    no preset leaves every tile unchecked with a **Custom** note. They are drafts:
    **Continue** sends only what changed (the render scale, then the frame-rate
    limit), **Skip** discards them.
-4. **Preferences.** Launch at login, Keep windows in place when clicking the
+3. **Preferences.** Launch at login, Keep windows in place when clicking the
    wallpaper and [Send performance data](telemetry.md) (off) are switches; the last
    is disabled in a run without the telemetry service. **On battery** is a menu: Keep running, Reduced quality
    or Pause; reaching this page answers the [battery question](#the-battery-question), so a new
@@ -104,16 +90,26 @@ have **Back**, and decision pages have **Skip**:
    value it had when the guide opened. During a preference or lock-screen commit,
    Back, step navigation, Skip and Continue are all disabled so the guide cannot leave
    a partially submitted operation.
-5. **Tips.** Three one-line tips (browsing **Steam Workshop**, download then double-click to
-   apply, one wallpaper per display), then a compatibility card: not every wallpaper
+4. **Tips.** Four one-line tips (browsing **Steam Workshop**, which needs no account;
+   download then double-click to apply; one wallpaper per display; downloading from Steam
+   needs a Steam account that owns Wallpaper Engine). Under them, **Create a Steam account**
+   (`store.steampowered.com/join/`) and **Buy Wallpaper Engine**, only while no Steam
+   account is signed in on this Mac, the download dialog's rule
+   (`DownloadsModel.showsAccountRequirement`): a guide replayed by someone signed in
+   leaves them out. Then a compatibility card: not every wallpaper
    works (videos usually play, scenes are experimental, Application wallpapers cannot
    run), failures are reported with the inspector's report button, and pull
    requests are welcome, with **Report an issue** and **Contribute on GitHub**
    links.
-6. **Start.** A recap of language, appearance and the actual Steam sign-in state.
-   Pending jobs or setup requests offer **Finish sign-in**. Unsaved performance or
+5. **Start.** A recap of language, appearance and Steam: **Signed in as …** with the
+   account signed in for downloads on this Mac (a SteamCMD or a QR sign-in), or that the
+   first download asks. Unsaved performance or
    preference drafts each add a row with their count and **Review**, which returns
-   to that page without discarding them; closing does not auto-save the drafts.
+   to that page without discarding them; closing does not auto-save the drafts. With
+   any unsaved, the lead under **Setup complete** says some changes are not saved yet
+   and can be reviewed or left behind, in place of the note that the desktop changes
+   only when a wallpaper is applied, so someone sent here by **Skip setup** learns why
+   at once.
    **Browse the Workshop** ends the guide and opens **Steam Workshop**. It wears that
    tab's symbol, and its note says that after the guide Steam's wallpapers are always
    in the **Steam Workshop** tab at the top of the window (the guide hides the tabs
@@ -121,15 +117,14 @@ have **Back**, and decision pages have **Skip**:
    the import picker, and **Start using the app** simply closes it. A note says the
    guide can be opened again from Settings → General.
 
-Leaving the guide by any of the closing actions stores the flag in the app's defaults
+Leaving the guide by any of the closing actions or by **Skip setup** stores the flag in
+the app's defaults
 (`WallpaperMachine.welcomeSeen`, `PanelPreferences.welcomeSeenKey`), so the guide is shown
 on its own exactly once per Mac; a window closed and reopened before then starts the guide
 again from the first page and keeps what was already applied.
 **Settings → General → Help → Welcome guide → Show again** brings it back from the
 first page; closing it then does not touch the stored flag. Every link passes the
-same external-link allowlist as every other link in the panel. While the guide is
-open the download dialog does not surface the sign-in job's prompts (the guide answers
-them). A finished sign-in-only job is not listed as a download. The guide's texts can
+same external-link allowlist as every other link in the panel. The guide's texts can
 be selected and copied.
 
 ## First wallpaper support prompt
@@ -179,7 +174,7 @@ performance data question, then the [battery question](#the-battery-question), t
 subscriptions offer, then the support prompt, then the star prompt, then the
 [Discord invitation](#discord-invitation), and no
 prompt appears on the same calendar day as another, nor on the day the first-run guide
-ended: the guide was that day's question (a guide replayed from Settings does not
+was finished or skipped: the guide was that day's question (a guide replayed from Settings does not
 count). Once one has been answered or dismissed, no other appears in
 that window.
 
@@ -189,12 +184,12 @@ that window.
   Reaching the guide's Preferences page, or choosing in Settings, counts as having been
   asked; someone who leaves the guide before that page is asked once afterwards. A run
   without the telemetry service never asks.
-- **Import your Steam subscriptions?** offers once the guide's **Import my
-  subscriptions** to someone who finished the guide and has a saved SteamCMD sign-in
-  but never signed in to Steam Community in a build that has the import: an existing
-  user after the update, or someone who skipped the guide's Steam page and signed in
-  at a first download. The guide's card appearing, or a Steam Community sign-in from
-  anywhere (**Your subscriptions** included), counts as having met it. Choosing it
+- **Import your Steam subscriptions?** offers once **Import my subscriptions** to
+  someone who finished the guide and has a saved SteamCMD sign-in but never signed in
+  to Steam Community in a build that has the import: an existing user after the update,
+  or anyone who signed in at a download, since the guide asks for no Steam account. A
+  Steam Community sign-in from anywhere (**Your subscriptions** included), or the import
+  card of an earlier guide that had one, counts as having met it. Choosing it
   spends the offer, closes the sheet and goes on: Steam's sign-in window, then the
   downloads, whose failure, or finding nothing missing, reaches the banner.
 - **Like WallpaperMachine?** asks once for a GitHub star from someone who did not

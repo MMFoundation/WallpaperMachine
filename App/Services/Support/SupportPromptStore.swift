@@ -18,9 +18,10 @@ import Observation
 ///   The guide's Preferences page, which shows the On battery choice, and a battery choice made in
 ///   Settings or the menu bar count as asking it.
 /// - `subscriptions` offers once to import the Steam subscriptions, to someone who finished the
-///   guide and is signed in to Steam but has never signed in to Steam Community here: someone who
-///   finished the guide before it offered the import, or skipped its Steam page. The guide's
-///   offer, or signing in to Steam Community anywhere, spends it.
+///   guide and is signed in to Steam but never met the import here: someone who finished the
+///   guide before it offered the import, or who signed in at a download (the guide asks for no
+///   Steam account). Having met it in an earlier guide, or signing in to Steam Community
+///   anywhere, spends it.
 /// - `discord` invites once to MMFoundation's Discord, after 21 days and on at least 7 different
 ///   days of opening the panel: the star's clock, a week and two days of use later, so it never
 ///   comes before the star and, for someone new, usually not right after it. Joining from
@@ -223,7 +224,7 @@ final class SupportPromptStore {
         persist(next)
     }
 
-    /// The first-run guide ended. It was that day's question, so no one-time
+    /// The first-run guide ended, finished or skipped. It was that day's question, so no one-time
     /// prompt follows it on the same day.
     func recordWelcomeGuideEnded(now: Date = Date()) {
         guard state.lastPromptAt.map({ $0 < now }) ?? true else { return }
@@ -256,8 +257,8 @@ final class SupportPromptStore {
         persist(next)
     }
 
-    /// The import of the Steam subscriptions was offered, or the person found it: the guide showed
-    /// it, or they signed in to Steam Community. The prompt is then not needed.
+    /// The person found the import of the Steam subscriptions: they signed in to Steam Community.
+    /// The prompt is then not needed.
     func recordSubscriptionsOffered() {
         guard !state.subscriptionsOffered else { return }
         var next = state

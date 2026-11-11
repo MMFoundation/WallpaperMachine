@@ -284,7 +284,7 @@ extension PanelController {
     try await navigate(.workshop)
   }
 
-  /// **Import my subscriptions**, in the welcome guide and the one-time offer: signs in to Steam
+  /// **Import my subscriptions**, in the one-time offer: signs in to Steam
   /// Community first when no session is held, waiting for that window, then downloads every
   /// subscribed wallpaper the library lacks, as `downloadSubscribedWorkshopItems` does. Answers how
   /// many were queued, 0 when the library already has them all, or nil when no session came of

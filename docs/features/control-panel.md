@@ -167,7 +167,8 @@ Arrow keys, `Home` and `End` move focus across a grid, and `Return` or `Space` o
 focused tile acts as a click. On Installed and Steam Workshop, `Command`-`Return` does what a
 double click does: on Installed it applies the wallpaper, on Steam Workshop it applies one in
 the library and otherwise downloads it (or opens a collection, or the setup a download waits
-for). On pixiv it only selects the tile, as `Return` does. `Escape` cancels a collection's name field, then closes an
+for). On pixiv it only selects the tile, as `Return` does. While the [welcome guide](first-run.md#first-run)
+is open `Escape` is its **Skip setup**; otherwise it cancels a collection's name field, then closes an
 open popover, then leaves selection mode. `Command-F` puts the keyboard in the page's
 search field (on Settings, the one above its sections). Errors show in a banner at the top of the page
 with their original details, which can be selected and copied, and **Dismiss**; VoiceOver

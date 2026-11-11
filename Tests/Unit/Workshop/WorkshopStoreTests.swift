@@ -990,8 +990,8 @@ final class WorkshopDownloadIntentTests: XCTestCase {
   }
 
   /// An installed scene wallpaper needs no consent step once its shared assets exist.
-  /// The welcome guide signs in ahead of any download: the intent waits for SteamCMD like a
-  /// download, never asks about shared resources, and runs as a sign-in-only job.
+  /// A sign-in ahead of any download (which nothing in the panel starts now): the intent waits for
+  /// SteamCMD like a download, never asks about shared resources, and runs as a sign-in-only job.
   func testSignInRequestWaitsForSetupThenSignsInWithoutADownload() async throws {
     let fixture = try makeFixture()
     fixture.store.requestSignIn(account: "localtest", rememberSession: true, bridge: fixture.bridge)

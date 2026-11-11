@@ -347,11 +347,17 @@ final class ShellModel {
 
   // MARK: Keyboard
 
-  /// Escape, for what the shell owns. An open name field of the Collections section is cancelled
+  /// Escape, for what the shell owns. The welcome guide covers everything, so while it is open
+  /// Escape is its **Skip setup**, and is used up even where that does nothing (the Start page, a
+  /// choice being committed). Otherwise an open name field of the Collections section is cancelled
   /// first, then an open popover; a selection (the library's) is left to the library page. True when
   /// the shell used the key.
   @discardableResult
   func handleEscape() -> Bool {
+    if isWelcomeOpen {
+      controller.welcome.skipSetup()
+      return true
+    }
     if collectionEditor.isOpen {
       collectionEditor.cancel()
       return true

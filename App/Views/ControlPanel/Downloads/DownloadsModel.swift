@@ -102,6 +102,12 @@ final class DownloadsModel {
       target: session.target, currentStage: stage, handoffTarget: handoffTarget)
   }
 
+  /// Whether the setup and account stages say what a Steam download needs (an account that owns
+  /// Wallpaper Engine) with where to get one: while no Steam account is signed in on this Mac. The
+  /// welcome guide asks for no account, so a first download is where most people meet this; the
+  /// guide's Tips page offers the same links by the same rule.
+  var showsAccountRequirement: Bool { controller.steamAccount.saved == nil }
+
   /// A change of this value is a change of what the dialog is about, which moves focus; a
   /// progress update is not, so typing is never interrupted.
   var focusKey: String {

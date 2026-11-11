@@ -223,6 +223,31 @@ final class PanelLibraryActionsTests: PanelTestCase {
     }
   }
 
+  /// Someone who skips the welcome guide and applies a first downloaded wallpaper the same day sees
+  /// it at once: the window hides and no one-time question comes up, though one would otherwise
+  /// be due.
+  func testSkippingSetupThenApplyingTheFirstDownloadedWallpaperHidesTheWindowAndAsksNothingThatDay()
+    async throws
+  {
+    let prompt = SupportPromptStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+    prompt.qualifyForDiscordInvitation()
+    try await withApplyingPanel(supportPrompt: prompt, welcomeSeen: false) { panel, _, _ in
+      let controller = panel.controller
+      var hidden = 0
+      controller.hideApplication = { hidden += 1 }
+      controller.welcome.open()
+      controller.welcome.skipSetup()
+      XCTAssertFalse(controller.shell.isWelcomeOpen)
+
+      panel.defaults.set(true, forKey: PanelPreferences.hideAfterActivatingKey)
+      prompt.recordDownload(wallpaperID: "c")
+      try await controller.activate("c")
+      XCTAssertEqual(hidden, 1, "The first downloaded wallpaper is made visible")
+      XCTAssertTrue(prompt.isPending, "The support offer is earned")
+      XCTAssertNil(controller.duePrompt, "but nothing is asked on the day the guide ended")
+    }
+  }
+
   func testAFailedApplyKeepsItsNoteUntilTheNextOneSucceeds() async throws {
     try await withApplyingPanel { panel, bridge, _ in
       let controller = panel.controller

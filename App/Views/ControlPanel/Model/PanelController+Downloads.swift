@@ -29,7 +29,7 @@ extension PanelController {
     workshop.downloader.downloads.first { $0.id == id }.map(mediaDownloadRow)
   }
 
-  /// The sign-in-only job the first-run guide and Settings start, while it exists.
+  /// The sign-in-only job `steamSignIn` starts, while it exists; nothing in the panel starts it now.
   var steamSignInRow: DownloadRow? { steamDownloadRow(for: WorkshopStore.signInRequestID) }
 
   /// Every retained request, with the prerequisite each still needs.
@@ -52,8 +52,8 @@ extension PanelController {
   /// sign-in downloads without it.
   var steamDownloadsReady: Bool { steamSetup.isReady || workshop.nativeSession?.isSignedIn == true }
 
-  /// The QR sign-in to offer for the dialog's request: never for the sign-in that SteamCMD runs
-  /// (the first-run guide's), which a QR sign-in would not complete.
+  /// The QR sign-in to offer for the dialog's request: never for the sign-in-only job SteamCMD
+  /// runs (`steamSignIn`'s), which a QR sign-in would not complete.
   func steamQRSession(for target: String?) -> SteamNativeSession? {
     target == WorkshopStore.signInRequestID ? nil : workshop.nativeSession
   }
@@ -91,7 +91,8 @@ extension PanelController {
 
   /// The job whose password or Steam Guard request should open the download dialog by itself, or
   /// nil. `dismissed` holds the requests the user closed with **Not now**; `welcomeIsOpen` keeps
-  /// the first-run guide's own sign-in out of the panel's dialog.
+  /// the sign-in-only job out of the dialog while the first-run guide is open, a rule from when the
+  /// guide signed in to Steam itself.
   func steamAuthRequestToSurface(dismissed: Set<SteamAuthKey>, welcomeIsOpen: Bool) -> DownloadRow? {
     SteamAuthKey.surfaced(in: steamDownloadRows, dismissed: dismissed, welcomeIsOpen: welcomeIsOpen)
   }
@@ -221,8 +222,9 @@ extension PanelController {
   }
 
   /// Signs in to Steam without downloading anything, so the account and its saved sign-in are in
-  /// place before the first download (the first-run guide and Settings do this). It rides the same
-  /// ladder as a download: SteamCMD must be set up first. The password is never an argument: Steam
+  /// place before the first download. Nothing in the panel calls it now: the first-run guide asks
+  /// for no Steam account, and Settings signs in with a QR code. It rides the same ladder as a
+  /// download: SteamCMD must be set up first. The password is never an argument: Steam
   /// asks for it through the job's own prompt, answered with `submitDownloadInput`.
   func steamSignIn(account: String, remembersSession keepsSession: Bool) async throws {
     try await run(.queued) {

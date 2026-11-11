@@ -21,6 +21,8 @@ struct AccessibilityElement {
   var identifier: String { string("accessibilityIdentifier") }
   /// What it says: its label, or, for a text, its value.
   var text: String { label.isEmpty ? value : label }
+  /// Where it is on the screen, in AppKit's coordinates (y grows upwards); zero without a frame.
+  var frame: CGRect { (attribute("accessibilityFrame") as? NSValue)?.rectValue ?? .zero }
 
   var children: [AccessibilityElement] {
     ((attribute("accessibilityChildren") as? [Any]) ?? []).compactMap {
