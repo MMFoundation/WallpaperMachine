@@ -45,6 +45,8 @@ final class NativeWorkshopDownloader: WorkshopDownloadWorker {
     @ObservationIgnored private let supportDirectory: URL
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var transferStarted: ContinuousClock.Instant?
+    /// Counts transfers within a run (an item, then its preset base), to drop late reports.
+    @ObservationIgnored private var transfer = 0
 
     init(session: SteamNativeSession, supportDirectory: URL) {
         self.session = session
@@ -150,19 +152,26 @@ final class NativeWorkshopDownloader: WorkshopDownloadWorker {
     }
 
     private func beginTransfer() {
+        clearTransferFigures()
+        transfer += 1
         phase = .transferring
         status = String(localized: "Downloading Workshop files…")
         transferStarted = .now
     }
 
+    /// Reports reach the main actor one task each, in no guaranteed order: a report of an
+    /// earlier transfer (an item before its preset base) or an older figure is dropped, so the
+    /// count never steps back.
     private func progressHandler() -> @Sendable (UInt64, UInt64) -> Void {
-        { [weak self] done, total in
-            Task { @MainActor in self?.report(done: done, total: total) }
+        let transfer = transfer
+        return { [weak self] done, total in
+            Task { @MainActor in self?.report(done: done, total: total, transfer: transfer) }
         }
     }
 
-    private func report(done: UInt64, total: UInt64) {
-        guard isRunning, phase == .transferring else { return }
+    private func report(done: UInt64, total: UInt64, transfer: Int) {
+        guard isRunning, phase == .transferring, transfer == self.transfer,
+              Int64(clamping: done) >= bytesReceived ?? 0 else { return }
         bytesReceived = Int64(clamping: done)
         bytesExpected = total > 0 ? Int64(clamping: total) : nil
         progress = total > 0 ? min(Double(done) / Double(total), 1) : nil
@@ -188,24 +197,30 @@ final class NativeWorkshopDownloader: WorkshopDownloadWorker {
         }
         AppLog.warn("Steam download failed (\(error.localizedDescription))")
         failureOutput = "native Steam client: \(error.localizedDescription)"
-        // Steam hands out a depot key only to an account that owns the app.
-        if case SteamCMConnection.Failure.requestFailed("the depot key", let eresult)? = error as? SteamCMConnection.Failure,
-           eresult == 15 || eresult == 2 {
-            wallpaperEngineOwnership = .notOwned
-        }
+        if Self.meansNotOwned(error) { wallpaperEngineOwnership = .notOwned }
         errorMessage = Self.message(for: error)
         status = errorMessage ?? status
+    }
+
+    /// Steam hands a depot key only to an account that owns the app, and the key is asked for
+    /// before anything else of the depot, so its refusal is the ownership answer: AccessDenied,
+    /// InsufficientPrivilege, Blocked, or a plain Fail with nothing else asked yet that could fail.
+    static func meansNotOwned(_ error: any Error) -> Bool {
+        guard case SteamCMConnection.Failure.requestFailed(SteamContentClient.depotKeyRequest, let eresult)? =
+                error as? SteamCMConnection.Failure else { return false }
+        return [2, 15, 24, 40].contains(eresult)
     }
 
     /// What the person reads about a failed native download: a few phrases in their language, the
     /// technical detail staying in the log. Errors of the import and install steps that follow the
     /// download are the app's own and already read well.
     static func message(for error: any Error) -> String {
+        if meansNotOwned(error) {
+            return String(localized: "This Steam account does not own Wallpaper Engine. Please purchase it on Steam to download Wallpaper Engine wallpapers. You can still download from Pixiv, browse the Workshop, and view Wallpaper Engine wallpapers you already have.")
+        }
         switch error {
         case let failure as SteamNativeSession.Failure:
             return failure.localizedDescription
-        case SteamCMConnection.Failure.requestFailed("the depot key", let eresult) where eresult == 15 || eresult == 2:
-            return String(localized: "This Steam account does not own Wallpaper Engine. Please purchase it on Steam to download Wallpaper Engine wallpapers. You can still download from Pixiv, browse the Workshop, and view Wallpaper Engine wallpapers you already have.")
         case SteamContentClient.Failure.insufficientSpace(let needed, let available):
             let formatter = ByteCountFormatter()
             formatter.countStyle = .file
@@ -219,6 +234,17 @@ final class NativeWorkshopDownloader: WorkshopDownloadWorker {
             return String(localized: "Steam’s download servers did not deliver this wallpaper. Try again later.")
         case is SteamContentClient.Failure, is SteamDepotCrypto.Failure, is SteamProto.DecodingError, is BridgeError:
             return String(localized: "A downloaded file did not match what Steam listed, so nothing was installed. Try again.")
+        case SteamCMConnection.Failure.logOnRefused(84):
+            return String(localized: "Steam has temporarily limited sign-in attempts. Wait before retrying.")
+        case SteamCMConnection.Failure.logOnRefused:
+            return String(localized: "Steam sign-in failed. Try again.")
+        case SteamCMConnection.Failure.loggedOff:
+            return String(localized: "Steam ended the session, for example because this account signed in elsewhere. Try again.")
+        case SteamCMConnection.Failure.requestFailed(SteamContentClient.itemDetailsMethod, _):
+            return String(localized: "Steam does not offer this Workshop item for download. It may be private, removed, or not a Wallpaper Engine item.")
+        case SteamCMConnection.Failure.requestFailed:
+            // Steam answered but declined a manifest code, the product info or a depot key.
+            return String(localized: "Steam’s download servers did not deliver this wallpaper. Try again later.")
         case is URLError, is SteamCMConnection.Failure, is SteamWebAPIError:
             return String(localized: "Could not reach Steam. Check your internet connection and try again.")
         default:

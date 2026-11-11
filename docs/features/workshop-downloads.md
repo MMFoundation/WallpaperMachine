@@ -1006,6 +1006,9 @@ section shows the newest one, says when the phone has scanned it, and offers
 download dialog or the Settings popover stops a code that was not approved, so
 nothing signs in once no code is on screen. The dialog does not offer it for the
 first-run guide's SteamCMD sign-in request, which a QR sign-in would not complete.
+With a SteamCMD sign-in already saved, Settings shows that account and **Log out…**
+instead of the QR button, and downloads keep using SteamCMD without reaching the
+dialog's account stage: switching to a QR sign-in starts with logging out.
 
 The approved refresh token is kept in the login keychain as one generic password
 (`KeychainSteamClientTokenStore`, service `app.wallpapermachine.steam-client`),
@@ -1022,7 +1025,11 @@ SteamCMD and account stages (`WorkshopStore.stage(for:)`) and runs through
 `NativeWorkshopDownloader` instead of SteamCMD; a SteamCMD sign-in request
 (`steam-sign-in`) still uses SteamCMD. The prerequisite observer tracks the QR
 sign-in, so a request waiting at those stages starts as soon as it completes, from
-the dialog or from Settings. A partial SteamCMD download kept for the item is
+the dialog or from Settings; a QR sign-in also clears the mark of a request the queue
+refused for the account it named (`WorkshopStore.steamQRSignInChanged`), which then
+goes again, and stays refused if the queue refuses it once more. A request refused
+while the QR sign-in exists shows the account stage as **Signed in as …** with
+**Continue** instead of SteamCMD's account form. A partial SteamCMD download kept for the item is
 discarded when the item goes to the native worker. The native worker sits in the same queue,
 behind the same `WorkshopDownloadWorker` protocol, so tiles, rows, pausing,
 cancelling and **Download next** behave as for SteamCMD. It lays an item out
@@ -1039,8 +1046,13 @@ connection manager over WebSocket with the token (`SteamCMConnection`); a listed
 server that does not answer a ping within ten seconds is passed over for the next
 one (up to three). A logon that fails in any way closes its socket, and a request
 that is paused or cancelled stops waiting at once instead of at its 30-second
-timeout. The client asks the connection manager for the item's details, the depot
-key and the manifest request code, and fetches the manifest and chunks from Steam's
+timeout. The logon runs in a task of its own that every waiting job shares, so a job
+paused or cancelled while it signs in stops waiting at once and the logon goes on for
+the others; one overtaken by a sign-out, a new sign-in or the idle disconnect closes
+its connection when it answers instead of adopting it. The client asks the
+connection manager for the item's details, then the depot key (first, so that an
+account without Wallpaper Engine learns it before anything is fetched) and the
+manifest request code, and fetches the manifest and chunks from Steam's
 content servers over HTTPS only: a server that lists no HTTPS support is skipped,
 and one that answers after another failed is tried first from then on
 (`SteamContentClient`). An item must belong to Wallpaper Engine (app 431960), since
@@ -1058,10 +1070,15 @@ install its `assets` folder like SteamCMD's.
 A token Steam refuses at logon (invalid, expired or revoked) is removed from the
 keychain, and the job fails with "Steam no longer accepts this QR sign-in"; the next
 request falls back to SteamCMD unless the person scans a new code. Steam hands a
-depot key only to an account that owns Wallpaper Engine, so a refused key reports
-the account as not owning it. Other failures read as one of a few phrases in the
-person's language (Steam unreachable, item not offered, content servers failed,
-content did not match), with the technical detail in the log and the failure log
+depot key only to an account that owns Wallpaper Engine, so a key refused as
+AccessDenied, InsufficientPrivilege, Blocked or a plain Fail reports the account as
+not owning it (`NativeWorkshopDownloader.meansNotOwned`). Other failures read as one
+of a few phrases in the person's language: Steam unreachable (no answer at all),
+sign-ins limited (a logon refused for its rate), sign-in failed (any other logon
+refusal), session ended (Steam logged the session off, as when the account signs in
+elsewhere), item not offered (its details refused), content servers failed (a
+manifest code, the product info or another key refusal, or the servers themselves)
+and content did not match, with the technical detail in the log and the failure log
 (`NativeWorkshopDownloader.message(for:)`). Native jobs keep no partial download: a
 paused or interrupted one fetches the item again when it resumes.
 

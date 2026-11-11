@@ -270,6 +270,21 @@ final class WorkshopStore {
     restoreBrowseFilters()
     updateSteamCMD = { [steamCMDSetup] in await steamCMDSetup.updateIfOutdated(within: $0) }
     downloader.onUnexplainedSignInFailure = { [weak self] job in self?.checkSteamCMD(after: job) }
+    nativeSession?.onChange = { [weak self] in self?.steamQRSignInChanged() }
+  }
+
+  /// A QR sign-in takes the place of the account form, so requests the queue refused for the
+  /// account they named may go again: the prerequisite observer starts them. One the queue
+  /// refuses once more stays refused, so nothing retries in a loop.
+  private func steamQRSignInChanged() {
+    guard nativeSession?.isSignedIn == true else { return }
+    var changed = false
+    for index in downloadRequests.indices
+    where downloadRequests[index].refused && downloadRequests[index].id != Self.signInRequestID {
+      downloadRequests[index].refused = false
+      changed = true
+    }
+    if changed { persistDownloadRequests() }
   }
 
   func showDownload(_ job: WorkshopDownload) {
@@ -475,7 +490,7 @@ final class WorkshopStore {
   func stage(for request: WorkshopDownloadRequest) -> WorkshopDownloadStage {
     // Signed in with a QR code: no SteamCMD to set up and no account name to type.
     if nativeEngine(for: request) != nil {
-      // A request the queue refused waits on the dialog, where the QR section continues it.
+      // A request the queue refused waits on the dialog, whose account stage continues it.
       if request.refused { return .account }
       return !request.includesResources && needsResources(request) ? .resources : .ready
     }

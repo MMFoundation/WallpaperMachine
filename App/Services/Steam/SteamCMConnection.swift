@@ -321,7 +321,10 @@ actor SteamCMConnection {
 
         let multi = try SteamProto.Message(body)
         var payload = multi.bytes(2) ?? Data()
-        if let size = multi.varint(1), size > 0 { payload = try gunzip(payload, expectedSize: Int(size)) }
+        if let size = multi.varint(1), size > 0 {
+            guard let expected = Int(exactly: size) else { throw SteamProto.DecodingError(reason: "Multi size \(size)") }
+            payload = try gunzip(payload, expectedSize: expected)
+        }
         var inner = SteamProto.Reader(data: payload)
         var packets: [Packet] = []
         while !inner.isAtEnd {
@@ -355,7 +358,8 @@ actor SteamCMConnection {
     }
 
     /// The binary KeyValues object Steam expects as `machine_id`: three SHA-1 hex strings.
-    /// Derived from the account so the same Mac reads as the same machine across sign-ins.
+    /// Derived from the account alone, so every sign-in of an account reads as one machine,
+    /// on this Mac and on any other; the device name tells them apart in Steam's list.
     static func machineID(for accountName: String) -> Data {
         var data = Data([0])
         data.append(contentsOf: Array("MessageObject".utf8) + [0])

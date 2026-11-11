@@ -23,6 +23,10 @@ final class FakeSteam: @unchecked Sendable {
     let fetcher = FakeSteamContentFetcher()
     /// Steam's answer to the logon; 5 refuses the token.
     var logOnResult: Int32 = 1
+    /// False leaves every logon unanswered, as a Steam that went silent would.
+    var answersLogOn = true
+    /// Steam's answer to the depot key; 15 is what an account that does not own the app gets.
+    var depotKeyResult: Int32 = 1
     private let lock = NSLock()
     private var opened = 0
 
@@ -84,6 +88,7 @@ final class FakeSteam: @unchecked Sendable {
             case (SteamCMConnection.EMsg.clientLogon, _):
                 let token = (try? SteamProto.Message(packet.body))?.string(108) ?? ""
                 let steamID = (try? SteamRefreshToken(token, accountName: "")).map(\.steamID) ?? 0
+                guard answersLogOn else { return [] }
                 return [ScriptedCMSocket.logOnReply(eresult: logOnResult, steamID: steamID)]
             case (_, "PublishedFile.GetDetails#1"):
                 var details = SteamProto.Writer()
@@ -95,9 +100,9 @@ final class FakeSteam: @unchecked Sendable {
             case (_, "ContentServerDirectory.GetManifestRequestCode#1"):
                 body.varint(1, 999)
             case (SteamCMConnection.EMsg.clientGetDepotDecryptionKey, _):
-                body.varint(1, 1)
+                body.varint(1, UInt64(UInt32(bitPattern: depotKeyResult)))
                 body.varint(2, UInt64(Self.app))
-                body.bytes(3, key)
+                if depotKeyResult == 1 { body.bytes(3, key) }
                 return [ScriptedCMSocket.frame(5439, jobTarget: job, body: body)]
             default:
                 return []

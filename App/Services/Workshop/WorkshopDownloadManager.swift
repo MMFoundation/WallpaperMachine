@@ -131,6 +131,8 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
     for record in saved where record.id != Self.signInID && seen.insert(record.id).inserted {
       guard record.id == "scene-assets" || (record.item?.id == record.id && record.id.allSatisfy(\.isNumber)),
         WorkshopDownloader.normalizedAccount(record.account) != nil else { continue }
+      // A restored job only shows as paused, whichever client ran it: resuming goes through
+      // `WorkshopStore.resolve`, which picks SteamCMD or the QR sign-in afresh.
       let job = WorkshopDownload(id: record.id, item: record.item, account: record.account,
         rememberSession: record.rememberSession, worker: makeSteamCMDWorker(for: record.id))
       job.isQueued = false

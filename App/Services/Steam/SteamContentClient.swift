@@ -73,6 +73,10 @@ actor SteamContentClient {
         }
     }
 
+    /// What a refused request names in `SteamCMConnection.Failure.requestFailed`.
+    static let itemDetailsMethod = "PublishedFile.GetDetails#1"
+    static let depotKeyRequest = "the depot key"
+
     struct ContentServer: Sendable, Equatable {
         let base: URL
     }
@@ -103,7 +107,7 @@ actor SteamContentClient {
     func publishedFile(_ id: UInt64) async throws -> SteamPublishedFile {
         var request = SteamProto.Writer()
         request.fixed64(1, id)
-        let response = try await connection.serviceMethod("PublishedFile.GetDetails#1", request.data)
+        let response = try await connection.serviceMethod(Self.itemDetailsMethod, request.data)
         guard let details = try response.messages(1).first(where: { $0.varint(2) == id }) else {
             throw Failure.itemUnavailable(id, eresult: 9)
         }
@@ -166,16 +170,19 @@ actor SteamContentClient {
         request.varint(1, UInt64(depot))
         request.varint(2, UInt64(app))
         let response = try await connection.request(SteamCMConnection.EMsg.clientGetDepotDecryptionKey, request.data,
-                                                    what: "the depot key")
+                                                    what: Self.depotKeyRequest)
         let eresult = response.int32(1) ?? 2
         guard eresult == 1, let key = response.bytes(3) else {
-            throw SteamCMConnection.Failure.requestFailed("the depot key", eresult: eresult)
+            throw SteamCMConnection.Failure.requestFailed(Self.depotKeyRequest, eresult: eresult)
         }
         depotKeys[depot] = key
         return key
     }
 
     func manifest(app: UInt32, depot: UInt32, manifestID: UInt64, branch: String = "public") async throws -> SteamDepotManifest {
+        // The key comes first although only encrypted names and the chunks need it: Steam gives
+        // it only to an account that owns the app, so a refusal says so before anything else.
+        let key = try await depotKey(app: app, depot: depot)
         var request = SteamProto.Writer()
         request.varint(1, UInt64(app))
         request.varint(2, UInt64(depot))
@@ -188,7 +195,7 @@ actor SteamContentClient {
         let packed = try await fetchFromAnyServer("depot/\(depot)/manifest/\(manifestID)/5/\(requestCode)")
         var manifest = try SteamDepotManifest(try decompressor.decompress(packed))
         if manifest.filenamesEncrypted {
-            try manifest.decryptFilenames(key: try await depotKey(app: app, depot: depot))
+            try manifest.decryptFilenames(key: key)
         }
         return manifest
     }

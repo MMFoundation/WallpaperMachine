@@ -107,6 +107,84 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     XCTAssertNil(store.token)
   }
 
+  func testAPausedDownloadStopsWaitingForASilentLogOn() async throws {
+    let steam = try FakeSteam(item: itemID, files: [:])
+    steam.answersLogOn = false
+    let session = steam.session(store: MemorySteamTokenStore(SteamTestToken.token()))
+    await session.restore()
+
+    let waiting = Task { try await session.contentClient() }
+    try await waitUntil { steam.connectionsOpened == 1 }
+    let clock = ContinuousClock()
+    let cancelled = clock.now
+    waiting.cancel()
+    do {
+      _ = try await waiting.value
+      XCTFail("expected the wait to end with the cancellation")
+    } catch {
+      XCTAssertTrue(error is CancellationError, "\(error)")
+    }
+    XCTAssertLessThan(clock.now - cancelled, .seconds(2), "the scripted logon only times out after 5 seconds")
+    XCTAssertTrue(session.isSignedIn, "a paused download is no reason to forget the sign-in")
+  }
+
+  func testAnAccountWithoutWallpaperEngineIsToldSoBeforeAnyContentIsFetched() async throws {
+    let root = try makeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let steam = try FakeSteam(item: itemID, files: ["project.json": Data("{}".utf8)])
+    steam.depotKeyResult = 15
+    let session = steam.session(store: MemorySteamTokenStore(SteamTestToken.token()))
+    await session.restore()
+    let manager = WorkshopDownloadManager(
+      sessionDirectory: root.appendingPathComponent("SteamSession"), runtimeProvider: ShellRuntimeProvider(),
+      downloadRegion: { .steamsChoice })
+    manager.startNative(item: item(), session: session, library: root.appendingPathComponent("Library")) {}
+    let job = try XCTUnwrap(manager.download(for: String(itemID)))
+    try await waitUntil { !manager.isRunning }
+
+    XCTAssertEqual(job.worker.wallpaperEngineOwnership, .notOwned)
+    XCTAssertFalse(job.worker.completedSuccessfully)
+    XCTAssertEqual(steam.fetcher.requests, [], "neither the manifest nor a chunk is fetched")
+  }
+
+  func testAQRSignInLetsARequestRefusedForItsAccountGoAgain() async throws {
+    let root = try makeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let steam = try FakeSteam(item: itemID, files: [:])
+    var challenge = SteamProto.Writer()
+    challenge.varint(1, 7)
+    challenge.string(2, "https://s.team/q/1/7")
+    challenge.bytes(3, Data([1]))
+    challenge.fixed32(4, Float(1).bitPattern)
+    steam.api.reply("BeginAuthSessionViaQR", challenge)
+    var approved = SteamProto.Writer()
+    approved.string(3, SteamTestToken.jwt())
+    approved.string(6, "someone")
+    steam.api.reply("PollAuthSessionStatus", approved)
+    let session = steam.session(store: MemorySteamTokenStore())
+    let requests = root.appendingPathComponent("Downloads/workshop-requests.json")
+    try FileManager.default.createDirectory(at: requests.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try JSONEncoder().encode([
+      WorkshopDownloadRequest(
+        id: String(itemID), item: item(), account: "", rememberSession: true, includesResources: false,
+        refused: true)
+    ]).write(to: requests)
+    let store = WorkshopStore(
+      downloader: WorkshopDownloadManager(
+        sessionDirectory: root.appendingPathComponent("SteamSession"), runtimeProvider: ShellRuntimeProvider(),
+        downloadRegion: { .steamsChoice }),
+      supportDirectory: root, defaults: try TemporaryDefaults.make(for: self).defaults,
+      runtimeProvider: ShellRuntimeProvider(), nativeSession: session)
+
+    session.beginQRSignIn()
+    try await waitUntil { session.isSignedIn }
+
+    let request = try XCTUnwrap(store.downloadRequests.first)
+    XCTAssertFalse(request.refused, "the QR sign-in answers what the account form was waiting for")
+    XCTAssertEqual(store.stage(for: request), .ready)
+    await store.steamCMDSetup.shutdown()
+  }
+
   func testNativeFailuresReadAsAFewPlainPhrases() {
     let unreachable = NativeWorkshopDownloader.message(for: URLError(.notConnectedToInternet))
     XCTAssertEqual(NativeWorkshopDownloader.message(for: SteamCMConnection.Failure.timedOut("the sign-in")), unreachable)
@@ -124,10 +202,32 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     let mismatch = NativeWorkshopDownloader.message(for: SteamContentClient.Failure.chunkMismatch("ab"))
     XCTAssertEqual(NativeWorkshopDownloader.message(for: SteamProto.DecodingError(reason: "bad")), mismatch)
 
-    XCTAssertEqual(Set([unreachable, unavailable, servers, mismatch]).count, 4)
-    for message in [unreachable, unavailable, servers, mismatch] {
+    XCTAssertEqual(
+      NativeWorkshopDownloader.message(
+        for: SteamCMConnection.Failure.requestFailed(SteamContentClient.itemDetailsMethod, eresult: 9)),
+      unavailable)
+    XCTAssertEqual(
+      NativeWorkshopDownloader.message(
+        for: SteamCMConnection.Failure.requestFailed("the manifest request code", eresult: 2)),
+      servers)
+
+    // Steam answered, so none of these is the internet connection's fault.
+    let limited = NativeWorkshopDownloader.message(for: SteamCMConnection.Failure.logOnRefused(eresult: 84))
+    let refused = NativeWorkshopDownloader.message(for: SteamCMConnection.Failure.logOnRefused(eresult: 2))
+    let ended = NativeWorkshopDownloader.message(for: SteamCMConnection.Failure.loggedOff(eresult: 6))
+
+    let phrases = [unreachable, unavailable, servers, mismatch, limited, refused, ended]
+    XCTAssertEqual(Set(phrases).count, phrases.count)
+    for message in phrases {
       XCTAssertFalse(message.contains("EResult"), message)
     }
+    XCTAssertTrue(NativeWorkshopDownloader.meansNotOwned(
+      SteamCMConnection.Failure.requestFailed(SteamContentClient.depotKeyRequest, eresult: 15)))
+    XCTAssertFalse(NativeWorkshopDownloader.meansNotOwned(
+      SteamCMConnection.Failure.requestFailed(SteamContentClient.depotKeyRequest, eresult: 84)),
+      "a rate limit says nothing about ownership")
+    XCTAssertFalse(NativeWorkshopDownloader.meansNotOwned(
+      SteamCMConnection.Failure.requestFailed(SteamContentClient.itemDetailsMethod, eresult: 15)))
     XCTAssertTrue(
       NativeWorkshopDownloader.message(for: SteamCMConnection.Failure.requestFailed("the depot key", eresult: 15))
         .contains("does not own Wallpaper Engine"))

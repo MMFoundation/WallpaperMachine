@@ -44,6 +44,8 @@ final class SteamNativeSession {
     @ObservationIgnored private var connection: SteamCMConnection?
     @ObservationIgnored private var client: SteamContentClient?
     @ObservationIgnored private var connecting: Task<SteamContentClient, any Error>?
+    /// Counts logons; one that is no longer the latest closes its connection when it answers.
+    @ObservationIgnored private var logOnAttempt = 0
     @ObservationIgnored private var qrTask: Task<Void, Never>?
     @ObservationIgnored private var users = 0
     @ObservationIgnored private var idleDisconnect: Task<Void, Never>?
@@ -146,36 +148,95 @@ final class SteamNativeSession {
         users += 1
         idleDisconnect?.cancel()
         if let client, let connection, await connection.isLoggedOn { return client }
-        if let connecting {
-            // Joining a logon already under way: its failure reads the same for every job.
-            do {
-                return try await connecting.value
-            } catch {
-                users -= 1
-                throw Self.mapped(error)
-            }
+        // Every job waiting for a logon shares the one under way, and its failure reads the
+        // same for each of them.
+        let logOn = connecting ?? startLogOn(with: token)
+        do {
+            return try await Self.waitFor(logOn)
+        } catch {
+            release()
+            throw Self.mapped(error)
         }
+    }
+
+    /// Logs on in a task of its own, so a job that is paused or cancelled stops waiting at
+    /// once while the logon goes on for the jobs that still need it. A logon overtaken by a
+    /// sign-out, a new sign-in or an idle disconnect closes its connection instead of adopting it.
+    private func startLogOn(with token: SteamRefreshToken) -> Task<SteamContentClient, any Error> {
         // A connection that dropped is closed before another one opens.
         if connection != nil { disconnect() }
         let connection = makeConnection()
         let client = makeClient(connection)
         let deviceName = deviceName
-        let task = Task { () throws -> SteamContentClient in
-            try await connection.logOn(with: token, machineName: deviceName)
+        logOnAttempt += 1
+        let attempt = logOnAttempt
+        let task = Task { [weak self] () throws -> SteamContentClient in
+            do {
+                try await connection.logOn(with: token, machineName: deviceName)
+            } catch {
+                self?.logOnFailed(error, attempt: attempt, token: token)
+                throw error
+            }
+            guard let self, self.adoptLogOn(connection, client, attempt: attempt, token: token) else {
+                await connection.logOff()
+                throw Failure.notSignedIn
+            }
             return client
         }
         connecting = task
-        defer { connecting = nil }
-        do {
-            let ready = try await task.value
-            self.connection = connection
-            self.client = ready
-            return ready
-        } catch {
-            users -= 1
-            let failure = Self.mapped(error)
-            if failure as? Failure == .signInExpired { forgetRejectedToken() }
-            throw failure
+        return task
+    }
+
+    private func isCurrent(_ attempt: Int, _ token: SteamRefreshToken) -> Bool {
+        logOnAttempt == attempt && self.token == token
+    }
+
+    private func logOnFailed(_ error: any Error, attempt: Int, token: SteamRefreshToken) {
+        guard isCurrent(attempt, token) else { return }
+        connecting = nil
+        if Self.mapped(error) as? Failure == .signInExpired { forgetRejectedToken() }
+    }
+
+    private func adoptLogOn(_ connection: SteamCMConnection, _ client: SteamContentClient, attempt: Int,
+                           token: SteamRefreshToken) -> Bool {
+        guard isCurrent(attempt, token) else { return false }
+        connecting = nil
+        self.connection = connection
+        self.client = client
+        // Every job that asked for it was paused or cancelled meanwhile.
+        if users == 0 { scheduleIdleDisconnect() }
+        return true
+    }
+
+    /// The logon's client, or `CancellationError` as soon as the waiting job is cancelled.
+    private static func waitFor(_ logOn: Task<SteamContentClient, any Error>) async throws -> SteamContentClient {
+        try Task.checkCancellation()
+        let waiter = LogOnWaiter()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                waiter.install(continuation)
+                Task { @MainActor in waiter.finish(await logOn.result) }
+            }
+        } onCancel: {
+            Task { @MainActor in waiter.finish(.failure(CancellationError())) }
+        }
+    }
+
+    /// One job's wait for the shared logon: the first outcome wins, a later one is ignored.
+    @MainActor
+    private final class LogOnWaiter {
+        private var continuation: CheckedContinuation<SteamContentClient, any Error>?
+        private var outcome: Result<SteamContentClient, any Error>?
+
+        func install(_ continuation: CheckedContinuation<SteamContentClient, any Error>) {
+            if let outcome { continuation.resume(with: outcome) } else { self.continuation = continuation }
+        }
+
+        func finish(_ result: Result<SteamContentClient, any Error>) {
+            guard outcome == nil else { return }
+            outcome = result
+            continuation?.resume(with: result)
+            continuation = nil
         }
     }
 
@@ -192,6 +253,10 @@ final class SteamNativeSession {
     func release() {
         users = max(users - 1, 0)
         guard users == 0 else { return }
+        scheduleIdleDisconnect()
+    }
+
+    private func scheduleIdleDisconnect() {
         idleDisconnect?.cancel()
         idleDisconnect = Task { [weak self] in
             try? await Task.sleep(for: .seconds(60))
@@ -211,6 +276,9 @@ final class SteamNativeSession {
     private func disconnect() {
         idleDisconnect?.cancel()
         idleDisconnect = nil
+        // A logon still under way is overtaken: it closes its connection when it answers.
+        logOnAttempt += 1
+        connecting = nil
         if let connection { Task { await connection.logOff() } }
         connection = nil
         client = nil

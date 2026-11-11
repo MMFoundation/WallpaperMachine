@@ -171,8 +171,39 @@ struct DownloadAccountStage: View {
   var body: some View {
     let working = controller.isBusy(
       PanelActionCoordinator.key("continueDownload", id: session.target))
-    let trimmed = session.account.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let qr = controller.steamQRSession(for: session.target), let account = qr.accountName {
+      signedInWithQRCode(account: account, working: working)
+    } else {
+      accountForm(working: working)
+    }
+  }
+
+  /// Signed in with a QR code, the download needs no account name: Continue hands the request
+  /// back to the queue, which refused it before.
+  private func signedInWithQRCode(account: String, working: Bool) -> some View {
     VStack(alignment: .leading, spacing: 12) {
+      Text("Signed in as \(account)")
+        .font(.system(size: 12, weight: .medium))
+      DialogActions {
+        EmptyView()
+      } trailing: {
+        Button("Not now") { controller.downloads.closeDialog() }
+          .keyboardShortcut(.cancelAction)
+        Button {
+          controller.downloads.continueDownload(includeResources: false)
+        } label: {
+          Label("Continue", systemImage: "chevron.right")
+        }
+        .buttonStyle(.panelPrimary)
+        .keyboardShortcut(.defaultAction)
+        .disabled(working)
+      }
+    }
+  }
+
+  private func accountForm(working: Bool) -> some View {
+    let trimmed = session.account.trimmingCharacters(in: .whitespacesAndNewlines)
+    return VStack(alignment: .leading, spacing: 12) {
       if let qr = controller.steamQRSession(for: session.target) {
         SteamQRSignInSection(session: qr) { controller.downloads.continueDownload(includeResources: false) }
         Divider()
