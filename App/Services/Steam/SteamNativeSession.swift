@@ -94,6 +94,9 @@ final class SteamNativeSession {
     /// Starts a QR sign-in, replacing one already showing. The code renews itself until it is
     /// approved, it fails, or `cancelQRSignIn()` is called.
     func beginQRSignIn() {
+        // The keychain read of a launch may still be on its way: the code shown now is the
+        // newer word, so that read must not sign in the old account under it.
+        signInChanges += 1
         qrTask?.cancel()
         qr = .starting
         qrTask = Task { [weak self, signIn, deviceName] in

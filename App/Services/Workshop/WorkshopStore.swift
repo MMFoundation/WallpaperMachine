@@ -429,7 +429,8 @@ final class WorkshopStore {
   /// account, so nothing signs in again under the name the user rejected. Consent already
   /// given for shared assets is preserved; other queued jobs are untouched.
   func changeDownloadAccount(id: String) async {
-    guard let job = downloader.downloads.first(where: { $0.id == id }) else { return }
+    // Only SteamCMD takes an account per job; the QR sign-in's account changes in Settings.
+    guard let job = downloader.downloads.first(where: { $0.id == id }), job.steamCMD != nil else { return }
     let item = job.item
     let rememberSession = downloader.rememberSessionWhileRunning ?? true
     downloader.cancel(job)

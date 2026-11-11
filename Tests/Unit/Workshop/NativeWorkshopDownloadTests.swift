@@ -163,6 +163,46 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     XCTAssertFalse(session.isSignedIn, "the read began before the sign-out, which is the newer word")
   }
 
+  func testAQRCodeStartedDuringTheKeychainReadIsNotOvertakenByIt() async throws {
+    let steam = try FakeSteam(item: itemID, files: [:])
+    let store = GatedSteamTokenStore(SteamTestToken.token())
+    let session = steam.session(store: store)
+
+    let restoring = Task { await session.restore() }
+    try await waitUntil { store.isReading }
+    session.beginQRSignIn()
+    store.open()
+    await restoring.value
+
+    XCTAssertFalse(session.isSignedIn, "the code on screen, not the old account, decides the sign-in")
+    session.cancelQRSignIn()
+  }
+
+  func testChangeAccountLeavesAQRSignedDownloadAlone() async throws {
+    let root = try makeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let steam = try FakeSteam(item: itemID, files: [:])
+    steam.answersLogOn = false
+    let session = steam.session(store: MemorySteamTokenStore(SteamTestToken.token()), timeout: .seconds(60))
+    await session.restore()
+    let downloader = WorkshopDownloadManager(
+      sessionDirectory: root.appendingPathComponent("SteamSession"), runtimeProvider: ShellRuntimeProvider(),
+      downloadRegion: { .steamsChoice })
+    let store = WorkshopStore(
+      downloader: downloader, supportDirectory: root, defaults: try TemporaryDefaults.make(for: self).defaults,
+      runtimeProvider: ShellRuntimeProvider(), nativeSession: session)
+    downloader.startNative(item: item(), session: session, library: root.appendingPathComponent("Library")) {}
+    let job = try XCTUnwrap(downloader.download(for: String(itemID)))
+
+    await store.changeDownloadAccount(id: job.id)
+
+    XCTAssertTrue(job.isPending, "the job goes on signing in")
+    XCTAssertTrue(store.downloadRequests.isEmpty, "no refused request asks for an account the QR sign-in ignores")
+    downloader.cancel(job)
+    try await waitUntil { !downloader.isRunning }
+    await store.steamCMDSetup.shutdown()
+  }
+
   func testASteamCMDPartialDownloadGoesOnlyOnceTheNativeJobIsQueued() async throws {
     let root = try makeRoot()
     defer { try? FileManager.default.removeItem(at: root) }

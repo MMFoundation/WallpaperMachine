@@ -433,9 +433,12 @@ struct DownloadAuthStage: View {
       .lineLimit(1)
       .truncationMode(.middle)
       Spacer(minLength: 8)
-      Button("Change account") { model.changeAccount(forJob: job.id) }
-        .buttonStyle(.panelLink)
-        .font(.system(size: 12))
+      // A QR-signed job has no account of its own to change: that is a Settings log-out.
+      if !job.signsInWithQRCode {
+        Button("Change account") { model.changeAccount(forJob: job.id) }
+          .buttonStyle(.panelLink)
+          .font(.system(size: 12))
+      }
     }
   }
 

@@ -809,7 +809,9 @@ work.
   dialog seeds the account per request, so switching requests cannot submit
   another one's sign-in. A submitted secret is cleared from the field immediately
   and is not retained by the panel. **Change account** cancels that job and hands
-  the same intent back at the sign-in step.
+  the same intent back at the sign-in step. A job on the QR sign-in does not offer it
+  (`DownloadRow.signsInWithQRCode`): its account is the QR sign-in's, changed by
+  logging out in Settings.
 - **Dialog stages.** The account stage is just the **Steam account name** field,
   the keep-signed-in checkbox and a note that the password and Steam Guard come
   next; a password prompt is the same without the checkbox. Steam Guard stages are
@@ -1018,7 +1020,8 @@ The approved refresh token is kept in the login keychain as one generic password
 beside the Steam Community sign-in and kept the same way; it is never logged or
 written anywhere else. A launch restores it off the main thread
 (`WorkshopStore.restoreSteamQRSignIn`), and an expired one is removed instead; a
-sign-out or new sign-in made while the keychain answers wins over what it read.
+sign-out, a new sign-in or a QR code started while the keychain answers wins over
+what it read.
 Settings shows the account as signed in, and **Log out…** removes the token as
 well as any saved SteamCMD sign-in. Steam lists the Mac (named
 "WallpaperMachine on <Mac name>") under the account's authorized devices, where it
