@@ -167,11 +167,23 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     XCTAssertFalse(session.isSignedIn, "the read began before the sign-out, which is the newer word")
   }
 
+  func testATokenTheKeychainWillNotDeleteIsEmptiedSoNoLaunchRestoresIt() async throws {
+    // macOS refuses to delete an item another build saved but lets its data change.
+    let keychain = MemoryKeychain()
+    let service = KeychainSteamClientTokenStore.service, account = KeychainSteamClientTokenStore.account
+    keychain.holdItemSavedByAnotherBuild(service: service, account: account, data: Data("{}".utf8))
+
+    try KeychainSteamClientTokenStore(calls: keychain).remove()
+
+    XCTAssertEqual(keychain.data(service: service, account: account), Data(), "nothing a launch could restore is left")
+  }
+
   func testALogOutTheKeychainRefusesKeepsTheSignInAndSaysSo() async throws {
-    // macOS refuses to delete an item another build saved.
+    // macOS refuses to delete an item another build saved, and here to change it as well.
     let keychain = MemoryKeychain()
     keychain.holdItemSavedByAnotherBuild(
       service: KeychainSteamClientTokenStore.service, account: KeychainSteamClientTokenStore.account, data: Data("{}".utf8))
+    keychain.refuseUpdates(with: errSecInteractionNotAllowed)
     XCTAssertThrowsError(try KeychainSteamClientTokenStore(calls: keychain).remove())
 
     let steam = try FakeSteam(item: itemID, files: [:])

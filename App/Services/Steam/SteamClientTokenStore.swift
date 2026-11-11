@@ -66,13 +66,21 @@ struct KeychainSteamClientTokenStore: SteamClientTokenStoring {
         }
     }
 
+    /// Deletes the item, or empties it when the keychain refuses: macOS will not let one build
+    /// delete what another saved, but lets it change the data, and an emptied item loads as no
+    /// sign-in. Throws only when the token stays readable.
     func remove() throws {
         do {
             try item.delete()
         } catch {
-            AppLog.warn("Steam QR sign-in could not be removed from the keychain (\(error))")
-            let reason = (error as? KeychainFailure).flatMap { SecCopyErrorMessageString($0.status, nil) as String? }
-            throw SteamClientTokenRemovalFailed(reason: reason ?? String(describing: error))
+            do {
+                try item.write(Data())
+                AppLog.info("Steam QR sign-in could not be deleted from the keychain (\(error)); it was emptied instead")
+            } catch {
+                AppLog.warn("Steam QR sign-in could not be removed from the keychain (\(error))")
+                let reason = (error as? KeychainFailure).flatMap { SecCopyErrorMessageString($0.status, nil) as String? }
+                throw SteamClientTokenRemovalFailed(reason: reason ?? String(describing: error))
+            }
         }
     }
 }

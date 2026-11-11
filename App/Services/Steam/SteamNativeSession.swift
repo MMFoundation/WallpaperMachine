@@ -297,7 +297,8 @@ final class SteamNativeSession {
         AppLog.warn("Steam no longer accepts the saved QR sign-in; it was removed")
         signInChanges += 1
         disconnect()
-        // Best effort: one the keychain keeps is refused again at the next logon.
+        // The store empties what the keychain will not delete; one it cannot even empty is
+        // refused again at the next logon and removed then.
         try? store.remove()
         token = nil
         onChange?()
