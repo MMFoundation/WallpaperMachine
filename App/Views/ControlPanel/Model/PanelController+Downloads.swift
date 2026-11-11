@@ -45,10 +45,14 @@ extension PanelController {
   /// SteamCMD's state: whether it is installed, being set up, or needs the user's approval.
   var steamSetup: SteamSetupState { SteamSetupState(workshop.steamCMDSetup) }
 
+  /// The QR-code sign-in. Signed in, downloads skip SteamCMD and its password prompts.
+  var steamQRSession: SteamNativeSession? { workshop.nativeSession }
+
   /// The Steam account the next download would use and what the sign-in will remember.
   var steamAccount: SteamAccountState {
     SteamAccountState(
-      suggested: workshop.suggestedAccount, saved: workshop.downloader.savedAccount,
+      suggested: workshop.suggestedAccount,
+      saved: workshop.nativeSession?.accountName ?? workshop.downloader.savedAccount,
       remembersSession: workshop.downloader.rememberSessionWhileRunning ?? remembersSession,
       slotLimit: workshop.downloader.slotLimit,
       downloadsRunOneAtATimeAfterConflict: workshop.downloader.sessionConflictDetected)
@@ -328,7 +332,7 @@ extension PanelController {
   /// Not while a download is active or waiting, which the downloader says as this action's error.
   func logOutSteam() async throws {
     try await run(.queued) {
-      let account = workshop.downloader.savedAccount ?? ""
+      let account = workshop.nativeSession?.accountName ?? workshop.downloader.savedAccount ?? ""
       guard
         await dialogs.confirm(
           L("Log out of Steam?"),
@@ -339,6 +343,8 @@ extension PanelController {
       else { return }
       workshop.downloader.forgetSavedAccount()
       if let message = workshop.downloader.errorMessage { throw WallpaperActionError(message: message) }
+      // Only once nothing runs: a download using the QR sign-in needs it until it ends.
+      workshop.nativeSession?.signOut()
     }
   }
 

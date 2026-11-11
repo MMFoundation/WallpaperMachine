@@ -415,6 +415,7 @@ private struct LibraryDownloadsRow: View {
 private struct LibraryAccountRow: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @State private var showsQRSignIn = false
 
   var body: some View {
     let account = controller.steamAccount.saved
@@ -431,6 +432,18 @@ private struct LibraryAccountRow: View {
         }
         .foregroundStyle(theme.surface.danger.color)
         .disabled(hasDownload || controller.isStoreBusy)
+      } else if let qr = controller.steamQRSession {
+        Button("Sign in with a QR code…") {
+          showsQRSignIn = true
+          if qr.qr == .idle { qr.beginQRSignIn() }
+        }
+        .disabled(hasDownload)
+        .popover(isPresented: $showsQRSignIn) {
+          SteamQRSignInSection(session: qr) { showsQRSignIn = false }
+            .padding(14)
+            .frame(width: 340)
+            .onDisappear { if !qr.isSignedIn { qr.cancelQRSignIn() } }
+        }
       } else {
         Text("Not signed in")
           .font(.system(size: 12))

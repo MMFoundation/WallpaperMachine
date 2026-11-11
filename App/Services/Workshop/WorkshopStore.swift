@@ -150,6 +150,9 @@ final class WorkshopStore {
   var errorMessage: String?
   let downloader: WorkshopDownloadManager
   let steamCMDSetup: SteamCMDSetupStore
+  /// The QR-code sign-in. While it is signed in, downloads use the app's own Steam client
+  /// instead of SteamCMD; nil in tests that never touch the keychain.
+  let nativeSession: SteamNativeSession?
   /// Which installed Workshop wallpapers have updates; an update downloads like any item.
   let updates: WorkshopUpdateStore
   @ObservationIgnored private let service: WorkshopService
@@ -216,7 +219,7 @@ final class WorkshopStore {
   convenience init(service: WorkshopService = WorkshopService()) {
     self.init(
       service: service, downloader: WorkshopDownloadManager(), storageDirectory: ClientPaths.storageURL,
-      webSessions: KeychainSteamWebSessionStore())
+      webSessions: KeychainSteamWebSessionStore(), nativeSession: SteamNativeSession())
   }
 
   /// `storageDirectory` holds the partial downloads, beside the library (`ClientPaths.storageURL`);
@@ -230,10 +233,12 @@ final class WorkshopStore {
     sceneAssetsLocation: @escaping @MainActor () -> URL = { ClientPaths.assetsURL },
     sceneAssetsAvailable: @escaping @MainActor (URL) -> Bool = { ClientPaths.hasSceneAssets(at: $0) },
     webSessions: (any SteamWebSessionStoring)? = nil,
+    nativeSession: SteamNativeSession? = nil,
     now: @escaping @MainActor () -> Date = Date.init
   ) {
     self.service = service
     self.webSessions = webSessions
+    self.nativeSession = nativeSession
     self.now = now
     requestFile = supportDirectory.appendingPathComponent("Downloads/workshop-requests.json")
     self.downloader = downloader
@@ -466,6 +471,12 @@ final class WorkshopStore {
   }
 
   func stage(for request: WorkshopDownloadRequest) -> WorkshopDownloadStage {
+    // Signed in with a QR code: no SteamCMD to set up and no account name to type.
+    if nativeEngine(for: request) != nil {
+      // A request the queue refused waits on the dialog, where the QR section continues it.
+      if request.refused { return .account }
+      return !request.includesResources && needsResources(request) ? .resources : .ready
+    }
     if steamCMDSetup.isBusy || steamCMDSetup.selectedRuntime == nil { return .setup }
     if request.refused || Self.normalizedAccount(request.account).isEmpty { return .account }
     // A sign-in downloads nothing, so shared resources never come into it.
@@ -551,12 +562,21 @@ final class WorkshopStore {
     return persistDownloadRequests()
   }
 
+  /// The QR sign-in that serves `request`, when there is one. A SteamCMD sign-in request
+  /// stays with SteamCMD.
+  private func nativeEngine(for request: WorkshopDownloadRequest) -> SteamNativeSession? {
+    guard request.id != Self.signInRequestID, let nativeSession, nativeSession.isSignedIn else { return nil }
+    return nativeSession
+  }
+
   private func resolve(_ request: WorkshopDownloadRequest, bridge: BridgeStore) {
+    let native = nativeEngine(for: request)
     // Downloads never let SteamCMD update itself, and Steam stops accepting a client that falls
     // behind, so a daily check against Valve's newest comes first. The request waits for it as
     // for setup, and the prerequisite observer resumes it once the check is over.
-    steamCMDSetup.startUpdateCheck()
-    guard stage(for: request) == .ready, let runtime = steamCMDSetup.selectedRuntime else {
+    if native == nil { steamCMDSetup.startUpdateCheck() }
+    let runtime = steamCMDSetup.selectedRuntime
+    guard stage(for: request) == .ready, native != nil || runtime != nil else {
       let previous = downloadRequests
       if upsert(request) {
         downloader.transferPausedToRequest(id: request.id)
@@ -566,7 +586,7 @@ final class WorkshopStore {
       }
       return
     }
-    if request.id == Self.signInRequestID {
+    if request.id == Self.signInRequestID, let runtime {
       downloader.signIn(
         username: request.account, executable: runtime.executableURL,
         // A sign-in fetches nothing, so it stays beside the saved sign-in, not the library.
@@ -575,19 +595,23 @@ final class WorkshopStore {
     } else if let item = request.item {
       // Shared assets are queued first and only once: other scenes ride the same job.
       if needsSharedAssets(item), !sharedAssetsPending {
-        installAssets(request, runtime: runtime)
+        installAssets(request, runtime: runtime, native: native)
       }
       // A wallpaper already in the library is being updated: its new files replace the old,
       // and a display showing it loads them again.
       let replacing = bridge.librarySnapshot.wallpapers.contains { $0.id == item.id }
-      downloader.start(
-        item: item, username: request.account, executable: runtime.executableURL,
-        library: ClientPaths.libraryURL, rememberSession: request.rememberSession
-      ) { [weak self] in
+      let imported: @MainActor () async throws -> Void = { [weak self] in
         try await self?.finishInstall(item: item, replacing: replacing, bridge: bridge)
       }
+      if let native {
+        downloader.startNative(item: item, session: native, library: ClientPaths.libraryURL, onImported: imported)
+      } else if let runtime {
+        downloader.start(
+          item: item, username: request.account, executable: runtime.executableURL,
+          library: ClientPaths.libraryURL, rememberSession: request.rememberSession, onImported: imported)
+      }
     } else {
-      installAssets(request, runtime: runtime)
+      installAssets(request, runtime: runtime, native: native)
     }
     let started = request.id == Self.signInRequestID ? downloader.signIn : downloader.download(for: request.item?.id)
     if let job = started, job.isPending {
@@ -638,16 +662,26 @@ final class WorkshopStore {
     }
   }
 
-  private func installAssets(_ request: WorkshopDownloadRequest, runtime: SteamCMDRuntime) {
+  private func installAssets(_ request: WorkshopDownloadRequest, runtime: SteamCMDRuntime?, native: SteamNativeSession?) {
     let destination = ClientPaths.managedAssetsURL
-    downloader.installAssets(
-      username: request.account, executable: runtime.executableURL,
-      destination: destination, rememberSession: request.rememberSession
-    ) {
+    let installed: @MainActor () throws -> Void = {
       try ClientPaths.configureAssetsFolder(at: destination)
       self.refreshSceneAssetsReadiness()
       if let bridge = self.downloadBridge { self.settleApplyIntentsAwaitingAssets(bridge: bridge) }
     }
+    if let native {
+      downloader.installAssetsNative(session: native, destination: destination, onInstalled: installed)
+    } else if let runtime {
+      downloader.installAssets(
+        username: request.account, executable: runtime.executableURL,
+        destination: destination, rememberSession: request.rememberSession, onInstalled: installed)
+    }
+  }
+
+  /// Takes back the QR sign-in saved by an earlier launch. The keychain is read off the main thread.
+  func restoreSteamQRSignIn() {
+    guard let nativeSession else { return }
+    Task { await nativeSession.restore() }
   }
 
   /// What follows a Workshop item arriving in the library: record it, rescan, load a replaced

@@ -7,7 +7,8 @@ Steam Community ([subscriptions](#subscriptions)), the Workshop is browsed as th
 account, so the lists match what Steam shows it. The
 bundled Aurora Drift video wallpaper (`Resources/StarterWallpaper`) can be applied
 from Installed without any download. Credentials for a download are entered only
-in the app's own local prompts.
+in the app's own local prompts, or not at all with a [QR-code
+sign-in](#signing-in-with-a-qr-code), which downloads without SteamCMD.
 
 ## Discover
 
@@ -988,6 +989,61 @@ sharing passwords, verification codes or recovery codes. Valve's
 describe the supported methods, and
 [email-code help](https://help.steampowered.com/en/wizard/HelpWithSteamGuardCode)
 covers delivery delays.
+
+## Signing in with a QR code
+
+Downloads can also run without SteamCMD and without a password. **Sign in with a QR
+code** (in the download dialog's SteamCMD and account stages, and in Settings →
+Library & Steam while no account is signed in) shows a code that the person scans
+with the Steam mobile app (Steam Guard → Scan a QR code) and approves there; the
+app never sees a password or a Steam Guard code. The sign-in uses Steam's own
+authentication service over HTTPS (`IAuthenticationService/BeginAuthSessionViaQR`
+and `PollAuthSessionStatus`, `SteamQRSignIn`), asking for a token issued for the
+Steam client (`platform_type` 1). Steam renews the code while it waits; the
+section shows the newest one, says when the phone has scanned it, and offers
+**Show a new code** once a code expires.
+
+The approved refresh token is kept in the login keychain as one generic password
+(`KeychainSteamClientTokenStore`, service `app.wallpapermachine.steam-client`),
+beside the Steam Community sign-in and kept the same way; it is never logged or
+written anywhere else. A launch restores it off the main thread
+(`WorkshopStore.restoreSteamQRSignIn`), and an expired one is removed instead.
+Settings shows the account as signed in, and **Log out…** removes the token as
+well as any saved SteamCMD sign-in. Steam lists the Mac (named
+"WallpaperMachine on <Mac name>") under the account's authorized devices, where it
+can be revoked from any other device.
+
+While the QR sign-in exists, every Workshop and shared-resources request skips the
+SteamCMD and account stages (`WorkshopStore.stage(for:)`) and runs through
+`NativeWorkshopDownloader` instead of SteamCMD; a SteamCMD sign-in request
+(`steam-sign-in`) still uses SteamCMD. The native worker sits in the same queue,
+behind the same `WorkshopDownloadWorker` protocol, so tiles, rows, pausing,
+cancelling and **Download next** behave as for SteamCMD. It lays an item out
+exactly as SteamCMD does (`<staging>/steamapps/workshop/content/431960/<id>`, in a
+claimed `.WallpaperMachine-workshop-` staging folder on the library's volume), so
+the import, preset bases and update replacement are the same code. Without it,
+nothing changes: SteamCMD, the account form and the password prompts work as above.
+
+Every native job shares one logged-on connection (`SteamNativeSession`), so a batch
+signs in once and Steam's one-session-per-account limit never ends a sibling; the
+connection closes a minute after the last job. The app's client
+(`App/Services/Steam/`) logs on to a Steam connection manager over WebSocket with
+the token (`SteamCMConnection`), asks it for the item's details, the depot key and
+the manifest request code, and fetches the manifest and chunks from Steam's
+content servers over HTTPS (`SteamContentClient`). Chunks are fetched six at a time,
+decrypted (AES-256, `SteamDepotCrypto`), unpacked by the Rust bridge
+(`decompress_steam_content`: zstd, LZMA or zip, with their CRC checked) and checked
+against their SHA-1 before they are written; a file path from a manifest that would
+leave the download folder fails the download. The shared scene resources read the
+current public manifest of depot 431961 from the app's product info (PICS) and
+install its `assets` folder like SteamCMD's.
+
+A token Steam refuses at logon (invalid, expired or revoked) is removed from the
+keychain, and the job fails with "Steam no longer accepts this QR sign-in"; the next
+request falls back to SteamCMD unless the person scans a new code. Steam hands a
+depot key only to an account that owns Wallpaper Engine, so a refused key reports
+the account as not owning it. Native jobs keep no partial download: a paused or
+interrupted one fetches the item again when it resumes.
 
 ## Prompt and retry handling
 

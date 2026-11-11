@@ -48,6 +48,10 @@ struct DownloadSetupStage: View {
   var body: some View {
     let setup = controller.steamSetup
     VStack(alignment: .leading, spacing: 12) {
+      if let qr = controller.steamQRSession {
+        SteamQRSignInSection(session: qr) { controller.downloads.continueDownload(includeResources: false) }
+        Divider()
+      }
       Text(
         "SteamCMD is Valve’s download tool. Install it here, or point to a copy you already have. Installing it does not sign you in."
       )
@@ -169,6 +173,10 @@ struct DownloadAccountStage: View {
       PanelActionCoordinator.key("continueDownload", id: session.target))
     let trimmed = session.account.trimmingCharacters(in: .whitespacesAndNewlines)
     VStack(alignment: .leading, spacing: 12) {
+      if let qr = controller.steamQRSession {
+        SteamQRSignInSection(session: qr) { controller.downloads.continueDownload(includeResources: false) }
+        Divider()
+      }
       VStack(alignment: .leading, spacing: 6) {
         Text("Steam account name")
           .font(.system(size: 12, weight: .medium))
