@@ -161,6 +161,10 @@ was run.
 - [ ] Command-F puts the keyboard in the page's search field (Settings' too); grid arrows, Home and End, Return and Space, Delete, Escape (a name field,
       then a popover, then selection mode), text editing and VoiceOver names stay
       correctly scoped. With Reduce Motion on, no equalizer, spinner or preview animates.
+- [ ] Command-Return on a focused tile does what a double click does: on Installed it applies the
+      wallpaper; on Steam Workshop it applies one in the library and otherwise downloads it (or
+      opens a collection); on pixiv it applies a saved page and otherwise downloads one (the page
+      the inspector shows, else the work's first). Return and Space on the same tile only select it.
 - [ ] Control-Command-S and Option-Command-I open and close the Filters sidebar and the
       inspector on Installed, Steam Workshop and pixiv (taking turns in a narrow window); the View
       menu says Show or Hide for each to match, and both are dimmed on Settings and under the guide.

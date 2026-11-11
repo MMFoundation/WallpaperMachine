@@ -1381,8 +1381,10 @@ never to `.shared`.
   `LibraryGridGeometryTests`, `LibraryTileRulesTests` (which empty state names what hides the
   tiles, a Workshop link or id that is not installed among them, but not an id being typed or one
   too short for Discover to look up), `TileGridLayoutTests` (at least three
-  columns, arrow keys held at the ends, Return or Space a click and Command-Return the double
-  click where the grid has one), `InstalledBrowserModelTests` (the reopen state and its
+  columns, arrow keys held at the ends, and the key rule: Return or Space a click and
+  Command-Return the double click where the grid has one; that the Steam Workshop and pixiv pages
+  give their grids one is checked by hand in [manual smoke](manual-smoke.md)),
+  `InstalledBrowserModelTests` (the reopen state and its
   cadence, Favorites and collections as views, a 10,000-wallpaper library filtered as the user
   types, Last used following the history and the search reading descriptions, links and
   collection names, each empty state and its recovery, a typed id saying it is not installed only

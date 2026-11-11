@@ -97,7 +97,8 @@ private struct PixivGrid: View {
 
   var body: some View {
     let model = controller.pixivBrowser
-    TileGrid(works, onActivate: { model.select($0) }) { work in
+    // Return or Space selects a focused tile, as a click does; Command-Return is the double click.
+    TileGrid(works, onActivate: { model.select($0) }, onOpen: { model.doubleClick($0) }) { work in
       PixivTileCell(work: work, isSelected: work.id == selectedID)
     }
     .scrollPosition($position)

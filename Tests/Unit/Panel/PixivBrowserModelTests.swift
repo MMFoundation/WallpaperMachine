@@ -335,6 +335,9 @@ final class PixivBrowserModelTests: MediaPanelTestCase {
       let model = controller.pixivBrowser
       try await openRanking(panel)
       let work = try XCTUnwrap(panel.pixiv.works.first { $0.id == "301" })
+      // The double click acts on a work nobody selected first. Command-Return on a focused tile
+      // calls it too, but that key path is checked by hand (manual-smoke.md), not here.
+      XCTAssertNil(controller.pixivSelection, "nothing is selected before the double click")
 
       await model.doubleClick(work)?.value
       XCTAssertNotNil(panel.pixiv.downloads.download(for: "pixiv-301-p0"))
