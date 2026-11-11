@@ -435,14 +435,19 @@ private struct LibraryAccountRow: View {
       } else if let qr = controller.steamQRSession {
         Button("Sign in with a QR code…") {
           showsQRSignIn = true
-          if qr.qr == .idle { qr.beginQRSignIn() }
+          if qr.qr == .idle {
+            controller.launch(PanelActionCoordinator.key("startSteamQRSignIn")) { try await controller.startSteamQRSignIn() }
+          }
         }
         .disabled(hasDownload)
         .popover(isPresented: $showsQRSignIn) {
           SteamQRSignInSection(session: qr) { showsQRSignIn = false }
             .padding(14)
             .frame(width: 340)
-            .onDisappear { if !qr.isSignedIn { qr.cancelQRSignIn() } }
+            .onDisappear {
+              guard !qr.isSignedIn else { return }
+              controller.launch(PanelActionCoordinator.key("cancelSteamQRSignIn")) { try await controller.cancelSteamQRSignIn() }
+            }
         }
       } else {
         Text("Not signed in")

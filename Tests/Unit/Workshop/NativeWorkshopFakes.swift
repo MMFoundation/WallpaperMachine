@@ -82,7 +82,7 @@ final class FakeSteam: @unchecked Sendable {
             var body = SteamProto.Writer()
             switch (packet.emsg, packet.header.string(12)) {
             case (SteamCMConnection.EMsg.clientLogon, _):
-                let token = try! SteamProto.Message(packet.body).string(108) ?? ""
+                let token = (try? SteamProto.Message(packet.body))?.string(108) ?? ""
                 let steamID = (try? SteamRefreshToken(token, accountName: "")).map(\.steamID) ?? 0
                 return [ScriptedCMSocket.logOnReply(eresult: logOnResult, steamID: steamID)]
             case (_, "PublishedFile.GetDetails#1"):

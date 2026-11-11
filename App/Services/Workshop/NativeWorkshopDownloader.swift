@@ -146,7 +146,7 @@ final class NativeWorkshopDownloader: WorkshopDownloadWorker {
         let folder = staging.appending(path: "steamapps/workshop/content/\(Self.wallpaperEngineApp)/\(id)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         beginTransfer()
-        _ = try await client.downloadWorkshopItem(id, into: folder, progress: progressHandler())
+        _ = try await client.downloadWorkshopItem(id, of: Self.wallpaperEngineApp, into: folder, progress: progressHandler())
     }
 
     private func beginTransfer() {
@@ -192,13 +192,38 @@ final class NativeWorkshopDownloader: WorkshopDownloadWorker {
         if case SteamCMConnection.Failure.requestFailed("the depot key", let eresult)? = error as? SteamCMConnection.Failure,
            eresult == 15 || eresult == 2 {
             wallpaperEngineOwnership = .notOwned
-            errorMessage = String(localized: "This Steam account does not own Wallpaper Engine. Please purchase it on Steam to download Wallpaper Engine wallpapers. You can still download from Pixiv, browse the Workshop, and view Wallpaper Engine wallpapers you already have.")
-        } else if let failure = error as? SteamNativeSession.Failure {
-            errorMessage = failure.localizedDescription
-        } else {
-            errorMessage = String(localized: "Steam download failed: \(error.localizedDescription)")
         }
+        errorMessage = Self.message(for: error)
         status = errorMessage ?? status
+    }
+
+    /// What the person reads about a failed native download: a few phrases in their language, the
+    /// technical detail staying in the log. Errors of the import and install steps that follow the
+    /// download are the app's own and already read well.
+    static func message(for error: any Error) -> String {
+        switch error {
+        case let failure as SteamNativeSession.Failure:
+            return failure.localizedDescription
+        case SteamCMConnection.Failure.requestFailed("the depot key", let eresult) where eresult == 15 || eresult == 2:
+            return String(localized: "This Steam account does not own Wallpaper Engine. Please purchase it on Steam to download Wallpaper Engine wallpapers. You can still download from Pixiv, browse the Workshop, and view Wallpaper Engine wallpapers you already have.")
+        case SteamContentClient.Failure.insufficientSpace(let needed, let available):
+            let formatter = ByteCountFormatter()
+            formatter.countStyle = .file
+            let neededText = formatter.string(fromByteCount: needed)
+            let availableText = formatter.string(fromByteCount: available)
+            return String(localized: "Not enough free disk space: this download needs about \(neededText) and only \(availableText) is available on the disk that holds your library. Free up space, then try again.")
+        case SteamContentClient.Failure.itemUnavailable, SteamContentClient.Failure.notDepotContent,
+             SteamContentClient.Failure.wrongApp:
+            return String(localized: "Steam does not offer this Workshop item for download. It may be private, removed, or not a Wallpaper Engine item.")
+        case SteamContentClient.Failure.http, SteamContentClient.Failure.noContentServers:
+            return String(localized: "Steam’s download servers did not deliver this wallpaper. Try again later.")
+        case is SteamContentClient.Failure, is SteamDepotCrypto.Failure, is SteamProto.DecodingError, is BridgeError:
+            return String(localized: "A downloaded file did not match what Steam listed, so nothing was installed. Try again.")
+        case is URLError, is SteamCMConnection.Failure, is SteamWebAPIError:
+            return String(localized: "Could not reach Steam. Check your internet connection and try again.")
+        default:
+            return error.localizedDescription
+        }
     }
 
     // MARK: - Control

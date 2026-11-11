@@ -1001,7 +1001,11 @@ authentication service over HTTPS (`IAuthenticationService/BeginAuthSessionViaQR
 and `PollAuthSessionStatus`, `SteamQRSignIn`), asking for a token issued for the
 Steam client (`platform_type` 1). Steam renews the code while it waits; the
 section shows the newest one, says when the phone has scanned it, and offers
-**Show a new code** once a code expires.
+**Show a new code** once a code expires. Its buttons go through the panel's actions
+(`PanelController.startSteamQRSignIn`, `cancelSteamQRSignIn`), and closing the
+download dialog or the Settings popover stops a code that was not approved, so
+nothing signs in once no code is on screen. The dialog does not offer it for the
+first-run guide's SteamCMD sign-in request, which a QR sign-in would not complete.
 
 The approved refresh token is kept in the login keychain as one generic password
 (`KeychainSteamClientTokenStore`, service `app.wallpapermachine.steam-client`),
@@ -1016,7 +1020,10 @@ can be revoked from any other device.
 While the QR sign-in exists, every Workshop and shared-resources request skips the
 SteamCMD and account stages (`WorkshopStore.stage(for:)`) and runs through
 `NativeWorkshopDownloader` instead of SteamCMD; a SteamCMD sign-in request
-(`steam-sign-in`) still uses SteamCMD. The native worker sits in the same queue,
+(`steam-sign-in`) still uses SteamCMD. The prerequisite observer tracks the QR
+sign-in, so a request waiting at those stages starts as soon as it completes, from
+the dialog or from Settings. A partial SteamCMD download kept for the item is
+discarded when the item goes to the native worker. The native worker sits in the same queue,
 behind the same `WorkshopDownloadWorker` protocol, so tiles, rows, pausing,
 cancelling and **Download next** behave as for SteamCMD. It lays an item out
 exactly as SteamCMD does (`<staging>/steamapps/workshop/content/431960/<id>`, in a
@@ -1026,11 +1033,21 @@ nothing changes: SteamCMD, the account form and the password prompts work as abo
 
 Every native job shares one logged-on connection (`SteamNativeSession`), so a batch
 signs in once and Steam's one-session-per-account limit never ends a sibling; the
-connection closes a minute after the last job. The app's client
-(`App/Services/Steam/`) logs on to a Steam connection manager over WebSocket with
-the token (`SteamCMConnection`), asks it for the item's details, the depot key and
-the manifest request code, and fetches the manifest and chunks from Steam's
-content servers over HTTPS (`SteamContentClient`). Chunks are fetched six at a time,
+connection closes a minute after the last job, and one that dropped is closed before
+another opens. The app's client (`App/Services/Steam/`) logs on to a Steam
+connection manager over WebSocket with the token (`SteamCMConnection`); a listed
+server that does not answer a ping within ten seconds is passed over for the next
+one (up to three). A logon that fails in any way closes its socket, and a request
+that is paused or cancelled stops waiting at once instead of at its 30-second
+timeout. The client asks the connection manager for the item's details, the depot
+key and the manifest request code, and fetches the manifest and chunks from Steam's
+content servers over HTTPS only: a server that lists no HTTPS support is skipped,
+and one that answers after another failed is tried first from then on
+(`SteamContentClient`). An item must belong to Wallpaper Engine (app 431960), since
+a preset's base comes from an author-written file. Before anything is written, the
+manifest's exact size must fit on the library's disk with the same allowance a
+SteamCMD download gets (`WorkshopDownloader.requiredFreeBytes`); otherwise the job
+fails with the same "Not enough free disk space" message. Chunks are fetched six at a time,
 decrypted (AES-256, `SteamDepotCrypto`), unpacked by the Rust bridge
 (`decompress_steam_content`: zstd, LZMA or zip, with their CRC checked) and checked
 against their SHA-1 before they are written; a file path from a manifest that would
@@ -1042,8 +1059,11 @@ A token Steam refuses at logon (invalid, expired or revoked) is removed from the
 keychain, and the job fails with "Steam no longer accepts this QR sign-in"; the next
 request falls back to SteamCMD unless the person scans a new code. Steam hands a
 depot key only to an account that owns Wallpaper Engine, so a refused key reports
-the account as not owning it. Native jobs keep no partial download: a paused or
-interrupted one fetches the item again when it resumes.
+the account as not owning it. Other failures read as one of a few phrases in the
+person's language (Steam unreachable, item not offered, content servers failed,
+content did not match), with the technical detail in the log and the failure log
+(`NativeWorkshopDownloader.message(for:)`). Native jobs keep no partial download: a
+paused or interrupted one fetches the item again when it resumes.
 
 ## Prompt and retry handling
 

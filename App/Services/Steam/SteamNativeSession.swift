@@ -147,13 +147,16 @@ final class SteamNativeSession {
         idleDisconnect?.cancel()
         if let client, let connection, await connection.isLoggedOn { return client }
         if let connecting {
+            // Joining a logon already under way: its failure reads the same for every job.
             do {
                 return try await connecting.value
             } catch {
                 users -= 1
-                throw error
+                throw Self.mapped(error)
             }
         }
+        // A connection that dropped is closed before another one opens.
+        if connection != nil { disconnect() }
         let connection = makeConnection()
         let client = makeClient(connection)
         let deviceName = deviceName
@@ -168,14 +171,21 @@ final class SteamNativeSession {
             self.connection = connection
             self.client = ready
             return ready
-        } catch SteamCMConnection.Failure.logOnRefused(let eresult) where Self.rejectedTokenResults.contains(eresult) {
-            users -= 1
-            forgetRejectedToken()
-            throw Failure.signInExpired
         } catch {
             users -= 1
-            throw error
+            let failure = Self.mapped(error)
+            if failure as? Failure == .signInExpired { forgetRejectedToken() }
+            throw failure
         }
+    }
+
+    /// A logon refusal that means the token itself is no longer good becomes `signInExpired`.
+    private static func mapped(_ error: any Error) -> any Error {
+        if case SteamCMConnection.Failure.logOnRefused(let eresult)? = error as? SteamCMConnection.Failure,
+           rejectedTokenResults.contains(eresult) {
+            return Failure.signInExpired
+        }
+        return error
     }
 
     /// A download is done with the connection; it closes a minute after the last one.
@@ -211,6 +221,9 @@ final class SteamNativeSession {
         if let refused = error as? SteamWebAPIError, refused.eresult == 9 || refused.eresult == 27 {
             return String(localized: "The QR code expired. Show a new one and scan it again.")
         }
-        return String(localized: "Steam sign-in failed: \(error.localizedDescription)")
+        if error is URLError {
+            return String(localized: "Could not reach Steam. Check your internet connection and try again.")
+        }
+        return String(localized: "Steam sign-in failed. Try again.")
     }
 }

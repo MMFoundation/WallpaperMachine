@@ -48,7 +48,7 @@ struct DownloadSetupStage: View {
   var body: some View {
     let setup = controller.steamSetup
     VStack(alignment: .leading, spacing: 12) {
-      if let qr = controller.steamQRSession {
+      if let qr = controller.steamQRSession(for: controller.downloads.session?.target) {
         SteamQRSignInSection(session: qr) { controller.downloads.continueDownload(includeResources: false) }
         Divider()
       }
@@ -173,7 +173,7 @@ struct DownloadAccountStage: View {
       PanelActionCoordinator.key("continueDownload", id: session.target))
     let trimmed = session.account.trimmingCharacters(in: .whitespacesAndNewlines)
     VStack(alignment: .leading, spacing: 12) {
-      if let qr = controller.steamQRSession {
+      if let qr = controller.steamQRSession(for: session.target) {
         SteamQRSignInSection(session: qr) { controller.downloads.continueDownload(includeResources: false) }
         Divider()
       }

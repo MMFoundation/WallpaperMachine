@@ -443,6 +443,8 @@ final class WorkshopStore {
       _ = sceneAssetsReady
       _ = username
       _ = downloader.savedAccount
+      // A QR sign-in made anywhere (Settings, the dialog) lets waiting requests go.
+      _ = nativeSession?.isSignedIn
       _ = downloader.isRunning
       _ = downloadRequests
     } onChange: { [weak self] in

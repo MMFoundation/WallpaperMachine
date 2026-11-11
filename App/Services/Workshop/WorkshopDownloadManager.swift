@@ -259,6 +259,8 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
     onImported: @escaping @MainActor () async throws -> Void
   ) {
     guard let account = session.accountName else { return }
+    // A partial SteamCMD download of this item is of no use to the native client, which starts over.
+    discardRetainedCheckpoint(id: item.id)
     let worker = NativeWorkshopDownloader(session: session, supportDirectory: sessionDirectory.deletingLastPathComponent())
     enqueue(id: item.id, item: item, username: account, rememberSession: true, worker: worker) { [weak worker] _ in
       worker?.start(item: item, library: library, onImported: onImported)
@@ -282,6 +284,7 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
     session: SteamNativeSession, destination: URL, onInstalled: @escaping @MainActor () throws -> Void
   ) {
     guard let account = session.accountName else { return }
+    discardRetainedCheckpoint(id: "scene-assets")
     let worker = NativeWorkshopDownloader(session: session, supportDirectory: sessionDirectory.deletingLastPathComponent())
     enqueue(id: "scene-assets", item: nil, username: account, rememberSession: true, worker: worker) { [weak worker] _ in
       worker?.installAssets(destination: destination, onInstalled: onInstalled)

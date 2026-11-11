@@ -55,6 +55,7 @@ final class ScriptedCMSocket: SteamCMSocket, SteamCMSocketOpening, @unchecked Se
     private let continuation: AsyncStream<Data>.Continuation
     private var sentPackets: [SteamCMConnection.Packet] = []
     private var iterator: AsyncStream<Data>.Iterator
+    private var closed = false
 
     init(respond: @escaping Responder) {
         self.respond = respond
@@ -63,6 +64,8 @@ final class ScriptedCMSocket: SteamCMSocket, SteamCMSocketOpening, @unchecked Se
     }
 
     var sent: [SteamCMConnection.Packet] { lock.withLock { sentPackets } }
+
+    var isClosed: Bool { lock.withLock { closed } }
 
     func open(endpoint: String) async throws -> any SteamCMSocket { self }
 
@@ -80,7 +83,10 @@ final class ScriptedCMSocket: SteamCMSocket, SteamCMSocketOpening, @unchecked Se
         return data
     }
 
-    func close() { continuation.finish() }
+    func close() {
+        lock.withLock { closed = true }
+        continuation.finish()
+    }
 
     /// A reply frame as Steam would send it.
     static func frame(_ emsg: UInt32, steamID: UInt64 = 0, sessionID: Int32 = 0, jobTarget: UInt64? = nil,
@@ -108,20 +114,29 @@ final class ScriptedCMSocket: SteamCMSocket, SteamCMSocketOpening, @unchecked Se
 
 final class FakeSteamContentFetcher: SteamContentFetching, @unchecked Sendable {
     private let lock = NSLock()
+    private let failingHost: String?
     private var files: [String: Data] = [:]
-    private var requested: [String] = []
+    private var requested: [(host: String, path: String)] = []
+
+    /// Every request to `failingHost` fails the way an unhealthy content server would.
+    init(failingHost: String? = nil) {
+        self.failingHost = failingHost
+    }
 
     func serve(_ path: String, _ data: Data) { lock.withLock { files[path] = data } }
 
-    var requests: [String] { lock.withLock { requested } }
+    var requests: [String] { lock.withLock { requested.map(\.path) } }
+
+    var hosts: [String] { lock.withLock { requested.map(\.host) } }
 
     func fetch(_ url: URL) async throws -> Data {
         let path = String(url.path.dropFirst())
+        let host = url.host() ?? ""
         let data = lock.withLock { () -> Data? in
-            requested.append(path)
-            return files[path]
+            requested.append((host, path))
+            return host == failingHost ? nil : files[path]
         }
-        guard let data else { throw SteamContentClient.Failure.http(status: 404, url: url) }
+        guard let data else { throw SteamContentClient.Failure.http(status: host == failingHost ? 503 : 404, url: url) }
         return data
     }
 }

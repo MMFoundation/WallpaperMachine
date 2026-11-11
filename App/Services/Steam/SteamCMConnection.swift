@@ -75,6 +75,8 @@ actor SteamCMConnection {
     private var sessionID: Int32 = 0
     private var nextJobID: UInt64 = 1
     private var jobs: [UInt64: CheckedContinuation<Packet, any Error>] = [:]
+    /// Each pending job's send-then-time-out task, cancelled as soon as the job ends.
+    private var timers: [UInt64: Task<Void, Never>] = [:]
     private var receiveTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
     private(set) var isLoggedOn = false
@@ -107,7 +109,16 @@ actor SteamCMConnection {
         steamID = token.steamID
         sessionID = 0
         startReceiving(from: socket)
+        do {
+            try await completeLogOn(with: token, machineName: machineName)
+        } catch {
+            // Whatever went wrong, the socket and its receive loop go with the attempt.
+            disconnect()
+            throw error
+        }
+    }
 
+    private func completeLogOn(with token: SteamRefreshToken, machineName: String) async throws {
         var body = SteamProto.Writer()
         body.varint(1, Self.protocolVersion)
         body.string(6, "english")
@@ -124,10 +135,7 @@ actor SteamCMConnection {
         let response = try await exchange(EMsg.clientLogon, body.data, awaiting: .logOn, what: "the sign-in")
         let result = try SteamProto.Message(response.body)
         let eresult = result.int32(1) ?? 2
-        guard eresult == 1 else {
-            disconnect()
-            throw Failure.logOnRefused(eresult: eresult)
-        }
+        guard eresult == 1 else { throw Failure.logOnRefused(eresult: eresult) }
         steamID = response.header.fixed64(1) ?? steamID
         sessionID = response.header.int32(2) ?? 0
         cellID = UInt32(truncatingIfNeeded: result.varint(7) ?? 0)
@@ -195,26 +203,36 @@ actor SteamCMConnection {
         }
         let data = frame(emsg, body: body, jobID: awaiting == .job ? jobID : Self.noJob, jobName: jobName)
         let timeout = timeout
-        return try await withCheckedThrowingContinuation { continuation in
-            jobs[jobID] = continuation
-            Task {
-                do {
-                    try await socket.send(data)
-                } catch {
-                    self.finish(jobID, with: .failure(error))
-                    return
+        // A paused or cancelled download must not wait for Steam to answer or for the timeout.
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else { return continuation.resume(throwing: CancellationError()) }
+                jobs[jobID] = continuation
+                timers[jobID] = Task { [weak self] in
+                    do {
+                        try await socket.send(data)
+                    } catch {
+                        await self?.finish(jobID, with: .failure(error))
+                        return
+                    }
+                    try? await Task.sleep(for: timeout)
+                    guard !Task.isCancelled else { return }
+                    await self?.finish(jobID, with: .failure(Failure.timedOut(what)))
                 }
-                try? await Task.sleep(for: timeout)
-                self.finish(jobID, with: .failure(Failure.timedOut(what)))
             }
+        } onCancel: {
+            Task { await self.finish(jobID, with: .failure(CancellationError())) }
         }
     }
 
     private func finish(_ jobID: UInt64, with result: Result<Packet, any Error>) {
+        timers.removeValue(forKey: jobID)?.cancel()
         jobs.removeValue(forKey: jobID)?.resume(with: result)
     }
 
     private func failAll(_ error: any Error) {
+        for timer in timers.values { timer.cancel() }
+        timers = [:]
         let pending = jobs
         jobs = [:]
         for continuation in pending.values { continuation.resume(throwing: error) }
@@ -374,8 +392,31 @@ struct URLSessionCMSocketOpener: SteamCMSocketOpening {
         // A Multi bundle can carry several large replies at once.
         task.maximumMessageSize = 32 * 1024 * 1024
         task.resume()
-        let socket = URLSessionCMSocket(task: task)
-        return socket
+        // Resuming connects in the background; a ping answered proves the server is there, so
+        // `logOn` can move on to the next listed server when it is not.
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                    task.sendPing { error in
+                        if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                    }
+                }
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(10))
+                // Cancelling the task answers the ping with an error, so the group can finish.
+                task.cancel(with: .goingAway, reason: nil)
+                throw SteamCMConnection.Failure.timedOut("the connection server")
+            }
+            do {
+                try await group.next()
+                group.cancelAll()
+            } catch {
+                task.cancel(with: .goingAway, reason: nil)
+                throw error
+            }
+        }
+        return URLSessionCMSocket(task: task)
     }
 }
 

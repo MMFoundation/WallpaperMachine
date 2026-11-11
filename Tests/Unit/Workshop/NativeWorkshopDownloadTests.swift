@@ -86,6 +86,58 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     XCTAssertNil(store.token, "a token Steam refused is removed from the keychain")
   }
 
+  func testDownloadsWaitingOnTheSameLogOnAllLearnTheSignInExpired() async throws {
+    let steam = try FakeSteam(item: itemID, files: [:])
+    steam.logOnResult = 5
+    let store = MemorySteamTokenStore(SteamTestToken.token())
+    let session = steam.session(store: store)
+    await session.restore()
+
+    // Both start before either logon answers, so the second joins the first.
+    let downloads = [Task { try await session.contentClient() }, Task { try await session.contentClient() }]
+    for download in downloads {
+      do {
+        _ = try await download.value
+        XCTFail("expected the refusal")
+      } catch {
+        XCTAssertEqual(error as? SteamNativeSession.Failure, .signInExpired)
+      }
+    }
+    XCTAssertEqual(steam.connectionsOpened, 1, "the second download joined the first logon")
+    XCTAssertNil(store.token)
+  }
+
+  func testNativeFailuresReadAsAFewPlainPhrases() {
+    let unreachable = NativeWorkshopDownloader.message(for: URLError(.notConnectedToInternet))
+    XCTAssertEqual(NativeWorkshopDownloader.message(for: SteamCMConnection.Failure.timedOut("the sign-in")), unreachable)
+    XCTAssertEqual(NativeWorkshopDownloader.message(for: SteamWebAPIError(method: "x", status: 502, eresult: nil)), unreachable)
+
+    let unavailable = NativeWorkshopDownloader.message(for: SteamContentClient.Failure.itemUnavailable(1, eresult: 9))
+    XCTAssertEqual(NativeWorkshopDownloader.message(for: SteamContentClient.Failure.wrongApp(1, app: 480)), unavailable)
+    XCTAssertEqual(NativeWorkshopDownloader.message(for: SteamContentClient.Failure.notDepotContent(1)), unavailable)
+
+    let servers = NativeWorkshopDownloader.message(for: SteamContentClient.Failure.noContentServers)
+    XCTAssertEqual(
+      NativeWorkshopDownloader.message(for: SteamContentClient.Failure.http(status: 503, url: URL(string: "https://cdn.test/")!)),
+      servers)
+
+    let mismatch = NativeWorkshopDownloader.message(for: SteamContentClient.Failure.chunkMismatch("ab"))
+    XCTAssertEqual(NativeWorkshopDownloader.message(for: SteamProto.DecodingError(reason: "bad")), mismatch)
+
+    XCTAssertEqual(Set([unreachable, unavailable, servers, mismatch]).count, 4)
+    for message in [unreachable, unavailable, servers, mismatch] {
+      XCTAssertFalse(message.contains("EResult"), message)
+    }
+    XCTAssertTrue(
+      NativeWorkshopDownloader.message(for: SteamCMConnection.Failure.requestFailed("the depot key", eresult: 15))
+        .contains("does not own Wallpaper Engine"))
+    XCTAssertTrue(
+      NativeWorkshopDownloader.message(for: SteamContentClient.Failure.insufficientSpace(needed: 2_000_000_000, available: 1_000))
+        .hasPrefix("Not enough free disk space"))
+    XCTAssertEqual(NativeWorkshopDownloader.message(for: SteamNativeSession.Failure.signInExpired),
+                   SteamNativeSession.Failure.signInExpired.localizedDescription)
+  }
+
   func testAQRSignInSkipsSteamCMDSetupAndTheAccountName() async throws {
     let root = try makeRoot()
     defer { try? FileManager.default.removeItem(at: root) }

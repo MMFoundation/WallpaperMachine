@@ -105,6 +105,65 @@ final class SteamCMConnectionTests: XCTestCase {
         await connection.disconnect()
     }
 
+    func testALogOnThatFailsClosesItsSocket() async throws {
+        let token = SteamTestToken.token()
+        let socket = ScriptedCMSocket { _ in [ScriptedCMSocket.logOnReply(eresult: 84, steamID: token.steamID)] }
+        let connection = SteamCMConnection(api: api(), opener: socket, timeout: .seconds(5))
+        _ = try? await connection.logOn(with: token, machineName: "Test Mac")
+        XCTAssertTrue(socket.isClosed, "a refused logon leaves no socket or receive loop behind")
+
+        let silent = ScriptedCMSocket { _ in [] }
+        let timedOut = SteamCMConnection(api: api(), opener: silent, timeout: .milliseconds(200))
+        do {
+            try await timedOut.logOn(with: token, machineName: "Test Mac")
+            XCTFail("expected a timeout")
+        } catch {
+            XCTAssertEqual(error as? SteamCMConnection.Failure, .timedOut("the sign-in"))
+        }
+        XCTAssertTrue(silent.isClosed)
+    }
+
+    func testAnUnreachableConnectionServerFallsBackToTheNextOne() async throws {
+        let token = SteamTestToken.token()
+        let api = FakeSteamWebAPI()
+        api.serve("ISteamDirectory/GetCMListForConnect/v1/", json: #"""
+            {"response":{"serverlist":[{"endpoint":"dead.test:443","type":"websockets"},
+            {"endpoint":"live.test:443","type":"websockets"}],"success":true}}
+            """#)
+        let socket = ScriptedCMSocket { packet in
+            packet.emsg == SteamCMConnection.EMsg.clientLogon ? [ScriptedCMSocket.logOnReply(steamID: token.steamID)] : []
+        }
+        let opener = FailingFirstOpener(socket: socket, failing: "dead.test:443")
+        let connection = SteamCMConnection(api: api, opener: opener, timeout: .seconds(5))
+        try await connection.logOn(with: token, machineName: "Test Mac")
+
+        let loggedOn = await connection.isLoggedOn
+        XCTAssertTrue(loggedOn)
+        XCTAssertEqual(opener.attempts, ["dead.test:443", "live.test:443"])
+        await connection.disconnect()
+    }
+
+    func testCancellingAPendingRequestStopsWaitingAtOnce() async throws {
+        let token = SteamTestToken.token()
+        let socket = ScriptedCMSocket { packet in
+            packet.emsg == SteamCMConnection.EMsg.clientLogon ? [ScriptedCMSocket.logOnReply(steamID: token.steamID)] : []
+        }
+        let connection = SteamCMConnection(api: api(), opener: socket, timeout: .seconds(30))
+        try await connection.logOn(with: token, machineName: "Test Mac")
+        let request = Task { try await connection.serviceMethod("Test.Silent#1", Data()) }
+        try await Task.sleep(for: .milliseconds(100))
+        let started = ContinuousClock.now
+        request.cancel()
+        do {
+            _ = try await request.value
+            XCTFail("expected the cancellation")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "got \(error)")
+        }
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(5), "a cancelled request does not wait for its timeout")
+        await connection.disconnect()
+    }
+
     func testRequestsBeforeLogOnAreRefused() async {
         let connection = SteamCMConnection(api: api(), opener: ScriptedCMSocket { _ in [] })
         do {
@@ -128,5 +187,27 @@ final class SteamCMConnectionTests: XCTestCase {
         body.varint(1, UInt64(payload.count))
         body.bytes(2, gzip)
         return ScriptedCMSocket.frame(SteamCMConnection.EMsg.multi, body: body)
+    }
+}
+
+/// Refuses one endpoint the way an unreachable server would, and opens the scripted socket
+/// for the rest.
+private final class FailingFirstOpener: SteamCMSocketOpening, @unchecked Sendable {
+    private let lock = NSLock()
+    private let socket: ScriptedCMSocket
+    private let failing: String
+    private var opened: [String] = []
+
+    init(socket: ScriptedCMSocket, failing: String) {
+        self.socket = socket
+        self.failing = failing
+    }
+
+    var attempts: [String] { lock.withLock { opened } }
+
+    func open(endpoint: String) async throws -> any SteamCMSocket {
+        lock.withLock { opened.append(endpoint) }
+        guard endpoint != failing else { throw SteamCMConnection.Failure.timedOut("the connection server") }
+        return socket
     }
 }

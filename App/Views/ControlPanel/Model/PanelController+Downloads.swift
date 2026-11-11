@@ -48,6 +48,23 @@ extension PanelController {
   /// The QR-code sign-in. Signed in, downloads skip SteamCMD and its password prompts.
   var steamQRSession: SteamNativeSession? { workshop.nativeSession }
 
+  /// The QR sign-in to offer for the dialog's request: never for the sign-in that SteamCMD runs
+  /// (the first-run guide's), which a QR sign-in would not complete.
+  func steamQRSession(for target: String?) -> SteamNativeSession? {
+    target == WorkshopStore.signInRequestID ? nil : workshop.nativeSession
+  }
+
+  /// Shows a Steam QR code to scan, replacing one already showing. The code keeps renewing until
+  /// it is approved, fails, or `cancelSteamQRSignIn` stops it.
+  func startSteamQRSignIn() async throws {
+    workshop.nativeSession?.beginQRSignIn()
+  }
+
+  /// Stops waiting for a QR code: the surface that showed it closed or the person cancelled.
+  func cancelSteamQRSignIn() async throws {
+    workshop.nativeSession?.cancelQRSignIn()
+  }
+
   /// The Steam account the next download would use and what the sign-in will remember.
   var steamAccount: SteamAccountState {
     SteamAccountState(

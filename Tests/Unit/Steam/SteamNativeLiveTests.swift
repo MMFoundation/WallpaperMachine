@@ -40,7 +40,7 @@ final class SteamNativeLiveTests: XCTestCase {
 
         let started = ContinuousClock.now
         // "Cyberpunk: Edgerunner-Lucy[4K]": a public 32 MB scene served only as depot content.
-        let item = try await client.downloadWorkshopItem(3_521_337_568, into: folder) { _, _ in }
+        let item = try await client.downloadWorkshopItem(3_521_337_568, of: 431_960, into: folder) { _, _ in }
         let elapsed = ContinuousClock.now - started
 
         // The shared scene resources: the current manifest and one real chunk, not all ~800 MB.

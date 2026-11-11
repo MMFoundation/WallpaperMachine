@@ -5,6 +5,7 @@ import SwiftUI
 /// Signing in to Steam by scanning a QR code with the Steam mobile app: no password and no
 /// SteamCMD. Shown where a Steam sign-in is asked for; `onSignedIn` runs once Steam approved.
 struct SteamQRSignInSection: View {
+  @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
   let session: SteamNativeSession
   var onSignedIn: @MainActor () -> Void = {}
@@ -14,7 +15,7 @@ struct SteamQRSignInSection: View {
       switch session.qr {
       case .idle:
         Button {
-          session.beginQRSignIn()
+          start()
         } label: {
           Label("Sign in with a QR code", systemImage: "qrcode")
         }
@@ -39,13 +40,13 @@ struct SteamQRSignInSection: View {
               Text("Open the Steam app on your phone, tap the Steam Guard shield, then “Scan a QR code”.")
                 .font(.system(size: 12))
             }
-            Button("Cancel") { session.cancelQRSignIn() }
+            Button("Cancel") { cancel() }
           }
         }
       case .failed(let message):
         DownloadNotice(kind: .error, text: message)
         Button {
-          session.beginQRSignIn()
+          start()
         } label: {
           Label("Show a new code", systemImage: "arrow.clockwise")
         }
@@ -55,6 +56,14 @@ struct SteamQRSignInSection: View {
     .onChange(of: session.isSignedIn) { _, signedIn in
       if signedIn { onSignedIn() }
     }
+  }
+
+  private func start() {
+    controller.launch(PanelActionCoordinator.key("startSteamQRSignIn")) { try await controller.startSteamQRSignIn() }
+  }
+
+  private func cancel() {
+    controller.launch(PanelActionCoordinator.key("cancelSteamQRSignIn")) { try await controller.cancelSteamQRSignIn() }
   }
 }
 

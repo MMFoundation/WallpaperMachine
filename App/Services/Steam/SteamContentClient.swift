@@ -56,9 +56,13 @@ actor SteamContentClient {
         case http(status: Int, url: URL)
         case unsafePath(String)
         case chunkMismatch(String)
+        case wrongApp(UInt64, app: UInt32)
+        case insufficientSpace(needed: Int64, available: Int64)
 
         var errorDescription: String? {
             switch self {
+            case .wrongApp(let id, let app): "Workshop item \(id) belongs to app \(app), not the one asked for"
+            case .insufficientSpace(let needed, let available): "Not enough free space (\(needed) bytes needed, \(available) available)"
             case .itemUnavailable(let id, let eresult): "Workshop item \(id) is not available (EResult \(eresult))"
             case .notDepotContent(let id): "Workshop item \(id) has no Steam depot content"
             case .noContentServers: "Steam listed no content server"
@@ -78,6 +82,7 @@ actor SteamContentClient {
     private let fetcher: any SteamContentFetching
     private let decompressor: any SteamContentDecompressing
     private let parallelChunks: Int
+    private let freeSpace: @Sendable (URL) -> Int64?
     private var depotKeys: [UInt32: Data] = [:]
     private var servers: [ContentServer] = []
 
@@ -85,8 +90,10 @@ actor SteamContentClient {
          api: any SteamWebAPI = URLSessionSteamWebAPI(),
          fetcher: any SteamContentFetching = URLSessionSteamContentFetcher(),
          decompressor: any SteamContentDecompressing = BridgeSteamContentDecompressor(),
-         parallelChunks: Int = 6) {
+         parallelChunks: Int = 6,
+         freeSpace: @escaping @Sendable (URL) -> Int64? = WorkshopDownloader.systemFreeSpace) {
         self.connection = connection
+        self.freeSpace = freeSpace
         self.api = api
         self.fetcher = fetcher
         self.decompressor = decompressor
@@ -108,11 +115,13 @@ actor SteamContentClient {
             timeUpdated: updated)
     }
 
-    /// Downloads a Workshop item's files into `directory`, which must exist and be empty.
-    func downloadWorkshopItem(_ id: UInt64, into directory: URL,
+    /// Downloads a Workshop item of `app` into `directory`, which must exist and be empty. An
+    /// item of any other app is refused: ids can come from author-written files (a preset's base).
+    func downloadWorkshopItem(_ id: UInt64, of app: UInt32, into directory: URL,
                               progress: @escaping @Sendable (_ done: UInt64, _ total: UInt64) -> Void) async throws -> SteamPublishedFile {
         let item = try await publishedFile(id)
         guard item.result == 1 else { throw Failure.itemUnavailable(id, eresult: item.result) }
+        guard item.appID == app else { throw Failure.wrongApp(id, app: item.appID) }
         guard item.manifestID != 0 else { throw Failure.notDepotContent(id) }
         // Workshop content lives in a depot named after the app that consumes it.
         let manifest = try await manifest(app: item.appID, depot: item.appID, manifestID: item.manifestID)
@@ -190,6 +199,14 @@ actor SteamContentClient {
                   progress: @escaping @Sendable (_ done: UInt64, _ total: UInt64) -> Void) async throws {
         let key = try await depotKey(app: app, depot: depot)
         let root = directory.standardizedFileURL
+        // The same allowance a SteamCMD download gets, from the manifest's exact size.
+        let measure = freeSpace
+        if let needed = WorkshopDownloader.requiredFreeBytes(
+               expected: Int64(clamping: manifest.totalSize), alreadyStaged: 0, installingAssets: false),
+           let available = await Task.detached(priority: .utility, operation: { measure(root) }).value,
+           available < needed {
+            throw Failure.insufficientSpace(needed: needed, available: available)
+        }
         let fileManager = FileManager.default
         var pieces: [(file: URL, chunk: SteamDepotManifest.Chunk)] = []
         for file in manifest.files {
@@ -269,9 +286,14 @@ actor SteamContentClient {
     private func fetchFromAnyServer(_ path: String) async throws -> Data {
         let servers = try await contentServers()
         var lastError: any Error = Failure.noContentServers
-        for server in servers.prefix(3) {
+        for (index, server) in servers.prefix(3).enumerated() {
             do {
-                return try await fetcher.fetch(server.base.appending(path: path))
+                let data = try await fetcher.fetch(server.base.appending(path: path))
+                // A server that answered after others failed goes first for the requests that follow.
+                if index > 0, let current = self.servers.firstIndex(of: server), current > 0 {
+                    self.servers.insert(self.servers.remove(at: current), at: 0)
+                }
+                return data
             } catch {
                 lastError = error
                 if error is CancellationError { throw error }
@@ -304,9 +326,9 @@ actor SteamContentClient {
             let response: Response
         }
         return try JSONDecoder().decode(Directory.self, from: data).response.servers.compactMap { server in
-            guard server.type == "CDN" || server.type == "SteamCache" else { return nil }
-            let scheme = server.https_support == "unavailable" ? "http" : "https"
-            return URL(string: "\(scheme)://\(server.host)/").map(ContentServer.init)
+            // Content travels over HTTPS only; a server that cannot serve it is skipped.
+            guard server.type == "CDN" || server.type == "SteamCache", server.https_support != "unavailable" else { return nil }
+            return URL(string: "https://\(server.host)/").map(ContentServer.init)
         }
     }
 }
