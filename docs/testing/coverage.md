@@ -1326,7 +1326,8 @@ never to `.shared`.
   screen, Split View and minimum sizes, the window title and subtitle, the target menu and
   inspector toggle on library pages only, a banner never widening the layout, shrinking step by
   step with the inspector open, Command-F reaching the Settings search, the tabs in the toolbar,
-  the Now Playing bar's height and its details popover), `ShellBannersTests`,
+  the Now Playing bar's height and its details popover), `ShellBannersTests` (the error line's
+  Dismiss a 24-point square),
   `ShellSearchFocusTests`, `PanelTitleTests`,
   `CollectionEditorModelTests` (create, rename and delete with the inline name field and the
   confirmation sheet), `PanelShellTests` (choosing a Settings section ends the search, a reveal is

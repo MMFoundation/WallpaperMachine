@@ -65,13 +65,15 @@ private struct ErrorBanner: View {
       systemImage: "exclamationmark.triangle.fill", tint: theme.surface.danger.color,
       message: message
     ) {
+      // The frame and the hit shape belong to the label: outside it, a plain button still takes
+      // clicks only on the glyph's own pixels.
       Button(action: dismiss) {
         Image(systemName: "xmark").font(.system(size: 10.5, weight: .bold))
+          .frame(width: 24, height: 24)
+          .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .foregroundStyle(theme.surface.danger.color)
-      .frame(width: 22, height: 22)
-      .contentShape(Rectangle())
       .help(L("Dismiss error"))
       .accessibilityLabel(Text(verbatim: L("Dismiss error")))
       .accessibilityIdentifier("dismiss-error")

@@ -161,6 +161,8 @@ was run.
 - [ ] Control-Command-S and Option-Command-I open and close the Filters sidebar and the
       inspector on Installed, Steam Workshop and pixiv (taking turns in a narrow window); the View
       menu says Show or Hide for each to match, and both are dimmed on Settings and under the guide.
+- [ ] The error banner's Dismiss and Recently used's close button take a click anywhere in
+      their 24-point square, not only on the cross itself.
 
 ## Discover, search and filters
 

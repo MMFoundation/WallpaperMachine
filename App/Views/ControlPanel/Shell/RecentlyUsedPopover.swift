@@ -65,12 +65,13 @@ struct RecentlyUsedPopover: View {
       Button {
         shell.closePopover()
       } label: {
+        // The frame and the hit shape are the label's, so the whole square takes the click.
         Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+          .frame(width: 24, height: 24)
+          .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .foregroundStyle(theme.surface.muted.color)
-      .frame(width: 22, height: 22)
-      .contentShape(Rectangle())
       .help(L("Close history"))
       .accessibilityLabel(Text(verbatim: L("Close history")))
       .accessibilityIdentifier("history-close")
