@@ -259,6 +259,23 @@ final class InstalledPageRenderTests: PanelTestCase {
     accessibilityElements(in: view).first { $0.identifier == identifier }
   }
 
+  func testTheFirstReadOfTheLibraryIsSaidOnceByTheGrid() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    panel.show()
+    let model = panel.controller.library
+    XCTAssertEqual(model.emptyState, .loading, "the library has not been read yet")
+    let hosted = HostedPanel(panel, size: Self.sizes[0])
+    try await hosted.settle(0.3)
+    XCTAssertEqual(model.emptyState, .loading, "still being read while the page is looked at")
+    XCTAssertNotNil(
+      element("installed-empty", in: hosted.hosting.view), "the grid says the library is being read")
+    XCTAssertNil(
+      element("installed-summary", in: hosted.hosting.view), "the bar under the grid does not say it again")
+    assertFits(hosted, Self.sizes[0], "loading")
+    hosted.close()
+  }
+
   func testTheActivePillSaysActiveInTheCornerAndMovesPastTheCheckOnlyWhileItShows() async throws {
     let panel = try makeController()
     defer { Task { await panel.shutdown() } }

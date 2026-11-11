@@ -1381,7 +1381,8 @@ never to `.shared`.
   and edge scrolling, every tile on screen playing its preview and the hover-only setting, the
   import popover and pill) and
   `InstalledPageRenderTests` (the page, footer, empty states, an empty collection among them, and
-  popovers in every language and appearance at the narrowest column, the scroll offset restored).
+  popovers in every language and appearance at the narrowest column, the first read of the
+  library said by the grid with no footer, the scroll offset restored).
 - Inspector: `InspectorPolicyTests`, `InspectorWordingTests` (among its sentences, what draws
   the wallpaper said in words, with the renderer's id kept as it is on the detail line; a reported
   problem leads the line and is never said to play; nothing named before the runtime reports it,

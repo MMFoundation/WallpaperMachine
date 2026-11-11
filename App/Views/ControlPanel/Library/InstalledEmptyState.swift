@@ -13,10 +13,13 @@ struct InstalledEmptyState: View {
     Group {
       switch state {
       case .loading:
+        // The ring stops in a hidden window and with Reduce Motion.
         PanelEmptyState(
           "Loading wallpapers", systemImage: "photo.stack",
           description: "Reading your wallpaper library."
-        )
+        ) {
+          ProgressRing(value: nil, lineWidth: 1.75).frame(width: 13, height: 13)
+        }
         .textSelectable()
       case .failed(let message):
         // An error keeps its symbol whatever the season, and its reason is the service's own words.

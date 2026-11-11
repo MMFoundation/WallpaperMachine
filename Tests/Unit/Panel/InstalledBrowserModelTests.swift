@@ -448,7 +448,9 @@ final class InstalledBrowserModelTests: PanelTestCase {
     defer { Task { await panel.shutdown() } }
     let model = panel.controller.library
     XCTAssertEqual(model.emptyState, .loading, "nothing is known until the library has been read")
+    XCTAssertNil(model.summary, "the grid says the library is being read; the bar under it does not say it again")
     try await installNames(panel, count: 3)
+    XCTAssertNotNil(model.summary, "once read, the bar counts what the grid shows")
     model.setText("zzz")
     XCTAssertEqual(model.emptyState, .search(text: "zzz"))
     model.setText("https://steamcommunity.com/sharedfiles/filedetails/?id=3632513108")

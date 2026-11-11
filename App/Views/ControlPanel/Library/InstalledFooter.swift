@@ -2,9 +2,9 @@ import SwiftUI
 
 /// The bar under the grid. It says how many wallpapers a search or filter leaves and offers the
 /// Workshop's updates; while some are ticked it becomes the tools for them: Add to playlist, the
-/// favorite tool, the collection tools and Move to Trash; and while the library loads it says so.
-/// What the last action did is said here too. With nothing to say it is not there: the window's
-/// subtitle already counts the view on show.
+/// favorite tool, the collection tools and Move to Trash. What the last action did is said here
+/// too. With nothing to say it is not there: the window's subtitle already counts the view on
+/// show, and the grid's own empty state says when the library is being read.
 struct InstalledFooter: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
@@ -18,18 +18,11 @@ struct InstalledFooter: View {
     let selected = model.selectedIDs.count
     // An empty grid says what is wrong itself; a count of zero under it adds nothing. What an
     // action just did is still said under it.
-    if controller.isLibraryLoading || selected > 0 || model.notice != nil
-      || (model.emptyState == nil && IdleBar.hasContent(controller))
-    {
+    if selected > 0 || model.notice != nil || (model.emptyState == nil && IdleBar.hasContent(controller)) {
       VStack(spacing: 0) {
         Rectangle().fill(theme.surface.divider.color).frame(height: 0.5)
         Group {
-          if controller.isLibraryLoading {
-            HStack(spacing: 8) {
-              ProgressRing(value: nil, lineWidth: 1.75).frame(width: 13, height: 13)
-              Text("Loading your library…")
-            }
-          } else if selected > 0 {
+          if selected > 0 {
             SelectionBar(count: selected, isCompact: width < Self.compactWidth)
           } else {
             IdleBar()

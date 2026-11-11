@@ -497,10 +497,10 @@ final class InstalledBrowserModel {
   /// How long the summary must stay the same before VoiceOver hears it.
   static let summaryDelay = Duration.milliseconds(500)
 
-  /// What the bar under the grid says first: that the library is loading, how many wallpapers are
-  /// ticked, or how many the grid shows. Nil while the grid stands empty: its empty state says why.
+  /// What the bar under the grid says first: how many wallpapers are ticked, or how many the grid
+  /// shows. Nil while the grid stands empty, the first read of the library among them: its empty
+  /// state says why.
   var summary: String? {
-    if controller.isLibraryLoading { return L("Loading your library…") }
     let selected = selectedIDs.count
     if selected > 0 { return L("\(selected) selected") }
     guard emptyState == nil else { return nil }

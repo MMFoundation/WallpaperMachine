@@ -4278,9 +4278,6 @@
     "Searching Steam Workshop…" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Buscando no Workshop da Steam…"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "Steam 창작마당 검색 중…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamワークショップを検索中…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在搜索 Steam 创意工坊…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在搜尋 Steam 工作坊…"}}}
     },
-    "Loading your library…" : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Carregando sua biblioteca…"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "보관함 불러오는 중…"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ライブラリを読み込み中…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在加载壁纸库…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在載入桌布庫…"}}}
-    },
     "%lld results" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "%lld resultados"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "결과 %lld개"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%lld件の結果"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%lld 个结果"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%lld 個結果"}}}
     },
