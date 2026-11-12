@@ -100,7 +100,9 @@ inspector's own, whose help names the target display while two or more displays 
 their own wallpaper ([Selection versus apply](control-panel.md#selection-versus-apply)), and
 **Show in library**. Double-clicking a tile, or `Command`-`Return` on a focused one, downloads
 the page the inspector shows (the first page of a work it does not show), and applies it once it
-is in the library. Downloads run two at a time in the order asked
+is in the library. While a page downloads, **Pause download** and an icon-only **Cancel** take
+the place of Download, drawn like the Steam Workshop inspector's plain buttons, and the
+inspector's links and type follow the other inspectors'. Downloads run two at a time in the order asked
 for, each with progress on its tile and in the toolbar's downloads button and shared
 Downloads popover; while one runs, a toolbar pill leads back to this page. They can be paused, resumed, cancelled or retried. Queue order and original-image checkpoints survive quitting and
 relaunch in the app's `Downloads/Pixiv` directory; restored jobs wait for an

@@ -545,8 +545,9 @@ place of **Modified**, and a display card with one says so under the display's n
 card starts collapsed under a one-line summary of its settings, and opens while it holds a
 value that waits. A preset's **Apply** is a plain button.
 
-The Installed and Steam Workshop inspectors share one set of plain buttons and links. A plain
-button (**Revert**, a preset's **Apply**, **Cancel**, **Choose…**) sets the same type at the
+The Installed, Steam Workshop and pixiv inspectors share one set of plain buttons and links. A
+plain button (**Revert**, a preset's **Apply**, **Cancel**, **Choose…**, pixiv's **Pause
+download**) sets the same type at the
 same size as the accent button beside it, on a translucent fill with a hairline that reads on a
 card in either appearance; a link is in the accent colour and underlines under the pointer. An
 action that removes something (**Move to Trash**, a preset's **Delete…** and **Delete**,

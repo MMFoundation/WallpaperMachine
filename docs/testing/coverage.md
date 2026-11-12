@@ -1578,8 +1578,9 @@ including R-18 and R-18G, request pacing, the session cookie reaching
 `https://www.pixiv.net` only, sign-in, log out, a keychain refusal and expiry
 against an in-memory store, resumable thumbnail and download transport, the
 download queue (concurrency, cancel, retry, shutdown) and packaging (sniffed
-formats, scaled display copies, staging reclaim), and the loading page's ring with no
-system spinner. None of it reaches pixiv: its
+formats, scaled display copies, staging reclaim), the loading page's ring with no
+system spinner, and the inspector's Pause download and Cancel taking Download's height
+when a save starts. None of it reaches pixiv: its
 signed-in answers and the real sign-in page are not covered
 ([pixiv](../features/pixiv.md#verification)).
 

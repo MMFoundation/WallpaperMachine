@@ -40,12 +40,9 @@ private struct PixivInspectorDetail: View {
         }
         if !work.tags.isEmpty { tags }
         links
-        Text(
+        InspectorNote(
           "Saved to your library as a still wallpaper that applies like any other. The artwork belongs to its artist."
         )
-        .font(.caption)
-        .foregroundStyle(theme.surface.muted.color)
-        .textSelection(.enabled)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(16)
@@ -86,7 +83,8 @@ private struct PixivInspectorDetail: View {
           } label: {
             Text(verbatim: work.authorName)
           }
-          .buttonStyle(.link)
+          .buttonStyle(.panelLink)
+          .font(.panel(.body))
           .help(L("View on pixiv"))
         } else {
           Text(verbatim: work.authorName)
@@ -118,7 +116,7 @@ private struct PixivInspectorDetail: View {
         if isMultiPage {
           PixivPageStepper(selection: selection)
           if selection.pages == .loading {
-            Text("Loading pages…").font(.caption).foregroundStyle(theme.surface.muted.color)
+            Text("Loading pages…").font(.panel(.caption)).foregroundStyle(theme.surface.muted.color)
           }
         }
         if let failure = pagesFailure {
@@ -126,8 +124,8 @@ private struct PixivInspectorDetail: View {
             Button("Try again") {
               controller.launch("pixivRetryPages") { try await controller.pixivRetryPages() }
             }
-            .buttonStyle(.link)
-            .controlSize(.small)
+            .buttonStyle(.panelLink)
+            .font(.panel(.callout))
             .accessibilityIdentifier("pixiv-retry-pages")
           }
         }
@@ -194,10 +192,8 @@ private struct PixivInspectorDetail: View {
       controller.downloads.pause(DownloadRow(job))
     } label: {
       Label("Pause download", systemImage: DownloadRowAction.pause.systemImage)
-        .frame(maxWidth: .infinity)
     }
-    .buttonStyle(.bordered)
-    .controlSize(.large)
+    .buttonStyle(.panelSecondary(size: .regular, expands: true))
     .accessibilityIdentifier("pixiv-pause")
   }
 
@@ -216,10 +212,8 @@ private struct PixivInspectorDetail: View {
       controller.downloads.cancel(DownloadRow(job))
     } label: {
       Image(systemName: DownloadRowAction.cancel.systemImage)
-        .font(.system(size: 12, weight: .semibold))
     }
-    .buttonStyle(.bordered)
-    .controlSize(.large)
+    .buttonStyle(.panelSecondary(size: .regular))
     .help(L("Cancel"))
     .accessibilityLabel(L("Cancel"))
     .accessibilityIdentifier("pixiv-cancel")
@@ -237,9 +231,8 @@ private struct PixivInspectorDetail: View {
           ProgressView()
         }
         Text(verbatim: job.inspectorStatus())
-          .font(.caption)
+          .font(.panel(.footnote).monospacedDigit())
           .foregroundStyle(theme.surface.muted.color)
-          .monospacedDigit()
       }
       .progressViewStyle(.linear)
       .accessibilityElement(children: .combine)
@@ -267,10 +260,10 @@ private struct PixivInspectorDetail: View {
             try await controller.showInstalled(id)
           }
         } label: {
-          Label("Show in library", systemImage: "photo.on.rectangle")
+          Label("Show in library", systemImage: "photo")
         }
-        .buttonStyle(.link)
-        .labelStyle(PixivLinkLabelStyle())
+        .buttonStyle(.panelLink)
+        .labelStyle(.panelLinkRow)
         .accessibilityIdentifier("pixiv-show-in-library")
       }
       if let url = ExternalLink.pixivArtwork(id: work.id) {
@@ -279,22 +272,13 @@ private struct PixivInspectorDetail: View {
         } label: {
           Label("View on pixiv", systemImage: "arrow.up.right.square")
         }
-        .buttonStyle(.link)
-        .labelStyle(PixivLinkLabelStyle())
+        .buttonStyle(.panelLink)
+        .labelStyle(.panelLinkRow)
         .accessibilityIdentifier("pixiv-view-on-pixiv")
       }
     }
-  }
-}
-
-/// A glyph and a title for a link-style button, with the glyphs in a column of one width so the
-/// titles of stacked links line up.
-private struct PixivLinkLabelStyle: LabelStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    HStack(spacing: 6) {
-      configuration.icon.frame(width: 16)
-      configuration.title
-    }
+    // The Steam Workshop inspector's links set the same type.
+    .font(.panel(.callout))
   }
 }
 

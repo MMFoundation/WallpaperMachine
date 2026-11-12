@@ -508,11 +508,23 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
     XCTAssertFalse(PixivActivityPill.isActive(in: controller))
     try await hosted.layout(at: sizes[1])
     let idle = hosted.contentToolbarItems.count
+    let inspector = hosted.standalone(PixivInspector(), size: NSSize(width: 300, height: 760))
+    func height(of identifier: String) throws -> CGFloat {
+      inspector.layoutSubtreeIfNeeded()
+      let found = AccessibilityElement(object: inspector).first(identifier: identifier)
+      return try XCTUnwrap(found, "\(identifier) is drawn").frame.height
+    }
+    let download = try height(of: "pixiv-download")
 
     try await controller.pixivDownload(workID: "302", page: 0)
     try await hosted.fixture.waitUntil(timeout: 5) {
       hosted.fixture.pixiv.downloads.download(for: "pixiv-302-p0")?.status == .downloading
     }
+    try await Task.sleep(for: .milliseconds(300))
+    // Pause and Cancel take Download's place at its height, the panel's quiet button beside the
+    // accent one, so nothing under them moves when a save starts.
+    XCTAssertEqual(try height(of: "pixiv-pause"), download, accuracy: 1)
+    XCTAssertEqual(try height(of: "pixiv-cancel"), download, accuracy: 1)
     XCTAssertTrue(PixivActivityPill.isActive(in: controller))
     XCTAssertEqual(controller.pixivActivity?.jobCount, 1)
     let work = try XCTUnwrap(hosted.fixture.pixiv.works.first { $0.id == "302" })
