@@ -28,16 +28,9 @@ struct SteamAuthKey: Hashable {
   /// The job whose password or Steam Guard request should open the dialog by itself, or nil. A
   /// password or a code is the one thing a download cannot finish alone, so it surfaces on its own;
   /// a saved sign-in never asks, so routine downloads stay on their tile. A request already
-  /// dismissed stays quiet, and so does the sign-in-only job while the first-run guide is open, a
-  /// rule from when the guide signed in to Steam itself: nothing in the panel starts that job now
-  /// (`PanelController.steamSignIn` has no caller).
-  static func surfaced(
-    in jobs: [DownloadRow], dismissed: Set<SteamAuthKey>, welcomeIsOpen: Bool
-  ) -> DownloadRow? {
-    let asking = jobs.first {
-      $0.isRunning && ($0.prompt != nil || $0.challenge != nil)
-        && !($0.isSignInOnly && welcomeIsOpen)
-    }
+  /// dismissed stays quiet.
+  static func surfaced(in jobs: [DownloadRow], dismissed: Set<SteamAuthKey>) -> DownloadRow? {
+    let asking = jobs.first { $0.isRunning && ($0.prompt != nil || $0.challenge != nil) }
     guard let asking, !dismissed.contains(SteamAuthKey(asking)) else { return nil }
     return asking
   }

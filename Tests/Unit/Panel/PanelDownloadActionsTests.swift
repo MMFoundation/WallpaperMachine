@@ -231,7 +231,7 @@ final class PanelDownloadActionsTests: MediaPanelTestCase {
       XCTAssertTrue(row.needsAuthentication)
       XCTAssertTrue(row.promptIsSecret)
       XCTAssertEqual(
-        controller.steamAuthRequestToSurface(dismissed: [], welcomeIsOpen: false)?.id, "222",
+        controller.steamAuthRequestToSurface(dismissed: [])?.id, "222",
         "a password request is what opens the dialog by itself")
       XCTAssertTrue(controller.downloadQueue.needsAttention)
       XCTAssertEqual(controller.downloadDialogTarget(afterRequesting: "222"), "222")
@@ -257,14 +257,13 @@ final class PanelDownloadActionsTests: MediaPanelTestCase {
   func testASecretGoesStraightToTheJobThatIsAskingAndNowhereElse() async throws {
     try await withPanel { panel in
       let controller = panel.controller
-      try await useFakeSteamCMD(panel)
-      try await controller.steamSignIn(account: "fixture", remembersSession: false)
-      let signIn = try await panel.waitForSignIn()
-      try await panel.waitUntil { signIn.worker.prompt == .password }
+      // The fake SteamCMD reads the answer to its prompt and records it, where Steam would take it.
+      try Data().write(to: panel.root.appendingPathComponent("reads-password"))
+      let job = try await startRunningJob(panel)
 
       for secret in ["", "line one\nline two", "with\0nul", "carriage\rreturn"] {
         do {
-          try await controller.submitDownloadInput(secret, toJob: WorkshopStore.signInRequestID)
+          try await controller.submitDownloadInput(secret, toJob: job.id)
           XCTFail("\(secret.debugDescription) is not an answer the dialog sends")
         } catch is InvalidControlValue {}
       }
@@ -272,12 +271,12 @@ final class PanelDownloadActionsTests: MediaPanelTestCase {
         try await controller.submitDownloadInput("secret", toJob: "no-such-job")
         XCTFail("an unknown job cannot be answered")
       } catch is InvalidControlValue {}
-      XCTAssertNotNil(signIn.worker.prompt, "no refused answer reached the job")
+      XCTAssertNotNil(job.worker.prompt, "no refused answer reached the job")
 
       let secret = "correct horse battery staple"
-      try await controller.submitDownloadInput(secret, toJob: WorkshopStore.signInRequestID)
-      try await panel.waitUntil { !signIn.isPending }
-      XCTAssertEqual(try String(contentsOf: panel.root.appendingPathComponent("password"), encoding: .utf8), secret)
+      try await controller.submitDownloadInput(secret, toJob: job.id)
+      let recorded = panel.root.appendingPathComponent("password")
+      try await panel.waitUntil { (try? String(contentsOf: recorded, encoding: .utf8)) == secret }
       for state in [
         String(describing: controller.steamDownloadRows), String(describing: controller.downloadQueue),
         String(describing: controller.steamSetup), String(describing: controller.steamAccount),
@@ -285,12 +284,13 @@ final class PanelDownloadActionsTests: MediaPanelTestCase {
       ] {
         XCTAssertFalse(state.contains(secret), "the secret is never part of any state the panel keeps")
       }
-      XCTAssertFalse(controller.downloadQueue.isVisible, "a finished sign-in is not a download")
 
       do {
-        try await controller.submitDownloadInput("again", toJob: WorkshopStore.signInRequestID)
+        try await controller.submitDownloadInput("again", toJob: job.id)
         XCTFail("a job that is not asking takes no answer")
       } catch is InvalidControlValue {}
+      try await controller.cancelDownload(id: job.id)
+      try await panel.waitUntil { !job.isPending }
     }
   }
 

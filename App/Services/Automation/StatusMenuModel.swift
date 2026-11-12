@@ -55,7 +55,7 @@ enum StatusMenuModel {
         var percent: Int?
 
         /// `jobs` are the downloads in progress (`WorkshopDownloadManager.inProgressTransfers`): not
-        /// paused ones, finished or failed ones, nor the sign-in that downloads nothing. A job
+        /// paused ones, nor finished or failed ones. A job
         /// still waiting for a slot or signing in has no byte counts, and the percent is left
         /// out instead of guessed. The last percent is Steam's own success line to claim, so a
         /// job that is still in progress never reads as complete.

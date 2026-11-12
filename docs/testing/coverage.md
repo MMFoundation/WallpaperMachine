@@ -1468,8 +1468,8 @@ never to `.shared`.
   `WorkshopItemDownloadTests`, `TileDownloadStateTests` (a paused ring's mark told apart from a
   waiting one's, the cross shown on hover or keyboard focus only by a ring whose click cancels), `ResultPagerTests`, `DownloadsModelTests`
   and `DownloadDialogResolutionTests` (the download dialog's stages, Not now, the hand-off card, a
-  rejected account, late failures, a sign-in-only job keeping its own sign-in, the account
-  requirement shown only until a Steam account is signed in), and
+  rejected account, late failures, the account requirement shown only until a Steam account is
+  signed in), and
   `WorkshopBrowserRenderTests` (the page, inspector, empty states, dialog stages and Downloads list
   in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label and
   its caption's tooltip with the whole title, an
@@ -1929,15 +1929,13 @@ and `WorkshopDownloadPersistenceTests`:
   running one); FIFO handoff after failure or cancel; shutdown never launching
   queued work. The ceiling is clamped to 1–6, persists across relaunch and
   reaches Swift from the Settings select as a number.
-- Sign-in and ownership: per-job secrets, saved-sign-in handoff and relaunch
+- Sign-in: per-job secrets, saved-sign-in handoff and relaunch
   without resubmitting secrets, which names are Steam login names (email addresses and a
   leading underscore included, `anonymous` never), account switching never restoring the previous
-  account's credentials, stale credential rejections not erasing a newer session,
-  ownership checks (owned, missing, unconfirmed, split output), and an anonymous
-  account unable to start a download.
+  account's credentials, stale credential rejections not erasing a newer session, and an
+  anonymous account unable to start a download.
 - Menu bar line (`testMenuBarCountsOnlyTransfersThatAreMovingOrWaiting`): a running job and a
-  waiting one count, a pausing job (still holding its slot), a paused one and the sign-in
-  job do not.
+  waiting one count, a pausing job (still holding its slot) and a paused one do not.
 - Content: staging reclaim limited to directories nothing is writing to,
   partial content never published on cancel or incomplete download, scene-asset
   installation keeping only validated assets, pause and checkpoint recovery of
@@ -1945,7 +1943,7 @@ and `WorkshopDownloadPersistenceTests`:
 - Free space (`DownloaderLifecycleTests`, injected disk): a download that cannot
   fit fails before SteamCMD launches with the needed and available sizes, Try again
   checks again, partial data already staged lowers the requirement, and an unknown
-  size, an unreadable disk or a sign-in-only run never blocks; an important-usage
+  size or an unreadable disk never blocks; an important-usage
   figure of 0 does not hide the plain free space. Scene assets use a
   fixed floor whatever is staged, since their depot download starts over; a
   checkpoint an earlier version kept is deleted, not restored. Depot progress is

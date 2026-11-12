@@ -219,11 +219,9 @@ final class DownloadsModelTests: MediaPanelTestCase {
         sceneAssets: nil, currentStage: nil, handoffTarget: nil)
       return resolution.flatMap(DownloadDialogView.placeholderSymbol(for:))
     }
-    let symbols = [
-      header(WorkshopStore.sceneAssetsRequestID), header(WorkshopStore.signInRequestID), header("222"),
-    ]
+    let symbols = [header(WorkshopStore.sceneAssetsRequestID), header("222")]
     XCTAssertTrue(symbols.allSatisfy { $0 != nil }, "never an empty frame: \(symbols)")
-    XCTAssertEqual(Set(symbols).count, 3, "the shared resources, the sign-in and an item each have their own")
+    XCTAssertEqual(Set(symbols).count, 2, "the shared resources and an item each have their own")
     XCTAssertNil(
       header("222", image: .steamThumbnail(URL(string: "https://images.steamusercontent.com/ugc/1/")!)),
       "an item's own picture is shown")
@@ -253,25 +251,6 @@ final class DownloadsModelTests: MediaPanelTestCase {
     }
   }
 
-  /// The sign-in-only job stays out of the dialog while the guide is open, a rule from when the
-  /// guide signed in to Steam itself; nothing in the panel starts that job now.
-  func testTheSignInOnlyJobIsNotSurfacedWhileTheGuideIsOpen() async throws {
-    try await withPanel { panel in
-      let controller = panel.controller
-      panel.show()
-      try await useFakeSteamCMD(panel)
-      try await controller.steamSignIn(account: "fixture", remembersSession: false)
-      let signIn = try await panel.waitForSignIn()
-      try await panel.waitUntil(timeout: 15) { signIn.worker.prompt == .password }
-      controller.shell.isWelcomeRequested = true
-      controller.downloads.reconcile()
-      XCTAssertFalse(controller.downloads.isDialogOpen, "the sign-in-only job stays quiet in the guide")
-      controller.shell.isWelcomeRequested = false
-      controller.downloads.reconcile()
-      XCTAssertTrue(controller.downloads.isDialogOpen, "outside the guide a password request opens it")
-    }
-  }
-
   func testNotNowSilencesWhatSteamIsAskingForAndEveryOtherJobThatIsAsking() async throws {
     try await withPanel { panel in
       let controller = panel.controller
@@ -287,7 +266,7 @@ final class DownloadsModelTests: MediaPanelTestCase {
       downloads.reconcile()
       XCTAssertFalse(downloads.isDialogOpen, "that request stays quiet")
       XCTAssertNil(
-        controller.steamAuthRequestToSurface(dismissed: downloads.dismissedAuth, welcomeIsOpen: false))
+        controller.steamAuthRequestToSurface(dismissed: downloads.dismissedAuth))
       // The tile's shield, a queue row or Settings reopen it on request.
       downloads.openDialog(for: job.id)
       XCTAssertEqual(downloads.resolution?.stage, .auth)
@@ -385,17 +364,15 @@ final class DownloadsModelTests: MediaPanelTestCase {
     try await withPanel { panel in
       let controller = panel.controller
       let downloads = controller.downloads
-      try await useFakeSteamCMD(panel)
-      try await controller.steamSignIn(account: "fixture", remembersSession: false)
-      let signIn = try await panel.waitForSignIn()
-      try await panel.waitUntil(timeout: 15) { signIn.worker.prompt == .password }
-      downloads.openDialog(for: WorkshopStore.signInRequestID)
+      // The fake SteamCMD reads the answer to its prompt and records it, where Steam would take it.
+      try Data().write(to: panel.root.appendingPathComponent("reads-password"))
+      let job = try await startPromptingJob(panel)
+      downloads.openDialog(for: job.id)
 
       let secret = "correct horse battery staple"
-      await downloads.submitSecret(secret, toJob: WorkshopStore.signInRequestID).value
-      try await panel.waitUntil(timeout: 15) { !signIn.isPending }
-      XCTAssertEqual(
-        try String(contentsOf: panel.root.appendingPathComponent("password"), encoding: .utf8), secret)
+      await downloads.submitSecret(secret, toJob: job.id).value
+      let recorded = panel.root.appendingPathComponent("password")
+      try await panel.waitUntil(timeout: 15) { (try? String(contentsOf: recorded, encoding: .utf8)) == secret }
       var seen = String(describing: Mirror(reflecting: downloads).children.map { "\($0.value)" })
       seen += String(describing: Mirror(reflecting: try XCTUnwrap(downloads.session)).children.map { "\($0.value)" })
       XCTAssertFalse(seen.contains(secret), "the model holds no copy of what was typed")
@@ -521,20 +498,6 @@ final class DownloadsModelTests: MediaPanelTestCase {
       await controller.downloads.requestSceneAssets().value
       XCTAssertTrue(DownloadsToolbarButton.isActive(in: controller), "a request that waits is something to list")
       try await controller.removeDownloadRequest(id: WorkshopStore.sceneAssetsRequestID)
-      XCTAssertFalse(DownloadsToolbarButton.isActive(in: controller))
-    }
-  }
-
-  func testAFinishedSignInIsNotADownloadAndNeverShowsTheButton() async throws {
-    try await withPanel { panel in
-      let controller = panel.controller
-      try await useFakeSteamCMD(panel)
-      try await controller.steamSignIn(account: "fixture", remembersSession: false)
-      let signIn = try await panel.waitForSignIn()
-      try await panel.waitUntil(timeout: 15) { signIn.worker.prompt == .password }
-      XCTAssertTrue(DownloadsToolbarButton.isActive(in: controller), "while it runs it is shown")
-      try await controller.submitDownloadInput("secret", toJob: WorkshopStore.signInRequestID)
-      try await panel.waitUntil(timeout: 15) { !signIn.isPending }
       XCTAssertFalse(DownloadsToolbarButton.isActive(in: controller))
     }
   }

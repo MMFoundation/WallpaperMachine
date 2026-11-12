@@ -59,16 +59,19 @@ final class DownloaderFailureOutputTests: DownloaderTestCase {
     XCTAssertTrue(reported.isEmpty)
     XCTAssertNotNil(job.worker.failureOutput, "A reported failure still keeps what SteamCMD printed")
 
-    let signedIn = try makeRuntime("printf 'Waiting for user info...OK\\n'")
-    defer { try? FileManager.default.removeItem(at: signedIn) }
-    let downloader = WorkshopDownloader(
-      sessionDirectory: signedIn.appendingPathComponent("SteamSession"),
-      runtimeProvider: ShellRuntimeProvider(), networkMonitor: FixtureNetworkMonitor())
-    downloader.signIn(
-      username: "localtest", executable: signedIn.appendingPathComponent("runtime/steamcmd"),
-      root: signedIn, rememberSession: false)
+    let finished = try makeRuntime(
+      """
+      printf 'Waiting for user info...OK\\nDownloading item 123456 ...\\n'
+      mkdir -p steamapps/workshop/content/431960/123456
+      printf '{"title":"Finished fixture","type":"video","file":"movie.mp4"}' > steamapps/workshop/content/431960/123456/project.json
+      printf 'downloaded-content' > steamapps/workshop/content/431960/123456/movie.mp4
+      printf 'Success. Downloaded item 123456\\n'
+      """)
+    defer { try? FileManager.default.removeItem(at: finished) }
+    let downloader = startDownload(in: finished, rememberSession: false)
     try await waitForStop(downloader)
     XCTAssertNil(downloader.errorMessage)
+    XCTAssertEqual(downloader.downloadedID, item.id)
     XCTAssertNil(downloader.failureOutput)
     XCTAssertFalse(downloader.endedBeforeSignInUnexplained)
   }

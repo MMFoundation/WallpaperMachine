@@ -162,8 +162,7 @@ final class DownloadsModel {
       if stage != resolution.stage { stage = resolution.stage }
       if resolution.beginsHandoff { beginHandoff(resolution.subjectID) }
     } else if controller.presentation.isVisible,
-      let asking = controller.steamAuthRequestToSurface(
-        dismissed: dismissedAuth, welcomeIsOpen: controller.shell.isWelcomeOpen)
+      let asking = controller.steamAuthRequestToSurface(dismissed: dismissedAuth)
     {
       open(asking.id)
     }

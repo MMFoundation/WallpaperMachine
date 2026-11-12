@@ -102,7 +102,7 @@ final class DownloadQueueTests: DownloaderTestCase {
   }
 
   /// The menu bar's line counts what is moving or waiting. A paused job stays pending until its
-  /// session has closed, and the sign-in downloads nothing, so neither may count.
+  /// session has closed, so it may not count.
   func testMenuBarCountsOnlyTransfersThatAreMovingOrWaiting() async throws {
     let root = try makeRuntime(
       """
@@ -124,15 +124,13 @@ final class DownloadQueueTests: DownloaderTestCase {
         username: "localtest", executable: executable,
         library: root.appendingPathComponent("Library"), rememberSession: false, onImported: {})
     }
-    manager.signIn(username: "localtest", executable: executable, root: root, rememberSession: false)
     do {
       let first = try XCTUnwrap(manager.download(for: "1"))
       let second = try XCTUnwrap(manager.download(for: "2"))
       try await waitUntil { first.worker.prompt == .password }
       XCTAssertTrue(second.isQueued)
-      XCTAssertNotNil(manager.signIn, "the sign-in job is waiting in line too")
 
-      XCTAssertEqual(manager.inProgressTransfers.count, 2, "the running job and the waiting one, not the sign-in")
+      XCTAssertEqual(manager.inProgressTransfers.count, 2, "the running job and the waiting one")
       XCTAssertEqual(StatusMenuModel.DownloadActivity.make(manager.inProgressTransfers),
                      StatusMenuModel.DownloadActivity(count: 2, percent: nil),
                      "neither has byte counts yet, so no percent is guessed")
@@ -145,7 +143,6 @@ final class DownloadQueueTests: DownloaderTestCase {
       XCTAssertTrue(manager.inProgressTransfers.isEmpty)
       XCTAssertNil(StatusMenuModel.DownloadActivity.make(manager.inProgressTransfers))
 
-      if let signIn = manager.signIn { manager.cancel(signIn) }
       await manager.shutdown()
       XCTAssertTrue(manager.inProgressTransfers.isEmpty)
     } catch {

@@ -989,41 +989,10 @@ final class WorkshopDownloadIntentTests: XCTestCase {
       fixture.store.downloader.downloads.map(\.id), [WorkshopStore.sceneAssetsRequestID])
   }
 
-  /// An installed scene wallpaper needs no consent step once its shared assets exist.
-  /// A sign-in ahead of any download (which nothing in the panel starts now): the intent waits for
-  /// SteamCMD like a download, never asks about shared resources, and runs as a sign-in-only job.
-  func testSignInRequestWaitsForSetupThenSignsInWithoutADownload() async throws {
-    let fixture = try makeFixture()
-    fixture.store.requestSignIn(account: "localtest", rememberSession: true, bridge: fixture.bridge)
-    XCTAssertEqual(fixture.store.downloadRequests.map(\.id), [WorkshopStore.signInRequestID])
-    XCTAssertEqual(try stage(fixture.store), .setup)
-    XCTAssertTrue(fixture.store.downloader.downloads.isEmpty)
-
-    try await makeSetupReady(fixture)
-    fixture.store.resumeDownloadRequests(bridge: fixture.bridge)
-    XCTAssertTrue(fixture.store.downloadRequests.isEmpty, "Finishing setup resumes the sign-in on its own")
-    let job = try XCTUnwrap(fixture.store.downloader.signIn)
-    XCTAssertEqual(fixture.store.downloader.downloads.map(\.id), [WorkshopStore.signInRequestID])
-    XCTAssertTrue(job.isSignIn)
-    XCTAssertNil(job.item)
-    try await waitUntil { !job.isQueued }
-    XCTAssertTrue(job.steamCMD?.isSigningInOnly == true)
-    XCTAssertFalse(job.steamCMD?.isInstallingAssets ?? true)
-
-    // A second request while one runs shows the running job instead of starting another.
-    fixture.store.requestSignIn(account: "localtest", rememberSession: true, bridge: fixture.bridge)
-    XCTAssertEqual(fixture.store.downloader.downloads.count, 1)
-    XCTAssertEqual(fixture.store.selectedDownloadID, WorkshopStore.signInRequestID)
-
-    // An empty account is refused up front and retained for correction, as for a download.
-    fixture.store.downloader.cancel(job)
-    try await waitUntil { !job.isPending }
-    fixture.store.requestSignIn(account: "", rememberSession: true, bridge: fixture.bridge)
-    XCTAssertEqual(try stage(fixture.store), .account)
-    XCTAssertEqual(fixture.store.downloader.downloads.count, 1, "No job starts without an account")
-  }
-
-  func testSignInThatEndsForNoReasonIsTriedAgainOnceAfterSteamCMDChanged() async throws {
+  /// SteamCMD ending a download before Steam accepted the sign-in, with no reason given, has
+  /// Valve's newest looked for; a download that failed so is tried again once, and only when
+  /// SteamCMD changed.
+  func testADownloadThatEndsForNoReasonIsTriedAgainOnceAfterSteamCMDChanged() async throws {
     let fixture = try makeFixture()
     let launches = home.appendingPathComponent("launches")
     try Data("#!/bin/sh\nprintf x >> '\(launches.path)'\nprintf 'Logging in user to Steam Public...\\n'\nexit 8\n".utf8)
@@ -1035,12 +1004,13 @@ final class WorkshopDownloadIntentTests: XCTestCase {
       return updated
     }
     try await makeSetupReady(fixture)
+    fixture.store.username = "localtest"
     func launched() -> Int { (try? Data(contentsOf: launches).count) ?? 0 }
 
-    fixture.store.requestSignIn(account: "localtest", rememberSession: true, bridge: fixture.bridge)
-    try await waitUntil { launched() == 2 && fixture.store.downloader.signIn?.isPending == false }
+    fixture.store.requestDownload(item: video, rememberSession: true, bridge: fixture.bridge)
+    try await waitUntil { launched() == 2 && fixture.store.downloader.download(for: video.id)?.isPending == false }
     XCTAssertEqual(checks, [SteamCMDSetupStore.failureUpdateCheckInterval])
-    XCTAssertNotNil(fixture.store.downloader.signIn?.errorMessage)
+    XCTAssertNotNil(fixture.store.downloader.download(for: video.id)?.errorMessage)
     // The retry failed too: what an update could fix, it did not, so the failure is the user's.
     try await Task.sleep(for: .milliseconds(200))
     XCTAssertEqual(launched(), 2)
@@ -1049,13 +1019,17 @@ final class WorkshopDownloadIntentTests: XCTestCase {
     // When SteamCMD did not change, nothing is tried again.
     updated = false
     try FileManager.default.removeItem(at: launches)
-    fixture.store.requestDownload(item: video, rememberSession: true, bridge: fixture.bridge)
+    let other = WorkshopItem(
+      id: "444", title: "Second video", creator: "Test", summary: "",
+      previewURL: nil, tags: ["Video"], size: 0, subscriptions: 0)
+    fixture.store.requestDownload(item: other, rememberSession: true, bridge: fixture.bridge)
     try await waitUntil { checks.count == 2 }
     try await Task.sleep(for: .milliseconds(200))
     XCTAssertEqual(launched(), 1)
-    XCTAssertEqual(fixture.store.downloader.download(for: video.id)?.isPending, false)
+    XCTAssertEqual(fixture.store.downloader.download(for: other.id)?.isPending, false)
   }
 
+  /// An installed scene wallpaper needs no consent step once its shared assets exist.
   func testSceneSkipsResourceConsentWhenAssetsAreReady() async throws {
     let fixture = try makeFixture(sceneAssetsReady: true)
     try await makeSetupReady(fixture)
@@ -1092,6 +1066,25 @@ final class WorkshopDownloadIntentTests: XCTestCase {
     XCTAssertTrue(restored.store.resumeDownloadRequest(id: video.id, bridge: restored.bridge))
     try await waitUntil { restored.store.downloader.download(for: self.video.id)?.isPending == true }
     XCTAssertTrue(restored.store.downloadRequests.isEmpty)
+  }
+
+  /// Only the shared assets are requested without an item. Any other item-less request in the
+  /// saved file has nothing to download: a relaunch drops it rather than taking it for them.
+  func testAnItemlessRequestOtherThanTheSharedAssetsIsDroppedOnRelaunch() throws {
+    let original = try makeFixture()
+    original.store.username = "localtest"
+    original.store.requestDownload(item: video, rememberSession: false, bridge: original.bridge)
+    let file = home.appendingPathComponent("Downloads/workshop-requests.json")
+    var saved = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [[String: Any]])
+    var itemless = try XCTUnwrap(saved.first)
+    itemless["id"] = "itemless"
+    itemless.removeValue(forKey: "item")
+    saved.append(itemless)
+    try JSONSerialization.data(withJSONObject: saved).write(to: file)
+
+    let restored = try makeFixture()
+    XCTAssertEqual(restored.store.downloadRequests.map(\.id), [video.id])
   }
 
   func testCancellingARestoredJobWaitingForSetupCannotRestartItLater() async throws {

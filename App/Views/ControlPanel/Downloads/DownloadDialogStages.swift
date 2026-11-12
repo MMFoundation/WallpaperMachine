@@ -81,7 +81,7 @@ struct DownloadSetupStage: View {
     let setup = controller.steamSetup
     VStack(alignment: .leading, spacing: 12) {
       AccountRequirementNote()
-      if let qr = controller.steamQRSession(for: controller.downloads.session?.target) {
+      if let qr = controller.steamQRSession {
         SteamQRSignInSection(session: qr) { controller.downloads.continueDownload(includeResources: false) }
         Divider()
       }
@@ -204,7 +204,7 @@ struct DownloadAccountStage: View {
   var body: some View {
     let working = controller.isBusy(
       PanelActionCoordinator.key("continueDownload", id: session.target))
-    if let qr = controller.steamQRSession(for: session.target), let account = qr.accountName {
+    if let qr = controller.steamQRSession, let account = qr.accountName {
       signedInWithQRCode(account: account, working: working)
     } else {
       accountForm(working: working)
@@ -238,7 +238,7 @@ struct DownloadAccountStage: View {
     let trimmed = session.account.trimmingCharacters(in: .whitespacesAndNewlines)
     return VStack(alignment: .leading, spacing: 12) {
       AccountRequirementNote()
-      if let qr = controller.steamQRSession(for: session.target) {
+      if let qr = controller.steamQRSession {
         SteamQRSignInSection(session: qr) { controller.downloads.continueDownload(includeResources: false) }
         Divider()
       }
@@ -597,15 +597,13 @@ struct DownloadStartedStage: View {
   }
 
   private func title(shared: Bool, subject: String) -> String {
-    if job.isSignInOnly { return L("Signed in to Steam") }
-    return shared
+    shared
       ? L("Signed in. Shared resources are downloading first")
       : L("Signed in. \(subject) is downloading")
   }
 
   private func note(shared: Bool, subject: String) -> String {
-    if job.isSignInOnly { return L("Downloads will use this sign-in.") }
-    return shared
+    shared
       ? L("\(subject) starts automatically once they are installed. You can keep using the app meanwhile.")
       : L("You can keep using the app. Progress shows on the wallpaper and in the downloads list.")
   }

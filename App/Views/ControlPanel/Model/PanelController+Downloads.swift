@@ -24,13 +24,10 @@ extension PanelController {
     workshop.downloader.downloads.map(mediaDownloadRow)
   }
 
-  /// The Steam job of this item (or `WorkshopStore.sceneAssetsRequestID`, or the sign-in's id).
+  /// The Steam job of this item (or `WorkshopStore.sceneAssetsRequestID`).
   func steamDownloadRow(for id: String) -> DownloadRow? {
     workshop.downloader.downloads.first { $0.id == id }.map(mediaDownloadRow)
   }
-
-  /// The sign-in-only job `steamSignIn` starts, while it exists; nothing in the panel starts it now.
-  var steamSignInRow: DownloadRow? { steamDownloadRow(for: WorkshopStore.signInRequestID) }
 
   /// Every retained request, with the prerequisite each still needs.
   var downloadRequestRows: [DownloadRequestRow] {
@@ -51,12 +48,6 @@ extension PanelController {
   /// Whether a Steam download can be tried again right now: SteamCMD is installed, or the QR
   /// sign-in downloads without it.
   var steamDownloadsReady: Bool { steamSetup.isReady || workshop.nativeSession?.isSignedIn == true }
-
-  /// The QR sign-in to offer for the dialog's request: never for the sign-in-only job SteamCMD
-  /// runs (`steamSignIn`'s), which a QR sign-in would not complete.
-  func steamQRSession(for target: String?) -> SteamNativeSession? {
-    target == WorkshopStore.signInRequestID ? nil : workshop.nativeSession
-  }
 
   /// Shows a Steam QR code to scan, replacing one already showing. The code keeps renewing until
   /// it is approved, fails, or `cancelSteamQRSignIn` stops it.
@@ -90,11 +81,9 @@ extension PanelController {
   }
 
   /// The job whose password or Steam Guard request should open the download dialog by itself, or
-  /// nil. `dismissed` holds the requests the user closed with **Not now**; `welcomeIsOpen` keeps
-  /// the sign-in-only job out of the dialog while the first-run guide is open, a rule from when the
-  /// guide signed in to Steam itself.
-  func steamAuthRequestToSurface(dismissed: Set<SteamAuthKey>, welcomeIsOpen: Bool) -> DownloadRow? {
-    SteamAuthKey.surfaced(in: steamDownloadRows, dismissed: dismissed, welcomeIsOpen: welcomeIsOpen)
+  /// nil. `dismissed` holds the requests the user closed with **Not now**.
+  func steamAuthRequestToSurface(dismissed: Set<SteamAuthKey>) -> DownloadRow? {
+    SteamAuthKey.surfaced(in: steamDownloadRows, dismissed: dismissed)
   }
 
   /// Where the download dialog stands for the item it is open on, or nil when it should close. A
@@ -221,19 +210,6 @@ extension PanelController {
     }
   }
 
-  /// Signs in to Steam without downloading anything, so the account and its saved sign-in are in
-  /// place before the first download. Nothing in the panel calls it now: the first-run guide asks
-  /// for no Steam account, and Settings signs in with a QR code. It rides the same ladder as a
-  /// download: SteamCMD must be set up first. The password is never an argument: Steam
-  /// asks for it through the job's own prompt, answered with `submitDownloadInput`.
-  func steamSignIn(account: String, remembersSession keepsSession: Bool) async throws {
-    try await run(.queued) {
-      remembersSession = keepsSession
-      workshop.requestSignIn(account: account, rememberSession: keepsSession, bridge: store)
-      try checkDownloadError()
-    }
-  }
-
   /// Drops a retained request, its apply choice and its kept checkpoint. A request that just
   /// started is already gone, so this is not an error.
   func removeDownloadRequest(id: String) async throws {
@@ -260,7 +236,7 @@ extension PanelController {
     try await run(.immediate) { workshop.cancelDownload(id: id) }
   }
 
-  /// Pauses a running or queued download, keeping its content. The sign-in job cannot be paused.
+  /// Pauses a running or queued download, keeping its content.
   func pauseDownload(id: String) async throws {
     try await run(.immediate) {
       guard let job = workshop.downloader.downloads.first(where: { $0.id == id }) else {

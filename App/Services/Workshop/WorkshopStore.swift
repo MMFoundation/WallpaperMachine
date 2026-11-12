@@ -34,8 +34,7 @@ enum WorkshopDownloadStage: String, Sendable {
 /// A retained download intent. One click keeps the wallpaper the user asked for while
 /// the runtime, the Steam account, and shared scene assets are resolved in turn.
 struct WorkshopDownloadRequest: Identifiable, Codable, Sendable {
-  /// Workshop item id, `WorkshopStore.sceneAssetsRequestID` for the shared assets download, or
-  /// `WorkshopStore.signInRequestID` for a sign-in that downloads nothing.
+  /// Workshop item id, or `WorkshopStore.sceneAssetsRequestID` for the shared assets download.
   let id: String
   let item: WorkshopItem?
   var account: String
@@ -190,7 +189,6 @@ final class WorkshopStore {
   @ObservationIgnored var updateSteamCMD: @MainActor (TimeInterval) async -> Bool = { _ in false }
 
   static let sceneAssetsRequestID = "scene-assets"
-  static let signInRequestID = WorkshopDownloadManager.signInID
 
   var hasDownloadActivity: Bool { !downloader.downloads.isEmpty || !downloadRequests.isEmpty }
   var selectedDownload: WorkshopDownload? {
@@ -259,7 +257,9 @@ final class WorkshopStore {
     if let data = try? Data(contentsOf: requestFile),
       let saved = try? JSONDecoder().decode([WorkshopDownloadRequest].self, from: data)
     {
-      downloadRequests = saved.filter { $0.id != Self.signInRequestID }.map {
+      // Only the shared assets are requested without an item; any other item-less request has
+      // nothing to download and must not be taken for them.
+      downloadRequests = saved.filter { $0.item != nil || $0.id == Self.sceneAssetsRequestID }.map {
         var request = $0
         request.isPaused = true
         return request
@@ -279,8 +279,7 @@ final class WorkshopStore {
   private func steamQRSignInChanged() {
     guard nativeSession?.isSignedIn == true else { return }
     var changed = false
-    for index in downloadRequests.indices
-    where downloadRequests[index].refused && downloadRequests[index].id != Self.signInRequestID {
+    for index in downloadRequests.indices where downloadRequests[index].refused {
       downloadRequests[index].refused = false
       changed = true
     }
@@ -372,23 +371,6 @@ final class WorkshopStore {
     requestDownload(item: item, rememberSession: rememberSession, bridge: bridge)
   }
 
-  /// Signs in to Steam without downloading anything, so the account and its saved sign-in are in
-  /// place before the first download. Rides the same ladder as a download: SteamCMD must be set
-  /// up first, and a running sign-in is shown rather than started twice.
-  func requestSignIn(account: String, rememberSession: Bool, bridge: BridgeStore) {
-    startDownloadLifecycle(bridge: bridge)
-    if let job = downloader.signIn, job.isPending {
-      showDownload(job)
-      return
-    }
-    username = account
-    resolve(
-      WorkshopDownloadRequest(
-        id: Self.signInRequestID, item: nil, account: account,
-        rememberSession: rememberSession, includesResources: true),
-      bridge: bridge)
-  }
-
   /// Supplies the account and the consent a retained request is waiting on, then resumes it.
   /// Returns `false` when the id names neither a retained request nor a known Workshop item.
   @discardableResult
@@ -398,7 +380,7 @@ final class WorkshopStore {
   ) -> Bool {
     startDownloadLifecycle(bridge: bridge)
     let existing = downloadRequests.first { $0.id == id }
-    let itemless = id == Self.sceneAssetsRequestID || id == Self.signInRequestID
+    let itemless = id == Self.sceneAssetsRequestID
     let item = itemless ? nil : existing?.item ?? workshopItem(id: id)
     guard itemless || item != nil else { return false }
     username = account
@@ -497,8 +479,6 @@ final class WorkshopStore {
     }
     if steamCMDSetup.isBusy || steamCMDSetup.selectedRuntime == nil { return .setup }
     if request.refused || Self.normalizedAccount(request.account).isEmpty { return .account }
-    // A sign-in downloads nothing, so shared resources never come into it.
-    if request.id == Self.signInRequestID { return .ready }
     if !request.includesResources, needsResources(request) { return .resources }
     return .ready
   }
@@ -543,9 +523,8 @@ final class WorkshopStore {
   @discardableResult
   private func persistDownloadRequests() -> Bool {
     do {
-      let requests = downloadRequests.filter { $0.id != Self.signInRequestID }
       try FileManager.default.createDirectory(at: requestFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-      try JSONEncoder().encode(requests).write(to: requestFile, options: .atomic)
+      try JSONEncoder().encode(downloadRequests).write(to: requestFile, options: .atomic)
       downloadPersistenceError = nil
       return true
     } catch {
@@ -580,10 +559,9 @@ final class WorkshopStore {
     return persistDownloadRequests()
   }
 
-  /// The QR sign-in that serves `request`, when there is one. A SteamCMD sign-in request
-  /// stays with SteamCMD.
+  /// The QR sign-in that serves `request`, when there is one.
   private func nativeEngine(for request: WorkshopDownloadRequest) -> SteamNativeSession? {
-    guard request.id != Self.signInRequestID, let nativeSession, nativeSession.isSignedIn else { return nil }
+    guard let nativeSession, nativeSession.isSignedIn else { return nil }
     return nativeSession
   }
 
@@ -604,13 +582,7 @@ final class WorkshopStore {
       }
       return
     }
-    if request.id == Self.signInRequestID, let runtime {
-      downloader.signIn(
-        username: request.account, executable: runtime.executableURL,
-        // A sign-in fetches nothing, so it stays beside the saved sign-in, not the library.
-        root: ClientPaths.supportURL,
-        rememberSession: request.rememberSession)
-    } else if let item = request.item {
+    if let item = request.item {
       // Shared assets are queued first and only once: other scenes ride the same job.
       if needsSharedAssets(item), !sharedAssetsPending {
         installAssets(request, runtime: runtime, native: native)
@@ -631,7 +603,7 @@ final class WorkshopStore {
     } else {
       installAssets(request, runtime: runtime, native: native)
     }
-    let started = request.id == Self.signInRequestID ? downloader.signIn : downloader.download(for: request.item?.id)
+    let started = downloader.download(for: request.item?.id)
     if let job = started, job.isPending {
       // Persist the started job before deleting its retained intent so a crash cannot lose both.
       downloadRequests.removeAll { $0.id == request.id }

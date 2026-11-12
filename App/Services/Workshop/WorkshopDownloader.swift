@@ -8,7 +8,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     enum Prompt: String { case password = "Steam password", guardCode = "Steam Guard code" }
     enum SteamGuardChallenge { case mobileApproval, authenticatorCode, emailCode }
     enum WallpaperEngineOwnership: String { case unknown, owned, notOwned }
-    private(set) var wallpaperEngineOwnership = WallpaperEngineOwnership.unknown
+    /// A SteamCMD run never asks Steam about the license, so it cannot tell; the QR client can.
+    var wallpaperEngineOwnership: WallpaperEngineOwnership { .unknown }
     /// Coarse step of a run for compact surfaces such as the tile ring; `status` carries the
     /// full sentence. Bytes only move during `transferring`; `finishing` covers SteamCMD's
     /// close and the validation/import that follows it.
@@ -53,8 +54,6 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     private struct RunState {
         var pauseRequested = false
         var discardPartialRequested = false
-        var readingLicense = false
-        var licenseIsActive = false
         /// The method this pass's output has named for Steam Guard so far (the email wording, or the
         /// mobile app's), which a later code prompt is read by: the prompt's own words do not say.
         var steamGuardMethod: SteamGuardChallenge?
@@ -132,13 +131,10 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     private(set) var errorMessage: String?
     private(set) var downloadedID: String?
     /// What a run fetches: one Workshop item (a preset's base wallpaper comes along in a second
-    /// pass), the shared scene assets, or nothing. A sign-in-only run signs in, checks ownership,
-    /// and downloads nothing; the welcome guide and Settings use it to verify an account and save
-    /// its sign-in ahead of any download.
+    /// pass), or the shared scene assets.
     enum RunKind: Equatable {
         case item(String)
         case assets
-        case signInOnly
 
         var itemID: String? {
             if case .item(let id) = self { return id }
@@ -148,7 +144,6 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// The kind of the current or last run; nil before the first.
     private(set) var runKind: RunKind?
     var isInstallingAssets: Bool { runKind == .assets }
-    var isSigningInOnly: Bool { runKind == .signInOnly }
     private(set) var savedAccount: String?
     private(set) var sessionWarning: String?
     @ObservationIgnored private let sessionDirectory: URL
@@ -298,16 +293,6 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         }
     }
 
-    /// Signs in, checks ownership, and quits using the same password and Steam Guard prompts
-    /// as a download; with `rememberSession` the accepted sign-in is saved for later downloads.
-    func signIn(username: String, executable: URL, root: URL, rememberSession: Bool = true, onSignedIn: @escaping @MainActor () -> Void = {}) {
-        download(kind: .signInOnly, username: username, executable: executable, root: root, rememberSession: rememberSession) { _ in
-            self.phase = .finishing
-            self.status = String(localized: "Signed in to Steam")
-            onSignedIn()
-        }
-    }
-
     /// `followUp` may name one more Workshop item to fetch into the same staging, in the same
     /// session, once the first has arrived.
     private func download(kind: RunKind, username: String, executable: URL, root: URL, rememberSession: Bool,
@@ -335,7 +320,6 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         switch kind {
         case .item(let id): label = id
         case .assets: label = "scene assets"
-        case .signInOnly: label = "sign-in"
         }
         run.label = label
         task = Task {
@@ -362,7 +346,6 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         downloadedID = nil
         runKind = kind
         sessionWarning = nil
-        wallpaperEngineOwnership = .unknown
         endedBySessionConflict = false
         endedBeforeSignInUnexplained = false
         failureOutput = nil
@@ -374,9 +357,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         run = RunState()
         run.expectedBytes = expectedBytes
         run.lastActivity = now()
-        status = kind == .signInOnly
-            ? String(localized: "Preparing a private SteamCMD sign-in…")
-            : String(localized: "Preparing a private SteamCMD download…")
+        status = String(localized: "Preparing a private SteamCMD download…")
     }
 
     /// The whole life of one run: staging, passes of SteamCMD, hand-over of what arrived, and the
@@ -416,7 +397,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 await Task.detached(priority: .utility) {
                     try? WorkshopDownloadCheckpoint.remove(at: checkpoint)
                 }.value
-            } else if let checkpoint = checkpointDirectory, !isSigningInOnly {
+            } else if let checkpoint = checkpointDirectory {
                 try await Task.detached(priority: .utility) {
                     try WorkshopDownloadCheckpoint.restore(from: checkpoint, to: content)
                 }.value
@@ -503,9 +484,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             failedRun = true
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             failureOutput = failureTranscript(label: label)
-            status = isSigningInOnly
-                ? String(localized: "Sign-in could not finish")
-                : String(localized: "Download could not finish")
+            status = String(localized: "Download could not finish")
         }
 
         // From here on nothing may depend on the task still being live.
@@ -528,7 +507,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             await settleSession(staging: staging, account: account, restoredRevision: restoredRevision)
         }
         // SteamCMD cannot resume a depot download, so the shared assets keep nothing for later.
-        let keepForLater = !finishedItem && !isSigningInOnly && !isInstallingAssets
+        let keepForLater = !finishedItem && !isInstallingAssets
             && (failedRun || (run.pauseRequested && !wasCancelled))
         await retireStaging(staging, content: content, keepingPartialData: keepForLater && !run.discardPartialRequested)
         if claim >= 0 { close(claim) }
@@ -542,25 +521,19 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
 
     /// What SteamCMD's exit says about a pass that reported no failure of its own.
     private func judgeExit(_ exitStatus: Int32, itemID: String?) throws {
-        let confirmed = isSigningInOnly ? !isAuthenticating
-            : isInstallingAssets ? run.assetsDownloadCompleted : run.workshopDownloadCompleted
+        let confirmed = isInstallingAssets ? run.assetsDownloadCompleted : run.workshopDownloadCompleted
         if exitStatus != 0 {
             authenticationFailed = isAuthenticating && !run.signInAccepted
             // Only the step it ended in is logged, never what SteamCMD printed.
             AppLog.warn("SteamCMD \(run.label): exited with status \(exitStatus) while \(phase.rawValue) (sign-in accepted: \(run.signInAccepted), Steam Guard answered: \(run.steamGuardAnswered))")
             endedBeforeSignInUnexplained = authenticationFailed
             // Before Steam accepts the sign-in, ownership has not been asked about yet.
-            throw passFailure(isSigningInOnly || authenticationFailed
+            throw passFailure(authenticationFailed
                 ? String(localized: "SteamCMD exited before confirming the sign-in. Check the account name and password, approve Steam Guard, and retry.")
                 : String(localized: "SteamCMD exited before completing the download. Confirm this account owns Wallpaper Engine, approve Steam Guard, and retry."),
                 itemID: itemID)
         }
         guard confirmed else {
-            if isSigningInOnly {
-                authenticationFailed = true
-                endedBeforeSignInUnexplained = isAuthenticating && !run.signInAccepted
-                throw WorkshopFailure(message: String(localized: "Steam closed the session without confirming the sign-in. Check the account name and password, then retry."))
-            }
             throw passFailure(isInstallingAssets
                 ? String(localized: "Steam exited without confirming a complete Wallpaper Engine installation. Retry installing scene assets; existing assets have not been changed.")
                 : String(localized: "Steam exited without confirming a complete Workshop download. Retry; no partial wallpaper has been added to your library."),
@@ -648,12 +621,12 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     }
 
     /// Records how the pass failed, once. A failure is transient only once Steam has accepted the
-    /// sign-in and the run downloads something; everything the user has to decide is final.
+    /// sign-in; everything the user has to decide is final.
     private func setFailure(_ failure: PassFailure) {
         guard run.failure == nil else { return }
         switch failure {
         case .transient(let message), .silence(let message):
-            run.failure = run.signInAccepted && !isSigningInOnly ? failure : PassFailure.final(message)
+            run.failure = run.signInAccepted ? failure : PassFailure.final(message)
         case .final, .sessionConflict:
             run.failure = failure
         }
@@ -744,8 +717,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     private func ensureFreeSpace(under root: URL, staging: URL, item: String?, label: String) async throws {
         let installingAssets = isInstallingAssets
         let expected = run.expectedBytes
-        guard !isSigningInOnly,
-              Self.requiredFreeBytes(expected: expected, alreadyStaged: 0, installingAssets: installingAssets) != nil
+        guard Self.requiredFreeBytes(expected: expected, alreadyStaged: 0, installingAssets: installingAssets) != nil
         else { return }
         // What an item already has under the Workshop tree counts; the shared assets' depot
         // download starts over every time, so nothing of theirs does.
@@ -807,7 +779,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     nonisolated static let sceneAssetsFreeBytes: Int64 = 3 * 1024 * 1024 * 1024
 
     /// The free space a download needs before it starts, or nil when nothing can be said and the
-    /// download is never blocked: a sign-in-only run, or an item whose listing gives no size.
+    /// download is never blocked: an item whose listing gives no size.
     /// Bytes an earlier attempt already staged for an item are on the disk and are not needed
     /// again; the shared assets always need the whole floor, since their download starts over.
     nonisolated static func requiredFreeBytes(expected: Int64?, alreadyStaged: Int64, installingAssets: Bool) -> Int64? {
@@ -826,7 +798,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// little so parallel jobs that lost the same connection do not all come back in the same second.
     private func nextRetryDelay() -> TimeInterval? {
         guard let failure = run.failure, failure.isTransient, retryAttempt < retryDelays.count,
-              !run.cachedCredentialsRejected, !endedBySessionConflict, !isSigningInOnly, prompt == nil,
+              !run.cachedCredentialsRejected, !endedBySessionConflict, prompt == nil,
               steamGuardChallenge == nil, !failure.endedBySilence || run.silentRetries < Self.maximumSilentRetries
         else { return nil }
         let delay = retryDelays[retryAttempt]
@@ -848,7 +820,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// that keeps receiving is left alone. A run that was signing in or requesting has nothing to
     /// restart (Steam Guard may be waiting for the user), so only a transfer in progress counts.
     func noteSystemResume() {
-        guard isRunning, !isSigningInOnly, run.receivesNetwork, phase == .transferring, run.failure == nil else { return }
+        guard isRunning, run.receivesNetwork, phase == .transferring, run.failure == nil else { return }
         resumedAt = now()
         AppLog.info("SteamCMD \(run.label): Mac woke; watching for bytes")
     }
@@ -878,7 +850,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     }
 
     func pause() {
-        guard isRunning, !isSigningInOnly else { return }
+        guard isRunning else { return }
         run.pauseRequested = true
         task?.cancel()
         status = String(localized: "Pausing…")
@@ -937,8 +909,6 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         // The state of one pass starts from nothing.
         run.recentOutput = ""
         keepOutputLine("--- SteamCMD started ---")
-        run.readingLicense = false
-        run.licenseIsActive = false
         prompt = nil
         steamGuardChallenge = nil
         run.steamGuardMethod = nil
@@ -956,9 +926,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         var arguments = ["-inhibitbootstrap", "+@ShutdownOnFailedCommand", "1"]
         if isInstallingAssets { arguments += ["+@sSteamCmdForcePlatformType", "windows"] }
         arguments += ["+force_install_dir", installDirectory.path, "+login", account]
-        if isSigningInOnly {
-            arguments += ["+licenses_for_app", "431960"]
-        } else if let itemID {
+        if let itemID {
             arguments += ["+workshop_download_item", "431960", itemID]
         } else {
             arguments += ["+download_depot", "431960", Self.sceneAssetsDepotID]
@@ -1019,7 +987,6 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         while let newline = run.recentOutput.firstIndex(where: { $0.isNewline }) {
             let line = String(run.recentOutput[..<newline])
             run.recentOutput.removeSubrange(...newline)
-            consumeOwnershipLine(line)
             consumeLine(line)
         }
         // An old prompt must not mask a later failure, and a prompt has no newline to wait for.
@@ -1063,28 +1030,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// arrive, so a failure reported that way is judged like any other.
     private func consumeUnterminatedOutput() {
         guard !run.recentOutput.isEmpty else { return }
-        consumeOwnershipLine(run.recentOutput)
         consumeLine(run.recentOutput)
-    }
-
-    /// Only complete lines establish ownership; a truncated app ID must never match 431960.
-    private func consumeOwnershipLine(_ line: String) {
-        guard isSigningInOnly, !isAuthenticating, run.failure == nil else { return }
-        let output = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        if output.range(of: #"^no active license found for appid 431960\.?$"#, options: .regularExpression) != nil {
-            wallpaperEngineOwnership = .notOwned
-            run.readingLicense = false
-        } else if output.range(of: #"^license packageid [0-9]+:$"#, options: .regularExpression) != nil {
-            run.readingLicense = true
-            run.licenseIsActive = false
-        } else if run.readingLicense && output.hasPrefix("- state") {
-            run.licenseIsActive = output.range(of: #"^- state\s*:\s*active\s*\("#, options: .regularExpression) != nil
-        } else if run.readingLicense && run.licenseIsActive && output.hasPrefix("- apps") {
-            let apps = output.split(separator: ":", maxSplits: 1).last?.split(separator: ",") ?? []
-            if apps.contains(where: { $0.trimmingCharacters(in: .whitespaces) == "431960" }) {
-                wallpaperEngineOwnership = .owned
-            }
-        }
     }
 
     /// `complete` is false for the unfinished end of the output so far. Prompts have to be
@@ -1249,11 +1195,9 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
             prompt = nil
             steamGuardChallenge = nil
             phase = .requesting
-            status = isSigningInOnly
-                ? String(localized: "Signed in; closing SteamCMD…")
-                : isInstallingAssets
-                    ? String(localized: "Signed in; requesting Wallpaper Engine’s shared assets…")
-                    : String(localized: "Signed in; requesting your Workshop download…")
+            status = isInstallingAssets
+                ? String(localized: "Signed in; requesting Wallpaper Engine’s shared assets…")
+                : String(localized: "Signed in; requesting your Workshop download…")
             return
         }
         if text.contains("logging in using cached credentials") {

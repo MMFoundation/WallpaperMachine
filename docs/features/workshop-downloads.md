@@ -802,8 +802,8 @@ work.
 - **Menu bar.** While downloads run, the menu bar menu has a line right under **Control
   Panel**: **Downloads: 2 in progress, 40%**, or **Downloads: 2 in progress** when a figure
   cannot be given. It counts the downloads that are moving or waiting for a slot or a
-  sign-in (`WorkshopDownloadManager.inProgressTransfers`): a paused job, a finished,
-  failed or cancelled one and the sign-in that downloads nothing are left out, and so is
+  sign-in (`WorkshopDownloadManager.inProgressTransfers`): a paused job and a finished,
+  failed or cancelled one are left out, and so is
   a job that is pausing, which still holds its slot until its session closes. The percent
   is the share of the bytes all of them expect that has arrived, so a large download
   weighs more than a small one (the downloads button averages each job's own percentage
@@ -934,32 +934,9 @@ Engine, with **Create a Steam account** and **Buy Wallpaper Engine**
 (`DownloadsModel.showsAccountRequirement`); the guide's Tips page says the same, and
 offers the same links by the same rule ([first-run guide](first-run.md#first-run)). Both
 links wear the external-link symbol, since they open Steam in the browser. Settings →
-Library & Steam can sign in before any download.
-
-A sign-in-only job can also sign in ahead of any download. Nothing in the panel starts one
-since the guide stopped signing in; it stays working and tested until a follow-up removes
-it. `WorkshopStore.requestSignIn` retains a `WorkshopDownloadRequest` with id
-`WorkshopStore.signInRequestID` (`steam-sign-in`) that climbs the same ladder as a
-download — SteamCMD setup, then the account — and never the shared-resources stage, then runs
-`WorkshopDownloader.signIn`: a private SteamCMD session with `+login <account>
-+licenses_for_app 431960 +quit` and no download command (`isSigningInOnly`).
-Steam's password and Steam Guard prompts arrive on the job exactly as for a
-download and are answered through `submitDownloadInput`; with **Keep me signed in** the
-accepted session is saved the same way, so the next download starts silently. The
-job takes a queue slot like any other (`WorkshopDownloadManager.signIn`, at most
-one at a time), succeeds only once Steam confirms the sign-in before quitting, and
-reports "Steam sign-in" as its title; the page hides it from the downloads list
-once it has finished.
-
-After authentication, `licenses_for_app` checks the account's active Wallpaper
-Engine license in that same session (the command is also recommended by [Valve
-support](https://github.com/ValveSoftware/steam-for-linux/issues/6218)). An active
-license listing app 431960 confirms ownership; an explicit `No active license
-found for appID 431960` response reports no ownership. Missing or unrecognized
-output stays **unconfirmed**, never a missing purchase. Ownership is scoped to the
-current sign-in job, not persisted with credentials; a saved account from a previous
-launch can be checked again. Steam still authorizes each actual download, so this advisory check cannot
-bypass or permanently deny it.
+Library & Steam can sign in before any download. A SteamCMD sign-in happens only as part
+of a download: Steam's password and Steam Guard prompts arrive on the job and are answered
+through `submitDownloadInput`.
 
 **Keep me signed in on this Mac** is enabled by default for Workshop downloads and
 for scene-asset installation. After a successful authentication the app preserves
@@ -1021,8 +998,7 @@ download dialog or the Settings popover stops a code that was not approved, so
 nothing signs in once no code is on screen: an approval already on its way back when
 the code closes is dropped, not saved. A failed code is kept as its reason (expired,
 Steam unreachable, failed) and worded when the section shows it, so the message
-follows the panel's language. The dialog does not offer it for a SteamCMD
-sign-in-only request, which a QR sign-in would not complete.
+follows the panel's language.
 With a SteamCMD sign-in already saved, Settings shows that account and **Log out…**
 instead of the QR button, and downloads keep using SteamCMD without reaching the
 dialog's account stage: switching to a QR sign-in starts with logging out.
@@ -1045,8 +1021,7 @@ can be revoked from any other device.
 
 While the QR sign-in exists, every Workshop and shared-resources request skips the
 SteamCMD and account stages (`WorkshopStore.stage(for:)`) and runs through
-`NativeWorkshopDownloader` instead of SteamCMD; a SteamCMD sign-in request
-(`steam-sign-in`) still uses SteamCMD. The prerequisite observer tracks the QR
+`NativeWorkshopDownloader` instead of SteamCMD. The prerequisite observer tracks the QR
 sign-in, so a request waiting at those stages starts as soon as it completes, from
 the dialog or from Settings; a QR sign-in also clears the mark of a request the queue
 refused for the account it named (`WorkshopStore.steamQRSignInChanged`), which then
@@ -1157,7 +1132,7 @@ used to be reported with the purchase requirement below. Nothing the user has
 to decide is retried: rejected passwords or Steam Guard, rate limits, access
 denied, a session ended by a sign-in elsewhere, a rejected saved sign-in, a
 generic or unrecognised failure (a removed or private item fails at once), a
-sign-in-only run, a failure or silence before Steam accepted the first sign-in,
+failure or silence before Steam accepted the first sign-in,
 and SteamCMD exiting without confirming the download. Real SteamCMD output for a
 dropped connection has been checked only against a scripted stand-in.
 
@@ -1227,7 +1202,7 @@ depot is about 800 MB on disk): a lower bound meant to block only a clearly full
 disk. Their depot download cannot resume, so nothing staged counts against it. When the disk is short
 the download fails with a message naming what it needs and what is available; its
 partial data is kept and **Try again** checks again. Nothing blocks a download
-whose size Steam does not list, a sign-in-only run, or a disk whose free space
+whose size Steam does not list, or a disk whose free space
 cannot be read. A preset's base wallpaper is checked before its pass at the size
 Steam lists for it ([Workshop presets](#workshop-presets)), and
 parallel jobs are checked one by one, not added together, so a bulk **Download the

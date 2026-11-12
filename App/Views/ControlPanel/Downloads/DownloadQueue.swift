@@ -6,8 +6,7 @@ import Foundation
 /// The batch is described as the Wallpaper Engine panel always did: several downloads can run at
 /// once, so the button carries one job's own figures, or the batch's mean progress and summed
 /// speed once more than one runs. The batch is done when its slowest job is, so one job without an
-/// estimate leaves the batch without one. A finished sign-in is not a download and shows only
-/// while it runs.
+/// estimate leaves the batch without one.
 struct DownloadQueue: Equatable {
   /// Retained intents, waiting for a prerequisite or for the user.
   let requests: [DownloadRequestRow]
@@ -96,7 +95,7 @@ struct DownloadQueue: Equatable {
   // MARK: Making
 
   /// - Parameters:
-  ///   - steam: every Steam job, a finished sign-in included (it decides the footer note).
+  ///   - steam: every Steam job.
   ///   - pixiv: every pixiv save.
   ///   - slotLimit: how many Steam downloads run at once right now.
   @MainActor
@@ -105,7 +104,7 @@ struct DownloadQueue: Equatable {
     locale: Locale? = nil
   ) -> DownloadQueue {
     let locale = locale ?? PanelLocale.shared.locale
-    let downloads = steam.filter { !$0.isSignInOnly || $0.isPending } + pixiv
+    let downloads = steam + pixiv
     let active = downloads.filter { $0.isPending && !$0.isQueued }
     let queued = downloads.filter { $0.isPending && $0.isQueued }
     let attention = downloads.filter(\.needsAttention)
@@ -162,7 +161,7 @@ struct DownloadQueue: Equatable {
   /// A queue that holds only pixiv's saves says how those run; otherwise the Steam slots.
   @MainActor
   private static func note(steam: [DownloadRow], pixiv: [DownloadRow], slotLimit: Int) -> String {
-    if !steam.contains(where: { !$0.isSignInOnly }) && !pixiv.isEmpty {
+    if steam.isEmpty && !pixiv.isEmpty {
       return L("pixiv downloads run two at a time; paused downloads stay in the queue.")
     }
     return slotLimit > 1

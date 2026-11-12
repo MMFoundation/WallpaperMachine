@@ -85,13 +85,12 @@ struct DownloadDialogView: View {
   // MARK: Header
 
   /// The symbol the header shows where the subject has no picture of its own, which the shared
-  /// scene resources and the Steam sign-in never have (and an item may lack): a symbol of what the
-  /// dialog is about, never an empty frame. Nil when there is a picture to show.
+  /// scene resources never have (and an item may lack): a symbol of what the dialog is about,
+  /// never an empty frame. Nil when there is a picture to show.
   static func placeholderSymbol(for resolution: DownloadDialogResolution) -> String? {
     guard resolution.image == nil else { return nil }
     switch resolution.subjectID {
     case WorkshopStore.sceneAssetsRequestID: return "shippingbox"
-    case WorkshopStore.signInRequestID: return "person.badge.key"
     default: return "photo"
     }
   }

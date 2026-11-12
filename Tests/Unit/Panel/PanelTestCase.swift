@@ -403,23 +403,14 @@ final class PanelFixture {
     previousHome = ProcessInfo.processInfo.environment["WALLPAPER_MACHINE_HOME"]
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     executable = root.appendingPathComponent("steamcmd")
-    // A download prints its password prompt and blocks until `advance` appears; a sign-in-only
-    // session (no `+workshop_download_item`) reads the password, records it and signs in.
+    // A download prints its password prompt and blocks until `advance` appears. With
+    // `reads-password` beside it, it first reads the answer and records it in `password`.
     try Data("""
       #!/bin/sh
-      mode=signin
-      for argument in "$@"; do [ "$argument" = +workshop_download_item ] && mode=download; done
       printf 'Password:\\n'
-      if [ "$mode" = signin ]; then
+      if [ -e "\(root.path)/reads-password" ]; then
         IFS= read -r password
         printf '%s' "$password" > "\(root.path)/password"
-        printf 'Waiting for user info...OK\\n'
-        if [ -f "\(root.path)/ownership" ]; then
-          cat "\(root.path)/ownership"
-        else
-          printf 'License packageID 12345:\\n - State : Active( flags 512 )\\n - Apps : 431960, (1 in total)\\n'
-        fi
-        exit 0
       fi
       while [ ! -e "\(root.path)/advance" ]; do /bin/sleep 0.02; done
       printf 'Downloading item 222\\n'
@@ -512,29 +503,26 @@ final class PanelFixture {
     try await waitUntil(timeout: 15) { !self.workshop.steamCMDSetup.isBusy }
   }
 
-  /// The sign-in-only job once `steamSignIn` has started it.
-  func waitForSignIn() async throws -> WorkshopDownload {
-    try await waitUntil(timeout: 5) { self.workshop.downloader.signIn != nil }
-    return try XCTUnwrap(workshop.downloader.signIn)
-  }
-
-  /// Signs `account` in to Steam through the fake SteamCMD and keeps its session, so the account
-  /// is saved on this Mac afterwards (`controller.steamAccount.saved`), as after a real sign-in.
+  /// Saves `account` on this Mac as a kept Steam sign-in would (`controller.steamAccount.saved`).
+  /// The fake SteamCMD keeps no session of its own, so the one Steam would have saved is written
+  /// while a download of it waits at its password prompt; the queue reads it back once that
+  /// download, cancelled, has ended, and the cancelled download is cleared away.
   func saveSteamAccount(_ account: String = "fixture") async throws {
-    workshop.steamCMDSetup.selectExisting(at: executable)
-    try await waitUntil(timeout: 15) { self.workshop.steamCMDSetup.selectedRuntime != nil }
-    try await controller.steamSignIn(account: account, remembersSession: true)
-    let signIn = try await waitForSignIn()
-    try await waitUntil(timeout: 15) { signIn.worker.prompt == .password }
-    // The fake SteamCMD keeps no session of its own; the sign-in Steam would have saved is the
-    // account file the queue reads back once the job ends.
+    let item = WorkshopItem(
+      id: "222", title: "Fixture", creator: "Fixture", summary: "", previewURL: nil, tags: ["Video"],
+      size: 0, subscriptions: 0)
+    workshop.downloader.start(
+      item: item, username: account, executable: executable, library: library, rememberSession: true,
+      onImported: {})
+    let job = try XCTUnwrap(workshop.downloader.download(for: item.id))
+    try await waitUntil(timeout: 15) { job.worker.prompt == .password }
     let session = root.appendingPathComponent("session", isDirectory: true)
     try FileManager.default.createDirectory(
       at: session, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     try Data(account.utf8).write(to: session.appendingPathComponent("account"))
-    controller.downloads.openDialog(for: WorkshopStore.signInRequestID)
-    await controller.downloads.submitSecret("fixture-password", toJob: WorkshopStore.signInRequestID).value
-    try await waitUntil(timeout: 15) { !signIn.isPending }
+    workshop.downloader.cancel(job)
+    try await waitUntil(timeout: 15) { !job.isPending }
+    workshop.clearDownloadActivity()
   }
 
   /// Shows the panel to everything gated on visibility, as a window ordered front would. `date` is
