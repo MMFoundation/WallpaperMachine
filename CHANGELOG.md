@@ -12,6 +12,197 @@ app's update window shows the sections of every version newer than the installed
 one, in the app's language; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.11.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.10.0...v1.11.0) (2026-11-12)
+
+### English
+
+This release brings widgets to your desktop, easier Workshop downloads through Steam QR sign-in, and a clearer, more consistent control panel
+
+#### Highlights
+
+- Put clocks, calendars, countdowns and other widgets on your desktop over any wallpaper, and style them on a large canvas or start from ready-made designs ([be5ea29](https://github.com/MMFoundation/WallpaperMachine/commit/be5ea29e77ced2db9aab178dfcb5d6c17a22726f), [b989826](https://github.com/MMFoundation/WallpaperMachine/commit/b9898267b136da863a07999114934e586de8c2f7), [caef030](https://github.com/MMFoundation/WallpaperMachine/commit/caef0304749a45603b0981c1eeebe3fae69f012d), [05e13de](https://github.com/MMFoundation/WallpaperMachine/commit/05e13ded4c22f15e95b8b48d4df8b6186d9e4f94))
+- Download Steam Workshop wallpapers by scanning a QR code with the Steam mobile app, with no password, Steam Guard code or SteamCMD needed ([2146b7e](https://github.com/MMFoundation/WallpaperMachine/commit/2146b7e4d9d56e2ce4312a12f65b64c07591f2ae))
+- Wallpapers can now turn their volume down instead of muting or pausing while another app plays sound (closes [#182](https://github.com/MMFoundation/WallpaperMachine/issues/182)) ([c300771](https://github.com/MMFoundation/WallpaperMachine/commit/c3007717b238b56c64c56c3535a28a78644dda12))
+- The menu bar now shows how much energy WallpaperMachine is using right now (closes [#188](https://github.com/MMFoundation/WallpaperMachine/issues/188)) ([f8329bf](https://github.com/MMFoundation/WallpaperMachine/commit/f8329bf1e0ee4b18820ad99593d6fb3337c4c64d))
+
+#### Features
+
+- Add clocks, dates, a month calendar, text, a countdown, a greeting, the battery level or the next sunrise or sunset to your desktop in Settings › Desktop Widgets ([be5ea29](https://github.com/MMFoundation/WallpaperMachine/commit/be5ea29e77ced2db9aab178dfcb5d6c17a22726f))
+- Arrange widgets on a large picture of your display, resizing, rotating and snapping them to guides, and stack them as layers you can reorder, hide or duplicate ([b989826](https://github.com/MMFoundation/WallpaperMachine/commit/b9898267b136da863a07999114934e586de8c2f7), [05e13de](https://github.com/MMFoundation/WallpaperMachine/commit/05e13ded4c22f15e95b8b48d4df8b6186d9e4f94), [a8420b1](https://github.com/MMFoundation/WallpaperMachine/commit/a8420b17e8f66868fb2d9996f1424037b28bbc11))
+- Start from ready-made widgets such as a big clock, a neon clock, world clocks, a lunar date or a month calendar, then edit them like any other ([b989826](https://github.com/MMFoundation/WallpaperMachine/commit/b9898267b136da863a07999114934e586de8c2f7))
+- Style widgets with any installed font, gradients, outlines, glows, shadows, background plates and tilt, or apply a finished look like Neon or Glass in one click ([caef030](https://github.com/MMFoundation/WallpaperMachine/commit/caef0304749a45603b0981c1eeebe3fae69f012d))
+- Sign in to Steam by scanning a QR code in the download dialog or in Settings › Library & Steam, and Workshop downloads then run without SteamCMD ([2146b7e](https://github.com/MMFoundation/WallpaperMachine/commit/2146b7e4d9d56e2ce4312a12f65b64c07591f2ae))
+- Choose Reduce volume for when another app plays sound, and set how quiet wallpapers get with a slider from 0% to 100% (closes [#182](https://github.com/MMFoundation/WallpaperMachine/issues/182)) ([c300771](https://github.com/MMFoundation/WallpaperMachine/commit/c3007717b238b56c64c56c3535a28a78644dda12))
+- The menu bar panel shows how much energy WallpaperMachine uses, and Settings › General can show the figure beside the menu bar icon too (closes [#188](https://github.com/MMFoundation/WallpaperMachine/issues/188)) ([f8329bf](https://github.com/MMFoundation/WallpaperMachine/commit/f8329bf1e0ee4b18820ad99593d6fb3337c4c64d))
+- A Random wallpaper button in the Now Playing bar picks another wallpaper from your library, showing every one before any repeats ([f4d3b9d](https://github.com/MMFoundation/WallpaperMachine/commit/f4d3b9d339f7b79be4ccfa207c3562985c1cd2a1))
+- Open and close the Filters sidebar and the wallpaper details from the View menu or with Control-Command-S and Option-Command-I ([af7af65](https://github.com/MMFoundation/WallpaperMachine/commit/af7af6558419491a52311ef99fb6ab3cbbcc6e76))
+- Press Command-Return on a focused Steam Workshop or pixiv tile to apply or download it, just as a double click does ([95f01d1](https://github.com/MMFoundation/WallpaperMachine/commit/95f01d10dad01e26218fd2ec07ead17195b6e256), [c6fff14](https://github.com/MMFoundation/WallpaperMachine/commit/c6fff14a913b126f373f08b498a70d83f023c183))
+- Move a downloaded Workshop wallpaper to the Trash right from its details on Steam Workshop, without changing your Steam subscriptions (closes [#183](https://github.com/MMFoundation/WallpaperMachine/issues/183)) ([dcd8702](https://github.com/MMFoundation/WallpaperMachine/commit/dcd870220c7f550f78b027d43e53dd9330aede93))
+- Leave the welcome guide from any page with Skip setup or Escape, keeping the choices you already made ([53c037f](https://github.com/MMFoundation/WallpaperMachine/commit/53c037fdec598d9dff712fb2924dd41784194cc2))
+- After updating, a one-time window introduces desktop widgets and takes you to their settings when you choose Set Up Desktop Widgets ([cbbdfdf](https://github.com/MMFoundation/WallpaperMachine/commit/cbbdfdf02db0589f341e554dceeea6fdcccf92a7))
+
+#### Improvements
+
+- Revert and Apply changes now appear only while edits wait, and a Not applied mark shows which settings still need applying ([adb2ab2](https://github.com/MMFoundation/WallpaperMachine/commit/adb2ab244fdc2a040ccae0ea1ce2d8d0d2b3ad27), [2ba2440](https://github.com/MMFoundation/WallpaperMachine/commit/2ba24403e283f848ca9d9c53e4342febcf4130f2))
+- Applying a wallpaper has its own symbol, a display with a down arrow, so Play now only means starting a rotation or resuming playback ([03aca16](https://github.com/MMFoundation/WallpaperMachine/commit/03aca16b693f55011a00c4d7b1fbcfe7be26e02b))
+- Wallpapers already in your library carry the Library symbol instead of a tick, and download or apply status darkens tiles the same way everywhere ([288cafe](https://github.com/MMFoundation/WallpaperMachine/commit/288cafe3068728a805ae5c1012784614e94f39dc), [c6da5d0](https://github.com/MMFoundation/WallpaperMachine/commit/c6da5d09f585d66440f51e775758614193cdd141))
+- With two or more displays, each display's card in the details starts collapsed under a one-line summary, so other settings are easier to reach ([0dcfad5](https://github.com/MMFoundation/WallpaperMachine/commit/0dcfad56ec19baddd8422c3651203b7aa3960ba6))
+- The Compatibility check says in plain words what draws a wallpaper, and Scale factor now explains how it zooms the wallpaper ([14ae78a](https://github.com/MMFoundation/WallpaperMachine/commit/14ae78ae537c9ae1d8d7d2d1782249e98fe3d523))
+- The welcome guide is a page shorter and no longer asks for your Steam password, since your first Workshop download asks for Steam when needed ([53c037f](https://github.com/MMFoundation/WallpaperMachine/commit/53c037fdec598d9dff712fb2924dd41784194cc2))
+- Progress bars, spinners and loading rings stay still while the window is hidden or Reduce Motion is on, and look alike on every page ([893b7db](https://github.com/MMFoundation/WallpaperMachine/commit/893b7db51446555477b60f0706759f8e320f75b4), [7013795](https://github.com/MMFoundation/WallpaperMachine/commit/70137959970418f26dad79ca5032af059286dc53))
+- Buttons, links and group headings now share one look across the details of Installed, Steam Workshop and pixiv wallpapers and in Settings ([c837076](https://github.com/MMFoundation/WallpaperMachine/commit/c837076d0a5320bc984190d835ea2ba6a4216842), [697ea2e](https://github.com/MMFoundation/WallpaperMachine/commit/697ea2ed78411b3204ad14f31053858cef60f9f0), [4ac5a96](https://github.com/MMFoundation/WallpaperMachine/commit/4ac5a9698c18b231f45f436c0546a0938dc755d9))
+- Steam Workshop details of a wallpaper already in your library now lead with Apply wallpaper, which the keyboard and VoiceOver can reach ([1b614cf](https://github.com/MMFoundation/WallpaperMachine/commit/1b614cf0e97d6e37e9a933e690a907a248f3d298))
+- In a narrow window, the Library's view buttons and Play shrink to symbols in steps, so the open collection's name stays readable ([046d980](https://github.com/MMFoundation/WallpaperMachine/commit/046d980147aabfdce1e6083633079934f60e6416))
+- Hover a cut-off wallpaper title on a tile to read it in full ([09f6f02](https://github.com/MMFoundation/WallpaperMachine/commit/09f6f0229e88bbebacc8690c919c86efdd3dacd2))
+- With several displays, the help for Apply wallpaper and Reapply wallpaper names the display the wallpaper will go to ([85537f8](https://github.com/MMFoundation/WallpaperMachine/commit/85537f863194d464abf42f833a2c29b8fe2e6386))
+- When nothing is playing, the Now Playing bar and menu bar panel now give clear advice on how to apply a wallpaper ([7143230](https://github.com/MMFoundation/WallpaperMachine/commit/714323038678826a9697df12f6263b0babf06baa))
+- The support prompt now waits at least a day after your first downloaded wallpaper and offers sponsoring MMFoundation on Open Collective ([8e035b3](https://github.com/MMFoundation/WallpaperMachine/commit/8e035b34f8f1020293c06ede39773f2525a068a8), [7b24c9f](https://github.com/MMFoundation/WallpaperMachine/commit/7b24c9f5f510876149770b7cb9a2f15a14d4edc0))
+- The close buttons of the error banner and the Recently used list now respond to clicks just beside the cross ([3185290](https://github.com/MMFoundation/WallpaperMachine/commit/318529019b01c2ea868c48405fb9d2370f4c0154))
+
+#### Bug Fixes
+
+- Switching wallpapers no longer crashes, and the experimental animated lock screen no longer gets stuck restarting itself after a change (closes [#184](https://github.com/MMFoundation/WallpaperMachine/issues/184)) ([5ce34fd](https://github.com/MMFoundation/WallpaperMachine/commit/5ce34fd6523d0977cbf929a49beb10a73412cbfc))
+- After a failed SteamCMD sign-in, you can now choose QR sign-in or correct your account details instead of retrying the same way (closes [#186](https://github.com/MMFoundation/WallpaperMachine/issues/186)) ([d1ec386](https://github.com/MMFoundation/WallpaperMachine/commit/d1ec386040235218ebd7722225516756f51b17b9))
+- A new Steam Workshop search no longer shows wallpapers from the search before it ([34ddecf](https://github.com/MMFoundation/WallpaperMachine/commit/34ddecf5cc2af925d65d80c9da3bb63a6175e608))
+- Dragging Finder icons across the desktop over a web wallpaper no longer gets caught by the page's pictures or links ([5757d12](https://github.com/MMFoundation/WallpaperMachine/commit/5757d12f0ee52214f3a7f6d2ebc5ce8f768ed60a))
+- Issue reports started from a wallpaper mark a changed setting as not applied only when it really still waits for Apply changes ([53689af](https://github.com/MMFoundation/WallpaperMachine/commit/53689afca6bb08fc831a85d5324f5240d9f60f90))
+- A downloading Steam Workshop tile now shows its cancel cross when reached with the keyboard, not only under the pointer ([cab75ce](https://github.com/MMFoundation/WallpaperMachine/commit/cab75cec16dd1f22fedb06c41c2345046bb2a02d))
+- VoiceOver no longer reads an outdated message at the top of the welcome guide after you add or discard changes ([a1f9824](https://github.com/MMFoundation/WallpaperMachine/commit/a1f9824b637c33cd9636853789c00d3f6cf870aa))
+- The update banner now uses the accent colour chosen in Settings › Appearance instead of the system's ([4da1457](https://github.com/MMFoundation/WallpaperMachine/commit/4da1457bf6c520f58fb57b28eb7151dd7f7acbc4))
+- Labels in the wallpaper switch rule editor and the welcome guide's summary no longer break onto two lines in some languages ([3287a24](https://github.com/MMFoundation/WallpaperMachine/commit/3287a24c29c0ac52488f1da746cf7d51828e61f2))
+- An empty collection now says it is empty instead of claiming no wallpapers match ([37aa18b](https://github.com/MMFoundation/WallpaperMachine/commit/37aa18bda086614d8413a190155873a1816c2358))
+- Searches on Steam Workshop that use no filters and find nothing no longer suggest removing filters ([ed038ab](https://github.com/MMFoundation/WallpaperMachine/commit/ed038ab03aff001594249eb0f05dbc6b5c4159c8))
+- The Library no longer says it is loading twice at once while your wallpapers are first read ([7f4ecc6](https://github.com/MMFoundation/WallpaperMachine/commit/7f4ecc6279cd54766e6dcb9afdbbb06812259ae5))
+- The welcome guide now points to the Steam Workshop tab instead of a sidebar the window no longer has ([56f7ca5](https://github.com/MMFoundation/WallpaperMachine/commit/56f7ca5c49e244f743f2b978703f27ac80dbc07b))
+
+Thanks to [@arleckk](https://github.com/arleckk) and [@403Denied](https://github.com/403Denied) for contributing to this release.
+
+### 简体中文
+
+本次更新为桌面带来小组件，通过 Steam 二维码登录让创意工坊下载更省事，控制面板也更清晰统一
+
+#### 亮点
+
+- 在任意壁纸上方放置时钟、日历、倒计时等桌面小组件，可在大画布上自由排版，也可直接使用现成样式 ([be5ea29](https://github.com/MMFoundation/WallpaperMachine/commit/be5ea29e77ced2db9aab178dfcb5d6c17a22726f), [b989826](https://github.com/MMFoundation/WallpaperMachine/commit/b9898267b136da863a07999114934e586de8c2f7), [caef030](https://github.com/MMFoundation/WallpaperMachine/commit/caef0304749a45603b0981c1eeebe3fae69f012d), [05e13de](https://github.com/MMFoundation/WallpaperMachine/commit/05e13ded4c22f15e95b8b48d4df8b6186d9e4f94))
+- 用 Steam 手机应用扫描二维码即可下载 Steam 创意工坊壁纸，无需密码、Steam 令牌验证码或 SteamCMD ([2146b7e](https://github.com/MMFoundation/WallpaperMachine/commit/2146b7e4d9d56e2ce4312a12f65b64c07591f2ae))
+- 其他应用播放声音时，壁纸现在可以降低音量，而不只是静音或暂停 (closes [#182](https://github.com/MMFoundation/WallpaperMachine/issues/182)) ([c300771](https://github.com/MMFoundation/WallpaperMachine/commit/c3007717b238b56c64c56c3535a28a78644dda12))
+- 菜单栏现在会显示 WallpaperMachine 当前的能耗 (closes [#188](https://github.com/MMFoundation/WallpaperMachine/issues/188)) ([f8329bf](https://github.com/MMFoundation/WallpaperMachine/commit/f8329bf1e0ee4b18820ad99593d6fb3337c4c64d))
+
+#### 新功能
+
+- 在“设置 › 桌面小组件”中，可将时钟、日期、月历、文字、倒计时、问候语、电池电量或下一次日出日落添加到桌面 ([be5ea29](https://github.com/MMFoundation/WallpaperMachine/commit/be5ea29e77ced2db9aab178dfcb5d6c17a22726f))
+- 在显示器的大幅预览上排列小组件，可调整大小、旋转并吸附到参考线，还能像图层一样调整顺序、隐藏或复制 ([b989826](https://github.com/MMFoundation/WallpaperMachine/commit/b9898267b136da863a07999114934e586de8c2f7), [05e13de](https://github.com/MMFoundation/WallpaperMachine/commit/05e13ded4c22f15e95b8b48d4df8b6186d9e4f94), [a8420b1](https://github.com/MMFoundation/WallpaperMachine/commit/a8420b17e8f66868fb2d9996f1424037b28bbc11))
+- 可从现成的小组件开始，例如大号时钟、霓虹时钟、世界时钟、农历日期或月历，添加后可随意编辑 ([b989826](https://github.com/MMFoundation/WallpaperMachine/commit/b9898267b136da863a07999114934e586de8c2f7))
+- 可为小组件使用 Mac 上安装的任意字体、渐变色、描边、发光、阴影、背景底板和倾斜效果，或一键套用“霓虹”“玻璃”等现成样式 ([caef030](https://github.com/MMFoundation/WallpaperMachine/commit/caef0304749a45603b0981c1eeebe3fae69f012d))
+- 可在下载对话框或“设置 › 壁纸库与 Steam”中扫描二维码登录 Steam，之后创意工坊下载无需 SteamCMD ([2146b7e](https://github.com/MMFoundation/WallpaperMachine/commit/2146b7e4d9d56e2ce4312a12f65b64c07591f2ae))
+- “其他应用播放声音时”新增“降低音量”选项，可用滑块在 0% 到 100% 之间设定壁纸音量 (closes [#182](https://github.com/MMFoundation/WallpaperMachine/issues/182)) ([c300771](https://github.com/MMFoundation/WallpaperMachine/commit/c3007717b238b56c64c56c3535a28a78644dda12))
+- 菜单栏面板会显示 WallpaperMachine 的能耗，在“设置 › 通用”中还可让数值显示在菜单栏图标旁 (closes [#188](https://github.com/MMFoundation/WallpaperMachine/issues/188)) ([f8329bf](https://github.com/MMFoundation/WallpaperMachine/commit/f8329bf1e0ee4b18820ad99593d6fb3337c4c64d))
+- “正在播放”栏新增“随机壁纸”按钮，会从壁纸库中换一张壁纸，所有壁纸都轮过一遍才会重复 ([f4d3b9d](https://github.com/MMFoundation/WallpaperMachine/commit/f4d3b9d339f7b79be4ccfa207c3562985c1cd2a1))
+- 可从“显示”菜单或使用 Control-Command-S 和 Option-Command-I 打开或关闭筛选边栏和壁纸详情 ([af7af65](https://github.com/MMFoundation/WallpaperMachine/commit/af7af6558419491a52311ef99fb6ab3cbbcc6e76))
+- 在 Steam 创意工坊或 pixiv 中选中缩略图后按 Command-Return，即可像双击一样应用或下载 ([95f01d1](https://github.com/MMFoundation/WallpaperMachine/commit/95f01d10dad01e26218fd2ec07ead17195b6e256), [c6fff14](https://github.com/MMFoundation/WallpaperMachine/commit/c6fff14a913b126f373f08b498a70d83f023c183))
+- 可直接在 Steam 创意工坊的详情栏中将已下载的壁纸移到废纸篓，不影响你的 Steam 订阅 (closes [#183](https://github.com/MMFoundation/WallpaperMachine/issues/183)) ([dcd8702](https://github.com/MMFoundation/WallpaperMachine/commit/dcd870220c7f550f78b027d43e53dd9330aede93))
+- 在欢迎指南任意一页点“跳过设置”或按 Esc 即可结束，已做的选择会保留 ([53c037f](https://github.com/MMFoundation/WallpaperMachine/commit/53c037fdec598d9dff712fb2924dd41784194cc2))
+- 更新后会弹出一次介绍窗口，展示桌面小组件，选择“设置桌面小组件”即可打开相应设置 ([cbbdfdf](https://github.com/MMFoundation/WallpaperMachine/commit/cbbdfdf02db0589f341e554dceeea6fdcccf92a7))
+
+#### 改进
+
+- “还原”和“应用更改”只在有待应用的修改时出现，“未应用”标记会指出哪些设置尚未生效 ([adb2ab2](https://github.com/MMFoundation/WallpaperMachine/commit/adb2ab244fdc2a040ccae0ea1ce2d8d0d2b3ad27), [2ba2440](https://github.com/MMFoundation/WallpaperMachine/commit/2ba24403e283f848ca9d9c53e4342febcf4130f2))
+- 应用壁纸现在有专属图标（带向下箭头的显示器），“播放”图标只用于开始轮播或继续播放 ([03aca16](https://github.com/MMFoundation/WallpaperMachine/commit/03aca16b693f55011a00c4d7b1fbcfe7be26e02b))
+- 已在壁纸库中的壁纸改用壁纸库图标标记，不再与勾选混淆，下载或应用状态下的缩略图也在各页面以相同方式变暗 ([288cafe](https://github.com/MMFoundation/WallpaperMachine/commit/288cafe3068728a805ae5c1012784614e94f39dc), [c6da5d0](https://github.com/MMFoundation/WallpaperMachine/commit/c6da5d09f585d66440f51e775758614193cdd141))
+- 连接两台或以上显示器时，详情栏中每台显示器的卡片默认收起并显示一行摘要，其他设置更容易找到 ([0dcfad5](https://github.com/MMFoundation/WallpaperMachine/commit/0dcfad56ec19baddd8422c3651203b7aa3960ba6))
+- 兼容性检查会用通俗的话说明壁纸由什么绘制，“缩放系数”也会说明它如何放大或缩小壁纸 ([14ae78a](https://github.com/MMFoundation/WallpaperMachine/commit/14ae78ae537c9ae1d8d7d2d1782249e98fe3d523))
+- 欢迎指南少了一页，不再索要 Steam 密码，首次下载创意工坊壁纸时才会按需请求登录 Steam ([53c037f](https://github.com/MMFoundation/WallpaperMachine/commit/53c037fdec598d9dff712fb2924dd41784194cc2))
+- 窗口隐藏或开启“减弱动态效果”时，进度条、加载指示和加载圆环会停止转动，且各页面样式一致 ([893b7db](https://github.com/MMFoundation/WallpaperMachine/commit/893b7db51446555477b60f0706759f8e320f75b4), [7013795](https://github.com/MMFoundation/WallpaperMachine/commit/70137959970418f26dad79ca5032af059286dc53))
+- 已安装、Steam 创意工坊和 pixiv 壁纸的详情栏以及设置中的按钮、链接和分组标题，现在样式统一 ([c837076](https://github.com/MMFoundation/WallpaperMachine/commit/c837076d0a5320bc984190d835ea2ba6a4216842), [697ea2e](https://github.com/MMFoundation/WallpaperMachine/commit/697ea2ed78411b3204ad14f31053858cef60f9f0), [4ac5a96](https://github.com/MMFoundation/WallpaperMachine/commit/4ac5a9698c18b231f45f436c0546a0938dc755d9))
+- 对已在壁纸库中的壁纸，Steam 创意工坊详情栏现在以“应用壁纸”按钮开头，可通过键盘和旁白操作 ([1b614cf](https://github.com/MMFoundation/WallpaperMachine/commit/1b614cf0e97d6e37e9a933e690a907a248f3d298))
+- 窗口较窄时，壁纸库的视图按钮和“播放”会逐步收缩为图标，当前合集的名称始终清晰可读 ([046d980](https://github.com/MMFoundation/WallpaperMachine/commit/046d980147aabfdce1e6083633079934f60e6416))
+- 鼠标悬停在被截断的壁纸标题上，即可看到完整标题 ([09f6f02](https://github.com/MMFoundation/WallpaperMachine/commit/09f6f0229e88bbebacc8690c919c86efdd3dacd2))
+- 连接多台显示器时，“应用壁纸”和“重新应用壁纸”的帮助提示会说明壁纸将应用到哪台显示器 ([85537f8](https://github.com/MMFoundation/WallpaperMachine/commit/85537f863194d464abf42f833a2c29b8fe2e6386))
+- 没有壁纸在播放时，“正在播放”栏和菜单栏面板会清楚说明如何应用壁纸 ([7143230](https://github.com/MMFoundation/WallpaperMachine/commit/714323038678826a9697df12f6263b0babf06baa))
+- 支持提示现在会在首次下载壁纸至少一天后才出现，并提供在 Open Collective 上赞助 MMFoundation 的选项 ([8e035b3](https://github.com/MMFoundation/WallpaperMachine/commit/8e035b34f8f1020293c06ede39773f2525a068a8), [7b24c9f](https://github.com/MMFoundation/WallpaperMachine/commit/7b24c9f5f510876149770b7cb9a2f15a14d4edc0))
+- 错误横幅和“最近使用”列表的关闭按钮扩大了点击范围，点在叉号旁边也能关闭 ([3185290](https://github.com/MMFoundation/WallpaperMachine/commit/318529019b01c2ea868c48405fb9d2370f4c0154))
+
+#### 问题修复
+
+- 切换壁纸时不再崩溃，实验性的动态锁定屏幕也不会在更换壁纸后反复重启 (closes [#184](https://github.com/MMFoundation/WallpaperMachine/issues/184)) ([5ce34fd](https://github.com/MMFoundation/WallpaperMachine/commit/5ce34fd6523d0977cbf929a49beb10a73412cbfc))
+- SteamCMD 登录失败后，现在可以改用二维码登录或修改账户信息，而不是原样重试 (closes [#186](https://github.com/MMFoundation/WallpaperMachine/issues/186)) ([d1ec386](https://github.com/MMFoundation/WallpaperMachine/commit/d1ec386040235218ebd7722225516756f51b17b9))
+- 在 Steam 创意工坊重新搜索时，不再显示上一次搜索的壁纸 ([34ddecf](https://github.com/MMFoundation/WallpaperMachine/commit/34ddecf5cc2af925d65d80c9da3bb63a6175e608))
+- 在网页壁纸上拖动桌面上的访达图标时，不再被网页中的图片或链接打断 ([5757d12](https://github.com/MMFoundation/WallpaperMachine/commit/5757d12f0ee52214f3a7f6d2ebc5ce8f768ed60a))
+- 从壁纸发起的问题报告只会把确实尚待应用的设置标为“未应用” ([53689af](https://github.com/MMFoundation/WallpaperMachine/commit/53689afca6bb08fc831a85d5324f5240d9f60f90))
+- 正在下载的 Steam 创意工坊缩略图在键盘聚焦时也会显示取消叉号，而不只是在鼠标悬停时 ([cab75ce](https://github.com/MMFoundation/WallpaperMachine/commit/cab75cec16dd1f22fedb06c41c2345046bb2a02d))
+- 在欢迎指南中添加或放弃更改后，旁白不再读出顶部过时的提示 ([a1f9824](https://github.com/MMFoundation/WallpaperMachine/commit/a1f9824b637c33cd9636853789c00d3f6cf870aa))
+- 更新横幅现在使用“设置 › 外观”中选择的强调色，而不是系统强调色 ([4da1457](https://github.com/MMFoundation/WallpaperMachine/commit/4da1457bf6c520f58fb57b28eb7151dd7f7acbc4))
+- 壁纸切换规则编辑器和欢迎指南摘要中的标签在某些语言下不再折成两行 ([3287a24](https://github.com/MMFoundation/WallpaperMachine/commit/3287a24c29c0ac52488f1da746cf7d51828e61f2))
+- 空合集现在会显示“此合集为空”，而不是“没有匹配的壁纸” ([37aa18b](https://github.com/MMFoundation/WallpaperMachine/commit/37aa18bda086614d8413a190155873a1816c2358))
+- 未设筛选条件的 Steam 创意工坊搜索无结果时，不再建议移除筛选条件 ([ed038ab](https://github.com/MMFoundation/WallpaperMachine/commit/ed038ab03aff001594249eb0f05dbc6b5c4159c8))
+- 首次读取壁纸时，壁纸库不再同时显示两条加载提示 ([7f4ecc6](https://github.com/MMFoundation/WallpaperMachine/commit/7f4ecc6279cd54766e6dcb9afdbbb06812259ae5))
+- 欢迎指南现在会指向“Steam 创意工坊”标签页，而不是已不存在的边栏 ([56f7ca5](https://github.com/MMFoundation/WallpaperMachine/commit/56f7ca5c49e244f743f2b978703f27ac80dbc07b))
+
+感谢 [@arleckk](https://github.com/arleckk) 和 [@403Denied](https://github.com/403Denied) 为本版本做出的贡献。
+
+### 한국어
+
+이번 업데이트로 데스크톱에 위젯을 둘 수 있고, Steam QR 로그인으로 창작마당 다운로드가 쉬워졌으며, 제어판도 더 명확하고 일관되게 바뀌었습니다
+
+#### 주요 변경 사항
+
+- 어떤 배경화면 위에든 시계, 달력, 카운트다운 등 위젯을 데스크톱에 올리고, 큰 캔버스에서 꾸미거나 기성 디자인으로 시작할 수 있습니다 ([be5ea29](https://github.com/MMFoundation/WallpaperMachine/commit/be5ea29e77ced2db9aab178dfcb5d6c17a22726f), [b989826](https://github.com/MMFoundation/WallpaperMachine/commit/b9898267b136da863a07999114934e586de8c2f7), [caef030](https://github.com/MMFoundation/WallpaperMachine/commit/caef0304749a45603b0981c1eeebe3fae69f012d), [05e13de](https://github.com/MMFoundation/WallpaperMachine/commit/05e13ded4c22f15e95b8b48d4df8b6186d9e4f94))
+- Steam 모바일 앱으로 QR 코드를 스캔하면 비밀번호, Steam Guard 코드, SteamCMD 없이 Steam 창작마당 배경화면을 다운로드할 수 있습니다 ([2146b7e](https://github.com/MMFoundation/WallpaperMachine/commit/2146b7e4d9d56e2ce4312a12f65b64c07591f2ae))
+- 다른 앱에서 소리가 재생될 때 배경화면을 음소거하거나 일시 정지하는 대신 볼륨만 줄일 수 있습니다 (closes [#182](https://github.com/MMFoundation/WallpaperMachine/issues/182)) ([c300771](https://github.com/MMFoundation/WallpaperMachine/commit/c3007717b238b56c64c56c3535a28a78644dda12))
+- 이제 메뉴 막대에서 WallpaperMachine의 현재 에너지 사용량을 확인할 수 있습니다 (closes [#188](https://github.com/MMFoundation/WallpaperMachine/issues/188)) ([f8329bf](https://github.com/MMFoundation/WallpaperMachine/commit/f8329bf1e0ee4b18820ad99593d6fb3337c4c64d))
+
+#### 새로운 기능
+
+- 설정 › 데스크톱 위젯에서 시계, 날짜, 월간 달력, 텍스트, 카운트다운, 인사말, 배터리 잔량, 다음 일출 또는 일몰을 데스크톱에 추가할 수 있습니다 ([be5ea29](https://github.com/MMFoundation/WallpaperMachine/commit/be5ea29e77ced2db9aab178dfcb5d6c17a22726f))
+- 디스플레이를 크게 보여 주는 화면에서 위젯의 크기를 조절하고 회전하며 안내선에 맞추고, 레이어처럼 순서를 바꾸거나 숨기거나 복제할 수 있습니다 ([b989826](https://github.com/MMFoundation/WallpaperMachine/commit/b9898267b136da863a07999114934e586de8c2f7), [05e13de](https://github.com/MMFoundation/WallpaperMachine/commit/05e13ded4c22f15e95b8b48d4df8b6186d9e4f94), [a8420b1](https://github.com/MMFoundation/WallpaperMachine/commit/a8420b17e8f66868fb2d9996f1424037b28bbc11))
+- 큰 시계, 네온 시계, 세계 시계, 음력 날짜, 월간 달력 등 기성 위젯으로 시작해 다른 위젯처럼 편집할 수 있습니다 ([b989826](https://github.com/MMFoundation/WallpaperMachine/commit/b9898267b136da863a07999114934e586de8c2f7))
+- Mac에 설치된 모든 글꼴, 그라데이션, 외곽선, 글로우, 그림자, 배경판, 기울이기로 위젯을 꾸미거나 네온, 글래스 같은 스타일을 한 번에 적용할 수 있습니다 ([caef030](https://github.com/MMFoundation/WallpaperMachine/commit/caef0304749a45603b0981c1eeebe3fae69f012d))
+- 다운로드 대화상자나 설정 › 보관함 및 Steam에서 QR 코드를 스캔해 Steam에 로그인하면 SteamCMD 없이 창작마당 항목을 다운로드합니다 ([2146b7e](https://github.com/MMFoundation/WallpaperMachine/commit/2146b7e4d9d56e2ce4312a12f65b64c07591f2ae))
+- 다른 앱에서 소리가 재생될 때 볼륨 줄이기를 선택하고, 슬라이더로 배경화면 볼륨을 0%에서 100% 사이로 정할 수 있습니다 (closes [#182](https://github.com/MMFoundation/WallpaperMachine/issues/182)) ([c300771](https://github.com/MMFoundation/WallpaperMachine/commit/c3007717b238b56c64c56c3535a28a78644dda12))
+- 메뉴 막대 패널에 WallpaperMachine의 에너지 사용량이 표시되며, 설정 › 일반에서 메뉴 막대 아이콘 옆에도 표시할 수 있습니다 (closes [#188](https://github.com/MMFoundation/WallpaperMachine/issues/188)) ([f8329bf](https://github.com/MMFoundation/WallpaperMachine/commit/f8329bf1e0ee4b18820ad99593d6fb3337c4c64d))
+- 지금 재생 중 막대에 새로 생긴 무작위 배경화면 버튼은 보관함에서 다른 배경화면을 고르며, 모두 한 번씩 나온 뒤에야 반복합니다 ([f4d3b9d](https://github.com/MMFoundation/WallpaperMachine/commit/f4d3b9d339f7b79be4ccfa207c3562985c1cd2a1))
+- 보기 메뉴나 Control-Command-S, Option-Command-I로 필터 사이드바와 배경화면 세부 정보를 열고 닫을 수 있습니다 ([af7af65](https://github.com/MMFoundation/WallpaperMachine/commit/af7af6558419491a52311ef99fb6ab3cbbcc6e76))
+- Steam 창작마당이나 pixiv에서 포커스된 타일에 Command-Return을 누르면 더블 클릭처럼 적용하거나 다운로드합니다 ([95f01d1](https://github.com/MMFoundation/WallpaperMachine/commit/95f01d10dad01e26218fd2ec07ead17195b6e256), [c6fff14](https://github.com/MMFoundation/WallpaperMachine/commit/c6fff14a913b126f373f08b498a70d83f023c183))
+- Steam 창작마당 세부 정보 패널에서 다운로드한 배경화면을 바로 휴지통으로 옮길 수 있으며, Steam 구독은 그대로 유지됩니다 (closes [#183](https://github.com/MMFoundation/WallpaperMachine/issues/183)) ([dcd8702](https://github.com/MMFoundation/WallpaperMachine/commit/dcd870220c7f550f78b027d43e53dd9330aede93))
+- 환영 안내의 어느 페이지에서든 설정 건너뛰기나 Esc로 끝낼 수 있으며, 이미 고른 설정은 유지됩니다 ([53c037f](https://github.com/MMFoundation/WallpaperMachine/commit/53c037fdec598d9dff712fb2924dd41784194cc2))
+- 업데이트 후 한 번만 나타나는 창에서 데스크톱 위젯을 소개하며, 데스크톱 위젯 설정을 선택하면 바로 설정으로 이동합니다 ([cbbdfdf](https://github.com/MMFoundation/WallpaperMachine/commit/cbbdfdf02db0589f341e554dceeea6fdcccf92a7))
+
+#### 개선 사항
+
+- 되돌리기와 변경 사항 적용 버튼은 적용할 편집이 있을 때만 나타나며, 적용 안 됨 표시로 아직 적용되지 않은 설정을 알려 줍니다 ([adb2ab2](https://github.com/MMFoundation/WallpaperMachine/commit/adb2ab244fdc2a040ccae0ea1ce2d8d0d2b3ad27), [2ba2440](https://github.com/MMFoundation/WallpaperMachine/commit/2ba24403e283f848ca9d9c53e4342febcf4130f2))
+- 배경화면 적용에 아래 화살표가 있는 디스플레이 아이콘이 생겨, 재생 아이콘은 이제 순환 시작이나 재생 재개만 뜻합니다 ([03aca16](https://github.com/MMFoundation/WallpaperMachine/commit/03aca16b693f55011a00c4d7b1fbcfe7be26e02b))
+- 이미 보관함에 있는 배경화면은 체크 표시 대신 보관함 아이콘으로 표시되며, 다운로드나 적용 중인 타일은 어디서나 같은 방식으로 어두워집니다 ([288cafe](https://github.com/MMFoundation/WallpaperMachine/commit/288cafe3068728a805ae5c1012784614e94f39dc), [c6da5d0](https://github.com/MMFoundation/WallpaperMachine/commit/c6da5d09f585d66440f51e775758614193cdd141))
+- 디스플레이가 두 대 이상이면 세부 정보 패널의 디스플레이 카드가 한 줄 요약으로 접혀 있어 다른 설정에 더 쉽게 닿을 수 있습니다 ([0dcfad5](https://github.com/MMFoundation/WallpaperMachine/commit/0dcfad56ec19baddd8422c3651203b7aa3960ba6))
+- 호환성 검사가 배경화면을 무엇이 그리는지 쉬운 말로 알려 주고, 배율 항목은 배경화면을 어떻게 확대하거나 축소하는지 설명합니다 ([14ae78a](https://github.com/MMFoundation/WallpaperMachine/commit/14ae78ae537c9ae1d8d7d2d1782249e98fe3d523))
+- 환영 안내가 한 페이지 줄었고 더 이상 Steam 비밀번호를 묻지 않으며, 첫 창작마당 다운로드 때 필요하면 Steam 로그인을 요청합니다 ([53c037f](https://github.com/MMFoundation/WallpaperMachine/commit/53c037fdec598d9dff712fb2924dd41784194cc2))
+- 창이 가려져 있거나 동작 줄이기가 켜져 있으면 진행 막대와 로딩 표시가 멈추며, 모든 페이지에서 같은 모양으로 보입니다 ([893b7db](https://github.com/MMFoundation/WallpaperMachine/commit/893b7db51446555477b60f0706759f8e320f75b4), [7013795](https://github.com/MMFoundation/WallpaperMachine/commit/70137959970418f26dad79ca5032af059286dc53))
+- 설치됨, Steam 창작마당, pixiv 배경화면의 세부 정보 패널과 설정에서 버튼, 링크, 그룹 제목이 같은 모양을 갖습니다 ([c837076](https://github.com/MMFoundation/WallpaperMachine/commit/c837076d0a5320bc984190d835ea2ba6a4216842), [697ea2e](https://github.com/MMFoundation/WallpaperMachine/commit/697ea2ed78411b3204ad14f31053858cef60f9f0), [4ac5a96](https://github.com/MMFoundation/WallpaperMachine/commit/4ac5a9698c18b231f45f436c0546a0938dc755d9))
+- 보관함에 있는 배경화면의 Steam 창작마당 세부 정보 패널은 이제 키보드와 VoiceOver로 접근할 수 있는 배경화면 적용 버튼으로 시작합니다 ([1b614cf](https://github.com/MMFoundation/WallpaperMachine/commit/1b614cf0e97d6e37e9a933e690a907a248f3d298))
+- 창이 좁으면 보관함의 보기 버튼과 재생 버튼이 단계적으로 아이콘만 남아, 열린 컬렉션 이름을 계속 읽을 수 있습니다 ([046d980](https://github.com/MMFoundation/WallpaperMachine/commit/046d980147aabfdce1e6083633079934f60e6416))
+- 타일에서 잘린 배경화면 제목 위에 포인터를 올리면 전체 제목을 볼 수 있습니다 ([09f6f02](https://github.com/MMFoundation/WallpaperMachine/commit/09f6f0229e88bbebacc8690c919c86efdd3dacd2))
+- 디스플레이가 여러 대일 때 배경화면 적용과 다시 적용 도움말에 배경화면이 적용될 디스플레이 이름이 표시됩니다 ([85537f8](https://github.com/MMFoundation/WallpaperMachine/commit/85537f863194d464abf42f833a2c29b8fe2e6386))
+- 재생 중인 배경화면이 없을 때 지금 재생 중 막대와 메뉴 막대 패널이 배경화면 적용 방법을 정확히 안내합니다 ([7143230](https://github.com/MMFoundation/WallpaperMachine/commit/714323038678826a9697df12f6263b0babf06baa))
+- 후원 안내는 이제 첫 배경화면을 다운로드하고 최소 하루가 지난 뒤에 나타나며, Open Collective에서 MMFoundation을 후원하는 방법을 안내합니다 ([8e035b3](https://github.com/MMFoundation/WallpaperMachine/commit/8e035b34f8f1020293c06ede39773f2525a068a8), [7b24c9f](https://github.com/MMFoundation/WallpaperMachine/commit/7b24c9f5f510876149770b7cb9a2f15a14d4edc0))
+- 오류 배너와 최근 사용 목록의 닫기 버튼이 X 표시 주변을 클릭해도 반응합니다 ([3185290](https://github.com/MMFoundation/WallpaperMachine/commit/318529019b01c2ea868c48405fb9d2370f4c0154))
+
+#### 버그 수정
+
+- 배경화면을 바꿀 때 더 이상 충돌하지 않으며, 실험적 기능인 움직이는 잠금 화면도 변경 후 다시 시작을 반복하지 않습니다 (closes [#184](https://github.com/MMFoundation/WallpaperMachine/issues/184)) ([5ce34fd](https://github.com/MMFoundation/WallpaperMachine/commit/5ce34fd6523d0977cbf929a49beb10a73412cbfc))
+- SteamCMD 로그인에 실패하면 같은 방식으로 재시도하는 대신 QR 로그인을 선택하거나 계정 정보를 고칠 수 있습니다 (closes [#186](https://github.com/MMFoundation/WallpaperMachine/issues/186)) ([d1ec386](https://github.com/MMFoundation/WallpaperMachine/commit/d1ec386040235218ebd7722225516756f51b17b9))
+- Steam 창작마당에서 새로 검색할 때 이전 검색의 배경화면이 더 이상 나타나지 않습니다 ([34ddecf](https://github.com/MMFoundation/WallpaperMachine/commit/34ddecf5cc2af925d65d80c9da3bb63a6175e608))
+- 웹 배경화면 위에서 데스크톱의 Finder 아이콘을 끌 때 페이지의 이미지나 링크에 걸리지 않습니다 ([5757d12](https://github.com/MMFoundation/WallpaperMachine/commit/5757d12f0ee52214f3a7f6d2ebc5ce8f768ed60a))
+- 배경화면에서 시작한 문제 보고서는 실제로 적용을 기다리는 설정만 적용 안 됨으로 표시합니다 ([53689af](https://github.com/MMFoundation/WallpaperMachine/commit/53689afca6bb08fc831a85d5324f5240d9f60f90))
+- 다운로드 중인 Steam 창작마당 타일은 포인터를 올릴 때뿐 아니라 키보드로 이동해도 취소 X 표시를 보여 줍니다 ([cab75ce](https://github.com/MMFoundation/WallpaperMachine/commit/cab75cec16dd1f22fedb06c41c2345046bb2a02d))
+- 환영 안내에서 변경 사항을 추가하거나 버린 뒤 VoiceOver가 상단의 지난 메시지를 읽지 않습니다 ([a1f9824](https://github.com/MMFoundation/WallpaperMachine/commit/a1f9824b637c33cd9636853789c00d3f6cf870aa))
+- 업데이트 배너가 시스템 강조 색상 대신 설정 › 화면 모드에서 고른 강조 색상을 사용합니다 ([4da1457](https://github.com/MMFoundation/WallpaperMachine/commit/4da1457bf6c520f58fb57b28eb7151dd7f7acbc4))
+- 배경화면 전환 규칙 편집기와 환영 안내 요약의 레이블이 일부 언어에서 두 줄로 끊기지 않습니다 ([3287a24](https://github.com/MMFoundation/WallpaperMachine/commit/3287a24c29c0ac52488f1da746cf7d51828e61f2))
+- 빈 컬렉션은 이제 일치하는 배경화면이 없다는 대신 컬렉션이 비어 있다고 표시합니다 ([37aa18b](https://github.com/MMFoundation/WallpaperMachine/commit/37aa18bda086614d8413a190155873a1816c2358))
+- 필터 없이 검색한 Steam 창작마당 결과가 없을 때 더 이상 필터를 제거하라고 안내하지 않습니다 ([ed038ab](https://github.com/MMFoundation/WallpaperMachine/commit/ed038ab03aff001594249eb0f05dbc6b5c4159c8))
+- 배경화면을 처음 불러올 때 보관함에 로딩 안내가 두 번 동시에 표시되지 않습니다 ([7f4ecc6](https://github.com/MMFoundation/WallpaperMachine/commit/7f4ecc6279cd54766e6dcb9afdbbb06812259ae5))
+- 환영 안내가 이제 사라진 사이드바 대신 Steam 창작마당 탭을 안내합니다 ([56f7ca5](https://github.com/MMFoundation/WallpaperMachine/commit/56f7ca5c49e244f743f2b978703f27ac80dbc07b))
+
+이번 릴리스에 기여해 주신 [@arleckk](https://github.com/arleckk), [@403Denied](https://github.com/403Denied) 님께 감사드립니다.
+
 ## [1.10.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.9.4...v1.10.0) (2026-11-10)
 
 ### English
