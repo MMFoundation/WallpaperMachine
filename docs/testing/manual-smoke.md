@@ -815,7 +815,8 @@ closed lid has not been seen on a desktop
       back at once. Choose **Reduce volume**: **Reduce volume to** appears under that row, and
       covering the desktop turns the wallpaper down to that level instead. With two displays
       that both show a wallpaper, covering only one leaves the sound alone; covering both
-      changes it.
+      changes it. With the desktop covered and muted, choose **Pause**: no sound comes
+      through before the wallpaper stops.
 - [ ] Verify that the final disabled or removed scene stops capture.
 - [ ] Verify that denied permission surfaces an error.
 

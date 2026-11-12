@@ -537,9 +537,10 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
         XCTAssertEqual(probe.audio, [true, false], "Uncovering does not wait")
     }
 
-    /// A new choice applies to a desktop that is already covered at the next evaluation: Mute to
-    /// Reduce volume trades the silence for the level, Pause gives the sound back and pauses the
-    /// covered display, and Keep running does neither.
+    /// A new choice applies to a desktop that is already covered at the next evaluation, and no
+    /// step lets the sound out louder than the new choice: Mute to Reduce volume sets the level
+    /// before it lifts the mute, Pause keeps the covered desktop silent and pauses the covered
+    /// display, and Keep running gives the sound back.
     func testChangingTheChoiceOnACoveredDesktopAppliesAtTheNextEvaluation() {
         let probe = CompositionProbe()
         probe.coveredAction = .mute
@@ -547,24 +548,61 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
         let policy = makePolicy(probe)
         policy.start()
         defer { policy.stop() }
-        XCTAssertEqual(probe.audio, [true])
+        XCTAssertEqual(probe.order, [.audio(suppressed: true)])
 
         probe.coveredAction = .reduceVolume
         policy.evaluate()
-        XCTAssertEqual(probe.audio, [true, false])
-        XCTAssertEqual(probe.gains, [0.3])
+        XCTAssertEqual(
+            probe.order, [.audio(suppressed: true), .gain(0.3), .audio(suppressed: false)],
+            "The level first, then the sound, so it never plays at its own volume in between")
 
         probe.coveredAction = .pause
         policy.evaluate()
-        XCTAssertEqual(probe.gains, [0.3, 1])
-        XCTAssertFalse(policy.isDesktopCoveredForSound)
+        XCTAssertEqual(
+            Array(probe.order.suffix(2)), [.audio(suppressed: true), .gain(1)],
+            "Silent again before the level goes back up")
+        XCTAssertTrue(policy.isDesktopCoveredForSound, "The covered desktop is still silent under Pause")
         XCTAssertEqual(probe.displays.map(\.suspended), [true], "Pause suspends the covered display")
 
         probe.coveredAction = .keepRunning
         policy.evaluate()
         XCTAssertEqual(probe.displays.map(\.suspended), [true, false])
-        XCTAssertEqual(probe.audio, [true, false])
+        XCTAssertEqual(probe.order.last, .audio(suppressed: false))
+        XCTAssertFalse(policy.isDesktopCoveredForSound)
         XCTAssertEqual(probe.gains, [0.3, 1])
+    }
+
+    /// Changing a muted covered desktop to Pause keeps it silent through the settle the pause waits
+    /// for, instead of letting the sound out for that second; the sound comes back with the
+    /// wallpaper when the desktop shows again. Pause alone never silences anything.
+    func testAMutedCoveredDesktopChangedToPauseStaysSilentUntilItIsUncovered() async throws {
+        let probe = CompositionProbe()
+        probe.coveredAction = .mute
+        probe.covered = [1]
+        let policy = makePolicy(probe, settle: .milliseconds(20))
+        policy.start()
+        defer { policy.stop() }
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(probe.audio, [true])
+
+        probe.coveredAction = .pause
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true], "Still silent while the pause waits for the settle")
+        XCTAssertTrue(probe.displays.isEmpty)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(probe.displays.map(\.suspended), [true])
+        XCTAssertEqual(probe.audio, [true])
+
+        probe.covered = []
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true, false])
+        XCTAssertEqual(probe.displays.map(\.suspended), [true, false])
+
+        probe.covered = [1]
+        policy.evaluate()
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(probe.audio, [true, false], "Pause on its own pauses and leaves the sound alone")
+        XCTAssertEqual(probe.displays.map(\.suspended), [true, false, true])
     }
 
     /// A covered desktop is one more reason for the mute, beside the user's own and the rules:

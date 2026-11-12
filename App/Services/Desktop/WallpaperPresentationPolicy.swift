@@ -144,9 +144,9 @@ final class WallpaperPresentationPolicy {
     private(set) var audioGain: Float = 1
     /// Other windows have covered the working area of every display whose wallpaper is in view for
     /// the settle delay, while the covered-desktop choice acts on sound. Kept while no wallpaper is
-    /// in view at all (a full-screen app, sleeping displays), so leaving that for the same covered
-    /// desktop brings no burst of sound; cleared at once when a wallpaper is in view uncovered or
-    /// the choice stops acting on sound.
+    /// in view at all (a full-screen app, sleeping displays, or covered displays that the choice,
+    /// changed to Pause, now pauses), so none of those brings a burst of sound; cleared at once
+    /// when a wallpaper is in view uncovered or the choice becomes Keep running.
     private(set) var isDesktopCoveredForSound = false
     /// The conditions asking for the reduced-quality profile, whatever presentation does.
     private(set) var qualityReductions: Set<QualityReduction> = []
@@ -465,13 +465,16 @@ final class WallpaperPresentationPolicy {
     /// What windows do to the wallpapers in view, for a covered-desktop choice that acts on sound:
     /// true while they cover the working area of every display whose wallpaper is in view (on
     /// screen and not paused for a full-screen app or for the user working elsewhere), false while
-    /// one of those is uncovered or the choice leaves sound alone, and nil while no wallpaper is in
-    /// view at all, which leaves the last answer standing.
+    /// one of those is uncovered or the choice is Keep running, and nil while no wallpaper is in
+    /// view at all, which leaves the last answer standing. Under Pause a covered display is out of
+    /// view already, so it is never true, and a desktop covered while the choice changed to Pause
+    /// stays quiet until a wallpaper shows uncovered.
     private func soundCoverage(_ current: [WallpaperSurfaceVisibility]) -> Bool? {
-        guard desktopCoveredAction().actsOnSound else { return false }
+        let action = desktopCoveredAction()
+        guard action.watchesCoverage else { return false }
         let inView = Set(current.filter(\.isVisible).map(\.displayID))
         guard !inView.isEmpty else { return nil }
-        return inView.isSubset(of: coveredDisplays())
+        return action.actsOnSound && inView.isSubset(of: coveredDisplays())
     }
 
     /// Windows have covered every wallpaper in view for the settle delay: the covered-desktop
@@ -639,7 +642,9 @@ final class WallpaperPresentationPolicy {
     private func resolvedAudioSuppressed() -> Bool {
         if userMuted() { return true }
         if appRuleActions().contains(.mute) { return true }
-        if isDesktopCoveredForSound, desktopCoveredAction() == .mute { return true }
+        // Pause holds the silence of a desktop that was already covered while its covered
+        // displays wait out the settle, instead of letting the sound out for that second.
+        if isDesktopCoveredForSound, [.mute, .pause].contains(desktopCoveredAction()) { return true }
         return otherAudioActive() && otherAudioAction() == .mute
     }
 
@@ -680,9 +685,9 @@ final class WallpaperPresentationPolicy {
 
     private func deliverPending() {
         guard !deliveryInFlight else { return }
-        // The global condition is the coarser one, so it goes first. Audio (the mute,
-        // then the gain) and quality follow, then per-display occlusion, one
-        // acknowledgement at a time.
+        // The global condition is the coarser one, so it goes first. Audio (a mute before
+        // the gain, its release after it) and quality follow, then per-display occlusion,
+        // one acknowledgement at a time.
         if appliedGlobal != globalPresentation {
             let presentation = globalPresentation
             let resumes = isRunning && presentation == .running && appliedGlobal != .running
@@ -706,18 +711,13 @@ final class WallpaperPresentationPolicy {
             }
             return
         }
-        if appliedAudio != isAudioSuppressed {
-            let suppressed = isAudioSuppressed
-            deliveryInFlight = true
-            applyAudio(suppressed) { [self] result in
-                deliveryInFlight = false
-                guard case .success = result else {
-                    appliedAudio = nil
-                    return
-                }
-                appliedAudio = suppressed
-                deliverPending()
-            }
+        // A mute goes before a new gain and its release after it, so sound never plays for a
+        // moment at a level that is no longer the decision (Mute to Reduce volume, say). A gain
+        // the bridge refused does not hold the release back: it is sent again later.
+        let releasesMute = appliedAudio != isAudioSuppressed && !isAudioSuppressed
+        let gainSettled = appliedAudioGain == audioGain || appliedAudioGain == nil
+        if appliedAudio != isAudioSuppressed, !releasesMute || gainSettled {
+            deliverAudioSuppression()
             return
         }
         if appliedAudioGain != audioGain {
@@ -733,6 +733,10 @@ final class WallpaperPresentationPolicy {
                 appliedAudioGain = gain
                 deliverPending()
             }
+            return
+        }
+        if appliedAudio != isAudioSuppressed {
+            deliverAudioSuppression()
             return
         }
         if appliedQuality != qualityReductions {
@@ -782,6 +786,20 @@ final class WallpaperPresentationPolicy {
                 deliverPending()
             }
             return
+        }
+    }
+
+    private func deliverAudioSuppression() {
+        let suppressed = isAudioSuppressed
+        deliveryInFlight = true
+        applyAudio(suppressed) { [self] result in
+            deliveryInFlight = false
+            guard case .success = result else {
+                appliedAudio = nil
+                return
+            }
+            appliedAudio = suppressed
+            deliverPending()
         }
     }
 

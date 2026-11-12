@@ -548,7 +548,11 @@ sound alone while the other's wallpaper is still in view, even when the sound co
 from the covered one's wallpaper. Like a pause, the sound changes after the
 one-second settle and comes back the moment any of those working areas shows again.
 While no wallpaper is in view at all, the last decision stands, so leaving a
-full-screen app for the same covered desktop brings no second of sound first. They
+full-screen app for the same covered desktop brings no second of sound first. Changing
+the choice while the desktop is covered lets no sound out either: **Mute** to **Reduce
+volume** sets the level before it lifts the mute, and **Mute** or **Reduce volume** to
+**Pause** keeps the wallpapers silent while the covered display waits out the settle,
+until the desktop shows again; **Keep running** gives the sound back at once. They
 compose with the other reasons to mute or turn down as **Reduce volume** below does:
 **Mute all wallpapers**, a mute rule or a Focus filter still silences a wallpaper that
 is turned down, and nothing rewrites a wallpaper's saved volume or mute. A

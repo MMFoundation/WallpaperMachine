@@ -477,8 +477,10 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   stay but hide nothing: since the audio flag and the gain reach every display at once, the policy
   sets `isDesktopCoveredForSound` only once the working area of every display whose wallpaper is
   in view is covered, after the same settle, clears it the moment one is uncovered, and leaves it
-  as it was while no wallpaper is in view at all. A per-display mute would need the bridge to
-  carry one. With
+  as it was while no wallpaper is in view at all; under Pause, which hides the covered displays,
+  a flag already set keeps the wallpapers muted until one shows uncovered. The policy delivers a
+  mute before a new gain and lifts it after one, so no switch plays a moment at the old level. A
+  per-display mute would need the bridge to carry one. With
   `PlaybackPreferences.playsOnlyOnActiveDisplay` on, every display but the one under the pointer
   counts as hidden too, once the pointer has been away for 3 s: `ActiveDisplayTracker` follows
   the pointer with event monitors that exist only while the option is on and two displays are
