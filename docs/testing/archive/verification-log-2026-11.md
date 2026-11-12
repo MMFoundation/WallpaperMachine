@@ -9,6 +9,13 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-11 — Desktop widgets: seven more kinds
+
+- Added Text, Countdown, Greeting, Battery, Sunrise and sunset, Analog clock and Month calendar widgets; clocks and dates gained Time zone and Label, dates gained month-year, week and day-of-year styles and other calendars.
+- python3 scripts/test.py --only DesktopWidgetTests --only DesktopWidgetControllerTests --only WidgetsSettingsTests --only LowBatteryTests --only SettingsSectionsLocalizationTests: 49 passed.
+- python3 scripts/test.py: 4779 passed, 66 skipped, 0 failed (run with CLAUDE.md restored temporarily; the working tree has it deleted, which fails test_doc_links).
+- Not checked: how the clock face, month grid and multi-line text look on a real desktop; no Release build.
+
 ## 2026-11-11 — Desktop widgets
 
 Clocks and dates drawn on the desktop over any wallpaper (Settings › Desktop Widgets); see [desktop widgets](../../features/desktop-widgets.md).

@@ -9,23 +9,79 @@ opens that page ([feature introductions](updates.md#feature-introductions)).
 
 ## What the user sees
 
+Unlike the other Settings pages, Desktop Widgets is not one scrolling column of rows: a widget
+is arranged and styled by looking at it, and its forty-odd rows down one page kept every control a
+long scroll from the picture it changed. Without a search the page is a **workspace**
+(`WidgetsWorkspace`):
+
+- a header with the section's name, **Ready-made** and **Add Widget**;
+- a large **canvas** of the selected widget's display (of the main display while none is
+  selected), as wide as the page leaves it, which grows with the window (see
+  [the canvas](#the-canvas)); under it how to use it, and the **Center on the display** buttons
+  (**Center Horizontally**, **Center Vertically**) for the selected widget;
+- the **Layers** list under the canvas;
+- an **inspector** beside the canvas, 340 points wide, naming the selected widget (what it says,
+  its kind and display) above four tabs, **Content**, **Text**, **Style** and **Position**, and
+  the rows of the tab chosen, which scroll on their own while the canvas and the layers stay put.
+  A battery and a month calendar have no **Content** tab; a widget without the tab chosen last
+  opens on its first. A wide control (a slider, a long menu, a field) sits under its row's title
+  there.
+
+When the page is narrower than 800 points the inspector goes under the canvas, before the
+layers, and the canvas stays on show above them while they scroll. With no widget yet, the
+inspector offers the ready-made widgets instead of the tabs. A search shows the page as every
+other page: the list, then the rows of every tab one under another (Position, Text, Style,
+Content), with only those that match, and the Arrange picture as a row of Position.
+
+**Ready-made** opens a popover of finished widgets, each drawn as the desktop will draw it over
+the main display's wallpaper; a click adds it and opens it in the editor. Some are a group laid
+out together, the widgets spaced by their real size on the main display
+(`DesktopWidgetPreset`): **Big clock**, **Clock and date** (the date in spaced capitals under the
+clock), **Neon clock**, **Clock face** (minute ticks on a glass disc), **World clocks** (New York,
+London and Tokyo side by side, each labelled with its city, as badges), **Lunar date** (the
+Chinese calendar), **Month calendar** (a badge at the top right), **Countdown**, **Greeting and
+date**, **Gradient note** and **Battery and sun** (bottom left). They are ordinary widgets once
+added: nothing remembers the preset. A group goes in front of the others, in its order; one that
+would pass the limit is disabled, and adds nothing.
+
 **Add Widget** is a menu of the kinds; the one chosen goes on the main display (the one with the
 menu bar), a little below any widget already there, at the top of the list, and opens in the
 editor. Up to 24 widgets can be added.
 
-The list under it is the widgets' **layers**, front first: where two widgets overlap on the
-desktop, the one higher in the list covers the other (with two or more widgets, the Add Widget
-row says so). Each row shows a drag handle, the widget's words now (the first line of a text, the
+The **Layers** list is the widgets' layers, front first: where two widgets overlap on the
+desktop, the one higher in the list covers the other (with two or more widgets, the list says
+so). Each row shows a drag handle, the widget's words now (the first line of a text, the
 month of a calendar), its kind and its display (and **Hidden** for one switched off), and two
 buttons: the eye shows or hides it on the desktop, and the trash removes it after asking once more
 in place (**Cancel** or **Remove**), since a removal cannot be undone; the editor then moves to
-the next widget. A click picks the widget the groups below edit, and the selected row is
+the next widget. A click picks the widget the inspector edits, and the selected row is
 highlighted. Dragging a row's handle onto another row puts it in that row's place; a drop made
 from an order that has changed since is refused. The row's context menu has **Show on the
 desktop** or **Hide on the desktop**, **Duplicate** (a copy just in front of it, a little lower on
 the display, opened in the editor), **Bring to Front**, **Bring Forward**, **Send Backward**,
 **Send to Back** and **Remove**; VoiceOver offers Bring Forward and Send Backward as actions of
-the row. The first group of the editor names the widget it edits on its title line.
+the row. In the search results, the first group of the editor names the widget it edits on its
+title line.
+
+### The canvas
+
+The canvas shows the display's wallpaper ([its backdrop](#the-previews-backdrop)) and every widget
+shown there, stacked as on the desktop. A click on a widget selects it; dragging it moves it,
+snapping to guides ([snapping](#snapping-and-guides)). The selected widget is outlined above every
+layer, so it can be found under another one, with:
+
+- a square **handle at each corner**: dragging one resizes the widget about its middle, by the
+  pointer's distance from the middle over its distance when the drag began (10 to 320 points);
+- a round **knob** above it (below it when the widget is at the top of the display) on a short
+  stem: dragging it turns the widget about its middle, settling on every 15° within 4° of one
+  unless Command is held; a double click turns it upright.
+
+While a handle moves, its size ("128 pt") or turn ("15°") shows under the widget; the change is
+saved when it is let go, as a move is. Once the canvas has been clicked, the arrow keys move the
+selected widget one point of the display, ten with Shift. A widget's context menu on the canvas
+has **Hide on the desktop** or **Show on the desktop**, **Duplicate**, **Bring to Front** and
+**Send to Back**. The canvas is hidden from VoiceOver: the rows of the Position and Text tabs do
+the same from the keyboard.
 
 | Kind | Shows | Changes |
 | --- | --- | --- |
@@ -39,27 +95,24 @@ the row. The first group of the editor names the widget it edits on its title li
 | **Analog clock** | A clock face with hour marks and hands, a second hand if asked | Each minute, or each second with seconds |
 | **Month calendar** | This month's name, the weekdays and the days in a grid, today in bold and underlined; weeks start on the region's first weekday | At midnight |
 
-- **Position**: **Show on the desktop**; **Display** (**Main display**, which follows the menu
-  bar, **All displays**, or one display by name; a display that is not connected stays in the
-  menu as "*name* (not connected)" and the widget comes back when it does); **Arrange**, a
-  picture of that display with the frame its wallpaper is drawing and every widget shown there,
-  where dragging a widget moves it and letting go saves the place (see
-  [the preview's backdrop](#the-previews-backdrop) and [snapping](#snapping-and-guides)); the
-  widgets are stacked there as on the desktop, the selected one is outlined above them all so it
-  can be found under another one, and a hidden selected one is drawn faded so it can still be
-  arranged; **Center on the display** (**Horizontally**, **Vertically**), which puts the middle of
-  what the widget shows on the display's centre line, whichever edge its alignment holds, each
-  button disabled while that is already so; **Horizontal position** and
-  **Vertical position**, the same place in whole percent from the left and the top edge, for the
-  keyboard and VoiceOver; **Alignment** (**Left**, **Center**, **Right**), the edge of the text
-  the position holds, so a clock aligned left does not move its left edge when "9:59" becomes
-  "10:00".
-- **Rotation** (in **Position**): −180° to 180°, turning the whole widget about its middle; the
-  frame grows to the turned box, which then sits where an unturned widget would.
-- **Look**: **Style**, a menu of finished looks (**Soft shadow**, a new widget's; **Plain**;
-  **Neon**; **Outlined**; **Badge**; **Glass**; **Sunset**; **Long shadow**) that sets the colours
-  and effects below in one go, starting from a new widget's, and never the font, the size or the
-  place; **Size** (10 to 320 points; a clock face is one and a half times its size across);
+The tabs of the inspector, and the groups they hold:
+
+- **Position** (the Position group): **Show on the desktop**; **Display** (**Main display**,
+  which follows the menu bar, **All displays**, or one display by name; a display that is not
+  connected stays in the menu as "*name* (not connected)" and the widget comes back when it
+  does); in the search results only, **Arrange** (the canvas as a row, 480 × 270 points at most)
+  and **Center on the display**, which the workspace shows by the canvas; **Horizontal position**
+  and **Vertical position**, the same place in whole percent from the left and the top edge, for
+  the keyboard and VoiceOver; **Alignment** (**Left**, **Center**, **Right**), the edge of the
+  text the position holds, so a clock aligned left does not move its left edge when "9:59"
+  becomes "10:00"; **Rotation**, −180° to 180°, turning the whole widget about its middle; the
+  frame grows to the turned box, which then sits where an unturned widget would. A hidden
+  selected widget is drawn faded on the canvas so it can still be arranged. **Center on the
+  display** (**Center Horizontally**, **Center Vertically**) puts the middle of what the widget shows on the
+  display's centre line, whichever edge its alignment holds, each button disabled while that is
+  already so.
+- **Text** (the Look group): **Size** (10 to 320 points; a clock face is one and a half times its
+  size across);
   **Typeface**, the system font's four designs (**Standard**, **Rounded**, **Serif**,
   **Monospaced**) or any font family installed on this Mac, listed by name (read once a launch; a
   family since removed is offered as "*name* (not installed)" and draws in the system font); for
@@ -69,6 +122,11 @@ the row. The first group of the editor names the widget it edits on its title li
   **Lowercase**, by the language's rules), not for the clock face; **Line height** (70 to 200 %)
   for a text and a clock. Digits keep one width in every font that has tabular figures, so a clock
   does not shift as it counts. The lines of a text line up on the edge chosen in **Alignment**.
+- **Style**: first **Style**, the finished looks (**Soft shadow**, a new widget's; **Plain**;
+  **Neon**; **Outlined**; **Badge**; **Glass**; **Sunset**; **Long shadow**), each a swatch of the
+  selected widget's own words in that look over the wallpaper, a click setting the colours and
+  effects below in one go, starting from a new widget's, and never the font, the size or the
+  place; then the Colors and Effects groups.
 - **Colors**: **Color**; **Accent color**, the second hand of a clock face and today in a month
   calendar (the colour until one is chosen; **Use Text Color** goes back to it); **Gradient**, which
   fades the colour into a **Second color** along a **Gradient direction** (0° to 359° clockwise from
@@ -84,7 +142,7 @@ the row. The first group of the editor names the widget it edits on its title li
   **Reset effects** puts gradient, outline, glow, shadow and background back to a new widget's.
   The rows that only matter once a choice is made (the second colour, the shadow's details, the
   background's) show only then, and search finds them only then.
-- **Format**, by kind:
+- **Content** (the Format group), by kind:
   - a clock: **Time format** (**Follow system**, **12-hour**, **24-hour**), **Layout** (**One
     line**, or **Stacked**: the hour over the minutes, over the seconds and AM or PM, each in the
     locale's digits, the label on a line above), **Leading zero** ("09:41"; a region that writes
@@ -132,7 +190,8 @@ desktop-picture posters never look at it. Being transparent, and never as tall a
 working area even at the largest size, it never makes a display count as covered. A click on a
 widget reaches the desktop beneath it.
 
-`DesktopWidgetRendering` holds what both the desktop and the panel's **Arrange** picture draw: the
+`DesktopWidgetRendering` holds what both the desktop and the panel's canvas, swatches and
+ready-made cards draw: the
 words (a Unicode date template the locale arranges, through cached `DateFormatter`s; a clock's
 leading zero, missing AM/PM and stacked lines rewrite the locale's own pattern, quoted words
 kept), the month grid (right-aligned tab stops, one per weekday), the clock face (where each hand
@@ -171,7 +230,7 @@ The windows cost nothing between changes of their words:
 
 ## Snapping and guides
 
-While a widget is dragged on **Arrange**, the display's two centre lines show faintly dashed, so
+While a widget is dragged on the canvas, the display's two centre lines show faintly dashed, so
 the centre can be found before the widget gets there. Within about 6 of the picture's points of a
 line, the widget snaps onto it (`DesktopWidgetSnapping`), and a solid guide in the accent colour
 (over a dark hairline, readable on any wallpaper) is drawn along each line it lies on:
@@ -202,13 +261,14 @@ A [backup](backup-restore.md) carries the widgets and refuses a list with such a
 
 ## The preview's backdrop
 
-The **Arrange** picture shows the wallpaper as the display draws it, not the author's preview
+The canvas shows the wallpaper as the display draws it, not the author's preview
 image, which often has another shape, crop and resolution. When the row appears, or the
 display's wallpaper or its files change, the page asks the wallpaper's own surface for one frame
 through the poster pipeline ([when a poster is taken](desktop-picture.md#when-a-poster-is-taken)):
 a Metal readback for a scene, a snapshot for a web page, the player's frame for a video. The
 frame has the display's aspect and the wallpaper's placement, scaling and properties; it is
-scaled to at most 1024 pixels on its longer edge and only that copy is kept
+scaled to at most 2048 pixels on its longer edge (sharp on a Retina canvas up to about 1,000
+points wide) and only that copy is kept
 (`DesktopWallpaperFrames`, wired as `BridgeStore.wallpaperFrame`).
 
 Many wallpapers open with an intro or fade in from black, so the first frame is shown at once
@@ -267,10 +327,14 @@ and replaced by a **settled** one once the wallpaper has played a moment:
   `DesktopWidgetStore`, `DesktopWidgetRendering`, `DesktopWidgetController`,
   `DesktopWidgetWindow`, and `DesktopWallpaperFrames` and `WallpaperSettleClock` (the preview's
   backdrop).
-- `App/Views/ControlPanel/`: `Settings/Sections/WidgetsSettingsSection.swift` and
-  `DesktopWidgetPreview.swift`, the page model `Settings/DesktopWidgetsSettingsModel.swift`, the
-  snapping `Settings/DesktopWidgetSnapping.swift` and
-  the typed actions in `Model/PanelController+DesktopWidgets.swift`.
+- `App/Services/Desktop/DesktopWidgetPreset.swift`: the ready-made widgets and their layout.
+- `App/Views/ControlPanel/`: `Settings/Sections/WidgetsWorkspace.swift` (the workspace, the
+  ready-made cards and the style swatches), `WidgetsSettingsSection.swift` (the searchable rows,
+  the search results' page and `WidgetEditor`, the rows by tab) and `DesktopWidgetPreview.swift`
+  (the canvas and its handles), the page model `Settings/DesktopWidgetsSettingsModel.swift` (the
+  selection, the tab, drags, resizing and turning), the snapping
+  `Settings/DesktopWidgetSnapping.swift`, `SettingsPages` (which shows the workspace without a
+  search) and the typed actions in `Model/PanelController+DesktopWidgets.swift`.
 - Tests: `Tests/Unit/Desktop/DesktopWidgetTests.swift` (each kind's words, a clock's leading
   zero, AM/PM and stacked lines, the letters' case, spacing and slant, installed and missing font
   families, the room effects take and a turned frame, the styles and resetting the effects, the
@@ -279,10 +343,14 @@ and replaced by a **settled** one once the wallpaper has played a moment:
   `DesktopWidgetControllerTests.swift` (windows per display, stacking in the layers' order,
   timing, occlusion, wake and screen changes, the battery's notification and the sunrise and
   sunset settings, the window's level and class) and `Tests/Unit/Panel/WidgetsSettingsTests.swift`
-  (actions, layers and the preview's stacking, snapping a drag and the Center buttons, the
+  (actions, layers and the preview's stacking, snapping a drag and the Center buttons, resizing
+  and turning by the handles and nudging, the ready-made widgets' layout and limit, the
+  inspector's tabs, the
   Display, Date format, Time zone and Calendar menus, the rows each kind offers and those waiting
-  on another choice, the preview's wallpaper frame, search and layout in the narrowest and widest
-  column); `Tests/Unit/Panel/DesktopWidgetSnappingTests.swift` the snap lines, the pull and the
+  on another choice, the preview's wallpaper frame, search and layout of the workspace in a
+  narrow, a middle and a wide column in every tab); `testSnapshotsOnRequest` writes offscreen
+  renders of the workspace to the folder in `WALLPAPER_MACHINE_WIDGET_SNAPSHOTS` (pass it as
+  `TEST_RUNNER_WALLPAPER_MACHINE_WIDGET_SNAPSHOTS`) for a person to look at; `Tests/Unit/Panel/DesktopWidgetSnappingTests.swift` the snap lines, the pull and the
   guides.
   `DesktopWallpaperFramesTests.swift` covers asking a settled wallpaper once and scaling, waiting
   for the sync's own frame, not asking during an intro, the frame kept per look, blank frames and

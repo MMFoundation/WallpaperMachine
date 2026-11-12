@@ -122,6 +122,15 @@ extension PanelController {
     }
   }
 
+  /// Adds a ready-made preset's widgets on the main display, in front of the others, and opens the
+  /// first of them in the editor.
+  func addDesktopWidgetPreset(_ preset: DesktopWidgetPreset) async throws {
+    _ = try await run(.immediate) {
+      let added = try desktopWidgets.add(widgetsSettings.widgets(of: preset))
+      if let first = added.first { widgetsSettings.select(first.id) }
+    }
+  }
+
   func changeDesktopWidget(_ id: String, _ change: DesktopWidgetChange) async throws {
     _ = try await run(.immediate) {
       try desktopWidgets.update(id) { change.apply(to: &$0) }

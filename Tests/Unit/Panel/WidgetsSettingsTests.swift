@@ -117,6 +117,147 @@ final class WidgetsSettingsTests: PanelTestCase {
     }
   }
 
+  /// The canvas's handles: a corner resizes about the middle and a knob turns, both shown while they
+  /// move and saved when let go; a turn snaps to 15° unless Command is held; an arrow key nudges.
+  func testTheCanvasHandlesResizeAndTurnAWidgetAndTheArrowKeysNudgeIt() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop] in [laptop] }
+      let model = controller.widgetsSettings
+      try await controller.addDesktopWidget(.time)
+      let id = try XCTUnwrap(model.selectedID)
+      var widget = try XCTUnwrap(model.selected)
+      XCTAssertEqual(widget.size, 96)
+
+      model.resize(widget, by: 1.5)
+      model.resize(widget, by: 1.25)
+      XCTAssertEqual(model.shown(widget).size, 120, "from the size at the start, not the last step")
+      XCTAssertEqual(model.drag?.guides, [], "no snapping guides while resizing")
+      XCTAssertEqual(model.selected?.size, 96, "nothing is saved before it is let go")
+      await model.endDrag()?.value
+      widget = try XCTUnwrap(model.selected)
+      XCTAssertEqual(widget.size, 120)
+      model.resize(widget, by: 100)
+      XCTAssertEqual(model.shown(widget).size, DesktopWidget.sizeRange.upperBound)
+      model.resize(widget, by: 0)
+      XCTAssertEqual(model.shown(widget).size, 120, "a factor that means nothing changes nothing")
+      await model.endDrag()?.value
+
+      model.rotate(widget, by: 43, snaps: true)
+      XCTAssertEqual(model.shown(widget).rotation, 45, "settles on 45°")
+      model.rotate(widget, by: 43, snaps: false)
+      XCTAssertEqual(model.shown(widget).rotation, 43, "Command turns it freely")
+      model.rotate(widget, by: 200, snaps: false)
+      XCTAssertEqual(model.shown(widget).rotation, -160, "past half a turn it goes the other way")
+      await model.endDrag()?.value
+      widget = try XCTUnwrap(model.selected)
+      XCTAssertEqual(widget.rotation, -160)
+      XCTAssertEqual(widget.size, 120, "turning keeps the size")
+
+      let center = CGPoint(x: 100, y: 100)
+      XCTAssertEqual(DesktopWidgetsSettingsModel.angle(of: CGPoint(x: 100, y: 0), around: center), 0, accuracy: 0.01)
+      XCTAssertEqual(DesktopWidgetsSettingsModel.angle(of: CGPoint(x: 200, y: 100), around: center), 90, accuracy: 0.01)
+      XCTAssertEqual(
+        abs(DesktopWidgetsSettingsModel.angle(of: CGPoint(x: 100, y: 200), around: center)), 180, accuracy: 0.01,
+        "clockwise from straight up in a picture whose y grows downwards")
+
+      let x = widget.x, y = widget.y
+      await model.nudge(widget, by: CGSize(width: 10, height: -1), on: laptop)?.value
+      widget = try XCTUnwrap(model.selected)
+      XCTAssertEqual(widget.x, x + 10 / laptop.frame.width, accuracy: 1e-9)
+      XCTAssertEqual(widget.y, y - 1 / laptop.frame.height, accuracy: 1e-9)
+      XCTAssertEqual(widget.id, id)
+    }
+  }
+
+  /// Every ready-made widget adds valid widgets on the main display, front first and opened in the
+  /// editor; a group is laid out without its widgets covering each other, and one that would pass
+  /// the limit adds nothing.
+  func testReadyMadeWidgetsAddFinishedWidgetsLaidOutTogether() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop] in [laptop] }
+      let model = controller.widgetsSettings
+      let display = laptop.frame.size
+      for preset in DesktopWidgetPreset.allCases {
+        let widgets = model.widgets(of: preset)
+        XCTAssertFalse(widgets.isEmpty, "\(preset)")
+        XCTAssertTrue(widgets.allSatisfy(\.isValid), "\(preset)")
+        let frames = widgets.map { model.frame(of: $0, in: display, scale: 1) }
+        for (index, frame) in frames.enumerated() {
+          XCTAssertTrue(
+            NSRect(origin: .zero, size: display).insetBy(dx: -1, dy: -1).contains(frame), "\(preset) on the display")
+          for other in frames[(index + 1)...] {
+            XCTAssertLessThan(
+              frame.intersection(other).width * frame.intersection(other).height, 4, "\(preset) does not overlap")
+          }
+        }
+      }
+      let world = model.widgets(of: .worldClocks)
+      XCTAssertEqual(world.map(\.timeZone), DesktopWidgetPreset.worldClockZones)
+      XCTAssertEqual(world.map(\.text), DesktopWidgetPreset.worldClockZones.map(model.city), "each says its city")
+      XCTAssertEqual(world.map(\.x), world.map(\.x).sorted(), "west to east")
+
+      try await controller.addDesktopWidget(.text)
+      try await controller.addDesktopWidgetPreset(.clockAndDate)
+      XCTAssertEqual(model.widgets.map(\.kind), [.time, .date, .text], "in front, in the preset's order")
+      XCTAssertEqual(model.selectedID, model.widgets.first?.id, "the first opens in the editor")
+      XCTAssertEqual(Set(model.widgets.map(\.id)).count, 3)
+      XCTAssertEqual(DesktopWidgetStore(defaults: panel.defaults).widgets.count, 3, "kept")
+
+      while model.widgets.count < DesktopWidgetStore.limit - 1 {
+        try await controller.addDesktopWidget(.battery)
+      }
+      do {
+        try await controller.addDesktopWidgetPreset(.worldClocks)
+        XCTFail("three clocks do not fit in one place")
+      } catch {
+        XCTAssertEqual(error as? DesktopWidgetError, .tooMany)
+      }
+      XCTAssertEqual(model.widgets.count, DesktopWidgetStore.limit - 1, "none of them is added")
+    }
+  }
+
+  /// A sample's wallpaper fills its card and stays inside it, whatever the wallpaper's shape, so a
+  /// card never spills over the one beside it.
+  func testASamplesWallpaperStaysInsideItsCard() throws {
+    for (width, height) in [(400, 100), (100, 400)] {
+      let context = try XCTUnwrap(
+        CGContext(
+          data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+      let image = try XCTUnwrap(context.makeImage())
+      let hosting = NSHostingController(
+        rootView: AnyView(
+          WidgetSampleBackdrop(image: image).environment(\.panelTheme, PanelTheme(appearance: .dark))))
+      hosting.sizingOptions = []
+      let size = hosting.sizeThatFits(in: NSSize(width: 160, height: 100))
+      XCTAssertEqual(size.width, 160, accuracy: 0.5, "\(width)x\(height)")
+      XCTAssertEqual(size.height, 100, accuracy: 0.5, "\(width)x\(height)")
+    }
+  }
+
+  /// The inspector shows one pane at a time; a widget without the pane chosen shows its first.
+  func testTheInspectorShowsThePaneChosenOrTheWidgetsFirst() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      let model = controller.widgetsSettings
+      try await controller.addDesktopWidget(.battery)
+      let battery = try XCTUnwrap(model.selected)
+      try await controller.addDesktopWidget(.time)
+      let clock = try XCTUnwrap(model.selected)
+      XCTAssertEqual(DesktopWidgetPane.panes(for: .battery), [.text, .style, .position], "a battery says nothing of its own")
+      XCTAssertEqual(DesktopWidgetPane.panes(for: .time), DesktopWidgetPane.allCases)
+      XCTAssertEqual(model.pane(for: clock), .content)
+      XCTAssertEqual(model.pane(for: battery), .text)
+      model.pane = .position
+      XCTAssertEqual(model.pane(for: battery), .position)
+      XCTAssertEqual(model.pane(for: clock), .position)
+      XCTAssertEqual(
+        Set(WidgetsSettingsSection.searchOrder), Set(DesktopWidgetPane.allCases), "search results show every pane")
+    }
+  }
+
   func testTheControlsChangeAWidgetWithoutWaitingForTheRenderer() async throws {
     try await withPanel { panel in
       let controller = panel.controller
@@ -363,6 +504,8 @@ final class WidgetsSettingsTests: PanelTestCase {
       settings.query = "Countdown"
       XCTAssertTrue(settings.search.shows(WidgetsSettingsSection.add), "by every kind it adds")
       XCTAssertFalse(settings.search.shows(WidgetsSettingsSection.size), "no widget, no editor")
+      settings.query = "World clocks"
+      XCTAssertTrue(settings.search.shows(WidgetsSettingsSection.readyMade), "by every ready-made widget")
       settings.query = ""
     }
   }
@@ -375,6 +518,74 @@ final class WidgetsSettingsTests: PanelTestCase {
     hosting.view.layoutSubtreeIfNeeded()
     RunLoop.current.run(until: Date().addingTimeInterval(0.06))
     hosting.view.layoutSubtreeIfNeeded()
+  }
+
+  /// With `WALLPAPER_MACHINE_WIDGET_SNAPSHOTS` set to a folder, writes the workspace there for a
+  /// person to look at: empty, with ready-made widgets in each pane, wide and narrow.
+  func testSnapshotsOnRequest() async throws {
+    guard let folder = ProcessInfo.processInfo.environment["WALLPAPER_MACHINE_WIDGET_SNAPSHOTS"]
+    else { throw XCTSkip("set WALLPAPER_MACHINE_WIDGET_SNAPSHOTS to write snapshots") }
+    let url = URL(fileURLWithPath: folder, isDirectory: true)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop] in [laptop] }
+      Self.show("aurora", in: panel)
+      let wallpaper = try Self.wallpaper()
+      panel.store.wallpaperFrame = { _, _ in .frame(wallpaper) }
+      let hosting = NSHostingController(
+        rootView: AnyView(
+          SettingsPages().environment(controller)
+            .panelTheme(theme: controller.theme, locale: PanelLocale.shared)))
+      hosting.sizingOptions = []
+      let window = ControlPanelWindow.make(contentViewController: hosting, delegate: nil)
+      defer {
+        window.contentViewController = nil
+        window.close()
+      }
+      controller.settings.select(.widgets)
+      @MainActor func write(_ name: String, _ size: NSSize) async throws {
+        settle(hosting, window, at: size)
+        try await Task.sleep(for: .milliseconds(300))
+        settle(hosting, window, at: size)
+        let view = hosting.view
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+          .write(to: url.appendingPathComponent("\(name).png"))
+      }
+      try await write("empty-wide", NSSize(width: 1020, height: 760))
+      try await controller.addDesktopWidgetPreset(.worldClocks)
+      try await controller.addDesktopWidgetPreset(.monthCalendar)
+      try await controller.addDesktopWidgetPreset(.clockAndDate)
+      for pane in DesktopWidgetPane.allCases {
+        controller.widgetsSettings.pane = pane
+        try await write("wide-\(pane)", NSSize(width: 1020, height: 760))
+      }
+      let selected = try XCTUnwrap(controller.widgetsSettings.selected)
+      controller.widgetsSettings.rotate(selected, by: 14, snaps: true)
+      try await write("wide-turning", NSSize(width: 1020, height: 760))
+      controller.widgetsSettings.endDrag()
+      controller.widgetsSettings.pane = .style
+      try await write("narrow-style", NSSize(width: 540, height: 700))
+      controller.settings.query = "shadow"
+      try await write("search", NSSize(width: 1020, height: 760))
+      controller.settings.query = ""
+    }
+  }
+
+  /// A wallpaper-like gradient, wider than the laptop, as a wallpaper of another shape than the
+  /// cards it is drawn in.
+  private static func wallpaper() throws -> CGImage {
+    let context = try XCTUnwrap(
+      CGContext(
+        data: nil, width: 1200, height: 491, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    let colors = [CGColor(red: 0.12, green: 0.2, blue: 0.45, alpha: 1), CGColor(red: 0.85, green: 0.45, blue: 0.4, alpha: 1)]
+    let gradient = try XCTUnwrap(
+      CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1]))
+    context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 300, y: 491), options: [])
+    return try XCTUnwrap(context.makeImage())
   }
 
   func testThePageLaysOutInTheNarrowestAndTheWidestColumnWithAndWithoutWidgets() async throws {
@@ -405,13 +616,18 @@ final class WidgetsSettingsTests: PanelTestCase {
         for language in ["en", "ja"] {
           PanelLocale.shared.bind(
             to: AppLanguageStore(defaults: try TemporaryDefaults.make(for: self).defaults, systemLanguages: [language]))
-          for size in [NSSize(width: 460, height: 560), NSSize(width: 980, height: 800)] {
-            settle(hosting, window, at: size)
-            let context = "\(widgets ? "widgets" : "empty") \(language) \(Int(size.width))"
-            let least = hosting.sizeThatFits(in: NSSize(width: 0, height: size.height))
-            XCTAssertLessThanOrEqual(least.width, size.width, "\(context): too wide")
-            let taken = hosting.sizeThatFits(in: size)
-            XCTAssertEqual(taken.width, size.width, accuracy: 1, "\(context): takes the width it is given")
+          // The workspace beside and under the canvas, and every pane of the inspector.
+          let sizes = [NSSize(width: 460, height: 560), NSSize(width: 980, height: 800), NSSize(width: 1400, height: 900)]
+          for size in sizes {
+            for pane in widgets ? DesktopWidgetPane.allCases : [.content] {
+              controller.widgetsSettings.pane = pane
+              settle(hosting, window, at: size)
+              let context = "\(widgets ? "widgets" : "empty") \(language) \(Int(size.width)) \(pane)"
+              let least = hosting.sizeThatFits(in: NSSize(width: 0, height: size.height))
+              XCTAssertLessThanOrEqual(least.width, size.width, "\(context): too wide")
+              let taken = hosting.sizeThatFits(in: size)
+              XCTAssertEqual(taken.width, size.width, accuracy: 1, "\(context): takes the width it is given")
+            }
           }
         }
       }

@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-12 — Desktop widgets workspace: canvas, tabbed inspector, handles, ready-made widgets
+
+- Settings › Desktop Widgets without a search is now a workspace (large canvas, layers, inspector with Content/Text/Style/Position tabs); search still lists every row.
+- Canvas: corner handles resize, a knob turns (15° snap, Command free, double click upright), arrow keys nudge, context menu; preview frame raised to 2048 px.
+- Ready-made widgets (11 presets, groups laid out by measured size) via a popover and the empty inspector; style swatches replace the Apply Style menu.
+- python3 scripts/test.py --only WidgetsSettingsTests: 16 passed (new: handles/nudge, presets layout and limit, inspector tabs, workspace layout at 460/980/1400 in en and ja for every tab).
+- python3 scripts/test.py: 4924 passed, 0 failed, 70 skipped.
+- Offscreen renders (testSnapshotsOnRequest with TEST_RUNNER_WALLPAPER_MACHINE_WIDGET_SNAPSHOTS) checked by eye in English, dark: empty, each tab, turning, narrow, search.
+- Not checked: the live app (no Release build, no desktop run); pointer cursors, real drags and the popover on screen; other languages' renders; light appearance.
+
 ## 2026-11-12 — Desktop widgets introduction after an update
 
 A window that introduces desktop widgets once to people updating from 1.10.0 or older, opening Settings › Desktop Widgets.
@@ -104,10 +114,3 @@ Addresses the PR review: CM logon cleanup, endpoint fallback and cancellation; H
 - `python3 scripts/test.py --only SteamCMConnectionTests SteamContentClientTests NativeWorkshopDownloadTests SteamQRSignInTests SteamKeyValuesTests WorkshopStoreTests DownloadQueueTests` — 58 passed, including 10 new tests (logon cleanup, endpoint fallback, cancellation, wrong app, free space, server promotion, HTTPS-only servers, joined logon failure, message mapping)
 - `python3 -m unittest scripts.tests.test_localization_catalogs scripts.tests.test_panel_localization` — 17 passed
 - Not covered: live Steam and the UI were not rerun after these fixes
-
-## 2026-11-11 — Desktop widgets: seven more kinds
-
-- Added Text, Countdown, Greeting, Battery, Sunrise and sunset, Analog clock and Month calendar widgets; clocks and dates gained Time zone and Label, dates gained month-year, week and day-of-year styles and other calendars.
-- python3 scripts/test.py --only DesktopWidgetTests --only DesktopWidgetControllerTests --only WidgetsSettingsTests --only LowBatteryTests --only SettingsSectionsLocalizationTests: 49 passed.
-- python3 scripts/test.py: 4779 passed, 66 skipped, 0 failed (run with CLAUDE.md restored temporarily; the working tree has it deleted, which fails test_doc_links).
-- Not checked: how the clock face, month grid and multi-line text look on a real desktop; no Release build.

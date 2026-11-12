@@ -2,20 +2,25 @@ import AppKit
 import SwiftUI
 
 /// Settings › Desktop Widgets: clocks, dates, notes, countdowns and the other widgets the app draws on
-/// the desktop over any wallpaper. A widget
-/// belongs to no wallpaper, so changing the wallpaper keeps it, and none of its controls waits for
-/// the renderer. The list is the layers, front first: a click picks the widget the groups below
-/// edit, its own buttons show, hide or remove it, its handle drags it to another layer, and its
-/// context menu duplicates it or moves it a layer. The preview arranges the widget by drag,
-/// snapping it to guides; the position sliders and the Center buttons do the same from the
-/// keyboard and VoiceOver.
+/// the desktop over any wallpaper. A widget belongs to no wallpaper, so changing the wallpaper keeps
+/// it, and none of its controls waits for the renderer.
+///
+/// This type declares the page's searchable rows and draws the page as search results show it: the
+/// list, then every pane of the editor (`WidgetEditor`) one under another. Without a search,
+/// Settings shows the page as `WidgetsWorkspace` instead: a large canvas, the layers and an
+/// inspector that shows one pane at a time, since a widget's dozens of rows down one scrolling page
+/// kept the controls far from the picture they change. The list is the layers, front first: a click
+/// picks the widget the editor edits, its own buttons show, hide or remove it, its handle drags it
+/// to another layer, and its context menu duplicates it or moves it a layer.
 struct WidgetsSettingsSection: View {
   private static let list = SettingsItem.Group("widgets")
-  private static let arrange = SettingsItem.Group("arrange", title: "Position")
-  private static let look = SettingsItem.Group("look", title: "Look")
-  private static let colors = SettingsItem.Group("colors", title: "Colors")
-  private static let effects = SettingsItem.Group("effects", title: "Effects")
-  private static let format = SettingsItem.Group("format", title: "Format")
+  static let arrange = SettingsItem.Group("arrange", title: "Position")
+  static let look = SettingsItem.Group("look", title: "Look")
+  static let colors = SettingsItem.Group("colors", title: "Colors")
+  static let effects = SettingsItem.Group("effects", title: "Effects")
+  static let format = SettingsItem.Group("format", title: "Format")
+  /// The finished looks, a card of their own at the top of the Style pane.
+  static let styles = SettingsItem.Group("styles")
 
   static let add = SettingsItem(
     id: "widgets.add", section: .widgets, group: list, title: "Add a widget",
@@ -26,6 +31,14 @@ struct WidgetsSettingsSection: View {
       "Analog clock", "Month calendar",
     ])
 
+  static let readyMade = SettingsItem(
+    id: "widgets.ready-made", section: .widgets, group: list, title: "Ready-made widgets",
+    note: "Add a finished widget in one click, then change anything about it.",
+    keywords: [
+      "Big clock", "Clock and date", "Neon clock", "Clock face", "World clocks", "Lunar date",
+      "Greeting and date", "Gradient note", "Battery and sun",
+    ])
+
   static let shown = SettingsItem(
     id: "widgets.shown", section: .widgets, group: arrange, title: "Show on the desktop")
   static let display = SettingsItem(
@@ -33,11 +46,12 @@ struct WidgetsSettingsSection: View {
     keywords: ["Main display", "All displays"])
   static let preview = SettingsItem(
     id: "widgets.preview", section: .widgets, group: arrange, title: "Arrange",
-    note: "Drag a widget to move it. It snaps to the center and to other widgets; hold Command to place it freely.",
-    keywords: ["Snap", "Guides"])
+    note:
+      "Drag a widget to move it, a corner to resize it and the knob above it to turn it. It snaps to the center and to other widgets; hold Command to place it freely.",
+    keywords: ["Snap", "Guides", "Resize", "Rotate"])
   static let center = SettingsItem(
     id: "widgets.center", section: .widgets, group: arrange, title: "Center on the display",
-    keywords: ["Horizontally", "Vertically", "Middle"])
+    keywords: ["Horizontally", "Vertically", "Center Horizontally", "Center Vertically", "Middle"])
   static let horizontal = SettingsItem(
     id: "widgets.horizontal", section: .widgets, group: arrange, title: "Horizontal position")
   static let vertical = SettingsItem(
@@ -51,7 +65,7 @@ struct WidgetsSettingsSection: View {
     id: "widgets.rotation", section: .widgets, group: arrange, title: "Rotation")
 
   static let style = SettingsItem(
-    id: "widgets.style", section: .widgets, group: look, title: "Style",
+    id: "widgets.style", section: .widgets, group: styles, title: "Style",
     note: "Applies a finished look in one go: colors and effects, never the font or the place.",
     keywords: ["Neon", "Outlined", "Glass", "Sunset", "Long shadow"])
   static let size = SettingsItem(id: "widgets.size", section: .widgets, group: look, title: "Size")
@@ -182,7 +196,7 @@ struct WidgetsSettingsSection: View {
     clockLayout, padsHour, showsPeriod, seconds, dialMarks, dialRing, dateFormat, calendarSystem, timeZone, label,
     content, event, targetDay, name, sunStyle,
   ]
-  static let items = [add] + editorItems
+  static let items = [add, readyMade] + editorItems
 
   /// The rows only some kinds of widget have, and those kinds.
   static let kindRows: [String: Set<DesktopWidget.Kind>] = [
@@ -222,8 +236,13 @@ struct WidgetsSettingsSection: View {
   }
 
   @Environment(PanelController.self) private var controller
-  @Environment(\.panelTheme) private var theme
 
+  /// The order the editor's panes take on the scrolling page of search results, as its groups
+  /// always stood.
+  static let searchOrder: [DesktopWidgetPane] = [.position, .text, .style, .content]
+
+  /// The page as search results show it: the list, then every pane of the editor one under another,
+  /// with only the matching rows. Without a search, Settings shows `WidgetsWorkspace` instead.
   var body: some View {
     let model = controller.widgetsSettings
     let widgets = model.widgets
@@ -235,7 +254,10 @@ struct WidgetsSettingsSection: View {
           note: widgets.count > 1
             ? L("Widgets higher in the list are in front. Drag a widget by its handle to change the order.") : nil
         ) {
-          addMenu
+          WidgetAddMenu()
+        }
+        SettingsRow(Self.readyMade) {
+          ReadyMadeWidgetsButton()
         }
         if !controller.settings.search.isActive {
           let order = widgets.map(\.id)
@@ -245,464 +267,13 @@ struct WidgetsSettingsSection: View {
         }
       }
       if let widget = model.selected {
-        editor(widget, screens: screens)
+        WidgetEditor(widget: widget, screens: screens, panes: Self.searchOrder, compact: false)
       }
     }
-  }
-
-  /// The Add Widget menu: every kind, by name and symbol.
-  private var addMenu: some View {
-    let key = PanelActionCoordinator.key("addDesktopWidget")
-    return Menu {
-      ForEach(DesktopWidget.Kind.allCases, id: \.self) { kind in
-        Button {
-          controller.launch(key) { try await controller.addDesktopWidget(kind) }
-        } label: {
-          Label {
-            Text(verbatim: Self.title(of: kind))
-          } icon: {
-            Image(systemName: Self.symbol(of: kind))
-          }
-        }
-        .accessibilityIdentifier("widgets.add.\(kind.rawValue)")
-      }
-    } label: {
-      Text("Add Widget")
-    }
-    .menuStyle(.button)
-    .buttonStyle(.bordered)
-    .controlSize(.small)
-    .fixedSize()
-    .disabled(controller.widgetsSettings.widgets.count >= DesktopWidgetStore.limit || controller.isBusy(key))
-  }
-
-  // MARK: The editor
-
-  @ViewBuilder
-  private func editor(_ widget: DesktopWidget, screens: [DesktopWidgetController.Screen]) -> some View {
-    let model = controller.widgetsSettings
-    let id = widget.id
-    let screen = model.previewScreen(for: widget, among: screens)
-    SettingsGroup(Self.arrange, in: .widgets) {
-      SettingsRow(Self.shown) {
-        WidgetSwitch(id: id, control: "shown", saved: widget.isShown) { .shown($0) }
-      }
-      SettingsRow(Self.display) {
-        SettingsMenuControl(
-          key: DesktopWidgetsSettingsModel.key(id, "placement"),
-          saved: model.placementValue(for: widget, among: screens),
-          options: model.placementOptions(for: widget, among: screens), waitsForMac: false,
-          policy: .latestWins
-        ) { try await controller.changeDesktopWidget(id, .placement($0)) }
-      }
-      if let screen {
-        SettingsRow(Self.preview, stacked: true) {
-          DesktopWidgetPreview(screen: screen)
-        }
-        SettingsRow(Self.center) {
-          centerButtons(widget, on: screen)
-        }
-      }
-      SettingsRow(Self.horizontal) {
-        percentSlider(id, "x", saved: widget.x) { .x($0) }
-      }
-      SettingsRow(Self.vertical) {
-        percentSlider(id, "y", saved: widget.y) { .y($0) }
-      }
-      SettingsRow(Self.alignment) {
-        SettingsSegmentedControl(
-          segments: DesktopWidget.Alignment.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
-          selection: model.value(id, "alignment", saved: widget.alignment), fillsWidth: false
-        ) { value in
-          model.commit(id, "alignment", to: value) { .alignment($0) }
-        }
-      }
-      SettingsRow(Self.rotation) {
-        slider(id, "rotation", saved: widget.rotation, range: DesktopWidget.rotationRange,
-               readout: { L("\($0)°") }) { .rotation($0) }
-      }
-    } accessory: {
-      editing(widget)
-    }
-    SettingsGroup(Self.look, in: .widgets) {
-      SettingsRow(Self.style) {
-        styleMenu(id)
-      }
-      SettingsRow(Self.size) {
-        SettingsSliderControl(
-          key: DesktopWidgetsSettingsModel.key(id, "size"), saved: widget.size, range: DesktopWidget.sizeRange,
-          waitsForMac: false, readout: { L("\($0) pt") }
-        ) { try await controller.changeDesktopWidget(id, .size($0)) }
-      }
-      SettingsRow(Self.typeface) {
-        WidgetFontMenu(widget: widget)
-      }
-      SettingsRow(Self.weight) {
-        SettingsSliderControl(
-          key: DesktopWidgetsSettingsModel.key(id, "weight"), saved: widget.weight / 100,
-          range: (DesktopWidget.weightRange.lowerBound / 100)...(DesktopWidget.weightRange.upperBound / 100),
-          waitsForMac: false, readout: { String($0 * 100) }
-        ) { try await controller.changeDesktopWidget(id, .weight($0 * 100)) }
-      }
-      SettingsRow(Self.italic) {
-        WidgetSwitch(id: id, control: "italic", saved: widget.isItalic) { .italic($0) }
-      }
-      if Self.offers(Self.letterSpacing, for: widget) {
-        SettingsRow(Self.letterSpacing) {
-          slider(id, "letterSpacing", saved: widget.letterSpacing, range: DesktopWidget.letterSpacingRange,
-                 readout: { L("\($0)%") }) { .letterSpacing($0) }
-        }
-      }
-      if Self.offers(Self.lineHeight, for: widget) {
-        SettingsRow(Self.lineHeight) {
-          slider(id, "lineHeight", saved: widget.lineHeight, range: DesktopWidget.lineHeightRange,
-                 readout: { L("\($0)%") }) { .lineHeight($0) }
-        }
-      }
-      if Self.offers(Self.textCase, for: widget) {
-        SettingsRow(Self.textCase) {
-          SettingsMenuControl(
-            key: DesktopWidgetsSettingsModel.key(id, "textCase"), saved: widget.textCase,
-            options: DesktopWidget.TextCase.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
-            waitsForMac: false, policy: .latestWins
-          ) { try await controller.changeDesktopWidget(id, .textCase($0)) }
-        }
-      }
-    }
-    SettingsGroup(Self.colors, in: .widgets) {
-      SettingsRow(Self.color) {
-        WidgetColorControl(id: id, control: "color", saved: widget.color) { .color($0) }
-      }
-      if Self.offers(Self.accent, for: widget) {
-        SettingsRow(Self.accent) {
-          HStack(spacing: 8) {
-            WidgetColorControl(id: id, control: "accent", saved: widget.accentColor ?? widget.color) {
-              .accentColor($0)
-            }
-            if widget.accentColor != nil {
-              let key = PanelActionCoordinator.key("resetDesktopWidgetAccent", id: id)
-              SettingsActionButton("Use Text Color", isDisabled: controller.isBusy(key)) {
-                controller.launch(key) { try await controller.changeDesktopWidget(id, .accentColor(nil)) }
-              }
-            }
-          }
-        }
-      }
-      SettingsRow(Self.gradient) {
-        WidgetSwitch(id: id, control: "gradient", saved: widget.fill == .gradient) {
-          .fill($0 ? .gradient : .solid)
-        }
-      }
-      if Self.offers(Self.gradientColor, for: widget) {
-        SettingsRow(Self.gradientColor) {
-          WidgetColorControl(id: id, control: "gradientColor", saved: widget.gradientColor) { .gradientColor($0) }
-        }
-        SettingsRow(Self.gradientAngle) {
-          slider(id, "gradientAngle", saved: widget.gradientAngle, range: DesktopWidget.angleRange,
-                 readout: { L("\($0)°") }) { .gradientAngle($0) }
-        }
-      }
-      SettingsRow(Self.opacity) {
-        slider(id, "opacity", saved: widget.opacity, range: DesktopWidget.opacityRange,
-               readout: { L("\($0)%") }) { .opacity($0) }
-      }
-    }
-    SettingsGroup(Self.effects, in: .widgets) {
-      SettingsRow(Self.outline) {
-        slider(id, "outline", saved: widget.outlineWidth, range: DesktopWidget.outlineRange,
-               readout: Self.offOrPercent) { .outlineWidth($0) }
-      }
-      if Self.offers(Self.outlineColor, for: widget) {
-        SettingsRow(Self.outlineColor) {
-          WidgetColorControl(id: id, control: "outlineColor", saved: widget.outlineColor) { .outlineColor($0) }
-        }
-      }
-      SettingsRow(Self.glow) {
-        slider(id, "glow", saved: widget.glowSize, range: DesktopWidget.glowRange,
-               readout: Self.offOrPercent) { .glowSize($0) }
-      }
-      if Self.offers(Self.glowColor, for: widget) {
-        SettingsRow(Self.glowColor) {
-          WidgetColorControl(id: id, control: "glowColor", saved: widget.glowColor) { .glowColor($0) }
-        }
-      }
-      SettingsRow(Self.shadow) {
-        WidgetSwitch(id: id, control: "shadow", saved: widget.hasShadow) { .shadow($0) }
-      }
-      if Self.offers(Self.shadowColor, for: widget) {
-        SettingsRow(Self.shadowColor) {
-          WidgetColorControl(id: id, control: "shadowColor", saved: widget.shadowColor) { .shadowColor($0) }
-        }
-        SettingsRow(Self.shadowOpacity) {
-          slider(id, "shadowOpacity", saved: widget.shadowOpacity, range: DesktopWidget.opacityRange,
-                 readout: { L("\($0)%") }) { .shadowOpacity($0) }
-        }
-        SettingsRow(Self.shadowBlur) {
-          slider(id, "shadowBlur", saved: widget.shadowBlur, range: DesktopWidget.shadowBlurRange,
-                 readout: { L("\($0)%") }) { .shadowBlur($0) }
-        }
-        SettingsRow(Self.shadowDistance) {
-          slider(id, "shadowDistance", saved: widget.shadowDistance, range: DesktopWidget.shadowDistanceRange,
-                 readout: { L("\($0)%") }) { .shadowDistance($0) }
-        }
-        SettingsRow(Self.shadowAngle) {
-          slider(id, "shadowAngle", saved: widget.shadowAngle, range: DesktopWidget.angleRange,
-                 readout: { L("\($0)°") }) { .shadowAngle($0) }
-        }
-      }
-      SettingsRow(Self.background) {
-        SettingsMenuControl(
-          key: DesktopWidgetsSettingsModel.key(id, "background"), saved: widget.background,
-          options: DesktopWidget.Background.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
-          waitsForMac: false, policy: .latestWins
-        ) { try await controller.changeDesktopWidget(id, .background($0)) }
-      }
-      if Self.offers(Self.backgroundColor, for: widget) {
-        SettingsRow(Self.backgroundColor) {
-          WidgetColorControl(id: id, control: "backgroundColor", saved: widget.backgroundColor) {
-            .backgroundColor($0)
-          }
-        }
-        SettingsRow(Self.backgroundOpacity) {
-          slider(id, "backgroundOpacity", saved: widget.backgroundOpacity, range: DesktopWidget.opacityRange,
-                 readout: { L("\($0)%") }) { .backgroundOpacity($0) }
-        }
-        SettingsRow(Self.backgroundPadding) {
-          slider(id, "backgroundPadding", saved: widget.backgroundPadding,
-                 range: DesktopWidget.backgroundPaddingRange, readout: { L("\($0)%") }) { .backgroundPadding($0) }
-        }
-      }
-      SettingsRow(Self.resetEffects) {
-        let key = PanelActionCoordinator.key("resetDesktopWidgetEffects", id: id)
-        SettingsActionButton("Reset", isDisabled: controller.isBusy(key)) {
-          controller.launch(key) { try await controller.changeDesktopWidget(id, .resetEffects) }
-        }
-      }
-    }
-    SettingsGroup(Self.format, in: .widgets) {
-      switch widget.kind {
-      case .time:
-        SettingsRow(Self.timeFormat) {
-          SettingsMenuControl(
-            key: DesktopWidgetsSettingsModel.key(id, "timeFormat"), saved: widget.timeFormat,
-            options: DesktopWidget.TimeFormat.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
-            waitsForMac: false, policy: .latestWins
-          ) { try await controller.changeDesktopWidget(id, .timeFormat($0)) }
-        }
-        SettingsRow(Self.clockLayout) {
-          SettingsSegmentedControl(
-            segments: DesktopWidget.ClockLayout.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
-            selection: model.value(id, "clockLayout", saved: widget.clockLayout), fillsWidth: false
-          ) { value in
-            model.commit(id, "clockLayout", to: value) { .clockLayout($0) }
-          }
-        }
-        SettingsRow(Self.padsHour) {
-          WidgetSwitch(id: id, control: "padsHour", saved: widget.padsHour) { .padsHour($0) }
-        }
-        SettingsRow(Self.showsPeriod) {
-          WidgetSwitch(id: id, control: "showsPeriod", saved: widget.showsPeriod) { .showsPeriod($0) }
-        }
-        SettingsRow(Self.seconds) {
-          WidgetSwitch(id: id, control: "seconds", saved: widget.showsSeconds) { .showsSeconds($0) }
-        }
-        timeZoneRow(widget)
-        labelRow(widget)
-      case .date:
-        SettingsRow(Self.dateFormat) {
-          SettingsMenuControl(
-            key: DesktopWidgetsSettingsModel.key(id, "dateStyle"), saved: widget.dateStyle,
-            options: model.dateStyleOptions(for: widget), waitsForMac: false, policy: .latestWins
-          ) { try await controller.changeDesktopWidget(id, .dateStyle($0)) }
-        }
-        SettingsRow(Self.calendarSystem) {
-          SettingsMenuControl(
-            key: DesktopWidgetsSettingsModel.key(id, "calendarSystem"), saved: widget.calendarSystem,
-            options: model.calendarOptions(), waitsForMac: false, policy: .latestWins
-          ) { try await controller.changeDesktopWidget(id, .calendarSystem($0)) }
-        }
-        timeZoneRow(widget)
-        labelRow(widget)
-      case .analog:
-        SettingsRow(Self.dialMarks) {
-          SettingsMenuControl(
-            key: DesktopWidgetsSettingsModel.key(id, "dialMarks"), saved: widget.dialMarks,
-            options: DesktopWidget.DialMarks.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
-            waitsForMac: false, policy: .latestWins
-          ) { try await controller.changeDesktopWidget(id, .dialMarks($0)) }
-        }
-        SettingsRow(Self.dialRing) {
-          WidgetSwitch(id: id, control: "dialRing", saved: widget.showsDialRing) { .showsDialRing($0) }
-        }
-        SettingsRow(Self.seconds) {
-          WidgetSwitch(id: id, control: "seconds", saved: widget.showsSeconds) { .showsSeconds($0) }
-        }
-        timeZoneRow(widget)
-      case .text:
-        SettingsRow(Self.content) {
-          WidgetTextField(id: id, saved: widget.text, multiline: true)
-        }
-      case .countdown:
-        SettingsRow(Self.event) {
-          WidgetTextField(id: id, saved: widget.text, multiline: false)
-        }
-        SettingsRow(Self.targetDay) {
-          DatePicker(
-            noLabel,
-            selection: Binding(
-              get: { model.targetDate(model.value(id, "targetDay", saved: widget.targetDay)) },
-              set: { date in
-                model.commit(id, "targetDay", to: DesktopWidget.day(of: date, in: .autoupdatingCurrent)) {
-                  .targetDay($0)
-                }
-              }),
-            displayedComponents: .date
-          )
-          .datePickerStyle(.stepperField)
-          .labelsHidden()
-          .fixedSize()
-        }
-      case .greeting:
-        SettingsRow(Self.name) {
-          WidgetTextField(id: id, saved: widget.text, multiline: false)
-        }
-      case .sun:
-        SettingsRow(Self.sunStyle) {
-          SettingsMenuControl(
-            key: DesktopWidgetsSettingsModel.key(id, "sunStyle"), saved: widget.sunStyle,
-            options: DesktopWidget.SunStyle.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
-            waitsForMac: false, policy: .latestWins
-          ) { try await controller.changeDesktopWidget(id, .sunStyle($0)) }
-        }
-        SettingsRow(Self.timeFormat) {
-          SettingsMenuControl(
-            key: DesktopWidgetsSettingsModel.key(id, "timeFormat"), saved: widget.timeFormat,
-            options: DesktopWidget.TimeFormat.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
-            waitsForMac: false, policy: .latestWins
-          ) { try await controller.changeDesktopWidget(id, .timeFormat($0)) }
-        }
-      case .battery, .calendar:
-        EmptyView()
-      }
-    }
-  }
-
-  /// Which widget the groups below edit, on the first group's title line, so it stays clear once
-  /// the list has scrolled away.
-  private func editing(_ widget: DesktopWidget) -> some View {
-    let text = controller.widgetsSettings.text(for: widget)
-    return Label {
-      Text(verbatim: text)
-        .lineLimit(1)
-        .truncationMode(.tail)
-    } icon: {
-      Image(systemName: Self.symbol(of: widget.kind))
-    }
-    .font(.panel(.callout))
-    .foregroundStyle(theme.surface.muted.color)
-    .padding(.trailing, 12)
-    .frame(minWidth: 0, maxWidth: 240, alignment: .trailing)
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel(Text(verbatim: L("Editing \(text)")))
-  }
-
-  /// Center horizontally and vertically: the middle of what the widget shows goes on the display's
-  /// centre line, whichever edge its alignment holds. A button whose centring is done is disabled.
-  private func centerButtons(_ widget: DesktopWidget, on screen: DesktopWidgetController.Screen) -> some View {
-    let model = controller.widgetsSettings
-    let id = widget.id
-    let shown = model.shown(widget)
-    return HStack(spacing: 6) {
-      ForEach([true, false], id: \.self) { horizontally in
-        let key = PanelActionCoordinator.key("centerDesktopWidget", id: id, detail: horizontally ? "x" : "y")
-        Button {
-          let value = model.centered(shown, on: screen, horizontally: horizontally)
-          controller.launch(key, policy: .latestWins) {
-            try await controller.changeDesktopWidget(id, horizontally ? .x(value) : .y(value))
-          }
-        } label: {
-          Label {
-            Text(verbatim: horizontally ? L("Horizontally") : L("Vertically"))
-          } icon: {
-            Image(systemName: horizontally ? "align.horizontal.center" : "align.vertical.center")
-          }
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .disabled(model.isCentered(shown, on: screen, horizontally: horizontally))
-        .help(horizontally ? L("Center from left to right") : L("Center from top to bottom"))
-        .accessibilityIdentifier("widgets.center.\(horizontally ? "horizontal" : "vertical")")
-      }
-    }
-    .fixedSize()
-    .accessibilityElement(children: .contain)
-  }
-
-  /// The Time zone menu. Choosing a city for a widget without a label labels it with the city.
-  private func timeZoneRow(_ widget: DesktopWidget) -> some View {
-    let model = controller.widgetsSettings
-    let id = widget.id
-    return SettingsRow(Self.timeZone) {
-      SettingsMenuControl(
-        key: DesktopWidgetsSettingsModel.key(id, "timeZone"), saved: widget.timeZone,
-        options: model.timeZoneOptions(for: widget), waitsForMac: false, policy: .latestWins
-      ) { value in
-        try await controller.setDesktopWidgetTimeZone(id, value, label: value.map(model.city))
-      }
-    }
-  }
-
-  private func labelRow(_ widget: DesktopWidget) -> some View {
-    SettingsRow(Self.label) {
-      WidgetTextField(id: widget.id, saved: widget.text, multiline: false)
-    }
-  }
-
-  /// The Style menu: each finished look by name.
-  private func styleMenu(_ id: String) -> some View {
-    let key = PanelActionCoordinator.key("styleDesktopWidget", id: id)
-    return Menu {
-      ForEach(DesktopWidget.StylePreset.allCases, id: \.self) { preset in
-        Button {
-          controller.launch(key) { try await controller.changeDesktopWidget(id, .style(preset)) }
-        } label: {
-          Text(verbatim: Self.title(of: preset))
-        }
-        .accessibilityIdentifier("widgets.style.\(preset.rawValue)")
-      }
-    } label: {
-      Text("Apply Style")
-    }
-    .menuStyle(.button)
-    .buttonStyle(.bordered)
-    .controlSize(.small)
-    .fixedSize()
-    .disabled(controller.isBusy(key))
-  }
-
-  /// A slider for one of a widget's numbers.
-  private func slider(
-    _ id: String, _ control: String, saved: Int, range: ClosedRange<Int>, readout: @escaping (Int) -> String,
-    change: @escaping (Int) -> DesktopWidgetChange
-  ) -> some View {
-    SettingsSliderControl(
-      key: DesktopWidgetsSettingsModel.key(id, control), saved: saved, range: range, waitsForMac: false,
-      readout: readout
-    ) { try await controller.changeDesktopWidget(id, change($0)) }
   }
 
   /// "Off" at 0, else the percent.
-  private static func offOrPercent(_ value: Int) -> String { value == 0 ? L("Off") : L("\(value)%") }
-
-  /// A position slider in whole percent of the display, 0 at the left or top edge.
-  private func percentSlider(
-    _ id: String, _ control: String, saved: Double, change: @escaping (Double) -> DesktopWidgetChange
-  ) -> some View {
-    SettingsSliderControl(
-      key: DesktopWidgetsSettingsModel.key(id, control), saved: Int((saved * 100).rounded()), range: 0...100,
-      waitsForMac: false, readout: { L("\($0)%") }
-    ) { try await controller.changeDesktopWidget(id, change(Double($0) / 100)) }
-  }
+  static func offOrPercent(_ value: Int) -> String { value == 0 ? L("Off") : L("\(value)%") }
 
   // MARK: Words
 
@@ -814,6 +385,537 @@ struct WidgetsSettingsSection: View {
   }
 }
 
+/// The Add Widget menu: every kind, by name and symbol.
+struct WidgetAddMenu: View {
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    let key = PanelActionCoordinator.key("addDesktopWidget")
+    Menu {
+      ForEach(DesktopWidget.Kind.allCases, id: \.self) { kind in
+        Button {
+          controller.launch(key) { try await controller.addDesktopWidget(kind) }
+        } label: {
+          Label {
+            Text(verbatim: WidgetsSettingsSection.title(of: kind))
+          } icon: {
+            Image(systemName: WidgetsSettingsSection.symbol(of: kind))
+          }
+        }
+        .accessibilityIdentifier("widgets.add.\(kind.rawValue)")
+      }
+    } label: {
+      Text("Add Widget")
+    }
+    .menuStyle(.button)
+    .buttonStyle(.bordered)
+    .controlSize(.small)
+    .fixedSize()
+    .disabled(controller.widgetsSettings.widgets.count >= DesktopWidgetStore.limit || controller.isBusy(key))
+  }
+}
+
+/// Center horizontally and vertically: the middle of what the widget shows goes on the display's
+/// centre line, whichever edge its alignment holds. A button whose centring is done is disabled.
+struct WidgetCenterButtons: View {
+  let widget: DesktopWidget
+  let screen: DesktopWidgetController.Screen
+
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    let model = controller.widgetsSettings
+    let id = widget.id
+    let shown = model.shown(widget)
+    HStack(spacing: 6) {
+      ForEach([true, false], id: \.self) { horizontally in
+        let key = PanelActionCoordinator.key("centerDesktopWidget", id: id, detail: horizontally ? "x" : "y")
+        Button {
+          let value = model.centered(shown, on: screen, horizontally: horizontally)
+          controller.launch(key, policy: .latestWins) {
+            try await controller.changeDesktopWidget(id, horizontally ? .x(value) : .y(value))
+          }
+        } label: {
+          Label {
+            Text(verbatim: horizontally ? L("Center Horizontally") : L("Center Vertically"))
+          } icon: {
+            Image(systemName: horizontally ? "align.horizontal.center" : "align.vertical.center")
+          }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(model.isCentered(shown, on: screen, horizontally: horizontally))
+        .help(horizontally ? L("Center from left to right") : L("Center from top to bottom"))
+        .accessibilityIdentifier("widgets.center.\(horizontally ? "horizontal" : "vertical")")
+      }
+    }
+    .fixedSize()
+    .accessibilityElement(children: .contain)
+  }
+}
+
+/// The rows that edit the selected widget, by pane (`DesktopWidgetPane`): the workspace's inspector
+/// shows one pane at a time beside the canvas, the search results every pane one under another.
+/// Rows only some kinds have, and rows waiting on another choice, show only when they apply
+/// (`WidgetsSettingsSection.offers`).
+struct WidgetEditor: View {
+  private typealias Section = WidgetsSettingsSection
+
+  let widget: DesktopWidget
+  let screens: [DesktopWidgetController.Screen]
+  let panes: [DesktopWidgetPane]
+  /// The workspace's narrow inspector: a row puts a wide control under its title, and the canvas
+  /// beside it shows the picture and the Center buttons, so the Position pane leaves them out.
+  let compact: Bool
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: compact ? 18 : 22) {
+      ForEach(panes) { pane in
+        switch pane {
+        case .position: positionGroup
+        case .text: lookGroup
+        case .style: styleGroups
+        case .content:
+          if DesktopWidgetPane.panes(for: widget.kind).contains(.content) { formatGroup }
+        }
+      }
+    }
+  }
+
+  // MARK: Rows
+
+  /// A row of the editor. In the inspector, a row whose control is wide (a slider, a long menu, a
+  /// field) puts it under its title; `inline` keeps a switch, a colour well or a short choice
+  /// beside it.
+  private func row<Control: View>(
+    _ item: SettingsItem, inline: Bool = false, note: String? = nil, @ViewBuilder control: () -> Control
+  ) -> some View {
+    SettingsRow(item, note: note, stacked: compact && !inline, control: control)
+  }
+
+  private var sliderWidth: CGFloat { compact ? 196 : 160 }
+
+  /// A slider for one of a widget's numbers.
+  private func slider(
+    _ control: String, saved: Int, range: ClosedRange<Int>, readout: @escaping (Int) -> String,
+    change: @escaping (Int) -> DesktopWidgetChange
+  ) -> some View {
+    let id = widget.id
+    return SettingsSliderControl(
+      key: DesktopWidgetsSettingsModel.key(id, control), saved: saved, range: range, width: sliderWidth,
+      waitsForMac: false, readout: readout
+    ) { try await controller.changeDesktopWidget(id, change($0)) }
+  }
+
+  /// A position slider in whole percent of the display, 0 at the left or top edge.
+  private func percentSlider(
+    _ control: String, saved: Double, change: @escaping (Double) -> DesktopWidgetChange
+  ) -> some View {
+    let id = widget.id
+    return SettingsSliderControl(
+      key: DesktopWidgetsSettingsModel.key(id, control), saved: Int((saved * 100).rounded()), range: 0...100,
+      width: sliderWidth, waitsForMac: false, readout: { L("\($0)%") }
+    ) { try await controller.changeDesktopWidget(id, change(Double($0) / 100)) }
+  }
+
+  private func menu<Value: Hashable>(
+    _ control: String, saved: Value, options: [SettingsMenuOption<Value>],
+    change: @escaping (Value) -> DesktopWidgetChange
+  ) -> some View {
+    let id = widget.id
+    return SettingsMenuControl(
+      key: DesktopWidgetsSettingsModel.key(id, control), saved: saved, options: options, waitsForMac: false,
+      policy: .latestWins
+    ) { try await controller.changeDesktopWidget(id, change($0)) }
+  }
+
+  // MARK: Position
+
+  private var positionGroup: some View {
+    let model = controller.widgetsSettings
+    let id = widget.id
+    let screen = model.previewScreen(for: widget, among: screens)
+    return SettingsGroup(Section.arrange, in: .widgets) {
+      row(Section.shown, inline: true) {
+        WidgetSwitch(id: id, control: "shown", saved: widget.isShown) { .shown($0) }
+      }
+      row(Section.display) {
+        SettingsMenuControl(
+          key: DesktopWidgetsSettingsModel.key(id, "placement"),
+          saved: model.placementValue(for: widget, among: screens),
+          options: model.placementOptions(for: widget, among: screens), waitsForMac: false,
+          policy: .latestWins
+        ) { try await controller.changeDesktopWidget(id, .placement($0)) }
+      }
+      if !compact, let screen {
+        SettingsRow(Section.preview, stacked: true) {
+          DesktopWidgetPreview(screen: screen, limit: DesktopWidgetPreview.rowLimit)
+        }
+        SettingsRow(Section.center) {
+          WidgetCenterButtons(widget: widget, screen: screen)
+        }
+      }
+      row(Section.horizontal) {
+        percentSlider("x", saved: widget.x) { .x($0) }
+      }
+      row(Section.vertical) {
+        percentSlider("y", saved: widget.y) { .y($0) }
+      }
+      row(Section.alignment, inline: true) {
+        SettingsSegmentedControl(
+          segments: DesktopWidget.Alignment.allCases.map { .init(value: $0, title: Section.title(of: $0)) },
+          selection: model.value(id, "alignment", saved: widget.alignment), fillsWidth: false
+        ) { value in
+          model.commit(id, "alignment", to: value) { .alignment($0) }
+        }
+      }
+      row(Section.rotation) {
+        slider("rotation", saved: widget.rotation, range: DesktopWidget.rotationRange, readout: { L("\($0)°") }) {
+          .rotation($0)
+        }
+      }
+    } accessory: {
+      if !compact { editing }
+    }
+  }
+
+  /// Which widget the groups below edit, on the first group's title line, so it stays clear once
+  /// the list has scrolled away.
+  private var editing: some View {
+    let text = controller.widgetsSettings.text(for: widget)
+    return Label {
+      Text(verbatim: text)
+        .lineLimit(1)
+        .truncationMode(.tail)
+    } icon: {
+      Image(systemName: Section.symbol(of: widget.kind))
+    }
+    .font(.panel(.callout))
+    .foregroundStyle(theme.surface.muted.color)
+    .padding(.trailing, 12)
+    .frame(minWidth: 0, maxWidth: 240, alignment: .trailing)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text(verbatim: L("Editing \(text)")))
+  }
+
+  // MARK: Text
+
+  private var lookGroup: some View {
+    let id = widget.id
+    return SettingsGroup(Section.look, in: .widgets) {
+      row(Section.size) {
+        slider("size", saved: widget.size, range: DesktopWidget.sizeRange, readout: { L("\($0) pt") }) {
+          .size($0)
+        }
+      }
+      row(Section.typeface) {
+        WidgetFontMenu(widget: widget)
+      }
+      row(Section.weight) {
+        SettingsSliderControl(
+          key: DesktopWidgetsSettingsModel.key(id, "weight"), saved: widget.weight / 100,
+          range: (DesktopWidget.weightRange.lowerBound / 100)...(DesktopWidget.weightRange.upperBound / 100),
+          width: sliderWidth, waitsForMac: false, readout: { String($0 * 100) }
+        ) { try await controller.changeDesktopWidget(id, .weight($0 * 100)) }
+      }
+      row(Section.italic, inline: true) {
+        WidgetSwitch(id: id, control: "italic", saved: widget.isItalic) { .italic($0) }
+      }
+      if Section.offers(Section.letterSpacing, for: widget) {
+        row(Section.letterSpacing) {
+          slider(
+            "letterSpacing", saved: widget.letterSpacing, range: DesktopWidget.letterSpacingRange,
+            readout: { L("\($0)%") }
+          ) { .letterSpacing($0) }
+        }
+      }
+      if Section.offers(Section.lineHeight, for: widget) {
+        row(Section.lineHeight) {
+          slider(
+            "lineHeight", saved: widget.lineHeight, range: DesktopWidget.lineHeightRange, readout: { L("\($0)%") }
+          ) { .lineHeight($0) }
+        }
+      }
+      if Section.offers(Section.textCase, for: widget) {
+        row(Section.textCase, inline: true) {
+          menu(
+            "textCase", saved: widget.textCase,
+            options: DesktopWidget.TextCase.allCases.map { .init(value: $0, title: Section.title(of: $0)) }
+          ) { .textCase($0) }
+        }
+      }
+    }
+  }
+
+  // MARK: Style
+
+  @ViewBuilder
+  private var styleGroups: some View {
+    SettingsGroup(Section.styles, in: .widgets) {
+      SettingsRow(Section.style, stacked: true) {
+        WidgetStyleSwatches(widget: widget)
+      }
+    }
+    colorsGroup
+    effectsGroup
+  }
+
+  private var colorsGroup: some View {
+    let id = widget.id
+    return SettingsGroup(Section.colors, in: .widgets) {
+      row(Section.color, inline: true) {
+        WidgetColorControl(id: id, control: "color", saved: widget.color) { .color($0) }
+      }
+      if Section.offers(Section.accent, for: widget) {
+        row(Section.accent, inline: true) {
+          HStack(spacing: 8) {
+            WidgetColorControl(id: id, control: "accent", saved: widget.accentColor ?? widget.color) {
+              .accentColor($0)
+            }
+            if widget.accentColor != nil {
+              let key = PanelActionCoordinator.key("resetDesktopWidgetAccent", id: id)
+              SettingsActionButton("Use Text Color", isDisabled: controller.isBusy(key)) {
+                controller.launch(key) { try await controller.changeDesktopWidget(id, .accentColor(nil)) }
+              }
+            }
+          }
+        }
+      }
+      row(Section.gradient, inline: true) {
+        WidgetSwitch(id: id, control: "gradient", saved: widget.fill == .gradient) {
+          .fill($0 ? .gradient : .solid)
+        }
+      }
+      if Section.offers(Section.gradientColor, for: widget) {
+        row(Section.gradientColor, inline: true) {
+          WidgetColorControl(id: id, control: "gradientColor", saved: widget.gradientColor) { .gradientColor($0) }
+        }
+        row(Section.gradientAngle) {
+          slider(
+            "gradientAngle", saved: widget.gradientAngle, range: DesktopWidget.angleRange, readout: { L("\($0)°") }
+          ) { .gradientAngle($0) }
+        }
+      }
+      row(Section.opacity) {
+        slider("opacity", saved: widget.opacity, range: DesktopWidget.opacityRange, readout: { L("\($0)%") }) {
+          .opacity($0)
+        }
+      }
+    }
+  }
+
+  private var effectsGroup: some View {
+    let id = widget.id
+    return SettingsGroup(Section.effects, in: .widgets) {
+      row(Section.outline) {
+        slider(
+          "outline", saved: widget.outlineWidth, range: DesktopWidget.outlineRange, readout: Section.offOrPercent
+        ) { .outlineWidth($0) }
+      }
+      if Section.offers(Section.outlineColor, for: widget) {
+        row(Section.outlineColor, inline: true) {
+          WidgetColorControl(id: id, control: "outlineColor", saved: widget.outlineColor) { .outlineColor($0) }
+        }
+      }
+      row(Section.glow) {
+        slider("glow", saved: widget.glowSize, range: DesktopWidget.glowRange, readout: Section.offOrPercent) {
+          .glowSize($0)
+        }
+      }
+      if Section.offers(Section.glowColor, for: widget) {
+        row(Section.glowColor, inline: true) {
+          WidgetColorControl(id: id, control: "glowColor", saved: widget.glowColor) { .glowColor($0) }
+        }
+      }
+      row(Section.shadow, inline: true) {
+        WidgetSwitch(id: id, control: "shadow", saved: widget.hasShadow) { .shadow($0) }
+      }
+      if Section.offers(Section.shadowColor, for: widget) {
+        row(Section.shadowColor, inline: true) {
+          WidgetColorControl(id: id, control: "shadowColor", saved: widget.shadowColor) { .shadowColor($0) }
+        }
+        row(Section.shadowOpacity) {
+          slider(
+            "shadowOpacity", saved: widget.shadowOpacity, range: DesktopWidget.opacityRange, readout: { L("\($0)%") }
+          ) { .shadowOpacity($0) }
+        }
+        row(Section.shadowBlur) {
+          slider(
+            "shadowBlur", saved: widget.shadowBlur, range: DesktopWidget.shadowBlurRange, readout: { L("\($0)%") }
+          ) { .shadowBlur($0) }
+        }
+        row(Section.shadowDistance) {
+          slider(
+            "shadowDistance", saved: widget.shadowDistance, range: DesktopWidget.shadowDistanceRange,
+            readout: { L("\($0)%") }
+          ) { .shadowDistance($0) }
+        }
+        row(Section.shadowAngle) {
+          slider(
+            "shadowAngle", saved: widget.shadowAngle, range: DesktopWidget.angleRange, readout: { L("\($0)°") }
+          ) { .shadowAngle($0) }
+        }
+      }
+      row(Section.background, inline: true) {
+        menu(
+          "background", saved: widget.background,
+          options: DesktopWidget.Background.allCases.map { .init(value: $0, title: Section.title(of: $0)) }
+        ) { .background($0) }
+      }
+      if Section.offers(Section.backgroundColor, for: widget) {
+        row(Section.backgroundColor, inline: true) {
+          WidgetColorControl(id: id, control: "backgroundColor", saved: widget.backgroundColor) {
+            .backgroundColor($0)
+          }
+        }
+        row(Section.backgroundOpacity) {
+          slider(
+            "backgroundOpacity", saved: widget.backgroundOpacity, range: DesktopWidget.opacityRange,
+            readout: { L("\($0)%") }
+          ) { .backgroundOpacity($0) }
+        }
+        row(Section.backgroundPadding) {
+          slider(
+            "backgroundPadding", saved: widget.backgroundPadding, range: DesktopWidget.backgroundPaddingRange,
+            readout: { L("\($0)%") }
+          ) { .backgroundPadding($0) }
+        }
+      }
+      row(Section.resetEffects, inline: true) {
+        let key = PanelActionCoordinator.key("resetDesktopWidgetEffects", id: id)
+        SettingsActionButton("Reset", isDisabled: controller.isBusy(key)) {
+          controller.launch(key) { try await controller.changeDesktopWidget(id, .resetEffects) }
+        }
+      }
+    }
+  }
+
+  // MARK: Content
+
+  private var formatGroup: some View {
+    let model = controller.widgetsSettings
+    let id = widget.id
+    return SettingsGroup(Section.format, in: .widgets) {
+      switch widget.kind {
+      case .time:
+        row(Section.timeFormat, inline: true) { timeFormatMenu }
+        row(Section.clockLayout, inline: true) {
+          SettingsSegmentedControl(
+            segments: DesktopWidget.ClockLayout.allCases.map { .init(value: $0, title: Section.title(of: $0)) },
+            selection: model.value(id, "clockLayout", saved: widget.clockLayout), fillsWidth: false
+          ) { value in
+            model.commit(id, "clockLayout", to: value) { .clockLayout($0) }
+          }
+        }
+        row(Section.padsHour, inline: true) {
+          WidgetSwitch(id: id, control: "padsHour", saved: widget.padsHour) { .padsHour($0) }
+        }
+        row(Section.showsPeriod, inline: true) {
+          WidgetSwitch(id: id, control: "showsPeriod", saved: widget.showsPeriod) { .showsPeriod($0) }
+        }
+        row(Section.seconds, inline: true) {
+          WidgetSwitch(id: id, control: "seconds", saved: widget.showsSeconds) { .showsSeconds($0) }
+        }
+        timeZoneRow
+        labelRow
+      case .date:
+        row(Section.dateFormat) {
+          menu("dateStyle", saved: widget.dateStyle, options: model.dateStyleOptions(for: widget)) { .dateStyle($0) }
+        }
+        row(Section.calendarSystem) {
+          menu("calendarSystem", saved: widget.calendarSystem, options: model.calendarOptions()) {
+            .calendarSystem($0)
+          }
+        }
+        timeZoneRow
+        labelRow
+      case .analog:
+        row(Section.dialMarks, inline: true) {
+          menu(
+            "dialMarks", saved: widget.dialMarks,
+            options: DesktopWidget.DialMarks.allCases.map { .init(value: $0, title: Section.title(of: $0)) }
+          ) { .dialMarks($0) }
+        }
+        row(Section.dialRing, inline: true) {
+          WidgetSwitch(id: id, control: "dialRing", saved: widget.showsDialRing) { .showsDialRing($0) }
+        }
+        row(Section.seconds, inline: true) {
+          WidgetSwitch(id: id, control: "seconds", saved: widget.showsSeconds) { .showsSeconds($0) }
+        }
+        timeZoneRow
+      case .text:
+        row(Section.content) {
+          WidgetTextField(id: id, saved: widget.text, multiline: true)
+        }
+      case .countdown:
+        row(Section.event) {
+          WidgetTextField(id: id, saved: widget.text, multiline: false)
+        }
+        row(Section.targetDay, inline: true) {
+          DatePicker(
+            noLabel,
+            selection: Binding(
+              get: { model.targetDate(model.value(id, "targetDay", saved: widget.targetDay)) },
+              set: { date in
+                model.commit(id, "targetDay", to: DesktopWidget.day(of: date, in: .autoupdatingCurrent)) {
+                  .targetDay($0)
+                }
+              }),
+            displayedComponents: .date
+          )
+          .datePickerStyle(.stepperField)
+          .labelsHidden()
+          .fixedSize()
+        }
+      case .greeting:
+        row(Section.name) {
+          WidgetTextField(id: id, saved: widget.text, multiline: false)
+        }
+      case .sun:
+        row(Section.sunStyle) {
+          menu(
+            "sunStyle", saved: widget.sunStyle,
+            options: DesktopWidget.SunStyle.allCases.map { .init(value: $0, title: Section.title(of: $0)) }
+          ) { .sunStyle($0) }
+        }
+        row(Section.timeFormat, inline: true) { timeFormatMenu }
+      case .battery, .calendar:
+        EmptyView()
+      }
+    }
+  }
+
+  private var timeFormatMenu: some View {
+    menu(
+      "timeFormat", saved: widget.timeFormat,
+      options: DesktopWidget.TimeFormat.allCases.map { .init(value: $0, title: Section.title(of: $0)) }
+    ) { .timeFormat($0) }
+  }
+
+  /// The Time zone menu. Choosing a city for a widget without a label labels it with the city.
+  private var timeZoneRow: some View {
+    let model = controller.widgetsSettings
+    let id = widget.id
+    return row(Section.timeZone) {
+      SettingsMenuControl(
+        key: DesktopWidgetsSettingsModel.key(id, "timeZone"), saved: widget.timeZone,
+        options: model.timeZoneOptions(for: widget), waitsForMac: false, policy: .latestWins
+      ) { value in
+        try await controller.setDesktopWidgetTimeZone(id, value, label: value.map(model.city))
+      }
+    }
+  }
+
+  private var labelRow: some View {
+    row(Section.label) {
+      WidgetTextField(id: widget.id, saved: widget.text, multiline: false)
+    }
+  }
+}
+
 /// What a drag of a widget's handle carries: the widget, and the layers' order when its row was
 /// drawn, so a drop on a list that changed meanwhile changes nothing. It travels as private JSON.
 struct WidgetLayerDrag: Codable, Transferable {
@@ -828,7 +930,7 @@ struct WidgetLayerDrag: Codable, Transferable {
 /// One layer of the list: a handle to drag it to another place, what it says now, its kind and
 /// display, and buttons that show or hide it and remove it. A click picks it for the editor below;
 /// the selected layer is highlighted. Removing asks once more in place, since it cannot be undone.
-private struct WidgetLayerRow: View {
+struct WidgetLayerRow: View {
   let widget: DesktopWidget
   let screens: [DesktopWidgetController.Screen]
   /// The layers' order as the list shows it, front first.

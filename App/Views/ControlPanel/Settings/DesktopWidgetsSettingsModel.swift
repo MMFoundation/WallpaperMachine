@@ -2,30 +2,68 @@ import AppKit
 import Foundation
 import Observation
 
+/// One pane of the Desktop Widgets inspector, which shows the selected widget's controls a pane at a
+/// time beside the canvas, so none of them is a long scroll away from the picture they change.
+enum DesktopWidgetPane: String, CaseIterable, Identifiable, Sendable {
+  /// What the widget says: its format, words, time zone, day.
+  case content
+  /// The letters: size, font, weight, spacing, case.
+  case text
+  /// The finished looks, the colours and the effects.
+  case style
+  /// Where it is: display, place, alignment and turn.
+  case position
+
+  var id: String { rawValue }
+
+  /// The panes a widget of `kind` has: a battery and a month calendar say nothing of their own.
+  static func panes(for kind: DesktopWidget.Kind) -> [DesktopWidgetPane] {
+    switch kind {
+    case .battery, .calendar: [.text, .style, .position]
+    default: allCases
+    }
+  }
+}
+
 /// Page state of Settings › Desktop Widgets that must outlive the page being rebuilt: which widget the
-/// editor shows and where a widget being dragged on the preview is before it is let go. It reads
-/// the widgets from `controller.desktopWidgets` and acts through the controller's typed actions.
+/// editor shows, which pane of the inspector is open, and where a widget being dragged, resized or
+/// turned on the canvas is before it is let go. It reads the widgets from
+/// `controller.desktopWidgets` and acts through the controller's typed actions.
 @MainActor
 @Observable
 final class DesktopWidgetsSettingsModel {
   typealias Screen = DesktopWidgetController.Screen
 
   /// A widget being dragged on the preview, where the pointer has taken it so far, and the guides
-  /// it snapped to there.
+  /// it snapped to there; or one being resized or turned by its handles, with its size or turn so
+  /// far.
   struct Drag: Equatable {
     var id: String
     var x: Double
     var y: Double
+    var size: Int? = nil
+    var rotation: Int? = nil
     var guides: [DesktopWidgetSnapping.Guide] = []
   }
 
-  /// What a drag keeps from its start: where the widget was, and the frames of the widgets it can
-  /// line up with, in the display's points.
+  /// What a drag keeps from its start: where the widget was, its size and turn, and the frames of
+  /// the widgets it can line up with, in the display's points.
   private struct DragStart {
     var id: String
     var x: Double
     var y: Double
+    var size: Int
+    var rotation: Int
     var others: [CGRect]
+  }
+
+  /// The inspector's pane the person chose last; a widget without it shows its first pane.
+  var pane = DesktopWidgetPane.content
+
+  /// The pane the inspector shows for `widget`.
+  func pane(for widget: DesktopWidget) -> DesktopWidgetPane {
+    let panes = DesktopWidgetPane.panes(for: widget.kind)
+    return panes.contains(pane) ? pane : panes.first ?? .text
   }
 
   unowned let controller: PanelController
@@ -49,13 +87,17 @@ final class DesktopWidgetsSettingsModel {
 
   func select(_ id: String?) { chosenID = id }
 
-  /// `widget` where the preview draws it: where a drag has it, or where it was let go while that
-  /// position is being saved.
+  /// `widget` where the preview draws it: where a drag has it, at the size and turn its handles
+  /// have it, or as it was let go while that is being saved.
   func shown(_ widget: DesktopWidget) -> DesktopWidget {
     var moved = widget
+    moved.size = value(widget.id, "size", saved: widget.size)
+    moved.rotation = value(widget.id, "rotation", saved: widget.rotation)
     if let drag, drag.id == widget.id {
       moved.x = drag.x
       moved.y = drag.y
+      if let size = drag.size { moved.size = size }
+      if let rotation = drag.rotation { moved.rotation = rotation }
     } else {
       let position = value(widget.id, "position", saved: [widget.x, widget.y])
       moved.x = position[0]
@@ -267,8 +309,9 @@ final class DesktopWidgetsSettingsModel {
     var waitsToSettle = false
   }
 
-  /// The longest edge, in pixels, of a frame the preview keeps: its widest size on a Retina display.
-  static let framePixels = 1024
+  /// The longest edge, in pixels, of a frame the preview keeps: the canvas grows with the window, and
+  /// this keeps it sharp on a Retina display up to about 1,000 points wide.
+  static let framePixels = 2048
 
   /// What each display's wallpaper last gave the preview.
   private(set) var wallpaperFrames: [UInt32: WallpaperFrame] = [:]
@@ -362,14 +405,106 @@ final class DesktopWidgetsSettingsModel {
     controller.settings.value(Self.key(id, control), saved: saved)
   }
 
-  /// Ends a drag on the preview where it was let go, and saves that position. The draft shows it
-  /// until it is saved, so the widget does not jump back meanwhile.
+  /// Ends a drag on the preview where it was let go, and saves that position, or the size or turn
+  /// a handle gave it. The draft shows it until it is saved, so the widget does not jump back
+  /// meanwhile.
   @discardableResult
   func endDrag() -> Task<Void, Never>? {
     dragStart = nil
     guard let drag else { return nil }
     self.drag = nil
+    if let size = drag.size { return commit(drag.id, "size", to: size) { .size($0) } }
+    if let rotation = drag.rotation { return commit(drag.id, "rotation", to: rotation) { .rotation($0) } }
     return commit(drag.id, "position", to: [drag.x, drag.y]) { .position(x: $0[0], y: $0[1]) }
+  }
+
+  // MARK: Resizing and turning
+
+  /// Keeps what a handle's drag starts from, and selects the widget.
+  private func beginTransform(_ widget: DesktopWidget) -> DragStart {
+    if let start = dragStart, start.id == widget.id, drag?.id == widget.id { return start }
+    let shown = shown(widget)
+    let start = DragStart(
+      id: widget.id, x: shown.x, y: shown.y, size: shown.size, rotation: shown.rotation, others: [])
+    dragStart = start
+    if selectedID != widget.id { select(widget.id) }
+    return start
+  }
+
+  /// Resizes a widget by a corner handle: its size at the start of the drag times `factor`, the
+  /// pointer's distance from the widget's middle over its distance there at the start.
+  func resize(_ widget: DesktopWidget, by factor: CGFloat) {
+    let start = beginTransform(widget)
+    drag = Drag(id: widget.id, x: start.x, y: start.y, size: Self.size(start.size, scaledBy: factor))
+  }
+
+  /// Turns a widget by its turn handle: its turn at the start of the drag plus `degrees`. With
+  /// `snaps` the turn settles on a multiple of 15° within a few degrees of one.
+  func rotate(_ widget: DesktopWidget, by degrees: CGFloat, snaps: Bool) {
+    let start = beginTransform(widget)
+    drag = Drag(
+      id: widget.id, x: start.x, y: start.y,
+      rotation: Self.rotation(CGFloat(start.rotation) + degrees, snaps: snaps))
+  }
+
+  /// Moves a widget by `points` of its display, as an arrow key on the canvas does, and saves it.
+  @discardableResult
+  func nudge(_ widget: DesktopWidget, by points: CGSize, on screen: Screen) -> Task<Void, Never>? {
+    let display = screen.frame.size
+    guard display.width > 0, display.height > 0 else { return nil }
+    let shown = shown(widget)
+    let x = min(max(shown.x + points.width / display.width, 0), 1)
+    let y = min(max(shown.y + points.height / display.height, 0), 1)
+    if selectedID != widget.id { select(widget.id) }
+    return commit(widget.id, "position", to: [x, y]) { .position(x: $0[0], y: $0[1]) }
+  }
+
+  /// A size `factor` times `start`, in whole points inside the size's range.
+  static func size(_ start: Int, scaledBy factor: CGFloat) -> Int {
+    let range = DesktopWidget.sizeRange
+    guard factor.isFinite, factor > 0 else { return start }
+    return min(max(Int((CGFloat(start) * factor).rounded()), range.lowerBound), range.upperBound)
+  }
+
+  /// The snap of a turn: within this many degrees of a multiple of 15°, it goes there.
+  static let rotationSnap: CGFloat = 4
+
+  /// A turn of `degrees`, brought into −180° to 180° and whole degrees; with `snaps` it settles on
+  /// a multiple of 15° within `rotationSnap` of one.
+  static func rotation(_ degrees: CGFloat, snaps: Bool) -> Int {
+    guard degrees.isFinite else { return 0 }
+    var turn = degrees.truncatingRemainder(dividingBy: 360)
+    if turn > 180 { turn -= 360 } else if turn < -180 { turn += 360 }
+    if snaps {
+      let nearest = (turn / 15).rounded() * 15
+      if abs(nearest - turn) <= rotationSnap { turn = nearest }
+    }
+    let range = DesktopWidget.rotationRange
+    return min(max(Int(turn.rounded()), range.lowerBound), range.upperBound)
+  }
+
+  /// The direction of `point` from `center` in a picture whose y grows downwards, in degrees
+  /// clockwise from straight up, as a widget's turn is measured.
+  static func angle(of point: CGPoint, around center: CGPoint) -> CGFloat {
+    atan2(point.x - center.x, center.y - point.y) * 180 / .pi
+  }
+
+  // MARK: Ready-made widgets
+
+  /// The display a ready-made widget is laid out for: the main one, or a common laptop's when none
+  /// is known.
+  func presetDisplay() -> CGSize {
+    let screens = screens()
+    let size = (screens.first(where: \.isMain) ?? screens.first)?.frame.size ?? .zero
+    return size.width > 0 && size.height > 0 ? size : CGSize(width: 1512, height: 982)
+  }
+
+  /// A ready-made preset's widgets, placed on the main display as the desktop will draw them.
+  func widgets(of preset: DesktopWidgetPreset, at date: Date = Date()) -> [DesktopWidget] {
+    let display = presetDisplay()
+    return preset.widgets(
+      on: display, measure: { self.frame(of: $0, in: display, scale: 1).size }, city: { self.city($0) },
+      today: date)
   }
 
   // MARK: Arranging
@@ -400,11 +535,14 @@ final class DesktopWidgetsSettingsModel {
       let start = shown(widget)
       let others = widgets(on: screen).filter { $0.id != widget.id && $0.isShown }
         .map { frame(of: shown($0), in: display, scale: 1) }
-      dragStart = DragStart(id: widget.id, x: start.x, y: start.y, others: others)
+      dragStart = DragStart(
+        id: widget.id, x: start.x, y: start.y, size: start.size, rotation: start.rotation, others: others)
       if selectedID != widget.id { select(widget.id) }
     }
     guard let start = dragStart else { return }
     var moved = widget
+    moved.size = start.size
+    moved.rotation = start.rotation
     moved.x = min(max(start.x + translation.width / size.width, 0), 1)
     moved.y = min(max(start.y + translation.height / size.height, 0), 1)
     var guides: [DesktopWidgetSnapping.Guide] = []

@@ -218,6 +218,9 @@ Library & Steam, Storage and About. Each section opens with a header: its tile a
 System Settings draws them: the title and its explanation on the left, the control
 at the trailing edge. A long explanation keeps its first sentence under the title;
 the rest opens in a popover from the ⓘ beside the title.
+Desktop Widgets is the one section drawn otherwise: without a search it is a workspace of a large
+canvas, the widgets' layers and an inspector with tabs, which do not scroll as one page
+([desktop widgets](desktop-widgets.md#what-the-user-sees)).
 
 - **Search** filters rows across every section by their own words in the language
   on show (titles, explanations, keywords, choices and button labels). The page then

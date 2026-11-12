@@ -26,15 +26,27 @@ struct SettingsDetail: View {
   }
 }
 
-/// The scrolling pages of the Settings detail column.
+/// The scrolling pages of the Settings detail column. Desktop Widgets is the one page that does not
+/// scroll as a whole: without a search it is a workspace (`WidgetsWorkspace`) whose canvas stays on
+/// show while its inspector scrolls; its rows still join the search results as every page's do.
 struct SettingsPages: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
 
   var body: some View {
     let settings = controller.settings
+    if !settings.search.isActive && settings.selectedSection == .widgets {
+      WidgetsWorkspace()
+        .id(PageIdentity(section: .widgets, epoch: settings.scrollEpoch, query: ""))
+        .background(theme.surface.surface.color, ignoresSafeAreaEdges: [])
+    } else {
+      pages(settings)
+    }
+  }
+
+  private func pages(_ settings: SettingsModel) -> some View {
     let search = settings.search
-    ScrollView {
+    return ScrollView {
       VStack(alignment: .leading, spacing: 30) {
         if search.hasNoResults {
           PanelEmptyState(

@@ -43,6 +43,21 @@ final class DesktopWidgetStore {
         return widget
     }
 
+    /// Adds finished widgets (a ready-made preset's) in front of the others, in their own order, each
+    /// under a new id. Either all of them fit under the limit or none is added.
+    @discardableResult
+    func add(_ new: [DesktopWidget]) throws -> [DesktopWidget] {
+        guard !new.isEmpty else { return [] }
+        guard widgets.count + new.count <= Self.limit else { throw DesktopWidgetError.tooMany }
+        let added = new.map { widget in
+            var copy = widget.clamped()
+            copy.id = UUID().uuidString
+            return copy
+        }
+        try commit(added + widgets)
+        return added
+    }
+
     /// Adds a copy of a widget just in front of it, a little lower on the display so both can be
     /// seen (higher when there is no room below).
     @discardableResult
