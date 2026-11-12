@@ -527,8 +527,8 @@ private struct WidgetLayerRow: View {
     }
     .padding(.leading, 6)
     .padding(.trailing, 10)
-    .padding(.vertical, 4)
-    .frame(minHeight: 44)
+    .padding(.vertical, 6)
+    .frame(minHeight: 48)
     .background(background(isSelected: isSelected))
     .contentShape(Rectangle())
     .onHover { isHovering = $0 }
@@ -651,13 +651,16 @@ private struct WidgetLayerRow: View {
     Button("Remove", role: .destructive) { confirmsRemoval = true }
   }
 
+  /// The highlight sits the same distance inside the row on every side, with corners concentric
+  /// to the card's, so on the card's last row it follows the card's own rounded edge.
   private func background(isSelected: Bool) -> some View {
-    let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+    let inset: CGFloat = 4
+    let shape = RoundedRectangle(cornerRadius: PanelCardSurface.cornerRadius - inset, style: .continuous)
     let fill: Color =
       isTargeted
       ? theme.accent.accent.color.opacity(0.14)
       : isSelected ? theme.surface.selected.color : isHovering ? theme.surface.hover.color : .clear
-    return shape.fill(fill).padding(.horizontal, 4).padding(.vertical, 2)
+    return shape.fill(fill).padding(inset)
   }
 
   private func iconButton(
