@@ -25,7 +25,7 @@ pub enum Class {
     Clamp,
     /// `mix(a, b, t)`: the mask may be a scalar.
     Mix,
-    /// `dot`, `length`, `distance`: one scalar result, no argument conversion.
+    /// `dot`, `length`, `distance`: one scalar result (`dot` converts arguments separately).
     ScalarResult,
     /// `cross`: 3-vector result.
     Cross,

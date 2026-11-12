@@ -3916,6 +3916,16 @@ Rust regressions in `Renderer/Shader` (`src/*/tests/` for the preprocessor, the 
 converter, the legalizer and the pipeline, and `tests/`) cover these paths with synthetic
 shader sources; the corpus sweeps skip asset-dependent cases with a printed reason.
 
+- **Dot argument conversions (`Renderer/Shader/tests/dot_product.rs`, issue #189)** —
+  `dot_accepts_mixed_vector_widths_and_scalar_arguments` compiles unequal widths,
+  scalars and the nested luminance expression used by fog effects.
+  `dot_uses_leading_components_broadcasts_scalars_and_evaluates_arguments_once`
+  checks GPU results with `WM_SHADER_GPU_PROBES=1`: truncation keeps leading components,
+  scalars broadcast, numeric kinds convert and a function argument runs once.
+  `an_authored_dot_overload_keeps_its_own_behavior` preserves user functions;
+  `converted_dot_arguments_reconvert_unchanged` guards generated GLSL. A 12-cell
+  Wallpaper Engine 2.8.0.42 probe confirms the conversion values. Pipeline revision 11
+  invalidates earlier shader caches.
 - **The dialect's texel fetch, back-buffer and comparison sampling (Wallpaper Engine 2.8.0.42
   prelude, `artifacts/we-parity/decompiles/E-D8.md`)** — `dialect` `vocabulary`
   (`comparison_sampling_reads_a_shadow_sampler_at_level_zero`,

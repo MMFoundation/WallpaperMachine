@@ -501,6 +501,12 @@ shaders are the ones compiled: the flipped screen coordinate of the compositing
 pass, a brace-listed sample kernel, and a light falloff that stays defined beyond a
 light's radius.
 
+Shader `dot` calls follow Wallpaper Engine's argument conversions: vectors of different
+widths use their shared leading components, a scalar beside a vector is repeated, and
+two scalars multiply. Fog effects can use a four-component sampled colour with three
+luminance weights without falling back to the error shader. These conversions happen
+during shader translation and add no rendering passes.
+
 A vertex shader may assign to its own inputs, as Wallpaper Engine's HLSL lets it (the
 Shadow effect's default `a_TexCoord *= atFactor`, a factor of 1 at its default
 settings). The input keeps reading the mesh attribute it names on both renderers, so

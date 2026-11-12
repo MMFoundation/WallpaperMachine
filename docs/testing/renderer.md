@@ -46,6 +46,10 @@ It assembles the Homebrew environment from `scripts/build.py`, then:
 | `--allow-missing-gpu` | CI fallback only: compile a Metal-device probe; its exact exit 77 skips the GPU targets flagged in `REGRESSION_BINARIES` plus the image and reload probes. Compile errors, abnormal exits and timeouts still fail. Default local runs require GPU checks. |
 | `--allow-imprecise-timers` | CI fallback only: compile a timer probe that takes the median of 31 condition-variable waits of 10 ms; its exact exit 77 (median above 15 ms; a Mac measures about 12 ms, hosted VMs 18 ms and more) filters the cadence tests named in `REALTIME_TESTS` out of their binaries. Compile errors, abnormal exits and timeouts still fail. Default local runs require every cadence test. |
 
+For a `--project` with particle emitters, prefix the command with
+`WE_TEST_RANDOM_SEED=1` so the pooled and isolated runs spawn the same particles.
+Without a fixed seed their pictures can differ even when resource reuse is correct.
+
 Reports, SHA-256 hashes, logs, the generated synthetic fixtures and private GPU
 output go under a fresh `artifacts/renderer/adaptive-<timestamp>/` directory,
 with `report.json` as the summary; check binaries live in

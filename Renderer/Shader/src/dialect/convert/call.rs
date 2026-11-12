@@ -321,6 +321,7 @@ impl Converter {
                 let a = targs.pop().unwrap();
                 return self.mul_call(a, b, span);
             }
+            ("dot", 2) => return self.dot_call(targs, span),
             ("saturate", 1) => {
                 let x = targs.pop().unwrap();
                 let x = self.float_shape(x);
@@ -579,6 +580,23 @@ impl Converter {
             return T::new(Expr::new(e.kind, span), ty);
         }
         self.binary_typed(Operator::Mul, b, a, span)
+    }
+
+    /// HLSL dot truncates unequal vectors and broadcasts a scalar beside a vector.
+    /// GLSL needs equal float-vector arguments; a scalar dot is multiplication.
+    fn dot_call(&mut self, targs: Vec<T>, span: Span) -> T {
+        if targs.iter().any(|t| !t.ty.is_scalar() && !t.ty.is_vector()) {
+            return T::new(Expr::call("dot", targs.into_iter().map(|t| t.e).collect(), span), FLOAT);
+        }
+        let (mut args, ty) = self.shape_args(Class::Pair, targs);
+        let expression = if ty.is_scalar() {
+            let b = args.pop().unwrap();
+            let a = args.pop().unwrap();
+            Expr::new(ExprKind::Binary(Operator::Mul, Box::new(a.e.paren()), Box::new(b.e.paren())), span).paren()
+        } else {
+            Expr::call("dot", args.into_iter().map(|t| t.e).collect(), span)
+        };
+        T::new(expression, FLOAT)
     }
 
     /// A component-wise call of a built-in, with the arguments brought to one shape.

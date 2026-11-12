@@ -24,6 +24,8 @@ const SHIPPED: &[(&str, &str)] = &[
     ("9:naga-29.0.3-msl2.0-untransformed", "81d5f272f54deb9007775fa53bda918b9a6656b2773cc935d54c91a992d1c453"),
     // 10: the reflection document gains the read uniforms and the fragment colour; the Metal text is unchanged.
     ("10:naga-29.0.3-msl2.0-untransformed", "81d5f272f54deb9007775fa53bda918b9a6656b2773cc935d54c91a992d1c453"),
+    // 11: dot gains mixed-width/scalar conversions; these fixed programs are unchanged.
+    ("11:naga-29.0.3-msl2.0-untransformed", "81d5f272f54deb9007775fa53bda918b9a6656b2773cc935d54c91a992d1c453"),
 ];
 
 fn programs() -> Vec<crate::pipeline::CompiledProgram> {

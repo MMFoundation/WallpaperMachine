@@ -1141,6 +1141,17 @@ complete coverage of all remaining builtin names, constructor syntax or builtin 
     `a_program_within_the_budget_never_sees_glsl`,
     `a_program_still_over_the_budget_with_glsl_keeps_the_first_refusal`) and `preprocess`
     `the_glsl_prelude_adds_glsl_to_the_direct3d_macros_without_writing_any`.
+144. **Dot argument conversions; pipeline revision 11** (issue #189). Wallpaper Engine
+    2.8.0.42's 12-cell reference probe confirms that `dot` truncates unequal vectors to
+    the smaller width, broadcasts a scalar beside a vector, and multiplies two scalars.
+    Numeric arguments are converted to float before the GLSL dot; the scalar case lowers
+    to multiplication because GLSL dot requires vectors. A four-component colour can
+    therefore feed three-component luminance weights without losing the whole fog pass
+    to the compiler-failure fallback. Conversion evaluates each argument once and leaves
+    authored overload resolution in place. `tests/dot_product.rs` checks compilation,
+    generated-GLSL reconversion and GPU values, including truncation, scalar broadcasts,
+    integer inputs and a function argument with a side effect. The new identity invalidates
+    old cached programs; historical golden rows are retained.
 
 The shipped sweeps now include `volumetricsfront` (167 programs legalized and compiled, 1 failing
 as before: `shadowcasterfoliage4`'s undeclared `g_Texture1Texel`); every `SHADOW`, `POINTLIGHT`

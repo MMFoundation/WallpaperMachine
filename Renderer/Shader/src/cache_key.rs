@@ -472,6 +472,7 @@ mod tests {
         ("8:naga-29.0.3-msl2.0-untransformed", "f73f1acf150bcbe7bac00048b893a2df"),
         ("9:naga-29.0.3-msl2.0-untransformed", "9c0500459f036c42802afaa18bb546f2"),
         ("10:naga-29.0.3-msl2.0-untransformed", "a1284e92c4d9c9464dc281486f91274d"),
+        ("11:naga-29.0.3-msl2.0-untransformed", "3285ade020d81d5dc6b28d254309bf9f"),
     ];
 
     fn golden_case() -> Case {
