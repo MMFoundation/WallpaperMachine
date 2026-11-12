@@ -218,7 +218,8 @@ extension PanelController {
   }
 
   /// `otherAudioVolume`: the share of its own volume, in whole percent from 0 to 100
-  /// (`PlaybackPreferences.otherAudioVolumeRange`), each wallpaper keeps under Reduce volume.
+  /// (`PlaybackPreferences.otherAudioVolumeRange`), each wallpaper keeps under Reduce volume, for
+  /// other-app sound and a covered desktop alike.
   func setOtherAudioVolume(_ percent: Int) async throws {
     guard PlaybackPreferences.otherAudioVolumeRange.contains(percent) else {
       throw InvalidControlValue()

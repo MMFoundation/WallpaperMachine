@@ -809,6 +809,12 @@ closed lid has not been seen on a desktop
       moved. A Web wallpaper that makes its sound with Web Audio keeps its level, as it does
       for its own Volume. Turn **Mute all wallpapers** on while turned down, then off: silent,
       then turned down again, not at full volume.
+- [ ] With a wallpaper that makes sound on one display, set **When windows cover the desktop**
+      to **Mute**. Zoom a window over the desktop: about a second later the wallpaper is silent
+      and still animating in the strip under the menu bar; minimize the window and the sound is
+      back at once. Choose **Reduce volume**: **Reduce volume to** appears under that row, and
+      covering the desktop turns the wallpaper down to that level instead. With two displays,
+      covering only one leaves the sound alone; covering both changes it.
 - [ ] Verify that the final disabled or removed scene stops capture.
 - [ ] Verify that denied permission surfaces an error.
 

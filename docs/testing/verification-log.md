@@ -47,6 +47,15 @@ Core Audio start receive timeouts now stop and release the uncertain session bef
 - Renderer runs exercised GPU and realtime checks, twelve generated pooled/isolated image comparisons and eight reload projects twice, all successful. Seven local asset/corpus cases were skipped; authored wallpaper compatibility remains unverified.
 - Live system audio capture, permission prompts, device changes and desktop behavior were not exercised. No app was installed, launched or restarted. Full native and renderer gates remain blocked by the failures above.
 
+## 2026-11-12 — Mute or Reduce volume when windows cover the desktop (#192)
+
+Written on a Linux host without Xcode or Swift: nothing native was compiled or run.
+
+- `python3 scripts/test.py --python-only` — exit 0; 34 script test files OK, including `test_localization_catalogs.py` and `test_panel_localization.py` for the three new catalog keys in pt-BR, ko, ja, zh-Hans and zh-Hant
+- `python3 scripts/test.py` (XcodeGen and the native unit tests) — not run: no macOS host. New and changed tests in `PlaybackPolicyCompositionTests`, `PlaybackPreferencesTests`, `WallpaperBackupTests`, `OtherAudioVolumeSettingsTests` and `SettingsSectionsLocalizationTests` have not been compiled
+- Release build — not run
+- Gaps: real coverage-probe occlusion and audible output not checked; the four-segment Quick Settings module not checked visually in any language; translations are machine-written and want a native review
+
 ## 2026-11-12 — Desktop widgets workspace: canvas, tabbed inspector, handles, ready-made widgets
 
 - Settings › Desktop Widgets without a search is now a workspace (large canvas, layers, inspector with Content/Text/Style/Position tabs); search still lists every row.
@@ -108,13 +117,3 @@ Installed font families, italic, letter spacing, line height and case; gradient 
 - python3 scripts/check_renderer.py on the final tree: exit 0; 12 generated scenes pixel-equal pooled vs isolated, 0 reload cycles; 19 local-corpus and energy checks skipped (no corpus or opt-ins), so asset coverage is skipped, not passed.
 - Not rendered: no Release build, no app launch, no screenshots. Unverified by eye: paused vs waiting rings, scrim strengths, the new markHeart pink and the library mark's contrast, the translucent secondary fill in dark mode, the View menu titles, the welcome Skip setup and Escape routing.
 - Not covered by tests: whether a click (not a key) focuses a tile and makes its ring show the cancel mark instead of the percentage; pixiv Command-Return wiring (manual smoke only); the scope bar's middle tier; translations without native-speaker review.
-
-## 2026-11-11 — Feeling good? offers Sponsor on Open Collective; README lists Open Collective sponsors
-
-The support prompt's second choice opens MMFoundation's Open Collective (approved by Open Source Collective on 2026-11-11) instead of the website's pricing page, with new strings in every shipped language; the four READMEs gain a sponsors block drawn by Open Collective.
-
-- `python3 scripts/build.py --renderer-only` — OK; the checkout's `libwallpaper_bridge.a` predated main's Steam QR sign-in bridge, so the first targeted build failed to link
-- `xattr -cr build/Build/Products/Debug` — cleared after the extension's CodeSign refused Finder/File Provider attributes (docs/build.md)
-- `python3 scripts/test.py --only SupportPromptPresenterTests --only PanelSupportPromptTests --only PanelPerformanceDataTests --only ExternalLinkTests` — 32 passed; `--only PanelSharingTests` — 5 passed
-- `python3 scripts/test.py` — exit 0: every Python suite, XcodeGen, and 4,843 native tests passed, 0 failed, 68 skipped of 4,911 (two main-thread API runtime warnings)
-- Not checked: the sheet's longer row in six languages on screen (no desktop run, no Release build); the README block through GitHub's image proxy (rendered with GitHub's Markdown API, images loaded from Open Collective directly)

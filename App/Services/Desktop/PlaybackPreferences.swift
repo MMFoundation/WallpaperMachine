@@ -42,8 +42,22 @@ enum OtherAppInFrontAction: String, Codable, CaseIterable, Sendable {
 
 /// What a wallpaper does while other windows cover its display's working area.
 enum DesktopCoveredAction: String, Codable, CaseIterable, Sendable {
+    /// The covered display alone holds its last frame.
     case pause
+    /// Every wallpaper keeps playing, silenced, once windows cover each display that shows one.
+    case mute
+    /// Every wallpaper keeps playing at a share of its own volume
+    /// (`PlaybackPreferences.otherAudioVolume`, the level other-app sound uses too) once windows
+    /// cover each display that shows one.
+    case reduceVolume
     case keepRunning
+
+    /// Whether it acts on sound instead of presentation. Wallpaper sound is one channel for every
+    /// display, so these act only once no wallpaper is left in view uncovered.
+    var actsOnSound: Bool { self == .mute || self == .reduceVolume }
+
+    /// Whether the coverage probes have to measure the working areas for it.
+    var watchesCoverage: Bool { self != .keepRunning }
 }
 
 /// What wallpapers do while a condition of the whole Mac holds: Low Power Mode, macOS
@@ -191,7 +205,8 @@ final class PlaybackPreferences {
     }
 
     /// The share of its own saved volume each wallpaper plays at, in percent, while another app
-    /// plays sound and `otherAudioAction` is Reduce volume. A whole number in
+    /// plays sound and `otherAudioAction` is Reduce volume, or windows cover the desktop and
+    /// `desktopCoveredAction` is Reduce volume: one level for both. A whole number in
     /// `otherAudioVolumeRange`: a stored value outside it, or one that is not a whole number,
     /// which only a hand edit or a damaged file can leave, reads as the default; setting one is
     /// ignored. It never rewrites a wallpaper's own volume.
@@ -218,6 +233,8 @@ final class PlaybackPreferences {
         set { store(newValue.rawValue, forKey: Self.otherAppInFrontKey) }
     }
 
+    /// Pause unless chosen otherwise. Mute and Reduce volume keep wallpapers playing and change
+    /// only their sound.
     var desktopCoveredAction: DesktopCoveredAction {
         get { storedEnum(Self.desktopCoveredKey, default: .pause) }
         set { store(newValue.rawValue, forKey: Self.desktopCoveredKey) }

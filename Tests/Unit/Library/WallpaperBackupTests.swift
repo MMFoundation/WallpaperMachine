@@ -860,6 +860,25 @@ final class WallpaperBackupTests: XCTestCase {
         }
     }
 
+    /// "When windows cover the desktop" is backed up with every choice the row offers, Mute and
+    /// Reduce volume included, and only those restore.
+    func testTheCoveredDesktopChoiceIsBackedUpAndOnlyAnOfferedOneRestores() throws {
+        let preferences = try defaults()
+        PlaybackPreferences(defaults: preferences).desktopCoveredAction = .reduceVolume
+        let export = try WallpaperBackupPreferences(defaults: preferences, domainName: domainName(for: preferences))
+        let key = "WallpaperMachine.desktopCoveredAction"
+
+        let stored = try WallpaperBackupPreferences.decode(XCTUnwrap(export.values[key], key))
+        try WallpaperBackupPreferences.validate(stored, forKey: key)
+        XCTAssertEqual(stored as? String, "reduceVolume")
+        for action in DesktopCoveredAction.allCases {
+            XCTAssertNoThrow(try WallpaperBackupPreferences.validate(action.rawValue, forKey: key), action.rawValue)
+        }
+        for value: Any in ["stop", "", "louder", 1, true] {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(value, forKey: key), "\(value)")
+        }
+    }
+
     /// Muting every wallpaper is local to this Mac: a backup never carries it, and a package that
     /// claims to cannot silence a Mac whose owner did not ask.
     func testMutingEveryWallpaperIsNeitherBackedUpNorRestored() async throws {

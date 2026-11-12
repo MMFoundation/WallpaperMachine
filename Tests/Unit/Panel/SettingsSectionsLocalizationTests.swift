@@ -59,6 +59,7 @@ final class SettingsSectionsLocalizationTests: XCTestCase {
         (QualityPreset.low.title, "Low"), (QualityPreset.medium.title, "Medium"), (QualityPreset.high.title, "High"),
         (QualityPreset.customTitle, "Custom"),
         (DesktopCoveredAction.keepRunning.title, "Keep running"), (OtherAudioAction.mute.title, "Mute"),
+        (DesktopCoveredAction.mute.title, "Mute"), (DesktopCoveredAction.reduceVolume.title, "Reduce volume"),
         (OtherAudioAction.reduceVolume.title, "Reduce volume"),
         (DisplaySleepAction.stop.title, "Stop (free memory)"),
         (SystemConditionAction.reduceQuality.title, "Reduced quality"),

@@ -240,7 +240,8 @@ canvas, the widgets' layers and an inspector with tabs, which do not scroll as o
   its row). Below the tiles are modules with
   segmented controls: the **Quality** preset (Low, Medium, High; Custom shows when
   the values match none), **On battery** (on a Mac with a battery, or when it is
-  not Keep running), **When windows cover the desktop** and **Appearance**
+  not Keep running), **When windows cover the desktop** (Pause, Mute, Reduce volume,
+  Keep running; the level for Reduce volume is on its Playback & Power row) and **Appearance**
   (System, Light, Dark). Each module has a chevron to its full section. While a
   condition lowers quality, Quality names it under its segments in place of its hint,
   and On battery does too while the Mac runs on battery, so a choice another rule

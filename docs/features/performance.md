@@ -485,7 +485,7 @@ wins. There is no timer and no per-frame check (bridge `tests::playback_reconcil
 | Setting | Values | Default |
 | --- | --- | --- |
 | Mute all wallpapers | On, Off | Off |
-| When windows cover the desktop | **Pause**, **Keep running** | Pause |
+| When windows cover the desktop | **Pause**, **Mute**, **Reduce volume**, **Keep running**; Reduce volume uses the level of **Reduce volume to** | Pause |
 | When another app plays sound | **Keep running**, **Reduce volume**, **Mute**, **Pause**; Reduce volume plays wallpapers at **0%** to **100%** of their own volume | Keep running, 30% |
 | When another app is in front | **Keep running**, **Mute**, **Pause**, **Pause on battery** | Keep running |
 | When displays sleep | **Pause**, **Stop (free memory)** | Pause |
@@ -533,6 +533,30 @@ leaves the wallpaper animating in the gaps. `WallpaperCoverageProbes` measures t
 with one fully transparent, mouse-transparent window per display just above the
 wallpaper; see [architecture](../architecture.md#desktop-wallpaper-windows-and-private-api-handling).
 
+**Mute** and **Reduce volume** keep the wallpaper animating in the gaps, as **Keep
+running** does, and change only its sound: **Mute** silences every wallpaper and
+**Reduce volume** plays each at the share of its own volume set by **Reduce volume
+to**, the one level **When another app plays sound** uses too. Choosing **Reduce
+volume** here shows that slider under this row, or under the other-app row when only
+that one chose it; when both turn wallpapers down at once they play at that level, not
+at the level of the level. Wallpaper sound is one channel for every display (the
+bridge's mute flag and gain), so these act only once windows cover the working area of
+every display whose wallpaper is in view: a wallpaper on screen and not paused for
+another reason, such as a full-screen app or **Only play on the display I’m using**.
+With one display that is simply a covered desktop; with two, covering one leaves the
+sound alone while the other's wallpaper is still in view, even when the sound comes
+from the covered one's wallpaper. Like a pause, the sound changes after the
+one-second settle and comes back the moment any of those working areas shows again.
+While no wallpaper is in view at all, the last decision stands, so leaving a
+full-screen app for the same covered desktop brings no second of sound first. They
+compose with the other reasons to mute or turn down as **Reduce volume** below does:
+**Mute all wallpapers**, a mute rule or a Focus filter still silences a wallpaper that
+is turned down, and nothing rewrites a wallpaper's saved volume or mute. A
+[backup](backup-restore.md) carries the choice, and **Reset all settings** puts it back
+on **Pause**. Whether the sound is heard to change on a real output has not been
+checked by a test: the tests follow the decision to the policy's mute and gain
+channels (`PlaybackPolicyCompositionTests`).
+
 **Only play on the display I’m using** is for a Mac with two or more displays. The
 display the pointer is on keeps playing; every other display pauses once the pointer
 has been away from it for 3 seconds, and resumes the moment the pointer returns, so
@@ -576,7 +600,7 @@ wallpaper and does not change the user's own Play/Pause.
 
 **Reduce volume** keeps wallpapers playing and turns them down while another app
 plays sound. Choosing it shows **Reduce volume to**, a slider from 0% to 100%
-(default 30%): each wallpaper plays at that share of its own saved volume, so one
+(default 30%) shared with **When windows cover the desktop** (above): each wallpaper plays at that share of its own saved volume, so one
 saved at 80% plays at 40% with the slider at 50%, and it returns to its own volume
 when the other sound ends. The level is a gain the bridge multiplies every saved
 volume by (`set_audio_gain`, from `PlaybackPreferences.otherAudioVolume`). It is
@@ -590,9 +614,9 @@ not Web Audio, which only **Mute** silences
 ([Page sound](web-wallpapers.md#page-sound)); at 0% the page is muted, as it is at
 zero volume. It does not stand in for a mute: **Mute all wallpapers**, a mute app
 rule and a Focus filter still silence a wallpaper that is turned down, and when they
-end it is still turned down for as long as the other sound lasts. Only this row
-offers it; **When another app is in front** and the app rules mute or pause as
-before. A [backup](backup-restore.md) carries the choice and the level, and **Reset
+end it is still turned down for as long as the other sound lasts. Only this row and
+**When windows cover the desktop** offer it; **When another app is in front** and the
+app rules mute or pause as before. A [backup](backup-restore.md) carries the choice and the level, and **Reset
 all settings** puts them back on **Keep running** and 30%. Whether the lower volume
 is heard as expected on a real output has not been checked by a test: the tests
 follow the gain to the engine's volume call and to the web and video descriptors.

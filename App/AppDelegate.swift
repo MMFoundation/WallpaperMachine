@@ -503,7 +503,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 },
                 otherAudioActive: { otherAudio.isActive },
                 otherAudioAction: { preferences.otherAudioAction },
-                // Reduce volume: the share of its own volume each wallpaper keeps meanwhile.
+                // Reduce volume: the share of its own volume each wallpaper keeps meanwhile, the
+                // same level for other-app sound and for a covered desktop.
                 otherAudioVolume: { Float(preferences.otherAudioVolume) / 100 },
                 // The user's own mute of every wallpaper, on top of the rules above and never
                 // written into any wallpaper's saved sound settings.

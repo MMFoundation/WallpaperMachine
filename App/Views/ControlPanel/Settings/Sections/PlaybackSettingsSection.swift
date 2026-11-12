@@ -18,7 +18,7 @@ struct PlaybackSettingsSection: View {
     id: "playback.desktop-covered", section: .playback, group: playback,
     title: "When windows cover the desktop",
     note:
-      "Covered means windows hide everything but the menu bar and the screen edges. Pause keeps the last frame there. Wallpapers you can’t see at all always pause."
+      "Covered means windows hide everything but the menu bar and the screen edges. Pause keeps the last frame there. Mute and Reduce volume keep wallpapers playing and change only their sound, once windows cover every display that shows one. Wallpapers you can’t see at all always pause."
   )
   static let activeDisplayOnly = SettingsItem(
     id: "playback.active-display-only", section: .playback, group: playback,
@@ -36,7 +36,7 @@ struct PlaybackSettingsSection: View {
     id: "playback.other-audio-volume", section: .playback, group: playback,
     title: "Reduce volume to",
     note:
-      "Each wallpaper plays at this share of its own volume while the other sound lasts; its saved volume is not changed. In Web wallpapers it reaches only the audio and video played through media elements."
+      "Each wallpaper plays at this share of its own volume while windows cover the desktop or another app plays sound, whichever you set to Reduce volume; its saved volume is not changed. In Web wallpapers it reaches only the audio and video played through media elements."
   )
   static let otherAppInFront = SettingsItem(
     id: "playback.other-app-in-front", section: .playback, group: playback,
@@ -127,7 +127,7 @@ struct PlaybackSettingsSection: View {
 
   /// The rows this page leaves out now, by the rules its body draws them with: "Only play on the
   /// display I'm using" needs two displays (or is on), the reduced volume needs Reduce volume to
-  /// be the choice for other-app sound, the time without input needs an inactivity
+  /// be the choice for a covered desktop or other-app sound, the time without input needs an inactivity
   /// rule that does something, the reduced profile needs a Reduced quality choice, and the
   /// low-battery rows need a battery (the level also a rule that does something).
   @MainActor
@@ -160,6 +160,10 @@ struct PlaybackSettingsSection: View {
             options: DesktopCoveredAction.allCases.map { ($0, $0.title) }
           ) { try await controller.setDesktopCoveredAction($0) }
         }
+        // One level for both rows that can turn wallpapers down, under the first that does.
+        if playback.showsOtherAudioVolume, playback.reducedVolumeFollowsDesktopCovered {
+          reducedVolumeRow(playback)
+        }
         if playback.showsActiveDisplayOnly {
           SettingsRow(Self.activeDisplayOnly) {
             SettingsSwitchControl(key: .playOnlyOnActiveDisplay)
@@ -171,14 +175,8 @@ struct PlaybackSettingsSection: View {
             options: OtherAudioAction.allCases.map { ($0, $0.title) }
           ) { try await controller.setOtherAudioAction($0) }
         }
-        if playback.showsOtherAudioVolume {
-          SettingsRow(Self.otherAudioVolume) {
-            // A percentage reads the same in every language.
-            SettingsSliderControl(
-              key: "otherAudioVolume", saved: playback.otherAudioVolume,
-              range: PlaybackPreferences.otherAudioVolumeRange, readout: { "\($0)%" }
-            ) { try await controller.setOtherAudioVolume($0) }
-          }
+        if playback.showsOtherAudioVolume, !playback.reducedVolumeFollowsDesktopCovered {
+          reducedVolumeRow(playback)
         }
         SettingsRow(Self.otherAppInFront, note: playback.otherAppInFrontNote) {
           menu(
@@ -264,6 +262,17 @@ struct PlaybackSettingsSection: View {
     .onAppear { controller.refreshSystemReadings() }
   }
 
+  /// The share of its own volume each wallpaper keeps wherever Reduce volume is the choice.
+  private func reducedVolumeRow(_ playback: PlaybackSettings) -> some View {
+    SettingsRow(Self.otherAudioVolume) {
+      // A percentage reads the same in every language.
+      SettingsSliderControl(
+        key: "otherAudioVolume", saved: playback.otherAudioVolume,
+        range: PlaybackPreferences.otherAudioVolumeRange, readout: { "\($0)%" }
+      ) { try await controller.setOtherAudioVolume($0) }
+    }
+  }
+
   /// The render scale and frame rate every Reduced quality choice shares, and which reason is
   /// holding quality down now.
   @ViewBuilder
@@ -313,7 +322,7 @@ struct PlaybackSettingsSection: View {
   private var context: some View {
     SettingsProse {
       Text(
-        "Wallpapers you can’t see, such as behind a full-screen app, pause on their own. When windows cover the desktop, Pause keeps the last frame and Keep running keeps it moving in the gaps."
+        "Wallpapers you can’t see, such as behind a full-screen app, pause on their own. When windows cover the desktop, Pause keeps the last frame, Mute and Reduce volume keep it moving silenced or quieter, and Keep running keeps it moving in the gaps."
       )
       Text(
         "With two or more displays, Only play on the display I’m using pauses the others a few seconds after your pointer leaves them."
