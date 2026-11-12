@@ -304,7 +304,7 @@ picture shows between a window closing and the web page's window opening.
   the chain for heat: serious reduces, critical also pauses without sending the reduction
   again, cooling to serious resumes and keeps it, and nominal releases it. The store call and
   the app delegate's closure are thin forwarders and are not tested on their own. The reduced
-  volume for other-app audio is a further delivery, after a mute and before its release: sent only while another app
+  volume for other-app audio is a further delivery, after a mute and, when it is lower, before its release: sent only while another app
   plays sound and Reduce volume is the choice, as a number (a new level is delivered while the
   rule already holds, one outside 0 to 1 is held to the nearest end), lifted by the other choices
   and when the sound ends, sent again after a refusal, restored at teardown, and independent of
@@ -317,9 +317,10 @@ picture shows between a window closing and the web page's window opening.
   other-app sound turns wallpapers down too, acts only once every display whose wallpaper is in
   view is covered (a display hidden by a full-screen app does not keep the sound), keeps its last
   decision while no wallpaper is in view, waits for the settle and lifts at once, follows a
-  changed choice at the next evaluation without letting sound out (the level before the mute is
-  lifted; a muted covered desktop changed to Pause stays silent through the settle until it is
-  uncovered), composes with the user's mute and is released at
+  changed choice at the next evaluation without letting sound out (a lower level before the mute
+  is lifted, a refused one sent again while the mute holds, a rising one after it; a muted covered
+  desktop changed to Pause stays silent through the settle until it is uncovered), composes with
+  the user's mute and is released at
   teardown; `PlaybackPreferencesTests` and `WallpaperBackupTests` cover the stored and backed-up
   choice, and `OtherAudioVolumeSettingsTests` the four choices and the level row following the
   covered-desktop row. Whether the probes' real occlusion and a real output follow is not covered. The bridge's half is

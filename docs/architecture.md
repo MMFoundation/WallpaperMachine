@@ -479,7 +479,8 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   in view is covered, after the same settle, clears it the moment one is uncovered, and leaves it
   as it was while no wallpaper is in view at all; under Pause, which hides the covered displays,
   a flag already set keeps the wallpapers muted until one shows uncovered. The policy delivers a
-  mute before a new gain and lifts it after one, so no switch plays a moment at the old level. A
+  mute before a new gain and lifts it only once no gain louder than the decision can remain (a
+  lower gain the bridge refused is sent again first), so no switch plays a moment above it. A
   per-display mute would need the bridge to carry one. With
   `PlaybackPreferences.playsOnlyOnActiveDisplay` on, every display but the one under the pointer
   counts as hidden too, once the pointer has been away for 3 s: `ActiveDisplayTracker` follows

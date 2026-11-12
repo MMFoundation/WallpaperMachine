@@ -572,6 +572,46 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
         XCTAssertEqual(probe.gains, [0.3, 1])
     }
 
+    /// A lower level the bridge refused is not known to have landed, so the mute stays until the
+    /// level is sent again and taken; only then is the sound let out.
+    func testTheMuteStaysUntilARefusedLowerLevelIsTaken() {
+        let probe = CompositionProbe()
+        probe.coveredAction = .mute
+        probe.covered = [1]
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+
+        probe.coveredAction = .reduceVolume
+        probe.gainFailures = 1
+        policy.evaluate()
+        XCTAssertEqual(probe.order, [.audio(suppressed: true), .gain(0.3)], "Refused, so still muted")
+
+        policy.evaluate()
+        XCTAssertEqual(
+            probe.order, [.audio(suppressed: true), .gain(0.3), .gain(0.3), .audio(suppressed: false)],
+            "The level is taken, then the sound comes back at it")
+    }
+
+    /// Lifting a mute while the level goes back up needs no wait: the sound comes back no louder
+    /// than the decision either way.
+    func testAMuteLiftedWhileTheLevelRisesIsNotHeldBack() {
+        let probe = CompositionProbe()
+        probe.coveredAction = .reduceVolume
+        probe.covered = [1]
+        probe.userMuted = true
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(probe.order, [.audio(suppressed: true), .gain(0.3)])
+
+        probe.userMuted = false
+        probe.covered = []
+        policy.evaluate()
+        XCTAssertEqual(
+            probe.order, [.audio(suppressed: true), .gain(0.3), .audio(suppressed: false), .gain(1)])
+    }
+
     /// Changing a muted covered desktop to Pause keeps it silent through the settle the pause waits
     /// for, instead of letting the sound out for that second; the sound comes back with the
     /// wallpaper when the desktop shows again. Pause alone never silences anything.

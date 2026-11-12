@@ -686,8 +686,8 @@ final class WallpaperPresentationPolicy {
     private func deliverPending() {
         guard !deliveryInFlight else { return }
         // The global condition is the coarser one, so it goes first. Audio (a mute before
-        // the gain, its release after it) and quality follow, then per-display occlusion,
-        // one acknowledgement at a time.
+        // the gain, its release after a lower one) and quality follow, then per-display
+        // occlusion, one acknowledgement at a time.
         if appliedGlobal != globalPresentation {
             let presentation = globalPresentation
             let resumes = isRunning && presentation == .running && appliedGlobal != .running
@@ -711,12 +711,13 @@ final class WallpaperPresentationPolicy {
             }
             return
         }
-        // A mute goes before a new gain and its release after it, so sound never plays for a
-        // moment at a level that is no longer the decision (Mute to Reduce volume, say). A gain
-        // the bridge refused does not hold the release back: it is sent again later.
+        // A mute goes before a new gain, and its release waits for any gain that could be louder
+        // than the decision, so sound never plays for a moment above it (Mute to Reduce volume,
+        // say). A gain the bridge refused is unknown, so the release waits for it unless the
+        // decision is full volume, which no gain exceeds.
         let releasesMute = appliedAudio != isAudioSuppressed && !isAudioSuppressed
-        let gainSettled = appliedAudioGain == audioGain || appliedAudioGain == nil
-        if appliedAudio != isAudioSuppressed, !releasesMute || gainSettled {
+        let gainNoLouder = appliedAudioGain.map { $0 <= audioGain } ?? (audioGain >= 1)
+        if appliedAudio != isAudioSuppressed, !releasesMute || gainNoLouder {
             deliverAudioSuppression()
             return
         }
