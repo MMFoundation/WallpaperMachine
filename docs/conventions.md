@@ -161,7 +161,22 @@ How the panel runs (controller, actions, observation, window hosting) is in
   cancel, resume and retry draw `DownloadRowAction.systemImage`, wherever the control
   sits. Read these names instead of writing the symbol again.
 - **Colours** come from `\.panelTheme` (`AccentPalette`, `SurfacePalette`) or the
-  system's semantic colours; a view never hardcodes a colour value.
+  system's semantic colours; a view never hardcodes a colour value. A control that cannot be
+  used fades by `PanelTheme.disabledOpacity` (`.panelDisabledOpacity(isEnabled)`), never by an
+  amount of its own; the Steam Workshop tile's ring, which sits on a dimmed picture, is the one
+  named exception.
+- **Buttons** with words are `.panelPrimary` (the one accent action of a place),
+  `.panelSecondary` beside it, in the same `PrimaryButtonStyle.Size`, and `.panelLink` for an
+  action within a sentence's reach; a link sets no font, so it takes the text's around it (a
+  notice's, or `.panel(.callout)` with `.labelStyle(.panelLinkRow)` for the column of links under
+  an inspector's notes, in every inspector). An action link on its own in an inspector card
+  (Center, Check again, Delete…) is `.panelCardLink`, which sets `.panel(.label)` and a 20-point
+  click target. Something that removes or deletes is `Button(role: .destructive)`, which both
+  draw in the danger colour; never a flag of a style's own. A glyph button beside the accent
+  action (favorite, the more menu) is `InspectorIconButtonStyle`; one beside a quiet button
+  (Share, pixiv's Cancel) is `.panelSecondary` at that button's size, so the two share their fill
+  and hairline. The system `.bordered` and `.link` styles
+  ignore the panel's palettes; the few left outside the inspectors are a backlog, not a pattern.
 - **Type** comes from the roles of `PanelFont` (`Theme/PanelFont.swift`), named for what the text
   is (`.title`, `.sectionHeader`, `.body`, `.callout`, `.caption`…): `.font(.panel(.body))`, or
   `.panelFont(.eyebrow)` where the role also sets capitals and tracking. A size taken from a

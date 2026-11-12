@@ -43,6 +43,9 @@ struct WorkshopTileRing: View {
     }
     .buttonStyle(.plain)
     .disabled(!state.isEnabled)
+    // The one control that fades less than `PanelTheme.disabledOpacity`: a ring that cannot be
+    // clicked yet (a retry waiting for SteamCMD's setup) sits on a dimmed picture, where it would
+    // all but vanish at 0.4, and it still has to say why the download stopped.
     .opacity(state.isEnabled ? 1 : 0.6)
     .onHover { isHovering = $0 }
     .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovering)

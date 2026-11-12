@@ -269,7 +269,7 @@ private struct WelcomePrimaryBody: View {
       .padding(.horizontal, 18)
       .padding(.vertical, 9)
       .background(fill.color, in: Capsule())
-      .opacity(isEnabled ? 1 : 0.4)
+      .panelDisabledOpacity(isEnabled)
       .contentShape(Capsule())
       .onHover { isHovering = $0 }
   }
@@ -302,7 +302,7 @@ private struct WelcomeQuietBody: View {
       .padding(.horizontal, 12)
       .padding(.vertical, 6)
       .background(background, in: Capsule())
-      .opacity(isEnabled ? 1 : 0.4)
+      .panelDisabledOpacity(isEnabled)
       .contentShape(Capsule())
       .onHover { isHovering = $0 }
   }
@@ -338,7 +338,7 @@ private struct WelcomeCapsuleBody: View {
       .padding(.horizontal, 11)
       .padding(.vertical, 5)
       .background(background, in: Capsule())
-      .opacity(isEnabled ? 1 : 0.4)
+      .panelDisabledOpacity(isEnabled)
       .contentShape(Capsule())
       .onHover { isHovering = $0 }
   }
@@ -472,7 +472,7 @@ private struct WelcomeTileBody: View {
             .padding(-3)
         }
       }
-      .opacity(isEnabled ? 1 : 0.55)
+      .panelDisabledOpacity(isEnabled)
       .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
       .onHover { isHovering = $0 }
       .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isSelected)

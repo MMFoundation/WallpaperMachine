@@ -545,6 +545,18 @@ place of **Modified**, and a display card with one says so under the display's n
 card starts collapsed under a one-line summary of its settings, and opens while it holds a
 value that waits. A preset's **Apply** is a plain button.
 
+The Installed and Steam Workshop inspectors share one set of plain buttons and links. A plain
+button (**Revert**, a preset's **Apply**, **Cancel**, **Choose…**) sets the same type at the
+same size as the accent button beside it, on a translucent fill with a hairline that reads on a
+card in either appearance; a link is in the accent colour and underlines under the pointer. An
+action that removes something (**Move to Trash**, a preset's **Delete…** and **Delete**,
+**Remove from display**) is drawn in red. Across the panel, a control that cannot be used is
+faded by the same amount. A link on its own in an inspector card (**Center**, **Check again**,
+**Delete…**) is set in the card's label type and answers clicks over at least 20 points of
+height; the links under an inspector's notes (**Show in downloads**, **View on pixiv**, **Not
+working? Report on GitHub**) are set in the notes' type with their symbols in one column, the
+same in all three inspectors.
+
 Below the compatibility note, an installed wallpaper that can run (not
 Application) shows **Not working? Report on GitHub**. It opens the repository's
 bug report form in the browser with the wallpaper's title, Workshop link or id,

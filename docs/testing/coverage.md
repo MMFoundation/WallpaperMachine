@@ -1345,7 +1345,12 @@ never to `.shared`.
   fallback, unformatted runtime lookups, the system region kept, the bound store driving the
   language), `SettingsSectionsLocalizationTests`, `PanelThemeTests`, `AccentPaletteTests` (every
   token equal to the original algorithm's, readable fills, links and rings for every accent),
-  `SurfacePaletteTests` and `PanelFontTests`.
+  `SurfacePaletteTests` and `PanelFontTests`. `PanelButtonStyleTests` hold the buttons with
+  words to one look: a quiet button is the size of the main one beside it for the same words,
+  the inspector's Apply keeps its size when it gives up the accent, a card's own link sets the
+  label type at a 20-point click height while a link in text keeps its line, and a quiet button
+  or link with the destructive role takes the theme's danger colour in every tone and
+  appearance (checked on the colour the styles pick, not on drawn pixels).
 - Images: `PanelImagePipelineTests` (covers scaled and read only inside the library, a symlink out
   and a non-image refused, a replaced preview under a new stamp is another image, a cover that
   cannot be made falls back once to the downsampled preview, stills decoded to the view's size
@@ -1421,7 +1426,9 @@ never to `.shared`.
   language, and the inspector with edits waiting, footer and Not applied marks included; a switch
   kept on its line whichever mark its row shows, Restore default beside it; the footer drawn and said
   aloud only while an edit waits; the Compatibility card's renderer lines, with a problem, wrap in the narrowest column
-  in every language; a slider's VoiceOver, key and pointer changes reach the bridge; the row whose
+  in every language; the Presets and Collections cards' buttons (Apply, the Delete confirmation, the
+  name forms) as wide in the narrowest column as with all the room they want, in every language;
+  a slider's VoiceOver, key and pointer changes reach the bridge; the row whose
   edit brings the footer in scrolled clear of it, and Apply changes and Revert said aloud once done),
   `PropertyLabelDocumentTests` (the label allowlist: entities, emphasis, colours, lists, broken
   markup, scripts and controls dropped, links only to allowed hosts, registered images only,

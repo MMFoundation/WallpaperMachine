@@ -204,7 +204,7 @@ struct InspectorFooter: View {
         Button("Revert") {
           run(.revert, key: revertKey, saying: L("Changes reverted.")) { try await controller.revert(id) }
         }
-        .buttonStyle(.inspectorSecondary(size: .regular, expands: true))
+        .buttonStyle(.panelSecondary(size: .regular, expands: true))
         .disabled(!options.canRevert || controller.isBusy(revertKey))
         .focused($focused, equals: .revert)
         .accessibilityFocused($voiceOverFocused, equals: .revert)

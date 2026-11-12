@@ -1,79 +1,8 @@
 import SwiftUI
 
-// The small controls the inspector is made of: link-style buttons, neutral buttons, icon buttons,
-// notices and the collapsible section. All follow `\.panelTheme`, dim when disabled, and show a
-// hover and a pressed state.
-
-/// A borderless accent-coloured action in a sentence's reach: Retry wallpaper, Check again, Center.
-struct InspectorLinkButtonStyle: ButtonStyle {
-  var isDestructive = false
-
-  func makeBody(configuration: Configuration) -> some View {
-    LinkBody(configuration: configuration, isDestructive: isDestructive)
-  }
-
-  private struct LinkBody: View {
-    let configuration: ButtonStyleConfiguration
-    let isDestructive: Bool
-    @Environment(\.panelTheme) private var theme
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var isHovering = false
-
-    var body: some View {
-      configuration.label
-        .font(.panel(.label))
-        .foregroundStyle(isDestructive ? theme.surface.danger.color : theme.accent.accent.color)
-        .frame(minHeight: 20)
-        .opacity(isEnabled ? (configuration.isPressed ? 0.6 : isHovering ? 0.85 : 1) : 0.4)
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-    }
-  }
-}
-
-/// A neutral button on a card or surface: Revert, Choose…, Clear, Cancel.
-struct InspectorSecondaryButtonStyle: ButtonStyle {
-  var size: PrimaryButtonStyle.Size = .compact
-  var expands = false
-  var isDestructive = false
-
-  func makeBody(configuration: Configuration) -> some View {
-    SecondaryBody(
-      configuration: configuration, size: size, expands: expands, isDestructive: isDestructive)
-  }
-
-  private struct SecondaryBody: View {
-    let configuration: ButtonStyleConfiguration
-    let size: PrimaryButtonStyle.Size
-    let expands: Bool
-    let isDestructive: Bool
-    @Environment(\.panelTheme) private var theme
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var isHovering = false
-
-    var body: some View {
-      configuration.label
-        .font(.panel(.label))
-        .foregroundStyle(isDestructive ? theme.surface.danger.color : theme.surface.text.color)
-        .lineLimit(1)
-        .padding(.horizontal, 10)
-        .frame(maxWidth: expands ? .infinity : nil, minHeight: size.height)
-        .background(fill, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .overlay {
-          RoundedRectangle(cornerRadius: 7, style: .continuous)
-            .strokeBorder(theme.surface.line.color, lineWidth: 0.5)
-        }
-        .opacity(isEnabled ? 1 : 0.4)
-        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .onHover { isHovering = $0 }
-    }
-
-    private var fill: Color {
-      if configuration.isPressed { return theme.surface.pressed.color }
-      return isHovering && isEnabled ? theme.surface.selected.color : theme.surface.hover.color
-    }
-  }
-}
+// The small controls the inspector is made of besides the panel's own buttons and links
+// (`.panelPrimary`, `.panelSecondary`, `.panelLink`): icon buttons, notices and the collapsible
+// section. All follow `\.panelTheme`, dim when disabled, and show a hover and a pressed state.
 
 /// A square glyph button beside the main action: favorite, the more menu, Restore default.
 struct InspectorIconButtonStyle: ButtonStyle {
@@ -101,7 +30,7 @@ struct InspectorIconButtonStyle: ButtonStyle {
         .foregroundStyle(isActive ? (activeTint ?? theme.accent.accent.color) : theme.surface.text.color)
         .frame(width: side, height: side)
         .background(fill, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .opacity(isEnabled ? 1 : 0.4)
+        .panelDisabledOpacity(isEnabled)
         .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .onHover { isHovering = $0 }
     }
@@ -113,78 +42,22 @@ struct InspectorIconButtonStyle: ButtonStyle {
   }
 }
 
-extension ButtonStyle where Self == InspectorLinkButtonStyle {
-  static var inspectorLink: InspectorLinkButtonStyle { InspectorLinkButtonStyle() }
-  static var inspectorDestructiveLink: InspectorLinkButtonStyle {
-    InspectorLinkButtonStyle(isDestructive: true)
-  }
-}
-
-extension ButtonStyle where Self == InspectorSecondaryButtonStyle {
-  static var inspectorSecondary: InspectorSecondaryButtonStyle { InspectorSecondaryButtonStyle() }
-  static func inspectorSecondary(
-    size: PrimaryButtonStyle.Size = .compact, expands: Bool = false, isDestructive: Bool = false
-  ) -> InspectorSecondaryButtonStyle {
-    InspectorSecondaryButtonStyle(size: size, expands: expands, isDestructive: isDestructive)
-  }
-}
-
-/// The inspector's lead action, Apply wallpaper: the accent fill of `PrimaryButtonStyle` while
-/// `isPrimary`, otherwise the quiet well and hairline of `.panelSecondary`, for the time staged
-/// edits give the accent to Apply changes. Both looks take `PrimaryButtonStyle.Size`'s metrics.
+/// The inspector's lead action, Apply wallpaper: drawn as `.panelPrimary` while `isPrimary`,
+/// otherwise as `.panelSecondary`, for the time staged edits give the accent to Apply changes.
 ///
-/// One style with one body and one hover state, so the look flips under the same button. Two
-/// buttons (or two style bodies) chosen by an if/else would give the button a new identity the
-/// moment an edit is staged or applied, and its keyboard focus, VoiceOver focus and hover would
-/// reset under the person using it.
+/// Both looks come from the one body the panel's buttons share (`PanelButtonBody`), so the look
+/// flips under the same view. Two buttons, or two style bodies chosen by an if/else, would give
+/// the button a new identity the moment an edit is staged or applied, and its keyboard focus,
+/// VoiceOver focus and hover would reset under the person using it.
 struct InspectorActionButtonStyle: ButtonStyle {
   var isPrimary: Bool
   var size: PrimaryButtonStyle.Size = .regular
   var expands = false
 
   func makeBody(configuration: Configuration) -> some View {
-    ActionBody(configuration: configuration, isPrimary: isPrimary, size: size, expands: expands)
-  }
-
-  private struct ActionBody: View {
-    let configuration: ButtonStyleConfiguration
-    let isPrimary: Bool
-    let size: PrimaryButtonStyle.Size
-    let expands: Bool
-    @Environment(\.panelTheme) private var theme
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var isHovering = false
-
-    var body: some View {
-      let shape = RoundedRectangle(cornerRadius: size.cornerRadius, style: .continuous)
-      configuration.label
-        .font(.panel(size.font))
-        .foregroundStyle(isPrimary ? theme.accent.onPrimary.color : theme.surface.text.color)
-        .lineLimit(1)
-        .padding(.horizontal, size.horizontalPadding)
-        .frame(maxWidth: expands ? .infinity : nil, minHeight: size.height)
-        .background(fill, in: shape)
-        .overlay { shape.fill(shade) }
-        .overlay { shape.strokeBorder(isPrimary ? Color.clear : theme.surface.divider.color, lineWidth: 0.5) }
-        .opacity(isEnabled ? 1 : 0.4)
-        .contentShape(shape)
-        .onHover { isHovering = $0 }
-    }
-
-    /// The accent and its hover and pressed fills, or the neutral well.
-    private var fill: Color {
-      guard isPrimary else { return theme.surface.well.color }
-      let accent = theme.accent
-      if configuration.isPressed { return accent.primaryActive.color }
-      return isHovering && isEnabled ? accent.primaryHover.color : accent.primary.color
-    }
-
-    /// The neutral button's hover and pressed shade over its well; none over the accent.
-    private var shade: Color {
-      guard !isPrimary else { return .clear }
-      if configuration.isPressed { return theme.surface.pressed.color }
-      return isHovering && isEnabled ? theme.surface.hover.color : .clear
-    }
+    PanelButtonBody(
+      configuration: configuration, look: isPrimary ? .accent : .quiet, size: size,
+      expands: expands)
   }
 }
 

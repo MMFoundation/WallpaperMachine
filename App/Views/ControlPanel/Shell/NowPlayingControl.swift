@@ -55,7 +55,7 @@ private struct NowPlayingControlBody: View {
       .foregroundStyle(theme.surface.text.color)
       .frame(maxWidth: .infinity, minHeight: 28)
       .background(fill, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-      .opacity(isEnabled ? 1 : 0.32)
+      .panelDisabledOpacity(isEnabled)
       .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
       .onHover { isHovering = $0 }
   }

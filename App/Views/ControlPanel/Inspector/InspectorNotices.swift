@@ -51,7 +51,8 @@ struct InspectorNotices: View {
       }
       if controller.offersShowInDownloads(for: id) {
         Button("Show in downloads") { controller.downloads.showDownloads() }
-          .buttonStyle(.inspectorLink)
+          .buttonStyle(.panelLink)
+          .font(.panel(.callout))
       }
       TypeNoteView(row: row)
     }
@@ -62,11 +63,8 @@ struct InspectorNotices: View {
 
 /// A scene cannot play until Wallpaper Engine's shared resources are installed: the one-time setup,
 /// offered as the notice's own button, or their download when it is already under way. The
-/// Installed inspector and the Workshop's show the same notice; each draws **Show in downloads** in
-/// its own link style.
-struct SceneResourcesNotice<LinkStyle: ButtonStyle>: View {
-  let linkStyle: LinkStyle
-
+/// Installed inspector and the Workshop's show the same notice.
+struct SceneResourcesNotice: View {
   @Environment(PanelController.self) private var controller
 
   var body: some View {
@@ -74,7 +72,7 @@ struct SceneResourcesNotice<LinkStyle: ButtonStyle>: View {
       Text("Shared scene resources are required before playback.")
       if controller.sceneResourcesArePending {
         Button("Show in downloads") { controller.downloads.showDownloads() }
-          .buttonStyle(linkStyle)
+          .buttonStyle(.panelLink)
       } else {
         Button {
           controller.downloads.requestSceneAssets()
@@ -87,11 +85,6 @@ struct SceneResourcesNotice<LinkStyle: ButtonStyle>: View {
     }
     .accessibilityElement(children: .contain)
   }
-}
-
-extension SceneResourcesNotice where LinkStyle == InspectorLinkButtonStyle {
-  /// The Installed inspector's notice, with its links.
-  init() { self.init(linkStyle: .inspectorLink) }
 }
 
 // MARK: - Update
@@ -110,7 +103,7 @@ struct UpdateNoticeView: View {
       switch notice.action {
       case .showInDownloads:
         Button("Show in downloads") { controller.downloads.showDownloads() }
-          .buttonStyle(.inspectorLink)
+          .buttonStyle(.panelLink)
       case .continueSetup:
         Button {
           controller.downloads.openDialog(for: controller.downloadRequestRow(for: id)?.id ?? id)
@@ -151,8 +144,9 @@ struct FailureNoticeView: View {
           ExternalLink.open(url)
         } label: {
           Label("Report this problem on GitHub", systemImage: "exclamationmark.bubble")
+            .labelStyle(.panelLinkRow)
         }
-        .buttonStyle(.inspectorLink)
+        .buttonStyle(.panelLink)
       }
     }
     .accessibilityElement(children: .contain)
@@ -189,7 +183,7 @@ struct HostStatusView: View {
         } label: {
           Label("Retry wallpaper", systemImage: "arrow.clockwise")
         }
-        .buttonStyle(.inspectorLink)
+        .buttonStyle(.panelLink)
         .disabled(controller.isBusy(retryKey))
       }
     }
@@ -215,8 +209,10 @@ struct TypeNoteView: View {
           ExternalLink.open(artwork)
         } label: {
           Label("View on pixiv", systemImage: "arrow.up.right.square")
+            .labelStyle(.panelLinkRow)
         }
-        .buttonStyle(.inspectorLink)
+        .buttonStyle(.panelLink)
+        .font(.panel(.callout))
       }
       // After a failure the report travels with the notice above; otherwise this is where someone
       // checking a problem is reading. A wallpaper that cannot run has nothing to report but its
@@ -228,8 +224,10 @@ struct TypeNoteView: View {
           ExternalLink.open(url)
         } label: {
           Label("Not working? Report on GitHub", systemImage: "exclamationmark.bubble")
+            .labelStyle(.panelLinkRow)
         }
-        .buttonStyle(.inspectorLink)
+        .buttonStyle(.panelLink)
+        .font(.panel(.callout))
       }
     }
   }

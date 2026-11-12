@@ -239,7 +239,7 @@ struct DisplayCard: View {
             Button("Open Performance") {
               controller.launch("openSettings") { try await controller.openSettings(.performance) }
             }
-            .buttonStyle(.inspectorLink)
+            .buttonStyle(.panelCardLink)
           }
         }
       }
@@ -255,7 +255,7 @@ struct DisplayCard: View {
               Button(limit.section.openTitle) {
                 controller.launch("openSettings") { try await controller.openSettings(limit.section) }
               }
-              .buttonStyle(.inspectorLink)
+              .buttonStyle(.panelCardLink)
             }
           }
         }
@@ -264,14 +264,14 @@ struct DisplayCard: View {
         PositionRows(options: options, display: display)
       }
       InspectorCardRow {
-        Button {
+        Button(role: .destructive) {
           controller.launch(PanelActionCoordinator.key("eject", id: id, displayID: display.id)) {
             try await controller.eject(id, from: display.id)
           }
         } label: {
           Label("Remove from display", systemImage: "minus.circle")
         }
-        .buttonStyle(.inspectorDestructiveLink)
+        .buttonStyle(.panelCardLink)
         .disabled(options.isLocked)
       }
     }
@@ -522,7 +522,7 @@ private struct PositionRows: View {
         } label: {
           Label("Center", systemImage: "arrow.counterclockwise")
         }
-        .buttonStyle(.inspectorLink)
+        .buttonStyle(.panelCardLink)
         .disabled(display.position.isCentered)
         .help(L("Center the wallpaper on the display"))
         InspectorNote(

@@ -24,7 +24,7 @@ struct EngineOptionsCard: View {
             } label: {
               Label("Restore all defaults", systemImage: "arrow.counterclockwise")
             }
-            .buttonStyle(.inspectorLink)
+            .buttonStyle(.panelCardLink)
             .disabled(!options.canRestoreAllEngineOptions)
             .help(L("Stages the default for every Wallpaper Engine option. Revert undoes it."))
           }

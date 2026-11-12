@@ -20,6 +20,10 @@ struct PanelTheme: Equatable, Sendable {
   let accent: AccentPalette
   let surface: SurfacePalette
 
+  /// How far a control that cannot be used fades: one amount for every button, capsule, link and
+  /// row, so a disabled control reads the same wherever it is (`panelDisabledOpacity(_:)`).
+  static let disabledOpacity: Double = 0.4
+
   init(
     preferences: AppThemePreferences = AppThemePreferences(), season: Season? = nil,
     appearance: PanelAppearance
@@ -34,6 +38,13 @@ struct PanelTheme: Equatable, Sendable {
       accent = AccentPalette(accent: preferences.accent, appearance: appearance)
       surface = SurfacePalette(tone: preferences.tone, appearance: appearance)
     }
+  }
+}
+
+extension View {
+  /// Fades the view by `PanelTheme.disabledOpacity` while it cannot be used.
+  func panelDisabledOpacity(_ isEnabled: Bool) -> some View {
+    opacity(isEnabled ? 1 : PanelTheme.disabledOpacity)
   }
 }
 

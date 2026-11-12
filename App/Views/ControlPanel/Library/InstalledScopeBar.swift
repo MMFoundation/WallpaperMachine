@@ -163,7 +163,7 @@ private struct ScopePlayButtons: View {
     }
     .background(theme.surface.hover.color, in: Capsule())
     .clipShape(Capsule())
-    .opacity(isEnabled ? 1 : 0.4)
+    .panelDisabledOpacity(isEnabled)
     .fixedSize()
     .disabled(!isEnabled)
   }

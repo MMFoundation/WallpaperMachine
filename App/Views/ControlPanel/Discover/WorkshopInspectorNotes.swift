@@ -41,7 +41,7 @@ struct WorkshopDownloadNotes: View {
       }
       // What keeps a scene from playing comes before any failure: getting the resources is the
       // way forward, where a failure's report link is not.
-      if sceneResourcesMissing { SceneResourcesNotice(linkStyle: .panelLink) }
+      if sceneResourcesMissing { SceneResourcesNotice() }
       failure
       if isInstalled, download.hasFinishedDownload { showInLibrary }
       if download.showsInDownloads {

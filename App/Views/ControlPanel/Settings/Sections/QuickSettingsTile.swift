@@ -160,7 +160,7 @@ struct QuickTileView: View {
     }
     .buttonStyle(QuickTilePressStyle(reduceMotion: reduceMotion))
     .disabled(!tile.isEnabled || isLocked)
-    .opacity(tile.isEnabled ? 1 : 0.5)
+    .panelDisabledOpacity(tile.isEnabled)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(Text(verbatim: title))
     .accessibilityValue(Text(verbatim: tile.stateLine))

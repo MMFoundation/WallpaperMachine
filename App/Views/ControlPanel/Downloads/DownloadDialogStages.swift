@@ -390,7 +390,7 @@ private struct ChoiceButton<Title: View, Note: View>: View {
     }
     .buttonStyle(.plain)
     .disabled(!isEnabled)
-    .opacity(isEnabled ? 1 : 0.5)
+    .panelDisabledOpacity(isEnabled)
     .onHover { isHovering = $0 }
   }
 }

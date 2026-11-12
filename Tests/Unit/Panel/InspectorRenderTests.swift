@@ -236,6 +236,74 @@ final class InspectorRenderTests: InspectorTestCase {
     await fixture.shutdown()
   }
 
+  /// The quiet buttons of the Presets and Collections cards set the accent button's type at its
+  /// size, so the narrowest inspector column must hold their whole words in every language: a
+  /// chosen preset's Apply beside the menu, Delete and Cancel under a preset's Delete…, the name
+  /// form's Save preset or Save with Cancel, and a new collection's Create with Cancel. Each is
+  /// drawn as wide in that column as it is with all the room it wants, so none is cut short.
+  func testThePresetAndCollectionButtonsKeepTheirWholeWordsInTheNarrowestColumnInEveryLanguage()
+    async throws
+  {
+    let fixture = try InspectorRenderFixture()
+    try await prepare(fixture)
+    let id = InspectorRenderFixture.selected
+    // The Collections card opens by itself for a wallpaper that is in a collection.
+    try await fixture.controller.createCollection(name: "Evenings by the sea", wallpaperIDs: [id])
+    let preset = PresetsState.Item(id: "evening", name: "Evening glow over the harbour")
+    let presets = PresetsState(
+      wallpaperID: id, items: [preset], isDirty: false, canSave: true, status: nil, error: nil)
+    var chosen = PresetsBarState()
+    chosen.pick(preset.id)
+    var deleting = chosen
+    deleting.beginDelete(of: preset)
+    var saving = chosen
+    saving.beginSave()
+    var renaming = chosen
+    renaming.beginRename(of: preset)
+    let cards: [(name: String, buttons: [String], card: AnyView)] = [
+      ("a chosen preset", ["Apply"], AnyView(PresetsCard(state: presets, bar: chosen))),
+      ("Delete…", ["Delete", "Cancel"], AnyView(PresetsCard(state: presets, bar: deleting))),
+      ("Save current…", ["Save preset", "Cancel"], AnyView(PresetsCard(state: presets, bar: saving))),
+      ("Rename…", ["Save", "Cancel"], AnyView(PresetsCard(state: presets, bar: renaming))),
+      ("New collection…", ["Create", "Cancel"], AnyView(CollectionsCard(wallpaperID: id, isNaming: true))),
+    ]
+    // The inspector draws its cards 16 points in from either edge of its column.
+    let inner = InspectorColumn<EmptyView>.widths.lowerBound - 2 * 16
+    /// The width of each button of `card` named in `names`, drawn `width` points wide.
+    func buttons(_ card: AnyView, names: [String], width: CGFloat) async throws -> [String: CGFloat] {
+      let (window, view) = fixture.host(size: NSSize(width: width, height: 640)) { card }
+      try await settle()
+      view.layoutSubtreeIfNeeded()
+      var found: [String: CGFloat] = [:]
+      for element in AccessibilityElement(object: view).all()
+      where element.role == NSAccessibility.Role.button.rawValue && names.contains(element.label) {
+        found[element.label] = element.frame.width
+      }
+      window.contentView = nil
+      window.close()
+      return found
+    }
+    for language in AppLanguage.supported.map(\.tag) {
+      let languages = AppLanguageStore(
+        defaults: TemporaryDefaults.makeForCurrentTest().defaults, systemLanguages: [language])
+      PanelLocale.shared.bind(to: languages)
+      for (name, keys, card) in cards {
+        let names = keys.map { L(String.LocalizationValue($0)) }
+        let drawn = try await buttons(card, names: names, width: inner)
+        let roomy = try await buttons(card, names: names, width: 1000)
+        XCTAssertEqual(Set(drawn.keys), Set(names), "\(language) \(name): every button is drawn")
+        for label in names {
+          let wanted = try XCTUnwrap(roomy[label], "\(language) \(name): \(label)")
+          XCTAssertGreaterThan(wanted, 2 * 14, "\(language) \(name): \(label)'s words are measured")
+          XCTAssertGreaterThanOrEqual(
+            drawn[label] ?? 0, wanted - 0.5,
+            "\(language) \(name): \(label) is cut short in the narrowest column")
+        }
+      }
+    }
+    await fixture.shutdown()
+  }
+
   // MARK: The narrowest window
 
   /// A library too short to fill the Installed page: four wallpapers, whose grid is about as tall

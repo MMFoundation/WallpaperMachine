@@ -25,7 +25,7 @@ struct PropertiesCards: View {
             } label: {
               Label("Restore all defaults", systemImage: "arrow.counterclockwise")
             }
-            .buttonStyle(.inspectorLink)
+            .buttonStyle(.panelCardLink)
             .disabled(!options.canRestoreAll)
             .help(
               L(
@@ -208,10 +208,10 @@ struct PropertyRowView: View {
           } label: {
             Label("Choose image", systemImage: "folder")
           }
-          .buttonStyle(.inspectorSecondary)
+          .buttonStyle(.panelSecondary(size: .compact))
           if !path.isEmpty {
             Button("Clear") { commit(.string(value: "")) }
-              .buttonStyle(.inspectorSecondary)
+              .buttonStyle(.panelSecondary(size: .compact))
           }
         }
         .disabled(isDisabled)
@@ -507,12 +507,12 @@ private struct AssetValueView<Header: View>: View {
             Label("Choose…", systemImage: "folder")
           }
         }
-        .buttonStyle(.inspectorSecondary)
+        .buttonStyle(.panelSecondary(size: .compact))
         .help(isFolder ? L("Choose a folder for \(row.name)") : L("Choose a file for \(row.name)"))
         Button("Clear") {
           controller.launch(key) { try await controller.clearAssetPath(id, property: row.id) }
         }
-        .buttonStyle(.inspectorSecondary)
+        .buttonStyle(.panelSecondary(size: .compact))
         .disabled(!state.isChosen)
         .help(L("Clear \(row.name)"))
       }

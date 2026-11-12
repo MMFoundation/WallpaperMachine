@@ -77,7 +77,7 @@ struct CompatibilityCard: View {
               Label("Check again", systemImage: "arrow.clockwise")
             }
           }
-          .buttonStyle(.inspectorLink)
+          .buttonStyle(.panelCardLink)
           .disabled(state.isChecking || !state.canCheck || controller.isBusy(checkKey))
           .help(
             state.canCheck
@@ -92,7 +92,7 @@ struct CompatibilityCard: View {
             } label: {
               Label("Reinstall from Workshop…", systemImage: "arrow.triangle.2.circlepath")
             }
-            .buttonStyle(.inspectorLink)
+            .buttonStyle(.panelCardLink)
           }
         }
       }
@@ -188,7 +188,7 @@ struct LetterboxCard: View {
                 "Set scale factor to ×\(InspectorWording.factor(factor))",
                 systemImage: "slider.horizontal.3")
             }
-            .buttonStyle(.inspectorLink)
+            .buttonStyle(.panelCardLink)
             .disabled(!state.isEligible || controller.isBusy(stageKey))
           }
           Button {
@@ -202,7 +202,7 @@ struct LetterboxCard: View {
               Label("Look again", systemImage: "arrow.clockwise")
             }
           }
-          .buttonStyle(.inspectorLink)
+          .buttonStyle(.panelCardLink)
           .disabled(checking || !state.isEligible || controller.isBusy(checkKey))
           .help(
             state.isEligible
