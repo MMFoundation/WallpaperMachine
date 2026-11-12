@@ -389,7 +389,7 @@ private struct PropertyNameView: View {
   var body: some View {
     let document = InspectorPolicy.labelDocument(for: row)
     if row.label.markup != nil, !document.isEmpty {
-      PropertyLabelView(document: document, baseSize: 13)
+      PropertyLabelView(document: document, role: .body)
     } else {
       Text(verbatim: row.name)
         .font(.panel(.body))
@@ -405,9 +405,7 @@ private struct PropertyHeadingView: View {
   let row: InspectorOptions.PropertyRow
 
   var body: some View {
-    PropertyLabelView(
-      document: InspectorPolicy.labelDocument(for: row), baseSize: 12.5, baseWeight: .semibold
-    )
+    PropertyLabelView(document: InspectorPolicy.labelDocument(for: row), role: .sectionHeader)
     .padding(.horizontal, 12)
     .padding(.top, 12)
     .padding(.bottom, 6)
@@ -426,7 +424,7 @@ private struct PropertyDescriptionView: View {
     VStack(alignment: .leading, spacing: 4) {
       let document = InspectorPolicy.labelDocument(for: row)
       if !document.isEmpty {
-        PropertyLabelView(document: document, baseSize: 12, color: theme.surface.muted.color)
+        PropertyLabelView(document: document, role: .callout, color: theme.surface.muted.color)
       }
       if let detail {
         Text(verbatim: detail)

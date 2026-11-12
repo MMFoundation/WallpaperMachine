@@ -207,7 +207,9 @@ struct InspectorSection<Accessory: View, Content: View>: View {
         HStack(spacing: 6) {
           VStack(alignment: .leading, spacing: 1) {
             title
-              .font(.system(size: isNested ? 12.5 : 12, weight: isNested ? .medium : .semibold))
+              // A card's title is a group heading, as a Settings group's is; a nested one is a
+              // label inside its card.
+              .font(.panel(isNested ? .label : .sectionHeader))
               .foregroundStyle(isNested ? theme.surface.text.color : theme.surface.muted.color)
               .lineLimit(2)
             accessory

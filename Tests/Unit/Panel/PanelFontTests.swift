@@ -88,6 +88,23 @@ final class PanelFontTests: XCTestCase {
     XCTAssertEqual(PanelFont.body.scaled(by: 1.5).weight, PanelFont.body.weight)
   }
 
+  /// A group heading has one size wherever it heads a group: an author's property group heading in
+  /// the inspector draws its words as a Settings group's title does, and an author's own bold or
+  /// heading runs only ever grow from there.
+  func testAPropertyGroupHeadingIsSetLikeASettingsGroupTitle() {
+    let words = "Colours and motion"
+    let settingsTitle = fitting(Text(verbatim: words).font(.panel(.sectionHeader)).fixedSize())
+    let heading = fitting(
+      PropertyLabelView(document: .parse(words), role: .sectionHeader).fixedSize())
+    XCTAssertEqual(heading.width, settingsTitle.width, accuracy: 1)
+    XCTAssertEqual(heading.height, settingsTitle.height, accuracy: 1)
+    let body = fitting(PropertyLabelView(document: .parse(words), role: .body).fixedSize())
+    XCTAssertLessThan(body.width, heading.width, "a heading is heavier than a row's label")
+    let bold = fitting(
+      PropertyLabelView(document: .parse("<b>\(words)</b>"), role: .sectionHeader).fixedSize())
+    XCTAssertGreaterThanOrEqual(bold.width, heading.width)
+  }
+
   /// The Library grid sizes its cells before any tile is drawn (`LibraryCollectionLayout`); the
   /// height it reserves under the art must be the caption a tile draws, or captions are cut off or
   /// rows drift apart.

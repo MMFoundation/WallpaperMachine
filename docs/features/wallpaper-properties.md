@@ -191,8 +191,9 @@ Plain labels remain available for accessibility and native file pickers. An empt
 readable name uses **Unnamed option**, never the editor's markup-derived id.
 
 A `group` record is a section heading for the controls after it, so it is shown
-as a bold heading with a rule above it (marked as a heading for VoiceOver) rather
-than as muted description text. It takes the same sanitised label as any
+as a heading with a rule above it (marked as a heading for VoiceOver) rather
+than as muted description text, at the size of the inspector's card titles and a Settings
+group's title. It takes the same sanitised label as any
 other, is omitted when it has no words, and is not collapsible: Wallpaper Engine
 groups only label what follows and own no rows of their own.
 

@@ -32,7 +32,8 @@ is linked from the domain; the shared limits are collected at the end.
   and heart, a tile's controls) the same in every look and readable over a white picture. `PanelFontTests` (Panel) keep the type scale in order from page title to a
   tile's mark with no words under 10 points, and check that what AppKit measures with a role's
   `nsFont` and `lineHeight` is what SwiftUI draws: the caption height the Library grid reserves
-  under a tile, and the room a property row keeps for its Modified or Not applied pill.
+  under a tile, and the room a property row keeps for its Modified or Not applied pill; an
+  author's property group heading is set like a Settings group's title.
 
 ## Automation
 

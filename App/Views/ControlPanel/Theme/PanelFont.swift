@@ -94,6 +94,11 @@ struct PanelFont: Equatable, Sendable {
     PanelFont(size * factor, weight, isUppercase: isUppercase, tracking: tracking)
   }
 
+  /// The same role in another weight: the bold runs of an author's label.
+  func weighted(_ weight: Weight) -> PanelFont {
+    PanelFont(size, weight, isUppercase: isUppercase, tracking: tracking)
+  }
+
   /// A size taken from a control's geometry: `ratio` of `side`, as a glyph fills a disc or a tile,
   /// and never under `minimum`.
   static func proportional(

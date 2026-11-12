@@ -549,6 +549,11 @@ place of **Modified**, and a display card with one says so under the display's n
 card starts collapsed under a one-line summary of its settings, and opens while it holds a
 value that waits. A preset's **Apply** is a plain button.
 
+The inspector's card titles (**Compatibility check**, **Wallpaper properties**, **Displays**)
+are group headings at the size of a Settings group's title, and an author's property group
+heading matches them; a display's own card inside **Displays** keeps its label size, and a
+page's own title and the menu bar panel's small capitals are other roles and keep their sizes.
+
 The Installed, Steam Workshop and pixiv inspectors share one set of plain buttons and links. A
 plain button (**Revert**, a preset's **Apply**, **Cancel**, **Choose…**, pixiv's **Pause
 download**) sets the same type at the
