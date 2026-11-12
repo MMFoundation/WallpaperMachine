@@ -106,9 +106,10 @@ struct AccessibilityElement {
 
 /// Makes the test host look, to SwiftUI, like an app an accessibility client is talking to.
 ///
-/// On macOS 26 SwiftUI builds no accessibility elements for hosted content until a client such as
-/// VoiceOver has asked the app something; macOS 27 builds them regardless. The render tests read
-/// that tree, so on a Mac with no client running (a hosted CI runner) every page looked empty.
+/// SwiftUI may build no accessibility elements for hosted content until a client such as VoiceOver
+/// has asked the app something: macOS 26 never does, and macOS 27 not always (a test run alone on
+/// 27.0.1 found an empty tree). The render tests read that tree, so on a Mac with no client running
+/// (a hosted CI runner) every page looked empty; every test that reads it connects first.
 /// One request to this app's own element, sent the way a client sends it, is enough; it is made
 /// off the main thread because the app answers it there.
 enum AccessibilityClient {

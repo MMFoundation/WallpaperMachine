@@ -385,10 +385,11 @@ they do not establish.
 5. **Use original synthetic fixtures** when you need content; do not check in
    Workshop packages or other copyrighted assets.
 6. **Expect the CI gate to run on macOS 26.** CI's runner is a macOS 26 VM
-   while developers may be on a later macOS. There SwiftUI builds no
-   accessibility tree for an unshown window until a client has contacted the app;
-   `PanelTestCase` does that once (`AccessibilityClient`), so panel tests read the
-   tree through it. Behaviour of an unshown window that only macOS 27 shows
+   while developers may be on a later macOS. SwiftUI may build no
+   accessibility tree for an unshown window until a client has contacted the app
+   (macOS 26 never does, macOS 27 not always); `PanelTestCase` does that once
+   (`AccessibilityClient`), and a test that reads the tree without subclassing it
+   calls `AccessibilityClient.connect()` in its own `setUp`. Behaviour of an unshown window that only macOS 27 shows
    (toolbar overflow, sidebar arrow keys) skips earlier with
    `PanelTestSupport.skipBeforeMacOS27`, which leaves it unverified there.
    `gh workflow run test.yml --ref <branch>` runs the gate on that runner

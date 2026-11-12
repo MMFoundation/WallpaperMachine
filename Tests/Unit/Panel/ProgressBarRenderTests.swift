@@ -9,6 +9,13 @@ import XCTest
 final class ProgressBarRenderTests: XCTestCase {
   private var windows: [NSWindow] = []
 
+  override func setUp() async throws {
+    try await super.setUp()
+    // SwiftUI builds no accessibility elements for hosted content until a client has asked the app
+    // something, and the first check reads that tree.
+    await AccessibilityClient.connect()
+  }
+
   override func tearDown() async throws {
     for window in windows {
       window.contentView = nil
