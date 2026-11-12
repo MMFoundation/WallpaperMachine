@@ -7,8 +7,10 @@ import SwiftUI
 /// one; an inspector beside it shows the selected widget's controls a pane at a time
 /// (`DesktopWidgetPane`), so a control is never a long scroll from the picture it changes. Neither
 /// the canvas nor the layers move when the inspector scrolls. In a narrow window the inspector goes
-/// under the canvas instead, which stays on show above it. With no widget yet, the inspector offers
-/// the ready-made widgets (`DesktopWidgetPreset`); the Ready-made button offers them at any time.
+/// under the canvas instead, which stays on show above it. With no widget yet, or none selected (a
+/// click on the canvas's backdrop puts the selection away to see the widgets as the desktop will),
+/// the inspector offers the ready-made widgets (`DesktopWidgetPreset`); the Ready-made button
+/// offers them at any time.
 ///
 /// The page takes the size it is offered and asks for none of its own, as every Settings page does
 /// (`SettingsDetail`).
@@ -30,7 +32,7 @@ struct WidgetsWorkspace: View {
     let screens = model.screens()
     let selected = model.selected
     let screen =
-      selected.flatMap { model.previewScreen(for: $0, among: screens) }
+      model.lastChosen.flatMap { model.previewScreen(for: $0, among: screens) }
       ?? screens.first(where: \.isMain) ?? screens.first
     let display = screen?.frame.size ?? .zero
     let aspect = display.width > 0 && display.height > 0 ? display.width / display.height : 16 / 10
@@ -117,7 +119,7 @@ struct WidgetsWorkspace: View {
       .frame(maxWidth: .infinity)
       .frame(height: max(height, 0))
       HStack(alignment: .center, spacing: 12) {
-        Text(verbatim: L("Drag to move, drag a corner to resize and the knob to turn. Hold Command to turn snapping off."))
+        Text(verbatim: L("Drag to move, drag a corner to resize and the knob to turn. Hold Command to turn snapping off. Click the wallpaper to select nothing."))
           .font(.panel(.footnote))
           .foregroundStyle(theme.surface.muted.color)
           .lineLimit(3)
@@ -201,6 +203,15 @@ struct WidgetsWorkspace: View {
       }
     } else {
       let gallery = VStack(alignment: .leading, spacing: 10) {
+        if !model.widgets.isEmpty {
+          Text("No widget selected")
+            .font(.panel(.sectionHeader))
+            .accessibilityAddTraits(.isHeader)
+          Text(verbatim: L("Click a widget on the canvas or in Layers to change it."))
+            .font(.panel(.callout))
+            .foregroundStyle(theme.surface.muted.color)
+            .padding(.bottom, 8)
+        }
         Text("Start with a ready-made widget")
           .font(.panel(.sectionHeader))
           .accessibilityAddTraits(.isHeader)

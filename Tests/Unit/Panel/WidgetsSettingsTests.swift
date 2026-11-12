@@ -68,6 +68,40 @@ final class WidgetsSettingsTests: PanelTestCase {
     }
   }
 
+  /// A click on the canvas's wallpaper selects nothing, to see the widgets as the desktop will:
+  /// no outline, no handles, no hidden widget, on the same display; picking a widget ends it.
+  func testClearingTheSelectionShowsTheDesktopAsItWillLookUntilAWidgetIsPicked() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop, external] in [laptop, external] }
+      let model = controller.widgetsSettings
+      try await controller.addDesktopWidget(.time)
+      try await controller.addDesktopWidget(.date)
+      let ids = model.widgets.map(\.id)
+      try await controller.changeDesktopWidget(ids[0], .placement(.display(uuid: "BBBB-2", name: "Studio Display")))
+      try await controller.changeDesktopWidget(ids[0], .shown(false))
+      model.select(ids[0])
+      XCTAssertEqual(model.widgets(on: external).map(\.id), [ids[0]], "the selected one is drawn while hidden")
+
+      model.clearSelection()
+      XCTAssertNil(model.selected)
+      XCTAssertNil(model.selectedID, "no outline or handles, and the arrow keys move nothing")
+      XCTAssertEqual(model.widgets(on: external), [], "a hidden widget is not drawn, as on the desktop")
+      XCTAssertEqual(model.lastChosen?.id, ids[0], "the canvas stays on its display")
+      XCTAssertEqual(
+        model.lastChosen.flatMap { model.previewScreen(for: $0, among: model.screens()) }?.uuid, external.uuid)
+      XCTAssertNotEqual(
+        WidgetsSettingsSection.unofferedItems(controller), Set(WidgetsSettingsSection.editorItems.map(\.id)),
+        "search results keep editing the widget chosen last")
+
+      model.select(ids[1])
+      XCTAssertEqual(model.selectedID, ids[1], "picking a widget selects it again")
+      model.clearSelection()
+      try await controller.addDesktopWidget(.text)
+      XCTAssertEqual(model.selectedID, model.widgets.first?.id, "a new widget opens in the editor")
+    }
+  }
+
   func testDraggingSnapsToTheCenterUnlessCommandIsHeldAndTheCenterButtonsCenter() async throws {
     try await withPanel { panel in
       let controller = panel.controller
@@ -566,6 +600,9 @@ final class WidgetsSettingsTests: PanelTestCase {
       controller.widgetsSettings.rotate(selected, by: 14, snaps: true)
       try await write("wide-turning", NSSize(width: 1020, height: 760))
       controller.widgetsSettings.endDrag()
+      controller.widgetsSettings.clearSelection()
+      try await write("wide-none-selected", NSSize(width: 1020, height: 760))
+      controller.widgetsSettings.select(selected.id)
       controller.widgetsSettings.pane = .style
       try await write("narrow-style", NSSize(width: 540, height: 700))
       controller.settings.query = "shadow"
@@ -605,8 +642,9 @@ final class WidgetsSettingsTests: PanelTestCase {
         PanelLocale.shared.bind(to: .testHost)
       }
       controller.settings.select(.widgets)
-      for widgets in [false, true] {
-        if widgets {
+      for state in ["empty", "widgets", "none selected"] {
+        if state == "none selected" { controller.widgetsSettings.clearSelection() }
+        if state == "widgets" {
           try await controller.addDesktopWidget(.date)
           try await controller.addDesktopWidget(.time)
           try await controller.addDesktopWidget(.calendar)
@@ -619,10 +657,10 @@ final class WidgetsSettingsTests: PanelTestCase {
           // The workspace beside and under the canvas, and every pane of the inspector.
           let sizes = [NSSize(width: 460, height: 560), NSSize(width: 980, height: 800), NSSize(width: 1400, height: 900)]
           for size in sizes {
-            for pane in widgets ? DesktopWidgetPane.allCases : [.content] {
+            for pane in state == "widgets" ? DesktopWidgetPane.allCases : [.content] {
               controller.widgetsSettings.pane = pane
               settle(hosting, window, at: size)
-              let context = "\(widgets ? "widgets" : "empty") \(language) \(Int(size.width)) \(pane)"
+              let context = "\(state) \(language) \(Int(size.width)) \(pane)"
               let least = hosting.sizeThatFits(in: NSSize(width: 0, height: size.height))
               XCTAssertLessThanOrEqual(least.width, size.width, "\(context): too wide")
               let taken = hosting.sizeThatFits(in: size)

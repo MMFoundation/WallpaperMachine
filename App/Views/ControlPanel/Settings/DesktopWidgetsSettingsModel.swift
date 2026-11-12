@@ -77,15 +77,30 @@ final class DesktopWidgetsSettingsModel {
 
   var widgets: [DesktopWidget] { controller.desktopWidgets.widgets }
 
-  /// The widget the editor shows: the one chosen, else the first.
-  var selected: DesktopWidget? {
+  /// Whether a click on the canvas's backdrop has put the selection away, so the canvas shows the
+  /// widgets as the desktop will, with no outline or handles over them. Picking a widget ends it.
+  private(set) var isSelectionCleared = false
+
+  /// The widget the editor shows: the one chosen, else the first; none while the selection is
+  /// cleared.
+  var selected: DesktopWidget? { isSelectionCleared ? nil : lastChosen }
+
+  /// The one chosen, else the first, also while the selection is cleared: the canvas stays on its
+  /// display, and the search results keep editing it.
+  var lastChosen: DesktopWidget? {
     let widgets = widgets
     return widgets.first { $0.id == chosenID } ?? widgets.first
   }
 
   var selectedID: String? { selected?.id }
 
-  func select(_ id: String?) { chosenID = id }
+  func select(_ id: String?) {
+    chosenID = id
+    isSelectionCleared = false
+  }
+
+  /// Selects nothing, to see the widgets without the selection drawn over them.
+  func clearSelection() { isSelectionCleared = true }
 
   /// `widget` where the preview draws it: where a drag has it, at the size and turn its handles
   /// have it, or as it was let go while that is being saved.

@@ -225,7 +225,7 @@ struct WidgetsSettingsSection: View {
   /// those waiting on a choice not made.
   @MainActor
   static func unofferedItems(_ controller: PanelController) -> Set<String> {
-    guard let widget = controller.widgetsSettings.selected else { return Set(editorItems.map(\.id)) }
+    guard let widget = controller.widgetsSettings.lastChosen else { return Set(editorItems.map(\.id)) }
     return Set(kindRows.filter { !$0.value.contains(widget.kind) }.keys)
       .union(dependentRows.filter { !$0.value(widget) }.keys)
   }
@@ -266,7 +266,7 @@ struct WidgetsSettingsSection: View {
           }
         }
       }
-      if let widget = model.selected {
+      if let widget = model.lastChosen {
         WidgetEditor(widget: widget, screens: screens, panes: Self.searchOrder, compact: false)
       }
     }

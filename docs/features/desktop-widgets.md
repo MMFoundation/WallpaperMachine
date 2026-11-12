@@ -29,7 +29,8 @@ long scroll from the picture it changed. Without a search the page is a **worksp
 
 When the page is narrower than 800 points the inspector goes under the canvas, before the
 layers, and the canvas stays on show above them while they scroll. With no widget yet, the
-inspector offers the ready-made widgets instead of the tabs. A search shows the page as every
+inspector offers the ready-made widgets instead of the tabs; with none selected, it says so
+(**No widget selected**) above them. A search shows the page as every
 other page: the list, then the rows of every tab one under another (Position, Text, Style,
 Content), with only those that match, and the Arrange picture as a row of Position.
 
@@ -78,7 +79,14 @@ layer, so it can be found under another one, with:
 
 While a handle moves, its size ("128 pt") or turn ("15°") shows under the widget; the change is
 saved when it is let go, as a move is. Once the canvas has been clicked, the arrow keys move the
-selected widget one point of the display, ten with Shift. A widget's context menu on the canvas
+selected widget one point of the display, ten with Shift.
+
+A click on the wallpaper around the widgets, or Escape on the canvas, **selects nothing**, to see
+the widgets as the desktop will show them: no outline or handles, no highlighted layer, and no
+hidden widget (one is drawn, faded, only while it is selected). The canvas stays on the display it
+showed, the arrow keys move nothing, and the inspector says no widget is selected above the
+ready-made widgets. Clicking a widget on the canvas or in the layers, or adding one, selects it
+again. The search results keep editing the widget chosen last. A widget's context menu on the canvas
 has **Hide on the desktop** or **Show on the desktop**, **Duplicate**, **Bring to Front** and
 **Send to Back**. The canvas is hidden from VoiceOver: the rows of the Position and Text tabs do
 the same from the keyboard.

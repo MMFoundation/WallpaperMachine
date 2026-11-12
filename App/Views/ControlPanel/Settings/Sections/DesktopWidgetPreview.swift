@@ -15,7 +15,9 @@ import SwiftUI
 /// corner that resizes it about its middle and a knob that turns it (snapping to every 15°, again
 /// unless Command is held; a double click on the knob turns it back upright); its size or turn
 /// shows under it meanwhile. The arrow keys move the selected widget a point of the display, ten
-/// with Shift. A hidden one is drawn faded. The words are those of when the page was drawn: the
+/// with Shift. A click on the wallpaper around the widgets, or Escape, selects nothing, so the
+/// picture shows the widgets as the desktop will, without the outline and handles. A hidden widget
+/// is drawn, faded, only while it is selected. The words are those of when the page was drawn: the
 /// preview runs no clock of its own and the frame does not move. The rows of the editor are the
 /// keyboard's and VoiceOver's way to the same things, so the picture itself is hidden from
 /// VoiceOver.
@@ -81,6 +83,11 @@ struct DesktopWidgetPreview: View {
     .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow], phases: [.down, .repeat]) { press in
       nudge(press)
     }
+    .onKeyPress(.escape) {
+      guard controller.widgetsSettings.selectedID != nil else { return .ignored }
+      controller.widgetsSettings.clearSelection()
+      return .handled
+    }
     .accessibilityHidden(true)
   }
 
@@ -109,7 +116,10 @@ struct DesktopWidgetPreview: View {
     .clipShape(shape)
     .overlay { shape.strokeBorder(theme.surface.divider.color, lineWidth: 0.5) }
     .contentShape(shape)
-    .onTapGesture { isFocused = true }
+    .onTapGesture {
+      isFocused = true
+      controller.widgetsSettings.clearSelection()
+    }
   }
 
   private func item(_ widget: DesktopWidget, saved: DesktopWidget, in size: CGSize, scale: CGFloat) -> some View {
