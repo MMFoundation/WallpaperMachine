@@ -39,7 +39,7 @@ struct WallpaperTile<Artwork: View>: View {
   @Environment(\.libraryCollectionTile) private var collectionTile
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  static var cornerRadius: CGFloat { 10 }
+  static var cornerRadius: CGFloat { TileGridLayout.pictureCornerRadius }
 
   init(
     title: String, subtitle: String? = nil, kind: String, isSelected: Bool = false,

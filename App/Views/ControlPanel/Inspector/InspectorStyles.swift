@@ -227,9 +227,10 @@ struct InspectorNotice<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(10)
-    .background(fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .background(
+      fill, in: RoundedRectangle(cornerRadius: PanelCardSurface.cornerRadius, style: .continuous))
     .overlay {
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
+      RoundedRectangle(cornerRadius: PanelCardSurface.cornerRadius, style: .continuous)
         .strokeBorder(accent.opacity(tone == .info ? 0.2 : 0.28), lineWidth: 0.5)
     }
   }
@@ -388,6 +389,42 @@ extension InspectorSection where Accessory == EmptyView {
     self.init(
       verbatim: title, isOpen: isOpen, card: card, nested: nested, accessory: { EmptyView() },
       content: content)
+  }
+}
+
+/// One row of an inspector card (`PanelCard`): a label on the leading side and its control or
+/// value trailing, at least 36 points high.
+struct InspectorRow<Label: View, Trailing: View>: View {
+  private let label: Label
+  private let trailing: Trailing
+
+  init(@ViewBuilder trailing: () -> Trailing, @ViewBuilder label: () -> Label) {
+    self.label = label()
+    self.trailing = trailing()
+  }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      label
+        .font(.panel(.body))
+        .frame(maxWidth: .infinity, alignment: .leading)
+      trailing
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 4)
+    .frame(minHeight: 36)
+  }
+}
+
+extension InspectorRow where Label == Text {
+  /// A row named by fixed wording.
+  init(_ title: LocalizedStringKey, @ViewBuilder trailing: () -> Trailing) {
+    self.init(trailing: trailing) { Text(title) }
+  }
+
+  /// A row named by text that is not a catalog key.
+  init(verbatim title: String, @ViewBuilder trailing: () -> Trailing) {
+    self.init(trailing: trailing) { Text(verbatim: title) }
   }
 }
 

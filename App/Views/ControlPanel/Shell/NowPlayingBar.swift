@@ -228,7 +228,7 @@ struct NowPlayingDetails: View {
       if let item = state.item {
         NowPlayingCover(
           source: item.still, width: coverWidth, height: (coverWidth * 9 / 16).rounded(),
-          cornerRadius: 10)
+          cornerRadius: TileGridLayout.pictureCornerRadius)
       }
       VStack(alignment: .leading, spacing: 3) {
         Text("Now Playing")

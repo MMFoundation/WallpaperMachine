@@ -52,16 +52,36 @@ struct PanelCard<Content: View>: View {
   var separatorInset: CGFloat = 12
   @ViewBuilder var content: Content
 
-  @Environment(\.panelTheme) private var theme
-
   var body: some View {
     DividedRows(separatorInset: separatorInset) { content }
-      .background(
-        theme.surface.card.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-      )
-      .overlay {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-          .strokeBorder(theme.surface.divider.color, lineWidth: 0.5)
-      }
+      .panelCardSurface()
+  }
+}
+
+/// The look of a card: the card surface, rounded, edged with a hairline. `PanelCard` wears it, and
+/// so does any other block that sits on a page as a card (a sign-in guide, a choice in the
+/// download dialog, the pixiv page stepper).
+struct PanelCardSurface: ViewModifier {
+  /// The corner radius of every card, which the notices, banners, wells and drop target drawn at a
+  /// card's size share with their own fills.
+  static let cornerRadius: CGFloat = 10
+
+  /// The fill, when it is not the card surface (a choice under the pointer).
+  var fill: Color?
+
+  @Environment(\.panelTheme) private var theme
+
+  func body(content: Content) -> some View {
+    let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+    content
+      .background(fill ?? theme.surface.card.color, in: shape)
+      .overlay { shape.strokeBorder(theme.surface.divider.color, lineWidth: 0.5) }
+  }
+}
+
+extension View {
+  /// Draws the view as a card (`PanelCardSurface`), on the card surface or on `fill`.
+  func panelCardSurface(fill: Color? = nil) -> some View {
+    modifier(PanelCardSurface(fill: fill))
   }
 }

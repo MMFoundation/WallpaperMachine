@@ -9,6 +9,9 @@ extension EnvironmentValues {
 enum TileGridLayout {
   /// The width a tile is drawn at when there is room for it, at the standard zoom.
   static let preferredTileWidth: CGFloat = 140
+  /// The corner radius of a tile's picture (`WallpaperTile.cornerRadius`), which the panel's other
+  /// pictures share: the Now Playing cover and the season's banner.
+  static let pictureCornerRadius: CGFloat = 10
   static let minimumColumns = 3
   /// The preferred widths View › Zoom In and Zoom Out step through, one per `TileZoom.steps`;
   /// the standard one is step 0.

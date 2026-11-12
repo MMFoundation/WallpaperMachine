@@ -76,11 +76,7 @@ struct SteamGuideCard<Extra: View>: View {
     }
     .padding(12)
     .foregroundStyle(theme.surface.text.color)
-    .background(theme.surface.card.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
-        .strokeBorder(theme.surface.divider.color, lineWidth: 0.5)
-    }
+    .panelCardSurface()
     .accessibilityElement(children: .contain)
     .accessibilityLabel(Text(verbatim: title))
   }

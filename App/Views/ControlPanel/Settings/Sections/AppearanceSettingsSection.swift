@@ -218,9 +218,10 @@ private struct SeasonBanner: View {
     SeasonHorizon(season: season, style: .night)
       .frame(maxWidth: .infinity)
       .frame(height: 120)
-      .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .clipShape(
+        RoundedRectangle(cornerRadius: TileGridLayout.pictureCornerRadius, style: .continuous))
       .overlay {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: TileGridLayout.pictureCornerRadius, style: .continuous)
           .strokeBorder(theme.surface.divider.color, lineWidth: 0.5)
       }
       .accessibilityHidden(true)

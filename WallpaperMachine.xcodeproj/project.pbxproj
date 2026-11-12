@@ -755,7 +755,6 @@
 		A63AF517EA609925C6DBA0B3 /* get.m in Sources */ = {isa = PBXBuildFile; fileRef = 5CC6B968AE6D8C82E8C2C495 /* get.m */; };
 		A6900543C52CB37A7587339B /* speed.m in Sources */ = {isa = PBXBuildFile; fileRef = 3A2E1510FB4BE969E39E96F8 /* speed.m */; };
 		A6963C7CC4D31B87420C172A /* SteamCMDApprovalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FEA1C6890F850AD1367E5F0 /* SteamCMDApprovalTests.swift */; };
-		A7095EE03498B25672EFA0A7 /* InspectorCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C0B40C14862ABFBD3D47558 /* InspectorCard.swift */; };
 		A769D14D48FD0304B2DB857E /* LockScreenXPCDrift.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AE05066630E84CB75D7D3D9 /* LockScreenXPCDrift.swift */; };
 		A7BB3E6D7C0185FD72074E82 /* WallpaperWindowAuditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C77A010A4254DC88EBEE6AE2 /* WallpaperWindowAuditorTests.swift */; };
 		A7E6DFA1C2A7D6E59F6ED240 /* PowerSourceResamplerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06F846DDE993A9DCBA21E6E9 /* PowerSourceResamplerTests.swift */; };
@@ -1302,7 +1301,6 @@
 		0B81B8A846B693D1A445A1DE /* PanelController+ImagePlacement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelController+ImagePlacement.swift"; sourceTree = "<group>"; };
 		0BD1FA0716201E21C2542A66 /* LockScreenWallpaperSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockScreenWallpaperSelection.swift; sourceTree = "<group>"; };
 		0BD52246CCE5D246BBD632B1 /* globals.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = globals.h; sourceTree = "<group>"; };
-		0C0B40C14862ABFBD3D47558 /* InspectorCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorCard.swift; sourceTree = "<group>"; };
 		0C69D79840A52A8A588613E0 /* PlacementGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacementGeometry.swift; sourceTree = "<group>"; };
 		0CA4109F19BB249E08288C98 /* NativeVideoWallpaperWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVideoWallpaperWindow.swift; sourceTree = "<group>"; };
 		0CC9CBA0E4EFAED2CF3738B6 /* PanelController+Automation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelController+Automation.swift"; sourceTree = "<group>"; };
@@ -2695,7 +2693,6 @@
 				6CA6557127953F06A8D6DA53 /* Equalizer.swift */,
 				33327E4ABAF3A88DD55EEEED /* FilterPanel.swift */,
 				DC4AD3DF595CFA0613D6170F /* FilterTagChip.swift */,
-				0C0B40C14862ABFBD3D47558 /* InspectorCard.swift */,
 				3D1DDFD13D69F8FD8CF84818 /* PageJumpControls.swift */,
 				9067411408CD0C7642908327 /* PanelButtonStyles.swift */,
 				63BD9BC972B2149ED94EF286 /* PanelCard.swift */,
@@ -5104,7 +5101,6 @@
 				C0A3AB6291C24E5AE93C24BD /* ImportPill.swift in Sources */,
 				2CC3850194A34F83AEB577E5 /* ImportPopover.swift in Sources */,
 				1501F3D38CD63048DC796C0A /* InspectorAction.swift in Sources */,
-				A7095EE03498B25672EFA0A7 /* InspectorCard.swift in Sources */,
 				A3383E786A5505AC23970609 /* InspectorChecksCards.swift in Sources */,
 				02E38AAE94D4C55A3ECCA5EA /* InspectorColumn.swift in Sources */,
 				E4A5923468F38ACD6F077C15 /* InspectorControls.swift in Sources */,

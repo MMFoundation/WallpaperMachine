@@ -384,15 +384,9 @@ private struct ChoiceButton<Title: View, Note: View>: View {
           .foregroundStyle(theme.surface.faint.color)
       }
       .padding(10)
-      .background(
-        isHovering && isEnabled ? theme.surface.raisedHover.color : theme.surface.card.color,
-        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-      )
-      .overlay {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-          .strokeBorder(theme.surface.divider.color, lineWidth: 0.5)
-      }
-      .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .panelCardSurface(fill: isHovering && isEnabled ? theme.surface.raisedHover.color : nil)
+      .contentShape(
+        RoundedRectangle(cornerRadius: PanelCardSurface.cornerRadius, style: .continuous))
     }
     .buttonStyle(.plain)
     .disabled(!isEnabled)

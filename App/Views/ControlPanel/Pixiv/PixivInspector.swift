@@ -379,13 +379,7 @@ private struct PixivPageStepper: View {
     }
     .padding(.horizontal, 4)
     .frame(height: 32)
-    .background(
-      theme.surface.card.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-    )
-    .overlay {
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
-        .strokeBorder(theme.surface.divider.color, lineWidth: 0.5)
-    }
+    .panelCardSurface()
     .accessibilityElement(children: .contain)
     .accessibilityLabel(L("Pages of this work"))
   }

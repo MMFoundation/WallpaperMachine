@@ -66,18 +66,22 @@ private struct PrimaryButtonBody: View {
 }
 
 /// A quiet capsule button for the bars above a page: Filter, Sort, Select, and the pills that
-/// report activity. `isActive` tints it with the accent, as a Filter that has filters set.
+/// report activity. `isActive` tints it with the accent, as a Filter that has filters set; a bar
+/// short of room passes less `horizontalPadding` (`HeaderTier.capsulePadding`).
 struct ToolbarCapsuleButtonStyle: ButtonStyle {
   var isActive = false
+  var horizontalPadding: CGFloat = 10
 
   func makeBody(configuration: Configuration) -> some View {
-    ToolbarCapsuleBody(configuration: configuration, isActive: isActive)
+    ToolbarCapsuleBody(
+      configuration: configuration, isActive: isActive, horizontalPadding: horizontalPadding)
   }
 }
 
 private struct ToolbarCapsuleBody: View {
   let configuration: ButtonStyleConfiguration
   let isActive: Bool
+  let horizontalPadding: CGFloat
 
   @Environment(\.panelTheme) private var theme
   @Environment(\.isEnabled) private var isEnabled
@@ -88,7 +92,7 @@ private struct ToolbarCapsuleBody: View {
       .font(.panel(.label))
       .foregroundStyle(isActive ? theme.accent.accent.color : theme.surface.text.color)
       .lineLimit(1)
-      .padding(.horizontal, 10)
+      .padding(.horizontal, horizontalPadding)
       .frame(minHeight: 26)
       .background(background, in: Capsule())
       .opacity(isEnabled ? 1 : 0.4)
@@ -116,7 +120,9 @@ extension ButtonStyle where Self == PrimaryButtonStyle {
 extension ButtonStyle where Self == ToolbarCapsuleButtonStyle {
   /// `ToolbarCapsuleButtonStyle` in its resting state.
   static var panelCapsule: ToolbarCapsuleButtonStyle { ToolbarCapsuleButtonStyle() }
-  static func panelCapsule(isActive: Bool) -> ToolbarCapsuleButtonStyle {
-    ToolbarCapsuleButtonStyle(isActive: isActive)
+  static func panelCapsule(isActive: Bool = false, horizontalPadding: CGFloat = 10)
+    -> ToolbarCapsuleButtonStyle
+  {
+    ToolbarCapsuleButtonStyle(isActive: isActive, horizontalPadding: horizontalPadding)
   }
 }

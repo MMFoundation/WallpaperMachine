@@ -172,7 +172,8 @@ struct ImportPopover: View {
       .padding(12)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(
-        theme.surface.sunken.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        theme.surface.sunken.color,
+        in: RoundedRectangle(cornerRadius: PanelCardSurface.cornerRadius, style: .continuous))
     }
   }
 

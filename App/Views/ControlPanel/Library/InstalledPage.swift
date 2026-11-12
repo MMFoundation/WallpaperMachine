@@ -28,11 +28,11 @@ struct InstalledPage: View {
     } isTargeted: { isDropTargeted = $0 }
     .overlay {
       if isDropTargeted {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: PanelCardSurface.cornerRadius, style: .continuous)
           .strokeBorder(theme.accent.accent.color, lineWidth: 2)
           .background(
             theme.accent.accent.color.opacity(0.08),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            in: RoundedRectangle(cornerRadius: PanelCardSurface.cornerRadius, style: .continuous)
           )
           .padding(6)
           .allowsHitTesting(false)

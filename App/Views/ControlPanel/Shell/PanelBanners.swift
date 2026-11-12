@@ -166,11 +166,12 @@ private struct BannerRow<Trailing: View>: View {
     .padding(.horizontal, 12)
     .padding(.vertical, 8)
     .frame(minWidth: 0)
-    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
-        .strokeBorder(tint.opacity(0.3), lineWidth: 0.5)
-    }
+    .background(tint.opacity(0.12), in: shape)
+    .overlay { shape.strokeBorder(tint.opacity(0.3), lineWidth: 0.5) }
     .accessibilityElement(children: .contain)
+  }
+
+  private var shape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: PanelCardSurface.cornerRadius, style: .continuous)
   }
 }
