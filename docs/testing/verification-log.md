@@ -47,6 +47,16 @@ Core Audio start receive timeouts now stop and release the uncertain session bef
 - Renderer runs exercised GPU and realtime checks, twelve generated pooled/isolated image comparisons and eight reload projects twice, all successful. Seven local asset/corpus cases were skipped; authored wallpaper compatibility remains unverified.
 - Live system audio capture, permission prompts, device changes and desktop behavior were not exercised. No app was installed, launched or restarted. Full native and renderer gates remain blocked by the failures above.
 
+## 2026-11-12 — Gate run on a Mac for the covered-desktop sound choices (#192)
+
+Run on an M4 Mac mini with macOS 27.2 and Xcode 27.2 (27B52) through DEVELOPER_DIR; build.md asks for Xcode 26 and the Test workflow uses macos-26 runners, which this run did not use. Commit d1d5d4e2, with no changes needed.
+
+- `python3 scripts/build.py` (full, Debug) — exit 0
+- `python3 scripts/test.py --only` PlaybackPolicyCompositionTests, WallpaperPresentationPolicyTests, PlaybackPreferencesTests, WallpaperBackupTests, OtherAudioVolumeSettingsTests, SettingsSectionsLocalizationTests, PanelSettingsValuesTests, SettingsSectionsRenderTests, SettingsWindowRenderTests — exit 0; 175 passed, 0 failed, 0 skipped
+- `python3 scripts/test.py` — exit 0; 34 script test modules OK; 4936 passed, 0 failed, 70 skipped of 5006; 2 runtime warnings in the result bundle not examined
+- Not checked: a Release build, the four-segment Quick Settings module in each language, real coverage-probe occlusion and audible output; the five translations are machine-written
+- Found in passing, not caused by this change: `AppUpdateTests` builds `AppUpdateStore` without `defaults:`, and the gate wrote `WallpaperMachine.updates.lastAttempt` into the installed app's preferences
+
 ## 2026-11-12 — Mute or Reduce volume when windows cover the desktop (#192)
 
 Written on a Linux host without Xcode or Swift: nothing native was compiled or run.
@@ -107,13 +117,3 @@ Installed font families, italic, letter spacing, line height and case; gradient 
 - `python3 scripts/test.py` after the welcome fix: Python checks passed; 4889 native tests passed, 0 failed, 68 opt-in media/network/reference checks skipped.
 - Steam timeout/password rejection, corrected-account retry, QR recovery through import, an existing QR session, and normal transfer retries were exercised with offline fakes.
 - Live Steam sign-in, the reporter’s network/account, desktop interaction and VoiceOver remain unverified. No Release build or renderer changes.
-
-## 2026-11-12 — Control panel UI critique fixes (ws1-ws7) on claude/ui-critique-fixes
-
-- Scope: 34 local commits over main 54227ed3: Apply/Play symbols and wording, Workshop inspector Apply and Command-Return, staged-edit footer and Not applied marks (Rust bridge staged flags), collapsible display cards, welcome Skip setup and the delayed support prompt, P3 polish, and the panel type scale, shared buttons, scrims, tile marks and design-token lint.
-- python3 scripts/test.py on the final tree: 4887 passed, 0 failed, 68 skipped; script tests incl. test_panel_design_tokens, catalogs and doc links OK. Each workstream also passed the full gate before its commits.
-- Known flake seen once under full-gate load: WebWallpaperPageTests.testRefusedOrReplacedNavigationDoesNotFailTheWallpaper (10 s WebKit deadline) in ws3's first run; the rerun passed. Not caused by this branch.
-- python3 scripts/check_rust.py after the bridge change: core 429, bridge 961, shader 958 and core-integration passed, 0 failed; desktop-window tests excluded (need an authorized desktop run). No Rust or bridge change since.
-- python3 scripts/check_renderer.py on the final tree: exit 0; 12 generated scenes pixel-equal pooled vs isolated, 0 reload cycles; 19 local-corpus and energy checks skipped (no corpus or opt-ins), so asset coverage is skipped, not passed.
-- Not rendered: no Release build, no app launch, no screenshots. Unverified by eye: paused vs waiting rings, scrim strengths, the new markHeart pink and the library mark's contrast, the translucent secondary fill in dark mode, the View menu titles, the welcome Skip setup and Escape routing.
-- Not covered by tests: whether a click (not a key) focuses a tile and makes its ring show the cancel mark instead of the percentage; pixiv Command-Return wiring (manual smoke only); the scope bar's middle tier; translations without native-speaker review.
