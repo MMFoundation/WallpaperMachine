@@ -5,6 +5,8 @@ import Foundation
 /// typed setter: pressing either moves the other.
 enum SettingsSwitchKey: String, CaseIterable, Sendable {
   case launchAtLogin, hideAfterActivating, libraryPreviewsOnHover
+  /// Settings › General: the menu bar icon carries what the app draws now.
+  case menuBarEnergy
   case writeDesktopPicture, refreshDesktopPicture, keepWindowsOnWallpaperClick, livePropertyEdits
   case hideDesktopIcons, hideNotch
   case lockScreenEnabled, screenSaverEnabled
@@ -29,6 +31,7 @@ extension PanelController {
     case .launchAtLogin: generalSettings.launchAtLogin.isOn
     case .hideAfterActivating: generalSettings.hidesAfterActivating
     case .libraryPreviewsOnHover: generalSettings.playsLibraryPreviewsOnHover
+    case .menuBarEnergy: generalSettings.showsEnergyInMenuBar
     case .writeDesktopPicture: desktopSettings.writesDesktopPicture
     case .refreshDesktopPicture: desktopSettings.refreshesDesktopPicture
     case .keepWindowsOnWallpaperClick: desktopSettings.keepsWindowsOnWallpaperClick
@@ -82,6 +85,7 @@ extension PanelController {
     case .launchAtLogin: try await setLaunchAtLogin(on)
     case .hideAfterActivating: try await setHidesAfterActivating(on)
     case .libraryPreviewsOnHover: try await setLibraryPreviewsOnHover(on)
+    case .menuBarEnergy: try await setShowsEnergyInMenuBar(on)
     case .writeDesktopPicture: try await setWritesDesktopPicture(on)
     case .refreshDesktopPicture: try await setRefreshesDesktopPicture(on)
     case .keepWindowsOnWallpaperClick: try await setKeepsWindowsOnWallpaperClick(on)

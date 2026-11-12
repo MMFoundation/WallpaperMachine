@@ -13,6 +13,8 @@ struct GeneralSettings: Equatable, Sendable {
   var hidesAfterActivating: Bool
   /// Whether Library tiles play their animated preview only on hover. Off until turned on.
   var playsLibraryPreviewsOnHover: Bool
+  /// Whether the menu bar icon carries what the app draws now. Off until turned on.
+  var showsEnergyInMenuBar: Bool
 }
 
 /// Launch at login as the Startup row shows it. The facts are the bridge's: whether the login item

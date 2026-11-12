@@ -13,13 +13,19 @@ protocol StatusPanelSource: AnyObject {
   func performStatusPanel(_ command: StatusPanelModel.Command) async throws
   /// The saved volume and mute of an installed wallpaper.
   func statusPanelVolume(of wallpaperID: String) async throws -> StatusPanelModel.Volume
+  /// What measures the app's energy use for the panel's Energy use row, nil where nothing does.
+  var statusPanelEnergy: MenuBarEnergyMeter? { get }
+}
+
+extension StatusPanelSource {
+  var statusPanelEnergy: MenuBarEnergyMeter? { nil }
 }
 
 /// The menu bar panel's state and typed actions, for one opening of the panel.
 ///
 /// Nothing runs before `start()`, which the popover calls as it opens, and `stop()`, called as it
 /// closes, ends all of it: the observation of the stores, the preference notifications, the reads
-/// of the covers' stamps and a volume read still on its way. A new controller is made for every
+/// of the covers' stamps, a volume read still on its way and the energy meter's panel pace. A new controller is made for every
 /// opening, so the covers it decoded leave with it. Views start the typed actions through
 /// `launch`; what failed shows under the panel until an action succeeds.
 @MainActor
@@ -50,6 +56,8 @@ final class StatusPanelController {
   ]
 
   @ObservationIgnored private weak var source: (any StatusPanelSource)?
+  /// The source's meter, held from `start()` to `stop()`.
+  private var energyMeter: MenuBarEnergyMeter?
   @ObservationIgnored private let covers: LibraryCoverStamps
   @ObservationIgnored private let center: NotificationCenter
   @ObservationIgnored private let dismiss: @MainActor () -> Void
@@ -96,6 +104,8 @@ final class StatusPanelController {
     guard !isStarted else { return }
     isStarted = true
     covers.onChange = { [weak self] in self?.coversChanged() }
+    energyMeter = source?.statusPanelEnergy
+    energyMeter?.setPanelOpen(true)
     for name in Self.notifications {
       observers.append(
         center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -115,6 +125,19 @@ final class StatusPanelController {
     covers.onChange = nil
     volumeRead?.task.cancel()
     volumeRead = nil
+    energyMeter?.setPanelOpen(false)
+    energyMeter = nil
+  }
+
+  /// Whether the panel has an Energy use row; unlike `energy`, it does not change with each reading.
+  var hasEnergy: Bool { energyMeter != nil }
+
+  /// What the Energy use row shows, nil without a meter. Reading it inside a view follows the
+  /// meter, so only that row redraws with each reading.
+  var energy: EnergyReadout? {
+    guard let energyMeter else { return nil }
+    return EnergyReadout(
+      reading: energyMeter.reading, comparison: nil, batteryCapacityWattHours: energyMeter.batteryCapacity)
   }
 
   /// Reads the input again and observes what it read, so the next change of it refreshes again.

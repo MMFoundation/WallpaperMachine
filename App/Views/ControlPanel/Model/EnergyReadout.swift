@@ -149,6 +149,39 @@ struct EnergyReadout: Equatable {
     return L("Before your change: \(before). Now: \(after) (\(text)).")
   }
 
+  /// The readout as one spoken line: the grade or the state, the figures and the notes. VoiceOver
+  /// reads it for the Settings row and the menu bar panel's, and it is the menu bar icon's tooltip.
+  @MainActor var summary: String {
+    let comparison = [comparisonNote()].compactMap { $0 }
+    switch status {
+    case .unavailable: return L("Unavailable on this Mac")
+    case .measuring: return ([L("Measuring…")] + comparison).joined(separator: ". ")
+    case .ready:
+      var parts: [String] = []
+      if let first = caveats.first {
+        parts.append(first.title)
+      } else {
+        parts.append(Self.milliwatts(totalMilliwatts))
+        if let levelTitle { parts.append(levelTitle) }
+      }
+      parts.append("\(L("CPU")) \(Self.milliwatts(cpuMilliwatts))")
+      parts.append("\(L("GPU")) \(Self.milliwatts(gpuMilliwatts))")
+      parts += caveats.isEmpty ? [batteryShareNote].compactMap { $0 } : caveats.map(\.note)
+      return (parts + comparison).joined(separator: ". ")
+    }
+  }
+
+  /// The figure beside the menu bar icon: the total once measured, an ellipsis while the first
+  /// reading is taken, nil on a Mac that cannot measure. A caveat does not hide it; the icon draws
+  /// it dimmed and its tooltip says why.
+  @MainActor func menuBarTitle(locale: Locale = .current) -> String? {
+    switch status {
+    case .unavailable: nil
+    case .measuring: "…"
+    case .ready: Self.milliwatts(totalMilliwatts, locale: locale)
+    }
+  }
+
   /// "1.2 W" from 1,000 mW, "840 mW" below it, "Unavailable" for a figure that is not a number.
   @MainActor static func milliwatts(_ value: Double, locale: Locale = .current) -> String {
     guard value.isFinite else { return L("Unavailable") }

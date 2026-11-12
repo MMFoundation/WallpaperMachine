@@ -117,6 +117,7 @@ struct WallpaperBackupPreferences: Sendable {
         PlaybackPreferences.playOnlyOnActiveDisplayKey,
         PanelPreferences.hideAfterActivatingKey, PanelPreferences.tileZoomKey,
         PanelPreferences.libraryPreviewsOnHoverKey, StatusItemClick.defaultsKey,
+        MenuBarEnergyPreference.defaultsKey,
         WorkshopSearchTranslator.enabledKey,
         WorkshopStore.concurrentDownloadsKey,
         WorkshopUpdateStore.automaticKey, ClientPaths.assetsPathKey,

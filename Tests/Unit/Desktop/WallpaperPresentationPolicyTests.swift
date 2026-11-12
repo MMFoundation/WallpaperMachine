@@ -262,6 +262,32 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
         XCTAssertEqual(probe.applied, [true, false])
     }
 
+    /// Displays asleep and a locked session are reported as they come and go, once each, so the
+    /// menu bar's energy figure stops while nobody can see it and comes back after.
+    func testAttendanceChangesAreReportedOnceEach() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe)
+        var seen: [Bool] = []
+        policy.onAttendanceChanged = { seen.append(policy.isUnattended) }
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertTrue(seen.isEmpty, "someone at the Mac is the starting point")
+
+        workspaceCenter.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        policy.evaluate()
+        XCTAssertEqual(seen, [true])
+        workspaceCenter.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        XCTAssertEqual(seen, [true, false])
+
+        probe.sessionLocked = true
+        lockCenter.post(name: Notification.Name("com.apple.screenIsLocked"), object: nil)
+        policy.evaluate()
+        XCTAssertEqual(seen, [true, false, true])
+        probe.sessionLocked = false
+        lockCenter.post(name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
+        XCTAssertEqual(seen, [true, false, true, false])
+    }
+
     /// The unlock is reported once, after the decision it causes was made, however many
     /// evaluations follow.
     func testUnlockIsReportedOnceWhenTheLockClears() {

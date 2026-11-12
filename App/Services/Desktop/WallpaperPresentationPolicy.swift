@@ -180,6 +180,10 @@ final class WallpaperPresentationPolicy {
     /// when `start()` ran (nothing was seen to unlock), nor for `stop()`. Callers must only read
     /// the policy from it: it runs inside `evaluate()`.
     var onSessionUnlocked: (@MainActor () -> Void)?
+    /// Called after an evaluation that finds `isUnattended` changed since the last one reported.
+    /// Like `onSessionUnlocked`, it runs inside `evaluate()`, so callers must only read the policy.
+    var onAttendanceChanged: (@MainActor () -> Void)?
+    private var reportedUnattended = false
 
     /// Between `start()` and `stop()`.
     private var isRunning: Bool { !observers.isEmpty }
@@ -461,7 +465,13 @@ final class WallpaperPresentationPolicy {
         // Reported when evaluate() returns, whichever path it takes, so `globalPresentation` is
         // already settled for the callback.
         var unlocked = false
-        defer { if unlocked { onSessionUnlocked?() } }
+        defer {
+            if unlocked { onSessionUnlocked?() }
+            if isUnattended != reportedUnattended {
+                reportedUnattended = isUnattended
+                onAttendanceChanged?()
+            }
+        }
         syncProbes()
         if sessionLockStale || sessionLocked || !sessionOnConsole {
             let wasLocked = sessionLocked

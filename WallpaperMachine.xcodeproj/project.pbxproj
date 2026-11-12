@@ -530,6 +530,7 @@
 		6EB8A0117F0C441852D38CC4 /* PanelSupportPromptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E48D7C622BCDE50CBBB793A4 /* PanelSupportPromptTests.swift */; };
 		6EBD94225A8843425D6CE0A3 /* PanelController+Letterbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6604F944757214EC02F990AC /* PanelController+Letterbox.swift */; };
 		6EE0A64A953485D6518090AF /* DownloaderSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F714FB5E9A5B1F0185D8210 /* DownloaderSessionTests.swift */; };
+		6F1767F38F0D6142E5F25DDF /* MenuBarEnergy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 731873D8E4B85A8AFDAE3F37 /* MenuBarEnergy.swift */; };
 		6F3C5AB672C4D09CDF3390FF /* ClientPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F3C06EF88D99DE255EF961 /* ClientPreferences.swift */; };
 		6F4C755DE1DFD974E2B30F90 /* stream.m in Sources */ = {isa = PBXBuildFile; fileRef = 2F17048279366BDAEFEB2792 /* stream.m */; };
 		6F693B2FA874955D0A0EF65E /* HotKeyPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE3937B8067DB862EBDEAE3B /* HotKeyPreferences.swift */; };
@@ -654,6 +655,7 @@
 		8C0FD1D9138C9378877BD82E /* PowerSourceResampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07B725B421F1A97C2D4D91AB /* PowerSourceResampler.swift */; };
 		8C3D72E3605B97446C0ABCAC /* StatusMenuModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FB152B7CAD3019706CCC2F4 /* StatusMenuModel.swift */; };
 		8C5505AD9A3F918F8FBD1C40 /* SteamKeyValuesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D50D45CA6B1AABC275C5F2 /* SteamKeyValuesTests.swift */; };
+		8C649983ECA4044F7A25E2D1 /* AppDelegate+MenuBarEnergy.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD728A481561CBC2A9C22700 /* AppDelegate+MenuBarEnergy.swift */; };
 		8C96FD99318EBBA41565C1C1 /* BridgeStoreDisplayLayouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E71B8530A8F0F68D7437E9C /* BridgeStoreDisplayLayouts.swift */; };
 		8CA179812986CD14B970D964 /* UserCommandQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD323FA35344BDFB8F88B9FB /* UserCommandQueueTests.swift */; };
 		8D4E11EB3C597A5A0506B9F2 /* DesktopPosterNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC37DCAA8AC6813526B41AD5 /* DesktopPosterNotification.swift */; };
@@ -1085,6 +1087,7 @@
 		EE54E97CDEA34D910742AFAD /* AppUpdatePersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A894F34EA558557F7F0CC962 /* AppUpdatePersistenceTests.swift */; };
 		EE88E5CF198F07B4D4B738B1 /* PanelViewStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 768008A7AF11956F882F5575 /* PanelViewStateTests.swift */; };
 		EE9B15595D5AAF1AD1FAD135 /* StatusPanelControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC43F368822A903E159E7F17 /* StatusPanelControllerTests.swift */; };
+		EEF30B159FDBA49C519DBD7B /* MenuBarEnergyMeterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42DE56FEF67117E7E4B4DFA8 /* MenuBarEnergyMeterTests.swift */; };
 		EEF9C591AE30A377AFCFE40F /* LockScreenIdleExitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56534C81E185DAA1A7932E25 /* LockScreenIdleExitTests.swift */; };
 		EF36BA734181E7463B006E66 /* WebMVideoWallpaperWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AF619F37A559DAD3272CB01 /* WebMVideoWallpaperWindowTests.swift */; };
 		EFEB2FCAD29F092EB043CDDF /* PixivTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E347156459471DE3892D68F9 /* PixivTransport.swift */; };
@@ -1542,6 +1545,7 @@
 		420BEFFA539D6BCA4C0820E0 /* PixivService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixivService.swift; sourceTree = "<group>"; };
 		42112C9EFDF605E489B61679 /* WorkshopBrowseState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopBrowseState.swift; sourceTree = "<group>"; };
 		42C1BF25276FF0A59B1506BC /* VideoColorPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoColorPipelineTests.swift; sourceTree = "<group>"; };
+		42DE56FEF67117E7E4B4DFA8 /* MenuBarEnergyMeterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarEnergyMeterTests.swift; sourceTree = "<group>"; };
 		43827C038FB1884BD8F8672F /* UserAssetStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserAssetStorage.swift; sourceTree = "<group>"; };
 		4391FAA77F687E4211984EB1 /* PanelController+HotKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelController+HotKeys.swift"; sourceTree = "<group>"; };
 		43A63B42C998EB2C4433B286 /* WorkshopThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopThumbnailCache.swift; sourceTree = "<group>"; };
@@ -1753,6 +1757,7 @@
 		722CF79BAB639572CB5A580B /* PanelVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelVisibility.swift; sourceTree = "<group>"; };
 		728E7897632BB07E9BADA8A0 /* PanelControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelControllerTests.swift; sourceTree = "<group>"; };
 		729A84DA5B761CB693D0609A /* PanelDownloadQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelDownloadQueueTests.swift; sourceTree = "<group>"; };
+		731873D8E4B85A8AFDAE3F37 /* MenuBarEnergy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarEnergy.swift; sourceTree = "<group>"; };
 		7385CF6CE8122A02D3C44B90 /* HostWallpaperState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostWallpaperState.swift; sourceTree = "<group>"; };
 		739C82869FBAC0392BCD8562 /* AppLogRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogRouter.swift; sourceTree = "<group>"; };
 		7457DC8A543F42ED4BA6ABEE /* SettingsStatusViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStatusViews.swift; sourceTree = "<group>"; };
@@ -2006,6 +2011,7 @@
 		AC9ACA99171CFE268B1C6D83 /* DisplayTitleResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayTitleResolverTests.swift; sourceTree = "<group>"; };
 		ACE7F85743E165C3FE5C8103 /* LibraryCollectionLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryCollectionLayout.swift; sourceTree = "<group>"; };
 		AD4605658F48904A0C3B50A2 /* TelemetryPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryPreferences.swift; sourceTree = "<group>"; };
+		AD728A481561CBC2A9C22700 /* AppDelegate+MenuBarEnergy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+MenuBarEnergy.swift"; sourceTree = "<group>"; };
 		ADA296B41B97A9B3F58937FD /* WebWallpaperRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebWallpaperRecoveryTests.swift; sourceTree = "<group>"; };
 		ADB58A30879083DD063CC052 /* WallpaperImportPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperImportPicker.swift; sourceTree = "<group>"; };
 		ADD8A7A09D45A6CB35B0D033 /* DisplaysDesktopRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplaysDesktopRows.swift; sourceTree = "<group>"; };
@@ -2979,6 +2985,7 @@
 			children = (
 				07A8672C9A03D8353209ACD5 /* AppDelegate.swift */,
 				35C28D49A610D0E3231557AC /* AppDelegate+DesktopPosters.swift */,
+				AD728A481561CBC2A9C22700 /* AppDelegate+MenuBarEnergy.swift */,
 				D31282F51276484A266AE8BB /* AppDelegate+Menus.swift */,
 				8D6A7A5F08BFBF24482C3253 /* AppDelegate+StatusPanel.swift */,
 				EBBAAE671C3152A0D30DFF2B /* WallpaperEngineApp.swift */,
@@ -3060,6 +3067,7 @@
 				044D88D9678E316F75CDB4E8 /* DiagnosticsRedactor.swift */,
 				77AE0BE70E8DF0312EDF325B /* EnergyUsageMonitor.swift */,
 				709733CDF8CF0B7174EDCAD4 /* MemoryPressureMonitor.swift */,
+				731873D8E4B85A8AFDAE3F37 /* MenuBarEnergy.swift */,
 				81483378A5FBDAFC5A0134A4 /* ProcessFootprint.swift */,
 				4477EF46F5A657D0CD755EA7 /* RuntimeDiagnosticsSession.swift */,
 				8FA17C4DDA5A1EBF349C947F /* SessionLedger.swift */,
@@ -3637,6 +3645,7 @@
 				339850BB03F83A2AA45C5066 /* DiagnosticsRedactorTests.swift */,
 				7D9753908B8059E4B43D87AD /* EnergyUsageMonitorTests.swift */,
 				64BA9F24E0DAF34643164906 /* MemoryPressureMonitorTests.swift */,
+				42DE56FEF67117E7E4B4DFA8 /* MenuBarEnergyMeterTests.swift */,
 				E5CEB65FCE398F74510E6C2A /* ProcessFootprintTests.swift */,
 				3503666BFB572F4354ED44F2 /* RuntimeCountersTests.swift */,
 				294BC0CF74507522CAA9A8C0 /* RuntimeDiagnosticsReportTests.swift */,
@@ -4668,6 +4677,7 @@
 				613389AEB622A9D3C3EC95AE /* MediaPanelTestCase.swift in Sources */,
 				F40FFD1A123752DFA91FB59D /* MediaSnapshotReaderTests.swift in Sources */,
 				1D95BF060E69F2B821500940 /* MemoryPressureMonitorTests.swift in Sources */,
+				EEF30B159FDBA49C519DBD7B /* MenuBarEnergyMeterTests.swift in Sources */,
 				06E17ECA88FFC0A98BF5B464 /* MirrorAudioOwnershipTests.swift in Sources */,
 				890C8397296FA4EFB17CEBD2 /* NativeVideoAdmissionTests.swift in Sources */,
 				1E0C91AFFE61E34CD4EF86AD /* NativeVideoDeadlineTests.swift in Sources */,
@@ -4981,6 +4991,7 @@
 				33339F3AD2B3665C3F0462FF /* AnimatedPreview.swift in Sources */,
 				47612DAC45AAF2E378150CE2 /* AppAutomation.swift in Sources */,
 				C8104A023A7F7C47FDA4F9E7 /* AppDelegate+DesktopPosters.swift in Sources */,
+				8C649983ECA4044F7A25E2D1 /* AppDelegate+MenuBarEnergy.swift in Sources */,
 				1A361FF995B48350C7126FB0 /* AppDelegate+Menus.swift in Sources */,
 				CB0F9ED31E60A4635E91C960 /* AppDelegate+StatusPanel.swift in Sources */,
 				F0FFC309AE03A890A5DD83F9 /* AppDelegate.swift in Sources */,
@@ -5200,6 +5211,7 @@
 				C8953FD04F7372D96C69FD81 /* MediaSnapshotReader.swift in Sources */,
 				4A33AD7BC8080C01F0B301CB /* MediaTimerScheduler.swift in Sources */,
 				8662E6923DAC81A51E078272 /* MemoryPressureMonitor.swift in Sources */,
+				6F1767F38F0D6142E5F25DDF /* MenuBarEnergy.swift in Sources */,
 				D671C389184297CD74C958C2 /* MirrorAudioOwnership.swift in Sources */,
 				CCE532DA2152E18F6DCE836E /* NativeVideoAdmission.swift in Sources */,
 				13EA24BB107EC8B0F993AAF2 /* NativeVideoDeadline.swift in Sources */,

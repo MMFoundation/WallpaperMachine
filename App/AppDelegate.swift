@@ -11,6 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The panel a left click on the status item opens (`AppDelegate+StatusPanel`).
     private(set) lazy var statusPanel = StatusPanelPopover(source: self)
     var statusItemClickObserver: NSObjectProtocol?
+    /// What the app draws now, for the menu bar icon and the panel (`AppDelegate+MenuBarEnergy`).
+    private(set) lazy var menuBarEnergy = makeMenuBarEnergy()
+    var menuBarEnergyObserver: NSObjectProtocol?
     /// The menu bar's Wallpaper menu, filled from `StatusMenuModel` each time it opens.
     var wallpaperMenu: NSMenu?
     private(set) var controlPanelWindow: NSWindow?
@@ -717,6 +720,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 guard let self, !self.shutdownInProgress else { return }
                 self.playlistScheduler?.noteUnlock()
             }
+            // The menu bar's energy figure is not kept current while nobody can see it.
+            policy.onAttendanceChanged = { [weak self, weak policy] in
+                guard let self, let policy else { return }
+                self.menuBarEnergy.setUnattended(policy.isUnattended)
+            }
+            // The policy started above, so a session locked at launch is already known.
+            menuBarEnergy.setUnattended(policy.isUnattended)
             // Records the system's memory-pressure events beside the app's footprint;
             // it never unloads or pauses anything.
             let pressure = MemoryPressureMonitor(presentingScenes: { [weak store] in
@@ -1352,6 +1362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         stopPlaybackMonitoring()
         wallpaperEnergy?.stop()
         wallpaperEnergy = nil
+        menuBarEnergy.stop()
         telemetry?.stop()
         telemetry = nil
         activeCount?.stop()

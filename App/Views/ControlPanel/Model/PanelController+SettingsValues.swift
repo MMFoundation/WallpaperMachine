@@ -13,7 +13,8 @@ extension PanelController {
         isOn: settings.launchAtLoginEnabled, isAvailable: settings.launchAtLoginAvailable,
         needsApproval: settings.launchAtLoginNeedsApproval),
       hidesAfterActivating: hidesAfterActivating,
-      playsLibraryPreviewsOnHover: PanelPreferences.playsLibraryPreviewsOnHover(in: defaults))
+      playsLibraryPreviewsOnHover: PanelPreferences.playsLibraryPreviewsOnHover(in: defaults),
+      showsEnergyInMenuBar: MenuBarEnergyPreference.isOn(in: defaults))
   }
 
   var desktopSettings: DesktopSettings {

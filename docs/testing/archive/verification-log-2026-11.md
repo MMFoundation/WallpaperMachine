@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-10 — Steam QR-code sign-in and native Workshop downloads
+
+Downloads signed in with a QR code run through the app's own Steam client (App/Services/Steam/) instead of SteamCMD; the Rust bridge unpacks depot content (decompress_steam_content).
+
+- `python3 scripts/test.py` — 4830 tests: 4759 passed, 70 skipped, 1 failed: WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem, which fails the same way on main without this change
+- `python3 scripts/check_rust.py` — passed; `cargo test -p wallpaper-bridge steam_content` — 3 passed (zstd, VZip LZMA, zip stored/deflated, CRC and truncation)
+- `python3 scripts/test.py --only Steam…Tests NativeWorkshopDownloadTests` — 23 passed against a scripted Steam: QR flow, logon, Multi routing, manifests, chunks, unsafe paths, PICS, queue import, shared connection, refused token
+- `WALLPAPER_MACHINE_NETWORK_TESTS=1 WALLPAPER_MACHINE_STEAM_TOKEN_FILE=… python3 scripts/test.py --only SteamNativeLiveTests` — 2 passed against live Steam (QR session; logon with a QR token and download of Workshop item 3521337568); the later depot-431961 chunk check was not run live
+- Manual Debug-build run: QR sign-in from the panel, 8 Workshop items and the shared scene assets downloaded and imported natively; the log shows no SteamCMD run and no staging left behind
+- Not covered: welcome guide has no QR option yet; no free-space check before the ~800 MB scene depot; native jobs restart from zero after a pause
+
 ## 2026-11-10 — Library tile menu, drop to import, keyboard and batch favorites; service fixes
 
 Installed gains a right-click menu on tiles (the inspector's More actions list, shared as WallpaperActionItems), files dropped on the page import, Command-Delete and Command-Return on the grid, File › Import… and Refresh Library, and a favorite tool for the ticked selection. The same change fixes six service defects (unreadable saved entries no longer erase their neighbours; an automatic command replacing a queued rule or Focus change no longer marks it handled; a day and night display keeps a manual choice across a relaunch; a shuffle round ends without a wallpaper that keeps failing; a stale Steam request no longer signs out a newer session; equal day and night start times are refused), adds feedback where actions were silent, and gathers the renderer's leftover material constants into one log line per scene.

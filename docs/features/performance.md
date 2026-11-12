@@ -110,7 +110,9 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
   (`PanelStoreRevisions.energy`), and only the Energy use rows read it, so a two-second
   update redraws those rows and nothing else. The rows show an `EnergyReadout`: the
   figure, its grade, the battery share and the before-and-after comparison when they
-  apply.
+  apply. The [menu bar figure and the menu bar panel's
+  row](control-panel.md#energy-use-in-the-menu-bar) use a monitor of their own at their own pace,
+  so they never restart or drop this readout's comparison.
 - **Unavailable.** The interfaces are private libsystem exports resolved with
   `dlsym`. If a macOS release removes one, the row reads **Unavailable on this
   Mac**.

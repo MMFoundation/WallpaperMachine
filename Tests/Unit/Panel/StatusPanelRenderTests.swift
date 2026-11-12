@@ -40,13 +40,28 @@ final class StatusPanelRenderTests: PanelTestCase {
     return (hosting, controller)
   }
 
+  /// A source whose meter holds a graded reading, as the panel finds it with the menu bar figure on.
+  private func source(_ input: StatusPanelModel.Input, energy: Bool) -> Source {
+    let source = Source(input)
+    guard energy else { return source }
+    let counters = SteadyEnergy()
+    let monitor = EnergyUsageMonitor(source: counters)
+    let meter = MenuBarEnergyMeter(monitor: monitor, showsInMenuBar: true)
+    monitor.record(counters.sample())
+    monitor.record(counters.sample())
+    addTeardownBlock { @MainActor in meter.stop() }
+    source.energy = meter
+    return source
+  }
+
   func testVoiceOverFindsEveryControlAndTheDisplayPickerOnlyWithTwoDisplays() throws {
     try pinPanelLanguageToEnglish()
-    let (two, _) = host(Source(input(displays: 2)))
+    let (two, _) = host(source(input(displays: 2), energy: true))
     let elements = AccessibilityElement.everything(in: two)
     for identifier in [
       "status-panel-displays", "status-panel-previous", "status-panel-toggle", "status-panel-next",
       "status-panel-random", "status-panel-favorite", "status-panel-mute", "status-panel-shuffle",
+      "status-panel-energy",
       "status-panel-control-panel", "status-panel-settings", "status-panel-quit",
     ] {
       XCTAssertTrue(elements.contains { $0.identifier == identifier }, "\(identifier) is reachable")
@@ -92,10 +107,27 @@ final class StatusPanelRenderTests: PanelTestCase {
     addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: .testHost) }
     for language in AppLanguage.supported.map(\.tag) {
       try languages.set(language)
-      let (hosting, _) = host(Source(input(displays: 3, muted: true)))
+      let (hosting, _) = host(source(input(displays: 3, muted: true), energy: true))
       let size = hosting.fittingSize
       XCTAssertEqual(size.width, StatusPanelView.width, accuracy: 1, "\(language): the panel keeps its width")
       XCTAssertLessThan(size.height, 820, "\(language): the panel fits under the menu bar of a small screen")
     }
+  }
+}
+
+/// 1.2 W of CPU, two seconds a sample, however often it is asked.
+private final class SteadyEnergy: EnergyUsageSource, @unchecked Sendable {
+  private let lock = NSLock()
+  private var step: UInt64 = 0
+
+  func sample() -> EnergyUsageSample? {
+    lock.lock()
+    defer { lock.unlock() }
+    step += 1
+    return EnergyUsageSample(
+      uptimeNanoseconds: step * 2_000_000_000,
+      own: [1: CoalitionEnergyCounters(
+        cpuEnergyNanojoules: step * 2_400_000_000, gpuEnergyNanojoules: 0, gpuTimeNanoseconds: 0)],
+      otherGPUTime: [:])
   }
 }

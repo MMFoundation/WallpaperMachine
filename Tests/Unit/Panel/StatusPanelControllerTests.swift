@@ -23,6 +23,7 @@ final class StatusPanelControllerTests: PanelTestCase {
     @ObservationIgnored var volumeReads: [String] = []
     @ObservationIgnored var failure: Error?
     @ObservationIgnored var log: [String] = []
+    @ObservationIgnored var energy: MenuBarEnergyMeter?
 
     init(_ input: StatusPanelModel.Input) { self.input = input }
 
@@ -42,6 +43,8 @@ final class StatusPanelControllerTests: PanelTestCase {
       guard let volume = volumes[wallpaperID] else { throw CancellationError() }
       return volume
     }
+
+    var statusPanelEnergy: MenuBarEnergyMeter? { energy }
   }
 
   private static let library = (1...20).map { "w\($0)" }
@@ -363,6 +366,50 @@ final class StatusPanelControllerTests: PanelTestCase {
       try await controller.resetAllSettings()
       XCTAssertEqual(StatusItemClick.current(in: panel.defaults), .panel)
     }
+  }
+
+  func testShowingEnergyInTheMenuBarIsOffUntilTurnedOnAndResetWithEverySetting() async throws {
+    try await withRecordingPanel { panel, _ in
+      let controller = panel.controller
+      XCTAssertFalse(controller.isSwitchOn(.menuBarEnergy), "The icon stays alone until the user asks")
+
+      try await controller.setSwitch(.menuBarEnergy, to: true)
+      XCTAssertTrue(MenuBarEnergyPreference.isOn(in: panel.defaults))
+      XCTAssertTrue(controller.isSwitchOn(.menuBarEnergy))
+      XCTAssertTrue(panel.buildController().isSwitchOn(.menuBarEnergy), "The choice survives a relaunch")
+
+      panel.dialogs.confirmAnswer = true
+      try await controller.resetAllSettings()
+      XCTAssertFalse(MenuBarEnergyPreference.isOn(in: panel.defaults))
+    }
+  }
+
+  // MARK: Energy use
+
+  /// The panel's Energy use row measures from opening to closing at the panel's pace, and a panel
+  /// without a meter has no row.
+  func testTheEnergyRowMeasuresOnlyWhileThePanelIsOpen() {
+    let source = Source(input())
+    let monitor = EnergyUsageMonitor(source: nil)
+    let meter = MenuBarEnergyMeter(monitor: monitor, showsInMenuBar: false)
+    source.energy = meter
+    let controller = makeController(source)
+    XCTAssertFalse(controller.hasEnergy)
+    XCTAssertFalse(meter.isPanelOpen)
+
+    controller.start()
+    XCTAssertTrue(controller.hasEnergy)
+    XCTAssertTrue(meter.isPanelOpen)
+    XCTAssertEqual(controller.energy?.status, .unavailable, "Without the kernel interface the row says so")
+
+    controller.stop()
+    XCTAssertFalse(meter.isPanelOpen, "Closing the panel ends its pace")
+    XCTAssertNil(controller.energy)
+
+    let bare = makeController(Source(input()))
+    bare.start()
+    XCTAssertFalse(bare.hasEnergy)
+    XCTAssertNil(bare.energy)
   }
 
   func testAFavoriteSavedFromTheMenuBarShowsInAnOpenControlPanel() async throws {

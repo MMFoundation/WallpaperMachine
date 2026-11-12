@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// Settings › General: the interface language, how the Library plays its previews, what a click on the menu bar icon opens,
+/// whether the menu bar shows the app's energy use,
 /// what happens at login and after applying a wallpaper, the way back to the welcome guide, resetting every setting, and
 /// translating Workshop searches into English.
 struct GeneralSettingsSection: View {
@@ -25,6 +26,12 @@ struct GeneralSettingsSection: View {
     note:
       "The panel shows what is playing on each display, its controls and a quick switcher. Right-click or Control-click the icon for the menu either way.",
     keywords: ["Shows the panel", "Shows the menu"])
+  static let menuBarEnergy = SettingsItem(
+    id: "general.menu-bar-energy", section: .general, group: interface,
+    title: "Show energy use in the menu bar",
+    note:
+      "Shows what this app draws now beside the menu bar icon, measured every few seconds. The menu bar panel shows it either way.",
+    keywords: ["Energy use"])
   static let launchAtLogin = SettingsItem(
     id: "general.launch-at-login", section: .general, group: startup, title: "Launch at login",
     keywords: [
@@ -47,7 +54,7 @@ struct GeneralSettingsSection: View {
     keywords: ["Reset…", "Restore defaults"])
 
   static let items = [
-    language, libraryPreviewsOnHover, statusItemClick, translateSearches, launchAtLogin, hideAfterApplying, welcomeGuide,
+    language, libraryPreviewsOnHover, statusItemClick, menuBarEnergy, translateSearches, launchAtLogin, hideAfterApplying, welcomeGuide,
     resetAll,
   ]
 
@@ -62,6 +69,7 @@ struct GeneralSettingsSection: View {
           SettingsSwitchControl(key: .libraryPreviewsOnHover)
         }
         SettingsRow(Self.statusItemClick) { statusItemClickMenu }
+        SettingsRow(Self.menuBarEnergy) { SettingsSwitchControl(key: .menuBarEnergy) }
       }
       SettingsGroup(Self.translation, in: .general) { SearchTranslationSettingsRow() }
       SettingsGroup(Self.startup, in: .general) {

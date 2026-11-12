@@ -247,8 +247,9 @@ the rest opens in a popover from the ⓘ beside the title.
   filters, app rules and **When another app is in front** (its **Pause on battery**
   included) keep to their own rows
   ([performance](performance.md#low-battery-low-power-mode-heat-and-focus)).
-- **General** starts with the [Language](#language) picker and **Clicking the menu bar icon**
-  ([menu bar panel](#menu-bar-panel)) under Interface, then Translation
+- **General** starts with the [Language](#language) picker, **Clicking the menu bar icon**
+  ([menu bar panel](#menu-bar-panel)) and **Show energy use in the menu bar**
+  ([below](#energy-use-in-the-menu-bar)) under Interface, then Translation
   (**Translate Workshop searches into English**, see
   [Workshop](workshop-downloads.md#searching-in-another-language)), then Startup
   (**Launch at login** and **Hide window after applying a wallpaper**), Help (the
@@ -770,6 +771,12 @@ last, else the control panel's target display, else the main one. Below the pick
   **Show other wallpapers** then draws from that pool.
 - **Recently used**: the four wallpapers used on the display most recently, other than the one
   it shows; a click applies one again.
+- **Energy use**: what the app draws now, as Settings → Performance measures it
+  ([Energy use](performance.md#energy-use)): the total, its grade or, for a figure a plain video
+  or a busy GPU qualifies, the caveat's title, and the battery share on a Mac with a battery. CPU,
+  GPU and the caveat's note are in its tooltip and what VoiceOver reads; there is no before-and-after
+  comparison. It reads **Measuring…** for the first few seconds unless the menu bar figure was
+  already measuring, and **Unavailable on this Mac** where the kernel's counters cannot be read.
 - A passive **update row** when an update is available, downloading, verifying, ready,
   deferred, needs attention or was just installed. It opens Settings → About after
   dismissing the popover. It remains available even if no display can play a wallpaper;
@@ -792,6 +799,24 @@ hold and draw it; `AppDelegate+StatusPanel` routes the click and carries out its
 The large cover ignores pointer hit testing so aspect-filled artwork cropped to 16:9 cannot
 intercept clicks on the display picker above it.
 Tests: `StatusPanelModelTests`, `StatusPanelControllerTests` and `StatusPanelRenderTests`.
+
+#### Energy use in the menu bar
+
+**Settings → General → Show energy use in the menu bar** (off by default, saved as
+`WallpaperMachine.menuBarEnergy`, kept by a [backup](backup-restore.md) and turned off by **Reset all
+settings**) puts the app's power beside the menu bar icon, `840 mW` or `1.2 W` in the menu bar's
+font with steady digits, `…` until the first reading. A figure a plain video or a busy GPU
+qualifies is drawn dimmed; the tooltip gives the grade or caveat, CPU, GPU and the battery share.
+On a Mac that cannot measure the icon stays alone. The figure follows the switch at once.
+
+One `MenuBarEnergyMeter` (`App/Services/Diagnostics/MenuBarEnergy.swift`) owns an
+`EnergyUsageMonitor` for both the figure and the panel's row, separate from Settings' readout. It
+samples every 5 s for the figure and every 2 s while the panel is open; a change of pace keeps the
+samples it holds, so opening the panel with the figure on shows a reading at once. With the figure
+off and the panel closed no timer exists. While nobody is at the Mac (displays asleep, session
+locked; `WallpaperPresentationPolicy.onAttendanceChanged`) the figure is dropped and nothing samples.
+`AppDelegate+MenuBarEnergy` draws it. Tests: `MenuBarEnergyMeterTests`, `EnergyReadoutTests` and
+the status panel's tests.
 
 ## Deleting wallpapers
 

@@ -15,7 +15,7 @@ struct StatusPanelRoot: View {
 
 /// The panel a click on the menu bar icon opens: the chosen display's wallpaper with its state,
 /// favorite heart and transport, its own volume, a quick switcher of eight wallpapers, the ones
-/// used there recently, and the way to the control panel, Settings and Quit.
+/// used there recently, what the app draws now, and the way to the control panel, Settings and Quit.
 ///
 /// It only draws and starts `StatusPanelController`'s typed actions. Covers come from the image
 /// pipeline once their stamps are read, never a full-size preview or a live render, and nothing in
@@ -48,6 +48,7 @@ struct StatusPanelView: View {
         if panel.wallpaper != nil { StatusPanelSound() }
         StatusPanelSwitcher()
         if !panel.recent.isEmpty { StatusPanelRecent() }
+        if controller.hasEnergy { StatusPanelEnergy() }
       }
       if let update = panel.update {
         Button { controller.openUpdates() } label: {
@@ -381,6 +382,79 @@ private struct StatusPanelRecentRow: View {
     .disabled(controller.isBusy(key))
     .onHover { isHovering = $0 }
     .accessibilityLabel(Text(verbatim: wallpaper.title))
+  }
+}
+
+/// What this app draws now, as Settings › Performance › Energy use measures it, while the panel is
+/// open. Its own view, so a reading every two seconds redraws only this row.
+private struct StatusPanelEnergy: View {
+  @Environment(StatusPanelController.self) private var controller
+
+  var body: some View {
+    if let energy = controller.energy { StatusPanelEnergyReading(reading: energy) }
+  }
+}
+
+/// The figure and its grade on one line, a caveat in place of the grade, and the battery share
+/// below. CPU and GPU are in the tooltip and what VoiceOver reads; the row is not announced as it
+/// changes, which would speak every two seconds.
+struct StatusPanelEnergyReading: View {
+  let reading: EnergyReadout
+
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      StatusPanelCaption(text: Text("Energy use"))
+      switch reading.status {
+      case .unavailable:
+        Text("Unavailable on this Mac").font(.system(size: 12)).foregroundStyle(theme.surface.muted.color)
+      case .measuring:
+        Text("Measuring…").font(.system(size: 12)).foregroundStyle(theme.surface.muted.color)
+      case .ready:
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text(verbatim: EnergyReadout.milliwatts(reading.totalMilliwatts))
+            .font(.system(size: 15, weight: .semibold).monospacedDigit())
+            .foregroundStyle(reading.caveats.isEmpty ? theme.surface.text.color : theme.surface.muted.color)
+            .lineLimit(1)
+            .fixedSize()
+          if let caveat = reading.caveats.first {
+            Text(verbatim: caveat.title)
+              .font(.system(size: 11.5))
+              .foregroundStyle(theme.surface.muted.color)
+              .lineLimit(1)
+              .truncationMode(.tail)
+          } else if let level = reading.level, let title = reading.levelTitle {
+            HStack(spacing: 5) {
+              Circle().fill(tint(for: level)).frame(width: 7, height: 7)
+              Text(verbatim: title).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
+            }
+            .foregroundStyle(tint(for: level))
+          }
+          Spacer(minLength: 0)
+        }
+        if reading.caveats.isEmpty, let share = reading.batteryShareNote {
+          Text(verbatim: share)
+            .font(.system(size: 11.5))
+            .foregroundStyle(theme.surface.muted.color)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .help(reading.summary)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text("Energy use"))
+    .accessibilityValue(Text(verbatim: reading.summary))
+    .accessibilityIdentifier("status-panel-energy")
+  }
+
+  private func tint(for level: EnergyLevel) -> Color {
+    switch level {
+    case .low: theme.surface.approved.color
+    case .medium: theme.surface.warning.color
+    case .high: theme.surface.danger.color
+    }
   }
 }
 

@@ -121,6 +121,8 @@ extension AppDelegate: StatusPanelSource {
         return StatusPanelModel.Volume(wallpaperID: wallpaperID, volume: Double(options.volume), muted: options.muted)
     }
 
+    var statusPanelEnergy: MenuBarEnergyMeter? { menuBarEnergy }
+
     // MARK: Helpers
 
     /// As `runAutomation` runs a menu item's command, but awaited, so the panel can say what failed.

@@ -25,6 +25,13 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-12 — Menu bar energy use (issue 188)
+
+- Added Settings → General → Show energy use in the menu bar (off by default) and an Energy use row in the menu bar panel, both from one MenuBarEnergyMeter (5 s for the figure, 2 s with the panel open, nothing while unattended).
+- Targeted: python3 scripts/test.py --only MenuBarEnergyMeterTests --only EnergyReadoutTests --only StatusPanelControllerTests --only StatusPanelRenderTests --only WallpaperPresentationPolicyTests --only SettingsSectionsRenderTests --only EnergyUsageMonitorTests --only WallpaperBackupTests: 155 passed.
+- Gate: python3 scripts/test.py: 4897 passed, 0 failed, 68 skipped.
+- Not checked: the status item drawn in the real menu bar (no desktop run, no Release build); the figure's width beside other menu bar items.
+
 ## 2026-11-12 — Integrate Steam sign-in retry recovery
 
 - Integrated the fix from fix/steam-sign-in-retry-186 onto current main; removed an obsolete sign-in-only assertion and documentation after that API was removed.
@@ -112,14 +119,3 @@ Adds Reduce volume beside Mute under When another app plays sound, with a Reduce
 - Parallel full gate: 4722 passed, 5 timing/session failures, 66 skipped.
 - python3 scripts/test.py --serial: 4727 passed, 0 failed, 66 skipped; one runtime warning.
 - Opt-in media/network and desktop UI checks were not run; visual behavior was not manually checked.
-
-## 2026-11-10 — Steam QR-code sign-in and native Workshop downloads
-
-Downloads signed in with a QR code run through the app's own Steam client (App/Services/Steam/) instead of SteamCMD; the Rust bridge unpacks depot content (decompress_steam_content).
-
-- `python3 scripts/test.py` — 4830 tests: 4759 passed, 70 skipped, 1 failed: WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem, which fails the same way on main without this change
-- `python3 scripts/check_rust.py` — passed; `cargo test -p wallpaper-bridge steam_content` — 3 passed (zstd, VZip LZMA, zip stored/deflated, CRC and truncation)
-- `python3 scripts/test.py --only Steam…Tests NativeWorkshopDownloadTests` — 23 passed against a scripted Steam: QR flow, logon, Multi routing, manifests, chunks, unsafe paths, PICS, queue import, shared connection, refused token
-- `WALLPAPER_MACHINE_NETWORK_TESTS=1 WALLPAPER_MACHINE_STEAM_TOKEN_FILE=… python3 scripts/test.py --only SteamNativeLiveTests` — 2 passed against live Steam (QR session; logon with a QR token and download of Workshop item 3521337568); the later depot-431961 chunk check was not run live
-- Manual Debug-build run: QR sign-in from the panel, 8 Workshop items and the shared scene assets downloaded and imported natively; the log shows no SteamCMD run and no staging left behind
-- Not covered: welcome guide has no QR option yet; no free-space check before the ~800 MB scene depot; native jobs restart from zero after a pause

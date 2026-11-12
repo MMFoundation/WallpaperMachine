@@ -29,6 +29,7 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.configureStatusItemClick() }
         }
+        installMenuBarEnergy()
     }
 
     /// An item created while Launch Services is still starting the app can stay out of the menu
