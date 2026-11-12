@@ -192,20 +192,8 @@ struct InstalledTile: View {
   private func markBadges(_ marks: LibraryTileMarks) -> some View {
     if marks.isApproved || marks.hasUpdate {
       HStack(spacing: 4) {
-        if marks.isApproved {
-          TileMarkChip(
-            systemImage: "trophy.fill", glyph: theme.surface.markApproved.color,
-            fill: theme.surface.markFill.color
-          )
-          .help(L("Approved by Wallpaper Engine"))
-        }
-        if marks.hasUpdate {
-          TileMarkChip(
-            systemImage: "arrow.down", glyph: theme.accent.onPrimary.color,
-            fill: theme.accent.primary.color
-          )
-          .help(L("Update available"))
-        }
+        if marks.isApproved { TileMarkChip(.approved) }
+        if marks.hasUpdate { TileMarkChip(.update) }
       }
     }
   }
@@ -267,7 +255,7 @@ private struct TileCheck: View {
     let isFilled = isOn || isArming
     Button(action: action) {
       // An unticked check is a hollow ring, as in Photos; the mark appears once it is ticked.
-      Image(systemName: "checkmark")
+      Image(systemName: LibraryTileChrome.checkSymbol)
         .font(.system(size: 12, weight: .bold))
         .foregroundStyle(theme.accent.onPrimary.color)
         .opacity(isOn ? 1 : 0)

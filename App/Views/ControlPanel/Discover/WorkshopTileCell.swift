@@ -107,34 +107,10 @@ struct WorkshopTileCell: View {
 
   // MARK: Marks
 
-  /// A mark in the tile's top corner, in the order they stack.
-  enum Mark: Hashable {
-    /// The wallpaper is in the library.
-    case installed
-    /// Wallpaper Engine's staff approved it.
-    case approved
-    /// The installed copy is one of the favorites.
-    case favorite
-    /// The signed-in Steam account subscribes to it.
-    case subscribed
-    /// A Workshop preset: values for another wallpaper, which a download fetches with it.
-    case preset
-
-    @MainActor
-    var label: String {
-      switch self {
-      case .installed: L("In your library")
-      case .approved: L("Approved by Wallpaper Engine")
-      case .favorite: L("Favorite")
-      case .subscribed: L("Subscribed on Steam")
-      case .preset: L("Preset")
-      }
-    }
-  }
-
-  static func marks(of tile: WorkshopTile) -> [Mark] {
-    var marks: [Mark] = []
-    if tile.isInstalled { marks.append(.installed) }
+  /// The marks in the tile's top corner, in the order they stack.
+  static func marks(of tile: WorkshopTile) -> [TileMark] {
+    var marks: [TileMark] = []
+    if tile.isInstalled { marks.append(.inLibrary) }
     if tile.item.isApproved { marks.append(.approved) }
     if tile.isFavorite { marks.append(.favorite) }
     if tile.isSubscribed { marks.append(.subscribed) }
@@ -143,54 +119,21 @@ struct WorkshopTileCell: View {
   }
 
   /// "Title, Scene, In your library, Favorite": what VoiceOver reads for the tile.
-  private func accessibilityLabel(marks: [Mark]) -> String {
+  private func accessibilityLabel(marks: [TileMark]) -> String {
     ([item.title, item.kindLabel] + marks.map(\.label)).joined(separator: ", ")
   }
 }
 
 /// The marks of a tile, stacked in its top leading corner as small round chips.
 private struct MarkStack: View {
-  let marks: [WorkshopTileCell.Mark]
-
-  @Environment(\.panelTheme) private var theme
+  let marks: [TileMark]
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
       ForEach(marks, id: \.self) { mark in
-        chip(mark)
+        TileMarkChip(mark)
       }
     }
-  }
-
-  private func chip(_ mark: WorkshopTileCell.Mark) -> some View {
-    let fill: Color
-    let glyph: Color
-    let symbol: String
-    switch mark {
-    case .installed:
-      fill = theme.accent.primary.color
-      glyph = theme.accent.onPrimary.color
-      symbol = "checkmark"
-    case .approved:
-      fill = theme.surface.markFill.color
-      glyph = theme.surface.markApproved.color
-      symbol = "trophy.fill"
-    case .favorite:
-      fill = theme.surface.markFill.color
-      glyph = theme.surface.heart.color
-      symbol = "heart.fill"
-    case .subscribed:
-      fill = theme.surface.markFill.color
-      glyph = theme.surface.markGlyph.color
-      symbol = "bookmark.fill"
-    case .preset:
-      fill = theme.surface.markFill.color
-      glyph = theme.surface.markGlyph.color
-      symbol = "slider.horizontal.3"
-    }
-    return TileMarkChip(systemImage: symbol, glyph: glyph, fill: fill)
-      .help(mark.label)
-      .accessibilityHidden(true)
   }
 }
 

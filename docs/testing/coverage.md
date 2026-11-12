@@ -28,8 +28,8 @@ is linked from the domain; the shared limits are collected at the end.
   and the Dock wear it and the person's own choices are kept. `PanelThemeTests` derive
   the palettes from the preferences, the season and the resolved appearance, and
   `SurfacePaletteTests` hold every tone's and the Halloween look's palettes to the
-  contrast floor, and keep what lies over a picture (scrims, mark and ring discs, a tile's
-  controls) the same in every look and readable over a white picture. `PanelFontTests` (Panel) keep the type scale in order from page title to a
+  contrast floor, and keep what lies over a picture (scrims, mark and ring discs, a mark's trophy
+  and heart, a tile's controls) the same in every look and readable over a white picture. `PanelFontTests` (Panel) keep the type scale in order from page title to a
   tile's mark with no words under 10 points, and check that what AppKit measures with a role's
   `nsFont` and `lineHeight` is what SwiftUI draws: the caption height the Library grid reserves
   under a tile, and the room a property row keeps for its Modified or Not applied pill.
@@ -1389,7 +1389,9 @@ never to `.shared`.
   (ticks, ranges and the hold-and-sweep gesture),
   `LibraryGridGeometryTests`, `LibraryTileRulesTests` (which empty state names what hides the
   tiles, a Workshop link or id that is not installed among them, but not an id being typed or one
-  too short for Discover to look up), `TileGridLayoutTests` (at least three
+  too short for Discover to look up; a wallpaper in the library never wears the tick's symbol or
+  the accent disc in any tone, appearance or accent, a mark for what the wallpaper is or has looks
+  the same in every tone, season and appearance, and every tile mark is an SF Symbol), `TileGridLayoutTests` (at least three
   columns, arrow keys held at the ends, and the key rule: Return or Space a click and
   Command-Return the double click where the grid has one; that the Steam Workshop and pixiv pages
   give their grids one is checked by hand in [manual smoke](manual-smoke.md)),

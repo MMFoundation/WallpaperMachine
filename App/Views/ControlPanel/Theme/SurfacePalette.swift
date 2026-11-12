@@ -52,6 +52,9 @@ struct SurfacePalette: Equatable, Sendable {
   /// The approved trophy on that dark disc: a bright green in both appearances, since the
   /// light-appearance `approved` green is too dark to read on it.
   let markApproved: PanelColor
+  /// A favorite's heart on that dark disc: a light pink in both appearances, since `heart` is too
+  /// dark to read on it over a bright picture.
+  let markHeart: PanelColor
   /// What darkens a picture under a status: `scrim` under one that brings its own disc (a
   /// download ring, an apply that waits), `scrimStrong` under words drawn straight on the picture
   /// (Applying), and `scrimSubtle` under a ticked tile's controls.
@@ -138,6 +141,7 @@ struct SurfacePalette: Equatable, Sendable {
     markFillHover = PanelColor(rgb: 0, alpha: 0.72)
     markGlyph = PanelColor(rgb: 0xffffff)
     markApproved = PanelColor(rgb: 0x5cf27c)
+    markHeart = PanelColor(rgb: 0xffb3c8)
     scrim = PanelColor(rgb: 0, alpha: 0.4)
     scrimStrong = PanelColor(rgb: 0, alpha: 0.58)
     scrimSubtle = PanelColor(rgb: 0, alpha: 0.18)

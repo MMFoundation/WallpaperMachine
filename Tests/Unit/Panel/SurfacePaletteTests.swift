@@ -109,8 +109,8 @@ final class SurfacePaletteTests: XCTestCase {
     func overlays(_ palette: SurfacePalette) -> [PanelColor] {
       [
         palette.scrim, palette.scrimStrong, palette.scrimSubtle, palette.markFill,
-        palette.markFillHover, palette.markGlyph, palette.markApproved, palette.controlFill,
-        palette.controlRim,
+        palette.markFillHover, palette.markGlyph, palette.markApproved, palette.markHeart,
+        palette.controlFill, palette.controlRim,
       ]
     }
     let reference = overlays(SurfacePalette(tone: .neutral, appearance: .light))
@@ -144,6 +144,11 @@ final class SurfacePaletteTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(
       glyph.contrast(with: over(palette.scrimStrong)), 4.5, "Applying, straight on the scrim")
     XCTAssertGreaterThanOrEqual(glyph.contrast(with: over(palette.controlFill)), 3, "a tile's check")
+    // A mark's trophy and heart are graphics, not words: 3:1 against the disc they sit on.
+    XCTAssertGreaterThanOrEqual(
+      palette.markApproved.contrast(with: over(palette.markFill)), 3, "the trophy on a mark's disc")
+    XCTAssertGreaterThanOrEqual(
+      palette.markHeart.contrast(with: over(palette.markFill)), 3, "the heart on a mark's disc")
     XCTAssertEqual(glyph, white)
 
     let darkness = [

@@ -106,31 +106,16 @@ private struct PixivTileArtwork: View {
   }
 }
 
-/// The marks in a tile's top leading corner: the saved check, and on a compact tile R-18 beneath
-/// it, where no other corner's mark can meet them.
+/// The marks in a tile's top leading corner: the library mark of a saved page, and on a compact tile
+/// R-18 beneath it, where no other corner's mark can meet them.
 private struct PixivTileLeadingMarks: View {
   let corners: PixivTileCorners
 
   var body: some View {
     VStack(alignment: .leading, spacing: 3) {
-      if corners.showsSaved { PixivSavedMark(isCompact: corners.isCompact) }
+      if corners.showsSaved { TileMarkChip(.inLibrary, isCompact: corners.isCompact) }
       if corners.isCompact, corners.showsMature { PixivMatureBadge(isCompact: true) }
     }
-  }
-}
-
-/// The check in the corner of a tile of which a page is in the library.
-private struct PixivSavedMark: View {
-  let isCompact: Bool
-
-  var body: some View {
-    Image(systemName: "checkmark")
-      .font(.system(size: isCompact ? 8 : 9.5, weight: .bold))
-      .foregroundStyle(.white)
-      .frame(width: isCompact ? 16 : 20, height: isCompact ? 16 : 20)
-      .background(.black.opacity(0.6), in: Circle())
-      .help(L("In your library"))
-      .accessibilityHidden(true)
   }
 }
 

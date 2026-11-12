@@ -94,7 +94,8 @@ R-18 ranking denials have the account-specific handling described below.
 
 Selecting a tile fetches the work's page list; the inspector shows the page
 whole, the artist's name (a link to their pixiv page), a page stepper for works with
-several, **Download** (or **Download page N**) and **View on pixiv**; a saved page
+several (with the Library tab's grid symbol beside a page that is already in the library, the
+mark its tile wears too), **Download** (or **Download page N**) and **View on pixiv**; a saved page
 offers **Apply wallpaper** (or **Reapply wallpaper**) as its primary button, the Installed
 inspector's own, whose help names the target display while two or more displays can show
 their own wallpaper ([Selection versus apply](control-panel.md#selection-versus-apply)), and

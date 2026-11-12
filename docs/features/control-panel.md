@@ -398,7 +398,7 @@ disclosures and the library view (Favorites or a collection) are not restored.
 
 ## Thumbnail corner marks
 
-Installed and Discover tiles wear status marks as small round badges:
+Installed, Discover and pixiv tiles wear status marks as small round badges:
 
 - A pink heart identifies a local favorite, including the same item when it
   appears in Discover. On Installed it is the heart button in the tile's upper-right
@@ -412,17 +412,19 @@ Installed and Discover tiles wear status marks as small round badges:
   for imported wallpapers.
 - A download arrow on Installed marks a Workshop wallpaper whose author has
   published an update ([Updates](workshop-downloads.md#updates)).
-- Discover also retains a check for items already in the library, marks what the
+- Discover and pixiv mark a wallpaper already in the library with the Library tab's own
+  grid symbol, so it is never taken for a ticked tile; Discover also marks what the
   signed-in Steam account subscribes to with a bookmark
   ([subscriptions](workshop-downloads.md#subscriptions)) and a Workshop preset with
   sliders ([presets](workshop-downloads.md#workshop-presets)).
 
-On Discover the marks stack in the upper-left corner. On Installed the trophy and the
-update arrow sit in the lower-right corner, clear of the selection check in the
-upper-left corner, which the Active or Other display capsule sits beside. Both draw
-each mark as the same small round chip: a glyph on a dark disc in either appearance
-(a bright green trophy), and an accent-filled disc for Discover's library check and
-Installed's update arrow. VoiceOver reads the marks with the tile.
+On Discover and pixiv the marks stack in the upper-left corner. On Installed the trophy and
+the update arrow sit in the lower-right corner, clear of the selection check in the
+upper-left corner, which the Active or Other display capsule sits beside. All three draw
+each mark as the same small round chip, smaller on a compact pixiv tile: a glyph on a dark
+disc in either appearance (a bright green trophy, a pink heart). An accent-filled disc is only
+ever Installed's selection tick and its update arrow, something to act on. VoiceOver reads
+the marks with the tile.
 
 ## Selection versus apply
 

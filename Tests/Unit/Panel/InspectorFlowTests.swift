@@ -280,7 +280,9 @@ final class InspectorFlowTests: InspectorTestCase {
     let dynamic =
       [WallpaperCompatibilityCheck.Status.ok, .warning, .unavailable, .unknown].map(InspectorGlyphs.compatibility)
       + [InspectorWording.LetterboxGlyph.ok, .info, .unclear, .failed].map(InspectorGlyphs.letterbox)
-    let shared = [ApplyOffer.symbol, ApplyOffer.reapplySymbol] + DownloadRowAction.allCases.map(\.systemImage)
+    let shared =
+      [ApplyOffer.symbol, ApplyOffer.reapplySymbol, TileMark.inLibrary.systemImage]
+      + DownloadRowAction.allCases.map(\.systemImage)
     let fixed = [
       "photo", "heart", "heart.fill", "ellipsis", "arrow.clockwise", "eye", "folder",
       "display.2", "text.badge.plus", "text.badge.minus", "arrow.triangle.2.circlepath",

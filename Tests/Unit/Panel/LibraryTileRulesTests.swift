@@ -55,6 +55,58 @@ final class LibraryTileRulesTests: PanelTestCase {
     XCTAssertEqual(LibraryTileMarks(LibraryRows.row("c"), isFavorite: false).names, [])
   }
 
+  /// A wallpaper that is in the library and a ticked tile must never look alike: the library mark is
+  /// another symbol than the tick, on a disc that is never the accent's, whatever the tone, the
+  /// appearance and the accent (a light one included, whose fill is darkest).
+  func testAWallpaperInYourLibraryNeverWearsTheTick() {
+    XCTAssertNotEqual(TileMark.inLibrary.systemImage, LibraryTileChrome.checkSymbol)
+    XCTAssertFalse(
+      TileMark.allCases.map(\.systemImage).contains(LibraryTileChrome.checkSymbol),
+      "no mark is drawn with the tick")
+    for tone in [AppThemePreferences.Tone.neutral, .warm, .cool] {
+      for appearance in [PanelAppearance.light, .dark] {
+        for accent in ["#007aff", "#ffcc00", "#1d1d1f"] {
+          var preferences = AppThemePreferences()
+          preferences.tone = tone
+          preferences.accent = accent
+          let theme = PanelTheme(preferences: preferences, appearance: appearance)
+          let context = "\(tone) \(appearance) \(accent)"
+          XCTAssertNotEqual(TileMark.inLibrary.look(in: theme).fill, theme.accent.primary, context)
+          XCTAssertEqual(
+            TileMark.inLibrary.look(in: theme).fill, TileMark.subscribed.look(in: theme).fill,
+            "\(context): the dark disc of every information mark")
+        }
+      }
+    }
+  }
+
+  /// A mark lies over a picture of any colour, so what the wallpaper is or has (in the library,
+  /// approved, a favorite, subscribed, a preset) looks the same in every tone, season and
+  /// appearance; only the update arrow, something to act on, wears the accent.
+  func testAnInformationMarkLooksTheSameInEveryLook() {
+    let information = TileMark.allCases.filter { $0 != .update }
+    func looks(_ theme: PanelTheme) -> [PanelColor] {
+      information.flatMap { mark in [mark.look(in: theme).glyph, mark.look(in: theme).fill] }
+    }
+    let reference = looks(PanelTheme(appearance: .light))
+    for appearance in [PanelAppearance.light, .dark] {
+      for tone in [AppThemePreferences.Tone.neutral, .warm, .cool] {
+        var preferences = AppThemePreferences()
+        preferences.tone = tone
+        let theme = PanelTheme(preferences: preferences, appearance: appearance)
+        XCTAssertEqual(looks(theme), reference, "\(tone) \(appearance)")
+      }
+      let halloween = PanelTheme(season: .halloween, appearance: appearance)
+      XCTAssertEqual(looks(halloween), reference, "Halloween \(appearance)")
+    }
+  }
+
+  func testEverySymbolATileMarkOrItsTickDrawsIsInTheSymbolSet() {
+    for name in TileMark.allCases.map(\.systemImage) + [LibraryTileChrome.checkSymbol] {
+      XCTAssertNotNil(NSImage(systemSymbolName: name, accessibilityDescription: nil), "\(name) is not an SF Symbol")
+    }
+  }
+
   // MARK: Controls, pill and emphasis
 
   private func chrome(

@@ -331,7 +331,7 @@ extension PixivNotice where Trailing == EmptyView {
   }
 }
 
-/// Previous page, "Page 2 of 3" with a check when that page is saved, and next page.
+/// Previous page, "Page 2 of 3" with the library mark when that page is saved, and next page.
 private struct PixivPageStepper: View {
   let selection: PixivSelection
 
@@ -349,10 +349,11 @@ private struct PixivPageStepper: View {
           .font(.panel(.label).monospacedDigit())
           .foregroundStyle(theme.surface.text.color)
         if selection.isSaved {
-          Image(systemName: "checkmark.circle.fill")
+          // The grid's mark for a page in the library, not a tick or the green of approval.
+          Image(systemName: TileMark.inLibrary.systemImage)
             .font(.system(size: 12))
-            .foregroundStyle(theme.surface.approved.color)
-            .help(L("In your library"))
+            .foregroundStyle(theme.surface.muted.color)
+            .help(TileMark.inLibrary.label)
         }
       }
       .accessibilityElement(children: .ignore)

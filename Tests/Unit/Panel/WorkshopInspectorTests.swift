@@ -159,23 +159,18 @@ final class WorkshopInspectorTests: MediaPanelTestCase {
         isInstalled: installed, isFavorite: favorite, download: nil)
     }
     XCTAssertEqual(WorkshopTileCell.marks(of: tile()), [])
-    XCTAssertEqual(WorkshopTileCell.marks(of: tile(installed: true)), [.installed])
+    XCTAssertEqual(WorkshopTileCell.marks(of: tile(installed: true)), [.inLibrary])
     XCTAssertEqual(WorkshopTileCell.marks(of: tile(tags: ["Scene", "Approved"])), [.approved])
     XCTAssertEqual(
       WorkshopTileCell.marks(of: tile(installed: true, favorite: true, tags: ["Approved"])),
-      [.installed, .approved, .favorite], "the check, the trophy, then the heart")
+      [.inLibrary, .approved, .favorite], "the library mark, the trophy, then the heart")
     XCTAssertEqual(WorkshopTileCell.marks(of: tile(tags: ["Scene", "Preset"])), [.preset])
     var subscribed = tile()
     subscribed.isSubscribed = true
     XCTAssertEqual(WorkshopTileCell.marks(of: subscribed), [.subscribed])
     XCTAssertEqual(
       WorkshopTileCell.marks(of: tile(installed: true, tags: ["Preset", "Approved"])),
-      [.installed, .approved, .preset], "a preset is marked after what it shares with any wallpaper")
-    XCTAssertEqual(WorkshopTileCell.Mark.installed.label, "In your library")
-    XCTAssertEqual(WorkshopTileCell.Mark.approved.label, "Approved by Wallpaper Engine")
-    XCTAssertEqual(WorkshopTileCell.Mark.favorite.label, "Favorite")
-    XCTAssertEqual(WorkshopTileCell.Mark.preset.label, "Preset")
-    XCTAssertEqual(WorkshopTileCell.Mark.subscribed.label, "Subscribed on Steam")
+      [.inLibrary, .approved, .preset], "a preset is marked after what it shares with any wallpaper")
   }
 
   func testVoiceOversActionForATileIsNamedForWhatTheDoubleClickDoes() throws {

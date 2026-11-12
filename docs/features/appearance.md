@@ -19,7 +19,9 @@ the resolved light or dark appearance: `AccentPalette` fits the accent's fills, 
 rings and label colour for contrast, and `SurfacePalette` gives the tone's backgrounds,
 text and semantic colours. What lies over a picture (a tile's marks, its download or apply
 status and the darkening under it, its check and heart) is dark and white in every tone, season
-and appearance, since the picture under it can be any colour. The panel's root applies them to every view below it and
+and appearance, since the picture under it can be any colour; a mark's trophy and heart are a
+bright green and a light pink in every look, and only a favorite's switched-on heart button,
+pink on a white disc, follows the appearance. The panel's root applies them to every view below it and
 sets the accent as the tint, re-rendering when the stored accent or tone changes, when
 the resolved appearance flips and when the language does. It reads the appearance
 macOS resolved and never sets one itself; `AppDelegate` is the only writer of

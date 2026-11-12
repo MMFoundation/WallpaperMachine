@@ -468,7 +468,7 @@ Wallpaper Engine's own library does:
 | Pulsing shield | Steam or setup needs you | Open the dialog |
 | Dimmed arrow down to a line | Paused, including work restored after relaunch | Resume download |
 | Retry mark | Failed or cancelled | Try again |
-| Small check in the corner | Already in your library | — |
+| The Library tab's grid symbol in the corner | Already in your library | — |
 
 Before any bytes move, the sweeping ring names the current SteamCMD step inside
 it (Preparing, Connecting, Updating, Signing in, Requesting) from the job's
