@@ -57,7 +57,8 @@ App/                               WallpaperMachine application target sources o
                                    and SIGTERM/SIGHUP as a quit (TerminationSignalRelay);
                                    ProcessSignals makes a broken pipe a write error;
                                    the one-copy-per-library lock and the second launch's hand-over
-                                   (InstanceLock, SingleInstance)
+                                   (InstanceLock, SingleInstance); the feature an update introduces once
+                                   (FeatureIntroduction)
     Keychain/                      KeychainGenericPassword: the login-keychain item the pixiv and Steam sign-ins are kept in
     Localization/                  AppLanguage.swift: shipped-language registry and the language preference store;
                                    on-device translation (OnDeviceTranslating, SystemTranslation, TranslationSessionHost)

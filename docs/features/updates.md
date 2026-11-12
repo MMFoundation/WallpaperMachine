@@ -308,7 +308,28 @@ An installation intent is persisted before quitting. On the next launch the actu
 running version, not the helper's existence, confirms success. A passive **Updated to
 version…** notice links back to the notes and can be dismissed. If the previous version
 still runs, the version is held back from automatic retries and the update entry asks
-for attention. No post-update window opens; changelog images are not bundled.
+for attention. No release-notes window opens after an update; changelog images are not
+bundled.
+
+### Feature introductions
+
+A version may introduce one new feature in a window of its own, once, after an update
+(`FeatureIntroduction`, `FeatureIntroductionStore` in `App/Services/Lifecycle/`, the
+window in `App/Views/ControlPanel/FeatureIntroWindow.swift`). Each introduction names the
+newest version without its feature; desktop widgets name 1.10.0.
+
+- It opens on the first launch of a newer version, over the panel when the launch opens
+  it, for anyone whose last launched version is that version or older, however many
+  versions they skipped. Its main button opens the feature's Settings page; **Not now**,
+  Escape and the close button just close it.
+- `WallpaperMachine.lastLaunchedVersion` keeps the newest version launched. Builds before
+  the first introduction never wrote it, so without it an existing user (the first-run
+  guide was seen) counts as coming from an older build, and anyone else as a fresh
+  install, which never sees it.
+- Once on screen it is spent (`WallpaperMachine.featureIntroductionsShown`): neither a
+  relaunch, a downgrade and return, nor any later update shows it again. A launch that
+  ends before the window shows, or whose library failed to open, offers it next time.
+- A quit closes it. Neither key is part of a wallpaper backup.
 
 ### Automatic updates
 

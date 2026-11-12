@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-12 — Desktop widgets introduction after an update
+
+A window that introduces desktop widgets once to people updating from 1.10.0 or older, opening Settings › Desktop Widgets.
+
+- `python3 scripts/test.py --only FeatureIntroductionTests --only FeatureIntroWindowTests --only ActivationPolicyRuleTests` — passed
+- `python3 scripts/test.py` — exit 0; 4990 tests: 4921 passed, 69 skipped
+- Offscreen renders of the window (`FeatureIntroWindowTests.testSnapshotsOnRequest`, `WALLPAPER_MACHINE_FEATURE_INTRO_SNAPSHOTS`) checked by eye in en, zh-Hans, zh-Hant, ja, ko and pt-BR, light and dark
+- Gap: not opened on the desktop; the launch path (window over the panel, Set Up opening Settings › Desktop Widgets, the Dock icon) was not exercised in a running app
+
 ## 2026-11-12 — Desktop widget fonts, effects and clock options
 
 Installed font families, italic, letter spacing, line height and case; gradient fill, accent colour, outline, glow, a configurable shadow, a background plate and rotation; style presets; clock leading zero, AM/PM and stacked layout; clock-face dial marks, numbers and ring. Rebased onto the layers and snapping change (05e13ded); the preview's frame, snapping and the Center buttons use the turned box of a rotated widget.
@@ -102,13 +111,3 @@ Addresses the PR review: CM logon cleanup, endpoint fallback and cancellation; H
 - python3 scripts/test.py --only DesktopWidgetTests --only DesktopWidgetControllerTests --only WidgetsSettingsTests --only LowBatteryTests --only SettingsSectionsLocalizationTests: 49 passed.
 - python3 scripts/test.py: 4779 passed, 66 skipped, 0 failed (run with CLAUDE.md restored temporarily; the working tree has it deleted, which fails test_doc_links).
 - Not checked: how the clock face, month grid and multi-line text look on a real desktop; no Release build.
-
-## 2026-11-11 — Desktop widgets
-
-Clocks and dates drawn on the desktop over any wallpaper (Settings › Desktop Widgets); see [desktop widgets](../features/desktop-widgets.md).
-
-- `python3 scripts/build.py --renderer-only` — OK; the renderer library was stale against the committed bindings (`set_audio_gain`), rebuilt so the app links
-- `python3 scripts/test.py --only DesktopWidgetTests --only DesktopWidgetControllerTests --only WidgetsSettingsTests` (plus the Settings search, localization and window render classes) — 45 passed
-- `python3 scripts/test.py` — exit 0; Python stage OK; 4831 native tests: 4765 passed, 66 skipped, 0 failed
-- The Settings page was drawn off screen in light and dark and checked by eye; the Arrange picture matches the desktop geometry
-- Not checked: widget windows on a real desktop (over scene, video and web wallpapers, across Spaces, with the notch strip, after sleep); no desktop run was authorized. No Release build

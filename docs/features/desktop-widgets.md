@@ -3,7 +3,9 @@
 Clocks, dates and the other widgets the app draws on the desktop, over whatever wallpaper is on
 show. A widget
 belongs to no wallpaper: applying another wallpaper, a playlist change or an automatic rule
-leaves it where it is. They are set up in **Settings › Desktop Widgets**.
+leaves it where it is. They are set up in **Settings › Desktop Widgets**. People who update
+from 1.10.0 or older are introduced to them once, in a window whose **Set Up Desktop Widgets**
+opens that page ([feature introductions](updates.md#feature-introductions)).
 
 ## What the user sees
 

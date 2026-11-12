@@ -22,7 +22,7 @@ final class ActivationPolicyRuleTests: XCTestCase {
     }
 
     func testEachOrdinaryWindowCountsOnScreenOrInTheDock() {
-        let roles: [Window.Role] = [.controlPanel, .update, .preview, .signIn]
+        let roles: [Window.Role] = [.controlPanel, .update, .preview, .signIn, .introduction]
         for role in roles {
             XCTAssertTrue(keepsRegular([window(role, visible: true)]), "\(role) on screen")
             XCTAssertTrue(keepsRegular([window(role, minimized: true)]), "\(role) minimized")

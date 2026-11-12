@@ -18,6 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var wallpaperMenu: NSMenu?
     private(set) var controlPanelWindow: NSWindow?
     private var previewWindow: WallpaperPreviewWindowController?
+    /// The window that introduces a feature once after an update (`FeatureIntroductionStore`).
+    private var featureIntroWindow: NSWindow?
+    private lazy var featureIntroductions = FeatureIntroductionStore()
     let controlPanelNavigation = ControlPanelNavigation()
     private(set) lazy var workshopStore = WorkshopStore()
     private lazy var pixivStore = PixivStore()
@@ -812,6 +815,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in
             if opensPanel { self?.showControlPanel(selection: .wallpaper) }
             if !opened.isEmpty { self?.importOpenedFiles(opened) }
+            self?.showFeatureIntroductionIfDue()
         }
     }
 
@@ -1242,6 +1246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         previewWindow?.session.close()
         previewWindow?.close()
         previewWindow = nil
+        featureIntroWindow?.close()
         // The quit restores the desktop itself; a restore the switch started must not race it.
         restoringDesktopPicture?.cancel()
         desktopWallpaperSync?.suspendForNativeProvider()
@@ -1622,6 +1627,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Closing the panel releases its controller; the stores and the navigation object outlive it,
     /// so opening it again builds a fresh view around them and resumes where it was.
     func windowWillClose(_ notification: Notification) {
+        if let window = notification.object as? NSWindow, window === featureIntroWindow {
+            featureIntroWindow = nil
+            window.contentViewController = nil
+            leaveDockUnlessAWindowIsOpen()
+            return
+        }
         guard let window = notification.object as? NSWindow, window === controlPanelWindow else { return }
 
         controlPanelWindow = nil
@@ -1647,6 +1658,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if window === controlPanelWindow { return .controlPanel }
         if window === updates.window { return .update }
         if window === previewWindow?.window { return .preview }
+        if window === featureIntroWindow { return .introduction }
         if WebSignInWindowController.isOpen(window) { return .signIn }
         return nil
     }
@@ -1708,6 +1720,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func showAboutSettings() {
         controlPanelNavigation.revealSettingsSection(.about)
         showControlPanel(selection: .settings)
+    }
+
+    /// The feature introduction this launch owes, once: after an update into the feature, over the
+    /// panel when the launch opens it. Not while the library failed to open, where its button would
+    /// lead nowhere; the next launch offers it then.
+    private func showFeatureIntroductionIfDue() {
+        guard store != nil, !shutdownInProgress, !shutdownComplete, featureIntroWindow == nil,
+              let introduction = featureIntroductions.due(existingUser: PanelPreferences.welcomeSeen())
+        else { return }
+        let window = FeatureIntroWindow.make(actions: FeatureIntroWindow.Actions(
+            open: { [weak self] in
+                guard let self else { return }
+                // The panel first, so the Dock icon stays while the introduction closes.
+                self.controlPanelNavigation.revealSettingsSection(.widgets)
+                self.showControlPanel(selection: .settings)
+                self.featureIntroWindow?.performClose(nil)
+            },
+            close: { [weak self] in self?.featureIntroWindow?.performClose(nil) }))
+        window.delegate = self
+        window.center()
+        ControlPanelWindow.moveToActiveSpace(window)
+        featureIntroWindow = window
+        NSApp.setActivationPolicy(.regular)
+        ControlPanelWindow.bringForward(window)
+        NSApp.activate(ignoringOtherApps: true)
+        featureIntroductions.didPresent(introduction)
+        AppLog.info("startup: introduced \(introduction.id) after an update")
     }
 
     func showControlPanel(selection: SidebarSelection) {

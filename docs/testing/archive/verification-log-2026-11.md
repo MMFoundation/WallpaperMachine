@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-11 — Desktop widgets
+
+Clocks and dates drawn on the desktop over any wallpaper (Settings › Desktop Widgets); see [desktop widgets](../../features/desktop-widgets.md).
+
+- `python3 scripts/build.py --renderer-only` — OK; the renderer library was stale against the committed bindings (`set_audio_gain`), rebuilt so the app links
+- `python3 scripts/test.py --only DesktopWidgetTests --only DesktopWidgetControllerTests --only WidgetsSettingsTests` (plus the Settings search, localization and window render classes) — 45 passed
+- `python3 scripts/test.py` — exit 0; Python stage OK; 4831 native tests: 4765 passed, 66 skipped, 0 failed
+- The Settings page was drawn off screen in light and dark and checked by eye; the Arrange picture matches the desktop geometry
+- Not checked: widget windows on a real desktop (over scene, video and web wallpapers, across Spaces, with the notch strip, after sleep); no desktop run was authorized. No Release build
+
 ## 2026-11-11 — Reduce volume while another app plays sound (issue 182)
 
 Adds Reduce volume beside Mute under When another app plays sound, with a Reduce volume to slider (0% to 100%, default 30%). The bridge gains a transient audio gain (set_audio_gain) multiplied into each saved volume for scenes, web pages and native video; no saved volume is rewritten.
