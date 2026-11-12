@@ -30,7 +30,7 @@ struct SettingsGroup<Content: View, Accessory: View>: View {
         if let title = group.title {
           HStack(spacing: 8) {
             Text(verbatim: settings.text(title))
-              .font(.system(size: 13, weight: .semibold))
+              .font(.panel(.sectionHeader))
               .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
             accessory

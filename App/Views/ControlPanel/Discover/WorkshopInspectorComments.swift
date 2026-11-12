@@ -14,7 +14,7 @@ struct WorkshopItemComments: View {
       VStack(alignment: .leading, spacing: 10) {
         HStack(spacing: 6) {
           Text("Comments")
-            .font(.system(size: 13, weight: .semibold))
+            .font(.panel(.sectionHeader))
             .accessibilityAddTraits(.isHeader)
           if case .loaded(item.id, let thread) = model.comments, thread.total > 0 {
             CountBadge(count: thread.total)
@@ -24,7 +24,7 @@ struct WorkshopItemComments: View {
         content(model: model)
         Button("Read all comments on Steam") { model.viewOnSteam(item) }
           .buttonStyle(.panelLink)
-          .font(.system(size: 12))
+          .font(.panel(.callout))
       }
       .padding(12)
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -36,32 +36,32 @@ struct WorkshopItemComments: View {
   private func content(model: WorkshopBrowserModel) -> some View {
     if model.comments.itemID != item.id || model.comments == .loading(itemID: item.id) {
       Text("Loading comments…")
-        .font(.system(size: 12))
+        .font(.panel(.callout))
         .foregroundStyle(theme.surface.muted.color)
     } else if case .failed(_, let message) = model.comments {
       Text(verbatim: message)
-        .font(.system(size: 12))
+        .font(.panel(.callout))
         .foregroundStyle(theme.surface.muted.color)
     } else if case .loaded(_, let thread) = model.comments {
       if thread.comments.isEmpty {
         Text("No comments yet")
-          .font(.system(size: 12))
+          .font(.panel(.callout))
           .foregroundStyle(theme.surface.muted.color)
       } else {
         ForEach(Array(thread.comments.enumerated()), id: \.offset) { _, comment in
           VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
               Text(verbatim: comment.author)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.panel(.calloutStrong))
                 .lineLimit(1)
               if let date = comment.date {
                 Text(date, format: .relative(presentation: .named))
-                  .font(.system(size: 11))
+                  .font(.panel(.caption))
                   .foregroundStyle(theme.surface.muted.color)
               }
             }
             Text(verbatim: comment.text)
-              .font(.system(size: 12))
+              .font(.panel(.callout))
               .frame(maxWidth: .infinity, alignment: .leading)
               .textSelection(.enabled)
           }

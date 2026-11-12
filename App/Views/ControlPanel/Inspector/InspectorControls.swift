@@ -125,10 +125,10 @@ struct InspectorSliderRow: View {
     ) { output in
       HStack(spacing: 8) {
         Text(title)
-          .font(.system(size: 13))
+          .font(.panel(.body))
           .frame(maxWidth: .infinity, alignment: .leading)
         Text(verbatim: output)
-          .font(.system(size: 12).monospacedDigit())
+          .font(.panel(.callout).monospacedDigit())
           .foregroundStyle(theme.surface.muted.color)
           .accessibilityHidden(true)
       }

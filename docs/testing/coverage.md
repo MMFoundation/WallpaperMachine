@@ -28,7 +28,10 @@ is linked from the domain; the shared limits are collected at the end.
   and the Dock wear it and the person's own choices are kept. `PanelThemeTests` derive
   the palettes from the preferences, the season and the resolved appearance, and
   `SurfacePaletteTests` hold every tone's and the Halloween look's palettes to the
-  contrast floor.
+  contrast floor. `PanelFontTests` (Panel) keep the type scale in order from page title to a
+  tile's mark with no words under 10 points, and check that what AppKit measures with a role's
+  `nsFont` and `lineHeight` is what SwiftUI draws: the caption height the Library grid reserves
+  under a tile, and the room a property row keeps for its Modified or Not applied pill.
 
 ## Automation
 
@@ -1341,8 +1344,8 @@ never to `.shared`.
   integer and text arguments, reordered and repeated placeholders, a literal percent, English
   fallback, unformatted runtime lookups, the system region kept, the bound store driving the
   language), `SettingsSectionsLocalizationTests`, `PanelThemeTests`, `AccentPaletteTests` (every
-  token equal to the original algorithm's, readable fills, links and rings for every accent) and
-  `SurfacePaletteTests`.
+  token equal to the original algorithm's, readable fills, links and rings for every accent),
+  `SurfacePaletteTests` and `PanelFontTests`.
 - Images: `PanelImagePipelineTests` (covers scaled and read only inside the library, a symlink out
   and a non-image refused, a replaced preview under a new stamp is another image, a cover that
   cannot be made falls back once to the downsampled preview, stills decoded to the view's size

@@ -106,7 +106,7 @@ struct WallpaperTile<Artwork: View>: View {
         .overlay { ring(emphasis, radius: radius) }
       VStack(alignment: .leading, spacing: 1) {
         Text(verbatim: title)
-          .font(.system(size: 12, weight: .semibold))
+          .font(.panel(.calloutStrong))
           .foregroundStyle(theme.surface.text.color)
           .lineLimit(1)
           // The whole title, for one its line cuts short. Shown on every caption: telling a cut one
@@ -114,7 +114,7 @@ struct WallpaperTile<Artwork: View>: View {
           .help(Text(verbatim: title))
         if let subtitle {
           Text(verbatim: subtitle)
-            .font(.system(size: 11))
+            .font(.panel(.caption))
             .foregroundStyle(theme.surface.muted.color)
             .lineLimit(1)
         }

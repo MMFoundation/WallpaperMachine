@@ -162,6 +162,12 @@ How the panel runs (controller, actions, observation, window hosting) is in
   sits. Read these names instead of writing the symbol again.
 - **Colours** come from `\.panelTheme` (`AccentPalette`, `SurfacePalette`) or the
   system's semantic colours; a view never hardcodes a colour value.
+- **Type** comes from the roles of `PanelFont` (`Theme/PanelFont.swift`), named for what the text
+  is (`.title`, `.sectionHeader`, `.body`, `.callout`, `.caption`…): `.font(.panel(.body))`, or
+  `.panelFont(.eyebrow)` where the role also sets capitals and tracking. A size taken from a
+  control's geometry (a glyph in a disc) is `PanelFont.proportional(to:ratio:weight:)`, and
+  AppKit code that measures the panel's text reads the role's `nsFont` or `lineHeight`, so what
+  is measured is what is drawn. A new size that fits no role is a new role, not a literal.
 - **Accessibility.** Every icon-only control has an accessibility label
   (`L("…")`); an error or a status change is announced; the keyboard paths stay
   (grid arrows, Home and End, Return and Space, the Escape chain, Command-F for the

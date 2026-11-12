@@ -21,7 +21,7 @@ struct WorkshopDownloadNotes: View {
             .progressViewStyle(.linear)
             .accessibilityLabel(Text(verbatim: L("\(item.title) download progress")))
           Text(verbatim: download.statusLine)
-            .font(.system(size: 11.5))
+            .font(.panel(.footnote))
             .foregroundStyle(theme.surface.muted.color)
             .textSelection(.enabled)
             .accessibilityAddTraits(.updatesFrequently)
@@ -47,7 +47,7 @@ struct WorkshopDownloadNotes: View {
       if download.showsInDownloads {
         Button("Show in downloads") { downloads.showDownloads() }
           .buttonStyle(.panelLink)
-          .font(.system(size: 12))
+          .font(.panel(.callout))
       }
       if let compatibility = compatibilityNote {
         Text(verbatim: compatibility).noteStyle(theme)
@@ -84,7 +84,7 @@ struct WorkshopDownloadNotes: View {
               .labelStyle(.panelLinkRow)
           }
           .buttonStyle(.panelLink)
-          .font(.system(size: 12))
+          .font(.panel(.callout))
         }
       }
     }
@@ -107,7 +107,7 @@ struct WorkshopDownloadNotes: View {
           .labelStyle(.panelLinkRow)
       }
       .buttonStyle(.panelLink)
-      .font(.system(size: 12))
+      .font(.panel(.callout))
     }
     if controller.canReinstallWorkshopItem(item) {
       Button {
@@ -120,7 +120,7 @@ struct WorkshopDownloadNotes: View {
           .labelStyle(.panelLinkRow)
       }
       .buttonStyle(.panelLink)
-      .font(.system(size: 12))
+      .font(.panel(.callout))
     }
   }
 
@@ -135,7 +135,7 @@ struct WorkshopDownloadNotes: View {
         .labelStyle(.panelLinkRow)
     }
     .buttonStyle(.panelLink)
-    .font(.system(size: 12))
+    .font(.panel(.callout))
   }
 
   // MARK: Compatibility
@@ -174,7 +174,7 @@ private struct UpdateNotice: View {
     let downloads = controller.downloads
     VStack(alignment: .leading, spacing: 8) {
       Text(verbatim: notice.message())
-        .font(.system(size: 12))
+        .font(.panel(.callout))
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityAddTraits(.updatesFrequently)
       switch notice.action {
@@ -210,7 +210,7 @@ private struct UpdateNotice: View {
 private extension Text {
   /// A small muted line, as the inspector's hints are.
   func noteStyle(_ theme: PanelTheme) -> some View {
-    font(.system(size: 11.5))
+    font(.panel(.footnote))
       .foregroundStyle(theme.surface.muted.color)
       .frame(maxWidth: .infinity, alignment: .leading)
       .textSelection(.enabled)

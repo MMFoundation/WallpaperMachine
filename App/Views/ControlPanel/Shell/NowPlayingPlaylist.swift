@@ -55,12 +55,10 @@ private struct NowPlayingPlaylistDetails: View {
     VStack(alignment: .leading, spacing: 12) {
       VStack(alignment: .leading, spacing: 3) {
         Text("Playlist")
-          .font(.system(size: 10, weight: .semibold))
-          .textCase(.uppercase)
-          .tracking(0.4)
+          .panelFont(.eyebrow)
           .foregroundStyle(theme.surface.muted.color)
         Text(verbatim: title(state))
-          .font(.system(size: 15, weight: .semibold))
+          .font(.panel(.headline))
           .foregroundStyle(theme.surface.text.color)
           .lineLimit(2)
           .fixedSize(horizontal: false, vertical: true)

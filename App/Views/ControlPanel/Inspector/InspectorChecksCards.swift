@@ -46,13 +46,13 @@ struct CompatibilityCard: View {
         InspectorCardRow {
           VStack(alignment: .leading, spacing: 2) {
             Text(verbatim: backend.text)
-              .font(.system(size: 11.5))
+              .font(.panel(.footnote))
               .foregroundStyle(theme.surface.text.color)
               .textSelection(.enabled)
             if let detail = backend.detail {
               // The renderer's own id, kept as it is for a problem report.
               Text(verbatim: detail)
-                .font(.system(size: 11))
+                .font(.panel(.caption))
                 .foregroundStyle(theme.surface.muted.color)
                 .textSelection(.enabled)
             }
@@ -113,11 +113,11 @@ struct CompatibilityCard: View {
           .accessibilityLabel(InspectorWording.statusWord(check.status))
         VStack(alignment: .leading, spacing: 2) {
           Text(verbatim: check.title)
-            .font(.system(size: 12.5, weight: .medium))
+            .font(.panel(.label))
             .foregroundStyle(theme.surface.text.color)
           if !check.detail.isEmpty {
             Text(verbatim: check.detail)
-              .font(.system(size: 11.5))
+              .font(.panel(.footnote))
               .foregroundStyle(theme.surface.muted.color)
           }
         }
@@ -168,7 +168,7 @@ struct LetterboxCard: View {
           HStack(spacing: 6) {
             ProgressRing(value: nil, lineWidth: 1.5).frame(width: 12, height: 12)
             Text("Looking for black bars…")
-              .font(.system(size: 11.5))
+              .font(.panel(.footnote))
               .foregroundStyle(theme.surface.muted.color)
           }
           .accessibilityElement(children: .combine)
@@ -241,11 +241,11 @@ struct LetterboxCard: View {
           .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 2) {
           Text(verbatim: result.headline)
-            .font(.system(size: 12.5, weight: .medium))
+            .font(.panel(.label))
             .foregroundStyle(theme.surface.text.color)
           if let detail = result.detail {
             Text(verbatim: detail)
-              .font(.system(size: 11.5))
+              .font(.panel(.footnote))
               .foregroundStyle(theme.surface.muted.color)
           }
         }

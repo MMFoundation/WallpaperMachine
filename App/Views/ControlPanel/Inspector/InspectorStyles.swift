@@ -21,7 +21,7 @@ struct InspectorLinkButtonStyle: ButtonStyle {
 
     var body: some View {
       configuration.label
-        .font(.system(size: 12.5, weight: .medium))
+        .font(.panel(.label))
         .foregroundStyle(isDestructive ? theme.surface.danger.color : theme.accent.accent.color)
         .frame(minHeight: 20)
         .opacity(isEnabled ? (configuration.isPressed ? 0.6 : isHovering ? 0.85 : 1) : 0.4)
@@ -53,7 +53,7 @@ struct InspectorSecondaryButtonStyle: ButtonStyle {
 
     var body: some View {
       configuration.label
-        .font(.system(size: 12.5, weight: .medium))
+        .font(.panel(.label))
         .foregroundStyle(isDestructive ? theme.surface.danger.color : theme.surface.text.color)
         .lineLimit(1)
         .padding(.horizontal, 10)
@@ -97,7 +97,7 @@ struct InspectorIconButtonStyle: ButtonStyle {
 
     var body: some View {
       configuration.label
-        .font(.system(size: side * 0.5, weight: .medium))
+        .font(.panel(.proportional(to: side, ratio: 0.5, weight: .medium)))
         .foregroundStyle(isActive ? (activeTint ?? theme.accent.accent.color) : theme.surface.text.color)
         .frame(width: side, height: side)
         .background(fill, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -158,7 +158,7 @@ struct InspectorActionButtonStyle: ButtonStyle {
     var body: some View {
       let shape = RoundedRectangle(cornerRadius: size.cornerRadius, style: .continuous)
       configuration.label
-        .font(.system(size: size.fontSize, weight: .medium))
+        .font(.panel(size.font))
         .foregroundStyle(isPrimary ? theme.accent.onPrimary.color : theme.surface.text.color)
         .lineLimit(1)
         .padding(.horizontal, size.horizontalPadding)
@@ -215,14 +215,14 @@ struct InspectorNotice<Content: View>: View {
     HStack(alignment: .top, spacing: 8) {
       if let glyph = systemImage ?? defaultSymbol {
         Image(systemName: glyph)
-          .font(.system(size: 12, weight: .semibold))
+          .font(.panel(.calloutStrong))
           .foregroundStyle(accent)
           .frame(width: 14)
           .padding(.top, 1)
           .accessibilityHidden(true)
       }
       VStack(alignment: .leading, spacing: 6) { content }
-        .font(.system(size: 12))
+        .font(.panel(.callout))
         .foregroundStyle(theme.surface.text.color)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -272,7 +272,7 @@ struct InspectorNote: View {
 
   var body: some View {
     text
-      .font(.system(size: 11.5))
+      .font(.panel(.footnote))
       .foregroundStyle(theme.surface.muted.color)
       .frame(maxWidth: .infinity, alignment: .leading)
       .textSelection(.enabled)

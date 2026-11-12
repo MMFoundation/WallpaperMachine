@@ -304,7 +304,7 @@ private struct ScaleFactorRow: View {
     VStack(alignment: .leading, spacing: 4) {
       InspectorRow("Scale factor") {
         HStack(spacing: 4) {
-          Text(verbatim: "×").font(.system(size: 12)).foregroundStyle(theme.surface.muted.color)
+          Text(verbatim: "×").font(.panel(.callout)).foregroundStyle(theme.surface.muted.color)
           TextField("Scale factor", text: $text)
             .labelsHidden()
             .textFieldStyle(.roundedBorder)
@@ -323,7 +323,7 @@ private struct ScaleFactorRow: View {
       .help(explanation)
       if let issue {
         Text(verbatim: issue)
-          .font(.system(size: 11.5))
+          .font(.panel(.footnote))
           .foregroundStyle(theme.surface.danger.color)
           .padding(.horizontal, 12)
           .padding(.bottom, 6)

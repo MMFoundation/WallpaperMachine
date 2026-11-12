@@ -22,7 +22,7 @@ struct InspectorCard<Content: View>: View {
     VStack(alignment: .leading, spacing: 6) {
       if let title {
         title
-          .font(.system(size: 12, weight: .semibold))
+          .font(.panel(.calloutStrong))
           .foregroundStyle(theme.surface.muted.color)
           .padding(.leading, 12)
           .accessibilityAddTraits(.isHeader)
@@ -46,7 +46,7 @@ struct InspectorRow<Label: View, Trailing: View>: View {
   var body: some View {
     HStack(spacing: 12) {
       label
-        .font(.system(size: 13))
+        .font(.panel(.body))
         .frame(maxWidth: .infinity, alignment: .leading)
       trailing
     }

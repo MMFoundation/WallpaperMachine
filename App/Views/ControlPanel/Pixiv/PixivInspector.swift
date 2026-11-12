@@ -75,7 +75,7 @@ private struct PixivInspectorDetail: View {
   private var heading: some View {
     VStack(alignment: .leading, spacing: 4) {
       Text(verbatim: work.displayTitle)
-        .font(.system(size: 17, weight: .bold))
+        .font(.panel(.title))
         .foregroundStyle(theme.surface.text.color)
         .textSelection(.enabled)
         .accessibilityAddTraits(.isHeader)
@@ -90,7 +90,7 @@ private struct PixivInspectorDetail: View {
           .help(L("View on pixiv"))
         } else {
           Text(verbatim: work.authorName)
-            .font(.system(size: 13))
+            .font(.panel(.body))
             .foregroundStyle(theme.surface.muted.color)
             .textSelection(.enabled)
         }
@@ -98,7 +98,7 @@ private struct PixivInspectorDetail: View {
       let meta = PixivMeta.parts(selection)
       if !meta.isEmpty {
         Text(verbatim: meta.joined(separator: " · "))
-          .font(.system(size: 12))
+          .font(.panel(.callout))
           .foregroundStyle(theme.surface.muted.color)
           .textSelection(.enabled)
       }
@@ -328,7 +328,7 @@ private struct PixivNotice<Trailing: View>: View {
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 6) {
         Text(verbatim: message)
-          .font(.system(size: 12))
+          .font(.panel(.callout))
           .foregroundStyle(theme.surface.text.color)
           .textSelection(.enabled)
         trailing
@@ -362,7 +362,7 @@ private struct PixivPageStepper: View {
       Spacer(minLength: 4)
       HStack(spacing: 5) {
         Text("Page \(index + 1) of \(count)")
-          .font(.system(size: 12.5, weight: .medium).monospacedDigit())
+          .font(.panel(.label).monospacedDigit())
           .foregroundStyle(theme.surface.text.color)
         if selection.isSaved {
           Image(systemName: "checkmark.circle.fill")

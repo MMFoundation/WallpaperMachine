@@ -101,7 +101,7 @@ App/                               WallpaperMachine application target sources o
     Settings/                      Settings infrastructure (rows, groups, search) and the twelve sections
     Welcome/                       the first-run guide and the support prompt
     MenuBar/                       the menu bar panel: its popover, controller and view
-    Components/ Theme/             shared views; accent and surface palettes
+    Components/ Theme/             shared views; accent and surface palettes, type scale
     Localization/ Images/          PanelLocale and L(); the image pipeline and animated preview
   Resources/                       Info.plist, string catalogs, Assets.xcassets (tray icon, Dock icon image sets),
                                    AppIcon.icon; app resources only

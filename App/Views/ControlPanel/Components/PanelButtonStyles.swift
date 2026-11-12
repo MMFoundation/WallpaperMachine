@@ -21,7 +21,7 @@ struct PrimaryButtonStyle: ButtonStyle {
       }
     }
 
-    var fontSize: CGFloat { self == .small ? 11 : 13 }
+    var font: PanelFont { self == .small ? .controlSmall : .control }
     var horizontalPadding: CGFloat { self == .small ? 9 : 14 }
     var cornerRadius: CGFloat { self == .small ? 5 : 7 }
   }
@@ -47,7 +47,7 @@ private struct PrimaryButtonBody: View {
   var body: some View {
     let accent = theme.accent
     configuration.label
-      .font(.system(size: size.fontSize, weight: .medium))
+      .font(.panel(size.font))
       .foregroundStyle(accent.onPrimary.color)
       .lineLimit(1)
       .padding(.horizontal, size.horizontalPadding)
@@ -85,7 +85,7 @@ private struct ToolbarCapsuleBody: View {
 
   var body: some View {
     configuration.label
-      .font(.system(size: 12.5, weight: .medium))
+      .font(.panel(.label))
       .foregroundStyle(isActive ? theme.accent.accent.color : theme.surface.text.color)
       .lineLimit(1)
       .padding(.horizontal, 10)

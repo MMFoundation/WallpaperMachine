@@ -155,7 +155,7 @@ private struct LoadingOptions: View {
     HStack(spacing: 8) {
       ProgressRing(value: nil, lineWidth: 1.5).frame(width: 12, height: 12)
       Text("Loading wallpaper options…")
-        .font(.system(size: 12))
+        .font(.panel(.callout))
         .foregroundStyle(theme.surface.muted.color)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -195,7 +195,7 @@ struct InspectorFooter: View {
           .font(.system(size: 11.5, weight: .medium))
           .foregroundStyle(theme.surface.text.color)
         Text("Audio, scaling mode, position and frame rate take effect immediately.")
-          .font(.system(size: 11))
+          .font(.panel(.caption))
           .foregroundStyle(theme.surface.muted.color)
       }
       .frame(maxWidth: .infinity, alignment: .leading)

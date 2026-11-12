@@ -88,9 +88,7 @@ private struct StatusPanelCaption: View {
 
   var body: some View {
     text
-      .font(.system(size: 10, weight: .semibold))
-      .textCase(.uppercase)
-      .tracking(0.4)
+      .panelFont(.eyebrow)
       .foregroundStyle(theme.surface.muted.color)
       .accessibilityAddTraits(.isHeader)
   }

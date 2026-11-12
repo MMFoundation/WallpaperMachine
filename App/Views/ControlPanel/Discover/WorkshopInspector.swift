@@ -58,7 +58,7 @@ private struct ItemInspector: View {
     VStack(alignment: .leading, spacing: 3) {
       // Everything here is the Workshop's text, so none of it is read as a catalog key.
       Text(verbatim: item.title)
-        .font(.system(size: 17, weight: .bold))
+        .font(.panel(.title))
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
         .accessibilityAddTraits(.isHeader)
@@ -72,12 +72,12 @@ private struct ItemInspector: View {
           if showsAuthorLink {
             Button("More by this author") { controller.workshopBrowser.openAuthor(of: item) }
               .buttonStyle(.panelLink)
-              .font(.system(size: 12))
+              .font(.panel(.callout))
           }
         }
       }
       meta
-        .font(.system(size: 12))
+        .font(.panel(.callout))
         .foregroundStyle(theme.surface.muted.color)
         .textSelection(.enabled)
     }

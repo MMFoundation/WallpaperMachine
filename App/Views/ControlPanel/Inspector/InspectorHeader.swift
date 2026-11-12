@@ -17,20 +17,20 @@ struct InspectorHeader: View {
       VStack(alignment: .leading, spacing: 4) {
         // A wallpaper's own title: text, never a catalog key.
         Text(verbatim: row.title)
-          .font(.system(size: 17, weight: .bold))
+          .font(.panel(.title))
           .foregroundStyle(theme.surface.text.color)
           .lineLimit(4)
           .frame(maxWidth: .infinity, alignment: .leading)
           .textSelection(.enabled)
           .accessibilityAddTraits(.isHeader)
         Text(verbatim: InspectorWording.meta(for: row))
-          .font(.system(size: 12))
+          .font(.panel(.callout))
           .foregroundStyle(theme.surface.muted.color)
           .frame(maxWidth: .infinity, alignment: .leading)
           .textSelection(.enabled)
         if let rating = row.energy {
           Text(verbatim: InspectorWording.energyLine(rating))
-            .font(.system(size: 11))
+            .font(.panel(.caption))
             .foregroundStyle(theme.surface.muted.color)
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)

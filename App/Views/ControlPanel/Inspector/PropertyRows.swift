@@ -336,7 +336,7 @@ struct PropertyRowView: View {
     ) { output in
       topLine {
         Text(verbatim: output)
-          .font(.system(size: 12).monospacedDigit())
+          .font(.panel(.callout).monospacedDigit())
           .foregroundStyle(theme.surface.muted.color)
           .accessibilityHidden(true)
       }
@@ -392,7 +392,7 @@ private struct PropertyNameView: View {
       PropertyLabelView(document: document, baseSize: 13)
     } else {
       Text(verbatim: row.name)
-        .font(.system(size: 13))
+        .font(.panel(.body))
         .foregroundStyle(theme.surface.text.color)
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
@@ -430,7 +430,7 @@ private struct PropertyDescriptionView: View {
       }
       if let detail {
         Text(verbatim: detail)
-          .font(.system(size: 12))
+          .font(.panel(.callout))
           .foregroundStyle(theme.surface.muted.color)
           .frame(maxWidth: .infinity, alignment: .leading)
           .textSelection(.enabled)
@@ -456,7 +456,7 @@ struct PathValueField: View {
 
   var body: some View {
     Text(verbatim: text)
-      .font(.system(size: 12))
+      .font(.panel(.callout))
       .foregroundStyle(isPlaceholder ? theme.surface.faint.color : theme.surface.text.color)
       .lineLimit(1)
       .truncationMode(.middle)

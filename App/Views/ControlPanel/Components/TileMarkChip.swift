@@ -9,7 +9,7 @@ struct TileMarkChip: View {
 
   var body: some View {
     Image(systemName: systemImage)
-      .font(.system(size: 9.5, weight: .bold))
+      .font(.panel(.mark))
       .foregroundStyle(glyph)
       .frame(width: 20, height: 20)
       .background(fill, in: Circle())

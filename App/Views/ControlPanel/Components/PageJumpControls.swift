@@ -54,7 +54,7 @@ struct PageJumpControls: View {
         Text("of \(pager.pages)").foregroundStyle(theme.surface.muted.color)
         goButton
       }
-      .font(.system(size: 12).monospacedDigit())
+      .font(.panel(.callout).monospacedDigit())
       .accessibilityElement(children: .contain)
       .accessibilityLabel(Text("Go to page"))
 
@@ -111,7 +111,7 @@ struct PageJumpControls: View {
       if pager.canJump && text != String(pager.page) {
         Button("Go", action: jump)
           .buttonStyle(.panelLink)
-          .font(.system(size: 12))
+          .font(.panel(.callout))
       }
     case .bordered:
       if showsLabel {

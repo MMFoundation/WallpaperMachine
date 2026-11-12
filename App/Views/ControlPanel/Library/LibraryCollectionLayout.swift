@@ -7,14 +7,10 @@ final class LibraryCollectionLayout: NSCollectionViewLayout {
   private(set) var geometry = LibraryGridGeometry()
   private(set) var itemCount = 0
 
-  /// The two single-line captions (15 and 14 points), their 1-point gap, and the 7-point art gap.
-  static let captionHeight: CGFloat = {
-    func line(_ size: CGFloat, weight: NSFont.Weight) -> CGFloat {
-      let font = NSFont.systemFont(ofSize: size, weight: weight)
-      return ceil(font.ascender - font.descender + font.leading)
-    }
-    return line(12, weight: .semibold) + line(11, weight: .regular) + 8
-  }()
+  /// The two single-line captions a `WallpaperTile` draws under its art (its title and its kind),
+  /// their 1-point gap, and the 7-point gap above them.
+  static let captionHeight: CGFloat =
+    PanelFont.calloutStrong.lineHeight + PanelFont.caption.lineHeight + 8
 
   @discardableResult
   func configure(viewport: CGSize, preferredWidth: CGFloat, count: Int) -> Bool {

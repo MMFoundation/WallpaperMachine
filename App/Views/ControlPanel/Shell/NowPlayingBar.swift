@@ -232,12 +232,10 @@ struct NowPlayingDetails: View {
       }
       VStack(alignment: .leading, spacing: 3) {
         Text("Now Playing")
-          .font(.system(size: 10, weight: .semibold))
-          .textCase(.uppercase)
-          .tracking(0.4)
+          .panelFont(.eyebrow)
           .foregroundStyle(theme.surface.muted.color)
         Text(verbatim: state.title)
-          .font(.system(size: 15, weight: .semibold))
+          .font(.panel(.headline))
           .foregroundStyle(theme.surface.text.color)
           .lineLimit(3)
           .fixedSize(horizontal: false, vertical: true)
