@@ -525,6 +525,13 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
     // accent one, so nothing under them moves when a save starts.
     XCTAssertEqual(try height(of: "pixiv-pause"), download, accuracy: 1)
     XCTAssertEqual(try height(of: "pixiv-cancel"), download, accuracy: 1)
+    // pixiv has not said the original's size yet: the inspector's bar is the panel's, which
+    // stops in a hidden window and with Reduce Motion, never the system's, which slides on.
+    guard case .pending(let saving) = controller.pixivSelection?.download else {
+      return XCTFail("the inspector follows the save")
+    }
+    XCTAssertNil(saving.progress, "the size is not known while pixiv holds the original")
+    XCTAssertEqual(AccessibilityElement.systemProgressIndicators(in: inspector), [])
     XCTAssertTrue(PixivActivityPill.isActive(in: controller))
     XCTAssertEqual(controller.pixivActivity?.jobCount, 1)
     let work = try XCTUnwrap(hosted.fixture.pixiv.works.first { $0.id == "302" })

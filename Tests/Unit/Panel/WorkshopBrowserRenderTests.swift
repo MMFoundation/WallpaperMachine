@@ -493,6 +493,52 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     }
   }
 
+  /// While Steam is contacted, and while a started download does not know its size yet, the
+  /// dialog shows the panel's bar, which stops in a hidden window and with Reduce Motion, never the
+  /// system's indeterminate bar, which slides on.
+  func testTheDialogWaitsWithThePanelsBarAndNoSystemSpinner() async throws {
+    let panel = try makeDiscoverPanel()
+    let connecting = DownloadRow(
+      id: "222", title: "Rainy Tokyo Window", status: "Connecting…", account: "bobby", isPending: true,
+      isAuthenticating: true)
+    let started = DownloadRow(id: "222", title: "Rainy Tokyo Window", status: "Downloading", isPending: true)
+    let stages: [(DownloadRow, DownloadDialogResolution.Stage?, DownloadDialogResolution.Stage, String)] = [
+      (connecting, nil, .auth, L("Connecting to Steam")),
+      (started, .auth, .started, L("Download in progress")),
+    ]
+    for (job, current, stage, label) in stages {
+      let resolved = try XCTUnwrap(
+        DownloadDialogResolution.resolve(
+          target: "222", request: nil, own: job, sceneAssets: nil, currentStage: current,
+          handoffTarget: nil))
+      XCTAssertEqual(resolved.stage, stage)
+      let session = DownloadsModel.Session(target: "222", account: "bobby", remembersSession: true)
+      let hosting = NSHostingView(
+        rootView: AnyView(
+          DownloadDialogView(session: session, resolution: resolved)
+            .environment(panel.controller)
+            .environment(\.panelImages, panel.controller.images)
+            .environment(\.panelIsVisible, true)
+            .panelTheme(theme: panel.controller.theme, locale: PanelLocale.shared)
+            .frame(width: 460)))
+      hosting.sceneBridgingOptions = []
+      let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 460, height: 640), styleMask: [.titled],
+        backing: .buffered, defer: false)
+      window.isReleasedWhenClosed = false
+      window.contentView = hosting
+      hosting.layoutSubtreeIfNeeded()
+      try await Task.sleep(for: .milliseconds(300))
+      hosting.layoutSubtreeIfNeeded()
+      XCTAssertTrue(
+        AccessibilityElement.everything(in: hosting).contains { $0.text == label },
+        "\(stage): the waiting stage is drawn, so an empty tree cannot pass")
+      XCTAssertEqual(AccessibilityElement.systemProgressIndicators(in: hosting), [], "\(stage)")
+      window.contentView = nil
+      window.close()
+    }
+  }
+
   func testTheDownloadsListFitsItsWidthWithEveryKindOfRowInEveryLanguage() async throws {
     let requests = [
       DownloadRequestRow(id: "10", title: "Rainy Tokyo Window with a very long title", stage: .account),

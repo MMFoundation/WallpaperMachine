@@ -225,16 +225,11 @@ private struct PixivInspectorDetail: View {
   private var progress: some View {
     if case .pending(let job) = selection.download {
       VStack(alignment: .leading, spacing: 6) {
-        if let fraction = job.progress {
-          ProgressView(value: fraction)
-        } else {
-          ProgressView()
-        }
+        ProgressBar(value: job.progress)
         Text(verbatim: job.inspectorStatus())
           .font(.panel(.footnote).monospacedDigit())
           .foregroundStyle(theme.surface.muted.color)
       }
-      .progressViewStyle(.linear)
       .accessibilityElement(children: .combine)
       .accessibilityLabel(Text("\(job.work.displayTitle) download progress"))
       .accessibilityValue(Text(verbatim: job.inspectorStatus()))

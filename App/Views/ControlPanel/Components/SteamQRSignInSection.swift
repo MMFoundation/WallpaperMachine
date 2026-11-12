@@ -25,7 +25,7 @@ struct SteamQRSignInSection: View {
           .frame(maxWidth: .infinity, alignment: .leading)
       case .starting:
         HStack(spacing: 8) {
-          ProgressView().controlSize(.small)
+          LoadingRing()
           Text("Getting a code from Steam…").font(.system(size: 12))
         }
       case .waiting(let url, let scanned):

@@ -201,7 +201,11 @@ How the panel runs (controller, actions, observation, window hosting) is in
   static text, not on a container, where it can swallow button clicks. The tabs,
   the toolbar, tiles and Settings are not selectable.
 - **No per-frame or idle work.** Anything that animates on its own reads
-  `\.panelIsVisible` and Reduce Motion and stops when either says so; no timer runs
+  `\.panelIsVisible` and Reduce Motion and stops when either says so. Work of unknown
+  length shows `ProgressRing(value: nil)` (or `LoadingRing`) or `ProgressBar(value: nil)`,
+  never a `ProgressView` without a `value:`, which keeps turning;
+  `scripts/tests/test_panel_progress_indicators.py` enforces this. A window outside the
+  panel that shows them sets `\.panelIsVisible` itself, as the update window does. No timer runs
   while the window is hidden; grids are lazy; nothing walks the library on a
   download tick. A grid tile builds only what it shows: a control hidden with
   `.opacity(0)` still costs its whole view tree in every tile, and scrolling builds

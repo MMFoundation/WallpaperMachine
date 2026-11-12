@@ -133,7 +133,7 @@ struct ImportPopover: View {
         if state.isBusy || !state.status.isEmpty {
           VStack(alignment: .leading, spacing: 6) {
             if state.isBusy {
-              ProgressView().progressViewStyle(.linear)
+              ProgressBar(value: nil)
                 .accessibilityLabel(Text("Importing…"))
             }
             if !state.status.isEmpty {

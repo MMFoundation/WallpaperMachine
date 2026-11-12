@@ -100,8 +100,7 @@ private struct WorkshopGrid: View {
     .overlay(alignment: .top) {
       // A search that replaces what is on show says so without hiding it.
       if isLoading {
-        ProgressView()
-          .progressViewStyle(.linear)
+        ProgressBar(value: nil)
           .padding(.horizontal, 20)
           .transition(.opacity)
           .accessibilityLabel(Text("Searching Steam Workshop…"))

@@ -34,15 +34,33 @@ enum UpdateWindow {
     window.isReleasedWhenClosed = false
     let notesLanguage = UpdateNotesLanguage(
       language ?? AppReleaseHistory.Language(appLanguage: AppLanguageStore.shared.effective))
+    // This window's own visibility, so a bar that moves on its own stops while the window is
+    // minimized or covered, as it does in the panel.
+    let presentation = PanelPresentation()
     let hosting = NSHostingController(
-      rootView: UpdateWindowView(store: store, actions: actions, notesLanguage: notesLanguage)
-        .panelTheme(theme: AppThemeStore.shared, locale: PanelLocale.shared))
+      rootView: Root(
+        presentation: presentation,
+        content: UpdateWindowView(store: store, actions: actions, notesLanguage: notesLanguage)
+      )
+      .panelTheme(theme: AppThemeStore.shared, locale: PanelLocale.shared))
     hosting.sizingOptions = []
     window.contentViewController = hosting
+    presentation.attach(to: window)
     window.contentMinSize = minimumContentSize
     // Installing a controller can resize the window to its content view's fitting size.
     window.setContentSize(defaultContentSize)
     return window
+  }
+
+  /// The window's view with `\.panelIsVisible` following the window; it keeps the presentation
+  /// alive for as long as the window shows it.
+  private struct Root: View {
+    let presentation: PanelPresentation
+    let content: UpdateWindowView
+
+    var body: some View {
+      content.environment(\.panelIsVisible, presentation.isVisible)
+    }
   }
 
   /// A note's inline Markdown, links kept and nothing else interpreted: notes come from the
@@ -217,11 +235,7 @@ struct UpdateWindowView: View {
 
   private func progress(value: Double?, @ViewBuilder label: () -> some View) -> some View {
     VStack(alignment: .leading, spacing: 4) {
-      if let value {
-        ProgressView(value: value).progressViewStyle(.linear)
-      } else {
-        ProgressView().progressViewStyle(.linear)
-      }
+      ProgressBar(value: value)
       label()
         .font(.system(size: 11.5))
         .foregroundStyle(theme.surface.muted.color)

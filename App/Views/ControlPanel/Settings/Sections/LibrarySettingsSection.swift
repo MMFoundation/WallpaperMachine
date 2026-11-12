@@ -260,17 +260,10 @@ private struct LibrarySceneRows: View {
         .accessibilityAddTraits(.updatesFrequently)
     }
     if presentation.isPending {
-      Group {
-        if let progress = presentation.progress {
-          ProgressView(value: progress)
-        } else {
-          ProgressView()
-        }
-      }
-      .progressViewStyle(.linear)
-      .accessibilityLabel(Text("Shared resources download progress"))
-      .padding(.horizontal, 12)
-      .padding(.vertical, 10)
+      ProgressBar(value: presentation.progress)
+        .accessibilityLabel(Text("Shared resources download progress"))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
     if let error = presentation.error { DisplaysMessageRow(text: error, isError: true) }
     ForEach(presentation.warnings, id: \.self) { DisplaysMessageRow(text: $0) }

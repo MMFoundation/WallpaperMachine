@@ -345,8 +345,7 @@ private struct StorageBackupRows: View {
           }
         }
       }
-      ProgressView()
-        .progressViewStyle(.linear)
+      ProgressBar(value: nil)
         .accessibilityLabel(Text("Backup progress"))
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

@@ -418,8 +418,7 @@ struct DownloadAuthStage: View {
           systemImage: "person.badge.key", title: job.status,
           note: L("Contacting Steam. Password and Steam Guard prompts appear here.")
         ) {
-          ProgressView()
-            .progressViewStyle(.linear)
+          ProgressBar(value: nil)
             .accessibilityLabel(Text("Connecting to Steam"))
         }
       } else if let guide {
@@ -572,8 +571,7 @@ struct DownloadStartedStage: View {
               .progressViewStyle(.linear)
               .accessibilityLabel(Text("Download progress"))
           } else {
-            ProgressView()
-              .progressViewStyle(.linear)
+            ProgressBar(value: nil)
               .accessibilityLabel(Text("Download in progress"))
           }
         }

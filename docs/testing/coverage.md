@@ -1474,7 +1474,7 @@ never to `.shared`.
   in every language at both sizes, shrinking with the inspector open, a tile's VoiceOver label and
   its caption's tooltip with the whole title, an
   installed item's Apply reached by VoiceOver with Move to Trash below it, the Apply and Reapply
-  buttons keeping their whole label in the narrowest column, a download that resumes or pauses with the Downloads list open redrawn in place, the loading grid's ring with no system spinner), and
+  buttons keeping their whole label in the narrowest column, a download that resumes or pauses with the Downloads list open redrawn in place, the loading grid's ring with no system spinner, the dialog's bar with no system one while Steam is contacted and while a started download does not know its size), and
   `WorkshopSearchTranslationTests` (a search typed in Chinese sent in English while the field keeps
   it, **Search “…” instead** kept for a sort and by a reopened panel and the text translated
   again once another was searched, a click on a replaced line ignored, the page and the
@@ -1494,6 +1494,13 @@ never to `.shared`.
   that its allowlists do not name, and for an allowlisted file with none left, so the lists only
   shrink; shadows and alpha masks are skipped. A raw value added to a file already listed is not
   caught until that file is migrated.
+- Progress indicators: `scripts/tests/test_panel_progress_indicators.py` fails for a
+  `ProgressView` under `App/Views/` given no `value:` (a system spinner or bar of unknown length,
+  or a `timerInterval:` one), which keeps animating in a hidden window and with Reduce Motion.
+  `ProgressBarRenderTests` checks that the panel's `ProgressBar` without an amount is no system
+  indicator, carries the label its place gives it, and stands at the system bar's height at the
+  regular and small control sizes. That the bar and the ring stop in a hidden window and with
+  Reduce Motion is read from the code, not tested.
 - pixiv: `PanelPixivActionsTests`, `PixivPanelStateTests`, `PixivBrowserModelTests`,
   `PixivListSummaryTests` and `PixivBrowserRenderTests`; see [Pixiv](#pixiv).
 - Settings: `SettingsSearchTests` (matches, counts, folding disclosures, the panel's language, the
@@ -1590,7 +1597,7 @@ against an in-memory store, resumable thumbnail and download transport, the
 download queue (concurrency, cancel, retry, shutdown) and packaging (sniffed
 formats, scaled display copies, staging reclaim), the loading page's ring with no
 system spinner, and the inspector's Pause download and Cancel taking Download's height
-when a save starts. None of it reaches pixiv: its
+when a save starts, with the panel's bar and no system one while the size is unknown. None of it reaches pixiv: its
 signed-in answers and the real sign-in page are not covered
 ([pixiv](../features/pixiv.md#verification)).
 
