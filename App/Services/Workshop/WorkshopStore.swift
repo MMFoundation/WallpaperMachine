@@ -393,6 +393,23 @@ final class WorkshopStore {
     return true
   }
 
+  /// A failed SteamCMD sign-in returns to the account choice instead of immediately starting
+  /// the same sign-in again. A QR session acquired since the failure can serve the retry directly.
+  func retryDownload(_ job: WorkshopDownload, rememberSession: Bool, bridge: BridgeStore) {
+    guard !job.isPending else { return }
+    let request = WorkshopDownloadRequest(
+      id: job.id, item: job.item, account: job.account,
+      rememberSession: rememberSession, includesResources: false, refused: true)
+    if job.steamCMD?.canRetryAuthentication == true, nativeEngine(for: request) == nil {
+      startDownloadLifecycle(bridge: bridge)
+      resolve(request, bridge: bridge)
+    } else {
+      continueDownload(
+        id: job.id, account: job.account, rememberSession: rememberSession,
+        includeResources: false, bridge: bridge)
+    }
+  }
+
   func removeDownloadRequest(id: String) {
     guard downloadRequests.contains(where: { $0.id == id }) else { return }
     dropApplyChoice(id)

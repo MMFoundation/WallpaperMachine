@@ -260,16 +260,17 @@ extension PanelController {
     }
   }
 
-  /// Tries a failed or cancelled download again. It re-enters the same prerequisite ladder, and the
-  /// shared resources need their consent again. A job that is still under way is refused.
+  /// Tries a failed or cancelled download again. A failed SteamCMD sign-in opens the account
+  /// choice, including QR sign-in; shared resources still need consent. A pending job is refused.
   func retryDownload(id: String) async throws {
     try await run(.queued) {
       guard let job = workshop.downloader.downloads.first(where: { $0.id == id }), !job.isPending
       else { throw InvalidControlValue() }
-      workshop.continueDownload(
-        id: job.id, account: job.account, rememberSession: remembersSession,
-        includeResources: false, bridge: store)
+      workshop.retryDownload(job, rememberSession: remembersSession, bridge: store)
       try checkDownloadError()
+    }
+    if let target = downloadDialogTarget(afterRequesting: id) {
+      downloads.openDialog(for: target)
     }
   }
 

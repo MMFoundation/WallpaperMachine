@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-12 — Integrate Steam sign-in retry recovery
+
+- Integrated the fix from fix/steam-sign-in-retry-186 onto current main; removed an obsolete sign-in-only assertion and documentation after that API was removed.
+- `python3 scripts/test.py --only PanelDownloadActionsTests --only DownloadDialogResolutionTests --only DownloaderFailureOutputTests`: 42 passed, 0 failed, 0 skipped.
+- Initial full gate: 4888 passed, 1 failed, 68 skipped; the welcome accessibility regression also failed on unchanged main. Fixed separately in a1f9824.
+- `python3 scripts/test.py --only WelcomeRenderTests --only FirstRunModelTests --only PanelDownloadActionsTests`: 59 passed, 0 failed, 0 skipped.
+- `python3 scripts/test.py` after the welcome fix: Python checks passed; 4889 native tests passed, 0 failed, 68 opt-in media/network/reference checks skipped.
+- Steam timeout/password rejection, corrected-account retry, QR recovery through import, an existing QR session, and normal transfer retries were exercised with offline fakes.
+- Live Steam sign-in, the reporter’s network/account, desktop interaction and VoiceOver remain unverified. No Release build or renderer changes.
+
 ## 2026-11-12 — Control panel UI critique fixes (ws1-ws7) on claude/ui-critique-fixes
 
 - Scope: 34 local commits over main 54227ed3: Apply/Play symbols and wording, Workshop inspector Apply and Command-Return, staged-edit footer and Not applied marks (Rust bridge staged flags), collapsible display cards, welcome Skip setup and the delayed support prompt, P3 polish, and the panel type scale, shared buttons, scrims, tile marks and design-token lint.
@@ -113,16 +123,3 @@ Downloads signed in with a QR code run through the app's own Steam client (App/S
 - `WALLPAPER_MACHINE_NETWORK_TESTS=1 WALLPAPER_MACHINE_STEAM_TOKEN_FILE=… python3 scripts/test.py --only SteamNativeLiveTests` — 2 passed against live Steam (QR session; logon with a QR token and download of Workshop item 3521337568); the later depot-431961 chunk check was not run live
 - Manual Debug-build run: QR sign-in from the panel, 8 Workshop items and the shared scene assets downloaded and imported natively; the log shows no SteamCMD run and no staging left behind
 - Not covered: welcome guide has no QR option yet; no free-space check before the ~800 MB scene depot; native jobs restart from zero after a pause
-
-## 2026-11-10 — Library tile menu, drop to import, keyboard and batch favorites; service fixes
-
-Installed gains a right-click menu on tiles (the inspector's More actions list, shared as WallpaperActionItems), files dropped on the page import, Command-Delete and Command-Return on the grid, File › Import… and Refresh Library, and a favorite tool for the ticked selection. The same change fixes six service defects (unreadable saved entries no longer erase their neighbours; an automatic command replacing a queued rule or Focus change no longer marks it handled; a day and night display keeps a manual choice across a relaunch; a shuffle round ends without a wallpaper that keeps failing; a stale Steam request no longer signs out a newer session; equal day and night start times are refused), adds feedback where actions were silent, and gathers the renderer's leftover material constants into one log line per scene.
-
-- `python3 scripts/test.py` — exit 0; 4789 tests: 4723 passed, 0 failed, 66 skipped (the first run failed two tests that asserted the old batch-limit error; both were updated and the gate rerun)
-- `python3 scripts/check_renderer.py` — exit 0; generated scenes pixel-equal pooled and isolated, 0 reload-cycle diagnostics; the local-corpus tests (particle corpus, local projects through the native backend, poster pictures, energy, corpus stamps, a local clip) skipped: no corpus configured
-- New unit tests: PreservedJSONTests; unreadable entries in WallpaperAutomationStoreTests, PlaylistStoreTests, WallpaperCollectionStoreTests and PlaybackPreferencesTests; queue outcomes in UserCommandQueueTests; a Focus change replaced by a reload in WallpaperAutomationSchedulerTests; relaunch and shuffle rounds in PlaylistSchedulerTests; the Steam session in WorkshopSourceTests
-- New panel tests: add-to-playlist and refresh notices, the unreadable-library state, the failed-still mark (offscreen render), drop import, the favorite tool, Command-Delete and Command-Return on the hosted grid, equal start times, preset and batch-limit refusals
-- Renderer: two gtest cases for UnmatchedConstantTally in material_constant_behavior_test; no frame output changed, so no Wallpaper Engine reference comparison was made
-- Not exercised: the tile's context menu, the drop outline and a real Finder drag, and the File menu items with their shortcuts in a real window. They need desktop control, which was not authorized; the menu's item rules are InspectorPolicy's existing tests, and the drop and menu actions are covered through the model
-- Not rebuilt: no Release build was made, so the delivered app does not contain these changes
-- Runtime warnings in the result bundle (2, main-thread call) come from AppUpdateTests and WebMOpeningTests, which this change does not touch

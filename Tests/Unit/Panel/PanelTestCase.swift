@@ -37,23 +37,24 @@ class PanelTestCase: XCTestCase {
   func makeController(
     displayTitles: DisplayTitleResolver = .renderer, supportPrompt: SupportPromptStore? = nil,
     spaces: WallpaperSpaceMonitor? = nil, welcomeSeen: Bool = true,
-    letterbox: VideoLetterboxStore? = nil
+    letterbox: VideoLetterboxStore? = nil, nativeSession: SteamNativeSession? = nil
   ) throws -> PanelFixture {
     let fixture = makeStore(supportPrompt: supportPrompt)
     return try PanelFixture(
       store: fixture.store, bridge: fixture.bridge, displayTitles: displayTitles, spaces: spaces,
-      welcomeSeen: welcomeSeen, letterbox: letterbox)
+      welcomeSeen: welcomeSeen, letterbox: letterbox, nativeSession: nativeSession)
   }
 
   /// `makeController` that is started, handed to `body` and always shut down afterwards.
   func withPanel(
     displayTitles: DisplayTitleResolver = .renderer, supportPrompt: SupportPromptStore? = nil,
     spaces: WallpaperSpaceMonitor? = nil, welcomeSeen: Bool = true,
+    nativeSession: SteamNativeSession? = nil,
     _ body: (PanelFixture) async throws -> Void
   ) async throws {
     let panel = try makeController(
       displayTitles: displayTitles, supportPrompt: supportPrompt, spaces: spaces,
-      welcomeSeen: welcomeSeen)
+      welcomeSeen: welcomeSeen, nativeSession: nativeSession)
     do {
       try await panel.start()
       try await body(panel)
@@ -390,7 +391,8 @@ final class PanelFixture {
 
   init(store: BridgeStore, bridge: LayoutSnapshotBridge, displayTitles: DisplayTitleResolver,
     pixivTransport: (any PixivTransport)? = nil, spaces: WallpaperSpaceMonitor? = nil,
-    welcomeSeen: Bool = true, letterbox: VideoLetterboxStore? = nil) throws {
+    welcomeSeen: Bool = true, letterbox: VideoLetterboxStore? = nil,
+    nativeSession: SteamNativeSession? = nil) throws {
     self.store = store
     self.bridge = bridge
     self.displayTitles = displayTitles
@@ -427,7 +429,7 @@ final class PanelFixture {
       service: WorkshopService(session: OfflineSteamProtocol.session()),
       downloader: downloader, supportDirectory: root, defaults: defaults,
       runtimeProvider: PanelRuntime(), updates: OfflineSteamProtocol.updates(defaults: defaults),
-      sceneAssetsAvailable: { [sceneAssets] _ in sceneAssets.available })
+      sceneAssetsAvailable: { [sceneAssets] _ in sceneAssets.available }, nativeSession: nativeSession)
     let image = try PanelTestCase.gif(frames: 1, brightness: 0.6)
     self.image = image
     let transport = PixivFixtureTransport(respondingToSession: { url, session in

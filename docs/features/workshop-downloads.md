@@ -1000,8 +1000,23 @@ the code closes is dropped, not saved. A failed code is kept as its reason (expi
 Steam unreachable, failed) and worded when the section shows it, so the message
 follows the panel's language.
 With a SteamCMD sign-in already saved, Settings shows that account and **Log out…**
-instead of the QR button, and downloads keep using SteamCMD without reaching the
-dialog's account stage: switching to a QR sign-in starts with logging out.
+instead of the QR button, and new downloads normally start through SteamCMD. To
+switch before a failure, log out first.
+
+After a SteamCMD connection or sign-in failure, **Try again** opens the download's
+account choice instead of immediately repeating the failed sign-in. The account
+name stays available to correct, and **Sign in with a QR code** offers the native
+Steam client without requiring the saved SteamCMD session to be removed. Approving
+the QR code resumes the waiting request; an already-approved QR sign-in serves the
+retry directly. **Continue** still retries SteamCMD for people who prefer their
+password. Shared scene resources still require consent, and failures after Steam
+accepted the sign-in keep the normal transfer retry behavior.
+
+A successful Steam Community website login does not verify the separate SteamCMD
+connection or its cached credentials. QR sign-in uses a different authentication
+path, but still requires network access to Steam and an account with access to the
+requested content. If it also fails, export a diagnostics report from Settings;
+a connection timeout alone does not establish that the password is wrong.
 
 The approved refresh token is kept in the login keychain as one generic password
 (`KeychainSteamClientTokenStore`, service `app.wallpapermachine.steam-client`),

@@ -352,6 +352,118 @@ final class PanelDownloadActionsTests: MediaPanelTestCase {
     }
   }
 
+  func testRetryingAFailedSteamSignInOffersTheAccountChoiceBeforeStartingAgain() async throws {
+    for reason in ["Timeout", "InvalidPassword"] {
+      try await withPanel { panel in
+        try Data("#!/bin/sh\nprintf 'Logging in...failed (\(reason))\\n'\n".utf8)
+          .write(to: panel.executable)
+        try await useFakeSteamCMD(panel)
+        let wanted = item()
+        panel.workshop.selectedItem = wanted
+        panel.workshop.username = "localtest"
+        panel.controller.remembersSession = false
+        try await panel.controller.requestDownload(item: wanted)
+        let job = try XCTUnwrap(panel.workshop.downloader.download(for: "222"))
+        try await panel.waitUntil { !job.isPending }
+        XCTAssertTrue(try XCTUnwrap(job.steamCMD).canRetryAuthentication)
+
+        try await panel.controller.retryDownload(id: job.id)
+
+        let request = try XCTUnwrap(panel.controller.downloadRequestRow(for: job.id))
+        XCTAssertEqual(request.stage, .account)
+        XCTAssertEqual(request.account, "localtest", "the person can correct the name or choose QR sign-in")
+        XCTAssertFalse(request.rememberSession)
+        XCTAssertEqual(panel.controller.downloads.resolution?.stage, .account)
+        XCTAssertFalse(job.isPending, "retry must not immediately repeat the failed SteamCMD sign-in")
+        panel.workshop.resumeDownloadRequests(bridge: panel.store)
+        XCTAssertFalse(panel.workshop.downloader.isRunning, "the prerequisite observer must wait for a choice")
+
+        try await panel.controller.continueDownload(
+          id: job.id, account: "corrected", remembersSession: false, includeResources: false)
+        XCTAssertNil(panel.controller.downloadRequestRow(for: job.id))
+        let retried = try XCTUnwrap(panel.workshop.downloader.download(for: job.id))
+        XCTAssertFalse(retried === job)
+        XCTAssertEqual(retried.account, "corrected")
+      }
+    }
+  }
+
+  func testAFailedSteamCMDSignInCanRecoverWithQRCodeAndImportTheWallpaper() async throws {
+    for signedInBeforeRetry in [false, true] {
+      let steam = try FakeSteam(item: 222, files: [
+        "project.json": Data(#"{"type":"video","file":"movie.mp4"}"#.utf8),
+        "movie.mp4": Data("frames".utf8),
+      ])
+      var challenge = SteamProto.Writer()
+      challenge.varint(1, 7)
+      challenge.string(2, "https://s.team/q/1/7")
+      challenge.bytes(3, Data([1]))
+      challenge.fixed32(4, Float(1).bitPattern)
+      steam.api.reply("BeginAuthSessionViaQR", challenge)
+      var approved = SteamProto.Writer()
+      approved.string(3, SteamTestToken.jwt())
+      approved.string(6, "someone")
+      steam.api.reply("PollAuthSessionStatus", approved)
+      let session = steam.session(store: MemorySteamTokenStore(SteamTestToken.token()))
+      try await withPanel(nativeSession: session) { panel in
+        panel.reportFromBridge(panel.store.settingsSnapshot)
+        try Data("#!/bin/sh\nprintf 'Logging in...failed (Timeout)\\n'\n".utf8)
+          .write(to: panel.executable)
+        try await useFakeSteamCMD(panel)
+        let wanted = item()
+        panel.workshop.selectedItem = wanted
+        panel.workshop.username = "localtest"
+        panel.controller.remembersSession = false
+        try await panel.controller.requestDownload(item: wanted)
+        let failed = try XCTUnwrap(panel.workshop.downloader.download(for: "222"))
+        try await panel.waitUntil { !failed.isPending }
+        XCTAssertTrue(try XCTUnwrap(failed.steamCMD).canRetryAuthentication)
+        if signedInBeforeRetry { await session.restore() }
+
+        try await panel.controller.retryDownload(id: failed.id)
+        if !signedInBeforeRetry {
+          XCTAssertEqual(panel.controller.downloads.resolution?.stage, .account)
+          try await panel.controller.startSteamQRSignIn()
+        }
+        try await panel.waitUntil {
+          let job = panel.workshop.downloader.download(for: "222")
+          return job !== failed && job?.isPending == false
+        }
+        let downloaded = try XCTUnwrap(panel.workshop.downloader.download(for: "222"))
+        XCTAssertNil(downloaded.steamCMD)
+        XCTAssertNil(downloaded.errorMessage)
+        XCTAssertTrue(downloaded.worker.completedSuccessfully)
+        XCTAssertNil(panel.controller.downloadRequestRow(for: "222"))
+        XCTAssertEqual(
+          try Data(contentsOf: panel.library.appendingPathComponent("222/movie.mp4")), Data("frames".utf8))
+        try session.signOut()
+      }
+    }
+  }
+
+  func testRetryingATransferFailureDoesNotAskForTheAccountAgain() async throws {
+    try await withPanel { panel in
+      try Data("#!/bin/sh\nprintf 'Waiting for user info...OK\\nERROR! Download item 222 failed (Access Denied)\\n'\n".utf8)
+        .write(to: panel.executable)
+      try await useFakeSteamCMD(panel)
+      let wanted = item()
+      panel.workshop.selectedItem = wanted
+      panel.workshop.username = "localtest"
+      panel.controller.remembersSession = false
+      try await panel.controller.requestDownload(item: wanted)
+      let job = try XCTUnwrap(panel.workshop.downloader.download(for: "222"))
+      try await panel.waitUntil { !job.isPending }
+      XCTAssertNotNil(job.errorMessage)
+      XCTAssertFalse(try XCTUnwrap(job.steamCMD).canRetryAuthentication)
+
+      try await panel.controller.retryDownload(id: job.id)
+
+      XCTAssertNil(panel.controller.downloadRequestRow(for: job.id))
+      XCTAssertFalse(panel.controller.downloads.isDialogOpen)
+      XCTAssertFalse(panel.workshop.downloader.download(for: job.id) === job)
+    }
+  }
+
   func testChangingTheAccountStopsThatJobAndKeepsItsWallpaperAsARefusedRequest() async throws {
     try await withPanel { panel in
       let controller = panel.controller
