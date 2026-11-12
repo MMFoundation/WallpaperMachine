@@ -28,13 +28,13 @@ struct WorkshopTileRing: View {
   var body: some View {
     Button(action: action) {
       ZStack {
-        Circle().fill(.black.opacity(isHovering && interactive ? 0.62 : 0.5))
+        ArtworkDisc(isHighlighted: isHovering && interactive)
         ring
         centre
         if showsClose {
           Image(systemName: DownloadRowAction.cancel.systemImage)
-            .font(.system(size: diameter * 0.26, weight: .bold))
-            .foregroundStyle(.white)
+            .font(.panel(.proportional(to: diameter, ratio: 0.26, weight: .bold)))
+            .foregroundStyle(theme.surface.markGlyph.color)
             .transition(.opacity)
         }
       }
@@ -65,12 +65,12 @@ struct WorkshopTileRing: View {
     switch state.kind {
     case .progress:
       ProgressRing(value: state.progress, lineWidth: width)
-        .foregroundStyle(.white)
+        .foregroundStyle(theme.surface.markGlyph.color)
         .tint(accent)
         .padding(diameter * 0.1)
     case .busy:
       ProgressRing(value: nil, lineWidth: width)
-        .foregroundStyle(.white)
+        .foregroundStyle(theme.surface.markGlyph.color)
         .tint(accent)
         .padding(diameter * 0.1)
     case .attention:
@@ -84,7 +84,7 @@ struct WorkshopTileRing: View {
         .padding(diameter * 0.1)
     case .queued:
       Circle()
-        .strokeBorder(.white.opacity(0.28), lineWidth: width)
+        .strokeBorder(theme.surface.markGlyph.color.opacity(0.28), lineWidth: width)
         .padding(diameter * 0.1)
     }
   }
@@ -100,8 +100,9 @@ struct WorkshopTileRing: View {
           if !state.text.isEmpty {
             Text(verbatim: state.text)
               .font(
-                .system(
-                  size: diameter * (state.isStepWord ? 0.145 : 0.24), weight: .semibold,
+                .panel(
+                  .proportional(
+                    to: diameter, ratio: state.isStepWord ? 0.145 : 0.24, weight: .semibold),
                   design: .rounded
                 ).monospacedDigit()
               )
@@ -110,7 +111,7 @@ struct WorkshopTileRing: View {
           }
           if !state.speed.isEmpty {
             Text(verbatim: state.speed)
-              .font(.system(size: max(7.5, diameter * 0.115)).monospacedDigit())
+              .font(.panel(.proportional(to: diameter, ratio: 0.115, minimum: 7.5)).monospacedDigit())
               .opacity(0.8)
               .lineLimit(1)
               .minimumScaleFactor(0.6)
@@ -119,10 +120,10 @@ struct WorkshopTileRing: View {
         .padding(.horizontal, diameter * 0.16)
       } else if let glyph = state.glyph {
         Image(systemName: glyph.systemImage)
-          .font(.system(size: diameter * 0.3, weight: .semibold))
+          .font(.panel(.proportional(to: diameter, ratio: 0.3, weight: .semibold)))
       }
     }
-    .foregroundStyle(.white)
+    .foregroundStyle(theme.surface.markGlyph.color)
     .opacity(hidden ? 0 : 1)
   }
 

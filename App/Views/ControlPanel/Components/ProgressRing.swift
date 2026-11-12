@@ -54,3 +54,17 @@ struct LoadingRing: View {
     ProgressRing(value: nil, lineWidth: 1.75).frame(width: 13, height: 13)
   }
 }
+
+/// The dark disc a status sits on over a picture: the download ring of a Steam Workshop or pixiv
+/// tile and the mark of an Installed tile's apply that waits, one look on every page. It is the
+/// same in every tone, season and appearance, since the picture under it can be any colour
+/// (`SurfacePalette.markFill`), and darker while a ring that can be clicked is under the pointer.
+struct ArtworkDisc: View {
+  var isHighlighted = false
+
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    Circle().fill((isHighlighted ? theme.surface.markFillHover : theme.surface.markFill).color)
+  }
+}

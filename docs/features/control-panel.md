@@ -449,7 +449,9 @@ double click does.
   apply** and a tile's **Apply wallpaper** item; the play symbol only ever starts a rotation
   (**Play**) or resumes playback.
   An Installed tile shows an **Applying** spinner while its apply runs and a quiet
-  Apply mark while it waits behind another apply. A scene Native Metal refused with this
+  Apply mark while it waits behind another apply, on the dark disc a Steam Workshop or pixiv
+  tile's download ring sits on. A picture under any of these statuses darkens the same way on
+  every page, a little more under the **Applying** words so they read on a bright picture. A scene Native Metal refused with this
   app version and these files, when it last ran or its
   [Compatibility check](wallpaper-properties.md#compatibility-check) read it, asks first
   (**Native Metal can’t draw this scene**, with the renderer's reason): applied, it would show

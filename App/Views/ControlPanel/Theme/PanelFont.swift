@@ -8,8 +8,8 @@ import SwiftUI
 /// sets the case and the tracking. AppKit code that measures text the panel draws reads the same
 /// role's `nsFont` or `lineHeight`, so what is measured is what is drawn. A size that comes from a
 /// control's geometry (a glyph in a disc, a symbol on a tile) is `proportional(to:ratio:weight:)`.
-/// Rounded and monospaced designs stay call-site modifiers (`.fontDesign(.rounded)`,
-/// `.monospacedDigit()`).
+/// A rounded design is `Font.panel(_:design:)`, and figures that must not move are
+/// `.monospacedDigit()` on the font.
 ///
 /// The scale is the same in every tone, season and appearance, so it is not part of
 /// `\.panelTheme`; it is read outside a view too (`LibraryCollectionLayout`).
@@ -94,11 +94,12 @@ struct PanelFont: Equatable, Sendable {
     PanelFont(size * factor, weight, isUppercase: isUppercase, tracking: tracking)
   }
 
-  /// A size taken from a control's geometry: `ratio` of `side`, as a glyph fills a disc or a tile.
-  static func proportional(to side: CGFloat, ratio: CGFloat, weight: Weight = .regular)
-    -> PanelFont
-  {
-    PanelFont(side * ratio, weight)
+  /// A size taken from a control's geometry: `ratio` of `side`, as a glyph fills a disc or a tile,
+  /// and never under `minimum`.
+  static func proportional(
+    to side: CGFloat, ratio: CGFloat, weight: Weight = .regular, minimum: CGFloat = 0
+  ) -> PanelFont {
+    PanelFont(max(minimum, side * ratio), weight)
   }
 
   // MARK: AppKit
@@ -116,8 +117,8 @@ struct PanelFont: Equatable, Sendable {
 extension Font {
   /// The system font of a role of the panel's type scale (`PanelFont`). Case and tracking are
   /// not part of a `Font`; `View.panelFont(_:)` sets them too.
-  static func panel(_ role: PanelFont) -> Font {
-    .system(size: role.size, weight: role.weight.font)
+  static func panel(_ role: PanelFont, design: Font.Design = .default) -> Font {
+    .system(size: role.size, weight: role.weight.font, design: design)
   }
 }
 

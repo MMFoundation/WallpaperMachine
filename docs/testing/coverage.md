@@ -28,7 +28,8 @@ is linked from the domain; the shared limits are collected at the end.
   and the Dock wear it and the person's own choices are kept. `PanelThemeTests` derive
   the palettes from the preferences, the season and the resolved appearance, and
   `SurfacePaletteTests` hold every tone's and the Halloween look's palettes to the
-  contrast floor. `PanelFontTests` (Panel) keep the type scale in order from page title to a
+  contrast floor, and keep what lies over a picture (scrims, mark and ring discs, a tile's
+  controls) the same in every look and readable over a white picture. `PanelFontTests` (Panel) keep the type scale in order from page title to a
   tile's mark with no words under 10 points, and check that what AppKit measures with a role's
   `nsFont` and `lineHeight` is what SwiftUI draws: the caption height the Library grid reserves
   under a tile, and the room a property row keeps for its Modified or Not applied pill.

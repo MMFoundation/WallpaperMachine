@@ -103,6 +103,58 @@ final class SurfacePaletteTests: XCTestCase {
       SurfacePalette.miniature(tone: .warm, appearance: .light).background.hex, "#f5efe7")
   }
 
+  /// What lies over a picture is drawn on any picture in any look, so it never follows the tone,
+  /// the season or the appearance.
+  func testWhatLiesOverAPictureIsTheSameInEveryToneSeasonAndAppearance() {
+    func overlays(_ palette: SurfacePalette) -> [PanelColor] {
+      [
+        palette.scrim, palette.scrimStrong, palette.scrimSubtle, palette.markFill,
+        palette.markFillHover, palette.markGlyph, palette.markApproved, palette.controlFill,
+        palette.controlRim,
+      ]
+    }
+    let reference = overlays(SurfacePalette(tone: .neutral, appearance: .light))
+    for appearance in appearances {
+      for (context, palette) in palettes(appearance) {
+        XCTAssertEqual(overlays(palette), reference, context)
+      }
+    }
+  }
+
+  /// The brightest picture is white: a status's words and glyphs must read on it through the scrim
+  /// and the disc they are drawn on, and the disc under the pointer and the scrims must step from
+  /// lighter to darker.
+  func testWordsAndGlyphsOverAPictureStayReadableOverTheBrightestPicture() {
+    let palette = SurfacePalette(tone: .neutral, appearance: .light)
+    let white = PanelColor(rgb: 0xffffff)
+    /// `layers` of black or white laid over a white picture, in order.
+    func over(_ layers: PanelColor...) -> PanelColor {
+      var channel = 1.0
+      for layer in layers {
+        let ink = layer.rgb == 0 ? 0.0 : 1.0
+        channel = channel * (1 - layer.alpha) + ink * layer.alpha
+      }
+      let value = UInt32((channel * 255).rounded())
+      return PanelColor(rgb: value << 16 | value << 8 | value)
+    }
+    let glyph = palette.markGlyph
+    XCTAssertGreaterThanOrEqual(glyph.contrast(with: over(palette.markFill)), 4.5, "a mark's disc")
+    XCTAssertGreaterThanOrEqual(
+      glyph.contrast(with: over(palette.scrim, palette.markFill)), 4.5, "a ring's disc on a scrim")
+    XCTAssertGreaterThanOrEqual(
+      glyph.contrast(with: over(palette.scrimStrong)), 4.5, "Applying, straight on the scrim")
+    XCTAssertGreaterThanOrEqual(glyph.contrast(with: over(palette.controlFill)), 3, "a tile's check")
+    XCTAssertEqual(glyph, white)
+
+    let darkness = [
+      palette.scrimSubtle, palette.scrim, palette.scrimStrong, palette.markFill,
+      palette.markFillHover,
+    ].map(\.alpha)
+    XCTAssertEqual(darkness, darkness.sorted(), "subtle, scrim, strong, the disc, the disc hovered")
+    XCTAssertLessThan(palette.scrim.alpha, palette.scrimStrong.alpha)
+    XCTAssertLessThan(palette.markFill.alpha, palette.markFillHover.alpha)
+  }
+
   private func red(_ color: PanelColor) -> Int { Int((color.rgb >> 16) & 255) }
   private func blue(_ color: PanelColor) -> Int { Int(color.rgb & 255) }
 }

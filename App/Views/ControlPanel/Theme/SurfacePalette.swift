@@ -4,8 +4,9 @@ import Foundation
 /// appearance table of `WebUI/panel.css`. Neutral is the untinted look; Warm and Cool shift
 /// every surface and text colour a little toward amber or blue. A season has a column of its own
 /// beside the tones (Halloween: moonlit ink in the dark, candlelit parchment in the light).
-/// Contrast-fitted accent colours live in `AccentPalette`; media overlays are always dark and
-/// never toned, so they are not here.
+/// Contrast-fitted accent colours live in `AccentPalette`. What lies over a picture (marks,
+/// rings, scrims, a tile's controls) is the last group: dark and white, the same in every tone,
+/// season and appearance, since the picture under it can be any colour.
 struct SurfacePalette: Equatable, Sendable {
   /// The window and content background.
   let background: PanelColor
@@ -41,13 +42,26 @@ struct SurfacePalette: Equatable, Sendable {
   let warning: PanelColor
   let approved: PanelColor
   let heart: PanelColor
-  /// A mark over a preview picture (a Library or Workshop tile's chips): a dark disc and a
-  /// white glyph in both appearances, since the picture under it is either.
+  /// A mark over a preview picture (a Library or Workshop tile's chips) and the disc a status sits
+  /// on (a download ring, the mark of an apply that waits): a dark disc and a white glyph in both
+  /// appearances, since the picture under it is either. `markFillHover` is the disc under the
+  /// pointer.
   let markFill: PanelColor
+  let markFillHover: PanelColor
   let markGlyph: PanelColor
   /// The approved trophy on that dark disc: a bright green in both appearances, since the
   /// light-appearance `approved` green is too dark to read on it.
   let markApproved: PanelColor
+  /// What darkens a picture under a status: `scrim` under one that brings its own disc (a
+  /// download ring, an apply that waits), `scrimStrong` under words drawn straight on the picture
+  /// (Applying), and `scrimSubtle` under a ticked tile's controls.
+  let scrim: PanelColor
+  let scrimStrong: PanelColor
+  let scrimSubtle: PanelColor
+  /// A control over a picture (a tile's check and heart): its dark glass disc and the white rim
+  /// that keeps the disc's edge on a dark picture.
+  let controlFill: PanelColor
+  let controlRim: PanelColor
 
   init(tone: AppThemePreferences.Tone, appearance: PanelAppearance) {
     self.init(look: .tone(tone), appearance: appearance)
@@ -121,8 +135,14 @@ struct SurfacePalette: Equatable, Sendable {
     approved = byAppearance(dark: "#4cd964", light: "#248a3d")
     heart = byAppearance(dark: "#ff5c86", light: "#e0245e")
     markFill = PanelColor(rgb: 0, alpha: 0.58)
+    markFillHover = PanelColor(rgb: 0, alpha: 0.72)
     markGlyph = PanelColor(rgb: 0xffffff)
     markApproved = PanelColor(rgb: 0x5cf27c)
+    scrim = PanelColor(rgb: 0, alpha: 0.4)
+    scrimStrong = PanelColor(rgb: 0, alpha: 0.58)
+    scrimSubtle = PanelColor(rgb: 0, alpha: 0.18)
+    controlFill = PanelColor(rgb: 0, alpha: 0.42)
+    controlRim = PanelColor(rgb: 0xffffff, alpha: 0.35)
   }
 
   /// The three colours of a miniature window, as the Settings appearance cards and the welcome

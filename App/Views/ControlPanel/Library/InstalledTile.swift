@@ -130,12 +130,13 @@ struct InstalledTile: View {
   private var applyState: some View {
     if controller.applyingWallpaperID == row.id {
       ZStack {
-        Color.black.opacity(0.5)
+        // Words straight on the picture: the stronger scrim keeps them readable on a bright one.
+        theme.surface.scrimStrong.color
         VStack(spacing: 5) {
           ProgressRing(value: nil, lineWidth: 2.5).frame(width: 26, height: 26)
-          Text("Applying").font(.system(size: 11, weight: .semibold))
+          Text("Applying").font(.panel(.badge))
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(theme.surface.markGlyph.color)
       }
       .allowsHitTesting(false)
       .accessibilityElement(children: .ignore)
@@ -143,12 +144,13 @@ struct InstalledTile: View {
       .accessibilityAddTraits(.updatesFrequently)
     } else if controller.queuedApplyIDs.contains(row.id) {
       ZStack {
-        Color.black.opacity(0.4)
+        // The picture and the disc of a Steam Workshop tile's waiting ring.
+        theme.surface.scrim.color
         Image(systemName: ApplyOffer.symbol)
-          .font(.system(size: 12, weight: .semibold))
-          .foregroundStyle(.white)
+          .font(.panel(.calloutStrong))
+          .foregroundStyle(theme.surface.markGlyph.color)
           .frame(width: 30, height: 30)
-          .background(.white.opacity(0.18), in: Circle())
+          .background { ArtworkDisc() }
       }
       .allowsHitTesting(false)
       .accessibilityElement(children: .ignore)
@@ -228,15 +230,17 @@ private struct TileDisc: View {
   let systemImage: String
   var isOn = false
   var onColor: Color
-  var onFill: Color = .white.opacity(0.94)
+
+  @Environment(\.panelTheme) private var theme
 
   var body: some View {
+    let surface = theme.surface
     Image(systemName: systemImage)
       .font(.system(size: 12, weight: .bold))
-      .foregroundStyle(isOn ? onColor : .white)
+      .foregroundStyle(isOn ? onColor : surface.markGlyph.color)
       .frame(width: LibraryGridGeometry.controlSize, height: LibraryGridGeometry.controlSize)
-      .background(isOn ? onFill : .black.opacity(0.42), in: Circle())
-      .overlay { Circle().strokeBorder(.white.opacity(isOn ? 0 : 0.35), lineWidth: 0.75) }
+      .background(isOn ? surface.markGlyph.color.opacity(0.94) : surface.controlFill.color, in: Circle())
+      .overlay { Circle().strokeBorder(isOn ? .clear : surface.controlRim.color, lineWidth: 0.75) }
       .contentShape(Circle())
   }
 }
@@ -270,7 +274,7 @@ private struct TileCheck: View {
         .frame(width: LibraryGridGeometry.controlSize, height: LibraryGridGeometry.controlSize)
         .background {
           ZStack {
-            Circle().fill(.black.opacity(0.42))
+            Circle().fill(theme.surface.controlFill.color)
             // The hold's 350 ms, as long as the tile takes to sink in; a ticked check is full.
             Circle().fill(theme.accent.primary.color)
               .scaleEffect(isFilled ? 1 : 0.01)
@@ -278,7 +282,10 @@ private struct TileCheck: View {
                 isOn || reduceMotion ? nil : .easeIn(duration: 0.35), value: isFilled)
           }
         }
-        .overlay { Circle().strokeBorder(.white.opacity(isFilled ? 0 : 0.7), lineWidth: 1.25) }
+        .overlay {
+          Circle().strokeBorder(
+            theme.surface.markGlyph.color.opacity(isFilled ? 0 : 0.7), lineWidth: 1.25)
+        }
         .contentShape(Circle())
     }
     .buttonStyle(DiscButtonStyle())

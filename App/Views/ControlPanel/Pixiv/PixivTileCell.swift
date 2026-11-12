@@ -88,17 +88,18 @@ struct PixivTileCell: View {
   }
 }
 
-/// The picture of a tile, dimmed while a ring is over it.
+/// The picture of a tile, darkened while a ring is over it the way a Steam Workshop tile's is.
 private struct PixivTileArtwork: View {
   let tile: PixivTile
   let ringAction: (PixivTile.Ring) -> Void
 
+  @Environment(\.panelTheme) private var theme
+
   var body: some View {
     ZStack {
       PanelImage(source: tile.image, pointSize: 180)
-        .saturation(tile.ring == nil ? 1 : 0.85)
-        .brightness(tile.ring == nil ? 0 : -0.28)
       if let ring = tile.ring {
+        theme.surface.scrim.color
         PixivTileRing(state: ring.state) { ringAction(ring) }
       }
     }

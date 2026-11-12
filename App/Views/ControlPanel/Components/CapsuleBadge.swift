@@ -30,7 +30,7 @@ struct CapsuleBadge<Content: View>: View {
   private var foreground: Color {
     switch style {
     case .accent: theme.accent.onPrimary.color
-    case .overlay: .white
+    case .overlay: theme.surface.markGlyph.color
     case .neutral: theme.surface.tagInk.color
     }
   }
@@ -38,7 +38,7 @@ struct CapsuleBadge<Content: View>: View {
   private var background: Color {
     switch style {
     case .accent: theme.accent.primary.color
-    case .overlay: .black.opacity(0.6)
+    case .overlay: theme.surface.markFill.color
     case .neutral: theme.surface.badge.color
     }
   }

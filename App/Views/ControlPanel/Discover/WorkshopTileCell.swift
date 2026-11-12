@@ -68,7 +68,7 @@ struct WorkshopTileCell: View {
       }
       if let ring = tile.download {
         // The picture dims under a ring, so the ring reads on any wallpaper.
-        Color.black.opacity(0.4)
+        theme.surface.scrim.color
         GeometryReader { proxy in
           let diameter = min(WorkshopTileRing.largestDiameter, proxy.size.width * 0.52)
           WorkshopTileRing(state: ring, diameter: diameter) {

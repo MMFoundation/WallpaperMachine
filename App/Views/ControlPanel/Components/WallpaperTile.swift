@@ -92,7 +92,7 @@ struct WallpaperTile<Artwork: View>: View {
         // A ticked tile's artwork darkens by the same 18 % the web panel's `brightness(.82)` took,
         // beneath its own controls so they stay as bright as on any other tile.
         .overlay {
-          if emphasis == .checked { Color.black.opacity(0.18).allowsHitTesting(false) }
+          if emphasis == .checked { theme.surface.scrimSubtle.color.allowsHitTesting(false) }
         }
         .overlay(alignment: .topLeading) { topLeading.padding(6) }
         .overlay(alignment: .topTrailing) { topTrailing.padding(6) }
