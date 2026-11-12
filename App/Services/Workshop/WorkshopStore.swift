@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-struct WorkshopQuery: Equatable, Sendable {
+struct WorkshopQuery: Hashable, Sendable {
   let text: String
   let kind: WorkshopKind
   let sort: WorkshopSort
@@ -21,7 +21,7 @@ struct WorkshopQuery: Equatable, Sendable {
   var itemID: String? { source == .browse ? WorkshopLink.itemID(in: text) : nil }
 }
 
-struct WorkshopRequest: Equatable, Sendable {
+struct WorkshopRequest: Hashable, Sendable {
   let query: WorkshopQuery
   let page: Int
 }
@@ -802,13 +802,13 @@ final class WorkshopStore {
   @ObservationIgnored private var generation = UUID()
   private(set) var committedQuery: WorkshopQuery?
   private(set) var failedRequest: WorkshopRequest?
-  /// Panel pages fetched for `cacheQuery`, keyed by page number, plus fetches still in
-  /// flight, so paging back never touches the network. A search always starts a fresh
-  /// cache, even for the same query.
+  /// Panel pages fetched for `cacheQuery`, keyed by page number, so paging back never touches
+  /// the network, plus fetches still in flight, keyed by their whole request. A search always
+  /// starts a fresh cache, even for the same query.
   @ObservationIgnored private var cacheQuery: WorkshopQuery?
   @ObservationIgnored private var cacheID = UUID()
   @ObservationIgnored private var steamPages: [Int: WorkshopPage] = [:]
-  @ObservationIgnored private var steamFetches: [Int: Task<WorkshopPage, Error>] = [:]
+  @ObservationIgnored private var steamFetches: [WorkshopRequest: Task<WorkshopPage, Error>] = [:]
   /// For panel pages filled from several Steam pages: the screened Steam pages, keyed by
   /// Steam's page number, with their fetches in flight, and where each panel page starts.
   @ObservationIgnored private var screenedPages: [Int: WorkshopPage] = [:]
@@ -1131,18 +1131,24 @@ final class WorkshopStore {
     }
   }
 
-  /// Starts, or joins, the fetch of one panel page for the current cache.
-  private func fetchSteamPage(_ number: Int, query: WorkshopQuery) -> Task<WorkshopPage, Error> {
-    if let task = steamFetches[number] { return task }
-    let cacheID = cacheID
+  /// Starts, or joins, the fetch of one panel page for the cache that asks, `cacheID`, which the
+  /// caller takes when the page is asked for. A cache replaced since gets nothing, so a request
+  /// made for an earlier search never reaches Steam or fills the new cache; and a fetch is only
+  /// joined by the same request, never by another query's page of the same number.
+  private func fetchSteamPage(_ request: WorkshopRequest, cacheID: UUID) -> Task<WorkshopPage, Error> {
+    guard cacheID == self.cacheID else { return Task { throw CancellationError() } }
+    if let task = steamFetches[request] { return task }
+    let (number, query) = (request.page, request.query)
     let service = service
     let task = Task { [weak self] in
-      defer { if let self, self.cacheID == cacheID { self.steamFetches[number] = nil } }
+      defer { if let self, self.cacheID == cacheID { self.steamFetches[request] = nil } }
       let result: WorkshopPage
       if Self.fillsPages(query), let self {
         result = try await self.filledPage(number, query: query, cacheID: cacheID)
       } else {
         let account = try await self?.readingSession(for: query)
+        // Replaced while a saved sign-in or a renewal was awaited: Steam is not asked at all.
+        try Task.checkCancellation()
         result = try await service.page(for: query, page: number, account: account)
       }
       try Task.checkCancellation()
@@ -1153,7 +1159,7 @@ final class WorkshopStore {
       }
       return result
     }
-    steamFetches[number] = task
+    steamFetches[request] = task
     return task
   }
 
@@ -1243,7 +1249,7 @@ final class WorkshopStore {
 
   /// Steam's own `total_pages` is already clamped to 1,000; clamping again keeps the panel's
   /// page count within that limit whatever a page says, so no page beyond it is ever offered.
-  private func publish(_ result: WorkshopPage, for request: WorkshopRequest) {
+  private func publish(_ result: WorkshopPage, for request: WorkshopRequest, cacheID: UUID) {
     var seen = Set<String>()
     items = result.items.filter { seen.insert($0.id).inserted }
     totalCount = result.totalCount
@@ -1257,7 +1263,7 @@ final class WorkshopStore {
     failedRequest = nil
     // A failed prefetch is simply retried as an ordinary load when the user gets there.
     if prefetchesNextPage, page < totalPages, steamPages[page + 1] == nil {
-      _ = fetchSteamPage(page + 1, query: request.query)
+      _ = fetchSteamPage(WorkshopRequest(query: request.query, page: page + 1), cacheID: cacheID)
     }
   }
 
@@ -1268,10 +1274,13 @@ final class WorkshopStore {
     let token = UUID()
     generation = token
     errorMessage = nil
+    // The cache this request is made for, taken now: a search that replaces it before the task
+    // below runs makes the request stale, and nothing of it reaches Steam or the new cache.
+    let cacheID = cacheID
     // Paging back to a page already read shows it at once, never as loading.
     if let cached = steamPages[request.page] {
       isLoading = false
-      publish(cached, for: request)
+      publish(cached, for: request, cacheID: cacheID)
       return
     }
     isLoading = true
@@ -1279,9 +1288,9 @@ final class WorkshopStore {
       guard let self else { return }
       defer { if self.generation == token { self.isLoading = false } }
       do {
-        let result = try await self.fetchSteamPage(request.page, query: request.query).value
+        let result = try await self.fetchSteamPage(request, cacheID: cacheID).value
         guard self.generation == token, !Task.isCancelled else { return }
-        self.publish(result, for: request)
+        self.publish(result, for: request, cacheID: cacheID)
       } catch {
         guard self.generation == token, !Task.isCancelled, !(error is CancellationError) else { return }
         AppLog.warn("Workshop \(request.query.source.key) page \(request.page) failed: \(error.localizedDescription)")

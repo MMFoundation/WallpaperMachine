@@ -353,6 +353,64 @@ final class WorkshopStoreTests: XCTestCase {
     }
   }
 
+  /// A search replaced in the same turn, before it has asked Steam for anything, must never
+  /// answer for the search that replaced it: Steam answers each request with its own query.
+  func testSearchReplacedBeforeItStartsNeverAnswersForItsReplacement() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let store = fixture.store
+    store.searchText = "forest"
+    store.search()
+    store.searchText = "rain"
+    store.search()
+    try await serve(fixture, store, pages: [
+      "forest": [1: pageHTML(id: "101", page: 1, pages: 9, count: 270)],
+      "rain": [1: pageHTML(id: "201", page: 1, pages: 2, count: 33)],
+    ])
+    assertPage(store, id: "201", page: 1, pages: 2, count: 33)
+    assertBrowseURL(store, text: "rain", kind: .all, sort: .trendingYear, page: 1)
+    XCTAssertNil(store.errorMessage)
+  }
+
+  /// A page asked for just before a new search, which Steam answers only after the new search's
+  /// first page, must never be shown, or kept, as a page of the new search.
+  func testPageAskedForJustBeforeANewSearchNeverAnswersForIt() async throws {
+    for prefetches in [false, true] {
+      let fixture = try Fixture()
+      defer { fixture.remove() }
+      let store = fixture.store
+      store.prefetchesNextPage = prefetches
+      // Two pages each, so the second has nothing after it to prefetch.
+      let pages: [String: [Int: Data]] = [
+        "forest": [
+          1: try pageHTML(id: "101", page: 1, pages: 2, count: 60),
+          2: try pageHTML(id: "102", page: 2, pages: 2, count: 60),
+        ],
+        "rain": [
+          1: try pageHTML(id: "201", page: 1, pages: 2, count: 45),
+          2: try pageHTML(id: "202", page: 2, pages: 2, count: 45),
+        ],
+      ]
+      store.searchText = "forest"
+      store.search()
+      try await fixture.held(text: "forest", page: 1).succeed(pages["forest"]![1]!)
+      try await finished(store)
+      store.loadPage(2)
+      store.searchText = "rain"
+      store.search()
+      // Out of order: the new search's first page answers while the older page is still held.
+      try await fixture.held(text: "rain", page: 1).succeed(pages["rain"]![1]!)
+      try await finished(store)
+      assertPage(store, id: "201", page: 1, pages: 2, count: 45)
+
+      store.loadPage(2)
+      try await serve(fixture, store, pages: pages)
+      assertPage(store, id: "202", page: 2, pages: 2, count: 45)
+      assertBrowseURL(store, text: "rain", kind: .all, sort: .trendingYear, page: 2)
+      XCTAssertNil(store.errorMessage)
+    }
+  }
+
   func testCancellationDoesNotClaimInitialSuccessOrDiscardLoadedPage() async throws {
     let fixture = try Fixture()
     defer { fixture.remove() }
@@ -519,6 +577,28 @@ final class WorkshopStoreTests: XCTestCase {
     try await waitUntil { !store.isLoading }
   }
 
+  /// Answers every request as it arrives with the page `pages` holds for its own search text and
+  /// page number, until the store has stopped loading and no request is left.
+  private func serve(
+    _ fixture: Fixture, _ store: WorkshopStore, pages: [String: [Int: Data]]
+  ) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while store.isLoading || fixture.inbox.hasRequest {
+      guard ContinuousClock.now < deadline else { throw FixtureError.timedOut }
+      guard fixture.inbox.hasRequest else {
+        try await Task.sleep(for: .milliseconds(2))
+        continue
+      }
+      let pending = fixture.inbox.take()
+      let (text, page) = Fixture.searchAndPage(of: pending)
+      guard let body = text.flatMap({ pages[$0] })?[page ?? 0] else {
+        pending.fail(URLError(.badURL))
+        throw FixtureError.unexpectedRequest(pending.request.url)
+      }
+      pending.succeed(body)
+    }
+  }
+
   private func pageHTML(
     id: String, title: String = "Fixture wallpaper", kind: WorkshopKind = .scene,
     page: Int, pages: Int, count: Int
@@ -633,6 +713,29 @@ final class WorkshopStoreTests: XCTestCase {
       return pending
     }
 
+    /// The request for page `page` of `text`, held unanswered, wherever it waits among the
+    /// requests Steam received; the others stay queued in the order they arrived.
+    func held(text: String, page: Int) async throws -> WorkshopFixtureProtocol {
+      var found: WorkshopFixtureProtocol?
+      try await WorkshopStoreTests.waitUntil {
+        found = self.inbox.take {
+          let (asked, number) = Self.searchAndPage(of: $0)
+          return asked == text && number == page
+        }
+        return found != nil
+      }
+      return found!
+    }
+
+    static func searchAndPage(of pending: WorkshopFixtureProtocol) -> (String?, Int?) {
+      let values =
+        URLComponents(url: pending.request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+      return (
+        values.first { $0.name == "searchtext" }?.value,
+        values.first { $0.name == "p" }?.value.flatMap { Int($0) }
+      )
+    }
+
     func reply(
       text: String, kind: WorkshopKind, sort: WorkshopSort, page: Int, body: Data,
       status: Int = 200,
@@ -672,6 +775,10 @@ private final class WorkshopRequestInbox: @unchecked Sendable {
   var hasRequest: Bool { lock.withLock { !pending.isEmpty } }
   func append(_ request: WorkshopFixtureProtocol) { lock.withLock { pending.append(request) } }
   func take() -> WorkshopFixtureProtocol { lock.withLock { pending.removeFirst() } }
+  /// Removes and returns the first request `matches` accepts, or nil while none does.
+  func take(where matches: (WorkshopFixtureProtocol) -> Bool) -> WorkshopFixtureProtocol? {
+    lock.withLock { pending.firstIndex(where: matches).map { pending.remove(at: $0) } }
+  }
 }
 
 private final class WorkshopFixtureProtocol: URLProtocol, @unchecked Sendable {

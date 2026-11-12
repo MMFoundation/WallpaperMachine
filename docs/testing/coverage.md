@@ -1853,10 +1853,12 @@ unless `scripts/we_reference.py render` hands it real pages to draw. Detail and 
 
 - `WorkshopStoreTests` — pagination follows the displayed query until a draft is
   submitted; a failed page or submission retries its own query; superseded and
-  racing requests cannot publish over a newer search; pages are Steam's own pages
-  served from cache, capped at Steam's page limit, with the next page prefetched;
-  the sidebar defaults match Wallpaper Engine's; Recently updated reaches Steam as
-  `lastupdated` with the search text and tags.
+  racing requests cannot publish over a newer search; a search replaced before it
+  reached Steam is never shown for its replacement; a page asked for just before a
+  newer search, answered after it, never fills the newer search's cache; pages are
+  Steam's own pages served from cache, capped at Steam's page limit, with the next
+  page prefetched; the sidebar defaults match Wallpaper Engine's; Recently updated
+  reaches Steam as `lastupdated` with the search text and tags.
 - `WorkshopSearchLanguageTests` — which language a search reads as: Simplified and
   Traditional Chinese told apart by their characters, Japanese from kana and from kanji the
   recognizer is sure of, Korean from Hangul, mixed text read by its CJK characters, English

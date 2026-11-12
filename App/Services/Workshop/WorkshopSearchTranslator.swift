@@ -3,7 +3,7 @@ import Observation
 
 /// A Workshop search typed in another language, and the English words Steam was searched with
 /// instead. Display-only beyond the search itself: nothing stores it.
-struct WorkshopSearchTranslation: Equatable, Sendable {
+struct WorkshopSearchTranslation: Hashable, Sendable {
     /// What the person typed, trimmed.
     let original: String
     /// The translation into English that Steam is searched with.

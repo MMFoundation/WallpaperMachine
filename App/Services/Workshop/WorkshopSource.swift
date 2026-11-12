@@ -1,7 +1,7 @@
 import Foundation
 
 /// Where Discover's tiles come from.
-enum WorkshopSource: Equatable, Sendable {
+enum WorkshopSource: Hashable, Sendable {
     /// The Workshop's wallpapers, searched, filtered and sorted by Steam.
     case browse
     /// The Workshop's collections, searched and sorted by Steam.
