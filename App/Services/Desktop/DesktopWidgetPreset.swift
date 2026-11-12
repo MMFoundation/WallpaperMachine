@@ -160,18 +160,18 @@ enum DesktopWidgetPreset: String, CaseIterable, Sendable {
         switch layout.arrangement {
         case .column(let gap):
             let total = sizes.map(\.height).reduce(0, +) + gap * CGFloat(max(widgets.count - 1, 0))
-            var top = layout.y * display.height - total / 2
+            var top = CGFloat(layout.y) * display.height - total / 2
             for index in widgets.indices {
                 widgets[index].x = layout.x
-                widgets[index].y = (top + sizes[index].height / 2) / display.height
+                widgets[index].y = Double((top + sizes[index].height / 2) / display.height)
                 top += sizes[index].height + gap
             }
         case .row(let gap):
             let total = sizes.map(\.width).reduce(0, +) + gap * CGFloat(max(widgets.count - 1, 0))
-            var left = layout.x * display.width - total / 2
+            var left = CGFloat(layout.x) * display.width - total / 2
             for index in widgets.indices {
                 widgets[index].alignment = .center
-                widgets[index].x = (left + sizes[index].width / 2) / display.width
+                widgets[index].x = Double((left + sizes[index].width / 2) / display.width)
                 widgets[index].y = layout.y
                 left += sizes[index].width + gap
             }
