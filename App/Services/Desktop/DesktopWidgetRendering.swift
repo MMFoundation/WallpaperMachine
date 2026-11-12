@@ -33,26 +33,75 @@ enum DesktopWidgetRendering {
     /// from twelve o'clock.
     struct AnalogFace: Equatable {
         var diameter: CGFloat
+        /// The ring, marks and hands, opaque: the widget's opacity is the look's.
         var color: NSColor
+        /// The second hand's.
+        var accent: NSColor
         /// The minute hand's width; the others are drawn in proportion.
         var lineWidth: CGFloat
         var hour: Double
         var minute: Double
         /// Nil without a second hand.
         var second: Double?
-        /// The shadow's blur and downward offset; nil without one.
-        var shadow: Shadow?
-
-        struct Shadow: Equatable {
-            var blur: CGFloat
-            var offset: CGFloat
-        }
+        var marks: DesktopWidget.DialMarks = .hours
+        var showsRing = true
+        /// The numbers' font, for a face with numbers.
+        var numeralFont: NSFont?
+        /// Slanted numbers, for an italic face whose font has no italic of its own.
+        var slantsNumerals = false
     }
 
     /// How a widget is drawn.
     enum Drawing: Equatable {
         case text(NSAttributedString)
         case analog(AnalogFace)
+    }
+
+    /// What is done to the whole drawing: its opacity and turn, the gradient that fills it, its
+    /// outline, glow and shadow, and the plate behind it. Every length is in points at the scale
+    /// drawn.
+    struct Look: Equatable {
+        var opacity: CGFloat = 1
+        /// The drawing's own size, before any turn.
+        var size: NSSize = .zero
+        /// Degrees clockwise.
+        var rotation: CGFloat = 0
+        var gradient: Gradient?
+        var outline: Outline?
+        var glow: Glow?
+        var shadow: Shadow?
+        var background: Plate?
+
+        struct Gradient: Equatable {
+            var from: NSColor
+            var to: NSColor
+            /// Degrees clockwise from upwards.
+            var angle: CGFloat
+        }
+
+        struct Outline: Equatable {
+            var width: CGFloat
+            var color: NSColor
+        }
+
+        struct Glow: Equatable {
+            var radius: CGFloat
+            var color: NSColor
+        }
+
+        struct Shadow: Equatable {
+            var blur: CGFloat
+            /// Up is positive, as AppKit counts.
+            var offset: NSSize
+            var color: NSColor
+        }
+
+        struct Plate: Equatable {
+            var shape: DesktopWidget.Background
+            var color: NSColor
+            /// How far it reaches past the drawing on every side.
+            var inset: CGFloat
+        }
     }
 
     /// Everything one widget shows at a moment.
@@ -62,8 +111,20 @@ enum DesktopWidgetRendering {
         var drawing: Drawing
         /// The size of what is drawn, without the padding.
         var size: NSSize
-        /// The room left around it so the shadow is not cut off.
+        /// The room left around it so the effects and the background are not cut off.
         var padding: CGFloat
+        var look = Look()
+
+        /// The size the padded drawing takes once turned: its own when it is not.
+        var boxSize: NSSize {
+            let width = size.width + 2 * padding, height = size.height + 2 * padding
+            guard look.rotation != 0 else { return NSSize(width: width, height: height) }
+            let angle = look.rotation * .pi / 180
+            let cosine = abs(cos(angle)), sine = abs(sin(angle))
+            // Rounded up, but not by a rounding error: a quarter turn swaps the sides exactly.
+            return NSSize(
+                width: ceil(width * cosine + height * sine - 1e-6), height: ceil(width * sine + height * cosine - 1e-6))
+        }
     }
 
     // MARK: Formatters
@@ -81,6 +142,16 @@ enum DesktopWidgetRendering {
             formatter(template: template, locale: locale, calendar: calendar).string(from: date)
         }
 
+        /// The pattern the locale makes of `template`, such as "h:mm a" for "jmm" in the US.
+        func pattern(template: String, locale: Locale, calendar: Calendar) -> String {
+            formatter(template: template, locale: locale, calendar: calendar).dateFormat ?? ""
+        }
+
+        /// `date` written with an explicit pattern, in the locale's digits and words.
+        func string(_ date: Date, format: String, locale: Locale, calendar: Calendar) -> String {
+            formatter(template: format, locale: locale, calendar: calendar, isPattern: true).string(from: date)
+        }
+
         /// The one-letter weekday names of `locale`, Sunday first.
         func weekdaySymbols(locale: Locale) -> [String] {
             if let found = symbols[locale.identifier] { return found }
@@ -91,9 +162,11 @@ enum DesktopWidgetRendering {
             return found
         }
 
-        private func formatter(template: String, locale: Locale, calendar: Calendar) -> DateFormatter {
+        private func formatter(
+            template: String, locale: Locale, calendar: Calendar, isPattern: Bool = false
+        ) -> DateFormatter {
             let key = [
-                template, locale.identifier, "\(calendar.identifier)", calendar.timeZone.identifier,
+                isPattern ? "=" : "~", template, locale.identifier, "\(calendar.identifier)", calendar.timeZone.identifier,
                 "\(calendar.firstWeekday)", "\(calendar.minimumDaysInFirstWeek)",
             ].joined(separator: "|")
             if let formatter = cache[key] { return formatter }
@@ -111,7 +184,11 @@ enum DesktopWidgetRendering {
             }
             formatter.calendar = calendar
             formatter.timeZone = calendar.timeZone
-            formatter.setLocalizedDateFormatFromTemplate(template)
+            if isPattern {
+                formatter.dateFormat = template
+            } else {
+                formatter.setLocalizedDateFormatFromTemplate(template)
+            }
             if cache.count >= 48 { cache.removeAll() }
             cache[key] = formatter
             return formatter
@@ -160,7 +237,14 @@ enum DesktopWidgetRendering {
             formatters.string(date, template: template, locale: inputs.locale, calendar: calendar)
         }
         switch widget.kind {
-        case .time, .analog:
+        case .time:
+            let words = clock(widget, at: now, locale: inputs.locale, calendar: calendar, formatters: formatters)
+            if widget.clockLayout == .stacked {
+                let label = line(widget.text)
+                return label.isEmpty ? words : "\(label)\n\(words)"
+            }
+            return labelled(words, widget: widget)
+        case .analog:
             return labelled(format(template(for: widget)), widget: widget)
         case .date:
             let words = switch widget.dateStyle {
@@ -194,6 +278,73 @@ enum DesktopWidgetRendering {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         return text(for: widget, inputs: Inputs(date: date, calendar: calendar, locale: locale), formatters: formatters)
+    }
+
+    /// A digital clock's time: on one line in the locale's pattern, with or without the hour's
+    /// leading zero and AM or PM, or stacked, the hour over the minutes (over the seconds, over AM
+    /// or PM).
+    @MainActor
+    static func clock(
+        _ widget: DesktopWidget, at date: Date, locale: Locale, calendar: Calendar, formatters: Formatters
+    ) -> String {
+        let base = formatters.pattern(
+            template: timeTemplate(widget.timeFormat, seconds: widget.showsSeconds), locale: locale,
+            calendar: calendar)
+        func write(_ pattern: String) -> String {
+            formatters.string(date, format: pattern, locale: locale, calendar: calendar)
+        }
+        guard widget.clockLayout == .stacked else {
+            let pattern = adjusted(base, padsHour: widget.padsHour, showsPeriod: widget.showsPeriod)
+            return pattern == base
+                ? formatters.string(
+                    date, template: timeTemplate(widget.timeFormat, seconds: widget.showsSeconds), locale: locale,
+                    calendar: calendar)
+                : write(pattern)
+        }
+        // The locale's own hour letter and its digits: "HH" stays two digits in Britain.
+        let hourLetter = base.first { "hHkK".contains($0) } ?? "H"
+        let localDigits = base.filter { $0 == hourLetter }.count
+        let hour = String(repeating: hourLetter, count: max(localDigits, widget.padsHour ? 2 : 1))
+        var lines = [write(hour), write("mm")]
+        if widget.showsSeconds { lines.append(write("ss")) }
+        if widget.showsPeriod, "hK".contains(hourLetter) { lines.append(write("a")) }
+        return lines.joined(separator: "\n")
+    }
+
+    /// `pattern` with the hour written in at least two digits when `padsHour`, and without AM or
+    /// PM (and the space beside it) unless `showsPeriod`. Quoted words are kept as they are.
+    static func adjusted(_ pattern: String, padsHour: Bool, showsPeriod: Bool) -> String {
+        let characters = Array(pattern)
+        var result = ""
+        var quoted = false
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            if character == "'" {
+                quoted.toggle()
+                result.append(character)
+                index += 1
+                continue
+            }
+            if quoted || !character.isLetter {
+                result.append(character)
+                index += 1
+                continue
+            }
+            var end = index
+            while end < characters.count, characters[end] == character { end += 1 }
+            let run = end - index
+            if "hHkK".contains(character) {
+                result += String(repeating: character, count: padsHour ? max(run, 2) : run)
+            } else if showsPeriod || !"abB".contains(character) {
+                result += String(repeating: character, count: run)
+            }
+            index = end
+        }
+        guard !showsPeriod else { return result }
+        let spaces = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "\u{202F}\u{00A0}"))
+        return result.trimmingCharacters(in: spaces)
+            .replacingOccurrences(of: "  ", with: " ")
     }
 
     /// `words` after the widget's label, when it has one.
@@ -300,19 +451,25 @@ enum DesktopWidgetRendering {
     ) -> Content {
         let text = text(for: widget, inputs: inputs, formatters: formatters)
         let padding = padding(for: widget, scale: scale)
+        let drawing: Drawing
+        let size: NSSize
         switch widget.kind {
         case .analog:
             let face = analogFace(for: widget, inputs: inputs, scale: scale)
-            return Content(
-                text: text, drawing: .analog(face), size: NSSize(width: face.diameter, height: face.diameter),
-                padding: padding)
+            drawing = .analog(face)
+            size = NSSize(width: face.diameter, height: face.diameter)
         case .calendar:
             let grid = calendarGrid(for: widget, inputs: inputs, formatters: formatters, scale: scale)
-            return Content(text: text, drawing: .text(grid), size: measure(grid), padding: padding)
+            drawing = .text(grid)
+            size = measure(grid)
         default:
-            let attributed = attributedText(text, for: widget, scale: scale)
-            return Content(text: text, drawing: .text(attributed), size: measure(attributed), padding: padding)
+            let attributed = attributedText(cased(text, widget, inputs.locale), for: widget, scale: scale)
+            drawing = .text(attributed)
+            size = measure(attributed)
         }
+        var look = look(for: widget, scale: scale)
+        look.size = size
+        return Content(text: text, drawing: drawing, size: size, padding: padding, look: look)
     }
 
     /// The size text takes, line breaks included.
@@ -321,6 +478,15 @@ enum DesktopWidgetRendering {
             with: NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading])
         return NSSize(width: ceil(bounds.width), height: ceil(bounds.height))
+    }
+
+    /// `text` in the widget's case, by the rules of `locale`.
+    static func cased(_ text: String, _ widget: DesktopWidget, _ locale: Locale) -> String {
+        switch widget.textCase {
+        case .asWritten: text
+        case .uppercase: text.uppercased(with: locale)
+        case .lowercase: text.lowercased(with: locale)
+        }
     }
 
     /// A clock face's diameter for each point of the widget's size.
@@ -333,19 +499,25 @@ enum DesktopWidgetRendering {
         let minute = Double(parts.minute ?? 0)
         let second = Double(parts.second ?? 0)
         let diameter = max(CGFloat(widget.size) * analogScale * scale, 1)
-        let shadow = shadow(for: widget, scale: scale).map {
-            AnalogFace.Shadow(blur: $0.shadowBlurRadius, offset: abs($0.shadowOffset.height))
+        var numeralFont: NSFont?
+        var slants = false
+        if widget.dialMarks == .numbers || widget.dialMarks == .quarters {
+            let font = font(for: widget, pointSize: max(diameter * 0.14, 1))
+            numeralFont = font
+            slants = needsSlant(widget, font)
         }
         return AnalogFace(
-            diameter: diameter, color: widget.textColor,
+            diameter: diameter, color: widget.textColor, accent: widget.accent,
             lineWidth: diameter * (0.012 + 0.03 * CGFloat(widget.weight) / 900),
             hour: (hour.truncatingRemainder(dividingBy: 12) + minute / 60) / 12,
             minute: (minute + (widget.showsSeconds ? second / 60 : 0)) / 60,
-            second: widget.showsSeconds ? second / 60 : nil, shadow: shadow)
+            second: widget.showsSeconds ? second / 60 : nil, marks: widget.dialMarks,
+            showsRing: widget.showsDialRing, numeralFont: numeralFont, slantsNumerals: slants)
     }
 
     /// This month's grid: its name, the weekdays, then a line for each week, the days under their
-    /// weekdays and today in bold and underlined. The weeks start on the region's first weekday.
+    /// weekdays and today in bold, underlined and in the accent colour. The weeks start on the
+    /// region's first weekday.
     @MainActor
     static func calendarGrid(
         for widget: DesktopWidget, inputs: Inputs, formatters: Formatters, scale: CGFloat = 1
@@ -362,12 +534,12 @@ enum DesktopWidgetRendering {
         let header = NSMutableParagraphStyle()
         header.alignment = .center
         header.paragraphSpacing = font.pointSize * 0.3
-        var base: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: widget.textColor]
-        if let shadow = shadow(for: widget, scale: scale) { base[.shadow] = shadow }
+        let base = textAttributes(for: widget, font: font, scale: scale)
 
         let result = NSMutableAttributedString()
         func append(_ string: String, _ extra: [NSAttributedString.Key: Any]) {
-            result.append(NSAttributedString(string: string, attributes: base.merging(extra) { $1 }))
+            result.append(
+                NSAttributedString(string: cased(string, widget, inputs.locale), attributes: base.merging(extra) { $1 }))
         }
         append(
             formatters.string(now, template: "yMMMM", locale: inputs.locale, calendar: calendar) + "\n",
@@ -375,7 +547,7 @@ enum DesktopWidgetRendering {
 
         let first = calendar.firstWeekday
         let symbols = formatters.weekdaySymbols(locale: inputs.locale)
-        let faded = widget.textColor.withAlphaComponent(widget.textColor.alphaComponent * 0.6)
+        let faded = widget.textColor.withAlphaComponent(0.6)
         if symbols.count == 7 {
             let ordered = (0..<7).map { symbols[(first - 1 + $0) % 7] }
             append(ordered.map { "\t\($0)" }.joined() + "\n", [.paragraphStyle: grid, .foregroundColor: faded])
@@ -392,7 +564,10 @@ enum DesktopWidgetRendering {
             append(
                 number,
                 day == today
-                    ? [.paragraphStyle: grid, .font: boldFont, .underlineStyle: NSUnderlineStyle.single.rawValue]
+                    ? [
+                        .paragraphStyle: grid, .font: boldFont, .foregroundColor: widget.accent,
+                        .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    ]
                     : [.paragraphStyle: grid])
             column0 += 1
             if column0 == 7, day != days.upperBound - 1 {
@@ -408,7 +583,15 @@ enum DesktopWidgetRendering {
     /// The widget's font at `scale` times its size. Digits keep one width, so a clock does not
     /// shift as its numbers change.
     static func font(for widget: DesktopWidget, scale: CGFloat = 1) -> NSFont {
-        let size = max(CGFloat(widget.size) * scale, 1)
+        font(for: widget, pointSize: max(CGFloat(widget.size) * scale, 1))
+    }
+
+    /// The weights AppKit's font manager counts, 0 to 15, for each hundred of the 100 to 900 scale.
+    private static let managerWeights = [100: 2, 200: 3, 300: 4, 400: 5, 500: 6, 600: 8, 700: 9, 800: 10, 900: 11]
+
+    /// The widget's font at `pointSize`: its installed family when it has one and the Mac still
+    /// does, else the system font in its design; italic when asked and the font has an italic.
+    static func font(for widget: DesktopWidget, pointSize size: CGFloat) -> NSFont {
         let weight: NSFont.Weight = switch widget.weight {
         case ...100: .ultraLight
         case ...200: .thin
@@ -420,42 +603,107 @@ enum DesktopWidgetRendering {
         case ...800: .heavy
         default: .black
         }
-        var descriptor = NSFont.systemFont(ofSize: size, weight: weight).fontDescriptor
-        let design: NSFontDescriptor.SystemDesign? = switch widget.typeface {
-        case .standard: nil
-        case .rounded: .rounded
-        case .serif: .serif
-        case .monospaced: .monospaced
+        var chosen: NSFont?
+        if let family = widget.fontFamily {
+            let manager = NSFontManager.shared
+            let managerWeight = managerWeights[min(max(widget.weight / 100 * 100, 100), 900)] ?? 5
+            if widget.isItalic {
+                chosen = manager.font(withFamily: family, traits: .italicFontMask, weight: managerWeight, size: size)
+            }
+            if chosen == nil {
+                chosen = manager.font(withFamily: family, traits: [], weight: managerWeight, size: size)
+            }
         }
-        if let design, let designed = descriptor.withDesign(design) { descriptor = designed }
+        var descriptor: NSFontDescriptor
+        if let chosen {
+            descriptor = chosen.fontDescriptor
+        } else {
+            descriptor = NSFont.systemFont(ofSize: size, weight: weight).fontDescriptor
+            let design: NSFontDescriptor.SystemDesign? = switch widget.typeface {
+            case .standard: nil
+            case .rounded: .rounded
+            case .serif: .serif
+            case .monospaced: .monospaced
+            }
+            if let design, let designed = descriptor.withDesign(design) { descriptor = designed }
+            if widget.isItalic {
+                descriptor = descriptor.withSymbolicTraits(descriptor.symbolicTraits.union(.italic))
+            }
+        }
         descriptor = descriptor.addingAttributes([
             .featureSettings: [[
                 NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
                 NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector,
             ]],
         ])
-        return NSFont(descriptor: descriptor, size: size) ?? .systemFont(ofSize: size, weight: weight)
+        return NSFont(descriptor: descriptor, size: size) ?? chosen ?? .systemFont(ofSize: size, weight: weight)
     }
+
+    /// Whether an italic widget's font has no italic of its own, so its letters are slanted instead.
+    static func needsSlant(_ widget: DesktopWidget, _ font: NSFont) -> Bool {
+        widget.isItalic && !font.fontDescriptor.symbolicTraits.contains(.italic)
+    }
+
+    /// The slant given to letters whose font has no italic.
+    static let slant: CGFloat = 0.2
 
     /// The soft shadow that keeps light text readable on a light wallpaper; nil without one.
-    static func shadow(for widget: DesktopWidget, scale: CGFloat = 1) -> NSShadow? {
+    static func shadow(for widget: DesktopWidget, scale: CGFloat = 1) -> Look.Shadow? {
         guard widget.hasShadow else { return nil }
         let size = CGFloat(widget.size) * scale
-        let shadow = NSShadow()
-        shadow.shadowBlurRadius = max(size * 0.06, 1)
-        shadow.shadowOffset = NSSize(width: 0, height: -max(size * 0.015, 0.5))
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.45)
-        return shadow
+        let distance = size * CGFloat(widget.shadowDistance) / 100
+        let angle = CGFloat(widget.shadowAngle) * .pi / 180
+        return Look.Shadow(
+            blur: size * CGFloat(widget.shadowBlur) / 100,
+            offset: NSSize(width: sin(angle) * distance, height: cos(angle) * distance),
+            color: DesktopWidget.color(widget.shadowColor, alpha: CGFloat(widget.shadowOpacity) / 100))
     }
 
-    /// The room left around the text so the shadow is not cut off.
+    /// Everything done to the whole drawing, at `scale` times the widget's size; the drawing's
+    /// size is the caller's.
+    static func look(for widget: DesktopWidget, scale: CGFloat = 1) -> Look {
+        let size = CGFloat(widget.size) * scale
+        var look = Look(opacity: CGFloat(widget.opacity) / 100, rotation: CGFloat(widget.rotation))
+        if widget.fill == .gradient {
+            look.gradient = .init(
+                from: widget.textColor, to: DesktopWidget.color(widget.gradientColor),
+                angle: CGFloat(widget.gradientAngle))
+        }
+        if widget.outlineWidth > 0 {
+            look.outline = .init(
+                width: max(size * CGFloat(widget.outlineWidth) / 100, 0.5),
+                color: DesktopWidget.color(widget.outlineColor))
+        }
+        if widget.glowSize > 0 {
+            look.glow = .init(
+                radius: max(size * CGFloat(widget.glowSize) / 100, 1), color: DesktopWidget.color(widget.glowColor))
+        }
+        look.shadow = shadow(for: widget, scale: scale)
+        if widget.background != .off {
+            look.background = .init(
+                shape: widget.background,
+                color: DesktopWidget.color(widget.backgroundColor, alpha: CGFloat(widget.backgroundOpacity) / 100),
+                inset: size * CGFloat(widget.backgroundPadding) / 100)
+        }
+        return look
+    }
+
+    /// The room left around the drawing so its shadow, glow, outline and background are not cut
+    /// off.
     static func padding(for widget: DesktopWidget, scale: CGFloat = 1) -> CGFloat {
-        guard let shadow = shadow(for: widget, scale: scale) else { return 1 }
-        return ceil(shadow.shadowBlurRadius + abs(shadow.shadowOffset.height)) + 1
+        let look = look(for: widget, scale: scale)
+        var reach: CGFloat = 0
+        if let shadow = look.shadow {
+            reach = shadow.blur + max(abs(shadow.offset.width), abs(shadow.offset.height))
+        }
+        if let glow = look.glow { reach = max(reach, glow.radius * 1.5) }
+        reach += look.outline?.width ?? 0
+        if let plate = look.background { reach = max(reach, plate.inset) }
+        return reach > 0 ? ceil(reach) + 1 : 1
     }
 
-    /// The text in the widget's font, colour and shadow. Lines of a text widget line up on the
-    /// edge the widget is aligned on.
+    /// The text in the widget's font, colour, spacing and line height. Lines of a text widget line
+    /// up on the edge the widget is aligned on.
     static func attributedText(_ text: String, for widget: DesktopWidget, scale: CGFloat = 1) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = switch widget.alignment {
@@ -463,13 +711,23 @@ enum DesktopWidgetRendering {
         case .center: .center
         case .trailing: .right
         }
-        var attributes: [NSAttributedString.Key: Any] = [
-            .font: font(for: widget, scale: scale),
-            .foregroundColor: widget.textColor,
-            .paragraphStyle: paragraph,
-        ]
-        if let shadow = shadow(for: widget, scale: scale) { attributes[.shadow] = shadow }
+        if widget.lineHeight != 100 { paragraph.lineHeightMultiple = CGFloat(widget.lineHeight) / 100 }
+        let font = font(for: widget, scale: scale)
+        var attributes = textAttributes(for: widget, font: font, scale: scale)
+        attributes[.paragraphStyle] = paragraph
         return NSAttributedString(string: text, attributes: attributes)
+    }
+
+    /// The font, colour, letter spacing and any slant of a widget's text.
+    private static func textAttributes(
+        for widget: DesktopWidget, font: NSFont, scale: CGFloat
+    ) -> [NSAttributedString.Key: Any] {
+        var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: widget.textColor]
+        if widget.letterSpacing != 0 {
+            attributes[.kern] = CGFloat(widget.size) * scale * CGFloat(widget.letterSpacing) / 100
+        }
+        if needsSlant(widget, font) { attributes[.obliqueness] = slant }
+        return attributes
     }
 
     // MARK: Place
@@ -502,6 +760,15 @@ enum DesktopWidgetRendering {
             x: min(max(x, display.minX), display.maxX - width).rounded(.down),
             y: min(max(y, display.minY), display.maxY - height).rounded(.down),
             width: width, height: height)
+    }
+
+    /// The frame of `content` on a display: as `frame(textSize:padding:widget:display:)` for a
+    /// drawing that is not turned, else the box the turned drawing takes, placed the same way.
+    static func frame(for content: Content, widget: DesktopWidget, display: NSRect) -> NSRect {
+        guard content.look.rotation != 0 else {
+            return frame(textSize: content.size, padding: content.padding, widget: widget, display: display)
+        }
+        return frame(textSize: content.boxSize, padding: 0, widget: widget, display: display)
     }
 
     // MARK: Time

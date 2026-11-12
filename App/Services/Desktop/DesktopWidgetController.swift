@@ -213,10 +213,9 @@ final class DesktopWidgetController {
             let content = DesktopWidgetRendering.content(for: widget, inputs: inputs, formatters: formatters)
             for (key, surface) in surfaces where key.widgetID == widget.id {
                 guard let display = frames[key.displayID] else { continue }
-                let frame = DesktopWidgetRendering.frame(
-                    textSize: content.size, padding: content.padding, widget: widget, display: display)
+                let frame = DesktopWidgetRendering.frame(for: content, widget: widget, display: display)
                 let shown = Shown(widgetID: widget.id, displayID: key.displayID, frame: frame, text: content.text)
-                surface.show(content.drawing, padding: content.padding, frame: frame)
+                surface.show(content.drawing, look: content.look, padding: content.padding, frame: frame)
                 drawn[key] = shown
             }
         }

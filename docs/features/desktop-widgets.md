@@ -52,22 +52,50 @@ the row. The first group of the editor names the widget it edits on its title li
   keyboard and VoiceOver; **Alignment** (**Left**, **Center**, **Right**), the edge of the text
   the position holds, so a clock aligned left does not move its left edge when "9:59" becomes
   "10:00".
-- **Look**: **Size** (10 to 320 points; a clock face is one and a half times its size across),
-  **Typeface** (not for the clock face) (**Standard**, **Rounded**, **Serif**,
-  **Monospaced**: the system font's four designs), **Weight** (100 to 900 in steps of 100),
-  **Color**, **Opacity** (10 to 100 %) and **Shadow**, a soft dark shadow that keeps light text
-  readable on a light wallpaper. Digits keep one width in every typeface, so a clock does not
-  shift as it counts. The lines of a text line up on the edge chosen in **Alignment**.
+- **Rotation** (in **Position**): −180° to 180°, turning the whole widget about its middle; the
+  frame grows to the turned box, which then sits where an unturned widget would.
+- **Look**: **Style**, a menu of finished looks (**Soft shadow**, a new widget's; **Plain**;
+  **Neon**; **Outlined**; **Badge**; **Glass**; **Sunset**; **Long shadow**) that sets the colours
+  and effects below in one go, starting from a new widget's, and never the font, the size or the
+  place; **Size** (10 to 320 points; a clock face is one and a half times its size across);
+  **Typeface**, the system font's four designs (**Standard**, **Rounded**, **Serif**,
+  **Monospaced**) or any font family installed on this Mac, listed by name (read once a launch; a
+  family since removed is offered as "*name* (not installed)" and draws in the system font); for
+  a clock face it is the font of its numbers; **Weight** (100 to 900 in steps of 100, the nearest
+  face the family has); **Italic** (a font without an italic is slanted instead); **Letter
+  spacing** (−10 to 50 % of the size) and **Letter case** (**As written**, **Uppercase**,
+  **Lowercase**, by the language's rules), not for the clock face; **Line height** (70 to 200 %)
+  for a text and a clock. Digits keep one width in every font that has tabular figures, so a clock
+  does not shift as it counts. The lines of a text line up on the edge chosen in **Alignment**.
+- **Colors**: **Color**; **Accent color**, the second hand of a clock face and today in a month
+  calendar (the colour until one is chosen; **Use Text Color** goes back to it); **Gradient**, which
+  fades the colour into a **Second color** along a **Gradient direction** (0° to 359° clockwise from
+  upwards; 180° runs from the top down) across the whole widget, accent included; and **Opacity**
+  (10 to 100 %), which applies to the whole drawing, effects and background included.
+- **Effects**: **Outline** (0 to 15 % of the size, 0 for none) in an **Outline color**, drawn
+  outside the letters (round-joined) and around every line of a clock face; **Glow** (0 to 50 %,
+  0 for none) in a **Glow color**; **Shadow**, with **Shadow color**, **Shadow opacity** (10 to
+  100 %, 45 for a new widget), **Shadow blur** and **Shadow distance** (0 to 50 % of the size; 6 and
+  2) and **Shadow direction** (clockwise from upwards; 180° falls straight down); **Background**
+  (**Off**, **Rectangle**, **Rounded rectangle**, **Capsule**: a circle behind a clock face) with
+  **Background color**, **Background opacity** and **Background padding** (0 to 100 % of the size);
+  **Reset effects** puts gradient, outline, glow, shadow and background back to a new widget's.
+  The rows that only matter once a choice is made (the second colour, the shadow's details, the
+  background's) show only then, and search finds them only then.
 - **Format**, by kind:
-  - a clock: **Time format** (**Follow system**, **12-hour**, **24-hour**), **Show seconds**,
-    **Time zone** and **Label**;
+  - a clock: **Time format** (**Follow system**, **12-hour**, **24-hour**), **Layout** (**One
+    line**, or **Stacked**: the hour over the minutes, over the seconds and AM or PM, each in the
+    locale's digits, the label on a line above), **Leading zero** ("09:41"; a region that writes
+    two digits keeps them), **Show AM/PM** (off drops the period and the space beside it, wherever
+    the region writes it), **Show seconds**, **Time zone** and **Label**;
   - a date: **Date format**, whose menu writes each style out for today (weekday, month and day;
     month, day and year; the short form; numbers only; the weekday alone; month and year; the
     week of the year, numbered as the region numbers weeks; the day of the year), **Calendar**
     (**Follow system**, or the Chinese, Islamic (Umm al-Qura), Hebrew, Persian, Buddhist,
     Japanese or Indian calendar, each named in the panel's language and written in that
     calendar's own words: "九月三十" in the Chinese calendar), **Time zone** and **Label**;
-  - an analog clock: **Show seconds** and **Time zone**;
+  - an analog clock: **Dial** (**Hands only**, **Hour marks**, **Minute ticks**, **Numbers**,
+    **12, 3, 6 and 9**), **Show ring**, **Show seconds** and **Time zone**;
   - a text: **Text** (Option-Return starts a new line); a countdown: **Event** and **Count down
     to**, a date picker; a greeting: **Your name**;
   - sunrise and sunset: **Sun times** (**Next sunrise or sunset**, **Today’s sunrise and
@@ -103,10 +131,19 @@ working area even at the largest size, it never makes a display count as covered
 widget reaches the desktop beneath it.
 
 `DesktopWidgetRendering` holds what both the desktop and the panel's **Arrange** picture draw: the
-words (a Unicode date template the locale arranges, through cached `DateFormatter`s), the month
-grid (right-aligned tab stops, one per weekday), the clock face (where each hand points), the
-font, the shadow and the frame. `DesktopWidgetView` draws text from the top of its frame, or the
-face as one layer, so crossing hands neither darken nor shadow each other. The position names the
+words (a Unicode date template the locale arranges, through cached `DateFormatter`s; a clock's
+leading zero, missing AM/PM and stacked lines rewrite the locale's own pattern, quoted words
+kept), the month grid (right-aligned tab stops, one per weekday), the clock face (where each hand
+points, its marks and numbers), the font, the `Look` (opacity, turn, gradient, outline, glow,
+shadow, background, every length in points at the scale drawn) and the frame.
+`DesktopWidgetView` draws text from the top of its frame, or the face, in transparency layers: the
+letters or the face are filled, a gradient replaces their colour where they are (`sourceIn`), the
+outline goes behind them (`destinationOver`), that group casts the glow (drawn twice, so it reads
+as light) and then the shadow, the plate sits under everything without a shadow, and the opacity
+applies to the whole. Crossing hands neither darken nor shadow each other, and an outline or a
+gradient never shows through the letters. All of it is drawn only when the words or the look
+change, as before; no effect animates. The padding around the content is the reach of its shadow, glow and outline, or the
+background's padding, whichever is larger. The position names the
 content's chosen edge and its vertical centre as fractions of the display; the frame is then
 moved, never shrunk, to lie on the display, and is cut only when the content is wider than the
 display or taller than 60 % of it, so even a long text never covers a display's working area.
@@ -210,6 +247,10 @@ and replaced by a **settled** one once the wallpaper has played a moment:
   wallpaper (macOS draws its own clock there), and so do the still pictures the app writes as
   the macOS desktop picture, which Mission Control and a quit show.
 - Widgets cannot be clicked or dragged on the desktop itself; they are arranged in Settings.
+- The effects are still: nothing pulses, shakes, scrolls or blinks (as Wallpaper Engine's text
+  layers can), because a widget is drawn only when its words change and costs nothing between.
+  There is no blur of the wallpaper behind a background either: it would make the window server
+  blur every frame of a moving wallpaper.
 - The kinds are the app's own: lifting a layer out of a scene wallpaper (such as another
   wallpaper's clock) is a different feature this one does not do. Weather, calendar events,
   system load and Now Playing are not offered: they would need a network service, a permission
@@ -228,19 +269,22 @@ and replaced by a **settled** one once the wallpaper has played a moment:
   `DesktopWidgetPreview.swift`, the page model `Settings/DesktopWidgetsSettingsModel.swift`, the
   snapping `Settings/DesktopWidgetSnapping.swift` and
   the typed actions in `Model/PanelController+DesktopWidgets.swift`.
-- Tests: `Tests/Unit/Desktop/DesktopWidgetTests.swift` (each kind's words, the clock face, the
-  month grid, other calendars and time zones, frames and the height limit, the next change,
-  storage and backup validation, the layers' order, moving and duplicating),
+- Tests: `Tests/Unit/Desktop/DesktopWidgetTests.swift` (each kind's words, a clock's leading
+  zero, AM/PM and stacked lines, the letters' case, spacing and slant, installed and missing font
+  families, the room effects take and a turned frame, the styles and resetting the effects, the
+  clock face, the month grid, other calendars and time zones, frames and the height limit, the
+  next change, storage and backup validation, the layers' order, moving and duplicating),
   `DesktopWidgetControllerTests.swift` (windows per display, stacking in the layers' order,
   timing, occlusion, wake and screen changes, the battery's notification and the sunrise and
   sunset settings, the window's level and class) and `Tests/Unit/Panel/WidgetsSettingsTests.swift`
   (actions, layers and the preview's stacking, snapping a drag and the Center buttons, the
-  Display, Date format, Time zone and Calendar menus, the rows each kind offers,
-  the preview's wallpaper frame, search and layout in the narrowest and widest column);
-  `Tests/Unit/Panel/DesktopWidgetSnappingTests.swift` the snap lines, the pull and the guides.
+  Display, Date format, Time zone and Calendar menus, the rows each kind offers and those waiting
+  on another choice, the preview's wallpaper frame, search and layout in the narrowest and widest
+  column); `Tests/Unit/Panel/DesktopWidgetSnappingTests.swift` the snap lines, the pull and the
+  guides.
   `DesktopWallpaperFramesTests.swift` covers asking a settled wallpaper once and scaling, waiting
   for the sync's own frame, not asking during an intro, the frame kept per look, blank frames and
   the poster fallback; `WallpaperSettleClockTests.swift` the settle count.
 - The unit tests never put a widget window on screen. What a widget looks like on a real
-  desktop (the clock face and the month grid included), over each kind of wallpaper and across
+  desktop (the clock face, the month grid and every effect included), over each kind of wallpaper and across
   Spaces, is checked by hand.

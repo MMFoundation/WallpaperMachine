@@ -25,7 +25,10 @@ final class DesktopWidgetControllerTests: XCTestCase {
 
         func raise() { raises += 1 }
 
-        func show(_ drawing: DesktopWidgetRendering.Drawing, padding: CGFloat, frame: NSRect) {
+        func show(
+            _ drawing: DesktopWidgetRendering.Drawing, look: DesktopWidgetRendering.Look, padding: CGFloat,
+            frame: NSRect
+        ) {
             self.frame = frame
             if case .text(let text) = drawing { self.text = text.string } else { self.text = "" }
         }
@@ -310,7 +313,7 @@ final class DesktopWidgetControllerTests: XCTestCase {
 
         let widget = DesktopWidget(kind: .time)
         let text = DesktopWidgetRendering.attributedText("21:05", for: widget)
-        window.show(.text(text), padding: 4, frame: NSRect(x: 10, y: 20, width: 300, height: 140))
+        window.show(.text(text), look: .init(), padding: 4, frame: NSRect(x: 10, y: 20, width: 300, height: 140))
         XCTAssertEqual(window.frame, NSRect(x: 10, y: 20, width: 300, height: 140))
         XCTAssertEqual(window.shownText, "21:05")
     }

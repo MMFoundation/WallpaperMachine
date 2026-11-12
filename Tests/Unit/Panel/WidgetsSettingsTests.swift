@@ -151,21 +151,31 @@ final class WidgetsSettingsTests: PanelTestCase {
 
       typealias Section = WidgetsSettingsSection
       let kindRows = Set(Section.kindRows.keys)
+      let lettering: Set<String> = [Section.letterSpacing.id, Section.textCase.id]
       let expected: [DesktopWidget.Kind: Set<String>] = [
-        .time: [Section.typeface.id, Section.timeFormat.id, Section.seconds.id, Section.timeZone.id, Section.label.id],
-        .date: [Section.typeface.id, Section.dateFormat.id, Section.calendarSystem.id, Section.timeZone.id, Section.label.id],
-        .text: [Section.typeface.id, Section.content.id],
-        .countdown: [Section.typeface.id, Section.event.id, Section.targetDay.id],
-        .greeting: [Section.typeface.id, Section.name.id],
-        .battery: [Section.typeface.id],
-        .sun: [Section.typeface.id, Section.sunStyle.id, Section.timeFormat.id],
-        .analog: [Section.seconds.id, Section.timeZone.id],
-        .calendar: [Section.typeface.id],
+        .time: lettering.union([
+          Section.lineHeight.id, Section.timeFormat.id, Section.clockLayout.id, Section.padsHour.id,
+          Section.showsPeriod.id, Section.seconds.id, Section.timeZone.id, Section.label.id,
+        ]),
+        .date: lettering.union([Section.dateFormat.id, Section.calendarSystem.id, Section.timeZone.id, Section.label.id]),
+        .text: lettering.union([Section.lineHeight.id, Section.content.id]),
+        .countdown: lettering.union([Section.event.id, Section.targetDay.id]),
+        .greeting: lettering.union([Section.name.id]),
+        .battery: lettering,
+        .sun: lettering.union([Section.sunStyle.id, Section.timeFormat.id]),
+        .analog: [Section.accent.id, Section.dialMarks.id, Section.dialRing.id, Section.seconds.id, Section.timeZone.id],
+        .calendar: lettering.union([Section.accent.id]),
+      ]
+      // A new widget has a shadow, a solid fill and no outline, glow or background.
+      let waiting: Set<String> = [
+        Section.gradientColor.id, Section.gradientAngle.id, Section.outlineColor.id, Section.glowColor.id,
+        Section.backgroundColor.id, Section.backgroundOpacity.id, Section.backgroundPadding.id,
       ]
       for kind in DesktopWidget.Kind.allCases {
         try await controller.addDesktopWidget(kind)
         XCTAssertEqual(
-          WidgetsSettingsSection.unofferedItems(controller), kindRows.subtracting(expected[kind] ?? []), "\(kind)")
+          WidgetsSettingsSection.unofferedItems(controller),
+          kindRows.subtracting(expected[kind] ?? []).union(waiting), "\(kind)")
         let widget = try XCTUnwrap(controller.widgetsSettings.selected)
         XCTAssertFalse(controller.widgetsSettings.text(for: widget).isEmpty, "\(kind) says something in the list")
       }

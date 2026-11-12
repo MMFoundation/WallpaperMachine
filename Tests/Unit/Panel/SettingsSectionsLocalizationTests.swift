@@ -19,7 +19,7 @@ final class SettingsSectionsLocalizationTests: XCTestCase {
   private static let sameIn: [String: Set<String>] = [
     "pt-BR": [
       "App", "Backup", "CPU", "Downloads", "Experimental", "GPU", "Interface", "Latitude",
-      "Longitude", "min", "normal", "Playlist", "Spaces", "SteamCMD", "Volume", "Web",
+      "Longitude", "min", "Neon", "normal", "Playlist", "Spaces", "SteamCMD", "Volume", "Web",
     ]
   ]
 

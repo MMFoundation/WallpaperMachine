@@ -89,7 +89,7 @@ struct DesktopWidgetPreview: View {
     let model = controller.widgetsSettings
     let content = model.content(for: widget, scale: scale)
     let frame = model.frame(of: widget, in: size, scale: scale)
-    return WidgetDrawing(drawing: content.drawing, padding: content.padding)
+    return WidgetDrawing(drawing: content.drawing, look: content.look, padding: content.padding)
       .frame(width: frame.width, height: frame.height)
       .opacity(widget.isShown ? 1 : 0.35)
       .contentShape(Rectangle())
@@ -163,11 +163,12 @@ struct DesktopWidgetPreview: View {
 /// A widget drawn by the same view the desktop's widget window uses.
 private struct WidgetDrawing: NSViewRepresentable {
   let drawing: DesktopWidgetRendering.Drawing
+  let look: DesktopWidgetRendering.Look
   let padding: CGFloat
 
   func makeNSView(context: Context) -> DesktopWidgetView { DesktopWidgetView() }
 
   func updateNSView(_ view: DesktopWidgetView, context: Context) {
-    view.update(drawing: drawing, padding: padding)
+    view.update(drawing: drawing, look: look, padding: padding)
   }
 }

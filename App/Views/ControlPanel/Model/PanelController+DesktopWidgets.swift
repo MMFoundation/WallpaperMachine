@@ -21,6 +21,38 @@ enum DesktopWidgetChange: Hashable, Sendable {
   case text(String)
   case targetDay(String)
   case sunStyle(DesktopWidget.SunStyle)
+  case font(DesktopWidget.FontChoice)
+  case italic(Bool)
+  case letterSpacing(Int)
+  case lineHeight(Int)
+  case textCase(DesktopWidget.TextCase)
+  case fill(DesktopWidget.Fill)
+  case gradientColor(String)
+  case gradientAngle(Int)
+  case accentColor(String?)
+  case outlineWidth(Int)
+  case outlineColor(String)
+  case glowSize(Int)
+  case glowColor(String)
+  case shadowColor(String)
+  case shadowOpacity(Int)
+  case shadowBlur(Int)
+  case shadowDistance(Int)
+  case shadowAngle(Int)
+  case background(DesktopWidget.Background)
+  case backgroundColor(String)
+  case backgroundOpacity(Int)
+  case backgroundPadding(Int)
+  case rotation(Int)
+  case padsHour(Bool)
+  case showsPeriod(Bool)
+  case clockLayout(DesktopWidget.ClockLayout)
+  case dialMarks(DesktopWidget.DialMarks)
+  case showsDialRing(Bool)
+  /// A finished look from the Style menu.
+  case style(DesktopWidget.StylePreset)
+  /// The effects back to a new widget's.
+  case resetEffects
 
   func apply(to widget: inout DesktopWidget) {
     switch self {
@@ -45,6 +77,36 @@ enum DesktopWidgetChange: Hashable, Sendable {
     case .text(let value): widget.text = value
     case .targetDay(let value): widget.targetDay = value
     case .sunStyle(let value): widget.sunStyle = value
+    case .font(let value): widget.font = value
+    case .italic(let value): widget.isItalic = value
+    case .letterSpacing(let value): widget.letterSpacing = value
+    case .lineHeight(let value): widget.lineHeight = value
+    case .textCase(let value): widget.textCase = value
+    case .fill(let value): widget.fill = value
+    case .gradientColor(let value): widget.gradientColor = value
+    case .gradientAngle(let value): widget.gradientAngle = value
+    case .accentColor(let value): widget.accentColor = value
+    case .outlineWidth(let value): widget.outlineWidth = value
+    case .outlineColor(let value): widget.outlineColor = value
+    case .glowSize(let value): widget.glowSize = value
+    case .glowColor(let value): widget.glowColor = value
+    case .shadowColor(let value): widget.shadowColor = value
+    case .shadowOpacity(let value): widget.shadowOpacity = value
+    case .shadowBlur(let value): widget.shadowBlur = value
+    case .shadowDistance(let value): widget.shadowDistance = value
+    case .shadowAngle(let value): widget.shadowAngle = value
+    case .background(let value): widget.background = value
+    case .backgroundColor(let value): widget.backgroundColor = value
+    case .backgroundOpacity(let value): widget.backgroundOpacity = value
+    case .backgroundPadding(let value): widget.backgroundPadding = value
+    case .rotation(let value): widget.rotation = value
+    case .padsHour(let value): widget.padsHour = value
+    case .showsPeriod(let value): widget.showsPeriod = value
+    case .clockLayout(let value): widget.clockLayout = value
+    case .dialMarks(let value): widget.dialMarks = value
+    case .showsDialRing(let value): widget.showsDialRing = value
+    case .style(let preset): preset.apply(to: &widget)
+    case .resetEffects: widget.resetEffects()
     }
   }
 }

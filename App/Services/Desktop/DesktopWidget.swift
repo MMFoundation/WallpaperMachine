@@ -44,8 +44,103 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         case leading, center, trailing
     }
 
+    /// One of the system font's four designs; a font of the Mac's own (`fontFamily`) replaces it.
     enum Typeface: String, Codable, CaseIterable, Sendable {
         case standard, rounded, serif, monospaced
+    }
+
+    /// The font a widget is written in: the system font in one of its designs, or a family
+    /// installed on this Mac.
+    enum FontChoice: Hashable, Sendable {
+        case system(Typeface)
+        case family(String)
+    }
+
+    /// The letters' case, whatever the words were written in.
+    enum TextCase: String, Codable, CaseIterable, Sendable {
+        case asWritten, uppercase, lowercase
+    }
+
+    /// How the letters (or a clock face's lines) are filled.
+    enum Fill: String, Codable, CaseIterable, Sendable {
+        /// The colour alone.
+        case solid
+        /// The colour fading into `gradientColor` along `gradientAngle`.
+        case gradient
+    }
+
+    /// A plate drawn behind the widget, in `backgroundColor`.
+    enum Background: String, Codable, CaseIterable, Sendable {
+        case off, rectangle, rounded, capsule
+    }
+
+    /// How a digital clock lays out its numbers.
+    enum ClockLayout: String, Codable, CaseIterable, Sendable {
+        /// "9:41" on one line.
+        case line
+        /// The hour over the minutes (over the seconds), each on its own line.
+        case stacked
+    }
+
+    /// What marks a clock face's hours.
+    enum DialMarks: String, Codable, CaseIterable, Sendable {
+        /// Only the hands.
+        case bare
+        /// Twelve marks, the quarters longer.
+        case hours
+        /// Sixty ticks, the hours longer.
+        case minutes
+        /// The numbers 1 to 12.
+        case numbers
+        /// 12, 3, 6 and 9 with marks between.
+        case quarters
+    }
+
+    /// A finished look the Style menu applies in one go: the colours and effects, never the font,
+    /// the size or the place.
+    enum StylePreset: String, CaseIterable, Sendable {
+        case soft, plain, neon, outlined, badge, glass, sunset, longShadow
+
+        /// Applies the look to `widget`, starting from the default effects; its colour stays unless
+        /// the look has its own.
+        func apply(to widget: inout DesktopWidget) {
+            widget.resetEffects()
+            switch self {
+            case .soft:
+                break
+            case .plain:
+                widget.hasShadow = false
+            case .neon:
+                widget.color = "#FFFFFF"
+                widget.hasShadow = false
+                widget.glowSize = 18
+                widget.glowColor = "#00E5FF"
+            case .outlined:
+                widget.hasShadow = false
+                widget.outlineWidth = 4
+            case .badge:
+                widget.hasShadow = false
+                widget.background = .rounded
+                widget.backgroundOpacity = 45
+                widget.backgroundPadding = 35
+            case .glass:
+                widget.color = "#FFFFFF"
+                widget.background = .capsule
+                widget.backgroundColor = "#FFFFFF"
+                widget.backgroundOpacity = 20
+                widget.backgroundPadding = 40
+                widget.shadowOpacity = 30
+            case .sunset:
+                widget.color = "#FFC56B"
+                widget.fill = .gradient
+                widget.gradientColor = "#FF4E8A"
+            case .longShadow:
+                widget.shadowBlur = 0
+                widget.shadowDistance = 6
+                widget.shadowAngle = 135
+                widget.shadowOpacity = 60
+            }
+        }
     }
 
     enum TimeFormat: String, Codable, CaseIterable, Sendable {
@@ -110,6 +205,23 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
     static let weightRange = 100...900
     /// The longest text a widget keeps, in characters.
     static let textLimit = 500
+    /// Letter spacing, in percent of the size: negative pulls the letters together.
+    static let letterSpacingRange = -10...50
+    /// The height of a line, in percent of the font's own.
+    static let lineHeightRange = 70...200
+    /// An angle, in degrees clockwise from straight up.
+    static let angleRange = 0...359
+    /// The outline's width, in percent of the size; 0 draws none.
+    static let outlineRange = 0...15
+    /// The glow's reach, in percent of the size; 0 draws none.
+    static let glowRange = 0...50
+    /// The shadow's blur and its distance from the letters, in percent of the size.
+    static let shadowBlurRange = 0...50
+    static let shadowDistanceRange = 0...50
+    /// The room between the words and the edge of the background, in percent of the size.
+    static let backgroundPaddingRange = 0...100
+    /// A turn of the whole widget, in degrees clockwise.
+    static let rotationRange = -180...180
 
     var id: String
     var kind: Kind
@@ -128,8 +240,51 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
     var color = "#FFFFFF"
     /// Percent.
     var opacity = 100
+    /// A font family installed on this Mac, such as "Avenir Next"; nil for the system font in
+    /// `typeface`'s design. A family no longer installed draws in the system font.
+    var fontFamily: String?
+    var isItalic = false
+    /// Percent of the size.
+    var letterSpacing = 0
+    /// Percent of the font's line height.
+    var lineHeight = 100
+    var textCase = TextCase.asWritten
+    var fill = Fill.solid
+    /// The colour a gradient fades into.
+    var gradientColor = "#7AA7FF"
+    /// The way a gradient runs from `color` to `gradientColor`, clockwise from upwards: 180 runs
+    /// from the top down.
+    var gradientAngle = 180
+    /// A clock face's second hand and the month calendar's today; nil for `color`.
+    var accentColor: String?
+    var outlineWidth = 0
+    var outlineColor = "#000000"
+    var glowSize = 0
+    var glowColor = "#FFFFFF"
     var hasShadow = true
+    var shadowColor = "#000000"
+    /// Percent.
+    var shadowOpacity = 45
+    var shadowBlur = 6
+    var shadowDistance = 2
+    /// Where the shadow falls, clockwise from upwards: 180 is straight down.
+    var shadowAngle = 180
+    var background = Background.off
+    var backgroundColor = "#000000"
+    /// Percent.
+    var backgroundOpacity = 35
+    var backgroundPadding = 30
+    /// Degrees clockwise.
+    var rotation = 0
     var timeFormat = TimeFormat.system
+    /// "09:41" rather than "9:41".
+    var padsHour = false
+    /// AM and PM after a 12-hour time.
+    var showsPeriod = true
+    var clockLayout = ClockLayout.line
+    var dialMarks = DialMarks.hours
+    /// The circle around a clock face.
+    var showsDialRing = true
     var showsSeconds = false
     var dateStyle = DateStyle.weekdayMonthDay
     /// The calendar a date is written in.
@@ -191,7 +346,11 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, kind, isShown, placement, x, y, alignment, size, typeface, weight, color, opacity
         case hasShadow, timeFormat, showsSeconds, dateStyle, calendarSystem, timeZone, text, targetDay
-        case sunStyle
+        case sunStyle, fontFamily, isItalic, letterSpacing, lineHeight, textCase, fill, gradientColor
+        case gradientAngle, accentColor, outlineWidth, outlineColor, glowSize, glowColor, shadowColor
+        case shadowOpacity, shadowBlur, shadowDistance, shadowAngle, background, backgroundColor
+        case backgroundOpacity, backgroundPadding, rotation, padsHour, showsPeriod, clockLayout, dialMarks
+        case showsDialRing
     }
 
     init(from decoder: any Decoder) throws {
@@ -221,6 +380,34 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         try read(.text, into: &text)
         try read(.targetDay, into: &targetDay)
         try read(.sunStyle, into: &sunStyle)
+        fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
+        try read(.isItalic, into: &isItalic)
+        try read(.letterSpacing, into: &letterSpacing)
+        try read(.lineHeight, into: &lineHeight)
+        try read(.textCase, into: &textCase)
+        try read(.fill, into: &fill)
+        try read(.gradientColor, into: &gradientColor)
+        try read(.gradientAngle, into: &gradientAngle)
+        accentColor = try container.decodeIfPresent(String.self, forKey: .accentColor)
+        try read(.outlineWidth, into: &outlineWidth)
+        try read(.outlineColor, into: &outlineColor)
+        try read(.glowSize, into: &glowSize)
+        try read(.glowColor, into: &glowColor)
+        try read(.shadowColor, into: &shadowColor)
+        try read(.shadowOpacity, into: &shadowOpacity)
+        try read(.shadowBlur, into: &shadowBlur)
+        try read(.shadowDistance, into: &shadowDistance)
+        try read(.shadowAngle, into: &shadowAngle)
+        try read(.background, into: &background)
+        try read(.backgroundColor, into: &backgroundColor)
+        try read(.backgroundOpacity, into: &backgroundOpacity)
+        try read(.backgroundPadding, into: &backgroundPadding)
+        try read(.rotation, into: &rotation)
+        try read(.padsHour, into: &padsHour)
+        try read(.showsPeriod, into: &showsPeriod)
+        try read(.clockLayout, into: &clockLayout)
+        try read(.dialMarks, into: &dialMarks)
+        try read(.showsDialRing, into: &showsDialRing)
     }
 
     /// Whether every value is one the panel could have chosen.
@@ -238,6 +425,15 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
             && text.count <= Self.textLimit && !text.contains("\0")
             && (timeZone.map(Self.validTimeZone) ?? true)
             && (targetDay.isEmpty || Self.components(ofDay: targetDay) != nil)
+            && (fontFamily.map { Self.validText($0, limit: 128) } ?? true)
+            && Self.letterSpacingRange.contains(letterSpacing) && Self.lineHeightRange.contains(lineHeight)
+            && Self.angleRange.contains(gradientAngle) && Self.angleRange.contains(shadowAngle)
+            && Self.outlineRange.contains(outlineWidth) && Self.glowRange.contains(glowSize)
+            && Self.opacityRange.contains(shadowOpacity) && Self.opacityRange.contains(backgroundOpacity)
+            && Self.shadowBlurRange.contains(shadowBlur) && Self.shadowDistanceRange.contains(shadowDistance)
+            && Self.backgroundPaddingRange.contains(backgroundPadding) && Self.rotationRange.contains(rotation)
+            && [gradientColor, outlineColor, glowColor, shadowColor, backgroundColor].allSatisfy { Self.rgb($0) != nil }
+            && (accentColor.map { Self.rgb($0) != nil } ?? true)
     }
 
     /// The widget with every number pulled into its range and an unreadable colour made white.
@@ -252,7 +448,66 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         copy.text = String(text.replacingOccurrences(of: "\0", with: "").prefix(Self.textLimit))
         if let timeZone, !Self.validTimeZone(timeZone) { copy.timeZone = nil }
         if !targetDay.isEmpty, Self.components(ofDay: targetDay) == nil { copy.targetDay = "" }
+        if let fontFamily, !Self.validText(fontFamily, limit: 128) { copy.fontFamily = nil }
+        func clamp(_ value: Int, _ range: ClosedRange<Int>) -> Int { min(max(value, range.lowerBound), range.upperBound) }
+        func turn(_ value: Int) -> Int { ((value % 360) + 360) % 360 }
+        copy.letterSpacing = clamp(letterSpacing, Self.letterSpacingRange)
+        copy.lineHeight = clamp(lineHeight, Self.lineHeightRange)
+        copy.gradientAngle = turn(gradientAngle)
+        copy.shadowAngle = turn(shadowAngle)
+        copy.outlineWidth = clamp(outlineWidth, Self.outlineRange)
+        copy.glowSize = clamp(glowSize, Self.glowRange)
+        copy.shadowOpacity = clamp(shadowOpacity, Self.opacityRange)
+        copy.backgroundOpacity = clamp(backgroundOpacity, Self.opacityRange)
+        copy.shadowBlur = clamp(shadowBlur, Self.shadowBlurRange)
+        copy.shadowDistance = clamp(shadowDistance, Self.shadowDistanceRange)
+        copy.backgroundPadding = clamp(backgroundPadding, Self.backgroundPaddingRange)
+        copy.rotation = clamp(rotation, Self.rotationRange)
+        if Self.rgb(gradientColor) == nil { copy.gradientColor = "#7AA7FF" }
+        if Self.rgb(outlineColor) == nil { copy.outlineColor = "#000000" }
+        if Self.rgb(glowColor) == nil { copy.glowColor = "#FFFFFF" }
+        if Self.rgb(shadowColor) == nil { copy.shadowColor = "#000000" }
+        if Self.rgb(backgroundColor) == nil { copy.backgroundColor = "#000000" }
+        if let accentColor, Self.rgb(accentColor) == nil { copy.accentColor = nil }
         return copy
+    }
+
+    /// The font, as the Typeface menu chooses it.
+    var font: FontChoice {
+        get { fontFamily.map(FontChoice.family) ?? .system(typeface) }
+        set {
+            switch newValue {
+            case .system(let design):
+                typeface = design
+                fontFamily = nil
+            case .family(let family):
+                fontFamily = family
+            }
+        }
+    }
+
+    /// Puts the fill, outline, glow, shadow and background back to how a new widget has them,
+    /// keeping the colour, the font, the words and the place.
+    mutating func resetEffects() {
+        let fresh = DesktopWidget(id: id, kind: kind)
+        opacity = fresh.opacity
+        fill = fresh.fill
+        gradientColor = fresh.gradientColor
+        gradientAngle = fresh.gradientAngle
+        outlineWidth = fresh.outlineWidth
+        outlineColor = fresh.outlineColor
+        glowSize = fresh.glowSize
+        glowColor = fresh.glowColor
+        hasShadow = fresh.hasShadow
+        shadowColor = fresh.shadowColor
+        shadowOpacity = fresh.shadowOpacity
+        shadowBlur = fresh.shadowBlur
+        shadowDistance = fresh.shadowDistance
+        shadowAngle = fresh.shadowAngle
+        background = fresh.background
+        backgroundColor = fresh.backgroundColor
+        backgroundOpacity = fresh.backgroundOpacity
+        backgroundPadding = fresh.backgroundPadding
     }
 
     // MARK: Time zone and day
@@ -327,12 +582,19 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
             channel(srgb.blueComponent))
     }
 
-    /// The text colour with the widget's opacity.
-    var textColor: NSColor {
-        let rgb = Self.rgb(color) ?? (255, 255, 255)
+    /// The text colour, opaque: the widget's opacity is applied to the whole drawing, effects
+    /// and all, so an outline or a gradient does not show through the letters.
+    var textColor: NSColor { Self.color(color) }
+
+    /// The second hand's and today's colour.
+    var accent: NSColor { Self.color(accentColor ?? color) }
+
+    /// An opaque sRGB colour of `#RRGGBB`, white for anything else, with `alpha`.
+    static func color(_ hex: String, alpha: CGFloat = 1) -> NSColor {
+        let rgb = Self.rgb(hex) ?? (255, 255, 255)
         return NSColor(
             srgbRed: CGFloat(rgb.red) / 255, green: CGFloat(rgb.green) / 255, blue: CGFloat(rgb.blue) / 255,
-            alpha: CGFloat(opacity) / 100)
+            alpha: alpha)
     }
 
     private static func validText(_ value: String, limit: Int) -> Bool {

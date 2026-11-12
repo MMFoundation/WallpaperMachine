@@ -221,6 +221,20 @@ final class DesktopWidgetsSettingsModel {
 
   @ObservationIgnored private let zoneFormatter = DateFormatter()
 
+  /// The font families installed on this Mac, by name, without the system's hidden ones. The
+  /// font manager is asked the first time the menu is drawn, not on every redraw; a font installed
+  /// after that is offered once the app is opened again.
+  func fontFamilies() -> [String] {
+    if let families { return families }
+    let found = NSFontManager.shared.availableFontFamilies
+      .filter { !$0.hasPrefix(".") }
+      .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    families = found
+    return found
+  }
+
+  @ObservationIgnored private var families: [String]?
+
   /// A countdown's day as a date for the date picker: its start in this Mac's time zone, or
   /// today's for an unreadable day.
   func targetDate(_ day: String) -> Date {
@@ -365,8 +379,7 @@ final class DesktopWidgetsSettingsModel {
   func frame(of widget: DesktopWidget, in size: CGSize, scale: CGFloat) -> CGRect {
     let content = content(for: widget, scale: scale)
     let frame = DesktopWidgetRendering.frame(
-      textSize: content.size, padding: content.padding, widget: widget,
-      display: NSRect(origin: .zero, size: size))
+      for: content, widget: widget, display: NSRect(origin: .zero, size: size))
     return CGRect(x: frame.minX, y: size.height - frame.maxY, width: frame.width, height: frame.height)
   }
 
@@ -420,14 +433,15 @@ final class DesktopWidgetsSettingsModel {
     guard display.width > 0 else { return widget.x }
     let content = content(for: widget)
     let width = DesktopWidgetRendering.frame(
-      textSize: content.size, padding: content.padding, widget: widget,
-      display: NSRect(origin: .zero, size: display)
+      for: content, widget: widget, display: NSRect(origin: .zero, size: display)
     ).width
+    // A turned widget's frame is its turned box, which the position places without padding.
+    let padding = content.look.rotation == 0 ? content.padding : 0
     let anchor: CGFloat =
       switch widget.alignment {
-      case .leading: (display.width - width) / 2 + content.padding
+      case .leading: (display.width - width) / 2 + padding
       case .center: display.width / 2
-      case .trailing: (display.width + width) / 2 - content.padding
+      case .trailing: (display.width + width) / 2 - padding
       }
     return min(max(Double(anchor / display.width), 0), 1)
   }

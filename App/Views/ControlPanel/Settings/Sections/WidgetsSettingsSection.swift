@@ -13,6 +13,8 @@ struct WidgetsSettingsSection: View {
   private static let list = SettingsItem.Group("widgets")
   private static let arrange = SettingsItem.Group("arrange", title: "Position")
   private static let look = SettingsItem.Group("look", title: "Look")
+  private static let colors = SettingsItem.Group("colors", title: "Colors")
+  private static let effects = SettingsItem.Group("effects", title: "Effects")
   private static let format = SettingsItem.Group("format", title: "Format")
 
   static let add = SettingsItem(
@@ -45,19 +47,84 @@ struct WidgetsSettingsSection: View {
     note: "The edge of the text that stays in place when the text gets longer or shorter.",
     keywords: ["Left", "Center", "Right"])
 
+  static let rotation = SettingsItem(
+    id: "widgets.rotation", section: .widgets, group: arrange, title: "Rotation")
+
+  static let style = SettingsItem(
+    id: "widgets.style", section: .widgets, group: look, title: "Style",
+    note: "Applies a finished look in one go: colors and effects, never the font or the place.",
+    keywords: ["Neon", "Outlined", "Glass", "Sunset", "Long shadow"])
   static let size = SettingsItem(id: "widgets.size", section: .widgets, group: look, title: "Size")
   static let typeface = SettingsItem(
     id: "widgets.typeface", section: .widgets, group: look, title: "Typeface",
-    keywords: ["Standard", "Rounded", "Serif", "Monospaced"])
+    note: "The system font in one of its designs, or any font installed on this Mac.",
+    keywords: ["Font", "Standard", "Rounded", "Serif", "Monospaced"])
   static let weight = SettingsItem(
     id: "widgets.weight", section: .widgets, group: look, title: "Weight",
     note: "From 100, the thinnest, through 400, regular, to 900, the boldest.")
-  static let color = SettingsItem(id: "widgets.color", section: .widgets, group: look, title: "Color")
+  static let italic = SettingsItem(
+    id: "widgets.italic", section: .widgets, group: look, title: "Italic",
+    note: "A font without an italic is slanted instead.")
+  static let letterSpacing = SettingsItem(
+    id: "widgets.letter-spacing", section: .widgets, group: look, title: "Letter spacing",
+    keywords: ["Tracking"])
+  static let lineHeight = SettingsItem(
+    id: "widgets.line-height", section: .widgets, group: look, title: "Line height")
+  static let textCase = SettingsItem(
+    id: "widgets.case", section: .widgets, group: look, title: "Letter case",
+    keywords: ["Uppercase", "Lowercase"])
+
+  static let color = SettingsItem(id: "widgets.color", section: .widgets, group: colors, title: "Color")
+  static let accent = SettingsItem(
+    id: "widgets.accent", section: .widgets, group: colors, title: "Accent color",
+    note: "The second hand of a clock face, and today in a month calendar.")
+  static let gradient = SettingsItem(
+    id: "widgets.gradient", section: .widgets, group: colors, title: "Gradient",
+    note: "Fades the color into a second one across the widget.")
+  static let gradientColor = SettingsItem(
+    id: "widgets.gradient-color", section: .widgets, group: colors, title: "Second color")
+  static let gradientAngle = SettingsItem(
+    id: "widgets.gradient-angle", section: .widgets, group: colors, title: "Gradient direction",
+    note: "At 180° the gradient runs from the top down.")
   static let opacity = SettingsItem(
-    id: "widgets.opacity", section: .widgets, group: look, title: "Opacity")
+    id: "widgets.opacity", section: .widgets, group: colors, title: "Opacity")
+
+  static let outline = SettingsItem(
+    id: "widgets.outline", section: .widgets, group: effects, title: "Outline",
+    keywords: ["Stroke", "Border"])
+  static let outlineColor = SettingsItem(
+    id: "widgets.outline-color", section: .widgets, group: effects, title: "Outline color")
+  static let glow = SettingsItem(
+    id: "widgets.glow", section: .widgets, group: effects, title: "Glow", keywords: ["Neon"])
+  static let glowColor = SettingsItem(
+    id: "widgets.glow-color", section: .widgets, group: effects, title: "Glow color")
   static let shadow = SettingsItem(
-    id: "widgets.shadow", section: .widgets, group: look, title: "Shadow",
+    id: "widgets.shadow", section: .widgets, group: effects, title: "Shadow",
     note: "Keeps light text readable on a light wallpaper.")
+  static let shadowColor = SettingsItem(
+    id: "widgets.shadow-color", section: .widgets, group: effects, title: "Shadow color")
+  static let shadowOpacity = SettingsItem(
+    id: "widgets.shadow-opacity", section: .widgets, group: effects, title: "Shadow opacity")
+  static let shadowBlur = SettingsItem(
+    id: "widgets.shadow-blur", section: .widgets, group: effects, title: "Shadow blur")
+  static let shadowDistance = SettingsItem(
+    id: "widgets.shadow-distance", section: .widgets, group: effects, title: "Shadow distance")
+  static let shadowAngle = SettingsItem(
+    id: "widgets.shadow-angle", section: .widgets, group: effects, title: "Shadow direction",
+    note: "At 180° the shadow falls straight down.")
+  static let background = SettingsItem(
+    id: "widgets.background", section: .widgets, group: effects, title: "Background",
+    note: "A plate behind the widget that keeps it readable on a busy wallpaper.",
+    keywords: ["Rectangle", "Capsule"])
+  static let backgroundColor = SettingsItem(
+    id: "widgets.background-color", section: .widgets, group: effects, title: "Background color")
+  static let backgroundOpacity = SettingsItem(
+    id: "widgets.background-opacity", section: .widgets, group: effects, title: "Background opacity")
+  static let backgroundPadding = SettingsItem(
+    id: "widgets.background-padding", section: .widgets, group: effects, title: "Background padding")
+  static let resetEffects = SettingsItem(
+    id: "widgets.reset-effects", section: .widgets, group: effects, title: "Reset effects",
+    note: "Puts the gradient, outline, glow, shadow and background back as a new widget has them.")
 
   static let timeFormat = SettingsItem(
     id: "widgets.time-format", section: .widgets, group: format, title: "Time format",
@@ -70,6 +137,20 @@ struct WidgetsSettingsSection: View {
   static let calendarSystem = SettingsItem(
     id: "widgets.calendar", section: .widgets, group: format, title: "Calendar",
     note: "Writes the date in another calendar, such as the Chinese lunar calendar.")
+  static let clockLayout = SettingsItem(
+    id: "widgets.clock-layout", section: .widgets, group: format, title: "Layout",
+    note: "Stacked puts the hour above the minutes.", keywords: ["One line", "Stacked"])
+  static let padsHour = SettingsItem(
+    id: "widgets.leading-zero", section: .widgets, group: format, title: "Leading zero",
+    note: "Writes 9:41 as 09:41.")
+  static let showsPeriod = SettingsItem(
+    id: "widgets.period", section: .widgets, group: format, title: "Show AM/PM",
+    note: "Only a 12-hour time has AM or PM.")
+  static let dialMarks = SettingsItem(
+    id: "widgets.dial", section: .widgets, group: format, title: "Dial",
+    keywords: ["Hour marks", "Minute ticks", "Numbers"])
+  static let dialRing = SettingsItem(
+    id: "widgets.dial-ring", section: .widgets, group: format, title: "Show ring")
   static let timeZone = SettingsItem(
     id: "widgets.time-zone", section: .widgets, group: format, title: "Time zone",
     note: "Shows the time in another city instead of this Mac’s time zone.")
@@ -94,26 +175,50 @@ struct WidgetsSettingsSection: View {
 
   /// The rows that edit the selected widget.
   static let editorItems = [
-    shown, display, preview, center, horizontal, vertical, alignment, size, typeface, weight, color, opacity,
-    shadow, timeFormat, seconds, dateFormat, calendarSystem, timeZone, label, content, event, targetDay, name,
-    sunStyle,
+    shown, display, preview, center, horizontal, vertical, alignment, rotation, style, size, typeface, weight,
+    italic, letterSpacing, lineHeight, textCase, color, accent, gradient, gradientColor, gradientAngle, opacity,
+    outline, outlineColor, glow, glowColor, shadow, shadowColor, shadowOpacity, shadowBlur, shadowDistance,
+    shadowAngle, background, backgroundColor, backgroundOpacity, backgroundPadding, resetEffects, timeFormat,
+    clockLayout, padsHour, showsPeriod, seconds, dialMarks, dialRing, dateFormat, calendarSystem, timeZone, label,
+    content, event, targetDay, name, sunStyle,
   ]
   static let items = [add] + editorItems
 
   /// The rows only some kinds of widget have, and those kinds.
   static let kindRows: [String: Set<DesktopWidget.Kind>] = [
-    typeface.id: Set(DesktopWidget.Kind.allCases).subtracting([.analog]),
+    letterSpacing.id: Set(DesktopWidget.Kind.allCases).subtracting([.analog]),
+    textCase.id: Set(DesktopWidget.Kind.allCases).subtracting([.analog]),
+    lineHeight.id: [.text, .time], accent.id: [.analog, .calendar],
     timeFormat.id: [.time, .sun], seconds.id: [.time, .analog], dateFormat.id: [.date],
+    clockLayout.id: [.time], padsHour.id: [.time], showsPeriod.id: [.time],
+    dialMarks.id: [.analog], dialRing.id: [.analog],
     calendarSystem.id: [.date], timeZone.id: [.time, .date, .analog], label.id: [.time, .date],
     content.id: [.text], event.id: [.countdown], targetDay.id: [.countdown], name.id: [.greeting],
     sunStyle.id: [.sun],
   ]
 
-  /// The editor's rows while there is no widget to edit, and the rows the selected kind has not.
+  /// The rows that only matter once another choice is made, each with that choice.
+  static let dependentRows: [String: @Sendable (DesktopWidget) -> Bool] = [
+    gradientColor.id: { $0.fill == .gradient }, gradientAngle.id: { $0.fill == .gradient },
+    outlineColor.id: { $0.outlineWidth > 0 }, glowColor.id: { $0.glowSize > 0 },
+    shadowColor.id: { $0.hasShadow }, shadowOpacity.id: { $0.hasShadow }, shadowBlur.id: { $0.hasShadow },
+    shadowDistance.id: { $0.hasShadow }, shadowAngle.id: { $0.hasShadow },
+    backgroundColor.id: { $0.background != .off }, backgroundOpacity.id: { $0.background != .off },
+    backgroundPadding.id: { $0.background != .off },
+  ]
+
+  /// The editor's rows while there is no widget to edit, the rows the selected kind has not, and
+  /// those waiting on a choice not made.
   @MainActor
   static func unofferedItems(_ controller: PanelController) -> Set<String> {
     guard let widget = controller.widgetsSettings.selected else { return Set(editorItems.map(\.id)) }
     return Set(kindRows.filter { !$0.value.contains(widget.kind) }.keys)
+      .union(dependentRows.filter { !$0.value(widget) }.keys)
+  }
+
+  /// Whether the editor shows a row for `widget`.
+  static func offers(_ item: SettingsItem, for widget: DesktopWidget) -> Bool {
+    (kindRows[item.id]?.contains(widget.kind) ?? true) && (dependentRows[item.id]?(widget) ?? true)
   }
 
   @Environment(PanelController.self) private var controller
@@ -212,10 +317,17 @@ struct WidgetsSettingsSection: View {
           model.commit(id, "alignment", to: value) { .alignment($0) }
         }
       }
+      SettingsRow(Self.rotation) {
+        slider(id, "rotation", saved: widget.rotation, range: DesktopWidget.rotationRange,
+               readout: { L("\($0)°") }) { .rotation($0) }
+      }
     } accessory: {
       editing(widget)
     }
     SettingsGroup(Self.look, in: .widgets) {
+      SettingsRow(Self.style) {
+        styleMenu(id)
+      }
       SettingsRow(Self.size) {
         SettingsSliderControl(
           key: DesktopWidgetsSettingsModel.key(id, "size"), saved: widget.size, range: DesktopWidget.sizeRange,
@@ -223,11 +335,7 @@ struct WidgetsSettingsSection: View {
         ) { try await controller.changeDesktopWidget(id, .size($0)) }
       }
       SettingsRow(Self.typeface) {
-        SettingsMenuControl(
-          key: DesktopWidgetsSettingsModel.key(id, "typeface"), saved: widget.typeface,
-          options: DesktopWidget.Typeface.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
-          waitsForMac: false, policy: .latestWins
-        ) { try await controller.changeDesktopWidget(id, .typeface($0)) }
+        WidgetFontMenu(widget: widget)
       }
       SettingsRow(Self.weight) {
         SettingsSliderControl(
@@ -236,17 +344,139 @@ struct WidgetsSettingsSection: View {
           waitsForMac: false, readout: { String($0 * 100) }
         ) { try await controller.changeDesktopWidget(id, .weight($0 * 100)) }
       }
+      SettingsRow(Self.italic) {
+        WidgetSwitch(id: id, control: "italic", saved: widget.isItalic) { .italic($0) }
+      }
+      if Self.offers(Self.letterSpacing, for: widget) {
+        SettingsRow(Self.letterSpacing) {
+          slider(id, "letterSpacing", saved: widget.letterSpacing, range: DesktopWidget.letterSpacingRange,
+                 readout: { L("\($0)%") }) { .letterSpacing($0) }
+        }
+      }
+      if Self.offers(Self.lineHeight, for: widget) {
+        SettingsRow(Self.lineHeight) {
+          slider(id, "lineHeight", saved: widget.lineHeight, range: DesktopWidget.lineHeightRange,
+                 readout: { L("\($0)%") }) { .lineHeight($0) }
+        }
+      }
+      if Self.offers(Self.textCase, for: widget) {
+        SettingsRow(Self.textCase) {
+          SettingsMenuControl(
+            key: DesktopWidgetsSettingsModel.key(id, "textCase"), saved: widget.textCase,
+            options: DesktopWidget.TextCase.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
+            waitsForMac: false, policy: .latestWins
+          ) { try await controller.changeDesktopWidget(id, .textCase($0)) }
+        }
+      }
+    }
+    SettingsGroup(Self.colors, in: .widgets) {
       SettingsRow(Self.color) {
-        WidgetColorControl(id: id, saved: widget.color)
+        WidgetColorControl(id: id, control: "color", saved: widget.color) { .color($0) }
+      }
+      if Self.offers(Self.accent, for: widget) {
+        SettingsRow(Self.accent) {
+          HStack(spacing: 8) {
+            WidgetColorControl(id: id, control: "accent", saved: widget.accentColor ?? widget.color) {
+              .accentColor($0)
+            }
+            if widget.accentColor != nil {
+              let key = PanelActionCoordinator.key("resetDesktopWidgetAccent", id: id)
+              SettingsActionButton("Use Text Color", isDisabled: controller.isBusy(key)) {
+                controller.launch(key) { try await controller.changeDesktopWidget(id, .accentColor(nil)) }
+              }
+            }
+          }
+        }
+      }
+      SettingsRow(Self.gradient) {
+        WidgetSwitch(id: id, control: "gradient", saved: widget.fill == .gradient) {
+          .fill($0 ? .gradient : .solid)
+        }
+      }
+      if Self.offers(Self.gradientColor, for: widget) {
+        SettingsRow(Self.gradientColor) {
+          WidgetColorControl(id: id, control: "gradientColor", saved: widget.gradientColor) { .gradientColor($0) }
+        }
+        SettingsRow(Self.gradientAngle) {
+          slider(id, "gradientAngle", saved: widget.gradientAngle, range: DesktopWidget.angleRange,
+                 readout: { L("\($0)°") }) { .gradientAngle($0) }
+        }
       }
       SettingsRow(Self.opacity) {
-        SettingsSliderControl(
-          key: DesktopWidgetsSettingsModel.key(id, "opacity"), saved: widget.opacity,
-          range: DesktopWidget.opacityRange, waitsForMac: false, readout: { L("\($0)%") }
-        ) { try await controller.changeDesktopWidget(id, .opacity($0)) }
+        slider(id, "opacity", saved: widget.opacity, range: DesktopWidget.opacityRange,
+               readout: { L("\($0)%") }) { .opacity($0) }
+      }
+    }
+    SettingsGroup(Self.effects, in: .widgets) {
+      SettingsRow(Self.outline) {
+        slider(id, "outline", saved: widget.outlineWidth, range: DesktopWidget.outlineRange,
+               readout: Self.offOrPercent) { .outlineWidth($0) }
+      }
+      if Self.offers(Self.outlineColor, for: widget) {
+        SettingsRow(Self.outlineColor) {
+          WidgetColorControl(id: id, control: "outlineColor", saved: widget.outlineColor) { .outlineColor($0) }
+        }
+      }
+      SettingsRow(Self.glow) {
+        slider(id, "glow", saved: widget.glowSize, range: DesktopWidget.glowRange,
+               readout: Self.offOrPercent) { .glowSize($0) }
+      }
+      if Self.offers(Self.glowColor, for: widget) {
+        SettingsRow(Self.glowColor) {
+          WidgetColorControl(id: id, control: "glowColor", saved: widget.glowColor) { .glowColor($0) }
+        }
       }
       SettingsRow(Self.shadow) {
         WidgetSwitch(id: id, control: "shadow", saved: widget.hasShadow) { .shadow($0) }
+      }
+      if Self.offers(Self.shadowColor, for: widget) {
+        SettingsRow(Self.shadowColor) {
+          WidgetColorControl(id: id, control: "shadowColor", saved: widget.shadowColor) { .shadowColor($0) }
+        }
+        SettingsRow(Self.shadowOpacity) {
+          slider(id, "shadowOpacity", saved: widget.shadowOpacity, range: DesktopWidget.opacityRange,
+                 readout: { L("\($0)%") }) { .shadowOpacity($0) }
+        }
+        SettingsRow(Self.shadowBlur) {
+          slider(id, "shadowBlur", saved: widget.shadowBlur, range: DesktopWidget.shadowBlurRange,
+                 readout: { L("\($0)%") }) { .shadowBlur($0) }
+        }
+        SettingsRow(Self.shadowDistance) {
+          slider(id, "shadowDistance", saved: widget.shadowDistance, range: DesktopWidget.shadowDistanceRange,
+                 readout: { L("\($0)%") }) { .shadowDistance($0) }
+        }
+        SettingsRow(Self.shadowAngle) {
+          slider(id, "shadowAngle", saved: widget.shadowAngle, range: DesktopWidget.angleRange,
+                 readout: { L("\($0)°") }) { .shadowAngle($0) }
+        }
+      }
+      SettingsRow(Self.background) {
+        SettingsMenuControl(
+          key: DesktopWidgetsSettingsModel.key(id, "background"), saved: widget.background,
+          options: DesktopWidget.Background.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
+          waitsForMac: false, policy: .latestWins
+        ) { try await controller.changeDesktopWidget(id, .background($0)) }
+      }
+      if Self.offers(Self.backgroundColor, for: widget) {
+        SettingsRow(Self.backgroundColor) {
+          WidgetColorControl(id: id, control: "backgroundColor", saved: widget.backgroundColor) {
+            .backgroundColor($0)
+          }
+        }
+        SettingsRow(Self.backgroundOpacity) {
+          slider(id, "backgroundOpacity", saved: widget.backgroundOpacity, range: DesktopWidget.opacityRange,
+                 readout: { L("\($0)%") }) { .backgroundOpacity($0) }
+        }
+        SettingsRow(Self.backgroundPadding) {
+          slider(id, "backgroundPadding", saved: widget.backgroundPadding,
+                 range: DesktopWidget.backgroundPaddingRange, readout: { L("\($0)%") }) { .backgroundPadding($0) }
+        }
+      }
+      SettingsRow(Self.resetEffects) {
+        let key = PanelActionCoordinator.key("resetDesktopWidgetEffects", id: id)
+        SettingsActionButton("Reset", isDisabled: controller.isBusy(key)) {
+          controller.launch(key) { try await controller.changeDesktopWidget(id, .resetEffects) }
+        }
       }
     }
     SettingsGroup(Self.format, in: .widgets) {
@@ -258,6 +488,20 @@ struct WidgetsSettingsSection: View {
             options: DesktopWidget.TimeFormat.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
             waitsForMac: false, policy: .latestWins
           ) { try await controller.changeDesktopWidget(id, .timeFormat($0)) }
+        }
+        SettingsRow(Self.clockLayout) {
+          SettingsSegmentedControl(
+            segments: DesktopWidget.ClockLayout.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
+            selection: model.value(id, "clockLayout", saved: widget.clockLayout), fillsWidth: false
+          ) { value in
+            model.commit(id, "clockLayout", to: value) { .clockLayout($0) }
+          }
+        }
+        SettingsRow(Self.padsHour) {
+          WidgetSwitch(id: id, control: "padsHour", saved: widget.padsHour) { .padsHour($0) }
+        }
+        SettingsRow(Self.showsPeriod) {
+          WidgetSwitch(id: id, control: "showsPeriod", saved: widget.showsPeriod) { .showsPeriod($0) }
         }
         SettingsRow(Self.seconds) {
           WidgetSwitch(id: id, control: "seconds", saved: widget.showsSeconds) { .showsSeconds($0) }
@@ -280,6 +524,16 @@ struct WidgetsSettingsSection: View {
         timeZoneRow(widget)
         labelRow(widget)
       case .analog:
+        SettingsRow(Self.dialMarks) {
+          SettingsMenuControl(
+            key: DesktopWidgetsSettingsModel.key(id, "dialMarks"), saved: widget.dialMarks,
+            options: DesktopWidget.DialMarks.allCases.map { .init(value: $0, title: Self.title(of: $0)) },
+            waitsForMac: false, policy: .latestWins
+          ) { try await controller.changeDesktopWidget(id, .dialMarks($0)) }
+        }
+        SettingsRow(Self.dialRing) {
+          WidgetSwitch(id: id, control: "dialRing", saved: widget.showsDialRing) { .showsDialRing($0) }
+        }
         SettingsRow(Self.seconds) {
           WidgetSwitch(id: id, control: "seconds", saved: widget.showsSeconds) { .showsSeconds($0) }
         }
@@ -404,6 +658,42 @@ struct WidgetsSettingsSection: View {
     }
   }
 
+  /// The Style menu: each finished look by name.
+  private func styleMenu(_ id: String) -> some View {
+    let key = PanelActionCoordinator.key("styleDesktopWidget", id: id)
+    return Menu {
+      ForEach(DesktopWidget.StylePreset.allCases, id: \.self) { preset in
+        Button {
+          controller.launch(key) { try await controller.changeDesktopWidget(id, .style(preset)) }
+        } label: {
+          Text(verbatim: Self.title(of: preset))
+        }
+        .accessibilityIdentifier("widgets.style.\(preset.rawValue)")
+      }
+    } label: {
+      Text("Apply Style")
+    }
+    .menuStyle(.button)
+    .buttonStyle(.bordered)
+    .controlSize(.small)
+    .fixedSize()
+    .disabled(controller.isBusy(key))
+  }
+
+  /// A slider for one of a widget's numbers.
+  private func slider(
+    _ id: String, _ control: String, saved: Int, range: ClosedRange<Int>, readout: @escaping (Int) -> String,
+    change: @escaping (Int) -> DesktopWidgetChange
+  ) -> some View {
+    SettingsSliderControl(
+      key: DesktopWidgetsSettingsModel.key(id, control), saved: saved, range: range, waitsForMac: false,
+      readout: readout
+    ) { try await controller.changeDesktopWidget(id, change($0)) }
+  }
+
+  /// "Off" at 0, else the percent.
+  private static func offOrPercent(_ value: Int) -> String { value == 0 ? L("Off") : L("\(value)%") }
+
   /// A position slider in whole percent of the display, 0 at the left or top edge.
   private func percentSlider(
     _ id: String, _ control: String, saved: Double, change: @escaping (Double) -> DesktopWidgetChange
@@ -465,6 +755,53 @@ struct WidgetsSettingsSection: View {
     case .rounded: L("Rounded")
     case .serif: L("Serif")
     case .monospaced: L("Monospaced")
+    }
+  }
+
+  static func title(of preset: DesktopWidget.StylePreset) -> String {
+    switch preset {
+    case .soft: L("Soft shadow")
+    case .plain: L("Plain")
+    case .neon: L("Neon")
+    case .outlined: L("Outlined")
+    case .badge: L("Badge")
+    case .glass: L("Glass")
+    case .sunset: L("Sunset")
+    case .longShadow: L("Long shadow")
+    }
+  }
+
+  static func title(of textCase: DesktopWidget.TextCase) -> String {
+    switch textCase {
+    case .asWritten: L("As written")
+    case .uppercase: L("Uppercase")
+    case .lowercase: L("Lowercase")
+    }
+  }
+
+  static func title(of background: DesktopWidget.Background) -> String {
+    switch background {
+    case .off: L("Off")
+    case .rectangle: L("Rectangle")
+    case .rounded: L("Rounded rectangle")
+    case .capsule: L("Capsule")
+    }
+  }
+
+  static func title(of layout: DesktopWidget.ClockLayout) -> String {
+    switch layout {
+    case .line: L("One line")
+    case .stacked: L("Stacked")
+    }
+  }
+
+  static func title(of marks: DesktopWidget.DialMarks) -> String {
+    switch marks {
+    case .bare: L("Hands only")
+    case .hours: L("Hour marks")
+    case .minutes: L("Minute ticks")
+    case .numbers: L("Numbers")
+    case .quarters: L("12, 3, 6 and 9")
     }
   }
 
@@ -719,6 +1056,7 @@ private struct WidgetTextField: View {
     .font(.system(size: 12.5))
     .frame(maxWidth: 240)
     .settingsRowAccessibility(row)
+    .controlSize(.small)
   }
 }
 
@@ -748,11 +1086,13 @@ private struct WidgetSwitch: View {
   }
 }
 
-/// The colour well of a widget. The colour panel sends every colour the person passes over, and the
+/// A colour well of a widget. The colour panel sends every colour the person passes over, and the
 /// desktop follows each one.
 private struct WidgetColorControl: View {
   let id: String
+  let control: String
   let saved: String
+  let change: (String) -> DesktopWidgetChange
 
   @Environment(PanelController.self) private var controller
 
@@ -760,10 +1100,10 @@ private struct WidgetColorControl: View {
     let model = controller.widgetsSettings
     ColorPicker(
       selection: Binding(
-        get: { Self.color(model.value(id, "color", saved: saved)) },
+        get: { Self.color(model.value(id, control, saved: saved)) },
         set: { color in
           guard let hex = DesktopWidget.hex(NSColor(color)) else { return }
-          model.commit(id, "color", to: hex) { .color($0) }
+          model.commit(id, control, to: hex, change)
         }),
       supportsOpacity: false
     ) {
@@ -775,5 +1115,47 @@ private struct WidgetColorControl: View {
   private static func color(_ hex: String) -> Color {
     let rgb = DesktopWidget.rgb(hex) ?? (255, 255, 255)
     return Color(.sRGB, red: Double(rgb.red) / 255, green: Double(rgb.green) / 255, blue: Double(rgb.blue) / 255)
+  }
+}
+
+/// The Typeface menu: the system font's four designs, then every font family installed on this
+/// Mac, and the widget's own family when it is no longer installed.
+private struct WidgetFontMenu: View {
+  let widget: DesktopWidget
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.settingsRow) private var row
+
+  var body: some View {
+    let model = controller.widgetsSettings
+    let id = widget.id
+    let families = model.fontFamilies()
+    Picker(
+      selection: Binding(
+        get: { model.value(id, "font", saved: widget.font) },
+        set: { model.commit(id, "font", to: $0) { .font($0) } })
+    ) {
+      Section(L("System")) {
+        ForEach(DesktopWidget.Typeface.allCases, id: \.self) { design in
+          Text(verbatim: WidgetsSettingsSection.title(of: design)).tag(DesktopWidget.FontChoice.system(design))
+        }
+      }
+      Section(L("Installed fonts")) {
+        if let own = widget.fontFamily, !families.contains(own) {
+          Text(verbatim: L("\(own) (not installed)")).tag(DesktopWidget.FontChoice.family(own))
+        }
+        ForEach(families, id: \.self) { family in
+          Text(verbatim: family).tag(DesktopWidget.FontChoice.family(family))
+        }
+      }
+    } label: {
+      EmptyView()
+    }
+    .pickerStyle(.menu)
+    .labelsHidden()
+    // A pop-up is as wide as its longest font name otherwise.
+    .frame(maxWidth: 240)
+    .settingsRowAccessibility(row)
+    .controlSize(.small)
   }
 }

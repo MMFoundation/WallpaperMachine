@@ -25,6 +25,14 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-12 — Desktop widget fonts, effects and clock options
+
+Installed font families, italic, letter spacing, line height and case; gradient fill, accent colour, outline, glow, a configurable shadow, a background plate and rotation; style presets; clock leading zero, AM/PM and stacked layout; clock-face dial marks, numbers and ring. Rebased onto the layers and snapping change (05e13ded); the preview's frame, snapping and the Center buttons use the turned box of a rotated widget.
+
+- `python3 scripts/test.py` on the rebased tree — exit 0; 4979 tests: 4911 passed, 68 skipped
+- Offscreen renders of each style preset, a stacked clock, an italic installed family, a turned outlined date, numbered and ticked clock faces, an accented calendar and a gradient with glow, drawn by DesktopWidgetView into PNGs by a throwaway test (not committed) and inspected
+- Not checked: widgets on a real desktop, over moving wallpapers and across Spaces; snapping a rotated widget by hand
+
 ## 2026-11-12 — Desktop widgets: layers list, snapping guides, Center buttons
 
 - python3 scripts/test.py: Python stage passed; native 4906 passed, 0 failed, 68 skipped.
@@ -104,16 +112,3 @@ Clocks and dates drawn on the desktop over any wallpaper (Settings › Desktop W
 - `python3 scripts/test.py` — exit 0; Python stage OK; 4831 native tests: 4765 passed, 66 skipped, 0 failed
 - The Settings page was drawn off screen in light and dark and checked by eye; the Arrange picture matches the desktop geometry
 - Not checked: widget windows on a real desktop (over scene, video and web wallpapers, across Spaces, with the notch strip, after sleep); no desktop run was authorized. No Release build
-
-## 2026-11-11 — Reduce volume while another app plays sound (issue 182)
-
-Adds Reduce volume beside Mute under When another app plays sound, with a Reduce volume to slider (0% to 100%, default 30%). The bridge gains a transient audio gain (set_audio_gain) multiplied into each saved volume for scenes, web pages and native video; no saved volume is rewritten.
-
-- `python3 scripts/build.py --renderer-only` — exit 0; renderer built and Swift bindings regenerated (one added call, `setAudioGain`).
-- `python3 scripts/check_rust.py` — exit 0; 2,499 passing tests (core 429, bridge 956, core-integration 20, shader 1,094), 0 failed. Five desktop-window tests explicitly excluded; desktop/media/network opt-ins disabled.
-- New bridge tests: the gain scales an open scene's volume live and restores the saved one, a volume or a mirror's volume changed meanwhile is saved whole and played reduced, a wallpaper applied meanwhile starts reduced, web and native-video descriptors carry the product, a display refresh does not reload a turned-down scene, and a gain outside 0 to 1 is refused.
-- `python3 scripts/check_renderer.py` — exit 0; all 12 generated scenes matched between pooled and isolated runs; seven local-asset-dependent cases skipped.
-- `python3 scripts/test.py` — exit 0: all 32 Python suites, XcodeGen, and 4,739 native tests passed, 0 failed, 66 skipped of 4,805, the skip count of the gate runs logged before it (opt-in media, live Steam and reference jobs). An earlier targeted run failed in CodeSign on build-product extended attributes; `xattr -cr build/Build/Products/Debug`, as [build](../build.md#troubleshooting) says, cleared it.
-- Three runtime warnings, all the known main-thread one (a method that should not be called on the main thread); none was traced to this change.
-- New native tests cover the level preference (default, range, corrupt values, reset, one change posted), its backup validation, the policy's gain channel (only while other sound plays and Reduce volume is chosen, a new level delivered while the rule holds, mute still silences, refused delivery retried, teardown restores) and the panel row (offered beside Mute, shown only while chosen, out-of-range refused).
-- Not checked: the lower volume was not heard on a real output, and the slider was not operated in the running app; no desktop automation and no Release build. A [manual smoke](manual-smoke.md#audio-responsiveness) item covers both.

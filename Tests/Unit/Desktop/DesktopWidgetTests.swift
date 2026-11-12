@@ -56,6 +56,118 @@ final class DesktopWidgetTests: XCTestCase {
         XCTAssertEqual(text(clock), "9:05:07 PM")
     }
 
+    func testAClockCanPadItsHourDropAMAndPMAndStackItsNumbers() {
+        var clock = DesktopWidget(kind: .time)
+        clock.padsHour = true
+        XCTAssertEqual(text(clock), "09:05 PM")
+        clock.showsPeriod = false
+        XCTAssertEqual(text(clock), "09:05")
+        clock.padsHour = false
+        XCTAssertEqual(text(clock), "9:05")
+        XCTAssertEqual(text(clock, locale: Locale(identifier: "ko_KR")), "9:05", "a period written first goes too")
+        XCTAssertEqual(text(clock, locale: Locale(identifier: "en_GB")), "21:05", "a 24-hour time has none")
+
+        clock.clockLayout = .stacked
+        XCTAssertEqual(text(clock), "9\n05")
+        clock.showsPeriod = true
+        clock.showsSeconds = true
+        XCTAssertEqual(text(clock), "9\n05\n07\nPM")
+        clock.text = "Home"
+        clock.showsSeconds = false
+        clock.showsPeriod = false
+        XCTAssertEqual(text(clock, locale: Locale(identifier: "en_GB")), "Home\n21\n05", "the label on its own line")
+
+        XCTAssertEqual(
+            DesktopWidgetRendering.adjusted("'at' h:mm a", padsHour: true, showsPeriod: false), "'at' hh:mm",
+            "quoted words are kept")
+    }
+
+    func testTheLettersCaseSpacingAndSlantFollowTheWidget() throws {
+        var date = DesktopWidget(kind: .date)
+        date.textCase = .uppercase
+        date.letterSpacing = 10
+        date.isItalic = true
+        date.typeface = .rounded
+        let content = DesktopWidgetRendering.content(
+            for: date, inputs: inputs(), formatters: DesktopWidgetRendering.Formatters())
+        XCTAssertEqual(content.text, "Sunday, November 8", "the words themselves keep their case")
+        guard case .text(let attributed) = content.drawing else { return XCTFail("text") }
+        XCTAssertEqual(attributed.string, "SUNDAY, NOVEMBER 8")
+        XCTAssertEqual(try XCTUnwrap(attributed.attribute(.kern, at: 0, effectiveRange: nil) as? CGFloat), 2.8, accuracy: 1e-6)
+        let font = try XCTUnwrap(attributed.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+        let slanted = attributed.attribute(.obliqueness, at: 0, effectiveRange: nil) != nil
+        XCTAssertTrue(
+            font.fontDescriptor.symbolicTraits.contains(.italic) || slanted, "an italic, or slanted letters")
+    }
+
+    func testAnInstalledFontFamilyIsUsedAndAMissingOneFallsBackToTheSystemFont() {
+        var widget = DesktopWidget(kind: .text)
+        widget.fontFamily = "Helvetica Neue"
+        widget.weight = 700
+        let font = DesktopWidgetRendering.font(for: widget)
+        XCTAssertEqual(font.familyName, "Helvetica Neue")
+        XCTAssertTrue(font.fontDescriptor.symbolicTraits.contains(.bold), "the family's bold")
+        widget.fontFamily = "No Such Family 1234"
+        XCTAssertEqual(
+            DesktopWidgetRendering.font(for: widget).familyName, NSFont.systemFont(ofSize: 12).familyName)
+        widget.font = .system(.serif)
+        XCTAssertNil(widget.fontFamily, "choosing a design leaves the family")
+    }
+
+    func testEffectsWidenTheRoomAroundTheDrawingAndATurnWidensItsBox() {
+        var widget = DesktopWidget(kind: .time)
+        widget.hasShadow = false
+        XCTAssertEqual(DesktopWidgetRendering.padding(for: widget), 1)
+        XCTAssertNil(DesktopWidgetRendering.look(for: widget).shadow)
+        widget.glowSize = 20
+        XCTAssertEqual(DesktopWidgetRendering.padding(for: widget), ceil(96 * 0.2 * 1.5) + 1, "the glow's reach")
+        widget.glowSize = 0
+        widget.background = .rounded
+        widget.backgroundPadding = 50
+        XCTAssertEqual(DesktopWidgetRendering.padding(for: widget), 49, "the plate's")
+        widget.hasShadow = true
+        widget.shadowAngle = 90
+        let shadow = DesktopWidgetRendering.look(for: widget).shadow
+        XCTAssertEqual(shadow?.offset.width ?? 0, 96 * 0.02, accuracy: 1e-6, "falls to the right")
+        XCTAssertEqual(shadow?.offset.height ?? 1, 0, accuracy: 1e-6)
+
+        let content = DesktopWidgetRendering.Content(
+            text: "", drawing: .text(NSAttributedString()), size: NSSize(width: 200, height: 100), padding: 0,
+            look: .init(rotation: 90))
+        XCTAssertEqual(content.boxSize, NSSize(width: 100, height: 200))
+        widget.rotation = 90
+        let frame = DesktopWidgetRendering.frame(for: content, widget: widget, display: display)
+        XCTAssertEqual(frame.size, NSSize(width: 100, height: 200))
+    }
+
+    func testAStyleChangesOnlyTheLookAndResetPutsTheEffectsBack() {
+        var widget = DesktopWidget(kind: .text)
+        widget.text = "Hello"
+        widget.size = 60
+        widget.x = 0.2
+        widget.fontFamily = "Avenir Next"
+        widget.color = "#123456"
+        DesktopWidget.StylePreset.neon.apply(to: &widget)
+        XCTAssertEqual(widget.glowSize, 18)
+        XCTAssertFalse(widget.hasShadow)
+        XCTAssertEqual(widget.text, "Hello")
+        XCTAssertEqual(widget.size, 60)
+        XCTAssertEqual(widget.x, 0.2)
+        XCTAssertEqual(widget.fontFamily, "Avenir Next")
+        DesktopWidget.StylePreset.outlined.apply(to: &widget)
+        XCTAssertEqual(widget.glowSize, 0, "a style starts from the default effects")
+        XCTAssertEqual(widget.outlineWidth, 4)
+        for preset in DesktopWidget.StylePreset.allCases {
+            var styled = widget
+            preset.apply(to: &styled)
+            XCTAssertTrue(styled.isValid, "\(preset)")
+        }
+        widget.resetEffects()
+        XCTAssertEqual(widget.outlineWidth, 0)
+        XCTAssertTrue(widget.hasShadow)
+        XCTAssertEqual(widget.color, "#FFFFFF", "the outlined style kept the neon's white")
+    }
+
     func testADateIsWrittenInTheStyleChosenAndTheRegionsOrder() {
         var date = DesktopWidget(kind: .date)
         let expected: [DesktopWidget.DateStyle: String] = [
@@ -359,6 +471,11 @@ final class DesktopWidgetTests: XCTestCase {
         XCTAssertNil(widgets[0].timeZone)
         XCTAssertEqual(widgets[0].calendarSystem, .system)
         XCTAssertEqual(widgets[0].text, "")
+        XCTAssertNil(widgets[0].fontFamily)
+        XCTAssertEqual(widgets[0].background, .off)
+        XCTAssertEqual(widgets[0].outlineWidth, 0)
+        XCTAssertTrue(widgets[0].hasShadow)
+        XCTAssertEqual(widgets[0].shadowAngle, 180, "an older widget keeps the shadow it had")
 
         let every = try DesktopWidgetStore.decode(JSONEncoder().encode(DesktopWidget.Kind.allCases.map {
             var widget = DesktopWidget(kind: $0)
@@ -382,6 +499,13 @@ final class DesktopWidgetTests: XCTestCase {
             #"[{"id":"a","kind":"countdown","targetDay":"2026-02-30"}]"#,
             #"[{"id":"a","kind":"countdown","targetDay":"20261120"}]"#,
             #"[{"id":"a","kind":"text","text":"a\u0000b"}]"#,
+            #"[{"id":"a","kind":"time","outlineWidth":40}]"#,
+            #"[{"id":"a","kind":"time","shadowAngle":360}]"#,
+            #"[{"id":"a","kind":"time","rotation":270}]"#,
+            #"[{"id":"a","kind":"time","glowColor":"red"}]"#,
+            ##"[{"id":"a","kind":"time","accentColor":"#12"}]"##,
+            #"[{"id":"a","kind":"time","background":"blur"}]"#,
+            #"[{"id":"a","kind":"time","fontFamily":"a\nb"}]"#,
             "[{\"id\":\"a\",\"kind\":\"text\",\"text\":\"\(String(repeating: "x", count: 501))\"}]",
         ] {
             XCTAssertThrowsError(try DesktopWidgetStore.decode(Data(json.utf8)), json)
