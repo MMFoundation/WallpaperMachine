@@ -335,6 +335,7 @@ final class WelcomeRenderTests: PanelTestCase {
       }
       try await harness.layout(at: sizes[1])
       let saved = texts()
+      XCTAssertFalse(saved.isEmpty, "The hosted page must expose its accessible text")
       model.choosePreset(.low)
       XCTAssertGreaterThan(model.unsavedPerformanceCount, 0)
       try await harness.layout(at: sizes[1])
@@ -342,6 +343,11 @@ final class WelcomeRenderTests: PanelTestCase {
       XCTAssertFalse(
         saved.subtracting(unsaved).isEmpty, "With drafts, the lead for a guide with nothing unsaved is gone")
       XCTAssertFalse(model.recap.unsaved.isEmpty)
+      model.skipPerformance()
+      try await harness.layout(at: sizes[1])
+      XCTAssertTrue(model.recap.unsaved.isEmpty)
+      XCTAssertEqual(texts(), saved, "Discarding the drafts must also remove the unsaved lead")
+      XCTAssertFalse(harness.window.isVisible)
       harness.close()
     }
   }

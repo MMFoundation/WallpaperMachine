@@ -105,6 +105,9 @@ struct WelcomeStartPage: View {
         lead: recap.unsaved.isEmpty
           ? Text("Your desktop won’t change until you apply a wallpaper.")
           : Text("Some changes aren’t saved yet. Review them, or start without them."))
+        // Selectable Text can keep its old AppKit accessibility value when only its
+        // content changes. Replace the header when its saved/unsaved meaning changes.
+        .id(recap.unsaved.isEmpty)
       DividedRows(separatorInset: 14) {
         recapRow(Text("Language"), value: language(recap), action: nil)
         recapRow(Text("Appearance"), value: appearance(recap), action: nil)

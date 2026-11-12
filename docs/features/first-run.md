@@ -109,7 +109,8 @@ Settings → Library & Steam can sign in before that. The guide's pages:
    any unsaved, the lead under **Setup complete** says some changes are not saved yet
    and can be reviewed or left behind, in place of the note that the desktop changes
    only when a wallpaper is applied, so someone sent here by **Skip setup** learns why
-   at once.
+   at once. When the saved/unsaved state changes, the header's selectable text is
+   replaced so its AppKit accessibility value does not retain the previous lead.
    **Browse the Workshop** ends the guide and opens **Steam Workshop**. It wears that
    tab's symbol, and its note says that after the guide Steam's wallpapers are always
    in the **Steam Workshop** tab at the top of the window (the guide hides the tabs
