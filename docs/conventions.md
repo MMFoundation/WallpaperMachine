@@ -164,7 +164,10 @@ How the panel runs (controller, actions, observation, window hosting) is in
   system's semantic colours; a view never hardcodes a colour value. A control that cannot be
   used fades by `PanelTheme.disabledOpacity` (`.panelDisabledOpacity(isEnabled)`), never by an
   amount of its own; the Steam Workshop tile's ring, which sits on a dimmed picture, is the one
-  named exception.
+  named exception. Over a picture use `SurfacePalette`'s scrim, mark and control tokens; never
+  `.black`, `.white`, a named hue or the hierarchical `.secondary` and `.tertiary`, which ignore
+  the tone. `scripts/tests/test_panel_design_tokens.py` fails on a raw colour in a file not on its
+  allowlist, which only shrinks.
 - **Buttons** with words are `.panelPrimary` (the one accent action of a place),
   `.panelSecondary` beside it, in the same `PrimaryButtonStyle.Size`, and `.panelLink` for an
   action within a sentence's reach; a link sets no font, so it takes the text's around it (a
@@ -183,6 +186,9 @@ How the panel runs (controller, actions, observation, window hosting) is in
   control's geometry (a glyph in a disc) is `PanelFont.proportional(to:ratio:weight:)`, and
   AppKit code that measures the panel's text reads the role's `nsFont` or `lineHeight`, so what
   is measured is what is drawn. A new size that fits no role is a new role, not a literal.
+  `scripts/tests/test_panel_design_tokens.py` fails on a raw `.system(size:)`,
+  `systemFont(ofSize:)` or system text style in a file not on its allowlist; migrate a listed
+  file and delete its entry.
 - **Accessibility.** Every icon-only control has an accessibility label
   (`L("…")`); an error or a status change is announced; the keyboard paths stay
   (grid arrows, Home and End, Return and Space, the Escape chain, Command-F for the

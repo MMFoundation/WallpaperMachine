@@ -1488,6 +1488,12 @@ never to `.shared`.
 - Lazy lists: `scripts/tests/test_panel_lazy_lists.py` fails for a `LazyVStack`, `LazyHStack`,
   `LazyVGrid`, `LazyHGrid` or `List` that draws more than one top-level `ForEach`, the shape that
   kept a resumed download's row stale; a `ForEach` inside a separate subview is not seen by it.
+- Design tokens: `scripts/tests/test_panel_design_tokens.py` fails for a raw font size
+  (`.system(size:)`, `systemFont(ofSize:)`, a system text style) or a raw colour (`.black`,
+  `.white`, a named hue, `Color(red:)`, `.secondary`, `.tertiary`) in a panel file outside `Theme/`
+  that its allowlists do not name, and for an allowlisted file with none left, so the lists only
+  shrink; shadows and alpha masks are skipped. A raw value added to a file already listed is not
+  caught until that file is migrated.
 - pixiv: `PanelPixivActionsTests`, `PixivPanelStateTests`, `PixivBrowserModelTests`,
   `PixivListSummaryTests` and `PixivBrowserRenderTests`; see [Pixiv](#pixiv).
 - Settings: `SettingsSearchTests` (matches, counts, folding disclosures, the panel's language, the
