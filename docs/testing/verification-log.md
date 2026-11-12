@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-12 — Control panel UI critique fixes (ws1-ws7) on claude/ui-critique-fixes
+
+- Scope: 34 local commits over main 54227ed3: Apply/Play symbols and wording, Workshop inspector Apply and Command-Return, staged-edit footer and Not applied marks (Rust bridge staged flags), collapsible display cards, welcome Skip setup and the delayed support prompt, P3 polish, and the panel type scale, shared buttons, scrims, tile marks and design-token lint.
+- python3 scripts/test.py on the final tree: 4887 passed, 0 failed, 68 skipped; script tests incl. test_panel_design_tokens, catalogs and doc links OK. Each workstream also passed the full gate before its commits.
+- Known flake seen once under full-gate load: WebWallpaperPageTests.testRefusedOrReplacedNavigationDoesNotFailTheWallpaper (10 s WebKit deadline) in ws3's first run; the rerun passed. Not caused by this branch.
+- python3 scripts/check_rust.py after the bridge change: core 429, bridge 961, shader 958 and core-integration passed, 0 failed; desktop-window tests excluded (need an authorized desktop run). No Rust or bridge change since.
+- python3 scripts/check_renderer.py on the final tree: exit 0; 12 generated scenes pixel-equal pooled vs isolated, 0 reload cycles; 19 local-corpus and energy checks skipped (no corpus or opt-ins), so asset coverage is skipped, not passed.
+- Not rendered: no Release build, no app launch, no screenshots. Unverified by eye: paused vs waiting rings, scrim strengths, the new markHeart pink and the library mark's contrast, the translucent secondary fill in dark mode, the View menu titles, the welcome Skip setup and Escape routing.
+- Not covered by tests: whether a click (not a key) focuses a tile and makes its ring show the cancel mark instead of the percentage; pixiv Command-Return wiring (manual smoke only); the scope bar's middle tier; translations without native-speaker review.
+
 ## 2026-11-11 — Feeling good? offers Sponsor on Open Collective; README lists Open Collective sponsors
 
 The support prompt's second choice opens MMFoundation's Open Collective (approved by Open Source Collective on 2026-11-11) instead of the website's pricing page, with new strings in every shipped language; the four READMEs gain a sponsors block drawn by Open Collective.
@@ -116,15 +126,3 @@ Installed gains a right-click menu on tiles (the inspector's More actions list, 
 - Not exercised: the tile's context menu, the drop outline and a real Finder drag, and the File menu items with their shortcuts in a real window. They need desktop control, which was not authorized; the menu's item rules are InspectorPolicy's existing tests, and the drop and menu actions are covered through the model
 - Not rebuilt: no Release build was made, so the delivered app does not contain these changes
 - Runtime warnings in the result bundle (2, main-thread call) come from AppUpdateTests and WebMOpeningTests, which this change does not touch
-
-## 2026-11-09 — Web wallpaper submitted background for Stage Manager
-
-- The desktop web container now submits one opaque black 1×1 Metal frame per backing layer and retains it through resize and page suspension, with no recurring GPU submission or rendering loop. The bounded allocation trade-off was approved; battery impact was not measured.
-- On the Dell display, the user reported that a submitted surface kept Belle smooth, removing it or replacing it with an empty Metal queue brought the freeze back, and using the submitted surface as the existing black background looked normal and stayed smooth.
-- The earlier tag-only Release candidate and native backing-flattening override failed the visible Stage Manager check. The override is removed; the existing transition tag remains alongside the submitted background.
-- `python3 scripts/test.py --only WebWallpaperWindowCompositionTests` — before the Metal implementation, 3 passed and 2 new regressions failed; final run: 7 passed, 0 failed, 0 skipped. Coverage includes a real submitted frame, resize, suspension/resume and the no-Metal fallback.
-- `python3 scripts/test.py` — passed: Python checks and XcodeGen succeeded; native suite: 4,698 passed, 0 failed, 66 skipped. Three unrelated runtime warnings concerned main-thread use in video and app-update tests.
-- `python3 scripts/build.py --renderer-only` rebuilt current upstream dependencies; `python3 scripts/build.py --swift-only --configuration Release` passed. No renderer source changes were made by this fix.
-- The clean Release app was restarted with the original covered-desktop preference restored. Runtime inspection confirmed attached web views and submitted 1×1 Metal backgrounds on both the Dell and built-in displays, with no diagnostic layer or runtime patch.
-- The additional clean-build Stage Manager and Mission Control visual check was requested but remains unconfirmed. The accepted smoothness result above is from the working prototype, not a claimed final-build visual observation.
-- Wallpaper Engine reference-frame comparison and measured power consumption were not performed; this change addresses host-window presentation rather than wallpaper content rendering.
