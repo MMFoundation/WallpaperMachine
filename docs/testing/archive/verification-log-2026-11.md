@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-11 — Workshop inspector removal (#183)
+
+- Added Move to Trash for installed Workshop items using the existing confirmed library removal action; collections remain open-only.
+- Reused the existing label and translations in all shipped app languages; documented removal in workshop-downloads.md.
+- python3 scripts/test.py --only WorkshopInspectorTests: 13 passed.
+- Initial full gate blocked by the pre-existing deleted CLAUDE.md documentation link; temporarily restored its relative symlink for validation.
+- Parallel full gate: 4722 passed, 5 timing/session failures, 66 skipped.
+- python3 scripts/test.py --serial: 4727 passed, 0 failed, 66 skipped; one runtime warning.
+- Opt-in media/network and desktop UI checks were not run; visual behavior was not manually checked.
+
 ## 2026-11-10 — Steam QR-code sign-in and native Workshop downloads
 
 Downloads signed in with a QR code run through the app's own Steam client (App/Services/Steam/) instead of SteamCMD; the Rust bridge unpacks depot content (decompress_steam_content).

@@ -3,11 +3,18 @@ import SwiftUI
 
 /// Settings › Desktop Widgets' Arrange row: a small picture of a display, with the frame its
 /// wallpaper draws (its first at once, then one past any intro or fade-in once it has played a
-/// moment) and the widgets shown on it drawn as the desktop draws them, scaled down. Without a frame
-/// the picture shows the wallpaper's still, and a note under it says why when one is to come. Dragging a widget moves it; the position is saved when it is let
-/// go. The words are those of when the page was drawn: the preview runs no clock of its own and the
-/// frame does not move. The position sliders below it are the keyboard's and VoiceOver's way to the
-/// same thing, so the picture itself is hidden from VoiceOver.
+/// moment) and the widgets shown on it drawn as the desktop draws them, scaled down and stacked in
+/// the layers' order. Without a frame the picture shows the wallpaper's still, and a note under it
+/// says why when one is to come.
+///
+/// Dragging a widget moves it; the position is saved when it is let go. While it moves, the
+/// display's centre lines show faintly, and the widget snaps to them, to the thirds, to a margin
+/// from the edges and to the other widgets' edges and centres, drawing a guide along each line it
+/// lies on (`DesktopWidgetSnapping`); holding Command places it freely. The selected widget is
+/// outlined above every layer, so it can be found even under another one, and a hidden one is
+/// drawn faded. The words are those of when the page was drawn: the preview runs no clock of its
+/// own and the frame does not move. The position sliders and the Center buttons are the keyboard's
+/// and VoiceOver's way to the same thing, so the picture itself is hidden from VoiceOver.
 struct DesktopWidgetPreview: View {
   let screen: DesktopWidgetController.Screen
 
@@ -22,12 +29,17 @@ struct DesktopWidgetPreview: View {
       GeometryReader { proxy in
         let size = proxy.size
         let scale = display.width > 0 ? size.width / display.width : 1
+        let widgets = model.widgets(on: screen)
         ZStack(alignment: .topLeading) {
           backdrop(
             frame: model.wallpaperFrame(on: screen.displayID), still: model.wallpaperStill(on: screen.displayID),
             size: size)
-          ForEach(model.widgets(on: screen)) { widget in
+          ForEach(widgets) { widget in
             item(model.shown(widget), saved: widget, in: size, scale: scale)
+          }
+          guides(in: size)
+          if let selected = widgets.first(where: { $0.id == model.selectedID }) {
+            outline(model.frame(of: model.shown(selected), in: size, scale: scale))
           }
         }
         .coordinateSpace(.named(Self.space))
@@ -36,7 +48,7 @@ struct DesktopWidgetPreview: View {
       .frame(maxWidth: 480, maxHeight: 270)
       if model.waitsForWallpaperToSettle(on: screen.displayID) {
         Text("Showing the wallpaper’s preview image until it has played for a moment.")
-          .font(.system(size: 11.5))
+          .font(.panel(.footnote))
           .foregroundStyle(theme.surface.muted.color)
           .multilineTextAlignment(.center)
           .fixedSize(horizontal: false, vertical: true)
@@ -76,31 +88,75 @@ struct DesktopWidgetPreview: View {
   private func item(_ widget: DesktopWidget, saved: DesktopWidget, in size: CGSize, scale: CGFloat) -> some View {
     let model = controller.widgetsSettings
     let content = model.content(for: widget, scale: scale)
-    // AppKit's frame counts up from the bottom; the picture counts down from the top.
-    let frame = DesktopWidgetRendering.frame(
-      textSize: content.size, padding: content.padding, widget: widget,
-      display: NSRect(origin: .zero, size: size))
-    let isSelected = model.selectedID == widget.id
+    let frame = model.frame(of: widget, in: size, scale: scale)
     return WidgetDrawing(drawing: content.drawing, padding: content.padding)
       .frame(width: frame.width, height: frame.height)
-      .overlay {
-        RoundedRectangle(cornerRadius: 3, style: .continuous)
-          .strokeBorder(
-            isSelected ? theme.accent.accent.color : Color.clear, lineWidth: 1, antialiased: true)
-      }
+      .opacity(widget.isShown ? 1 : 0.35)
       .contentShape(Rectangle())
-      .position(x: frame.midX, y: size.height - frame.midY)
+      .position(x: frame.midX, y: frame.midY)
       .gesture(
         DragGesture(minimumDistance: 1, coordinateSpace: .named(Self.space))
           .onChanged { drag in
-            if model.selectedID != widget.id { model.select(widget.id) }
-            let x = saved.x + drag.translation.width / max(size.width, 1)
-            let y = saved.y + drag.translation.height / max(size.height, 1)
-            model.drag = .init(id: widget.id, x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+            model.drag(
+              saved, by: drag.translation, in: size, scale: scale, on: screen,
+              snaps: !NSEvent.modifierFlags.contains(.command))
           }
           .onEnded { _ in model.endDrag() }
       )
       .onTapGesture { model.select(widget.id) }
+  }
+
+  /// The selected widget's outline, above every layer: a dark hairline under the accent one keeps
+  /// it on a light wallpaper as on a dark one.
+  private func outline(_ frame: CGRect) -> some View {
+    let shape = RoundedRectangle(cornerRadius: 3, style: .continuous)
+    return ZStack {
+      shape.strokeBorder(theme.surface.markFill.color, lineWidth: 2.5)
+      shape.strokeBorder(theme.accent.accent.color, lineWidth: 1.25)
+    }
+    .frame(width: frame.width + 2, height: frame.height + 2)
+    .position(x: frame.midX, y: frame.midY)
+    .allowsHitTesting(false)
+  }
+
+  /// While a widget is dragged: the display's centre lines, faint and dashed until the widget lies
+  /// on one, and a solid guide along every line it snapped to.
+  private func guides(in size: CGSize) -> some View {
+    let model = controller.widgetsSettings
+    let snapped = model.drag?.guides ?? []
+    let faint = model.drag == nil
+      ? []
+      : DesktopWidgetSnapping.displayGuides(in: size).filter { line in
+        !snapped.contains { $0.axis == line.axis && abs($0.position - line.position) < 1.5 }
+      }
+    return ZStack(alignment: .topLeading) {
+      ForEach(Array(faint.enumerated()), id: \.offset) { _, guide in
+        path(guide).stroke(theme.surface.controlRim.color, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+      }
+      ForEach(Array(snapped.enumerated()), id: \.offset) { _, guide in
+        path(guide).stroke(theme.surface.markFill.color, lineWidth: 2.5)
+        path(guide).stroke(
+          theme.accent.accent.color,
+          style: StrokeStyle(lineWidth: 1, dash: guide.kind == .third || guide.kind == .margin ? [4, 2] : []))
+      }
+    }
+    .frame(width: size.width, height: size.height)
+    .allowsHitTesting(false)
+  }
+
+  private func path(_ guide: DesktopWidgetSnapping.Guide) -> Path {
+    Path { path in
+      // On the half point, so a one-point line is crisp.
+      let position = guide.position.rounded(.down) + 0.5
+      switch guide.axis {
+      case .vertical:
+        path.move(to: CGPoint(x: position, y: guide.start))
+        path.addLine(to: CGPoint(x: position, y: guide.end))
+      case .horizontal:
+        path.move(to: CGPoint(x: guide.start, y: position))
+        path.addLine(to: CGPoint(x: guide.end, y: position))
+      }
+    }
   }
 }
 

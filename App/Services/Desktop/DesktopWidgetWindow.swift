@@ -8,6 +8,8 @@ protocol DesktopWidgetSurface: AnyObject {
     /// Whether any of it can be seen now: false while windows cover it, the display sleeps or the
     /// screen is locked.
     var isOnScreen: Bool { get }
+    /// Puts it in front of the other widgets' surfaces, still behind Finder's icons.
+    func raise()
     func remove()
 }
 
@@ -66,6 +68,8 @@ final class DesktopWidgetWindow: NSWindow, DesktopWidgetSurface {
     }
 
     var isOnScreen: Bool { occlusionState.contains(.visible) }
+
+    func raise() { orderFrontRegardless() }
 
     func remove() {
         orderOut(nil)

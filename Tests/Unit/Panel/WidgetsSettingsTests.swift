@@ -28,7 +28,7 @@ final class WidgetsSettingsTests: PanelTestCase {
       try await controller.addDesktopWidget(.time)
       let ids = model.widgets.map(\.id)
       XCTAssertEqual(model.widgets.map(\.kind), [.time, .date, .time])
-      XCTAssertEqual(model.selectedID, ids[2], "a new widget opens in the editor")
+      XCTAssertEqual(model.selectedID, ids[0], "a new widget opens in the editor, at the top of the list")
 
       model.select(ids[1])
       try await controller.removeDesktopWidget(ids[1])
@@ -38,6 +38,82 @@ final class WidgetsSettingsTests: PanelTestCase {
 
       XCTAssertEqual(
         DesktopWidgetStore(defaults: panel.defaults).widgets.map(\.id), [ids[0]], "every change is kept")
+    }
+  }
+
+  func testTheListIsTheLayersAndThePreviewStacksThemSo() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop] in [laptop] }
+      let model = controller.widgetsSettings
+      try await controller.addDesktopWidget(.time)
+      try await controller.addDesktopWidget(.date)
+      try await controller.addDesktopWidget(.text)
+      let ids = model.widgets.map(\.id)
+      XCTAssertEqual(model.widgets(on: laptop).map(\.id), ids.reversed(), "drawn back to front")
+
+      try await controller.moveDesktopWidget(ids[2], to: 0, expected: ids)
+      XCTAssertEqual(model.widgets.map(\.id), [ids[2], ids[0], ids[1]])
+      try await controller.moveDesktopWidget(ids[0], to: 2, expected: ids)
+      XCTAssertEqual(model.widgets.map(\.id), [ids[2], ids[0], ids[1]], "a drop from an older order is refused")
+
+      try await controller.duplicateDesktopWidget(ids[1])
+      let copy = try XCTUnwrap(model.selectedID)
+      XCTAssertEqual(model.widgets.map(\.id), [ids[2], ids[0], copy, ids[1]], "the copy, in front of it, opens")
+
+      try await controller.changeDesktopWidget(copy, .shown(false))
+      XCTAssertTrue(model.widgets(on: laptop).contains { $0.id == copy }, "the selected one is drawn while hidden")
+      model.select(ids[0])
+      XCTAssertFalse(model.widgets(on: laptop).contains { $0.id == copy }, "another hidden one is not")
+    }
+  }
+
+  func testDraggingSnapsToTheCenterUnlessCommandIsHeldAndTheCenterButtonsCenter() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop] in [laptop] }
+      let model = controller.widgetsSettings
+      try await controller.addDesktopWidget(.text)
+      let id = try XCTUnwrap(model.selectedID)
+      await model.commit(id, "alignment", to: DesktopWidget.Alignment.leading) { .alignment($0) }?.value
+      await model.commit(id, "position", to: [0.1, 0.1]) { .position(x: $0[0], y: $0[1]) }?.value
+      let widget = try XCTUnwrap(model.selected)
+      let size = CGSize(width: 480, height: 480 * laptop.frame.height / laptop.frame.width)
+      let scale = size.width / laptop.frame.width
+
+      // Within a few of the picture's points of the centre, measured on the display.
+      let display = laptop.frame.size
+      let start = model.frame(of: widget, in: display, scale: 1)
+      let near = CGSize(
+        width: (display.width / 2 - start.midX) * scale + 3, height: (display.height / 2 - start.midY) * scale - 4)
+      model.drag(widget, by: near, in: size, scale: scale, on: laptop, snaps: true)
+      var frame = model.frame(of: model.shown(widget), in: display, scale: 1)
+      XCTAssertEqual(frame.midX, display.width / 2, accuracy: 1, "on the desktop's vertical centre line")
+      XCTAssertEqual(frame.midY, display.height / 2, accuracy: 1, "and its horizontal one")
+      let guides = try XCTUnwrap(model.drag?.guides)
+      XCTAssertEqual(Set(guides.map(\.kind)), [.center])
+      XCTAssertEqual(
+        guides.first { $0.axis == .vertical }?.position ?? 0, size.width / 2, accuracy: 1, "drawn on the picture")
+
+      model.drag(widget, by: near, in: size, scale: scale, on: laptop, snaps: false)
+      frame = model.frame(of: model.shown(widget), in: display, scale: 1)
+      XCTAssertEqual(frame.midX, display.width / 2 + 3 / scale, accuracy: 1, "Command places it freely")
+      XCTAssertEqual(model.drag?.guides, [])
+      await model.endDrag()?.value
+
+      var saved = try XCTUnwrap(model.selected)
+      XCTAssertFalse(model.isCentered(saved, on: laptop, horizontally: true))
+      try await controller.changeDesktopWidget(id, .x(model.centered(saved, on: laptop, horizontally: true)))
+      try await controller.changeDesktopWidget(id, .y(model.centered(saved, on: laptop, horizontally: false)))
+      saved = try XCTUnwrap(model.selected)
+      XCTAssertTrue(model.isCentered(saved, on: laptop, horizontally: true))
+      XCTAssertTrue(model.isCentered(saved, on: laptop, horizontally: false))
+      let content = model.content(for: saved)
+      let onDisplay = DesktopWidgetRendering.frame(
+        textSize: content.size, padding: content.padding, widget: saved,
+        display: NSRect(origin: .zero, size: laptop.frame.size))
+      XCTAssertEqual(onDisplay.midX, laptop.frame.width / 2, accuracy: 1, "a left-aligned text centred by its middle")
+      XCTAssertEqual(onDisplay.midY, laptop.frame.height / 2, accuracy: 1)
     }
   }
 

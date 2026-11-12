@@ -8,10 +8,22 @@ leaves it where it is. They are set up in **Settings › Desktop Widgets**.
 ## What the user sees
 
 **Add Widget** is a menu of the kinds; the one chosen goes on the main display (the one with the
-menu bar), a little below any widget already there, and opens in the editor. The list under it
-shows each widget's words now (the first line of a text, the month of a calendar), its kind and
-its display (and **Hidden** for one switched off); a click picks the widget the groups below
-edit. Up to 24 widgets can be added.
+menu bar), a little below any widget already there, at the top of the list, and opens in the
+editor. Up to 24 widgets can be added.
+
+The list under it is the widgets' **layers**, front first: where two widgets overlap on the
+desktop, the one higher in the list covers the other (with two or more widgets, the Add Widget
+row says so). Each row shows a drag handle, the widget's words now (the first line of a text, the
+month of a calendar), its kind and its display (and **Hidden** for one switched off), and two
+buttons: the eye shows or hides it on the desktop, and the trash removes it after asking once more
+in place (**Cancel** or **Remove**), since a removal cannot be undone; the editor then moves to
+the next widget. A click picks the widget the groups below edit, and the selected row is
+highlighted. Dragging a row's handle onto another row puts it in that row's place; a drop made
+from an order that has changed since is refused. The row's context menu has **Show on the
+desktop** or **Hide on the desktop**, **Duplicate** (a copy just in front of it, a little lower on
+the display, opened in the editor), **Bring to Front**, **Bring Forward**, **Send Backward**,
+**Send to Back** and **Remove**; VoiceOver offers Bring Forward and Send Backward as actions of
+the row. The first group of the editor names the widget it edits on its title line.
 
 | Kind | Shows | Changes |
 | --- | --- | --- |
@@ -30,7 +42,12 @@ edit. Up to 24 widgets can be added.
   menu as "*name* (not connected)" and the widget comes back when it does); **Arrange**, a
   picture of that display with the frame its wallpaper is drawing and every widget shown there,
   where dragging a widget moves it and letting go saves the place (see
-  [the preview's backdrop](#the-previews-backdrop)); **Horizontal position** and
+  [the preview's backdrop](#the-previews-backdrop) and [snapping](#snapping-and-guides)); the
+  widgets are stacked there as on the desktop, the selected one is outlined above them all so it
+  can be found under another one, and a hidden selected one is drawn faded so it can still be
+  arranged; **Center on the display** (**Horizontally**, **Vertically**), which puts the middle of
+  what the widget shows on the display's centre line, whichever edge its alignment holds, each
+  button disabled while that is already so; **Horizontal position** and
   **Vertical position**, the same place in whole percent from the left and the top edge, for the
   keyboard and VoiceOver; **Alignment** (**Left**, **Center**, **Right**), the edge of the text
   the position holds, so a clock aligned left does not move its left edge when "9:59" becomes
@@ -64,8 +81,6 @@ edit. Up to 24 widgets can be added.
   the city's name in the panel's language and its offset from GMT now. Choosing a city for a
   clock or a date without a label labels it with the city; a label of one's own stays. The
   label, a text, an event or a name keeps at most 500 characters.
-- **Remove this widget** takes it away; the editor moves to the next widget.
-
 Every change shows on the desktop at once, a colour while it is being picked in the colour
 panel included; none of these controls waits for the renderer or for a wallpaper being applied.
 The words follow the Mac's language and region formats (System Settings › General › Language &
@@ -76,7 +91,9 @@ was launched in.
 ## How it is drawn
 
 `DesktopWidgetController` (`App/Services/Desktop/`), started by `AppDelegate`, puts one
-`MWEDesktopWidgetWindow` (`DesktopWidgetWindow`) on each display a shown widget belongs on. The
+`MWEDesktopWidgetWindow` (`DesktopWidgetWindow`) on each display a shown widget belongs on, and
+stacks the windows in the layers' order: they share one window level, so each is ordered in front
+of the one behind it, only when a window is added or the order changes. The
 window is transparent and only as large as its text and shadow, one level above the wallpaper
 windows (the [coverage probes'](../architecture.md#desktop-wallpaper-windows-and-private-api-handling)
 level) and below Finder's desktop icons, on every Space, ignoring the mouse and never hidden with
@@ -113,10 +130,29 @@ The windows cost nothing between changes of their words:
   screen change moves the windows and touches only the ones whose frame changed, so an XDR
   display's stream of EDR headroom changes touches none.
 
+## Snapping and guides
+
+While a widget is dragged on **Arrange**, the display's two centre lines show faintly dashed, so
+the centre can be found before the widget gets there. Within about 6 of the picture's points of a
+line, the widget snaps onto it (`DesktopWidgetSnapping`), and a solid guide in the accent colour
+(over a dark hairline, readable on any wallpaper) is drawn along each line it lies on:
+
+- the display's centre lines, with the widget's middle;
+- the lines a third of the way across and down, with its middle (dashed guide);
+- a margin of 4 % of the display's shorter side in from each edge, with the edge facing it
+  (dashed guide);
+- every other widget shown on that display: its left, middle and right, and its top, middle and
+  bottom, with the dragged widget's; that guide runs between the two widgets.
+
+The nearest line on each axis wins, so a widget can sit on a vertical and a horizontal line at
+once. Holding **Command** while dragging places the widget freely. The lines are worked out on the
+display at the widgets' real size, not on the scaled picture, whose text is laid out at another
+size, so a widget snapped to the centre is centred on the desktop to the point.
+
 ## Storage
 
 The widgets are a JSON array in the app's preferences (`WallpaperMachine.desktopWidgets`,
-`DesktopWidgetStore`). Each field has a default, so a widget saved by another version keeps what
+`DesktopWidgetStore`), in the layers' order, front first. Each field has a default, so a widget saved by another version keeps what
 it carries; a saved list with a value no control could choose (out of range, an unreadable
 colour, a repeated id) is not read, and the log says so. The panel's store writes the list and
 posts `DesktopWidgetStore.didChangeNotification`; the controller reads the list again from the
@@ -189,15 +225,19 @@ and replaced by a **settled** one once the wallpaper has played a moment:
   `DesktopWidgetWindow`, and `DesktopWallpaperFrames` and `WallpaperSettleClock` (the preview's
   backdrop).
 - `App/Views/ControlPanel/`: `Settings/Sections/WidgetsSettingsSection.swift` and
-  `DesktopWidgetPreview.swift`, the page model `Settings/DesktopWidgetsSettingsModel.swift` and
+  `DesktopWidgetPreview.swift`, the page model `Settings/DesktopWidgetsSettingsModel.swift`, the
+  snapping `Settings/DesktopWidgetSnapping.swift` and
   the typed actions in `Model/PanelController+DesktopWidgets.swift`.
 - Tests: `Tests/Unit/Desktop/DesktopWidgetTests.swift` (each kind's words, the clock face, the
   month grid, other calendars and time zones, frames and the height limit, the next change,
-  storage and backup validation), `DesktopWidgetControllerTests.swift` (windows per display,
+  storage and backup validation, the layers' order, moving and duplicating),
+  `DesktopWidgetControllerTests.swift` (windows per display, stacking in the layers' order,
   timing, occlusion, wake and screen changes, the battery's notification and the sunrise and
   sunset settings, the window's level and class) and `Tests/Unit/Panel/WidgetsSettingsTests.swift`
-  (actions, the Display, Date format, Time zone and Calendar menus, the rows each kind offers,
-  the preview's wallpaper frame, search and layout in the narrowest and widest column).
+  (actions, layers and the preview's stacking, snapping a drag and the Center buttons, the
+  Display, Date format, Time zone and Calendar menus, the rows each kind offers,
+  the preview's wallpaper frame, search and layout in the narrowest and widest column);
+  `Tests/Unit/Panel/DesktopWidgetSnappingTests.swift` the snap lines, the pull and the guides.
   `DesktopWallpaperFramesTests.swift` covers asking a settled wallpaper once and scaling, waiting
   for the sync's own frame, not asking during an intro, the frame kept per look, blank frames and
   the poster fallback; `WallpaperSettleClockTests.swift` the settle count.

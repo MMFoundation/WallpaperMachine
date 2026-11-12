@@ -21,6 +21,9 @@ final class DesktopWidgetControllerTests: XCTestCase {
         var text = ""
         var isOnScreen = true
         var removed = false
+        var raises = 0
+
+        func raise() { raises += 1 }
 
         func show(_ drawing: DesktopWidgetRendering.Drawing, padding: CGFloat, frame: NSRect) {
             self.frame = frame
@@ -269,6 +272,25 @@ final class DesktopWidgetControllerTests: XCTestCase {
         XCTAssertTrue(fixture.controller.shown.isEmpty)
         _ = try fixture.store.add(.date)
         XCTAssertEqual(fixture.made.count, 1)
+    }
+
+    func testTheWindowsAreStackedInTheLayersOrder() throws {
+        let fixture = try makeFixture(screens: [laptop, external])
+        fixture.controller.start()
+        let clock = try fixture.store.add(.time)
+        let date = try fixture.store.add(.date)
+        XCTAssertEqual(fixture.controller.stacking, [clock.id, date.id], "back to front: the newest in front")
+
+        try fixture.store.move(clock.id, to: 0)
+        XCTAssertEqual(fixture.controller.stacking, [date.id, clock.id])
+        let raises = fixture.live.map(\.raises).reduce(0, +)
+        try fixture.store.update(clock.id) { $0.size = 40 }
+        XCTAssertEqual(fixture.live.map(\.raises).reduce(0, +), raises, "a change that keeps the order restacks nothing")
+
+        try fixture.store.update(date.id) { $0.placement = .all }
+        XCTAssertEqual(fixture.controller.stacking, [date.id, date.id, clock.id], "each display's window in its layer")
+        try fixture.store.remove(clock.id)
+        XCTAssertEqual(fixture.controller.stacking, [date.id, date.id])
     }
 
     // MARK: The window

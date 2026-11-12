@@ -4,6 +4,9 @@ import Observation
 /// The desktop widgets the person added, kept in the app's preferences. The panel changes them here;
 /// `DesktopWidgetController` reads them again from the preferences whenever this store posts
 /// `didChangeNotification`, so the desktop follows each change at once.
+///
+/// The order is the layers' order, front first: a widget covers the ones after it where they
+/// overlap, and the panel lists them in this order.
 @MainActor
 @Observable
 final class DesktopWidgetStore {
@@ -26,8 +29,8 @@ final class DesktopWidgetStore {
         return widget
     }
 
-    /// Adds a widget of `kind` on the main display, below the widgets already there so it does not
-    /// cover them.
+    /// Adds a widget of `kind` on the main display, in front of the others and a little lower on the
+    /// display than those already there, so it does not cover them.
     @discardableResult
     func add(_ kind: DesktopWidget.Kind) throws -> DesktopWidget {
         guard widgets.count < Self.limit else { throw DesktopWidgetError.tooMany }
@@ -36,8 +39,35 @@ final class DesktopWidgetStore {
         while taken.contains(where: { abs($0 - widget.y) < 0.05 }), widget.y < 0.9 {
             widget.y += 0.1
         }
-        try commit(widgets + [widget])
+        try commit([widget] + widgets)
         return widget
+    }
+
+    /// Adds a copy of a widget just in front of it, a little lower on the display so both can be
+    /// seen (higher when there is no room below).
+    @discardableResult
+    func duplicate(_ id: String) throws -> DesktopWidget {
+        guard widgets.count < Self.limit else { throw DesktopWidgetError.tooMany }
+        let original = try widget(id)
+        var copy = original
+        copy.id = UUID().uuidString
+        copy.y = original.y <= 0.9 ? original.y + 0.08 : original.y - 0.08
+        copy = copy.clamped()
+        var values = widgets
+        values.insert(copy, at: values.firstIndex { $0.id == id } ?? 0)
+        try commit(values)
+        return copy
+    }
+
+    /// Moves a widget to `index` of the layers (0 is the front), the others making room. `expected`
+    /// is the order the person saw when they asked; a list that changed since is left as it is, so
+    /// a late drop does not undo a newer change.
+    func move(_ id: String, to index: Int, expected: [String]? = nil) throws {
+        if let expected, expected != widgets.map(\.id) { return }
+        let widget = try widget(id)
+        var values = widgets.filter { $0.id != id }
+        values.insert(widget, at: min(max(index, 0), values.count))
+        try commit(values)
     }
 
     func update(_ id: String, _ change: (inout DesktopWidget) -> Void) throws {

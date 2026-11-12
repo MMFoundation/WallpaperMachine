@@ -52,7 +52,7 @@ enum DesktopWidgetChange: Hashable, Sendable {
 /// Settings › Desktop Widgets' actions. A widget belongs to no wallpaper and the renderer never draws it,
 /// so none of them waits for a wallpaper command or clears an older banner.
 extension PanelController {
-  /// Adds a widget of `kind` on the main display and opens it in the editor.
+  /// Adds a widget of `kind` on the main display, in front of the others, and opens it in the editor.
   func addDesktopWidget(_ kind: DesktopWidget.Kind) async throws {
     _ = try await run(.immediate) {
       let widget = try desktopWidgets.add(kind)
@@ -76,6 +76,22 @@ extension PanelController {
           widget.text = label
         }
       }
+    }
+  }
+
+  /// Adds a copy of a widget in front of it and opens the copy in the editor.
+  func duplicateDesktopWidget(_ id: String) async throws {
+    _ = try await run(.immediate) {
+      let copy = try desktopWidgets.duplicate(id)
+      widgetsSettings.select(copy.id)
+    }
+  }
+
+  /// Moves a widget to `index` of the layers, 0 being the front. `expected` is the order the list
+  /// showed, so a drop on a list that changed since changes nothing.
+  func moveDesktopWidget(_ id: String, to index: Int, expected: [String]? = nil) async throws {
+    _ = try await run(.immediate) {
+      try desktopWidgets.move(id, to: index, expected: expected)
     }
   }
 

@@ -10,17 +10,29 @@ import Observation
 final class DesktopWidgetsSettingsModel {
   typealias Screen = DesktopWidgetController.Screen
 
-  /// A widget being dragged on the preview, where the pointer has taken it so far.
+  /// A widget being dragged on the preview, where the pointer has taken it so far, and the guides
+  /// it snapped to there.
   struct Drag: Equatable {
     var id: String
     var x: Double
     var y: Double
+    var guides: [DesktopWidgetSnapping.Guide] = []
+  }
+
+  /// What a drag keeps from its start: where the widget was, and the frames of the widgets it can
+  /// line up with, in the display's points.
+  private struct DragStart {
+    var id: String
+    var x: Double
+    var y: Double
+    var others: [CGRect]
   }
 
   unowned let controller: PanelController
   private var chosenID: String?
   /// The drag in progress on the preview; nil when none is.
   var drag: Drag?
+  @ObservationIgnored private var dragStart: DragStart?
   @ObservationIgnored private let formatters = DesktopWidgetRendering.Formatters()
 
   init(controller: PanelController) { self.controller = controller }
@@ -69,12 +81,15 @@ final class DesktopWidgetsSettingsModel {
     return screens.first(where: \.isMain) ?? screens.first
   }
 
-  /// The widgets the preview of `screen` draws, the selected one last so it is on top.
+  /// The widgets the preview of `screen` draws, back to front as the desktop stacks them. The
+  /// selected one is drawn while it is hidden too, so it can still be arranged; the picture fades
+  /// it.
   func widgets(on screen: Screen) -> [DesktopWidget] {
     let selectedID = selectedID
-    return widgets
-      .filter { $0.isShown && $0.isPlaced(onDisplayUUID: screen.uuid, isMain: screen.isMain) }
-      .sorted { ($0.id == selectedID ? 1 : 0) < ($1.id == selectedID ? 1 : 0) }
+    return widgets.reversed()
+      .filter {
+        ($0.isShown || $0.id == selectedID) && $0.isPlaced(onDisplayUUID: screen.uuid, isMain: screen.isMain)
+      }
   }
 
   /// The Display menu: the main display, every display, each connected one by name, and the
@@ -337,8 +352,90 @@ final class DesktopWidgetsSettingsModel {
   /// until it is saved, so the widget does not jump back meanwhile.
   @discardableResult
   func endDrag() -> Task<Void, Never>? {
+    dragStart = nil
     guard let drag else { return nil }
     self.drag = nil
     return commit(drag.id, "position", to: [drag.x, drag.y]) { .position(x: $0[0], y: $0[1]) }
+  }
+
+  // MARK: Arranging
+
+  /// Where `widget` lies in a picture of `size` drawn at `scale` times the display: its frame in
+  /// the picture's points, top-left origin.
+  func frame(of widget: DesktopWidget, in size: CGSize, scale: CGFloat) -> CGRect {
+    let content = content(for: widget, scale: scale)
+    let frame = DesktopWidgetRendering.frame(
+      textSize: content.size, padding: content.padding, widget: widget,
+      display: NSRect(origin: .zero, size: size))
+    return CGRect(x: frame.minX, y: size.height - frame.maxY, width: frame.width, height: frame.height)
+  }
+
+  /// Moves a widget being dragged on the preview of `screen` (a picture of `size`, at `scale`
+  /// times the display) by `translation` from where the drag started, and selects it. With `snaps`
+  /// it lines up with the display's centre, thirds and margins and with the other widgets there
+  /// when it comes within a few of the picture's points of one (`DesktopWidgetSnapping`). The lines
+  /// are worked out on the display itself, where text is laid out at its own size, so a widget
+  /// snapped to the centre is centred on the desktop to the point; the guides are scaled to the
+  /// picture.
+  func drag(
+    _ widget: DesktopWidget, by translation: CGSize, in size: CGSize, scale: CGFloat, on screen: Screen,
+    snaps: Bool
+  ) {
+    let display = screen.frame.size
+    guard size.width > 0, size.height > 0, display.width > 0, display.height > 0, scale > 0 else { return }
+    if dragStart?.id != widget.id || drag?.id != widget.id {
+      let start = shown(widget)
+      let others = widgets(on: screen).filter { $0.id != widget.id && $0.isShown }
+        .map { frame(of: shown($0), in: display, scale: 1) }
+      dragStart = DragStart(id: widget.id, x: start.x, y: start.y, others: others)
+      if selectedID != widget.id { select(widget.id) }
+    }
+    guard let start = dragStart else { return }
+    var moved = widget
+    moved.x = min(max(start.x + translation.width / size.width, 0), 1)
+    moved.y = min(max(start.y + translation.height / size.height, 0), 1)
+    var guides: [DesktopWidgetSnapping.Guide] = []
+    if snaps {
+      let snapped = DesktopWidgetSnapping.snap(
+        frame(of: moved, in: display, scale: 1), in: display, others: start.others,
+        threshold: DesktopWidgetSnapping.threshold / scale)
+      moved.x = min(max(moved.x + snapped.offset.width / display.width, 0), 1)
+      moved.y = min(max(moved.y + snapped.offset.height / display.height, 0), 1)
+      guides = snapped.guides.map { guide in
+        var scaled = guide
+        scaled.position *= scale
+        scaled.start *= scale
+        scaled.end *= scale
+        return scaled
+      }
+    }
+    drag = Drag(id: widget.id, x: moved.x, y: moved.y, guides: guides)
+  }
+
+  /// The position that centres `widget` on `screen` across (`horizontally`) or down: the middle of
+  /// what it shows on the display's centre line, whichever edge its alignment holds.
+  func centered(_ widget: DesktopWidget, on screen: Screen, horizontally: Bool) -> Double {
+    guard horizontally else { return 0.5 }
+    let display = screen.frame.size
+    guard display.width > 0 else { return widget.x }
+    let content = content(for: widget)
+    let width = DesktopWidgetRendering.frame(
+      textSize: content.size, padding: content.padding, widget: widget,
+      display: NSRect(origin: .zero, size: display)
+    ).width
+    let anchor: CGFloat =
+      switch widget.alignment {
+      case .leading: (display.width - width) / 2 + content.padding
+      case .center: display.width / 2
+      case .trailing: (display.width + width) / 2 - content.padding
+      }
+    return min(max(Double(anchor / display.width), 0), 1)
+  }
+
+  /// Whether `widget` is centred on `screen` across or down, to the display's point.
+  func isCentered(_ widget: DesktopWidget, on screen: Screen, horizontally: Bool) -> Bool {
+    let extent = horizontally ? screen.frame.width : screen.frame.height
+    let position = horizontally ? widget.x : widget.y
+    return abs(position - centered(widget, on: screen, horizontally: horizontally)) * extent < 1
   }
 }

@@ -420,6 +420,31 @@ final class DesktopWidgetTests: XCTestCase {
         XCTAssertThrowsError(try store.add(.date)) { XCTAssertEqual($0 as? DesktopWidgetError, .tooMany) }
     }
 
+    func testTheOrderIsTheLayersAndANewOrCopiedWidgetGoesInFront() throws {
+        let store = DesktopWidgetStore(defaults: try TemporaryDefaults.make(for: self).defaults, center: NotificationCenter())
+        let clock = try store.add(.time)
+        let date = try store.add(.date)
+        let text = try store.add(.text)
+        XCTAssertEqual(store.widgets.map(\.id), [text.id, date.id, clock.id], "the newest in front")
+
+        try store.move(clock.id, to: 0)
+        XCTAssertEqual(store.widgets.map(\.id), [clock.id, text.id, date.id])
+        try store.move(clock.id, to: 99)
+        XCTAssertEqual(store.widgets.map(\.id), [text.id, date.id, clock.id], "past the back stays at the back")
+        try store.move(text.id, to: 1, expected: [clock.id, text.id, date.id])
+        XCTAssertEqual(
+            store.widgets.map(\.id), [text.id, date.id, clock.id], "a move from an order since changed does nothing")
+        XCTAssertThrowsError(try store.move("gone", to: 0)) { XCTAssertEqual($0 as? DesktopWidgetError, .missing) }
+
+        try store.update(date.id) { $0.size = 50; $0.text = "Paris" }
+        let copy = try store.duplicate(date.id)
+        XCTAssertEqual(store.widgets.map(\.id), [text.id, copy.id, date.id, clock.id], "just in front of it")
+        XCTAssertNotEqual(copy.id, date.id)
+        XCTAssertEqual(copy.size, 50)
+        XCTAssertEqual(copy.text, "Paris")
+        XCTAssertNotEqual(copy.y, try store.widget(date.id).y, "not right on top of it")
+    }
+
     func testABackupCarriesTheWidgetsAndRefusesBrokenOnes() throws {
         XCTAssertTrue(WallpaperBackupPreferences.allowedKeys.contains(DesktopWidgetStore.storageKey))
         let valid = try JSONEncoder().encode([DesktopWidget(kind: .time)])

@@ -145,8 +145,6 @@ TYPE_ALLOWLIST = {
         "backlog: Settings",
     "App/Views/ControlPanel/Settings/Sections/DesktopSettingsSection.swift":
         "backlog: Settings",
-    "App/Views/ControlPanel/Settings/Sections/DesktopWidgetPreview.swift":
-        "backlog: Settings",
     "App/Views/ControlPanel/Settings/Sections/DisplaysAutomationRows.swift":
         "backlog: Settings",
     "App/Views/ControlPanel/Settings/Sections/DisplaysControls.swift":

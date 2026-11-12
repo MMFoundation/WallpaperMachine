@@ -25,6 +25,14 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-12 — Desktop widgets: layers list, snapping guides, Center buttons
+
+- python3 scripts/test.py: Python stage passed; native 4906 passed, 0 failed, 68 skipped.
+- Targeted: WidgetsSettingsTests, DesktopWidgetSnappingTests, DesktopWidgetTests, DesktopWidgetControllerTests, SettingsSectionsLocalizationTests passed.
+- Covered: layer order (add in front, move, refused stale drop, duplicate), window stacking, preview stacking, snap lines and guides, drag snap on the display and Command bypass, Center buttons for a left-aligned text.
+- Gap: the panel and the desktop windows were not looked at; drag-and-drop of list rows, the guides' look over real wallpapers and window stacking on a real desktop are unchecked by hand.
+- App not rebuilt.
+
 ## 2026-11-12 — Menu bar energy use (issue 188)
 
 - Added Settings → General → Show energy use in the menu bar (off by default) and an Energy use row in the menu bar panel, both from one MenuBarEnergyMeter (5 s for the figure, 2 s with the panel open, nothing while unattended).
@@ -109,13 +117,3 @@ Adds Reduce volume beside Mute under When another app plays sound, with a Reduce
 - Three runtime warnings, all the known main-thread one (a method that should not be called on the main thread); none was traced to this change.
 - New native tests cover the level preference (default, range, corrupt values, reset, one change posted), its backup validation, the policy's gain channel (only while other sound plays and Reduce volume is chosen, a new level delivered while the rule holds, mute still silences, refused delivery retried, teardown restores) and the panel row (offered beside Mute, shown only while chosen, out-of-range refused).
 - Not checked: the lower volume was not heard on a real output, and the slider was not operated in the running app; no desktop automation and no Release build. A [manual smoke](manual-smoke.md#audio-responsiveness) item covers both.
-
-## 2026-11-11 — Workshop inspector removal (#183)
-
-- Added Move to Trash for installed Workshop items using the existing confirmed library removal action; collections remain open-only.
-- Reused the existing label and translations in all shipped app languages; documented removal in workshop-downloads.md.
-- python3 scripts/test.py --only WorkshopInspectorTests: 13 passed.
-- Initial full gate blocked by the pre-existing deleted CLAUDE.md documentation link; temporarily restored its relative symlink for validation.
-- Parallel full gate: 4722 passed, 5 timing/session failures, 66 skipped.
-- python3 scripts/test.py --serial: 4727 passed, 0 failed, 66 skipped; one runtime warning.
-- Opt-in media/network and desktop UI checks were not run; visual behavior was not manually checked.

@@ -3,7 +3,8 @@ import Foundation
 
 /// Puts the desktop widgets on the displays and keeps their words current.
 ///
-/// One window per widget and display, sized to what it shows. Without widgets it keeps no window and
+/// One window per widget and display, sized to what it shows, stacked in the store's order: a widget
+/// listed first is in front of the ones after it where they overlap. Without widgets it keeps no window and
 /// no timer and only listens for the store's change. With widgets it redraws when what they show
 /// changes (each second for a clock with seconds, each minute for another clock, at a greeting's
 /// hour, at sunrise and sunset, at midnight for dates, countdowns and the month), and only while one
@@ -62,6 +63,8 @@ final class DesktopWidgetController {
     private var widgets: [DesktopWidget] = []
     private var surfaces: [Key: any DesktopWidgetSurface] = [:]
     private var drawn: [Key: Shown] = [:]
+    /// The windows in the order they were last stacked, back first.
+    private var stacked: [Key] = []
     private var cancelTimer: (() -> Void)?
     private(set) var nextChange: Date?
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
@@ -97,6 +100,9 @@ final class DesktopWidgetController {
     var shown: [Shown] {
         drawn.values.sorted { ($0.widgetID, $0.displayID) < ($1.widgetID, $1.displayID) }
     }
+
+    /// The widget of each window, back to front, as the windows were last stacked.
+    var stacking: [String] { stacked.map(\.widgetID) }
 
     // MARK: Running
 
@@ -142,6 +148,7 @@ final class DesktopWidgetController {
         for surface in surfaces.values { surface.remove() }
         surfaces.removeAll()
         drawn.removeAll()
+        stacked.removeAll()
     }
 
     /// The words are due to change: draws them, which schedules the next change.
@@ -175,9 +182,24 @@ final class DesktopWidgetController {
         for key in wanted where surfaces[key] == nil {
             surfaces[key] = makeSurface()
         }
+        stack()
         let placed = Set(wanted.map(\.widgetID))
         observeBattery(widgets.contains { $0.kind == .battery && placed.contains($0.id) })
         render(screens: screens)
+    }
+
+    /// Puts the windows in the layers' order, the last widget at the back. A new window comes up in
+    /// front of the others, so one being added or a new order restacks them; anything else leaves
+    /// the windows as they are.
+    private func stack() {
+        let order = widgets.reversed().flatMap { widget in
+            surfaces.keys.filter { $0.widgetID == widget.id }.sorted { $0.displayID < $1.displayID }
+        }
+        guard order != stacked else { return }
+        let isOnlyRemoval = order.count < stacked.count && stacked.filter { order.contains($0) } == order
+        stacked = order
+        guard !isOnlyRemoval else { return }
+        for key in order { surfaces[key]?.raise() }
     }
 
     private func render() { render(screens: screens()) }
