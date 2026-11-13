@@ -9,6 +9,14 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-12 — Desktop widgets: layers list, snapping guides, Center buttons
+
+- python3 scripts/test.py: Python stage passed; native 4906 passed, 0 failed, 68 skipped.
+- Targeted: WidgetsSettingsTests, DesktopWidgetSnappingTests, DesktopWidgetTests, DesktopWidgetControllerTests, SettingsSectionsLocalizationTests passed.
+- Covered: layer order (add in front, move, refused stale drop, duplicate), window stacking, preview stacking, snap lines and guides, drag snap on the display and Command bypass, Center buttons for a left-aligned text.
+- Gap: the panel and the desktop windows were not looked at; drag-and-drop of list rows, the guides' look over real wallpapers and window stacking on a real desktop are unchecked by hand.
+- App not rebuilt.
+
 ## 2026-11-12 — Menu bar energy use (issue 188)
 
 - Added Settings → General → Show energy use in the menu bar (off by default) and an Energy use row in the menu bar panel, both from one MenuBarEnergyMeter (5 s for the figure, 2 s with the panel open, nothing while unattended).

@@ -32,6 +32,7 @@ struct SettingsDetail: View {
 struct SettingsPages: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @State private var position = ScrollPosition(edge: .top)
 
   var body: some View {
     let settings = controller.settings
@@ -47,18 +48,16 @@ struct SettingsPages: View {
   private func pages(_ settings: SettingsModel) -> some View {
     let search = settings.search
     return ScrollView {
-      VStack(alignment: .leading, spacing: 30) {
+      LazyVStack(alignment: .leading, spacing: 30) {
         if search.hasNoResults {
           PanelEmptyState(
             verbatim: L("No settings match “\(search.query)”."), systemImage: "magnifyingglass"
           )
           .frame(maxWidth: .infinity, minHeight: 240)
-        } else if search.isActive {
-          ForEach(search.sections, id: \.self) { section in
+        } else {
+          ForEach(search.isActive ? search.sections : [settings.selectedSection], id: \.self) { section in
             page(of: section)
           }
-        } else {
-          page(of: settings.selectedSection)
         }
       }
       .frame(maxWidth: 620, alignment: .leading)
@@ -66,13 +65,17 @@ struct SettingsPages: View {
       .padding(.horizontal, 28)
       .padding(.vertical, 24)
     }
-    // A new section, a reveal and a change of the query each start the page at its top.
-    .id(
-      PageIdentity(
-        section: settings.selectedSection, epoch: settings.scrollEpoch, query: search.query)
-    )
+    .scrollPosition($position)
+    // Reset the position without recreating every result and repeating each
+    // section's onAppear work for every character typed.
+    .onChange(of: PageIdentity(
+      section: settings.selectedSection, epoch: settings.scrollEpoch, query: search.query), initial: true
+    ) { position.scrollTo(edge: .top) }
     // Not under the title bar, which keeps the page's colour across the window.
     .background(theme.surface.surface.color, ignoresSafeAreaEdges: [])
+    // A single page and a list of results have different estimated heights.
+    // Reset that layout only when entering/leaving search, never while typing.
+    .id(search.isActive)
   }
 
   private struct PageIdentity: Hashable {

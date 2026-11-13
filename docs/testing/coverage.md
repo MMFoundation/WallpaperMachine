@@ -1523,7 +1523,11 @@ never to `.shared`.
 - pixiv: `PanelPixivActionsTests`, `PixivPanelStateTests`, `PixivBrowserModelTests`,
   `PixivListSummaryTests` and `PixivBrowserRenderTests`; see [Pixiv](#pixiv).
 - Settings: `SettingsSearchTests` (matches, counts, folding disclosures, the panel's language, the
-  first-sentence note), `SettingsEditingModelTests` (a control shows its draft until its change
+  first-sentence note), `SettingsSearchRenderingTests` (refining results without repeated system
+  reads, returning to the top after query changes, section reveals and widget-workspace searches,
+  preserving disclosure choices when clearing a broad search, and reaching the last matching
+  section by scrolling),
+  `SettingsEditingModelTests` (a control shows its draft until its change
   has run, a refusal snaps back and reaches the banner, controls wait while the Mac is busy except
   the one whose change runs, appearance and language never wait, a new snapshot keeps disclosures
   and the scroll position), `SettingsEntryControlsTests`, `QuickSettingsTileTests`,

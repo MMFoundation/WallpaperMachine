@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-13 — Keep settings searches responsive
+
+- Issue #201: retain the settings result view while typing, build result sections lazily, and reset scrolling explicitly; entering/leaving search resets only the list layout.
+- Baseline production source d82c4249: refining wallp through wallpaper and back caused 32 additional system-reading refreshes across eight edits. The regression now passes with no additional refreshes.
+- Same offscreen Debug fixture, 760 x 560 points, eight query edits: mean update time 315.52 ms before, 45.75 ms after; maximum 341.32 ms before, 47.01 ms after. Each sample includes a fixed 30 ms settle wait; this is not a live keyboard-latency or Release benchmark. Search calculation remained about 3.1 ms.
+- `python3 scripts/test.py --only SettingsSearchRenderingTests --only SettingsSearchTests --only SettingsSearchOfferTests --only DisplaysSettingsSearchTests --only SettingsSectionsRenderTests/testSearchResultsOfTheSixPagesLayOutInTheNarrowColumn --only SettingsWindowRenderTests/testEverySectionFitsTheSmallestWindowAtEveryHeightWhileMovingBetweenSections`: 30 passed, 0 failed, 0 skipped.
+- `python3 scripts/test.py`: all 35 Python modules passed; 4,971 native tests passed, 0 failed, 70 skipped of 5,041.
+- Skipped checks require opt-in media, live Steam/network, web reference jobs or panel snapshot output. Two main-thread runtime warnings came from unchanged LockScreenWebMPlayerTests.testAFailureTheClipHadBeforeAHandlerWasSetIsHeldAndDeliveredOnce and AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; both passed.
+- `git diff --check`, `python3 scripts/tests/test_doc_links.py`, and `python3 scripts/tests/test_panel_lazy_lists.py`: passed. XcodeGen registered the new render-test file.
+- No real desktop interaction or screenshots; windows stayed unordered. No Release app was built, installed or restarted.
+
 ## 2026-11-13 — Preserve desktop originals after native restoration failures
 
 - Issue #197: keep poster synchronization suspended until native restoration succeeds; reject native desktop selections when recording poster originals and preserve the existing recovery journal.
@@ -112,11 +123,3 @@ Installed font families, italic, letter spacing, line height and case; gradient 
 - `python3 scripts/test.py` on the rebased tree — exit 0; 4979 tests: 4911 passed, 68 skipped
 - Offscreen renders of each style preset, a stacked clock, an italic installed family, a turned outlined date, numbered and ticked clock faces, an accented calendar and a gradient with glow, drawn by DesktopWidgetView into PNGs by a throwaway test (not committed) and inspected
 - Not checked: widgets on a real desktop, over moving wallpapers and across Spaces; snapping a rotated widget by hand
-
-## 2026-11-12 — Desktop widgets: layers list, snapping guides, Center buttons
-
-- python3 scripts/test.py: Python stage passed; native 4906 passed, 0 failed, 68 skipped.
-- Targeted: WidgetsSettingsTests, DesktopWidgetSnappingTests, DesktopWidgetTests, DesktopWidgetControllerTests, SettingsSectionsLocalizationTests passed.
-- Covered: layer order (add in front, move, refused stale drop, duplicate), window stacking, preview stacking, snap lines and guides, drag snap on the display and Command bypass, Center buttons for a left-aligned text.
-- Gap: the panel and the desktop windows were not looked at; drag-and-drop of list rows, the guides' look over real wallpapers and window stacking on a real desktop are unchecked by hand.
-- App not rebuilt.

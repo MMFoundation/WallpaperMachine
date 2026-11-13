@@ -227,7 +227,10 @@ canvas, the widgets' layers and an inspector with tabs, which do not scroll as o
   lists every section with a match, one under another, with only the matching rows;
   the section list counts the matches per section and dims the rest; disclosures holding a
   match open for the search and fold again when it clears. `Escape` clears the field,
-  and **No settings match “…”.** shows when nothing matches.
+  and **No settings match “…”.** shows when nothing matches. Results load near the visible
+  part of the list as it scrolls. Editing the query returns to the top without rebuilding
+  every matching section or repeating its system-state reads; clearing it returns to the
+  selected section with the person's disclosure choices intact.
 - **Quick Settings** collects Control Center-style tiles that switch the same
   preferences as their full rows and stay in sync with them: **Open at Login**,
   **Mute All**, **Lock Screen** and **Screen Saver** (both experimental),
