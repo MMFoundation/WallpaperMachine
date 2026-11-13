@@ -183,7 +183,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
-  func testActivationFailureAlwaysHandsDesktopBackToPosterProvider() async throws {
+  func testActivationFailureKeepsPostersSuspendedWhenRestorationFails() async throws {
     try XCTSkipIf(CGDisplayIsOnline(CGMainDisplayID()) == 0, "No online main display")
     let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [self.scene()] },
     selection: LockScreenWallpaperSelection(
@@ -197,14 +197,14 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     service.setEnabled(true)
     await waitFor("the failed activation to settle") { !service.isBusy }
     XCTAssertEqual(before, 1)
-    XCTAssertEqual(after, 1)
-    XCTAssertFalse(service.ownsDesktopProvider)
+    XCTAssertEqual(after, 0)
+    XCTAssertTrue(service.ownsDesktopProvider)
     XCTAssertFalse(service.isEnabled)
     XCTAssertNotNil(service.errorMessage)
   }
 
   @MainActor
-  func testDisableWithFailedRestorationStillHandsDesktopBack() async throws {
+  func testDisableWithFailedRestorationHandsDesktopBackOnlyAfterRetry() async throws {
     try XCTSkipIf(CGDisplayIsOnline(CGMainDisplayID()) == 0, "No online main display")
     var failReload = false
     let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [self.scene()] },
@@ -230,11 +230,76 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     failReload = true
     service.setEnabled(false)
     await waitFor("deactivation to finish") { !service.isBusy }
+    XCTAssertEqual(after, 0)
+    XCTAssertTrue(service.ownsDesktopProvider)
+    XCTAssertNotNil(service.errorMessage)
+    XCTAssertTrue(service.claimsDesktopPicture)
+    XCTAssertTrue(service.locksDesktopPictureChoice)
+
+    failReload = false
+    service.setEnabled(false)
+    await waitFor("restoration retry to finish") { !service.isBusy }
     XCTAssertEqual(after, 1)
     XCTAssertFalse(service.ownsDesktopProvider)
-    XCTAssertNotNil(service.errorMessage)
-    XCTAssertFalse(service.claimsDesktopPicture, "handed back, so the posters may start again")
+    XCTAssertFalse(service.claimsDesktopPicture)
     XCTAssertFalse(service.locksDesktopPictureChoice)
+    XCTAssertNil(service.errorMessage)
+  }
+
+  @MainActor
+  func testRacedRestorationKeepsNativeDesktopAndOriginalsUntilRetry() async throws {
+    var record = scene()
+    record.displayId = 1
+    var raceRestoration = false
+    let selection = LockScreenWallpaperSelection(
+      storeURL: store, journalURL: journal, reload: {},
+      persistJournal: { url, data in
+        try LockScreenWallpaperSelection.persistJournalFile(url, data)
+        if raceRestoration {
+          var root = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: Data(contentsOf: self.store), format: nil)
+              as? [String: Any])
+          root["Unrelated"] = UUID().uuidString
+          try self.write(root)
+        }
+      })
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: selection, exchange: exchange, defaults: defaults,
+      scheduleMonitor: scheduleMonitor, displayUUID: { _ in "one" })
+    var handedBack = false
+    service.afterDeactivation = {
+      XCTAssertEqual(try self.selectedProvider("Desktop"), "display-one-desktop")
+      handedBack = true
+    }
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    service.setEnabled(true)
+    await waitFor("native desktop activation") { service.isEnabled && !service.isBusy }
+    // macOS copied the native choice into a new Space. Restoring it must extend
+    // the recovery journal before the store write, where the competing writer runs.
+    var active = try XCTUnwrap(
+      PropertyListSerialization.propertyList(from: Data(contentsOf: store), format: nil)
+        as? [String: Any])
+    var spaces = try XCTUnwrap(active["Spaces"] as? [String: Any])
+    spaces["created-after-activation"] = ["Displays": try XCTUnwrap(active["Displays"])]
+    active["Spaces"] = spaces
+    try write(active)
+    raceRestoration = true
+    service.setEnabled(false)
+    await waitFor("raced native restoration") { !service.isBusy }
+    XCTAssertEqual(try selectedProvider("Desktop"), LockScreenConfiguration.extensionIdentifier)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
+    XCTAssertTrue(service.claimsDesktopPicture)
+    XCTAssertFalse(handedBack)
+    XCTAssertNotNil(service.errorMessage)
+
+    raceRestoration = false
+    service.setEnabled(false)
+    await waitFor("native restoration retry") { !service.isBusy }
+    XCTAssertTrue(handedBack)
+    XCTAssertFalse(service.claimsDesktopPicture)
+    XCTAssertNil(service.errorMessage)
   }
 
   /// Any snapshot refreshes the service, so refreshes arrive while the first frame is awaited.

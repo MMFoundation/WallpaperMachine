@@ -59,6 +59,8 @@ extension DesktopPictureWorkspace {
 final class DesktopWallpaperLedger {
     enum Failure: LocalizedError {
         case originalUnavailable
+        /// Our native extension still owns a desktop; its stand-in is not an original.
+        case nativeProviderPending
         /// macOS still names a poster in its wallpaper store.
         case restorationPending
         /// A desktop's restored wallpaper does not read back yet.
@@ -68,7 +70,7 @@ final class DesktopWallpaperLedger {
             switch self {
             case .originalUnavailable:
                 String(localized: "The original macOS wallpaper could not be recovered. Select your wallpaper again in System Settings.")
-            case .restorationPending, .restorationUnconfirmed:
+            case .nativeProviderPending, .restorationPending, .restorationUnconfirmed:
                 String(localized: "macOS is still restoring the desktop wallpaper. Please try quitting again.")
             }
         }
@@ -123,6 +125,14 @@ final class DesktopWallpaperLedger {
     }
     private var storeSnapshot: StoreSnapshot?
     private let storeSnapshotURL: URL
+    private var checkedOriginalStore = false
+
+    /// Share a read across this pass's new originals, without caching it across
+    /// later handovers or external changes. Ordinary poster updates need no read.
+    private enum OriginalStore {
+        case unread
+        case read(Data?)
+    }
 
     /// What macOS shows a new user, through a link to the current release's
     /// picture. It is put back on a desktop whose original no longer exists
@@ -188,6 +198,12 @@ final class DesktopWallpaperLedger {
     func synchronize(posters: [String: Data], liveDisplays: Set<String>, targetSpaces: [String: Set<String>] = [:],
                      spacePosters: [String: [String: Data]] = [:]) throws {
         let targets = try workspace.targets()
+        var originalStore = OriginalStore.unread
+        if !checkedOriginalStore, !liveDisplays.isEmpty {
+            // A restarted sync can arrive before its first frame. Do not prune
+            // the old poster journal while the native provider still holds it.
+            _ = try readOriginalStore(&originalStore)
+        }
         var firstError: Error?
         // Cache only within this pass: external edits/missing files must still
         // be detected on the next refresh. Retain no extra image buffers.
@@ -212,7 +228,7 @@ final class DesktopWallpaperLedger {
                     applied.insert(target)
                     let digest = fresh != nil ? digests[target.display]! : Data(SHA256.hash(data: image))
                     try apply(image: image, digest: digest, target: target,
-                              comparisons: &comparisons, fallbacks: fallbacks)
+                              comparisons: &comparisons, fallbacks: fallbacks, originalStore: &originalStore)
                 } else if !liveDisplays.contains(target.display) {
                     try restore(target: target) {
                         if let restorable { return restorable }
@@ -221,6 +237,10 @@ final class DesktopWallpaperLedger {
                         return found
                     }
                 }
+            } catch Failure.nativeProviderPending {
+                // Its journal may still be referenced by the native recovery
+                // journal even though the picture API only returns a stand-in.
+                throw Failure.nativeProviderPending
             } catch is DesktopPictureUnconfirmed {
                 // `apply` handles its own unconfirmed writes, so this is a
                 // restoration; the next pass reads it back.
@@ -293,12 +313,14 @@ final class DesktopWallpaperLedger {
 
     func apply(image: Data, target: DesktopPictureTarget) throws {
         var comparisons: [URL: Bool] = [:]
+        var originalStore = OriginalStore.unread
         try apply(image: image, digest: Data(SHA256.hash(data: image)), target: target,
-                  comparisons: &comparisons, fallbacks: userWallpapers(targets: [target]))
+                  comparisons: &comparisons, fallbacks: userWallpapers(targets: [target]), originalStore: &originalStore)
     }
 
     private func apply(image: Data, digest: Data, target: DesktopPictureTarget,
-                       comparisons: inout [URL: Bool], fallbacks: [String: DesktopPicture]) throws {
+                       comparisons: inout [URL: Bool], fallbacks: [String: DesktopPicture],
+                       originalStore: inout OriginalStore) throws {
         guard refusals[target, default: 0] < Self.refusalsBeforePause else { return }
         guard let current = try workspace.currentPicture(target: target) else {
             throw NSError(domain: "DesktopWallpaperSync", code: 2, userInfo: [
@@ -343,6 +365,12 @@ final class DesktopWallpaperLedger {
             refusals[target] = nil
             return
         }
+        let store: Data?
+        if !checkedOriginalStore || owned == nil || storeSnapshot == nil {
+            store = try readOriginalStore(&originalStore)
+        } else {
+            store = nil
+        }
         // Never reuse a filename for different pixels: WallpaperAgent can cache
         // inactive-Space thumbnails by URL even after the file is overwritten.
         // Identical originals/frames may share an immutable file safely.
@@ -365,7 +393,7 @@ final class DesktopWallpaperLedger {
         // The store as the user left it, before the first poster since the last full
         // restoration. A poster file journaled in an earlier run is written again under
         // its old name, so this cannot wait for a new journal entry.
-        if storeSnapshot == nil, let store = try workspace.storeContents() {
+        if storeSnapshot == nil, let store {
             try save(StoreSnapshot(store: store))
         }
         if entries[name] == nil {
@@ -390,6 +418,17 @@ final class DesktopWallpaperLedger {
             countRefusal(target)
             throw error
         }
+    }
+
+    private func readOriginalStore(_ originalStore: inout OriginalStore) throws -> Data? {
+        if case .read(let data) = originalStore { return data }
+        let data = try workspace.storeContents()
+        if let data, try DesktopWallpaperStoreRestoration.containsNativeDesktop(in: data) {
+            throw Failure.nativeProviderPending
+        }
+        originalStore = .read(data)
+        checkedOriginalStore = true
+        return data
     }
 
     private func countRefusal(_ target: DesktopPictureTarget) {

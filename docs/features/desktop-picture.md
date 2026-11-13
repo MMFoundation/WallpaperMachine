@@ -354,6 +354,15 @@ journal, and finally another display's original. With no recoverable original it
 that desktop untouched and reports the failure through `AppLog`; live playback
 continues without new posters there.
 
+The app's native lock-screen provider is never a user original. Before a new poster
+ledger starts, and before it records a picture not already covered by its journal, it
+checks the store's desktop selections. If one still selects the WallpaperMachine
+extension, poster writes and journal pruning wait for native restoration. This also
+keeps `DefaultDesktop.heic`, returned by the picture API for that extension, out of the
+originals journal. An extension used only for the screen saver does not block posters;
+Apple's default image, aerials and other user-selected providers remain valid originals.
+The store is read once per such pass, not for ordinary updates to journaled posters.
+
 Another app can delete a picture it set, as a wallpaper app clearing out its old
 downloads does, and macOS refuses to show a file that does not exist. Writing that
 original back would fail on every attempt and so refuse every quit. So whenever a
@@ -383,8 +392,8 @@ turned off, the launch repair), once every desktop reads back without a poster, 
 only posters or pictures the app wrote back gets its pre-poster value, a node the writes
 created goes, and WallpaperAgent is restarted to load it; a restart that fails is
 retried by the next pass or launch even though the store has nothing left to change. A selection chosen in System
-Settings meanwhile is kept, a snapshot entry that already named a poster is never put
-back, and the store is written only if it is still the version just read. The copy is
+Settings meanwhile is kept, a snapshot entry that already named a poster or the app's
+native extension is never put back, and the store is written only if it is still the version just read. The copy is
 deleted once restoration succeeds.
 
 A desktop showing anything but a poster was changed outside the app and keeps that
@@ -536,8 +545,9 @@ animating for 15 seconds after its first frame before holding it
 to do. `suspendForNativeProvider` stops every poster write, cancels the timers and
 drops the per-layer state, but keeps the poster file and the journal because the
 native provider journals the current poster as the original it will restore. Poster
-sync restarts when the provider releases the desktop, and is not started while one is
-active or an animated lock screen is on its way to taking it. A screen saver chosen on
+sync restarts after native restoration succeeds; a failed restoration keeps its
+ownership and the suspended poster journal until a retry succeeds. It is not started
+while the provider is active or an animated lock screen is on its way to taking it. A screen saver chosen on
 its own leaves poster sync running. For restoration order at quit with the provider active, see
 [lock-screen.md](lock-screen.md#turning-it-off).
 

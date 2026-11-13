@@ -123,6 +123,10 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
   refusal; a failed Space neither blocks the others nor loses its old poster.
 - Originals and quit: inherited (pathless) selections resolve through the public
   API before any poster write and are never replaced by an unresolved poster;
+  the native lock-screen provider's stand-in is not recorded as an original, and
+  a pending native handover preserves the existing journal even before a new frame;
+  screen-saver-only selections do not block posters, and an older snapshot never
+  reinstalls the app's native desktop provider;
   independent per-Space originals survive; a user's own wallpaper change is not
   overwritten on restore; an original whose file is gone gives way to another
   display's original and then macOS's default picture (when its display stops playing,
@@ -870,7 +874,9 @@ or depend on a second physical monitor.
   renderer while frame rate, title and pause do not, no position and the middle are one
   picture, and an out-of-range or non-finite position is invalid.
 - `LockScreenWallpaperServiceTests` — activation failure hands the Desktop back
-  to the poster provider; surviving lock screens are not cleared by topology
+  to the poster provider only after native restoration succeeds; a failed reload or
+  raced restoration retains ownership and the originals until a successful retry;
+  surviving lock screens are not cleared by topology
   changes, and a display that leaves while the Mac is away keeps its lock screen while
   steady monitor ticks never ask whether the Mac is away; screen-saver-only, lock-only and both modes disable and roll back
   independently; shared-extension and Idle-only publication failures roll back;

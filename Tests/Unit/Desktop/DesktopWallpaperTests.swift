@@ -799,6 +799,95 @@ final class DesktopWallpaperTests: XCTestCase {
         try XCTUnwrap(PropertyListSerialization.propertyList(from: XCTUnwrap(data), format: nil) as? [String: Any])
     }
 
+    @MainActor
+    func testNativeDesktopMustBeRestoredBeforePostersRecordOriginals() throws {
+        let native = try storeSelection(provider: LockScreenConfiguration.extensionIdentifier,
+                                        configuration: [:])
+        let desktop: [String: Any] = ["Type": "desktop", "Desktop": native]
+        let stores: [[String: Any]] = [
+            ["AllSpacesAndDisplays": ["Type": "linked", "Linked": native]],
+            ["SystemDefault": desktop],
+            ["Displays": ["display-uuid": desktop]],
+            ["Spaces": ["one": ["Default": desktop]]],
+            ["Spaces": ["one": ["Displays": ["display-uuid": desktop]]]],
+        ]
+        for (index, store) in stores.enumerated() {
+            let folder = root.appendingPathComponent("posters-\(index)")
+            let workspace = MemoryDesktopWorkspace()
+            workspace.pictures = [one: try DesktopSpaceWallpaperAPI.decodePicture([:])]
+            workspace.visiblePictures = ["1": original("DefaultDesktop")]
+            workspace.store = try storeData(store)
+            let ledger = try DesktopWallpaperLedger(folder: folder, workspace: workspace)
+
+            XCTAssertThrowsError(try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"]))
+            XCTAssertTrue(workspace.writes.isEmpty)
+            XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: folder))
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
+
+            // The lock-screen journal restores the real selection before the next attempt.
+            let user = original("before-lock-screen")
+            workspace.pictures = [one: user]
+            workspace.visiblePictures = ["1": user]
+            workspace.store = try storeData(["SystemDefault": ["Type": "desktop", "Desktop": try storeImage(user.url)]])
+            try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+            let relaunched = try DesktopWallpaperLedger(folder: folder, workspace: workspace)
+            try relaunched.restoreAll()
+            XCTAssertEqual(workspace.pictures[one], user)
+        }
+    }
+
+    @MainActor
+    func testNativeHandoverDoesNotReplaceOrPrunePreviouslyRecordedOriginals() throws {
+        let workspace = MemoryDesktopWorkspace()
+        let user = original("before-lock-screen")
+        workspace.pictures = [one: user]
+        workspace.store = try storeData(["SystemDefault": ["Type": "desktop", "Desktop": try storeImage(user.url)]])
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        let poster = try XCTUnwrap(workspace.pictures[one])
+        let journalURL = root.appendingPathComponent("originals.json")
+        let snapshotURL = root.appendingPathComponent("store-original.json")
+        let journal = try Data(contentsOf: journalURL)
+        let snapshot = try Data(contentsOf: snapshotURL)
+
+        workspace.pictures = [one: original("DefaultDesktop")]
+        let native = try storeSelection(provider: LockScreenConfiguration.extensionIdentifier, configuration: [:])
+        workspace.store = try storeData(["SystemDefault": ["Type": "desktop", "Desktop": native]])
+        workspace.writes.removeAll()
+        let restarted = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        XCTAssertThrowsError(try restarted.synchronize(posters: [:], liveDisplays: ["1"]))
+        XCTAssertThrowsError(try ledger.synchronize(posters: ["1": Data([2])], liveDisplays: ["1"]))
+        XCTAssertTrue(workspace.writes.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: journalURL), journal)
+        XCTAssertEqual(try Data(contentsOf: snapshotURL), snapshot)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: poster.url.path))
+
+        workspace.pictures = [one: poster]
+        workspace.store = try storeData(["SystemDefault": ["Type": "desktop", "Desktop": try storeImage(poster.url)]])
+        let relaunched = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try relaunched.restoreAll()
+        XCTAssertEqual(workspace.pictures[one], user)
+    }
+
+    @MainActor
+    func testScreenSaverAndInactiveNativeChoicesDoNotBlockDesktopPosters() throws {
+        let workspace = MemoryDesktopWorkspace()
+        let user = original("DefaultDesktop")
+        let image = try storeImage(user.url)
+        let native = try storeSelection(provider: LockScreenConfiguration.extensionIdentifier, configuration: [:])
+        workspace.store = try storeData([
+            "AllSpacesAndDisplays": ["Type": "linked", "Linked": image, "Desktop": native],
+            "SystemDefault": ["Type": "individual", "Desktop": image, "Idle": native, "Linked": native],
+            "Displays": ["idle-only": ["Type": "idle", "Idle": native, "Desktop": native]],
+        ])
+        workspace.pictures = [one: user]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        XCTAssertEqual(workspace.writes, [one])
+        try ledger.restoreAll()
+        XCTAssertEqual(workspace.pictures[one], user)
+    }
+
     /// An aerial shown on all Spaces reads as an empty per-Space selection, and the public API
     /// answers with a still stand-in. Writing that still back left an image choice on every
     /// desktop, which macOS showed as a different wallpaper; quitting puts the aerial back.
@@ -910,10 +999,12 @@ final class DesktopWallpaperTests: XCTestCase {
                                         configuration: ["assetID": "golden-gate"])
         let idle = try storeSelection(provider: "default", configuration: [:])
         let poster = try storeImage(posters.appendingPathComponent("poster-old.jpg"))
+        let native: [String: Any] = ["Type": "desktop", "Desktop": try storeSelection(
+            provider: LockScreenConfiguration.extensionIdentifier, configuration: [:])]
         let original = try storeData([
             "AllSpacesAndDisplays": ["Type": "individual", "Desktop": aerial, "Idle": idle],
             "SystemDefault": ["Type": "individual", "Desktop": poster, "Idle": idle],
-            "Displays": [String: Any](), "Spaces": ["kept": ["Displays": [String: Any]()]]])
+            "Displays": ["native-original": native], "Spaces": ["kept": ["Displays": [String: Any]()]]])
         let user = try storeImage(self.original("user-choice").url)
         let wroteAt = Date(timeIntervalSinceReferenceDate: 800_000_000)
         var ourImage = try storeImage(written)
@@ -928,7 +1019,7 @@ final class DesktopWallpaperTests: XCTestCase {
         let current = try storeData([
             "AllSpacesAndDisplays": ["Type": "individual", "Desktop": aerial, "Idle": idle],
             "SystemDefault": ours,
-            "Displays": ["d": ours, "e": usersSameFile, "f": untimed],
+            "Displays": ["d": ours, "e": usersSameFile, "f": untimed, "native-original": ours],
             "Spaces": ["kept": ["Displays": [String: Any]()],
                        "user": ["Default": ["Type": "individual", "Desktop": user, "Idle": idle],
                                 "Displays": ["d": ours]]]])
@@ -937,7 +1028,9 @@ final class DesktopWallpaperTests: XCTestCase {
             current: current, original: original, written: writes, posters: posters))
         XCTAssertEqual(restored["SystemDefault"] as? NSDictionary, ours as NSDictionary,
                        "a poster in the snapshot is not an original")
-        XCTAssertEqual(restored["Displays"] as? NSDictionary, ["e": usersSameFile, "f": untimed] as NSDictionary)
+        XCTAssertEqual(restored["Displays"] as? NSDictionary,
+                       ["e": usersSameFile, "f": untimed, "native-original": ours] as NSDictionary,
+                       "an older snapshot must not reselect our own native extension")
         let spaces = try XCTUnwrap(restored["Spaces"] as? [String: Any])
         XCTAssertNotNil(spaces["kept"])
         let space = try XCTUnwrap(spaces["user"] as? [String: Any])

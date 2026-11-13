@@ -9,6 +9,13 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-12 — Menu bar energy use (issue 188)
+
+- Added Settings → General → Show energy use in the menu bar (off by default) and an Energy use row in the menu bar panel, both from one MenuBarEnergyMeter (5 s for the figure, 2 s with the panel open, nothing while unattended).
+- Targeted: python3 scripts/test.py --only MenuBarEnergyMeterTests --only EnergyReadoutTests --only StatusPanelControllerTests --only StatusPanelRenderTests --only WallpaperPresentationPolicyTests --only SettingsSectionsRenderTests --only EnergyUsageMonitorTests --only WallpaperBackupTests: 155 passed.
+- Gate: python3 scripts/test.py: 4897 passed, 0 failed, 68 skipped.
+- Not checked: the status item drawn in the real menu bar (no desktop run, no Release build); the figure's width beside other menu bar items.
+
 ## 2026-11-12 — Integrate Steam sign-in retry recovery
 
 - Integrated the fix from fix/steam-sign-in-retry-186 onto current main; removed an obsolete sign-in-only assertion and documentation after that API was removed.

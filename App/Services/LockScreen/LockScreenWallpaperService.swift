@@ -22,7 +22,7 @@ final class LockScreenWallpaperService {
   }
   /// Whether the native provider has the desktop picture, or an animated lock screen is on its way
   /// to taking it. Poster sync then stays out of the way; a screen saver chosen on its own and a
-  /// lock screen that failed to start leave the picture to the posters.
+  /// lock screen that failed to start and restored its selection leave the picture to the posters.
   var claimsDesktopPicture: Bool {
     ownsDesktopProvider || (isRequested && canRefreshAutomatically && errorMessage == nil)
   }
@@ -702,9 +702,9 @@ final class LockScreenWallpaperService {
     throw failure
   }
 
-  /// Restore the native selection and hand the desktop back to the poster
-  /// provider. Both steps always run so a failed restoration can never leave
-  /// the poster sync suspended; the first error is rethrown afterwards.
+  /// Hand the desktop back only after restoring the native selection. A failed
+  /// restore can leave our extension selected; the picture API's stand-in for
+  /// it must never be journaled by the poster provider as the user's original.
   private func deactivate() throws {
     cancelExtensionPreparation()
     cancelRendererWatches()
@@ -713,13 +713,11 @@ final class LockScreenWallpaperService {
     isEnabled = false
     screenSaverEnabled = false
     lastInputs = nil
-    var firstError: Error?
-    do { try restoreNativeSelection() } catch { firstError = error }
+    try restoreNativeSelection()
     if ownsDesktopProvider {
       ownsDesktopProvider = false
-      do { try afterDeactivation?() } catch { if firstError == nil { firstError = error } }
+      try afterDeactivation?()
     }
-    if let firstError { throw firstError }
   }
 
   private func cancelExtensionPreparation() {

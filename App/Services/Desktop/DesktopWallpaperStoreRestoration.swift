@@ -24,6 +24,42 @@ enum DesktopWallpaperStoreRestoration {
     /// copies it into the display-wide and system-wide selections then too.
     static let writeTolerance: (before: TimeInterval, after: TimeInterval) = (2, 10)
 
+    /// A snapshot of our own native desktop cannot restore the user's wallpaper.
+    /// Check all nodes because a poster can also replace inherited/global choices.
+    /// Idle-only and inactive fields do not own the desktop.
+    static func containsNativeDesktop(in data: Data) throws -> Bool {
+        guard let root = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { throw CocoaError(.fileReadCorruptFile) }
+        func contains(_ value: Any?) -> Bool {
+            guard let node = value as? [String: Any] else { return false }
+            let fields: [String]
+            switch node["Type"] as? String {
+            case "idle": fields = []
+            case "linked": fields = ["Linked"]
+            case "desktop", "individual": fields = ["Desktop"]
+            default: fields = ["Desktop", "Linked"]
+            }
+            return fields.contains { field in
+                guard let selection = node[field] as? [String: Any] else { return false }
+                return namesNativeProvider(selection)
+            }
+        }
+        if contains(root["AllSpacesAndDisplays"]) || contains(root["SystemDefault"]) { return true }
+        if (root["Displays"] as? [String: Any] ?? [:]).values.contains(where: contains) { return true }
+        for value in (root["Spaces"] as? [String: Any] ?? [:]).values {
+            guard let space = value as? [String: Any] else { continue }
+            if contains(space["Default"]) { return true }
+            if (space["Displays"] as? [String: Any] ?? [:]).values.contains(where: contains) { return true }
+        }
+        return false
+    }
+
+    private static func namesNativeProvider(_ selection: [String: Any]) -> Bool {
+        let content = selection["Content"] as? [String: Any]
+        let choices = content?["Choices"] as? [[String: Any]] ?? []
+        return choices.contains { $0["Provider"] as? String == LockScreenConfiguration.extensionIdentifier }
+    }
+
     /// The store with every selection this app wrote put back as `original` had
     /// it, or nil when nothing needs to change. `written` are the image files
     /// the app wrote back through the per-Space API; a selection of the same
@@ -60,7 +96,7 @@ enum DesktopWallpaperStoreRestoration {
             let originalNode = self.node(before, path: path)
             let originalDesktop = originalNode.flatMap(desktopSelection)
             if let originalDesktop {
-                guard !namesPoster(originalDesktop),
+                guard !namesPoster(originalDesktop), !namesNativeProvider(originalDesktop),
                       !(originalDesktop as NSDictionary).isEqual(to: desktop) else { continue }
                 node["Desktop"] = originalDesktop
             } else {

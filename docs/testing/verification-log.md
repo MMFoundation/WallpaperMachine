@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-13 — Preserve desktop originals after native restoration failures
+
+- Issue #197: keep poster synchronization suspended until native restoration succeeds; reject native desktop selections when recording poster originals and preserve the existing recovery journal.
+- Regression run on the previous implementation: 4 expected failures and 1 passing control across the five selected desktop/lock-screen tests.
+- `python3 scripts/test.py --only DesktopWallpaperTests --only LockScreenWallpaperServiceTests --only LockScreenWallpaperTests`: 252 passed, 0 failed, 0 skipped.
+- `python3 scripts/test.py`: all 35 Python modules passed; 4,967 native tests passed, 0 failed, 70 skipped of 5,037.
+- Skipped checks require opt-in media, live Steam/network, web reference jobs or panel snapshot output.
+- The full native run reported main-thread warnings in unchanged AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy and WebMOpeningTests.testAVp9FileOpensWithItsFormatSizeAndLength; both passed. The targeted run reported no runtime warnings.
+- `git diff --check` and `python3 scripts/tests/test_doc_links.py`: passed.
+- No live desktop/lock-screen/quit cycle was performed; no Release app was built, installed or restarted. Existing incorrectly recorded still-image originals are not migrated from the lock-screen journal; shared WallpaperAgent write/reload coordination remains #199.
+
 ## 2026-11-13 — Covered-desktop sound: PR 194 review and reconnect fix
 
 - Four reconnect regressions failed before the fix, covering retained pauses and refused resumes for Mute and Reduce volume.
@@ -109,10 +120,3 @@ Installed font families, italic, letter spacing, line height and case; gradient 
 - Covered: layer order (add in front, move, refused stale drop, duplicate), window stacking, preview stacking, snap lines and guides, drag snap on the display and Command bypass, Center buttons for a left-aligned text.
 - Gap: the panel and the desktop windows were not looked at; drag-and-drop of list rows, the guides' look over real wallpapers and window stacking on a real desktop are unchecked by hand.
 - App not rebuilt.
-
-## 2026-11-12 — Menu bar energy use (issue 188)
-
-- Added Settings → General → Show energy use in the menu bar (off by default) and an Energy use row in the menu bar panel, both from one MenuBarEnergyMeter (5 s for the figure, 2 s with the panel open, nothing while unattended).
-- Targeted: python3 scripts/test.py --only MenuBarEnergyMeterTests --only EnergyReadoutTests --only StatusPanelControllerTests --only StatusPanelRenderTests --only WallpaperPresentationPolicyTests --only SettingsSectionsRenderTests --only EnergyUsageMonitorTests --only WallpaperBackupTests: 155 passed.
-- Gate: python3 scripts/test.py: 4897 passed, 0 failed, 68 skipped.
-- Not checked: the status item drawn in the real menu bar (no desktop run, no Release build); the figure's width beside other menu bar items.

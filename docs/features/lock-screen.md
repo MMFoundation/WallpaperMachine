@@ -513,8 +513,11 @@ saved original (poster ownership and the quit wait are described in
 [desktop picture](desktop-picture.md#quitting)).
 If restoration still fails after the wait, or takes longer than 20 seconds, quit is cancelled
 and an alert gives the error; it also stays in the menu bar (and native-feature status) so the
-user can retry. A failed activation
-also restores native selections, but resumes live desktop playback afterward.
+user can retry. A failed activation also restores native selections. If that
+restoration fails, the service keeps desktop ownership and poster synchronization
+stays suspended until restoration succeeds; the picture API's temporary stand-in
+must not become a new poster original. Live desktop playback is independent of this
+poster handoff.
 
 ## Background checks and recovery
 
