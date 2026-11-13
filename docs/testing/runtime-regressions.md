@@ -1045,6 +1045,17 @@ engine to redo, and when.
   reading it as absent would close the scene and reload it after the glitch. All
   descriptors are synthetic; a real display that reports 0x0 while connecting was
   not reproduced.
+- **An empty active-display report preserves every scene** —
+  `engine::actor::main_display_tests::empty_active_display_reports_keep_scenes_until_displays_return`
+  checks repeated empty reports, the published snapshot, paused scenes and renderer instance
+  identity across a return, then confirms that a nonempty report still disconnects a missing
+  display. `::display_refresh_read_failures_are_reported_without_changing_scenes` keeps actual
+  platform failures visible. `display::tests::plan_refresh_skips_an_empty_active_display_report`,
+  `::refresh_plan_uses_the_main_display_in_the_same_report` and
+  `::an_empty_display_report_is_logged_once_until_a_usable_report_returns` cover the raw empty
+  report, captured main-display selection (including its fallback and zero-sized mode), and
+  bounded diagnostics. These are synthetic reports and windowless runtimes; a real lock,
+  sleep or multi-display wake cycle was not exercised.
 - **A scene moved to a display of another shape fills it** —
   `UnchangedPresent.ASceneResizedOntoADisplayOfAnotherShapeFillsItLikeAFreshOne`:
   a scene running on a 16:9 surface at 1x and rebuilt in place on a 16:10 surface at

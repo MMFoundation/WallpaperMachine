@@ -1766,10 +1766,10 @@ mod tests {
             let token = actor.state.display_records[0].runtime.as_ref().unwrap().renderer_instance();
             let mut unusable = desc.display.clone();
             unusable.width = 0;
-            actor.apply_display_report(unusable.clone(), vec![unusable]).unwrap();
+            actor.apply_display_report(Ok(crate::display::plan_refresh(unusable.clone(), vec![unusable]))).unwrap();
             assert_eq!(actor.state.display_records[0].model.live_display.as_ref(), Some(&desc.display));
             assert!(Arc::ptr_eq(&token, &actor.state.display_records[0].runtime.as_ref().unwrap().renderer_instance()));
-            actor.apply_display_report(desc.display.clone(), vec![desc.display.clone()]).unwrap();
+            actor.apply_display_report(Ok(crate::display::plan_refresh(desc.display.clone(), vec![desc.display.clone()]))).unwrap();
             assert_eq!(actor.state.display_records[0].handle, Some(handle));
             assert!(Arc::ptr_eq(&token, &actor.state.display_records[0].runtime.as_ref().unwrap().renderer_instance()));
         });
@@ -1782,10 +1782,10 @@ mod tests {
         let mut secondary = DisplayDesc::new(203, 1800, -71, 2192, 0, 2.0);
         secondary.identity.uuid = Some("physical-secondary".into());
         let mut actor = make_actor(EngineState::default());
-        actor.apply_display_report(primary.clone(), vec![primary.clone(), secondary.clone()]).unwrap();
+        actor.apply_display_report(Ok(crate::display::plan_refresh(primary.clone(), vec![primary.clone(), secondary.clone()]))).unwrap();
         assert_eq!(actor.state.snapshot().displays.iter().map(|e| e.desc.display_id).collect::<Vec<_>>(), vec![87]);
         secondary.height = 1232;
-        actor.apply_display_report(primary.clone(), vec![primary, secondary.clone()]).unwrap();
+        actor.apply_display_report(Ok(crate::display::plan_refresh(primary.clone(), vec![primary, secondary.clone()]))).unwrap();
         let entries = actor.state.snapshot().displays;
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[1].desc, secondary);

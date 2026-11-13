@@ -320,8 +320,8 @@ pub(crate) fn sanitized_scale(scale: f64) -> f64 {
 /// What one display report from the platform means for the running scenes.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RefreshPlan {
-    /// The primary display has no pixels, so the whole layout is in flux and
-    /// every runtime stays as it is until the next report.
+    /// No displays are active or the primary has no pixels. Every runtime
+    /// stays as it is until the next usable report.
     Skip { reason: String },
     /// The report is usable. `transitional` holds the displays that report no
     /// pixels yet: they stay out of `displays`, and a display that already
@@ -333,6 +333,27 @@ pub(crate) enum RefreshPlan {
     },
 }
 
+impl RefreshPlan {
+    fn no_active_displays() -> Self {
+        Self::Skip { reason: "no active displays".to_owned() }
+    }
+}
+
+/// Read one coherent report: selecting the main display from a second platform
+/// query can mix two layouts while screens sleep, wake or reconnect.
+pub(crate) fn read_refresh_plan() -> Result<RefreshPlan, crate::EngineError> {
+    Ok(plan_refresh_from_metrics(platform::read_displays()?))
+}
+
+fn plan_refresh_from_metrics(metrics: Vec<DisplayMetrics>) -> RefreshPlan {
+    let primary_index = metrics.iter().position(|display| display.is_primary).unwrap_or(0);
+    let displays: Vec<_> = metrics.into_iter().map(DisplayDesc::from).collect();
+    let Some(primary) = displays.get(primary_index).cloned() else {
+        return RefreshPlan::no_active_displays();
+    };
+    plan_refresh(primary, displays)
+}
+
 /// Splits a platform display report into the displays a scene can be placed
 /// on and the ones that are still connecting.
 ///
@@ -340,6 +361,9 @@ pub(crate) enum RefreshPlan {
 /// reconfiguration, so a display left out here is picked up when it settles.
 #[must_use]
 pub(crate) fn plan_refresh(primary: DisplayDesc, all: Vec<DisplayDesc>) -> RefreshPlan {
+    if all.is_empty() {
+        return RefreshPlan::no_active_displays();
+    }
     if !primary.has_presentable_size() {
         return RefreshPlan::Skip {
             reason: format!(
@@ -660,6 +684,7 @@ mod descriptor_contract;
 mod tests {
     use super::{
         DisplayDesc, DisplayIdentity, DisplayMetrics, RefreshPlan, RefreshReportLog, plan_refresh,
+        plan_refresh_from_metrics,
     };
 
     #[test]
@@ -905,6 +930,59 @@ mod tests {
             }
             RefreshPlan::Apply { .. } => panic!("a primary without pixels must skip the refresh"),
         }
+    }
+
+    #[test]
+    fn plan_refresh_skips_an_empty_active_display_report() {
+        let primary = DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0);
+        assert!(matches!(plan_refresh(primary, vec![]), RefreshPlan::Skip { .. }));
+        assert!(matches!(plan_refresh_from_metrics(vec![]), RefreshPlan::Skip { .. }));
+    }
+
+    #[test]
+    fn refresh_plan_uses_the_main_display_in_the_same_report() {
+        let metric = |id, is_primary| DisplayMetrics {
+            display_id: id,
+            identity: DisplayIdentity::default(),
+            origin_x: 0.0,
+            origin_y: 0.0,
+            logical_width: 1920.0,
+            logical_height: 1080.0,
+            pixel_width: 1920,
+            pixel_height: 1080,
+            primary_logical_height: 1080.0,
+            refresh_rate_hz: 60,
+            is_primary,
+        };
+        let (primary, displays, transitional) = apply_parts(plan_refresh_from_metrics(vec![
+            metric(71, false), metric(92, true),
+        ]));
+        assert_eq!(primary.display_id, 92);
+        assert_eq!(displays, vec![71, 92]);
+        assert!(transitional.is_empty());
+
+        let (primary, _, _) = apply_parts(plan_refresh_from_metrics(vec![
+            metric(71, false), metric(92, false),
+        ]));
+        assert_eq!(primary.display_id, 71, "a report without a main display falls back to its first display");
+
+        let mut primary = metric(92, true);
+        primary.pixel_width = 0;
+        assert!(matches!(
+            plan_refresh_from_metrics(vec![metric(71, false), primary]),
+            RefreshPlan::Skip { .. }
+        ));
+    }
+
+    #[test]
+    fn an_empty_display_report_is_logged_once_until_a_usable_report_returns() {
+        let mut log = RefreshReportLog::default();
+        let empty = plan_refresh_from_metrics(vec![]);
+        assert!(log.message_for(&empty).is_some());
+        assert!(log.message_for(&empty).is_none());
+        let primary = DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0);
+        assert!(log.message_for(&plan_refresh(primary.clone(), vec![primary])).is_none());
+        assert!(log.message_for(&empty).is_some());
     }
 
     #[test]

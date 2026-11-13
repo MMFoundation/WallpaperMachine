@@ -10,7 +10,7 @@ use kameo::actor::Spawn;
 use super::EngineActor;
 use crate::{
     DisplayDesc, DisplayIdentity, EngineError,
-    display::state::{DisplayKey, DisplayStateModel},
+    display::{plan_refresh, state::{DisplayKey, DisplayStateModel}},
     engine::{
         EngineSnapshotPublisher,
         runtime::{RuntimeRefreshJob, RuntimeRefreshMode, SceneRuntime},
@@ -135,6 +135,69 @@ pub(super) fn running_on(actor: &EngineActor, display: &DisplayDesc) -> (Display
         record.handle.expect("a live scene has a handle"),
         runtime.desc.scene_path.clone(),
     )
+}
+
+#[test]
+fn empty_active_display_reports_keep_scenes_until_displays_return() {
+    let tokio = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let _context = tokio.enter();
+    let mut model = DisplayStateModel::from_config(crate::WallpaperEngineConfig::default())
+        .expect("default model");
+    model.refresh_connected(builtin(), vec![builtin(), external()]).unwrap();
+    let mut actor = engine_for(model);
+    let facade = RuntimeFacade::default();
+    let mut paused = scene(&external(), "basalt");
+    paused.paused = true;
+    facade.update(&mut actor, |model| {
+        model.apply_reconcile(&[scene(&builtin(), "aurora"), paused])
+    }).unwrap();
+    let before = actor.state.snapshot();
+    let instances: Vec<_> = actor.state.display_records.iter().map(|record| {
+        record.runtime.as_ref().unwrap().renderer_instance()
+    }).collect();
+
+    for _ in 0..3 {
+        actor.with_snapshot_update(|actor| {
+            actor.apply_display_report(Ok(plan_refresh(builtin(), vec![])))
+        }).expect("temporary absence is not an error");
+        assert_eq!(actor.state.snapshot(), before);
+        assert_eq!(*actor.snapshots.load(), before);
+        for (record, instance) in actor.state.display_records.iter().zip(&instances) {
+            assert!(Arc::ptr_eq(instance, &record.runtime.as_ref().unwrap().renderer_instance()));
+        }
+    }
+    actor.apply_display_report(Ok(plan_refresh(builtin(), vec![builtin(), external()]))).unwrap();
+    assert_eq!(actor.state.snapshot(), before);
+    for (record, instance) in actor.state.display_records.iter().zip(&instances) {
+        assert!(Arc::ptr_eq(instance, &record.runtime.as_ref().unwrap().renderer_instance()));
+    }
+
+    // A nonempty report still reconciles an actual disconnect after the wake.
+    actor.apply_display_report(Ok(plan_refresh(builtin(), vec![builtin()]))).unwrap();
+    assert_eq!(actor.state.snapshot().displays.len(), 1);
+    assert_eq!(actor.state.snapshot().displays[0].handle, before.displays[0].handle);
+}
+
+#[test]
+fn display_refresh_read_failures_are_reported_without_changing_scenes() {
+    let tokio = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let _context = tokio.enter();
+    let mut model = DisplayStateModel::from_config(crate::WallpaperEngineConfig::default()).unwrap();
+    model.refresh_connected(builtin(), vec![builtin(), external()]).unwrap();
+    let mut actor = engine_for(model);
+    RuntimeFacade::default().update(&mut actor, |model| {
+        model.apply_reconcile(&[scene(&builtin(), "aurora"), scene(&external(), "basalt")])
+    }).unwrap();
+    let before = actor.state.snapshot();
+    let result = actor.with_snapshot_update(|actor| {
+        actor.apply_display_report(Err(EngineError::Platform("display query failed".to_owned())))
+    });
+    assert!(matches!(result, Err(EngineError::Platform(message)) if message == "display query failed"));
+    assert_eq!(actor.state.snapshot(), before);
+    assert_eq!(*actor.snapshots.load(), before);
 }
 
 #[test]

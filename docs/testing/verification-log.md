@@ -25,6 +25,18 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-13 — Keep scenes through empty active-display reports
+
+- Issue #196: build each refresh plan from one CoreGraphics report and its captured main-display flag. An empty active list skips reconciliation, retains scenes/assignments/handles and logs once; actual read errors still propagate.
+- Two new empty-report regressions failed before the fix, including loss of the secondary scene. Five added regressions cover empty reports, return/disconnect behavior, preserved paused state and renderer identity, coherent primary selection, bounded diagnostics and error propagation.
+- Targeted wallpaper-core display tests: 138 passed. `python3 scripts/check_rust.py --output artifacts/issue-196/rust`: all checks passed; Core 436 and Bridge 962 library tests passed, as did all six integration targets and Shader checks. Five real-desktop cases were explicitly excluded and the opt-in window gate remained disabled.
+- `python3 scripts/check_renderer.py`: exit 0; 110 executable/probe statuses succeeded, 12 synthetic pooled/isolated comparisons passed and reload cycles passed. GPU and realtime checks ran; the timer diagnostic was collected.
+- Renderer coverage gaps: seven optional local video, particle, wallpaper, energy and corpus cases skipped; four pre-existing corpus/benchmark/worker cases remained disabled.
+- `python3 scripts/test.py --only DisplayRefreshCoalescerTests --only SystemWakeRevalidatorTests --only WallpaperPresentationPolicyTests`: 96 passed, 0 failed, 0 skipped.
+- `python3 scripts/test.py`: all 35 Python modules passed; 4,971 native tests passed, 0 failed, 70 skipped of 5,041. Skips require opt-in media, live Steam/network, reference jobs or snapshots.
+- The full native run reported main-thread warnings in unchanged VideoFormatSupportTests.testTheOpenedFilesAreKeyedByTheFileAndForgetAChangedOne and AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; both passed. Documentation links and git diff --check passed.
+- No real lock/sleep/multi-display wake cycle or wallpaper reference comparison was performed. No Release app was built, installed or restarted.
+
 ## 2026-11-13 — Keep settings searches responsive
 
 - Issue #201: retain the settings result view while typing, build result sections lazily, and reset scrolling explicitly; entering/leaving search resets only the list layout.
@@ -115,11 +127,3 @@ A window that introduces desktop widgets once to people updating from 1.10.0 or 
 - `python3 scripts/test.py` — exit 0; 4990 tests: 4921 passed, 69 skipped
 - Offscreen renders of the window (`FeatureIntroWindowTests.testSnapshotsOnRequest`, `WALLPAPER_MACHINE_FEATURE_INTRO_SNAPSHOTS`) checked by eye in en, zh-Hans, zh-Hant, ja, ko and pt-BR, light and dark
 - Gap: not opened on the desktop; the launch path (window over the panel, Set Up opening Settings › Desktop Widgets, the Dock icon) was not exercised in a running app
-
-## 2026-11-12 — Desktop widget fonts, effects and clock options
-
-Installed font families, italic, letter spacing, line height and case; gradient fill, accent colour, outline, glow, a configurable shadow, a background plate and rotation; style presets; clock leading zero, AM/PM and stacked layout; clock-face dial marks, numbers and ring. Rebased onto the layers and snapping change (05e13ded); the preview's frame, snapping and the Center buttons use the turned box of a rotated widget.
-
-- `python3 scripts/test.py` on the rebased tree — exit 0; 4979 tests: 4911 passed, 68 skipped
-- Offscreen renders of each style preset, a stacked clock, an italic installed family, a turned outlined date, numbered and ticked clock faces, an accented calendar and a gradient with glow, drawn by DesktopWidgetView into PNGs by a throwaway test (not committed) and inspected
-- Not checked: widgets on a real desktop, over moving wallpapers and across Spaces; snapping a rotated widget by hand

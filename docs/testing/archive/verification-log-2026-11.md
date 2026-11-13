@@ -9,6 +9,14 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-12 — Desktop widget fonts, effects and clock options
+
+Installed font families, italic, letter spacing, line height and case; gradient fill, accent colour, outline, glow, a configurable shadow, a background plate and rotation; style presets; clock leading zero, AM/PM and stacked layout; clock-face dial marks, numbers and ring. Rebased onto the layers and snapping change (05e13ded); the preview's frame, snapping and the Center buttons use the turned box of a rotated widget.
+
+- `python3 scripts/test.py` on the rebased tree — exit 0; 4979 tests: 4911 passed, 68 skipped
+- Offscreen renders of each style preset, a stacked clock, an italic installed family, a turned outlined date, numbered and ticked clock faces, an accented calendar and a gradient with glow, drawn by DesktopWidgetView into PNGs by a throwaway test (not committed) and inspected
+- Not checked: widgets on a real desktop, over moving wallpapers and across Spaces; snapping a rotated widget by hand
+
 ## 2026-11-12 — Desktop widgets: layers list, snapping guides, Center buttons
 
 - python3 scripts/test.py: Python stage passed; native 4906 passed, 0 failed, 68 skipped.

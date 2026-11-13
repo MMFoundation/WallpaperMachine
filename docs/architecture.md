@@ -540,7 +540,12 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   picked up on the next refresh, which the display reconfiguration watcher schedules when it
   settles: one that already runs a scene keeps its previous descriptor, so the scene is not
   closed and reloaded, and a new one gets no window yet. If the primary display reports no
-  pixels, the whole refresh waits. When another display becomes the main one, the renderer
+  pixels, the whole refresh waits. An empty active-display report (including while every
+  screen sleeps) also leaves every scene, assignment and handle intact without a bridge
+  error; the next usable report resumes reconciliation. Core derives the main display and
+  the complete list from the same platform report, so a transition cannot mix two reads.
+  Actual failures to read the CoreGraphics list still reach the caller, and repeated empty
+  reports are logged only once until a usable report arrives. When another display becomes the main one, the renderer
   keeps every scene the bridge reconciled on the display it was opened for (its window only
   moves), so the refresh itself opens or reloads nothing before the bridge's reconcile.
 - **Switch hold.** `WallpaperSwitchHold` keeps the previous picture on a display while a

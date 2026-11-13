@@ -11,7 +11,7 @@ use crate::engine::messages::{DisplayRecordCountForTest, SequenceForTest};
 use crate::{
     DisplaySelector, EngineError, WallpaperAssignment,
     display::{
-        RefreshPlan, RefreshReportLog, plan_refresh,
+        RefreshPlan, RefreshReportLog, read_refresh_plan,
         state::{DisplayKey, DisplayStateModel},
     },
     engine::{
@@ -190,9 +190,7 @@ impl EngineActor {
     }
 
     pub fn refresh_displays_now(&mut self) -> Result<(), EngineError> {
-        let primary = crate::DisplayDesc::primary()?;
-        let all = crate::DisplayDesc::all()?;
-        self.apply_display_report(primary, all)
+        self.apply_display_report(read_refresh_plan())
     }
 
     /// The display model as the slots hold it now.
@@ -227,15 +225,13 @@ impl EngineActor {
         }
     }
 
-    /// Applies one platform display report. A display that reports no pixels
-    /// yet is left out (see [`plan_refresh`]) instead of failing the refresh
-    /// for the others; the display watcher refreshes again when it settles.
+    /// Applies one platform report, retaining scenes through temporary empty
+    /// or zero-sized layouts. Platform read failures still reach the caller.
     pub(crate) fn apply_display_report(
         &mut self,
-        primary: crate::DisplayDesc,
-        all: Vec<crate::DisplayDesc>,
+        report: Result<RefreshPlan, EngineError>,
     ) -> Result<(), EngineError> {
-        let plan = plan_refresh(primary, all);
+        let plan = report?;
         if let Some(message) = self.refresh_report_log.message_for(&plan) {
             log::warn!("{message}");
         }
