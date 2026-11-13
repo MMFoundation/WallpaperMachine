@@ -595,15 +595,26 @@ and pruned only after a successful reload; failed writes, reloads or journal rem
 keep it for retry, and a malformed saved linked or inherited baseline fails recovery
 before the store changes or the journal is removed.
 
-A pruned journal is kept as `restored-native-selection.plist`. WallpaperAgent can save
-the store it loaded before a restore over that restore (seen after quitting), which
-puts the extension back with no journal: the next activation used to fail with "no
-restoration journal or surviving system fallback", and **Retry** could not get past
-it. Nodes that still hold the extension in every field the pruned journal owned are
-taken back with its entries, as if it had never been pruned, so they are restored to
-the originals they had; global choices that the same save removed again come back
-with them. A choice made since replaced the extension, so it is never
-overwritten.
+Restored fields are kept in `restored-native-selection.plist`, including when one
+mode is turned off while the other remains enabled. WallpaperAgent can save the
+store it loaded before a restore over that restore (seen after quitting), putting
+the extension back after its live journal entry was pruned. Each app-written
+`current:<revision>` field is taken back independently with its saved original,
+even while another field still has an active journal entry. Active originals take
+precedence; missing global choices are recovered only for modes taken back this way.
+The manually selected WallpaperMachine item in System Settings uses plain `current`
+and does not adopt an archived original; it uses the current native fallback when
+activated. Other wallpaper choices made since are preserved.
+
+Before pruning the live journal, the app atomically archives the relinquished fields,
+replacing older originals for those same fields. A failed archive write keeps the
+live recovery journal intact. Fields taken back from the archive join the write-ahead
+journal before the next store write, so a failed reload or process exit can still
+restore them. Repeated toggles keep one archive entry per node with at most the two
+native fields; pruning drops paths no longer represented by the store or live
+journal. Archive reads share the existing store-change check and archive writes
+happen only when relinquishing fields, with no additional work on settled monitor
+ticks or rendering frames.
 
 macOS copies the extension's selection into the fallbacks it reloads (`SystemDefault`
 and each Space's `Default`), and a Space created while the feature is on, a new
