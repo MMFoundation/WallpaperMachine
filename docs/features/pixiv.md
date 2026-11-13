@@ -154,7 +154,10 @@ runs in a private website data store that disappears with the window; the app
 reads exactly one thing from it, the `PHPSESSID` cookie pixiv sets on
 `.pixiv.net` once someone has signed in, and only in its signed-in shape
 (account id, underscore, token). The password, and anything else typed into the
-page, stays between the page and pixiv. Closing the window cancels. When the page
+page, stays between the page and pixiv. Closing the window cancels. The page may go
+to any HTTPS site, as signing in with Google, Apple or another provider needs, and
+nothing else (`WebSignInSite.allows`); Steam's sign-in keeps its page on Steam's own
+hosts. When the page
 does not load (a cancelled or replaced navigation aside), WebKit would leave the window
 blank, so the window covers it with **Couldn’t open the sign-in page**, the reason and
 **Retry**, which loads the site's sign-in address again; the next page that loads clears

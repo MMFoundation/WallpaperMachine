@@ -327,7 +327,11 @@ SteamCMD's (see [Steam sign-in](#steam-sign-in)), and the app never sees the
 password: **Sign in to Steam…** opens Steam's own sign-in page in a window
 (`WebSignInWindowController` with its `.steam` site, the same one pixiv uses; a page
 that does not load is replaced by its reason and **Retry**, see
-[pixiv](pixiv.md#signing-in-and-r-18-works)) and
+[pixiv](pixiv.md#signing-in-and-r-18-works)). The window shows no address, so the page
+itself stays on `steamcommunity.com`, `login.steampowered.com`, `help.steampowered.com`
+and `store.steampowered.com` over HTTPS (`WebSignInSite.pageHosts`): a link, a redirect
+or a popup to anywhere else goes nowhere, while frames inside the page, such as
+reCAPTCHA's, may load any HTTPS site. It
 takes the `steamLoginSecure` cookie Steam sets, and with it the
 `steamRefresh_steam` renewal token Steam sets on `login.steampowered.com` when the page
 set one for the same account. The session (`WorkshopStore.steamWebSession`) is kept in

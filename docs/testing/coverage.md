@@ -1924,7 +1924,8 @@ unless `scripts/we_reference.py render` hands it real pages to draw. Detail and 
   sign-out, the session saved for the next launch and removed with it, an expired
   cookie renewed with Steam's renewal token before a read (and a refused renewal
   ending the session; `SteamWebSessionTests` covers which token is kept and when a
-  cookie needs renewing), and a pasted link or id: one tile that no sidebar filter hides, no
+  cookie needs renewing; `WebSignInPolicyTests` (Panel) what the sign-in window may
+  load), and a pasted link or id: one tile that no sidebar filter hides, no
   browse page read, failures on the normal retry path, other sources ignoring the
   id, and a browse page whose markup changed: listed from its links or the ids in
   its renamed data, an id Steam does not serve left out, paging estimates, the

@@ -13,6 +13,23 @@ struct WebSignInSite: Sendable {
     var companionDomains: Set<String> = []
     /// Whether a cookie value is a real session rather than a placeholder the page sets early.
     let accepts: @Sendable (String) -> Bool
+    /// The hosts the page itself may be, after a link, a redirect or a popup alike; nil lets it
+    /// be any HTTPS site, as pixiv's sign-in with Google, Apple and other providers needs.
+    var pageHosts: Set<String>?
+
+    /// Whether the window may load `url`, as the page itself (`inPage`) or in a frame inside it.
+    /// Only HTTPS loads, or a blank page. The window shows no address and carries the site's name,
+    /// so the page stays on `pageHosts`, at the standard port and without a user name in the
+    /// address, where nothing else can stand in for the site's own sign-in form. A frame may be
+    /// any HTTPS site: the page embeds third-party challenges such as reCAPTCHA.
+    func allows(_ url: URL?, inPage: Bool) -> Bool {
+        guard let url, let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "about" { return !inPage || url.absoluteString.lowercased() == "about:blank" }
+        guard scheme == "https" else { return false }
+        guard inPage, let pageHosts else { return true }
+        guard let host = url.host?.lowercased(), pageHosts.contains(host) else { return false }
+        return url.user == nil && url.password == nil && (url.port ?? 443) == 443
+    }
 
     static var pixiv: WebSignInSite {
         WebSignInSite(
@@ -29,7 +46,9 @@ struct WebSignInSite: Sendable {
             signInURL: URL(string: "https://steamcommunity.com/login/home/?goto=")!,
             cookieName: "steamLoginSecure", cookieDomains: ["steamcommunity.com", ".steamcommunity.com"],
             companionName: "steamRefresh_steam", companionDomains: ["login.steampowered.com"],
-            accepts: { SteamWebSession(cookie: $0) != nil })
+            accepts: { SteamWebSession(cookie: $0) != nil },
+            // The sign-in, its renewal host, and the help and sign-up pages its links open.
+            pageHosts: ["steamcommunity.com", "login.steampowered.com", "help.steampowered.com", "store.steampowered.com"])
     }
 }
 
@@ -163,20 +182,28 @@ final class WebSignInWindowController: NSWindowController, NSWindowDelegate, WKN
         finish(nil)
     }
 
-    // Anything but HTTPS (an app link, a mail address) goes nowhere; the window is for signing in.
+    // Anything the site does not allow (an app link, a mail address, another site) goes nowhere;
+    // the window is for signing in. A new window has no target frame and would replace the page.
     func webView(
         _ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction
     ) async -> WKNavigationActionPolicy {
-        let scheme = navigationAction.request.url?.scheme?.lowercased()
-        return scheme == "https" || scheme == "about" ? .allow : .cancel
+        let inPage = navigationAction.targetFrame?.isMainFrame ?? true
+        return site.allows(navigationAction.request.url, inPage: inPage) ? .allow : .cancel
     }
 
-    // A page that opens a window of its own continues in this one instead.
+    // Checked again where a redirect ends, so a link to an allowed host cannot land elsewhere.
+    func webView(
+        _ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse
+    ) async -> WKNavigationResponsePolicy {
+        site.allows(navigationResponse.response.url, inPage: navigationResponse.isForMainFrame) ? .allow : .cancel
+    }
+
+    // A page that opens a window of its own continues in this one instead, where it may go.
     func webView(
         _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
         for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if navigationAction.request.url?.scheme?.lowercased() == "https" { webView.load(navigationAction.request) }
+        if site.allows(navigationAction.request.url, inPage: true) { webView.load(navigationAction.request) }
         return nil
     }
 

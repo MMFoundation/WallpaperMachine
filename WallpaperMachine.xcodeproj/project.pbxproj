@@ -428,6 +428,7 @@
 		5CA667641E5030AF49639BE9 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13D8391E4A5278E5408424FB /* AppLanguage.swift */; };
 		5CB8AC1E83D70FB35526D2AA /* WallpaperBackupSolarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 870B521585FBD724D9A19E02 /* WallpaperBackupSolarTests.swift */; };
 		5CD2B9A5DDFE653FA6E6B765 /* SettingsSectionsLocalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 329FDCBA7F60D6D40F164F16 /* SettingsSectionsLocalizationTests.swift */; };
+		5D10520C8457B0842DD42013 /* WebSignInPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAEC03546762BD84C94E6EDD /* WebSignInPolicyTests.swift */; };
 		5D4364273A09AF1EE89637BE /* NativeVideoWallpaperHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43C92D05A282380D4607428F /* NativeVideoWallpaperHost.swift */; };
 		5D7CD1C37076252142793F5C /* NotchMaskControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B2FEA730F8BEDF298D5A12 /* NotchMaskControllerTests.swift */; };
 		5E06E71B2086456236657BE4 /* SteamCMDReportedFailure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 279EA9A0FBA438E4D75E86F9 /* SteamCMDReportedFailure.swift */; };
@@ -2233,6 +2234,7 @@
 		DA4264DD5277CE169A3141C6 /* ConditionOverrideTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConditionOverrideTests.swift; sourceTree = "<group>"; };
 		DAA7961C88F1EB33E9367DA4 /* PanelPlaylistActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelPlaylistActionsTests.swift; sourceTree = "<group>"; };
 		DAAC9D5B6D0FF08221AB739D /* PropertyRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropertyRows.swift; sourceTree = "<group>"; };
+		DAEC03546762BD84C94E6EDD /* WebSignInPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSignInPolicyTests.swift; sourceTree = "<group>"; };
 		DB2E1095FE0E140C0026149A /* SettingsValues.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsValues.swift; sourceTree = "<group>"; };
 		DB4A47DDBB08C42EC351C028 /* LockScreenConnectionTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockScreenConnectionTrace.swift; sourceTree = "<group>"; };
 		DB96EFEF4D940C435EA52B52 /* DisplayGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayGeometry.swift; sourceTree = "<group>"; };
@@ -3550,6 +3552,7 @@
 				7C06BFD327C11E6ADF7C681A /* TransferFormatTests.swift */,
 				2A3834DAA1650B160E7333FE /* UpdatePresentationTests.swift */,
 				1DB4BE71ACE2675951C28DE2 /* WallpaperEditorStateTests.swift */,
+				DAEC03546762BD84C94E6EDD /* WebSignInPolicyTests.swift */,
 				C1F27C606169E4C7857D00CC /* WelcomeRenderHarness.swift */,
 				DD93E383D184631271B2E128 /* WelcomeRenderTests.swift */,
 				59637116F331C22646564C20 /* WidgetsSettingsTests.swift */,
@@ -4957,6 +4960,7 @@
 				99DD257EF829C576563E9B7C /* WebMOpeningTests.swift in Sources */,
 				58E2C0FC0B752A3653B3E463 /* WebMPlayerTests.swift in Sources */,
 				EF36BA734181E7463B006E66 /* WebMVideoWallpaperWindowTests.swift in Sources */,
+				5D10520C8457B0842DD42013 /* WebSignInPolicyTests.swift in Sources */,
 				2E0988260C41000B0E60E7EA /* WebWallpaperAudioMediaTests.swift in Sources */,
 				41672CD77EDB28CDCE87F09B /* WebWallpaperAudioOutputTests.swift in Sources */,
 				532F522F77BD37A5E6BED73E /* WebWallpaperAuthorAPITests.swift in Sources */,
