@@ -338,7 +338,11 @@ set one for the same account. The session (`WorkshopStore.steamWebSession`) is k
 the login keychain as one generic password (`KeychainSteamWebSessionStore`, service
 `app.wallpapermachine.steam-community`), read once at launch off the main thread, so
 the sign-in survives quitting; **Sign out of Steam**, or Steam ending the session,
-removes it. The cookie is sent only to `steamcommunity.com` over HTTPS (a redirect
+removes it. The keychain refuses to delete an item another build saved but lets its
+data change, so such a session is emptied instead (`KeychainGenericPassword.remove`,
+as for the [QR sign-in](#steam-sign-in)); only when the keychain refuses that too does
+**Sign out of Steam** say it could not log out, with the account and its list still
+signed in. The cookie is sent only to `steamcommunity.com` over HTTPS (a redirect
 anywhere else goes without it, `WorkshopService.redirected`), to read the subscriptions
 list (the author page with `browsefilter=mysubscriptions`), and with every other
 Steam Community page the Workshop reads: search, collections and authors' pages.

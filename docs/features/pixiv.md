@@ -196,7 +196,10 @@ A session pixiv no longer recognises is dropped, here and in the keychain, with
 a note to sign in again; a failure to reach pixiv keeps it. **Log out** forgets
 the session in the app and the keychain, reloads what an anonymous visitor
 sees and deselects an R-18 work; pixiv itself keeps the session until it expires
-or is ended on pixiv. If the keychain refuses the session, the sign-in lasts
+or is ended on pixiv. A saved session the keychain will not delete, as for one
+another build saved, is emptied instead (`KeychainGenericPassword.remove`); only
+when the keychain refuses that too does **Log out** say it could not log out, still
+signed in. If the keychain refuses the session, the sign-in lasts
 until the app quits and the popover says so. Some third-party sign-in providers
 refuse to run inside another app's web view; signing in with a pixiv ID or email
 and password always works.

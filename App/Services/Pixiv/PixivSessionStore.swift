@@ -5,7 +5,8 @@ protocol PixivSessionStoring: Sendable {
     /// The saved session; nil when there is none or it cannot be read.
     func load() -> String?
     func save(_ session: String) throws
-    func remove()
+    /// Throws when the saved session stays: a log-out must not report what did not happen.
+    func remove() throws
 }
 
 /// The session as a generic password in the user's login keychain (`KeychainGenericPassword`
@@ -43,11 +44,8 @@ struct KeychainPixivSessionStore: PixivSessionStoring {
         }
     }
 
-    func remove() {
-        do {
-            try item.delete()
-        } catch {
-            AppLog.warn("pixiv sign-in could not be removed from the keychain (\(error))")
-        }
+    /// Deletes the item, or empties it, which loads as no session (`KeychainGenericPassword.remove`).
+    func remove() throws {
+        try item.remove()
     }
 }

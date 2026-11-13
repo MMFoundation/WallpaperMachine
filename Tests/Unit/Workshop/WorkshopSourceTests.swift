@@ -444,7 +444,7 @@ final class WorkshopSourceTests: XCTestCase {
     let read = Task { try await store.refreshSubscribedIDs() }
     for _ in 0..<500 where fixture.subscriptionReads == 0 { try await Task.sleep(for: .milliseconds(10)) }
     XCTAssertEqual(fixture.subscriptionReads, 1, "the read is held at Steam")
-    store.signOutOfSteamWeb()
+    try store.signOutOfSteamWeb()
     try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||fedcba9876543210fedc") }
     fixture.subscriptionPages = [1: Data("<html><head><title>Sign In</title></head></html>".utf8)]
     gate.signal()
@@ -466,7 +466,7 @@ final class WorkshopSourceTests: XCTestCase {
     let read = Task { try await store.missingSubscriptions(installed: []) }
     for _ in 0..<500 where fixture.subscriptionReads == 0 { try await Task.sleep(for: .milliseconds(10)) }
     XCTAssertEqual(fixture.subscriptionReads, 1, "the read is held at Steam")
-    store.signOutOfSteamWeb()
+    try store.signOutOfSteamWeb()
     try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||fedcba9876543210fedc") }
     fixture.subscriptionPages = [1: Data("<html><head><title>Sign In</title></head></html>".utf8)]
     gate.signal()
@@ -556,7 +556,7 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(url.queryItems?.first { $0.name == "browsefilter" }?.value, "myfavorites")
     XCTAssertEqual(url.queryItems?.first { $0.name == "sortmethod" }?.value, "alpha")
 
-    store.signOutOfSteamWeb()
+    try store.signOutOfSteamWeb()
     XCTAssertEqual(store.items, [], "signing out empties the account's own list")
   }
 
@@ -578,7 +578,7 @@ final class WorkshopSourceTests: XCTestCase {
     while !gate.isHolding, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
     XCTAssertTrue(gate.isHolding, "the favorites request reached Steam with the session")
     let load = try XCTUnwrap(store.searchTask)
-    store.signOutOfSteamWeb()
+    try store.signOutOfSteamWeb()
     gate.open()
     // The cancelled load settles only after Steam's answer was handed over, or was dropped.
     await load.value
@@ -624,7 +624,7 @@ final class WorkshopSourceTests: XCTestCase {
     fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
     try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
     try await finished(store)
-    store.signOutOfSteamWeb()
+    try store.signOutOfSteamWeb()
     XCTAssertNil(store.steamWebSession)
     XCTAssertEqual(store.items, [])
     XCTAssertFalse(store.hasLoaded)
@@ -653,7 +653,7 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(fixture.cookies.last, "steamLoginSecure=\(access)")
     XCTAssertTrue(fixture.renewalForms.isEmpty, "a fresh cookie is not renewed")
 
-    relaunched.signOutOfSteamWeb()
+    try relaunched.signOutOfSteamWeb()
     XCTAssertNil(fixture.webSessions.session)
 
     try await fixture.store.signInToSteamWeb { WebSignInCookies(session: access, companion: refresh) }
@@ -662,6 +662,31 @@ final class WorkshopSourceTests: XCTestCase {
     try await finished(fixture.store)
     XCTAssertNil(fixture.store.steamWebSession)
     XCTAssertNil(fixture.webSessions.session, "a session Steam ended is not taken back next launch")
+  }
+
+  /// A sign-out the keychain refuses leaves the account signed in, with its list on show, rather
+  /// than claiming a sign-out the next launch would undo; once the keychain lets go, it signs out.
+  func testASignOutTheKeychainRefusesKeepsTheAccountAndItsList() async throws {
+    let cookie = SteamWebFixtures.cookie(SteamWebFixtures.token(expiresIn: 3600))
+    let store = fixture.store
+    try await store.signInToSteamWeb { WebSignInCookies(session: cookie) }
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
+    fixture.details = ["1": detailsRow("1", tags: ["Scene", "Everyone"])]
+    store.open(.subscriptions)
+    try await finished(store)
+    fixture.webSessions.keepsOnRemove = true
+
+    XCTAssertThrowsError(try store.signOutOfSteamWeb())
+
+    XCTAssertEqual(store.steamWebSession?.cookie, cookie)
+    XCTAssertEqual(fixture.webSessions.session?.cookie, cookie)
+    XCTAssertEqual(store.items.map(\.id), ["1"])
+
+    fixture.webSessions.keepsOnRemove = false
+    try store.signOutOfSteamWeb()
+    XCTAssertNil(store.steamWebSession)
+    XCTAssertNil(fixture.webSessions.session)
+    XCTAssertTrue(store.items.isEmpty)
   }
 
   /// The cookie lasts about a day and the renewal token months: an expired cookie is traded for a
@@ -1108,7 +1133,7 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(fixture.browseSections.last, "collections")
     XCTAssertEqual(fixture.cookies.last, signedIn)
 
-    store.signOutOfSteamWeb()
+    try store.signOutOfSteamWeb()
     try await finished(store)
     XCTAssertEqual(store.items.map(\.id), ["901"], "a public list stays on show")
     XCTAssertEqual(fixture.browseSections.count, 4, "signing out reads it again")

@@ -20,7 +20,7 @@ final class KeptSteamTokenStore: SteamClientTokenStoring, @unchecked Sendable {
     init(_ token: SteamRefreshToken?) { self.token = token }
     func load() async -> SteamRefreshToken? { token }
     func save(_ token: SteamRefreshToken) throws {}
-    func remove() throws { throw SteamClientTokenRemovalFailed(reason: "kept") }
+    func remove() throws { throw KeychainRemovalFailed(reason: "kept") }
 }
 
 /// A keychain whose read waits, suspended, until the test opens `gate`: it hands back what was

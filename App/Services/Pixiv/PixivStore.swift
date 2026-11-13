@@ -168,13 +168,14 @@ final class PixivStore {
     }
 
     /// Forgets the session, here and in the keychain, and shows what an anonymous visitor
-    /// sees. pixiv itself keeps the session until it expires or is signed out on pixiv.
-    func signOut() {
+    /// sees. pixiv itself keeps the session until it expires or is signed out on pixiv. Throws,
+    /// still signed in, when the keychain keeps the saved session: the next launch would restore it.
+    func signOut() throws {
+        try sessions.remove()
         restoreTask?.cancel()
         signInTask?.cancel()
         signInTask = nil
         isSigningIn = false
-        sessions.remove()
         accountMessage = nil
         use(nil, account: nil)
     }
@@ -225,7 +226,8 @@ final class PixivStore {
                 self.account = account
             } else {
                 AppLog.info("pixiv ended the saved sign-in")
-                self.sessions.remove()
+                // A saved copy the keychain keeps signs no one in; the store logs why.
+                try? self.sessions.remove()
                 self.use(nil, account: nil)
                 self.accountMessage = PixivFailure(code: .signedOut).localizedDescription
             }

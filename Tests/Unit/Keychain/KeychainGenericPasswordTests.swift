@@ -109,6 +109,36 @@ final class KeychainGenericPasswordTests: XCTestCase {
         XCTAssertThrowsError(try item(in: keychain).read()) { error in
             XCTAssertEqual(error as? KeychainFailure, KeychainFailure(status: errSecAuthFailed))
         }
-        XCTAssertNoThrow(try item(in: MemoryKeychain()).delete())
+        XCTAssertNoThrow(try item(in: MemoryKeychain()).remove())
+    }
+
+    func testRemovingAnItemThisBuildSavedDeletesIt() throws {
+        let password = item(in: MemoryKeychain())
+        try password.write(Data("session".utf8))
+
+        try password.remove()
+
+        XCTAssertNil(try password.read())
+    }
+
+    func testRemovingAnItemAnotherBuildSavedEmptiesWhatTheKeychainWillNotDelete() throws {
+        let keychain = MemoryKeychain()
+        keychain.holdItemSavedByAnotherBuild(service: service, account: account, data: Data("session".utf8))
+
+        try item(in: keychain).remove()
+
+        XCTAssertEqual(keychain.data(service: service, account: account), Data(), "nothing a later read could sign in with is left")
+    }
+
+    func testARemovalTheKeychainRefusesOutrightThrowsAndLeavesTheItem() {
+        let keychain = MemoryKeychain()
+        let saved = Data("session".utf8)
+        keychain.holdItemSavedByAnotherBuild(service: service, account: account, data: saved)
+        keychain.refuseUpdates(with: errSecInteractionNotAllowed)
+
+        XCTAssertThrowsError(try item(in: keychain).remove()) { error in
+            XCTAssertTrue(error is KeychainRemovalFailed, "\(error)")
+        }
+        XCTAssertEqual(keychain.data(service: service, account: account), saved)
     }
 }

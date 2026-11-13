@@ -1615,7 +1615,7 @@ on-screen window and are on [manual-smoke.md](manual-smoke.md).
 `PixivPanelStateTests`, `PixivBrowserModelTests`, `PixivListSummaryTests`,
 `PixivBrowserRenderTests`) cover decoding of pixiv's answer shapes, search and ranking addresses, ratings
 including R-18 and R-18G, request pacing, the session cookie reaching
-`https://www.pixiv.net` only, sign-in, log out, a keychain refusal and expiry
+`https://www.pixiv.net` only, sign-in, log out (and one the keychain refuses), a keychain refusal and expiry
 against an in-memory store, resumable thumbnail and download transport, the
 download queue (concurrency, cancel, retry, shutdown) and packaging (sniffed
 formats, scaled display copies, staging reclaim), the loading page's ring with no
@@ -1921,11 +1921,12 @@ unless `scripts/we_reference.py render` hands it real pages to draw. Detail and 
   unfiltered pages, age-rating sampling of collections, every subscription page
   read with the session, a page whose entries cannot be read failing instead of
   passing for empty, the store's back history, sign-in, ended session and
-  sign-out, the session saved for the next launch and removed with it, an expired
+  sign-out (a refused one keeping the account and its list), the session saved for
+  the next launch and removed with it, an expired
   cookie renewed with Steam's renewal token before a read (and a refused renewal
-  ending the session; `SteamWebSessionTests` covers which token is kept and when a
-  cookie needs renewing; `WebSignInPolicyTests` (Panel) what the sign-in window may
-  load), and a pasted link or id: one tile that no sidebar filter hides, no
+  ending the session; `SteamWebSessionTests` covers which token is kept, when a
+  cookie needs renewing and a saved session another build saved being emptied;
+  `WebSignInPolicyTests` (Panel) what the sign-in window may load), and a pasted link or id: one tile that no sidebar filter hides, no
   browse page read, failures on the normal retry path, other sources ignoring the
   id, and a browse page whose markup changed: listed from its links or the ids in
   its renamed data, an id Steam does not serve left out, paging estimates, the

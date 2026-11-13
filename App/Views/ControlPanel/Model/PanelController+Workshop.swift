@@ -308,7 +308,14 @@ extension PanelController {
   /// Forgets the Steam Community session, also on this Mac; Your subscriptions empties if it was on
   /// show.
   func steamWebSignOut() async throws {
-    try await run(.immediate) { workshop.signOutOfSteamWeb() }
+    try await run(.immediate) {
+      do {
+        try workshop.signOutOfSteamWeb()
+      } catch {
+        // Still signed in, as the panel keeps showing: the keychain kept the session.
+        throw WallpaperActionError(message: L("Could not log out of Steam: \(error.localizedDescription)"))
+      }
+    }
   }
 
   /// Downloads every wallpaper the signed-in account subscribes to that the library lacks.

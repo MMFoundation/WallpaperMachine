@@ -48,7 +48,7 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     panel.controller.workshopBrowser.pageAppeared()
     try await waitFor { panel.workshop.subscribedIDs == ["111"] }
 
-    panel.workshop.signOutOfSteamWeb()
+    try panel.workshop.signOutOfSteamWeb()
     SubscriptionsProtocol.subscribed = ["222": "Video"]
     try await panel.workshop.signInToSteamWeb {
       WebSignInCookies(session: "76561198000000001%7C%7Cfedcba9876543210fedc")

@@ -331,6 +331,20 @@ final class PixivStoreTests: XCTestCase {
         XCTAssertEqual(store.works.map(\.rating), [.mature, .mature, .mature])
     }
 
+    func testALogOutTheKeychainRefusesKeepsTheSignIn() async throws {
+        let sessions = PixivMemorySessionStore()
+        let store = store(Self.member(), sessions: sessions)
+        store.signIn { PixivFixtures.session }
+        try await waitUntil { store.account != nil }
+        sessions.keepsOnRemove = true
+
+        XCTAssertThrowsError(try store.signOut())
+
+        XCTAssertTrue(store.isSignedIn, "the session the next launch would restore is still there")
+        XCTAssertNotNil(store.account)
+        XCTAssertEqual(sessions.session, PixivFixtures.session)
+    }
+
     func testLoggingOutForgetsTheSessionAndEverythingR18() async throws {
         let transport = Self.member()
         let sessions = PixivMemorySessionStore()
@@ -343,7 +357,7 @@ final class PixivStoreTests: XCTestCase {
         XCTAssertEqual(store.selectedWork?.rating, .mature)
         XCTAssertEqual(store.works.count, 3)
 
-        store.signOut()
+        try store.signOut()
 
         XCTAssertFalse(store.isSignedIn)
         XCTAssertNil(store.account)

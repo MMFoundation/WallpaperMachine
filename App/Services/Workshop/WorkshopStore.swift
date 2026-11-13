@@ -961,9 +961,12 @@ final class WorkshopStore {
   /// Forgets the Steam Community session, here and on this Mac; Steam's own sign-in window keeps
   /// no cookie either. An account's own list that is loading is stopped, and one on show is
   /// emptied, while another list already loading in its place goes on. Any other list on show
-  /// is read again as anyone sees it.
-  func signOutOfSteamWeb() {
-    forgetSteamWebSession()
+  /// is read again as anyone sees it. Throws, still signed in with the list on show, when the
+  /// keychain keeps the saved session: the next launch would restore it.
+  func signOutOfSteamWeb() throws {
+    // First, so a session the keychain keeps stays signed in here too, list and all.
+    try webSessions?.remove()
+    dropSteamWebSession()
     let loadsPersonal = source.isPersonal
     let reads = committedQuery != nil || isLoading
     if loadsPersonal { cancelSearch() }
@@ -1103,7 +1106,6 @@ final class WorkshopStore {
     try? webSessions?.save(session)
   }
 
-  /// Drops the session, and the saved one with it.
   /// Forgets `session` once Steam has ended it, unless another sign-in has replaced it since;
   /// nil (no request had a session yet) forgets the current one.
   private func forgetSteamWebSession(endedWith session: SteamWebSession?) {
@@ -1111,14 +1113,21 @@ final class WorkshopStore {
     forgetSteamWebSession()
   }
 
+  /// Drops the session Steam ended, and the saved one with it.
   private func forgetSteamWebSession() {
+    dropSteamWebSession()
+    // Steam ended it, so a saved copy the keychain keeps signs no one in; the store logs why.
+    try? webSessions?.remove()
+  }
+
+  /// Drops the session here; the saved one is the caller's.
+  private func dropSteamWebSession() {
     webSessionRestore?.cancel()
     webSessionRenewal?.cancel()
     webSessionRenewal = nil
     steamWebSession = nil
     subscribedIDs = []
     subscriptionsReadFor = nil
-    webSessions?.remove()
   }
 
   func loadPage(_ page: Int) {

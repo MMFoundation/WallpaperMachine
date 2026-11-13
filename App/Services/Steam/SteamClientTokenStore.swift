@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 /// Keeps the QR sign-in between launches. Injected so tests never touch the keychain.
 protocol SteamClientTokenStoring: Sendable {
@@ -10,13 +9,6 @@ protocol SteamClientTokenStoring: Sendable {
     func save(_ token: SteamRefreshToken) throws
     /// Throws when the saved sign-in stays: a log-out must not report what did not happen.
     func remove() throws
-}
-
-/// The keychain kept the saved sign-in it was asked to delete, as it does for an item another
-/// build saved; `reason` is macOS's own wording.
-struct SteamClientTokenRemovalFailed: LocalizedError {
-    let reason: String
-    var errorDescription: String? { reason }
 }
 
 /// The refresh token as a generic password in the user's login keychain, beside the Steam
@@ -66,21 +58,9 @@ struct KeychainSteamClientTokenStore: SteamClientTokenStoring {
         }
     }
 
-    /// Deletes the item, or empties it when the keychain refuses: macOS will not let one build
-    /// delete what another saved, but lets it change the data, and an emptied item loads as no
-    /// sign-in. Throws only when the token stays readable.
+    /// Deletes the item, or empties it, which loads as no sign-in (`KeychainGenericPassword.remove`).
+    /// Throws only when the token stays readable.
     func remove() throws {
-        do {
-            try item.delete()
-        } catch {
-            do {
-                try item.write(Data())
-                AppLog.info("Steam QR sign-in could not be deleted from the keychain (\(error)); it was emptied instead")
-            } catch {
-                AppLog.warn("Steam QR sign-in could not be removed from the keychain (\(error))")
-                let reason = (error as? KeychainFailure).flatMap { SecCopyErrorMessageString($0.status, nil) as String? }
-                throw SteamClientTokenRemovalFailed(reason: reason ?? String(describing: error))
-            }
-        }
+        try item.remove()
     }
 }

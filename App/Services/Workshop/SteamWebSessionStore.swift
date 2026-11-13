@@ -7,7 +7,8 @@ protocol SteamWebSessionStoring: Sendable {
     /// The saved session; nil when there is none or it cannot be read.
     func load() -> SteamWebSession?
     func save(_ session: SteamWebSession) throws
-    func remove()
+    /// Throws when the saved session stays: a sign-out must not report what did not happen.
+    func remove() throws
 }
 
 /// The session as a generic password in the user's login keychain, next to the pixiv one and
@@ -53,11 +54,8 @@ struct KeychainSteamWebSessionStore: SteamWebSessionStoring {
         }
     }
 
-    func remove() {
-        do {
-            try item.delete()
-        } catch {
-            AppLog.warn("Steam sign-in could not be removed from the keychain (\(error))")
-        }
+    /// Deletes the item, or empties it, which loads as no session (`KeychainGenericPassword.remove`).
+    func remove() throws {
+        try item.remove()
     }
 }
