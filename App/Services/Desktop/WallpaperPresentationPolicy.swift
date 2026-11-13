@@ -540,9 +540,13 @@ final class WallpaperPresentationPolicy {
         // A covered wallpaper resuming from any per-display pause must take the sound setting
         // first (including Pause -> Mute/Reduce volume). Another settle would let it play at full
         // volume meanwhile, even if a sibling display only just became covered. With no paused
-        // wallpaper resuming, sound keeps the ordinary coverage settle below.
+        // wallpaper resuming, sound keeps the ordinary coverage settle below. A disconnect clears
+        // the desired pause but retains the acknowledged or unknown bridge state, so include the
+        // same retained pauses that reconciliation below can resume.
         if coverage == true, !isDesktopCoveredForSound,
-           !known.subtracting(hidden).isDisjoint(with: suspendedDisplayIDs) {
+           known.subtracting(hidden).contains(where: {
+               suspendedDisplayIDs.contains($0) || appliedDisplays[$0] == true || failedDisplays.contains($0)
+           }) {
             coverSound()
         }
         let coversSound = coverage == true && !isDesktopCoveredForSound

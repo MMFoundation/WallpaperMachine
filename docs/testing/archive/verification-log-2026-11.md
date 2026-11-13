@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-12 — Integrate Steam sign-in retry recovery
+
+- Integrated the fix from fix/steam-sign-in-retry-186 onto current main; removed an obsolete sign-in-only assertion and documentation after that API was removed.
+- `python3 scripts/test.py --only PanelDownloadActionsTests --only DownloadDialogResolutionTests --only DownloaderFailureOutputTests`: 42 passed, 0 failed, 0 skipped.
+- Initial full gate: 4888 passed, 1 failed, 68 skipped; the welcome accessibility regression also failed on unchanged main. Fixed separately in a1f9824.
+- `python3 scripts/test.py --only WelcomeRenderTests --only FirstRunModelTests --only PanelDownloadActionsTests`: 59 passed, 0 failed, 0 skipped.
+- `python3 scripts/test.py` after the welcome fix: Python checks passed; 4889 native tests passed, 0 failed, 68 opt-in media/network/reference checks skipped.
+- Steam timeout/password rejection, corrected-account retry, QR recovery through import, an existing QR session, and normal transfer retries were exercised with offline fakes.
+- Live Steam sign-in, the reporter’s network/account, desktop interaction and VoiceOver remain unverified. No Release build or renderer changes.
+
 ## 2026-11-12 — Control panel UI critique fixes (ws1-ws7) on claude/ui-critique-fixes
 
 - Scope: 34 local commits over main 54227ed3: Apply/Play symbols and wording, Workshop inspector Apply and Command-Return, staged-edit footer and Not applied marks (Rust bridge staged flags), collapsible display cards, welcome Skip setup and the delayed support prompt, P3 polish, and the panel type scale, shared buttons, scrims, tile marks and design-token lint.

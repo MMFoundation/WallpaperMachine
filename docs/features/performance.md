@@ -549,11 +549,12 @@ from the covered one's wallpaper. Like a pause, the sound changes after the
 one-second settle and comes back the moment any of those working areas shows again.
 While no wallpaper is in view at all, the last decision stands, so leaving a
 full-screen app for the same covered desktop brings no second of sound first. Changing
-the choice while the desktop is covered lets no sound out either: switching from
+the choice while the desktop is covered prevents a full-volume burst: switching from
 **Pause** to **Mute** or **Reduce volume** applies the sound setting before resuming
 any already-paused wallpaper, without another settle, even if another display only
-just became covered. This still requires every wallpaper in view to be covered. A
-refused sound setting leaves the paused wallpapers paused until it is applied.
+just became covered. The same ordering applies when a display reconnects with a
+retained pause or an unacknowledged resume. This still requires every wallpaper in
+view to be covered. A refused sound setting leaves the paused wallpapers paused until it is applied.
 **Mute** to **Reduce volume** sets the level
 before it lifts the mute, and **Mute** or **Reduce volume** to
 **Pause** keeps the wallpapers silent while the covered display waits out the settle,

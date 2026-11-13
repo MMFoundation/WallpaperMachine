@@ -33,6 +33,7 @@ private final class CompositionProbe {
     var coveredAction = DesktopCoveredAction.keepRunning
     /// Per-display decisions, in delivery order.
     var displays: [(display: UInt32, suspended: Bool)] = []
+    var displayFailures = 0
     var onDisplay: ((UInt32, Bool) -> Void)?
 
     func setVisible(_ visible: Bool, display: UInt32) {
@@ -122,7 +123,12 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
             applyDisplay: { display, suspended, completion in
                 probe.displays.append((display, suspended))
                 probe.onDisplay?(display, suspended)
-                completion(.success(()))
+                if probe.displayFailures > 0 {
+                    probe.displayFailures -= 1
+                    completion(.failure(DeliveryRefused()))
+                } else {
+                    completion(.success(()))
+                }
             })
     }
 
@@ -641,6 +647,75 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
         }
         XCTAssertEqual(probe.displays.filter { !$0.suspended }.map(\.display), pausedDisplays.sorted(),
                        "Already-paused wallpapers resume without another settle, at the chosen sound level")
+    }
+
+    func testReconnectedCoveredDisplayMutesBeforeResumingItsRetainedPause() async {
+        await checkReconnectedCoveredDisplayResumes(with: .mute)
+    }
+
+    func testReconnectedCoveredDisplayReducesVolumeBeforeResumingItsRetainedPause() async {
+        await checkReconnectedCoveredDisplayResumes(with: .reduceVolume)
+    }
+
+    func testReconnectedCoveredDisplayMutesBeforeRetryingARefusedResume() async {
+        await checkReconnectedCoveredDisplayResumes(with: .mute, refuseResume: true)
+    }
+
+    func testReconnectedCoveredDisplayReducesVolumeBeforeRetryingARefusedResume() async {
+        await checkReconnectedCoveredDisplayResumes(with: .reduceVolume, refuseResume: true)
+    }
+
+    /// A disconnect removes the display from the desired pause set, but the bridge retains either
+    /// an acknowledged pause or an unknown state after a refused resume. Both need sound first.
+    private func checkReconnectedCoveredDisplayResumes(
+        with action: DesktopCoveredAction, refuseResume: Bool = false
+    ) async {
+        let probe = CompositionProbe()
+        probe.covered = [1]
+        probe.coveredAction = .pause
+        let paused = expectation(description: "Covered display paused")
+        probe.onDisplay = { _, suspended in
+            if suspended { paused.fulfill() }
+        }
+        let policy = makePolicy(probe, settle: .milliseconds(20))
+        policy.start()
+        defer {
+            probe.onDisplay = nil
+            policy.stop()
+        }
+        await fulfillment(of: [paused], timeout: 5)
+        probe.onDisplay = nil
+        XCTAssertEqual(probe.displays.map(\.suspended), [true])
+
+        if refuseResume {
+            probe.covered = []
+            probe.displayFailures = 1
+            policy.evaluate()
+            XCTAssertEqual(probe.displayFailures, 0, "The resume reached the bridge and was refused")
+        }
+        probe.surfaces = []
+        policy.evaluate()
+        XCTAssertTrue(policy.suspendedDisplayIDs.isEmpty)
+
+        probe.coveredAction = action
+        probe.covered = [1]
+        policy.evaluate()
+        XCTAssertTrue(probe.audio.isEmpty)
+        XCTAssertTrue(probe.gains.isEmpty)
+
+        let previousDeliveries = probe.displays.count
+        probe.onDisplay = { display, suspended in
+            XCTAssertEqual(display, 1)
+            XCTAssertFalse(suspended)
+            XCTAssertEqual(probe.audio.last ?? false, action == .mute,
+                           "The mute must reach the bridge before the reconnected wallpaper resumes")
+            XCTAssertEqual(probe.gains.last ?? 1, action == .reduceVolume ? 0.3 : 1,
+                           "The lower volume must reach the bridge before the reconnected wallpaper resumes")
+        }
+        probe.surfaces = [WallpaperSurfaceVisibility(displayID: 1, isVisible: true)]
+        policy.evaluate()
+        XCTAssertEqual(probe.displays.count, previousDeliveries + 1,
+                       "The reconnected wallpaper resumes immediately at the chosen sound level")
     }
 
     /// A lower level the bridge refused is not known to have landed, so the mute stays until the

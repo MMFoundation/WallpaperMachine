@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-13 — Covered-desktop sound: PR 194 review and reconnect fix
+
+- Four reconnect regressions failed before the fix, covering retained pauses and refused resumes for Mute and Reduce volume.
+- Targeted playback, preference, backup and panel checks: 169 passed, 0 failed, 0 skipped; no runtime warnings.
+- python3 scripts/test.py on main ef6c85c5 plus the final PR source: all 35 Python modules passed; 4,963 native passed, 0 failed, 70 skipped of 5,033 (Xcode 27.2).
+- The integration run used temporary test-home and path-backed preference-suite overrides to isolate the installed app.
+- Skipped: opt-in media, live Steam, reference rendering and panel snapshots. Two main-thread warnings came from unchanged VideoFormatSupportTests and AppUpdateTests cases.
+- Real coverage probes, audible output and narrow-window presentation were not exercised. No Release build, installation or desktop run.
+
 ## 2026-11-13 — Project triage and grouped GitHub Actions updates
 
 - Project triage maintains area and lifecycle labels from GitHub closing links, current-head reviews, CI, mergeability and DCO trailers; Dependabot groups weekly GitHub Actions updates.
@@ -107,13 +116,3 @@ Installed font families, italic, letter spacing, line height and case; gradient 
 - Targeted: python3 scripts/test.py --only MenuBarEnergyMeterTests --only EnergyReadoutTests --only StatusPanelControllerTests --only StatusPanelRenderTests --only WallpaperPresentationPolicyTests --only SettingsSectionsRenderTests --only EnergyUsageMonitorTests --only WallpaperBackupTests: 155 passed.
 - Gate: python3 scripts/test.py: 4897 passed, 0 failed, 68 skipped.
 - Not checked: the status item drawn in the real menu bar (no desktop run, no Release build); the figure's width beside other menu bar items.
-
-## 2026-11-12 — Integrate Steam sign-in retry recovery
-
-- Integrated the fix from fix/steam-sign-in-retry-186 onto current main; removed an obsolete sign-in-only assertion and documentation after that API was removed.
-- `python3 scripts/test.py --only PanelDownloadActionsTests --only DownloadDialogResolutionTests --only DownloaderFailureOutputTests`: 42 passed, 0 failed, 0 skipped.
-- Initial full gate: 4888 passed, 1 failed, 68 skipped; the welcome accessibility regression also failed on unchanged main. Fixed separately in a1f9824.
-- `python3 scripts/test.py --only WelcomeRenderTests --only FirstRunModelTests --only PanelDownloadActionsTests`: 59 passed, 0 failed, 0 skipped.
-- `python3 scripts/test.py` after the welcome fix: Python checks passed; 4889 native tests passed, 0 failed, 68 opt-in media/network/reference checks skipped.
-- Steam timeout/password rejection, corrected-account retry, QR recovery through import, an existing QR session, and normal transfer retries were exercised with offline fakes.
-- Live Steam sign-in, the reporter’s network/account, desktop interaction and VoiceOver remain unverified. No Release build or renderer changes.

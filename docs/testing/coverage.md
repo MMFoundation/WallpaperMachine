@@ -317,10 +317,11 @@ picture shows between a window closing and the web page's window opening.
   other-app sound turns wallpapers down too, acts only once every display whose wallpaper is in
   view is covered (a display hidden by a full-screen app does not keep the sound), keeps its last
   decision while no wallpaper is in view, waits for the settle and lifts at once, follows a
-  changed choice at the next evaluation without letting sound out (a lower level before the mute
+  changed choice at the next evaluation without a full-volume burst (a lower level before the mute
   is lifted, a refused one sent again while the mute holds, a rising one after it; a muted covered
-  desktop changed to Pause stays silent through the settle until it is uncovered), composes with
-  the user's mute and is released at
+  desktop changed to Pause stays silent through the settle until it is uncovered); a reconnected
+  display with a retained pause or a refused resume takes its mute or lower gain before resuming.
+  It composes with the user's mute and is released at
   teardown; `PlaybackPreferencesTests` and `WallpaperBackupTests` cover the stored and backed-up
   choice, and `OtherAudioVolumeSettingsTests` the four choices and the level row following the
   covered-desktop row. Whether the probes' real occlusion and a real output follow is not covered. The bridge's half is
