@@ -33,6 +33,7 @@ private final class CompositionProbe {
     var coveredAction = DesktopCoveredAction.keepRunning
     /// Per-display decisions, in delivery order.
     var displays: [(display: UInt32, suspended: Bool)] = []
+    var onDisplay: ((UInt32, Bool) -> Void)?
 
     func setVisible(_ visible: Bool, display: UInt32) {
         surfaces = surfaces.map {
@@ -120,6 +121,7 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
             },
             applyDisplay: { display, suspended, completion in
                 probe.displays.append((display, suspended))
+                probe.onDisplay?(display, suspended)
                 completion(.success(()))
             })
     }
@@ -570,6 +572,75 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
         XCTAssertEqual(probe.order.last, .audio(suppressed: false))
         XCTAssertFalse(policy.isDesktopCoveredForSound)
         XCTAssertEqual(probe.gains, [0.3, 1])
+    }
+
+    func testPausedCoveredDesktopMutesBeforeResuming() async {
+        await checkPausedCoveredDesktopResumes(with: .mute)
+    }
+
+    func testPausedCoveredDesktopReducesVolumeBeforeResuming() async {
+        await checkPausedCoveredDesktopResumes(with: .reduceVolume)
+    }
+
+    func testPausedCoveredDesktopWaitsForARefusedLowerVolumeBeforeResuming() async {
+        await checkPausedCoveredDesktopResumes(with: .reduceVolume, gainFailures: 1)
+    }
+
+    func testPausedCoveredDisplayMutesBeforeResumingBesideANewlyCoveredDisplay() async {
+        await checkPausedCoveredDesktopResumes(with: .mute, pausedDisplays: [1])
+    }
+
+    func testPausedCoveredDisplayReducesVolumeBeforeResumingBesideANewlyCoveredDisplay() async {
+        await checkPausedCoveredDesktopResumes(with: .reduceVolume, pausedDisplays: [1])
+    }
+
+    /// A sound-only choice must reach the bridge before any paused, covered display resumes,
+    /// even beside a newly covered display or if the lower volume has to be retried.
+    private func checkPausedCoveredDesktopResumes(
+        with action: DesktopCoveredAction, gainFailures: Int = 0, pausedDisplays: Set<UInt32> = [1, 2]
+    ) async {
+        let probe = CompositionProbe()
+        probe.surfaces = [
+            WallpaperSurfaceVisibility(displayID: 1, isVisible: true),
+            WallpaperSurfaceVisibility(displayID: 2, isVisible: true),
+        ]
+        probe.covered = pausedDisplays
+        probe.coveredAction = .pause
+        let paused = expectation(description: "Covered displays paused")
+        paused.expectedFulfillmentCount = pausedDisplays.count
+        probe.onDisplay = { _, suspended in
+            if suspended { paused.fulfill() }
+        }
+        let policy = makePolicy(probe, settle: .milliseconds(20))
+        policy.start()
+        defer {
+            probe.onDisplay = nil
+            policy.stop()
+        }
+        await fulfillment(of: [paused], timeout: 5)
+        XCTAssertEqual(policy.suspendedDisplayIDs, pausedDisplays)
+
+        probe.onDisplay = { _, suspended in
+            guard !suspended else { return }
+            XCTAssertEqual(probe.audio.last ?? false, action == .mute,
+                           "The mute must land before playback resumes")
+            XCTAssertEqual(probe.gains.last ?? 1, action == .reduceVolume ? 0.3 : 1,
+                           "The volume must land before playback resumes")
+            XCTAssertEqual(probe.gainFailures, 0)
+        }
+        probe.covered = [1, 2]
+        probe.coveredAction = action
+        probe.gainFailures = gainFailures
+        policy.evaluate()
+        if gainFailures > 0 {
+            XCTAssertTrue(probe.displays.allSatisfy(\.suspended),
+                          "A refused level must leave the displays paused")
+            XCTAssertEqual(probe.gains, [0.3])
+            policy.evaluate()
+            XCTAssertEqual(probe.gains, [0.3, 0.3])
+        }
+        XCTAssertEqual(probe.displays.filter { !$0.suspended }.map(\.display), pausedDisplays.sorted(),
+                       "Already-paused wallpapers resume without another settle, at the chosen sound level")
     }
 
     /// A lower level the bridge refused is not known to have landed, so the mute stays until the

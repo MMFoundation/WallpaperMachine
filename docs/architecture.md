@@ -478,7 +478,11 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   sets `isDesktopCoveredForSound` only once the working area of every display whose wallpaper is
   in view is covered, after the same settle, clears it the moment one is uncovered, and leaves it
   as it was while no wallpaper is in view at all; under Pause, which hides the covered displays,
-  a flag already set keeps the wallpapers muted until one shows uncovered. The policy delivers a
+  a flag already set keeps the wallpapers muted until one shows uncovered. If every wallpaper
+  in view is covered and one is resuming from a per-display suspension, the sound decision is
+  adopted before any per-display resume, without a second settle; a refused audio delivery leaves
+  the resumes pending. This prevents a full-volume burst when changing Pause to Mute or Reduce
+  volume. The policy delivers a
   mute before a new gain and lifts it only once no gain louder than the decision can remain (a
   lower gain the bridge refused is sent again first), so no switch plays a moment above it. A
   per-display mute would need the bridge to carry one. With

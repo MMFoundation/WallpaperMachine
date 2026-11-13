@@ -537,6 +537,14 @@ final class WallpaperPresentationPolicy {
             isDesktopCoveredForSound = false
             AppLog.info("a wallpaper in view is uncovered")
         }
+        // A covered wallpaper resuming from any per-display pause must take the sound setting
+        // first (including Pause -> Mute/Reduce volume). Another settle would let it play at full
+        // volume meanwhile, even if a sibling display only just became covered. With no paused
+        // wallpaper resuming, sound keeps the ordinary coverage settle below.
+        if coverage == true, !isDesktopCoveredForSound,
+           !known.subtracting(hidden).isDisjoint(with: suspendedDisplayIDs) {
+            coverSound()
+        }
         let coversSound = coverage == true && !isDesktopCoveredForSound
         settle?.cancel()
         settle = nil
