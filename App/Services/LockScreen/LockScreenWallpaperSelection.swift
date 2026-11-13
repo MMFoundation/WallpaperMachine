@@ -504,9 +504,13 @@ final class LockScreenWallpaperSelection {
       return entry.ownedFields.allSatisfy { Self.owns(node[$0]) }
     }
     let global = Self.separatedLinked(Self.node(root, path: Self.globalPath) ?? [:])
-    return taken.isEmpty ? [] : taken + pruned.filter {
-      $0.path == Self.globalPath && $0.ownedFields.allSatisfy { global[$0] == nil }
+    // Only the global choices still missing: one set since is kept, as on any restore.
+    let globalEntry = pruned.first { $0.path == Self.globalPath }.flatMap { entry -> Entry? in
+      var entry = entry
+      entry.fields = entry.ownedFields.filter { global[$0] == nil }.sorted()
+      return entry.ownedFields.isEmpty ? nil : entry
     }
+    return taken.isEmpty ? [] : taken + (globalEntry.map { [$0] } ?? [])
   }
 
   /// A fallback that macOS overwrote with a copy of this extension's selection
