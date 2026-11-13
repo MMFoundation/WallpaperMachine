@@ -123,6 +123,8 @@ final class LockScreenWallpaperSelection {
     if entries.isEmpty { entries = readoptedEntries(root) }
     var paths = displays.sorted().map { ["Displays", $0] }
     let spaces = root["Spaces"] as? [String: Any] ?? [:]
+    // Stored back converted: each node lookup would otherwise convert every Space again.
+    root["Spaces"] = spaces
     for (space, value) in spaces.sorted(by: { $0.key < $1.key }) {
       guard let node = value as? [String: Any], node["Displays"] is [String: Any] else {
         throw LockScreenWallpaperFailure(
