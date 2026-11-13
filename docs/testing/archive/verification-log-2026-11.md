@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-12 — Desktop widgets workspace: canvas, tabbed inspector, handles, ready-made widgets
+
+- Settings › Desktop Widgets without a search is now a workspace (large canvas, layers, inspector with Content/Text/Style/Position tabs); search still lists every row.
+- Canvas: corner handles resize, a knob turns (15° snap, Command free, double click upright), arrow keys nudge, context menu; preview frame raised to 2048 px.
+- Ready-made widgets (11 presets, groups laid out by measured size) via a popover and the empty inspector; style swatches replace the Apply Style menu.
+- python3 scripts/test.py --only WidgetsSettingsTests: 16 passed (new: handles/nudge, presets layout and limit, inspector tabs, workspace layout at 460/980/1400 in en and ja for every tab).
+- python3 scripts/test.py: 4924 passed, 0 failed, 70 skipped.
+- Offscreen renders (testSnapshotsOnRequest with TEST_RUNNER_WALLPAPER_MACHINE_WIDGET_SNAPSHOTS) checked by eye in English, dark: empty, each tab, turning, narrow, search.
+- Not checked: the live app (no Release build, no desktop run); pointer cursors, real drags and the popover on screen; other languages' renders; light appearance.
+
 ## 2026-11-12 — Desktop widgets introduction after an update
 
 A window that introduces desktop widgets once to people updating from 1.10.0 or older, opening Settings › Desktop Widgets.

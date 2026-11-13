@@ -39,12 +39,12 @@ final class LockScreenWallpaperSelection {
     var store: [Int]
   }
 
-  private static var lastReloadSignal: Date?
   private static let globalPath = ["AllSpacesAndDisplays"]
 
   private let storeURL: URL
   private let journalURL: URL
-  private let reload: @MainActor () throws -> Void
+  private let reload: @MainActor () async throws -> Void
+  private let coordinator: SystemWallpaperStore?
   private let persistJournal: @MainActor (URL, Data?) throws -> Void
   private let persistArchive: @MainActor (URL, Data?) throws -> Void
   private var entries: [Entry] = []
@@ -53,16 +53,18 @@ final class LockScreenWallpaperSelection {
   private var restartPending = false
   private var settled: Settled?
 
-  convenience init(folder: URL) {
+  convenience init(folder: URL, coordinator: SystemWallpaperStore? = nil) {
+    let coordinator = coordinator ?? .shared
     self.init(
       storeURL: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
         "Library/Application Support/com.apple.wallpaper/Store/Index.plist"),
       journalURL: folder.appendingPathComponent("native-selection.plist"),
-      reload: { try Self.reloadWallpaperAgent() })
+      reload: { try await coordinator.reload() }, coordinator: coordinator)
   }
 
   init(
-    storeURL: URL, journalURL: URL, reload: @escaping @MainActor () throws -> Void,
+    storeURL: URL, journalURL: URL, reload: @escaping @MainActor () async throws -> Void,
+    coordinator: SystemWallpaperStore? = nil,
     persistJournal: @escaping @MainActor (URL, Data?) throws -> Void =
       LockScreenWallpaperSelection.persistJournalFile,
     persistArchive: @escaping @MainActor (URL, Data?) throws -> Void =
@@ -71,11 +73,20 @@ final class LockScreenWallpaperSelection {
     self.storeURL = storeURL
     self.journalURL = journalURL
     self.reload = reload
+    self.coordinator = coordinator
     self.persistJournal = persistJournal
     self.persistArchive = persistArchive
   }
 
-  func recover() throws {
+  func recover() async throws {
+    if let coordinator {
+      try await coordinator.transaction { try await self.recoverSelection() }
+    } else {
+      try await recoverSelection()
+    }
+  }
+
+  private func recoverSelection() async throws {
     guard FileManager.default.fileExists(atPath: journalURL.path) else { return }
     let recovered = try PropertyListDecoder().decode([Entry].self, from: Data(contentsOf: journalURL))
     guard Set(recovered.map(\.path)).count == recovered.count else {
@@ -87,7 +98,7 @@ final class LockScreenWallpaperSelection {
     hasPersistedJournal = true
     // A crash may occur after the store write but before its service reload.
     restartPending = true
-    try synchronize(desktopDisplays: [], screenSaverDisplays: [])
+    try await synchronizeSelection(desktopDisplays: [], screenSaverDisplays: [])
   }
 
   func checkCompatibility() throws {
@@ -106,7 +117,22 @@ final class LockScreenWallpaperSelection {
 
   func synchronize(
     desktopDisplays: Set<String>, screenSaverDisplays: Set<String>, revision: String? = nil
-  ) throws {
+  ) async throws {
+    if let coordinator {
+      try await coordinator.transaction {
+        try await self.synchronizeSelection(
+          desktopDisplays: desktopDisplays, screenSaverDisplays: screenSaverDisplays, revision: revision)
+      }
+    } else {
+      try await synchronizeSelection(
+        desktopDisplays: desktopDisplays, screenSaverDisplays: screenSaverDisplays, revision: revision)
+    }
+  }
+
+  private func synchronizeSelection(
+    desktopDisplays: Set<String>, screenSaverDisplays: Set<String>, revision: String? = nil
+  ) async throws {
+    try Task.checkCancellation()
     let displays = desktopDisplays.union(screenSaverDisplays)
     if displays.isEmpty && entries.isEmpty && !restartPending { return }
     // With the same request and journal, only the store can change the outcome, and
@@ -468,11 +494,15 @@ final class LockScreenWallpaperSelection {
             String(localized: "The system wallpaper changed during native selection. Please retry; no concurrent changes were overwritten."),
           reason: .transient)
       }
-      try Self.encode(root).write(to: storeURL, options: .atomic)
+      if let coordinator {
+        try coordinator.replace(Self.encode(root), expected: bytes)
+      } else {
+        try Self.encode(root).write(to: storeURL, options: .atomic)
+      }
       restartPending = true
     }
     if restartPending {
-      try reload()
+      try await reload()
       restartPending = false
     }
     let unchanged = !changed && retained == entries
@@ -769,52 +799,4 @@ final class LockScreenWallpaperSelection {
     root[key] = child
   }
 
-  /// Verify effective UID and the kernel-reported executable immediately before
-  /// each signal. Never signal by name alone, restart Dock, or touch loginwindow.
-  static func reloadWallpaperAgent() throws {
-    let expected = "/System/Library/CoreServices/WallpaperAgent.app/Contents/MacOS/WallpaperAgent"
-    let capacity = proc_listallpids(nil, 0)
-    guard capacity > 0 else {
-      throw LockScreenWallpaperFailure(
-        message: String(localized: "Unable to enumerate the wallpaper service."), reason: .transient)
-    }
-    var pids = [pid_t](repeating: 0, count: Int(capacity) + 32)
-    let count = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
-    guard count > 0, Int(count) <= pids.count else {
-      throw LockScreenWallpaperFailure(
-        message: String(localized: "Unable to identify the wallpaper service safely."), reason: .transient)
-    }
-    var found = false
-    // PROC_PIDPATHINFO_MAXSIZE expands to 4*MAXPATHLEN and is not Swift-importable.
-    var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-    for pid in pids.prefix(Int(count)) where pid > 0 {
-      var info = proc_bsdinfo()
-      let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-      guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size,
-        info.pbi_uid == getuid(), info.pbi_ruid == getuid()
-      else { continue }
-      let length = path.withUnsafeMutableBytes {
-        proc_pidpath(pid, $0.baseAddress, UInt32($0.count))
-      }
-      guard length > 0, String(cString: path) == expected else { continue }
-      guard kill(pid, SIGTERM) == 0 || errno == ESRCH else {
-        throw LockScreenWallpaperFailure(
-          message:
-            String(localized: "macOS refused to reload the user-owned wallpaper service (errno \(errno)). The restoration journal was retained.")
-        )
-      }
-      found = true
-    }
-    if found {
-      lastReloadSignal = Date()
-      return
-    }
-    // We SIGTERMed the agent moments ago and launchd has not relaunched it yet.
-    // The relaunch reads the store we just wrote, so no signal is needed.
-    if let last = lastReloadSignal, Date().timeIntervalSince(last) < 10 { return }
-    throw LockScreenWallpaperFailure(
-      message:
-        String(localized: "No positively verified user-owned WallpaperAgent is running. Native selection could not be activated; its restoration journal was retained."),
-      reason: .transient)
-  }
 }

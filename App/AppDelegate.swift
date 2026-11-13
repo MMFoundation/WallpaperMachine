@@ -290,6 +290,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                         self.desktopWallpaperSync = try DesktopWallpaperSync(folder: ClientPaths.desktopPostersURL)
                     }
                     self.desktopWallpaperSync?.suspendForNativeProvider()
+                    await self.desktopWallpaperSync?.drainPendingWrites()
+                    try Task.checkCancellation()
                     self.spacePinning?.update()
                     self.spaceParking?.update()
                 }
@@ -783,15 +785,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             startWallpaperEnergyRecorder(store: store)
             startTelemetry(store: store)
             startActiveCount()
-            do {
-                try lockScreen?.start()
-                if lockScreen?.isRequested != true { try startDesktopWallpaperSync() }
-                // With the switch off this puts back a poster a crash or an older run left behind.
-                applyDesktopPicturePreference()
-            } catch {
-                lastError = error
-                AppLog.error("startup: Native wallpaper recovery failed: \(error.localizedDescription)")
+            Task {
+                do {
+                    try await lockScreen?.start()
+                    guard !shutdownInProgress else { return }
+                    if lockScreen?.isRequested != true { try startDesktopWallpaperSync() }
+                    applyDesktopPicturePreference()
+                } catch {
+                    lastError = error
+                    AppLog.error("startup: Native wallpaper recovery failed: \(error.localizedDescription)")
+                }
+                guard !shutdownInProgress else { return }
+                bootstrapStore()
             }
+            return
         }
         bootstrapStore()
     }
@@ -1319,6 +1326,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Puts the user's own desktop picture back, the lock screen's first. A failure or a
     /// stall cancels the quit.
     private func restoreDesktopForQuit(_ wallpaperRestorer: DesktopWallpaperSync?) async throws {
+        await wallpaperRestorer?.drainPendingWrites()
+        try Task.checkCancellation()
         if let lockScreen = store?.lockScreenWallpaper {
             try await lockScreen.shutdown {
                 try await wallpaperRestorer?.restoreForTermination()

@@ -342,6 +342,16 @@ Rust side resolves the same paths.
 
 ### Desktop wallpaper windows and private-API handling
 
+`SystemWallpaperStore` owns writes to macOS's wallpaper store and WallpaperAgent
+restarts for both native selection and desktop posters. Its FIFO transaction queue
+holds across suspension; main-actor isolation alone does not serialize these
+multi-step operations. The feature-specific journals remain with their existing
+owners and are acknowledged only after reload confirmation. The coordinator waits
+for verified process turnover, checks its changed selections, and reconciles stale
+saves without replacing foreign choices. Pending restarts survive cancellation as
+a barrier to subsequent picture writes. See [native restoration](features/lock-screen.md#turning-it-off)
+and [desktop restoration](features/desktop-picture.md#quitting).
+
 Three owners create live desktop windows. Scene wallpapers are drawn by the Rust core: `Renderer/Core/src/window.rs` defines the
 `NSWindow` subclass `MWEWallpaperDesktopWindow` (a stable Objective-C name, deliberately
 depended on by Swift) hosting a `CAMetalLayer` at a wallpaper window level. Web projects

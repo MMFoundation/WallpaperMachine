@@ -511,6 +511,14 @@ If the native provider replaced a desktop poster, quit restores the native selec
 first, then waits for WallpaperAgent's asynchronous reload and restores the poster's
 saved original (poster ownership and the quit wait are described in
 [desktop picture](desktop-picture.md#quitting)).
+Both writers use `SystemWallpaperStore`'s explicit transaction queue, which stays
+held across asynchronous waits. Native takeover first cancels and drains pending
+poster writes. A reload waits for the verified old WallpaperAgent process to exit
+and a replacement to start after the store write, then checks the changed selections.
+A stale save is retried only where the selection still matches the pre-write value;
+a different external choice is preserved and reported, never overwritten by a retry.
+The native journal is pruned only after confirmation, including partial restores.
+Cancellation or timeout leaves recovery information available for the next attempt.
 If restoration still fails after the wait, or takes longer than 20 seconds, quit is cancelled
 and an alert gives the error; it also stays in the menu bar (and native-feature status) so the
 user can retry. A failed activation also restores native selections. If that

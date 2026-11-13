@@ -29,7 +29,7 @@ final class LockScreenWallpaperService {
   /// Whether the choice to write the desktop picture is not the user's to make right now: from the
   /// moment the lock screen is asked for until it has handed the desktop back, even when it failed.
   var locksDesktopPictureChoice: Bool { isRequested || ownsDesktopProvider }
-  @ObservationIgnored var beforeActivation: (() throws -> Void)?
+  @ObservationIgnored var beforeActivation: (() async throws -> Void)?
   @ObservationIgnored var afterDeactivation: (() throws -> Void)?
 
   private static let preference = "WallpaperMachineAnimateLockScreen"
@@ -180,12 +180,12 @@ final class LockScreenWallpaperService {
   }
 
   /// Always recover before either native or PNG providers are allowed to start.
-  func start() throws {
+  func start() async throws {
     defer { updateMonitor() }
     isRequested = defaults.bool(forKey: Self.preference)
     screenSaverRequested = defaults.bool(forKey: Self.screenSaverPreference)
     do {
-      try selection.recover()
+      try await selection.recover()
       recovered = true
       if isRequested { status = String(localized: "Waiting for committed wallpapers…") }
       if screenSaverRequested {
@@ -325,7 +325,7 @@ final class LockScreenWallpaperService {
     await work?.value
     work = nil
     do {
-      try restoreNativeSelection()
+      try await restoreNativeSelection()
       ownsDesktopProvider = false
       isEnabled = false
       screenSaverEnabled = false
@@ -365,7 +365,7 @@ final class LockScreenWallpaperService {
     }
     do {
       if !recovered {
-        try selection.recover()
+        try await selection.recover()
         recovered = true
       }
       // A disable must not wait for a waking display to regain its UUID.
@@ -381,7 +381,7 @@ final class LockScreenWallpaperService {
           committed.scenes.removeAll()
         }
         try publish(committed)
-        try applySelection(committed, inputs: lastInputs)
+        try await applySelection(committed, inputs: lastInputs)
         if !committed.lockScreenEnabled {
           cancelRendererWatches()
           if ownsDesktopProvider {
@@ -394,7 +394,7 @@ final class LockScreenWallpaperService {
       guard (isRequested && lockScreenActivationError == nil) || screenSaverRequested else {
         status = String(localized: "Restoring system wallpapers…")
         screenSaverStatus = status
-        try deactivate()
+        try await deactivate()
         updateStatuses(LockScreenConfiguration(scenes: []))
         return
       }
@@ -454,12 +454,12 @@ final class LockScreenWallpaperService {
         // New Spaces and choices made in System Settings change only the system store.
         // The selection takes over the former and reports the latter, rereading the
         // store only after something wrote it.
-        try applySelection(published, inputs: inputs)
+        try await applySelection(published, inputs: inputs)
         updateStatuses(published)
         return
       }
       guard !inputs.isEmpty else {
-        try deactivate()
+        try await deactivate()
         updateStatuses(LockScreenConfiguration(scenes: []))
         return
       }
@@ -515,7 +515,7 @@ final class LockScreenWallpaperService {
         lastLockScreenRequested = isRequested
         lastScreenSaverRequested = screenSaverRequested
         try checkReadinessFailures(published)
-        try applySelection(published, inputs: inputs)
+        try await applySelection(published, inputs: inputs)
         guard unconfirmed?.revision == published.revision else {
           updateStatuses(published)
           return
@@ -525,7 +525,8 @@ final class LockScreenWallpaperService {
         configuration = published
       } else {
         if configuration.lockScreenEnabled, !ownsDesktopProvider {
-          try beforeActivation?()
+          try await beforeActivation?()
+          try Task.checkCancellation()
           ownsDesktopProvider = true
         }
         // Publishing notifies the old renderer before WallpaperAgent's reload ends it. Remember
@@ -535,7 +536,7 @@ final class LockScreenWallpaperService {
         extensionPreparation = nil
         LockScreenAssetPublisher.collectGarbage(
           exchange: root, keeping: prepared.referencedRevisions)
-        try applySelection(configuration, inputs: inputs)
+        try await applySelection(configuration, inputs: inputs)
         if !configuration.lockScreenEnabled, ownsDesktopProvider {
           ownsDesktopProvider = false
           try afterDeactivation?()
@@ -557,7 +558,7 @@ final class LockScreenWallpaperService {
           configuration.revision = UUID().uuidString
           configuration.lockScreenEnabled = false
           try publish(configuration)
-          try applySelection(configuration, inputs: inputs)
+          try await applySelection(configuration, inputs: inputs)
           ownsDesktopProvider = false
           cancelRendererWatches()
           try afterDeactivation?()
@@ -596,7 +597,7 @@ final class LockScreenWallpaperService {
         do {
           copyRecoveryAttempted = true
           AppLog.info("Native extension copy changed; repairing registration and retrying activation once")
-          try deactivate()
+          try await deactivate()
           try Task.checkCancellation()
           await update(revision: revision)
           return
@@ -624,7 +625,7 @@ final class LockScreenWallpaperService {
       lockScreenActivationError = nil
       electionRepairOffered = (failure as? LockScreenWallpaperFailure)?.reason == .extensionTurnedOff
       var message = failure.localizedDescription
-      do { try deactivate() } catch {
+      do { try await deactivate() } catch {
         message += " " + String(localized: "Restoration also failed: \(error.localizedDescription)")
       }
       if affectedLockScreen || !affectedScreenSaver {
@@ -641,13 +642,14 @@ final class LockScreenWallpaperService {
 
   private func applySelection(
     _ configuration: LockScreenConfiguration, inputs: [LockScreenPublishInput]
-  ) throws {
+  ) async throws {
     let ids = Set(configuration.scenes.lazy.map(\.displayID))
     let displays = Set(inputs.lazy.filter { ids.contains($0.displayID) }.map(\.displayUUID))
-    try selection.synchronize(
+    try await selection.synchronize(
       desktopDisplays: configuration.lockScreenEnabled ? displays : [],
       screenSaverDisplays: configuration.screenSaverEnabled ? displays : [],
       revision: configuration.revision)
+    try Task.checkCancellation()
   }
 
   private func updateStatuses(_ configuration: LockScreenConfiguration) {
@@ -705,7 +707,7 @@ final class LockScreenWallpaperService {
   /// Hand the desktop back only after restoring the native selection. A failed
   /// restore can leave our extension selected; the picture API's stand-in for
   /// it must never be journaled by the poster provider as the user's original.
-  private func deactivate() throws {
+  private func deactivate() async throws {
     cancelExtensionPreparation()
     cancelRendererWatches()
     retiringRendererProcesses.removeAll()
@@ -713,7 +715,7 @@ final class LockScreenWallpaperService {
     isEnabled = false
     screenSaverEnabled = false
     lastInputs = nil
-    try restoreNativeSelection()
+    try await restoreNativeSelection()
     if ownsDesktopProvider {
       ownsDesktopProvider = false
       try afterDeactivation?()
@@ -920,12 +922,12 @@ final class LockScreenWallpaperService {
     throw RendererUnavailable()
   }
 
-  private func restoreNativeSelection() throws {
+  private func restoreNativeSelection() async throws {
     var manifestError: Error?
     do { try clearManifest() } catch { manifestError = error }
     // A full disk or inaccessible exchange directory must never prevent restoring the
     // user's native selections. Preserve both errors when recovery also fails.
-    do { try selection.synchronize(desktopDisplays: [], screenSaverDisplays: []) } catch {
+    do { try await selection.synchronize(desktopDisplays: [], screenSaverDisplays: []) } catch {
       if let manifestError {
         throw LockScreenWallpaperFailure(
           message:

@@ -2910,7 +2910,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             XCTAssertEqual(Double(actual), Double(expected), accuracy: 4)
         }
         workspace.didWrite = nil
-        try sync.stopAndRestore()
+        try await sync.stopAndRestore()
         host.shutdown()
     }
 
@@ -3004,7 +3004,6 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let surface = try XCTUnwrap(surfacesMade[7])
         let layer = try XCTUnwrap(surface.posterLayer)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("preparing-poster-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
         let target = DesktopPictureTarget(display: "7", space: "test-space")
         let workspace = PosterWorkspace(target: target, original: root.appendingPathComponent("original.png"))
         let original = workspace.picture
@@ -3014,7 +3013,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             encode: { $0.pixels }, settleDelays: [])
         sync.canCapture = { _ in false }
         sync.start()
-        defer { workspace.didWrite = nil; sync.stop() }
+        addTeardownBlock { @MainActor in
+            workspace.didWrite = nil
+            await sync.stop().value
+            try? FileManager.default.removeItem(at: root)
+        }
         let firstRead = expectation(description: "the opening clip has no poster yet")
         let releaseRead = AsyncGate()
         openedAtTeardown.append(releaseRead)

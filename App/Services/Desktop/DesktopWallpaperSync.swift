@@ -219,6 +219,10 @@ final class DesktopWallpaperSync {
     private let retainedDisplays: @MainActor () -> Set<String>
     private var knownDisplays = Set<String>()
     private var retry: Task<Void, Never>?
+    private var posterWorker: Task<Void, Never>?
+    private var posterWrite: Task<Void, Never>?
+    private var pendingSynchronizationAttempt: Int?
+    private var stopping: Task<Void, Never>?
     /// Synchronizes again once unconfirmed poster writes should read back.
     private var confirming: Task<Void, Never>?
     private let confirmationDelay: Duration
@@ -685,8 +689,15 @@ final class DesktopWallpaperSync {
         synchronizeAllSpaces()
     }
 
-    func stop() {
-        do { try stopAndRestore() } catch { report(error) }
+    @discardableResult
+    func stop() -> Task<Void, Never> {
+        suspendForNativeProvider()
+        if let stopping { return stopping }
+        let task = Task {
+            do { try await stopAndRestore() } catch { report(error) }
+        }
+        stopping = task
+        return task
     }
 
     /// Stop poster writes without restoring through the legacy image API. The
@@ -694,6 +705,9 @@ final class DesktopWallpaperSync {
     /// alive until that provider releases ownership.
     func suspendForNativeProvider() {
         stopped = true
+        pendingSynchronizationAttempt = nil
+        posterWrite?.cancel()
+        posterWorker?.cancel()
         retry?.cancel()
         confirming?.cancel()
         confirming = nil
@@ -725,9 +739,14 @@ final class DesktopWallpaperSync {
         arrivals.removeAll()
     }
 
-    func stopAndRestore() throws {
+    func drainPendingWrites() async {
+        await posterWorker?.value
+    }
+
+    func stopAndRestore() async throws {
         suspendForNativeProvider()
-        try ledger.restoreAll()
+        await drainPendingWrites()
+        try await ledger.restoreAll()
     }
 
     /// Native Desktop/Idle restoration signals WallpaperAgent to reload. Wait
@@ -743,10 +762,11 @@ final class DesktopWallpaperSync {
         wait: () async throws -> Void = { try await Task.sleep(for: .milliseconds(200)) }
     ) async throws {
         suspendForNativeProvider()
+        await drainPendingWrites()
         for attempt in 0..<25 {
             try Task.checkCancellation()
             do {
-                try ledger.restoreAll()
+                try await ledger.restoreAll()
                 return
             } catch {
                 guard attempt < 24 else {
@@ -867,6 +887,25 @@ final class DesktopWallpaperSync {
     }
 
     private func synchronizeAllSpaces(attempt: Int = 0) {
+        guard !stopped else { return }
+        pendingSynchronizationAttempt = attempt
+        posterWrite?.cancel()
+        guard posterWorker == nil else { return }
+        posterWorker = Task { [weak self] in
+            guard let self else { return }
+            while !self.stopped, let attempt = self.pendingSynchronizationAttempt {
+                self.pendingSynchronizationAttempt = nil
+                let write = Task { await self.performSynchronization(attempt: attempt) }
+                self.posterWrite = write
+                await write.value
+                self.posterWrite = nil
+            }
+            self.posterWorker = nil
+        }
+    }
+
+    private func performSynchronization(attempt: Int) async {
+        guard !stopped, !Task.isCancelled else { return }
         let surfaces = surfaces()
         let keys = Set(surfaces.map { ObjectIdentifier($0.layer) })
         posters = posters.filter { keys.contains($0.key) }
@@ -910,13 +949,17 @@ final class DesktopWallpaperSync {
         retry?.cancel()
         defer { scheduleConfirmation() }
         do {
-            try ledger.synchronize(posters: byDisplay, liveDisplays: Set(surfaces.map(\.display)).union(retained),
+            try await ledger.synchronize(posters: byDisplay, liveDisplays: Set(surfaces.map(\.display)).union(retained),
                                    targetSpaces: targetSpaces, spacePosters: spacePosters)
+            guard !stopped, !Task.isCancelled else { return }
             synchronizedSurfaces = Dictionary(surfaces.map { (ObjectIdentifier($0.layer), $0.display) }) { first, _ in first }
+        } catch is CancellationError {
+            synchronizedSurfaces = nil
         } catch {
             // A display whose picture could not be put back is tried again by the next change of
             // windows, even one that leaves them as they are.
             synchronizedSurfaces = nil
+            guard !stopped, !Task.isCancelled else { return }
             report(error)
             // Retry native asynchronous acknowledgement/Space creation races,
             // not the initial update. Never require the user to visit a Space.

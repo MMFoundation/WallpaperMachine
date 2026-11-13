@@ -25,6 +25,18 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-14 — Shared wallpaper-store coordination (issue 199)
+
+- Implemented a shared FIFO transaction queue for native selection and desktop posters, with bounded verified WallpaperAgent turnover and selection readback.
+- Recovery retries preserve unrelated fields and reject foreign selections; cancelled writes and restarts remain admission barriers; both journals survive unconfirmed restoration.
+- Poster acknowledgements drain as a batch; native takeover and quit cancel and drain queued poster work before changing ownership.
+- python3 scripts/build.py --renderer-only — passed; prepared the missing test-link dependency and regenerated bindings; no renderer source changes.
+- Targeted native run across coordinator, lock-screen, desktop, panel-settings and native-video host tests — 436 passed, 0 failed, 0 skipped.
+- python3 scripts/test.py — passed all Python modules; native gate: 5017 passed, 0 failed, 70 skipped of 5087.
+- Three runtime main-thread warnings came from VideoFormatSupportTests, AppUpdateTests and WebMFilteredVideoSinkTests; compiler warnings remain in existing code.
+- Documentation links and git diff --check passed. Live desktop/WallpaperAgent behavior was not exercised; no desktop authorization, Release build, install, commit or push.
+- Removed this task’s disposable test result bundles and renderer-build logs after recording the verdicts; retained compiled build outputs.
+
 ## 2026-11-13 — Sign-in window hosts and sign-outs the keychain resists
 
 Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in window; Steam Community and pixiv sign-out emptying a keychain item another build saved, failing only when the session stays). The report's third finding, memory corruption in `SteamCMDRuntimeService.fingerprint` `readlinkat`, was not reproduced: SIL shows `&link` passing the element buffer (`_convertMutableArrayToPointerArgument<UInt8, UnsafeMutablePointer<Int8>>`), and the same pattern ran clean under AddressSanitizer with a 1022-byte target; the code is unchanged.
@@ -116,13 +128,3 @@ Written on a Linux host without Xcode or Swift: nothing native was compiled or r
 - `python3 scripts/test.py` (XcodeGen and the native unit tests) — not run: no macOS host. New and changed tests in `PlaybackPolicyCompositionTests`, `PlaybackPreferencesTests`, `WallpaperBackupTests`, `OtherAudioVolumeSettingsTests` and `SettingsSectionsLocalizationTests` have not been compiled
 - Release build — not run
 - Gaps: real coverage-probe occlusion and audible output not checked; the four-segment Quick Settings module not checked visually in any language; translations are machine-written and want a native review
-
-## 2026-11-12 — Desktop widgets workspace: canvas, tabbed inspector, handles, ready-made widgets
-
-- Settings › Desktop Widgets without a search is now a workspace (large canvas, layers, inspector with Content/Text/Style/Position tabs); search still lists every row.
-- Canvas: corner handles resize, a knob turns (15° snap, Command free, double click upright), arrow keys nudge, context menu; preview frame raised to 2048 px.
-- Ready-made widgets (11 presets, groups laid out by measured size) via a popover and the empty inspector; style swatches replace the Apply Style menu.
-- python3 scripts/test.py --only WidgetsSettingsTests: 16 passed (new: handles/nudge, presets layout and limit, inspector tabs, workspace layout at 460/980/1400 in en and ja for every tab).
-- python3 scripts/test.py: 4924 passed, 0 failed, 70 skipped.
-- Offscreen renders (testSnapshotsOnRequest with TEST_RUNNER_WALLPAPER_MACHINE_WIDGET_SNAPSHOTS) checked by eye in English, dark: empty, each tab, turning, narrow, search.
-- Not checked: the live app (no Release build, no desktop run); pointer cursors, real drags and the popover on screen; other languages' renders; light appearance.

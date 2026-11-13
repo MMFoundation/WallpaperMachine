@@ -455,6 +455,18 @@ retries asynchronous restoration for about five seconds (25 attempts, 200 ms apa
 while WallpaperAgent reloads. Quit waits for every restored desktop to read back and for any poster write
 still in flight; one that lands late is restored again.
 
+`SystemWallpaperStore` serializes native-selection and poster transactions across
+their asynchronous waits. Store replacement and WallpaperAgent restart belong to
+that shared owner; the native selection and desktop ledger keep their own recovery
+journals. A restart is not acknowledged merely because SIGTERM succeeded: the old
+verified process must exit, its replacement must start after the write, and the
+changed selections must read back. Retries merge only still-matching old selections,
+preserving unrelated fields and refusing to overwrite a new external choice.
+Unconfirmed restoration keeps its journal and store snapshot for recovery. A cancelled
+or timed-out restart remains a barrier before another writer can issue picture calls.
+Poster acknowledgements are drained as a batch rather than waiting a full confirmation
+window separately for each Space.
+
 A poster the store still names after every writable desktop is restored and read back
 is logged and does not block quit, since macOS 27 can keep a reference no per-Space
 write can remove. Any other failure cancels the quit, and so does restoration that

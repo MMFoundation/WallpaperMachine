@@ -183,6 +183,29 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testCancelledDesktopHandoffCannotPublishNativeSelection() async throws {
+    let original = try Data(contentsOf: store)
+    let sleeper = ManualSleeper()
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [self.scene()] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" })
+    service.beforeActivation = { try await sleeper.sleep(.seconds(1)) }
+    service.setEnabled(true)
+    await sleeper.waitUntilPending()
+    XCTAssertEqual(try Data(contentsOf: store), original)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+    service.setEnabled(false)
+    await waitFor("cancelled native handoff") { !service.isBusy }
+    XCTAssertFalse(service.isEnabled)
+    XCTAssertFalse(service.ownsDesktopProvider)
+    XCTAssertEqual(try Data(contentsOf: store), original)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+    try await service.shutdown()
+  }
+
+  @MainActor
   func testActivationFailureKeepsPostersSuspendedWhenRestorationFails() async throws {
     try XCTSkipIf(CGDisplayIsOnline(CGMainDisplayID()) == 0, "No online main display")
     let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [self.scene()] },
@@ -380,7 +403,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("both lock screens ready") { service.isEnabled && !service.isBusy }
 
@@ -433,7 +456,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     displayUUID: { online.contains($0) ? [1: "one", 2: "two"][$0] : nil })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("external-primary lock screens ready") { service.isEnabled && !service.isBusy }
     let manifest = exchange.appendingPathComponent(LockScreenConfiguration.fileName)
@@ -496,7 +519,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     selection: LockScreenWallpaperSelection(
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
-    try service.start()
+    try await service.start()
     XCTAssertTrue(timers.isEmpty)
     service.refresh()
     await waitFor("off refresh") { !service.isBusy }
@@ -549,7 +572,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     selection: LockScreenWallpaperSelection(
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
-    try service.start()
+    try await service.start()
     XCTAssertTrue(service.isRequested)
     XCTAssertEqual(timers.count, 1)
     let first = try XCTUnwrap(timers.first)
@@ -571,7 +594,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   /// The poster sync stays away from the desktop picture exactly while the lock screen is asked
   /// for and able to take it; the Settings switch stays locked from the ask until the handback.
   @MainActor
-  func testTheLockScreenClaimsTheDesktopPictureOnlyWhileItCanTakeIt() throws {
+  func testTheLockScreenClaimsTheDesktopPictureOnlyWhileItCanTakeIt() async throws {
     func makeService() -> LockScreenWallpaperService {
       LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [] },
         selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
@@ -580,20 +603,20 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     let off = makeService()
     XCTAssertFalse(off.claimsDesktopPicture, "Off, the posters keep the desktop")
     XCTAssertFalse(off.locksDesktopPictureChoice)
-    try off.start()
+    try await off.start()
     XCTAssertFalse(off.claimsDesktopPicture)
     XCTAssertFalse(off.locksDesktopPictureChoice)
 
     defaults.set(true, forKey: preference)
     let requested = makeService()
-    try requested.start()
+    try await requested.start()
     XCTAssertTrue(requested.isRequested)
     XCTAssertTrue(requested.claimsDesktopPicture, "Asked for and able to start: posters wait for it")
     XCTAssertTrue(requested.locksDesktopPictureChoice)
 
     try Data("invalid journal".utf8).write(to: journal)
     let failed = makeService()
-    XCTAssertThrowsError(try failed.start())
+    await XCTAssertThrowsErrorAsync(try await failed.start())
     XCTAssertNotNil(failed.errorMessage)
     XCTAssertFalse(failed.claimsDesktopPicture, "A lock screen that could not start leaves the desktop to the posters")
     XCTAssertTrue(failed.locksDesktopPictureChoice, "but the choice stays locked until it is turned off")
@@ -607,7 +630,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     selection: LockScreenWallpaperSelection(
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
-    XCTAssertThrowsError(try service.start())
+    await XCTAssertThrowsErrorAsync(try await service.start())
     XCTAssertTrue(timers.isEmpty)
     XCTAssertNotNil(service.errorMessage)
     try FileManager.default.removeItem(at: journal)
@@ -625,7 +648,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     selection: LockScreenWallpaperSelection(
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("published scene awaiting readiness") {
       service.ownsDesktopProvider && FileManager.default.fileExists(atPath: self.journal.path)
@@ -654,7 +677,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     selection: LockScreenWallpaperSelection(
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("first generation awaiting readiness") {
       service.ownsDesktopProvider && FileManager.default.fileExists(atPath: self.journal.path)
@@ -683,7 +706,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         if failReload { throw LockScreenWallpaperFailure(message: "restoration failed") }
       }),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("activation waiting for readiness") {
       service.ownsDesktopProvider && FileManager.default.fileExists(atPath: self.journal.path)
@@ -719,7 +742,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       displayUUID: { _ in "one" })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     service.setScreenSaverEnabled(true)
     await waitFor("both native modes enabled") { service.isEnabled && service.screenSaverEnabled }
@@ -749,7 +772,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [] },
       selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
       exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
-    try service.start()
+    try await service.start()
     do {
       try await service.shutdown {
         throw CocoaError(.fileWriteNoPermission)
@@ -805,7 +828,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       })
     var responder = readinessResponder(processID: 999_901)
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     let first = try publishedRevision()
@@ -845,7 +868,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     var pid: Int32 = 999_910
     var responder = readinessResponder(processID: pid)
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     for recovery in 1...LockScreenWallpaperService.rendererRecoveryLimit {
@@ -895,7 +918,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       })
     var responder = readinessResponder(processID: renderers.serving)
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     for change in 1...(LockScreenWallpaperService.rendererRecoveryLimit + 2) {
@@ -976,7 +999,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         return { watches.removeValue(forKey: process) }
       })
     updatingService = service
-    try service.start()
+    try await service.start()
     service.setScreenSaverEnabled(true)
     service.setEnabled(true)
     await waitFor("initial frame") { !service.isBusy && service.isEnabled }
@@ -1015,7 +1038,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     var pid: Int32 = 999_920
     var responder = readinessResponder(processID: pid)
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     let endings =
@@ -1069,7 +1092,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       displaysAreAway: { away })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     let selected = try Data(contentsOf: store)
@@ -1116,7 +1139,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     let timer = try XCTUnwrap(timers.last)
@@ -1157,7 +1180,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       displayUUID: { [1: "one"][$0] })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     let timer = try XCTUnwrap(timers.last)
@@ -1193,7 +1216,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
       displayUUID: { [1: "one"][$0] }, runningExtensionBundles: { [] }, readinessTimeout: 1)
     let responder = readinessResponder()
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     let timer = try XCTUnwrap(timers.last)
@@ -1257,7 +1280,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       displayUUID: { [1: "one"][$0] })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     service.setScreenSaverEnabled(true)
     await waitFor("both rows failed") {
@@ -1296,7 +1319,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       displayUUID: { [1: "one"][$0] })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     service.setScreenSaverEnabled(true)
     await waitFor("both modes on") { service.isEnabled && service.screenSaverEnabled && !service.isBusy }
@@ -1330,7 +1353,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         }),
       exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
       displayUUID: { [1: "one"][$0] })
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     service.setScreenSaverEnabled(true)
     await waitFor("selection awaiting its first frame") {
@@ -1373,7 +1396,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     let manifest = exchange.appendingPathComponent(LockScreenConfiguration.fileName)
@@ -1435,7 +1458,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         try bytes.write(to: url, options: .atomic)
         publications += 1
       }, contentRevision: { contentRevision })
-    try service.start()
+    try await service.start()
     service.setScreenSaverEnabled(true)
     await waitFor("initial web publication") { !service.isBusy }
     let initial = try publishedConfiguration()
@@ -1473,7 +1496,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     displayUUID: { online.contains($0) ? [1: "one"][$0] : nil })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     try setGlobalWallpaperLinked()
@@ -1521,7 +1544,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { [1: "one", 2: "two"][$0] })
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("first publication") {
       service.ownsDesktopProvider && FileManager.default.fileExists(atPath: self.journal.path)
@@ -1572,7 +1595,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("enabled with published assets") { service.isEnabled }
 
@@ -1609,7 +1632,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("first publication") { service.isEnabled }
 
@@ -1677,7 +1700,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in "one" })
     service.beforeActivation = { XCTFail("Saver-only selection must not take the desktop") }
-    try service.start()
+    try await service.start()
     service.setScreenSaverEnabled(true)
     await waitFor("idle selection without a readiness responder") { !service.isBusy }
     XCTAssertTrue(service.screenSaverEnabled)
@@ -1719,7 +1742,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
         displayUUID: { _ in "one" })
       let responder = readinessResponder()
-      try service.start()
+      try await service.start()
       service.setScreenSaverEnabled(true)
       if !saverOnly { service.setEnabled(true) }
       await waitFor("native default wallpaper activation") { !service.isBusy }
@@ -1751,7 +1774,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
       displayUUID: { _ in online ? "one" : nil })
       let responder = readinessResponder()
-      try service.start()
+      try await service.start()
       service.setScreenSaverEnabled(true)
       await waitFor("saver selected") { !service.isBusy }
       service.setEnabled(true)
@@ -1813,7 +1836,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in "one" })
-    try service.start()
+    try await service.start()
     service.setScreenSaverEnabled(true)
     await waitFor("web saver selected") { !service.isBusy }
     XCTAssertTrue(service.screenSaverEnabled)
@@ -1857,7 +1880,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       displayUUID: { _ in "one" })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     service.setScreenSaverEnabled(true)
     await waitFor("web lock screen and saver") {
@@ -1895,7 +1918,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in "one" })
-    try service.start()
+    try await service.start()
     service.setScreenSaverEnabled(true)
     await waitFor("rejected web entry") { !service.isBusy }
     XCTAssertFalse(service.screenSaverEnabled)
@@ -1912,7 +1935,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in "one" })
-    try service.start()
+    try await service.start()
     service.setScreenSaverEnabled(true)
     await waitFor("saver selected") { !service.isBusy }
     XCTAssertTrue(service.screenSaverEnabled)
@@ -1937,7 +1960,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in "one" })
-    try service.start()
+    try await service.start()
     service.setScreenSaverEnabled(true)
     await waitFor("saver selected") { !service.isBusy }
     service.setEnabled(true)
@@ -1974,7 +1997,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in "one" }, runningExtensionBundles: { [] }, readinessTimeout: 0.2)
     service.afterDeactivation = { desktopReturned = true }
-    try service.start()
+    try await service.start()
     service.refresh()
     await waitFor("restored lock activation timeout") { !service.isBusy }
     XCTAssertTrue(service.isRequested)
@@ -2039,7 +2062,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in online ? "one" : nil }, runningExtensionBundles: { [] },
     readinessTimeout: 0.2)
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     service.setScreenSaverEnabled(true)
     await waitFor("lock timeout retaining saver") { !service.isBusy }
@@ -2095,7 +2118,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in "one" }, expectedExtensionBundle: bundle,
     runningExtensionBundles: { [] }, readinessTimeout: 0.2)
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     service.setScreenSaverEnabled(true)
     await waitFor("shared extension rejection") { !service.isBusy }
@@ -2126,7 +2149,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in "one" }, runningExtensionBundles: { [] }, readinessTimeout: 0)
-    try service.start()
+    try await service.start()
     service.setScreenSaverEnabled(true)
     await waitFor("initial saver selection") { !service.isBusy }
     service.setEnabled(true)
@@ -2184,7 +2207,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       }
       try data.write(to: url, options: .atomic)
     }, runningExtensionBundles: { [] }, readinessTimeout: 0)
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     service.setScreenSaverEnabled(true)
     await waitFor("failed saver-only fallback") { !service.isBusy }
@@ -2219,7 +2242,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       displayUUID: { _ in "one" })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("\(type) published") { service.isEnabled && !service.isBusy }
     let published = try XCTUnwrap(publishedConfiguration().scenes.first)
@@ -2336,7 +2359,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("first publication") { service.isEnabled && !service.isBusy }
     let first = try publishedConfiguration()
@@ -2621,7 +2644,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       events.append("enable")
       off = false
     }, scenes: { [record] })
-    try service.start()
+    try await service.start()
     let monitor = try XCTUnwrap(timers.first)
     monitor.fire()
     await waitFor("activation stopped by the switched-off renderer") { !service.isBusy }
@@ -2663,7 +2686,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       enables += 1
       if stubborn { throw self.switchedOff("the renderer stayed switched off") }
     }, scenes: { [record] })
-    try service.start()
+    try await service.start()
     service.setScreenSaverEnabled(true)
     await waitFor("activation stopped") { !service.isBusy }
     XCTAssertEqual(service.screenSaverError, "the renderer is switched off")
@@ -2831,7 +2854,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     runningExtensionBundles: { XCTFail("Should fail before the timeout"); return [] })
     var handedBack = false
     service.afterDeactivation = { handedBack = true }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("configuration failure rollback", timeout: 3) { !service.isBusy }
     XCTAssertTrue(loadFailed)
@@ -2858,7 +2881,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in "one" }, expectedExtensionBundle: bundle)
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("diagnostic") {
       FileManager.default.fileExists(atPath: self.exchange.appendingPathComponent(LockScreenExtensionStatus.fileName).path)
@@ -2909,7 +2932,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
     exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
     displayUUID: { _ in "one" }, expectedExtensionBundle: bundle)
-    try service.start()
+    try await service.start()
     service.setScreenSaverEnabled(true)
     await waitFor("saver selection") { !service.isBusy }
     XCTAssertTrue(service.screenSaverEnabled)
@@ -2994,7 +3017,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("first publication") { service.isEnabled && !service.isBusy }
     let first = try publishedConfiguration()
@@ -3024,7 +3047,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       displayUUID: { _ in "one" })
     let responder = readinessResponder()
     defer { responder.cancel() }
-    try service.start()
+    try await service.start()
     service.setEnabled(true)
     await waitFor("\(type) published") { service.isEnabled && !service.isBusy }
     let published = try XCTUnwrap(publishedConfiguration().scenes.first)
