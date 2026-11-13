@@ -548,8 +548,12 @@ its store between the app's read and write, WallpaperAgent between a restart and
 relaunch, or no first frame within the readiness wait. The committed selection stays
 on the lock screen and the monitor publishes again after 2, 4, 8, 16 and 32 seconds,
 the status keeping its last progress text. A sixth failure in a row is reported and
-restored like any other, with **Retry**. A first activation, a switch change and every
-other failure report at once, as before. A write that lost the race to WallpaperAgent
+restored like any other, with **Retry**. A store race also does not fail an activation
+that turns no committed mode off (a first activation, at launch too, a switch or
+**Retry**): the journal can still restore everything, so the same back-off tries
+again. A restore, a switch turning a mode off and every other failure report at once,
+including a switch made while the first activation is still waiting for a frame.
+A write that lost the race to WallpaperAgent
 wrote nothing, so the selection's next attempt does not count the fields it was about
 to take as its own (it would read them as changed outside the app); the recovery
 journal keeps them on disk.
@@ -591,6 +595,29 @@ still need a service reload. The recovery union is persisted before the store ch
 and pruned only after a successful reload; failed writes, reloads or journal removal
 keep it for retry, and a malformed saved linked or inherited baseline fails recovery
 before the store changes or the journal is removed.
+
+Restored fields are kept in `restored-native-selection.plist`, including when one
+mode is turned off while the other remains enabled. WallpaperAgent can save the
+store it loaded before a restore over that restore (seen after quitting), putting
+the extension back after its live journal entry was pruned. Each app-written
+`current:<revision>` field is taken back independently with its saved original,
+even while another field still has an active journal entry. Active originals take
+precedence; missing global choices are recovered only for modes taken back this way.
+A live global entry records the whole original node, so its newer choices (including
+an absent choice) take precedence over archived values even for modes it does not own.
+The manually selected WallpaperMachine item in System Settings uses plain `current`
+and does not adopt an archived original; it uses the current native fallback when
+activated. Other wallpaper choices made since are preserved.
+
+Before pruning the live journal, the app atomically archives the relinquished fields,
+replacing older originals for those same fields. A failed archive write keeps the
+live recovery journal intact. Fields taken back from the archive join the write-ahead
+journal before the next store write, so a failed reload or process exit can still
+restore them. Repeated toggles keep one archive entry per node with at most the two
+native fields; pruning drops paths no longer represented by the store or live
+journal. Archive reads share the existing store-change check and archive writes
+happen only when relinquishing fields, with no additional work on settled monitor
+ticks or rendering frames.
 
 macOS copies the extension's selection into the fallbacks it reloads (`SystemDefault`
 and each Space's `Default`), and a Space created while the feature is on, a new

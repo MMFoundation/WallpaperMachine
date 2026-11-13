@@ -1163,6 +1163,129 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertFalse(try storeOwnsDisplayOne())
   }
 
+  /// An activation whose store write loses the race to WallpaperAgent wrote nothing, so it is
+  /// tried again like a committed one. Here it is a Retry after both rows failed: their errors
+  /// must not stop the monitor that runs the next attempt.
+  @MainActor
+  func testFirstActivationRetriesAStoreRaceInsteadOfFailing() async throws {
+    var record = scene()
+    record.displayId = 1
+    var external = fixture()
+    external["Unrelated"] = "WallpaperAgent wrote this"
+    var failScenes = true
+    var raced = false
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {},
+      scenes: {
+        if failScenes { throw LockScreenWallpaperFailure(message: "not ready") }
+        return [record]
+      },
+      selection: LockScreenWallpaperSelection(
+        storeURL: store, journalURL: journal, reload: {},
+        persistJournal: { url, data in
+          try LockScreenWallpaperSelection.persistJournalFile(url, data)
+          if !raced {
+            raced = true
+            try self.write(external)
+          }
+        }),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { [1: "one"][$0] })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try service.start()
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("both rows failed") {
+      service.errorMessage != nil && service.screenSaverError != nil && !service.isBusy
+    }
+    failScenes = false
+    service.retry(lockScreen: true)
+    await waitFor("the raced attempt") { raced && !service.isBusy }
+    XCTAssertNil(service.errorMessage)
+    XCTAssertNil(service.screenSaverError)
+    XCTAssertFalse(service.isEnabled, "the raced attempt wrote nothing")
+    XCTAssertFalse(try storeOwnsDisplayOne())
+    try XCTUnwrap(timers.last).fire()
+    await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
+    XCTAssertNil(service.errorMessage)
+    XCTAssertTrue(try storeOwnsDisplayOne())
+  }
+
+  /// Turning a committed mode off is not retried: a race there reports and restores at once, so
+  /// the switched-off mode does not stay selected through the back-off.
+  @MainActor
+  func testTurningAModeOffDuringAStoreRaceStillRestoresAtOnce() async throws {
+    var record = scene()
+    record.displayId = 1
+    var raceReload = false
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(
+        storeURL: store, journalURL: journal,
+        reload: {
+          if raceReload {
+            raceReload = false
+            throw LockScreenWallpaperFailure(message: "agent relaunching", reason: .transient)
+          }
+        }),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { [1: "one"][$0] })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try service.start()
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("both modes on") { service.isEnabled && service.screenSaverEnabled && !service.isBusy }
+    raceReload = true
+    service.setScreenSaverEnabled(false)
+    await waitFor("the raced switch") { !raceReload && !service.isBusy }
+    XCTAssertNotNil(service.errorMessage)
+    XCTAssertEqual(try selectedProvider("Idle"), "display-one-idle")
+  }
+
+  @MainActor
+  func testDisablingSaverBeforeFirstFrameDoesNotRetryAStoreRace() async throws {
+    var record = scene()
+    record.displayId = 1
+    var raceNextWrite = false
+    var raced = false
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {},
+      scenes: { [record] },
+      selection: LockScreenWallpaperSelection(
+        storeURL: store, journalURL: journal, reload: {},
+        persistJournal: { url, data in
+          try LockScreenWallpaperSelection.persistJournalFile(url, data)
+          if raceNextWrite {
+            raceNextWrite = false
+            raced = true
+            var current = try XCTUnwrap(PropertyListSerialization.propertyList(
+              from: Data(contentsOf: self.store), format: nil) as? [String: Any])
+            current["Unrelated"] = "WallpaperAgent wrote this"
+            try self.write(current)
+          }
+        }),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { [1: "one"][$0] })
+    try service.start()
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("selection awaiting its first frame") {
+      service.isBusy && (try? self.selectedProvider("Idle")) == LockScreenConfiguration.extensionIdentifier
+    }
+    XCTAssertFalse(service.isEnabled)
+    // New global metadata requires updating the recovery union before the disable writes.
+    var current = try XCTUnwrap(PropertyListSerialization.propertyList(
+      from: Data(contentsOf: store), format: nil) as? [String: Any])
+    current["AllSpacesAndDisplays"] = ["Type": "individual", "Unrelated": "new-metadata"]
+    try write(current)
+    raceNextWrite = true
+    service.setScreenSaverEnabled(false)
+    await waitFor("the raced disable") { raced && !service.isBusy }
+    XCTAssertNotNil(service.errorMessage)
+    XCTAssertEqual(try selectedProvider("Idle"), "display-one-idle")
+    XCTAssertFalse(service.screenSaverEnabled)
+    try await service.shutdown()
+  }
+
   @MainActor
   func testUnchangedMonitorTickDoesNotRepublishAndResolvedUUIDRecovers() async throws {
     var builtIn = scene()
