@@ -41,7 +41,7 @@ struct QuickSettingsSection: View {
     keywords: ["Keep running", "Reduced quality", "Pause"])
   static let covered = SettingsItem(
     id: "quick.module-covered", section: .quick, title: "When windows cover the desktop",
-    keywords: ["Pause", "Keep running"])
+    keywords: ["Pause", "Mute", "Reduce volume", "Keep running"])
   static let appearance = SettingsItem(
     id: "quick.module-appearance", section: .quick, title: "Appearance",
     keywords: ["System (Auto)", "Light", "Dark"])

@@ -198,8 +198,14 @@ struct PlaybackSettings: Equatable {
   var showsLowBatteryRows: Bool { hasBattery }
   /// The low battery level is asked only once the rule does something.
   var showsLowBatteryLevel: Bool { hasBattery && lowBatteryAction != .keepRunning }
-  /// The reduced volume is asked only once other-app sound turns wallpapers down.
-  var showsOtherAudioVolume: Bool { otherAudioAction == .reduceVolume }
+  /// The reduced volume is asked only once other-app sound or a covered desktop turns wallpapers
+  /// down. Both use the one level.
+  var showsOtherAudioVolume: Bool {
+    otherAudioAction == .reduceVolume || desktopCoveredAction == .reduceVolume
+  }
+  /// The level's row sits under the first row that chose Reduce volume: the covered desktop's,
+  /// unless only other-app sound did.
+  var reducedVolumeFollowsDesktopCovered: Bool { desktopCoveredAction == .reduceVolume }
   /// So is the time without input after which the Mac counts as inactive.
   var showsInactivityTime: Bool { inactivityAction != .keepRunning }
   /// "Only play on the display I'm using" needs two displays, or is shown while on so it can be turned off.

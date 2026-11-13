@@ -133,6 +133,8 @@ extension DesktopCoveredAction {
   @MainActor var title: String {
     switch self {
     case .pause: L("Pause")
+    case .mute: L("Mute")
+    case .reduceVolume: L("Reduce volume")
     case .keepRunning: L("Keep running")
     }
   }

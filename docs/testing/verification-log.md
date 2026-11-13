@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-13 — Covered-desktop sound: PR 194 review and reconnect fix
+
+- Four reconnect regressions failed before the fix, covering retained pauses and refused resumes for Mute and Reduce volume.
+- Targeted playback, preference, backup and panel checks: 169 passed, 0 failed, 0 skipped; no runtime warnings.
+- python3 scripts/test.py on main ef6c85c5 plus the final PR source: all 35 Python modules passed; 4,963 native passed, 0 failed, 70 skipped of 5,033 (Xcode 27.2).
+- The integration run used temporary test-home and path-backed preference-suite overrides to isolate the installed app.
+- Skipped: opt-in media, live Steam, reference rendering and panel snapshots. Two main-thread warnings came from unchanged VideoFormatSupportTests and AppUpdateTests cases.
+- Real coverage probes, audible output and narrow-window presentation were not exercised. No Release build, installation or desktop run.
+
 ## 2026-11-13 — Project triage and grouped GitHub Actions updates
 
 - Project triage maintains area and lifecycle labels from GitHub closing links, current-head reviews, CI, mergeability and DCO trailers; Dependabot groups weekly GitHub Actions updates.
@@ -46,6 +55,25 @@ Core Audio start receive timeouts now stop and release the uncertain session bef
 - `python3 scripts/check_renderer.py` — initial build interrupted by a killed backdrop_geometry_test discovery process; rebuilding that target succeeded. The subsequent full run and a final --skip-build run both exited 1 because backdrop_scene_test was killed (signal 9); all other registered binaries returned 0.
 - Renderer runs exercised GPU and realtime checks, twelve generated pooled/isolated image comparisons and eight reload projects twice, all successful. Seven local asset/corpus cases were skipped; authored wallpaper compatibility remains unverified.
 - Live system audio capture, permission prompts, device changes and desktop behavior were not exercised. No app was installed, launched or restarted. Full native and renderer gates remain blocked by the failures above.
+
+## 2026-11-12 — Gate run on a Mac for the covered-desktop sound choices (#192)
+
+Run on an M4 Mac mini with macOS 27.2 and Xcode 27.2 (27B52) through DEVELOPER_DIR; build.md asks for Xcode 26 and the Test workflow uses macos-26 runners, which this run did not use. Commit d1d5d4e2, with no changes needed.
+
+- `python3 scripts/build.py` (full, Debug) — exit 0
+- `python3 scripts/test.py --only` PlaybackPolicyCompositionTests, WallpaperPresentationPolicyTests, PlaybackPreferencesTests, WallpaperBackupTests, OtherAudioVolumeSettingsTests, SettingsSectionsLocalizationTests, PanelSettingsValuesTests, SettingsSectionsRenderTests, SettingsWindowRenderTests — exit 0; 175 passed, 0 failed, 0 skipped
+- `python3 scripts/test.py` — exit 0; 34 script test modules OK; 4936 passed, 0 failed, 70 skipped of 5006; 2 runtime warnings in the result bundle not examined
+- Not checked: a Release build, the four-segment Quick Settings module in each language, real coverage-probe occlusion and audible output; the five translations are machine-written
+- Found in passing, not caused by this change: `AppUpdateTests` builds `AppUpdateStore` without `defaults:`, and the gate wrote `WallpaperMachine.updates.lastAttempt` into the installed app's preferences
+
+## 2026-11-12 — Mute or Reduce volume when windows cover the desktop (#192)
+
+Written on a Linux host without Xcode or Swift: nothing native was compiled or run.
+
+- `python3 scripts/test.py --python-only` — exit 0; 34 script test files OK, including `test_localization_catalogs.py` and `test_panel_localization.py` for the three new catalog keys in pt-BR, ko, ja, zh-Hans and zh-Hant
+- `python3 scripts/test.py` (XcodeGen and the native unit tests) — not run: no macOS host. New and changed tests in `PlaybackPolicyCompositionTests`, `PlaybackPreferencesTests`, `WallpaperBackupTests`, `OtherAudioVolumeSettingsTests` and `SettingsSectionsLocalizationTests` have not been compiled
+- Release build — not run
+- Gaps: real coverage-probe occlusion and audible output not checked; the four-segment Quick Settings module not checked visually in any language; translations are machine-written and want a native review
 
 ## 2026-11-12 — Desktop widgets workspace: canvas, tabbed inspector, handles, ready-made widgets
 
@@ -88,33 +116,3 @@ Installed font families, italic, letter spacing, line height and case; gradient 
 - Targeted: python3 scripts/test.py --only MenuBarEnergyMeterTests --only EnergyReadoutTests --only StatusPanelControllerTests --only StatusPanelRenderTests --only WallpaperPresentationPolicyTests --only SettingsSectionsRenderTests --only EnergyUsageMonitorTests --only WallpaperBackupTests: 155 passed.
 - Gate: python3 scripts/test.py: 4897 passed, 0 failed, 68 skipped.
 - Not checked: the status item drawn in the real menu bar (no desktop run, no Release build); the figure's width beside other menu bar items.
-
-## 2026-11-12 — Integrate Steam sign-in retry recovery
-
-- Integrated the fix from fix/steam-sign-in-retry-186 onto current main; removed an obsolete sign-in-only assertion and documentation after that API was removed.
-- `python3 scripts/test.py --only PanelDownloadActionsTests --only DownloadDialogResolutionTests --only DownloaderFailureOutputTests`: 42 passed, 0 failed, 0 skipped.
-- Initial full gate: 4888 passed, 1 failed, 68 skipped; the welcome accessibility regression also failed on unchanged main. Fixed separately in a1f9824.
-- `python3 scripts/test.py --only WelcomeRenderTests --only FirstRunModelTests --only PanelDownloadActionsTests`: 59 passed, 0 failed, 0 skipped.
-- `python3 scripts/test.py` after the welcome fix: Python checks passed; 4889 native tests passed, 0 failed, 68 opt-in media/network/reference checks skipped.
-- Steam timeout/password rejection, corrected-account retry, QR recovery through import, an existing QR session, and normal transfer retries were exercised with offline fakes.
-- Live Steam sign-in, the reporter’s network/account, desktop interaction and VoiceOver remain unverified. No Release build or renderer changes.
-
-## 2026-11-12 — Control panel UI critique fixes (ws1-ws7) on claude/ui-critique-fixes
-
-- Scope: 34 local commits over main 54227ed3: Apply/Play symbols and wording, Workshop inspector Apply and Command-Return, staged-edit footer and Not applied marks (Rust bridge staged flags), collapsible display cards, welcome Skip setup and the delayed support prompt, P3 polish, and the panel type scale, shared buttons, scrims, tile marks and design-token lint.
-- python3 scripts/test.py on the final tree: 4887 passed, 0 failed, 68 skipped; script tests incl. test_panel_design_tokens, catalogs and doc links OK. Each workstream also passed the full gate before its commits.
-- Known flake seen once under full-gate load: WebWallpaperPageTests.testRefusedOrReplacedNavigationDoesNotFailTheWallpaper (10 s WebKit deadline) in ws3's first run; the rerun passed. Not caused by this branch.
-- python3 scripts/check_rust.py after the bridge change: core 429, bridge 961, shader 958 and core-integration passed, 0 failed; desktop-window tests excluded (need an authorized desktop run). No Rust or bridge change since.
-- python3 scripts/check_renderer.py on the final tree: exit 0; 12 generated scenes pixel-equal pooled vs isolated, 0 reload cycles; 19 local-corpus and energy checks skipped (no corpus or opt-ins), so asset coverage is skipped, not passed.
-- Not rendered: no Release build, no app launch, no screenshots. Unverified by eye: paused vs waiting rings, scrim strengths, the new markHeart pink and the library mark's contrast, the translucent secondary fill in dark mode, the View menu titles, the welcome Skip setup and Escape routing.
-- Not covered by tests: whether a click (not a key) focuses a tile and makes its ring show the cancel mark instead of the percentage; pixiv Command-Return wiring (manual smoke only); the scope bar's middle tier; translations without native-speaker review.
-
-## 2026-11-11 — Feeling good? offers Sponsor on Open Collective; README lists Open Collective sponsors
-
-The support prompt's second choice opens MMFoundation's Open Collective (approved by Open Source Collective on 2026-11-11) instead of the website's pricing page, with new strings in every shipped language; the four READMEs gain a sponsors block drawn by Open Collective.
-
-- `python3 scripts/build.py --renderer-only` — OK; the checkout's `libwallpaper_bridge.a` predated main's Steam QR sign-in bridge, so the first targeted build failed to link
-- `xattr -cr build/Build/Products/Debug` — cleared after the extension's CodeSign refused Finder/File Provider attributes (docs/build.md)
-- `python3 scripts/test.py --only SupportPromptPresenterTests --only PanelSupportPromptTests --only PanelPerformanceDataTests --only ExternalLinkTests` — 32 passed; `--only PanelSharingTests` — 5 passed
-- `python3 scripts/test.py` — exit 0: every Python suite, XcodeGen, and 4,843 native tests passed, 0 failed, 68 skipped of 4,911 (two main-thread API runtime warnings)
-- Not checked: the sheet's longer row in six languages on screen (no desktop run, no Release build); the README block through GitHub's image proxy (rendered with GitHub's Markdown API, images loaded from Open Collective directly)

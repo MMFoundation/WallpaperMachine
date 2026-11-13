@@ -26,6 +26,21 @@ private final class CompositionProbe {
     /// Holds the global acknowledgement until the test releases it.
     var holdGlobal = false
     var heldGlobal: [WallpaperPresentationPolicy.ApplyCompletion] = []
+    /// The displays with a wallpaper and whether each is on screen.
+    var surfaces = [WallpaperSurfaceVisibility(displayID: 1, isVisible: true)]
+    /// Displays whose working area other windows cover, and what the user chose for that.
+    var covered: Set<UInt32> = []
+    var coveredAction = DesktopCoveredAction.keepRunning
+    /// Per-display decisions, in delivery order.
+    var displays: [(display: UInt32, suspended: Bool)] = []
+    var displayFailures = 0
+    var onDisplay: ((UInt32, Bool) -> Void)?
+
+    func setVisible(_ visible: Bool, display: UInt32) {
+        surfaces = surfaces.map {
+            $0.displayID == display ? WallpaperSurfaceVisibility(displayID: display, isVisible: visible) : $0
+        }
+    }
 }
 
 private struct DeliveryRefused: Error {}
@@ -53,13 +68,13 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
     private let windowCenter = NotificationCenter()
 
     private func makePolicy(
-        _ probe: CompositionProbe, conditions: SystemConditionMonitor? = nil
+        _ probe: CompositionProbe, conditions: SystemConditionMonitor? = nil, settle: Duration = .zero
     ) -> WallpaperPresentationPolicy {
         WallpaperPresentationPolicy(
             workspaceCenter: workspaceCenter,
             lockCenter: lockCenter,
             windowCenter: windowCenter,
-            surfaces: { [WallpaperSurfaceVisibility(displayID: 1, isVisible: true)] },
+            surfaces: { probe.surfaces },
             sessionState: { .init(locked: probe.sessionLocked) },
             displaySleepAction: { probe.sleepAction },
             appRuleActions: { probe.rules.union(conditions?.actions ?? []) },
@@ -67,8 +82,10 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
             otherAudioAction: { probe.otherAudioAction },
             otherAudioVolume: { probe.otherAudioVolume },
             userMuted: { probe.userMuted },
+            desktopCoveredAction: { probe.coveredAction },
+            coveredDisplays: { probe.covered },
             qualityReductions: { probe.reductions.union(conditions?.qualityReductions ?? []) },
-            occlusionSettleDelay: .zero,
+            occlusionSettleDelay: settle,
             applyGlobal: { presentation, completion in
                 probe.presentations.append(presentation)
                 probe.order.append(.global(presentation))
@@ -103,7 +120,16 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
                     completion(.success(()))
                 }
             },
-            applyDisplay: { _, _, completion in completion(.success(())) })
+            applyDisplay: { display, suspended, completion in
+                probe.displays.append((display, suspended))
+                probe.onDisplay?(display, suspended)
+                if probe.displayFailures > 0 {
+                    probe.displayFailures -= 1
+                    completion(.failure(DeliveryRefused()))
+                } else {
+                    completion(.success(()))
+                }
+            })
     }
 
     func testDisplaySleepStopUnloadsAndPauseOnlySuspends() {
@@ -378,6 +404,411 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
         XCTAssertEqual(policy.globalPresentation, .running)
         XCTAssertFalse(policy.isAudioSuppressed)
         XCTAssertFalse(policy.isSuspended)
+    }
+
+    // MARK: Sound under a covered desktop
+
+    /// Mute for a covered desktop silences the wallpapers and leaves them playing: nothing is
+    /// suspended, globally or for the covered display, and uncovering gives the sound back.
+    func testMuteForACoveredDesktopSilencesWithoutPausingAnything() {
+        let probe = CompositionProbe()
+        probe.coveredAction = .mute
+        probe.covered = [1]
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(probe.audio, [true])
+        XCTAssertTrue(policy.isDesktopCoveredForSound)
+        XCTAssertTrue(probe.presentations.isEmpty, "Muting never pauses the desktop")
+        XCTAssertTrue(probe.displays.isEmpty, "Nor the covered display")
+        XCTAssertTrue(policy.suspendedDisplayIDs.isEmpty)
+        XCTAssertTrue(probe.gains.isEmpty, "Silenced at each wallpaper's own volume")
+
+        probe.covered = []
+        windowCenter.post(name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        XCTAssertEqual(probe.audio, [true, false])
+        XCTAssertFalse(policy.isDesktopCoveredForSound)
+    }
+
+    /// Reduce volume for a covered desktop uses the level other-app sound uses. When both hold,
+    /// the volume is that level once, not the level of the level.
+    func testReduceVolumeForACoveredDesktopUsesTheOneSharedLevel() {
+        let probe = CompositionProbe()
+        probe.coveredAction = .reduceVolume
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertTrue(probe.gains.isEmpty, "Nothing covers the desktop yet")
+
+        probe.covered = [1]
+        policy.evaluate()
+        XCTAssertEqual(probe.gains, [0.3])
+        XCTAssertTrue(probe.audio.isEmpty, "Turning down is not muting")
+        XCTAssertTrue(probe.displays.isEmpty)
+
+        probe.otherAudio = true
+        probe.otherAudioAction = .reduceVolume
+        policy.evaluate()
+        XCTAssertEqual(probe.gains, [0.3], "Both reasons, one level")
+
+        probe.covered = []
+        policy.evaluate()
+        XCTAssertEqual(probe.gains, [0.3], "The other sound still turns them down")
+        probe.otherAudio = false
+        policy.evaluate()
+        XCTAssertEqual(probe.gains, [0.3, 1])
+    }
+
+    /// Wallpaper sound is one channel for every display, so a covered display alone does not
+    /// silence a wallpaper still in view on another. A display hidden for another reason (a
+    /// full-screen app) is not in view and does not keep the sound.
+    func testSoundChangesOnlyOnceEveryWallpaperInViewIsCovered() {
+        let probe = CompositionProbe()
+        probe.surfaces = [
+            WallpaperSurfaceVisibility(displayID: 1, isVisible: true),
+            WallpaperSurfaceVisibility(displayID: 2, isVisible: true),
+        ]
+        probe.coveredAction = .mute
+        probe.covered = [1]
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertTrue(probe.audio.isEmpty, "The wallpaper on display 2 is still in view")
+        XCTAssertFalse(policy.isDesktopCoveredForSound)
+
+        probe.covered = [1, 2]
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true])
+
+        probe.covered = [1]
+        probe.setVisible(false, display: 2)
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true], "Display 2 is out of view, and display 1 is still covered")
+
+        probe.setVisible(true, display: 2)
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true, false], "Display 2 is in view again, uncovered")
+        XCTAssertTrue(probe.displays.allSatisfy { $0.display == 2 }, "Only the hidden display paused")
+    }
+
+    /// While no wallpaper is in view at all (a full-screen app, say) the last answer stands, so
+    /// coming back to the same covered desktop brings no burst of sound before the settle.
+    func testNoWallpaperInViewKeepsTheLastAnswer() {
+        let probe = CompositionProbe()
+        probe.coveredAction = .mute
+        probe.covered = [1]
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(probe.audio, [true])
+
+        probe.setVisible(false, display: 1)
+        probe.covered = []
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true], "Nothing is in view, so nothing is uncovered either")
+        XCTAssertTrue(policy.isDesktopCoveredForSound)
+
+        probe.setVisible(true, display: 1)
+        probe.covered = [1]
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true])
+
+        probe.covered = []
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true, false])
+    }
+
+    /// The mute waits for the same settle a covered display's pause does, so a brief cover never
+    /// cuts the sound, and uncovering gives it back at once.
+    func testTheSoundWaitsForTheSettleAndComesBackAtOnce() async throws {
+        let probe = CompositionProbe()
+        probe.coveredAction = .mute
+        let policy = makePolicy(probe, settle: .milliseconds(20))
+        policy.start()
+        defer { policy.stop() }
+
+        probe.covered = [1]
+        policy.evaluate()
+        probe.covered = []
+        policy.evaluate()
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertTrue(probe.audio.isEmpty, "Uncovered within the settle: never muted")
+
+        probe.covered = [1]
+        policy.evaluate()
+        XCTAssertTrue(probe.audio.isEmpty, "Covering waits for the settle")
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(probe.audio, [true])
+
+        probe.covered = []
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true, false], "Uncovering does not wait")
+    }
+
+    /// A new choice applies to a desktop that is already covered at the next evaluation, and no
+    /// step lets the sound out louder than the new choice: Mute to Reduce volume sets the level
+    /// before it lifts the mute, Pause keeps the covered desktop silent and pauses the covered
+    /// display, and Keep running gives the sound back.
+    func testChangingTheChoiceOnACoveredDesktopAppliesAtTheNextEvaluation() {
+        let probe = CompositionProbe()
+        probe.coveredAction = .mute
+        probe.covered = [1]
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(probe.order, [.audio(suppressed: true)])
+
+        probe.coveredAction = .reduceVolume
+        policy.evaluate()
+        XCTAssertEqual(
+            probe.order, [.audio(suppressed: true), .gain(0.3), .audio(suppressed: false)],
+            "The level first, then the sound, so it never plays at its own volume in between")
+
+        probe.coveredAction = .pause
+        policy.evaluate()
+        XCTAssertEqual(
+            Array(probe.order.suffix(2)), [.audio(suppressed: true), .gain(1)],
+            "Silent again before the level goes back up")
+        XCTAssertTrue(policy.isDesktopCoveredForSound, "The covered desktop is still silent under Pause")
+        XCTAssertEqual(probe.displays.map(\.suspended), [true], "Pause suspends the covered display")
+
+        probe.coveredAction = .keepRunning
+        policy.evaluate()
+        XCTAssertEqual(probe.displays.map(\.suspended), [true, false])
+        XCTAssertEqual(probe.order.last, .audio(suppressed: false))
+        XCTAssertFalse(policy.isDesktopCoveredForSound)
+        XCTAssertEqual(probe.gains, [0.3, 1])
+    }
+
+    func testPausedCoveredDesktopMutesBeforeResuming() async {
+        await checkPausedCoveredDesktopResumes(with: .mute)
+    }
+
+    func testPausedCoveredDesktopReducesVolumeBeforeResuming() async {
+        await checkPausedCoveredDesktopResumes(with: .reduceVolume)
+    }
+
+    func testPausedCoveredDesktopWaitsForARefusedLowerVolumeBeforeResuming() async {
+        await checkPausedCoveredDesktopResumes(with: .reduceVolume, gainFailures: 1)
+    }
+
+    func testPausedCoveredDisplayMutesBeforeResumingBesideANewlyCoveredDisplay() async {
+        await checkPausedCoveredDesktopResumes(with: .mute, pausedDisplays: [1])
+    }
+
+    func testPausedCoveredDisplayReducesVolumeBeforeResumingBesideANewlyCoveredDisplay() async {
+        await checkPausedCoveredDesktopResumes(with: .reduceVolume, pausedDisplays: [1])
+    }
+
+    /// A sound-only choice must reach the bridge before any paused, covered display resumes,
+    /// even beside a newly covered display or if the lower volume has to be retried.
+    private func checkPausedCoveredDesktopResumes(
+        with action: DesktopCoveredAction, gainFailures: Int = 0, pausedDisplays: Set<UInt32> = [1, 2]
+    ) async {
+        let probe = CompositionProbe()
+        probe.surfaces = [
+            WallpaperSurfaceVisibility(displayID: 1, isVisible: true),
+            WallpaperSurfaceVisibility(displayID: 2, isVisible: true),
+        ]
+        probe.covered = pausedDisplays
+        probe.coveredAction = .pause
+        let paused = expectation(description: "Covered displays paused")
+        paused.expectedFulfillmentCount = pausedDisplays.count
+        probe.onDisplay = { _, suspended in
+            if suspended { paused.fulfill() }
+        }
+        let policy = makePolicy(probe, settle: .milliseconds(20))
+        policy.start()
+        defer {
+            probe.onDisplay = nil
+            policy.stop()
+        }
+        await fulfillment(of: [paused], timeout: 5)
+        XCTAssertEqual(policy.suspendedDisplayIDs, pausedDisplays)
+
+        probe.onDisplay = { _, suspended in
+            guard !suspended else { return }
+            XCTAssertEqual(probe.audio.last ?? false, action == .mute,
+                           "The mute must land before playback resumes")
+            XCTAssertEqual(probe.gains.last ?? 1, action == .reduceVolume ? 0.3 : 1,
+                           "The volume must land before playback resumes")
+            XCTAssertEqual(probe.gainFailures, 0)
+        }
+        probe.covered = [1, 2]
+        probe.coveredAction = action
+        probe.gainFailures = gainFailures
+        policy.evaluate()
+        if gainFailures > 0 {
+            XCTAssertTrue(probe.displays.allSatisfy(\.suspended),
+                          "A refused level must leave the displays paused")
+            XCTAssertEqual(probe.gains, [0.3])
+            policy.evaluate()
+            XCTAssertEqual(probe.gains, [0.3, 0.3])
+        }
+        XCTAssertEqual(probe.displays.filter { !$0.suspended }.map(\.display), pausedDisplays.sorted(),
+                       "Already-paused wallpapers resume without another settle, at the chosen sound level")
+    }
+
+    func testReconnectedCoveredDisplayMutesBeforeResumingItsRetainedPause() async {
+        await checkReconnectedCoveredDisplayResumes(with: .mute)
+    }
+
+    func testReconnectedCoveredDisplayReducesVolumeBeforeResumingItsRetainedPause() async {
+        await checkReconnectedCoveredDisplayResumes(with: .reduceVolume)
+    }
+
+    func testReconnectedCoveredDisplayMutesBeforeRetryingARefusedResume() async {
+        await checkReconnectedCoveredDisplayResumes(with: .mute, refuseResume: true)
+    }
+
+    func testReconnectedCoveredDisplayReducesVolumeBeforeRetryingARefusedResume() async {
+        await checkReconnectedCoveredDisplayResumes(with: .reduceVolume, refuseResume: true)
+    }
+
+    /// A disconnect removes the display from the desired pause set, but the bridge retains either
+    /// an acknowledged pause or an unknown state after a refused resume. Both need sound first.
+    private func checkReconnectedCoveredDisplayResumes(
+        with action: DesktopCoveredAction, refuseResume: Bool = false
+    ) async {
+        let probe = CompositionProbe()
+        probe.covered = [1]
+        probe.coveredAction = .pause
+        let paused = expectation(description: "Covered display paused")
+        probe.onDisplay = { _, suspended in
+            if suspended { paused.fulfill() }
+        }
+        let policy = makePolicy(probe, settle: .milliseconds(20))
+        policy.start()
+        defer {
+            probe.onDisplay = nil
+            policy.stop()
+        }
+        await fulfillment(of: [paused], timeout: 5)
+        probe.onDisplay = nil
+        XCTAssertEqual(probe.displays.map(\.suspended), [true])
+
+        if refuseResume {
+            probe.covered = []
+            probe.displayFailures = 1
+            policy.evaluate()
+            XCTAssertEqual(probe.displayFailures, 0, "The resume reached the bridge and was refused")
+        }
+        probe.surfaces = []
+        policy.evaluate()
+        XCTAssertTrue(policy.suspendedDisplayIDs.isEmpty)
+
+        probe.coveredAction = action
+        probe.covered = [1]
+        policy.evaluate()
+        XCTAssertTrue(probe.audio.isEmpty)
+        XCTAssertTrue(probe.gains.isEmpty)
+
+        let previousDeliveries = probe.displays.count
+        probe.onDisplay = { display, suspended in
+            XCTAssertEqual(display, 1)
+            XCTAssertFalse(suspended)
+            XCTAssertEqual(probe.audio.last ?? false, action == .mute,
+                           "The mute must reach the bridge before the reconnected wallpaper resumes")
+            XCTAssertEqual(probe.gains.last ?? 1, action == .reduceVolume ? 0.3 : 1,
+                           "The lower volume must reach the bridge before the reconnected wallpaper resumes")
+        }
+        probe.surfaces = [WallpaperSurfaceVisibility(displayID: 1, isVisible: true)]
+        policy.evaluate()
+        XCTAssertEqual(probe.displays.count, previousDeliveries + 1,
+                       "The reconnected wallpaper resumes immediately at the chosen sound level")
+    }
+
+    /// A lower level the bridge refused is not known to have landed, so the mute stays until the
+    /// level is sent again and taken; only then is the sound let out.
+    func testTheMuteStaysUntilARefusedLowerLevelIsTaken() {
+        let probe = CompositionProbe()
+        probe.coveredAction = .mute
+        probe.covered = [1]
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+
+        probe.coveredAction = .reduceVolume
+        probe.gainFailures = 1
+        policy.evaluate()
+        XCTAssertEqual(probe.order, [.audio(suppressed: true), .gain(0.3)], "Refused, so still muted")
+
+        policy.evaluate()
+        XCTAssertEqual(
+            probe.order, [.audio(suppressed: true), .gain(0.3), .gain(0.3), .audio(suppressed: false)],
+            "The level is taken, then the sound comes back at it")
+    }
+
+    /// Lifting a mute while the level goes back up needs no wait: the sound comes back no louder
+    /// than the decision either way.
+    func testAMuteLiftedWhileTheLevelRisesIsNotHeldBack() {
+        let probe = CompositionProbe()
+        probe.coveredAction = .reduceVolume
+        probe.covered = [1]
+        probe.userMuted = true
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(probe.order, [.audio(suppressed: true), .gain(0.3)])
+
+        probe.userMuted = false
+        probe.covered = []
+        policy.evaluate()
+        XCTAssertEqual(
+            probe.order, [.audio(suppressed: true), .gain(0.3), .audio(suppressed: false), .gain(1)])
+    }
+
+    /// Changing a muted covered desktop to Pause keeps it silent through the settle the pause waits
+    /// for, instead of letting the sound out for that second; the sound comes back with the
+    /// wallpaper when the desktop shows again. Pause alone never silences anything.
+    func testAMutedCoveredDesktopChangedToPauseStaysSilentUntilItIsUncovered() async throws {
+        let probe = CompositionProbe()
+        probe.coveredAction = .mute
+        probe.covered = [1]
+        let policy = makePolicy(probe, settle: .milliseconds(20))
+        policy.start()
+        defer { policy.stop() }
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(probe.audio, [true])
+
+        probe.coveredAction = .pause
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true], "Still silent while the pause waits for the settle")
+        XCTAssertTrue(probe.displays.isEmpty)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(probe.displays.map(\.suspended), [true])
+        XCTAssertEqual(probe.audio, [true])
+
+        probe.covered = []
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true, false])
+        XCTAssertEqual(probe.displays.map(\.suspended), [true, false])
+
+        probe.covered = [1]
+        policy.evaluate()
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(probe.audio, [true, false], "Pause on its own pauses and leaves the sound alone")
+        XCTAssertEqual(probe.displays.map(\.suspended), [true, false, true])
+    }
+
+    /// A covered desktop is one more reason for the mute, beside the user's own and the rules:
+    /// lifting the user's mute keeps a covered desktop silent, and teardown releases everything.
+    func testACoveredDesktopComposesWithTheUsersMuteAndTeardownReleasesIt() {
+        let probe = CompositionProbe()
+        probe.coveredAction = .mute
+        probe.covered = [1]
+        probe.userMuted = true
+        let policy = makePolicy(probe)
+        policy.start()
+        XCTAssertEqual(probe.audio, [true])
+
+        probe.userMuted = false
+        policy.evaluate()
+        XCTAssertEqual(probe.audio, [true], "The covered desktop still mutes")
+
+        policy.stop()
+        XCTAssertEqual(probe.audio, [true, false], "Teardown must never leave a surface muted")
+        XCTAssertFalse(policy.isDesktopCoveredForSound)
     }
 
     // MARK: Quality channel

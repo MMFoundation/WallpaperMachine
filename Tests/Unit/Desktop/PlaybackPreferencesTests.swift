@@ -65,6 +65,17 @@ final class PlaybackPreferencesTests: XCTestCase {
         XCTAssertEqual(reloaded.appRules[0].id, added.id)
     }
 
+    /// Every choice of "When windows cover the desktop" is kept for a later launch, and only Keep
+    /// running leaves the working areas unmeasured.
+    func testEveryCoveredDesktopChoicePersistsAndOnlyKeepRunningIgnoresCoverage() {
+        for action in DesktopCoveredAction.allCases {
+            PlaybackPreferences(defaults: defaults).desktopCoveredAction = action
+            XCTAssertEqual(PlaybackPreferences(defaults: defaults).desktopCoveredAction, action)
+            XCTAssertEqual(action.watchesCoverage, action != .keepRunning, "\(action)")
+        }
+        XCTAssertEqual(DesktopCoveredAction.allCases.filter(\.actsOnSound), [.mute, .reduceVolume])
+    }
+
     func testCorruptStoredValuesFallBackToDefaults() {
         defaults.set("not-an-action", forKey: "WallpaperMachine.displaySleepAction")
         defaults.set("louder", forKey: "WallpaperMachine.otherAudioAction")

@@ -441,14 +441,16 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   reads the source `PowerSourceMonitor` last reported and is refreshed from the app delegate's
   power-source change, and which stops counting an app left in front without a window on screen
   once the occlusion of the coverage probes, kept for it, or the wallpaper windows changes) and `OtherAudioMonitor` feed those conditions, and wallpaper audio is
-  suppressed separately (`setAudioSuppressed`) for a mute rule, other-app audio set to mute or the
+  suppressed separately (`setAudioSuppressed`) for a mute rule, other-app audio or a covered
+  desktop set to mute, or the
   user's own mute of every wallpaper (`PlaybackPreferences.wallpapersMuted`). The bridge ORs that one
   flag with each wallpaper's saved mute, so the user's mute never rewrites a saved sound setting.
-  Other-app audio set to Reduce volume travels beside it on a channel of its own
+  Other-app audio or a covered desktop set to Reduce volume travels beside it on a channel of its own
   (`setAudioGain`): a gain from 0 to 1 the bridge multiplies each wallpaper's saved volume by, live
-  for an open scene and in the descriptors of web pages and native video. It is never saved, is
+  for an open scene and in the descriptors of web pages and native video. Both reasons use the one
+  level (`PlaybackPreferences.otherAudioVolume`), so they never compound. It is never saved, is
   compared as a number so a new level is delivered while the rule already holds, and goes back to 1
-  when the other sound ends and at teardown ([playback](features/performance.md#playback)).
+  when neither condition requests reduction and at teardown ([playback](features/performance.md#playback)).
   A scene renderer receives its pause, volume and mute inside its configuration
   (`owe_scene_wallpaper_apply_config`), not as settings sent after it: the scene can load the
   moment it is configured, and its sounds play once mounted, so a later mute would let the start of
@@ -471,7 +473,20 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   `PlaybackPreferences.desktopCoveredAction` at its default, pause, a display whose working
   area other windows cover counts as hidden too: `WallpaperCoverageProbes` keeps one alpha-0,
   mouse-transparent window per display just above the wallpaper level, over `visibleFrame`
-  inset by 32 pt, and the policy reads its occlusion. With
+  inset by 32 pt, and the policy reads its occlusion. Set to mute or reduce volume, the probes
+  stay but hide nothing: since the audio flag and the gain reach every display at once, the policy
+  sets `isDesktopCoveredForSound` only once the working area of every display whose wallpaper is
+  in view is covered, after the same settle, clears it the moment one is uncovered, and leaves it
+  as it was while no wallpaper is in view at all; under Pause, which hides the covered displays,
+  a flag already set keeps the wallpapers muted until one shows uncovered. If every wallpaper
+  in view is covered and one is resuming from a per-display suspension, the sound decision is
+  adopted before any per-display resume, including a retained pause or failed delivery after a
+  display reconnects, without a second settle; a refused audio delivery leaves
+  the resumes pending. This prevents a full-volume burst when changing Pause to Mute or Reduce
+  volume. The policy delivers a
+  mute before a new gain and lifts it only once no gain louder than the decision can remain (a
+  lower gain the bridge refused is sent again first), so no switch plays a moment above it. A
+  per-display mute would need the bridge to carry one. With
   `PlaybackPreferences.playsOnlyOnActiveDisplay` on, every display but the one under the pointer
   counts as hidden too, once the pointer has been away for 3 s: `ActiveDisplayTracker` follows
   the pointer with event monitors that exist only while the option is on and two displays are
