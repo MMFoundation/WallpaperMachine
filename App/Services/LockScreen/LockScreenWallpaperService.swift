@@ -605,6 +605,10 @@ final class LockScreenWallpaperService {
         transientFailures += 1
         retrySkipsRemaining = Self.transientRetrySkips[transientFailures - 1]
         forceRepublish = true
+        // The attempt covered every requested mode, so earlier errors are stale; left set, they
+        // would stop the monitor that runs the next attempt.
+        errorMessage = isRequested ? lockScreenActivationError : nil
+        screenSaverError = nil
         AppLog.error(
           "Native wallpaper: \(failure.localizedDescription) Keeping the committed selection; "
             + "attempt \(transientFailures) of \(Self.transientRetrySkips.count)")

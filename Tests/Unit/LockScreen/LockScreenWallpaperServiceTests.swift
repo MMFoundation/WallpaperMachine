@@ -1163,16 +1163,22 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertFalse(try storeOwnsDisplayOne())
   }
 
-  /// A first activation whose store write loses the race to WallpaperAgent wrote nothing, so it
-  /// is tried again like a committed one rather than asking for Retry.
+  /// An activation whose store write loses the race to WallpaperAgent wrote nothing, so it is
+  /// tried again like a committed one. Here it is a Retry after both rows failed: their errors
+  /// must not stop the monitor that runs the next attempt.
   @MainActor
   func testFirstActivationRetriesAStoreRaceInsteadOfFailing() async throws {
     var record = scene()
     record.displayId = 1
     var external = fixture()
     external["Unrelated"] = "WallpaperAgent wrote this"
+    var failScenes = true
     var raced = false
-    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {},
+      scenes: {
+        if failScenes { throw LockScreenWallpaperFailure(message: "not ready") }
+        return [record]
+      },
       selection: LockScreenWallpaperSelection(
         storeURL: store, journalURL: journal, reload: {},
         persistJournal: { url, data in
@@ -1188,8 +1194,15 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     defer { responder.cancel() }
     try service.start()
     service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("both rows failed") {
+      service.errorMessage != nil && service.screenSaverError != nil && !service.isBusy
+    }
+    failScenes = false
+    service.retry(lockScreen: true)
     await waitFor("the raced attempt") { raced && !service.isBusy }
     XCTAssertNil(service.errorMessage)
+    XCTAssertNil(service.screenSaverError)
     XCTAssertFalse(service.isEnabled, "the raced attempt wrote nothing")
     XCTAssertFalse(try storeOwnsDisplayOne())
     try XCTUnwrap(timers.last).fire()
