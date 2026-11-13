@@ -892,6 +892,38 @@ final class LockScreenWallpaperTests: XCTestCase {
   }
 
   @MainActor
+  func testReadoptionPreservesNewerGlobalBaselineIncludingAbsentChoices() throws {
+    for field in ["Desktop", "Idle"] {
+      for hasNewChoice in [false, true] {
+        var original = fixture()
+        original["AllSpacesAndDisplays"] = node("old-global")
+        try write(original)
+        let selection = LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {})
+        try selection.synchronize(desktopDisplays: ["one"], screenSaverDisplays: ["one"], revision: "old")
+        let stale = try Data(contentsOf: store)
+        try selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
+
+        var newer = node("old-global")
+        newer[field] = hasNewChoice ? choice("new-global") : nil
+        if !hasNewChoice { newer["Type"] = field == "Desktop" ? "idle" : "desktop" }
+        original["AllSpacesAndDisplays"] = newer
+        try write(original)
+        let desktops: Set<String> = field == "Idle" ? ["one"] : []
+        let savers: Set<String> = field == "Desktop" ? ["one"] : []
+        try selection.synchronize(desktopDisplays: desktops, screenSaverDisplays: savers, revision: "new")
+        try stale.write(to: store, options: .atomic)
+        try selection.synchronize(desktopDisplays: desktops, screenSaverDisplays: savers, revision: "new")
+
+        let global = try readStore()["AllSpacesAndDisplays"] as? [String: Any]
+        XCTAssertEqual(global?[field] as? NSDictionary, newer[field] as? NSDictionary)
+        try assertDiskRecovery(restores: original)
+        try selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
+        XCTAssertEqual(try readStore() as NSDictionary, original as NSDictionary)
+      }
+    }
+  }
+
+  @MainActor
   func testArchiveDropsRemovedSpaceHistoryAndKeepsPresentDisplayOriginals() throws {
     var original = fixture()
     try write(original)

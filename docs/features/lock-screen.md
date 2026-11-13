@@ -602,6 +602,8 @@ the extension back after its live journal entry was pruned. Each app-written
 `current:<revision>` field is taken back independently with its saved original,
 even while another field still has an active journal entry. Active originals take
 precedence; missing global choices are recovered only for modes taken back this way.
+A live global entry records the whole original node, so its newer choices (including
+an absent choice) take precedence over archived values even for modes it does not own.
 The manually selected WallpaperMachine item in System Settings uses plain `current`
 and does not adopt an archived original; it uses the current native fallback when
 activated. Other wallpaper choices made since are preserved.

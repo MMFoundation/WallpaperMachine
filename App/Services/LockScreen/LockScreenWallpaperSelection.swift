@@ -536,13 +536,16 @@ final class LockScreenWallpaperSelection {
     try persistArchive(Self.restoredJournalURL(journalURL), PropertyListEncoder().encode(combined))
   }
 
-  /// Newer ownership supplies the baseline and metadata; only fields it does not own
-  /// come from the older record. This also preserves linked and inherited shapes.
+  /// Global entries retain a complete baseline; display entries retain only owned fields.
+  /// Keep the newer baseline and metadata, filling only missing display ownership.
   private static func merging(_ older: Entry?, into newer: Entry) throws -> Entry {
     guard let older else { return newer }
     let extra = older.ownedFields.subtracting(newer.ownedFields)
     guard !extra.isEmpty else { return newer }
     var result = newer
+    result.fields = newer.ownedFields.union(extra).sorted()
+    // An unowned global choice (even an absent one) is newer recovery evidence too.
+    if newer.path == globalPath { return result }
     guard let previous = try PropertyListSerialization.propertyList(from: older.original, format: nil)
       as? [String: Any],
       let latest = try PropertyListSerialization.propertyList(from: newer.original, format: nil)
@@ -551,18 +554,9 @@ final class LockScreenWallpaperSelection {
       throw LockScreenWallpaperFailure(
         message: String(localized: "The native wallpaper restoration journal is invalid."))
     }
-    var original = newer.path == globalPath ? separatedLinked(latest) : latest
-    let source = newer.path == globalPath ? separatedLinked(previous) : previous
-    for key in extra { original[key] = source[key] }
-    if newer.path == globalPath {
-      if (original as NSDictionary) == (separatedLinked(latest) as NSDictionary) {
-        original = latest
-      } else if let node = globalNode(original) {
-        original = relinked(node, original: latest)
-      }
-    }
+    var original = latest
+    for key in extra { original[key] = previous[key] }
     result.original = try encode(original)
-    result.fields = newer.ownedFields.union(extra).sorted()
     return result
   }
 
