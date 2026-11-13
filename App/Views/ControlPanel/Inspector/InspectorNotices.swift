@@ -194,8 +194,8 @@ struct HostStatusView: View {
 
 // MARK: - The wallpaper's type
 
-/// The sentence about the wallpaper's type, the pixiv link of a saved illustration, and the plain
-/// problem-report link.
+/// The sentence about the wallpaper's type, the Workshop page of a Workshop wallpaper or the pixiv
+/// link of a saved illustration, and the plain problem-report link.
 struct TypeNoteView: View {
   let row: LibraryRow
 
@@ -204,6 +204,16 @@ struct TypeNoteView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       note
+      if InspectorPolicy.isWorkshopID(row.id), let page = ExternalLink.workshopItem(id: row.id) {
+        Button {
+          ExternalLink.open(page)
+        } label: {
+          Label("View on Steam Workshop", systemImage: "arrow.up.right.square")
+            .labelStyle(.panelLinkRow)
+        }
+        .buttonStyle(.panelLink)
+        .font(.panel(.callout))
+      }
       if let artwork = InspectorPolicy.pixivArtworkID(of: row.id).flatMap(ExternalLink.pixivArtwork(id:)) {
         Button {
           ExternalLink.open(artwork)

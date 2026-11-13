@@ -15,7 +15,8 @@ struct WallpaperActionItems: View {
     /// author, and the problem report.
     case inspector
     /// On a tile of the Installed grid: Apply and the favorite first, since a tile has no buttons
-    /// for them that the keyboard or a right click reach.
+    /// for them that the keyboard or a right click reach, and a Workshop wallpaper's page, which
+    /// the inspector links under its notes.
     case tile
   }
 
@@ -60,6 +61,13 @@ struct WallpaperActionItems: View {
       }
     } label: {
       Label("Show in Finder", systemImage: "folder")
+    }
+    if placement == .tile, isWorkshop, let page = ExternalLink.workshopItem(id: row.id) {
+      Button {
+        ExternalLink.open(page)
+      } label: {
+        Label("View on Steam Workshop", systemImage: "arrow.up.right.square")
+      }
     }
     if placement == .inspector {
       // Only a Workshop wallpaper has a page to share.

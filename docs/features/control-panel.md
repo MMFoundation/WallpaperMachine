@@ -439,7 +439,8 @@ A right click on an Installed tile opens the actions for that tile without selec
 first: **Apply wallpaper**, **Add to favorites** or **Remove from favorites**, then what
 the inspector's **More actions** menu offers (Preview, **Show in Finder**, **Apply to all
 displays**, the display's list, **Reinstall from Workshop…** and **Move wallpaper to
-Trash**), under the same rules. The two menus are one list of items
+Trash**), under the same rules, with **View on Steam Workshop** after **Show in Finder** for
+a Workshop wallpaper. The two menus are one list of items
 (`WallpaperActionItems`); sharing, the Steam subscription, the author's page and the
 problem report stay in the inspector's. The menu acts on the tile that was clicked, never
 on the ticked selection, whose tools are in the bar under the grid. With the keyboard,
@@ -567,11 +568,13 @@ action that removes something (**Move to Trash**, a preset's **Delete…** and *
 **Remove from display**) is drawn in red. Across the panel, a control that cannot be used is
 faded by the same amount. A link on its own in an inspector card (**Center**, **Check again**,
 **Delete…**) is set in the card's label type and answers clicks over at least 20 points of
-height; the links under an inspector's notes (**Show in downloads**, **View on pixiv**, **Not
+height; the links under an inspector's notes (**Show in downloads**, **View on Steam Workshop**, **View on pixiv**, **Not
 working? Report on GitHub**) are set in the notes' type with their symbols in one column, the
 same in all three inspectors.
 
-Below the compatibility note, an installed wallpaper that can run (not
+Below the compatibility note, an installed Workshop wallpaper links its Workshop page
+with **View on Steam Workshop** (a saved pixiv illustration links its work with **View on
+pixiv** instead), and an installed wallpaper that can run (not
 Application) shows **Not working? Report on GitHub**. It opens the repository's
 bug report form in the browser with the wallpaper's title, Workshop link or id,
 type, app version, while it is on screen the backend drawing it (with the
