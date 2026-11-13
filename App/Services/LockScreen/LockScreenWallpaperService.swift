@@ -720,8 +720,9 @@ final class LockScreenWallpaperService {
 
   /// Whether a failure may keep the committed selection and be tried again: one a later attempt
   /// can get past, of an update that keeps modes already committed as they are. A transient
-  /// failure leaves the journal able to restore everything, so an update that only turns modes on
-  /// (a launch, a switch, Retry) tries it again too: WallpaperAgent rewrites its store in bursts.
+  /// failure leaves the journal able to restore everything, so an activation that turns no
+  /// committed mode off (a launch, a switch, Retry) tries it again too: WallpaperAgent rewrites
+  /// its store in bursts. A restore clears the manifest first, so it still reports at once.
   private func mayRetryTransient(_ error: Error) -> Bool {
     guard transientFailures < Self.transientRetrySkips.count else { return false }
     let transient = (error as? LockScreenWallpaperFailure)?.reason == .transient
@@ -730,8 +731,10 @@ final class LockScreenWallpaperService {
     {
       return transient || error is RendererUnavailable
     }
-    return transient && anyRequested && (isRequested || lastLockScreenRequested != true)
-      && (screenSaverRequested || !lastScreenSaverRequested)
+    return transient && recovered && published?.scenes.isEmpty == false
+      && (lastInputs == nil
+        || ((isRequested || lastLockScreenRequested != true)
+          && (screenSaverRequested || !lastScreenSaverRequested)))
   }
 
   private func readiness(displayID: UInt32, revision: String) -> LockScreenReadiness? {

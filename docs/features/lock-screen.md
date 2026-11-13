@@ -548,10 +548,11 @@ its store between the app's read and write, WallpaperAgent between a restart and
 relaunch, or no first frame within the readiness wait. The committed selection stays
 on the lock screen and the monitor publishes again after 2, 4, 8, 16 and 32 seconds,
 the status keeping its last progress text. A sixth failure in a row is reported and
-restored like any other, with **Retry**. A store race also does not fail an update
-that only turns modes on (a first activation, at launch too, a switch or **Retry**):
-it wrote nothing, so the same back-off tries again. A switch turning a mode off and
-every other failure report at once, as before. A write that lost the race to WallpaperAgent
+restored like any other, with **Retry**. A store race also does not fail an activation
+that turns no committed mode off (a first activation, at launch too, a switch or
+**Retry**): the journal can still restore everything, so the same back-off tries
+again. A restore, a switch turning a mode off and every other failure report at once,
+as before. A write that lost the race to WallpaperAgent
 wrote nothing, so the selection's next attempt does not count the fields it was about
 to take as its own (it would read them as changed outside the app); the recovery
 journal keeps them on disk.
