@@ -624,6 +624,34 @@ final class LockScreenWallpaperTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
   }
 
+  /// WallpaperAgent can save the store it loaded before a restore over that restore. The
+  /// extension is then back everywhere, its fallbacks included, with the journal pruned; the
+  /// next activation must take it back with the originals it had, not fail for want of one.
+  @MainActor
+  func testSelectionWallpaperAgentSavesOverARestoreIsTakenBackWithItsOriginals() throws {
+    let original = fixture()
+    try write(original)
+    let selection = LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {})
+    try selection.synchronize(desktopDisplays: ["one"], screenSaverDisplays: ["one"])
+    var copied = try readStore()
+    let owned = try XCTUnwrap((copied["Displays"] as? [String: [String: Any]])?["one"])
+    var system = try XCTUnwrap(copied["SystemDefault"] as? [String: Any])
+    system["Desktop"] = owned["Desktop"]
+    system["Idle"] = owned["Idle"]
+    copied["SystemDefault"] = system
+    try write(copied)
+    try selection.synchronize(desktopDisplays: ["one"], screenSaverDisplays: ["one"])
+    let stale = try Data(contentsOf: store)
+    try selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
+    XCTAssertEqual(try readStore() as NSDictionary, original as NSDictionary)
+    try stale.write(to: store, options: .atomic)
+
+    let relaunched = LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {})
+    try relaunched.synchronize(desktopDisplays: ["one"], screenSaverDisplays: ["one"])
+    try relaunched.synchronize(desktopDisplays: [], screenSaverDisplays: [])
+    XCTAssertEqual(try readStore() as NSDictionary, original as NSDictionary)
+  }
+
   @MainActor
   func testOrphanWithoutNativeFallbackDoesNotChangeStore() throws {
     var original = fixture()

@@ -120,6 +120,7 @@ final class LockScreenWallpaperSelection {
         message:
           String(localized: "This macOS wallpaper store format is unsupported. Native selection was not changed."))
     }
+    if entries.isEmpty { entries = readoptedEntries(root) }
     var paths = displays.sorted().map { ["Displays", $0] }
     let spaces = root["Spaces"] as? [String: Any] ?? [:]
     for (space, value) in spaces.sorted(by: { $0.key < $1.key }) {
@@ -475,7 +476,31 @@ final class LockScreenWallpaperSelection {
         at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
       try data.write(to: url, options: .atomic)
     } else if FileManager.default.fileExists(atPath: url.path) {
-      try FileManager.default.removeItem(at: url)
+      let restored = restoredJournalURL(url)
+      try? FileManager.default.removeItem(at: restored)
+      try FileManager.default.moveItem(at: url, to: restored)
+    }
+  }
+
+  /// A pruned journal, kept for `readoptedEntries`.
+  private static func restoredJournalURL(_ journal: URL) -> URL {
+    journal.deletingLastPathComponent().appendingPathComponent("restored-" + journal.lastPathComponent)
+  }
+
+  /// WallpaperAgent can save the store it loaded before a restore over that restore, after the
+  /// journal was pruned: the extension is back with nothing journaled to restore it to. The
+  /// entries that restored those nodes are taken back, as if never pruned, instead of finding
+  /// no original (or the wrong fallback) for them. Any choice made since replaced the extension,
+  /// so a node that still holds it everywhere it was owned still has that original.
+  private func readoptedEntries(_ root: [String: Any]) -> [Entry] {
+    guard let data = try? Data(contentsOf: Self.restoredJournalURL(journalURL)),
+      let pruned = try? PropertyListDecoder().decode([Entry].self, from: data)
+    else { return [] }
+    return pruned.filter { entry in
+      guard entry.path != Self.globalPath, let node = Self.node(root, path: entry.path) else {
+        return false
+      }
+      return entry.ownedFields.allSatisfy { Self.owns(node[$0]) }
     }
   }
 

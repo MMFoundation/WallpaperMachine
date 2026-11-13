@@ -1163,6 +1163,39 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertFalse(try storeOwnsDisplayOne())
   }
 
+  /// A first activation whose store write loses the race to WallpaperAgent wrote nothing, so it
+  /// is tried again like a committed one rather than asking for Retry.
+  @MainActor
+  func testFirstActivationRetriesAStoreRaceInsteadOfFailing() async throws {
+    var record = scene()
+    record.displayId = 1
+    var external = fixture()
+    external["Unrelated"] = "WallpaperAgent wrote this"
+    var raced = false
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(
+        storeURL: store, journalURL: journal, reload: {},
+        persistJournal: { url, data in
+          try LockScreenWallpaperSelection.persistJournalFile(url, data)
+          if !raced {
+            raced = true
+            try self.write(external)
+          }
+        }),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { [1: "one"][$0] })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try service.start()
+    service.setEnabled(true)
+    await waitFor("the raced attempt") { raced && !service.isBusy }
+    XCTAssertNil(service.errorMessage)
+    try XCTUnwrap(timers.last).fire()
+    await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
+    XCTAssertNil(service.errorMessage)
+    XCTAssertTrue(try storeOwnsDisplayOne())
+  }
+
   @MainActor
   func testUnchangedMonitorTickDoesNotRepublishAndResolvedUUIDRecovers() async throws {
     var builtIn = scene()

@@ -548,8 +548,10 @@ its store between the app's read and write, WallpaperAgent between a restart and
 relaunch, or no first frame within the readiness wait. The committed selection stays
 on the lock screen and the monitor publishes again after 2, 4, 8, 16 and 32 seconds,
 the status keeping its last progress text. A sixth failure in a row is reported and
-restored like any other, with **Retry**. A first activation, a switch change and every
-other failure report at once, as before. A write that lost the race to WallpaperAgent
+restored like any other, with **Retry**. A store race also does not fail an update
+that only turns modes on (a first activation, at launch too, a switch or **Retry**):
+it wrote nothing, so the same back-off tries again. A switch turning a mode off and
+every other failure report at once, as before. A write that lost the race to WallpaperAgent
 wrote nothing, so the selection's next attempt does not count the fields it was about
 to take as its own (it would read them as changed outside the app); the recovery
 journal keeps them on disk.
@@ -591,6 +593,15 @@ still need a service reload. The recovery union is persisted before the store ch
 and pruned only after a successful reload; failed writes, reloads or journal removal
 keep it for retry, and a malformed saved linked or inherited baseline fails recovery
 before the store changes or the journal is removed.
+
+A pruned journal is kept as `restored-native-selection.plist`. WallpaperAgent can save
+the store it loaded before a restore over that restore (seen after quitting), which
+puts the extension back with no journal: the next activation used to fail with "no
+restoration journal or surviving system fallback", and **Retry** could not get past
+it. Nodes that still hold the extension in every field the pruned journal owned are
+taken back with its entries, as if it had never been pruned, so they are restored to
+the originals they had. A choice made since replaced the extension, so it is never
+overwritten.
 
 macOS copies the extension's selection into the fallbacks it reloads (`SystemDefault`
 and each Space's `Default`), and a Space created while the feature is on, a new
