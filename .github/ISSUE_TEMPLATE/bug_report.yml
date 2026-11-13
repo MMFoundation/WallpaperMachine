@@ -5,6 +5,20 @@ labels: [bug]
 # their ids (ExternalLink.newIssue in App/Views/ControlPanel/Model/): rename them together. It
 # never fills a required field, so the reporter always writes those.
 body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where does the problem happen? Choose the closest match.
+      options:
+        - Not sure / other
+        - Lock screen or screen saver
+        - Playback or sound
+        - Displays or Spaces
+        - Scene wallpaper
+        - Web wallpaper
+        - Settings
+        - Steam Workshop or downloads
   - type: markdown
     attributes:
       value: |

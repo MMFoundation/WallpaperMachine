@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-11 — Wallpaper-switch teardown and lock-screen recovery (issue 184)
+
+- `python3 scripts/test.py` in an isolated HEAD checkout plus this patch: 687 Python tests passed; native gate 4,741 passed, 66 skipped, zero failures. The shared checkout was blocked by its pre-existing missing `CLAUDE.md`; an earlier targeted build also encountered concurrent desktop-widget API edits.
+- Native result: one main-thread runtime warning, attributed by the detailed xcresult issue to `AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy()`; no source location.
+- `scripts/check_renderer.py` entry point with its output redirected to the task directory: 3,520 passed, seven local-asset/opt-in tests skipped; all 12 generated image comparisons and eight projects with two reload cycles passed. GPU and cadence checks ran; timer diagnostics were collected.
+- `python3 scripts/check_rust.py`: all four groups passed (2,499 tests); five desktop-window cases were explicitly excluded, and desktop/media/network opt-ins remained disabled.
+- The retiring-renderer acknowledgement regression and the pending-Metal-command release regression failed before their respective fixes and passed afterwards. Interrupted refreshes and genuine repeated renderer exits remain covered.
+- No live desktop run, Wallpaper Engine comparison, or Release app build. The exact Apple Metal HUD crash on the reported macOS build remains unverified; tests cover the identified teardown and acknowledgement races.
+
 ## 2026-11-11 — Review fixes for the Steam QR sign-in and native downloads
 
 Addresses the PR review: CM logon cleanup, endpoint fallback and cancellation; HTTPS-only content servers with failover promotion; Workshop app check; free-space check from the manifest size; QR actions through PanelController and cancelled when the dialog closes; localized native failure messages.

@@ -37,6 +37,7 @@ live under `testing/`.
 | [release.md](release.md) | Versioning, release specs, notes generation, CI pipeline, in-app updater contract |
 | [../CHANGELOG.md](../CHANGELOG.md) | Published versions, newest first; written by `scripts/release_notes.py` |
 | [development-tools.md](development-tools.md) | Optional diagnostic tools (Peekaboo, Instruments, `xctrace`), the safe setup check, and when a desktop run needs authorization |
+| [project-management.md](project-management.md) | Automatic issue/PR areas, closing-link tracking, readiness labels, DCO status, and previewing or disabling the project triage bot |
 | [../AGENTS.md](../AGENTS.md) / [../CLAUDE.md](../CLAUDE.md) | Agent rules; CLAUDE.md is a symlink, not a separate policy |
 | [../LICENSING.md](../LICENSING.md) | GPL-3.0-only source license and its origin, Priority Support (free signed download; paid support, not software), corresponding source, component licenses, bundled notices |
 | [../LICENSE](../LICENSE) | GNU GPL version 3 text, the license of this repository's source |

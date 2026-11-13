@@ -166,6 +166,11 @@ By making a contribution to this project, I certify that:
 
 ## Automated review
 
+The [project triage bot](docs/project-management.md) maintains issue/PR area and
+status labels and checks DCO trailers. Use closing links only for issues a PR
+fully resolves; use `Related: #123` for partial work. Its readiness labels help
+find the next action; maintainers still review, verify and decide when to merge.
+
 Every pull request into `main` runs the Checks workflow (`.github/workflows/checks.yml`): the
 Python script tests on Linux, a minute or two, the same as
 `python3 scripts/test.py --python-only` locally. CodeQL runs on pushes to `main`,

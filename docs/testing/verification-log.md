@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-13 — Project triage and grouped GitHub Actions updates
+
+- Project triage maintains area and lifecycle labels from GitHub closing links, current-head reviews, CI, mergeability and DCO trailers; Dependabot groups weekly GitHub Actions updates.
+- `python3 scripts/tests/test_project_triage.py` — 24 behavior tests passed; no network or writes in tests.
+- `actionlint .github/workflows/project-triage.yml`, Dependabot YAML parse and Markdown link checks — passed.
+- `python3 scripts/project_triage.py --repo MMFoundation/WallpaperMachine --apply` — reconciled 11 live items; DCO statuses and PR area labels read back. PR #194 has five unsigned commits; PR #195 has eight signed-off commits.
+- `python3 scripts/test.py` — exit 0 after documented Debug-product xattr cleanup; 35 Python modules passed; native 4,926 passed, 0 failed, 70 skipped, two runtime warnings.
+- The native gate used an isolated app home and preferences. Opt-in tests remained skipped; no Release build or interactive desktop validation was performed.
+- The workflows are not deployed yet: continuous triage and Dependabot require the configuration on the default branch. No commit, push, workflow installation or required-check rule was performed.
+
 ## 2026-11-13 — Audio capture startup timeout recovery
 
 Core Audio start receive timeouts now stop and release the uncertain session before one fresh attempt; cleanup failures block replacement. Native status stays typed, and permission advice is limited to authorization errors.
@@ -108,12 +118,3 @@ The support prompt's second choice opens MMFoundation's Open Collective (approve
 - `python3 scripts/test.py --only SupportPromptPresenterTests --only PanelSupportPromptTests --only PanelPerformanceDataTests --only ExternalLinkTests` — 32 passed; `--only PanelSharingTests` — 5 passed
 - `python3 scripts/test.py` — exit 0: every Python suite, XcodeGen, and 4,843 native tests passed, 0 failed, 68 skipped of 4,911 (two main-thread API runtime warnings)
 - Not checked: the sheet's longer row in six languages on screen (no desktop run, no Release build); the README block through GitHub's image proxy (rendered with GitHub's Markdown API, images loaded from Open Collective directly)
-
-## 2026-11-11 — Wallpaper-switch teardown and lock-screen recovery (issue 184)
-
-- `python3 scripts/test.py` in an isolated HEAD checkout plus this patch: 687 Python tests passed; native gate 4,741 passed, 66 skipped, zero failures. The shared checkout was blocked by its pre-existing missing `CLAUDE.md`; an earlier targeted build also encountered concurrent desktop-widget API edits.
-- Native result: one main-thread runtime warning, attributed by the detailed xcresult issue to `AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy()`; no source location.
-- `scripts/check_renderer.py` entry point with its output redirected to the task directory: 3,520 passed, seven local-asset/opt-in tests skipped; all 12 generated image comparisons and eight projects with two reload cycles passed. GPU and cadence checks ran; timer diagnostics were collected.
-- `python3 scripts/check_rust.py`: all four groups passed (2,499 tests); five desktop-window cases were explicitly excluded, and desktop/media/network opt-ins remained disabled.
-- The retiring-renderer acknowledgement regression and the pending-Metal-command release regression failed before their respective fixes and passed afterwards. Interrupted refreshes and genuine repeated renderer exits remain covered.
-- No live desktop run, Wallpaper Engine comparison, or Release app build. The exact Apple Metal HUD crash on the reported macOS build remains unverified; tests cover the identified teardown and acknowledgement races.
