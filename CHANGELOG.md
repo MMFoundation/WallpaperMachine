@@ -12,6 +12,104 @@ app's update window shows the sections of every version newer than the installed
 one, in the app's language; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.12.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.11.1...v1.12.0) (2026-11-13)
+
+### English
+
+This release lets wallpapers go quiet when windows cover the desktop and makes signing in to and out of Steam and pixiv more dependable, with fixes for scenes and audio
+
+#### Highlights
+
+- Wallpapers can mute or lower their sound whenever windows cover the desktop (closes [#192](https://github.com/MMFoundation/WallpaperMachine/issues/192)) ([7d523a1](https://github.com/MMFoundation/WallpaperMachine/commit/7d523a141dcd11eb9d1c8ca62ea2a02a8777ad1c))
+- A Workshop wallpaper's Steam page is now one click away from the Library (closes [#190](https://github.com/MMFoundation/WallpaperMachine/issues/190)) ([ba1afed](https://github.com/MMFoundation/WallpaperMachine/commit/ba1afed93a8a6db9c81e63052cea9b2bcd16873b))
+- Signing out of Steam or pixiv now really clears your saved session ([9cdf1e2](https://github.com/MMFoundation/WallpaperMachine/commit/9cdf1e2ca4543fb4c64e67e078b8319221113103))
+- Searching in Settings keeps up with your typing (closes [#201](https://github.com/MMFoundation/WallpaperMachine/issues/201)) ([f2b5989](https://github.com/MMFoundation/WallpaperMachine/commit/f2b5989ec1830e4fb7e89badb707af24cd0ed88a))
+
+#### Features
+
+- Wallpapers can now mute or turn down their sound while windows cover the desktop, set in Playback or Quick Settings, without changing each wallpaper's saved volume (closes [#192](https://github.com/MMFoundation/WallpaperMachine/issues/192)) ([7d523a1](https://github.com/MMFoundation/WallpaperMachine/commit/7d523a141dcd11eb9d1c8ca62ea2a02a8777ad1c))
+- Open an installed Workshop wallpaper's Steam page straight from the Library, through its inspector or by right-clicking its tile (closes [#190](https://github.com/MMFoundation/WallpaperMachine/issues/190)) ([ba1afed](https://github.com/MMFoundation/WallpaperMachine/commit/ba1afed93a8a6db9c81e63052cea9b2bcd16873b))
+
+#### Improvements
+
+- Searching in Settings stays responsive while you type, with results updating smoothly as the query changes (closes [#201](https://github.com/MMFoundation/WallpaperMachine/issues/201)) ([f2b5989](https://github.com/MMFoundation/WallpaperMachine/commit/f2b5989ec1830e4fb7e89badb707af24cd0ed88a))
+- The Steam sign-in window now stays on Steam's own pages, so a link, popup or redirect can no longer swap in a look-alike sign-in form ([fbab35d](https://github.com/MMFoundation/WallpaperMachine/commit/fbab35d3da5b62c1a5c943891ca14f01b631e9f9))
+
+#### Bug Fixes
+
+- Signing out of Steam or pixiv now really removes the saved session, and if macOS refuses, the app says so and keeps the account shown as signed in ([9cdf1e2](https://github.com/MMFoundation/WallpaperMachine/commit/9cdf1e2ca4543fb4c64e67e078b8319221113103))
+- Scenes with fog effects now display properly instead of turning solid red (closes [#189](https://github.com/MMFoundation/WallpaperMachine/issues/189)) ([4794622](https://github.com/MMFoundation/WallpaperMachine/commit/4794622c6b7fbf9eff7cef4f27a4b054be3d9e1d))
+- Through lock and sleep, scene wallpapers stay on their displays instead of being dropped while every display is briefly inactive (closes [#196](https://github.com/MMFoundation/WallpaperMachine/issues/196)) ([ae5921a](https://github.com/MMFoundation/WallpaperMachine/commit/ae5921a49ba8b981f9a2fc056fe493240caf49b6))
+- When handing over to the experimental lock screen fails, your original desktop picture is no longer replaced by the system's stand-in image (closes [#197](https://github.com/MMFoundation/WallpaperMachine/issues/197)) ([d82c424](https://github.com/MMFoundation/WallpaperMachine/commit/d82c424933f7b140c6dc78c561f87262315b2495))
+- The experimental lock screen and the screen saver stay switched on after you quit the app, and your original wallpaper choices remain recoverable ([ef6c85c](https://github.com/MMFoundation/WallpaperMachine/commit/ef6c85c5c4511c80cf0ffce9793cf5346a07c9fd))
+- System audio capture now recovers from a startup timeout, and recording-permission advice appears only when access was actually denied ([8262548](https://github.com/MMFoundation/WallpaperMachine/commit/8262548c2b790b847c0880a58f67ea7dbe57e110))
+
+Thanks to [@CagesThrottleUs](https://github.com/CagesThrottleUs), [@Copilot](https://github.com/Copilot), [@Macaron27](https://github.com/Macaron27) and [@kalynnka](https://github.com/kalynnka) for contributing to this release.
+
+### 简体中文
+
+本版本让壁纸在窗口遮住桌面时安静下来，让 Steam 和 pixiv 的登录与退出更可靠，同时修复了场景和音频方面的问题
+
+#### 亮点
+
+- 窗口遮住桌面时，壁纸可以自动静音或调低音量 (closes [#192](https://github.com/MMFoundation/WallpaperMachine/issues/192)) ([7d523a1](https://github.com/MMFoundation/WallpaperMachine/commit/7d523a141dcd11eb9d1c8ca62ea2a02a8777ad1c))
+- 在壁纸库中一键即可打开创意工坊壁纸的 Steam 页面 (closes [#190](https://github.com/MMFoundation/WallpaperMachine/issues/190)) ([ba1afed](https://github.com/MMFoundation/WallpaperMachine/commit/ba1afed93a8a6db9c81e63052cea9b2bcd16873b))
+- 退出 Steam 或 pixiv 登录时，已保存的会话现在会被真正清除 ([9cdf1e2](https://github.com/MMFoundation/WallpaperMachine/commit/9cdf1e2ca4543fb4c64e67e078b8319221113103))
+- 在设置中搜索时，结果能跟上你的输入速度 (closes [#201](https://github.com/MMFoundation/WallpaperMachine/issues/201)) ([f2b5989](https://github.com/MMFoundation/WallpaperMachine/commit/f2b5989ec1830e4fb7e89badb707af24cd0ed88a))
+
+#### 新功能
+
+- 窗口遮住桌面时，壁纸现在可以静音或调低音量，可在“播放”或快速设置中选择，各壁纸已保存的音量不受影响 (closes [#192](https://github.com/MMFoundation/WallpaperMachine/issues/192)) ([7d523a1](https://github.com/MMFoundation/WallpaperMachine/commit/7d523a141dcd11eb9d1c8ca62ea2a02a8777ad1c))
+- 在壁纸库中，可通过检查器或右键点按缩略图，直接打开已安装创意工坊壁纸的 Steam 页面 (closes [#190](https://github.com/MMFoundation/WallpaperMachine/issues/190)) ([ba1afed](https://github.com/MMFoundation/WallpaperMachine/commit/ba1afed93a8a6db9c81e63052cea9b2bcd16873b))
+
+#### 改进
+
+- 在设置中搜索时，输入过程保持流畅，结果会随输入顺畅更新 (closes [#201](https://github.com/MMFoundation/WallpaperMachine/issues/201)) ([f2b5989](https://github.com/MMFoundation/WallpaperMachine/commit/f2b5989ec1830e4fb7e89badb707af24cd0ed88a))
+- Steam 登录窗口现在只显示 Steam 自己的页面，链接、弹出窗口或重定向无法再换成仿冒的登录表单 ([fbab35d](https://github.com/MMFoundation/WallpaperMachine/commit/fbab35d3da5b62c1a5c943891ca14f01b631e9f9))
+
+#### 问题修复
+
+- 退出 Steam 或 pixiv 登录时会真正清除已保存的会话；若 macOS 拒绝清除，App 会提示失败并继续显示为已登录 ([9cdf1e2](https://github.com/MMFoundation/WallpaperMachine/commit/9cdf1e2ca4543fb4c64e67e078b8319221113103))
+- 带雾效的场景壁纸现在能正常显示，不再变成一片红色 (closes [#189](https://github.com/MMFoundation/WallpaperMachine/issues/189)) ([4794622](https://github.com/MMFoundation/WallpaperMachine/commit/4794622c6b7fbf9eff7cef4f27a4b054be3d9e1d))
+- 锁定或睡眠期间所有显示器短暂停用时，场景壁纸会留在原来的显示器上，不再丢失 (closes [#196](https://github.com/MMFoundation/WallpaperMachine/issues/196)) ([ae5921a](https://github.com/MMFoundation/WallpaperMachine/commit/ae5921a49ba8b981f9a2fc056fe493240caf49b6))
+- 切换到实验性锁定屏幕失败时，你原来的桌面图片不会再被系统的替代图片取代 (closes [#197](https://github.com/MMFoundation/WallpaperMachine/issues/197)) ([d82c424](https://github.com/MMFoundation/WallpaperMachine/commit/d82c424933f7b140c6dc78c561f87262315b2495))
+- 退出 App 后，实验性锁定屏幕和屏幕保护程序会保持开启，原来的壁纸选择也仍可恢复 ([ef6c85c](https://github.com/MMFoundation/WallpaperMachine/commit/ef6c85c5c4511c80cf0ffce9793cf5346a07c9fd))
+- 系统音频捕获在启动超时后会自动恢复，只有在确实被拒绝访问时才会提示更改录音权限 ([8262548](https://github.com/MMFoundation/WallpaperMachine/commit/8262548c2b790b847c0880a58f67ea7dbe57e110))
+
+感谢 [@CagesThrottleUs](https://github.com/CagesThrottleUs)、[@Copilot](https://github.com/Copilot)、[@Macaron27](https://github.com/Macaron27) 和 [@kalynnka](https://github.com/kalynnka) 为本版本做出的贡献。
+
+### 한국어
+
+이번 버전에서는 창이 데스크톱을 가릴 때 배경화면 소리를 줄일 수 있고 Steam과 pixiv 로그인과 로그아웃이 더 믿을 만해졌으며, 장면과 오디오 문제도 고쳤습니다
+
+#### 주요 변경 사항
+
+- 창이 데스크톱을 가리면 배경화면 소리를 음소거하거나 줄일 수 있습니다 (closes [#192](https://github.com/MMFoundation/WallpaperMachine/issues/192)) ([7d523a1](https://github.com/MMFoundation/WallpaperMachine/commit/7d523a141dcd11eb9d1c8ca62ea2a02a8777ad1c))
+- 보관함에서 클릭 한 번으로 창작마당 배경화면의 Steam 페이지를 열 수 있습니다 (closes [#190](https://github.com/MMFoundation/WallpaperMachine/issues/190)) ([ba1afed](https://github.com/MMFoundation/WallpaperMachine/commit/ba1afed93a8a6db9c81e63052cea9b2bcd16873b))
+- Steam이나 pixiv에서 로그아웃하면 이제 저장된 세션이 확실히 지워집니다 ([9cdf1e2](https://github.com/MMFoundation/WallpaperMachine/commit/9cdf1e2ca4543fb4c64e67e078b8319221113103))
+- 설정 검색이 입력 속도를 따라잡을 만큼 빨라졌습니다 (closes [#201](https://github.com/MMFoundation/WallpaperMachine/issues/201)) ([f2b5989](https://github.com/MMFoundation/WallpaperMachine/commit/f2b5989ec1830e4fb7e89badb707af24cd0ed88a))
+
+#### 새로운 기능
+
+- 창이 데스크톱을 가리면 배경화면 소리를 음소거하거나 줄일 수 있으며, 재생 또는 빠른 설정에서 고르고 각 배경화면에 저장된 볼륨은 그대로 유지됩니다 (closes [#192](https://github.com/MMFoundation/WallpaperMachine/issues/192)) ([7d523a1](https://github.com/MMFoundation/WallpaperMachine/commit/7d523a141dcd11eb9d1c8ca62ea2a02a8777ad1c))
+- 보관함에서 정보 패널이나 타일 우클릭 메뉴로 설치된 창작마당 배경화면의 Steam 페이지를 바로 열 수 있습니다 (closes [#190](https://github.com/MMFoundation/WallpaperMachine/issues/190)) ([ba1afed](https://github.com/MMFoundation/WallpaperMachine/commit/ba1afed93a8a6db9c81e63052cea9b2bcd16873b))
+
+#### 개선 사항
+
+- 설정에서 검색할 때 입력하는 동안에도 반응이 빠르고 결과가 매끄럽게 바뀝니다 (closes [#201](https://github.com/MMFoundation/WallpaperMachine/issues/201)) ([f2b5989](https://github.com/MMFoundation/WallpaperMachine/commit/f2b5989ec1830e4fb7e89badb707af24cd0ed88a))
+- Steam 로그인 창은 이제 Steam 자체 페이지만 보여 주므로 링크, 팝업, 리디렉션으로 가짜 로그인 양식이 끼어들 수 없습니다 ([fbab35d](https://github.com/MMFoundation/WallpaperMachine/commit/fbab35d3da5b62c1a5c943891ca14f01b631e9f9))
+
+#### 버그 수정
+
+- Steam이나 pixiv에서 로그아웃하면 저장된 세션이 실제로 지워지며, macOS가 거부하면 실패를 알리고 로그인된 상태로 표시합니다 ([9cdf1e2](https://github.com/MMFoundation/WallpaperMachine/commit/9cdf1e2ca4543fb4c64e67e078b8319221113103))
+- 안개 효과가 있는 장면 배경화면이 이제 빨간 화면 대신 제대로 표시됩니다 (closes [#189](https://github.com/MMFoundation/WallpaperMachine/issues/189)) ([4794622](https://github.com/MMFoundation/WallpaperMachine/commit/4794622c6b7fbf9eff7cef4f27a4b054be3d9e1d))
+- 잠금이나 잠자기 중 모든 디스플레이가 잠시 비활성화되어도 장면 배경화면이 사라지지 않고 그대로 유지됩니다 (closes [#196](https://github.com/MMFoundation/WallpaperMachine/issues/196)) ([ae5921a](https://github.com/MMFoundation/WallpaperMachine/commit/ae5921a49ba8b981f9a2fc056fe493240caf49b6))
+- 실험적 잠금 화면으로 전환하는 데 실패해도 원래 데스크톱 사진이 시스템 대체 이미지로 바뀌지 않습니다 (closes [#197](https://github.com/MMFoundation/WallpaperMachine/issues/197)) ([d82c424](https://github.com/MMFoundation/WallpaperMachine/commit/d82c424933f7b140c6dc78c561f87262315b2495))
+- 앱을 종료한 뒤에도 실험적 잠금 화면과 화면 보호기가 켜진 상태로 유지되며 원래 배경화면 선택도 복구할 수 있습니다 ([ef6c85c](https://github.com/MMFoundation/WallpaperMachine/commit/ef6c85c5c4511c80cf0ffce9793cf5346a07c9fd))
+- 시스템 오디오 캡처가 시작 시간 초과 후 스스로 복구되며, 실제로 접근이 거부된 경우에만 녹음 권한 변경을 안내합니다 ([8262548](https://github.com/MMFoundation/WallpaperMachine/commit/8262548c2b790b847c0880a58f67ea7dbe57e110))
+
+이번 릴리스에 기여해 주신 [@CagesThrottleUs](https://github.com/CagesThrottleUs), [@Copilot](https://github.com/Copilot), [@Macaron27](https://github.com/Macaron27), [@kalynnka](https://github.com/kalynnka) 님께 감사드립니다.
+
 ## [1.11.1](https://github.com/MMFoundation/WallpaperMachine/compare/v1.10.0...v1.11.1) (2026-11-12)
 
 ### English
