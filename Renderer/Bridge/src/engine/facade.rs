@@ -30,7 +30,7 @@ use wallpaper_core::{
 };
 
 use super::facade_readiness::FirstFrameReadiness;
-use super::audio_requests::{CaptureAssembly, CaptureEvents, CaptureMailbox, start_capture_lane};
+use super::audio_requests::{CaptureAssembly, CaptureEvents, CaptureMailbox, audio_capture_error, start_capture_lane};
 
 #[cfg(test)]
 mod mount_tests;
@@ -965,7 +965,7 @@ pub(crate) fn apply_audio_capture_demand<B: AudioCaptureBackend>(
         return Err("System audio capture permission was not granted.".to_string());
     }
     controller.set_demand(demand.suspended, demand.external_consumers)
-        .map_err(|error| format!("Audio response could not update: {error}. Check WallpaperMachine in System Settings > Privacy & Security > Screen & System Audio Recording."))
+        .map_err(|error| audio_capture_error("update", &error))
 }
 
 /// What the audio worker does next about a changed output device.

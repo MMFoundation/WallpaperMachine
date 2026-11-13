@@ -346,6 +346,7 @@ pub enum AudioCaptureError {
     UnsupportedPlatform,
     PermissionDenied(String),
     Platform(String),
+    CoreAudio { operation: &'static str, status: i32 },
     Engine(String),
 }
 
@@ -354,6 +355,14 @@ impl Display for AudioCaptureError {
         match self {
             Self::UnsupportedPlatform => {
                 f.write_str("system audio capture is not supported on this platform")
+            }
+            Self::CoreAudio { operation, status } => {
+                write!(f, "Core Audio call {operation} returned error status {status}")?;
+                let tag = status.to_be_bytes();
+                if tag.iter().all(u8::is_ascii_graphic) {
+                    write!(f, " / four-char code {:?}", String::from_utf8_lossy(&tag))?;
+                }
+                Ok(())
             }
             Self::PermissionDenied(message)
             | Self::Platform(message)

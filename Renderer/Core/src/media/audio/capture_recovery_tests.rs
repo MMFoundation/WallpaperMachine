@@ -76,7 +76,7 @@ impl AudioCaptureBackend for RecoveryBackend {
             |state| {
                 let mut control = self.control.lock().unwrap();
                 control.opens += 1;
-                populate(state, consumer);
+                populate(state, Arc::clone(&consumer));
                 if mem::take(&mut control.fail_setup) {
                     // IOProc and its callback exist, but AudioDeviceStart was
                     // never reached. Failed cleanup must not masquerade as capture.

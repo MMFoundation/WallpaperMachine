@@ -25,6 +25,18 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-13 — Audio capture startup timeout recovery
+
+Core Audio start receive timeouts now stop and release the uncertain session before one fresh attempt; cleanup failures block replacement. Native status stays typed, and permission advice is limited to authorization errors.
+
+- Injected AudioDeviceStart status 268451843: the new recovery regression failed before the fix (one attempt instead of two). After the fix, targeted cargo tests passed: 60 core audio and 32 audio-worker tests.
+- `python3 scripts/check_rust.py --output artifacts/audio-startup/rust` — exit 0 across core, bridge, integration and shader checks; five desktop-window tests excluded, desktop/media/network opt-ins disabled, primary-display probe skipped without an active display.
+- `python3 scripts/build.py --renderer-only` — exit 0; renderer library rebuilt and Swift bindings regenerated. No Release app build.
+- `python3 scripts/test.py` — exit 65: Python checks passed; native results were 4,925 passed, 1 failed, 70 skipped. InspectorRenderTests/testTheFooterNeverCoversTheRowWhoseEditBringsItIn failed because the footer covered Show the clock; the same targeted test also failed alone. Its fixture uses a test bridge, not native audio capture.
+- `python3 scripts/check_renderer.py` — initial build interrupted by a killed backdrop_geometry_test discovery process; rebuilding that target succeeded. The subsequent full run and a final --skip-build run both exited 1 because backdrop_scene_test was killed (signal 9); all other registered binaries returned 0.
+- Renderer runs exercised GPU and realtime checks, twelve generated pooled/isolated image comparisons and eight reload projects twice, all successful. Seven local asset/corpus cases were skipped; authored wallpaper compatibility remains unverified.
+- Live system audio capture, permission prompts, device changes and desktop behavior were not exercised. No app was installed, launched or restarted. Full native and renderer gates remain blocked by the failures above.
+
 ## 2026-11-12 — Desktop widgets workspace: canvas, tabbed inspector, handles, ready-made widgets
 
 - Settings › Desktop Widgets without a search is now a workspace (large canvas, layers, inspector with Content/Text/Style/Position tabs); search still lists every row.
@@ -105,12 +117,3 @@ The support prompt's second choice opens MMFoundation's Open Collective (approve
 - `python3 scripts/check_rust.py`: all four groups passed (2,499 tests); five desktop-window cases were explicitly excluded, and desktop/media/network opt-ins remained disabled.
 - The retiring-renderer acknowledgement regression and the pending-Metal-command release regression failed before their respective fixes and passed afterwards. Interrupted refreshes and genuine repeated renderer exits remain covered.
 - No live desktop run, Wallpaper Engine comparison, or Release app build. The exact Apple Metal HUD crash on the reported macOS build remains unverified; tests cover the identified teardown and acknowledgement races.
-
-## 2026-11-11 — Review fixes for the Steam QR sign-in and native downloads
-
-Addresses the PR review: CM logon cleanup, endpoint fallback and cancellation; HTTPS-only content servers with failover promotion; Workshop app check; free-space check from the manifest size; QR actions through PanelController and cancelled when the dialog closes; localized native failure messages.
-
-- `python3 scripts/test.py` — 4839 tests: 4767 passed, 70 skipped, 2 failed: WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem and WebWallpaperWindowCompositionTests/testPreservingLiveSurfacesLeavesOtherWindowPoliciesIntact, both failing the same way on main on this Mac
-- `python3 scripts/test.py --only SteamCMConnectionTests SteamContentClientTests NativeWorkshopDownloadTests SteamQRSignInTests SteamKeyValuesTests WorkshopStoreTests DownloadQueueTests` — 58 passed, including 10 new tests (logon cleanup, endpoint fallback, cancellation, wrong app, free space, server promotion, HTTPS-only servers, joined logon failure, message mapping)
-- `python3 -m unittest scripts.tests.test_localization_catalogs scripts.tests.test_panel_localization` — 17 passed
-- Not covered: live Steam and the UI were not rerun after these fixes

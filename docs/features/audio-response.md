@@ -33,7 +33,17 @@ audio. Enabling media integration alone does not enable audio response.
 
 macOS requests system audio recording permission at capture startup. If access
 is denied, grant it in **System Settings → Privacy & Security → Screen &
-System Audio Recording**, then retry the switch.
+System Audio Recording**, then retry the switch. Permission advice is shown only
+for an authorization failure; a device or service error retains its native diagnostic.
+
+If `AudioDeviceStart` returns `268451843` (`MACH_RCV_TIMED_OUT`), the audio service
+did not reply in time. Capture stops and releases that session, then tries one fresh
+tap and aggregate device before reporting failure. A timeout can leave I/O started
+without an acknowledgement, so cleanup includes stopping it. If cleanup fails, the
+resources remain owned and no replacement starts. Other errors, including denied
+permission, are not retried this way. Recovery runs on the existing capture worker
+and adds no work while capture is healthy. A persistently unresponsive audio service
+still produces an error after the retry; the app does not restart the system service.
 
 ## What the input is
 
@@ -144,7 +154,10 @@ Scenes receive the values as analysed; web pages receive them clamped to 0.0–1
 Synthetic offscreen checks cover the analysis against tone measurements
 (`AudioResponseMonoTest`, see [renderer testing](../testing/renderer.md)), audio-driven
 shader color and SceneScript scale. Device-free controller and bridge tests cover web-only
-capture startup, permission, shared ownership, suspension and shutdown, and the
+capture startup, permission, shared ownership, suspension and shutdown. Startup
+regressions inject the native timeout and cover recovery with a fresh session,
+persistent failure after one retry, cleanup failures that block replacement, and
+non-timeout failures that must not retry. They also cover the
 [output device rebuild](#output-device-changes): the debounce, the controller restart,
 the retry delays and superseded retries. They also drive the stall watch through the
 real I/O callback with an injected clock: silence, an idle output device and

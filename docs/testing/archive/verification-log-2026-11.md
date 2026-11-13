@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-11 — Review fixes for the Steam QR sign-in and native downloads
+
+Addresses the PR review: CM logon cleanup, endpoint fallback and cancellation; HTTPS-only content servers with failover promotion; Workshop app check; free-space check from the manifest size; QR actions through PanelController and cancelled when the dialog closes; localized native failure messages.
+
+- `python3 scripts/test.py` — 4839 tests: 4767 passed, 70 skipped, 2 failed: WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem and WebWallpaperWindowCompositionTests/testPreservingLiveSurfacesLeavesOtherWindowPoliciesIntact, both failing the same way on main on this Mac
+- `python3 scripts/test.py --only SteamCMConnectionTests SteamContentClientTests NativeWorkshopDownloadTests SteamQRSignInTests SteamKeyValuesTests WorkshopStoreTests DownloadQueueTests` — 58 passed, including 10 new tests (logon cleanup, endpoint fallback, cancellation, wrong app, free space, server promotion, HTTPS-only servers, joined logon failure, message mapping)
+- `python3 -m unittest scripts.tests.test_localization_catalogs scripts.tests.test_panel_localization` — 17 passed
+- Not covered: live Steam and the UI were not rerun after these fixes
+
 ## 2026-11-11 — Desktop widgets: seven more kinds
 
 - Added Text, Countdown, Greeting, Battery, Sunrise and sunset, Analog clock and Month calendar widgets; clocks and dates gained Time zone and Label, dates gained month-year, week and day-of-year styles and other calendars.

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::oneshot;
 use wallpaper_core::media::audio::{
-    AudioCaptureBackend, AudioCaptureController, TAP_STALL_CHECK_INTERVAL,
+    AudioCaptureBackend, AudioCaptureController, AudioCaptureError, TAP_STALL_CHECK_INTERVAL,
 };
 use wallpaper_core::project::SceneHandle;
 
@@ -259,10 +259,23 @@ fn apply_scene<B: AudioCaptureBackend>(
         .set_scene_capturing(handle, enabled)
         .map_err(|error| {
             let action = if enabled { "start" } else { "stop" };
-            format!(
-                "Audio response could not {action}: {error}. Check WallpaperMachine in System Settings > Privacy & Security > Screen & System Audio Recording."
-            )
+            audio_capture_error(action, &error)
         })
+}
+
+/// Permission advice belongs only to an authorization failure. Core Audio
+/// timeouts and device errors keep their diagnostic without blaming TCC.
+pub(super) fn audio_capture_error(action: &str, error: &AudioCaptureError) -> String {
+    let denied = matches!(error, AudioCaptureError::PermissionDenied(_))
+        || matches!(error, AudioCaptureError::CoreAudio { status, .. }
+            if *status == i32::from_be_bytes(*b"perm"));
+    if denied {
+        format!(
+            "Audio response could not {action}: {error}. Check WallpaperMachine in System Settings > Privacy & Security > Screen & System Audio Recording."
+        )
+    } else {
+        format!("Audio response could not {action}: {error}.")
+    }
 }
 
 #[cfg(test)]
@@ -283,6 +296,28 @@ mod tests {
     };
 
     const LIMIT: Duration = Duration::from_secs(10);
+
+    #[test]
+    fn capture_errors_only_offer_permission_advice_for_denied_access() {
+        for action in ["start", "stop", "update"] {
+            for (error, denied) in [
+                (AudioCaptureError::CoreAudio {
+                    operation: "AudioDeviceStart",
+                    status: 268451843,
+                }, false),
+                (AudioCaptureError::CoreAudio {
+                    operation: "AudioDeviceStart",
+                    status: i32::from_be_bytes(*b"perm"),
+                }, true),
+                (AudioCaptureError::PermissionDenied("denied".into()), true),
+                (AudioCaptureError::Platform("device disconnected".into()), false),
+            ] {
+                let message = audio_capture_error(action, &error);
+                assert_eq!(message.contains("System Settings"), denied);
+                assert!(message.contains(&error.to_string()));
+            }
+        }
+    }
     const FIRST: u64 = 6101;
     const SECOND: u64 = 6207;
 

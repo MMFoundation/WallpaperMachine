@@ -316,6 +316,73 @@ fn failed_setup_retains_failed_cleanup_and_reports_setup_error_first() {
 }
 
 #[test]
+fn timed_out_start_rebuilds_once_before_reporting_failure() {
+    for recovers in [true, false] {
+        let ops = FakeTeardown::default();
+        let consumer = Arc::new(Consumer);
+        let opens = AtomicUsize::new(0);
+        let mut capture = CaptureOwner { state: None };
+        let result = capture.start_with(
+            || CaptureState::with_teardown(ops.clone()),
+            |state| {
+                let attempt = opens.fetch_add(1, Ordering::Relaxed);
+                if attempt > 0 {
+                    assert_eq!(ops.calls(), [Step::Stop, Step::IoProc, Step::Aggregate, Step::Tap]);
+                    assert_eq!(Arc::strong_count(&consumer), 1);
+                }
+                populate(state, consumer.clone());
+                state.running = recovers && attempt > 0;
+                if state.running {
+                    Ok(())
+                } else {
+                    Err(check("AudioDeviceStart", 268451843).unwrap())
+                }
+            },
+        );
+        assert_eq!(opens.load(Ordering::Relaxed), 2);
+        assert_eq!(result.is_ok(), recovers);
+        assert_eq!(capture.is_running(), recovers);
+        assert!(!capture.has_pending_cleanup());
+        capture.stop().unwrap();
+        assert_eq!(Arc::strong_count(&consumer), 1);
+    }
+}
+
+#[test]
+fn startup_does_not_retry_other_errors_or_failed_cleanup() {
+    for (operation, status, failed_cleanup) in [
+        ("AudioDeviceStart", -1, None),
+        ("AudioDeviceStart", i32::from_be_bytes(*b"perm"), None),
+        ("AudioHardwareCreateProcessTap", 268451843, None),
+        ("AudioDeviceStart", 268451843, Some(Step::Stop)),
+        ("AudioDeviceStart", 268451843, Some(Step::IoProc)),
+        ("AudioDeviceStart", 268451843, Some(Step::Aggregate)),
+        ("AudioDeviceStart", 268451843, Some(Step::Tap)),
+    ] {
+        let ops = FakeTeardown::default();
+        ops.fail(failed_cleanup);
+        let opens = AtomicUsize::new(0);
+        let mut capture = CaptureOwner { state: None };
+        let expected = check(operation, status).unwrap();
+        let result = capture.start_with(
+            || CaptureState::with_teardown(ops.clone()),
+            |state| {
+                opens.fetch_add(1, Ordering::Relaxed);
+                populate(state, Arc::new(Consumer));
+                state.running = false;
+                Err(expected.clone())
+            },
+        );
+        assert_eq!(result, Err(expected));
+        assert_eq!(opens.load(Ordering::Relaxed), 1);
+        assert!(!capture.is_running());
+        assert_eq!(capture.has_pending_cleanup(), failed_cleanup.is_some());
+        ops.fail(None);
+        capture.stop().unwrap();
+    }
+}
+
+#[test]
 fn successful_stop_is_idempotent_and_reclaims_callback() {
     let ops = FakeTeardown::default();
     let consumer = Arc::new(Consumer);
@@ -380,7 +447,7 @@ impl AudioCaptureBackend for Backend {
         self.capture.start_with(
             || CaptureState::with_teardown(self.ops.clone()),
             |state| {
-                populate(state, consumer);
+                populate(state, Arc::clone(&consumer));
                 Ok(())
             },
         )

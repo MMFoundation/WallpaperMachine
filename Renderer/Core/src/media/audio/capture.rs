@@ -163,20 +163,12 @@ impl<O: TeardownOperations> Drop for CaptureState<O> {
     }
 }
 
-/// Turns a non-zero Core Audio result code into a platform error naming the call.
-fn check(operation: &str, status: i32) -> Option<AudioCaptureError> {
-    if status == 0 {
-        return None;
-    }
-    let tag = status.to_be_bytes();
-    let shown = if tag.iter().all(u8::is_ascii_graphic) {
-        format!("{status} / four-char code {:?}", String::from_utf8_lossy(&tag))
-    } else {
-        format!("{status}")
-    };
-    Some(AudioCaptureError::Platform(format!(
-        "Core Audio call {operation} returned error status {shown}"
-    )))
+/// Mach receive timeout: the server may have started I/O without replying.
+const MACH_RCV_TIMED_OUT: i32 = 0x1000_4003;
+
+/// Preserve the native call and status so recovery never parses diagnostic text.
+fn check(operation: &'static str, status: i32) -> Option<AudioCaptureError> {
+    (status != 0).then_some(AudioCaptureError::CoreAudio { operation, status })
 }
 
 /// Owns the whole session across start/stop, including partially constructed sessions.
@@ -187,8 +179,8 @@ struct CaptureOwner<O: TeardownOperations> {
 impl<O: TeardownOperations> CaptureOwner<O> {
     fn start_with(
         &mut self,
-        make_state: impl FnOnce() -> CaptureState<O>,
-        open: impl FnOnce(&mut CaptureState<O>) -> Result<(), AudioCaptureError>,
+        mut make_state: impl FnMut() -> CaptureState<O>,
+        mut open: impl FnMut(&mut CaptureState<O>) -> Result<(), AudioCaptureError>,
     ) -> Result<(), AudioCaptureError> {
         // A partially stopped session is not a healthy running tap. Finish its
         // cleanup before making anything new, even if AudioDeviceStop failed.
@@ -196,14 +188,36 @@ impl<O: TeardownOperations> CaptureOwner<O> {
             return Ok(());
         }
         self.stop()?;
-        self.state = Some(make_state());
-        if let Err(error) = open(self.state.as_mut().expect("state was just installed")) {
-            // Preserve the setup error. Failed cleanup stays owned for stop/start
-            // retries rather than being abandoned by a local CaptureState's Drop.
-            let _ = self.stop();
+        let mut retried = false;
+        loop {
+            self.state = Some(make_state());
+            let state = self.state.as_mut().expect("state was just installed");
+            let Err(error) = open(state) else {
+                return Ok(());
+            };
+            let timed_out = matches!(error, AudioCaptureError::CoreAudio {
+                operation: "AudioDeviceStart", status: MACH_RCV_TIMED_OUT,
+            });
+            if timed_out {
+                // A missing reply does not prove I/O never started. Stop before
+                // destroying the callback, and retain it if teardown fails.
+                state.running = true;
+            }
+            // Never reuse a timed-out aggregate. Only one fresh session is tried,
+            // and only after all resources from the first were released. This
+            // runs on the capture worker, with no polling or steady-state cost.
+            let cleaned = self.stop().is_ok();
+            if timed_out && cleaned && !retried {
+                retried = true;
+                log::warn!(
+                    "[wallpaper-core audio] AudioDeviceStart timed out (MACH_RCV_TIMED_OUT); rebuilding capture once"
+                );
+                continue;
+            }
+            // Preserve the setup error. Failed cleanup remains owned for a
+            // later stop/start, without risking a second concurrent session.
             return Err(error);
         }
-        Ok(())
     }
 
     fn stop(&mut self) -> Result<(), AudioCaptureError> {
@@ -284,7 +298,7 @@ impl AudioCaptureBackend for PlatformAudioCaptureBackend {
 
     fn start(&mut self, consumer: Arc<dyn AudioFrameConsumer>) -> Result<(), AudioCaptureError> {
         self.capture
-            .start_with(CaptureState::empty, |state| open_capture(state, consumer))?;
+            .start_with(CaptureState::empty, |state| open_capture(state, Arc::clone(&consumer)))?;
         self.permission_hint = true;
         Ok(())
     }
