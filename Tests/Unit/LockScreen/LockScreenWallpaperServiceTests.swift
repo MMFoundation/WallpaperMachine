@@ -1243,6 +1243,50 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testDisablingSaverBeforeFirstFrameDoesNotRetryAStoreRace() async throws {
+    var record = scene()
+    record.displayId = 1
+    var raceNextWrite = false
+    var raced = false
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {},
+      scenes: { [record] },
+      selection: LockScreenWallpaperSelection(
+        storeURL: store, journalURL: journal, reload: {},
+        persistJournal: { url, data in
+          try LockScreenWallpaperSelection.persistJournalFile(url, data)
+          if raceNextWrite {
+            raceNextWrite = false
+            raced = true
+            var current = try XCTUnwrap(PropertyListSerialization.propertyList(
+              from: Data(contentsOf: self.store), format: nil) as? [String: Any])
+            current["Unrelated"] = "WallpaperAgent wrote this"
+            try self.write(current)
+          }
+        }),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { [1: "one"][$0] })
+    try service.start()
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("selection awaiting its first frame") {
+      service.isBusy && (try? self.selectedProvider("Idle")) == LockScreenConfiguration.extensionIdentifier
+    }
+    XCTAssertFalse(service.isEnabled)
+    // New global metadata requires updating the recovery union before the disable writes.
+    var current = try XCTUnwrap(PropertyListSerialization.propertyList(
+      from: Data(contentsOf: store), format: nil) as? [String: Any])
+    current["AllSpacesAndDisplays"] = ["Type": "individual", "Unrelated": "new-metadata"]
+    try write(current)
+    raceNextWrite = true
+    service.setScreenSaverEnabled(false)
+    await waitFor("the raced disable") { raced && !service.isBusy }
+    XCTAssertNotNil(service.errorMessage)
+    XCTAssertEqual(try selectedProvider("Idle"), "display-one-idle")
+    XCTAssertFalse(service.screenSaverEnabled)
+    try await service.shutdown()
+  }
+
+  @MainActor
   func testUnchangedMonitorTickDoesNotRepublishAndResolvedUUIDRecovers() async throws {
     var builtIn = scene()
     builtIn.displayId = 1

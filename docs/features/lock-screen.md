@@ -552,7 +552,8 @@ restored like any other, with **Retry**. A store race also does not fail an acti
 that turns no committed mode off (a first activation, at launch too, a switch or
 **Retry**): the journal can still restore everything, so the same back-off tries
 again. A restore, a switch turning a mode off and every other failure report at once,
-as before. A write that lost the race to WallpaperAgent
+including a switch made while the first activation is still waiting for a frame.
+A write that lost the race to WallpaperAgent
 wrote nothing, so the selection's next attempt does not count the fields it was about
 to take as its own (it would read them as changed outside the app); the recovery
 journal keeps them on disk.

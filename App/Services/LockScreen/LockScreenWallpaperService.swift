@@ -350,6 +350,10 @@ final class LockScreenWallpaperService {
   private func update(revision: UInt64) async {
     let affectedLockScreen = isRequested || ownsDesktopProvider
     let affectedScreenSaver = screenSaverRequested || screenSaverEnabled
+    // Publication can select both modes before the first frame sets lastInputs. Capture
+    // a disable before this update replaces the manifest, including during that wait.
+    let disablingPublishedMode = (published?.lockScreenEnabled == true && !isRequested)
+      || (published?.screenSaverEnabled == true && !screenSaverRequested)
     defer {
       if generation == revision {
         isBusy = false
@@ -545,7 +549,8 @@ final class LockScreenWallpaperService {
         do {
           try await awaitReadiness(configuration)
         } catch let error as RendererUnavailable
-          where configuration.screenSaverEnabled && !mayRetryTransient(error)
+          where configuration.screenSaverEnabled
+            && !mayRetryTransient(error, disablingPublishedMode: disablingPublishedMode)
         {
           // Idle selection is valid without an acquired surface. A missing
           // Desktop acknowledgement must not take that independent choice down.
@@ -599,7 +604,7 @@ final class LockScreenWallpaperService {
           return
         } catch { failure = error }
       }
-      if mayRetryTransient(failure) {
+      if mayRetryTransient(failure, disablingPublishedMode: disablingPublishedMode) {
         // The committed selection stays: the lock screen keeps what it shows while a later
         // attempt publishes again, instead of falling back to macOS's wallpaper.
         transientFailures += 1
@@ -727,8 +732,9 @@ final class LockScreenWallpaperService {
   /// failure leaves the journal able to restore everything, so an activation that turns no
   /// committed mode off (a launch, a switch, Retry) tries it again too: WallpaperAgent rewrites
   /// its store in bursts. A restore clears the manifest first, so it still reports at once.
-  private func mayRetryTransient(_ error: Error) -> Bool {
-    guard transientFailures < Self.transientRetrySkips.count else { return false }
+  private func mayRetryTransient(_ error: Error, disablingPublishedMode: Bool) -> Bool {
+    guard !disablingPublishedMode, transientFailures < Self.transientRetrySkips.count
+    else { return false }
     let transient = (error as? LockScreenWallpaperFailure)?.reason == .transient
     if lastInputs != nil, lastLockScreenRequested == isRequested,
       lastScreenSaverRequested == screenSaverRequested
