@@ -55,7 +55,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - if: matrix.language == 'swift'
         uses: ./.github/actions/prepare-build
@@ -107,7 +107,7 @@ jobs:
 
       - name: Keep the build logs of a failed Swift build
         if: failure() && matrix.language == 'swift'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codeql-swift-build-logs
           path: artifacts/build/

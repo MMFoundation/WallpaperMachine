@@ -57,7 +57,7 @@ jobs:
       # The branch as it is once the lock is held, not the pushed commit: a queued run would
       # otherwise build on a commit the branch has moved past and fail to push. The release
       # request still comes from this run's own push event.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
