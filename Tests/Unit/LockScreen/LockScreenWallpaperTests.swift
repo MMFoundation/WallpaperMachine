@@ -629,7 +629,8 @@ final class LockScreenWallpaperTests: XCTestCase {
   /// next activation must take it back with the originals it had, not fail for want of one.
   @MainActor
   func testSelectionWallpaperAgentSavesOverARestoreIsTakenBackWithItsOriginals() throws {
-    let original = fixture()
+    var original = fixture()
+    original["AllSpacesAndDisplays"] = ["Idle": choice("another-app-idle"), "Type": "idle"]
     try write(original)
     let selection = LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {})
     try selection.synchronize(desktopDisplays: ["one"], screenSaverDisplays: ["one"])

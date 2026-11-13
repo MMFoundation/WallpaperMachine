@@ -600,7 +600,8 @@ puts the extension back with no journal: the next activation used to fail with "
 restoration journal or surviving system fallback", and **Retry** could not get past
 it. Nodes that still hold the extension in every field the pruned journal owned are
 taken back with its entries, as if it had never been pruned, so they are restored to
-the originals they had. A choice made since replaced the extension, so it is never
+the originals they had; global choices that the same save removed again come back
+with them. A choice made since replaced the extension, so it is never
 overwritten.
 
 macOS copies the extension's selection into the fallbacks it reloads (`SystemDefault`

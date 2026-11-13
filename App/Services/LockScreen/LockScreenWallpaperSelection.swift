@@ -491,16 +491,21 @@ final class LockScreenWallpaperSelection {
   /// journal was pruned: the extension is back with nothing journaled to restore it to. The
   /// entries that restored those nodes are taken back, as if never pruned, instead of finding
   /// no original (or the wrong fallback) for them. Any choice made since replaced the extension,
-  /// so a node that still holds it everywhere it was owned still has that original.
+  /// so a node that still holds it everywhere it was owned still has that original. The same
+  /// save removes the global choices again, so the global entry comes back with them.
   private func readoptedEntries(_ root: [String: Any]) -> [Entry] {
     guard let data = try? Data(contentsOf: Self.restoredJournalURL(journalURL)),
       let pruned = try? PropertyListDecoder().decode([Entry].self, from: data)
     else { return [] }
-    return pruned.filter { entry in
+    let taken = pruned.filter { entry in
       guard entry.path != Self.globalPath, let node = Self.node(root, path: entry.path) else {
         return false
       }
       return entry.ownedFields.allSatisfy { Self.owns(node[$0]) }
+    }
+    let global = Self.separatedLinked(Self.node(root, path: Self.globalPath) ?? [:])
+    return taken.isEmpty ? [] : taken + pruned.filter {
+      $0.path == Self.globalPath && $0.ownedFields.allSatisfy { global[$0] == nil }
     }
   }
 
