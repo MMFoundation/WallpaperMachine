@@ -1190,10 +1190,43 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     service.setEnabled(true)
     await waitFor("the raced attempt") { raced && !service.isBusy }
     XCTAssertNil(service.errorMessage)
+    XCTAssertFalse(service.isEnabled, "the raced attempt wrote nothing")
+    XCTAssertFalse(try storeOwnsDisplayOne())
     try XCTUnwrap(timers.last).fire()
     await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
     XCTAssertNil(service.errorMessage)
     XCTAssertTrue(try storeOwnsDisplayOne())
+  }
+
+  /// Turning a committed mode off is not retried: a race there reports and restores at once, so
+  /// the switched-off mode does not stay selected through the back-off.
+  @MainActor
+  func testTurningAModeOffDuringAStoreRaceStillRestoresAtOnce() async throws {
+    var record = scene()
+    record.displayId = 1
+    var raceReload = false
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(
+        storeURL: store, journalURL: journal,
+        reload: {
+          if raceReload {
+            raceReload = false
+            throw LockScreenWallpaperFailure(message: "agent relaunching", reason: .transient)
+          }
+        }),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { [1: "one"][$0] })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try service.start()
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("both modes on") { service.isEnabled && service.screenSaverEnabled && !service.isBusy }
+    raceReload = true
+    service.setScreenSaverEnabled(false)
+    await waitFor("the raced switch") { !raceReload && !service.isBusy }
+    XCTAssertNotNil(service.errorMessage)
+    XCTAssertEqual(try selectedProvider("Idle"), "display-one-idle")
   }
 
   @MainActor
