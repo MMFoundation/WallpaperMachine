@@ -2394,7 +2394,7 @@ void RegisterLayerVideos(ParseContext& context, const std::string& key,
         if (name.empty() || IsSpecTex(name) || ! seen.insert(name).second) continue;
         const auto found = context.scene->textures.find(name);
         if (found != context.scene->textures.end() && found->second.isVideo) {
-            runtime->RegisterNodeVideoTexture(key, name);
+            runtime->RegisterNodeVideoTexture(key, name, TextureHeaderOf(context, name).durationSeconds);
         }
     }
 }

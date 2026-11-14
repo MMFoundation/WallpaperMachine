@@ -2890,11 +2890,17 @@ void SceneRuntimeContext::RegisterSceneScript(std::string script_source, std::st
     m_scene_scripts.push_back(SceneScriptBinding { .script = std::move(program) });
 }
 
-void SceneRuntimeContext::RegisterNodeVideoTexture(std::string name, std::string texture_key) {
+void SceneRuntimeContext::RegisterNodeVideoTexture(std::string name, std::string texture_key,
+                                                  double duration_seconds) {
     if (name.empty() || texture_key.empty()) return;
     auto& keys = m_node_video_textures[name];
     if (std::find(keys.begin(), keys.end(), texture_key) == keys.end()) keys.push_back(texture_key);
-    m_video_texture_playback.try_emplace(std::move(texture_key));
+    auto& clock = m_video_texture_playback.try_emplace(std::move(texture_key)).first->second;
+    // Scripts may cache duration during init. Seed it from the header before they start,
+    // without resetting a clock already shared by another layer or a runtime-created copy.
+    if (clock.duration_seconds <= 0.0 && std::isfinite(duration_seconds) && duration_seconds > 0.0) {
+        clock.duration_seconds = duration_seconds;
+    }
 }
 
 void SceneRuntimeContext::RegisterSoundLayer(std::string                    name,

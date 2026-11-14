@@ -715,8 +715,8 @@ endif()
 if(APPLE)
     pkg_check_modules(TEST_LZ4_SCENE_VIDEO REQUIRED IMPORTED_TARGET liblz4)
     add_executable(scene_video_input_test scene_video_input_test.mm)
-    target_link_libraries(scene_video_input_test PRIVATE ${PROJECT_NAME} wpFs wpScene wmMedia
-        wescene_testing_media PkgConfig::TEST_LZ4_SCENE_VIDEO ${CORE_VIDEO_FRAMEWORK} GTest::gtest_main)
+    target_link_libraries(scene_video_input_test PRIVATE ${PROJECT_NAME} wpFs wpScene wpAudio wmMedia
+        nlohmann_json::nlohmann_json wescene_testing_media PkgConfig::TEST_LZ4_SCENE_VIDEO ${CORE_VIDEO_FRAMEWORK} GTest::gtest_main)
     target_include_directories(scene_video_input_test PRIVATE
         . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene ${CMAKE_SOURCE_DIR}/src/Scene/include
         ${CMAKE_SOURCE_DIR}/src/Scene/Parse)

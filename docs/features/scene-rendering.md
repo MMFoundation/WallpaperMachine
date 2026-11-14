@@ -943,11 +943,18 @@ the only text write compared with Wallpaper Engine's frames. A write from anythi
 else, such as another property's script, a scene script, a cursor handler or another
 layer's script, is the layer's text until the text property's own value is applied on
 the next tick; which script Wallpaper Engine lets win when two write one text is not
-established (the one frame that covers it shows the text script's value). Effect and
-video output of Native Metal has not been compared against real wallpapers.
+established (the one frame that covers it shows the text script's value). That text
+comparison does not establish broader effect or video parity.
 
 A video texture plays against the clock of the layer that shows it, the scene's until a script
-moves it, on both renderers. A render graph built again under a playing video (a text layer
+moves it, on both renderers. A loose or embedded video's duration is supplied from
+the cached texture header when its layer is registered, before scripts initialize.
+An `init()` that caches `getVideoTexture().duration` therefore sees the clip's
+length, including when it initially hides the layer for a delayed start. Registering
+another layer using the same video preserves its running clock. This uses the
+existing load-time metadata and adds no per-frame probe or decode.
+
+A render graph built again under a playing video (a text layer
 whose card changes size in texels, a property that shows or hides a layer, a change of the
 render scale on Native Metal) does not close the videos the new graph still shows. Wallpaper Engine resizes a text
 card's buffers in place and touches nothing else a scene holds, so its video neither goes back

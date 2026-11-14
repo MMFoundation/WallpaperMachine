@@ -6197,6 +6197,20 @@ export function cursorClick(event) { thisScene.getLayer('target').visible = fals
     EXPECT_TRUE(target->Visible()) << "a layer that is not solid hears no click";
 }
 
+TEST(ScriptVideo, RegisteringAnotherLayerKeepsTheSharedVideoClock) {
+    Scene scene;
+    auto runtime = MakeRuntimeWithScene(scene);
+    runtime->RegisterNodeVideoTexture("first", "shared.mp4", 3.0);
+    ASSERT_TRUE(runtime->SetNodeVideoTextureCurrentTime("first", 2.5));
+    runtime->Tick(2.0);
+    const auto before = runtime->ResolveVideoPlaybackState("shared.mp4", 0.0);
+    runtime->RegisterNodeVideoTexture("second", "shared.mp4", 3.0);
+    EXPECT_DOUBLE_EQ(runtime->NodeVideoTextureDuration("second"), 3.0);
+    EXPECT_DOUBLE_EQ(runtime->ResolveVideoPlaybackState("shared.mp4", 0.0).scene_elapsed_seconds,
+                     before.scene_elapsed_seconds);
+    EXPECT_DOUBLE_EQ(runtime->NodeVideoTextureCurrentTime("second"), 1.5);
+}
+
 // A layer's video texture (we_ss_reg_VideoTexture 0x140214050, decompiles/A-7i.md): `loop`
 // reads back what was written; a clip that does not loop stops on its last frame and tells its
 // `addEndedCallback` listeners once.

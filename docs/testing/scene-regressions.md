@@ -942,6 +942,14 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `getVideoTexture().isPlaying()` reflects shared runtime pause/play state, so
   scripts that hide a layer during init can reveal it during update; `Vec*.mix`
   and `MediaPlaybackEvent` constants are available.
+  `VideoInput.LayerScriptsKnowTheVideoDurationBeforeTheyInitialize`
+  (`scene_video_input_test`) parses generated video files both loose and embedded
+  in a texture: the script caches the real duration during `init`, can reveal
+  its initially hidden layer, and seeking wraps at that duration. It failed with
+  a zero duration and a permanently hidden layer before the metadata was passed
+  into the runtime. `ScriptVideo.RegisteringAnotherLayerKeepsTheSharedVideoClock`
+  (`script_runtime_compat_test`) checks that a second layer gets the same duration
+  without resetting the first layer's advancing clock.
 - **A scene with no player hears no media event** — `scenescript_media_event_smoke`:
   `SceneScriptMediaEventSmoke.ASceneWithNoPlayerHearsNoMediaEvent` (no handler of the
   five runs over two ticks) and `.ARealEventIsDeliveredOnceTheSettingIsOn`;

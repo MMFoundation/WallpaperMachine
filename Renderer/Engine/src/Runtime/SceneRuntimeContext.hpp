@@ -629,7 +629,7 @@ public:
     // matched across every registered timeline.
     ScalarAnimationPlayback* FindAnimationByName(std::string_view animation_name) const;
     void RegisterSceneScript(std::string script_source, std::string layer_name);
-    void RegisterNodeVideoTexture(std::string name, std::string texture_key);
+    void RegisterNodeVideoTexture(std::string name, std::string texture_key, double duration_seconds = 0.0);
     void RegisterSoundLayer(std::string name, std::shared_ptr<WPSoundStream> stream);
     /// A sound layer's script members (we_ss_reg_SoundLayer 0x1401F7090, decompiles/A-7j.md):
     /// `mintime`, `maxtime` and `playbackmode` reach the stream; `attenuation`, `mindistance`,

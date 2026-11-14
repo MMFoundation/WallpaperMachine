@@ -12,22 +12,29 @@
 //
 // Media is encoded by this project's synthetic encoder (Renderer/Testing). The temp directory is
 // a private folder for the length of each test, so the cache files a shape makes can be counted.
+#include "Audio/SoundManager.h"
 #include "Fs/CBinaryStream.h"
 #include "Fs/PhysicalFs.h"
 #include "Fs/VFS.h"
 #include "Image.hpp"
 #include "Media/ByteSource.hpp"
+#include "Project/ProjectProperties.hpp"
+#include "Runtime/SceneRuntimeContext.hpp"
+#include "Scene/Scene.h"
+#include "Scene/SceneNode.h"
 #include "Scene/WPPkgFs.hpp"
 #include "Utils/Sha.hpp"
 #include "Video/VideoContainerProbe.hpp"
 #include "Video/VideoTextureSource.hpp"
 #include "WPTexImageParser.hpp"
+#include "WPSceneParser.hpp"
 #include "synthetic_video.hpp"
 
 #import <CoreVideo/CoreVideo.h>
 
 #include <gtest/gtest.h>
 #include <lz4.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -630,6 +637,82 @@ TEST_F(VideoInput, AClipPackedIntoATexKeepsItsBytesInTheFirstLevel)
             EXPECT_LT(counters.bytes.load(), clip.size() + 4096) << "the range is probed in place";
             EXPECT_LE(counters.largest_read.load(), kMiB);
         }
+    }
+}
+
+TEST_F(VideoInput, LayerScriptsKnowTheVideoDurationBeforeTheyInitialize)
+{
+    const auto& clip = ClipBytes();
+    ASSERT_FALSE(clip.empty());
+    for (const bool embedded : { false, true }) {
+        SCOPED_TRACE(embedded ? "embedded texture" : "loose video");
+        ScopedTemp scratch;
+        const auto folder = scratch.Work() / "project";
+        if (embedded) {
+            WriteAll(folder / "materials/clip.tex",
+                     MakeVideoTex(clip, synth::kFrameWidth, synth::kFrameHeight, false));
+        } else {
+            WriteAll(folder / "clip.mp4", clip);
+        }
+        WriteAll(folder / "model.json", R"({"material":"material.json","width":64,"height":48})");
+        WriteAll(folder / "material.json", R"({"passes":[{"shader":"video","blending":"translucent",)"
+                 R"("cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","textures":["clip"]}]})");
+        WriteAll(folder / "shaders/video.vert", R"(
+uniform mat4 g_ModelViewProjectionMatrix;
+attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() { gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix); v_TexCoord = a_TexCoord; }
+)");
+        WriteAll(folder / "shaders/video.frag", R"(
+uniform sampler2D g_Texture0;
+varying vec2 v_TexCoord;
+void main() { gl_FragColor = texSample2D(g_Texture0, v_TexCoord); }
+)");
+        auto document = nlohmann::json::parse(R"({
+            "camera":{"center":[0,0,-1],"eye":[0,0,0],"up":[0,1,0]},
+            "general":{"orthogonalprojection":{"width":64,"height":48},"bloom":false},
+            "objects":[{"id":1,"name":"clip layer","image":"model.json","origin":[32,24,0],
+                        "visible":{"value":true}}]
+        })");
+        document["objects"][0]["visible"]["script"] = R"JS(
+let video, duration;
+export function init() {
+    video = thisLayer.getVideoTexture();
+    duration = video.duration;
+    video.stop();
+    thisLayer.visible = false;
+}
+export function update() {
+    thisLayer.origin = new Vec3(duration, 0, 0);
+    thisLayer.visible = duration > 0;
+    if (duration > 0) video.play();
+}
+)JS";
+        fs::VFS vfs;
+        ASSERT_TRUE(vfs.Mount("/assets", fs::CreatePhysicalFs(folder.string())));
+        audio::SoundManager sound(audio::SoundManager::OutputBackend::Null);
+        ProjectProperties properties;
+        SceneParseRequest request;
+        request.scene_id = "scripted-video-duration";
+        request.project_properties = &properties;
+        WPSceneParser parser;
+        auto scene = parser.Parse(request, document.dump(), vfs, sound);
+        ASSERT_NE(scene, nullptr);
+        ASSERT_NE(scene->runtime, nullptr);
+        SceneNode* node = nullptr;
+        for (const auto& child : scene->sceneGraph->GetChildren()) {
+            if (child->Name() == "clip layer") node = child.get();
+        }
+        ASSERT_NE(node, nullptr);
+        const double duration = static_cast<double>(synth::kGopFrames) / 30.0;
+        EXPECT_NEAR(scene->runtime->NodeVideoTextureDuration("clip layer"), duration, 0.001);
+        scene->runtime->Tick(1.0 / 60.0);
+        EXPECT_NEAR(node->Translate().x(), duration, 0.001) << "init cached the actual duration";
+        EXPECT_TRUE(node->Visible()) << "a control script must be able to reveal its video";
+        EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
+        EXPECT_TRUE(scene->runtime->SetNodeVideoTextureCurrentTime("clip layer", duration * 2.5));
+        EXPECT_NEAR(scene->runtime->NodeVideoTextureCurrentTime("clip layer"), duration * 0.5, 0.001);
     }
 }
 
