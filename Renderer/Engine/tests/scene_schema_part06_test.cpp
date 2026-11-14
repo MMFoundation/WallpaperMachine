@@ -75,7 +75,7 @@ struct Collector {
 
     UpdateUniformOp Op()
     {
-        return [this](std::string_view name, const ShaderValue& value) {
+        return [this](std::string_view name, std::span<const float> value) {
             seen[std::string(name)].assign(value.data(), value.data() + value.size());
         };
     }

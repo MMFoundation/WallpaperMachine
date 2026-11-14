@@ -843,7 +843,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
                 const Matrix4f matrix = pose[bone].matrix();
                 std::memcpy(packed.data() + bone * 16, matrix.data(), 16 * sizeof(float));
             }
-            write(G_BONES, ShaderValue(packed.data(), packed.size()));
+            write(G_BONES, packed);
         }
     }
     // A SKINNING_ALPHA puppet's per-bone alpha from the same evaluation (0x140206430 points
@@ -852,7 +852,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
         auto& layer = const_cast<WPShaderValueData*>(data)->puppet_layer;
         layer.genFrame(m_scene->elapsingTime);
         const auto alpha = layer.boneAlpha();
-        if (! alpha.empty()) write(G_BONESALPHA, ShaderValue(alpha.data(), alpha.size()));
+        if (! alpha.empty()) write(G_BONESALPHA, alpha);
     }
     if (info->has_MORPH && data != nullptr && data->puppet_layer.hasPuppet()) {
         auto& layer = const_cast<WPShaderValueData*>(data)->puppet_layer;
@@ -868,7 +868,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
     }
     if (info->has_BLENDMAP) {
         if (const auto weights = TextureChannelWeights(node); ! weights.empty()) {
-            write(G_BLENDMAP, ShaderValue(weights.data(), weights.size()));
+            write(G_BLENDMAP, weights);
         }
     }
 
@@ -935,7 +935,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
                 }
             }
         }
-        write(G_VIEWPORTVIEWPROJECTIONS, ShaderValue(matrices.data(), matrices.size()));
+        write(G_VIEWPORTVIEWPROJECTIONS, matrices);
     }
 
     // The native draw loop publishes the offset before drawing the object.
@@ -1145,10 +1145,10 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
     // ---- lights
     if (info->has_LP || info->has_LCP || info->has_LCR) {
         const auto& legacy = PackedLights(false).legacy;
-        write(G_LP, ShaderValue(legacy.positions.data(), legacy.positions.size()));
-        write(G_LCP, ShaderValue(legacy.colors.data(), legacy.colors.size()));
+        write(G_LP, legacy.positions);
+        write(G_LCP, legacy.colors);
         if (info->has_LCR) {
-            write(G_LCR, ShaderValue(legacy.color_radius.data(), legacy.color_radius.size()));
+            write(G_LCR, legacy.color_radius);
         }
     }
     if (info->has_LIGHTS_V1) {
@@ -1168,7 +1168,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
         } };
         for (const auto& [name, values] : arrays) {
             if (values->empty()) continue;
-            write(name, ShaderValue(values->data(), values->size()));
+            write(name, *values);
         }
     }
 
@@ -1182,7 +1182,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
         } };
         for (const auto& [name, values] : arrays) {
             if (values->empty()) continue;
-            write(name, ShaderValue(values->data(), values->size()));
+            write(name, *values);
         }
     }
 
@@ -1194,7 +1194,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slo
         ForEachBoundSpectrum(*info, snapshot, [&](std::string_view name, std::span<const float> bands) {
             m_audioPack.assign(bands.size() * 4, 0.0f);
             for (std::size_t i = 0; i < bands.size(); ++i) m_audioPack[i * 4] = bands[i];
-            write(name, ShaderValue(m_audioPack.data(), m_audioPack.size()));
+            write(name, m_audioPack);
         });
     }
 }

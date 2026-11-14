@@ -69,6 +69,8 @@ public:
     };
     size_t size() const noexcept { return m_size; };
 
+    operator std::span<const value_type>() const noexcept { return { data(), size() }; }
+
     /// Shrinks or regrows the count within the storage the value already has.
     void setSize(size_t v) noexcept {
         const size_t capacity = m_dynamic ? m_dvalue.size() : m_value.size();

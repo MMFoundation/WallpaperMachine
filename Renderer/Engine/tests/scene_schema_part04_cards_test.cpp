@@ -384,7 +384,7 @@ TEST(PuppetAttachmentFollowing, TheAttachmentUsesTheSamePoseAsTheSkinnedDrawAndK
     std::vector<float> last_bones;
     sprite_map_t       sprites;
     const auto         draw = [&] {
-        rig.updater->UpdateUniforms(rig.parent.get(), sprites, [&](std::string_view name, const ShaderValue& value) {
+        rig.updater->UpdateUniforms(rig.parent.get(), sprites, [&](std::string_view name, std::span<const float> value) {
             if (name != "g_Bones") return;
             ++bone_writes;
             last_bones.assign(value.data(), value.data() + value.size());

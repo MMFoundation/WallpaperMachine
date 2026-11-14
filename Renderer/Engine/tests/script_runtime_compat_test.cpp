@@ -1214,7 +1214,7 @@ TEST(ScriptRuntimeCompat, AComposeLayersFirstPassReadsTheScreenWhereParallaxDraw
         if (! camera_override.empty()) node.SetCamera(camera_override);
         sprite_map_t sprites;
         ShaderValue  actual;
-        updater.UpdateUniforms(&node, sprites, [&](std::string_view name, const ShaderValue& v) {
+        updater.UpdateUniforms(&node, sprites, [&](std::string_view name, std::span<const float> v) {
             if (name == "g_ModelViewProjectionMatrix") actual = v;
         });
         node.SetCamera(own);
@@ -3361,7 +3361,7 @@ TEST(ShaderValueUpdaterCompat, FourLightColorsRoundTripAndAFifthLightTakesSlotZe
         }
         sprite_map_t sprites;
         std::unordered_map<std::string, ShaderValue> values;
-        updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, const ShaderValue& value) {
+        updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, std::span<const float> value) {
             values.emplace(std::string(name), value);
         });
         const auto& colors = values.at("g_LightsColorPremultiplied");
@@ -3383,7 +3383,7 @@ TEST(ShaderValueUpdaterCompat, FourLightColorsRoundTripAndAFifthLightTakesSlotZe
     // Fewer lights on the next draw must clear the packed fourth-light lanes.
     scene.lights.clear();
     sprite_map_t sprites;
-    updater.UpdateUniforms(node.get(), sprites, [](std::string_view name, const ShaderValue& value) {
+    updater.UpdateUniforms(node.get(), sprites, [](std::string_view name, std::span<const float> value) {
         if (name == "g_LightsColorPremultiplied")
             for (size_t i = 0; i < value.size(); ++i) EXPECT_FLOAT_EQ(value[i], 0.f);
     });
@@ -3412,7 +3412,7 @@ TEST(ShaderValueUpdaterCompat, LegacyLightsFillColorRadiusSlots) {
     }
     sprite_map_t sprites;
     std::unordered_map<std::string, ShaderValue> values;
-    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, const ShaderValue& value) {
+    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, std::span<const float> value) {
         values.emplace(std::string(name), value);
     });
     ASSERT_TRUE(values.contains("g_LightsColorRadius"));
@@ -3452,7 +3452,7 @@ TEST(ShaderValueUpdaterCompat, DayTimeUniformFollowsLocalClockAndWrapsAtMidnight
     const auto sample = [&] {
         updater.FrameBegin();
         std::map<std::string, float> values;
-        updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, const ShaderValue& value) {
+        updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, std::span<const float> value) {
             values[std::string(name)] = value[0];
         });
         EXPECT_EQ(values.at("g_DayTime"), values.at("g_Daytime"));
@@ -3501,7 +3501,7 @@ TEST(ShaderValueUpdaterCompat, CameraParallaxMovesEachLayerTreeByItsRootsDistanc
         updater.InitUniforms(&node, [](std::string_view name) { return name == "g_ModelMatrix"; });
         sprite_map_t sprites;
         ShaderValue  value;
-        updater.UpdateUniforms(&node, sprites, [&](std::string_view name, const ShaderValue& v) {
+        updater.UpdateUniforms(&node, sprites, [&](std::string_view name, std::span<const float> v) {
             if (name == "g_ModelMatrix") value = v;
         });
         node.UpdateTrans();
@@ -3576,7 +3576,7 @@ TEST(ShaderValueUpdaterCompat, ZeroParallaxDelayFollowsTheCursorAtOnce) {
         std::map<std::string, ShaderValue, std::less<>> values;
         sprite_map_t                                    sprites;
         updater.UpdateUniforms(node.get(), sprites,
-                               [&](std::string_view name, const ShaderValue& v) {
+                               [&](std::string_view name, std::span<const float> v) {
                                    values[std::string(name)] = v;
                                });
         return values;
@@ -3630,7 +3630,7 @@ TEST(ShaderValueUpdaterCompat, ParallaxEasesAsWallpaperEngineWhileShadersSeeTheC
         std::map<std::string, ShaderValue, std::less<>> values;
         sprite_map_t                                    sprites;
         updater.UpdateUniforms(node.get(), sprites,
-                               [&](std::string_view name, const ShaderValue& v) {
+                               [&](std::string_view name, std::span<const float> v) {
                                    values[std::string(name)] = v;
                                });
         return values;
@@ -3729,7 +3729,7 @@ TEST(ShaderValueUpdaterCompat, EffectMatricesRetainOwnerScaleAndMapQuadToLayer) 
     });
     sprite_map_t sprites;
     std::unordered_map<std::string, ShaderValue> values;
-    auto capture = [&](std::string_view name, const ShaderValue& value) {
+    auto capture = [&](std::string_view name, std::span<const float> value) {
         values[std::string(name)] = value;
     };
     updater.UpdateUniforms(node.get(), sprites, capture);
@@ -3773,7 +3773,7 @@ TEST(ShaderValueUpdaterCompat, SimulationEffectsSeeFrameTimeCursorTravelAndButto
         std::map<std::string, ShaderValue, std::less<>> values;
         sprite_map_t                                    sprites;
         updater.UpdateUniforms(node.get(), sprites,
-                               [&](std::string_view name, const ShaderValue& v) {
+                               [&](std::string_view name, std::span<const float> v) {
                                    values[std::string(name)] = v;
                                });
         return values;
@@ -3868,7 +3868,7 @@ TEST(ShaderValueUpdaterCompat, EffectModelMatrixAndInverseProjectionMatchTheEffe
     });
     sprite_map_t                                 sprites;
     std::unordered_map<std::string, ShaderValue> values;
-    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, const ShaderValue& v) {
+    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, std::span<const float> v) {
         values[std::string(name)] = v;
     });
     ASSERT_TRUE(values.contains("g_EffectModelMatrix"));
@@ -3927,7 +3927,7 @@ TEST(ShaderValueUpdaterCompat, EffectTextureProjectionMapsTheLayerCardOntoTheScr
         sprite_map_t                                 sprites;
         std::unordered_map<std::string, ShaderValue> values;
         updater.UpdateUniforms(node.get(), sprites,
-                               [&](std::string_view name, const ShaderValue& v) {
+                               [&](std::string_view name, std::span<const float> v) {
                                    values[std::string(name)] = v;
                                });
         ASSERT_TRUE(values.contains("g_EffectTextureProjectionMatrix"));
@@ -4487,7 +4487,7 @@ TEST(ShaderValueUpdaterCompat, EmptyPuppetPosesDoNotEmitBoneUniforms) {
         data.puppet_layer = layer;
         updater.SetNodeData(node.get(), data);
         std::vector<std::string> names;
-        updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, const ShaderValue& value) {
+        updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, std::span<const float> value) {
             names.emplace_back(name);
             if (name == "g_Time") {
                 ASSERT_EQ(value.size(), 1u);
@@ -4503,7 +4503,7 @@ TEST(ShaderValueUpdaterCompat, EmptyPuppetPosesDoNotEmitBoneUniforms) {
     data.puppet_layer = WPPuppetLayer { asset };
     updater.SetNodeData(node.get(), data);
     std::vector<std::string> names;
-    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, const ShaderValue& value) {
+    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view name, std::span<const float> value) {
         names.emplace_back(name);
         if (name == "g_Bones") {
             ASSERT_EQ(value.size(), 16u);
@@ -5913,7 +5913,7 @@ struct SpriteSheetScene {
     // The frame the sheet shows after the renderer draws `seconds` more of it.
     int Draw(double seconds) {
         scene.frameTime = seconds;
-        updater.UpdateUniforms(node.get(), sprites, [](std::string_view, const ShaderValue&) {});
+        updater.UpdateUniforms(node.get(), sprites, [](std::string_view, std::span<const float> ) {});
         return sprites.at(0).CurFrameIndex();
     }
 
@@ -7381,7 +7381,7 @@ TEST(ScriptRuntimeCompat, ParallaxDepthKeepsChildValuesWhileParentWritesMoveThei
         fixture.updater.InitUniforms(&node,[](std::string_view name){return name=="g_ModelMatrix";});
         sprite_map_t sprites;
         ShaderValue value;
-        fixture.updater.UpdateUniforms(&node,sprites,[&](std::string_view name,const ShaderValue& v){
+        fixture.updater.UpdateUniforms(&node,sprites,[&](std::string_view name,std::span<const float> v){
             if (name=="g_ModelMatrix") value=v;
         });
         EXPECT_EQ(value.size(),16u);
@@ -7454,7 +7454,7 @@ struct ParallaxCardScene {
         updater.InitUniforms(&node, [](std::string_view name) { return name == "g_ModelMatrix"; });
         sprite_map_t sprites;
         ShaderValue  value;
-        updater.UpdateUniforms(&node, sprites, [&](std::string_view name, const ShaderValue& v) {
+        updater.UpdateUniforms(&node, sprites, [&](std::string_view name, std::span<const float> v) {
             if (name == "g_ModelMatrix") value = v;
         });
         node.UpdateTrans();

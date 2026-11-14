@@ -15,6 +15,7 @@
 #include "SpriteAnimation.hpp"
 #include "WPPuppet.hpp"
 #include "WPShaderValueUpdater.hpp"
+#include "support/allocation_tracking.hpp"
 
 #include <gtest/gtest.h>
 
@@ -48,7 +49,7 @@ constexpr const char* kMvp = "g_ModelViewProjectionMatrix";
 constexpr const char* kModel = "g_ModelMatrix";
 constexpr const char* kTime = "g_Time";
 
-Lanes LanesOf(const ShaderValue& value)
+Lanes LanesOf(std::span<const float> value)
 {
     Lanes lanes(value.size());
     for (std::size_t i = 0; i < lanes.size(); ++i) lanes[i] = value[i];
@@ -58,7 +59,7 @@ Lanes LanesOf(const ShaderValue& value)
 // Collects the last value written for every uniform name.
 UpdateUniformOp Collect(Captured& into)
 {
-    return [&into](std::string_view name, const ShaderValue& value) { into[std::string(name)] = LanesOf(value); };
+    return [&into](std::string_view name, std::span<const float> value) { into[std::string(name)] = LanesOf(value); };
 }
 
 ExistsUniformOp Declares(std::vector<std::string> names)
@@ -201,6 +202,52 @@ TEST(ShaderUpdaterLights, ReflectionCameraKeepsItsOwnLightOrderingInsideOneDraw)
     ExpectSameLightBytes(f.Update(1), reflection);
     f.updater.EndDraw();
     f.scene.activeCamera = f.screen.get();
+}
+
+TEST(ShaderUpdaterLights, CachedLightAndShadowArraysReachEveryPassWithoutHeapCopies) {
+    LitStage f;
+    f.scene.light_config.point = 8;
+    f.scene.shadows.cookie_features = true;
+    f.scene.shadows.projection.assign(128, 0.25f);
+    f.scene.shadows.projection_transform.assign(32, 0.5f);
+    f.scene.shadows.point_projection.assign(64, 0.75f);
+    f.scene.shadows.point_transform.assign(32, 1.0f);
+    f.updater.InitUniforms(f.node.get(), 0, Declares({
+        "g_LightsPosition", "g_LightsColorPremultiplied", "g_LightsColorRadius",
+        "g_LPoint_Origin", "g_LSpot_Origin", "g_LTube_OriginA", "g_LDirectional_Direction",
+        "g_LFeature_ShadowProjection", "g_LFeature_ShadowProjectionTransform",
+        "g_LFeature_ShadowPointProjection", "g_LFeature_ShadowPointProjectionTransform" }));
+    const auto expected = f.Update(0);
+    EXPECT_EQ(expected.at("g_LFeature_ShadowProjection"), f.scene.shadows.projection);
+    EXPECT_EQ(expected.at("g_LFeature_ShadowProjectionTransform"), f.scene.shadows.projection_transform);
+    EXPECT_EQ(expected.at("g_LFeature_ShadowPointProjection"), f.scene.shadows.point_projection);
+    EXPECT_EQ(expected.at("g_LFeature_ShadowPointProjectionTransform"), f.scene.shadows.point_transform);
+    auto copied = expected;
+    std::size_t writes = 0;
+    bool valid = true;
+    const UpdateUniformOp sink = [&](std::string_view name, const auto& value) {
+        for (auto& [key, lanes] : copied) {
+            if (key != name) continue;
+            if (lanes.size() != value.size()) { valid = false; return; }
+            std::copy_n(value.data(), value.size(), lanes.data());
+            ++writes;
+            return;
+        }
+        valid = false;
+    };
+    f.updater.BeginDraw();
+    f.updater.UpdateUniforms(f.node.get(), 0, f.sprites, sink);
+    writes = 0;
+    {
+        we_test::AllocationTrackingScope allocations;
+        for (unsigned pass = 0; pass < 64; ++pass)
+            f.updater.UpdateUniforms(f.node.get(), 0, f.sprites, sink);
+    }
+    f.updater.EndDraw();
+    EXPECT_EQ(we_test::LargestTrackedAllocation(), 0u);
+    EXPECT_TRUE(valid);
+    EXPECT_EQ(writes, 64u * expected.size());
+    ExpectSameLightBytes(copied, expected);
 }
 
 TEST(ShaderUpdaterLights, DrawsWithoutLightingDoNoLightPacking) {
@@ -615,6 +662,44 @@ TEST(ShaderUpdaterAudio, EachBandLandsInItsOwnVec4)
     EXPECT_FLOAT_EQ(lanes[14], 0.0f);
     EXPECT_FLOAT_EQ(lanes[15], 0.0f);
     EXPECT_FLOAT_EQ(lanes[0], 0.0f);
+}
+
+TEST(ShaderUpdaterAudio, WarmedUpdatesDeliverEverySpectrumWithoutHeapAllocations)
+{
+    AudioServiceGuard guard;
+    Stage f;
+    f.scene.runtime->SetAudioResponseEnabled(true);
+    f.updater.InitUniforms(f.node.get(), 0, Declares(SpectrumNames()));
+    f.updater.InitUniforms(f.node.get(), 1, Declares(SpectrumNames()));
+    std::array<std::array<float, 256>, 6> copied {};
+    std::array<std::size_t, 6> sizes {};
+    std::size_t writes = 0;
+    const UpdateUniformOp sink = [&](std::string_view name, const auto& value) {
+        for (std::size_t i = 0; i < SpectrumNames().size(); ++i) {
+            if (name != SpectrumNames()[i] || value.size() > copied[i].size()) continue;
+            std::copy_n(value.data(), value.size(), copied[i].data());
+            sizes[i] = value.size();
+            ++writes;
+        }
+    };
+    for (const auto& offsets : { SpectrumOffsets { 0.125f, 0.25f, 0.375f, 0.5f, 0.625f, 0.75f },
+                                SpectrumOffsets { -0.125f, -0.25f, -0.375f, -0.5f, -0.625f, -0.75f } }) {
+        const auto spectrum = SnapshotWith(offsets);
+        audio::SetAudioSpectrumSnapshotForTesting(spectrum);
+        f.updater.UpdateUniforms(f.node.get(), 0, f.sprites, sink);
+        writes = 0;
+        {
+            we_test::AllocationTrackingScope allocations;
+            for (uint32_t pass = 0; pass < 64; ++pass)
+                f.updater.UpdateUniforms(f.node.get(), pass % 2, f.sprites, sink);
+        }
+        EXPECT_EQ(we_test::LargestTrackedAllocation(), 0u);
+        EXPECT_EQ(writes, 64u * 6);
+        Captured captured;
+        for (std::size_t i = 0; i < sizes.size(); ++i)
+            captured[SpectrumNames()[i]] = Lanes(copied[i].begin(), copied[i].begin() + sizes[i]);
+        ExpectSpectrum(captured, &spectrum);
+    }
 }
 
 TEST(ShaderUpdaterAudio, ReadingAudioInOneSlotDoesNotChangeAnotherSlotsUniforms)

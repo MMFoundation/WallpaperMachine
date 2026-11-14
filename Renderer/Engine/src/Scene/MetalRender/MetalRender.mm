@@ -6065,7 +6065,7 @@ void MetalRender::Impl::writeUniforms(Scene& scene, const ScenePassDescription& 
 
     auto&       writes = planes_active ? pass.video_planes.uniform_writes : pass.uniform_writes;
     std::size_t cursor = 0;
-    const auto  write  = [&](std::string_view name, const ShaderValue& value) {
+    const auto  write  = [&](std::string_view name, std::span<const float> value) {
         if (cursor == writes.size()) writes.emplace_back();
         auto& slot = writes[cursor++];
         if (slot.name != name) {
@@ -6161,14 +6161,12 @@ void MetalRender::Impl::writeUniforms(Scene& scene, const ScenePassDescription& 
                 planes.params.g_cr,
                 planes.params.b_cb,
             };
-            write(pass.video_planes.range_uniform,
-                  ShaderValue(std::span<const float>(range.data(), range.size())));
-            write(pass.video_planes.matrix_uniform,
-                  ShaderValue(std::span<const float>(matrix.data(), matrix.size())));
+            write(pass.video_planes.range_uniform, range);
+            write(pass.video_planes.matrix_uniform, matrix);
             const auto& uv_transform = planes.display_transform.matrix;
             const auto& uv_offset = planes.display_transform.offset;
-            write(pass.video_planes.uv_transform_uniform, ShaderValue(std::span<const float>(uv_transform)));
-            write(pass.video_planes.uv_offset_uniform, ShaderValue(std::span<const float>(uv_offset)));
+            write(pass.video_planes.uv_transform_uniform, uv_transform);
+            write(pass.video_planes.uv_offset_uniform, uv_offset);
         }
     }
 
@@ -6211,15 +6209,13 @@ void MetalRender::Impl::writeUniforms(Scene& scene, const ScenePassDescription& 
             static_cast<float>(width), static_cast<float>(height),
             static_cast<float>(width), static_cast<float>(height),
         };
-        write(WE_GLTEX_RESOLUTION_NAMES[i],
-              ShaderValue(std::span<const float>(resolution.data(), resolution.size())));
+        write(WE_GLTEX_RESOLUTION_NAMES[i], resolution);
         if (width > 0 && height > 0) {
             const std::array<float, 4> texel {
                 1.0f / static_cast<float>(width), 1.0f / static_cast<float>(height),
                 static_cast<float>(width), static_cast<float>(height),
             };
-            write(WE_GLTEX_TEXEL_NAMES[i],
-                  ShaderValue(std::span<const float>(texel.data(), texel.size())));
+            write(WE_GLTEX_TEXEL_NAMES[i], texel);
         }
     }
 

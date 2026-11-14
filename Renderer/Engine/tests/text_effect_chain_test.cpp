@@ -176,7 +176,7 @@ TEST_F(TextEffectChain, AnEffectOnATextLayerReceivesFrameTime)
     sprite_map_t sprites;
     bool         seen = false;
     float        time = -1.0f;
-    updater->UpdateUniforms(effect_node, sprites, [&](std::string_view name, const ShaderValue& value) {
+    updater->UpdateUniforms(effect_node, sprites, [&](std::string_view name, std::span<const float> value) {
         if (name == "g_Time") {
             seen = true;
             time = value[0];
