@@ -607,6 +607,13 @@ and pruned only after a successful reload; failed writes, reloads or journal rem
 keep it for retry, and a malformed saved linked or inherited baseline fails recovery
 before the store changes or the journal is removed.
 
+Reconciliation still covers every Space in the store, including historical and
+full-screen Spaces. Each pass indexes desired paths and journal entries for lookups
+while keeping the existing traversal and journal order. Nested updates detach the
+child dictionary before editing it to avoid repeatedly copying the full Spaces
+dictionary. These optimizations do not prune Apple's Space records, change ownership
+or restoration rules, move work off the main actor, or eliminate concurrent writes.
+
 Restored fields are kept in `restored-native-selection.plist`, including when one
 mode is turned off while the other remains enabled. WallpaperAgent can save the
 store it loaded before a restore over that restore (seen after quitting), putting
