@@ -595,6 +595,19 @@ device.
   material's `customShader.constValues` only gains keys or is updated in place (a
   runtime erase would have to invalidate the memo), and `RuntimeImageSource`
   never removes a name (`NamesGeneration()` moves when one is added).
+- **Uniform delivery** borrows read-only float spans for the duration of each
+  synchronous callback; a consumer copies before returning and neither retains the
+  view nor re-enters the updater. Stored material/default values and matrix helpers
+  stay owning. Audio packing, light/shadow arrays, bone alpha and packed bone matrices
+  reach Metal without a second owning copy. The warmed audio and cached light/shadow
+  cases in `shader_updater_behavior_test` require zero heap allocations while checking
+  the complete delivered values; packing and updates still happen on every call.
+- **Optional video variants** report a readiness change when the frame boundary
+  adopts a completed pipeline, rather than counting all prepared passes before and
+  after every pump. Completions are still drained while plane sampling is disabled,
+  stale graph generations are ignored, and toggling the setting still refreshes
+  demand. The converted/direct video and live-toggle tests in
+  `metal_scene_draw_smoke` cover the selected paths.
 - **Puppet copies** reuse a result buffer in their existing shared playback state
   for the exact same finite time until a control mutation; fresh layers sharing an
   asset have independent results and attachments still apply each frame. Audio

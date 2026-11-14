@@ -473,7 +473,7 @@ linalg::Matrix4d DrawParallaxModel(ScriptScene& scene, SceneNode* node, uint32_t
     updater.FrameBegin();
     sprite_map_t sprites;
     linalg::Matrix4d model = linalg::Matrix4d::Zero();
-    updater.UpdateUniforms(node,slot,sprites,[&](std::string_view name,const ShaderValue& value){
+    updater.UpdateUniforms(node,slot,sprites,[&](std::string_view name,std::span<const float> value){
         if (name != "g_ModelMatrix" || value.size() != 16) return;
         for (std::size_t index=0;index<16;++index) model.data()[index]=value[index];
     });

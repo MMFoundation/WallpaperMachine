@@ -80,7 +80,7 @@ inline Recorded Probe(Scene& scene, SceneNode& node, std::initializer_list<std::
     if (updater == nullptr) return out;
     updater->InitUniforms(&node, slot, [&](std::string_view name) { return names.find(name) != names.end(); });
     wallpaper::sprite_map_t sprites;
-    updater->UpdateUniforms(&node, slot, sprites, [&](std::string_view name, const wallpaper::ShaderValue& value) {
+    updater->UpdateUniforms(&node, slot, sprites, [&](std::string_view name, std::span<const float> value) {
         out[std::string(name)].assign(value.data(), value.data() + value.size());
     });
     return out;

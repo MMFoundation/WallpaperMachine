@@ -373,7 +373,7 @@ std::string ParallaxTextScene(std::string objects_json) {
 linalg::Vector2f ParallaxDisplacement(WPShaderValueUpdater& updater, SceneNode& node) {
     sprite_map_t sprites;
     ShaderValue  model;
-    updater.UpdateUniforms(&node, 1, sprites, [&](std::string_view name, const ShaderValue& value) {
+    updater.UpdateUniforms(&node, 1, sprites, [&](std::string_view name, std::span<const float> value) {
         if (name == "g_ModelMatrix") model = value;
     });
     node.UpdateTrans();

@@ -6,6 +6,7 @@
 #include <array>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -13,12 +14,11 @@ namespace wallpaper
 {
 class SceneNode;
 class SceneShader;
-class ShaderValue;
 class SpriteAnimation;
 
 using sprite_map_t    = Map<usize, SpriteAnimation>;
-// Callbacks consume the owning value synchronously and must not retain its reference.
-using UpdateUniformOp = std::function<void(std::string_view, const ShaderValue&)>;
+// Callbacks consume each view before returning, without retaining it or re-entering the updater.
+using UpdateUniformOp = std::function<void(std::string_view, std::span<const float>)>;
 using ExistsUniformOp = std::function<bool(std::string_view)>;
 
 /// Uniforms whose value advances on its own, independently of anything the

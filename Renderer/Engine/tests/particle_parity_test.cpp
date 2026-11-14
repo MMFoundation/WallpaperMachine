@@ -4119,7 +4119,7 @@ TEST(Renderers, APerspectiveParticleReadsTheEyeTwoThousandUnitsOutWhateverTheLen
             std::array<float, 3> eye { 0.0f, 0.0f, 0.0f };
             sprite_map_t         sprites;
             updater->UpdateUniforms(node, sprites,
-                                    [&](std::string_view name, const ShaderValue& value) {
+                                    [&](std::string_view name, std::span<const float> value) {
                                         if (name == "g_EyePosition") eye = { value[0], value[1], value[2] };
                                     });
             return eye;
@@ -5936,7 +5936,7 @@ std::array<linalg::Vector3f,3> ReadRendererOrientation(nlohmann::json renderer,
         return name=="g_OrientationRight" || name=="g_OrientationUp" || name=="g_OrientationForward";
     });
     sprite_map_t sprites;
-    updater.UpdateUniforms(node,sprites,[&](std::string_view name,const ShaderValue& value){
+    updater.UpdateUniforms(node,sprites,[&](std::string_view name,std::span<const float> value){
         const int index=name=="g_OrientationRight"?0:name=="g_OrientationUp"?1:name=="g_OrientationForward"?2:-1;
         if(index>=0 && value.size()==3) basis[static_cast<std::size_t>(index)]={value[0],value[1],value[2]};
     });
@@ -6033,7 +6033,7 @@ TEST(ParticleOrientation, RenderersSharingParticlesKeepIndependentAxes) {
         updater.InitUniforms(nodes[index],0,[](std::string_view name){return name=="g_OrientationForward";});
         sprite_map_t sprites;
         bool written = false;
-        updater.UpdateUniforms(nodes[index],sprites,[&](std::string_view name,const ShaderValue& value){
+        updater.UpdateUniforms(nodes[index],sprites,[&](std::string_view name,std::span<const float> value){
             if(name=="g_OrientationForward" && value.size()==3) {
                 forward[index]={value[0],value[1],value[2]}; written=true;
             }

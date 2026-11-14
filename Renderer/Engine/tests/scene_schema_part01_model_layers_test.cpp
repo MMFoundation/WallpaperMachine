@@ -347,7 +347,7 @@ TEST(ModelLayerParse, BonesReachEveryMaterialAndTheBindPoseIsTheIdentity)
         scene->shaderValueUpdater->InitUniforms(node, slot, [](std::string_view name) { return name == "g_Bones"; });
         sprite_map_t sprites;
         int          calls = 0;
-        scene->shaderValueUpdater->UpdateUniforms(node, slot, sprites, [&](std::string_view name, const ShaderValue& value) {
+        scene->shaderValueUpdater->UpdateUniforms(node, slot, sprites, [&](std::string_view name, std::span<const float> value) {
             if (name != "g_Bones") return;
             ++calls;
             ASSERT_EQ(value.size(), 16u);

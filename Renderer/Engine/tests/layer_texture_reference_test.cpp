@@ -187,7 +187,7 @@ std::map<std::string, ShaderValue, std::less<>> PassUniforms(
     if (! pass.desc().camera_override.empty()) node->SetCamera(pass.desc().camera_override);
     sprite_map_t                                    sprites;
     std::map<std::string, ShaderValue, std::less<>> values;
-    updater.UpdateUniforms(node, slot, sprites, [&values](std::string_view name, const ShaderValue& v) {
+    updater.UpdateUniforms(node, slot, sprites, [&values](std::string_view name, std::span<const float> v) {
         values[std::string(name)] = v;
     });
     node->SetCamera(camera);

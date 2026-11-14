@@ -342,7 +342,7 @@ protected:
     }
     std::array<float,3> EffectiveTint(Scene& scene, SceneNode& node, const SceneMaterial& material) {
         std::array<float,3> rgb {-9,-9,-9};
-        const auto overlay = [&](const ShaderValue& value) {
+        const auto overlay = [&](std::span<const float> value) {
             for (std::size_t i = 0; i < std::min(rgb.size(),value.size()); ++i) rgb[i] = value[i];
         };
         if (const auto at = material.customShader.shader->default_uniforms.find("g_Color");
@@ -353,7 +353,7 @@ protected:
         updater.InitUniforms(&node,0,[](std::string_view name) { return name == "g_Color"; });
         sprite_map_t sprites;
         updater.FrameBegin();
-        updater.UpdateUniforms(&node,0,sprites,[&](std::string_view name,const ShaderValue& value) {
+        updater.UpdateUniforms(&node,0,sprites,[&](std::string_view name,std::span<const float> value) {
             // Own the lanes synchronously; the callback reference must not escape.
             if (name == "g_Color") overlay(value);
         });

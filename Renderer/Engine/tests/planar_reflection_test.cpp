@@ -161,7 +161,7 @@ TEST(PlanarReflection, ReflectedShaderEyeAndAxesKeepTheNativeForwardVector) {
     std::map<std::string,std::vector<float>> values;
     // Match the renderer's phase-local active-camera swap too.
     scene->activeCamera=scene->reflection.camera.get();
-    updater.UpdateUniforms(source,sprites,[&](std::string_view name,const ShaderValue& value) {
+    updater.UpdateUniforms(source,sprites,[&](std::string_view name,std::span<const float> value) {
         values[std::string(name)]={value.data(),value.data()+value.size()};
     });
     scene->activeCamera=const_cast<SceneCamera*>(normal);
