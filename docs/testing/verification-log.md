@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-14 — Compact pixiv pages after filtering
+
+- Matching works are deduplicated and paginated after filtering; rankings report exact matching totals and searches refill on demand with lookahead.
+- Targeted pixiv store and panel regression run: 84 passed, 0 failed, 0 skipped.
+- `python3 scripts/test.py`: exit 0; all Python script modules passed; native tests: 4,933 passed, 0 failed, 70 skipped.
+- Seven new pagination cases cover cross-page refill, cached refiltering, search lookahead, retry, duplicates, empty ratings, in-flight filter changes and a fully filtered tail.
+- Opt-in media, live-network and snapshot checks remained skipped. Two runtime main-thread warnings were reported by the full suite.
+- Live pixiv and desktop presentation were not checked; no desktop control, Release build, installation or restart was performed.
+
 ## 2026-11-14 — Shared wallpaper-store coordination (issue 199)
 
 - Implemented a shared FIFO transaction queue for native selection and desktop posters, with bounded verified WallpaperAgent turnover and selection readback.
@@ -119,12 +128,3 @@ Run on an M4 Mac mini with macOS 27.2 and Xcode 27.2 (27B52) through DEVELOPER_D
 - `python3 scripts/test.py` — exit 0; 34 script test modules OK; 4936 passed, 0 failed, 70 skipped of 5006; 2 runtime warnings in the result bundle not examined
 - Not checked: a Release build, the four-segment Quick Settings module in each language, real coverage-probe occlusion and audible output; the five translations are machine-written
 - Found in passing, not caused by this change: `AppUpdateTests` builds `AppUpdateStore` without `defaults:`, and the gate wrote `WallpaperMachine.updates.lastAttempt` into the installed app's preferences
-
-## 2026-11-12 — Mute or Reduce volume when windows cover the desktop (#192)
-
-Written on a Linux host without Xcode or Swift: nothing native was compiled or run.
-
-- `python3 scripts/test.py --python-only` — exit 0; 34 script test files OK, including `test_localization_catalogs.py` and `test_panel_localization.py` for the three new catalog keys in pt-BR, ko, ja, zh-Hans and zh-Hant
-- `python3 scripts/test.py` (XcodeGen and the native unit tests) — not run: no macOS host. New and changed tests in `PlaybackPolicyCompositionTests`, `PlaybackPreferencesTests`, `WallpaperBackupTests`, `OtherAudioVolumeSettingsTests` and `SettingsSectionsLocalizationTests` have not been compiled
-- Release build — not run
-- Gaps: real coverage-probe occlusion and audible output not checked; the four-segment Quick Settings module not checked visually in any language; translations are machine-written and want a native review

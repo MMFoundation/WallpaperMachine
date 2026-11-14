@@ -49,12 +49,12 @@ final class PixivListSummaryTests: MediaPanelTestCase {
       try await loaded(panel)
       XCTAssertEqual(
         PixivListSummary.make(panel.controller.pixivBrowse).text,
-        "Daily ranking · top 500 · 1 hidden by your filters on this page")
+        "Daily ranking · 2 results")
 
       await panel.controller.pixivBrowser.set(.questionable, isOn: true).value
       try await waitFor { panel.pixiv.hiddenCount == 0 }
       XCTAssertEqual(
-        PixivListSummary.make(panel.controller.pixivBrowse).text, "Daily ranking · top 500",
+        PixivListSummary.make(panel.controller.pixivBrowse).text, "Daily ranking · 3 results",
         "nothing hidden adds nothing")
 
       await panel.controller.pixivBrowser.choose(ranking: .monthly).value
@@ -62,7 +62,7 @@ final class PixivListSummaryTests: MediaPanelTestCase {
         panel.pixiv.committedQuery?.ranking == .monthly && !panel.pixiv.isLoading
       }
       XCTAssertEqual(
-        PixivListSummary.make(panel.controller.pixivBrowse).text, "Monthly ranking · top 500")
+        PixivListSummary.make(panel.controller.pixivBrowse).text, "Monthly ranking · 3 results")
     }
   }
 
@@ -87,7 +87,7 @@ final class PixivListSummaryTests: MediaPanelTestCase {
     let gate = DispatchSemaphore(value: 0)
     let held = PixivFixtureTransport { _ in
       _ = gate.wait(timeout: .now() + 10)
-      return PixivFixtures.ranking([PixivFixtures.rankingEntry(.init(id: 301), rank: 1)])
+      return PixivFixtures.ranking([PixivFixtures.rankingEntry(.init(id: 301), rank: 1)], total: 1)
     }
     try await withPanel(pixivTransport: held) { panel in
       await panel.controller.pixivBrowser.commit().value
@@ -117,12 +117,12 @@ final class PixivListSummaryTests: MediaPanelTestCase {
       try await loaded(panel)
       XCTAssertEqual(
         PixivEmptyState.make(panel.controller.pixivBrowse),
-        .filtersHideAll(hidden: 3, canGoNext: true))
+        .filtersHideAll)
       await panel.controller.pixivBrowser.set(.everyone, isOn: false).value
       try await settle(panel)
       XCTAssertEqual(
         PixivEmptyState.make(panel.controller.pixivBrowse),
-        .filtersHideAll(hidden: 3, canGoNext: true))
+        .filtersHideAll)
     }
     // An empty ranking, and an empty search.
     try await withPanel(pixivTransport: try ranking(entries: { [] })) { panel in
@@ -186,7 +186,7 @@ final class PixivListSummaryTests: MediaPanelTestCase {
       try await settle(panel)
     }
     // Every work of a page hidden: the bar stays while there are other pages to go to.
-    for (total, shown) in [(500, true), (3, false)] {
+    for (total, shown) in [(500, false), (3, false)] {
       try await withPanel(
         pixivTransport: PixivFixtureTransport { _ in
           PixivFixtures.ranking(

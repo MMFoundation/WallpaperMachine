@@ -197,12 +197,14 @@ final class PanelPixivActionsTests: MediaPanelTestCase {
       let page = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
         .first { $0.name == "p" }?.value.flatMap(Int.init) ?? 1
       return PixivFixtures.ranking(
-        [PixivFixtures.rankingEntry(.init(id: 300 + page, pages: 2), rank: 1)], page: page)
+        (1...50).map {
+          PixivFixtures.rankingEntry(.init(id: 300 + (page - 1) * 50 + $0, pages: 2), rank: $0)
+        }, page: page)
     })
     try await withPanel(pixivTransport: transport) { panel in
       let controller = panel.controller
       try await loadRanking(panel)
-      XCTAssertEqual(controller.pixivBrowse.works.map(\.id), ["301"])
+      XCTAssertEqual(controller.pixivBrowse.works.map(\.id), (301...350).map(String.init))
       XCTAssertTrue(controller.pixivBrowse.pager.canGoForward)
       XCTAssertFalse(controller.pixivBrowse.pager.canGoBack)
 
@@ -210,7 +212,7 @@ final class PanelPixivActionsTests: MediaPanelTestCase {
       try await waitFor { panel.pixiv.selectedPageList?.count == 2 }
       try await controller.pixivLoadPage(2)
       try await waitFor { panel.pixiv.page == 2 && !panel.pixiv.isLoading }
-      XCTAssertEqual(controller.pixivBrowse.works.map(\.id), ["302"])
+      XCTAssertEqual(controller.pixivBrowse.works.map(\.id), (351...400).map(String.init))
       XCTAssertEqual(controller.pixivBrowse.pager.page, 2)
       XCTAssertTrue(controller.pixivBrowse.pager.canGoBack)
       XCTAssertEqual(controller.pixivBrowse.selectedID, "301", "the selection survives paging away from it")

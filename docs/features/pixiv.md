@@ -50,11 +50,19 @@ sensitive or grades it suggestive (sanity level 4 or more, or a `sexual` grade
 above 0), and Everyone otherwise. R-18G (`xRestrict` 2, or `grotesque` in an
 R-18 ranking) is its own rating, which no box offers and no query admits.
 
-Pages are cached per listing (`PixivStore`), so paging back and changing a
-filter only the app applies cost no request; the page after the one on show is
-fetched ahead of time. The summary line names the listing and how many works on
-the page the filters hide, and a page whose works are all hidden offers **Clear
-filters** and **Next page**. JSON requests are spaced at least 350 ms apart and
+Source pages are cached per listing (`PixivStore`). Filters apply before matching
+works are divided into display pages (50 for rankings, 60 for search), preserving
+pixiv's order and removing duplicate works across source pages. Changing filters
+returns to page 1 and reuses cached source pages. Rankings scan their source pages
+to show the exact matching result and page counts. Search scans on demand until
+the requested page is full and another match is known, or the listing ends; its
+summary says **At least N results** and omits the final page count until then.
+Only the final page can be short, and **No matching illustrations** appears only
+after the listing is exhausted (or every age rating is unticked), offering **Clear
+filters** rather than a link to another empty page. Failed scans report an error
+and can be retried without discarding successful source fetches. Thumbnail caching
+is requested for displayed matches, not every filtered-out source work.
+JSON requests are spaced at least 350 ms apart and
 carry WebKit's user agent form naming the app instead of Safari
 (`Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)
 WallpaperMachine/<version>`): pixiv's Cloudflare front answers a signed-in request whose user

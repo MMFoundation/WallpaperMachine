@@ -339,23 +339,12 @@ private struct PixivEmptyView: View {
           Label("Try again", systemImage: "arrow.clockwise")
         }
       }
-    case .filtersHideAll(let hidden, let canGoNext):
+    case .filtersHideAll:
       PanelEmptyState(
         verbatim: L("No matching illustrations"), systemImage: "line.3.horizontal.decrease",
-        description: hidden == 1
-          ? L("Your filters hide the only work on this page.")
-          : L("Your filters hide all \(hidden) works on this page.")
+        description: L("No illustrations in this listing match your filters.")
       ) {
-        HStack {
-          Button("Clear filters") { model.clearFilters() }
-          if canGoNext {
-            Button {
-              model.showPage(controller.pixivBrowse.pager.nextPage)
-            } label: {
-              Label("Next page", systemImage: "chevron.right")
-            }
-          }
-        }
+        Button("Clear filters") { model.clearFilters() }
       }
     case .nothing(let searching):
       PanelEmptyState(

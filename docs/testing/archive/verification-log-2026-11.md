@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-12 — Mute or Reduce volume when windows cover the desktop (#192)
+
+Written on a Linux host without Xcode or Swift: nothing native was compiled or run.
+
+- `python3 scripts/test.py --python-only` — exit 0; 34 script test files OK, including `test_localization_catalogs.py` and `test_panel_localization.py` for the three new catalog keys in pt-BR, ko, ja, zh-Hans and zh-Hant
+- `python3 scripts/test.py` (XcodeGen and the native unit tests) — not run: no macOS host. New and changed tests in `PlaybackPolicyCompositionTests`, `PlaybackPreferencesTests`, `WallpaperBackupTests`, `OtherAudioVolumeSettingsTests` and `SettingsSectionsLocalizationTests` have not been compiled
+- Release build — not run
+- Gaps: real coverage-probe occlusion and audible output not checked; the four-segment Quick Settings module not checked visually in any language; translations are machine-written and want a native review
+
 ## 2026-11-12 — Desktop widgets workspace: canvas, tabbed inspector, handles, ready-made widgets
 
 - Settings › Desktop Widgets without a search is now a workspace (large canvas, layers, inspector with Content/Text/Style/Position tabs); search still lists every row.
