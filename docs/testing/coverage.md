@@ -868,7 +868,11 @@ or depend on a second physical monitor.
   restore, or stay recoverable after a reload failure; later global Desktop and
   Idle edits are preserved; malformed baselines are rejected without store
   writes; an unchanged journal is not rewritten; a concurrent store change keeps
-  the union. The same class holds the scene contract the extension reads: a file
+  the union. A large synthetic store, including the empty primary-Space key and
+  missing per-display nodes, keeps every Space and unowned choice through revision
+  changes, mode expansion, partial disable and recovery from disk, without rewriting
+  an unchanged journal. This is not a live macOS performance or Space-topology test.
+  The same class holds the scene contract the extension reads: a file
   without a position reads as centred and one with it round-trips, an unmoved scene
   keeps the old file shape, a moved picture or a changed scaling mode replaces the
   renderer while frame rate, title and pause do not, no position and the middle are one

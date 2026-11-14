@@ -156,7 +156,8 @@ final class LockScreenWallpaperSelection {
         message:
           String(localized: "This macOS wallpaper store format is unsupported. Native selection was not changed."))
     }
-    var paths = displays.sorted().map { ["Displays", $0] }
+    let sortedDisplays = displays.sorted()
+    var paths = sortedDisplays.map { ["Displays", $0] }
     let spaces = root["Spaces"] as? [String: Any] ?? [:]
     // Stored back converted: each node lookup would otherwise convert every Space again.
     root["Spaces"] = spaces
@@ -167,20 +168,23 @@ final class LockScreenWallpaperSelection {
     }
     entries = try readoptedEntries(root, archived: archived)
     if entries != priorEntries { readoptionNeedsPersistence = true }
+    let entryPaths = Set(entries.map(\.path))
     for (space, value) in spaces.sorted(by: { $0.key < $1.key }) {
       guard let node = value as? [String: Any], node["Displays"] is [String: Any] else {
         throw LockScreenWallpaperFailure(
           message: String(localized: "This macOS Space has an unsupported wallpaper configuration."))
       }
-      paths += displays.sorted().map { ["Spaces", space, "Displays", $0] }
+      paths += sortedDisplays.map { ["Spaces", space, "Displays", $0] }
     }
     let fallbackPaths = [["SystemDefault"]] + spaces.keys.sorted().map { ["Spaces", $0, "Default"] }
+    let desiredPaths = Set(paths)
+    let desiredFallbackPaths = Set(fallbackPaths)
     let activeFields = Set(
       (desktopDisplays.isEmpty ? [] : ["Desktop"])
         + (screenSaverDisplays.isEmpty ? [] : ["Idle"]))
     func desiredFields(_ path: [String], observeOnly: Bool) -> Set<String> {
-      if observeOnly { return fallbackPaths.contains(path) ? activeFields : [] }
-      guard paths.contains(path), let display = path.last else { return [] }
+      if observeOnly { return desiredFallbackPaths.contains(path) ? activeFields : [] }
+      guard desiredPaths.contains(path), let display = path.last else { return [] }
       return Set(
         (desktopDisplays.contains(display) ? ["Desktop"] : [])
           + (screenSaverDisplays.contains(display) ? ["Idle"] : []))
@@ -200,13 +204,15 @@ final class LockScreenWallpaperSelection {
     }
     let journaledOriginal = { (path: [String]) in originals[path] }
     var recovery = entries
+    var recoveryIndices = Dictionary(
+      uniqueKeysWithValues: recovery.enumerated().map { ($0.element.path, $0.offset) })
     var retained: [Entry] = []
     var changed = false
     let selection = try Self.selection(revision: revision)
     // The pre-commit journal owns the union of old and new fields. A crash at
     // either side of the atomic store write can therefore restore all of them.
     func record(_ entry: Entry, original: [String: Any]) throws {
-      if let index = recovery.firstIndex(where: { $0.path == entry.path }) {
+      if let index = recoveryIndices[entry.path] {
         var merged = originals[entry.path] ?? [:]
         if entry.path == Self.globalPath {
           merged = original
@@ -220,6 +226,7 @@ final class LockScreenWallpaperSelection {
         recovery[index].fields = recovery[index].ownedFields.union(entry.ownedFields).sorted()
         originals[entry.path] = merged
       } else {
+        recoveryIndices[entry.path] = recovery.count
         recovery.append(entry)
         originals[entry.path] = original
       }
@@ -459,7 +466,7 @@ final class LockScreenWallpaperSelection {
           (["Spaces", space, "Displays", $0.path[1]],
             $0.ownedFields.subtracting(desiredFields($0.path, observeOnly: false)))
         }
-      for (path, fields) in discovered where !entries.contains(where: { $0.path == path }) {
+      for (path, fields) in discovered where !entryPaths.contains(path) {
         guard var node = Self.node(root, path: path) else { continue }
         let copied = fields.filter { Self.owns(node[$0]) }
         guard !copied.isEmpty else { continue }
@@ -476,10 +483,10 @@ final class LockScreenWallpaperSelection {
       }
     }
     for path in fallbackPaths
-    where !activeFields.isEmpty && !entries.contains(where: { $0.path == path }) {
+    where !activeFields.isEmpty && !entryPaths.contains(path) {
       try reconcile(nil, path: path, observeOnly: true)
     }
-    for path in paths where !entries.contains(where: { $0.path == path }) {
+    for path in paths where !entryPaths.contains(path) {
       try reconcile(nil, path: path, observeOnly: false)
     }
     if changed {
@@ -794,7 +801,7 @@ final class LockScreenWallpaperSelection {
       root[key] = value
       return
     }
-    var child = root[key] as? [String: Any] ?? [:]
+    var child = root.removeValue(forKey: key) as? [String: Any] ?? [:]
     setNode(&child, path: Array(path.dropFirst()), value: value)
     root[key] = child
   }
