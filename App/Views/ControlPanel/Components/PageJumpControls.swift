@@ -17,6 +17,7 @@ struct PageJumpControls: View {
   var style = Style.inline
   /// Shows "Page" before the field. A bordered pager drops Go with it; Return still goes.
   var showsLabel = true
+  var showsTotal = true
   /// Starts the identifiers of the controls: `<prefix>-previous-page`, `<prefix>-page-field` and
   /// `<prefix>-next-page`.
   let identifierPrefix: String
@@ -51,7 +52,7 @@ struct PageJumpControls: View {
           .help(L("Type a page number and press Return"))
           .accessibilityLabel(Text("Page number"))
           .accessibilityIdentifier("\(identifierPrefix)-page-field")
-        Text("of \(pager.pages)").foregroundStyle(theme.surface.muted.color)
+        if showsTotal { Text("of \(pager.pages)").foregroundStyle(theme.surface.muted.color) }
         goButton
       }
       .font(.panel(.callout).monospacedDigit())

@@ -14,9 +14,10 @@ struct PixivBrowseState: Equatable {
   let isSearching: Bool
   /// The works on the page that the committed query's filters admit, in pixiv's order.
   let works: [PixivWork]
-  /// Works pixiv returned for this page that the age rating, orientation or size filters hide.
+  /// Unique works hidden across the source pages scanned for this query.
   let hiddenCount: Int
   let totalCount: Int
+  let hasExactTotal: Bool
   let pager: ResultPager
   let isLoading: Bool
   /// A page has arrived; before that the page is not empty, it is loading.
@@ -36,6 +37,7 @@ struct PixivBrowseState: Equatable {
     works = pixiv.works
     hiddenCount = pixiv.hiddenCount
     totalCount = pixiv.totalCount
+    hasExactTotal = pixiv.hasExactTotal
     pager = ResultPager(
       page: pixiv.page, totalPages: pixiv.totalPages, isLoading: pixiv.isLoading,
       maxPages: PixivService.maxPages)

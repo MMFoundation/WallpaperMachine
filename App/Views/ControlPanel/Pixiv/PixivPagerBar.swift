@@ -4,7 +4,7 @@ import SwiftUI
 /// When a later page failed to load, its error and Retry lead the bar. It is a `PixivBar`: its
 /// height follows the width it is given, never the other way round.
 ///
-/// The summary is what the bar is for (how many works the filters hide is said nowhere else), so
+/// The summary reports matching results, so
 /// the pager gives it room as the bar narrows: first the field drops its "Page" label and Go
 /// (Return still goes), then the summary moves above the pager. It wraps to a second line rather
 /// than being cut, and its tooltip carries the whole line if it still does not fit.
@@ -36,15 +36,11 @@ struct PixivPagerBar: View {
     return .stacked
   }
 
-  /// Whether the page shows the bar: while works are on show, and while the filters hide every
-  /// work of a page but there are other pages to go to. In the other empty states (loading, an
-  /// error, nothing found, a single page all hidden) the page's centre says everything, and a
-  /// bar of disabled controls under it would only be noise.
+  /// Empty listings need no pager; their loading, error or empty state fills the centre.
   static func isShown(for browse: PixivBrowseState) -> Bool {
     switch PixivEmptyState.make(browse) {
     case nil: true
-    case .filtersHideAll: browse.pager.pages > 1
-    case .loading, .error, .nothing: false
+    case .filtersHideAll, .loading, .error, .nothing: false
     }
   }
 
@@ -79,12 +75,12 @@ struct PixivPagerBar: View {
           }
           if layout == .stacked {
             summary.frame(maxWidth: .infinity, alignment: .leading)
-            PixivPageControls(pager: browse.pager, isCompact: true)
+            PixivPageControls(pager: browse.pager, isCompact: true, showsTotal: browse.hasExactTotal)
               .frame(maxWidth: .infinity, alignment: .center)
           } else {
             HStack(spacing: 12) {
               summary.frame(maxWidth: .infinity, alignment: .leading)
-              PixivPageControls(pager: browse.pager, isCompact: layout == .short)
+              PixivPageControls(pager: browse.pager, isCompact: layout == .short, showsTotal: browse.hasExactTotal)
             }
           }
         }
@@ -116,6 +112,7 @@ struct PixivPagerBar: View {
 struct PixivPageControls: View {
   let pager: ResultPager
   let isCompact: Bool
+  var showsTotal = true
 
   @Environment(PanelController.self) private var controller
 
@@ -123,6 +120,7 @@ struct PixivPageControls: View {
     @Bindable var model = controller.pixivBrowser
     PageJumpControls(
       pager: pager, text: $model.pageText, style: .bordered, showsLabel: !isCompact,
+      showsTotal: showsTotal,
       identifierPrefix: "pixiv", showPage: { model.showPage($0) }, jump: { model.jump() }
     )
     .onChange(of: pager.page, initial: true) { model.syncPageText() }

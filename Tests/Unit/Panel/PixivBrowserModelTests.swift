@@ -9,7 +9,7 @@ import XCTest
 final class PixivBrowserModelTests: MediaPanelTestCase {
   /// pixiv with a daily ranking of three works over ten pages (301 and 303 admitted by the default
   /// rating, 302 not), a tag search of two, and the pages and images the page asks for.
-  private func fixture() throws -> PixivFixtureTransport {
+  private func fixture(fullPages: Bool = false) throws -> PixivFixtureTransport {
     let image = try PanelTestCase.gif(frames: 1, brightness: 0.6)
     return PixivFixtureTransport(respondingToSession: { url, session in
       if url.host == "i.pximg.net" { return image }
@@ -32,6 +32,12 @@ final class PixivBrowserModelTests: MediaPanelTestCase {
         throw PixivFixtures.forbidden
       }
       let page = items.first { $0.name == "p" }?.value.flatMap(Int.init) ?? 1
+      if fullPages {
+        return PixivFixtures.ranking(
+          (1...50).map {
+            PixivFixtures.rankingEntry(.init(id: (page - 1) * 50 + $0), rank: (page - 1) * 50 + $0)
+          }, page: page, total: 500)
+      }
       return PixivFixtures.ranking(
         [
           PixivFixtures.rankingEntry(.init(id: 301, pages: 2), rank: 1),
@@ -276,7 +282,7 @@ final class PixivBrowserModelTests: MediaPanelTestCase {
   // MARK: Paging
 
   func testATypedPageNumberIsRoundedHeldToThePagesAndOnlyAnotherPageLoads() async throws {
-    let transport = try fixture()
+    let transport = try fixture(fullPages: true)
     try await withPanel(pixivTransport: transport) { panel in
       let model = panel.controller.pixivBrowser
       try await openRanking(panel)

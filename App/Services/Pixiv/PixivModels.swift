@@ -125,6 +125,11 @@ enum PixivListing: Hashable, Sendable {
         text: String, order: PixivSearchOrder, orientation: PixivOrientation,
         minimumSize: PixivMinimumSize, hidesAIGenerated: Bool, mode: PixivSearchMode)
 
+    var isSearch: Bool {
+        if case .search = self { return true }
+        return false
+    }
+
     var isR18: Bool {
         switch self {
         case .ranking(let ranking): ranking.isR18
