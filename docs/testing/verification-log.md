@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-14 — Recover orphaned lock-screen selections (#204)
+
+- Reproduced both regressions before the fix: startup skipped archived originals without a live journal, and a Desktop recovery error disabled an otherwise usable screen saver.
+- Targeted LockScreenWallpaperTests and LockScreenWallpaperServiceTests: 157 passed; two additional recovery and startup integration regressions also passed.
+- python3 scripts/test.py: all Python suites passed; 5032 native tests passed, 0 failed, 70 opt-in tests skipped.
+- One native runtime warning came from AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; no test failed.
+- Recovery preserves manual and foreign selections, journals a verified system-image fallback before writing, and runs the orphan scan only during recovery.
+- No live lock-screen or screen-saver run and no Release build; the reporter’s exact system wallpaper store was not included in the diagnostics.
+
 ## 2026-11-14 — Compact pixiv pages after filtering
 
 - Matching works are deduplicated and paginated after filtering; rankings report exact matching totals and searches refill on demand with lookahead.
@@ -118,13 +127,3 @@ Core Audio start receive timeouts now stop and release the uncertain session bef
 - `python3 scripts/check_renderer.py` — initial build interrupted by a killed backdrop_geometry_test discovery process; rebuilding that target succeeded. The subsequent full run and a final --skip-build run both exited 1 because backdrop_scene_test was killed (signal 9); all other registered binaries returned 0.
 - Renderer runs exercised GPU and realtime checks, twelve generated pooled/isolated image comparisons and eight reload projects twice, all successful. Seven local asset/corpus cases were skipped; authored wallpaper compatibility remains unverified.
 - Live system audio capture, permission prompts, device changes and desktop behavior were not exercised. No app was installed, launched or restarted. Full native and renderer gates remain blocked by the failures above.
-
-## 2026-11-12 — Gate run on a Mac for the covered-desktop sound choices (#192)
-
-Run on an M4 Mac mini with macOS 27.2 and Xcode 27.2 (27B52) through DEVELOPER_DIR; build.md asks for Xcode 26 and the Test workflow uses macos-26 runners, which this run did not use. Commit d1d5d4e2, with no changes needed.
-
-- `python3 scripts/build.py` (full, Debug) — exit 0
-- `python3 scripts/test.py --only` PlaybackPolicyCompositionTests, WallpaperPresentationPolicyTests, PlaybackPreferencesTests, WallpaperBackupTests, OtherAudioVolumeSettingsTests, SettingsSectionsLocalizationTests, PanelSettingsValuesTests, SettingsSectionsRenderTests, SettingsWindowRenderTests — exit 0; 175 passed, 0 failed, 0 skipped
-- `python3 scripts/test.py` — exit 0; 34 script test modules OK; 4936 passed, 0 failed, 70 skipped of 5006; 2 runtime warnings in the result bundle not examined
-- Not checked: a Release build, the four-segment Quick Settings module in each language, real coverage-probe occlusion and audible output; the five translations are machine-written
-- Found in passing, not caused by this change: `AppUpdateTests` builds `AppUpdateStore` without `defaults:`, and the gate wrote `WallpaperMachine.updates.lastAttempt` into the installed app's preferences

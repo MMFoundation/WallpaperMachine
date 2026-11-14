@@ -801,6 +801,156 @@ final class LockScreenWallpaperTests: XCTestCase {
     XCTAssertEqual(try readStore() as NSDictionary, original as NSDictionary)
   }
 
+  @MainActor
+  func testArchivedOriginalsRecoverAtStartupWithoutALiveJournal() async throws {
+    let original = fixture()
+    try write(original)
+    let selection = LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {})
+    try await selection.synchronize(
+      desktopDisplays: ["one"], screenSaverDisplays: ["one"], revision: "old-process")
+    let stale = try Data(contentsOf: store)
+    try await selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
+    XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+    try stale.write(to: store, options: .atomic)
+
+    let relaunched = LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {})
+    try await relaunched.recover()
+
+    XCTAssertEqual(try readStore() as NSDictionary, original as NSDictionary)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+  }
+
+  @MainActor
+  func testRevisionedOrphansRecoverWithSystemPictureWithoutOverwritingOtherChoices() async throws {
+    let picture = root.appendingPathComponent("system.heic")
+    try Data("system picture".utf8).write(to: picture)
+    let link = root.appendingPathComponent("DefaultDesktop.heic")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: picture)
+    var orphan = choice(LockScreenConfiguration.extensionIdentifier)
+    var content = try XCTUnwrap(orphan["Content"] as? [String: Any])
+    content["Choices"] = [["Provider": LockScreenConfiguration.extensionIdentifier,
+                            "Configuration": Data("current:old-process".utf8)]]
+    orphan["Content"] = content
+    var original = fixture()
+    original["AllSpacesAndDisplays"] = ["Type": "desktop", "Desktop": orphan]
+    var system = node("system")
+    system["Desktop"] = orphan
+    original["SystemDefault"] = system
+    var display = node("display-one")
+    display["Desktop"] = orphan
+    original["Displays"] = ["one": display, "two": node("external")]
+    original["Spaces"] = ["space-a": ["Default": display, "Displays": ["one": display]]]
+    try write(original)
+    var reloads = 0
+    let selection = LockScreenWallpaperSelection(
+      storeURL: store, journalURL: journal, reload: { reloads += 1 }, systemDefaultPicture: link)
+
+    try await selection.recover()
+
+    let restored = try readStore()
+    let restoredDisplays = try XCTUnwrap(restored["Displays"] as? [String: [String: Any]])
+    XCTAssertEqual(restoredDisplays["two"] as? NSDictionary, node("external") as NSDictionary)
+    let one = try XCTUnwrap(restoredDisplays["one"])
+    XCTAssertEqual(provider(one, key: "Desktop"), "com.apple.wallpaper.choice.image")
+    XCTAssertEqual(one["Idle"] as? NSDictionary, display["Idle"] as? NSDictionary)
+    let desktop = try XCTUnwrap(one["Desktop"] as? [String: Any])
+    let choices = try XCTUnwrap((desktop["Content"] as? [String: Any])?["Choices"] as? [[String: Any]])
+    let data = try XCTUnwrap(choices.first?["Configuration"] as? Data)
+    let configuration = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+    XCTAssertEqual((configuration["url"] as? [String: String])?["relative"], picture.absoluteString)
+    let global = try XCTUnwrap(restored["AllSpacesAndDisplays"] as? [String: Any])
+    XCTAssertEqual(provider(global, key: "Desktop"), "com.apple.wallpaper.choice.image")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+    XCTAssertEqual(reloads, 1)
+
+    try await selection.recover()
+    XCTAssertEqual(try readStore() as NSDictionary, restored as NSDictionary)
+    XCTAssertEqual(reloads, 1, "A recovered store must not be rewritten or reloaded again")
+  }
+
+  @MainActor
+  func testOrphanRecoveryPrefersSurvivingChoicesAndLeavesManualSelectionAlone() async throws {
+    var orphan = choice(LockScreenConfiguration.extensionIdentifier)
+    orphan["Content"] = ["Choices": [["Provider": LockScreenConfiguration.extensionIdentifier,
+                                        "Configuration": Data("current:old-process".utf8)]]]
+    var display = node("display-one")
+    display["Desktop"] = orphan
+    var original = fixture()
+    original["Displays"] = ["one": display, "two": ["Type": "individual",
+      "Desktop": choice(LockScreenConfiguration.extensionIdentifier), "Idle": choice("manual-idle")]]
+    original["Spaces"] = [String: Any]()
+    try write(original)
+    let selection = LockScreenWallpaperSelection(
+      storeURL: store, journalURL: journal, reload: {},
+      systemDefaultPicture: root.appendingPathComponent("missing.heic"))
+
+    try await selection.recover()
+
+    let displays = try XCTUnwrap(try readStore()["Displays"] as? [String: [String: Any]])
+    XCTAssertEqual(provider(try XCTUnwrap(displays["one"]), key: "Desktop"), "system-desktop")
+    XCTAssertEqual(displays["two"] as? NSDictionary,
+      (original["Displays"] as? [String: [String: Any]])?["two"] as? NSDictionary)
+  }
+
+  @MainActor
+  func testOrphanRecoveryWithoutAnyFallbackPreservesStoreAndJournal() async throws {
+    var orphan = choice(LockScreenConfiguration.extensionIdentifier)
+    orphan["Content"] = ["Choices": [["Provider": LockScreenConfiguration.extensionIdentifier,
+                                        "Configuration": Data("current:old-process".utf8)]]]
+    let original: [String: Any] = ["SystemDefault": [String: Any](), "Spaces": [String: Any](),
+      "Displays": ["one": ["Type": "individual", "Desktop": orphan, "Idle": choice("system-idle")]]]
+    try write(original)
+    let before = try Data(contentsOf: store)
+    let selection = LockScreenWallpaperSelection(
+      storeURL: store, journalURL: journal, reload: { XCTFail("Failed recovery must not reload") },
+      systemDefaultPicture: root.appendingPathComponent("missing.heic"))
+
+    await XCTAssertThrowsErrorAsync(try await selection.recover())
+
+    XCTAssertEqual(try Data(contentsOf: store), before)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+  }
+
+  @MainActor
+  func testOrphanRecoveryJournalsDefaultBeforeWritingAndSurvivesReloadFailure() async throws {
+    let picture = root.appendingPathComponent("system.heic")
+    try Data("system picture".utf8).write(to: picture)
+    let orphan: [String: Any] = ["Content": ["Choices": [[
+      "Provider": LockScreenConfiguration.extensionIdentifier,
+      "Configuration": Data("current:old-process".utf8),
+    ]]]]
+    let original: [String: Any] = ["SystemDefault": [String: Any](), "Spaces": [String: Any](),
+      "Displays": ["one": ["Type": "individual", "Desktop": orphan, "Idle": choice("system-idle")]]]
+    try write(original)
+    let before = try Data(contentsOf: store)
+    var rejectJournal = true
+    let selection = LockScreenWallpaperSelection(
+      storeURL: store, journalURL: journal,
+      reload: { throw CocoaError(.fileReadUnknown) },
+      persistJournal: { url, data in
+        if rejectJournal { throw CocoaError(.fileWriteOutOfSpace) }
+        XCTAssertEqual(try Data(contentsOf: self.store), before,
+          "The replacement must be recoverable before changing the system store")
+        try LockScreenWallpaperSelection.persistJournalFile(url, data)
+      }, systemDefaultPicture: picture)
+    await XCTAssertThrowsErrorAsync(try await selection.recover())
+    XCTAssertEqual(try Data(contentsOf: store), before)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+
+    rejectJournal = false
+    await XCTAssertThrowsErrorAsync(try await selection.recover())
+    XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
+    let recovered = LockScreenWallpaperSelection(
+      storeURL: store, journalURL: journal, reload: {},
+      systemDefaultPicture: root.appendingPathComponent("unavailable.heic"))
+    try await recovered.recover()
+
+    let display = try XCTUnwrap((try readStore()["Displays"] as? [String: [String: Any]])?["one"])
+    XCTAssertEqual(provider(display, key: "Desktop"), "com.apple.wallpaper.choice.image")
+    XCTAssertEqual(provider(display, key: "Idle"), "system-idle")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+  }
+
   /// A manual provider choice is not an old WallpaperAgent snapshot: it must use the
   /// current system fallback instead of adopting an obsolete archived original.
   @MainActor

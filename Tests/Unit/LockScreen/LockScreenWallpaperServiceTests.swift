@@ -1726,6 +1726,94 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testUnrecoverableManualDesktopDoesNotDisableTheScreenSaver() async throws {
+    var native = fixture()
+    let manual = choice(LockScreenConfiguration.extensionIdentifier)
+    native["AllSpacesAndDisplays"] = [String: Any]()
+    native["SystemDefault"] = ["Type": "individual", "Desktop": manual, "Idle": choice("system-idle")]
+    native["Spaces"] = [String: Any]()
+    native["Displays"] = ["one": ["Type": "individual", "Desktop": manual, "Idle": choice("display-idle")]]
+    try write(native)
+    var record = scene()
+    record.displayId = 1
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" })
+    try await service.start()
+    service.setScreenSaverEnabled(true)
+    await waitFor("screen saver selected") { !service.isBusy }
+    service.setEnabled(true)
+    await waitFor("lock-screen failure with retained screen saver") { !service.isBusy }
+
+    XCTAssertFalse(service.isEnabled)
+    XCTAssertNotNil(service.errorMessage)
+    XCTAssertTrue(service.screenSaverEnabled)
+    XCTAssertNil(service.screenSaverError)
+    XCTAssertFalse(try publishedConfiguration().lockScreenEnabled)
+    XCTAssertTrue(try publishedConfiguration().screenSaverEnabled)
+    XCTAssertEqual(try selectedProvider("Desktop"), LockScreenConfiguration.extensionIdentifier)
+    XCTAssertEqual(try selectedProvider("Idle"), LockScreenConfiguration.extensionIdentifier)
+
+    let monitor = try XCTUnwrap(timers.last)
+    monitor.fire()
+    await waitFor("screen saver refresh after desktop failure") { !service.isBusy }
+    XCTAssertTrue(service.screenSaverEnabled)
+    XCTAssertNotNil(service.errorMessage)
+    service.retry(lockScreen: true)
+    await waitFor("explicit retry keeps screen saver") { !service.isBusy }
+    XCTAssertTrue(service.screenSaverEnabled)
+    XCTAssertNotNil(service.errorMessage)
+
+    service.setScreenSaverEnabled(false)
+    await waitFor("screen saver restored") { !service.isBusy }
+    XCTAssertEqual(try selectedProvider("Idle"), "display-idle")
+    XCTAssertEqual(try selectedProvider("Desktop"), LockScreenConfiguration.extensionIdentifier)
+  }
+
+  @MainActor
+  func testSavedNativeModesActivateAfterRecoveringAnOrphanedDesktop() async throws {
+    let picture = root.appendingPathComponent("system.heic")
+    try Data("system picture".utf8).write(to: picture)
+    let orphan: [String: Any] = ["Content": ["Choices": [[
+      "Provider": LockScreenConfiguration.extensionIdentifier,
+      "Configuration": Data("current:old-process".utf8),
+    ]]]]
+    let original: [String: Any] = ["SystemDefault": ["Type": "individual",
+      "Desktop": orphan, "Idle": choice("system-idle")], "Spaces": [String: Any](),
+      "Displays": ["one": ["Type": "individual", "Desktop": orphan, "Idle": choice("display-idle")]]]
+    try write(original)
+    defaults.set(true, forKey: preference)
+    defaults.set(true, forKey: "WallpaperMachineUseWallpaperAsScreenSaver")
+    var record = scene()
+    record.displayId = 1
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(
+        storeURL: store, journalURL: journal, reload: {}, systemDefaultPicture: picture),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try await service.start()
+    XCTAssertEqual(try selectedProvider("Desktop"), "com.apple.wallpaper.choice.image")
+    let recovered = try PropertyListSerialization.propertyList(from: Data(contentsOf: store), format: nil) as? NSDictionary
+
+    service.refresh()
+    await waitFor("saved modes activate after orphan recovery") { !service.isBusy }
+    XCTAssertTrue(service.isEnabled)
+    XCTAssertTrue(service.screenSaverEnabled)
+    XCTAssertNil(service.errorMessage)
+    XCTAssertNil(service.screenSaverError)
+    XCTAssertTrue(service.ownsDesktopProvider)
+
+    try await service.shutdown()
+    XCTAssertEqual(try PropertyListSerialization.propertyList(from: Data(contentsOf: store), format: nil) as? NSDictionary,
+      recovered)
+  }
+
+  @MainActor
   func testSystemDefaultLinkedWallpaperActivatesBothModesAndRestoresOnShutdown() async throws {
     for saverOnly in [false, true] {
       var record = scene()

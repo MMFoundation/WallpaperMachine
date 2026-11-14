@@ -261,6 +261,12 @@ the screen saver's state. Retry preserves the last committed display mapping, an
 turning the screen saver off restores its Idle choice immediately even if a display
 UUID is temporarily unavailable during wake.
 
+A Desktop selection with no recoverable original is also a lock-screen-only
+failure: when Idle can still be selected, the screen saver stays on and keeps
+refreshing. The lock-screen row retains the recovery error until its own Retry
+action or switch starts another attempt. The app does not replace a wallpaper
+manually selected in System Settings merely to enable the lock screen.
+
 Both modes share the publisher and extension. Configuration-loading errors,
 unresolved extension conflicts, reported renderer failures, and failed publication or
 restoration can roll back both selections.
@@ -617,8 +623,9 @@ or restoration rules, move work off the main actor, or eliminate concurrent writ
 Restored fields are kept in `restored-native-selection.plist`, including when one
 mode is turned off while the other remains enabled. WallpaperAgent can save the
 store it loaded before a restore over that restore (seen after quitting), putting
-the extension back after its live journal entry was pruned. Each app-written
-`current:<revision>` field is taken back independently with its saved original,
+the extension back after its live journal entry was pruned. Startup reads that
+archive even when the live journal no longer exists, before desktop posters start.
+Each app-written `current:<revision>` field is taken back independently with its saved original,
 even while another field still has an active journal entry. Active originals take
 precedence; missing global choices are recovered only for modes taken back this way.
 A live global entry records the whole original node, so its newer choices (including
@@ -646,6 +653,15 @@ when the feature turns off. A Space created after the last check, just before th
 feature turns off, was never journaled; turning off still restores its Default and the
 journaled displays' nodes the same way, and keeps the journal for a retry if nothing
 native is left to restore them to.
+
+Older app versions can leave a revisioned `current:<revision>` selection behind
+without any recoverable original. Startup repairs those app-written fields only:
+it uses surviving system selections or archived originals first, then macOS's
+default desktop image if neither survives. That image is a fallback, not a
+reconstruction of the lost wallpaper. The resolved image must exist, and its
+selection is journaled before any store write so a failed reload can be retried.
+Unrelated fields, foreign providers and manually selected plain `current` choices
+are preserved. This orphan scan runs during recovery, not on steady monitor ticks.
 
 ## Storage
 

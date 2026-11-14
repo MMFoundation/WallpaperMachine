@@ -4,7 +4,9 @@ import Darwin
 struct LockScreenWallpaperFailure: LocalizedError {
   /// `transient` is a failure a later attempt can get past on its own: a write that raced
   /// WallpaperAgent's own, or the agent between a restart and its relaunch.
-  enum Reason { case general, differentExtensionCopy, extensionTurnedOff, transient }
+  enum Reason {
+    case general, differentExtensionCopy, extensionTurnedOff, transient, desktopOriginalUnavailable
+  }
   let message: String
   var reason: Reason = .general
   var errorDescription: String? { message }
@@ -47,6 +49,7 @@ final class LockScreenWallpaperSelection {
   private let coordinator: SystemWallpaperStore?
   private let persistJournal: @MainActor (URL, Data?) throws -> Void
   private let persistArchive: @MainActor (URL, Data?) throws -> Void
+  private let systemDefaultPicture: URL
   private var entries: [Entry] = []
   private var hasPersistedJournal = false
   private var readoptionNeedsPersistence = false
@@ -68,7 +71,8 @@ final class LockScreenWallpaperSelection {
     persistJournal: @escaping @MainActor (URL, Data?) throws -> Void =
       LockScreenWallpaperSelection.persistJournalFile,
     persistArchive: @escaping @MainActor (URL, Data?) throws -> Void =
-      LockScreenWallpaperSelection.persistJournalFile
+      LockScreenWallpaperSelection.persistJournalFile,
+    systemDefaultPicture: URL = DesktopWallpaperLedger.systemDefaultPictureURL
   ) {
     self.storeURL = storeURL
     self.journalURL = journalURL
@@ -76,6 +80,7 @@ final class LockScreenWallpaperSelection {
     self.coordinator = coordinator
     self.persistJournal = persistJournal
     self.persistArchive = persistArchive
+    self.systemDefaultPicture = systemDefaultPicture
   }
 
   func recover() async throws {
@@ -87,18 +92,23 @@ final class LockScreenWallpaperSelection {
   }
 
   private func recoverSelection() async throws {
-    guard FileManager.default.fileExists(atPath: journalURL.path) else { return }
-    let recovered = try PropertyListDecoder().decode([Entry].self, from: Data(contentsOf: journalURL))
-    guard Set(recovered.map(\.path)).count == recovered.count else {
-      throw LockScreenWallpaperFailure(
-        message: String(localized: "The native wallpaper restoration journal is invalid."))
+    if FileManager.default.fileExists(atPath: journalURL.path) {
+      let recovered = try PropertyListDecoder().decode([Entry].self, from: Data(contentsOf: journalURL))
+      guard Set(recovered.map(\.path)).count == recovered.count else {
+        throw LockScreenWallpaperFailure(
+          message: String(localized: "The native wallpaper restoration journal is invalid."))
+      }
+      entries = recovered
+      readoptionNeedsPersistence = false
+      hasPersistedJournal = true
+      // A crash may occur after the store write but before its service reload.
+      restartPending = true
+    } else if !FileManager.default.fileExists(atPath: storeURL.path) {
+      return
     }
-    entries = recovered
-    readoptionNeedsPersistence = false
-    hasPersistedJournal = true
-    // A crash may occur after the store write but before its service reload.
-    restartPending = true
-    try await synchronizeSelection(desktopDisplays: [], screenSaverDisplays: [])
+    // A successful quit may prune the journal before WallpaperAgent replays an old
+    // selection. Recover those leftovers before poster sync can see them as originals.
+    try await synchronizeSelection(desktopDisplays: [], screenSaverDisplays: [], recovering: true)
   }
 
   func checkCompatibility() throws {
@@ -130,11 +140,12 @@ final class LockScreenWallpaperSelection {
   }
 
   private func synchronizeSelection(
-    desktopDisplays: Set<String>, screenSaverDisplays: Set<String>, revision: String? = nil
+    desktopDisplays: Set<String>, screenSaverDisplays: Set<String>, revision: String? = nil,
+    recovering: Bool = false
   ) async throws {
     try Task.checkCancellation()
     let displays = desktopDisplays.union(screenSaverDisplays)
-    if displays.isEmpty && entries.isEmpty && !restartPending { return }
+    if displays.isEmpty && entries.isEmpty && !restartPending && !recovering { return }
     // With the same request and journal, only the store can change the outcome, and
     // everything that matters rewrites it: a new Space, a choice made in System
     // Settings, a WallpaperAgent reload. Until then a settled check would repeat itself.
@@ -167,6 +178,7 @@ final class LockScreenWallpaperSelection {
       $0.path == Self.globalPath || livePaths.contains($0.path) || Self.node(root, path: $0.path) != nil
     }
     entries = try readoptedEntries(root, archived: archived)
+    if recovering { entries = try recoveringOrphanedEntries(root, archived: archived) }
     if entries != priorEntries { readoptionNeedsPersistence = true }
     let entryPaths = Set(entries.map(\.path))
     for (space, value) in spaces.sorted(by: { $0.key < $1.key }) {
@@ -398,7 +410,9 @@ final class LockScreenWallpaperSelection {
         || ["desktop", "idle", "individual"].contains(restored["Type"] as? String ?? "")
       if !activeFields.isEmpty {
         guard supported,
-          previous.intersection(activeFields).allSatisfy({ restored[$0] == nil })
+          previous.intersection(activeFields).allSatisfy({
+            restored[$0] == nil || Self.ownsRevisionedSelection(restored[$0])
+          })
         else {
           throw LockScreenWallpaperFailure(
             message: String(localized: "The system wallpaper was changed outside WallpaperMachine. Disable the affected wallpaper feature before enabling it again; external choices will be preserved."))
@@ -422,7 +436,8 @@ final class LockScreenWallpaperSelection {
         if global == nil {
           restored = original.filter { !["Desktop", "Idle", "Linked", "Type"].contains($0.key) }
         }
-        for key in previous.subtracting(activeFields) where restored[key] == nil {
+        for key in previous.subtracting(activeFields)
+        where restored[key] == nil || Self.ownsRevisionedSelection(restored[key]) {
           restored[key] = Self.separatedLinked(original)[key]
         }
         for key in activeFields { restored.removeValue(forKey: key) }
@@ -638,39 +653,117 @@ final class LockScreenWallpaperSelection {
         .sorted { $0.path.lexicographicallyPrecedes($1.path) }
   }
 
+  /// Only app-written, revisioned choices can be orphaned. A manual `current`
+  /// selection and every foreign provider remain the user's choices.
+  private func recoveringOrphanedEntries(_ root: [String: Any], archived: [Entry]) throws -> [Entry] {
+    var recovered = entries
+    var indices = Dictionary(uniqueKeysWithValues: entries.enumerated().map { ($0.element.path, $0.offset) })
+    var originals: [[String]: [String: Any]] = [:]
+    let archivedByPath = Dictionary(uniqueKeysWithValues: archived.map { ($0.path, $0.original) })
+    for entry in entries {
+      guard let original = try PropertyListSerialization.propertyList(from: entry.original, format: nil)
+        as? [String: Any] else {
+        throw LockScreenWallpaperFailure(
+          message: String(localized: "The native wallpaper restoration journal is invalid."))
+      }
+      originals[entry.path] = original
+    }
+    let displays = root["Displays"] as? [String: Any] ?? [:]
+    let spaces = root["Spaces"] as? [String: Any] ?? [:]
+    var paths = [Self.globalPath, ["SystemDefault"]] + displays.keys.sorted().map { ["Displays", $0] }
+    for space in spaces.keys.sorted() {
+      paths.append(["Spaces", space, "Default"])
+      let scoped = (spaces[space] as? [String: Any])?["Displays"] as? [String: Any] ?? [:]
+      paths += scoped.keys.sorted().map { ["Spaces", space, "Displays", $0] }
+    }
+    var defaultChoice: [String: Any]?
+    var checkedDefault = false
+    var usedDefault = false
+    for path in paths {
+      guard let node = Self.node(root, path: path) else { continue }
+      let index = indices[path]
+      let owned = index.map { recovered[$0].ownedFields } ?? []
+      let orphaned = Set(["Desktop", "Idle"].filter {
+        !owned.contains($0) && Self.ownsRevisionedSelection(node[$0])
+      })
+      guard !orphaned.isEmpty else { continue }
+      let restored = try Self.restorationOriginal(
+        node, path: path, root: root, fields: orphaned,
+        journaled: { fallback in
+          if let original = originals[fallback] { return original }
+          guard let data = archivedByPath[fallback] else { return nil }
+          return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+        }, orphanFallback: {
+          if !checkedDefault {
+            checkedDefault = true
+            let url = self.systemDefaultPicture.resolvingSymlinksInPath()
+            if (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+              defaultChoice = ["Content": [
+                "Choices": [["Provider": "com.apple.wallpaper.choice.image",
+                  "Configuration": try Self.encode(["type": "imageFile", "url": ["relative": url.absoluteString]]),
+                  "Files": [String]()]],
+                "Shuffle": "$null", "EncodedOptionValues": try Self.encode(["values": [String: Any]()]),
+              ], "LastSet": Date(), "LastUse": Date()]
+            }
+          }
+          usedDefault = usedDefault || defaultChoice != nil
+          return defaultChoice
+        })
+      var original = originals[path] ?? (path == Self.globalPath ? node : [:])
+      for field in orphaned { original[field] = restored[field] }
+      originals[path] = original
+      if let index {
+        recovered[index].original = try Self.encode(original)
+        recovered[index].fields = owned.union(orphaned).sorted()
+      } else {
+        indices[path] = recovered.count
+        recovered.append(Entry(
+          path: path, original: try Self.encode(original), created: false,
+          observeOnly: path == ["SystemDefault"] || path.last == "Default",
+          fields: orphaned.sorted(), typeOwned: false,
+          globalWasPresent: path == Self.globalPath ? true : nil))
+      }
+    }
+    if usedDefault {
+      AppLog.warn("Native wallpaper: an app-written selection has no recoverable original; using the macOS default picture for recovery")
+    }
+    return recovered
+  }
+
   /// A fallback that macOS overwrote with a copy of this extension's selection
   /// still has its native choice in the journal, so `journaled` is consulted
   /// after the live value: a Space created after that copy, a full-screen
   /// app's included, would otherwise have no fallback left at all.
   private static func restorationOriginal(
     _ node: [String: Any], path: [String], root: [String: Any], fields: Set<String>,
-    journaled: ([String]) -> [String: Any]?
+    journaled: ([String]) -> [String: Any]?,
+    orphanFallback: () throws -> [String: Any]? = { nil }
   ) throws -> [String: Any] {
     var original = node
     let fallbackPaths = Self.fallbackPaths(for: path)
     for key in fields.sorted() where owns(node[key]) {
-      guard
-        let replacement = fallbackPaths
-          .filter({ $0 != path })
-          .flatMap({ fallback in
-            [
-              Self.node(root, path: fallback).map(Self.separatedLinked)?[key] as? [String: Any],
-              journaled(fallback).map(Self.separatedLinked)?[key] as? [String: Any],
-            ].compactMap { $0 }
-          })
-          .first(where: { value in
-            guard !owns(value), let content = value["Content"] as? [String: Any],
-              let choices = content["Choices"] as? [[String: Any]], !choices.isEmpty
-            else { return false }
-            return choices.allSatisfy {
-              guard let provider = $0["Provider"] as? String else { return false }
-              return !provider.isEmpty && provider != LockScreenConfiguration.extensionIdentifier
-            }
-          })
-      else {
+      let replacement = fallbackPaths
+        .filter({ $0 != path })
+        .flatMap({ fallback in
+          [
+            Self.node(root, path: fallback).map(Self.separatedLinked)?[key] as? [String: Any],
+            journaled(fallback).map(Self.separatedLinked)?[key] as? [String: Any],
+          ].compactMap { $0 }
+        })
+        .first(where: { value in
+          guard !owns(value), let content = value["Content"] as? [String: Any],
+            let choices = content["Choices"] as? [[String: Any]], !choices.isEmpty
+          else { return false }
+          return choices.allSatisfy {
+            guard let provider = $0["Provider"] as? String else { return false }
+            return !provider.isEmpty && provider != LockScreenConfiguration.extensionIdentifier
+          }
+        })
+      guard let replacement = try replacement ?? orphanFallback() else {
         throw LockScreenWallpaperFailure(
           message:
-            String(localized: "A native wallpaper selection has no restoration journal or surviving system fallback. Choose a system wallpaper for this display before enabling native wallpaper animation.")
+            String(localized: "A native wallpaper selection has no restoration journal or surviving system fallback. Choose a system wallpaper for this display before enabling native wallpaper animation."),
+          reason: key == "Desktop" ? .desktopOriginalUnavailable : .general
         )
       }
       original[key] = replacement

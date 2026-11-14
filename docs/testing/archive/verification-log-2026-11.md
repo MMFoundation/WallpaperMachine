@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-12 — Gate run on a Mac for the covered-desktop sound choices (#192)
+
+Run on an M4 Mac mini with macOS 27.2 and Xcode 27.2 (27B52) through DEVELOPER_DIR; build.md asks for Xcode 26 and the Test workflow uses macos-26 runners, which this run did not use. Commit d1d5d4e2, with no changes needed.
+
+- `python3 scripts/build.py` (full, Debug) — exit 0
+- `python3 scripts/test.py --only` PlaybackPolicyCompositionTests, WallpaperPresentationPolicyTests, PlaybackPreferencesTests, WallpaperBackupTests, OtherAudioVolumeSettingsTests, SettingsSectionsLocalizationTests, PanelSettingsValuesTests, SettingsSectionsRenderTests, SettingsWindowRenderTests — exit 0; 175 passed, 0 failed, 0 skipped
+- `python3 scripts/test.py` — exit 0; 34 script test modules OK; 4936 passed, 0 failed, 70 skipped of 5006; 2 runtime warnings in the result bundle not examined
+- Not checked: a Release build, the four-segment Quick Settings module in each language, real coverage-probe occlusion and audible output; the five translations are machine-written
+- Found in passing, not caused by this change: `AppUpdateTests` builds `AppUpdateStore` without `defaults:`, and the gate wrote `WallpaperMachine.updates.lastAttempt` into the installed app's preferences
+
 ## 2026-11-12 — Mute or Reduce volume when windows cover the desktop (#192)
 
 Written on a Linux host without Xcode or Swift: nothing native was compiled or run.

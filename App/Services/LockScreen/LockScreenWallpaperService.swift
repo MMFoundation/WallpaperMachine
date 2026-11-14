@@ -588,6 +588,17 @@ final class LockScreenWallpaperService {
       // A newer request owns the next publication; keep the committed surfaces.
     } catch {
       guard generation == revision else { return }
+      if (error as? LockScreenWallpaperFailure)?.reason == .desktopOriginalUnavailable,
+        screenSaverRequested, published?.lockScreenEnabled == true,
+        published?.screenSaverEnabled == true
+      {
+        // Failure to recover Desktop says nothing about Idle. Retry this update
+        // once without Desktop, retaining the lock-screen error until an explicit retry.
+        lockScreenActivationError = error.localizedDescription
+        AppLog.error("Native lock screen: \(error.localizedDescription)")
+        await update(revision: revision)
+        return
+      }
       var failure = error
       if (error as? LockScreenWallpaperFailure)?.reason == .differentExtensionCopy,
         !copyRecoveryAttempted
