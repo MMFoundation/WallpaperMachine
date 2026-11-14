@@ -9,6 +9,7 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
     var dirtyWallpapers = Set<String>()
     /// Wallpapers the app reports it is holding back after a crash.
     var held: [String] = []
+    var unsupported = Set<String>()
     var failOnce: String?
     var failAfterMutation = false
     var beforeApply: (@MainActor () async -> Void)?
@@ -62,7 +63,7 @@ final class DisplayTransferTestBridge: LayoutSnapshotBridge {
     var currentBundle: BridgeSnapshotBundle {
         .init(app: .init(playbackState: .paused, selectedWallpaperId: selected, activeWallpaperIds: Array(Set(assignments.values)), errors: [], heldWallpaperIds: held),
             library: .init(wallpapers: ["a", "b", "c"].map { id in
-                .init(id: id, title: id == "a" ? "Ocean <img src=x>" : id, kind: .webpage, supported: true,
+                .init(id: id, title: id == "a" ? "Ocean <img src=x>" : id, kind: .webpage, supported: !unsupported.contains(id),
                       active: assignments.values.contains(id), selected: selected == id, previewPath: nil)
             }, scanStatus: .init(scanning: false, done: 3, total: 3), sceneCount: 0, videoCount: 0, webpageCount: 3, unknownCount: 0),
             wallpaperOptions: currentOptions(selected), monitorInformation: .init(rows: ["primary", "secondary"].map { display in

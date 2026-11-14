@@ -40,6 +40,10 @@ final class BridgeStore {
     /// ejects the app makes on its own (deleting a wallpaper, reloading or reapplying one, a
     /// display layout's recovery, a Focus restore), which the user did not ask for.
     @ObservationIgnored var onUserWallpaperRemoved: (@MainActor (_ wallpaperID: String, _ displayID: String) -> Void)?
+    /// Continues an active playlist inside the deletion's command, without queueing another
+    /// command behind it. False lets this display use its recent wallpaper history instead.
+    @ObservationIgnored var continuePlaylistAfterDeletion:
+        (@MainActor (_ display: String, _ deleted: String, _ libraryBefore: [String], _ available: [String]) async throws -> Bool)?
     @ObservationIgnored var openPreview: (@MainActor (WallpaperPreviewSession.Selection) -> Void)?
     /// A wallpaper's pending property edits changed: an edit, a restored default, a revert, an
     /// apply or a preset. It runs once the change is stored and names the wallpaper, so whatever
@@ -201,6 +205,7 @@ final class BridgeStore {
     func deleteWallpaperAsync(id: String) async throws {
         let report = try await deleteWallpapersAsync(ids: [id])
         if let failure = report.failures.first { throw failure.error }
+        if let error = report.playbackError { throw error }
     }
 
     /// Trashes each wallpaper independently so one failure never blocks the rest;
@@ -209,8 +214,12 @@ final class BridgeStore {
         ids: [String],
         recycle: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
     ) async throws -> WallpaperDeletionReport {
+        let requested = Set(ids)
+        let libraryBefore = librarySnapshot.wallpapers.filter(\.supported).map(\.id)
+        var ejected: [String: String] = [:]
         var report = WallpaperDeletionReport()
-        for id in ids {
+        var visited = Set<String>()
+        for id in ids where visited.insert(id).inserted {
             do {
                 _ = try WallpaperDeletionService.wallpaperURL(id: id, library: ClientPaths.libraryURL)
                 let displayIDs = Set(monitorInformationSnapshot.rows.filter {
@@ -218,6 +227,7 @@ final class BridgeStore {
                 }.map(\.displayId))
                 for displayID in displayIDs.sorted() {
                     try await ejectWallpaperFromDisplayAsync(displayId: displayID, wallpaperId: id)
+                    if shownWallpaperID(on: displayID) == nil { ejected[displayID] = id }
                 }
                 try WallpaperDeletionService.moveToTrash(id: id, library: ClientPaths.libraryURL, recycle: recycle)
                 supportPrompt?.forgetDownload(wallpaperID: id)
@@ -226,15 +236,63 @@ final class BridgeStore {
                 report.failures.append((id: id, error: error))
             }
         }
-        guard !report.deleted.isEmpty else { return report }
-        try await refreshLibraryAsync()
+        if !report.deleted.isEmpty { try await refreshLibraryAsync() }
         for id in report.deleted {
             editorState.discard(wallpaperID: id)
             // Nothing draws it any more, so nothing is left to take back.
             desktopPropertyPreviews.cancel(id)
             forgetPropertyEditsOnDesktop(id)
         }
+        let deleted = Set(report.deleted)
+        history.forget(deleted)
+        let held = Set(heldWallpaperIDs)
+        let available = librarySnapshot.wallpapers.compactMap { wallpaper -> String? in
+            guard wallpaper.supported, !requested.contains(wallpaper.id), !held.contains(wallpaper.id)
+            else { return nil }
+            return wallpaper.id
+        }
+        let availableSet = Set(available)
+        for (display, previous) in ejected.sorted(by: { $0.key < $1.key }) {
+            guard shownWallpaperID(on: display) == nil,
+                settingsSnapshot.displays.contains(where: { $0.displayId == display && $0.isIndependent })
+            else { continue }
+            do {
+                if !deleted.contains(previous) {
+                    // Trashing failed after the renderer let go. Put the still-installed
+                    // wallpaper back without changing history or recording a manual choice.
+                    try await applyDeletionReplacement(previous, on: display, recordsHistory: false)
+                } else if try await continuePlaylistAfterDeletion?(display, previous, libraryBefore, available) != true,
+                    let replacement = history.recent(on: display, available: availableSet).first(where: {
+                        (try? WallpaperDeletionService.wallpaperURL(id: $0, library: ClientPaths.libraryURL)) != nil
+                    })
+                {
+                    try await applyDeletionReplacement(replacement, on: display, returningToPrevious: true)
+                }
+            } catch {
+                let title = settingsSnapshot.displays.first { $0.displayId == display }?.title ?? display
+                report.playbackFailures.append((display: title, error: error))
+                AppLog.warn("Wallpaper deletion: could not restore playback on display \(display): \(error.localizedDescription)")
+            }
+        }
         return report
+    }
+
+    /// A failed apply may have changed the assignment before reporting its error. Take only
+    /// that attempted replacement off again; another wallpaper on the display is preserved.
+    func applyDeletionReplacement(_ id: String, on display: String, origin: ActivationOrigin = .automation,
+                                  recordsHistory: Bool = true, returningToPrevious: Bool = false) async throws {
+        do {
+            try await activateWallpaperAsync(id: id, displayId: display, origin: origin,
+                returningToPrevious: returningToPrevious, recordsHistory: recordsHistory)
+        } catch {
+            if shownWallpaperID(on: display) == id {
+                do { try await ejectWallpaperFromDisplayAsync(displayId: display, wallpaperId: id) }
+                catch let restorationError {
+                    throw WallpaperActionError(message: "\(error.localizedDescription)\n\n\(restorationError.localizedDescription)")
+                }
+            }
+            throw error
+        }
     }
 
     func refreshDisplaysAsync() async throws {

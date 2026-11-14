@@ -241,6 +241,18 @@ when the display is emptied finds the hold and leaves the display empty. The hol
 kept across launches, so a relaunch does not fill a display that was cleared. It is
 run state like the shuffle round: it is not part of a backup.
 
+Deleting a wallpaper that was playing continues its playlist inside the deletion
+command. A rotation uses the item's position in the source before the deletion
+to choose its next remaining item; a shuffle preserves its round. Items requested
+in the same deletion batch and those cooling down after a playback failure are
+excluded. This replacement also runs while playback is paused, preserving that
+pause and starting a fresh timer interval. A rotation triggered by unlock waits
+for the next unlock afterwards. Day and night uses the current period's choice,
+or leaves the display empty when that choice was deleted. An empty playlist does
+not substitute an unrelated wallpaper from history. Failed replacements report
+their error and wait for the next normal change instead of trying a series of
+wallpapers during the delete command.
+
 ### Each time the Mac is unlocked
 
 **How often → Each time the Mac is unlocked** makes a rotation change when the Mac is

@@ -2,9 +2,8 @@ import Foundation
 
 /// Moving wallpapers to the Trash and forgetting everything the app kept about them.
 extension PanelController {
-  /// `delete`: asks first, then ejects the wallpaper from every display showing it, moves its
-  /// library copy to the Trash (the files the user imported are not touched) and forgets what the
-  /// app kept about it. A panel with no window cannot ask, so it deletes nothing.
+  /// `delete`: asks first, trashes the managed copy and replaces it on affected displays,
+  /// then forgets its metadata. A panel with no window cannot ask, so it deletes nothing.
   ///
   /// The confirmation is asked before queueing, so an open sheet holds up nothing else.
   func delete(_ id: String) async throws {
@@ -15,14 +14,17 @@ extension PanelController {
         await dialogs.confirm(
           L("Move \(title) to Trash?"),
           detail: L(
-            "It is removed from your library and stops playing. The original files you imported are not affected."
+            "Affected displays switch to another available wallpaper when possible. The original files you imported are not affected."
           ),
           button: L("Move to Trash"))
       else { return }
-      try await store.commands.run {
+      try await store.commands.run(choosing: deletionDisplaySlots) {
         let report = try await store.deleteWallpapersAsync(ids: [id], recycle: recycleWallpaperFolder)
-        if let failure = report.failures.first { throw failure.error }
-        try await forgetLibraryMetadata([id])
+        try await forgetLibraryMetadata(report.deleted)
+        if let failure = report.failures.first {
+          throw deletionError(failure.error, playback: report.playbackError)
+        }
+        if let error = report.playbackError { throw error }
       }
     }
   }
@@ -38,11 +40,11 @@ extension PanelController {
         await dialogs.confirm(
           title,
           detail: L(
-            "They are removed from your library and stop playing. The original files you imported are not affected."
+            "Affected displays switch to another available wallpaper when possible. The original files you imported are not affected."
           ),
           button: L("Move to Trash"))
       else { return }
-      try await store.commands.run {
+      try await store.commands.run(choosing: deletionDisplaySlots) {
         let report = try await store.deleteWallpapersAsync(ids: ids, recycle: recycleWallpaperFolder)
         try await forgetLibraryMetadata(report.deleted)
         if !report.failures.isEmpty {
@@ -52,13 +54,27 @@ extension PanelController {
           let details = report.failures.map {
             "\(titles[$0.id] ?? $0.id): \($0.error.localizedDescription)"
           }
-          throw WallpaperActionError(
+          throw deletionError(WallpaperActionError(
             message: L(
               "Moved \(report.deleted.count) of \(ids.count) wallpapers to Trash. Couldn’t move \(details.joined(separator: "; "))"
-            ))
+            )), playback: report.playbackError)
         }
+        if let error = report.playbackError { throw error }
       }
     }
+  }
+
+  /// Deletion can affect every independent display. Automatic choices give way while its
+  /// ejections and replacements run; a later user choice still runs after the deletion.
+  private var deletionDisplaySlots: [String] {
+    store.settingsSnapshot.displays.filter(\.isIndependent).map {
+      BridgeStore.activationSlot(displayId: $0.displayId)
+    }
+  }
+
+  private func deletionError(_ deletion: Error, playback: Error?) -> Error {
+    guard let playback else { return deletion }
+    return WallpaperActionError(message: "\(deletion.localizedDescription)\n\n\(playback.localizedDescription)")
   }
 
   /// Everything the app kept about wallpapers that are gone: favorites, playlist entries,

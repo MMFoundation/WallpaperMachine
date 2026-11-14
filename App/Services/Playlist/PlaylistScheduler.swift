@@ -55,6 +55,7 @@ final class PlaylistScheduler {
     private var timer: Task<Void, Never>?
     private var armedFor: Date?
     private var inFlight = Set<String>()
+    private var recoveringDeletions = Set<String>()
     /// Displays someone asked to move along while the timer's own change was waiting its turn:
     /// that change then runs as asked for, even if the display paused meanwhile.
     private var requestedWhileInFlight = Set<String>()
@@ -277,6 +278,7 @@ final class PlaylistScheduler {
         // The displays whose due change still waits for their video after this pass.
         var waitingForClip = Set<String>()
         for display in displays() {
+            guard !recoveringDeletions.contains(display) else { continue }
             let playlist = store.playlist(for: display)
             let running = isRunning(display)
             if store.holds[display] != nil {
@@ -418,6 +420,68 @@ final class PlaylistScheduler {
         guard playlist.mode == .rotate else { return false }
         let candidates = availableCandidates(for: playlist, on: display)
         return candidates.contains { $0 != current(display) }
+    }
+
+    /// The library deletion already owns the command queue. Apply inline so it can finish
+    /// before the next queued choice, and use the old order to find the deleted item's successor.
+    func continueAfterDeletion(
+        on display: String, after deleted: String, libraryBefore: [String], available: [String],
+        apply: @MainActor (String) async throws -> Void
+    ) async throws -> Bool {
+        let playlist = store.playlist(for: display)
+        guard playlist.mode != .off else { return false }
+        guard displays().contains(display), store.holds[display] == nil else { return true }
+        let revision = store.revisions[display] ?? 0
+        recoveringDeletions.insert(display)
+        endClipWait(display)
+        answerUnlock(display)
+        defer {
+            recoveringDeletions.remove(display)
+            if (store.revisions[display] ?? 0) == revision {
+                if playlist.hasTimer {
+                    store.schedule(display, at: now().addingTimeInterval(Self.seconds(playlist.interval)))
+                } else if playlist.mode == .dayNight {
+                    let period = PlaylistPlanner.phase(at: now(), dayStart: playlist.dayStart,
+                        nightStart: playlist.nightStart, calendar: calendar).until
+                    settle(display, (period, revision))
+                }
+            }
+            evaluate()
+        }
+        let playable = Set(available)
+        let candidates = availableCandidates(for: playlist, on: display).filter(playable.contains)
+        let selected: String?
+        switch playlist.mode {
+        case .off: return false
+        case .rotate:
+            let members = playlist.collectionID.flatMap { collections.collection(id: $0)?.wallpaperIDs } ?? []
+            let before = PlaylistPlanner.candidates(for: playlist, library: libraryBefore,
+                favorites: favorites(), collectionIDs: members)
+            let allowed = Set(candidates)
+            var order = before.filter { $0 == deleted || allowed.contains($0) }
+            let ordered = Set(order)
+            order += candidates.filter { !ordered.contains($0) }
+            selected = PlaylistPlanner.next(after: deleted, in: order, order: playlist.order,
+                recent: store.recent[display] ?? [], using: &random)
+        case .dayNight:
+            let phase = PlaylistPlanner.phase(at: now(), dayStart: playlist.dayStart,
+                nightStart: playlist.nightStart, calendar: calendar).phase
+            let target = phase == .day ? playlist.dayWallpaperID : playlist.nightWallpaperID
+            selected = target.flatMap { playable.contains($0) ? $0 : nil }
+        }
+        guard let selected else { return true }
+        do {
+            try await apply(selected)
+            store.clearFailure(selected, on: display)
+            if playlist.mode == .rotate { store.recordPick(selected, on: display, candidates: candidates) }
+        } catch {
+            if !(error is CancellationError) {
+                store.recordFailure(selected, on: display, message: error.localizedDescription,
+                    retryAfter: now().addingTimeInterval(Self.failureCooldown))
+            }
+            throw error
+        }
+        return true
     }
 
     /// Changes `display` to its playlist's next wallpaper now, whatever the timer says, and

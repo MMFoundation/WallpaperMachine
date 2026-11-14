@@ -905,6 +905,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 store.commands.revision(for: BridgeStore.activationSlot(displayId: display))
             })
         playlistScheduler = scheduler
+        store.continuePlaylistAfterDeletion = { [weak store, weak scheduler] display, deleted, before, available in
+            guard let store, let scheduler else { return false }
+            return try await scheduler.continueAfterDeletion(
+                on: display, after: deleted, libraryBefore: before, available: available
+            ) { id in
+                try await store.applyDeletionReplacement(id, on: display, origin: .playlist)
+            }
+        }
         playlists.skipHandler = { [weak scheduler] display in
             guard scheduler?.skip(display) == true else { return false }
             WallpaperAutomationStore.shared.manualChoice?(display)

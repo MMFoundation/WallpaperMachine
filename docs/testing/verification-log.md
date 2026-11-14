@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-14 — Continue playback after deleting wallpapers (#207)
+
+- Deleting an active wallpaper now restores that display’s recent playable wallpaper or continues its playlist; batch exclusions, mirrors, failed trash moves and failed replacements are covered.
+- Both initial deletion regressions failed before implementation. Targeted deletion, playlist, panel and display checks passed: 118 tests.
+- First full run: 5047 native tests passed, 1 fixed-delay fullscreen-occlusion test failed, 70 skipped. The untouched baseline then passed 5032 native tests with 70 skipped; no occlusion code or test was changed.
+- Final python3 scripts/test.py: all Python suites passed; 5048 native tests passed, 0 failed, 70 opt-in tests skipped.
+- Three main-thread runtime warnings were attributed to existing video-decoder, video-format and update-signature tests; all passed.
+- Deletion confirmation and playback-recovery errors are translated into all six app languages. No live desktop check or Release build.
+
 ## 2026-11-14 — Recover orphaned lock-screen selections (#204)
 
 - Reproduced both regressions before the fix: startup skipped archived originals without a live journal, and a Desktop recovery error disabled an otherwise usable screen saver.
@@ -115,15 +124,3 @@ Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in wind
 - `python3 scripts/test.py` — exit 0 after documented Debug-product xattr cleanup; 35 Python modules passed; native 4,926 passed, 0 failed, 70 skipped, two runtime warnings.
 - The native gate used an isolated app home and preferences. Opt-in tests remained skipped; no Release build or interactive desktop validation was performed.
 - The workflows are not deployed yet: continuous triage and Dependabot require the configuration on the default branch. No commit, push, workflow installation or required-check rule was performed.
-
-## 2026-11-13 — Audio capture startup timeout recovery
-
-Core Audio start receive timeouts now stop and release the uncertain session before one fresh attempt; cleanup failures block replacement. Native status stays typed, and permission advice is limited to authorization errors.
-
-- Injected AudioDeviceStart status 268451843: the new recovery regression failed before the fix (one attempt instead of two). After the fix, targeted cargo tests passed: 60 core audio and 32 audio-worker tests.
-- `python3 scripts/check_rust.py --output artifacts/audio-startup/rust` — exit 0 across core, bridge, integration and shader checks; five desktop-window tests excluded, desktop/media/network opt-ins disabled, primary-display probe skipped without an active display.
-- `python3 scripts/build.py --renderer-only` — exit 0; renderer library rebuilt and Swift bindings regenerated. No Release app build.
-- `python3 scripts/test.py` — exit 65: Python checks passed; native results were 4,925 passed, 1 failed, 70 skipped. InspectorRenderTests/testTheFooterNeverCoversTheRowWhoseEditBringsItIn failed because the footer covered Show the clock; the same targeted test also failed alone. Its fixture uses a test bridge, not native audio capture.
-- `python3 scripts/check_renderer.py` — initial build interrupted by a killed backdrop_geometry_test discovery process; rebuilding that target succeeded. The subsequent full run and a final --skip-build run both exited 1 because backdrop_scene_test was killed (signal 9); all other registered binaries returned 0.
-- Renderer runs exercised GPU and realtime checks, twelve generated pooled/isolated image comparisons and eight reload projects twice, all successful. Seven local asset/corpus cases were skipped; authored wallpaper compatibility remains unverified.
-- Live system audio capture, permission prompts, device changes and desktop behavior were not exercised. No app was installed, launched or restarted. Full native and renderer gates remain blocked by the failures above.

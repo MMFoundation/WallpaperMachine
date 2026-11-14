@@ -9,6 +9,18 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-13 — Audio capture startup timeout recovery
+
+Core Audio start receive timeouts now stop and release the uncertain session before one fresh attempt; cleanup failures block replacement. Native status stays typed, and permission advice is limited to authorization errors.
+
+- Injected AudioDeviceStart status 268451843: the new recovery regression failed before the fix (one attempt instead of two). After the fix, targeted cargo tests passed: 60 core audio and 32 audio-worker tests.
+- `python3 scripts/check_rust.py --output artifacts/audio-startup/rust` — exit 0 across core, bridge, integration and shader checks; five desktop-window tests excluded, desktop/media/network opt-ins disabled, primary-display probe skipped without an active display.
+- `python3 scripts/build.py --renderer-only` — exit 0; renderer library rebuilt and Swift bindings regenerated. No Release app build.
+- `python3 scripts/test.py` — exit 65: Python checks passed; native results were 4,925 passed, 1 failed, 70 skipped. InspectorRenderTests/testTheFooterNeverCoversTheRowWhoseEditBringsItIn failed because the footer covered Show the clock; the same targeted test also failed alone. Its fixture uses a test bridge, not native audio capture.
+- `python3 scripts/check_renderer.py` — initial build interrupted by a killed backdrop_geometry_test discovery process; rebuilding that target succeeded. The subsequent full run and a final --skip-build run both exited 1 because backdrop_scene_test was killed (signal 9); all other registered binaries returned 0.
+- Renderer runs exercised GPU and realtime checks, twelve generated pooled/isolated image comparisons and eight reload projects twice, all successful. Seven local asset/corpus cases were skipped; authored wallpaper compatibility remains unverified.
+- Live system audio capture, permission prompts, device changes and desktop behavior were not exercised. No app was installed, launched or restarted. Full native and renderer gates remain blocked by the failures above.
+
 ## 2026-11-12 — Gate run on a Mac for the covered-desktop sound choices (#192)
 
 Run on an M4 Mac mini with macOS 27.2 and Xcode 27.2 (27B52) through DEVELOPER_DIR; build.md asks for Xcode 26 and the Test workflow uses macos-26 runners, which this run did not use. Commit d1d5d4e2, with no changes needed.

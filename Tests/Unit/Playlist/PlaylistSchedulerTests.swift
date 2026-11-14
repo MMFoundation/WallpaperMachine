@@ -66,6 +66,102 @@ final class PlaylistSchedulerTests: XCTestCase {
         for _ in 0..<50 { await Task.yield() }
     }
 
+    func testDeletionContinuesAfterTheRemovedItemInTheOriginalOrderWhilePaused() async throws {
+        store.update("primary") { $0.mode = .rotate; $0.interval = 5 }
+        running = false
+        shown["primary"] = nil
+        let scheduler = makeScheduler(library: ["a", "c"])
+        scheduler.start()
+        defer { scheduler.stop() }
+
+        let handled = try await scheduler.continueAfterDeletion(
+            on: "primary", after: "b", libraryBefore: ["a", "b", "c"], available: ["a", "c"]
+        ) { id in self.shown["primary"] = id; self.applied.append(id) }
+
+        XCTAssertTrue(handled)
+        XCTAssertEqual(applied, ["c"])
+        XCTAssertEqual(store.nextChange["primary"], clock.addingTimeInterval(5 * 60))
+    }
+
+    func testDeletionRespectsPlaylistMembershipBatchExclusionsAndFailureCooldown() async throws {
+        store.update("primary") {
+            $0.mode = .rotate; $0.source = .list; $0.wallpaperIDs = ["c", "a", "b"]
+        }
+        let scheduler = makeScheduler()
+        scheduler.start()
+        defer { scheduler.stop() }
+        shown["primary"] = nil
+
+        _ = try await scheduler.continueAfterDeletion(
+            on: "primary", after: "a", libraryBefore: ["a", "b", "c"], available: ["c"]
+        ) { id in self.applied.append(id) }
+        XCTAssertEqual(applied, ["c"])
+        store.recordFailure("c", on: "primary", message: "unavailable", retryAfter: clock.addingTimeInterval(60))
+        applied.removeAll()
+        _ = try await scheduler.continueAfterDeletion(
+            on: "primary", after: "a", libraryBefore: ["a", "b", "c"], available: ["c"]
+        ) { id in self.applied.append(id) }
+        XCTAssertTrue(applied.isEmpty)
+    }
+
+    func testDeletionKeepsAnEmptyPlaylistEmptyInsteadOfUsingHistoryOrAnUnrelatedWallpaper() async throws {
+        store.update("primary") {
+            $0.mode = .rotate; $0.source = .list; $0.wallpaperIDs = ["a"]
+        }
+        let scheduler = makeScheduler(library: ["b", "c"])
+        scheduler.start()
+        defer { scheduler.stop() }
+
+        let handled = try await scheduler.continueAfterDeletion(
+            on: "primary", after: "a", libraryBefore: ["a", "b", "c"], available: ["b", "c"]
+        ) { _ in XCTFail("A playlist cannot pick outside its source") }
+        XCTAssertTrue(handled)
+
+        store.update("primary") { $0.mode = .off }
+        let off = try await scheduler.continueAfterDeletion(
+            on: "primary", after: "a", libraryBefore: ["a", "b", "c"], available: ["b", "c"]
+        ) { _ in XCTFail("History handles a display whose playlist is off") }
+        XCTAssertFalse(off)
+    }
+
+    func testDeletionDoesNotAdvanceShuffleOrRetryWhenTheReplacementFails() async throws {
+        store.update("primary") { $0.mode = .rotate; $0.order = .shuffle }
+        let scheduler = makeScheduler(library: ["a", "b"])
+        scheduler.start()
+        defer { scheduler.stop() }
+        let recent = store.recent
+        var attempts: [String] = []
+        await XCTAssertThrowsErrorAsync(try await scheduler.continueAfterDeletion(
+            on: "primary", after: "a", libraryBefore: ["a", "b"], available: ["b"]
+        ) { id in attempts.append(id); throw CocoaError(.fileReadCorruptFile) })
+        XCTAssertEqual(attempts, ["b"])
+        XCTAssertEqual(store.recent, recent)
+        XCTAssertNotNil(store.skipped["primary"]?["b"])
+    }
+
+    func testDeletionInDayNightModeKeepsTheCurrentPeriodAndExplicitHolds() async throws {
+        store.update("primary") {
+            $0.mode = .dayNight; $0.dayWallpaperID = "b"; $0.nightWallpaperID = "a"
+        }
+        let scheduler = makeScheduler(library: ["b", "c"])
+        running = false
+        scheduler.start()
+        defer { scheduler.stop() }
+        _ = try await scheduler.continueAfterDeletion(
+            on: "primary", after: "a", libraryBefore: ["a", "b", "c"], available: ["b", "c"]
+        ) { id in self.applied.append(id) }
+        XCTAssertEqual(applied, ["b"])
+
+        applied.removeAll()
+        shown["primary"] = nil
+        store.setHold(.removedWallpaper, on: "primary")
+        _ = try await scheduler.continueAfterDeletion(
+            on: "primary", after: "a", libraryBefore: ["a", "b", "c"], available: ["b", "c"]
+        ) { id in self.applied.append(id) }
+        XCTAssertTrue(applied.isEmpty)
+        XCTAssertEqual(store.holds["primary"], .removedWallpaper)
+    }
+
     func testFailedWallpaperIsSkippedImmediatelyAndRetriedAfterCooldown() async {
         store.update("primary") { $0.mode = .rotate; $0.interval = 5 }
         var attempts: [String] = []

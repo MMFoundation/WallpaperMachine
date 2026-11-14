@@ -45,4 +45,12 @@ enum WallpaperDeletionService {
 struct WallpaperDeletionReport {
     var deleted: [String] = []
     var failures: [(id: String, error: Error)] = []
+    var playbackFailures: [(display: String, error: Error)] = []
+
+    var playbackError: Error? {
+        guard !playbackFailures.isEmpty else { return nil }
+        let details = playbackFailures.map { "\($0.display): \($0.error.localizedDescription)" }.joined(separator: "; ")
+        return NSError(domain: "WallpaperMachine.Deletion", code: 2,
+            userInfo: [NSLocalizedDescriptionKey: String(localized: "Playback could not be restored: \(details)")])
+    }
 }

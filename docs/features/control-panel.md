@@ -832,7 +832,23 @@ the status panel's tests.
 
 Deletion always moves the managed library copy to the Mac's Trash after a
 confirmation sheet; imported source folders are never touched, and a wallpaper
-playing on a display is ejected first. A disconnected display, or a wallpaper
+playing on a display is ejected first. After successful deletion, each affected
+independent display returns to its most recently used wallpaper that is still
+installed and supported, skipping crash-held wallpapers and every item requested
+in the same deletion batch. Mirrors follow their source. An active playlist
+chooses the replacement from its own source instead, preserving its order or
+shuffle round; an empty source leaves the system wallpaper visible. With no
+usable history, the display likewise stays on the system wallpaper. **Remove
+from display** still deliberately clears it without choosing a replacement.
+
+A failed move to the Trash restores that display's original wallpaper. A
+replacement that cannot load leaves the display empty and reports playback
+recovery separately from which files were deleted, so deleted items still lose
+their library metadata. No succession of older wallpapers is loaded to hide
+the failure. Deletion and replacement share one command; a later user choice
+runs afterwards and takes precedence.
+
+A disconnected display, or a wallpaper
 folder removed outside the app, can keep its assignment: once the library has been
 scanned the renderer leaves that display empty rather than failing every apply,
 and reinstalling the wallpaper brings the assignment back.
