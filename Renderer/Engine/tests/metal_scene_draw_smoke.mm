@@ -8906,6 +8906,12 @@ TEST_F(MetalSceneDraw, AVideoLayerKeepsConvertingWhileTheSettingIsOff)
             ASSERT_TRUE(SettleVariantTranslation(*loaded.scene, &variant_error)) << variant_error;
             EXPECT_TRUE(DrawUntilVideoPath(render, *loaded.scene, SceneVideoPath::Nv12Direct))
                 << "a running scene never picked the setting up";
+            SetMetalVideoPlaneSamplingEnabled(false);
+            ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+            EXPECT_EQ(render.VideoPath(), SceneVideoPath::Nv12Converted);
+            SetMetalVideoPlaneSamplingEnabled(true);
+            ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+            EXPECT_EQ(render.VideoPath(), SceneVideoPath::Nv12Direct);
         }
 
         render.destroy();

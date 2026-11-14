@@ -2753,7 +2753,7 @@ struct MetalRender::Impl
     /// Runs at a frame boundary and never blocks: everything expensive happens
     /// on the variant queue, and a pass whose variant is not ready draws with
     /// the ordinary program exactly as it did before the variant existed.
-    void pumpVideoPlaneVariants(Scene& scene, bool planes_enabled);
+    bool pumpVideoPlaneVariants(Scene& scene, bool planes_enabled);
     /// Turns a compiled variant and its pipeline into a draw this pass can
     /// switch to. Never fails the pass: a variant that cannot be used is
     /// refused and the ordinary program keeps the material.
@@ -2791,16 +2791,6 @@ struct MetalRender::Impl
         return path;
     }
 
-    /// How many passes currently hold a usable variant. Used to notice that one
-    /// was adopted, which changes what its video's consumers need.
-    [[nodiscard]] std::size_t readyVariantCount() const
-    {
-        std::size_t count = 0;
-        for (const auto& pass : prepared) {
-            if (pass.video_planes.ready) ++count;
-        }
-        return count;
-    }
     /// Copies this frame's simulated geometry into the slot the frame owns.
     /// False means the mesh no longer matches what the pipeline was built for,
     /// which fails the frame rather than drawing it against a stale layout.
@@ -5720,8 +5710,9 @@ bool MetalRender::Impl::installVideoPlaneDraw(Scene& scene, std::size_t index, P
     return true;
 }
 
-void MetalRender::Impl::pumpVideoPlaneVariants(Scene& scene, bool planes_enabled)
+bool MetalRender::Impl::pumpVideoPlaneVariants(Scene& scene, bool planes_enabled)
 {
+    bool changed = false;
     // ---- results that arrived since the last frame
     std::vector<VariantPipelineMailbox::Entry> arrived;
     if (variant_mailbox != nullptr) {
@@ -5743,10 +5734,12 @@ void MetalRender::Impl::pumpVideoPlaneVariants(Scene& scene, bool planes_enabled
         }
         // Adopted at a frame boundary, before anything in this frame is
         // encoded, so the switch happens between frames and never inside one.
+        const bool was_ready = pass.video_planes.ready;
         pass.variant_build = installVideoPlaneDraw(scene, entry.description_index, pass, *variant,
                                                    std::move(entry.pipelines))
                                  ? VariantBuild::Ready
                                  : VariantBuild::Refused;
+        changed |= pass.video_planes.ready != was_ready;
     }
 
     // ---- builds worth starting now
@@ -5754,7 +5747,7 @@ void MetalRender::Impl::pumpVideoPlaneVariants(Scene& scene, bool planes_enabled
     // Nothing at all while the feature is off: an optional pipeline that
     // nothing would select is pure cost, and creating it anyway is exactly the
     // "it is already compiled, so it is free" mistake.
-    if (! planes_enabled) return;
+    if (! planes_enabled) return changed;
 
     for (std::size_t i = 0; i < prepared.size() && i < descriptions.size(); ++i) {
         auto& pass = prepared[i];
@@ -5860,6 +5853,7 @@ void MetalRender::Impl::pumpVideoPlaneVariants(Scene& scene, bool planes_enabled
             });
         });
     }
+    return changed;
 }
 
 void MetalRender::Impl::updateVideoDemand(bool planes_enabled)
@@ -7998,10 +7992,8 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         // changes what its pass can consume. Nothing here compiles anything or
         // waits for a compile: it collects what finished and starts what is
         // now worth starting.
-        const std::size_t variants_before = impl.readyVariantCount();
-        impl.pumpVideoPlaneVariants(scene, planes_enabled);
-        if (planes_enabled != impl.video_planes_applied ||
-            impl.readyVariantCount() != variants_before) {
+        const bool variants_changed = impl.pumpVideoPlaneVariants(scene, planes_enabled);
+        if (planes_enabled != impl.video_planes_applied || variants_changed) {
             impl.updateVideoDemand(planes_enabled);
         }
 
