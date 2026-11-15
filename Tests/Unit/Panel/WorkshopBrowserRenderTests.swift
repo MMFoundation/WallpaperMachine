@@ -156,6 +156,26 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     host.close()
   }
 
+  func testApplicationAndAssetFiltersFitInEveryLanguageAndAppearance() async throws {
+    for language in AppLanguage.supported.map(\.tag) {
+      let panel = try await makePanel(language: language)
+      panel.controller.shell.setFiltersShown(true)
+      for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+        let host = PanelHost(controller: panel.controller)
+        host.appearance(appearance)
+        for size in [NSSize(width: 760, height: 560), NSSize(width: 1240, height: 800)] {
+          try await settle(host, size: size)
+          assertFits(host, size, "\(language) \(appearance.rawValue) filters \(Int(size.width))")
+          let found = Set(AccessibilityElement.everything(in: host.hosting.view).map(\.text))
+          for label in [L("Application · unsupported on macOS"), L("Category"), L("Asset")] {
+            XCTAssertTrue(found.contains(label), "\(language): the filters must offer \(label)")
+          }
+        }
+        host.close()
+      }
+    }
+  }
+
   func testEveryStateOfAnEmptyGridFitsTheSmallestWindow() async throws {
     let panel = try await makePanel()
     let controller = panel.controller

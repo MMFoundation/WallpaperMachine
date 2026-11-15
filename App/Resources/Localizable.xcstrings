@@ -4108,6 +4108,12 @@
     "Application" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Aplicativo"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "응용 프로그램"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アプリケーション"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "应用程序"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "應用程式"}}}
     },
+    "Category" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Categoria"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "카테고리"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "カテゴリー"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "类别"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "類別"}}}
+    },
+    "Asset" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Recurso"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "에셋"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アセット"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "素材"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "素材"}}}
+    },
     "Unknown" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Desconhecido"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "알 수 없음"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "不明"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "未知"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "未知"}}}
     },

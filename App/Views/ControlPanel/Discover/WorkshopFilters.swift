@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// Each change searches at once. "Show only" boxes require a tag; the Tags chips start plain and a
 /// click selects one (`FilterTagChip`); every other box is ticked unless it hides what carries its
-/// tag, so a fresh sidebar filters nothing. A group's
+/// tag. Application, Asset and restricted-content tags start excluded. A group's
 /// title carries how many of its boxes differ from their defaults, the header carries the total,
 /// and Clear puts the defaults back.
 struct WorkshopFilters: View {

@@ -171,6 +171,49 @@ final class WorkshopBrowserModelTests: MediaPanelTestCase {
       Set(sent), Set(WorkshopSort.allCases.map(\.browseSort)), "each sort reached Steam in its own key")
   }
 
+  func testApplicationAndAssetCanBeIncludedIndependentlyAndClearRestoresTheirExclusions() async throws {
+    let panel = try makePanel()
+    let model = panel.controller.workshopBrowser
+    let type = try XCTUnwrap(WorkshopFilterCatalog.groups.first { $0.id == "type" })
+    let application = try XCTUnwrap(type.sections.first { $0.id == "type" }?.entries.first { $0.tag == "Application" })
+    let asset = try XCTUnwrap(type.sections.first { $0.id == "category" }?.entries.first { $0.tag == "Asset" })
+    try await open(panel)
+
+    func exclusions() throws -> Set<String> {
+      let request = try XCTUnwrap(WorkshopBrowseProtocol.requests.last)
+      let items = URLComponents(url: request, resolvingAgainstBaseURL: false)?.queryItems ?? []
+      XCTAssertFalse(items.contains { $0.name == "requiredtags[]" }, "including a type does not require it")
+      return Set(items.filter { $0.name == "excludedtags[]" }.compactMap(\.value))
+    }
+
+    XCTAssertEqual(try exclusions(), Set(WorkshopStore.defaultExcludedTags))
+    for entry in [application, asset] {
+      model.setIncluded(entry.tag, true)
+      try await waitFor { !panel.workshop.excludedTags.contains(entry.tag) }
+      try await loaded(panel)
+      XCTAssertFalse(try exclusions().contains(entry.tag))
+      XCTAssertEqual(model.filters.count(in: type), 1)
+      XCTAssertEqual(model.filterCount, 1)
+
+      model.clearFilters()
+      try await waitFor { panel.workshop.excludedTags == WorkshopStore.defaultExcludedTags }
+      try await loaded(panel)
+      XCTAssertEqual(try exclusions(), Set(WorkshopStore.defaultExcludedTags))
+      XCTAssertEqual(model.filters.count(in: type), 0)
+      XCTAssertEqual(model.filterCount, 0)
+    }
+
+    model.setIncluded(application.tag, true)
+    model.setIncluded(asset.tag, true)
+    try await waitFor {
+      !panel.workshop.excludedTags.contains(application.tag) && !panel.workshop.excludedTags.contains(asset.tag)
+    }
+    try await loaded(panel)
+    XCTAssertEqual(try exclusions(), ["Questionable", "Mature", "Unspecified"])
+    XCTAssertEqual(model.filters.count(in: type), 2)
+    XCTAssertEqual(model.filterCount, 2)
+  }
+
   func testClearSearchAndFiltersEmptiesTheFieldAndRestoresTheDefaults() async throws {
     let panel = try makePanel()
     let model = panel.controller.workshopBrowser

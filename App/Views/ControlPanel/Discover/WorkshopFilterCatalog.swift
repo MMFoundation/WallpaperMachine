@@ -5,11 +5,10 @@ import SwiftUI
 ///
 /// "Show only" boxes start unticked, and ticking one sends its tag to Steam as a required tag.
 /// Chips start out filtering nothing (`FilterTagChip`): a selected one is required too and a
-/// hidden one excluded. Every other box starts ticked, and unticking it sends its tag as an excluded one, so a group
-/// with everything ticked filters nothing. Tags travel to Steam in English; only their labels are
-/// translated. The boxes Wallpaper Engine leaves unticked by default (`isOffByDefault`) and the two
-/// tags that are never offered (`hiddenExcludedTags`) make up the default excluded list, which
-/// must equal `WorkshopStore.defaultExcludedTags`; a test holds the two together.
+/// hidden one excluded. An unticked checkbox sends its tag as an excluded one, so a group with
+/// everything ticked filters nothing. Tags travel to Steam in English; only their labels are
+/// translated. The boxes left unticked by default (`isOffByDefault`) make up the default excluded
+/// list, which must equal `WorkshopStore.defaultExcludedTags`; a test holds the two together.
 enum WorkshopFilterCatalog {
   /// How a box's name is written: fixed wording the catalog translates, or a value that is shown
   /// as it is (a resolution).
@@ -29,7 +28,7 @@ enum WorkshopFilterCatalog {
     /// The tag Steam knows the box by.
     let tag: String
     let name: Name
-    /// Wallpaper Engine leaves this box unticked until the user ticks it.
+    /// The box starts unticked until the user ticks it.
     let isOffByDefault: Bool
 
     var id: String { tag }
@@ -98,8 +97,6 @@ enum WorkshopFilterCatalog {
     RequiredEntry(tag: "Customizable", name: "Customizable", systemImage: "slider.horizontal.3"),
   ]
 
-  static let hiddenExcludedTags = ["Application", "Asset"]
-
   /// Steam's resolution tags: `Standard Definition` then each size, with the family as a prefix.
   private static func resolution(
     _ id: String, _ title: LocalizedStringKey, standard: LocalizedStringKey, prefix: String,
@@ -118,11 +115,14 @@ enum WorkshopFilterCatalog {
       sections: [
         Section(
           id: "type", title: nil,
-          entries: [Entry("Scene", "Scene"), Entry("Video", "Video"), Entry("Web", "Web")],
+          entries: [
+            Entry("Scene", "Scene"), Entry("Video", "Video"), Entry("Web", "Web"),
+            Entry("Application", "Application · unsupported on macOS", off: true),
+          ],
           hasQuickLinks: false, style: .checkboxes),
         Section(
-          id: "category", title: nil,
-          entries: [Entry("Wallpaper", "Wallpaper"), Entry("Preset", "Preset")],
+          id: "category", title: "Category",
+          entries: [Entry("Wallpaper", "Wallpaper"), Entry("Preset", "Preset"), Entry("Asset", "Asset", off: true)],
           hasQuickLinks: false, style: .checkboxes),
       ]),
     Group(
@@ -188,10 +188,8 @@ enum WorkshopFilterCatalog {
     groups.flatMap(\.sections).filter { $0.style == .chips }.flatMap(\.tags))
   static var entries: [Entry] { sections.flatMap(\.entries) }
 
-  /// What Wallpaper Engine excludes until the user says otherwise: the tags that are never offered,
-  /// then every box that starts unticked, in the catalog's order.
-  static let defaultExcludedTags: [String] =
-    hiddenExcludedTags + entries.filter(\.isOffByDefault).map(\.tag)
+  /// Every box that starts unticked, in the catalog's order.
+  static let defaultExcludedTags: [String] = entries.filter(\.isOffByDefault).map(\.tag)
 }
 
 /// The Workshop filters as the page edits them before and after asking Steam: the tags an item

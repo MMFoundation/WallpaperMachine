@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-15 — Workshop Application and Asset filters (#206)
+
+- Application and Category → Asset are visible, independent checkboxes, excluded by default; Clear restores those defaults.
+- Regression first: the previous implementation failed three targeted tests because the options were absent.
+- Targeted filter, browser model and download-policy tests passed; the added offscreen layout case passed in all six shipped languages, both appearances and 760×560 / 1240×800 windows.
+- python3 scripts/test.py: 35 Python modules passed; native tests 5,050 passed, 0 failed, 70 skipped (opt-in checks).
+- One runtime warning came from AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy: a method was called on the main thread. No warning was attributed to the filter tests.
+- Read-only anonymous Steam queries: Asset returned 30 tagged rows and a total of 1,290; Application returned no rows, so live Application results were not verified.
+- git diff --check and 17 local link targets in the owning Workshop document passed.
+- No desktop run or Release build; live visual interaction and Application search results remain unverified.
+
 ## 2026-11-14 — Continue playback after deleting wallpapers (#207)
 
 - Deleting an active wallpaper now restores that display’s recent playable wallpaper or continues its playlist; batch exclusions, mirrors, failed trash moves and failed replacements are covered.
@@ -114,13 +125,3 @@ Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in wind
 - The integration run used temporary test-home and path-backed preference-suite overrides to isolate the installed app.
 - Skipped: opt-in media, live Steam, reference rendering and panel snapshots. Two main-thread warnings came from unchanged VideoFormatSupportTests and AppUpdateTests cases.
 - Real coverage probes, audible output and narrow-window presentation were not exercised. No Release build, installation or desktop run.
-
-## 2026-11-13 — Project triage and grouped GitHub Actions updates
-
-- Project triage maintains area and lifecycle labels from GitHub closing links, current-head reviews, CI, mergeability and DCO trailers; Dependabot groups weekly GitHub Actions updates.
-- `python3 scripts/tests/test_project_triage.py` — 24 behavior tests passed; no network or writes in tests.
-- `actionlint .github/workflows/project-triage.yml`, Dependabot YAML parse and Markdown link checks — passed.
-- `python3 scripts/project_triage.py --repo MMFoundation/WallpaperMachine --apply` — reconciled 11 live items; DCO statuses and PR area labels read back. PR #194 has five unsigned commits; PR #195 has eight signed-off commits.
-- `python3 scripts/test.py` — exit 0 after documented Debug-product xattr cleanup; 35 Python modules passed; native 4,926 passed, 0 failed, 70 skipped, two runtime warnings.
-- The native gate used an isolated app home and preferences. Opt-in tests remained skipped; no Release build or interactive desktop validation was performed.
-- The workflows are not deployed yet: continuous triage and Dependabot require the configuration on the default branch. No commit, push, workflow installation or required-check rule was performed.

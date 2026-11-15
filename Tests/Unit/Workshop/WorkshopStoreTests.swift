@@ -76,7 +76,7 @@ final class WorkshopStoreTests: XCTestCase {
     defer { fixture.remove() }
     let store = fixture.store
     // Wallpaper Engine opens on this year's most popular items of every type, rated Everyone,
-    // with genre-less items hidden; Application and Asset are never offered.
+    // with genre-less items hidden; Application and Asset start excluded.
     XCTAssertEqual(store.kind, .all)
     XCTAssertEqual(store.sort, .trendingYear)
     XCTAssertEqual(store.tags, [])

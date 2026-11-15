@@ -79,7 +79,7 @@ final class WorkshopStore {
   var excludedTags: [String] = WorkshopStore.defaultExcludedTags
   /// Wallpaper Engine's own defaults: the sidebar lists every Type, Age rating, Resolution and
   /// Genre tag as a checkbox and unchecking one excludes it. Out of the box only Everyone is
-  /// rated in, genre-less items are hidden, and Application / Asset are never offered.
+  /// rated in, genre-less items are hidden, and Application / Asset start excluded.
   static let defaultExcludedTags = ["Application", "Asset", "Questionable", "Mature", "Unspecified"]
   var selectedItem: WorkshopItem?
   /// The order Steam lists the account's favorites in.

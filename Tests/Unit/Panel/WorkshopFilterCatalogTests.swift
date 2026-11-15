@@ -12,14 +12,12 @@ final class WorkshopFilterCatalogTests: XCTestCase {
     XCTAssertEqual(
       WorkshopFilterDraft.defaultExcludedTags, WorkshopStore.defaultExcludedTags,
       "the two lists must be kept identical: what the page ticks by default is what the store sends")
-    XCTAssertEqual(Catalog.hiddenExcludedTags, ["Application", "Asset"], "never offered, always excluded")
   }
 
   func testEveryTagIsOfferedOnceAndNoShowOnlyBoxIsAlsoAHidingBox() {
     let tags = Catalog.entries.map(\.tag)
     XCTAssertEqual(Set(tags).count, tags.count, "a tag in two boxes would be ticked by both")
     XCTAssertTrue(Set(Catalog.showOnly.map(\.tag)).isDisjoint(with: tags))
-    XCTAssertTrue(Set(tags).isDisjoint(with: Catalog.hiddenExcludedTags), "Application and Asset are never offered")
     XCTAssertEqual(Catalog.showOnly.map(\.tag), ["Approved", "Audio responsive", "Customizable"])
   }
 
@@ -32,8 +30,8 @@ final class WorkshopFilterCatalogTests: XCTestCase {
         "type", "category", "rating", "widescreen", "ultrawide", "dual", "triple", "portrait",
         "other-resolution", "genre",
       ])
-    XCTAssertEqual(sections.first { $0.id == "type" }?.tags, ["Scene", "Video", "Web"])
-    XCTAssertEqual(sections.first { $0.id == "category" }?.tags, ["Wallpaper", "Preset"])
+    XCTAssertEqual(sections.first { $0.id == "type" }?.tags, ["Scene", "Video", "Web", "Application"])
+    XCTAssertEqual(sections.first { $0.id == "category" }?.tags, ["Wallpaper", "Preset", "Asset"])
     XCTAssertEqual(
       sections.first { $0.id == "rating" }?.tags, ["Everyone", "Questionable", "Mature"])
     XCTAssertEqual(sections.first { $0.id == "genre" }?.entries.count, 25)
@@ -69,11 +67,14 @@ final class WorkshopFilterCatalogTests: XCTestCase {
     XCTAssertEqual(tags("other-resolution"), ["Other resolution", "Dynamic resolution"])
   }
 
-  func testOnlyQuestionableMatureAndUnspecifiedStartUnticked() {
+  func testApplicationAssetAndRestrictedContentStartUnticked() {
     XCTAssertEqual(
-      Catalog.entries.filter(\.isOffByDefault).map(\.tag), ["Questionable", "Mature", "Unspecified"])
+      Catalog.entries.filter(\.isOffByDefault).map(\.tag),
+      ["Application", "Asset", "Questionable", "Mature", "Unspecified"])
     let fresh = WorkshopFilterDraft.cleared
-    XCTAssertEqual(fresh.count, 0, "a fresh sidebar filters nothing, so the count reads zero")
+    XCTAssertEqual(fresh.count, 0, "default exclusions do not count as filter changes")
+    XCTAssertFalse(fresh.isIncluded("Application"))
+    XCTAssertFalse(fresh.isIncluded("Asset"))
     XCTAssertFalse(fresh.isIncluded("Mature"))
     XCTAssertTrue(fresh.isIncluded("Anime"))
   }

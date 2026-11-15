@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-13 — Project triage and grouped GitHub Actions updates
+
+- Project triage maintains area and lifecycle labels from GitHub closing links, current-head reviews, CI, mergeability and DCO trailers; Dependabot groups weekly GitHub Actions updates.
+- `python3 scripts/tests/test_project_triage.py` — 24 behavior tests passed; no network or writes in tests.
+- `actionlint .github/workflows/project-triage.yml`, Dependabot YAML parse and Markdown link checks — passed.
+- `python3 scripts/project_triage.py --repo MMFoundation/WallpaperMachine --apply` — reconciled 11 live items; DCO statuses and PR area labels read back. PR #194 has five unsigned commits; PR #195 has eight signed-off commits.
+- `python3 scripts/test.py` — exit 0 after documented Debug-product xattr cleanup; 35 Python modules passed; native 4,926 passed, 0 failed, 70 skipped, two runtime warnings.
+- The native gate used an isolated app home and preferences. Opt-in tests remained skipped; no Release build or interactive desktop validation was performed.
+- The workflows are not deployed yet: continuous triage and Dependabot require the configuration on the default branch. No commit, push, workflow installation or required-check rule was performed.
+
 ## 2026-11-13 — Audio capture startup timeout recovery
 
 Core Audio start receive timeouts now stop and release the uncertain session before one fresh attempt; cleanup failures block replacement. Native status stays typed, and permission advice is limited to authorization errors.

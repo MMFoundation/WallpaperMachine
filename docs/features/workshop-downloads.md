@@ -25,12 +25,12 @@ page (grid rules: [control panel](control-panel.md#layout)).
 
 The Filters sidebar (opened from the header's **Filter** button, see [control
 panel](control-panel.md#filtering)) mirrors Wallpaper Engine's own filter list, tag
-for tag and default for default:
+for tag, with Application and Asset excluded by default:
 
 | Group | Boxes | Default |
 | --- | --- | --- |
 | Show only | Approved, Audio responsive, Customizable | all off |
-| Type | Scene, Video, Web; Wallpaper, Preset | all on |
+| Type | Scene, Video, Web, Application; Category: Wallpaper, Preset, Asset | Application and Asset off; others on |
 | Age rating | Everyone (G), Questionable (PG-13), Mature (R-18) | Everyone only |
 | Resolution | Widescreen (Standard definition, 1280 x 720, 1366 x 768, 1920 x 1080, 2560 x 1440, 3840 x 2160), Ultrawide (standard, 2560 x 1080, 3440 x 1440), Dual monitor (standard, 3840 x 1080, 5120 x 1440, 7680 x 2160), Triple monitor (standard, 4096 x 768, 5760 x 1080, 7680 x 1440, 11520 x 2160), Portrait monitor / phone (standard, 720 x 1280, 1080 x 1920, 1440 x 2560, 2160 x 3840), Other resolution, Dynamic resolution | all on |
 | Tags (chips) | Abstract, Animal, Anime, Cartoon, CGI, Cyberpunk, Fantasy, Game, Girls, Guys, Landscape, Medieval, Memes, MMD, Music, Nature, Pixel art, Relaxing, Retro, Sci-Fi, Sports, Technology, Television, Vehicle, Unspecified genre | none selected; Unspecified hidden |
@@ -38,12 +38,14 @@ for tag and default for default:
 A ticked **Show only** box is sent to Steam as `requiredtags[]`, so every ticked
 one must be on an item. A selected Tags chip is sent the same way, so selecting
 Anime shows only items tagged Anime; a hidden chip (Option-click or its context
-menu) is sent as `excludedtags[]`. Every other box starts ticked and unticking it
+menu) is sent as `excludedtags[]`. An unticked checkbox
 sends the tag as `excludedtags[]`: Steam drops an item carrying *any* excluded
 tag, so a group with everything ticked filters nothing and unticking Video hides
 every Video item. Resolution sub-groups have **All** / **None** shortcuts and
-Tags has **Reset**. Application and Asset items are never offered, so
-those two tags are always excluded (`WorkshopStore.defaultExcludedTags` holds
+Tags has **Reset**. **Application** and **Category → Asset** start unticked;
+ticking either removes its exclusion so those items can appear in searches.
+Application is labeled unsupported on macOS because browsing it does not make
+Windows applications playable (`WorkshopStore.defaultExcludedTags` holds
 the out-of-the-box list: Application, Asset, Questionable, Mature,
 Unspecified). A tag is never both required and excluded: selecting a chip stops
 hiding it and the other way round. The Filter button's
