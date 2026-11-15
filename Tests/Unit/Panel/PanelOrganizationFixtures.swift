@@ -217,6 +217,22 @@ final class DisplaySettingsBridge: LayoutSnapshotBridge {
     return try wallpaperBundle(wallpaperId)
   }
 
+  override func setDisplayVolume(
+    wallpaperId: String, displayId: String, volume: Float
+  ) async throws -> BridgeWallpaperMutationBundle {
+    try record("setDisplayVolume \(wallpaperId) \(displayId) \(volume)")
+    try editConfig(wallpaperId, displayId) { $0.volume = volume }
+    return try wallpaperBundle(wallpaperId)
+  }
+
+  override func setDisplayMuted(
+    wallpaperId: String, displayId: String, muted: Bool
+  ) async throws -> BridgeWallpaperMutationBundle {
+    try record("setDisplayMuted \(wallpaperId) \(displayId) \(muted)")
+    try editConfig(wallpaperId, displayId) { $0.muted = muted }
+    return try wallpaperBundle(wallpaperId)
+  }
+
   override func setScalingMode(
     wallpaperId: String, displayId: String, mode: BridgeScalingMode
   ) async throws -> BridgeWallpaperMutationBundle {

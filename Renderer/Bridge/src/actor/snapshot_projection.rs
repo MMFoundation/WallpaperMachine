@@ -101,6 +101,8 @@ pub(super) fn project_options(
                 .iter()
                 .find(|render| render.selector == row.selector)
                 .unwrap_or(&default);
+            let audio = current.audio.for_display(crate::engine::select_render_setting(
+                &current.monitors, &row.selector, &display.desc, displays));
             let enabled_staged = draft.display_dirty(&row.selector, active_enabled_displays);
             // The scale factor and the Enabled switch are the display's settings that
             // wait for Apply; scaling mode, frame rate and position are saved at once.
@@ -117,8 +119,8 @@ pub(super) fn project_options(
                 framing: render.framing.into(),
                 target_fps: render.fps_on(max_fps),
                 max_fps,
-                muted: current.audio.muted,
-                volume: current.audio.volume,
+                muted: audio.muted,
+                volume: audio.volume,
                 dirty,
                 can_restore_defaults: dirty,
                 staged,
@@ -594,6 +596,8 @@ mod tests {
                 ..MonitorRender::default()
             },
             MonitorRender {
+                volume: None,
+                muted: None,
                 selector: selectors[2].clone(),
                 scaling_mode: "fit".into(),
                 scaling_factor: 1.25,

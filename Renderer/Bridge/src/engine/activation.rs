@@ -398,6 +398,9 @@ impl ActivationInputs<'_> {
                 .collect();
             let paused = self.display_paused(slot.display.display_id);
             let fps = self.slot_fps(&slot);
+            let audio = slot.wallpaper.audio.for_display(super::render_settings::select_render_setting(
+                &slot.wallpaper.monitors, &slot.monitor.selector, &slot.display, self.displays,
+            ));
             web.push(WebWallpaperDesc {
                 audio_source_display_id: slot.display.display_id,
                 display_key: slot.monitor.selector.id(),
@@ -407,8 +410,8 @@ impl ActivationInputs<'_> {
                 entry_file,
                 fps,
                 paused,
-                volume: self.audio_gain.applied_to(slot.wallpaper.audio.volume),
-                muted: slot.wallpaper.audio.muted || self.audio_suppressed,
+                volume: self.audio_gain.applied_to(audio.volume),
+                muted: audio.muted || self.audio_suppressed,
                 audio_response_enabled: slot.wallpaper.audio.response_enabled,
                 properties,
             });
@@ -623,6 +626,7 @@ impl ActivationInputs<'_> {
                 &slot.display,
                 self.displays,
             );
+            let audio = slot.wallpaper.audio.for_display(render);
             videos.push(NativeVideoWallpaperDesc {
                 audio_source_display_id: slot.display.display_id,
                 wallpaper_id: slot.wallpaper_id.to_string(),
@@ -632,8 +636,8 @@ impl ActivationInputs<'_> {
                     .map(|render| render.framing.to_scene())
                     .unwrap_or_default(),
                 paused: self.display_paused(slot.display.display_id),
-                volume: self.audio_gain.applied_to(slot.wallpaper.audio.volume),
-                muted: slot.wallpaper.audio.muted || self.audio_suppressed,
+                volume: self.audio_gain.applied_to(audio.volume),
+                muted: audio.muted || self.audio_suppressed,
                 scaling_mode: render
                     .map(crate::config::wallpaper::MonitorRender::parse_scaling_mode)
                     .unwrap_or_default(),

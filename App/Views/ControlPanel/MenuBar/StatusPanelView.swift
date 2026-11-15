@@ -225,6 +225,7 @@ private struct StatusPanelSound: View {
         }
         .disabled(volume == nil || silent)
       }
+      .help(L("Default sound settings for this wallpaper. Settings → Displays can set volume and mute separately for each display."))
       if panel.wallpapersMuted {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           Text("Mute All is on, so every wallpaper is silent.")

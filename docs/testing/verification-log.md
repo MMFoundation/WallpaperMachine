@@ -25,6 +25,19 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-15 — Independent-display wallpaper volume and mute
+
+Issue #213: optional per-wallpaper, per-display sound choices inherit existing wallpaper defaults until set; mirror settings and temporary playback rules are preserved.
+
+- Regression proof: the previous implementation returned global volume 0.8 and unmuted instead of the left display choice 0.2 and muted. Seven focused Rust cases passed after the change.
+- python3 scripts/build.py --renderer-only: passed; regenerated the Swift bindings through the build pipeline, including trailing-whitespace normalization.
+- Targeted native display, wallpaper-settings and status-panel suites: 43 passed, no failures or skips.
+- python3 scripts/check_rust.py: all checks passed; 2,523 tests in the printed summaries, with five explicitly excluded desktop-window cases and desktop/media/network opt-ins disabled.
+- python3 scripts/check_renderer.py --skip-build: full rerun passed with 3,529 tests passed and seven asset-dependent checks skipped; all 12 synthetic scenes and 16 reload cycles passed. The initial run failed one NV12 readiness case, which passed in isolation and in the full rerun.
+- python3 scripts/test.py: all 35 Python modules passed; 5,070 native tests passed, 0 failed, 70 skipped; one runtime warning. The initial full run timed out in an existing lock-screen readiness test; its isolated check and full rerun passed without source changes.
+- Build-script, localization and Markdown-link checks and git diff --check passed. The app help is translated into all six shipped languages.
+- No live multi-display sound or desktop interaction check, Release app build, installation or restart.
+
 ## 2026-11-15 — Retry native selection before a raced store write
 
 Refs #198. This implements bounded pre-write retries; historical-Space scaling and main-actor work remain open.
@@ -118,14 +131,3 @@ Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in wind
 - `python3 scripts/test.py`: all 35 Python modules passed; 4,971 native tests passed, 0 failed, 70 skipped of 5,041. Skips require opt-in media, live Steam/network, reference jobs or snapshots.
 - The full native run reported main-thread warnings in unchanged VideoFormatSupportTests.testTheOpenedFilesAreKeyedByTheFileAndForgetAChangedOne and AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; both passed. Documentation links and git diff --check passed.
 - No real lock/sleep/multi-display wake cycle or wallpaper reference comparison was performed. No Release app was built, installed or restarted.
-
-## 2026-11-13 — Keep settings searches responsive
-
-- Issue #201: retain the settings result view while typing, build result sections lazily, and reset scrolling explicitly; entering/leaving search resets only the list layout.
-- Baseline production source d82c4249: refining wallp through wallpaper and back caused 32 additional system-reading refreshes across eight edits. The regression now passes with no additional refreshes.
-- Same offscreen Debug fixture, 760 x 560 points, eight query edits: mean update time 315.52 ms before, 45.75 ms after; maximum 341.32 ms before, 47.01 ms after. Each sample includes a fixed 30 ms settle wait; this is not a live keyboard-latency or Release benchmark. Search calculation remained about 3.1 ms.
-- `python3 scripts/test.py --only SettingsSearchRenderingTests --only SettingsSearchTests --only SettingsSearchOfferTests --only DisplaysSettingsSearchTests --only SettingsSectionsRenderTests/testSearchResultsOfTheSixPagesLayOutInTheNarrowColumn --only SettingsWindowRenderTests/testEverySectionFitsTheSmallestWindowAtEveryHeightWhileMovingBetweenSections`: 30 passed, 0 failed, 0 skipped.
-- `python3 scripts/test.py`: all 35 Python modules passed; 4,971 native tests passed, 0 failed, 70 skipped of 5,041.
-- Skipped checks require opt-in media, live Steam/network, web reference jobs or panel snapshot output. Two main-thread runtime warnings came from unchanged LockScreenWebMPlayerTests.testAFailureTheClipHadBeforeAHandlerWasSetIsHeldAndDeliveredOnce and AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; both passed.
-- `git diff --check`, `python3 scripts/tests/test_doc_links.py`, and `python3 scripts/tests/test_panel_lazy_lists.py`: passed. XcodeGen registered the new render-test file.
-- No real desktop interaction or screenshots; windows stayed unordered. No Release app was built, installed or restarted.

@@ -114,13 +114,14 @@ pub(super) fn build_configured_scene(
     wallpaper: &WallpaperConfig,
     display: DisplayDesc,
 ) -> Result<SceneDesc, BridgeError> {
-    let volume = validated_volume(wallpaper.audio.volume)?;
     let setting = super::render_settings::select_render_setting(
         &wallpaper.monitors,
         &monitor.selector,
         &display,
         inputs.displays,
     );
+    let audio = wallpaper.audio.for_display(setting);
+    let volume = validated_volume(audio.volume)?;
     let (scaling_mode, scaling_factor, framing, frame_rate) = match setting {
         Some(setting) => (
             setting.parse_scaling_mode(),
@@ -164,7 +165,7 @@ pub(super) fn build_configured_scene(
     .audio_response_enabled(wallpaper.audio.response_enabled)
     .media_integration_enabled(wallpaper.media_integration_enabled)
     .audio_volume(f32::from(volume))
-    .audio_muted(wallpaper.audio.muted)
+    .audio_muted(audio.muted)
     .force_shader_refresh(inputs.force_shader_refresh)
     .quality(inputs.app_config.quality.scene.to_scene())
     .scene_storage_dir(
@@ -742,6 +743,8 @@ mod tests {
         wallpaper.audio.volume = 0.23;
         wallpaper.audio.muted = true;
         wallpaper.monitors.push(MonitorRender {
+            volume: None,
+            muted: None,
             selector: live(311),
             scaling_mode: "fit".into(),
             scaling_factor: 1.7,
@@ -863,6 +866,8 @@ mod tests {
         wallpaper.audio.muted = true;
         wallpaper.media_integration_enabled = true;
         wallpaper.monitors.push(MonitorRender {
+            volume: None,
+            muted: None,
             selector: live(311),
             scaling_mode: "FiT".into(),
             scaling_factor: 1.75,

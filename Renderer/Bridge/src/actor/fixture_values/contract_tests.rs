@@ -54,6 +54,8 @@ fn rich_config(id: &str) -> WallpaperConfig {
     config.media_integration_enabled = true;
     config.monitors = vec![
         MonitorRender {
+            volume: None,
+            muted: None,
             selector: selector(413),
             scaling_mode: "stretch".into(),
             scaling_factor: 1.625_f64,
@@ -64,6 +66,8 @@ fn rich_config(id: &str) -> WallpaperConfig {
             },
         },
         MonitorRender {
+            volume: None,
+            muted: None,
             selector: selector(719),
             scaling_mode: "fit".into(),
             scaling_factor: 0.875_f64,

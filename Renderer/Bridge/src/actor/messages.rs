@@ -183,6 +183,18 @@ pub struct SetMuted {
     pub muted: bool,
 }
 
+pub struct SetDisplayVolume {
+    pub wallpaper_id: String,
+    pub display_id: String,
+    pub volume: f32,
+}
+
+pub struct SetDisplayMuted {
+    pub wallpaper_id: String,
+    pub display_id: String,
+    pub muted: bool,
+}
+
 pub struct SetAudioResponseEnabled {
     pub wallpaper_id: String,
     pub enabled: bool,

@@ -786,6 +786,20 @@ final class BridgeStore {
         apply(bundle, keepingOpenOptions: keepingOpenOptions)
     }
 
+    func setDisplayVolumeAsync(wallpaperId: String, displayId: String, volume: Float) async throws {
+        beginWallpaperEdit(wallpaperId)
+        defer { endWallpaperEdit(wallpaperId) }
+        let bundle = try await bridge.setDisplayVolume(wallpaperId: wallpaperId, displayId: displayId, volume: volume)
+        apply(bundle)
+    }
+
+    func setDisplayMutedAsync(wallpaperId: String, displayId: String, muted: Bool) async throws {
+        beginWallpaperEdit(wallpaperId)
+        defer { endWallpaperEdit(wallpaperId) }
+        let bundle = try await bridge.setDisplayMuted(wallpaperId: wallpaperId, displayId: displayId, muted: muted)
+        apply(bundle)
+    }
+
     func setAudioResponseEnabledAsync(wallpaperId: String, enabled: Bool) async throws {
         beginWallpaperEdit(wallpaperId)
         defer { endWallpaperEdit(wallpaperId) }

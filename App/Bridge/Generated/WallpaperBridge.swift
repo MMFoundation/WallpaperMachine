@@ -1134,6 +1134,15 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func setDisplayMode(displayId: String, mode: BridgeDisplayMode) async throws  -> BridgeDisplayMutationBundle
 
     /**
+     * Saves the wallpaper's mute choice on one independent display.
+     *
+     * # Errors
+     *
+     * Returns an error for an unknown wallpaper/display or failed persistence.
+     */
+    func setDisplayMuted(wallpaperId: String, displayId: String, muted: Bool) async throws  -> BridgeWallpaperMutationBundle
+
+    /**
      * Sets which wallpapers the display `display_id` keeps loaded and paused
      * when it moves on to another one, so that one runs on from where it
      * stopped when it comes back instead of loading again. Only a scene that
@@ -1178,6 +1187,15 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * engine fails to apply the pause.
      */
     func setDisplayPresentationSuspended(displayId: String, suspended: Bool) async throws
+
+    /**
+     * Saves the wallpaper's volume on one independent display.
+     *
+     * # Errors
+     *
+     * Returns an error for an unknown wallpaper/display, invalid volume or failed persistence.
+     */
+    func setDisplayVolume(wallpaperId: String, displayId: String, volume: Float) async throws  -> BridgeWallpaperMutationBundle
 
     /**
      * # Errors
@@ -2974,6 +2992,30 @@ open func setDisplayMode(displayId: String, mode: BridgeDisplayMode)async throws
 }
 
     /**
+     * Saves the wallpaper's mute choice on one independent display.
+     *
+     * # Errors
+     *
+     * Returns an error for an unknown wallpaper/display or failed persistence.
+     */
+open func setDisplayMuted(wallpaperId: String, displayId: String, muted: Bool)async throws  -> BridgeWallpaperMutationBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_display_muted(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId),FfiConverterString.lower(displayId),FfiConverterBool.lower(muted)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+
+    /**
      * Sets which wallpapers the display `display_id` keeps loaded and paused
      * when it moves on to another one, so that one runs on from where it
      * stopped when it comes back instead of loading again. Only a scene that
@@ -3060,6 +3102,30 @@ open func setDisplayPresentationSuspended(displayId: String, suspended: Bool)asy
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_void,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_void,
             liftFunc: { $0 },
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+
+    /**
+     * Saves the wallpaper's volume on one independent display.
+     *
+     * # Errors
+     *
+     * Returns an error for an unknown wallpaper/display, invalid volume or failed persistence.
+     */
+open func setDisplayVolume(wallpaperId: String, displayId: String, volume: Float)async throws  -> BridgeWallpaperMutationBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_display_volume(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId),FfiConverterString.lower(displayId),FfiConverterFloat.lower(volume)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -12953,6 +13019,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_mode() != 57230) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_muted() != 48122) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_parked_wallpapers() != 21621) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12960,6 +13029,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_presentation_suspended() != 39147) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_volume() != 35602) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_filter() != 4762) {

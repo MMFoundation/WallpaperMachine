@@ -47,7 +47,7 @@ use crate::{
             RestoreEngineOptionDefault, RestorePropertyDefault,
             SelectWallpaper,
             SetAudioResponseEnabled, SetBatteryQualityProfile,
-            SetDisplayConfigEnabled, SetDisplayPosition,
+            SetDisplayConfigEnabled, SetDisplayPosition, SetDisplayVolume, SetDisplayMuted,
             SetDisplayParkedWallpapers, SetDisplayPresentationSuspended,
             FanOutSystemMediaArtwork, FanOutSystemMediaEvent, GetSystemMediaConsentHandles,
             GetSystemMediaSceneHandles, SetFilter,
@@ -655,6 +655,38 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
 
         handles
+    }
+
+    /// The configured sound of each independent live scene for this wallpaper.
+    fn wallpaper_audio_outputs(
+        &self,
+        wallpaper_id: &str,
+    ) -> Vec<(SceneHandle, crate::config::AudioCfg)> {
+        let displays = self.engine.display_snapshot();
+        let Some(config) = self.state.wallpaper_configs.get(wallpaper_id) else {
+            return Vec::new();
+        };
+        let normalized = self.state.app_config.normalized(&displays);
+        normalized
+            .monitor_rows(&displays)
+            .into_iter()
+            .filter_map(|row| {
+                if !row.config.enabled
+                    || row.config.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE)
+                    || row.config.wallpaper.as_deref() != Some(wallpaper_id)
+                {
+                    return None;
+                }
+                let display = displays.get(row.display_index?)?;
+                let render = crate::engine::select_render_setting(
+                    &config.monitors,
+                    &row.selector,
+                    &display.desc,
+                    &displays,
+                );
+                Some((display.handle?, config.audio.for_display(render)))
+            })
+            .collect()
     }
 
     fn target_has_wallpaper(&self, selector: &SerializedSelector, wallpaper_id: &str) -> bool {
@@ -3352,19 +3384,20 @@ impl<E: EngineFacade + Clone> Message<SetVolume> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let SetVolume { wallpaper_id, volume } = msg;
-        let level = AudioVolume::try_from(volume)
+        AudioVolume::try_from(volume)
             .map_err(|error| BridgeError::invalid_input(error.to_string()))?;
         let saved = self
             .state
             .wallpaper_draft_mut(&wallpaper_id)?
             .set_volume_immediate(volume)?;
         self.save_wallpaper(wallpaper_id.clone(), saved)?;
-        // Mirrors follow their source, so only the scenes of their own are told.
-        // What is saved is `volume`; what plays is its share under the gain in force.
-        let live = self.state.audio_gain.applied_to_volume(level);
-        for handle in self.wallpaper_handles(&wallpaper_id, false) {
+        // Mirrors keep their own output settings. Independent scenes resolve any saved
+        // display choice before the temporary gain is applied.
+        for (handle, audio) in self.wallpaper_audio_outputs(&wallpaper_id) {
+            let level = AudioVolume::try_from(audio.volume)
+                .map_err(|error| BridgeError::invalid_input(error.to_string()))?;
             self.engine
-                .set_audio_volume(handle, live)
+                .set_audio_volume(handle, self.state.audio_gain.applied_to_volume(level))
                 .await
                 .map_err(engine_failed)?;
         }
@@ -3386,11 +3419,65 @@ impl<E: EngineFacade + Clone> Message<SetMuted> for BridgeActor<E> {
             .wallpaper_draft_mut(&msg.wallpaper_id)?
             .set_muted_immediate(msg.muted);
         self.save_wallpaper(msg.wallpaper_id.clone(), wallpaper_config)?;
-        for handle in self.wallpaper_handles(&msg.wallpaper_id, false) {
+        for (handle, audio) in self.wallpaper_audio_outputs(&msg.wallpaper_id) {
+            self.engine
+                .set_audio_muted(handle, audio.muted || self.state.audio_suppressed)
+                .await
+                .map_err(|error| BridgeError::engine(error.to_string()))?;
+        }
+        self.invalidate_operations();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetDisplayVolume> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetDisplayVolume,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let volume = AudioVolume::try_from(msg.volume)
+            .map_err(|error| BridgeError::invalid_input(error.to_string()))?;
+        let displays = self.engine.display_snapshot();
+        let selector = self.resolve_operation_selector(&msg.display_id, &displays)?;
+        let saved = self
+            .state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .set_display_volume_immediate(selector.clone(), msg.volume, &displays)?;
+        self.save_wallpaper(msg.wallpaper_id.clone(), saved)?;
+        if let Some(handle) = self.display_handle(&msg.wallpaper_id, &selector) {
+            self.engine
+                .set_audio_volume(handle, self.state.audio_gain.applied_to_volume(volume))
+                .await
+                .map_err(engine_failed)?;
+        }
+        self.invalidate_operations();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetDisplayMuted> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetDisplayMuted,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let displays = self.engine.display_snapshot();
+        let selector = self.resolve_operation_selector(&msg.display_id, &displays)?;
+        let saved = self
+            .state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .set_display_muted_immediate(selector.clone(), msg.muted, &displays);
+        self.save_wallpaper(msg.wallpaper_id.clone(), saved)?;
+        if let Some(handle) = self.display_handle(&msg.wallpaper_id, &selector) {
             self.engine
                 .set_audio_muted(handle, msg.muted || self.state.audio_suppressed)
                 .await
-                .map_err(|error| BridgeError::engine(error.to_string()))?;
+                .map_err(engine_failed)?;
         }
         self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)

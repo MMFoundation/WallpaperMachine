@@ -179,6 +179,8 @@ impl WallpaperOptionsDraft {
                 || pending_row.scaling_mode != saved_row.scaling_mode
                 || pending_row.frame_rate != saved_row.frame_rate
                 || pending_row.framing != saved_row.framing
+                || pending_row.volume != saved_row.volume
+                || pending_row.muted != saved_row.muted
             {
                 return true;
             }
@@ -199,6 +201,8 @@ impl WallpaperOptionsDraft {
                 || row.scaling_mode != "fill"
                 || row.frame_rate.is_some()
                 || row.framing != FramingCfg::default()
+                || row.volume.is_some()
+                || row.muted.is_some()
             {
                 return true;
             }
@@ -228,6 +232,31 @@ impl WallpaperOptionsDraft {
     pub fn set_muted_immediate(&mut self, muted: bool) -> WallpaperConfig {
         self.saved_config.audio.muted = muted;
         self.pending_config.audio.muted = muted;
+        self.saved_config.clone()
+    }
+
+    pub fn set_display_volume_immediate(
+        &mut self,
+        selector: SerializedSelector,
+        volume: f32,
+        displays: &[wallpaper_core::DisplaySnapshotEntry],
+    ) -> Result<WallpaperConfig, BridgeError> {
+        Self::check_volume(volume)?;
+        for config in [&mut self.saved_config, &mut self.pending_config] {
+            Self::monitor_for_audio_edit(config, &selector, displays).volume = Some(volume);
+        }
+        Ok(self.saved_config.clone())
+    }
+
+    pub fn set_display_muted_immediate(
+        &mut self,
+        selector: SerializedSelector,
+        muted: bool,
+        displays: &[wallpaper_core::DisplaySnapshotEntry],
+    ) -> WallpaperConfig {
+        for config in [&mut self.saved_config, &mut self.pending_config] {
+            Self::monitor_for_audio_edit(config, &selector, displays).muted = Some(muted);
+        }
         self.saved_config.clone()
     }
 
@@ -575,6 +604,35 @@ impl WallpaperOptionsDraft {
             }
         };
         &mut config.monitors[index]
+    }
+
+    fn monitor_for_audio_edit<'a>(
+        config: &'a mut WallpaperConfig,
+        selector: &SerializedSelector,
+        displays: &[wallpaper_core::DisplaySnapshotEntry],
+    ) -> &'a mut MonitorRender {
+        use crate::display::DisplaySelectorExt;
+        if !config.monitors.iter().any(|row| &row.selector == selector) {
+            // A primary/identity alias can already carry scaling and position. Copy that
+            // row before adding sound, so an audio edit cannot reset the picture.
+            let inherited = selector
+                .to_selector()
+                .resolve_display(displays)
+                .and_then(|display| {
+                    crate::engine::select_render_setting(
+                        &config.monitors,
+                        selector,
+                        &display.desc,
+                        displays,
+                    )
+                })
+                .cloned();
+            config.monitors.push(MonitorRender {
+                selector: selector.clone(),
+                ..inherited.unwrap_or_default()
+            });
+        }
+        Self::monitor_for_edit(config, Cow::Borrowed(selector))
     }
 
     fn store_scaling_mode(row: &mut MonitorRender, mode: ScalingMode) {

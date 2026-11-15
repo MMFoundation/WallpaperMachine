@@ -21,6 +21,146 @@ use crate::{
 };
 
 #[test]
+fn independent_display_audio_is_resolved_for_scenes_web_and_video() {
+    use crate::{config::MonitorSettingsCfg, engine::AudioGain, project::ProjectModel};
+    for kind in ["scene", "web", "video"] {
+        let home = tempfile::tempdir().unwrap();
+        let paths = BridgePaths::for_home(home.path());
+        let folder = paths.steam_workshop_root().join("100");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("clip.mp4"), b"video").unwrap();
+        let displays = [
+            identified("left", 1, 60),
+            identified("right", 2, 60),
+            identified("mirror", 3, 60),
+        ];
+        let selectors: Vec<_> = displays
+            .iter()
+            .map(|display| {
+                SerializedSelector::from_selector(&DisplaySelector::Identity(
+                    display.identity.clone(),
+                ))
+            })
+            .collect();
+        let app = AppConfig {
+            monitors: vec![
+                MonitorCfg {
+                    selector: selectors[0].clone(),
+                    wallpaper: Some("100".into()),
+                    ..MonitorCfg::default()
+                },
+                MonitorCfg {
+                    selector: selectors[1].clone(),
+                    wallpaper: Some("100".into()),
+                    ..MonitorCfg::default()
+                },
+                MonitorCfg {
+                    selector: selectors[2].clone(),
+                    mode: "mirror".into(),
+                    mirror_target: Some(selectors[0].clone()),
+                    ..MonitorCfg::default()
+                },
+            ],
+            monitor_settings: vec![MonitorSettingsCfg {
+                selector: selectors[2].clone(),
+                volume: 0.6,
+                ..MonitorSettingsCfg::default()
+            }],
+            ..AppConfig::default()
+        };
+        // Loading JSON also exercises configurations saved before display audio existed:
+        // the right display has only its inherited wallpaper defaults.
+        let mut render = serde_json::to_value(MonitorRender {
+            selector: selectors[0].clone(),
+            ..MonitorRender::default()
+        })
+        .unwrap();
+        render["volume"] = serde_json::json!(0.2);
+        render["muted"] = serde_json::json!(true);
+        let wallpaper: WallpaperConfig = serde_json::from_value(serde_json::json!({
+            "workshop_id": "100", "type": kind, "audio": {"volume": 0.8, "muted": false},
+            "monitors": [render]
+        }))
+        .unwrap();
+        let wallpapers = BTreeMap::from([("100".into(), wallpaper)]);
+        let file = match kind {
+            "web" => "index.html",
+            "video" => "clip.mp4",
+            _ => "scene.json",
+        };
+        let models = BTreeMap::from([(
+            "100".into(),
+            ProjectModel::parse(
+                "100",
+                &serde_json::json!({"type":kind,"file":file,"general":{"properties":{}}})
+                    .to_string(),
+            )
+            .unwrap(),
+        )]);
+        for (gain, suppressed) in [(1.0, false), (0.5, false), (1.0, true)] {
+            let inputs = ActivationInputs {
+                app_config: &app,
+                wallpapers: &wallpapers,
+                library: None,
+                displays: &displays,
+                suspended_displays: &BTreeSet::new(),
+                held: &BTreeSet::new(),
+                paused: false,
+                paths: &paths,
+                force_shader_refresh: false,
+                project_models: &models,
+                frame_rate_cap: None,
+                audio_suppressed: suppressed,
+                audio_gain: AudioGain::new(gain).unwrap(),
+            };
+            let actual: BTreeMap<_, _> = match kind {
+                "web" => inputs
+                    .build_web()
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| (row.display.display_id, (row.volume, row.muted)))
+                    .collect(),
+                "video" => inputs
+                    .build_native_video()
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| (row.display.display_id, (row.volume, row.muted)))
+                    .collect(),
+                _ => inputs
+                    .build()
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| {
+                        (
+                            row.display.display_id,
+                            (f32::from(row.audio_volume), row.audio_muted),
+                        )
+                    })
+                    .collect(),
+            };
+            // Scene gain/suppression is composed by the actor after configuration planning.
+            let applied_gain = if kind == "scene" { 1.0 } else { gain };
+            let applied_suppression = kind != "scene" && suppressed;
+            assert_eq!(
+                actual[&1],
+                (0.2 * applied_gain, true),
+                "{kind}: left display"
+            );
+            assert_eq!(
+                actual[&2],
+                (0.8 * applied_gain, applied_suppression),
+                "{kind}: right display inherits"
+            );
+            assert_eq!(
+                actual[&3],
+                (0.6 * applied_gain, applied_suppression),
+                "{kind}: mirror keeps its own sound"
+            );
+        }
+    }
+}
+
+#[test]
 fn activation_plan_leaves_display_empty_when_assigned_wallpaper_left_the_library() {
     // A wallpaper deleted while its display was disconnected keeps its
     // assignment. Planning a scene for it would fail the whole reconcile and

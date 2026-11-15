@@ -91,6 +91,7 @@ use crate::{
             RestoreAllPropertyDefaults, RestoreEngineOptionDefault, RestorePropertyDefault,
             SelectWallpaper,
             SetAudioResponseEnabled, SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
+            SetDisplayVolume, SetDisplayMuted,
             PreviewDisplayPosition, PreviewWallpaperProperties, SetDisplayPosition,
             SetDisplayParkedWallpapers, SetDisplayPresentationSuspended,
             SetFilter, SetGlobalPlayback, SetLaunchAtLogin, SetMirrorMuted, SetMirrorScalingFactor,
@@ -1509,6 +1510,28 @@ impl WallpaperBridge {
                 muted,
             })
             .await
+    }
+
+    /// Saves the wallpaper's volume on one independent display.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown wallpaper/display, invalid volume or failed persistence.
+    pub async fn set_display_volume(
+        &self, wallpaper_id: String, display_id: String, volume: f32,
+    ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
+        self.actor.ask(SetDisplayVolume { wallpaper_id, display_id, volume }).await
+    }
+
+    /// Saves the wallpaper's mute choice on one independent display.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown wallpaper/display or failed persistence.
+    pub async fn set_display_muted(
+        &self, wallpaper_id: String, display_id: String, muted: bool,
+    ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
+        self.actor.ask(SetDisplayMuted { wallpaper_id, display_id, muted }).await
     }
 
     /// # Errors

@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-13 — Keep settings searches responsive
+
+- Issue #201: retain the settings result view while typing, build result sections lazily, and reset scrolling explicitly; entering/leaving search resets only the list layout.
+- Baseline production source d82c4249: refining wallp through wallpaper and back caused 32 additional system-reading refreshes across eight edits. The regression now passes with no additional refreshes.
+- Same offscreen Debug fixture, 760 x 560 points, eight query edits: mean update time 315.52 ms before, 45.75 ms after; maximum 341.32 ms before, 47.01 ms after. Each sample includes a fixed 30 ms settle wait; this is not a live keyboard-latency or Release benchmark. Search calculation remained about 3.1 ms.
+- `python3 scripts/test.py --only SettingsSearchRenderingTests --only SettingsSearchTests --only SettingsSearchOfferTests --only DisplaysSettingsSearchTests --only SettingsSectionsRenderTests/testSearchResultsOfTheSixPagesLayOutInTheNarrowColumn --only SettingsWindowRenderTests/testEverySectionFitsTheSmallestWindowAtEveryHeightWhileMovingBetweenSections`: 30 passed, 0 failed, 0 skipped.
+- `python3 scripts/test.py`: all 35 Python modules passed; 4,971 native tests passed, 0 failed, 70 skipped of 5,041.
+- Skipped checks require opt-in media, live Steam/network, web reference jobs or panel snapshot output. Two main-thread runtime warnings came from unchanged LockScreenWebMPlayerTests.testAFailureTheClipHadBeforeAHandlerWasSetIsHeldAndDeliveredOnce and AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; both passed.
+- `git diff --check`, `python3 scripts/tests/test_doc_links.py`, and `python3 scripts/tests/test_panel_lazy_lists.py`: passed. XcodeGen registered the new render-test file.
+- No real desktop interaction or screenshots; windows stayed unordered. No Release app was built, installed or restarted.
+
 ## 2026-11-13 — Preserve desktop originals after native restoration failures
 
 - Issue #197: keep poster synchronization suspended until native restoration succeeds; reject native desktop selections when recording poster originals and preserve the existing recovery journal.

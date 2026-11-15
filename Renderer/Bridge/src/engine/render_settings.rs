@@ -2,7 +2,7 @@ use crate::config::{MonitorRender, SerializedSelector};
 use crate::display::{DisplayDescExt, DisplaySelectorExt, DisplaySnapshotExt};
 use wallpaper_core::{DisplayDesc, DisplaySnapshotEntry};
 
-pub(super) fn select_render_setting<'settings>(
+pub(crate) fn select_render_setting<'settings>(
     settings: &'settings [MonitorRender],
     selected: &SerializedSelector,
     display: &DisplayDesc,
@@ -137,6 +137,8 @@ mod tests {
             _ => panic!("fixture supports two distinct setting positions"),
         };
         MonitorRender {
+            volume: None,
+            muted: None,
             selector,
             scaling_mode: mode.to_owned(),
             scaling_factor: factor,

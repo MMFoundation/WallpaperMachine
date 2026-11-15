@@ -314,6 +314,8 @@ canvas, the widgets' layers and an inspector with tabs, which do not scroll as o
   per hour, once it has one
   ([Per-wallpaper energy rating](performance.md#per-wallpaper-energy-rating)).
 - **Displays** holds each display's settings ([Target display](#target-display)).
+  Its sound controls save volume and mute for that wallpaper on that independent
+  display; another display showing the same wallpaper keeps its own sound.
 - **Keyboard shortcuts** holds the shortcut rows and the **Shortcuts app and
   links** disclosure (see [automation](automation.md)).
 - **About** opens with the app icon, name and version (`MARKETING_VERSION` in
@@ -786,7 +788,9 @@ last, else the control panel's target display, else the main one. Below the pick
   command queue, and a failure shows under the panel and at the foot of the menu. Play/pause acts
   on every display, as the menu's does.
 - The wallpaper's own sound: a mute button and a **Volume** slider, the inspector's **Mute this
-  wallpaper** and **Volume**, saved when the slider is let go or moved by a key. While **Mute
+  wallpaper** and **Volume** defaults, saved when the slider is let go or moved by a key.
+  Displays with their own sound choices keep them; the controls' help points to
+  **Settings → Displays** to adjust those. While **Mute
   All** is on both are locked, the note says so, and **Unmute Wallpapers** turns it off. An open
   control panel's inspector showing another wallpaper keeps its options, and a drag on them goes
   on.

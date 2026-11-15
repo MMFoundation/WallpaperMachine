@@ -1,4 +1,5 @@
 mod activation_plan;
+mod per_display_audio;
 mod api_smoke;
 mod apply_options;
 mod bridge_waits;

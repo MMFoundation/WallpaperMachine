@@ -1028,7 +1028,17 @@ heard from one member (`MirrorAudioOwnership`, the rule [web pages](web-wallpape
 the source while it is in sight and not paused or muted, otherwise the lowest-numbered mirror that
 is, at that display's own volume. The others play silently, so the sound is never heard twice,
 and a covered source hands the sound to a mirror still in sight. The same clip chosen for two
-independent displays is two wallpapers, and both are heard.
+independent displays is two wallpapers, and both are heard unless one is muted or
+its volume is zero. In **Settings → Displays**, an independent display's **Volume**
+and **Mute audio** are saved for that wallpaper on that display, so using the same
+wallpaper on another independent display does not link their sound controls.
+These choices are restored when that wallpaper is applied again. With no saved
+display choice, each field inherits the wallpaper's own default; an explicit
+unmuted choice or zero volume is still a choice. The inspector and menu bar panel
+edit those wallpaper defaults. **Mute all wallpapers** and playback rules compose
+their temporary mute or volume reduction over the resolved per-display sound
+without changing any saved value. Scene, web and plain-video wallpapers use the
+same resolution; mirror displays keep their own existing sound settings.
 
 A plain video that cannot be heard does not decode its sound at all ([below](#background-work-only-while-it-has-a-consumer)):
 one that is muted or at volume 0, muted by **Mute all wallpapers** or a rule (another app in front,

@@ -8,6 +8,7 @@ mod facade_readiness;
 mod load_journal;
 pub mod lut_catalog;
 mod render_settings;
+pub(crate) use render_settings::select_render_setting;
 pub(crate) mod revalidate;
 pub mod scene_traits;
 

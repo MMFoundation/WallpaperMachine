@@ -132,6 +132,11 @@ status** expands to show their explanations and delivery status. The presets and
 original order. **Displays** comes next with per-display playback configuration,
 open when the wallpaper is on a display and collapsed otherwise, then **Collections**
 and, for a scene or a video, [**Wallpaper Engine options**](#wallpaper-engine-options).
+The mute and volume here are the wallpaper's defaults. **Settings → Displays**
+can save either field separately for each independent display using that wallpaper;
+only fields without such a choice inherit later changes to the defaults.
+**Mute all wallpapers** still silences every display. Audio response and media
+integration remain per-wallpaper choices. See [sound output](performance.md#video-playback).
 Each display has its own card. The only display's card starts open. Beside another display,
 each card starts collapsed under a one-line summary: its scaling mode, with the scale factor
 when it is not 1; its frame rate, or the limit that holds it below that rate (none for a clip
