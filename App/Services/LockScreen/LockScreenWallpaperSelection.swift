@@ -16,6 +16,9 @@ struct LockScreenWallpaperFailure: LocalizedError {
 /// for the native presentation modes the app owns.
 @MainActor
 final class LockScreenWallpaperSelection {
+  /// Only a compare failure before any store write is safe to recompute here.
+  private struct StoreChangedBeforeWrite: Error {}
+
   private struct Entry: Codable, Equatable {
     var path: [String]
     var original: Data
@@ -142,6 +145,28 @@ final class LockScreenWallpaperSelection {
   private func synchronizeSelection(
     desktopDisplays: Set<String>, screenSaverDisplays: Set<String>, revision: String? = nil,
     recovering: Bool = false
+  ) async throws {
+    for attempt in 0..<3 {
+      do {
+        try await synchronizeAttempt(
+          desktopDisplays: desktopDisplays, screenSaverDisplays: screenSaverDisplays,
+          revision: revision, recovering: recovering)
+        return
+      } catch is StoreChangedBeforeWrite {
+        try Task.checkCancellation()
+        guard attempt < 2 else {
+          throw LockScreenWallpaperFailure(
+            message:
+              String(localized: "The system wallpaper changed during native selection. Please retry; no concurrent changes were overwritten."),
+            reason: .transient)
+        }
+      }
+    }
+  }
+
+  private func synchronizeAttempt(
+    desktopDisplays: Set<String>, screenSaverDisplays: Set<String>, revision: String?,
+    recovering: Bool
   ) async throws {
     try Task.checkCancellation()
     let displays = desktopDisplays.union(screenSaverDisplays)
@@ -506,18 +531,26 @@ final class LockScreenWallpaperSelection {
     }
     if changed {
       try persistEntries(recovery)
-      guard try Data(contentsOf: storeURL) == bytes else {
+      func changedBeforeWrite() -> StoreChangedBeforeWrite {
         // Nothing was written. The union stays on disk for recovery, but the next attempt must
         // not count the fields this one was about to take as ours: it would read them as
-        // changed outside the app.
+        // changed outside the app. Its new union must be persisted even if it matches the
+        // restored in-memory entries, because the failed attempt may have saved another union.
         entries = priorEntries
-        throw LockScreenWallpaperFailure(
-          message:
-            String(localized: "The system wallpaper changed during native selection. Please retry; no concurrent changes were overwritten."),
-          reason: .transient)
+        readoptionNeedsPersistence = true
+        return StoreChangedBeforeWrite()
+      }
+      guard try Data(contentsOf: storeURL) == bytes else {
+        throw changedBeforeWrite()
       }
       if let coordinator {
-        try coordinator.replace(Self.encode(root), expected: bytes)
+        do {
+          try coordinator.replace(Self.encode(root), expected: bytes)
+        } catch let failure as LockScreenWallpaperFailure where failure.reason == .transient {
+          // replace's own comparison can catch a write after the check above. It has not
+          // written anything either. Reload errors, in contrast, are never retried here.
+          throw changedBeforeWrite()
+        }
       } else {
         try Self.encode(root).write(to: storeURL, options: .atomic)
       }

@@ -1251,9 +1251,8 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertFalse(try storeOwnsDisplayOne())
   }
 
-  /// An activation whose store write loses the race to WallpaperAgent wrote nothing, so it is
-  /// tried again like a committed one. Here it is a Retry after both rows failed: their errors
-  /// must not stop the monitor that runs the next attempt.
+  /// An activation that exhausts its immediate store-race attempts wrote nothing, so it is
+  /// retried by the monitor like a committed one. Errors on both rows must not stop that monitor.
   @MainActor
   func testFirstActivationRetriesAStoreRaceInsteadOfFailing() async throws {
     var record = scene()
@@ -1261,7 +1260,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     var external = fixture()
     external["Unrelated"] = "WallpaperAgent wrote this"
     var failScenes = true
-    var raced = false
+    var races = 0
     let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {},
       scenes: {
         if failScenes { throw LockScreenWallpaperFailure(message: "not ready") }
@@ -1271,8 +1270,9 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         storeURL: store, journalURL: journal, reload: {},
         persistJournal: { url, data in
           try LockScreenWallpaperSelection.persistJournalFile(url, data)
-          if !raced {
-            raced = true
+          if races < 3 {
+            races += 1
+            external["Unrelated"] = "WallpaperAgent write \(races)"
             try self.write(external)
           }
         }),
@@ -1288,7 +1288,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     }
     failScenes = false
     service.retry(lockScreen: true)
-    await waitFor("the raced attempt") { raced && !service.isBusy }
+    await waitFor("the exhausted immediate attempts") { races == 3 && !service.isBusy }
     XCTAssertNil(service.errorMessage)
     XCTAssertNil(service.screenSaverError)
     XCTAssertFalse(service.isEnabled, "the raced attempt wrote nothing")
@@ -1331,11 +1331,11 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
-  func testDisablingSaverBeforeFirstFrameDoesNotRetryAStoreRace() async throws {
+  func testDisablingSaverBeforeFirstFrameDoesNotDeferExhaustedStoreRaces() async throws {
     var record = scene()
     record.displayId = 1
     var raceNextWrite = false
-    var raced = false
+    var races = 0
     let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {},
       scenes: { [record] },
       selection: LockScreenWallpaperSelection(
@@ -1343,11 +1343,11 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         persistJournal: { url, data in
           try LockScreenWallpaperSelection.persistJournalFile(url, data)
           if raceNextWrite {
-            raceNextWrite = false
-            raced = true
+            races += 1
+            if races == 3 { raceNextWrite = false }
             var current = try XCTUnwrap(PropertyListSerialization.propertyList(
               from: Data(contentsOf: self.store), format: nil) as? [String: Any])
-            current["Unrelated"] = "WallpaperAgent wrote this"
+            current["Unrelated"] = "WallpaperAgent write \(races)"
             try self.write(current)
           }
         }),
@@ -1367,7 +1367,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     try write(current)
     raceNextWrite = true
     service.setScreenSaverEnabled(false)
-    await waitFor("the raced disable") { raced && !service.isBusy }
+    await waitFor("the raced disable") { races == 3 && !service.isBusy }
     XCTAssertNotNil(service.errorMessage)
     XCTAssertEqual(try selectedProvider("Idle"), "display-one-idle")
     XCTAssertFalse(service.screenSaverEnabled)

@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-13 — Preserve desktop originals after native restoration failures
+
+- Issue #197: keep poster synchronization suspended until native restoration succeeds; reject native desktop selections when recording poster originals and preserve the existing recovery journal.
+- Regression run on the previous implementation: 4 expected failures and 1 passing control across the five selected desktop/lock-screen tests.
+- `python3 scripts/test.py --only DesktopWallpaperTests --only LockScreenWallpaperServiceTests --only LockScreenWallpaperTests`: 252 passed, 0 failed, 0 skipped.
+- `python3 scripts/test.py`: all 35 Python modules passed; 4,967 native tests passed, 0 failed, 70 skipped of 5,037.
+- Skipped checks require opt-in media, live Steam/network, web reference jobs or panel snapshot output.
+- The full native run reported main-thread warnings in unchanged AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy and WebMOpeningTests.testAVp9FileOpensWithItsFormatSizeAndLength; both passed. The targeted run reported no runtime warnings.
+- `git diff --check` and `python3 scripts/tests/test_doc_links.py`: passed.
+- No live desktop/lock-screen/quit cycle was performed; no Release app was built, installed or restarted. Existing incorrectly recorded still-image originals are not migrated from the lock-screen journal; shared WallpaperAgent write/reload coordination remains #199.
+
 ## 2026-11-13 — Covered-desktop sound: PR 194 review and reconnect fix
 
 - Four reconnect regressions failed before the fix, covering retained pauses and refused resumes for Mute and Reduce volume.

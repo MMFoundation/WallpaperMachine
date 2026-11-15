@@ -620,6 +620,16 @@ child dictionary before editing it to avoid repeatedly copying the full Spaces
 dictionary. These optimizations do not prune Apple's Space records, change ownership
 or restoration rules, move work off the main actor, or eliminate concurrent writes.
 
+If the store changes between reading it and the pre-write comparison, selection
+recomputes from the latest file, with at most three attempts per synchronization.
+Each attempt saves its recovery union before writing, and a failed comparison
+does not count planned fields as already owned. Newly created Spaces and native
+choices are read again; changes to fields already owned still stop selection.
+Only a comparison failure before writing is retried here: reload failures keep
+their existing recovery path. Exhausting all three attempts preserves the latest
+external store and the recovery journal, then reports the transient failure to
+the service. Successful and unchanged checks do no extra work.
+
 Restored fields are kept in `restored-native-selection.plist`, including when one
 mode is turned off while the other remains enabled. WallpaperAgent can save the
 store it loaded before a restore over that restore (seen after quitting), putting

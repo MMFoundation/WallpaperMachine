@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-15 — Retry native selection before a raced store write
+
+Refs #198. This implements bounded pre-write retries; historical-Space scaling and main-actor work remain open.
+
+- Regression proof: five new or updated race scenarios failed on the previous implementation.
+- Targeted selection, service and shared-store suites: 187 passed; focused restoration and reload checks: 2 passed.
+- python3 scripts/test.py: all 35 Python test modules passed; 5,069 native tests passed, 0 failed, 70 skipped; two runtime main-thread warnings.
+- An earlier parallel gate timed out in the Workshop filter layout matrix. Serial diagnosis also exposed a poster assertion before publication finished; test-only fixes wait for publication, traverse the accessibility tree once and split the appearance matrix.
+- git diff --check and scripts/tests/test_doc_links.py: passed.
+- Synthetic stores and injected services only. No live wallpaper or lock-screen test, Release build, app installation or restart.
+
 ## 2026-11-15 — Installed wallpaper resolution and full tags (#205)
 
 - Installed rows join cached public Workshop tags with local manifest facts, removing case-insensitive duplicates; metadata updates invalidate the row cache without creating update badges.
@@ -118,14 +129,3 @@ Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in wind
 - Skipped checks require opt-in media, live Steam/network, web reference jobs or panel snapshot output. Two main-thread runtime warnings came from unchanged LockScreenWebMPlayerTests.testAFailureTheClipHadBeforeAHandlerWasSetIsHeldAndDeliveredOnce and AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; both passed.
 - `git diff --check`, `python3 scripts/tests/test_doc_links.py`, and `python3 scripts/tests/test_panel_lazy_lists.py`: passed. XcodeGen registered the new render-test file.
 - No real desktop interaction or screenshots; windows stayed unordered. No Release app was built, installed or restarted.
-
-## 2026-11-13 — Preserve desktop originals after native restoration failures
-
-- Issue #197: keep poster synchronization suspended until native restoration succeeds; reject native desktop selections when recording poster originals and preserve the existing recovery journal.
-- Regression run on the previous implementation: 4 expected failures and 1 passing control across the five selected desktop/lock-screen tests.
-- `python3 scripts/test.py --only DesktopWallpaperTests --only LockScreenWallpaperServiceTests --only LockScreenWallpaperTests`: 252 passed, 0 failed, 0 skipped.
-- `python3 scripts/test.py`: all 35 Python modules passed; 4,967 native tests passed, 0 failed, 70 skipped of 5,037.
-- Skipped checks require opt-in media, live Steam/network, web reference jobs or panel snapshot output.
-- The full native run reported main-thread warnings in unchanged AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy and WebMOpeningTests.testAVp9FileOpensWithItsFormatSizeAndLength; both passed. The targeted run reported no runtime warnings.
-- `git diff --check` and `python3 scripts/tests/test_doc_links.py`: passed.
-- No live desktop/lock-screen/quit cycle was performed; no Release app was built, installed or restarted. Existing incorrectly recorded still-image originals are not migrated from the lock-screen journal; shared WallpaperAgent write/reload coordination remains #199.
