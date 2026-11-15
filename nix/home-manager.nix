@@ -7,7 +7,10 @@
 
 let
   cfg = config.programs.wallpapermachine;
-  settings = lib.filterAttrs (_: value: value != null) cfg.settings;
+  settings = import ./preferences.nix {
+    inherit lib;
+    config = cfg;
+  };
 
   writePreference = key: value: ''
     run /usr/bin/defaults write app.wallpapermachine ${lib.escapeShellArg key} ${

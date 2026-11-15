@@ -1,10 +1,10 @@
 {
-  description = "WallpaperMachine release package and macOS configuration modules";
+  description = "WallpaperMachine release package and Home Manager module";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
-    # Used to check the modules against their actual module systems.
+    # Used to check Home Manager standalone and inside nix-darwin.
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -38,11 +38,6 @@
       homeManagerModules = {
         wallpapermachine = ./nix/home-manager.nix;
         default = self.homeManagerModules.wallpapermachine;
-      };
-
-      darwinModules = {
-        wallpapermachine = ./nix/nix-darwin.nix;
-        default = self.darwinModules.wallpapermachine;
       };
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt);

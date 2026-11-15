@@ -7,7 +7,7 @@ let
 
   home =
     {
-      settings ? { },
+      preferences ? { },
       enable ? true,
       launchd ? false,
       package ? testPackage,
@@ -22,43 +22,95 @@ let
           home.homeDirectory = "/Users/nix-test";
           home.stateVersion = "26.05";
           programs.wallpapermachine = {
-            inherit enable package settings;
+            inherit enable package;
             launchd.enable = launchd;
-          };
+          }
+          // preferences;
         }
       ];
     };
 
   darwin =
     {
-      settings ? { },
+      preferences ? { },
       enable ? true,
       launchd ? false,
-      package ? testPackage,
     }:
     inputs.nix-darwin.lib.darwinSystem {
       modules = [
-        inputs.self.darwinModules.default
+        inputs.home-manager.darwinModules.home-manager
         {
           nixpkgs.hostPlatform = "aarch64-darwin";
           system.stateVersion = 6;
           system.primaryUser = "nix-test";
           users.users.nix-test.home = "/Users/nix-test";
-          programs.wallpapermachine = {
-            inherit enable package settings;
-            launchd.enable = launchd;
+          home-manager = {
+            useGlobalPkgs = true;
+            useUserPackages = true;
+            sharedModules = [ inputs.self.homeManagerModules.default ];
+            users.nix-test = {
+              home.stateVersion = "26.05";
+              programs.wallpapermachine = {
+                inherit enable;
+                package = testPackage;
+                launchd.enable = launchd;
+              }
+              // preferences;
+            };
           };
         }
       ];
     };
 
-  settings = {
+  preferences = {
+    updates.mode = "download";
+    playback = {
+      displaySleepAction = "stop";
+      otherAudioAction = "reduceVolume";
+      otherAudioVolume = 30;
+      otherAppInFrontAction = "pauseOnBattery";
+      desktopCoveredAction = "mute";
+      lowPowerModeAction = "reduceQuality";
+      thermalAction = "pause";
+      lowBatteryAction = "stop";
+      lowBatteryThreshold = 20;
+      inactivityAction = "pause";
+      inactivityMinutes = 10;
+      playOnlyOnActiveDisplay = true;
+      muted = false;
+    };
+    desktopPicture = {
+      enable = false;
+      refreshPeriodically = true;
+    };
+    extraSettings."Example.extra" = {
+      text = "a'b<&>";
+      values = [
+        1
+        0.5
+        false
+        "value"
+      ];
+    };
+  };
+
+  expected = {
+    "WallpaperMachine.updates.mode" = "download";
+    "WallpaperMachine.displaySleepAction" = "stop";
+    "WallpaperMachine.otherAudioAction" = "reduceVolume";
+    "WallpaperMachine.otherAudioVolume" = 30;
+    "WallpaperMachine.otherAppInFrontAction" = "pauseOnBattery";
+    "WallpaperMachine.desktopCoveredAction" = "mute";
     "WallpaperMachine.lowPowerModeAction" = "reduceQuality";
-    "WallpaperMachine.otherAudioAction" = "mute";
+    "WallpaperMachine.thermalAction" = "pause";
+    "WallpaperMachine.lowBatteryAction" = "stop";
     "WallpaperMachine.lowBatteryThreshold" = 20;
-    "WallpaperMachine.wallpapersMuted" = true;
-    "WallpaperMachine.displaySleepAction" = null;
-    # Exercise literal keys and nested plist values through the freeform type.
+    "WallpaperMachine.inactivityAction" = "pause";
+    "WallpaperMachine.inactivityMinutes" = 10;
+    "WallpaperMachine.playOnlyOnActiveDisplay" = true;
+    "WallpaperMachine.wallpapersMuted" = false;
+    "WallpaperMachine.writeDesktopPicture" = false;
+    "WallpaperMachine.refreshDesktopPicturePeriodically" = true;
     "Example.extra" = {
       text = "a'b<&>";
       values = [
@@ -69,18 +121,15 @@ let
       ];
     };
   };
-  expected = builtins.removeAttrs settings [ "WallpaperMachine.displaySleepAction" ] // {
-    "WallpaperMachine.updates.mode" = "notify";
-  };
 
   hm =
     (home {
-      inherit settings;
+      inherit preferences;
       launchd = true;
     }).config;
   nd =
     (darwin {
-      inherit settings;
+      inherit preferences;
       launchd = true;
     }).config;
   hmDisabled =
@@ -102,11 +151,18 @@ let
     ];
   };
 
+  overrides = {
+    playback.otherAudioVolume = 30;
+    extraSettings."WallpaperMachine.otherAudioVolume" = 50;
+    extraSettings."WallpaperMachine.updates.mode" = "automatic";
+  };
+
   fails = value: !(builtins.tryEval (builtins.deepSeq value true)).success;
-  invalidHome = value: (home { settings = value; }).config.home.activation.wallpapermachine.data;
+  invalidHome = preferences: (home { inherit preferences; }).activationPackage.drvPath;
   invalidDarwin =
-    value:
-    (darwin { settings = value; }).config.system.defaults.CustomUserPreferences."app.wallpapermachine";
+    preferences:
+    (darwin { inherit preferences; })
+    .config.home-manager.users.nix-test.home.activation.wallpapermachine.data;
   validAssertions = config: builtins.all (entry: entry.assertion) config.assertions;
 
   agent = {
@@ -123,50 +179,87 @@ let
   assertions = [
     (validAssertions hm)
     (validAssertions nd)
-    (nd.system.defaults.CustomUserPreferences."app.wallpapermachine" == expected)
     (builtins.elem testPackage hm.home.packages)
-    (builtins.elem testPackage nd.environment.systemPackages)
+    (builtins.elem testPackage nd.home-manager.users.nix-test.home.packages)
     (lib.all (name: hm.launchd.agents.wallpapermachine.config.${name} == agent.${name}) (
       builtins.attrNames agent
     ))
-    (lib.all (name: nd.launchd.user.agents.wallpapermachine.serviceConfig.${name} == agent.${name}) (
-      builtins.attrNames agent
-    ))
+    (lib.all (
+      name: nd.home-manager.users.nix-test.launchd.agents.wallpapermachine.config.${name} == agent.${name}
+    ) (builtins.attrNames agent))
     (!(hmDisabled.home.activation ? wallpapermachine))
-    (!(ndDisabled.system.defaults.CustomUserPreferences ? "app.wallpapermachine"))
+    (!(ndDisabled.home-manager.users.nix-test.home.activation ? wallpapermachine))
     (!(hmDisabled.launchd.agents ? wallpapermachine))
-    (!(ndDisabled.launchd.user.agents ? wallpapermachine))
+    (!(ndDisabled.home-manager.users.nix-test.launchd.agents ? wallpapermachine))
     (!((home { }).config.launchd.agents ? wallpapermachine))
-    (!((darwin { }).config.launchd.user.agents ? wallpapermachine))
+    (!((darwin { }).config.home-manager.users.nix-test.launchd.agents ? wallpapermachine))
     (hmDefault.config.programs.wallpapermachine.package.pname == "wallpapermachine")
     (
       hmDefault.config.programs.wallpapermachine.package.version
       == inputs.self.packages.aarch64-darwin.default.version
     )
     (fails (invalidHome {
-      "WallpaperMachine.otherAudioAction" = "invalid";
-    }))
-    (fails (invalidDarwin {
-      "WallpaperMachine.otherAudioVolume" = 101;
+      playback.otherAudioAction = "invalid";
     }))
     (fails (invalidHome {
-      "WallpaperMachine.lowBatteryThreshold" = 15;
-    }))
-    (fails (invalidDarwin {
-      "WallpaperMachine.inactivityMinutes" = 2;
+      playback.otherAudioVolume = 101;
     }))
     (fails (invalidHome {
-      "Example.extra" = [ null ];
+      playback.lowBatteryThreshold = 15;
     }))
-    (lib.hasInfix "/usr/bin/defaults write app.wallpapermachine" hm.home.activation.wallpapermachine.data)
-    (lib.hasInfix "app.wallpapermachine" nd.system.activationScripts.userDefaults.text)
-    # Force the complete activation derivations to evaluate, without building or
-    # running any Darwin executable on the machine performing this check.
+    (fails (invalidHome {
+      playback.inactivityMinutes = 2;
+    }))
+    (fails (invalidHome {
+      updates.mode = "disabled";
+    }))
+    (fails (invalidHome {
+      desktopPicture.enable = "yes";
+    }))
+    (fails (invalidHome {
+      extraSettings."Example.extra" = [ null ];
+    }))
+    (fails (invalidDarwin {
+      playback.otherAudioVolume = 101;
+    }))
     (builtins.isString hm.home.activationPackage.drvPath)
+    (builtins.isString nd.home-manager.users.nix-test.home.activationPackage.drvPath)
     (builtins.isString nd.system.build.toplevel.drvPath)
   ]
   ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [
     (fails (home { hostPkgs = pkgs; }).activationPackage.drvPath)
+  ];
+
+  profiles = [
+    {
+      activation = hm.home.activation.wallpapermachine.data;
+      inherit expected;
+    }
+    {
+      activation = nd.home-manager.users.nix-test.home.activation.wallpapermachine.data;
+      inherit expected;
+    }
+    {
+      activation = (home { }).config.home.activation.wallpapermachine.data;
+      expected = {
+        "WallpaperMachine.updates.mode" = "notify";
+      };
+    }
+    {
+      activation = (home { preferences = overrides; }).config.home.activation.wallpapermachine.data;
+      expected = {
+        "WallpaperMachine.otherAudioVolume" = 50;
+        "WallpaperMachine.updates.mode" = "automatic";
+      };
+    }
+    {
+      activation =
+        (home { preferences.playback.otherAudioVolume = null; })
+        .config.home.activation.wallpapermachine.data;
+      expected = {
+        "WallpaperMachine.updates.mode" = "notify";
+      };
+    }
   ];
 in
 assert lib.assertMsg (builtins.all (
@@ -175,34 +268,28 @@ assert lib.assertMsg (builtins.all (
 pkgs.runCommand "wallpapermachine-module-checks"
   {
     nativeBuildInputs = [ pkgs.python3 ];
-    plist = lib.generators.toPlist { escape = true; } expected;
-    expectedJSON = builtins.toJSON expected;
-    activation = hm.home.activation.wallpapermachine.data;
-    passAsFile = [
-      "plist"
-      "expectedJSON"
-      "activation"
-    ];
+    profilesJSON = builtins.toJSON profiles;
+    passAsFile = [ "profilesJSON" ];
   }
   ''
-    python3 - "$plistPath" "$expectedJSONPath" "$activationPath" <<'PY'
+    python3 - "$profilesJSONPath" <<'PY'
     import json
     import plistlib
     import shlex
     import sys
-    with open(sys.argv[1], "rb") as file:
-        actual = plistlib.load(file)
-    with open(sys.argv[2]) as file:
-        expected = json.load(file)
-    assert actual == expected, (actual, expected)
-    with open(sys.argv[3]) as file:
-        arguments = shlex.split(file.read())
-    written = {}
-    for offset in range(0, len(arguments), 6):
-        command = arguments[offset:offset + 6]
-        assert command[:4] == ["run", "/usr/bin/defaults", "write", "app.wallpapermachine"], command
-        written[command[4]] = plistlib.loads(command[5].encode())
-    assert written == expected, (written, expected)
+
+    with open(sys.argv[1]) as file:
+        profiles = json.load(file)
+    for profile in profiles:
+        arguments = shlex.split(profile["activation"])
+        assert len(arguments) % 6 == 0, arguments
+        written = {}
+        for offset in range(0, len(arguments), 6):
+            command = arguments[offset:offset + 6]
+            assert command[:4] == ["run", "/usr/bin/defaults", "write", "app.wallpapermachine"], command
+            assert command[4] not in written, command[4]
+            written[command[4]] = plistlib.loads(command[5].encode())
+        assert written == profile["expected"], (written, profile["expected"])
     PY
     touch "$out"
   ''
