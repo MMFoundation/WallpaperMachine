@@ -24,8 +24,9 @@ let
           programs.wallpapermachine = {
             inherit enable package;
             launchd.enable = launchd;
-          }
-          // preferences;
+            settings = builtins.removeAttrs preferences [ "extraSettings" ];
+            extraSettings = preferences.extraSettings or { };
+          };
         }
       ];
     };
@@ -54,8 +55,9 @@ let
                 inherit enable;
                 package = testPackage;
                 launchd.enable = launchd;
-              }
-              // preferences;
+                settings = builtins.removeAttrs preferences [ "extraSettings" ];
+                extraSettings = preferences.extraSettings or { };
+              };
             };
           };
         }

@@ -47,70 +47,72 @@ in
     not restart it. The control panel stays closed after onboarding
   '';
 
-  updates.mode = mkOption {
-    type = types.enum [
-      "notify"
-      "download"
-      "automatic"
-    ];
-    default = "notify";
-    description = ''
-      Built-in update behavior. Defaults to notifications so Nix controls
-      which application version is installed.
-    '';
-  };
+  settings = {
+    updates.mode = mkOption {
+      type = types.enum [
+        "notify"
+        "download"
+        "automatic"
+      ];
+      default = "notify";
+      description = ''
+        Built-in update behavior. Defaults to notifications so Nix controls
+        which application version is installed.
+      '';
+    };
 
-  playback = {
-    displaySleepAction = optionalPreference (types.enum [
-      "pause"
-      "stop"
-    ]) "Playback action when a display sleeps.";
-    otherAudioAction = optionalPreference (types.enum [
-      "keepRunning"
-      "reduceVolume"
-      "mute"
-      "pause"
-    ]) "Playback action while another application plays audio.";
-    otherAudioVolume = optionalPreference (types.ints.between 0 100) "Percentage of wallpaper volume used by the reduceVolume action.";
-    otherAppInFrontAction = optionalPreference (types.enum [
-      "keepRunning"
-      "mute"
-      "pause"
-      "pauseOnBattery"
-    ]) "Playback action while another application is in front.";
-    desktopCoveredAction = optionalPreference (types.enum [
-      "pause"
-      "mute"
-      "reduceVolume"
-      "keepRunning"
-    ]) "Playback action when other windows cover the desktop.";
-    lowPowerModeAction = optionalPreference conditionAction "Playback action while Low Power Mode is active.";
-    thermalAction = optionalPreference conditionAction "Playback action when macOS reports serious or critical thermal pressure.";
-    lowBatteryAction = optionalPreference conditionAction "Playback action while the battery is at or below the configured threshold.";
-    lowBatteryThreshold = optionalPreference (types.enum [
-      10
-      20
-      30
-    ]) "Low battery threshold as a percentage.";
-    inactivityAction = optionalPreference (types.enum [
-      "keepRunning"
-      "pause"
-      "stop"
-    ]) "Playback action after the configured period without user input.";
-    inactivityMinutes = optionalPreference (types.enum [
-      5
-      10
-      15
-      30
-      60
-    ]) "Minutes without input before applying the inactivity action.";
-    playOnlyOnActiveDisplay = optionalPreference types.bool "Whether to play wallpapers only on the display containing the pointer.";
-    muted = optionalPreference types.bool "Whether to mute every wallpaper.";
-  };
+    playback = {
+      displaySleepAction = optionalPreference (types.enum [
+        "pause"
+        "stop"
+      ]) "Playback action when a display sleeps.";
+      otherAudioAction = optionalPreference (types.enum [
+        "keepRunning"
+        "reduceVolume"
+        "mute"
+        "pause"
+      ]) "Playback action while another application plays audio.";
+      otherAudioVolume = optionalPreference (types.ints.between 0 100) "Percentage of wallpaper volume used by the reduceVolume action.";
+      otherAppInFrontAction = optionalPreference (types.enum [
+        "keepRunning"
+        "mute"
+        "pause"
+        "pauseOnBattery"
+      ]) "Playback action while another application is in front.";
+      desktopCoveredAction = optionalPreference (types.enum [
+        "pause"
+        "mute"
+        "reduceVolume"
+        "keepRunning"
+      ]) "Playback action when other windows cover the desktop.";
+      lowPowerModeAction = optionalPreference conditionAction "Playback action while Low Power Mode is active.";
+      thermalAction = optionalPreference conditionAction "Playback action when macOS reports serious or critical thermal pressure.";
+      lowBatteryAction = optionalPreference conditionAction "Playback action while the battery is at or below the configured threshold.";
+      lowBatteryThreshold = optionalPreference (types.enum [
+        10
+        20
+        30
+      ]) "Low battery threshold as a percentage.";
+      inactivityAction = optionalPreference (types.enum [
+        "keepRunning"
+        "pause"
+        "stop"
+      ]) "Playback action after the configured period without user input.";
+      inactivityMinutes = optionalPreference (types.enum [
+        5
+        10
+        15
+        30
+        60
+      ]) "Minutes without input before applying the inactivity action.";
+      playOnlyOnActiveDisplay = optionalPreference types.bool "Whether to play wallpapers only on the display containing the pointer.";
+      muted = optionalPreference types.bool "Whether to mute every wallpaper.";
+    };
 
-  desktopPicture = {
-    enable = optionalPreference types.bool "Whether to write wallpaper snapshots as the macOS desktop picture.";
-    refreshPeriodically = optionalPreference types.bool "Whether to refresh the macOS desktop picture periodically.";
+    desktopPicture = {
+      enable = optionalPreference types.bool "Whether to write wallpaper snapshots as the macOS desktop picture.";
+      refreshPeriodically = optionalPreference types.bool "Whether to refresh the macOS desktop picture periodically.";
+    };
   };
 
   extraSettings = mkOption {
