@@ -107,7 +107,8 @@ can do the same (see Troubleshooting). A build on macOS 26 never needs them.
 2. **Swift bindings** — `Renderer/target/release/uniffi-bindgen generate
    --library …/libwallpaper_bridge.a --language swift --no-format --out-dir
    App/Bridge/Generated`. This writes `WallpaperBridge.swift` plus the FFI header
-   and module map. `App/Bridge/Generated` is build output: never edit it, and
+   and module map. The build removes trailing template whitespace from these
+   generated text files. `App/Bridge/Generated` is build output: never edit it, and
    regenerate it whenever the bridge crate's interface changes.
 3. **Project generation** — `xcodegen generate --use-cache` rewrites
    `WallpaperMachine.xcodeproj` from `project.yml`, and leaves it (and Xcode's

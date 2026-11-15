@@ -57,6 +57,17 @@ def repository_commit(root=ROOT):
     return subprocess.check_output(["git", "-C", str(root), "rev-parse", "--short", "HEAD"], text=True).strip()
 
 
+def normalize_generated_bindings():
+    """Trim trailing whitespace left by the binding templates."""
+    for path in GENERATED_BRIDGE.iterdir():
+        if path.suffix not in (".swift", ".h", ".modulemap"):
+            continue
+        text = path.read_text()
+        normalized = "\n".join(line.rstrip(" \t") for line in text.split("\n"))
+        if normalized != text:
+            path.write_text(normalized)
+
+
 def build_environment():
     result = os.environ.copy()
     prefix = subprocess.check_output(["brew", "--prefix"], text=True).strip()
@@ -169,6 +180,7 @@ def main():
     if not args.swift_only:
         run(["cargo", "build", "--workspace", "--release"], RENDERER, cargo_environment(), stage="cargo")
         run([RENDERER / "target/release/uniffi-bindgen", "generate", "--library", RENDERER / "target/release/libwallpaper_bridge.a", "--language", "swift", "--no-format", "--out-dir", GENERATED_BRIDGE], cwd=RENDERER, env=env, stage="bindgen")
+        normalize_generated_bindings()
     if args.renderer_only:
         if args.swift_only:
             print(f"{MARK.warn} Renderer build skipped by --swift-only")
