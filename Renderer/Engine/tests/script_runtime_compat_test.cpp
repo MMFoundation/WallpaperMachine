@@ -2262,6 +2262,37 @@ export function update() {
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
+TEST(ScriptRuntimeCompat, ReplacingSharedStateReachesExistingAndNewPrograms) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    runtime->RegisterTextLayer("readout", TextLayerState { .text = "initial" });
+    runtime->RegisterTextValue("readout", ResolveStringSetting(*runtime, {
+        {"value", "initial"}, {"script", R"JS(
+export function update() { return shared.caption || 'waiting'; }
+)JS"}}, "readout"), false);
+    runtime->RegisterSceneScript(R"JS(
+'use strict';
+shared = { caption: 'first' };
+export function mediaPropertiesChanged(event) {
+    shared = { caption: event.title };
+}
+)JS", "");
+    runtime->Tick(0.01);
+    EXPECT_EQ(runtime->NodeText("readout"), "first");
+
+    runtime->RegisterTextLayer("later", TextLayerState { .text = "initial" });
+    runtime->RegisterTextValue("later", ResolveStringSetting(*runtime, {
+        {"value", "initial"}, {"script", R"JS(
+export function update() { return shared.caption || 'waiting'; }
+)JS"}}, "later"), false);
+    runtime->SetMediaIntegrationEnabled(true);
+    runtime->DispatchMediaEventJson(
+        R"({"type":"mediaPropertiesChanged","title":"new track"})");
+    runtime->Tick(0.01);
+    EXPECT_EQ(runtime->NodeText("readout"), "new track");
+    EXPECT_EQ(runtime->NodeText("later"), "new track");
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
 TEST(ScriptRuntimeCompat, SharedProducerRunsBeforeDependentTextAndAdvancesOncePerTick) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto producer = std::make_shared<SceneNode>();

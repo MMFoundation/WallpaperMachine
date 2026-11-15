@@ -252,7 +252,9 @@ function lock(name, value) {
 }
 lock('engine', engine);
 lock('input', input);
-lock('shared', shared);
+// Authors can replace the shared object as well as change its properties.
+// Every program resolves this global again when it runs.
+Object.defineProperty(G, 'shared', { value: shared, writable: true, configurable: false, enumerable: true });
 lock('localStorage', localStorage);
 G.scene = sceneProxy;
 G.console = consoleShim;

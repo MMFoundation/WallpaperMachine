@@ -183,6 +183,11 @@ Wallpaper Engine, which registers each script while it parses the object list an
 dispatches `update` down that list (`sub_1401A4DB0`, `sub_140177AD0`). What `init`
 returns is the property's value from then on, as what `update` returns is: a drag
 handle hides itself there, and a typing text starts empty.
+`shared` is a replaceable scene-wide value: assigning `shared = { ... }` in one
+script makes the replacement visible to existing and later scripts, just as mutating
+`shared.name` does. A media widget can initialize its shared visibility switches this
+way; treating the global as read-only leaves the widget hidden even when song events
+and audio samples arrive.
 A property script without `update` (an `init` that plays an animation, a click handler)
 costs no call into the script runtime on a tick where no timer is due and no audio
 buffer is registered: that call would only have run those. Its parameters and the

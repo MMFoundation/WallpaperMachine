@@ -970,6 +970,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   way up leaves a button that shrinks while held, or a press dragged off the
   desktop, latched for good. A layer that did not take the press hears a release
   only under the cursor, and a scene-wide script hears one from anywhere.
+- **Replacing shared script state** —
+  `ScriptRuntimeCompat.ReplacingSharedStateReachesExistingAndNewPrograms` replaces
+  `shared` at script initialization and again in a media event, then checks that
+  text scripts created before and after the replacement read the new state.
+  A generated Wallpaper Engine probe with two origin scripts confirms that both
+  read an object assigned by one of them. Issue #216's media panel and audio bars
+  use the same assignment to initialize their visibility switch.
 - **Creating layers from scripts** — SceneScript creation tests cover independent
   cloned layers, owner-local cached factories, bounded authored pools and lazy
   template loading. A script imported from the Workshop declares
