@@ -25,6 +25,18 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-15 — Nix package and configuration modules
+
+Added the signed release package, Home Manager and nix-darwin modules, and integration checks. Verification ran on x86_64-linux.
+
+- nix flake check --print-build-logs: passed. Repacked the actual 1.12.0 DMG, checked the bundle metadata and arm64 executable, and evaluated both real module systems.
+- Module checks cover package overrides, per-key preference commands and plist serialization, invalid values, disabled modules, and login agents.
+- nix flake check --all-systems --no-build: passed evaluation for aarch64-darwin, aarch64-linux and x86_64-linux. This did not build other systems.
+- nix fmt -- --check flake.nix nix/*.nix: passed.
+- python3 scripts/tests/test_doc_links.py: passed, 11 tests.
+- python3 scripts/test.py: all 35 Python test modules passed, 718 tests reported. The native gate then stopped because xcodegen is unavailable on this Linux host; the full gate did not pass.
+- macOS signature verification, native application tests, desktop behavior and extension registration were not run. The native app was not rebuilt.
+
 ## 2026-11-15 — Workshop Application and Asset filters (#206)
 
 - Application and Category → Asset are visible, independent checkboxes, excluded by default; Clear restores those defaults.
@@ -116,12 +128,3 @@ Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in wind
 - The full native run reported main-thread warnings in unchanged AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy and WebMOpeningTests.testAVp9FileOpensWithItsFormatSizeAndLength; both passed. The targeted run reported no runtime warnings.
 - `git diff --check` and `python3 scripts/tests/test_doc_links.py`: passed.
 - No live desktop/lock-screen/quit cycle was performed; no Release app was built, installed or restarted. Existing incorrectly recorded still-image originals are not migrated from the lock-screen journal; shared WallpaperAgent write/reload coordination remains #199.
-
-## 2026-11-13 — Covered-desktop sound: PR 194 review and reconnect fix
-
-- Four reconnect regressions failed before the fix, covering retained pauses and refused resumes for Mute and Reduce volume.
-- Targeted playback, preference, backup and panel checks: 169 passed, 0 failed, 0 skipped; no runtime warnings.
-- python3 scripts/test.py on main ef6c85c5 plus the final PR source: all 35 Python modules passed; 4,963 native passed, 0 failed, 70 skipped of 5,033 (Xcode 27.2).
-- The integration run used temporary test-home and path-backed preference-suite overrides to isolate the installed app.
-- Skipped: opt-in media, live Steam, reference rendering and panel snapshots. Two main-thread warnings came from unchanged VideoFormatSupportTests and AppUpdateTests cases.
-- Real coverage probes, audible output and narrow-window presentation were not exercised. No Release build, installation or desktop run.

@@ -6,6 +6,9 @@ Authoritative build document. Everything here is driven by `scripts/build.py` an
 
 ## Prerequisites
 
+For Nix installation of the signed release and declarative preferences, see
+[nix.md](nix.md). The source-build prerequisites below are not needed for that package.
+
 | Requirement | Detail |
 |---|---|
 | Hardware | Apple Silicon only. `project.yml` sets `ARCHS: arm64`, and release disk images are named `-arm64`. |
