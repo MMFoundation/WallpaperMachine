@@ -51,7 +51,8 @@ void SceneNode::UpdateTrans() {
     m_trans = (under && ! m_ignoreParentTransform) ? Matrix4d(m_parent->m_childTrans * local) : local;
     if (m_childLocal) {
         const Matrix4d base = under ? m_parent->m_childTrans : Matrix4d(Matrix4d::Identity());
-        m_childTrans        = base * *m_childLocal;
+        m_childTrans = m_attachmentTransform ? Matrix4d(base * *m_attachmentTransform * *m_childLocal)
+                                            : Matrix4d(base * *m_childLocal);
     } else {
         m_childTrans = m_trans;
     }

@@ -196,6 +196,70 @@ TEST(PuppetAttachmentLayers, AChildNamingAnAttachmentHangsFromThatAnchor)
     ExpectTranslation(model, 15, 27, 9);
 }
 
+// WE's centre/bottom/top probe moves only the parent's picture. Both ordinary
+// children and bone attachments keep the authored parent frame.
+TEST(PuppetAttachmentLayers, ImageAlignmentDoesNotMoveChildrenOrBoneAttachments)
+{
+    for (const bool live : { false, true }) {
+        for (const char* alignment : { "center", "bottom", "top" }) {
+            SCOPED_TRACE(live);
+            SCOPED_TRACE(alignment);
+            auto objects = AttachmentObjects("hat_anchor", false);
+            objects[0]["alignment"] = alignment;
+            objects[0]["scale"] = Json::array({ 2, 3, 1 });
+            objects[0]["angles"] = Json::array({ 0, 0, 1.5707963267948966 });
+            objects.push_back(ImageObject(302, "ordinary child", {
+                { "image", "child.json" }, { "parent", 300 },
+                { "origin", Json::array({ 1, 2, 3 }) } }));
+            ParseRig rig(AttachmentAssets());
+            auto scene = rig.Parse(CanvasOf(objects), ParseOptions { .live = live });
+            ASSERT_NE(scene, nullptr);
+            if (live) scene->runtime->Tick(0.0);
+            auto* parent = FindRootChild(*scene, "puppet parent");
+            ASSERT_NE(parent, nullptr);
+            auto* attached = FindChild(*parent, "hat child");
+            auto* ordinary = FindChild(*parent, "ordinary child");
+            ASSERT_NE(attached, nullptr);
+            ASSERT_NE(ordinary, nullptr);
+            parent->UpdateTrans();
+            const double shift = std::string(alignment) == "bottom" ? -48.0
+                               : std::string(alignment) == "top" ? 48.0 : 0.0;
+            ExpectTranslation(parent->ModelTrans(), 10 + shift, 20, 0);
+            attached->UpdateTrans();
+            ordinary->UpdateTrans();
+            ExpectTranslation(attached->ModelTrans(), -11, 30, 9);
+            ExpectTranslation(ordinary->ModelTrans(), 4, 22, 3);
+        }
+    }
+}
+
+TEST(PuppetAttachmentLayers, AnAlignedAttachedImageKeepsItsBoneFrameForGrandchildren)
+{
+    for (const bool live : { false, true }) {
+        SCOPED_TRACE(live);
+        auto objects = AttachmentObjects("hat_anchor", false);
+        objects[0]["alignment"] = "bottom";
+        objects[1]["alignment"] = "right";
+        objects.push_back(ImageObject(302, "grandchild", {
+            { "image", "child.json" }, { "parent", 301 },
+            { "origin", Json::array({ 2, 3, 0 }) } }));
+        ParseRig rig(AttachmentAssets());
+        auto scene = rig.Parse(CanvasOf(objects), ParseOptions { .live = live });
+        ASSERT_NE(scene, nullptr);
+        if (live) scene->runtime->Tick(0.0);
+        auto* parent = FindRootChild(*scene, "puppet parent");
+        ASSERT_NE(parent, nullptr);
+        auto* attached = FindChild(*parent, "hat child");
+        ASSERT_NE(attached, nullptr);
+        auto* grandchild = FindChild(*attached, "grandchild");
+        ASSERT_NE(grandchild, nullptr);
+        attached->UpdateTrans();
+        grandchild->UpdateTrans();
+        ExpectTranslation(attached->ModelTrans(), 7, 27, 9);
+        ExpectTranslation(grandchild->ModelTrans(), 17, 30, 9);
+    }
+}
+
 // R-4.05 / B-4.07
 TEST(PuppetAttachmentLayers, TheResultDoesNotDependOnTheDeclarationOrder)
 {

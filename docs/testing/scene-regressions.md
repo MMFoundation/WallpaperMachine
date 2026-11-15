@@ -3914,6 +3914,18 @@ texture entrances are not decoded-image or native-rendering evidence.
   animation sample, preserving initially collapsed eyelids and authored
   rotations. Synthetic regressions cover declaration order, animated
   translation/rotation/scale, repeated same-time samples and local edits.
+  `PuppetAttachmentLayers.ImageAlignmentDoesNotMoveChildrenOrBoneAttachments`
+  and `.AnAlignedAttachedImageKeepsItsBoneFrameForGrandchildren` cover static
+  and live parsing: centre/top/bottom alignment moves the image while ordinary
+  children, bone attachments and grandchildren retain the parent's authored
+  frame. A Wallpaper Engine 2.8.0.42 probe established this by comparing
+  ordinary markers and bone-attached markers under all three alignments.
+  `ScriptAttachments.AlignedParentEditsKeepAttachmentQueriesAndChildrenInTheSameFrame`
+  covers live origin/scale/rotation/alignment changes and unknown-attachment
+  fallback. `AnchoredTransform.ChildrenFollowAnimatedOriginScaleAndAnglesWithoutTheAlignmentOffset`
+  covers timelines; `ScriptRuntimeCompat.CopiedAlignedImagesKeepTheirChildOriginWhenEdited`
+  covers copied layers and later edits. These reuse the existing child frame,
+  updating it only when transform inputs change.
 - **Scalar material timelines** preserve paused first keys and authored Bezier
   handles; SceneScript named animation controls drive play, replay, pause, stop,
   seek and rate.

@@ -306,6 +306,30 @@ if(Math.abs(p.getAttachmentAngles('mount').z-90)>0.001)throw new Error('angle un
     EXPECT_TRUE(rig.runtime->scriptErrors().empty());
 }
 
+TEST(ScriptAttachments, AlignedParentEditsKeepAttachmentQueriesAndChildrenInTheSameFrame) {
+    AttachmentRig rig;
+    rig.runtime->RegisterNodeSize("parent", {20,10});
+    ASSERT_TRUE(rig.runtime->SetNodeAnchorAlignment("parent","bottom",{100,50,0}));
+    ASSERT_TRUE(rig.runtime->SetNodeParent("child","parent",0));
+    const auto check=[&](double x,double y) {
+        const auto query=rig.runtime->NodeAttachmentMatrix("parent",0);
+        const auto child=rig.runtime->NodeTransformMatrix("child");
+        EXPECT_NEAR(query(0,3),x,1e-4);EXPECT_NEAR(query(1,3),y,1e-4);
+        const linalg::Vector4d local(1,2,0,1);
+        EXPECT_TRUE(child.col(3).isApprox(query*local,1e-5));
+    };
+    check(108,54);
+    ASSERT_TRUE(rig.runtime->SetNodeScale("parent",{2,3,1}));
+    ASSERT_TRUE(rig.runtime->SetNodeRotation("parent",{0,0,1.5707963267948966f}));
+    ASSERT_TRUE(rig.runtime->SetNodeTranslate("parent",{200,100,0}));
+    check(188,116);
+    ASSERT_TRUE(rig.runtime->SetNodeAlignment("parent","center"));
+    check(188,116);
+    // An unknown attachment still uses the public layer transform.
+    EXPECT_TRUE(rig.runtime->NodeAttachmentMatrix("parent",-1).isApprox(
+        rig.runtime->NodeTransformMatrix("parent"),1e-6));
+}
+
 TEST(ScriptAttachments, ReparentingCanSwitchAndClearAnAttachmentWithoutAStaleUpdater) {
     AttachmentRig rig;
     rig.Script("thisLayer.setParent(thisScene.getLayer('parent'),'mount');");

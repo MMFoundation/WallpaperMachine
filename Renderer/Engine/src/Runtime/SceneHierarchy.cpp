@@ -29,7 +29,10 @@ linalg::Matrix4d SceneRuntimeContext::NodeAttachmentMatrix(std::string_view name
     if (puppet->simulates()) puppet->setLayerWorld(world);
     puppet->genFrame(m_scene ? m_scene->elapsingTime : 0);
     const auto local=puppet->attachmentTransform(attachment);
-    return local ? linalg::Matrix4d(world*local->matrix().cast<double>()) : world;
+    if (!local) return world;
+    const auto node=m_nodes.find(name);
+    const auto frame=node!=m_nodes.end() && node->second ? node->second->ChildTrans() : world;
+    return linalg::Matrix4d(frame*local->matrix().cast<double>());
 }
 
 std::optional<linalg::Matrix3d> SceneRuntimeContext::AttachmentToTexture(
@@ -189,6 +192,7 @@ bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view 
                     const auto length=local.col(axis).head<3>().norm();
                     if (length>1e-12) local.col(axis).head<3>()/=length;
                 }
+                if (current->AttachmentTransform()) local=*current->AttachmentTransform()*local;
             } else {
                 local=SceneNode::LocalTransOf(origin_of(current),
                     unscaled ? linalg::Vector3f::Ones() : current->Scale(),current->Rotation());

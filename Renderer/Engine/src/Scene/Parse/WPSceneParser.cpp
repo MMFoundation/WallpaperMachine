@@ -4181,7 +4181,8 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     auto* runtime   = scene.runtime.get();
 
     // Placement: a fullscreen layer sits on the canvas centre and keeps its authored
-    // transform for what hangs from it; an anchored layer is moved by its alignment.
+    // transform for what hangs from it. Alignment moves an image's centre, but
+    // children (including puppet attachments) keep its authored origin.
     if (kind.fullscreen) {
         node->SetChildFrame(Vector3f(origin.data()), Vector3f(scale.data()), Vector3f(angles.data()));
         node->SetIgnoreParentTransform(true);
@@ -4191,6 +4192,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         node->SetRotation(Vector3f::Zero());
     } else if (AlignmentHasAnchorOffset(image.alignment)) {
         if (runtime == nullptr) {
+            node->SetChildFrame(Vector3f(origin.data()), Vector3f(scale.data()), Vector3f(angles.data()));
             node->SetTranslate(Vector3f(origin.data()) +
                                AlignmentAnchorOffset(image.alignment, geometry.size,
                                                      Vector3f(scale.data()), Vector3f(angles.data())));

@@ -295,7 +295,11 @@ layer's own matrix, not the one it is drawn with: a camera parallax and the iden
 a layer drawn through its effects renders from are not in it. A layer anchored to an
 edge or a corner (`alignment`) answers the centre of its quad, which its anchor
 places, while `layer.origin` still reads the anchor. A layer that ignores its parent's
-transform answers its own placement. `layer.getChildren()` answers the direct children
+transform answers its own placement. Image alignment moves only the image's centre;
+ordinary children and puppet attachments inherit the parent's origin, scale and angles
+before that offset. This also applies to aligned attached images with children and to
+runtime transform edits, timelines and copied image layers.
+`layer.getChildren()` answers the direct children
 of the layer in scene order, `layer.rotateObjectSpace(angles)` turns the layer about its
 own axes by Euler angles in radians, and `layer.getEffectCount()` and
 `layer.getEffect(indexOrName)` return the layer's authored effects (built even when
@@ -335,8 +339,9 @@ an error, preserving the layer's local components even when adjustment was reque
 
 `getAttachmentIndex` matches names exactly, including an authored empty name.
 `getAttachmentMatrix`, `getAttachmentOrigin` and `getAttachmentAngles` read the
-current bone pose in world space; an unknown attachment uses the layer's own
-transform. Bone writes refresh attached children immediately, and reparenting
+current bone pose in world space, using the same pre-alignment parent frame as
+attached children; an unknown attachment uses the layer's own transform.
+Bone writes refresh attached children immediately, and reparenting
 removes the previous bone binding. `transformAttachmentToTexture` returns a `Mat3`
 with unit texture-space axes and a UV origin, including WE's half-texel offset and
 the current source/receiver cameras and transforms. Its parallax offsets are the

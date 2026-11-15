@@ -4298,6 +4298,31 @@ TEST(ScriptRuntimeCompat, RotatedAnchoredLayerTurnsAboutItsAnchor) {
     EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(110, 30, 0)));
 }
 
+TEST(ScriptRuntimeCompat, CopiedAlignedImagesKeepTheirChildOriginWhenEdited) {
+    Scene scene;
+    auto runtime = MakeRuntimeWithScene(scene);
+    auto source = std::make_shared<SceneNode>();
+    source->SetName("source");
+    runtime->RegisterNode("source", source.get());
+    runtime->RegisterNodeSize("source", {20,10});
+    ASSERT_TRUE(runtime->SetNodeAnchorAlignment("source", "bottom", {100,50,0}));
+    runtime->RegisterLayerTemplate("models/aligned.json", source, {20,10});
+    const auto copy = runtime->CreateLayerFromTemplate("models/aligned.json", "");
+    ASSERT_FALSE(copy.empty());
+    EXPECT_EQ(runtime->NodeTranslate(copy), linalg::Vector3f(100,50,0));
+    ASSERT_EQ(scene.sceneGraph->GetChildren().size(), 1u);
+    auto node = scene.sceneGraph->GetChildren().front();
+    auto child = std::make_shared<SceneNode>();
+    child->SetTranslate({2,4,0});
+    node->AppendChild(child);
+    ASSERT_TRUE(runtime->SetNodeScale(copy, {2,3,1}));
+    ASSERT_TRUE(runtime->SetNodeTranslate(copy, {200,100,0}));
+    child->UpdateTrans();
+    EXPECT_TRUE(child->ModelTrans().col(3).head<3>().isApprox(linalg::Vector3d(204,112,0),1e-6));
+    EXPECT_TRUE(runtime->NodeTransformMatrix(copy).col(3).head<3>().isApprox(
+        linalg::Vector3d(200,115,0),1e-6));
+}
+
 // Workshop 2850003448 builds a ring visualizer: every bar is aligned 'top',
 // placed on a circle and turned to face outward, then scaled by audio. Each
 // bar must hang outward from the circle; with the anchor offset left on the

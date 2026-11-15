@@ -186,8 +186,9 @@ public:
     /// other than its own transform. A fullscreen layer covers the screen
     /// whatever its origin, scale or angles, but the layers below it are placed
     /// from the transform the scene saved for it (none saved, none added), under
-    /// whatever groups it sits in. Without one a child is placed from the node's
-    /// own `ModelTrans`.
+    /// whatever groups it sits in. Aligned images likewise keep their origin
+    /// for children while their own centre moves. Without one a child is placed
+    /// from the node's own `ModelTrans`.
     void SetChildFrame(const linalg::Vector3f& translate, const linalg::Vector3f& scale,
                        const linalg::Vector3f& rotation) {
         m_childLocal = LocalTransOf(translate, scale, rotation);
@@ -195,6 +196,11 @@ public:
     }
     bool HasChildFrame() const { return m_childLocal.has_value(); }
     const auto& LocalChildFrame() const { return m_childLocal; }
+    void ClearChildFrame() {
+        if (!m_childLocal) return;
+        m_childLocal.reset();
+        MarkTransDirty();
+    }
     /// Takes over another node's child frame, as a copy of the node does.
     void CopyChildFrame(const SceneNode& node) {
         if (m_childLocal == node.m_childLocal) return;

@@ -2275,6 +2275,7 @@ void SceneRuntimeContext::ApplyAnchoredTransform(const std::string& name) {
 
     const linalg::Vector3f direction = AnchorDirection(alignment.alignment);
     if (direction.x() == 0.0f && direction.y() == 0.0f) {
+        if (!node->IgnoresParentTransform()) node->ClearChildFrame();
         alignment.transform_dirty    = false;
         alignment.cached_translate   = alignment.origin;
         alignment.rotation           = node->Rotation();
@@ -2294,6 +2295,11 @@ void SceneRuntimeContext::ApplyAnchoredTransform(const std::string& name) {
                                       direction.y() * size.y() * extent.y() * 0.5f, 0.0f);
         alignment.rotation         = node->Rotation();
         alignment.cached_translate = alignment.origin + NodeRotationMatrix(alignment.rotation) * offset;
+        // Children use the authored origin, not the aligned picture's centre.
+        // Rebuild this existing frame only when its inputs change; idle ticks
+        // neither recalculate matrices nor invalidate the child subtree.
+        if (!node->IgnoresParentTransform())
+            node->SetChildFrame(alignment.origin, node->Scale(), alignment.rotation);
         alignment.transform_dirty  = false;
     }
     node->SetTranslate(alignment.cached_translate);
@@ -3319,6 +3325,15 @@ std::string SceneRuntimeContext::CreateLayerFromTemplate(std::string_view reques
 
     RegisterNode(key, copy.get());
     RegisterNodeSize(key, size);
+    // The copied image keeps its alignment and authored child origin as well
+    // as its drawn centre. Its later transform edits must not collapse the two.
+    if (source.HasChildFrame() && !source.IgnoresParentTransform()) {
+        if (const auto anchor = m_node_alignment.find(source.Name()); anchor != m_node_alignment.end()) {
+            m_node_alignment[key] = anchor->second;
+            m_node_alignment[key].transform_dirty = true;
+            ApplyAnchoredTransform(key);
+        }
+    }
     m_script_created_layers.insert(key);
     m_node_template_paths[key] = found_path;
     if (const auto target = m_node_cursor_targets.find(std::string_view(source.Name()));
@@ -3602,9 +3617,11 @@ bool SceneRuntimeContext::SetNodeTranslate(std::string_view name, const linalg::
     const auto found = m_nodes.find(key);
     if (found == m_nodes.end() || found->second == nullptr) return false;
     if (const auto alignment = m_node_alignment.find(key); alignment != m_node_alignment.end()) {
-        if (!(alignment->second.origin == value)) found->second->MarkTransparentOriginChanged();
-        alignment->second.origin          = value;
-        alignment->second.transform_dirty = true;
+        if (!(alignment->second.origin == value)) {
+            found->second->MarkTransparentOriginChanged();
+            alignment->second.origin          = value;
+            alignment->second.transform_dirty = true;
+        }
     }
     ApplyAnchoredTransform(key);
     return true;
@@ -3619,8 +3636,10 @@ bool SceneRuntimeContext::SetNodeScale(std::string_view name, const linalg::Vect
     const auto found = m_nodes.find(key);
     if (found == m_nodes.end() || found->second == nullptr) return false;
     if (const auto alignment = m_node_alignment.find(key); alignment != m_node_alignment.end()) {
-        alignment->second.scale           = value;
-        alignment->second.transform_dirty = true;
+        if (!(alignment->second.scale == value)) {
+            alignment->second.scale           = value;
+            alignment->second.transform_dirty = true;
+        }
     }
     found->second->SetScale(value);
     ApplyAnchoredTransform(key);
@@ -3636,6 +3655,7 @@ bool SceneRuntimeContext::SetNodeAlignment(std::string_view name, std::string al
         return false;
     }
     NodeAlignmentBinding& anchor = entry->second;
+    if (anchor.alignment == alignment) return true;
     const auto            before = AnchorDirection(anchor.alignment);
     if (before.x() == 0.0f && before.y() == 0.0f) {
         // A layer with no anchor: where it stands now is the origin, and scaling it from

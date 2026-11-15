@@ -642,6 +642,30 @@ TEST(AnchoredTransform, AScaleTimelineKeepsALeftAnchoredLayersEdgeInPlace)
     EXPECT_FLOAT_EQ(node->Translate().x(), 10.0f + width * 3.0f * 0.5f);
 }
 
+TEST(AnchoredTransform, ChildrenFollowAnimatedOriginScaleAndAnglesWithoutTheAlignmentOffset)
+{
+    const auto clock = Options(10, 10, "single");
+    Live live(TimelineScene(Json::array({
+        ImageLayer(21, "parent", {
+            { "alignment", "bottom" },
+            { "origin", Timeline(V3(10, 20, 0), Animation(false, clock,
+                { Keys({ { 0, 10 }, { 10, 50 } }), Keys({ { 0, 20 }, { 10, 70 } }) })) },
+            { "scale", Timeline(V3(1, 1, 1), Animation(false, clock,
+                { Keys({ { 0, 1 }, { 10, 2 } }), Keys({ { 0, 1 }, { 10, 3 } }) })) },
+            { "angles", Timeline(V3(0, 0, 0), Animation(false, clock,
+                { Json(), Json(), Keys({ { 0, 0 }, { 10, 1.5707963267948966 } }) })) } }),
+        ImageLayer(22, "child", { { "parent", 21 }, { "origin", V3(2, 4, 0) } }) })));
+    ASSERT_TRUE(live.ok());
+    EXPECT_TRUE(live.rt().NodeTransformMatrix("child").col(3).head<3>().isApprox(
+        linalg::Vector3d(12, 24, 0), 1e-5));
+    live.Tick(1.0);
+    EXPECT_TRUE(live.rt().NodeTransformMatrix("child").col(3).head<3>().isApprox(
+        linalg::Vector3d(38, 74, 0), 1e-5));
+    const auto held = live.rt().NodeTransformMatrix("child");
+    live.Tick(0.0);
+    EXPECT_TRUE(live.rt().NodeTransformMatrix("child").isApprox(held, 1e-6));
+}
+
 // R-5.14 / B-5.13
 TEST(AnchoredTransform, TheAnchorOffsetIsDerivedAgainFromScriptedOriginAndScale)
 {
