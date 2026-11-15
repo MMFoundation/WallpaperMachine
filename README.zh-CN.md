@@ -65,9 +65,6 @@
 brew install --cask wallpapermachine
 ```
 
-使用 Nix？[Nix 指南](docs/nix.md)介绍了 flake 软件包，以及通过 Home Manager 或
-nix-darwin 声明式配置应用的方法。
-
 接下来由首次使用引导带你完成设置，此后应用会自行更新。[安装指南](https://www.wallpapermachine.app/zh/guides/install/)配有图片，逐步介绍每一个步骤。
 
 - **开箱即用：** 内置视频壁纸 Aurora Drift、pixiv 插画、你自己的视频和图片，以及无需登录即可浏览整个创意工坊。

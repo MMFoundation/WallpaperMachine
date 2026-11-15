@@ -9,15 +9,6 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
-## 2026-11-13 — Covered-desktop sound: PR 194 review and reconnect fix
-
-- Four reconnect regressions failed before the fix, covering retained pauses and refused resumes for Mute and Reduce volume.
-- Targeted playback, preference, backup and panel checks: 169 passed, 0 failed, 0 skipped; no runtime warnings.
-- python3 scripts/test.py on main ef6c85c5 plus the final PR source: all 35 Python modules passed; 4,963 native passed, 0 failed, 70 skipped of 5,033 (Xcode 27.2).
-- The integration run used temporary test-home and path-backed preference-suite overrides to isolate the installed app.
-- Skipped: opt-in media, live Steam, reference rendering and panel snapshots. Two main-thread warnings came from unchanged VideoFormatSupportTests and AppUpdateTests cases.
-- Real coverage probes, audible output and narrow-window presentation were not exercised. No Release build, installation or desktop run.
-
 ## 2026-11-13 — Project triage and grouped GitHub Actions updates
 
 - Project triage maintains area and lifecycle labels from GitHub closing links, current-head reviews, CI, mergeability and DCO trailers; Dependabot groups weekly GitHub Actions updates.

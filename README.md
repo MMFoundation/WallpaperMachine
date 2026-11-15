@@ -73,9 +73,6 @@ Using [Homebrew](https://brew.sh)? One command does the first two steps:
 brew install --cask wallpapermachine
 ```
 
-Using Nix? The [Nix guide](docs/nix.md) covers the flake package and declarative
-configuration with Home Manager or nix-darwin.
-
 A first-run guide takes it from there, and the app updates itself from then on.
 The [install guide](https://www.wallpapermachine.app/guides/install/) walks through
 every step with pictures.
