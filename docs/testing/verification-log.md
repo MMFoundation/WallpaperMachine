@@ -25,6 +25,19 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-15 — Installed wallpaper resolution and full tags (#205)
+
+- Installed rows join cached public Workshop tags with local manifest facts, removing case-insensitive duplicates; metadata updates invalidate the row cache without creating update badges.
+- The inspector shows local video dimensions including rotation, original packaged-image dimensions or a loose scene's fixed canvas; otherwise it uses Steam's resolution tag and omits unknown dimensions.
+- Workshop details survive relaunch, remain available offline and are refreshed for a selected item when missing or day-old, independently of automatic update checks; update checks and downloads also populate the cache.
+- Deletion, reinstall, selection changes and panel closure invalidate pending detail reads; edited manifests are remeasured on library refresh.
+- Targeted native run: 63 passed, 0 failed; full gate also covered the subsequently added selection-cancellation case. Header checks covered six languages and both appearances in a 320-point column.
+- python3 scripts/test.py: 35 Python modules passed; native 5,064 passed, 0 failed, 70 skipped (opt-in checks).
+- Three runtime main-thread warnings came from VideoFormatSupportTests.testTheOpenedFilesAreKeyedByTheFileAndForgetAChangedOne, WebMOpeningTests.testAVp9FileOpensWithItsFormatSizeAndLength and AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; no warning was attributed to the added tests.
+- A read-only public Steam details request returned a 3840 x 2160 tag and all 10 tags for a scene, including Puppet Warp and Media Integration.
+- git diff --check passed; 116 local documentation link targets exist. XcodeGen regenerated the project for the two new Swift files.
+- No Release build or live desktop interaction; packed/automatic scenes and unreadable local formats depend on known Workshop resolution tags.
+
 ## 2026-11-15 — Workshop Application and Asset filters (#206)
 
 - Application and Category → Asset are visible, independent checkboxes, excluded by default; Clear restores those defaults.
@@ -116,12 +129,3 @@ Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in wind
 - The full native run reported main-thread warnings in unchanged AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy and WebMOpeningTests.testAVp9FileOpensWithItsFormatSizeAndLength; both passed. The targeted run reported no runtime warnings.
 - `git diff --check` and `python3 scripts/tests/test_doc_links.py`: passed.
 - No live desktop/lock-screen/quit cycle was performed; no Release app was built, installed or restarted. Existing incorrectly recorded still-image originals are not migrated from the lock-screen journal; shared WallpaperAgent write/reload coordination remains #199.
-
-## 2026-11-13 — Covered-desktop sound: PR 194 review and reconnect fix
-
-- Four reconnect regressions failed before the fix, covering retained pauses and refused resumes for Mute and Reduce volume.
-- Targeted playback, preference, backup and panel checks: 169 passed, 0 failed, 0 skipped; no runtime warnings.
-- python3 scripts/test.py on main ef6c85c5 plus the final PR source: all 35 Python modules passed; 4,963 native passed, 0 failed, 70 skipped of 5,033 (Xcode 27.2).
-- The integration run used temporary test-home and path-backed preference-suite overrides to isolate the installed app.
-- Skipped: opt-in media, live Steam, reference rendering and panel snapshots. Two main-thread warnings came from unchanged VideoFormatSupportTests and AppUpdateTests cases.
-- Real coverage probes, audible output and narrow-window presentation were not exercised. No Release build, installation or desktop run.

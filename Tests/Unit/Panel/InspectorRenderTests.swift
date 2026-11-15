@@ -60,6 +60,44 @@ final class InspectorRenderTests: InspectorTestCase {
 
   // MARK: Layout
 
+  func testTheHeaderShowsResolutionAndEveryTagInEveryLanguageAndAppearance() async throws {
+    let fixture = try InspectorRenderFixture()
+    try await prepare(fixture)
+    var row = try XCTUnwrap(fixture.controller.libraryRow(id: InspectorRenderFixture.selected))
+    row.resolution = "3840 × 2160"
+    row.tags = ["Scene", "3840 x 2160", "Anime", "Nature", "Everyone", "Approved", "Audio responsive", "Customizable", "作者のタグ"]
+    for language in AppLanguage.supported.map(\.tag) {
+      let languages = AppLanguageStore(defaults: TemporaryDefaults.makeForCurrentTest().defaults, systemLanguages: [language])
+      PanelLocale.shared.bind(to: languages)
+      for dark in [false, true] {
+        let size = NSSize(width: 320, height: 800)
+        let hosting = NSHostingController(rootView: AnyView(
+          InspectorHeader(row: row, applyIsPrimary: true).padding(16)
+            .environment(fixture.controller)
+            .environment(\.panelImages, fixture.controller.images)
+            .environment(\.panelIsVisible, true)
+            .panelTheme(theme: fixture.controller.theme, locale: PanelLocale.shared)))
+        hosting.sizingOptions = []
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentViewController = hosting
+        hosting.view.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        try await settle()
+        hosting.view.layoutSubtreeIfNeeded()
+        let elements = AccessibilityElement.everything(in: hosting.view)
+        let text = Set(elements.map(\.text))
+        for tag in row.tags { XCTAssertTrue(text.contains(tag), "\(language): every original tag must be visible") }
+        XCTAssertTrue(text.contains(L("Resolution")))
+        XCTAssertTrue(text.contains("3840 × 2160"))
+        XCTAssertLessThanOrEqual(hosting.sizeThatFits(in: size).width, size.width + 1)
+        XCTAssertFalse(window.isVisible)
+        window.contentViewController = nil
+        window.close()
+      }
+    }
+    await fixture.shutdown()
+  }
+
   func testTheInspectorAcceptsTheWindowItIsGivenInEveryLanguageAndAppearance() async throws {
     let fixture = try InspectorRenderFixture()
     try await prepare(fixture)

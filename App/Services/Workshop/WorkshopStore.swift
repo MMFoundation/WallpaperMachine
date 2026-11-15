@@ -696,6 +696,7 @@ final class WorkshopStore {
   func finishInstall(item: WorkshopItem, replacing: Bool, bridge: BridgeStore) async throws {
     // The files are already in the library, so the install counts even if the refresh fails.
     updates.recordInstalled(item.id)
+    updates.rememberDetails(item)
     if !replacing { bridge.supportPrompt?.recordDownload(wallpaperID: item.id) }
     do {
       try await bridge.refreshLibraryAsync()

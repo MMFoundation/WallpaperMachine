@@ -12,7 +12,7 @@ import Foundation
 /// background walk, then `onChange` asks the panel for a fresh snapshot once the walk
 /// has landed. Until then the page sees `nil` and sorts those wallpapers last.
 ///
-/// A measurement is kept until the folder's own modification date moves (a re-downloaded
+/// A measurement is kept until the folder or manifest modification date moves (a re-downloaded
 /// Workshop item replaces its files) and is checked only when the library itself was
 /// reloaded (`revision`), never per snapshot. Ids that leave the library are forgotten.
 @MainActor
@@ -29,13 +29,16 @@ final class LibraryMetricsService {
     /// boxes as Discover: the manifest's genre `tags`, its `contentrating` (Everyone,
     /// Questionable or Mature), `Approved` for staff approval, `Audio responsive` when the
     /// wallpaper declares audio processing and `Customizable` when it ships user properties
-    /// beyond the stock scheme colour. Resolution is not in a manifest, so it never appears.
+    /// beyond the stock scheme colour. Steam's additional tags are joined by the panel separately.
     var tags: [String] = []
+    /// The content's dimensions, when readable without playing it.
+    var resolution: String? = nil
     /// The manifest's words as Installed's search reads them, folded (`searchText(project:tags:)`).
     /// Never shown: the author and description are the manifest's own, untrusted text.
     var searchText = ""
     /// The folder's content modification date when it was measured.
     var stamp: Date?
+    var manifestStamp: Date? = nil
   }
 
   let libraryURL: URL
@@ -102,11 +105,12 @@ final class LibraryMetricsService {
         for id in batch.sorted() {
           guard !Task.isCancelled else { break }
           let folder = root.appendingPathComponent(id, isDirectory: true)
-          if let kept = known[id], kept.stamp != nil, Self.stamp(of: folder) == kept.stamp {
+          if let kept = known[id], kept.stamp != nil, Self.stamp(of: folder) == kept.stamp,
+             Self.stamp(of: folder.appendingPathComponent("project.json")) == kept.manifestStamp {
             results[id] = kept
           } else {
             // `.some(nil)` keeps the key: a folder that cannot be measured is an answer too.
-            results[id] = .some(Self.measure(folder: folder))
+            results[id] = .some(await Self.measure(folder: folder))
           }
         }
         return results
@@ -137,13 +141,26 @@ final class LibraryMetricsService {
   /// Walks the folder once. A folder that is missing or unreadable measures as empty
   /// with no date rather than failing, so a wallpaper the renderer lists but the file
   /// system cannot show still sorts predictably (last).
-  nonisolated static func measure(folder: URL) -> Metrics? {
+  nonisolated static func measure(folder: URL) async -> Metrics? {
     guard
       let values = try? folder.resourceValues(forKeys: [
         .isDirectoryKey, .contentModificationDateKey, .addedToDirectoryDateKey,
         .creationDateKey,
       ]), values.isDirectory == true
     else { return nil }
+    let size = folderSize(folder)
+    let manifestURL = folder.appendingPathComponent("project.json")
+    let project = LibraryResolution.readObject(manifestURL) ?? [:]
+    let approved = approved(project: project)
+    let tags = tags(project: project, approved: approved)
+    let resolution = await LibraryResolution.read(project: project, folder: folder)
+    return Metrics(
+      size: size, addedAt: values.addedToDirectoryDate ?? values.creationDate,
+      approved: approved, tags: tags, resolution: resolution, searchText: searchText(project: project, tags: tags),
+      stamp: values.contentModificationDate, manifestStamp: stamp(of: manifestURL))
+  }
+
+  nonisolated private static func folderSize(_ folder: URL) -> Int64 {
     var size: Int64 = 0
     if let enumerator = FileManager.default.enumerator(
       at: folder, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
@@ -156,23 +173,7 @@ final class LibraryMetricsService {
         size += Int64(attributes.fileSize ?? 0)
       }
     }
-    let manifest = manifest(at: folder.appendingPathComponent("project.json"))
-    return Metrics(
-      size: size, addedAt: values.addedToDirectoryDate ?? values.creationDate,
-      approved: manifest.approved, tags: manifest.tags, searchText: manifest.searchText,
-      stamp: values.contentModificationDate)
-  }
-
-  /// The manifest's Steam-facing facts and the words its search reads. A missing, oversized
-  /// or unreadable manifest is simply not approved and carries no tags or words.
-  nonisolated static func manifest(at url: URL) -> (approved: Bool, tags: [String], searchText: String) {
-    guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 16_000_000,
-      let data = try? Data(contentsOf: url),
-      let project = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    else { return (false, [], "") }
-    let approved = approved(project: project)
-    let tags = tags(project: project, approved: approved)
-    return (approved, tags, searchText(project: project, tags: tags))
+    return size
   }
 
   /// How many characters of a description the search reads, which bounds what one runaway

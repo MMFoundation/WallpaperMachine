@@ -1294,6 +1294,14 @@ updates → Check once a day** is off; **Check Now** checks at once. The result 
 kept across launches, and a failed check keeps what was known and says why beneath
 the row.
 
+Every installed item's returned details are also cached, including items without
+an update, so Installed can show their full tags and resolution tag offline
+([inspector details](control-panel.md#selection-versus-apply)). Selecting an
+installed item with missing or day-old details can read them separately; that
+read does not mark an update or change when an update check is due. Downloads
+save their details too, including when automatic checks are off. A delayed read
+cannot overwrite a newer download or restore an item that was deleted.
+
 An installed wallpaper with an update wears a download mark on its tile, matches
 **Show only → Update available** in Installed's filters, and says in its details
 when its author changed it, with **Update**. Installed's summary offers **Update N

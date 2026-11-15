@@ -439,6 +439,24 @@ the marks with the tile.
 Selecting a tile only selects it: the inspector updates and nothing changes on
 screen. Activation is explicit.
 
+The Installed inspector shows **Resolution** when known and every available tag,
+without truncating the tag list. Local dimensions are read in the background:
+the displayed video-track dimensions (including rotation), the original image
+of an imported/pixiv still, or a loose scene's fixed orthographic canvas.
+A preview image or a web viewport never supplies the wallpaper's resolution.
+When local dimensions cannot be read, the Workshop's resolution tag is used;
+otherwise the row is omitted. Packed scenes do not need to be unpacked or rendered.
+
+Workshop tags supplement the local manifest's tags and inferred facts, with
+duplicates removed without regard to case. Selecting an installed Workshop
+wallpaper reads missing or day-old public details in the background; downloads
+and update checks also supply those details. The cache survives relaunch and
+remains usable offline. A failed read leaves cached/local information visible,
+and selecting the wallpaper again or refreshing the library can retry. Only
+numeric Workshop ids are sent to Steam, even when automatic update checks are
+off. Closing the panel or switching away cancels the selection's request.
+Deleting a wallpaper clears its cached details, and a reinstall replaces them.
+
 A right click on an Installed tile opens the actions for that tile without selecting it
 first: **Apply wallpaper**, **Add to favorites** or **Remove from favorites**, then what
 the inspector's **More actions** menu offers (Preview, **Show in Finder**, **Apply to all
@@ -1009,12 +1027,13 @@ tags are not claimed to be represented by the sum of visible group counts.
   (see below), applied in the page to each wallpaper. **Show only** starts with Favorites,
   Active on target display and Update available, then Approved, Audio responsive
   and Customizable; **Type** (Scene, Video, Web) reads the wallpaper's kind; **Age
-  rating** and **Tags** read its `project.json`, which `LibraryMetricsService`
-  turns into Steam's tags (the row's `tags`: the manifest's genre tags,
+  rating** and **Tags** read cached Workshop details when known, joined with its
+  `project.json`, which `LibraryMetricsService` turns into Steam's tags
+  (the row's `tags`: the manifest's genre tags,
   `contentrating`, `Approved`, `Audio responsive` for
   `general.supportsaudioprocessing` and `Customizable` for user properties beyond
   `schemecolor`); a wallpaper without a genre counts as Unspecified. A manifest
-  carries no resolution or Workshop category, so those boxes are Discover-only.
+  carries no Workshop resolution or category, so those filter boxes remain Discover-only.
   The Show only boxes start unticked and a ticked one requires its tag; Type and Age
   rating are boxes that start ticked (a library hides nothing by default) and an unticked box hides
   every wallpaper carrying that tag, case-insensitively. Search matches the title

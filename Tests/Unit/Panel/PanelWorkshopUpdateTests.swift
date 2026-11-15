@@ -15,6 +15,26 @@ final class PanelWorkshopUpdateTests: MediaPanelTestCase {
       videoCount: UInt64(ids.count), webpageCount: 0, unknownCount: 0)
   }
 
+  func testOpeningTheInstalledInspectorLoadsDetailsAndRefreshesItsCachedRow() async throws {
+    let details = WorkshopItem(id: "123", title: "Remote title", creator: "Creator", summary: "", previewURL: nil,
+                               tags: ["Video", "3840 x 2160", "Nature", "Everyone"], size: 1, subscriptions: 0)
+    let updates = WorkshopUpdateStore(defaults: try TemporaryDefaults.make(for: self).defaults, fetch: { _ in [details] })
+    let panel = try makeBrowsingPanel(service: WorkshopDetailsStub().service, updates: updates)
+    panel.store.librarySnapshot = installed(["123"])
+    panel.store.appSnapshot.selectedWallpaperId = "123"
+    let controller = panel.controller
+    XCTAssertNil(controller.libraryRow(id: "123")?.resolution)
+    controller.start()
+    try await controller.navigate(.wallpaper)
+    _ = controller.inspectorOptions(for: "123")
+    try await waitFor { !updates.isLoadingDetails && updates.details["123"] != nil }
+    let row = try XCTUnwrap(controller.libraryRow(id: "123"))
+    XCTAssertEqual(row.resolution, "3840 x 2160")
+    XCTAssertEqual(row.tags, details.tags)
+    XCTAssertFalse(row.isUpdateAvailable)
+    controller.stop()
+  }
+
   func testOnlyAnInstalledWallpaperThatItsAuthorChangedCanBeUpdated() async throws {
     // Installed two hours ago; its author changed it an hour ago.
     let changed = WorkshopItem(
