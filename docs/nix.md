@@ -105,12 +105,23 @@ that you changed in the app.
 
 The update mode defaults to `notify` so Nix controls application updates.
 To update WallpaperMachine, update its flake input and activate your
-configuration.
+configuration. After a release is published, CI advances `nix/release.json` on
+`main` with its version and the verified disk image's SHA-256. A release that
+finishes late cannot replace a newer pin. If publication succeeds but the pin
+update fails, rerun the failed **Update the Nix release pin** job; do not
+republish the release.
 
 When enabling `launchd.enable`, disable the app's own Launch at login setting.
 The app can start immediately when you activate the configuration. Quitting it
 keeps it closed until you reopen it or log in again. An unfinished welcome
 guide or startup failure can still open the panel.
+
+The login agent uses Home Manager's copied application when
+`targets.darwin.copyApps.enable` is enabled, including a custom
+`targets.darwin.copyApps.directory`, and waits until that copy is installed.
+Otherwise it runs the package in the Nix store; Home Manager's legacy symlinked
+application resolves to the same bundle. Avoid running a separately installed
+copy at the same time.
 
 ## Install without Home Manager
 
@@ -123,3 +134,24 @@ Add the package to your nix-darwin configuration:
   ];
 }
 ```
+
+## Verification
+
+Run `nix flake check --print-build-logs` to check module evaluation, preference
+serialization and release repacking. The package checks that the copied bundle
+is unchanged, has the expected identifiers and version, contains its extension,
+and has an arm64 executable. Linux checks cover repacking and evaluation, not
+macOS startup or extension registration.
+
+Signing and notarization are verified by the release packaging workflow before
+the disk image is published. Nix preserves those bytes and does not invoke the
+host's `/usr/bin/codesign` inside its Darwin build sandbox. After
+`nix build .#wallpapermachine`, a separate macOS signature check can be run with:
+
+```sh
+/usr/bin/codesign --verify --deep --strict result/Applications/WallpaperMachine.app
+```
+
+Activating Home Manager applies real preferences and can start the app when
+`launchd.enable` is set. That activation and a real login-startup test are
+separate, explicitly authorized checks, not part of the headless gate.

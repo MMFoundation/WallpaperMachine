@@ -9,6 +9,18 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-16 — Replaceable shared state in scene scripts
+
+- Issue #216: allow a scene script to replace shared state so media visibility switches reach other scripts; no per-frame work added.
+- The new generic shared-state regression failed before the fix; all three focused shared-state tests passed afterwards.
+- Wallpaper Engine origin probe: mean pixel error 50.12 → 0.37; pixels differing by more than 48: 20.4% → 0.4% for both captures.
+- Reported wallpaper with synthetic song/audio: media panel returned from x=-1200 to x=2000; all 63 cloned spectrum bars regained width, with nonzero heights in the injected tone bands.
+- Reported wallpaper without media: reference mean error 8.14 → 7.46 and 3.79 → 3.11; unchanged background animation still prevents pixel identity.
+- python3 scripts/test.py: 35 Python modules passed; 5070 native tests passed, 0 failed, 70 skipped; 3 runtime main-thread warnings.
+- python3 scripts/check_rust.py: core, bridge, core integration and shader checks passed; five desktop-window cases excluded.
+- python3 scripts/check_renderer.py: registered checks and generated pixel/reload probes passed; optional corpus/media/energy inputs skipped.
+- Windows reference VM suspended after capture. Live player/audio capture unverified; #215 and #202 remain unresolved. No Release build or app restart.
+
 ## 2026-11-15 — Independent-display wallpaper volume and mute
 
 Issue #213: optional per-wallpaper, per-display sound choices inherit existing wallpaper defaults until set; mirror settings and temporary playback rules are preserved.

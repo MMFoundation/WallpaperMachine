@@ -6,13 +6,16 @@
   python3,
 }:
 
+let
+  release = builtins.fromJSON (builtins.readFile ./release.json);
+in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "wallpapermachine";
-  version = "1.12.0";
+  version = release.version;
 
   src = fetchurl {
     url = "https://github.com/MMFoundation/WallpaperMachine/releases/download/v${finalAttrs.version}/WallpaperMachine-${finalAttrs.version}-arm64.dmg";
-    hash = "sha256-x2LKNHkx4v9YkOKLQqKUo+1l3RJ4cZwv3hvpfDA1KH4=";
+    hash = release.hash;
   };
 
   nativeBuildInputs = [ _7zz ];
@@ -58,9 +61,6 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     with (extension / "Contents/Info.plist").open("rb") as file:
         assert plistlib.load(file)["CFBundleIdentifier"] == "app.wallpapermachine.wallpaper-extension"
     PY
-    ${lib.optionalString stdenvNoCC.hostPlatform.isDarwin ''
-      /usr/bin/codesign --verify --deep --strict "$app"
-    ''}
     runHook postInstallCheck
   '';
 

@@ -12,6 +12,7 @@ let
       launchd ? false,
       package ? testPackage,
       hostPkgs ? darwinPkgs,
+      darwinOptions ? { },
     }:
     inputs.home-manager.lib.homeManagerConfiguration {
       pkgs = hostPkgs;
@@ -21,6 +22,7 @@ let
           home.username = "nix-test";
           home.homeDirectory = "/Users/nix-test";
           home.stateVersion = "26.05";
+          targets.darwin = darwinOptions;
           programs.wallpapermachine = {
             inherit enable package;
             launchd.enable = launchd;
@@ -169,7 +171,7 @@ let
 
   agent = {
     ProgramArguments = [
-      "${testPackage}/Applications/WallpaperMachine.app/Contents/MacOS/WallpaperMachine"
+      "/Users/nix-test/Applications/Home Manager Apps/WallpaperMachine.app/Contents/MacOS/WallpaperMachine"
     ];
     EnvironmentVariables.WALLPAPER_MACHINE_PANEL_AT_LAUNCH = "0";
     RunAtLoad = true;
@@ -177,6 +179,11 @@ let
     LimitLoadToSessionType = "Aqua";
     ProcessType = "Interactive";
   };
+
+  activationOrder = map (
+    entry: entry.name
+  ) (inputs.home-manager.lib.hm.dag.topoSort hm.home.activation).result;
+  activationIndex = name: lib.lists.findFirstIndex (entry: entry == name) null activationOrder;
 
   assertions = [
     (validAssertions hm)
@@ -189,6 +196,21 @@ let
     (lib.all (
       name: nd.home-manager.users.nix-test.launchd.agents.wallpapermachine.config.${name} == agent.${name}
     ) (builtins.attrNames agent))
+    (activationIndex "copyApps" < activationIndex "setupLaunchAgents")
+    (
+      (home {
+        launchd = true;
+        darwinOptions.copyApps.directory = "Applications/My Apps";
+      }).config.launchd.agents.wallpapermachine.config.ProgramArguments
+      == [ "/Users/nix-test/Applications/My Apps/WallpaperMachine.app/Contents/MacOS/WallpaperMachine" ]
+    )
+    (
+      (home {
+        launchd = true;
+        darwinOptions.copyApps.enable = false;
+      }).config.launchd.agents.wallpapermachine.config.ProgramArguments
+      == [ "${testPackage}/Applications/WallpaperMachine.app/Contents/MacOS/WallpaperMachine" ]
+    )
     (!(hmDisabled.home.activation ? wallpapermachine))
     (!(ndDisabled.home-manager.users.nix-test.home.activation ? wallpapermachine))
     (!(hmDisabled.launchd.agents ? wallpapermachine))
