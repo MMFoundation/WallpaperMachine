@@ -280,6 +280,7 @@ struct Data {
     reconcile_witness: Option<Arc<ReconcileWitness>>,
     pause: Option<OperationPlan>,
     demand_plan: Option<OperationPlan>,
+    audio_response_plan: Option<OperationPlan>,
     close: Option<OperationPlan>,
     fps_error: Option<EngineError>,
     scale_error: Option<EngineError>,
@@ -342,6 +343,7 @@ impl ControlledEngine {
                     reconcile: None,
                     pause: None,
                     demand_plan: None,
+                    audio_response_plan: None,
                     close: None,
                     reconcile_witness: None,
                     fps_error: None,
@@ -388,6 +390,9 @@ impl ControlledEngine {
     }
     pub(crate) fn audio_capture_state(&self, handle: SceneHandle) -> Option<bool> {
         self.inner.data.lock().unwrap().controls.capture.get(&handle).copied()
+    }
+    pub(crate) fn audio_capture_demand(&self) -> AudioCaptureDemand {
+        self.inner.data.lock().unwrap().demand
     }
     pub(crate) fn shown_property_state(&self, handle: SceneHandle) -> Option<ShownPropertyState> {
         self.inner.data.lock().unwrap().controls.shown_properties.get(&handle).cloned()
@@ -548,6 +553,9 @@ impl ControlledEngine {
     }
     pub(crate) fn hold_next_demand(&self, result: Result<(), EngineError>) -> OperationControl {
         self.plan(result, |d| &mut d.demand_plan)
+    }
+    pub(crate) fn hold_next_audio_response(&self) -> OperationControl {
+        self.plan(Ok(()), |d| &mut d.audio_response_plan)
     }
     pub(crate) fn hold_next_close(&self, result: Result<(), EngineError>) -> OperationControl {
         self.plan(result, |d| &mut d.close)
@@ -1070,17 +1078,18 @@ impl EngineFacade for ControlledEngine {
         )
     }
     fn set_audio_response_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()> {
-        self.mutation(
-            move |phase| EngineObservation::AudioResponse {
-                handle,
-                enabled,
-                phase,
-            },
-            move |d| selected_setter_mutation(d, SelectedSetter::AudioResponse, handle, |d| {
-                template_mut(d, handle, |t| t.audio_response_enabled = enabled);
-                Ok(())
-            }),
-        )
+        let engine = self.clone();
+        Box::pin(async move {
+            let plan = engine.inner.data.lock().unwrap().audio_response_plan.take();
+            release_plan(plan).await?;
+            engine.mutation(
+                move |phase| EngineObservation::AudioResponse { handle, enabled, phase },
+                move |d| selected_setter_mutation(d, SelectedSetter::AudioResponse, handle, |d| {
+                    template_mut(d, handle, |t| t.audio_response_enabled = enabled);
+                    Ok(())
+                }),
+            ).await
+        })
     }
     fn set_media_integration_enabled(
         &self,
@@ -1165,6 +1174,14 @@ impl EngineFacade for ControlledEngine {
                     },
                 });
             result
+        })
+    }
+
+    fn audio_capture_registered(&self, handle: SceneHandle) -> EngineFuture<bool> {
+        let engine = self.clone();
+        Box::pin(async move {
+            Ok(engine.inner.data.lock().unwrap().controls.capture
+                .get(&handle).copied().unwrap_or(false))
         })
     }
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()> {

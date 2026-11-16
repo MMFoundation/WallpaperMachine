@@ -11,7 +11,7 @@ final class SceneMediaSink {
     private let session: DesktopMediaSession
     private let submit: (String) async throws -> Void
     private let applyArtwork: (UInt32, UInt32, Data) async throws -> Void
-    private let fetchHandles: () async -> Set<UInt64>
+    private let fetchScenes: () async -> [UInt64: UInt64]
     private let nextShortcut: (() async throws -> BridgeUserShortcut)?
     /// Waits for wallpaper button presses. A long wait, not a poll: it returns
     /// only when a press arrives, so an untouched wallpaper costs nothing.
@@ -42,10 +42,9 @@ final class SceneMediaSink {
     /// engine in publication order rather than in whatever order the engine
     /// happened to answer.
     private var deliveryChain: Task<Void, Never>?
-    /// Scenes that have already been shown the current state. A scene is born
-    /// with none of it, so a handle absent from this set is what makes a
-    /// replay necessary — not the moment the first consumer appears.
-    private var fedHandles: Set<UInt64> = []
+    /// Renderer load IDs already fed on each display handle. A replacement
+    /// renderer keeps the handle but starts without the previous media state.
+    private var fedScenes: [UInt64: UInt64] = [:]
     /// Reconciles can overlap: a pause and a resume each start one, and the
     /// bridge call is awaited. Applying a stale answer would re-open the
     /// provider after a pause, so only the newest reconcile may act.
@@ -57,13 +56,13 @@ final class SceneMediaSink {
         session: DesktopMediaSession,
         submit: @escaping (String) async throws -> Void,
         applyArtwork: @escaping (UInt32, UInt32, Data) async throws -> Void,
-        fetchHandles: @escaping () async -> Set<UInt64>,
+        fetchScenes: @escaping () async -> [UInt64: UInt64],
         nextShortcut: (() async throws -> BridgeUserShortcut)? = nil
     ) {
         self.session = session
         self.submit = submit
         self.applyArtwork = applyArtwork
-        self.fetchHandles = fetchHandles
+        self.fetchScenes = fetchScenes
         self.nextShortcut = nextShortcut
         session.relay.addListener(listenerKey) { [weak self] event in
             self?.deliver(event)
@@ -127,21 +126,21 @@ final class SceneMediaSink {
         let generation = self.generation
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let handles = await self.fetchHandles()
+            let scenes = await self.fetchScenes()
             guard generation == self.generation else { return }
-            self.setConsuming(!handles.isEmpty)
+            self.setConsuming(!scenes.isEmpty)
             // Switching wallpapers, adding a display, rebuilding a scene or
-            // resuming after a pause produces a handle that has seen nothing.
+            // resuming after a pause produces an instance that has seen nothing.
             // Replaying reaches every opted-in scene, not only the new one,
             // because the engine has no per-handle submit here; re-sending an
             // unchanged state is idempotent, and the alternative is a new
             // display staying blank until the track changes.
-            if !handles.subtracting(self.fedHandles).isEmpty {
+            if scenes.contains(where: { self.fedScenes[$0.key] != $0.value }) {
                 for event in self.session.relay.currentEvents(userEnabled: true) {
                     self.deliver(event)
                 }
             }
-            self.fedHandles = handles
+            self.fedScenes = scenes
         }
     }
 
@@ -154,7 +153,7 @@ final class SceneMediaSink {
         generation &+= 1
         setConsuming(false)
         session.relay.removeListener(listenerKey)
-        fedHandles = []
+        fedScenes = [:]
     }
 
     /// Moves the epoch only when the answer actually changed, so an unrelated

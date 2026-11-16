@@ -112,6 +112,7 @@ pub trait EngineFacade: Send + Sync + 'static {
     /// Registers or releases one scene as a system-audio capture consumer.
     /// The scene's own audio-response switch is `set_audio_response_enabled`.
     fn set_audio_capture_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()>;
+    fn audio_capture_registered(&self, handle: SceneHandle) -> EngineFuture<bool>;
     fn set_scaling_mode(&self, handle: SceneHandle, mode: ScalingMode) -> EngineFuture<()>;
     fn set_scaling_factor(&self, handle: SceneHandle, factor: f64) -> EngineFuture<()>;
     /// Live-moves the presented wallpaper inside the room its display leaves
@@ -773,6 +774,14 @@ impl EngineFacade for RealEngineFacade {
         let audio_mutation = self.audio_mutation.clone();
         async move {
             mutate_audio(&audio_mutation, || audio_capture.mailbox().enable_scene(handle, enabled)).await
+        }.boxed()
+    }
+
+    fn audio_capture_registered(&self, handle: SceneHandle) -> EngineFuture<bool> {
+        let audio_capture = self.audio_capture.clone();
+        let audio_mutation = self.audio_mutation.clone();
+        async move {
+            mutate_audio(&audio_mutation, || audio_capture.mailbox().scene_registered(handle)).await
         }.boxed()
     }
 
@@ -2519,6 +2528,15 @@ impl EngineFacade for FakeEngineFacade {
         .boxed()
     }
 
+    fn audio_capture_registered(&self, handle: SceneHandle) -> EngineFuture<bool> {
+        let fake = self.clone();
+        async move {
+            Ok(fake.audio_capture_calls.snapshot().iter().rev()
+                .find(|(registered, _)| *registered == handle)
+                .is_some_and(|(_, enabled)| *enabled))
+        }.boxed()
+    }
+
     fn set_audio_capture_demand(&self, demand: AudioCaptureDemand) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
@@ -2957,6 +2975,7 @@ mod first_frame_tests {
         wallpaper_core::SceneWindowEntry {
             display_id: scene.display.display_id,
             handle: SceneHandle::new(90),
+            load_id: 0,
             desc: scene.clone(),
             window_number: Some(4_242),
             parked,

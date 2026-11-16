@@ -1622,6 +1622,8 @@ public protocol WallpaperBridgeProtocol : AnyObject {
 
     func systemMediaSceneHandles() async throws  -> [UInt64]
 
+    func systemMediaScenes() async throws  -> [BridgeSystemMediaScene]
+
     /**
      * Publishes a bounded player snapshot; delivery rechecks per-wallpaper consent.
      */
@@ -4103,6 +4105,23 @@ open func systemMediaSceneHandles()async throws  -> [UInt64] {
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceUInt64.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+
+open func systemMediaScenes()async throws  -> [BridgeSystemMediaScene] {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_system_media_scenes(
+                    self.uniffiClonePointer()
+
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeBridgeSystemMediaScene.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -9336,6 +9355,72 @@ public func FfiConverterTypeBridgeSurfaceCheck_lower(_ value: BridgeSurfaceCheck
 }
 
 
+public struct BridgeSystemMediaScene {
+    public var handle: UInt64
+    public var loadId: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(handle: UInt64, loadId: UInt64) {
+        self.handle = handle
+        self.loadId = loadId
+    }
+}
+
+
+
+extension BridgeSystemMediaScene: Equatable, Hashable {
+    public static func ==(lhs: BridgeSystemMediaScene, rhs: BridgeSystemMediaScene) -> Bool {
+        if lhs.handle != rhs.handle {
+            return false
+        }
+        if lhs.loadId != rhs.loadId {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(handle)
+        hasher.combine(loadId)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBridgeSystemMediaScene: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeSystemMediaScene {
+        return
+            try BridgeSystemMediaScene(
+                handle: FfiConverterUInt64.read(from: &buf),
+                loadId: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BridgeSystemMediaScene, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.handle, into: &buf)
+        FfiConverterUInt64.write(value.loadId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeSystemMediaScene_lift(_ buf: RustBuffer) throws -> BridgeSystemMediaScene {
+    return try FfiConverterTypeBridgeSystemMediaScene.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeSystemMediaScene_lower(_ value: BridgeSystemMediaScene) -> RustBuffer {
+    return FfiConverterTypeBridgeSystemMediaScene.lower(value)
+}
+
+
 /**
  * One `engine.openUserShortcut` request from a running wallpaper.
  *
@@ -12686,6 +12771,31 @@ fileprivate struct FfiConverterSequenceTypeBridgeSurfaceCheck: FfiConverterRustB
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeBridgeSystemMediaScene: FfiConverterRustBuffer {
+    typealias SwiftType = [BridgeSystemMediaScene]
+
+    public static func write(_ value: [BridgeSystemMediaScene], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBridgeSystemMediaScene.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [BridgeSystemMediaScene] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [BridgeSystemMediaScene]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBridgeSystemMediaScene.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeBridgeVideoBackendReport: FfiConverterRustBuffer {
     typealias SwiftType = [BridgeVideoBackendReport]
 
@@ -13179,6 +13289,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_system_media_scene_handles() != 58499) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_system_media_scenes() != 29418) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_update_scene_media() != 57302) {

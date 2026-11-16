@@ -9,6 +9,41 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-15 — Retry native selection before a raced store write
+
+Refs #198. This implements bounded pre-write retries; historical-Space scaling and main-actor work remain open.
+
+- Regression proof: five new or updated race scenarios failed on the previous implementation.
+- Targeted selection, service and shared-store suites: 187 passed; focused restoration and reload checks: 2 passed.
+- python3 scripts/test.py: all 35 Python test modules passed; 5,069 native tests passed, 0 failed, 70 skipped; two runtime main-thread warnings.
+- An earlier parallel gate timed out in the Workshop filter layout matrix. Serial diagnosis also exposed a poster assertion before publication finished; test-only fixes wait for publication, traverse the accessibility tree once and split the appearance matrix.
+- git diff --check and scripts/tests/test_doc_links.py: passed.
+- Synthetic stores and injected services only. No live wallpaper or lock-screen test, Release build, app installation or restart.
+
+## 2026-11-15 — Installed wallpaper resolution and full tags (#205)
+
+- Installed rows join cached public Workshop tags with local manifest facts, removing case-insensitive duplicates; metadata updates invalidate the row cache without creating update badges.
+- The inspector shows local video dimensions including rotation, original packaged-image dimensions or a loose scene's fixed canvas; otherwise it uses Steam's resolution tag and omits unknown dimensions.
+- Workshop details survive relaunch, remain available offline and are refreshed for a selected item when missing or day-old, independently of automatic update checks; update checks and downloads also populate the cache.
+- Deletion, reinstall, selection changes and panel closure invalidate pending detail reads; edited manifests are remeasured on library refresh.
+- Targeted native run: 63 passed, 0 failed; full gate also covered the subsequently added selection-cancellation case. Header checks covered six languages and both appearances in a 320-point column.
+- python3 scripts/test.py: 35 Python modules passed; native 5,064 passed, 0 failed, 70 skipped (opt-in checks).
+- Three runtime main-thread warnings came from VideoFormatSupportTests.testTheOpenedFilesAreKeyedByTheFileAndForgetAChangedOne, WebMOpeningTests.testAVp9FileOpensWithItsFormatSizeAndLength and AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; no warning was attributed to the added tests.
+- A read-only public Steam details request returned a 3840 x 2160 tag and all 10 tags for a scene, including Puppet Warp and Media Integration.
+- git diff --check passed; 116 local documentation link targets exist. XcodeGen regenerated the project for the two new Swift files.
+- No Release build or live desktop interaction; packed/automatic scenes and unreadable local formats depend on known Workshop resolution tags.
+
+## 2026-11-15 — Workshop Application and Asset filters (#206)
+
+- Application and Category → Asset are visible, independent checkboxes, excluded by default; Clear restores those defaults.
+- Regression first: the previous implementation failed three targeted tests because the options were absent.
+- Targeted filter, browser model and download-policy tests passed; the added offscreen layout case passed in all six shipped languages, both appearances and 760×560 / 1240×800 windows.
+- python3 scripts/test.py: 35 Python modules passed; native tests 5,050 passed, 0 failed, 70 skipped (opt-in checks).
+- One runtime warning came from AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy: a method was called on the main thread. No warning was attributed to the filter tests.
+- Read-only anonymous Steam queries: Asset returned 30 tagged rows and a total of 1,290; Application returned no rows, so live Application results were not verified.
+- git diff --check and 17 local link targets in the owning Workshop document passed.
+- No desktop run or Release build; live visual interaction and Application search results remain unverified.
+
 ## 2026-11-14 — Continue playback after deleting wallpapers (#207)
 
 - Deleting an active wallpaper now restores that display’s recent playable wallpaper or continues its playlist; batch exclusions, mirrors, failed trash moves and failed replacements are covered.

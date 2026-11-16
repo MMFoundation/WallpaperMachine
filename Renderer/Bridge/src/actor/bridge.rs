@@ -1628,6 +1628,36 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
     }
 
+    async fn sync_audio_capture(&self, handles: Vec<SceneHandle>) -> Result<(), BridgeError> {
+        let displays = self.engine.display_snapshot();
+        let scenes = self
+            .activation_inputs(&displays, self.playback_paused())
+            .build()
+            .unwrap_or_default();
+        let mut first_error = None;
+        for handle in handles {
+            let Some(display_id) = displays
+                .iter()
+                .find(|display| display.handle == Some(handle))
+                .map(|display| display.desc.display_id)
+            else {
+                continue;
+            };
+            let response_enabled = scenes
+                .iter()
+                .find(|scene| scene.display.display_id == display_id)
+                .is_some_and(|scene| scene.audio_response_enabled);
+            if let Err(error) = register_audio_capture(&self.engine, handle, response_enabled).await {
+                first_error.get_or_insert_with(|| BridgeError::engine(error.to_string()));
+            }
+        }
+        let demand_result = self.engine
+            .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
+            .await
+            .map_err(|error| BridgeError::engine(error.to_string()));
+        first_error.map_or(demand_result, Err)
+    }
+
     /// Wallpapers that enable audio response, whose scene reads audio and that
     /// are not paused for their own display, counting subscribed web pages
     /// alongside scenes. This is the same rule the capture tap follows,
@@ -2902,33 +2932,7 @@ impl<E: EngineFacade + Clone> Message<AudioRequirementChanged> for BridgeActor<E
         msg: AudioRequirementChanged,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let displays = self.engine.display_snapshot();
-        let scenes = self
-            .activation_inputs(&displays, self.playback_paused())
-            .build()
-            .unwrap_or_default();
-        for handle in msg.handles {
-            // A handle no display shows any more was already released when
-            // its scene went away.
-            let Some(display_id) = displays
-                .iter()
-                .find(|display| display.handle == Some(handle))
-                .map(|display| display.desc.display_id)
-            else {
-                continue;
-            };
-            let response_enabled = scenes
-                .iter()
-                .find(|scene| scene.display.display_id == display_id)
-                .is_some_and(|scene| scene.audio_response_enabled);
-            register_audio_capture(&self.engine, handle, response_enabled)
-                .await
-                .map_err(|error| BridgeError::engine(error.to_string()))?;
-        }
-        self.engine
-            .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
-            .await
-            .map_err(|error| BridgeError::engine(error.to_string()))
+        self.sync_audio_capture(msg.handles).await
     }
 }
 
@@ -3142,6 +3146,24 @@ impl<E: EngineFacade + Clone> Message<GetSystemMediaSceneHandles> for BridgeActo
             .into_iter()
             .map(SceneHandle::raw)
             .collect())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<messages::GetSystemMediaScenes> for BridgeActor<E> {
+    type Reply = messages::GetSystemMediaScenesReply;
+
+    async fn handle(
+        &mut self,
+        _msg: messages::GetSystemMediaScenes,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let handles: HashSet<_> = self.media_scene_handles().into_iter().collect();
+        Ok(self.engine.scene_windows().into_iter()
+            .filter(|scene| !scene.parked && handles.contains(&scene.handle))
+            .map(|scene| crate::api::BridgeSystemMediaScene {
+                handle: scene.handle.raw(),
+                load_id: scene.load_id,
+            }).collect())
     }
 }
 
@@ -3605,12 +3627,12 @@ impl<E: EngineFacade + Clone> Message<SetAudioResponseEnabled> for BridgeActor<E
                     break;
                 }
             }
-            if result.is_err() {
+            if let Err(BridgeError::Error { message, .. }) = &mut result {
                 for handle in handles {
                     if let Err(error) =
                         register_audio_capture(&engine, handle, previous_enabled).await
                     {
-                        log::warn!("could not restore audio response after failed change: {error}");
+                        message.push_str(&format!("; {error}"));
                     }
                 }
             }
@@ -3639,26 +3661,30 @@ impl<E: EngineFacade + Clone> Message<CompleteAudioResponse> for BridgeActor<E> 
             self.engine.set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
                 .await.map_err(|error| BridgeError::engine(error.to_string()))
         } else { Ok(()) };
-        let demand_failed = demand_result.is_err();
-        if let Err(error) = msg.result.and(demand_result) {
-            let config = self
-                .state
-                .wallpaper_draft_mut(&msg.wallpaper_id)?
-                .set_audio_response_enabled_immediate(msg.previous_enabled);
-            self.save_wallpaper(msg.wallpaper_id.clone(), config)?;
-            if demand_failed {
-                for handle in self.wallpaper_handles(&msg.wallpaper_id, true) {
-                    if let Err(rollback) = register_audio_capture(&self.engine, handle, msg.previous_enabled).await {
-                        log::warn!("could not restore audio registration: {rollback}");
+        if let Err(BridgeError::Error { kind, mut message }) = msg.result.and(demand_result) {
+            match self.state.wallpaper_draft_mut(&msg.wallpaper_id) {
+                Ok(draft) => {
+                    let config = draft.set_audio_response_enabled_immediate(msg.previous_enabled);
+                    if let Some(store) = &self.config_store {
+                        if let Err(rollback) = store.save_wallpaper(&config) {
+                            message.push_str(&format!("; {rollback}"));
+                        }
                     }
+                    self.state.wallpaper_configs.insert(msg.wallpaper_id.clone(), config);
+                }
+                Err(rollback) => message.push_str(&format!("; {rollback}")),
+            }
+            self.invalidate_operations();
+            for handle in self.wallpaper_handles(&msg.wallpaper_id, true) {
+                if let Err(rollback) = register_audio_capture(&self.engine, handle, msg.previous_enabled).await {
+                    message.push_str(&format!("; {rollback}"));
                 }
             }
             if let Err(rollback) = self.engine
                 .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused())).await {
-                log::warn!("could not restore audio demand: {rollback}");
+                message.push_str(&format!("; {rollback}"));
             }
-            self.invalidate_operations();
-            return Err(error);
+            return Err(BridgeError::Error { kind, message });
         }
         self.wallpaper_bundle(msg.wallpaper_id)
     }

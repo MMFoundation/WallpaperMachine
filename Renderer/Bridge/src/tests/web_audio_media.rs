@@ -747,6 +747,53 @@ async fn scene_media_handles_follow_consent_so_nothing_reads_the_player_without_
     );
 }
 
+#[tokio::test]
+async fn media_scene_instances_follow_reloads_consent_and_presentation() {
+    let engine = FakeEngineFacade::default();
+    let mut display = display_snapshot(7);
+    display.handle = Some(SceneHandle::new(11));
+    engine.set_snapshot(vec![display]);
+    let bridge = BridgeBuilder::new(engine.clone())
+        .with_state(crate::actor::state::BridgeActorState::default()).build().unwrap();
+    bridge.inject_scene_wallpaper_config_for_test("100", "Scene").await;
+    bridge.set_display_config_enabled("100".into(), "7".into(), true).await.unwrap();
+    bridge.apply_wallpaper_options("100".into(), true).await.unwrap();
+    let mut scene = wallpaper_core::SceneWindowEntry {
+        display_id: 7,
+        handle: SceneHandle::new(11),
+        load_id: 101,
+        desc: engine.rendered_scenes()[0].clone(),
+        window_number: Some(17),
+        parked: false,
+        ready: true,
+    };
+    engine.set_scene_windows(vec![scene.clone()]);
+    let first = bridge.system_media_scenes().await.unwrap();
+    assert_eq!(first, vec![crate::api::BridgeSystemMediaScene { handle: 11, load_id: 101 }]);
+
+    scene.load_id = 102;
+    engine.set_scene_windows(vec![scene.clone()]);
+    let replacement = bridge.system_media_scenes().await.unwrap();
+    assert_ne!(replacement, first);
+    assert_eq!(replacement[0].handle, first[0].handle);
+
+    bridge.set_display_presentation_suspended("7".into(), true).await.unwrap();
+    assert!(bridge.system_media_scenes().await.unwrap().is_empty());
+    bridge.set_display_presentation_suspended("7".into(), false).await.unwrap();
+    assert_eq!(bridge.system_media_scenes().await.unwrap(), replacement);
+
+    bridge.set_media_integration_enabled("100".into(), false).await.unwrap();
+    assert!(bridge.system_media_scenes().await.unwrap().is_empty());
+    bridge.set_media_integration_enabled("100".into(), true).await.unwrap();
+    assert_eq!(bridge.system_media_scenes().await.unwrap(), replacement);
+
+    scene.parked = true;
+    engine.set_scene_windows(vec![scene]);
+    assert!(bridge.system_media_scenes().await.unwrap().is_empty());
+    engine.set_scene_windows(Vec::new());
+    assert!(bridge.system_media_scenes().await.unwrap().is_empty());
+}
+
 /// Consent says a wallpaper *may* receive media. It does not say anything is
 /// there to receive it.
 ///
