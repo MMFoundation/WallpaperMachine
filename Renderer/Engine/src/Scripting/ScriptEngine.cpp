@@ -1018,8 +1018,9 @@ constexpr char kSettingMarker = '\x03';
 // The prologue shares the first line with the text so line numbers stay the author's.
 std::string WrapScript(const std::string& body) {
     std::string wrapped =
-        "(function(thisLayer,thisObject,thisScene,createScriptProperties,scriptProperties,"
+        "(function(thisScene,createScriptProperties,scriptProperties,"
         "__wmNs,__wmNamed,__wmHooks){"
+        "with(__wmHooks.scope){return(function(){"
         "__wmHooks.wid=function(){try{return __workshopId}catch(__wmE){return undefined}};";
     wrapped += body;
     wrapped += "\n;return{";
@@ -1028,7 +1029,7 @@ std::string WrapScript(const std::string& body) {
         if (i != 0) wrapped += ',';
         wrapped += name + ":typeof " + name + "==='function'?" + name + ":void 0";
     }
-    wrapped += "}})";
+    wrapped += "}})()}})";
     return wrapped;
 }
 

@@ -516,6 +516,22 @@ Playback, backend, host and startup areas are in
 
 ## Scene scripts and property bindings
 
+- **Shared helper caller context** —
+  `TextScripts.SharedListenerConstructorsCaptureTheRegisteringTextLayer` in
+  `text_object_behavior_test` keeps two timer-driven captions updating independently
+  through a shared listener constructor, while an explicitly saved layer reference
+  still targets its original layer. In `script_runtime_compat_test`,
+  `SharedHelpersUseCallbackOwnersAndRestoreNestedCallers` covers timers, registered
+  events, nested dispatch and exception restoration;
+  `PromiseContinuationsKeepTheRegisteringProgramContext` covers immediate async
+  continuation and a Promise resolved by another script, and
+  `LocalDeclarationsCanShadowContextualHostNames` preserves ordinary lexical
+  shadowing. A Wallpaper Engine probe
+  confirms that shared functions/constructors see the calling layer, a saved
+  reference stays saved, timers and Promise handlers see their registering layer,
+  and an ordinary cross-script callback sees its caller. The reported clock now
+  replaces its authored placeholders with a live date, time and weekday.
+
 - **Custom ModelData geometry** — `ScriptModelData.*` and
   `ModelDataGeometry.*` in `scenescript_behavior_test` exercise typed-array offsets,
   exact UInt16 triangle counts, shared updates, dynamic-buffer checks, replacement
