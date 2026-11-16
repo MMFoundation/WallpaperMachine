@@ -229,6 +229,11 @@ path. A test that passes alone but fails in the gate is the symptom; reproduce
 it with `python3 scripts/test.py --serial` and fix the shared state rather than
 the scheduling. UI runs are always serial: they drive one desktop.
 
+Lock-screen readiness-timeout fixtures also inject `runningExtensionBundles`:
+the live default can find the installed app's extension outside the test host.
+That selects different-copy repair and republishes the activation instead of
+reporting the intended first-frame timeout, even in an isolated test run.
+
 The Test workflow's `native` job runs `--serial` too: on hosted macOS runners serial
 costs almost no wall clock (the step's comment in `.github/workflows/test.yml` has the
 timings), and the `test-logs-<run id>-native` artifact carries the run's crash and

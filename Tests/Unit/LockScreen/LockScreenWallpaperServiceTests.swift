@@ -348,7 +348,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         try data.write(to: file, options: .atomic)
         let configuration = try JSONDecoder().decode(LockScreenConfiguration.self, from: data)
         if !configuration.scenes(for: .lockScreen).isEmpty { lockPublications.append(configuration.revision) }
-      }, readinessTimeout: 2)
+      }, runningExtensionBundles: { [] }, readinessTimeout: 2)
     service.setWallpaper("lock", lockScreen: true)
     service.setWallpaper("saver", lockScreen: false)
     service.setEnabled(true)
