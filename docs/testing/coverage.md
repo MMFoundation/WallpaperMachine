@@ -881,6 +881,9 @@ or depend on a second physical monitor.
   latest-source start on resume. These are callback/policy tests, not real hosted
   CAContext, GPU or energy measurements. Service regressions retain a live role's
   watch while excluding a handled exit from stale readiness files in that revision.
+  Initial-activation disable tests hold back the first frame, remove the display
+  UUID, disable each mode in turn, and verify immediate restoration of only that
+  native choice. The surviving lock screen remains unconfirmed until it draws.
 
 - `LockScreenWallpaperTests` (selection journal) — per-display ownership with
   independent originals; external Desktop changes survive; a reload failure

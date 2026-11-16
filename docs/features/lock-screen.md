@@ -292,6 +292,10 @@ starts a new attempt, and late reports for the abandoned revision cannot overwri
 the screen saver's state. Retry preserves the last committed display mapping, and
 turning the screen saver off restores its Idle choice immediately even if a display
 UUID is temporarily unavailable during wake.
+The published display mapping is kept before first-frame readiness, so disabling
+either mode during the initial activation wait also restores its native choice
+without waiting for a display UUID to return. A surviving lock-screen selection
+keeps its original readiness deadline and is not reported enabled before a frame.
 
 A Desktop selection with no recoverable original is also a lock-screen-only
 failure: when Idle can still be selected, the screen saver stays on and keeps

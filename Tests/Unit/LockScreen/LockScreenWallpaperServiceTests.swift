@@ -260,6 +260,64 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testSaverDisableBeforeInitialReadinessDoesNotWaitForDisplayUUID() async throws {
+    try await checkDisableBeforeReadiness(lockScreen: false)
+  }
+
+  @MainActor
+  func testLockDisableBeforeInitialReadinessKeepsIndependentSaverWithoutDisplayUUID() async throws {
+    try await checkDisableBeforeReadiness(lockScreen: true)
+  }
+
+  @MainActor
+  private func checkDisableBeforeReadiness(lockScreen: Bool) async throws {
+    var uuid: String? = "one"
+    var record = scene()
+    record.displayId = 1
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      wallpaperScenes: { id in
+        var source = record
+        source.wallpaperId = id
+        source.title = id
+        return [source]
+      },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in uuid }, readinessTimeout: 5)
+    service.setWallpaper("lock", lockScreen: true)
+    service.setWallpaper("saver", lockScreen: false)
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("both native selections before their first frame") {
+      service.isBusy && (try? self.selectedProvider("Desktop")) == LockScreenConfiguration.extensionIdentifier
+        && (try? self.selectedProvider("Idle")) == LockScreenConfiguration.extensionIdentifier
+    }
+    XCTAssertFalse(service.isEnabled)
+    uuid = nil
+    if lockScreen { service.setEnabled(false) }
+    else { service.setScreenSaverEnabled(false) }
+    await waitFor("disable without a display UUID") { !service.isBusy }
+    let configuration = try publishedConfiguration()
+    XCTAssertEqual(configuration.lockScreenEnabled, !lockScreen)
+    XCTAssertEqual(configuration.screenSaverEnabled, lockScreen)
+    XCTAssertEqual(try selectedProvider("Desktop"), lockScreen ? "display-one-desktop" : LockScreenConfiguration.extensionIdentifier)
+    XCTAssertEqual(try selectedProvider("Idle"), lockScreen ? LockScreenConfiguration.extensionIdentifier : "display-one-idle")
+    XCTAssertFalse(service.isEnabled, "a surviving Desktop selection is not confirmed before a frame")
+    XCTAssertEqual(service.screenSaverEnabled, lockScreen)
+    XCTAssertNil(service.errorMessage)
+    XCTAssertNil(service.screenSaverError)
+    uuid = "one"
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    service.refresh()
+    await waitFor("healthy mode after the display UUID returns") { !service.isBusy }
+    XCTAssertEqual(service.isEnabled, !lockScreen)
+    XCTAssertEqual(service.screenSaverEnabled, lockScreen)
+    try await service.shutdown()
+  }
+
+  @MainActor
   func testUnavailableLockSourceKeepsIndependentSaverRunning() async throws {
     try await checkIndependentSourceFailure(lockScreen: true)
   }

@@ -25,6 +25,13 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-16 — Disable native modes before initial readiness (#193)
+
+- Published display mappings are retained separately from successful-readiness inputs. Either native mode can be disabled during initial activation without a current display UUID, while preserving the other selection and its outstanding first-frame deadline.
+- python3 scripts/test.py --only LockScreenWallpaperServiceTests: 89 passed, 0 failed, 0 skipped; the two new cases withhold initial readiness and then remove the UUID before disabling each independent mode.
+- python3 scripts/test.py: all Python modules passed; 5100 native tests passed, 0 failed, 70 opt-in tests skipped; two runtime warnings were reported.
+- The native gate used the Captain-authorized serial Mac slot, which was released afterward. No renderer/Rust changes or gates; no desktop actions, Release build or installation. This gate predates the separate explicit-error acknowledgement correction.
+
 ## 2026-11-16 — Native source lifecycle and inactive preparation fixes (#193)
 
 - Revision-scoped handled exits cannot rearm a stale PID; the existing live-survivor policy remains unchanged. Pending acquire replies survive renderer replacement and complete once for the current generation.
@@ -120,12 +127,3 @@ Refs #198. This implements bounded pre-write retries; historical-Space scaling a
 - Final python3 scripts/test.py: all Python suites passed; 5048 native tests passed, 0 failed, 70 opt-in tests skipped.
 - Three main-thread runtime warnings were attributed to existing video-decoder, video-format and update-signature tests; all passed.
 - Deletion confirmation and playback-recovery errors are translated into all six app languages. No live desktop check or Release build.
-
-## 2026-11-14 — Recover orphaned lock-screen selections (#204)
-
-- Reproduced both regressions before the fix: startup skipped archived originals without a live journal, and a Desktop recovery error disabled an otherwise usable screen saver.
-- Targeted LockScreenWallpaperTests and LockScreenWallpaperServiceTests: 157 passed; two additional recovery and startup integration regressions also passed.
-- python3 scripts/test.py: all Python suites passed; 5032 native tests passed, 0 failed, 70 opt-in tests skipped.
-- One native runtime warning came from AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; no test failed.
-- Recovery preserves manual and foreign selections, journals a verified system-image fallback before writing, and runs the orphan scan only during recovery.
-- No live lock-screen or screen-saver run and no Release build; the reporter’s exact system wallpaper store was not included in the diagnostics.

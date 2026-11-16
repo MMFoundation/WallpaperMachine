@@ -70,6 +70,7 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private var stopping = false
   @ObservationIgnored private(set) var ownsDesktopProvider = false
   @ObservationIgnored private var lastInputs: [LockScreenPublishInput]?
+  @ObservationIgnored private var publishedInputs: [LockScreenPublishInput]?
   @ObservationIgnored private var lastContentRevision: UInt64?
   @ObservationIgnored private let contentRevision: () -> UInt64
   @ObservationIgnored private var lastLockScreenRequested: Bool?
@@ -77,7 +78,7 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private var published: LockScreenConfiguration?
   /// The published activation whose first frame has not arrived, and when the wait for it gives
   /// up. A refresh that interrupts the wait waits on for the same revision until that deadline.
-  @ObservationIgnored private var unconfirmed: (revision: String, deadline: Date)?
+  @ObservationIgnored private var unconfirmed: (revision: String, deadline: Date?)?
   @ObservationIgnored private var lockScreenActivationError: String?
   @ObservationIgnored private var lockScreenSourceError: String?
   @ObservationIgnored private var screenSaverSourceError: String?
@@ -455,10 +456,10 @@ final class LockScreenWallpaperService {
       // that would hand its lock screen back to macOS just before the user wakes it. Asked
       // only when a display left: the session's state is a window-server round trip, and
       // the monitor's steady ticks find every display still named.
-      if let lastInputs, let published {
+      if let publishedInputs, let published {
         let named = Set(records.map { $0.1.displayId })
         let active = Set((published.scenes(for: .lockScreen) + published.scenes(for: .screenSaver)).map(\.displayID))
-        let departed = lastInputs.map(\.displayID).filter { active.contains($0) && !named.contains($0) }
+        let departed = publishedInputs.map(\.displayID).filter { active.contains($0) && !named.contains($0) }
         if !departed.isEmpty, displaysAreAway() {
           AppLog.debug("Native wallpaper topology held: display(s) \(departed) left while the Mac is locked or its displays sleep")
           return
@@ -592,6 +593,7 @@ final class LockScreenWallpaperService {
         // those processes before the notification can replace their readiness files.
         retireRendererWatches()
         try publish(configuration)
+        unconfirmed = configuration.lockScreenEnabled ? (configuration.revision, nil) : nil
         extensionPreparation = nil
         LockScreenAssetPublisher.collectGarbage(
           exchange: root, keeping: prepared.referencedRevisions)
@@ -713,6 +715,7 @@ final class LockScreenWallpaperService {
   private func applySelection(
     _ configuration: LockScreenConfiguration, inputs: [LockScreenPublishInput]
   ) async throws {
+    publishedInputs = inputs
     let desktopIDs = Set(configuration.scenes(for: .lockScreen).map(\.displayID))
     let saverIDs = Set(configuration.scenes(for: .screenSaver).map(\.displayID))
     try await selection.synchronize(
@@ -723,7 +726,7 @@ final class LockScreenWallpaperService {
   }
 
   private func relinquishModes(lockScreen: Bool, screenSaver: Bool) async throws {
-    guard var committed = published, let lastInputs,
+    guard var committed = published, let publishedInputs,
       (committed.lockScreenEnabled && !lockScreen) || (committed.screenSaverEnabled && !screenSaver)
     else { return }
     committed.revision = UUID().uuidString
@@ -735,7 +738,12 @@ final class LockScreenWallpaperService {
       committed.screenSaverScenes = nil
     }
     try publish(committed)
-    try await applySelection(committed, inputs: lastInputs)
+    if !committed.lockScreenEnabled {
+      unconfirmed = nil
+    } else if let pending = unconfirmed {
+      unconfirmed = (committed.revision, pending.deadline)
+    }
+    try await applySelection(committed, inputs: publishedInputs)
     if !committed.lockScreenEnabled {
       cancelRendererWatches()
       if ownsDesktopProvider {
@@ -749,13 +757,16 @@ final class LockScreenWallpaperService {
   private func updateStatuses(_ configuration: LockScreenConfiguration) {
     let lockCount = configuration.scenes(for: .lockScreen).count
     isEnabled = isRequested && configuration.lockScreenEnabled && lockCount > 0
+      && unconfirmed?.revision != configuration.revision
     screenSaverEnabled = screenSaverRequested && configuration.screenSaverEnabled
       && !configuration.scenes(for: .screenSaver).isEmpty
     errorMessage = isRequested ? (lockScreenSourceError ?? lockScreenActivationError) : nil
     status = !isRequested ? String(localized: "Off") : errorMessage != nil
       ? String(localized: "Not enabled — action required") : isEnabled
         ? String(localized: "Enabled for \(lockCount) display(s)")
-        : String(localized: "Waiting for an applied wallpaper on a connected display")
+        : unconfirmed?.revision == configuration.revision
+          ? String(localized: "Waiting for the system wallpaper renderer…")
+          : String(localized: "Waiting for an applied wallpaper on a connected display")
     if isEnabled, errorMessage == nil, let held = heldNotice(for: configuration) {
       status += " — " + held
     }
@@ -1058,9 +1069,13 @@ final class LockScreenWallpaperService {
         atPath: exchange.appendingPathComponent(LockScreenConfiguration.fileName).path)
     else {
       published = nil
+      publishedInputs = nil
+      unconfirmed = nil
       return
     }
     try publish(LockScreenConfiguration(scenes: []))
+    publishedInputs = nil
+    unconfirmed = nil
   }
 
   private func publish(_ configuration: LockScreenConfiguration) throws {

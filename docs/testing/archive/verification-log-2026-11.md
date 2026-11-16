@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-14 — Recover orphaned lock-screen selections (#204)
+
+- Reproduced both regressions before the fix: startup skipped archived originals without a live journal, and a Desktop recovery error disabled an otherwise usable screen saver.
+- Targeted LockScreenWallpaperTests and LockScreenWallpaperServiceTests: 157 passed; two additional recovery and startup integration regressions also passed.
+- python3 scripts/test.py: all Python suites passed; 5032 native tests passed, 0 failed, 70 opt-in tests skipped.
+- One native runtime warning came from AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; no test failed.
+- Recovery preserves manual and foreign selections, journals a verified system-image fallback before writing, and runs the orphan scan only during recovery.
+- No live lock-screen or screen-saver run and no Release build; the reporter’s exact system wallpaper store was not included in the diagnostics.
+
 ## 2026-11-14 — Compact pixiv pages after filtering
 
 - Matching works are deduplicated and paginated after filtering; rankings report exact matching totals and searches refill on demand with lookahead.
