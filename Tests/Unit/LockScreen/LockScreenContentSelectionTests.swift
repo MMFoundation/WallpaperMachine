@@ -90,4 +90,33 @@ final class LockScreenContentSelectionTests: XCTestCase {
       try JSONDecoder().decode(LockScreenReadiness.self, from: JSONEncoder().encode(readiness)).content,
       .screenSaver)
   }
+
+  func testDisabledSourceNormalizationPreservesActiveAbsentAndEmptySemantics() {
+    let desktop = scene("desktop")
+    var following = LockScreenConfiguration(
+      scenes: [desktop], lockScreenEnabled: false, screenSaverEnabled: true,
+      lockScreenScenes: [scene("lock")])
+    following.removeDisabledSources()
+    XCTAssertNil(following.lockScreenScenes)
+    XCTAssertNil(following.screenSaverScenes)
+    XCTAssertEqual(following.scenes(for: .screenSaver), [desktop])
+
+    var explicit = LockScreenConfiguration(
+      scenes: [desktop], lockScreenEnabled: false, screenSaverEnabled: true,
+      lockScreenScenes: [scene("lock")], screenSaverScenes: [])
+    explicit.removeDisabledSources()
+    XCTAssertNil(explicit.lockScreenScenes)
+    XCTAssertEqual(explicit.screenSaverScenes, [])
+    XCTAssertTrue(explicit.scenes.isEmpty)
+    XCTAssertTrue(explicit.scenes(for: .screenSaver).isEmpty)
+
+    var lockOnly = LockScreenConfiguration(
+      scenes: [desktop], lockScreenEnabled: true, screenSaverEnabled: false,
+      lockScreenScenes: [], screenSaverScenes: [scene("saver")])
+    lockOnly.removeDisabledSources()
+    XCTAssertNil(lockOnly.screenSaverScenes)
+    XCTAssertEqual(lockOnly.lockScreenScenes, [])
+    XCTAssertEqual(lockOnly.scenes, [desktop])
+    XCTAssertTrue(lockOnly.scenes(for: .lockScreen).isEmpty)
+  }
 }

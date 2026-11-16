@@ -884,6 +884,9 @@ or depend on a second physical monitor.
   Initial-activation disable tests hold back the first frame, remove the display
   UUID, disable each mode in turn, and verify immediate restoration of only that
   native choice. The surviving lock screen remains unconfirmed until it draws.
+  Additional cases keep readiness withheld through UUID recovery, monitor ticks
+  and cancelling refreshes, asserting no redundant reload and expiration of the
+  original deadline; an explicit retry after failure starts a new activation.
 
 - `LockScreenWallpaperTests` (selection journal) — per-display ownership with
   independent originals; external Desktop changes survive; a reload failure

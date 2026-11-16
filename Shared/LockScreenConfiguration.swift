@@ -39,6 +39,14 @@ struct LockScreenConfiguration: Codable, Equatable {
   var lockScreenScenes: [LockScreenScene]? = nil
   var screenSaverScenes: [LockScreenScene]? = nil
 
+  mutating func removeDisabledSources() {
+    if !lockScreenEnabled { lockScreenScenes = nil }
+    if !screenSaverEnabled { screenSaverScenes = nil }
+    if !lockScreenEnabled && (!screenSaverEnabled || screenSaverScenes != nil) {
+      scenes.removeAll()
+    }
+  }
+
   func scenes(for content: LockScreenContent) -> [LockScreenScene] {
     switch content {
     case .desktop:

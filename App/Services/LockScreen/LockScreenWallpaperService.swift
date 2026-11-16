@@ -541,6 +541,7 @@ final class LockScreenWallpaperService {
         && !(configuration.lockScreenScenes ?? configuration.scenes).isEmpty
       configuration.screenSaverEnabled = screenSaverRequested && saverSourceError == nil
         && !(configuration.screenSaverScenes ?? configuration.scenes).isEmpty
+      configuration.removeDisabledSources()
       if (configuration.lockScreenEnabled || configuration.screenSaverEnabled)
         && ((published?.scenes(for: .lockScreen).isEmpty != false
             && published?.scenes(for: .screenSaver).isEmpty != false)
@@ -570,13 +571,13 @@ final class LockScreenWallpaperService {
          published.screenSaverScenes == configuration.screenSaverScenes,
          published.lockScreenEnabled == configuration.lockScreenEnabled,
          published.screenSaverEnabled == configuration.screenSaverEnabled {
-        lastInputs = inputs
-        lastContentRevision = currentContentRevision
-        lastLockScreenRequested = isRequested
-        lastScreenSaverRequested = screenSaverRequested
         try checkReadinessFailures(published)
         try await applySelection(published, inputs: inputs)
         guard unconfirmed?.revision == published.revision else {
+          lastInputs = inputs
+          lastContentRevision = currentContentRevision
+          lastLockScreenRequested = isRequested
+          lastScreenSaverRequested = screenSaverRequested
           updateStatuses(published)
           return
         }
@@ -618,6 +619,7 @@ final class LockScreenWallpaperService {
           // Desktop acknowledgement must not take that independent choice down.
           configuration.revision = UUID().uuidString
           configuration.lockScreenEnabled = false
+          configuration.removeDisabledSources()
           try publish(configuration)
           try await applySelection(configuration, inputs: inputs)
           ownsDesktopProvider = false
@@ -732,11 +734,7 @@ final class LockScreenWallpaperService {
     committed.revision = UUID().uuidString
     committed.lockScreenEnabled = committed.lockScreenEnabled && lockScreen
     committed.screenSaverEnabled = committed.screenSaverEnabled && screenSaver
-    if !committed.lockScreenEnabled && !committed.screenSaverEnabled {
-      committed.scenes.removeAll()
-      committed.lockScreenScenes = nil
-      committed.screenSaverScenes = nil
-    }
+    committed.removeDisabledSources()
     try publish(committed)
     if !committed.lockScreenEnabled {
       unconfirmed = nil

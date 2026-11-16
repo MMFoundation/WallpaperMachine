@@ -318,6 +318,92 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testDisablingCustomSaverKeepsTheOriginalDeadlineAfterUUIDRecovery() async throws {
+    try await checkDisabledSourceRecovery(lockScreen: false)
+  }
+
+  @MainActor
+  func testDisablingCustomLockDoesNotRepublishTheSurvivingSaverAfterUUIDRecovery() async throws {
+    try await checkDisabledSourceRecovery(lockScreen: true)
+  }
+
+  @MainActor
+  private func checkDisabledSourceRecovery(lockScreen: Bool) async throws {
+    var uuid: String? = "one"
+    var reloads = 0
+    var lockPublications: [String] = []
+    var record = scene()
+    record.displayId = 1
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      wallpaperScenes: { id in
+        var source = record
+        source.wallpaperId = id
+        source.title = id
+        return [source]
+      },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: { reloads += 1 }),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor, displayUUID: { _ in uuid },
+      persistConfiguration: { file, data in
+        try data.write(to: file, options: .atomic)
+        let configuration = try JSONDecoder().decode(LockScreenConfiguration.self, from: data)
+        if !configuration.scenes(for: .lockScreen).isEmpty { lockPublications.append(configuration.revision) }
+      }, readinessTimeout: 2)
+    service.setWallpaper("lock", lockScreen: true)
+    service.setWallpaper("saver", lockScreen: false)
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("both selections with their first frame withheld") {
+      service.isBusy && (try? self.selectedProvider("Desktop")) == LockScreenConfiguration.extensionIdentifier
+        && (try? self.selectedProvider("Idle")) == LockScreenConfiguration.extensionIdentifier
+    }
+    try await Task.sleep(for: .milliseconds(100))
+    uuid = nil
+    if lockScreen { service.setEnabled(false) }
+    else { service.setScreenSaverEnabled(false) }
+    await waitFor("partial disable before the first frame") { !service.isBusy }
+    let revision = try publishedRevision()
+    let reloadsAfterDisable = reloads
+    let publicationsAfterDisable = lockPublications
+    try XCTUnwrap(timers.last).fire()
+    await waitFor("monitor with an unavailable UUID") { !service.isBusy }
+    XCTAssertEqual(try publishedRevision(), revision)
+    XCTAssertEqual(reloads, reloadsAfterDisable)
+    if !lockScreen { try await Task.sleep(for: .milliseconds(2300)) }
+    uuid = "one"
+    service.refresh()
+    await Task.yield()
+    service.refresh()
+    await waitFor("UUID recovery without restarting the surviving activation", timeout: 1) { !service.isBusy }
+    XCTAssertEqual(lockPublications, publicationsAfterDisable)
+    XCTAssertFalse(service.isEnabled)
+    XCTAssertEqual(service.screenSaverEnabled, lockScreen)
+    if lockScreen {
+      XCTAssertEqual(try publishedRevision(), revision)
+      XCTAssertEqual(reloads, reloadsAfterDisable)
+      XCTAssertNil(service.errorMessage)
+      service.retry(lockScreen: false)
+      await waitFor("retry of an unchanged independent saver") { !service.isBusy }
+      XCTAssertEqual(try publishedRevision(), revision)
+      XCTAssertEqual(reloads, reloadsAfterDisable)
+      XCTAssertEqual(try selectedProvider("Idle"), LockScreenConfiguration.extensionIdentifier)
+    } else {
+      XCTAssertNotNil(service.errorMessage, "the original readiness deadline has already expired")
+      XCTAssertEqual(reloads, reloadsAfterDisable + 1, "only the timeout restoration reload is needed")
+      XCTAssertEqual(try selectedProvider("Desktop"), "display-one-desktop")
+      XCTAssertEqual(try selectedProvider("Idle"), "display-one-idle")
+      let responder = readinessResponder()
+      defer { responder.cancel() }
+      service.retry(lockScreen: true)
+      await waitFor("an explicit retry starts a new activation") { !service.isBusy }
+      XCTAssertTrue(service.isEnabled, service.errorMessage ?? service.status)
+      XCTAssertNil(service.errorMessage)
+      XCTAssertFalse(service.screenSaverEnabled)
+    }
+    try await service.shutdown()
+  }
+
+  @MainActor
   func testUnavailableLockSourceKeepsIndependentSaverRunning() async throws {
     try await checkIndependentSourceFailure(lockScreen: true)
   }
