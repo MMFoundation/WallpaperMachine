@@ -380,3 +380,30 @@ jobs:
         run: |
           python3 scripts/publish_release.py --tag "$TAG" --notes "${RUNNER_TEMP}/release/notes.md" \
             "$IMAGE" "$CHECKSUM" "$MANIFEST"
+
+  nix-release:
+    name: Update the Nix release pin
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ inputs.tag }}
+          path: ${{ runner.temp }}/release
+
+      - name: Advance the published version and hash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          (cd "${RUNNER_TEMP}/release" && sha256sum -c "WallpaperMachine-${TAG#v}-arm64.dmg.sha256")
+          python3 scripts/update_nix_release.py --tag "$TAG" --repository "$REPOSITORY" \
+            "${RUNNER_TEMP}/release/WallpaperMachine-${TAG#v}-arm64.dmg"

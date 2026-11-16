@@ -577,13 +577,15 @@ protection must allow GitHub Actions.
 `workflow_call` only, with a required `tag` input. It is the single place a
 publishable artifact is produced, called by Version for CI-produced tags and by
 Release for hand-pushed ones; [Rehearsal](#rehearsal-rehearsalyml) calls it with
-`rehearsal: true` and a `ref`. It runs three jobs. `app-icon` ("App icon (macOS 26)")
+`rehearsal: true` and a `ref`. It runs four jobs. `app-icon` ("App icon (macOS 26)")
 compiles the app icon on a `macos-26` runner. `build` ("Build, sign and notarize
 (macOS 15)") starts at the same time on `macos-15` (the oldest runner that carries
 Xcode 26, whose Homebrew bottles set the published app's minimum macOS), with a
 150-minute timeout, and takes the icon only once the app is compiled, so the icon job,
 about a minute, is never what a release waits for. `publish` ("Publish the release")
-runs on `ubuntu-latest` once `build` succeeds.
+runs on `ubuntu-latest` once `build` succeeds. `nix-release` ("Update the Nix
+release pin") runs after publication, also on `ubuntu-latest`, and is skipped
+along with publication during rehearsals.
 
 The test gate is not part of a release. Every change passes `python3 scripts/test.py`
 before it is committed, and on hosted VMs the gate failed 1.5.0 through 1.5.4 only on
@@ -673,6 +675,19 @@ summary.
    `publish`'s own checkout of the tag lacks a section generated for a hand-pushed tag;
 4. publishes the image, its sidecar and the manifest with
    `scripts/publish_release.py`.
+
+**`nix-release`**
+
+After publication, `scripts/update_nix_release.py` hashes that same image and
+advances `nix/release.json` on `main` through GitHub's Contents API. The Nix
+package reads both its version and fixed-output hash from this pin, so updating
+the flake input picks up newly published releases without a separate version
+source in the recipe. The API update is guarded by the file's blob SHA, retries
+conflicts up to three times, never downgrades a newer version, and refuses to
+replace a published version's hash. Its commit is `chore(nix): track release
+v<version>` without a `release:` line; a `GITHUB_TOKEN` commit does not start
+another workflow. If this job fails, the release is already public: rerun only
+the failed job, which is idempotent, rather than rerunning publication.
 
 **`prepare-build` and the caches.** The composite action selects the newest
 non-beta `/Applications/Xcode_26*.app`, downloads that Xcode's Metal Toolchain when

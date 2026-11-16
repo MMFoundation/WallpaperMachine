@@ -18,6 +18,7 @@ live under `testing/`.
 | [../CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) | Conduct expected in issues, discussions, pull requests and reviews; how it is enforced |
 | [../SECURITY.md](../SECURITY.md) | Private vulnerability reporting, supported versions, scope, checking a download |
 | [build.md](build.md) | Toolchain, dependencies, build, package, install, troubleshooting |
+| [nix.md](nix.md) | Nix flake package, Home Manager and nix-darwin configuration, and verification |
 
 ## Reference
 

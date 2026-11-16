@@ -9,6 +9,31 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-16 — Replaceable shared state in scene scripts
+
+- Issue #216: allow a scene script to replace shared state so media visibility switches reach other scripts; no per-frame work added.
+- The new generic shared-state regression failed before the fix; all three focused shared-state tests passed afterwards.
+- Wallpaper Engine origin probe: mean pixel error 50.12 → 0.37; pixels differing by more than 48: 20.4% → 0.4% for both captures.
+- Reported wallpaper with synthetic song/audio: media panel returned from x=-1200 to x=2000; all 63 cloned spectrum bars regained width, with nonzero heights in the injected tone bands.
+- Reported wallpaper without media: reference mean error 8.14 → 7.46 and 3.79 → 3.11; unchanged background animation still prevents pixel identity.
+- python3 scripts/test.py: 35 Python modules passed; 5070 native tests passed, 0 failed, 70 skipped; 3 runtime main-thread warnings.
+- python3 scripts/check_rust.py: core, bridge, core integration and shader checks passed; five desktop-window cases excluded.
+- python3 scripts/check_renderer.py: registered checks and generated pixel/reload probes passed; optional corpus/media/energy inputs skipped.
+- Windows reference VM suspended after capture. Live player/audio capture unverified; #215 and #202 remain unresolved. No Release build or app restart.
+
+## 2026-11-15 — Independent-display wallpaper volume and mute
+
+Issue #213: optional per-wallpaper, per-display sound choices inherit existing wallpaper defaults until set; mirror settings and temporary playback rules are preserved.
+
+- Regression proof: the previous implementation returned global volume 0.8 and unmuted instead of the left display choice 0.2 and muted. Seven focused Rust cases passed after the change.
+- python3 scripts/build.py --renderer-only: passed; regenerated the Swift bindings through the build pipeline, including trailing-whitespace normalization.
+- Targeted native display, wallpaper-settings and status-panel suites: 43 passed, no failures or skips.
+- python3 scripts/check_rust.py: all checks passed; 2,523 tests in the printed summaries, with five explicitly excluded desktop-window cases and desktop/media/network opt-ins disabled.
+- python3 scripts/check_renderer.py --skip-build: full rerun passed with 3,529 tests passed and seven asset-dependent checks skipped; all 12 synthetic scenes and 16 reload cycles passed. The initial run failed one NV12 readiness case, which passed in isolation and in the full rerun.
+- python3 scripts/test.py: all 35 Python modules passed; 5,070 native tests passed, 0 failed, 70 skipped; one runtime warning. The initial full run timed out in an existing lock-screen readiness test; its isolated check and full rerun passed without source changes.
+- Build-script, localization and Markdown-link checks and git diff --check passed. The app help is translated into all six shipped languages.
+- No live multi-display sound or desktop interaction check, Release app build, installation or restart.
+
 ## 2026-11-15 — Retry native selection before a raced store write
 
 Refs #198. This implements bounded pre-write retries; historical-Space scaling and main-actor work remain open.

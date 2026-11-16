@@ -69,6 +69,9 @@
 brew install --cask wallpapermachine
 ```
 
+Nix를 사용하시나요? [Nix 가이드](docs/nix.md)에서 flake 패키지와 Home Manager 또는
+nix-darwin을 통한 선언적 설정 방법을 확인할 수 있습니다.
+
 이후 과정은 시작 가이드에서 안내하고, 그다음부터는 앱이 스스로 업데이트합니다.
 [설치 가이드](https://www.wallpapermachine.app/guides/install/)(영문)에서 모든 단계를
 그림과 함께 볼 수 있습니다.
