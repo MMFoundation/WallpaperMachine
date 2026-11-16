@@ -185,6 +185,20 @@ extension PanelController {
     }
   }
 
+  func setNativeWallpaperSource(_ id: String?, for kind: LockScreenState.Kind) async throws {
+    try await change {
+      guard let lock = store.lockScreenWallpaper else {
+        throw WallpaperActionError(
+          message: kind == .lockScreen
+            ? L("Lock Screen integration is unavailable.") : L("Screen saver integration is unavailable."))
+      }
+      if let id, !automationTargets.wallpapers.contains(where: { $0.target.id == id }) {
+        throw InvalidControlValue()
+      }
+      lock.setWallpaper(id, lockScreen: kind == .lockScreen)
+    }
+  }
+
   /// `lockScreenRetry`: activation again. Does nothing without the service.
   func retryLockScreen() async throws {
     try await run(.queued) { store.lockScreenWallpaper?.retry(lockScreen: true) }

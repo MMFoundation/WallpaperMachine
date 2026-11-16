@@ -9,6 +9,53 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-14 — Continue playback after deleting wallpapers (#207)
+
+- Deleting an active wallpaper now restores that display’s recent playable wallpaper or continues its playlist; batch exclusions, mirrors, failed trash moves and failed replacements are covered.
+- Both initial deletion regressions failed before implementation. Targeted deletion, playlist, panel and display checks passed: 118 tests.
+- First full run: 5047 native tests passed, 1 fixed-delay fullscreen-occlusion test failed, 70 skipped. The untouched baseline then passed 5032 native tests with 70 skipped; no occlusion code or test was changed.
+- Final python3 scripts/test.py: all Python suites passed; 5048 native tests passed, 0 failed, 70 opt-in tests skipped.
+- Three main-thread runtime warnings were attributed to existing video-decoder, video-format and update-signature tests; all passed.
+- Deletion confirmation and playback-recovery errors are translated into all six app languages. No live desktop check or Release build.
+
+## 2026-11-14 — Recover orphaned lock-screen selections (#204)
+
+- Reproduced both regressions before the fix: startup skipped archived originals without a live journal, and a Desktop recovery error disabled an otherwise usable screen saver.
+- Targeted LockScreenWallpaperTests and LockScreenWallpaperServiceTests: 157 passed; two additional recovery and startup integration regressions also passed.
+- python3 scripts/test.py: all Python suites passed; 5032 native tests passed, 0 failed, 70 opt-in tests skipped.
+- One native runtime warning came from AppUpdateTests.testSignatureCheckRefusesAnUnsignedOrAlteredCopy; no test failed.
+- Recovery preserves manual and foreign selections, journals a verified system-image fallback before writing, and runs the orphan scan only during recovery.
+- No live lock-screen or screen-saver run and no Release build; the reporter’s exact system wallpaper store was not included in the diagnostics.
+
+## 2026-11-14 — Compact pixiv pages after filtering
+
+- Matching works are deduplicated and paginated after filtering; rankings report exact matching totals and searches refill on demand with lookahead.
+- Targeted pixiv store and panel regression run: 84 passed, 0 failed, 0 skipped.
+- `python3 scripts/test.py`: exit 0; all Python script modules passed; native tests: 4,933 passed, 0 failed, 70 skipped.
+- Seven new pagination cases cover cross-page refill, cached refiltering, search lookahead, retry, duplicates, empty ratings, in-flight filter changes and a fully filtered tail.
+- Opt-in media, live-network and snapshot checks remained skipped. Two runtime main-thread warnings were reported by the full suite.
+- Live pixiv and desktop presentation were not checked; no desktop control, Release build, installation or restart was performed.
+
+## 2026-11-14 — Shared wallpaper-store coordination (issue 199)
+
+- Implemented a shared FIFO transaction queue for native selection and desktop posters, with bounded verified WallpaperAgent turnover and selection readback.
+- Recovery retries preserve unrelated fields and reject foreign selections; cancelled writes and restarts remain admission barriers; both journals survive unconfirmed restoration.
+- Poster acknowledgements drain as a batch; native takeover and quit cancel and drain queued poster work before changing ownership.
+- python3 scripts/build.py --renderer-only — passed; prepared the missing test-link dependency and regenerated bindings; no renderer source changes.
+- Targeted native run across coordinator, lock-screen, desktop, panel-settings and native-video host tests — 436 passed, 0 failed, 0 skipped.
+- python3 scripts/test.py — passed all Python modules; native gate: 5017 passed, 0 failed, 70 skipped of 5087.
+- Three runtime main-thread warnings came from VideoFormatSupportTests, AppUpdateTests and WebMFilteredVideoSinkTests; compiler warnings remain in existing code.
+- Documentation links and git diff --check passed. Live desktop/WallpaperAgent behavior was not exercised; no desktop authorization, Release build, install, commit or push.
+- Removed this task’s disposable test result bundles and renderer-build logs after recording the verdicts; retained compiled build outputs.
+
+## 2026-11-13 — Sign-in window hosts and sign-outs the keychain resists
+
+Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in window; Steam Community and pixiv sign-out emptying a keychain item another build saved, failing only when the session stays). The report's third finding, memory corruption in `SteamCMDRuntimeService.fingerprint` `readlinkat`, was not reproduced: SIL shows `&link` passing the element buffer (`_convertMutableArrayToPointerArgument<UInt8, UnsafeMutablePointer<Int8>>`), and the same pattern ran clean under AddressSanitizer with a 1022-byte target; the code is unchanged.
+
+- `python3 scripts/test.py --only` WebSignInPolicyTests, KeychainGenericPasswordTests, SteamWebSessionTests, WorkshopSourceTests, PixivStoreTests, PanelWorkshopSubscriptionsTests, NativeWorkshopDownloadTests, PanelPixivActionsTests, PanelDownloadActionsTests — 143 passed
+- `python3 scripts/test.py` — first run 4980 passed, 1 failed (`ScreenSaverWebSurfaceTests` frame rate 8.7 < 14 under load; 16/16 alone); rerun 4981 passed, 0 failed, 70 skipped
+- Not checked: a live Steam or pixiv sign-in and sign-out against the allowlist, and macOS's real answer to emptying another build's item (modelled by `MemoryKeychain`)
+
 ## 2026-11-13 — Keep scenes through empty active-display reports
 
 - Issue #196: build each refresh plan from one CoreGraphics report and its captured main-display flag. An empty active list skips reconciliation, retains scenes/assignments/handles and logs once; actual read errors still propagate.

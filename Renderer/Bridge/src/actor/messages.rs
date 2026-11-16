@@ -30,6 +30,10 @@ pub struct GetLibrarySnapshot;
 
 pub struct GetLockScreenScenes;
 
+pub struct GetNativeWallpaperScenes {
+    pub wallpaper_id: String,
+}
+
 pub struct GetWallpaperPreview {
     pub wallpaper_id: String,
     pub display_id: String,
