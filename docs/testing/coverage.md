@@ -873,7 +873,11 @@ or depend on a second physical monitor.
   change to an owned field is still refused. A large synthetic store, including the
   empty primary-Space key and missing per-display nodes, keeps every Space and unowned choice through revision
   changes, mode expansion, partial disable and recovery from disk, without rewriting
-  an unchanged journal. This is not a live macOS performance or Space-topology test.
+  an unchanged journal. A 1,754-Space fixture also exercises the real shared-store
+  coordinator with injected agent identities: revision confirmation and stale-save
+  replay retain every Space, unowned choice, external metadata and journaled original,
+  including recovery from disk and final restoration. These are not live macOS
+  performance or Space-topology tests.
   The same class holds the scene contract the extension reads: a file
   without a position reads as centred and one with it round-trips, an unmoved scene
   keeps the old file shape, a moved picture or a changed scaling mode replaces the
