@@ -33,6 +33,24 @@ function reportError(entry, e) { n.error(entry, describe(e), stackOf(e)); }
 
 function finiteOr(value, fallback) { return typeof value === 'number' && isFinite(value) ? value : fallback; }
 
+var activeProgram = null;
+function callInProgram(program, fn, arg) {
+  var previous = activeProgram;
+  activeProgram = program;
+  try { return fn(arg); }
+  finally { activeProgram = previous; }
+}
+function captureCallback(fn) { return { fn: fn, program: activeProgram }; }
+function bindProgram(fn) {
+  if (typeof fn !== 'function') return fn;
+  var program = activeProgram;
+  return function (value) { return callInProgram(program, fn, value); };
+}
+var promiseThen = Promise.prototype.then;
+Promise.prototype.then = function (fulfilled, rejected) {
+  return promiseThen.call(this, bindProgram(fulfilled), bindProgram(rejected));
+};
+
 // ---- host values ----------------------------------------------------------
 var language = 'en-us';
 var canvasW = 0, canvasH = 0, resW = 0, resH = 0, curX = 0.5, curY = 0.5;
@@ -141,7 +159,7 @@ function addListener(event, fn) {
   if (typeof event !== 'string' || typeof fn !== 'function') return;
   var list = listeners[event];
   if (list === undefined) listeners[event] = list = [];
-  list.push(fn);
+  list.push(captureCallback(fn));
 }
 // A listener added while the list runs is first called by the next run; a
 // throwing listener ends this run (the caller reports it once).
@@ -149,7 +167,7 @@ function runListeners(event, arg) {
   var list = listeners[event];
   if (list === undefined) return;
   var count = list.length;
-  for (var i = 0; i < count; ++i) list[i](arg);
+  for (var i = 0; i < count; ++i) callInProgram(list[i].program, list[i].fn, arg);
 }
 engine.on = addListener;
 
@@ -179,7 +197,7 @@ function addTimer(fn, delay, repeat) {
   var ms = Number(delay);
   if (!(ms > 0)) ms = 0;
   var seconds = ms / 1000;
-  var timer = { fn: fn, due: sceneTime + seconds, period: seconds, repeat: repeat && ms > 0, dead: false };
+  var timer = { fn: fn, program: activeProgram, due: sceneTime + seconds, period: seconds, repeat: repeat && ms > 0, dead: false };
   timers.push(timer);
   if (!(timer.due >= toldDue)) tellHost();
   var cancel = function () { timer.dead = true; };
@@ -210,7 +228,7 @@ function runTimers() {
       anyDead = true;
     }
     if (typeof timer.fn !== 'function') continue;
-    try { timer.fn(); } catch (e) { if (!failed) { failed = true; failure = e; } }
+    try { callInProgram(timer.program, timer.fn); } catch (e) { if (!failed) { failed = true; failure = e; } }
   }
   if (anyDead || timers.length !== count) {
     var kept = [];

@@ -188,6 +188,17 @@ script makes the replacement visible to existing and later scripts, just as muta
 `shared.name` does. A media widget can initialize its shared visibility switches this
 way; treating the global as read-only leaves the widget hidden even when song events
 and audio samples arrive.
+`thisLayer` and `thisObject` follow the active script when a shared function or
+constructor reads them. A shared listener constructor therefore captures the layer
+registering the listener, not the layer that defined the constructor; an explicit
+saved layer reference still keeps its original target. Timers, registered event and
+animation/video callbacks, and Promise `then` handlers retain their registering
+program's context, and nested callbacks restore their caller even when they throw.
+Outside a host callback, the names retain the defining program's layer/object
+fallback, including ordinary asynchronous continuations. Promise jobs drain after
+the outermost library call returns, not inside nested template loading, so an
+async template script cannot inherit its loader's active layer. Script-local
+declarations still shadow these host names.
 A property script without `update` (an `init` that plays an animation, a click handler)
 costs no call into the script runtime on a tick where no timer is due and no audio
 buffer is registered: that call would only have run those. Its parameters and the

@@ -140,6 +140,55 @@ TEST_F(TextScripts, AnEventOnlyScriptIsASceneScriptThatWritesThroughItsLayer)
     EXPECT_EQ(Runtime().scriptErrorCount(), 0u);
 }
 
+TEST_F(TextScripts, SharedListenerConstructorsCaptureTheRegisteringTextLayer)
+{
+    ASSERT_TRUE(Load(SceneDocument({
+        TextObject(1, "registry", { { "value", "registry" }, { "script", R"JS(
+const originalLayer = thisLayer;
+shared.listeners = [];
+shared.Listener = class {
+    constructor(prefix) {
+        this.layer = thisLayer;
+        this.object = thisObject;
+        this.prefix = prefix;
+    }
+};
+shared.originalLayer = function () { return originalLayer; };
+let tick = 0;
+export function init() {
+    engine.setInterval(function () {
+        ++tick;
+        for (const listener of shared.listeners) {
+            listener.object.text = listener.prefix + tick;
+            listener.layer.origin = new Vec3(tick, 0, 0);
+        }
+    }, 10);
+}
+)JS" } }),
+        TextObject(2, "hours", { { "value", "pending hours" }, { "script", R"JS(
+export function init() { shared.listeners.push(new shared.Listener('hours:')); }
+)JS" } }),
+        TextObject(3, "seconds", { { "value", "pending seconds" }, { "script", R"JS(
+export function init() {
+    shared.listeners.push(new shared.Listener('seconds:'));
+    shared.originalLayer().text = 'original';
+}
+)JS" } }),
+    })));
+
+    Runtime().Tick(kFrame);
+    Runtime().Tick(kFrame);
+    EXPECT_EQ(Runtime().NodeText("hours"), "hours:1");
+    EXPECT_EQ(Runtime().NodeText("seconds"), "seconds:1");
+    EXPECT_EQ(Runtime().NodeText("registry"), "original");
+    EXPECT_FLOAT_EQ(Node("hours")->Translate().x(), 1.0f);
+    EXPECT_FLOAT_EQ(Node("seconds")->Translate().x(), 1.0f);
+    Runtime().Tick(kFrame);
+    EXPECT_EQ(Runtime().NodeText("hours"), "hours:2");
+    EXPECT_EQ(Runtime().NodeText("seconds"), "seconds:2");
+    EXPECT_EQ(Runtime().scriptErrorCount(), 0u);
+}
+
 // ---- L. dynamic position and scale -------------------------------------------------------
 
 TEST_F(TextScripts, UserPropertyOriginAndScaleFollowOverrides)
