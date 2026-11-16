@@ -61,6 +61,7 @@ pub struct DisplaySnapshotEntry {
 pub struct SceneWindowEntry {
     pub display_id: u32,
     pub handle: SceneHandle,
+    pub load_id: u64,
     /// The descriptor the scene runs.
     pub desc: SceneDesc,
     /// The window server's number for the scene's window; `None` without one.
@@ -76,6 +77,7 @@ impl SceneWindowEntry {
         Self {
             display_id: runtime.display_id(),
             handle,
+            load_id: runtime.load_id(),
             desc: runtime.desc.clone(),
             window_number: runtime.window_number(),
             parked,

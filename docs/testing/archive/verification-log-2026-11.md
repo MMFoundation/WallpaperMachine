@@ -9,6 +9,14 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-13 — Sign-in window hosts and sign-outs the keychain resists
+
+Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in window; Steam Community and pixiv sign-out emptying a keychain item another build saved, failing only when the session stays). The report's third finding, memory corruption in `SteamCMDRuntimeService.fingerprint` `readlinkat`, was not reproduced: SIL shows `&link` passing the element buffer (`_convertMutableArrayToPointerArgument<UInt8, UnsafeMutablePointer<Int8>>`), and the same pattern ran clean under AddressSanitizer with a 1022-byte target; the code is unchanged.
+
+- `python3 scripts/test.py --only` WebSignInPolicyTests, KeychainGenericPasswordTests, SteamWebSessionTests, WorkshopSourceTests, PixivStoreTests, PanelWorkshopSubscriptionsTests, NativeWorkshopDownloadTests, PanelPixivActionsTests, PanelDownloadActionsTests — 143 passed
+- `python3 scripts/test.py` — first run 4980 passed, 1 failed (`ScreenSaverWebSurfaceTests` frame rate 8.7 < 14 under load; 16/16 alone); rerun 4981 passed, 0 failed, 70 skipped
+- Not checked: a live Steam or pixiv sign-in and sign-out against the allowlist, and macOS's real answer to emptying another build's item (modelled by `MemoryKeychain`)
+
 ## 2026-11-13 — Keep scenes through empty active-display reports
 
 - Issue #196: build each refresh plan from one CoreGraphics report and its captured main-display flag. An empty active list skips reconciliation, retains scenes/assignments/handles and logs once; actual read errors still propagate.

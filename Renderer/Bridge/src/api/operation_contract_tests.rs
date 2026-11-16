@@ -2,6 +2,7 @@
 //! All synchronization is bounded and all engine work runs on the real actor runtime.
 
 mod apply_consumer_contract_tests;
+mod audio_capture_contract_tests;
 mod settings_consumer_contract_tests;
 
 use super::*;

@@ -389,6 +389,9 @@ impl ControlledEngine {
     pub(crate) fn audio_capture_state(&self, handle: SceneHandle) -> Option<bool> {
         self.inner.data.lock().unwrap().controls.capture.get(&handle).copied()
     }
+    pub(crate) fn audio_capture_demand(&self) -> AudioCaptureDemand {
+        self.inner.data.lock().unwrap().demand
+    }
     pub(crate) fn shown_property_state(&self, handle: SceneHandle) -> Option<ShownPropertyState> {
         self.inner.data.lock().unwrap().controls.shown_properties.get(&handle).cloned()
     }

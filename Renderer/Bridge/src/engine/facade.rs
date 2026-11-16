@@ -2957,6 +2957,7 @@ mod first_frame_tests {
         wallpaper_core::SceneWindowEntry {
             display_id: scene.display.display_id,
             handle: SceneHandle::new(90),
+            load_id: 0,
             desc: scene.clone(),
             window_number: Some(4_242),
             parked,

@@ -8,11 +8,11 @@ final class SceneMediaSinkTests: XCTestCase {
         let provider = ScriptedSystemMediaProvider()
         let session = DesktopMediaSession(provider: provider)
         var deliveries: [String] = []
-        var handles: Set<UInt64> = [11]
+        var scenes: [UInt64: UInt64] = [11: 0]
         let sink = SceneMediaSink(session: session, submit: { deliveries.append($0) },
             applyArtwork: { width, height, data in
                 deliveries.append("pixels:\(width)x\(height):\(data.count)")
-            }, fetchHandles: { handles })
+            }, fetchScenes: { scenes })
         defer { sink.shutdown() }
         sink.reconcile()
         try await poll { provider.consumers == 1 }
@@ -23,7 +23,7 @@ final class SceneMediaSinkTests: XCTestCase {
         try await poll { deliveries.contains { $0.contains("\"hasThumbnail\":false") } }
         XCTAssertEqual(deliveries.first, "pixels:0x0:0")
         deliveries.removeAll()
-        handles = [12, 13]
+        scenes = [12: 0, 13: 0]
         sink.reconcile()
         try await poll { deliveries.contains { $0.contains("\"hasThumbnail\":false") } }
         XCTAssertTrue(deliveries.contains("pixels:0x0:0"))
@@ -41,12 +41,12 @@ final class SceneMediaSinkTests: XCTestCase {
         let session = DesktopMediaSession(provider: provider)
         var submitted: [String] = []
         var artwork: [(UInt32, UInt32, Int)] = []
-        var handles: Set<UInt64> = [11]
+        var scenes: [UInt64: UInt64] = [11: 0]
         let sink = SceneMediaSink(
             session: session,
             submit: { submitted.append($0) },
             applyArtwork: { width, height, data in artwork.append((width, height, data.count)) },
-            fetchHandles: { handles })
+            fetchScenes: { scenes })
 
         sink.reconcile()
         try await poll { !submitted.isEmpty }
@@ -55,7 +55,7 @@ final class SceneMediaSinkTests: XCTestCase {
 
         submitted.removeAll()
         artwork.removeAll()
-        handles = [12]
+        scenes = [12: 0]
         sink.reconcile()
         try await poll { submitted.contains { $0.contains("Bohemian Rhapsody") } }
 
@@ -71,19 +71,54 @@ final class SceneMediaSinkTests: XCTestCase {
         XCTAssertTrue(submitted.isEmpty, "a handle already fed is not replayed to again")
     }
 
+    func testARebuiltRendererOnTheSameHandleReceivesTheCurrentSongAndCover() async throws {
+        let provider = ScriptedSystemMediaProvider()
+        let session = DesktopMediaSession(provider: provider)
+        var submitted: [String] = []
+        var artwork: [Data] = []
+        var scenes: [UInt64: UInt64] = [11: 1]
+        let sink = SceneMediaSink(
+            session: session,
+            submit: { submitted.append($0) },
+            applyArtwork: { _, _, data in artwork.append(data) },
+            fetchScenes: { scenes })
+        defer { sink.shutdown() }
+
+        sink.reconcile()
+        try await poll { !submitted.isEmpty }
+        provider.emitPlaying(title: "Current song")
+        try await poll { submitted.contains { $0.contains("\"state\":1") } }
+        submitted.removeAll()
+        artwork.removeAll()
+
+        scenes[11] = 2
+        sink.reconcile()
+        try await poll { submitted.contains { $0.contains("Current song") } }
+        try await poll { submitted.contains { $0.contains("\"state\":1") } }
+        XCTAssertEqual(artwork, [Data([232, 80, 58, 255])])
+        XCTAssertEqual(provider.consumers, 1)
+
+        submitted.removeAll()
+        artwork.removeAll()
+        sink.reconcile()
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertTrue(submitted.isEmpty)
+        XCTAssertTrue(artwork.isEmpty)
+    }
+
     /// Consent gone means the source stops; nothing is read and nothing is sent.
     func testNoConsentingSceneStopsTheProvider() async throws {
         let provider = ScriptedSystemMediaProvider()
         let session = DesktopMediaSession(provider: provider)
-        var handles: Set<UInt64> = [11]
+        var scenes: [UInt64: UInt64] = [11: 0]
         let sink = SceneMediaSink(
             session: session, submit: { _ in }, applyArtwork: { _, _, _ in },
-            fetchHandles: { handles })
+            fetchScenes: { scenes })
 
         sink.reconcile()
         try await poll { provider.consumers == 1 }
 
-        handles = []
+        scenes = [:]
         sink.reconcile()
         try await poll { provider.consumers == 0 }
     }
@@ -96,12 +131,12 @@ final class SceneMediaSinkTests: XCTestCase {
         let session = DesktopMediaSession(provider: provider)
         var release: CheckedContinuation<Void, Never>?
         var calls = 0
-        var answers: [Set<UInt64>] = [[11], [], [11]]
+        var answers: [[UInt64: UInt64]] = [[11: 0], [:], [11: 0]]
         let sink = SceneMediaSink(
             session: session, submit: { _ in }, applyArtwork: { _, _, _ in },
-            fetchHandles: {
+            fetchScenes: {
                 calls += 1
-                let answer = answers.isEmpty ? Set<UInt64>() : answers.removeFirst()
+                let answer = answers.isEmpty ? [UInt64: UInt64]() : answers.removeFirst()
                 // Only the first call is slow, so it answers last.
                 if calls == 1 { await withCheckedContinuation { release = $0 } }
                 return answer
@@ -131,10 +166,10 @@ final class SceneMediaSinkTests: XCTestCase {
         let provider = ScriptedSystemMediaProvider()
         let session = DesktopMediaSession(provider: provider)
         var submitted: [String] = []
-        var handles: Set<UInt64> = [11]
+        var scenes: [UInt64: UInt64] = [11: 0]
         let sink = SceneMediaSink(
             session: session, submit: { submitted.append($0) }, applyArtwork: { _, _, _ in },
-            fetchHandles: { handles })
+            fetchScenes: { scenes })
 
         sink.reconcile()
         try await poll { provider.consumers == 1 }
@@ -145,7 +180,7 @@ final class SceneMediaSinkTests: XCTestCase {
         session.relay.setConsuming(true, for: ObjectIdentifier(web))
         try await poll { provider.consumers == 2 }
 
-        handles = []
+        scenes = [:]
         sink.reconcile()
         try await poll { provider.consumers == 1 }
 
@@ -177,7 +212,7 @@ final class SceneMediaSinkTests: XCTestCase {
                 if coverCalls == 1 { await withCheckedContinuation { holdFirstCover = $0 } }
                 appliedCovers.append(data.first ?? 0)
             },
-            fetchHandles: { [11] })
+            fetchScenes: { [11: 0] })
 
         sink.reconcile()
         try await poll("initial consumer") { provider.consumers == 1 }
@@ -214,21 +249,21 @@ final class SceneMediaSinkTests: XCTestCase {
         var submitted: [String] = []
         var holdCover: CheckedContinuation<Void, Never>?
         var coverCalls = 0
-        var handles: Set<UInt64> = [11]
+        var scenes: [UInt64: UInt64] = [11: 0]
         let sink = SceneMediaSink(
             session: session, submit: { submitted.append($0) },
             applyArtwork: { _, _, _ in
                 coverCalls += 1
                 if coverCalls == 1 { await withCheckedContinuation { holdCover = $0 } }
             },
-            fetchHandles: { handles })
+            fetchScenes: { scenes })
 
         sink.reconcile()
         try await poll("initial consumer") { provider.consumers == 1 }
         provider.emitThumbnail(marker: 1)
         try await poll("cover reached the engine") { holdCover != nil }
 
-        handles = []
+        scenes = [:]
         sink.reconcile()
         try await poll("pause removed the consumer") { provider.consumers == 0 }
         submitted.removeAll()
@@ -255,7 +290,7 @@ final class SceneMediaSinkTests: XCTestCase {
         ])
         let sink = SceneMediaSink(
             session: session, submit: { _ in }, applyArtwork: { _, _, _ in },
-            fetchHandles: { [11] },
+            fetchScenes: { [11: 0] },
             nextShortcut: { try await presses.next() })
 
         try await poll { provider.sentCommands.count == 2 }

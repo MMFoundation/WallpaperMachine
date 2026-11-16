@@ -22,6 +22,12 @@ script that starts reading later starts capture then.
 Capture stops when the last such wallpaper stops presenting or is removed.
 Activation errors are reported rather than silently ignored.
 
+Applying a wallpaper synchronizes capture again after the new display assignment
+is published. A scene can report that it reads audio before its first frame,
+while the previous selection is still configured; that early report must not
+leave the new wallpaper waiting for an off/on toggle. Display changes and repairs
+also restore capture ownership and presentation demand from the published selection.
+
 A subscribed web page owns capture independently of renderer scene handles, so
 web-only sessions work and scene cleanup does not stop their audio. Both kinds
 of wallpaper share one capture tap; pause and the saved Audio response setting
@@ -154,7 +160,11 @@ Scenes receive the values as analysed; web pages receive them clamped to 0.0–1
 Synthetic offscreen checks cover the analysis against tone measurements
 (`AudioResponseMonoTest`, see [renderer testing](../testing/renderer.md)), audio-driven
 shader color and SceneScript scale. Device-free controller and bridge tests cover web-only
-capture startup, permission, shared ownership, suspension and shutdown. Startup
+capture startup, permission, shared ownership, suspension and shutdown.
+The `api::operation_contract_tests::audio_capture_contract_tests` regressions deliver
+audio requirements before the first frame and after the activation worker registers
+capture, then check response, ownership and demand without a toggle. They also cover
+display changes, save failure and stale-operation repair without opening an audio device. Startup
 regressions inject the native timeout and cover recovery with a fresh session,
 persistent failure after one retry, cleanup failures that block replacement, and
 non-timeout failures that must not retry. They also cover the

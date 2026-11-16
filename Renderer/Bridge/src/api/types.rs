@@ -1,3 +1,9 @@
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeSystemMediaScene {
+    pub handle: u64,
+    pub load_id: u64,
+}
+
 /// Player data read by the native host. Artwork is bounded RGBA8, never a path or URL.
 #[derive(Clone, Debug, Default, uniffi::Record)]
 pub struct BridgeMediaSnapshot {

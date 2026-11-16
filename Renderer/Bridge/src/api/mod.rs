@@ -31,7 +31,7 @@ pub use types::{
     BridgeEngineOptionValues, BridgeRgb, BridgeEngineOptions, BridgeFileFilter, BridgeFraming,
     BridgeLibraryScanStatus, BridgeLibrarySnapshot,
     BridgeLockScreenScene, BridgeLogLevel, BridgeLogStatus, BridgeMonitorInfoRow, BridgeWallpaperPreview,
-    BridgeNativeVideoWallpaper, BridgeMediaSnapshot,
+    BridgeNativeVideoWallpaper, BridgeMediaSnapshot, BridgeSystemMediaScene,
     BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgeBatteryMode, BridgePropertyDescriptor,
     BridgePropertyEdit, BridgePropertyKind, BridgePropertyValue, BridgeQualityThrottleCause,
     BridgeRendererCountersReport,
@@ -2532,6 +2532,12 @@ impl WallpaperBridge {
     pub async fn system_media_scene_handles(&self) -> Result<Vec<u64>, BridgeError> {
         self.actor
             .ask(crate::actor::messages::GetSystemMediaSceneHandles)
+            .await
+    }
+
+    pub async fn system_media_scenes(&self) -> Result<Vec<BridgeSystemMediaScene>, BridgeError> {
+        self.actor
+            .ask(crate::actor::messages::GetSystemMediaScenes)
             .await
     }
 

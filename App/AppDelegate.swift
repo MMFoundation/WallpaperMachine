@@ -376,8 +376,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     try await store.bridge.applySystemMediaArtwork(
                         width: width, height: height, rgba: rgba)
                 },
-                fetchHandles: {
-                    await Self.sceneMediaHandles(store: store)
+                fetchScenes: {
+                    await Self.sceneMediaLoadIDs(store: store)
                 },
                 nextShortcut: {
                     try await store.bridge.nextUserShortcut()
@@ -2155,14 +2155,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The bridge answers, not the library snapshot: consent is per wallpaper
     /// and the snapshot does not carry it. Nothing reads the system player
     /// while this is empty, so a user who left the setting off is never asked
-    /// for Automation permission, and a handle that was not there before is a
-    /// scene that still has to be told what is playing.
-    private static func sceneMediaHandles(store: BridgeStore) async -> Set<UInt64> {
+    /// for Automation permission. A different load ID on a retained handle is
+    /// a new renderer that still has to be told what is playing.
+    private static func sceneMediaLoadIDs(store: BridgeStore) async -> [UInt64: UInt64] {
         do {
-            return Set(try await store.bridge.systemMediaSceneHandles())
+            return Dictionary(uniqueKeysWithValues:
+                try await store.bridge.systemMediaScenes().map { ($0.handle, $0.loadId) })
         } catch {
             AppLog.warn("Scene media consumers could not be read: \(error.localizedDescription)")
-            return []
+            return [:]
         }
     }
 

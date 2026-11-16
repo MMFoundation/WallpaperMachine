@@ -1562,6 +1562,34 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
     }
 
+    async fn sync_audio_capture(&self, handles: Vec<SceneHandle>) -> Result<(), BridgeError> {
+        let displays = self.engine.display_snapshot();
+        let scenes = self
+            .activation_inputs(&displays, self.playback_paused())
+            .build()
+            .unwrap_or_default();
+        for handle in handles {
+            let Some(display_id) = displays
+                .iter()
+                .find(|display| display.handle == Some(handle))
+                .map(|display| display.desc.display_id)
+            else {
+                continue;
+            };
+            let response_enabled = scenes
+                .iter()
+                .find(|scene| scene.display.display_id == display_id)
+                .is_some_and(|scene| scene.audio_response_enabled);
+            register_audio_capture(&self.engine, handle, response_enabled)
+                .await
+                .map_err(|error| BridgeError::engine(error.to_string()))?;
+        }
+        self.engine
+            .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
+            .await
+            .map_err(|error| BridgeError::engine(error.to_string()))
+    }
+
     /// Wallpapers that enable audio response, whose scene reads audio and that
     /// are not paused for their own display, counting subscribed web pages
     /// alongside scenes. This is the same rule the capture tap follows,
@@ -2824,33 +2852,7 @@ impl<E: EngineFacade + Clone> Message<AudioRequirementChanged> for BridgeActor<E
         msg: AudioRequirementChanged,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let displays = self.engine.display_snapshot();
-        let scenes = self
-            .activation_inputs(&displays, self.playback_paused())
-            .build()
-            .unwrap_or_default();
-        for handle in msg.handles {
-            // A handle no display shows any more was already released when
-            // its scene went away.
-            let Some(display_id) = displays
-                .iter()
-                .find(|display| display.handle == Some(handle))
-                .map(|display| display.desc.display_id)
-            else {
-                continue;
-            };
-            let response_enabled = scenes
-                .iter()
-                .find(|scene| scene.display.display_id == display_id)
-                .is_some_and(|scene| scene.audio_response_enabled);
-            register_audio_capture(&self.engine, handle, response_enabled)
-                .await
-                .map_err(|error| BridgeError::engine(error.to_string()))?;
-        }
-        self.engine
-            .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
-            .await
-            .map_err(|error| BridgeError::engine(error.to_string()))
+        self.sync_audio_capture(msg.handles).await
     }
 }
 
@@ -3064,6 +3066,24 @@ impl<E: EngineFacade + Clone> Message<GetSystemMediaSceneHandles> for BridgeActo
             .into_iter()
             .map(SceneHandle::raw)
             .collect())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<messages::GetSystemMediaScenes> for BridgeActor<E> {
+    type Reply = messages::GetSystemMediaScenesReply;
+
+    async fn handle(
+        &mut self,
+        _msg: messages::GetSystemMediaScenes,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let handles: HashSet<_> = self.media_scene_handles().into_iter().collect();
+        Ok(self.engine.scene_windows().into_iter()
+            .filter(|scene| !scene.parked && handles.contains(&scene.handle))
+            .map(|scene| crate::api::BridgeSystemMediaScene {
+                handle: scene.handle.raw(),
+                load_id: scene.load_id,
+            }).collect())
     }
 }
 

@@ -37,6 +37,7 @@ async fn a_preload_frame_before_the_checkpoint_is_rechecked_after_promotion() {
                 let ready = snapshot_promotion.load(Ordering::SeqCst);
                 (Vec::new(), vec![wallpaper_core::SceneWindowEntry {
                     display_id: 7, handle: if same_handle { handle } else { SceneHandle::new(92) },
+                    load_id: 0,
                     desc: snapshot_scene.clone(), window_number: Some(1), parked: !ready, ready,
                 }])
             },
