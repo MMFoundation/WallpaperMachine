@@ -874,6 +874,13 @@ or depend on a second physical monitor.
   Missing-source regressions cover each mode independently at startup and after
   activation, preserve the healthy native choice and its automatic refreshes, and
   restore the failed mode after its source becomes available and Retry is pressed.
+- `LockScreenAcquireRepliesTests` — generation-checked acquire replies survive
+  source replacement, ignore stale frame completions, and finish once with success,
+  failure or cancellation. Preparation-policy tests defer invisible replacement,
+  preserve initial-acquire readiness and model zero inactive starts followed by one
+  latest-source start on resume. These are callback/policy tests, not real hosted
+  CAContext, GPU or energy measurements. Service regressions retain a live role's
+  watch while excluding a handled exit from stale readiness files in that revision.
 
 - `LockScreenWallpaperTests` (selection journal) — per-display ownership with
   independent originals; external Desktop changes survive; a reload failure

@@ -1102,6 +1102,76 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertEqual(cancelled, [999_901, 999_902])
   }
 
+  @MainActor
+  func testAnExitedRoleIsNotRearmedWhileAnotherRoleStillServesTheDisplay() async throws {
+    try await checkIndependentRendererExit(replaced: false)
+  }
+
+  @MainActor
+  func testALiveReplacementOfTheSameContentRoleAvoidsUnnecessaryRepublication() async throws {
+    try await checkIndependentRendererExit(replaced: true)
+  }
+
+  @MainActor
+  private func checkIndependentRendererExit(replaced: Bool) async throws {
+    let ended: Int32 = 999_920
+    let survivor = getpid()
+    var watches: [Int32: @MainActor () -> Void] = [:]
+    var armed: [Int32: Int] = [:]
+    var cancelled: [Int32] = []
+    var record = scene()
+    record.displayId = 1
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {
+        do {
+          let configuration = try self.publishedConfiguration()
+          let contents: [LockScreenContent] = [.desktop, .lockScreen]
+          for content in contents {
+            for scene in configuration.scenes(for: content) {
+              let state = LockScreenReadiness(
+                revision: configuration.revision, displayID: scene.displayID,
+                processID: content == .desktop ? survivor : ended, content: content)
+              try JSONEncoder().encode(state).write(to: self.exchange.appendingPathComponent(
+                LockScreenReadiness.fileName(displayID: scene.displayID, content: content)), options: .atomic)
+            }
+          }
+        } catch { XCTFail(error.localizedDescription) }
+      }, scenes: { [record] }, wallpaperScenes: { _ in [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor, displayUUID: { _ in "one" },
+      readinessTimeout: 1, watchProcessExit: { pid, callback in
+        armed[pid, default: 0] += 1
+        watches[pid] = callback
+        return { cancelled.append(pid) }
+      })
+    service.setWallpaper("independent", lockScreen: true)
+    service.setEnabled(true)
+    await waitFor("initial desktop-backed readiness") { !service.isBusy }
+    XCTAssertTrue(service.isEnabled, service.errorMessage ?? service.status)
+    let revision = try publishedRevision()
+    let lockedFile = exchange.appendingPathComponent(
+      LockScreenReadiness.fileName(displayID: 1, content: .lockScreen))
+    let exited = try XCTUnwrap(watches[ended])
+    XCTAssertEqual(armed[ended], 1)
+    if replaced {
+      let locked = LockScreenReadiness(revision: revision, displayID: 1, processID: survivor, content: .lockScreen)
+      try JSONEncoder().encode(locked).write(to: lockedFile, options: .atomic)
+    }
+    exited()
+    await waitFor("renderer exit handled") { !service.isBusy }
+    XCTAssertEqual(armed[ended], 1, "a retained acknowledgement must not re-arm an already handled exit")
+    XCTAssertTrue(service.isEnabled, service.errorMessage ?? service.status)
+    XCTAssertNil(service.errorMessage)
+    XCTAssertEqual(try publishedRevision(), revision)
+    XCTAssertEqual(cancelled, [ended])
+    XCTAssertEqual(armed[survivor], 1)
+    let settled = try publishedRevision()
+    exited()
+    XCTAssertFalse(service.isBusy)
+    XCTAssertEqual(try publishedRevision(), settled)
+    try await service.shutdown()
+  }
+
   /// A renderer that keeps dying is not restarted for ever: past the limit the lock screen is
   /// handed back to macOS with an error and a Retry, as for any other failure.
   @MainActor

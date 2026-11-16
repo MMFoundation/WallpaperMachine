@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-14 — Compact pixiv pages after filtering
+
+- Matching works are deduplicated and paginated after filtering; rankings report exact matching totals and searches refill on demand with lookahead.
+- Targeted pixiv store and panel regression run: 84 passed, 0 failed, 0 skipped.
+- `python3 scripts/test.py`: exit 0; all Python script modules passed; native tests: 4,933 passed, 0 failed, 70 skipped.
+- Seven new pagination cases cover cross-page refill, cached refiltering, search lookahead, retry, duplicates, empty ratings, in-flight filter changes and a fully filtered tail.
+- Opt-in media, live-network and snapshot checks remained skipped. Two runtime main-thread warnings were reported by the full suite.
+- Live pixiv and desktop presentation were not checked; no desktop control, Release build, installation or restart was performed.
+
 ## 2026-11-14 — Shared wallpaper-store coordination (issue 199)
 
 - Implemented a shared FIFO transaction queue for native selection and desktop posters, with bounded verified WallpaperAgent turnover and selection readback.

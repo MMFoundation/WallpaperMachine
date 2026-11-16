@@ -137,16 +137,23 @@ final class WallpaperController {
       surface.clear()
       return
     }
+    let sharesRenderer = surface.scene.sharesRenderer(with: scene)
+    if (!sharesRenderer || (!surface.hasContent && !surface.isLoading)), !surface.mayReplaceContent {
+      surface.applyPolicy()
+      return
+    }
     let changedContent = surface.content != content
     surface.content = content
-    if surface.scene == scene, surface.isLoading {
+    if sharesRenderer, surface.isLoading {
+      surface.update(scene: scene)
       if changedContent { acknowledge(surface: surface) }
-    } else if surface.hasContent, surface.scene.sharesRenderer(with: scene) {
+    } else if surface.hasContent, sharesRenderer {
       surface.update(scene: scene)
       acknowledge(surface: surface)
     } else {
+      let token = surface.pendingAcquires.begin()
       surface.replace(scene: scene, size: surface.size, scale: surface.scale) { [weak self, weak surface] error in
-        guard let self, let surface else { return }
+        guard let self, let surface, surface.pendingAcquires.complete(token, error: error) else { return }
         self.acknowledge(surface: surface, error: error)
         if let error { WallpaperRuntime.log("Replacement failed: \(error.localizedDescription)") }
       }
@@ -207,11 +214,11 @@ final class WallpaperController {
           self.acknowledge(surface: surface)
           let elapsed = ContinuousClock.now - started
           reply(contextReply, nil)
-          self.logFirstFrame(id: id, scene: scene, preview: preview, elapsed: elapsed)
+          self.logFirstFrame(id: id, scene: surface.scene, preview: preview, elapsed: elapsed)
         } catch {
           if !(error is CancellationError) {
             WallpaperRuntime.log(
-              "Acquire failed display=\(scene.displayID) after "
+              "Acquire failed display=\(surface.scene.displayID) after "
                 + "\(LockScreenFirstFrameTiming.seconds(ContinuousClock.now - started)) s: "
                 + error.localizedDescription)
             self.acknowledge(surface: surface, error: error)
@@ -220,14 +227,25 @@ final class WallpaperController {
           reply(nil, error)
         }
       }
+      surface.pendingAcquires.append(ready)
+      if !acquisition.isNew, surface.isLoading, surface.scene == scene,
+        surface.size == size, surface.scale == scale
+      {
+        surface.applyPolicy()
+        return
+      }
+      let token = surface.pendingAcquires.begin()
+      let complete: (Error?) -> Void = { [weak surface] error in
+        surface?.pendingAcquires.complete(token, error: error)
+      }
       if acquisition.isNew {
-        surface.start(completion: ready)
+        surface.start(completion: complete)
       } else if surface.hasContent, surface.scene == scene, surface.size == size, surface.scale == scale {
         surface.applyPolicy()
-        surface.whenReady(ready)
+        surface.whenReady(complete)
       } else {
         // Keep the hosted context while replacing its child renderer.
-        surface.replace(scene: scene, size: size, scale: scale, completion: ready)
+        surface.replace(scene: scene, size: size, scale: scale, completion: complete)
       }
     } catch {
       reply(nil, error)

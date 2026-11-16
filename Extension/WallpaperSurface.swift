@@ -44,6 +44,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     renderer != nil || video != nil || heldFailure != nil || (web != nil && contentError == nil)
   }
   var isLoading: Bool { firstFrameReply != nil }
+  let pendingAcquires = LockScreenAcquireReplies()
   private var rendererPaused = false
   /// When this surface started presenting, set once its first frame arrived.
   /// Kept apart from readiness so rendering one frame for a snapshot or a
@@ -113,8 +114,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       }
       try startEngine(project: project, assets: assets, completion: completion)
     } catch {
-      stop()
       completion(error)
+      stop()
     }
   }
 
@@ -304,10 +305,10 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       do { try await Task.sleep(for: .seconds(30)) } catch { return }
       guard let self, let reply = self.firstFrameReply else { return }
       self.firstFrameReply = nil
-      self.stop()
       reply(
         WallpaperRuntime.failure(
           "The lock-screen renderer did not produce a frame within 30 seconds."))
+      self.stop()
     }
   }
 
@@ -459,8 +460,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     } catch {
       if let reply = firstFrameReply {
         firstFrameReply = nil
-        stop()
         reply(error)
+        stop()
       }
       finishSnapshots(error: error)
     }
@@ -623,6 +624,11 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       continuousPreviewRequested: continuousPreviewRequested,
       lockScreenEnabled: WallpaperController.shared.configuration?.scene(for: .lockScreen, displayID: displayID) != nil,
       screenSaverEnabled: WallpaperController.shared.configuration?.scene(for: .screenSaver, displayID: displayID) != nil)
+  }
+
+  var mayReplaceContent: Bool {
+    WallpaperPresentationAuthority.mayPrepareReplacement(
+      authorityRequest, hasPendingAcquire: pendingAcquires.hasPending)
   }
 
   func applyPolicy() {
@@ -835,6 +841,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   }
 
   func clear() {
+    pendingAcquires.cancel()
     releaseRenderer()
     CATransaction.flush()
   }
@@ -842,6 +849,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   func stop() {
     guard !stopped else { return }
     stopped = true
+    pendingAcquires.cancel()
     releaseRenderer()
     context.invalidate()
   }

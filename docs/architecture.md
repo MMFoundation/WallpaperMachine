@@ -953,6 +953,10 @@ Rules of the exchange:
   presentation selects desktop content. Each surface replaces its renderer only when its
   selected content needs a different renderer. Readiness files identify the content role so
   a saver frame cannot acknowledge Desktop activation or overwrite a lock-screen error.
+  `LockScreenAcquireReplies` keeps host replies separate from replaceable renderer
+  completions, so an older renderer's cancellation cannot fail the current acquire.
+  Environment-driven replacement is deferred while no presentation consumer can
+  see it; an outstanding host acquire remains an explicit first-frame request.
   The single service journals Desktop and Idle ownership separately; only Desktop ownership
   suspends desktop poster sync, and an Idle-only selection is committed without waiting for an
   unshown surface to be acquired. The bridge exports committed scenes, videos and web projects

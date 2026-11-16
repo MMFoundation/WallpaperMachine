@@ -66,6 +66,14 @@ replacement needs its own first frame. Idle presentation selects the screen save
 even when the login session is also locked, and unlocking returns to desktop
 content.
 
+An existing surface does not prepare a different source while its display sleeps,
+its login session is off-console, the host suspends it, or it has no presentation
+consumer. It keeps the current renderer paused and selects the latest source when
+presentation resumes, rather than loading every intermediate choice. A host's
+pending acquire still needs its first frame: its reply survives source replacement
+and is completed once for the current renderer. Removing the configuration or a
+display's source clears the surface and cancels pending acquires immediately.
+
 Whether the display is asleep, whether the session is locked and whether it is on the
 console are read from the system each time a surface decides, not remembered from a
 notification. A surface asks about its own display, so one monitor sleeping does not pause

@@ -91,6 +91,7 @@ final class LockScreenWallpaperService {
   /// Exit watches on the extension processes that acknowledged the committed lock screen. macOS
   /// keeps a renderer whose process died as its wallpaper and shows nothing, never reloading it.
   @ObservationIgnored private var rendererWatches: [Int32: () -> Void] = [:]
+  @ObservationIgnored private var handledRendererExits: (revision: String, processes: Set<Int32>) = ("", [])
   /// A new publication reloads WallpaperAgent asynchronously. These processes may acknowledge
   /// the new manifest before that reload ends them; only their replacements can confirm it.
   @ObservationIgnored private var retiringRendererProcesses: Set<Int32> = []
@@ -858,12 +859,15 @@ final class LockScreenWallpaperService {
   /// Watches the processes that acknowledged `configuration`'s lock-screen scenes, and only
   /// those. An extension copy that does not report its process is not watched.
   private func armRendererWatches(_ configuration: LockScreenConfiguration) {
+    if handledRendererExits.revision != configuration.revision {
+      handledRendererExits = (configuration.revision, [])
+    }
     let processes = Set(
       [LockScreenContent.desktop, .lockScreen].flatMap { content in
         configuration.scenes(for: content).compactMap {
           self.readiness(displayID: $0.displayID, revision: configuration.revision, content: content)?.processID
         }
-      }.filter { $0 > 0 })
+      }.filter { $0 > 0 && !handledRendererExits.processes.contains($0) })
     for pid in rendererWatches.keys where !processes.contains(pid) {
       rendererWatches.removeValue(forKey: pid)?()
     }
@@ -893,6 +897,8 @@ final class LockScreenWallpaperService {
     guard let cancel = rendererWatches.removeValue(forKey: pid) else { return }
     cancel()
     guard !stopping, isEnabled, let published, published.lockScreenEnabled else { return }
+    if handledRendererExits.revision != published.revision { handledRendererExits = (published.revision, []) }
+    handledRendererExits.processes.insert(pid)
     let lockScenes = published.scenes(for: .lockScreen)
     let serving = lockScenes.compactMap { scene in
       let states = [LockScreenContent.desktop, .lockScreen].compactMap { content in
