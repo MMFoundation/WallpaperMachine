@@ -20,6 +20,7 @@ mod media_integration_default;
 mod missing_wallpaper_bootstrap;
 mod audio_response_nonblocking;
 mod native_video_routing;
+mod native_wallpaper_scenes;
 mod scene_capability;
 mod persistence_corruption;
 mod primary_switch_follow;

@@ -54,6 +54,11 @@ struct DesktopSettingsSection: View {
   static let lockScreenSwitch = SettingsItem(
     id: "desktop.lock-screen", section: .desktop, group: lockScreen, title: "Animate lock screen",
     note: "Experimental")
+  static let lockScreenSource = SettingsItem(
+    id: "desktop.lock-screen-source", section: .desktop, group: lockScreen,
+    title: "Lock screen wallpaper",
+    note: "Choose a library wallpaper for the lock screen, or follow the desktop; each display needs an applied desktop wallpaper.",
+    keywords: ["Same as desktop"])
   static let lockScreenStatus = SettingsItem(
     id: "desktop.lock-screen-status", section: .desktop, group: lockScreen,
     title: "Lock screen status", keywords: ["Retry"])
@@ -64,6 +69,11 @@ struct DesktopSettingsSection: View {
   static let screenSaverSwitch = SettingsItem(
     id: "desktop.screen-saver", section: .desktop, group: screenSaver,
     title: "Use wallpaper as screen saver", note: "Experimental")
+  static let screenSaverSource = SettingsItem(
+    id: "desktop.screen-saver-source", section: .desktop, group: screenSaver,
+    title: "Screen saver wallpaper",
+    note: "Choose a library wallpaper for the screen saver, independently of the lock screen and desktop.",
+    keywords: ["Same as desktop"])
   static let screenSaverStatus = SettingsItem(
     id: "desktop.screen-saver-status", section: .desktop, group: screenSaver,
     title: "Screen saver status", keywords: ["Retry"])
@@ -74,7 +84,8 @@ struct DesktopSettingsSection: View {
   static let items = [
     desktopWallpapers, writeDesktopPicture, refreshMissionControl, keepWindowsOnClick, hideDesktopIcons,
     hideNotch, livePropertyEdits,
-    lockScreenSwitch, lockScreenStatus, lockScreenContext, screenSaverSwitch, screenSaverStatus,
+    lockScreenSwitch, lockScreenSource, lockScreenStatus, lockScreenContext,
+    screenSaverSwitch, screenSaverSource, screenSaverStatus,
     screenSaverContext,
   ]
 
@@ -101,6 +112,7 @@ struct DesktopSettingsSection: View {
       }
       SettingsGroup(Self.lockScreen, in: .desktop) {
         SettingsRow(Self.lockScreenSwitch) { SettingsSwitchControl(key: .lockScreenEnabled) }
+        SettingsRow(Self.lockScreenSource) { NativeWallpaperSourceControl(kind: .lockScreen) }
         statusRow(Self.lockScreenStatus, controller.lockScreenState)
         if search.shows(Self.lockScreenStatus), let error = controller.lockScreenState.error {
           SettingsErrorLine(message: error)
@@ -108,7 +120,7 @@ struct DesktopSettingsSection: View {
         SettingsDisclosure(Self.lockScreenContext) {
           SettingsProse {
             Text(
-              "Lock screen animation uses private macOS APIs and may stop working after a macOS update. While it is on, the app takes over only the Desktop wallpaper selection on displays with an applied wallpaper, and reloads the macOS wallpaper service. The screen saver is a separate choice below. Turning this off restores the Desktop choices; quitting restores all choices the app changed and keeps other wallpaper changes."
+              "Lock screen animation uses the native Desktop wallpaper provider and private macOS APIs. While unlocked, it still shows each display’s desktop wallpaper; your lock screen choice does not replace it. Enabling this takes over the Desktop selection on displays with an applied wallpaper and reloads the macOS wallpaper service. Turning it off restores the previous Desktop choices. Quitting restores all choices the app changed and keeps other wallpaper changes. A macOS update may stop this experimental feature from working."
             )
             Text(
               "It keeps separate copies of wallpaper files, which uses extra disk space, and may not render on every macOS version. Pause and battery settings still apply."
@@ -118,6 +130,7 @@ struct DesktopSettingsSection: View {
       }
       SettingsGroup(Self.screenSaver, in: .desktop) {
         SettingsRow(Self.screenSaverSwitch) { SettingsSwitchControl(key: .screenSaverEnabled) }
+        SettingsRow(Self.screenSaverSource) { NativeWallpaperSourceControl(kind: .screenSaver) }
         statusRow(Self.screenSaverStatus, controller.screenSaverState)
         if search.shows(Self.screenSaverStatus), let error = controller.screenSaverState.error {
           SettingsErrorLine(message: error)
@@ -125,7 +138,7 @@ struct DesktopSettingsSection: View {
         SettingsDisclosure(Self.screenSaverContext) {
           SettingsProse {
             Text(
-              "Requires macOS 26 or later. Uses each display’s applied wallpaper as its screen saver, including scenes, videos, web wallpapers and still images. This experimental feature uses private macOS APIs and may stop working after an update."
+              "Requires macOS 26 or later. Same as desktop follows each display’s applied wallpaper; a library choice uses that wallpaper for the screen saver instead. Scenes, videos, web wallpapers and still images are supported. This experimental feature uses private macOS APIs and may stop working after an update."
             )
             Text(
               "The screen saver choice is independent of lock screen animation. It changes only the Idle wallpaper selection and reloads the macOS wallpaper service. Turning it off restores the previous screen saver without changing the Desktop selection, and keeps screen saver changes made elsewhere. Pause and battery settings still apply."

@@ -58,6 +58,95 @@ final class SettingsControlsRenderTests: PanelTestCase {
   /// The lead of a note: the part under the row's title, which is the control's hint.
   private func lead(_ note: String) -> String { SettingsNote.parts(note).lead }
 
+  func testNativeSourceRowsShowIndependentValuesAndKeepAMissingWallpaperVisible() async throws {
+    try pinPanelLanguageToEnglish()
+    try await withRecordingPanel { panel, _ in
+      prepare(panel)
+      panel.store.librarySnapshot.wallpapers = [
+        OrganizationFixtures.wallpaper("chosen", title: "Ocean <img src=x>"),
+      ]
+      try await withNativeWallpaperService(panel) { service in
+        let controller = panel.controller
+        try await withPage(DesktopSettingsSection(), controller) { hosting, tree in
+          @MainActor func control(_ item: SettingsItem) throws -> AccessibilityElement {
+            try XCTUnwrap(row(item, in: tree).first(role: "AXButton"))
+          }
+          for item in [DesktopSettingsSection.lockScreenSource, DesktopSettingsSection.screenSaverSource] {
+            let button = try control(item)
+            XCTAssertEqual(button.label, controller.settings.text(item.title))
+            XCTAssertEqual(button.value, "Same as desktop")
+          }
+
+          try await controller.setNativeWallpaperSource("chosen", for: .lockScreen)
+          try await panel.waitUntil { !service.isBusy }
+          try await Task.sleep(for: .milliseconds(250))
+          hosting.view.layoutSubtreeIfNeeded()
+          XCTAssertEqual(try control(DesktopSettingsSection.lockScreenSource).value, "Ocean <img src=x>")
+          XCTAssertEqual(try control(DesktopSettingsSection.screenSaverSource).value, "Same as desktop")
+
+          panel.store.librarySnapshot.wallpapers = []
+          try await Task.sleep(for: .milliseconds(250))
+          hosting.view.layoutSubtreeIfNeeded()
+          XCTAssertEqual(try control(DesktopSettingsSection.lockScreenSource).value, "Unavailable wallpaper: chosen")
+          XCTAssertEqual(service.lockScreenWallpaperID, "chosen")
+          XCTAssertNil(service.screenSaverWallpaperID)
+        }
+      }
+    }
+  }
+
+  func testNativeSourceControlsLayOutWithLongAndMissingNamesInEveryLanguage() async throws {
+    addTeardownBlock { @MainActor in PanelLocale.shared.bind(to: .testHost) }
+    try await withRecordingPanel { panel, _ in
+      prepare(panel)
+      let title = String(repeating: "Ocean <img src=x> — 長い壁紙名 ", count: 8)
+      panel.store.librarySnapshot.wallpapers = [OrganizationFixtures.wallpaper("chosen", title: title)]
+      try await withNativeWallpaperService(panel) { service in
+        try await panel.controller.setNativeWallpaperSource("chosen", for: .lockScreen)
+        service.setWallpaper("missing-library-wallpaper", lockScreen: false)
+        try await panel.waitUntil { !service.isBusy }
+        for language in AppLanguage.supported {
+          let locale = AppLanguageStore(
+            defaults: try TemporaryDefaults.make(for: self).defaults, systemLanguages: [language.tag])
+          PanelLocale.shared.bind(to: locale)
+          for kind in [LockScreenState.Kind.lockScreen, .screenSaver] {
+            let item = kind == .lockScreen
+              ? DesktopSettingsSection.lockScreenSource : DesktopSettingsSection.screenSaverSource
+            let content = SettingsRow(item) { NativeWallpaperSourceControl(kind: kind) }
+            try await withPage(content, panel.controller) { hosting, _ in
+              for width: CGFloat in [436, 800] {
+                let size = hosting.sizeThatFits(in: NSSize(width: width, height: 10_000))
+                XCTAssertLessThanOrEqual(size.width, width + 1, "\(language.tag) \(kind)")
+                XCTAssertGreaterThan(size.height, 20)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  func testNativeSourcePickerShowsDesktopAndLibraryChoicesWithoutMarkup() async throws {
+    try pinPanelLanguageToEnglish()
+    try await withRecordingPanel { panel, _ in
+      prepare(panel)
+      panel.store.librarySnapshot.wallpapers = [
+        OrganizationFixtures.wallpaper("chosen", title: "Ocean <img src=x>"),
+        OrganizationFixtures.wallpaper("unsupported", supported: false),
+      ]
+      try await withNativeWallpaperService(panel) { _ in
+        try await withPage(NativeWallpaperSourcePicker(kind: .screenSaver, dismiss: {}), panel.controller) { hosting, _ in
+          let elements = AccessibilityElement.everything(in: hosting.view)
+          let buttons = elements.filter { $0.role == "AXButton" }.map(\.text)
+          XCTAssertTrue(buttons.contains("Same as desktop"))
+          XCTAssertTrue(buttons.contains("Ocean <img src=x>"))
+          XCTAssertFalse(buttons.contains("unsupported"))
+          XCTAssertTrue(elements.contains { $0.role == "AXTextField" }, "The library choices can be searched")
+        }
+      }
+    }
+  }
+
   // MARK: VoiceOver
 
   /// Every control carries its row's name and the note under it as its hint, as the web page's

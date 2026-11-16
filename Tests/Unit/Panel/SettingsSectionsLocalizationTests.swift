@@ -77,6 +77,11 @@ final class SettingsSectionsLocalizationTests: XCTestCase {
         (EnergyReadout.title(for: .high), "High energy use"),
         (FrameRateCapSlider(refreshRate: 60).readout(atPosition: 61), "No limit"),
         (GeneralSettingsSection.languageOptions()[0].title, "System (Auto)"),
+        (NativeWallpaperSource(wallpaperID: nil, wallpaperTitle: nil, isEnabled: true).title, "Same as desktop"),
+        (
+          NativeWallpaperSource(wallpaperID: "missing", wallpaperTitle: nil, isEnabled: true).title,
+          "Unavailable wallpaper: missing"
+        ),
       ]
       for (translated, base) in words {
         XCTAssertNotEqual(translated, base, "\(language.tag): \(base)")

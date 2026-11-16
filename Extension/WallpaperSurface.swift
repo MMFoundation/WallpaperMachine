@@ -14,6 +14,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   private(set) var scale: CGFloat
   let preview: Bool
   var presentation = "active"
+  var content: LockScreenContent = .desktop
   var activity = "active"
   private var layer: CAMetalLayer?
   private var renderer: OpaquePointer?
@@ -42,6 +43,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   var hasContent: Bool {
     renderer != nil || video != nil || heldFailure != nil || (web != nil && contentError == nil)
   }
+  var isLoading: Bool { firstFrameReply != nil }
   private var rendererPaused = false
   /// When this surface started presenting, set once its first frame arrived.
   /// Kept apart from readiness so rendering one frame for a snapshot or a
@@ -619,8 +621,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       hostActivity: activity == "suspended" ? .suspended : .active,
       presentedFor: presentingSince.map { ContinuousClock.now - $0 },
       continuousPreviewRequested: continuousPreviewRequested,
-      lockScreenEnabled: WallpaperController.shared.configuration?.lockScreenEnabled ?? false,
-      screenSaverEnabled: WallpaperController.shared.configuration?.screenSaverEnabled ?? false)
+      lockScreenEnabled: WallpaperController.shared.configuration?.scene(for: .lockScreen, displayID: displayID) != nil,
+      screenSaverEnabled: WallpaperController.shared.configuration?.scene(for: .screenSaver, displayID: displayID) != nil)
   }
 
   func applyPolicy() {

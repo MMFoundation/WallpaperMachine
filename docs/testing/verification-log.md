@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-16 — Independent lock-screen and screen-saver wallpapers (#193)
+
+- Added independent saved library choices with Same as desktop defaults, source-aware extension playback, and read-only native exports without changing desktop assignments.
+- Focused bridge tests: 8 new independent-export cases and 18 existing activation/export cases passed; python3 scripts/build.py --renderer-only passed and regenerated bindings.
+- Focused native settings/service checks: 114 passed; subsequent legacy-manifest, content-selection, diagnostics and GPU-energy checks: 109 passed.
+- python3 scripts/test.py: final full gate passed, 5088 native tests passed, 0 failed, 70 opt-in tests skipped; all Python modules passed.
+- The first full gate found a legacy-manifest compatibility regression (fixed with version-2 decoding) and a GPU-energy threshold failure; the unchanged energy test passed in isolation and in the final full gate without the renderer suite running concurrently.
+- python3 scripts/check_rust.py --output artifacts/issue-193/rust: all four groups passed; five desktop-window cases excluded, desktop/media/network opt-ins disabled.
+- python3 scripts/check_renderer.py: passed, 12 generated pooled/isolated comparisons matched, reload cycles passed; seven local-asset cases across five binaries skipped.
+- Live desktop/lock/idle transitions, screenshots and UI automation were not authorized and remain unverified. No Release app build, install, commit or push.
+
 ## 2026-11-16 — Replaceable shared state in scene scripts
 
 - Issue #216: allow a scene script to replace shared state so media visibility switches reach other scripts; no per-frame work added.
@@ -123,11 +134,3 @@ Refs #198. This implements bounded pre-write retries; historical-Space scaling a
 - Three runtime main-thread warnings came from VideoFormatSupportTests, AppUpdateTests and WebMFilteredVideoSinkTests; compiler warnings remain in existing code.
 - Documentation links and git diff --check passed. Live desktop/WallpaperAgent behavior was not exercised; no desktop authorization, Release build, install, commit or push.
 - Removed this task’s disposable test result bundles and renderer-build logs after recording the verdicts; retained compiled build outputs.
-
-## 2026-11-13 — Sign-in window hosts and sign-outs the keychain resists
-
-Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in window; Steam Community and pixiv sign-out emptying a keychain item another build saved, failing only when the session stays). The report's third finding, memory corruption in `SteamCMDRuntimeService.fingerprint` `readlinkat`, was not reproduced: SIL shows `&link` passing the element buffer (`_convertMutableArrayToPointerArgument<UInt8, UnsafeMutablePointer<Int8>>`), and the same pattern ran clean under AddressSanitizer with a 1022-byte target; the code is unchanged.
-
-- `python3 scripts/test.py --only` WebSignInPolicyTests, KeychainGenericPasswordTests, SteamWebSessionTests, WorkshopSourceTests, PixivStoreTests, PanelWorkshopSubscriptionsTests, NativeWorkshopDownloadTests, PanelPixivActionsTests, PanelDownloadActionsTests — 143 passed
-- `python3 scripts/test.py` — first run 4980 passed, 1 failed (`ScreenSaverWebSurfaceTests` frame rate 8.7 < 14 under load; 16/16 alone); rerun 4981 passed, 0 failed, 70 skipped
-- Not checked: a live Steam or pixiv sign-in and sign-out against the allowlist, and macOS's real answer to emptying another build's item (modelled by `MemoryKeychain`)

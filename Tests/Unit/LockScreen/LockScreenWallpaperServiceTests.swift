@@ -97,6 +97,168 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       engineOptions: nil, sceneQuality: nil, borderColor: nil)
   }
 
+  @MainActor
+  func testIndependentSaverWorksWithoutDesktopAssignmentAndPersistsItsChoice() async throws {
+    let original = fixture()
+    try write(original)
+    var desktopRecords: [BridgeLockScreenScene] = []
+    var saver = scene()
+    saver.title = "Independent saver"
+    saver.wallpaperId = "saver"
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { desktopRecords },
+      wallpaperScenes: { _ in [saver] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor, displayUUID: { _ in "one" })
+    service.setWallpaper("saver", lockScreen: false)
+    service.setScreenSaverEnabled(true)
+    await waitFor("independent saver selection") { !service.isBusy }
+    XCTAssertTrue(service.screenSaverEnabled, service.screenSaverError ?? service.screenSaverStatus)
+    let file = exchange.appendingPathComponent(LockScreenConfiguration.fileName)
+    let configuration = try JSONDecoder().decode(LockScreenConfiguration.self, from: Data(contentsOf: file))
+    XCTAssertTrue(configuration.scenes.isEmpty)
+    XCTAssertEqual(configuration.scenes(for: .screenSaver).map(\.title), ["Independent saver"])
+    let storeValue = try XCTUnwrap(
+      PropertyListSerialization.propertyList(from: Data(contentsOf: store), format: nil) as? [String: Any])
+    let display = try XCTUnwrap((storeValue["Displays"] as? [String: [String: Any]])?["one"])
+    XCTAssertEqual(display["Desktop"] as? NSDictionary, node("display-one")["Desktop"] as? NSDictionary)
+    XCTAssertFalse(service.ownsDesktopProvider)
+    desktopRecords = [scene()]
+    service.refresh()
+    await waitFor("desktop change with independent saver") { !service.isBusy }
+    XCTAssertEqual(
+      try JSONDecoder().decode(LockScreenConfiguration.self, from: Data(contentsOf: file)).revision,
+      configuration.revision)
+    try await service.shutdown()
+    let restarted = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { desktopRecords },
+      wallpaperScenes: { _ in [saver] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor, displayUUID: { _ in "one" })
+    try await restarted.start()
+    restarted.refresh()
+    await waitFor("persisted saver selection") { !restarted.isBusy }
+    XCTAssertTrue(restarted.screenSaverEnabled)
+    XCTAssertEqual(restarted.screenSaverWallpaperID, "saver")
+    restarted.setWallpaper(nil, lockScreen: false)
+    await waitFor("returning saver to desktop") { !restarted.isBusy }
+    let following = try JSONDecoder().decode(LockScreenConfiguration.self, from: Data(contentsOf: file))
+    XCTAssertNil(following.screenSaverScenes)
+    XCTAssertEqual(following.scenes(for: .screenSaver).map(\.title), ["t"])
+    try await restarted.shutdown()
+  }
+
+  @MainActor
+  func testThreeSourcesPublishIndependentAssetsAndDisablingLockKeepsSaver() async throws {
+    var desktop = scene()
+    desktop.displayId = 1
+    let lockProject = root.appendingPathComponent("LockProject")
+    let saverProject = root.appendingPathComponent("SaverProject")
+    try FileManager.default.copyItem(at: project, to: lockProject)
+    try FileManager.default.copyItem(at: project, to: saverProject)
+    var lock = desktop
+    lock.wallpaperId = "lock"
+    lock.title = "Lock"
+    lock.projectPath = lockProject.appendingPathComponent("project.json").path
+    var saver = desktop
+    saver.wallpaperId = "saver"
+    saver.title = "Saver"
+    saver.projectPath = saverProject.appendingPathComponent("project.json").path
+    var secondSaver = saver
+    secondSaver.displayId = 2
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [desktop] },
+      wallpaperScenes: { $0 == "lock" ? [lock] : [saver, secondSaver] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { $0 == 1 ? "one" : "two" })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    service.setWallpaper("lock", lockScreen: true)
+    service.setWallpaper("saver", lockScreen: false)
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("three independently published sources") { !service.isBusy }
+    XCTAssertTrue(service.isEnabled, service.errorMessage ?? service.status)
+    XCTAssertTrue(service.screenSaverEnabled)
+    let file = exchange.appendingPathComponent(LockScreenConfiguration.fileName)
+    let configuration = try JSONDecoder().decode(LockScreenConfiguration.self, from: Data(contentsOf: file))
+    XCTAssertEqual(configuration.scenes.map(\.title), ["t"])
+    XCTAssertEqual(configuration.lockScreenScenes?.map(\.title), ["Lock"])
+    XCTAssertEqual(configuration.screenSaverScenes?.map(\.displayID), [1, 2])
+    let paths = configuration.scenes + (configuration.lockScreenScenes ?? []) + (configuration.screenSaverScenes ?? [])
+    XCTAssertEqual(Set(paths.map(\.projectPath)).count, 3)
+    for scene in paths {
+      XCTAssertTrue(FileManager.default.fileExists(atPath: exchange.appendingPathComponent(scene.projectPath).path))
+    }
+    service.setEnabled(false)
+    await waitFor("independent lock disable") { !service.isBusy }
+    XCTAssertFalse(service.ownsDesktopProvider)
+    XCTAssertTrue(service.screenSaverEnabled)
+    let remaining = try JSONDecoder().decode(LockScreenConfiguration.self, from: Data(contentsOf: file))
+    XCTAssertEqual(remaining.scenes(for: .screenSaver).map(\.title), ["Saver", "Saver"])
+    XCTAssertEqual(service.lockScreenWallpaperID, "lock")
+    try await service.shutdown()
+  }
+
+  @MainActor
+  func testUnavailableIndependentSourceNeverSilentlyUsesDesktop() async throws {
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [self.scene()] },
+      wallpaperScenes: { _ in throw LockScreenWallpaperFailure(message: "Wallpaper unavailable") },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor, displayUUID: { _ in "one" })
+    service.setWallpaper("deleted", lockScreen: false)
+    service.setScreenSaverEnabled(true)
+    await waitFor("missing independent wallpaper error") { !service.isBusy }
+    XCTAssertFalse(service.screenSaverEnabled)
+    XCTAssertNotNil(service.screenSaverError)
+    XCTAssertEqual(service.screenSaverWallpaperID, "deleted")
+    service.setWallpaper(nil, lockScreen: false)
+    await waitFor("recovering the saver source") { !service.isBusy }
+    XCTAssertTrue(service.screenSaverEnabled)
+    XCTAssertNil(service.screenSaverError)
+    try await service.shutdown()
+  }
+
+  @MainActor
+  func testSaverReadinessCannotConfirmLockButLockedContentCan() async throws {
+    var content = LockScreenContent.screenSaver
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {
+        do {
+          let configuration = try JSONDecoder().decode(
+            LockScreenConfiguration.self,
+            from: Data(contentsOf: self.exchange.appendingPathComponent(LockScreenConfiguration.fileName)))
+          for scene in configuration.scenes(for: content) {
+            try JSONEncoder().encode(LockScreenReadiness(
+              revision: configuration.revision, displayID: scene.displayID, content: content))
+              .write(to: self.exchange.appendingPathComponent(
+                LockScreenReadiness.fileName(displayID: scene.displayID, content: content)), options: .atomic)
+          }
+        } catch { XCTFail(error.localizedDescription) }
+      }, scenes: { [self.scene()] },
+      wallpaperScenes: { _ in [self.scene()] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" }, runningExtensionBundles: { [] }, readinessTimeout: 0.2)
+    service.setWallpaper("lock", lockScreen: true)
+    service.setWallpaper("saver", lockScreen: false)
+    service.setScreenSaverEnabled(true)
+    service.setEnabled(true)
+    await waitFor("lock readiness to reject the saver frame") { !service.isBusy }
+    XCTAssertFalse(service.isEnabled)
+    XCTAssertNotNil(service.errorMessage)
+    XCTAssertTrue(service.screenSaverEnabled)
+    content = .lockScreen
+    service.retry(lockScreen: true)
+    await waitFor("lock readiness from locked content") { !service.isBusy }
+    XCTAssertTrue(service.isEnabled, service.errorMessage ?? service.status)
+    XCTAssertNil(service.errorMessage)
+    XCTAssertTrue(service.screenSaverEnabled)
+    try await service.shutdown()
+  }
+
   /// The managed store as the app writes it, isolated per test through
   /// `WALLPAPER_MACHINE_HOME`.
   @discardableResult

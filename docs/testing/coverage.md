@@ -862,6 +862,16 @@ The native-selection and service suites run against a synthetic store and inject
 services. They never mutate LaunchServices or PlugInKit, select a real wallpaper
 or depend on a second physical monitor.
 
+- `LockScreenContentSelectionTests` — independent desktop, lock and saver content
+  round-trips; idle takes precedence over a locked session; unlocking selects desktop
+  content; missing optional sources follow the desktop but explicit empty sources do
+  not; a saver-only display needs no desktop assignment; readiness paths stay separate.
+  The service tests also publish three sources with retained immutable assets, keep
+  a custom saver independent of desktop changes, restore saved source IDs, return to
+  desktop following, retain missing choices without fallback, and reject saver-only
+  readiness as evidence that a lock screen started. Native host transitions remain
+  an authorized desktop check, not a result of these tests.
+
 - `LockScreenWallpaperTests` (selection journal) — per-display ownership with
   independent originals; external Desktop changes survive; a reload failure
   leaves a recoverable journal; inherited, linked and system-copied selections

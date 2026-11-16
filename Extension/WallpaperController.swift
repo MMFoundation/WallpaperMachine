@@ -12,7 +12,8 @@ final class WallpaperController {
   /// Every signal that display power or the lock state may have changed only
   /// starts this: the answer comes from the system, now and over the next 2 s.
   private lazy var reevaluation = LockScreenReevaluationBurst(perform: { [weak self] in
-    self?.surfaces.values.forEach { $0.applyPolicy() }
+    guard let self else { return }
+    self.surfaces.values.forEach { self.refresh($0) }
   })
   private var started = false
   /// Static so the extension's listener can count a connection off the main queue.
@@ -70,23 +71,7 @@ final class WallpaperController {
       guard next != configuration else { return }
       configuration = next
       for surface in Array(surfaces.values) {
-        guard let scene = selectScene(displayID: surface.displayID) else {
-          surface.clear()
-          continue
-        }
-        if surface.hasContent, surface.scene.sharesRenderer(with: scene) {
-          surface.update(scene: scene)
-          acknowledge(surface: surface)
-        } else {
-          // The hosted CAContext remains the same; only its child renderer changes.
-          surface.replace(scene: scene, size: surface.size, scale: surface.scale) { [weak self, weak surface] error in
-            guard let self, let surface else { return }
-            self.acknowledge(surface: surface, error: error)
-            if let error {
-              WallpaperRuntime.log("Replacement failed: \(error.localizedDescription)")
-            }
-          }
-        }
+        refresh(surface)
       }
       WallpaperRuntime.log("Configuration loaded scenes=\(next.scenes.count)")
     } catch {
@@ -99,30 +84,33 @@ final class WallpaperController {
 
   func acknowledge(surface: WallpaperSurface, error: Error? = nil) {
     guard !surface.preview, let configuration,
-      configuration.scenes.contains(surface.scene),
+      configuration.scenes(for: surface.content).contains(surface.scene),
       surfaces.values.contains(where: { $0 === surface })
     else { return }
     let scene = surface.scene
+    let content = surface.content
     surface.whenReady { [weak self, weak surface] readyError in
       guard let self, let surface, self.configuration == configuration,
-        surface.scene == scene, self.surfaces.values.contains(where: { $0 === surface }),
+        surface.scene == scene, surface.content == content,
+        self.surfaces.values.contains(where: { $0 === surface }),
         !(readyError is CancellationError) || error != nil
       else { return }
       Self.record(
         LockScreenReadiness(
           revision: configuration.revision, displayID: scene.displayID,
-          error: (error ?? readyError)?.localizedDescription, held: surface.heldNotice))
+          error: (error ?? readyError)?.localizedDescription, held: surface.heldNotice,
+          content: content))
     }
   }
 
   /// A failure before any surface existed. Reported rather than left for the
   /// app to time out on, which it could only blame on macOS.
-  private func acknowledge(scene: LockScreenScene, error: Error) {
-    guard let configuration, configuration.scenes.contains(scene) else { return }
+  private func acknowledge(scene: LockScreenScene, content: LockScreenContent, error: Error) {
+    guard let configuration, configuration.scenes(for: content).contains(scene) else { return }
     Self.record(
       LockScreenReadiness(
         revision: configuration.revision, displayID: scene.displayID,
-        error: error.localizedDescription))
+        error: error.localizedDescription, content: content))
   }
 
   private static func record(_ readiness: LockScreenReadiness) {
@@ -131,21 +119,43 @@ final class WallpaperController {
     do {
       let data = try JSONEncoder().encode(readiness)
       try data.write(
-        to: WallpaperRuntime.exchange.appendingPathComponent("ready-\(readiness.displayID).json"),
+        to: WallpaperRuntime.exchange.appendingPathComponent(
+          LockScreenReadiness.fileName(displayID: readiness.displayID, content: readiness.content ?? .desktop)),
         options: .atomic)
     } catch {
       WallpaperRuntime.log("Readiness acknowledgement failed: \(error.localizedDescription)")
     }
   }
 
-  private func selectScene(displayID: UInt32?) -> LockScreenScene? {
-    guard let displayID else { return configuration?.scenes.first }
-    return configuration?.scenes.first(where: { $0.displayID == displayID })
+  private func refresh(_ surface: WallpaperSurface) {
+    guard let configuration else { surface.clear(); return }
+    let content = configuration.content(
+      presentationMode: surface.presentation,
+      sessionLocked: WallpaperPresentationAuthority.SessionState.current().locked,
+      displayID: surface.displayID)
+    guard let scene = configuration.scene(for: content, displayID: surface.displayID) else {
+      surface.clear()
+      return
+    }
+    let changedContent = surface.content != content
+    surface.content = content
+    if surface.scene == scene, surface.isLoading {
+      if changedContent { acknowledge(surface: surface) }
+    } else if surface.hasContent, surface.scene.sharesRenderer(with: scene) {
+      surface.update(scene: scene)
+      acknowledge(surface: surface)
+    } else {
+      surface.replace(scene: scene, size: surface.size, scale: surface.scale) { [weak self, weak surface] error in
+        guard let self, let surface else { return }
+        self.acknowledge(surface: surface, error: error)
+        if let error { WallpaperRuntime.log("Replacement failed: \(error.localizedDescription)") }
+      }
+    }
   }
 
   func acquire(id value: Any?, request: Any?, reply: @escaping (Any?, Error?) -> Void) {
     let started = ContinuousClock.now
-    var acquiring: LockScreenScene?
+    var acquiring: (LockScreenScene, LockScreenContent)?
     WallpaperRuntime.logRequestShape("acquire", request)
     do {
       guard let id = WallpaperRuntime.identifier(value), let request,
@@ -157,13 +167,19 @@ final class WallpaperController {
       }
       let displayID = WallpaperRuntime.field("directDisplayID", in: destination) as? UInt32
       let preview = WallpaperRuntime.field("isPreview", in: request) as? Bool ?? false
+      let presentation = WallpaperRuntime.field("presentationMode", in: request)
+        .map(WallpaperRuntime.enumCase) ?? surfaces[id]?.presentation ?? "active"
       reload()
-      guard let scene = selectScene(displayID: displayID) else {
+      let content = configuration?.content(
+        presentationMode: presentation,
+        sessionLocked: WallpaperPresentationAuthority.SessionState.current().locked,
+        displayID: displayID) ?? .desktop
+      guard let scene = configuration?.scene(for: content, displayID: displayID) else {
         throw WallpaperRuntime.failure(
           "No applied wallpaper is available for this display. Enable Animate Lock Screen or Use wallpaper as screen saver in WallpaperMachine."
         )
       }
-      if !preview { acquiring = scene }
+      if !preview { acquiring = (scene, content) }
       let acquisition = try surfaces.acquire(
         id: id, matches: { $0.displayID == displayID && $0.preview == preview }
       ) { generation in
@@ -173,9 +189,8 @@ final class WallpaperController {
       }
       let surface = acquisition.surface
       let generation = acquisition.generation
-      if let mode = WallpaperRuntime.field("presentationMode", in: request) {
-        surface.presentation = WallpaperRuntime.enumCase(mode)
-      }
+      surface.presentation = presentation
+      surface.content = content
       if let activity = WallpaperRuntime.field("activityState", in: request) {
         surface.activity = WallpaperRuntime.enumCase(activity)
       }
@@ -217,7 +232,7 @@ final class WallpaperController {
     } catch {
       reply(nil, error)
       WallpaperRuntime.log("Acquire failed: \(error.localizedDescription)")
-      if let acquiring { acknowledge(scene: acquiring, error: error) }
+      if let acquiring { acknowledge(scene: acquiring.0, content: acquiring.1, error: error) }
     }
   }
 
@@ -266,7 +281,7 @@ final class WallpaperController {
     if let activity = WallpaperRuntime.field("activityState", in: request) {
       surface.activity = WallpaperRuntime.enumCase(activity)
     }
-    surface.applyPolicy()
+    refresh(surface)
     WallpaperRuntime.log(
       "Updated id=\(id) mode=\(surface.presentation) activity=\(surface.activity)")
   }

@@ -900,7 +900,7 @@ contracts they must agree on:
   publish-time copy of a scene's script `localStorage`, and `engineOptions`, `sceneQuality`,
   `lutFile` (a video's published image filter) and `borderColor` (a video's `schemecolor`
   border), the saved Wallpaper Engine options; a `sceneRenderer` key an older app wrote is read past), so the version stays and an extension
-  copy that predates it ignores the key; `LockScreenScene.sharesRenderer(with:)` names which
+  copy that predates it ignores the key within that contract version; `LockScreenScene.sharesRenderer(with:)` names which
   differences make the extension replace a renderer rather than update it.
 - `LockScreenExtensionStatus` is a separate diagnostic exchange (`activation-request.json`,
   `extension-status.json`) that reports a configuration error even when the scene schema cannot
@@ -942,11 +942,24 @@ contracts they must agree on:
 
 Rules of the exchange:
 
-- The version-2 manifest carries independent `lockScreenEnabled` and `screenSaverEnabled` flags.
+- The version-3 manifest carries independent `lockScreenEnabled` and `screenSaverEnabled` flags,
+  desktop `scenes`, and optional `lockScreenScenes` and `screenSaverScenes`. An absent list
+  follows the desktop; an explicitly empty list never falls back. The version change makes
+  an older extension refuse independent content rather than silently show the desktop.
+  The current extension also reads version 2 and upgrades it in memory with desktop-following
+  defaults, retaining the previous contract when no independent selections were published.
+  Content selection follows host presentation: idle selects the saver even while locked,
+  locked presentation or session state selects lock-screen content, and unlocked active
+  presentation selects desktop content. Each surface replaces its renderer only when its
+  selected content needs a different renderer. Readiness files identify the content role so
+  a saver frame cannot acknowledge Desktop activation or overwrite a lock-screen error.
   The single service journals Desktop and Idle ownership separately; only Desktop ownership
   suspends desktop poster sync, and an Idle-only selection is committed without waiting for an
   unshown surface to be acquired. The bridge exports committed scenes, videos and web projects
   independently of desktop routing or suspension.
+  `nativeWallpaperScenes(wallpaperId:)` exports one installed wallpaper's saved options on
+  enabled, non-mirrored displays without applying it or writing default configuration files.
+  The app stores the two optional library IDs in its preferences, not desktop assignments.
 - A scene's `paused` carries only the user's Play/Pause and power policy: the desktop display
   being suspended, which locking causes by covering it, is not a reason for the lock screen to
   hold still.
