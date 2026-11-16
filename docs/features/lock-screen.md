@@ -615,10 +615,14 @@ before the store changes or the journal is removed.
 
 Reconciliation still covers every Space in the store, including historical and
 full-screen Spaces. Each pass indexes desired paths and journal entries for lookups
-while keeping the existing traversal and journal order. Nested updates detach the
-child dictionary before editing it to avoid repeatedly copying the full Spaces
-dictionary. These optimizations do not prune Apple's Space records, change ownership
-or restoration rules, move work off the main actor, or eliminate concurrent writes.
+while keeping the existing traversal and journal order. Both selection and the
+shared-store coordinator convert the Spaces dictionary once per decoded snapshot:
+confirming or replaying thousands of changed choices after a reload must not bridge
+the entire dictionary again for each lookup. Nested updates, including stale-save
+replay, detach the child dictionary before editing it to avoid repeatedly copying
+the full Spaces dictionary. These optimizations do not prune Apple's Space records,
+change ownership or restoration rules, move work off the main actor, or eliminate
+concurrent writes.
 
 If the store changes between reading it and the pre-write comparison, selection
 recomputes from the latest file, with at most three attempts per synchronization.
