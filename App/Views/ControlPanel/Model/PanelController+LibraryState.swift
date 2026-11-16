@@ -35,6 +35,7 @@ extension PanelController {
       content: store.libraryPresentationRevision, refresh: store.libraryRefreshRevision,
       metrics: libraryMetrics.contentRevision, covers: libraryCovers.contentRevision,
       updates: workshop.updates.availableRevision,
+      details: workshop.updates.detailsRevision,
       // Nothing announces a new rating: one earned in the background shows with the next change
       // of anything above, as it did before.
       energy: store.wallpaperEnergyRatings?.revision ?? 0,
@@ -58,6 +59,7 @@ extension PanelController {
       LibraryRow.make(
         entry, isActive: store.isWallpaperActive(id: entry.id, displayId: target), covers: covers,
         metrics: metrics[entry.id], update: updates[entry.id],
+        details: workshop.updates.details[entry.id],
         energy: ratings?.snapshot(for: entry.id, kind: entry.kind))
     }
   }

@@ -255,10 +255,11 @@ final class SystemWallpaperStore {
     }
 
     private static func decode(_ data: Data) throws -> [String: Any] {
-        guard let root = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+        guard var root = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
             throw LockScreenWallpaperFailure(message: String(localized:
                 "This macOS wallpaper store format is unsupported. Native selection was not changed."))
         }
+        if let spaces = root["Spaces"] as? [String: Any] { root["Spaces"] = spaces }
         return root
     }
 
@@ -305,7 +306,7 @@ final class SystemWallpaperStore {
             root[key] = value
             return
         }
-        var child = root[key] as? [String: Any] ?? [:]
+        var child = root.removeValue(forKey: key) as? [String: Any] ?? [:]
         set(&child, path: Array(path.dropFirst()), value: value)
         root[key] = child.isEmpty ? nil : child
     }

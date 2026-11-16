@@ -89,9 +89,10 @@ seconds; cancellation or timeout terminates and reaps it without disturbing the
 long-lived stream. A successful empty snapshot withdraws the old song and cover.
 
 **The setting starts a source; presenting keeps it running.**
-`WallpaperBridge.systemMediaSceneHandles()` names the applied desktop Scenes that
-have the setting on **and** are actually presenting; the host starts and stops its
-provider from that answer plus web consumers. A machine where every wallpaper has
+`WallpaperBridge.systemMediaScenes()` names the applied desktop Scenes that
+have the setting on **and** are actually presenting, with each handle's current
+renderer load ID; the host starts and stops its provider from that answer plus web
+consumers. A machine where every wallpaper has
 the setting off never loads the adapter, never sends an Apple Event and is never
 asked for Automation permission. Pausing playback, a battery or power-policy suspend,
 a global presentation suspend and a single occluded display each remove their scenes
@@ -103,7 +104,13 @@ and does not shrink when playback stops; an incoming `engine.openUserShortcut` i
 judged against it, because a button press must be refused for want of permission,
 never for want of presentation. A scene the host has not fed yet (a replacement
 wallpaper, a newly lit display, a rebuild) is replayed the current state instead of
-waiting for the track to change.
+waiting for the track to change. Display handles survive renderer replacement, so
+the sink compares the process-unique load ID as well as the handle. A new renderer
+on an existing handle receives the title, artwork and playback state again at the
+next host reconciliation; an unchanged renderer receives no extra replay. Apply,
+snapshots and explicit presentation changes trigger reconciliation. Automatic surface
+recovery without a snapshot still waits for the next such trigger. Parked scenes do
+not consume media.
 
 The lock-screen extension does not load the provider or adapter. Lock-screen scenes
 force the setting off after apply, even if the stored desktop config has it on.

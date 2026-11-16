@@ -53,8 +53,10 @@ struct LibraryRow: Identifiable, Equatable, Sendable {
   /// `selected` flags are not used: they are not about the target display.
   var isActive: Bool
   var isSupported: Bool
-  /// The manifest's tags, content rating and Workshop-style facts. Empty until measured.
+  /// Cached Workshop tags joined with the manifest's tags, content rating and inferred facts.
   var tags: [String]
+  /// Actual content dimensions when known, otherwise the Workshop's resolution tag.
+  var resolution: String? = nil
   /// What the search reads, folded (`searchText(title:words:)`): the title and, once measured,
   /// the manifest's tags, author and description. Never shown.
   var searchText: String
@@ -96,19 +98,28 @@ extension LibraryRow {
   ///   - covers: Preview file stamps read so far, by wallpaper id.
   ///   - isActive: Whether the target display shows the wallpaper.
   ///   - energy: `WallpaperEnergyRatings.snapshot(for:kind:)`'s answer, nil until rated.
+  ///   - details: Cached public Workshop details, independent of whether an update exists.
   static func make(
     _ entry: BridgeWallpaperEntry, isActive: Bool, covers: [String: UInt64],
-    metrics: LibraryMetricsService.Metrics?, update: WorkshopItem?, energy: [String: Any]?
+    metrics: LibraryMetricsService.Metrics?, update: WorkshopItem?, details: WorkshopItem? = nil,
+    energy: [String: Any]?
   ) -> LibraryRow {
     let file = entry.previewPath.map { URL(fileURLWithPath: $0) }
     let cover: Cover =
       file == nil ? .none : covers[entry.id].map(Cover.stamped) ?? .pending
+    var seen = Set<String>()
+    let tags = ((details ?? update)?.tags ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      + (metrics?.tags ?? [])
+    let uniqueTags = tags.filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+    let words = details == nil && update == nil ? (metrics?.searchText ?? "")
+      : LibrarySearchText.fold(uniqueTags.joined(separator: " ")) + "\n" + (metrics?.searchText ?? "")
     return LibraryRow(
       id: entry.id, title: entry.title, kind: Kind(entry.kind), previewFile: file, cover: cover,
       canAnimate: file.map { animatedPreviewExtensions.contains($0.pathExtension.lowercased()) }
         ?? false,
-      isActive: isActive, isSupported: entry.supported, tags: metrics?.tags ?? [],
-      searchText: searchText(title: entry.title, words: metrics?.searchText ?? ""),
+      isActive: isActive, isSupported: entry.supported, tags: uniqueTags,
+      resolution: metrics?.resolution ?? LibraryResolution.tag(in: uniqueTags),
+      searchText: searchText(title: entry.title, words: words),
       isApproved: metrics?.approved ?? false, size: metrics?.size, addedAt: metrics?.addedAt,
       energy: energy.flatMap(LibraryEnergyRating.init(snapshot:)),
       isUpdateAvailable: update != nil, updatedAt: update?.timeUpdated)
@@ -168,6 +179,7 @@ final class LibraryRowsCache {
     var metrics: UInt64
     var covers: UInt64
     var updates: UInt64
+    var details: UInt64 = 0
     var energy: UInt64
     var target: String
     var language: String

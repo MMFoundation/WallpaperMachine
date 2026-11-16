@@ -324,6 +324,8 @@ mod tests {
     fn pending() -> WallpaperOptionsDraft {
         let mut config = WallpaperConfig::new_for("aurora", "scene");
         config.monitors = vec![MonitorRender {
+            volume: None,
+            muted: None,
             selector: SerializedSelector::Primary,
             scaling_mode: "fit".to_owned(),
             scaling_factor: 1.7,
@@ -585,6 +587,8 @@ mod tests {
                     wallpaper.monitors.clear();
                     if render_primary {
                         wallpaper.monitors.push(MonitorRender {
+                            volume: None,
+                            muted: None,
                             selector: SerializedSelector::Primary,
                             scaling_mode: "fit".to_owned(),
                             scaling_factor: 2.3,

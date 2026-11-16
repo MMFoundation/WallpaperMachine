@@ -240,14 +240,14 @@ class Layer {
     if (st.listeners === null) st.listeners = Object.create(null);
     var list = st.listeners[event];
     if (list === undefined) st.listeners[event] = list = [];
-    list.push(fn);
+    list.push(captureCallback(fn));
   }
   emit(event, payload) {
     var st = this[KEY];
     var list = st.listeners === null ? undefined : st.listeners[event];
     if (list === undefined) return;
     var count = list.length;
-    for (var i = 0; i < count; ++i) list[i](payload);
+    for (var i = 0; i < count; ++i) callInProgram(list[i].program, list[i].fn, payload);
   }
 }
 
@@ -681,13 +681,13 @@ class AnimationLayer {
       endedListeners.set(id, list);
       fileAnimationId(st.layer, id);
     }
-    list.push(fn);
+    list.push(captureCallback(fn));
   }
   removeEndedCallback(fn) {
     var st = this[KEY];
     var list = endedListeners.get(st.layer + '\u0001' + st.serial);
     if (list === undefined) return;
-    var at = list.indexOf(fn);
+    var at = list.findIndex(function (callback) { return callback.fn === fn; });
     if (at >= 0) list.splice(at, 1);
   }
 }
@@ -782,7 +782,7 @@ function notifyAnimationLayerEnded(layerKey, serial, removed) {
     for (var i = 0; i < copy.length; ++i) {
       // A listener an earlier one removed never fires.
       if (list.indexOf(copy[i]) < 0) continue;
-      try { copy[i](); } catch (e) { if (!failed) { failed = true; failure = e; } }
+      try { callInProgram(copy[i].program, copy[i].fn); } catch (e) { if (!failed) { failed = true; failure = e; } }
     }
     if (failed) reportError('layer-ended notice', failure);
   }
@@ -865,7 +865,7 @@ class Video {
     var key = this[KEY].key;
     var list = videoEndedListeners.get(key);
     if (list === undefined) videoEndedListeners.set(key, list = []);
-    list.push(fn);
+    list.push(captureCallback(fn));
   }
 }
 var videoEndedListeners = new Map();
@@ -873,7 +873,7 @@ function notifyVideoEnded(layerKey) {
   var list = videoEndedListeners.get(layerKey);
   if (list === undefined) return;
   var count = list.length;
-  for (var i = 0; i < count; ++i) list[i]();
+  for (var i = 0; i < count; ++i) callInProgram(list[i].program, list[i].fn);
 }
 
 // ---- scene API ------------------------------------------------------------

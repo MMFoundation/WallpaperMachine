@@ -1963,6 +1963,52 @@ export function update(value) {
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
+TEST(ScriptRuntimeCompat, NestedTemplateAsyncBodiesKeepTheirOwnLayer) {
+    for (const bool load_from_job : {false, true}) {
+        SCOPED_TRACE(load_from_job);
+        Scene scene;
+        auto runtime = MakeRuntimeWithScene(scene);
+        auto owner = std::make_shared<SceneNode>();
+        auto loaded = std::make_shared<SceneNode>();
+        runtime->RegisterNode("owner", owner.get());
+        runtime->RegisterNode("loaded", loaded.get());
+        scene.sceneGraph->AppendChild(owner);
+        runtime->SetLayerTemplateLoader([&](std::string_view path) {
+            auto mesh = std::make_shared<SceneMesh>();
+            mesh->AddMaterial(SceneMaterial {});
+            loaded->AddMesh(mesh);
+            runtime->RegisterMaterialConstant(mesh->MaterialSlotPtr(), "u_Value",
+                ResolveFloatSetting(*runtime, {
+                    {"value", 0.0f}, {"script", R"JS(
+(async function () {
+    await Promise.resolve();
+    thisLayer.origin = new Vec3(42, 0, 0);
+    thisObject.scale = new Vec3(3);
+})();
+export function update(value) { return value; }
+)JS"}
+                }, "loaded"));
+            runtime->RegisterLayerTemplate(std::string(path), loaded, linalg::Vector2f(16, 16));
+            return true;
+        });
+        const std::string load = "thisScene.createLayer('models/nested.json');";
+        const std::string trigger = load_from_job
+            ? "Promise.resolve().then(function () {" + load + "});" : load;
+        runtime->RegisterNodeVisibility("owner", owner.get(), ResolveBoolSetting(*runtime, {
+            {"value", true}, {"script",
+                "let made = false; export function update(value) {"
+                "if (!made) { made = true; " + trigger + "} return value; }"}
+        }, "owner"));
+
+        runtime->Tick(0.01);
+        EXPECT_FLOAT_EQ(loaded->Translate().x(), 42.0f);
+        EXPECT_TRUE(loaded->Scale().isApprox(linalg::Vector3f(3, 3, 3)));
+        EXPECT_FLOAT_EQ(owner->Translate().x(), 0.0f);
+        EXPECT_TRUE(owner->Scale().isApprox(linalg::Vector3f::Ones()));
+        EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+    }
+}
+
 TEST(ScriptRuntimeCompat, RecursiveTemplateLoadsAreGuardedAndMissingAssetsAreNotRetried) {
     Scene scene;
     auto runtime = MakeRuntimeWithScene(scene);
@@ -2259,6 +2305,37 @@ export function update() {
     EXPECT_TRUE(source->Scale().isOnes());
     EXPECT_TRUE(runtime->NodeColor("source").isOnes());
     EXPECT_FLOAT_EQ(mesh->Material()->customShader.constValues.at("g_Alpha")[0], 0.9f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+TEST(ScriptRuntimeCompat, ReplacingSharedStateReachesExistingAndNewPrograms) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    runtime->RegisterTextLayer("readout", TextLayerState { .text = "initial" });
+    runtime->RegisterTextValue("readout", ResolveStringSetting(*runtime, {
+        {"value", "initial"}, {"script", R"JS(
+export function update() { return shared.caption || 'waiting'; }
+)JS"}}, "readout"), false);
+    runtime->RegisterSceneScript(R"JS(
+'use strict';
+shared = { caption: 'first' };
+export function mediaPropertiesChanged(event) {
+    shared = { caption: event.title };
+}
+)JS", "");
+    runtime->Tick(0.01);
+    EXPECT_EQ(runtime->NodeText("readout"), "first");
+
+    runtime->RegisterTextLayer("later", TextLayerState { .text = "initial" });
+    runtime->RegisterTextValue("later", ResolveStringSetting(*runtime, {
+        {"value", "initial"}, {"script", R"JS(
+export function update() { return shared.caption || 'waiting'; }
+)JS"}}, "later"), false);
+    runtime->SetMediaIntegrationEnabled(true);
+    runtime->DispatchMediaEventJson(
+        R"({"type":"mediaPropertiesChanged","title":"new track"})");
+    runtime->Tick(0.01);
+    EXPECT_EQ(runtime->NodeText("readout"), "new track");
+    EXPECT_EQ(runtime->NodeText("later"), "new track");
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
@@ -4189,6 +4266,53 @@ TEST(ScriptRuntimeCompat, UpdateExceptionAndBooleanObjectKeepLiveNativeWrites) {
     }
 }
 
+TEST(ScriptRuntimeCompat, SharedHelpersUseCallbackOwnersAndRestoreNestedCallers) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto provider = std::make_shared<SceneNode>();
+    auto first = std::make_shared<SceneNode>();
+    auto second = std::make_shared<SceneNode>();
+    runtime->RegisterNode("provider", provider.get());
+    runtime->RegisterNode("first", first.get());
+    runtime->RegisterNode("second", second.get());
+    runtime->RegisterSceneScript(R"JS(
+shared.write = function (value) {
+    thisLayer.origin = new Vec3(value, 0, 0);
+    thisObject.scale = new Vec3(value);
+};
+)JS", "provider");
+    runtime->RegisterSceneScript(R"JS(
+export function init() {
+    thisLayer.on('nested', function () {
+        shared.write(7);
+        throw new Error('caught by caller');
+    });
+    engine.on('cursorDown', function () { shared.write(13); });
+    engine.setTimeout(function () { shared.write(11); }, 50);
+}
+)JS", "first");
+    runtime->RegisterSceneScript(R"JS(
+export function init() {
+    try { thisScene.getLayer('first').emit('nested'); } catch (_) {}
+    shared.write(9);
+}
+)JS", "second");
+
+    runtime->Tick(0.0);
+    EXPECT_FLOAT_EQ(provider->Translate().x(), 0.0f);
+    EXPECT_FLOAT_EQ(first->Translate().x(), 7.0f);
+    EXPECT_FLOAT_EQ(second->Translate().x(), 9.0f);
+    EXPECT_FLOAT_EQ(first->Scale().x(), 7.0f);
+    EXPECT_FLOAT_EQ(second->Scale().x(), 9.0f);
+    runtime->Tick(0.06);
+    EXPECT_FLOAT_EQ(first->Translate().x(), 11.0f);
+    EXPECT_FLOAT_EQ(second->Translate().x(), 9.0f);
+    runtime->DispatchCursorDown(0);
+    EXPECT_FLOAT_EQ(first->Translate().x(), 13.0f);
+    EXPECT_FLOAT_EQ(second->Translate().x(), 9.0f);
+    EXPECT_FLOAT_EQ(provider->Translate().x(), 0.0f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
 TEST(ScriptRuntimeCompat, SharedCallbacksRetainPerProgramDispatchAndDynamicRegistration) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto marker = std::make_shared<SceneNode>();
@@ -4218,6 +4342,49 @@ scene.on('update', function() {
     EXPECT_FLOAT_EQ(marker->Translate().y(), 2.0f);
     runtime->Tick(0.0);
     EXPECT_FLOAT_EQ(marker->Translate().x(), 4.0f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+TEST(ScriptRuntimeCompat, LocalDeclarationsCanShadowContextualHostNames) {
+    ScriptEngine engine;
+    const auto result = EvaluateScalar(engine, R"JS(
+export function update() {
+    const thisLayer = { thisObject: 3 };
+    const thisObject = 4;
+    function sum(thisLayer) { return thisLayer + thisObject; }
+    return sum(thisLayer.thisObject);
+}
+)JS");
+    EXPECT_FLOAT_EQ(result.getFloat(), 7.0f);
+}
+
+TEST(ScriptRuntimeCompat, PromiseContinuationsKeepTheRegisteringProgramContext) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto first = std::make_shared<SceneNode>();
+    auto second = std::make_shared<SceneNode>();
+    runtime->RegisterNode("first", first.get());
+    runtime->RegisterNode("second", second.get());
+    runtime->RegisterSceneScript(R"JS(
+shared.write = function (value) { thisObject.origin = new Vec3(value, 0, 0); };
+export function init() {
+    const pending = new Promise(function (resolve) { shared.resolve = resolve; });
+    pending.then(function () { shared.write(21); });
+    (async function () {
+        await Promise.resolve();
+        shared.write(17);
+    })();
+}
+)JS", "first");
+    runtime->RegisterSceneScript(R"JS(
+export function init() { engine.setTimeout(function () { shared.resolve(); }, 50); }
+)JS", "second");
+
+    runtime->Tick(0.0);
+    EXPECT_FLOAT_EQ(first->Translate().x(), 17.0f);
+    EXPECT_FLOAT_EQ(second->Translate().x(), 0.0f);
+    runtime->Tick(0.06);
+    EXPECT_FLOAT_EQ(first->Translate().x(), 21.0f);
+    EXPECT_FLOAT_EQ(second->Translate().x(), 0.0f);
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 

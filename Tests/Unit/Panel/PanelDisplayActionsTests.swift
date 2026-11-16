@@ -256,7 +256,7 @@ final class PanelDisplayActionsTests: PanelTestCase {
     try await withSettingsPanel { panel, bridge in
       let controller = panel.controller
       try await controller.setDisplay("primary", .volume(0.4))
-      XCTAssertEqual(bridge.calls, ["setVolume a 0.4", "applyWallpaperOptions a false"])
+      XCTAssertEqual(bridge.calls, ["setDisplayVolume a primary 0.4", "applyWallpaperOptions a false"])
       XCTAssertEqual(controller.displayRows[0].volume, 0.4)
 
       try await controller.setDisplay("primary", .muted(true))
@@ -266,7 +266,7 @@ final class PanelDisplayActionsTests: PanelTestCase {
       XCTAssertEqual(
         Array(bridge.calls.filter { !$0.hasPrefix("applyWallpaperOptions") }.dropFirst()),
         [
-          "setMuted a true", "setScalingMode a primary match", "editScalingFactor a primary 1.5",
+          "setDisplayMuted a primary true", "setScalingMode a primary match", "editScalingFactor a primary 1.5",
           "setTargetFps a primary 24",
         ])
       XCTAssertEqual(bridge.calls.filter { $0 == "applyWallpaperOptions a false" }.count, 5, "every edit is applied")
@@ -275,6 +275,24 @@ final class PanelDisplayActionsTests: PanelTestCase {
       XCTAssertEqual(row.scalingMode, .match)
       XCTAssertEqual(row.scalingFactor, 1.5)
       XCTAssertEqual(row.fps, 24)
+    }
+  }
+
+  func testIndependentDisplaysShowingTheSameWallpaperKeepSeparateSoundSettings() async throws {
+    try await withSettingsPanel { panel, bridge in
+      bridge.monitorRows[1] = OrganizationFixtures.monitor("secondary", wallpaper: "a")
+      try await panel.store.refreshAllAsync()
+      try await panel.controller.setDisplay("primary", .volume(0.25))
+      try await panel.controller.setDisplay("primary", .muted(true))
+      var rows = panel.controller.displayRows
+      XCTAssertEqual(rows.map(\.volume), [0.25, 1])
+      XCTAssertEqual(rows.map(\.muted), [true, false])
+      try await panel.controller.setDisplay("secondary", .volume(0.7))
+      rows = panel.controller.displayRows
+      XCTAssertEqual(rows.map(\.volume), [0.25, 0.7])
+      XCTAssertEqual(rows.map(\.muted), [true, false])
+      XCTAssertEqual(bridge.options["a"]?.volume, 1, "display edits preserve the wallpaper default")
+      XCTAssertEqual(bridge.options["a"]?.muted, false)
     }
   }
 
@@ -307,7 +325,7 @@ final class PanelDisplayActionsTests: PanelTestCase {
       try await controller.setDisplay("primary", .muted(true))
       XCTAssertEqual(
         bridge.calls,
-        ["setMuted a true", "editScalingFactor a secondary 1.75", "applyWallpaperOptions a false"],
+        ["setDisplayMuted a primary true", "editScalingFactor a secondary 1.75", "applyWallpaperOptions a false"],
         "the pending draft is sent before the apply")
       XCTAssertFalse(panel.store.editorState.hasPendingEdits(wallpaperID: "a"))
     }

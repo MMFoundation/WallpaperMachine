@@ -34,7 +34,7 @@ use crate::{
             self, AudioRequirementChanged, Bootstrap,
             ClearShaderCache,
             CompleteAudioResponse, EditEngineOption, EditProperty,
-            GetAllSnapshots, GetAppSnapshot, GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview,
+            GetAllSnapshots, GetAppSnapshot, GetLibrarySnapshot, GetLockScreenScenes, GetNativeWallpaperScenes, GetWallpaperPreview,
             GetMonitorInformationSnapshot, GetSceneProbeRequest, GetSettingsSnapshot,
             GetWallpaperOptionsSnapshot, GetWebWallpapers,
             InitialFrameReady, InjectDisplayForTest, InjectSceneProjectForTest,
@@ -47,7 +47,7 @@ use crate::{
             RestoreEngineOptionDefault, RestorePropertyDefault,
             SelectWallpaper,
             SetAudioResponseEnabled, SetBatteryQualityProfile,
-            SetDisplayConfigEnabled, SetDisplayPosition,
+            SetDisplayConfigEnabled, SetDisplayPosition, SetDisplayVolume, SetDisplayMuted,
             SetDisplayParkedWallpapers, SetDisplayPresentationSuspended,
             FanOutSystemMediaArtwork, FanOutSystemMediaEvent, GetSystemMediaConsentHandles,
             GetSystemMediaSceneHandles, SetFilter,
@@ -655,6 +655,38 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
 
         handles
+    }
+
+    /// The configured sound of each independent live scene for this wallpaper.
+    fn wallpaper_audio_outputs(
+        &self,
+        wallpaper_id: &str,
+    ) -> Vec<(SceneHandle, crate::config::AudioCfg)> {
+        let displays = self.engine.display_snapshot();
+        let Some(config) = self.state.wallpaper_configs.get(wallpaper_id) else {
+            return Vec::new();
+        };
+        let normalized = self.state.app_config.normalized(&displays);
+        normalized
+            .monitor_rows(&displays)
+            .into_iter()
+            .filter_map(|row| {
+                if !row.config.enabled
+                    || row.config.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE)
+                    || row.config.wallpaper.as_deref() != Some(wallpaper_id)
+                {
+                    return None;
+                }
+                let display = displays.get(row.display_index?)?;
+                let render = crate::engine::select_render_setting(
+                    &config.monitors,
+                    &row.selector,
+                    &display.desc,
+                    &displays,
+                );
+                Some((display.handle?, config.audio.for_display(render)))
+            })
+            .collect()
     }
 
     fn target_has_wallpaper(&self, selector: &SerializedSelector, wallpaper_id: &str) -> bool {
@@ -1299,7 +1331,74 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             frame_rate_cap: self.active_target_fps_cap(),
             ..self.activation_inputs(&displays, self.state.playback_state == BridgePlaybackState::Paused)
         };
+        self.native_scenes_from(inputs)
+    }
 
+    fn native_wallpaper_scenes(&self, wallpaper_id: &str) -> Result<Vec<BridgeLockScreenScene>, BridgeError> {
+        use std::path::{Component, Path};
+        let mut components = Path::new(wallpaper_id).components();
+        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+            return Err(BridgeError::invalid_input("invalid native wallpaper identifier"));
+        }
+        let entry = self.state.library.iter().find(|entry| entry.id == wallpaper_id)
+            .ok_or_else(|| BridgeError::invalid_input(format!("unknown wallpaper id {wallpaper_id}")))?;
+        if !entry.supported || entry.kind == BridgeWallpaperKind::Unknown {
+            return Err(BridgeError::invalid_input("this wallpaper type cannot be exported"));
+        }
+        let model = self.state.project_model(wallpaper_id)?;
+        if self.state.held_wallpapers.contains(wallpaper_id) {
+            return Err(BridgeError::engine(format!("wallpaper {wallpaper_id} is held after repeated load failures")));
+        }
+        let saved = match self.state.wallpaper_configs.get(wallpaper_id) {
+            Some(config) => config.clone(),
+            None => self.config_store.as_ref()
+                .map(|store| store.read_wallpaper(wallpaper_id))
+                .transpose()?
+                .flatten()
+                .unwrap_or_else(|| WallpaperConfig::new_for(wallpaper_id, match model.project_type {
+                    wallpaper_core::project::WallpaperProjectType::Scene => "scene",
+                    wallpaper_core::project::WallpaperProjectType::Video => "video",
+                    wallpaper_core::project::WallpaperProjectType::Web => "web",
+                    wallpaper_core::project::WallpaperProjectType::Unknown => "unknown",
+                })),
+        };
+        let wallpapers = BTreeMap::from([(wallpaper_id.to_owned(), saved)]);
+        let displays = self.engine.display_snapshot();
+        let mut app_config = self.state.app_config.clone();
+        app_config.monitors = app_config.monitor_rows(&displays).into_iter()
+            .filter_map(|row| {
+                let display = displays.get(row.display_index?)?;
+                let mut monitor = self.state.app_config.monitors.iter()
+                    .find(|monitor| monitor.selector == row.selector)
+                    .or_else(|| self.state.app_config.monitors.iter().find(|monitor| {
+                        monitor.selector.to_selector().resolve_display(&displays)
+                            .is_some_and(|resolved| resolved.desc.display_id == display.desc.display_id)
+                    }))
+                    .cloned()
+                    .unwrap_or(row.config);
+                if !monitor.enabled || monitor.mode.eq_ignore_ascii_case("mirror") {
+                    return None;
+                }
+                monitor.selector = row.selector;
+                monitor.wallpaper = Some(wallpaper_id.to_owned());
+                Some(monitor)
+            })
+            .collect();
+        let no_suspended_displays = BTreeSet::new();
+        let paused = self.state.playback_state == BridgePlaybackState::Paused
+            || self.state.pending_user_pause_after_initial_frame
+            || (self.state.power_source == crate::power::PowerSource::Battery
+                && self.state.app_config.power.on_battery == crate::config::BatteryModeCfg::Pause
+                && !self.state.battery_pause_suppressed);
+        self.native_scenes_from(ActivationInputs {
+            app_config: &app_config,
+            wallpapers: &wallpapers,
+            suspended_displays: &no_suspended_displays,
+            ..self.activation_inputs(&displays, paused)
+        })
+    }
+
+    fn native_scenes_from(&self, inputs: ActivationInputs<'_>) -> Result<Vec<BridgeLockScreenScene>, BridgeError> {
         // Plain videos included: the extension plays each with its own players, and holds the
         // clip with the failure when they cannot.
         let mut scenes = inputs
@@ -1376,15 +1475,14 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     framing: scene.framing.into(),
                     properties_json,
                     paused: scene.paused,
-                    engine_options: self
-                        .state
-                        .wallpaper_configs
+                    engine_options: inputs
+                        .wallpapers
                         .get(&wallpaper_id)
                         .map(|config| (&config.engine_options).into()),
                     scene_quality: (!is_video).then(|| scene.quality.into()),
                     border_color: is_video
                         .then(|| {
-                            self.state.wallpaper_configs.get(&wallpaper_id).and_then(|config| {
+                            inputs.wallpapers.get(&wallpaper_id).and_then(|config| {
                                 inputs.scheme_color(&wallpaper_id, config)
                             })
                         })
@@ -1528,6 +1626,36 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             suspended: !scene_consumers && !external_consumers,
             external_consumers,
         }
+    }
+
+    async fn sync_audio_capture(&self, handles: Vec<SceneHandle>) -> Result<(), BridgeError> {
+        let displays = self.engine.display_snapshot();
+        let scenes = self
+            .activation_inputs(&displays, self.playback_paused())
+            .build()
+            .unwrap_or_default();
+        let mut first_error = None;
+        for handle in handles {
+            let Some(display_id) = displays
+                .iter()
+                .find(|display| display.handle == Some(handle))
+                .map(|display| display.desc.display_id)
+            else {
+                continue;
+            };
+            let response_enabled = scenes
+                .iter()
+                .find(|scene| scene.display.display_id == display_id)
+                .is_some_and(|scene| scene.audio_response_enabled);
+            if let Err(error) = register_audio_capture(&self.engine, handle, response_enabled).await {
+                first_error.get_or_insert_with(|| BridgeError::engine(error.to_string()));
+            }
+        }
+        let demand_result = self.engine
+            .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
+            .await
+            .map_err(|error| BridgeError::engine(error.to_string()));
+        first_error.map_or(demand_result, Err)
     }
 
     /// Wallpapers that enable audio response, whose scene reads audio and that
@@ -1773,6 +1901,18 @@ impl<E: EngineFacade + Clone> Message<GetLockScreenScenes> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.lock_screen_scenes()
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<GetNativeWallpaperScenes> for BridgeActor<E> {
+    type Reply = messages::LockScreenScenesReply;
+
+    async fn handle(
+        &mut self,
+        msg: GetNativeWallpaperScenes,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.native_wallpaper_scenes(&msg.wallpaper_id)
     }
 }
 
@@ -2792,33 +2932,7 @@ impl<E: EngineFacade + Clone> Message<AudioRequirementChanged> for BridgeActor<E
         msg: AudioRequirementChanged,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let displays = self.engine.display_snapshot();
-        let scenes = self
-            .activation_inputs(&displays, self.playback_paused())
-            .build()
-            .unwrap_or_default();
-        for handle in msg.handles {
-            // A handle no display shows any more was already released when
-            // its scene went away.
-            let Some(display_id) = displays
-                .iter()
-                .find(|display| display.handle == Some(handle))
-                .map(|display| display.desc.display_id)
-            else {
-                continue;
-            };
-            let response_enabled = scenes
-                .iter()
-                .find(|scene| scene.display.display_id == display_id)
-                .is_some_and(|scene| scene.audio_response_enabled);
-            register_audio_capture(&self.engine, handle, response_enabled)
-                .await
-                .map_err(|error| BridgeError::engine(error.to_string()))?;
-        }
-        self.engine
-            .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
-            .await
-            .map_err(|error| BridgeError::engine(error.to_string()))
+        self.sync_audio_capture(msg.handles).await
     }
 }
 
@@ -3032,6 +3146,24 @@ impl<E: EngineFacade + Clone> Message<GetSystemMediaSceneHandles> for BridgeActo
             .into_iter()
             .map(SceneHandle::raw)
             .collect())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<messages::GetSystemMediaScenes> for BridgeActor<E> {
+    type Reply = messages::GetSystemMediaScenesReply;
+
+    async fn handle(
+        &mut self,
+        _msg: messages::GetSystemMediaScenes,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let handles: HashSet<_> = self.media_scene_handles().into_iter().collect();
+        Ok(self.engine.scene_windows().into_iter()
+            .filter(|scene| !scene.parked && handles.contains(&scene.handle))
+            .map(|scene| crate::api::BridgeSystemMediaScene {
+                handle: scene.handle.raw(),
+                load_id: scene.load_id,
+            }).collect())
     }
 }
 
@@ -3352,19 +3484,20 @@ impl<E: EngineFacade + Clone> Message<SetVolume> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let SetVolume { wallpaper_id, volume } = msg;
-        let level = AudioVolume::try_from(volume)
+        AudioVolume::try_from(volume)
             .map_err(|error| BridgeError::invalid_input(error.to_string()))?;
         let saved = self
             .state
             .wallpaper_draft_mut(&wallpaper_id)?
             .set_volume_immediate(volume)?;
         self.save_wallpaper(wallpaper_id.clone(), saved)?;
-        // Mirrors follow their source, so only the scenes of their own are told.
-        // What is saved is `volume`; what plays is its share under the gain in force.
-        let live = self.state.audio_gain.applied_to_volume(level);
-        for handle in self.wallpaper_handles(&wallpaper_id, false) {
+        // Mirrors keep their own output settings. Independent scenes resolve any saved
+        // display choice before the temporary gain is applied.
+        for (handle, audio) in self.wallpaper_audio_outputs(&wallpaper_id) {
+            let level = AudioVolume::try_from(audio.volume)
+                .map_err(|error| BridgeError::invalid_input(error.to_string()))?;
             self.engine
-                .set_audio_volume(handle, live)
+                .set_audio_volume(handle, self.state.audio_gain.applied_to_volume(level))
                 .await
                 .map_err(engine_failed)?;
         }
@@ -3386,11 +3519,65 @@ impl<E: EngineFacade + Clone> Message<SetMuted> for BridgeActor<E> {
             .wallpaper_draft_mut(&msg.wallpaper_id)?
             .set_muted_immediate(msg.muted);
         self.save_wallpaper(msg.wallpaper_id.clone(), wallpaper_config)?;
-        for handle in self.wallpaper_handles(&msg.wallpaper_id, false) {
+        for (handle, audio) in self.wallpaper_audio_outputs(&msg.wallpaper_id) {
+            self.engine
+                .set_audio_muted(handle, audio.muted || self.state.audio_suppressed)
+                .await
+                .map_err(|error| BridgeError::engine(error.to_string()))?;
+        }
+        self.invalidate_operations();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetDisplayVolume> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetDisplayVolume,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let volume = AudioVolume::try_from(msg.volume)
+            .map_err(|error| BridgeError::invalid_input(error.to_string()))?;
+        let displays = self.engine.display_snapshot();
+        let selector = self.resolve_operation_selector(&msg.display_id, &displays)?;
+        let saved = self
+            .state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .set_display_volume_immediate(selector.clone(), msg.volume, &displays)?;
+        self.save_wallpaper(msg.wallpaper_id.clone(), saved)?;
+        if let Some(handle) = self.display_handle(&msg.wallpaper_id, &selector) {
+            self.engine
+                .set_audio_volume(handle, self.state.audio_gain.applied_to_volume(volume))
+                .await
+                .map_err(engine_failed)?;
+        }
+        self.invalidate_operations();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetDisplayMuted> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetDisplayMuted,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let displays = self.engine.display_snapshot();
+        let selector = self.resolve_operation_selector(&msg.display_id, &displays)?;
+        let saved = self
+            .state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .set_display_muted_immediate(selector.clone(), msg.muted, &displays);
+        self.save_wallpaper(msg.wallpaper_id.clone(), saved)?;
+        if let Some(handle) = self.display_handle(&msg.wallpaper_id, &selector) {
             self.engine
                 .set_audio_muted(handle, msg.muted || self.state.audio_suppressed)
                 .await
-                .map_err(|error| BridgeError::engine(error.to_string()))?;
+                .map_err(engine_failed)?;
         }
         self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)
@@ -3440,12 +3627,12 @@ impl<E: EngineFacade + Clone> Message<SetAudioResponseEnabled> for BridgeActor<E
                     break;
                 }
             }
-            if result.is_err() {
+            if let Err(BridgeError::Error { message, .. }) = &mut result {
                 for handle in handles {
                     if let Err(error) =
                         register_audio_capture(&engine, handle, previous_enabled).await
                     {
-                        log::warn!("could not restore audio response after failed change: {error}");
+                        message.push_str(&format!("; {error}"));
                     }
                 }
             }
@@ -3474,26 +3661,30 @@ impl<E: EngineFacade + Clone> Message<CompleteAudioResponse> for BridgeActor<E> 
             self.engine.set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
                 .await.map_err(|error| BridgeError::engine(error.to_string()))
         } else { Ok(()) };
-        let demand_failed = demand_result.is_err();
-        if let Err(error) = msg.result.and(demand_result) {
-            let config = self
-                .state
-                .wallpaper_draft_mut(&msg.wallpaper_id)?
-                .set_audio_response_enabled_immediate(msg.previous_enabled);
-            self.save_wallpaper(msg.wallpaper_id.clone(), config)?;
-            if demand_failed {
-                for handle in self.wallpaper_handles(&msg.wallpaper_id, true) {
-                    if let Err(rollback) = register_audio_capture(&self.engine, handle, msg.previous_enabled).await {
-                        log::warn!("could not restore audio registration: {rollback}");
+        if let Err(BridgeError::Error { kind, mut message }) = msg.result.and(demand_result) {
+            match self.state.wallpaper_draft_mut(&msg.wallpaper_id) {
+                Ok(draft) => {
+                    let config = draft.set_audio_response_enabled_immediate(msg.previous_enabled);
+                    if let Some(store) = &self.config_store {
+                        if let Err(rollback) = store.save_wallpaper(&config) {
+                            message.push_str(&format!("; {rollback}"));
+                        }
                     }
+                    self.state.wallpaper_configs.insert(msg.wallpaper_id.clone(), config);
+                }
+                Err(rollback) => message.push_str(&format!("; {rollback}")),
+            }
+            self.invalidate_operations();
+            for handle in self.wallpaper_handles(&msg.wallpaper_id, true) {
+                if let Err(rollback) = register_audio_capture(&self.engine, handle, msg.previous_enabled).await {
+                    message.push_str(&format!("; {rollback}"));
                 }
             }
             if let Err(rollback) = self.engine
                 .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused())).await {
-                log::warn!("could not restore audio demand: {rollback}");
+                message.push_str(&format!("; {rollback}"));
             }
-            self.invalidate_operations();
-            return Err(error);
+            return Err(BridgeError::Error { kind, message });
         }
         self.wallpaper_bundle(msg.wallpaper_id)
     }

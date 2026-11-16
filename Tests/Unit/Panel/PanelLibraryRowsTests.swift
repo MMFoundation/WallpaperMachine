@@ -139,6 +139,26 @@ final class PanelLibraryRowsTests: PanelTestCase {
     XCTAssertNil(LibraryEnergyRating(snapshot: ["level": "nonsense"]))
   }
 
+  func testDetailsAddEverySteamTagAndResolutionWithoutAnUpdateBadge() {
+    let details = WorkshopItem(
+      id: "703", title: "Steam title", creator: "Creator", summary: "", previewURL: nil,
+      tags: ["Scene", "3840 x 2160", "Anime", "Customizable", " Landscape ", "ANIME"], size: 0, subscriptions: 0)
+    let metrics = LibraryMetricsService.Metrics(size: 123, addedAt: nil, tags: ["Anime", "Audio responsive"])
+    let row = LibraryRow.make(entry("703"), isActive: false, covers: [:], metrics: metrics,
+                              update: nil, details: details, energy: nil)
+    XCTAssertEqual(row.title, "703", "remote metadata does not rename the installed copy")
+    XCTAssertEqual(row.tags, ["Scene", "3840 x 2160", "Anime", "Customizable", "Landscape", "Audio responsive"])
+    XCTAssertEqual(row.resolution, "3840 x 2160")
+    XCTAssertFalse(row.isUpdateAvailable)
+    XCTAssertTrue(LibrarySearchText.contains(row.searchText, LibrarySearchText.fold("Landscape")))
+
+    var local = metrics
+    local.resolution = "1920 × 1080"
+    let actual = LibraryRow.make(entry("703"), isActive: false, covers: [:], metrics: local,
+                                 update: nil, details: details, energy: nil)
+    XCTAssertEqual(actual.resolution, "1920 × 1080", "actual installed dimensions take priority over the Steam tag")
+  }
+
   func testTypesSortByTheirEnglishNameAndPreviewsAnimateOnlyByExtension() {
     XCTAssertEqual(
       [LibraryRow.Kind.web, .video, .unknown, .scene].sorted(), [.scene, .unknown, .video, .web])

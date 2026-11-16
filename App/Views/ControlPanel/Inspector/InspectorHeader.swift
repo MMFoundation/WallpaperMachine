@@ -28,6 +28,14 @@ struct InspectorHeader: View {
           .foregroundStyle(theme.surface.muted.color)
           .frame(maxWidth: .infinity, alignment: .leading)
           .textSelection(.enabled)
+        if let resolution = row.resolution {
+          LabeledContent("Resolution") {
+            Text(verbatim: PanelLocale.shared.catalogString(resolution))
+              .textSelection(.enabled)
+          }
+          .font(.panel(.callout))
+          .foregroundStyle(theme.surface.muted.color)
+        }
         if let rating = row.energy {
           Text(verbatim: InspectorWording.energyLine(rating))
             .font(.panel(.caption))

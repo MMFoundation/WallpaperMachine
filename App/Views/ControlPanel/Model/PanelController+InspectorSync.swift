@@ -21,6 +21,10 @@ extension PanelController {
   func reconcileInspectorContext() {
     compatibility.select(compatibilityContext())
     letterbox.select(store.appSnapshot.selectedWallpaperId)
+    let selected = isStarted && navigation.selection == .wallpaper ? selectedInstalledWallpaperID : nil
+    workshop.updates.selectDetails(
+      selected,
+      libraryRevision: store.libraryRefreshRevision)
     forgetLetterboxStagedFactor(unlessHeldIn: letterboxContext())
     if let options = store.wallpaperOptionsSnapshot { _ = measuredAssets(for: options) }
   }
@@ -41,7 +45,10 @@ extension PanelController {
     inspectorContextLoop = loop
     loop.start()
     // The first read may come from a view update, which must not change state: reconcile later.
-    Task { @MainActor [weak self] in self?.reconcileInspectorContext() }
+    Task { @MainActor [weak self] in
+      guard let self, self.isStarted else { return }
+      self.reconcileInspectorContext()
+    }
   }
 
   /// Ends the observation.

@@ -275,10 +275,27 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         self.refresh_mouse_polling_policy();
     }
 
-    fn publish_operation_scenes(&mut self, scenes: &[SceneDesc]) {
+    async fn publish_operation_scenes(&mut self, scenes: &[SceneDesc]) -> Result<(), BridgeError> {
         self.operation_values_mut()
             .set_active_ids_from_scenes(scenes);
         self.refresh_mouse_polling_policy();
+        let engine = self.operation_engine();
+        let mut handles = Vec::new();
+        for display in engine.display_snapshot() {
+            let Some(handle) = display.handle else { continue; };
+            let desired = scenes.iter().find(|scene| scene.display.display_id == display.desc.display_id);
+            if let (Some(scene), Some(wallpaper_core::WallpaperAssignment::Direct(live))) =
+                (desired, display.assignment.as_ref())
+                && live.audio_response_enabled == scene.audio_response_enabled
+            {
+                let expected = scene.audio_response_enabled && engine.scene_requires_audio(handle);
+                if engine.audio_capture_registered(handle).await.ok() == Some(expected) {
+                    continue;
+                }
+            }
+            handles.push(handle);
+        }
+        self.sync_audio_capture(handles).await
     }
 
     pub(super) fn complete_inline_operation(&mut self, ticket: Ticket, actor: ActorRef<Self>) {
@@ -416,7 +433,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             return Ok(());
         }
         if let Some(scenes) = self.unchanged_configured_scenes(&displays)? {
-            self.publish_operation_scenes(&scenes);
+            self.publish_operation_scenes(&scenes).await?;
             // Nothing was rebuilt, but a scene's pause may still be one the
             // policy no longer asks for.
             self.align_live_pause_with_policy().await;
@@ -431,8 +448,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             .await;
         self.refresh_mouse_polling_policy();
         let scenes = result?;
-        self.publish_operation_scenes(&scenes);
-        Ok(())
+        self.publish_operation_scenes(&scenes).await
     }
 
     pub(super) async fn reconcile_inline_operation(&mut self) -> Result<(), BridgeError> {
@@ -567,14 +583,17 @@ impl<E: EngineFacade + Clone> Message<ApplyFinished> for BridgeActor<E> {
         self.operation_forget_property_preview(&msg.id);
         if let Err(error) = self.save_operation_apply(&msg.candidate) {
             *self.operation_app_slot() = msg.candidate.into_app_config();
-            self.publish_operation_scenes(&msg.scenes);
+            if let Err(audio_error) = self.publish_operation_scenes(&msg.scenes).await {
+                self.operation_append_error(audio_error.message().to_owned());
+            }
             self.complete_inline_operation(msg.ticket, ctx.actor_ref().clone());
             return Err(error);
         }
         self.operation_values_mut()
             .publish_apply(msg.id.clone(), msg.candidate, false)?;
-        self.publish_operation_scenes(&msg.scenes);
+        let audio_result = self.publish_operation_scenes(&msg.scenes).await;
         self.complete_inline_operation(msg.ticket, ctx.actor_ref().clone());
+        audio_result?;
         self.wallpaper_bundle(msg.id)
     }
 }
@@ -601,9 +620,10 @@ impl<E: EngineFacade + Clone> Message<DisplayFinished> for BridgeActor<E> {
         self.save_operation_app(&msg.candidate)?;
         *self.operation_app_slot() = msg.candidate;
         *self.operation_rows_slot() = msg.rows;
-        self.publish_operation_scenes(&msg.scenes);
+        let audio_result = self.publish_operation_scenes(&msg.scenes).await;
         self.operation_values_mut().rebase_drafts();
         self.complete_inline_operation(msg.ticket, ctx.actor_ref().clone());
+        audio_result?;
         Ok(self.display_bundle())
     }
 }
@@ -660,7 +680,9 @@ impl<E: EngineFacade + Clone> Message<RepairFinished> for BridgeActor<E> {
         }
         match msg.result {
             Ok(scenes) => {
-                self.publish_operation_scenes(&scenes);
+                if let Err(error) = self.publish_operation_scenes(&scenes).await {
+                    self.operation_append_error(error.message().to_owned());
+                }
                 self.align_live_pause_with_policy().await;
             }
             Err(error) => self.operation_append_error(error.message().to_owned()),

@@ -156,22 +156,30 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     host.close()
   }
 
-  func testApplicationAndAssetFiltersFitInEveryLanguageAndAppearance() async throws {
+  func testApplicationAndAssetFiltersFitInEveryLanguageInLightAppearance() async throws {
+    try await assertApplicationAndAssetFiltersFit(appearance: .aqua)
+  }
+
+  func testApplicationAndAssetFiltersFitInEveryLanguageInDarkAppearance() async throws {
+    try await assertApplicationAndAssetFiltersFit(appearance: .darkAqua)
+  }
+
+  private func assertApplicationAndAssetFiltersFit(appearance: NSAppearance.Name) async throws {
     for language in AppLanguage.supported.map(\.tag) {
       let panel = try await makePanel(language: language)
       panel.controller.shell.setFiltersShown(true)
-      for appearance in [NSAppearance.Name.aqua, .darkAqua] {
-        let host = PanelHost(controller: panel.controller)
-        host.appearance(appearance)
-        for size in [NSSize(width: 760, height: 560), NSSize(width: 1240, height: 800)] {
-          try await settle(host, size: size)
-          assertFits(host, size, "\(language) \(appearance.rawValue) filters \(Int(size.width))")
-          let found = Set(AccessibilityElement.everything(in: host.hosting.view).map(\.text))
-          for label in [L("Application · unsupported on macOS"), L("Category"), L("Asset")] {
-            XCTAssertTrue(found.contains(label), "\(language): the filters must offer \(label)")
-          }
+      let host = PanelHost(controller: panel.controller)
+      defer { host.close() }
+      host.appearance(appearance)
+      for size in [NSSize(width: 760, height: 560), NSSize(width: 1240, height: 800)] {
+        try await settle(host, size: size)
+        assertFits(host, size, "\(language) \(appearance.rawValue) filters \(Int(size.width))")
+        // Filters are in the page's accessibility tree. Walking every AppKit subview
+        // separately repeats SwiftUI's same accessibility subtree at each nesting level.
+        let found = Set(AccessibilityElement(object: host.hosting.view).all().map(\.text))
+        for label in [L("Application · unsupported on macOS"), L("Category"), L("Asset")] {
+          XCTAssertTrue(found.contains(label), "\(language): the filters must offer \(label)")
         }
-        host.close()
       }
     }
   }

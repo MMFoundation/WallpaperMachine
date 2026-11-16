@@ -441,6 +441,7 @@ final class PanelController {
     lifecycleLoop?.stop()
     errorLoop?.stop()
     stopInspectorContextObservation()
+    workshop.updates.selectDetails(nil)
     presentation.onBecameKey = nil
     presentation.onClose = nil
   }

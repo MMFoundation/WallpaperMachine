@@ -175,8 +175,8 @@ extension PanelController {
     }
   }
 
-  /// An independent display's playback settings belong to the wallpaper it shows. The edit goes to
-  /// that wallpaper's options and is applied at once, which also commits the wallpaper's other
+  /// An independent display's playback settings belong to that wallpaper on this display. The edit
+  /// goes to its per-display options and is applied at once, which also commits the wallpaper's other
   /// pending edits (a scale factor or text the inspector has not sent yet).
   private func setStandalone(_ display: BridgeDisplaySettingsRow, _ setting: DisplaySetting) async throws {
     let id = display.displayId
@@ -196,9 +196,9 @@ extension PanelController {
       else { throw InvalidControlValue() }
       try await store.setTargetFpsAsync(wallpaperId: wallpaper, displayId: id, fps: UInt32(fps))
     case .volume(let volume):
-      try await store.setVolumeAsync(wallpaperId: wallpaper, volume: volume)
+      try await store.setDisplayVolumeAsync(wallpaperId: wallpaper, displayId: id, volume: volume)
     case .muted(let muted):
-      try await store.setMutedAsync(wallpaperId: wallpaper, muted: muted)
+      try await store.setDisplayMutedAsync(wallpaperId: wallpaper, displayId: id, muted: muted)
     case .enabled, .mode, .mirrorTarget:
       throw InvalidControlValue()
     }

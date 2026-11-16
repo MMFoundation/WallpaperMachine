@@ -72,6 +72,7 @@ fn window(scene_path: &str, window_number: Option<isize>, parked: bool) -> Scene
     SceneWindowEntry {
         display_id: 7,
         handle: SceneHandle::new(3),
+        load_id: 0,
         desc: SceneDesc::new(desc, scene_path, "/assets", 30, false),
         window_number,
         parked,

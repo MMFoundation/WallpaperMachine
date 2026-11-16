@@ -31,7 +31,7 @@ pub use types::{
     BridgeEngineOptionValues, BridgeRgb, BridgeEngineOptions, BridgeFileFilter, BridgeFraming,
     BridgeLibraryScanStatus, BridgeLibrarySnapshot,
     BridgeLockScreenScene, BridgeLogLevel, BridgeLogStatus, BridgeMonitorInfoRow, BridgeWallpaperPreview,
-    BridgeNativeVideoWallpaper, BridgeMediaSnapshot,
+    BridgeNativeVideoWallpaper, BridgeMediaSnapshot, BridgeSystemMediaScene,
     BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgeBatteryMode, BridgePropertyDescriptor,
     BridgePropertyEdit, BridgePropertyKind, BridgePropertyValue, BridgeQualityThrottleCause,
     BridgeRendererCountersReport,
@@ -84,13 +84,14 @@ use crate::{
         messages::{
             ApplyWallpaperOptions, Bootstrap, CancelWallpaperOptions, ClearShaderCache,
             EditEngineOption, EditProperty, EjectWallpaperFromDisplay, GetAllSnapshots, GetAppSnapshot,
-            GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview, GetMonitorInformationSnapshot,
+            GetLibrarySnapshot, GetLockScreenScenes, GetNativeWallpaperScenes, GetWallpaperPreview, GetMonitorInformationSnapshot,
             GetSceneProbeRequest, GetSettingsSnapshot, GetWallpaperOptionsSnapshot, GetWebWallpapers,
             GetNativeVideoWallpapers, PollMousePosition, RendererCounters,
             RefreshDisplays, RefreshLibrary, ReleaseHeldWallpaper, RestoreAllEngineOptionDefaults,
             RestoreAllPropertyDefaults, RestoreEngineOptionDefault, RestorePropertyDefault,
             SelectWallpaper,
             SetAudioResponseEnabled, SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
+            SetDisplayVolume, SetDisplayMuted,
             PreviewDisplayPosition, PreviewWallpaperProperties, SetDisplayPosition,
             SetDisplayParkedWallpapers, SetDisplayPresentationSuspended,
             SetFilter, SetGlobalPlayback, SetLaunchAtLogin, SetMirrorMuted, SetMirrorScalingFactor,
@@ -1006,6 +1007,13 @@ impl EngineFacade for ArcEngineFacade {
         self.0.set_audio_capture_demand(demand)
     }
 
+    fn audio_capture_registered(
+        &self,
+        handle: SceneHandle,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, wallpaper_core::EngineError>> + Send>> {
+        self.0.audio_capture_registered(handle)
+    }
+
     fn set_scaling_mode(
         &self,
         handle: SceneHandle,
@@ -1205,6 +1213,21 @@ impl WallpaperBridge {
     /// Returns an error when scene resolution or renderer-input conversion fails.
     pub async fn lock_screen_scenes(&self) -> Result<Vec<BridgeLockScreenScene>, BridgeError> {
         self.actor.ask(GetLockScreenScenes).await
+    }
+
+    /// Exports one installed wallpaper's saved configuration for every connected,
+    /// enabled, nonmirror display without changing desktop assignments or drafts.
+    /// Native hosts own presentation; only user pause and power policy apply.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown, unsupported or held wallpaper, unreadable
+    /// saved configuration, or invalid renderer inputs. No configuration is written.
+    pub async fn native_wallpaper_scenes(
+        &self,
+        wallpaper_id: String,
+    ) -> Result<Vec<BridgeLockScreenScene>, BridgeError> {
+        self.actor.ask(GetNativeWallpaperScenes { wallpaper_id }).await
     }
 
     /// Exports current draft inputs for an isolated preview, without selecting, applying,
@@ -1509,6 +1532,28 @@ impl WallpaperBridge {
                 muted,
             })
             .await
+    }
+
+    /// Saves the wallpaper's volume on one independent display.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown wallpaper/display, invalid volume or failed persistence.
+    pub async fn set_display_volume(
+        &self, wallpaper_id: String, display_id: String, volume: f32,
+    ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
+        self.actor.ask(SetDisplayVolume { wallpaper_id, display_id, volume }).await
+    }
+
+    /// Saves the wallpaper's mute choice on one independent display.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown wallpaper/display or failed persistence.
+    pub async fn set_display_muted(
+        &self, wallpaper_id: String, display_id: String, muted: bool,
+    ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
+        self.actor.ask(SetDisplayMuted { wallpaper_id, display_id, muted }).await
     }
 
     /// # Errors
@@ -2509,6 +2554,12 @@ impl WallpaperBridge {
     pub async fn system_media_scene_handles(&self) -> Result<Vec<u64>, BridgeError> {
         self.actor
             .ask(crate::actor::messages::GetSystemMediaSceneHandles)
+            .await
+    }
+
+    pub async fn system_media_scenes(&self) -> Result<Vec<BridgeSystemMediaScene>, BridgeError> {
+        self.actor
+            .ask(crate::actor::messages::GetSystemMediaScenes)
             .await
     }
 

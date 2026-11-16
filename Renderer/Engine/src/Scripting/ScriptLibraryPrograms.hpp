@@ -97,9 +97,17 @@ function make(factory, kind, layerName, animIndex, effectRef, animRef) {
     },
     writable: true, configurable: true, enumerable: false
   });
-  var prog = { kind: kind, layerName: layerName, layerKey: layerKey, h: null, sp: sp, started: false, caps: 0 };
+  var prog = { kind: kind, layerName: layerName, layerKey: layerKey, layer: layer, object: object,
+               h: null, sp: sp, started: false, caps: 0 };
+  hooks.scope = Object.create(null);
+  Object.defineProperties(hooks.scope, {
+    thisLayer: { get: function () { return (activeProgram || prog).layer; } },
+    thisObject: { get: function () { return (activeProgram || prog).object; } }
+  });
+  var previous = activeProgram;
+  activeProgram = prog;
   try {
-    prog.h = factory(layer, object, scene, function createScriptProperties() { return builder; }, sp,
+    prog.h = factory(scene, function createScriptProperties() { return builder; }, sp,
                      moduleNamespace, moduleNamed, hooks);
   } catch (e) {
     // What a script threw is described here, inside the budgeted call, rather than by
@@ -107,6 +115,8 @@ function make(factory, kind, layerName, animIndex, effectRef, animRef) {
     var failure = new Error(describe(e));
     failure.stack = stackOf(e);
     throw failure;
+  } finally {
+    activeProgram = previous;
   }
   var h = prog.h;
   var caps = typeof h.update === 'function' ? 1 : 0;
@@ -119,7 +129,7 @@ function make(factory, kind, layerName, animIndex, effectRef, animRef) {
 function guard(entry, prog, arg) {
   var f = prog.h[entry];
   if (typeof f !== 'function') return;
-  try { f(arg); } catch (e) { reportError(entry, e); }
+  try { callInProgram(prog, f, arg); } catch (e) { reportError(entry, e); }
 }
 
 function noticeLanguage(prog) { guard('applyGeneralSettings', prog, { language: language }); }
@@ -142,7 +152,7 @@ function runInit(prog, value) {
   prog.started = true;
   var init = prog.h.init;
   if (typeof init !== 'function') return undefined;
-  try { return init(ownCopy(value)); } catch (e) { reportError('init', e); return undefined; }
+  try { return callInProgram(prog, init, ownCopy(value)); } catch (e) { reportError('init', e); return undefined; }
 }
 
 // The second step: the language and the user properties, told once every program has had its `init`.
@@ -158,7 +168,7 @@ function evaluate(prog, value, hasRuntime) {
   runTimers();
   var update = prog.h.update;
   if (typeof update !== 'function') return undefined;
-  try { return update(ownCopy(value)); } catch (e) { reportError('update', e); return undefined; }
+  try { return callInProgram(prog, update, ownCopy(value)); } catch (e) { reportError('update', e); return undefined; }
 }
 
 function startScene(prog) {
@@ -244,7 +254,7 @@ function resizeListeners() {
 function applyProps(prog, changed) { guard('applyUserProperties', prog, changed); }
 function destroyProgram(prog) { guard('destroy', prog, undefined); }
 // After an interrupted call: the state a call leaves behind while it runs.
-function resetTransient() { shortcutBudget = Infinity; }
+function resetTransient() { shortcutBudget = Infinity; activeProgram = null; }
 
 // ---- the global environment scripts see -----------------------------------
 function lock(name, value) {
@@ -252,7 +262,9 @@ function lock(name, value) {
 }
 lock('engine', engine);
 lock('input', input);
-lock('shared', shared);
+// Authors can replace the shared object as well as change its properties.
+// Every program resolves this global again when it runs.
+Object.defineProperty(G, 'shared', { value: shared, writable: true, configurable: false, enumerable: true });
 lock('localStorage', localStorage);
 G.scene = sceneProxy;
 G.console = consoleShim;

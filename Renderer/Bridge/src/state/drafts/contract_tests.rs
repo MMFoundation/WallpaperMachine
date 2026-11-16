@@ -36,6 +36,8 @@ fn saved_config() -> WallpaperConfig {
     config.media_integration_enabled = true;
     config.monitors = vec![
         MonitorRender {
+            volume: None,
+            muted: None,
             selector: SerializedSelector::Primary,
             scaling_mode: "fit".into(),
             scaling_factor: 1.75,
@@ -46,6 +48,8 @@ fn saved_config() -> WallpaperConfig {
             },
         },
         MonitorRender {
+            volume: None,
+            muted: None,
             selector: live(73),
             scaling_mode: "stretch".into(),
             scaling_factor: 0.625,
@@ -174,6 +178,8 @@ fn empty_values_and_constructor_non_normalization_remain_observable() {
     unusual.schema_version = 91;
     unusual.audio.volume = -0.0;
     unusual.monitors = vec![MonitorRender {
+        volume: None,
+        muted: None,
         selector: identity(8),
         scaling_mode: "FiLl".into(),
         scaling_factor: -7.0,
@@ -1064,6 +1070,8 @@ fn retained_position_uses_saved_omitted_axis_and_changes_only_first_rows_framing
     expected_pending.monitors = vec![
         expected_pending.monitors[1].clone(),
         MonitorRender {
+            volume: None,
+            muted: None,
             selector: a.clone(),
             scaling_mode: "none".into(),
             scaling_factor: 4.25,

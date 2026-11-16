@@ -7,7 +7,7 @@ struct LockScreenConfiguration: Codable, Equatable {
   static let extensionIdentifier = "app.wallpapermachine.wallpaper-extension"
   static let changedNotification = "app.wallpapermachine.lock-screen.changed"
   static let fileName = "configuration.json"
-  static let supportedVersion = 2
+  static let supportedVersion = 3
   /// Home-relative exchange directory. The app publishes here and the extension
   /// reads here and writes readiness and its log back. It lies outside both
   /// sandbox containers because macOS asks "would like to access data from other
@@ -36,6 +36,60 @@ struct LockScreenConfiguration: Codable, Equatable {
   var scenes: [LockScreenScene]
   var lockScreenEnabled: Bool = true
   var screenSaverEnabled: Bool = false
+  var lockScreenScenes: [LockScreenScene]? = nil
+  var screenSaverScenes: [LockScreenScene]? = nil
+
+  mutating func removeDisabledSources() {
+    if !lockScreenEnabled { lockScreenScenes = nil }
+    if !screenSaverEnabled { screenSaverScenes = nil }
+    if !lockScreenEnabled && (!screenSaverEnabled || screenSaverScenes != nil) {
+      scenes.removeAll()
+    }
+  }
+
+  func scenes(for content: LockScreenContent) -> [LockScreenScene] {
+    switch content {
+    case .desktop:
+      guard lockScreenEnabled else { return [] }
+      guard let lockScreenScenes else { return scenes }
+      let displays = Set(lockScreenScenes.map(\.displayID))
+      return scenes.filter { displays.contains($0.displayID) }
+    case .lockScreen: return lockScreenEnabled ? (lockScreenScenes ?? scenes) : []
+    case .screenSaver: return screenSaverEnabled ? (screenSaverScenes ?? scenes) : []
+    }
+  }
+
+  func content(
+    presentationMode: String, sessionLocked: Bool, displayID: UInt32? = nil
+  ) -> LockScreenContent {
+    if presentationMode == "idle" { return .screenSaver }
+    if scene(for: .lockScreen, displayID: displayID) == nil, screenSaverEnabled { return .screenSaver }
+    return presentationMode == "locked" || sessionLocked ? .lockScreen : .desktop
+  }
+
+  func scene(for content: LockScreenContent, displayID: UInt32?) -> LockScreenScene? {
+    let candidates = scenes(for: content)
+    guard let displayID else { return candidates.first }
+    return candidates.first { $0.displayID == displayID }
+  }
+}
+
+enum LockScreenContent: String, Codable, Sendable {
+  case desktop, lockScreen, screenSaver
+}
+
+extension LockScreenConfiguration {
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    let encodedVersion = try values.decode(Int.self, forKey: .version)
+    version = encodedVersion == 2 ? Self.supportedVersion : encodedVersion
+    revision = try values.decode(String.self, forKey: .revision)
+    scenes = try values.decode([LockScreenScene].self, forKey: .scenes)
+    lockScreenEnabled = try values.decode(Bool.self, forKey: .lockScreenEnabled)
+    screenSaverEnabled = try values.decode(Bool.self, forKey: .screenSaverEnabled)
+    lockScreenScenes = try values.decodeIfPresent([LockScreenScene].self, forKey: .lockScreenScenes)
+    screenSaverScenes = try values.decodeIfPresent([LockScreenScene].self, forKey: .screenSaverScenes)
+  }
 }
 
 struct LockScreenScene: Codable, Equatable {
@@ -139,6 +193,25 @@ struct LockScreenReadiness: Codable {
   /// The extension process that wrote it, so the app can tell when that renderer is gone.
   /// Absent from copies that predate it.
   var processID: Int32? = nil
+  var content: LockScreenContent? = nil
+
+  static func fileName(displayID: UInt32, content: LockScreenContent = .desktop) -> String {
+    content == .desktop ? "ready-\(displayID).json" : "ready-\(content.rawValue)-\(displayID).json"
+  }
+
+  @MainActor
+  static func deliver(
+    error: Error?, whenReady: (@escaping (Error?) -> Void) -> Void,
+    record: @escaping (Error?) -> Void
+  ) {
+    if let error {
+      if !(error is CancellationError) { record(error) }
+    } else {
+      whenReady { error in
+        if !(error is CancellationError) { record(error) }
+      }
+    }
+  }
 }
 
 /// An empty file the extension leaves in the exchange directory once macOS has closed every

@@ -364,6 +364,8 @@ fn wallpaper_fields_round_trip_including_compound_overrides_and_optional_omissio
         .collect();
         for selector in selectors() {
             expected.monitors.push(MonitorRender {
+                volume: None,
+                muted: None,
                 selector,
                 scaling_mode: "StReTcH".to_owned(),
                 scaling_factor: -4.0,

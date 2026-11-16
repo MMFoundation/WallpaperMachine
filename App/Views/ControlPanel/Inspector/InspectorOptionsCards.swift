@@ -24,6 +24,7 @@ struct GeneralConfigurationCard: View {
         ) { muted in
           controller.launch(mutedKey, policy: .latestWins) { try await controller.setMuted(muted, for: id) }
         }
+        .help(L("Default sound settings for this wallpaper. Settings → Displays can set volume and mute separately for each display."))
         if mute.isMutedByMuteAll {
           InspectorNote("Mute All is on, so every wallpaper is silent.")
             .padding(.horizontal, 12)
@@ -36,6 +37,7 @@ struct GeneralConfigurationCard: View {
         onRelease: { setVolume($0 / 100) }, onStep: { setVolume($0 / 100) }
       )
       .disabled(controller.isInspectorControlDisabled(options, key: volumeKey) || mute.isOn)
+      .help(L("Default sound settings for this wallpaper. Settings → Displays can set volume and mute separately for each display."))
       InspectorToggleRow(
         title: "Audio response", isOn: options.audioResponseEnabled,
         isDisabled: controller.isInspectorControlDisabled(options, key: audioKey)

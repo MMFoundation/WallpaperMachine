@@ -193,6 +193,100 @@ final class WorkshopUpdateStoreTests: XCTestCase {
         XCTAssertNil(store.available["500"])
         XCTAssertNil(makeStore().available["500"])
     }
+
+    private func settleDetails(_ store: WorkshopUpdateStore) async throws {
+        for _ in 0..<200 where store.isLoadingDetails { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertFalse(store.isLoadingDetails)
+    }
+
+    func testCurrentItemsKeepTheirDetailsWithoutBecomingUpdates() async throws {
+        try installed("700", writtenAt: clock)
+        answer = [item("700", updated: clock)]
+        let store = makeStore()
+        store.check(installed: ["700"], library: root)
+        try await settle(store)
+        XCTAssertTrue(store.available.isEmpty)
+        XCTAssertEqual(store.details["700"]?.tags, ["Video"])
+        XCTAssertEqual(makeStore().details["700"], answer.first, "details survive relaunch even without an update")
+        store.selectDetails("700")
+        try await settleDetails(store)
+        XCTAssertEqual(asked, [["700"]], "the update check already fetched fresh details")
+    }
+
+    func testSelectedDetailsAreCachedAndSurviveAnOfflineRefresh() async throws {
+        answer = [item("701", updated: clock)]
+        let store = makeStore()
+        store.checksAutomatically = false
+        store.selectDetails("701")
+        store.selectDetails("701")
+        try await settleDetails(store)
+        XCTAssertEqual(asked, [["701"]], "selection reads missing details once, independently of automatic updates")
+        XCTAssertNotNil(store.details["701"])
+        XCTAssertTrue(store.available.isEmpty, "reading details alone makes no update claim")
+
+        let reopened = makeStore()
+        reopened.selectDetails("701")
+        XCTAssertFalse(reopened.isLoadingDetails, "fresh cached details need no request")
+        XCTAssertEqual(reopened.details["701"], store.details["701"])
+        clock.addTimeInterval(WorkshopUpdateStore.checkInterval + 1)
+        let offline = WorkshopUpdateStore(defaults: defaults, fetch: { _ in throw URLError(.notConnectedToInternet) }, now: { self.clock })
+        offline.selectDetails("701")
+        try await settleDetails(offline)
+        XCTAssertEqual(offline.details["701"], store.details["701"], "offline keeps the last known tags")
+        XCTAssertNil(offline.errorMessage, "optional details do not report an update-check failure")
+        offline.forget(["701"])
+        XCTAssertNil(makeStore().details["701"], "deletion clears the persistent details too")
+    }
+
+    func testLateDetailsCannotReappearAfterDeletionOrReplaceANewDownload() async throws {
+        let gate = Gate()
+        let old = item("702", updated: clock.addingTimeInterval(-3600))
+        let store = WorkshopUpdateStore(defaults: defaults, fetch: { _ in await gate.wait(); return [old] })
+        store.selectDetails("702")
+        await Task.yield()
+        store.forget(["702"])
+        await gate.open()
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertNil(store.details["702"])
+        XCTAssertNil(makeStore().details["702"])
+
+        let secondGate = Gate()
+        let downloading = WorkshopUpdateStore(defaults: defaults, fetch: { _ in await secondGate.wait(); return [old] })
+        downloading.selectDetails("702")
+        await Task.yield()
+        downloading.recordInstalled("702")
+        let new = item("702", updated: clock)
+        downloading.rememberDetails(new)
+        await secondGate.open()
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(downloading.details["702"], new)
+        XCTAssertEqual(makeStore().details["702"], new)
+    }
+
+    func testLocalIdsNeverAskSteamForDetails() {
+        let store = makeStore()
+        for id in ["image-photo", "pixiv-123-p0", "local-clip", "../123"] {
+            store.selectDetails(id)
+            XCTAssertFalse(store.isLoadingDetails)
+        }
+        XCTAssertTrue(store.details.isEmpty)
+        XCTAssertTrue(asked.isEmpty)
+    }
+
+    func testSwitchingAwayDiscardsLateDetailsAndAllowsARetry() async throws {
+        let gate = Gate()
+        let old = item("704", updated: clock)
+        let store = WorkshopUpdateStore(defaults: defaults, fetch: { _ in await gate.wait(); return [old] })
+        store.selectDetails("704")
+        await Task.yield()
+        store.selectDetails("local-image")
+        await gate.open()
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertNil(store.details["704"])
+        store.selectDetails("704")
+        try await settleDetails(store)
+        XCTAssertEqual(store.details["704"], old)
+    }
 }
 
 /// Answers the store's details requests in place of Steam.

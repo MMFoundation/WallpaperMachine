@@ -44,7 +44,7 @@ struct DisplayRow: Identifiable, Equatable {
   /// The scaling, frame rate, volume and mute of an independent display come from its wallpaper's own
   /// per-display configuration when `options` (that wallpaper's saved options) holds one for this
   /// display, and from the display's saved values otherwise; a mirror always uses its own. The
-  /// wallpaper's volume and mute stand in for the display's only when such a configuration exists.
+  /// configuration already resolves any sound setting inherited from the wallpaper.
   ///
   /// - Parameters:
   ///   - displays: every display, to name the mirror sources.
@@ -69,8 +69,8 @@ struct DisplayRow: Identifiable, Equatable {
       scalingMode: config?.scalingMode ?? display.scalingMode,
       scalingFactor: config?.scalingFactor ?? display.scalingFactor,
       fps: config?.targetFps ?? display.targetFps, maxFps: display.maxFps,
-      volume: config == nil ? display.volume : options?.volume ?? display.volume,
-      muted: config == nil ? display.muted : options?.muted ?? display.muted,
+      volume: config?.volume ?? display.volume,
+      muted: config?.muted ?? display.muted,
       wallpaperID: wallpaperID,
       wallpaperTitle: wallpaperID.map { libraryTitle($0) ?? $0 })
   }

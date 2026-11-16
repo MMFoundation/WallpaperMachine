@@ -166,4 +166,23 @@ final class LibraryMetricsTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(changes, 2, "The same revision never re-checks")
     }
+
+    func testRefreshingAnEditedManifestUpdatesItsTagsAndResolution() async throws {
+        let folder = try wallpaper("scene", bytes: [1])
+        let manifest = folder.appendingPathComponent("project.json")
+        try Data(#"{"type":"scene","file":"scene.json","tags":["Nature"]}"#.utf8).write(to: manifest)
+        try Data(#"{"general":{"orthogonalprojection":{"width":1920,"height":1080}}}"#.utf8)
+            .write(to: folder.appendingPathComponent("scene.json"))
+        let service = makeService()
+        _ = service.metrics(for: ["scene"], revision: 0)
+        let first = try await reported(service, ids: ["scene"], count: 1)
+        XCTAssertEqual(first["scene"]?.resolution, "1920 × 1080")
+        try Data(#"{"type":"scene","file":"scene.json","tags":["Anime","Music"]}"#.utf8).write(to: manifest)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: manifest.path)
+        try FileManager.default.setAttributes([.modificationDate: try XCTUnwrap(first["scene"]?.stamp)], ofItemAtPath: folder.path)
+        _ = service.metrics(for: ["scene"], revision: 1)
+        let changed = try await reported(service, ids: ["scene"], revision: 1, count: 2)
+        XCTAssertEqual(changed["scene"]?.tags, ["Anime", "Music"], "an in-place manifest edit must not depend on the folder date changing")
+        XCTAssertEqual(changed["scene"]?.resolution, "1920 × 1080")
+    }
 }

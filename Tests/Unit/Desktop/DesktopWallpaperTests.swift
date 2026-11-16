@@ -1705,7 +1705,10 @@ final class DesktopWallpaperTests: XCTestCase {
         sleeper.fireNext()
         try await waitUntil { rig.total == 2 }
         post(Data([255]), layer: rig.layers[0], center: rig.frames)
-        try await waitUntil { cache.writes == 1 }
+        try await waitUntil {
+            guard cache.writes == 1, let url = rig.workspace.pictures[self.one]?.url else { return false }
+            return (try? Data(contentsOf: url)) == Data([255])
+        }
 
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([255]))
         XCTAssertEqual(cache.poster(for: look), Data([255]))

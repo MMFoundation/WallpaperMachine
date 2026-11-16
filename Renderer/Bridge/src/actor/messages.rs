@@ -30,6 +30,10 @@ pub struct GetLibrarySnapshot;
 
 pub struct GetLockScreenScenes;
 
+pub struct GetNativeWallpaperScenes {
+    pub wallpaper_id: String,
+}
+
 pub struct GetWallpaperPreview {
     pub wallpaper_id: String,
     pub display_id: String,
@@ -180,6 +184,18 @@ pub struct SetVolume {
 
 pub struct SetMuted {
     pub wallpaper_id: String,
+    pub muted: bool,
+}
+
+pub struct SetDisplayVolume {
+    pub wallpaper_id: String,
+    pub display_id: String,
+    pub volume: f32,
+}
+
+pub struct SetDisplayMuted {
+    pub wallpaper_id: String,
+    pub display_id: String,
     pub muted: bool,
 }
 
@@ -374,10 +390,11 @@ pub struct FanOutSystemMediaArtwork {
 /// The host reads the system player only while something would receive it, so
 /// an empty answer is what keeps a machine with the setting off — or one whose
 /// wallpapers are all paused or suspended — from being asked for Automation
-/// permission and from running the adapter. The handles themselves matter too:
-/// a scene that has just been created starts with no media state, and the host
-/// can only know to replay for it by seeing a handle it has not fed.
+/// permission and from running the adapter. `GetSystemMediaScenes` also returns
+/// load IDs, so a host can distinguish replacement renderers on retained handles.
 pub struct GetSystemMediaSceneHandles;
+
+pub struct GetSystemMediaScenes;
 
 /// Asks which applied desktop scenes their user allowed near media at all.
 ///
@@ -527,6 +544,7 @@ pub type SetMediaIntegrationEnabledReply = WallpaperMutationReply;
 pub type FanOutSystemMediaEventReply = Result<(), BridgeError>;
 pub type FanOutSystemMediaArtworkReply = Result<(), BridgeError>;
 pub type GetSystemMediaSceneHandlesReply = Result<Vec<u64>, BridgeError>;
+pub type GetSystemMediaScenesReply = Result<Vec<crate::api::BridgeSystemMediaScene>, BridgeError>;
 pub type GetSystemMediaConsentHandlesReply = Result<Vec<u64>, BridgeError>;
 pub type SetPropertyPathReply = WallpaperMutationReply;
 pub type GetNativeVideoWallpapersReply = Result<Vec<BridgeNativeVideoWallpaper>, BridgeError>;

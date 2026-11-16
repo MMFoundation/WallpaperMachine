@@ -82,6 +82,17 @@ impl Default for AudioCfg {
     }
 }
 
+impl AudioCfg {
+    /// A display inherits the wallpaper's sound until it has its own saved choice.
+    pub fn for_display(&self, render: Option<&MonitorRender>) -> Self {
+        Self {
+            volume: render.and_then(|row| row.volume).unwrap_or(self.volume),
+            muted: render.and_then(|row| row.muted).unwrap_or(self.muted),
+            response_enabled: self.response_enabled,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MonitorRender {
     pub selector: SerializedSelector,
@@ -91,6 +102,10 @@ pub struct MonitorRender {
     pub frame_rate: Option<u32>,
     #[serde(skip_serializing_if = "FramingCfg::is_default")]
     pub framing: FramingCfg,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
 }
 
 impl Default for MonitorRender {
@@ -101,6 +116,8 @@ impl Default for MonitorRender {
             scaling_factor: 1.0,
             frame_rate: None,
             framing: FramingCfg::default(),
+            volume: None,
+            muted: None,
         }
     }
 }
@@ -121,6 +138,10 @@ impl<'de> Deserialize<'de> for MonitorRender {
             fps: Option<u32>,
             #[serde(default)]
             framing: FramingCfg,
+            #[serde(default)]
+            volume: Option<f32>,
+            #[serde(default)]
+            muted: Option<bool>,
         }
         fn scaling_mode_default() -> String {
             "fill".to_owned()
@@ -135,6 +156,8 @@ impl<'de> Deserialize<'de> for MonitorRender {
             scaling_factor: fields.scaling_factor,
             frame_rate: read_frame_rate(fields.frame_rate, fields.fps),
             framing: fields.framing,
+            volume: fields.volume,
+            muted: fields.muted,
         })
     }
 }

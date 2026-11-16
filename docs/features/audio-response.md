@@ -20,7 +20,26 @@ that reads no audio, and every video wallpaper, never starts capture, even with
 the setting on; the effects that would have used it received silence anyway. A
 script that starts reading later starts capture then.
 Capture stops when the last such wallpaper stops presenting or is removed.
-Activation errors are reported rather than silently ignored.
+Activation errors are reported rather than silently ignored. If one display fails
+capture registration, synchronization still attempts the other displays and updates
+shared capture demand before returning the first error.
+If an Audio response change fails, rollback restores the previous setting in the
+draft and authoritative in-memory configuration, attempts live registration and
+demand restoration, and invalidates work prepared with the rejected value. A failed
+rollback save does not stop those steps: the original activation error and any persistence
+or cleanup errors are returned together. Disk may still contain the attempted
+setting until a later save succeeds; restored in-memory state is not a claim that
+persistence succeeded.
+
+Applying a wallpaper synchronizes capture again after the new display assignment
+is published. A scene can report that it reads audio before its first frame,
+while the previous selection is still configured; that early report must not
+leave the new wallpaper waiting for an off/on toggle. Display changes and repairs
+also restore capture ownership and presentation demand from the published selection.
+Publication checks the capture controller's actual registration as well as the
+renderer flag: concurrent writes can leave those two values disagreeing. This read
+runs only at publication, does not touch audio hardware, and leaves an already
+correct registration and healthy tap running without reinitialization.
 
 A subscribed web page owns capture independently of renderer scene handles, so
 web-only sessions work and scene cleanup does not stop their audio. Both kinds
@@ -154,7 +173,17 @@ Scenes receive the values as analysed; web pages receive them clamped to 0.0–1
 Synthetic offscreen checks cover the analysis against tone measurements
 (`AudioResponseMonoTest`, see [renderer testing](../testing/renderer.md)), audio-driven
 shader color and SceneScript scale. Device-free controller and bridge tests cover web-only
-capture startup, permission, shared ownership, suspension and shutdown. Startup
+capture startup, permission, shared ownership, suspension and shutdown.
+The `api::operation_contract_tests::audio_capture_contract_tests` regressions deliver
+audio requirements before the first frame, between capture registration and the
+worker's response write, and after the worker registers capture. They check response,
+ownership and demand without a toggle, including a failed registration that must not
+starve other displays. Capture-lane tests verify that ownership reads leave a healthy
+tap running and preserve registration while suspended. The contract tests also cover
+failed rollback persistence, downstream audio callbacks, fresh and stale Apply
+tickets, and independent registration/demand cleanup errors. These cases use
+injected engine failures and an obstructed fixture path, not an audio device.
+Display changes, save failure and stale-operation repair are also covered. Startup
 regressions inject the native timeout and cover recovery with a fresh session,
 persistent failure after one retry, cleanup failures that block replacement, and
 non-timeout failures that must not retry. They also cover the

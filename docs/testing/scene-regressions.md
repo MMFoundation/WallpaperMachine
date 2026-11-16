@@ -516,6 +516,25 @@ Playback, backend, host and startup areas are in
 
 ## Scene scripts and property bindings
 
+- **Shared helper caller context** —
+  `TextScripts.SharedListenerConstructorsCaptureTheRegisteringTextLayer` in
+  `text_object_behavior_test` keeps two timer-driven captions updating independently
+  through a shared listener constructor, while an explicitly saved layer reference
+  still targets its original layer. In `script_runtime_compat_test`,
+  `SharedHelpersUseCallbackOwnersAndRestoreNestedCallers` covers timers, registered
+  events, nested dispatch and exception restoration;
+  `PromiseContinuationsKeepTheRegisteringProgramContext` covers immediate async
+  continuation and a Promise resolved by another script;
+  `NestedTemplateAsyncBodiesKeepTheirOwnLayer` checks that an async template
+  script changes its own layer and object, not its loader's, whether loading
+  starts in an update or a Promise callback; and
+  `LocalDeclarationsCanShadowContextualHostNames` preserves ordinary lexical
+  shadowing. A Wallpaper Engine probe
+  confirms that shared functions/constructors see the calling layer, a saved
+  reference stays saved, timers and Promise handlers see their registering layer,
+  and an ordinary cross-script callback sees its caller. The reported clock now
+  replaces its authored placeholders with a live date, time and weekday.
+
 - **Custom ModelData geometry** — `ScriptModelData.*` and
   `ModelDataGeometry.*` in `scenescript_behavior_test` exercise typed-array offsets,
   exact UInt16 triangle counts, shared updates, dynamic-buffer checks, replacement
@@ -970,6 +989,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   way up leaves a button that shrinks while held, or a press dragged off the
   desktop, latched for good. A layer that did not take the press hears a release
   only under the cursor, and a scene-wide script hears one from anywhere.
+- **Replacing shared script state** —
+  `ScriptRuntimeCompat.ReplacingSharedStateReachesExistingAndNewPrograms` replaces
+  `shared` at script initialization and again in a media event, then checks that
+  text scripts created before and after the replacement read the new state.
+  A generated Wallpaper Engine probe with two origin scripts confirms that both
+  read an object assigned by one of them. Issue #216's media panel and audio bars
+  use the same assignment to initialize their visibility switch.
 - **Creating layers from scripts** — SceneScript creation tests cover independent
   cloned layers, owner-local cached factories, bounded authored pools and lazy
   template loading. A script imported from the Workshop declares

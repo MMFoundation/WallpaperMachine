@@ -802,6 +802,15 @@ device.
 
 ## Audio
 
+- **Independent-display sound** — bridge tests `per_display_audio` cover isolated
+  volume/mute edits, persistence and reload, inherited legacy fields, immediate
+  edits across Cancel, display-identity aliases, rejected values, and temporary
+  suppression/gain composed over saved choices. Activation test
+  `independent_display_audio_is_resolved_for_scenes_web_and_video` checks Scene,
+  Web and native-video outputs and a mirror that keeps its own sound. Native
+  `PanelDisplayActionsTests.testIndependentDisplaysShowingTheSameWallpaperKeepSeparateSoundSettings`
+  checks the display-card values after changing either screen. These use fake
+  engines, synthetic stores or offscreen models; real multi-display sound is unverified.
 - **FIFO continuity and overflow** — `audio_tests --gtest_filter='AudioResponseMonoTest.*'`
   includes `CompactedFifoPreservesEveryStereoWindow` (21 back-to-back stereo
   windows from 49 chunks of 700 frames, so windows straddle submissions; 34,300
