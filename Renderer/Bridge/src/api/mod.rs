@@ -84,7 +84,7 @@ use crate::{
         messages::{
             ApplyWallpaperOptions, Bootstrap, CancelWallpaperOptions, ClearShaderCache,
             EditEngineOption, EditProperty, EjectWallpaperFromDisplay, GetAllSnapshots, GetAppSnapshot,
-            GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview, GetMonitorInformationSnapshot,
+            GetLibrarySnapshot, GetLockScreenScenes, GetNativeWallpaperScenes, GetWallpaperPreview, GetMonitorInformationSnapshot,
             GetSceneProbeRequest, GetSettingsSnapshot, GetWallpaperOptionsSnapshot, GetWebWallpapers,
             GetNativeVideoWallpapers, PollMousePosition, RendererCounters,
             RefreshDisplays, RefreshLibrary, ReleaseHeldWallpaper, RestoreAllEngineOptionDefaults,
@@ -1213,6 +1213,21 @@ impl WallpaperBridge {
     /// Returns an error when scene resolution or renderer-input conversion fails.
     pub async fn lock_screen_scenes(&self) -> Result<Vec<BridgeLockScreenScene>, BridgeError> {
         self.actor.ask(GetLockScreenScenes).await
+    }
+
+    /// Exports one installed wallpaper's saved configuration for every connected,
+    /// enabled, nonmirror display without changing desktop assignments or drafts.
+    /// Native hosts own presentation; only user pause and power policy apply.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown, unsupported or held wallpaper, unreadable
+    /// saved configuration, or invalid renderer inputs. No configuration is written.
+    pub async fn native_wallpaper_scenes(
+        &self,
+        wallpaper_id: String,
+    ) -> Result<Vec<BridgeLockScreenScene>, BridgeError> {
+        self.actor.ask(GetNativeWallpaperScenes { wallpaper_id }).await
     }
 
     /// Exports current draft inputs for an isolated preview, without selecting, applying,

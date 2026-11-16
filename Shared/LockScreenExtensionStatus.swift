@@ -36,7 +36,7 @@ struct LockScreenExtensionStatus: Codable {
       }
       let header = try decoder.decode(Header.self, from: data)
       revision = header.revision
-      guard header.version == supportedVersion else {
+      guard header.version == supportedVersion || (header.version == 2 && supportedVersion == 3) else {
         throw ConfigurationError.unsupportedVersion(header.version)
       }
       let configuration = try decoder.decode(LockScreenConfiguration.self, from: data)

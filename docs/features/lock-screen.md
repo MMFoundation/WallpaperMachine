@@ -1,7 +1,8 @@
 # Lock screen and screen saver (experimental)
 
-The app can animate the macOS lock screen and use applied wallpapers as the
-screen saver. Both choices are off by default and require macOS 26 or later. The
+The app can animate the macOS lock screen and use a library wallpaper as the
+screen saver. Each can follow the desktop or use its own saved library choice.
+Both switches are off by default and require macOS 26 or later. The
 file exchange between the app and the sandboxed extension is specified in
 [architecture](../architecture.md#lock-screen-extension); this document describes
 what the user gets and the rules that keep the two native modes consistent.
@@ -13,6 +14,23 @@ Animate lock screen**, or the same switch on the welcome guide's Preferences pag
 (it applies at once there too; the page's **Skip** turns it back to what it was
 when the guide opened, while the guide's **Skip setup** keeps it as set). A status row next to the Settings switch reports the
 current state, and a **Retry** action appears when activation failed.
+
+The **Lock screen wallpaper** and **Screen saver wallpaper** controls below their
+switches default to **Same as desktop**. Choose an installed wallpaper to use it
+for that mode without applying it to the desktop. Choices survive disabling the
+switch and restarting the app; **Same as desktop** returns to following each
+display's applied wallpaper. An unavailable selection remains visible and reports
+an error rather than silently switching to a different wallpaper.
+If a selected wallpaper cannot be exported, only its native mode is restored to
+the previous system choice. The other mode keeps running and refreshing; Retry
+rechecks the unavailable source without forgetting its saved choice.
+
+An independent screen saver works on enabled, non-mirrored displays even when no
+WallpaperMachine wallpaper is applied, so macOS can keep a still desktop picture
+while a video plays as the saver. Animated lock screens still require an applied
+desktop wallpaper: macOS hosts them through its Desktop provider. Their separate
+choice is used while locked, and the applied desktop wallpaper is used while
+unlocked, including Mission Control. The app does not change desktop assignments.
 
 ### How the surface behaves
 
@@ -41,7 +59,20 @@ playback. This costs more resident memory than showing a static poster, but noth
 renders continuously while paused, and resolution, frame rate and effects are
 unchanged. A newly acquired surface or a changed wallpaper still needs an initial
 load, macOS can show its own cached snapshot before it presents the extension, and
-real lock/wake timing is OS-controlled.
+real lock/wake timing is OS-controlled. When the desktop, lock screen and saver
+use different wallpapers, a presentation change replaces the surface's renderer
+with the appropriate wallpaper; it does not keep three renderers running. The
+replacement needs its own first frame. Idle presentation selects the screen saver
+even when the login session is also locked, and unlocking returns to desktop
+content.
+
+An existing surface does not prepare a different source while its display sleeps,
+its login session is off-console, the host suspends it, or it has no presentation
+consumer. It keeps the current renderer paused and selects the latest source when
+presentation resumes, rather than loading every intermediate choice. A host's
+pending acquire still needs its first frame: its reply survives source replacement
+and is completed once for the current renderer. Removing the configuration or a
+display's source clears the surface and cancels pending acquires immediately.
 
 Whether the display is asleep, whether the session is locked and whether it is on the
 console are read from the system each time a surface decides, not remembered from a
@@ -203,8 +234,9 @@ WallpaperAgent abandons an extension that has not answered after about 31 second
 
 ## Use wallpaper as screen saver
 
-Enable **Settings → Desktop & Lock Screen → Screen saver → Use wallpaper as screen saver**. Each
-display follows its applied wallpaper and committed properties, including scene,
+Enable **Settings → Desktop & Lock Screen → Screen saver → Use wallpaper as screen saver**.
+With **Same as desktop**, each display follows its applied wallpaper; otherwise
+enabled, non-mirrored displays use the chosen library wallpaper. Both use committed properties, including scene,
 video, web and still-image/pixiv projects. Committed means saved: a property edit
 that the desktop only shows while it is made ([edits on the
 desktop](wallpaper-properties.md#showing-edits-on-the-desktop)) reaches the lock screen and
@@ -260,6 +292,13 @@ starts a new attempt, and late reports for the abandoned revision cannot overwri
 the screen saver's state. Retry preserves the last committed display mapping, and
 turning the screen saver off restores its Idle choice immediately even if a display
 UUID is temporarily unavailable during wake.
+The published display mapping is kept before first-frame readiness, so disabling
+either mode during the initial activation wait also restores its native choice
+without waiting for a display UUID to return. A surviving lock-screen selection
+keeps its original readiness deadline and is not reported enabled before a frame.
+Disabled source fields are removed consistently from the committed and freshly
+prepared manifests. Returning display UUIDs or repeated refreshes therefore do not
+reload an unchanged surviving mode or restart its unfinished readiness timeout.
 
 A Desktop selection with no recoverable original is also a lock-screen-only
 failure: when Idle can still be selected, the screen saver stays on and keeps
@@ -615,10 +654,14 @@ before the store changes or the journal is removed.
 
 Reconciliation still covers every Space in the store, including historical and
 full-screen Spaces. Each pass indexes desired paths and journal entries for lookups
-while keeping the existing traversal and journal order. Nested updates detach the
-child dictionary before editing it to avoid repeatedly copying the full Spaces
-dictionary. These optimizations do not prune Apple's Space records, change ownership
-or restoration rules, move work off the main actor, or eliminate concurrent writes.
+while keeping the existing traversal and journal order. Both selection and the
+shared-store coordinator convert the Spaces dictionary once per decoded snapshot:
+confirming or replaying thousands of changed choices after a reload must not bridge
+the entire dictionary again for each lookup. Nested updates, including stale-save
+replay, detach the child dictionary before editing it to avoid repeatedly copying
+the full Spaces dictionary. These optimizations do not prune Apple's Space records,
+change ownership or restoration rules, move work off the main actor, or eliminate
+concurrent writes.
 
 If the store changes between reading it and the pre-write comparison, selection
 recomputes from the latest file, with at most three attempts per synchronization.

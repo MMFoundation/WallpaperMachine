@@ -774,6 +774,18 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func nativeVideoWallpapers() async throws  -> [BridgeNativeVideoWallpaper]
 
     /**
+     * Exports one installed wallpaper's saved configuration for every connected,
+     * enabled, nonmirror display without changing desktop assignments or drafts.
+     * Native hosts own presentation; only user pause and power policy apply.
+     *
+     * # Errors
+     *
+     * Returns an error for an unknown, unsupported or held wallpaper, unreadable
+     * saved configuration, or invalid renderer inputs. No configuration is written.
+     */
+    func nativeWallpaperScenes(wallpaperId: String) async throws  -> [BridgeLockScreenScene]
+
+    /**
      * Which applied desktop scenes have consented to now-playing.
      *
      * The host starts and stops its system media source from this, so a
@@ -2185,6 +2197,33 @@ open func nativeVideoWallpapers()async throws  -> [BridgeNativeVideoWallpaper] {
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypeBridgeNativeVideoWallpaper.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+
+    /**
+     * Exports one installed wallpaper's saved configuration for every connected,
+     * enabled, nonmirror display without changing desktop assignments or drafts.
+     * Native hosts own presentation; only user pause and power policy apply.
+     *
+     * # Errors
+     *
+     * Returns an error for an unknown, unsupported or held wallpaper, unreadable
+     * saved configuration, or invalid renderer inputs. No configuration is written.
+     */
+open func nativeWallpaperScenes(wallpaperId: String)async throws  -> [BridgeLockScreenScene] {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_native_wallpaper_scenes(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeBridgeLockScreenScene.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -13034,6 +13073,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_native_video_wallpapers() != 32035) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_native_wallpaper_scenes() != 8227) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_next_user_shortcut() != 52775) {

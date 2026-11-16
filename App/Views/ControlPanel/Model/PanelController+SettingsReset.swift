@@ -79,6 +79,8 @@ extension PanelController {
     if let lock = store.lockScreenWallpaper {
       if lock.isRequested { lock.setEnabled(false) }
       if lock.screenSaverRequested { lock.setScreenSaverEnabled(false) }
+      lock.setWallpaper(nil, lockScreen: true)
+      lock.setWallpaper(nil, lockScreen: false)
     }
     NotchMaskController.setEnabled(false, defaults: defaults)
     let wasShowingLiveEdits = LivePropertyEditing.isEnabled(defaults: defaults)

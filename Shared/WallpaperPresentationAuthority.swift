@@ -153,6 +153,15 @@ enum WallpaperPresentationAuthority {
     suspensionReasons(for: request).isEmpty
   }
 
+  static func mayPrepareReplacement(_ request: Request, hasPendingAcquire: Bool) -> Bool {
+    if hasPendingAcquire { return true }
+    guard !request.displaysAsleep, request.sessionOnConsole, request.hostActivity == .active else { return false }
+    var firstFrame = request
+    firstFrame.userPaused = false
+    firstFrame.presentedFor = .zero
+    return mayPresent(firstFrame)
+  }
+
   /// When the decision for this surface will change on its own, so the caller
   /// can re-evaluate then instead of polling: when a preview's budget, or a
   /// desktop's settling, runs out.

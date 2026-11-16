@@ -34,7 +34,7 @@ use crate::{
             self, AudioRequirementChanged, Bootstrap,
             ClearShaderCache,
             CompleteAudioResponse, EditEngineOption, EditProperty,
-            GetAllSnapshots, GetAppSnapshot, GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview,
+            GetAllSnapshots, GetAppSnapshot, GetLibrarySnapshot, GetLockScreenScenes, GetNativeWallpaperScenes, GetWallpaperPreview,
             GetMonitorInformationSnapshot, GetSceneProbeRequest, GetSettingsSnapshot,
             GetWallpaperOptionsSnapshot, GetWebWallpapers,
             InitialFrameReady, InjectDisplayForTest, InjectSceneProjectForTest,
@@ -1331,7 +1331,74 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             frame_rate_cap: self.active_target_fps_cap(),
             ..self.activation_inputs(&displays, self.state.playback_state == BridgePlaybackState::Paused)
         };
+        self.native_scenes_from(inputs)
+    }
 
+    fn native_wallpaper_scenes(&self, wallpaper_id: &str) -> Result<Vec<BridgeLockScreenScene>, BridgeError> {
+        use std::path::{Component, Path};
+        let mut components = Path::new(wallpaper_id).components();
+        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+            return Err(BridgeError::invalid_input("invalid native wallpaper identifier"));
+        }
+        let entry = self.state.library.iter().find(|entry| entry.id == wallpaper_id)
+            .ok_or_else(|| BridgeError::invalid_input(format!("unknown wallpaper id {wallpaper_id}")))?;
+        if !entry.supported || entry.kind == BridgeWallpaperKind::Unknown {
+            return Err(BridgeError::invalid_input("this wallpaper type cannot be exported"));
+        }
+        let model = self.state.project_model(wallpaper_id)?;
+        if self.state.held_wallpapers.contains(wallpaper_id) {
+            return Err(BridgeError::engine(format!("wallpaper {wallpaper_id} is held after repeated load failures")));
+        }
+        let saved = match self.state.wallpaper_configs.get(wallpaper_id) {
+            Some(config) => config.clone(),
+            None => self.config_store.as_ref()
+                .map(|store| store.read_wallpaper(wallpaper_id))
+                .transpose()?
+                .flatten()
+                .unwrap_or_else(|| WallpaperConfig::new_for(wallpaper_id, match model.project_type {
+                    wallpaper_core::project::WallpaperProjectType::Scene => "scene",
+                    wallpaper_core::project::WallpaperProjectType::Video => "video",
+                    wallpaper_core::project::WallpaperProjectType::Web => "web",
+                    wallpaper_core::project::WallpaperProjectType::Unknown => "unknown",
+                })),
+        };
+        let wallpapers = BTreeMap::from([(wallpaper_id.to_owned(), saved)]);
+        let displays = self.engine.display_snapshot();
+        let mut app_config = self.state.app_config.clone();
+        app_config.monitors = app_config.monitor_rows(&displays).into_iter()
+            .filter_map(|row| {
+                let display = displays.get(row.display_index?)?;
+                let mut monitor = self.state.app_config.monitors.iter()
+                    .find(|monitor| monitor.selector == row.selector)
+                    .or_else(|| self.state.app_config.monitors.iter().find(|monitor| {
+                        monitor.selector.to_selector().resolve_display(&displays)
+                            .is_some_and(|resolved| resolved.desc.display_id == display.desc.display_id)
+                    }))
+                    .cloned()
+                    .unwrap_or(row.config);
+                if !monitor.enabled || monitor.mode.eq_ignore_ascii_case("mirror") {
+                    return None;
+                }
+                monitor.selector = row.selector;
+                monitor.wallpaper = Some(wallpaper_id.to_owned());
+                Some(monitor)
+            })
+            .collect();
+        let no_suspended_displays = BTreeSet::new();
+        let paused = self.state.playback_state == BridgePlaybackState::Paused
+            || self.state.pending_user_pause_after_initial_frame
+            || (self.state.power_source == crate::power::PowerSource::Battery
+                && self.state.app_config.power.on_battery == crate::config::BatteryModeCfg::Pause
+                && !self.state.battery_pause_suppressed);
+        self.native_scenes_from(ActivationInputs {
+            app_config: &app_config,
+            wallpapers: &wallpapers,
+            suspended_displays: &no_suspended_displays,
+            ..self.activation_inputs(&displays, paused)
+        })
+    }
+
+    fn native_scenes_from(&self, inputs: ActivationInputs<'_>) -> Result<Vec<BridgeLockScreenScene>, BridgeError> {
         // Plain videos included: the extension plays each with its own players, and holds the
         // clip with the failure when they cannot.
         let mut scenes = inputs
@@ -1408,15 +1475,14 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     framing: scene.framing.into(),
                     properties_json,
                     paused: scene.paused,
-                    engine_options: self
-                        .state
-                        .wallpaper_configs
+                    engine_options: inputs
+                        .wallpapers
                         .get(&wallpaper_id)
                         .map(|config| (&config.engine_options).into()),
                     scene_quality: (!is_video).then(|| scene.quality.into()),
                     border_color: is_video
                         .then(|| {
-                            self.state.wallpaper_configs.get(&wallpaper_id).and_then(|config| {
+                            inputs.wallpapers.get(&wallpaper_id).and_then(|config| {
                                 inputs.scheme_color(&wallpaper_id, config)
                             })
                         })
@@ -1835,6 +1901,18 @@ impl<E: EngineFacade + Clone> Message<GetLockScreenScenes> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.lock_screen_scenes()
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<GetNativeWallpaperScenes> for BridgeActor<E> {
+    type Reply = messages::LockScreenScenesReply;
+
+    async fn handle(
+        &mut self,
+        msg: GetNativeWallpaperScenes,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.native_wallpaper_scenes(&msg.wallpaper_id)
     }
 }
 

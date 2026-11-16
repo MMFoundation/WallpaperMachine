@@ -139,6 +139,22 @@ impl ConfigStore {
         Ok(config)
     }
 
+    pub(crate) fn read_wallpaper(&self, id: &str) -> Result<Option<WallpaperConfig>, BridgeError> {
+        let path = self.wallpaper_path(id);
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(config_error(format!(
+                "cannot read wallpaper configuration {}: {error}", path.display()
+            ))),
+        };
+        let config: WallpaperConfig = serde_json::from_str(&raw).map_err(|error| {
+            config_error(format!("invalid wallpaper configuration {}: {error}", path.display()))
+        })?;
+        supported(config.schema_version, wallpaper::SCHEMA_VERSION, path.display())?;
+        Ok(Some(config))
+    }
+
     fn recover_wallpaper(
         &self,
         path: &Path,
