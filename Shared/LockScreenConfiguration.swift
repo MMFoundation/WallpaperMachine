@@ -190,6 +190,20 @@ struct LockScreenReadiness: Codable {
   static func fileName(displayID: UInt32, content: LockScreenContent = .desktop) -> String {
     content == .desktop ? "ready-\(displayID).json" : "ready-\(content.rawValue)-\(displayID).json"
   }
+
+  @MainActor
+  static func deliver(
+    error: Error?, whenReady: (@escaping (Error?) -> Void) -> Void,
+    record: @escaping (Error?) -> Void
+  ) {
+    if let error {
+      if !(error is CancellationError) { record(error) }
+    } else {
+      whenReady { error in
+        if !(error is CancellationError) { record(error) }
+      }
+    }
+  }
 }
 
 /// An empty file the extension leaves in the exchange directory once macOS has closed every

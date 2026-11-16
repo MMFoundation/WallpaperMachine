@@ -73,6 +73,65 @@ final class LockScreenAcquireRepliesTests: XCTestCase {
     XCTAssertEqual(failures, 1)
   }
 
+  func testSynchronousStartFailureIsRecordedBeforeRetirementAndRepliesExactlyOnce() {
+    enum Failure: Error { case unavailable }
+    let replies = LockScreenAcquireReplies()
+    var registered = true
+    var events: [String] = []
+    var whenReady: ((Error?) -> Void)?
+    replies.append { error in
+      LockScreenReadiness.deliver(error: error, whenReady: { whenReady = $0 }) { reported in
+        guard registered else { return }
+        XCTAssertTrue(reported is Failure)
+        events.append("record failure")
+      }
+      registered = false
+      events.append("retire")
+      XCTAssertTrue(error is Failure)
+      events.append("reply failure")
+    }
+    let token = replies.begin()
+    replies.complete(token, error: Failure.unavailable)
+    replies.cancel()
+    XCTAssertNil(whenReady, "an explicit startup error cannot wait for a frame that will never arrive")
+    XCTAssertEqual(events, ["record failure", "retire", "reply failure"])
+    XCTAssertFalse(replies.complete(token, error: nil))
+    XCTAssertEqual(events, ["record failure", "retire", "reply failure"])
+  }
+
+  func testSuccessfulAcknowledgementWaitsForAFrameAndDropsAStaleSurface() {
+    var frame: ((Error?) -> Void)?
+    var registered = true
+    var records = 0
+    LockScreenReadiness.deliver(error: nil, whenReady: { frame = $0 }) { error in
+      guard registered else { return }
+      XCTAssertNil(error)
+      records += 1
+    }
+    XCTAssertEqual(records, 0)
+    frame?(nil)
+    XCTAssertEqual(records, 1)
+    LockScreenReadiness.deliver(error: nil, whenReady: { frame = $0 }) { _ in
+      guard registered else { return }
+      records += 1
+    }
+    registered = false
+    frame?(nil)
+    XCTAssertEqual(records, 1)
+  }
+
+  func testCancelledReadinessCannotOverwriteAnExplicitRendererFailure() {
+    enum Failure: Error { case renderer }
+    var records: [Error?] = []
+    var frame: ((Error?) -> Void)?
+    LockScreenReadiness.deliver(error: Failure.renderer, whenReady: { frame = $0 }) { records.append($0) }
+    LockScreenReadiness.deliver(error: CancellationError(), whenReady: { frame = $0 }) { records.append($0) }
+    LockScreenReadiness.deliver(error: nil, whenReady: { frame = $0 }) { records.append($0) }
+    frame?(CancellationError())
+    XCTAssertEqual(records.count, 1)
+    XCTAssertTrue(records.first! is Failure)
+  }
+
   func testInactiveSurfaceDefersItsLatestSourceUntilTheEnvironmentResumes() {
     let active = WallpaperPresentationAuthority.Request(role: .lockScreen, sessionLocked: true)
     var sleeping = active

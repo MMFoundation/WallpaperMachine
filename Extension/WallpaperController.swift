@@ -89,16 +89,15 @@ final class WallpaperController {
     else { return }
     let scene = surface.scene
     let content = surface.content
-    surface.whenReady { [weak self, weak surface] readyError in
+    LockScreenReadiness.deliver(error: error, whenReady: { surface.whenReady($0) }) { [weak self, weak surface] readyError in
       guard let self, let surface, self.configuration == configuration,
         surface.scene == scene, surface.content == content,
-        self.surfaces.values.contains(where: { $0 === surface }),
-        !(readyError is CancellationError) || error != nil
+        self.surfaces.values.contains(where: { $0 === surface })
       else { return }
       Self.record(
         LockScreenReadiness(
           revision: configuration.revision, displayID: scene.displayID,
-          error: (error ?? readyError)?.localizedDescription, held: surface.heldNotice,
+          error: readyError?.localizedDescription, held: surface.heldNotice,
           content: content))
     }
   }
