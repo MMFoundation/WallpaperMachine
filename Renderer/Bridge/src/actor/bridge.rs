@@ -3627,12 +3627,12 @@ impl<E: EngineFacade + Clone> Message<SetAudioResponseEnabled> for BridgeActor<E
                     break;
                 }
             }
-            if result.is_err() {
+            if let Err(BridgeError::Error { message, .. }) = &mut result {
                 for handle in handles {
                     if let Err(error) =
                         register_audio_capture(&engine, handle, previous_enabled).await
                     {
-                        log::warn!("could not restore audio response after failed change: {error}");
+                        message.push_str(&format!("; {error}"));
                     }
                 }
             }
@@ -3661,26 +3661,30 @@ impl<E: EngineFacade + Clone> Message<CompleteAudioResponse> for BridgeActor<E> 
             self.engine.set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
                 .await.map_err(|error| BridgeError::engine(error.to_string()))
         } else { Ok(()) };
-        let demand_failed = demand_result.is_err();
-        if let Err(error) = msg.result.and(demand_result) {
-            let config = self
-                .state
-                .wallpaper_draft_mut(&msg.wallpaper_id)?
-                .set_audio_response_enabled_immediate(msg.previous_enabled);
-            self.save_wallpaper(msg.wallpaper_id.clone(), config)?;
-            if demand_failed {
-                for handle in self.wallpaper_handles(&msg.wallpaper_id, true) {
-                    if let Err(rollback) = register_audio_capture(&self.engine, handle, msg.previous_enabled).await {
-                        log::warn!("could not restore audio registration: {rollback}");
+        if let Err(BridgeError::Error { kind, mut message }) = msg.result.and(demand_result) {
+            match self.state.wallpaper_draft_mut(&msg.wallpaper_id) {
+                Ok(draft) => {
+                    let config = draft.set_audio_response_enabled_immediate(msg.previous_enabled);
+                    if let Some(store) = &self.config_store {
+                        if let Err(rollback) = store.save_wallpaper(&config) {
+                            message.push_str(&format!("; {rollback}"));
+                        }
                     }
+                    self.state.wallpaper_configs.insert(msg.wallpaper_id.clone(), config);
+                }
+                Err(rollback) => message.push_str(&format!("; {rollback}")),
+            }
+            self.invalidate_operations();
+            for handle in self.wallpaper_handles(&msg.wallpaper_id, true) {
+                if let Err(rollback) = register_audio_capture(&self.engine, handle, msg.previous_enabled).await {
+                    message.push_str(&format!("; {rollback}"));
                 }
             }
             if let Err(rollback) = self.engine
                 .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused())).await {
-                log::warn!("could not restore audio demand: {rollback}");
+                message.push_str(&format!("; {rollback}"));
             }
-            self.invalidate_operations();
-            return Err(error);
+            return Err(BridgeError::Error { kind, message });
         }
         self.wallpaper_bundle(msg.wallpaper_id)
     }

@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-15 — Retry native selection before a raced store write
+
+Refs #198. This implements bounded pre-write retries; historical-Space scaling and main-actor work remain open.
+
+- Regression proof: five new or updated race scenarios failed on the previous implementation.
+- Targeted selection, service and shared-store suites: 187 passed; focused restoration and reload checks: 2 passed.
+- python3 scripts/test.py: all 35 Python test modules passed; 5,069 native tests passed, 0 failed, 70 skipped; two runtime main-thread warnings.
+- An earlier parallel gate timed out in the Workshop filter layout matrix. Serial diagnosis also exposed a poster assertion before publication finished; test-only fixes wait for publication, traverse the accessibility tree once and split the appearance matrix.
+- git diff --check and scripts/tests/test_doc_links.py: passed.
+- Synthetic stores and injected services only. No live wallpaper or lock-screen test, Release build, app installation or restart.
+
 ## 2026-11-15 — Installed wallpaper resolution and full tags (#205)
 
 - Installed rows join cached public Workshop tags with local manifest facts, removing case-insensitive duplicates; metadata updates invalidate the row cache without creating update badges.

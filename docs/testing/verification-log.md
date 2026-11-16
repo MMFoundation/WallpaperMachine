@@ -25,6 +25,19 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-16 — PR #218: preserve audio rollback after a save failure
+
+- A failed audio activation followed by failed rollback persistence no longer splits the restored draft from the authoritative map or skips live cleanup and operation invalidation.
+- Two real-actor regressions failed on unchanged production head 2d436018: audio stayed enabled immediately after rollback-save failure and after a subsequent failed Apply with a late audio report.
+- Four new cases cover registration/response and demand failures, original plus persistence/cleanup errors, unchanged on-disk optimistic data, downstream callbacks, fresh/stale Apply tickets and multi-display cleanup.
+- The complete focused selection passed 15 tests, retaining healthy initialize-once, ownership-read idempotence, earlier publication races and per-display failure isolation; no existing assertion was weakened.
+- python3 scripts/check_rust.py passed: core 436, bridge 990, core integration 20 and shader 1098. Five desktop-window cases excluded; desktop/media/network opt-ins disabled.
+- python3 scripts/build.py --renderer-only passed and regenerated unchanged public bridge bindings. No API schema, new UI literal, polling or per-frame work was introduced.
+- python3 scripts/test.py passed 718 Python and 5108 native tests, with 70 native skips and two runtime warnings without source locations. An initial Python failure was caused by the harness placing TMPDIR inside the checkout; normal temporary-directory isolation fixed it without changing tests or production code.
+- python3 scripts/check_renderer.py passed 3535 tests with seven optional skips; all 12 generated pixel cases and eight projects x two reload cycles passed. The timer benchmark is diagnostic, not energy evidence.
+- A focused compile was interrupted with exit 143 during a device disconnect. Source/log/process inspection after reconnect confirmed no surviving run before retry; no interrupted or partial result was counted as passing.
+- No Release app, installed-app restart, live capture/player, permission prompt, desktop or energy check. Source fingerprints remained unchanged across the final gates.
+
 ## 2026-11-16 — PR #218: resilient capture publication
 
 - PR #218 follow-up: isolate per-display registration errors and verify actual capture ownership before skipping publication repair; no polling or per-frame work.
@@ -117,14 +130,3 @@ Issue #213: optional per-wallpaper, per-display sound choices inherit existing w
 - python3 scripts/test.py: all 35 Python modules passed; 5,070 native tests passed, 0 failed, 70 skipped; one runtime warning. The initial full run timed out in an existing lock-screen readiness test; its isolated check and full rerun passed without source changes.
 - Build-script, localization and Markdown-link checks and git diff --check passed. The app help is translated into all six shipped languages.
 - No live multi-display sound or desktop interaction check, Release app build, installation or restart.
-
-## 2026-11-15 — Retry native selection before a raced store write
-
-Refs #198. This implements bounded pre-write retries; historical-Space scaling and main-actor work remain open.
-
-- Regression proof: five new or updated race scenarios failed on the previous implementation.
-- Targeted selection, service and shared-store suites: 187 passed; focused restoration and reload checks: 2 passed.
-- python3 scripts/test.py: all 35 Python test modules passed; 5,069 native tests passed, 0 failed, 70 skipped; two runtime main-thread warnings.
-- An earlier parallel gate timed out in the Workshop filter layout matrix. Serial diagnosis also exposed a poster assertion before publication finished; test-only fixes wait for publication, traverse the accessibility tree once and split the appearance matrix.
-- git diff --check and scripts/tests/test_doc_links.py: passed.
-- Synthetic stores and injected services only. No live wallpaper or lock-screen test, Release build, app installation or restart.
