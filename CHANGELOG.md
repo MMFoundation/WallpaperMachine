@@ -12,6 +12,116 @@ app's update window shows the sections of every version newer than the installed
 one, in the app's language; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.13.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.12.0...v1.13.0) (2026-11-16)
+
+### English
+
+This release lets you give the experimental lock screen its own wallpaper and each display its own sound, and makes clocks, audio and song details in wallpapers dependable again
+
+#### Highlights
+
+- Give the experimental lock screen and the screen saver their own wallpapers from your library, or keep them following the desktop (closes [#193](https://github.com/MMFoundation/WallpaperMachine/issues/193)) ([94610bc](https://github.com/MMFoundation/WallpaperMachine/commit/94610bcb370c73e4d016b34b0934143ebce10c54))
+- Displays showing the same wallpaper can now keep their own volume and mute settings (closes [#213](https://github.com/MMFoundation/WallpaperMachine/issues/213)) ([84bf8ad](https://github.com/MMFoundation/WallpaperMachine/commit/84bf8ad3adcf15d2a2868e23a5ceabf900f8f284))
+- The Library shows each wallpaper's resolution and all its Workshop tags, and search finds them too (closes [#205](https://github.com/MMFoundation/WallpaperMachine/issues/205)) ([1b8e59d](https://github.com/MMFoundation/WallpaperMachine/commit/1b8e59d411de5e609d6cce92fd14defb338c1771))
+- Delete the wallpaper that is playing and the display moves on to your last used or next playlist wallpaper (closes [#207](https://github.com/MMFoundation/WallpaperMachine/issues/207)) ([038e0de](https://github.com/MMFoundation/WallpaperMachine/commit/038e0de6b0bd229b6580dde321e67a19295fc946))
+- Clocks, song details and audio-reactive effects in wallpapers keep updating as they should (closes [#202](https://github.com/MMFoundation/WallpaperMachine/issues/202), closes [#215](https://github.com/MMFoundation/WallpaperMachine/issues/215)) ([a3204a0](https://github.com/MMFoundation/WallpaperMachine/commit/a3204a046693acb58baf8f78b49ec2a1419d13a3), [9608169](https://github.com/MMFoundation/WallpaperMachine/commit/960816952d48d9b0b0a0de739dea696a9dd64664), [fefa7f9](https://github.com/MMFoundation/WallpaperMachine/commit/fefa7f928a86c93b2db2fd64dcc984c90d59cebe))
+
+#### Features
+
+- Choose a separate library wallpaper for the experimental lock screen and for the screen saver, and if one cannot load, the other keeps playing (closes [#193](https://github.com/MMFoundation/WallpaperMachine/issues/193)) ([94610bc](https://github.com/MMFoundation/WallpaperMachine/commit/94610bcb370c73e4d016b34b0934143ebce10c54))
+- Set volume and mute separately for each display in Settings, even when several displays show the same wallpaper (closes [#213](https://github.com/MMFoundation/WallpaperMachine/issues/213)) ([84bf8ad](https://github.com/MMFoundation/WallpaperMachine/commit/84bf8ad3adcf15d2a2868e23a5ceabf900f8f284))
+- Wallpaper details in the Library now include resolution and every Workshop tag, which also work in search and stay available offline (closes [#205](https://github.com/MMFoundation/WallpaperMachine/issues/205)) ([1b8e59d](https://github.com/MMFoundation/WallpaperMachine/commit/1b8e59d411de5e609d6cce92fd14defb338c1771))
+- Steam Workshop filters can now include applications and assets, which stay excluded by default, with applications marked as unsupported on macOS (closes [#206](https://github.com/MMFoundation/WallpaperMachine/issues/206)) ([7ecc31a](https://github.com/MMFoundation/WallpaperMachine/commit/7ecc31ac1fd9915dbc4738dce2586b28dfa1eb88))
+- Nix users can install WallpaperMachine from a flake and set its preferences through Home Manager ([65fdc5b](https://github.com/MMFoundation/WallpaperMachine/commit/65fdc5bedd5159f40f148b5b25aa6081edfb3d7e))
+
+#### Improvements
+
+- Deleting a wallpaper that is playing now switches its display to your last used wallpaper or the next one in its playlist (closes [#207](https://github.com/MMFoundation/WallpaperMachine/issues/207)) ([038e0de](https://github.com/MMFoundation/WallpaperMachine/commit/038e0de6b0bd229b6580dde321e67a19295fc946))
+- Lock screen wallpaper changes are much faster on Macs with many Spaces ([003c7af](https://github.com/MMFoundation/WallpaperMachine/commit/003c7afdad26b421820094bfc842f96b0bf45509), [75e4d57](https://github.com/MMFoundation/WallpaperMachine/commit/75e4d57938b4dd4ca0f78e8f01aa9372f7f93ae1))
+
+#### Bug Fixes
+
+- Audio-reactive wallpapers keep responding and song details with artwork reappear after you switch wallpapers, without turning audio response off and on (closes [#215](https://github.com/MMFoundation/WallpaperMachine/issues/215)) ([fefa7f9](https://github.com/MMFoundation/WallpaperMachine/commit/fefa7f928a86c93b2db2fd64dcc984c90d59cebe))
+- Scene wallpaper clocks show the current date, time and weekday instead of placeholders, and media panels and spectrum bars hide when they should (closes [#202](https://github.com/MMFoundation/WallpaperMachine/issues/202)) ([a3204a0](https://github.com/MMFoundation/WallpaperMachine/commit/a3204a046693acb58baf8f78b49ec2a1419d13a3), [9608169](https://github.com/MMFoundation/WallpaperMachine/commit/960816952d48d9b0b0a0de739dea696a9dd64664))
+- In scene wallpapers, attached parts such as a character's head stay in place and delayed video layers now appear (closes [#200](https://github.com/MMFoundation/WallpaperMachine/issues/200), closes [#211](https://github.com/MMFoundation/WallpaperMachine/issues/211)) ([64e8856](https://github.com/MMFoundation/WallpaperMachine/commit/64e8856ab61f5b326435ac1d62051cc695cfd13c), [f538404](https://github.com/MMFoundation/WallpaperMachine/commit/f538404a6343fd965e9dd2da28045466adb64f51))
+- Lock screen and desktop wallpaper changes no longer overwrite each other or wallpapers you picked yourself while macOS reloads its wallpapers (closes [#199](https://github.com/MMFoundation/WallpaperMachine/issues/199)) ([58b9e77](https://github.com/MMFoundation/WallpaperMachine/commit/58b9e77945ee44e99ac1925f99a8dd081873d6cf), [5e53cc8](https://github.com/MMFoundation/WallpaperMachine/commit/5e53cc8c2449c7efaed6983d97ac0e44f539bb00))
+- Wallpapers an earlier update left on the lock screen are now replaced at launch with your original wallpaper or the macOS default image (closes [#204](https://github.com/MMFoundation/WallpaperMachine/issues/204)) ([d9062ca](https://github.com/MMFoundation/WallpaperMachine/commit/d9062ca8cec0bb960ef81321ed0b4300a0115665))
+- pixiv rankings and searches no longer show empty or half-filled pages after illustrations are filtered ([ea83a15](https://github.com/MMFoundation/WallpaperMachine/commit/ea83a155c0a1487a9a542d64f153bf9eb8d9c8cb))
+
+Thanks to [@NikoPit](https://github.com/NikoPit) for contributing to this release.
+
+### 简体中文
+
+本版本可为实验性锁定屏幕单独设置壁纸、为每台显示器单独设置声音，并让壁纸中的时钟、音频和歌曲信息重新稳定可靠
+
+#### 亮点
+
+- 可为实验性锁定屏幕和屏幕保护程序分别从壁纸库选择壁纸，也可以继续跟随桌面 (closes [#193](https://github.com/MMFoundation/WallpaperMachine/issues/193)) ([94610bc](https://github.com/MMFoundation/WallpaperMachine/commit/94610bcb370c73e4d016b34b0934143ebce10c54))
+- 显示同一壁纸的多台显示器现在可以分别设置音量和静音 (closes [#213](https://github.com/MMFoundation/WallpaperMachine/issues/213)) ([84bf8ad](https://github.com/MMFoundation/WallpaperMachine/commit/84bf8ad3adcf15d2a2868e23a5ceabf900f8f284))
+- 壁纸库会显示每个壁纸的分辨率和全部创意工坊标签，搜索时也能用上 (closes [#205](https://github.com/MMFoundation/WallpaperMachine/issues/205)) ([1b8e59d](https://github.com/MMFoundation/WallpaperMachine/commit/1b8e59d411de5e609d6cce92fd14defb338c1771))
+- 删除正在播放的壁纸后，显示器会自动换上最近用过的壁纸或播放列表中的下一个 (closes [#207](https://github.com/MMFoundation/WallpaperMachine/issues/207)) ([038e0de](https://github.com/MMFoundation/WallpaperMachine/commit/038e0de6b0bd229b6580dde321e67a19295fc946))
+- 壁纸中的时钟、歌曲信息和随音频变化的效果现在都能正常更新 (closes [#202](https://github.com/MMFoundation/WallpaperMachine/issues/202), closes [#215](https://github.com/MMFoundation/WallpaperMachine/issues/215)) ([a3204a0](https://github.com/MMFoundation/WallpaperMachine/commit/a3204a046693acb58baf8f78b49ec2a1419d13a3), [9608169](https://github.com/MMFoundation/WallpaperMachine/commit/960816952d48d9b0b0a0de739dea696a9dd64664), [fefa7f9](https://github.com/MMFoundation/WallpaperMachine/commit/fefa7f928a86c93b2db2fd64dcc984c90d59cebe))
+
+#### 新功能
+
+- 可为实验性锁定屏幕和屏幕保护程序分别选择壁纸库中的壁纸，其中一个无法载入时另一个仍会继续播放 (closes [#193](https://github.com/MMFoundation/WallpaperMachine/issues/193)) ([94610bc](https://github.com/MMFoundation/WallpaperMachine/commit/94610bcb370c73e4d016b34b0934143ebce10c54))
+- 即使多台显示器显示同一壁纸，也可以在设置中为每台显示器单独设定音量和静音 (closes [#213](https://github.com/MMFoundation/WallpaperMachine/issues/213)) ([84bf8ad](https://github.com/MMFoundation/WallpaperMachine/commit/84bf8ad3adcf15d2a2868e23a5ceabf900f8f284))
+- 壁纸库中的壁纸详情现在包括分辨率和所有创意工坊标签，可用于搜索，离线时也能查看 (closes [#205](https://github.com/MMFoundation/WallpaperMachine/issues/205)) ([1b8e59d](https://github.com/MMFoundation/WallpaperMachine/commit/1b8e59d411de5e609d6cce92fd14defb338c1771))
+- Steam 创意工坊筛选现可包含应用程序和素材，二者默认仍被排除，应用程序会标明在 macOS 上不受支持 (closes [#206](https://github.com/MMFoundation/WallpaperMachine/issues/206)) ([7ecc31a](https://github.com/MMFoundation/WallpaperMachine/commit/7ecc31ac1fd9915dbc4738dce2586b28dfa1eb88))
+- Nix 用户可通过 flake 安装 WallpaperMachine，并用 Home Manager 配置偏好设置 ([65fdc5b](https://github.com/MMFoundation/WallpaperMachine/commit/65fdc5bedd5159f40f148b5b25aa6081edfb3d7e))
+
+#### 改进
+
+- 删除正在播放的壁纸后，对应显示器会切换到最近使用的壁纸或播放列表中的下一个 (closes [#207](https://github.com/MMFoundation/WallpaperMachine/issues/207)) ([038e0de](https://github.com/MMFoundation/WallpaperMachine/commit/038e0de6b0bd229b6580dde321e67a19295fc946))
+- 在有大量空间的 Mac 上，更换锁定屏幕壁纸快了很多 ([003c7af](https://github.com/MMFoundation/WallpaperMachine/commit/003c7afdad26b421820094bfc842f96b0bf45509), [75e4d57](https://github.com/MMFoundation/WallpaperMachine/commit/75e4d57938b4dd4ca0f78e8f01aa9372f7f93ae1))
+
+#### 问题修复
+
+- 切换壁纸后，随音频变化的壁纸会继续响应，歌曲信息和封面也会恢复显示，无需关闭再打开音频响应 (closes [#215](https://github.com/MMFoundation/WallpaperMachine/issues/215)) ([fefa7f9](https://github.com/MMFoundation/WallpaperMachine/commit/fefa7f928a86c93b2db2fd64dcc984c90d59cebe))
+- 场景壁纸中的时钟会显示当前日期、时间和星期，不再停在占位文字，媒体面板和频谱条也会按需隐藏 (closes [#202](https://github.com/MMFoundation/WallpaperMachine/issues/202)) ([a3204a0](https://github.com/MMFoundation/WallpaperMachine/commit/a3204a046693acb58baf8f78b49ec2a1419d13a3), [9608169](https://github.com/MMFoundation/WallpaperMachine/commit/960816952d48d9b0b0a0de739dea696a9dd64664))
+- 场景壁纸中角色头部等附着部件会保持在正确位置，延时出现的视频图层也能正常显示 (closes [#200](https://github.com/MMFoundation/WallpaperMachine/issues/200), closes [#211](https://github.com/MMFoundation/WallpaperMachine/issues/211)) ([64e8856](https://github.com/MMFoundation/WallpaperMachine/commit/64e8856ab61f5b326435ac1d62051cc695cfd13c), [f538404](https://github.com/MMFoundation/WallpaperMachine/commit/f538404a6343fd965e9dd2da28045466adb64f51))
+- 在 macOS 重新载入壁纸期间，锁定屏幕和桌面壁纸的更改不再相互覆盖，也不会覆盖你自己选的壁纸 (closes [#199](https://github.com/MMFoundation/WallpaperMachine/issues/199)) ([58b9e77](https://github.com/MMFoundation/WallpaperMachine/commit/58b9e77945ee44e99ac1925f99a8dd081873d6cf), [5e53cc8](https://github.com/MMFoundation/WallpaperMachine/commit/5e53cc8c2449c7efaed6983d97ac0e44f539bb00))
+- 此前更新后遗留在锁定屏幕上的壁纸，现在会在启动时恢复为原来的壁纸或 macOS 默认图片 (closes [#204](https://github.com/MMFoundation/WallpaperMachine/issues/204)) ([d9062ca](https://github.com/MMFoundation/WallpaperMachine/commit/d9062ca8cec0bb960ef81321ed0b4300a0115665))
+- 筛选插画后，pixiv 排行榜和搜索结果不再出现空白或不满的页面 ([ea83a15](https://github.com/MMFoundation/WallpaperMachine/commit/ea83a155c0a1487a9a542d64f153bf9eb8d9c8cb))
+
+感谢 [@NikoPit](https://github.com/NikoPit) 为本版本做出的贡献。
+
+### 한국어
+
+이번 릴리스에서는 실험적 잠금 화면에 별도 배경화면을, 디스플레이마다 별도 소리를 지정할 수 있고, 배경화면 속 시계와 오디오, 곡 정보가 다시 안정적으로 작동합니다
+
+#### 주요 변경 사항
+
+- 실험적 잠금 화면과 화면 보호기에 보관함의 배경화면을 따로 지정하거나 계속 데스크탑을 따르게 할 수 있습니다 (closes [#193](https://github.com/MMFoundation/WallpaperMachine/issues/193)) ([94610bc](https://github.com/MMFoundation/WallpaperMachine/commit/94610bcb370c73e4d016b34b0934143ebce10c54))
+- 같은 배경화면을 표시하는 디스플레이마다 음량과 음소거를 따로 설정할 수 있습니다 (closes [#213](https://github.com/MMFoundation/WallpaperMachine/issues/213)) ([84bf8ad](https://github.com/MMFoundation/WallpaperMachine/commit/84bf8ad3adcf15d2a2868e23a5ceabf900f8f284))
+- 보관함에 배경화면마다 해상도와 창작마당 태그 전체가 표시되고 검색에도 쓰입니다 (closes [#205](https://github.com/MMFoundation/WallpaperMachine/issues/205)) ([1b8e59d](https://github.com/MMFoundation/WallpaperMachine/commit/1b8e59d411de5e609d6cce92fd14defb338c1771))
+- 재생 중인 배경화면을 삭제하면 최근에 사용한 배경화면이나 재생 목록의 다음 항목이 이어서 재생됩니다 (closes [#207](https://github.com/MMFoundation/WallpaperMachine/issues/207)) ([038e0de](https://github.com/MMFoundation/WallpaperMachine/commit/038e0de6b0bd229b6580dde321e67a19295fc946))
+- 배경화면 속 시계, 곡 정보, 오디오 반응 효과가 이제 제대로 갱신됩니다 (closes [#202](https://github.com/MMFoundation/WallpaperMachine/issues/202), closes [#215](https://github.com/MMFoundation/WallpaperMachine/issues/215)) ([a3204a0](https://github.com/MMFoundation/WallpaperMachine/commit/a3204a046693acb58baf8f78b49ec2a1419d13a3), [9608169](https://github.com/MMFoundation/WallpaperMachine/commit/960816952d48d9b0b0a0de739dea696a9dd64664), [fefa7f9](https://github.com/MMFoundation/WallpaperMachine/commit/fefa7f928a86c93b2db2fd64dcc984c90d59cebe))
+
+#### 새로운 기능
+
+- 실험적 잠금 화면과 화면 보호기에 보관함 배경화면을 각각 고를 수 있으며, 하나를 불러오지 못해도 다른 하나는 계속 재생됩니다 (closes [#193](https://github.com/MMFoundation/WallpaperMachine/issues/193)) ([94610bc](https://github.com/MMFoundation/WallpaperMachine/commit/94610bcb370c73e4d016b34b0934143ebce10c54))
+- 여러 디스플레이가 같은 배경화면을 표시해도 설정에서 디스플레이별로 음량과 음소거를 정할 수 있습니다 (closes [#213](https://github.com/MMFoundation/WallpaperMachine/issues/213)) ([84bf8ad](https://github.com/MMFoundation/WallpaperMachine/commit/84bf8ad3adcf15d2a2868e23a5ceabf900f8f284))
+- 보관함의 배경화면 정보에 해상도와 모든 창작마당 태그가 추가되어 검색에 쓸 수 있고 오프라인에서도 볼 수 있습니다 (closes [#205](https://github.com/MMFoundation/WallpaperMachine/issues/205)) ([1b8e59d](https://github.com/MMFoundation/WallpaperMachine/commit/1b8e59d411de5e609d6cce92fd14defb338c1771))
+- Steam 창작마당 필터에서 애플리케이션과 에셋을 포함할 수 있으며, 둘 다 기본적으로 제외되고 애플리케이션은 macOS 미지원으로 표시됩니다 (closes [#206](https://github.com/MMFoundation/WallpaperMachine/issues/206)) ([7ecc31a](https://github.com/MMFoundation/WallpaperMachine/commit/7ecc31ac1fd9915dbc4738dce2586b28dfa1eb88))
+- Nix 사용자는 flake로 WallpaperMachine을 설치하고 Home Manager로 환경설정을 지정할 수 있습니다 ([65fdc5b](https://github.com/MMFoundation/WallpaperMachine/commit/65fdc5bedd5159f40f148b5b25aa6081edfb3d7e))
+
+#### 개선 사항
+
+- 재생 중인 배경화면을 삭제하면 해당 디스플레이가 최근에 사용한 배경화면이나 재생 목록의 다음 항목으로 전환됩니다 (closes [#207](https://github.com/MMFoundation/WallpaperMachine/issues/207)) ([038e0de](https://github.com/MMFoundation/WallpaperMachine/commit/038e0de6b0bd229b6580dde321e67a19295fc946))
+- 스페이스가 많은 Mac에서 잠금 화면 배경화면을 훨씬 빠르게 바꿉니다 ([003c7af](https://github.com/MMFoundation/WallpaperMachine/commit/003c7afdad26b421820094bfc842f96b0bf45509), [75e4d57](https://github.com/MMFoundation/WallpaperMachine/commit/75e4d57938b4dd4ca0f78e8f01aa9372f7f93ae1))
+
+#### 버그 수정
+
+- 배경화면을 바꾼 뒤에도 오디오 반응 배경화면이 계속 반응하고 곡 정보와 앨범 아트가 다시 표시되어 오디오 반응을 껐다 켤 필요가 없습니다 (closes [#215](https://github.com/MMFoundation/WallpaperMachine/issues/215)) ([fefa7f9](https://github.com/MMFoundation/WallpaperMachine/commit/fefa7f928a86c93b2db2fd64dcc984c90d59cebe))
+- 장면 배경화면의 시계가 자리 표시 문구 대신 현재 날짜, 시간, 요일을 보여 주고 미디어 패널과 스펙트럼 막대도 제때 숨겨집니다 (closes [#202](https://github.com/MMFoundation/WallpaperMachine/issues/202)) ([a3204a0](https://github.com/MMFoundation/WallpaperMachine/commit/a3204a046693acb58baf8f78b49ec2a1419d13a3), [9608169](https://github.com/MMFoundation/WallpaperMachine/commit/960816952d48d9b0b0a0de739dea696a9dd64664))
+- 장면 배경화면에서 캐릭터 머리 같은 부착 부분이 제자리에 있고 늦게 나타나는 동영상 레이어도 제대로 표시됩니다 (closes [#200](https://github.com/MMFoundation/WallpaperMachine/issues/200), closes [#211](https://github.com/MMFoundation/WallpaperMachine/issues/211)) ([64e8856](https://github.com/MMFoundation/WallpaperMachine/commit/64e8856ab61f5b326435ac1d62051cc695cfd13c), [f538404](https://github.com/MMFoundation/WallpaperMachine/commit/f538404a6343fd965e9dd2da28045466adb64f51))
+- macOS가 배경화면을 다시 불러오는 동안에도 잠금 화면과 데스크탑 배경화면 변경이 서로 덮어쓰거나 직접 고른 배경화면을 덮어쓰지 않습니다 (closes [#199](https://github.com/MMFoundation/WallpaperMachine/issues/199)) ([58b9e77](https://github.com/MMFoundation/WallpaperMachine/commit/58b9e77945ee44e99ac1925f99a8dd081873d6cf), [5e53cc8](https://github.com/MMFoundation/WallpaperMachine/commit/5e53cc8c2449c7efaed6983d97ac0e44f539bb00))
+- 이전 업데이트 후 잠금 화면에 남아 있던 배경화면이 이제 실행 시 원래 배경화면이나 macOS 기본 이미지로 복원됩니다 (closes [#204](https://github.com/MMFoundation/WallpaperMachine/issues/204)) ([d9062ca](https://github.com/MMFoundation/WallpaperMachine/commit/d9062ca8cec0bb960ef81321ed0b4300a0115665))
+- 일러스트를 걸러 낸 뒤에도 pixiv 랭킹과 검색 결과에 빈 페이지나 덜 찬 페이지가 나오지 않습니다 ([ea83a15](https://github.com/MMFoundation/WallpaperMachine/commit/ea83a155c0a1487a9a542d64f153bf9eb8d9c8cb))
+
+이번 릴리스에 기여해 주신 [@NikoPit](https://github.com/NikoPit) 님께 감사드립니다.
+
 ## [1.12.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.11.1...v1.12.0) (2026-11-13)
 
 ### English
