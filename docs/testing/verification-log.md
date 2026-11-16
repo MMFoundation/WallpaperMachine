@@ -25,6 +25,19 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-16 — PR #218: resilient capture publication
+
+- PR #218 follow-up: isolate per-display registration errors and verify actual capture ownership before skipping publication repair; no polling or per-frame work.
+- The partial-registration regression failed before the fix because the second display retained no owner. Synchronization now attempts every handle and shared demand while preserving the first error.
+- The independent-review between-writes schedule was reproduced in the real bridge actor with the worker held after capture registration but before its response write; the descriptor matched while ownership was absent.
+- Publication now reads the capture controller through its existing serialized worker lane. Healthy registrations are not repeated; the read does not query permissions or start/restart hardware.
+- Nine targeted Rust tests passed, including both new failure regressions, capture-lane read idempotence and the existing saved-audio initializes-once contract.
+- `python3 scripts/check_rust.py` passed on the combined source: core 436, bridge 978, integration and shader suites all passed. Five desktop-window cases excluded; the primary-display sanity probe explicitly skipped with no active display; live media/network opt-ins off.
+- `python3 scripts/build.py --renderer-only` passed. `python3 scripts/test.py`: 718 Python tests and 5,071 native tests passed, 70 native skips, zero failures; two runtime warnings plus compiler/linker warnings remain.
+- `python3 scripts/check_renderer.py`: 3,530 tests passed, seven optional corpus/media skips; all 12 synthetic pixel cases and reload cycles passed. The earlier pipeline was deliberately stopped before the combined correction and is not final-source evidence.
+- The combined pipeline survived a device disconnect; surviving processes and exact-source logs were checked before continuing. No duplicate suite was started. Heavy processes were confirmed absent before releasing the shared Mac slot.
+- No Release app, live audio/player test, permission prompt, desktop action or energy measurement. Media replay remains driven by host reconciliation; automatic surface recovery without a snapshot waits for the next reconciliation trigger.
+
 ## 2026-11-16 — Issue #215: audio startup and media replay
 
 - Issue #215: repair activation-time audio capture and replay system media to a replacement renderer on a retained display handle; no wallpaper-specific conditions or per-frame work.
@@ -124,15 +137,3 @@ Refs #198. This implements bounded pre-write retries; historical-Space scaling a
 - Seven new pagination cases cover cross-page refill, cached refiltering, search lookahead, retry, duplicates, empty ratings, in-flight filter changes and a fully filtered tail.
 - Opt-in media, live-network and snapshot checks remained skipped. Two runtime main-thread warnings were reported by the full suite.
 - Live pixiv and desktop presentation were not checked; no desktop control, Release build, installation or restart was performed.
-
-## 2026-11-14 — Shared wallpaper-store coordination (issue 199)
-
-- Implemented a shared FIFO transaction queue for native selection and desktop posters, with bounded verified WallpaperAgent turnover and selection readback.
-- Recovery retries preserve unrelated fields and reject foreign selections; cancelled writes and restarts remain admission barriers; both journals survive unconfirmed restoration.
-- Poster acknowledgements drain as a batch; native takeover and quit cancel and drain queued poster work before changing ownership.
-- python3 scripts/build.py --renderer-only — passed; prepared the missing test-link dependency and regenerated bindings; no renderer source changes.
-- Targeted native run across coordinator, lock-screen, desktop, panel-settings and native-video host tests — 436 passed, 0 failed, 0 skipped.
-- python3 scripts/test.py — passed all Python modules; native gate: 5017 passed, 0 failed, 70 skipped of 5087.
-- Three runtime main-thread warnings came from VideoFormatSupportTests, AppUpdateTests and WebMFilteredVideoSinkTests; compiler warnings remain in existing code.
-- Documentation links and git diff --check passed. Live desktop/WallpaperAgent behavior was not exercised; no desktop authorization, Release build, install, commit or push.
-- Removed this task’s disposable test result bundles and renderer-build logs after recording the verdicts; retained compiled build outputs.

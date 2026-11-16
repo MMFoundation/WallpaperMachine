@@ -106,8 +106,11 @@ never for want of presentation. A scene the host has not fed yet (a replacement
 wallpaper, a newly lit display, a rebuild) is replayed the current state instead of
 waiting for the track to change. Display handles survive renderer replacement, so
 the sink compares the process-unique load ID as well as the handle. A new renderer
-on an existing handle receives the title, artwork and playback state again; an
-unchanged renderer receives no extra replay. Parked scenes do not consume media.
+on an existing handle receives the title, artwork and playback state again at the
+next host reconciliation; an unchanged renderer receives no extra replay. Apply,
+snapshots and explicit presentation changes trigger reconciliation. Automatic surface
+recovery without a snapshot still waits for the next such trigger. Parked scenes do
+not consume media.
 
 The lock-screen extension does not load the provider or adapter. Lock-screen scenes
 force the setting off after apply, even if the stored desktop config has it on.

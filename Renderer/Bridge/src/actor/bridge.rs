@@ -1568,6 +1568,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             .activation_inputs(&displays, self.playback_paused())
             .build()
             .unwrap_or_default();
+        let mut first_error = None;
         for handle in handles {
             let Some(display_id) = displays
                 .iter()
@@ -1580,14 +1581,15 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 .iter()
                 .find(|scene| scene.display.display_id == display_id)
                 .is_some_and(|scene| scene.audio_response_enabled);
-            register_audio_capture(&self.engine, handle, response_enabled)
-                .await
-                .map_err(|error| BridgeError::engine(error.to_string()))?;
+            if let Err(error) = register_audio_capture(&self.engine, handle, response_enabled).await {
+                first_error.get_or_insert_with(|| BridgeError::engine(error.to_string()));
+            }
         }
-        self.engine
+        let demand_result = self.engine
             .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
             .await
-            .map_err(|error| BridgeError::engine(error.to_string()))
+            .map_err(|error| BridgeError::engine(error.to_string()));
+        first_error.map_or(demand_result, Err)
     }
 
     /// Wallpapers that enable audio response, whose scene reads audio and that

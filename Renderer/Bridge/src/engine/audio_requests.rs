@@ -68,6 +68,10 @@ enum Envelope {
         operation: Operation,
         reply: oneshot::Sender<Result<(), String>>,
     },
+    SceneRegistered {
+        handle: SceneHandle,
+        reply: oneshot::Sender<Result<bool, String>>,
+    },
     OutputChanged,
     Retry {
         generation: u64,
@@ -113,6 +117,14 @@ impl CaptureMailbox {
 
     pub(super) async fn prune_scenes(&self) -> Result<(), String> {
         self.request(Operation::Prune).await
+    }
+
+    pub(super) async fn scene_registered(&self, handle: SceneHandle) -> Result<bool, String> {
+        let (reply, response) = oneshot::channel();
+        self.sender
+            .send(Envelope::SceneRegistered { handle, reply })
+            .map_err(|error| format!("audio capture worker stopped: {error}"))?;
+        response.await.map_err(|error| format!("audio capture worker did not reply: {error}"))?
     }
 
     async fn request(&self, operation: Operation) -> Result<(), String> {
@@ -172,6 +184,12 @@ fn run_lane<A: CaptureAssembly>(
         };
         match envelope {
             Envelope::Finish => break,
+            Envelope::SceneRegistered { handle, reply } => {
+                let result = initialized.as_ref()
+                    .map(|controller| controller.has_scene_consumer(handle))
+                    .map_err(Clone::clone);
+                let _ = reply.send(result);
+            }
             Envelope::OutputChanged => {
                 if let Ok(controller) = initialized.as_mut() {
                     assembly.output_changed(controller, &events);
@@ -1214,6 +1232,30 @@ mod tests {
         assert!(snapshot.healthy && snapshot.wanted && !snapshot.cleanup);
         assert_eq!(shared.permission_requests(), 0);
         assert_eq!(shared.starts().len(), 1);
+        lane.finish();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn ownership_reads_preserve_registration_without_starting_or_restarting_capture() {
+        let shared = Shared::new(&[FIRST, SECOND]);
+        let lane = Lane::start(shared.clone());
+        assert!(!lane.mailbox.scene_registered(handle(FIRST)).await.unwrap());
+        assert!(shared.starts().is_empty());
+        assert_eq!(lane.scene(FIRST, true).wait(), Ok(()));
+        for _ in 0..3 {
+            assert!(lane.mailbox.scene_registered(handle(FIRST)).await.unwrap());
+            assert!(!lane.mailbox.scene_registered(handle(SECOND)).await.unwrap());
+        }
+        assert_eq!(shared.starts().len(), 1);
+        assert_eq!(shared.permission_requests(), 0);
+        assert_eq!(lane.demand(AudioCaptureDemand {
+            suspended: true,
+            external_consumers: false,
+        }).wait(), Ok(()));
+        assert!(lane.mailbox.scene_registered(handle(FIRST)).await.unwrap());
+        assert_eq!(shared.starts().len(), 1);
+        assert_eq!(lane.scene(FIRST, false).wait(), Ok(()));
+        assert!(!lane.mailbox.scene_registered(handle(FIRST)).await.unwrap());
         lane.finish();
     }
 

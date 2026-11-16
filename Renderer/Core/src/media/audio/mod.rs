@@ -747,6 +747,11 @@ impl<B: AudioCaptureBackend> AudioCaptureController<B> {
     }
 
     #[must_use]
+    pub fn has_scene_consumer(&self, handle: SceneHandle) -> bool {
+        self.enabled_handles.contains(&handle)
+    }
+
+    #[must_use]
     pub fn backend(&self) -> &B {
         &self.backend
     }

@@ -1007,6 +1007,13 @@ impl EngineFacade for ArcEngineFacade {
         self.0.set_audio_capture_demand(demand)
     }
 
+    fn audio_capture_registered(
+        &self,
+        handle: SceneHandle,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, wallpaper_core::EngineError>> + Send>> {
+        self.0.audio_capture_registered(handle)
+    }
+
     fn set_scaling_mode(
         &self,
         handle: SceneHandle,

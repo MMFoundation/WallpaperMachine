@@ -279,18 +279,22 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         self.operation_values_mut()
             .set_active_ids_from_scenes(scenes);
         self.refresh_mouse_polling_policy();
-        let handles = self.operation_engine().display_snapshot()
-            .iter().filter_map(|display| {
-                let handle = display.handle?;
-                let desired = scenes.iter().find(|scene| scene.display.display_id == display.desc.display_id);
-                if let (Some(scene), Some(wallpaper_core::WallpaperAssignment::Direct(live))) =
-                    (desired, display.assignment.as_ref())
-                    && live.audio_response_enabled == scene.audio_response_enabled
-                {
-                    return None;
+        let engine = self.operation_engine();
+        let mut handles = Vec::new();
+        for display in engine.display_snapshot() {
+            let Some(handle) = display.handle else { continue; };
+            let desired = scenes.iter().find(|scene| scene.display.display_id == display.desc.display_id);
+            if let (Some(scene), Some(wallpaper_core::WallpaperAssignment::Direct(live))) =
+                (desired, display.assignment.as_ref())
+                && live.audio_response_enabled == scene.audio_response_enabled
+            {
+                let expected = scene.audio_response_enabled && engine.scene_requires_audio(handle);
+                if engine.audio_capture_registered(handle).await.ok() == Some(expected) {
+                    continue;
                 }
-                Some(handle)
-            }).collect();
+            }
+            handles.push(handle);
+        }
         self.sync_audio_capture(handles).await
     }
 

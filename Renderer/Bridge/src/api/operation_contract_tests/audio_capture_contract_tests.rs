@@ -26,6 +26,46 @@ fn assert_audio_active(f: &Fixture, handle: SceneHandle) {
 }
 
 #[tokio::test]
+async fn audio_sync_preserves_other_displays_and_demand_after_registration_failure() {
+    let f = Fixture::new(
+        AppConfig::default(),
+        vec![empty_row(1, 60), empty_row(2, 60)],
+    );
+    f.select(A);
+    f.enable_draft(A, "primary", true);
+    f.enable_draft(A, "2", true);
+    f.successful_apply(A, &[(1, 5911), (2, 5912)]);
+    let failed = SceneHandle::new(5911);
+    let healthy = SceneHandle::new(5912);
+    assert!(f.engine.audio_capture_demand().suspended);
+    f.engine.require_audio(failed, true);
+    f.engine.require_audio(healthy, true);
+    f.engine.fail_selected_setter(
+        SelectedSetter::AudioCapture,
+        failed,
+        1,
+        FaultTiming::BeforeMutation,
+        EngineError::Render("capture registration refused".into()),
+    );
+
+    let error = f
+        .handle()
+        .blocking_ask(AudioRequirementChanged {
+            handles: vec![failed, healthy],
+        })
+        .unwrap_err();
+
+    assert_error(
+        error,
+        BridgeErrorKind::Engine,
+        &engine_boundary("capture registration refused"),
+    );
+    assert_eq!(f.engine.audio_capture_state(failed), Some(false));
+    assert_audio_active(&f, healthy);
+    f.close().await;
+}
+
+#[tokio::test]
 async fn apply_starts_capture_when_audio_requirement_precedes_the_first_frame() {
     let f = Fixture::new(AppConfig::default(), vec![empty_row(1, 60)]);
     f.select(A);
@@ -40,6 +80,56 @@ async fn apply_starts_capture_when_audio_requirement_precedes_the_first_frame() 
     report_audio(&f, handle);
     assert!(f.engine.audio_capture_demand().suspended);
     pending.finish(&f.engine, &[handle]).unwrap();
+    assert_audio_active(&f, handle);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn apply_repairs_capture_lost_between_worker_registration_and_response() {
+    let f = Fixture::new(AppConfig::default(), vec![empty_row(1, 60)]);
+    f.select(A);
+    f.enable_draft(A, "primary", true);
+    let handle = SceneHandle::new(5913);
+    let gate = f
+        .engine
+        .hold_next_reconcile(Ok(vec![result(1, handle.raw())]));
+    let mut response = f.engine.hold_next_audio_response();
+    let pending = f.start_apply(A, true);
+    entered(gate).release();
+    wait_live(&f.engine, &[handle]);
+    f.engine.require_audio(handle, true);
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        f.engine.emit_first_frame(handle);
+        match response.entered.try_recv() {
+            Ok(()) => break,
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "worker did not reach its response write"
+                );
+                thread::sleep(QUANTUM);
+            }
+            Err(error) => panic!("response barrier closed: {error}"),
+        }
+    }
+    assert_eq!(f.engine.audio_capture_state(handle), Some(true));
+    report_audio(&f, handle);
+    assert_eq!(f.engine.audio_capture_state(handle), Some(false));
+    assert!(
+        !f.engine
+            .live_scene_controls(handle)
+            .unwrap()
+            .audio_response_enabled
+    );
+    response.release.send(()).unwrap();
+    pending.finish(&f.engine, &[handle]).unwrap();
+    assert!(
+        f.engine
+            .live_scene_controls(handle)
+            .unwrap()
+            .audio_response_enabled
+    );
     assert_audio_active(&f, handle);
     f.close().await;
 }
