@@ -26,6 +26,7 @@ struct NativeWallpaperSourceControl: View {
     .disabled(!source.isEnabled || controller.settings.isLocked())
     .popover(isPresented: $showsChoices, arrowEdge: .bottom) {
       NativeWallpaperSourcePicker(kind: kind) { showsChoices = false }
+        .panelPresentationLocale()
     }
   }
 }
