@@ -23,12 +23,17 @@ Add `inputs.wallpapermachine.homeManagerModules.default` to your Home Manager
 {
   programs.wallpapermachine = {
     enable = true;
+    # Start WallpaperMachine when you log in.
     launchd.enable = true;
     settings = {
+      # Let Nix control app updates by default.
       updates.mode = "notify";
       playback = {
+        # Lower wallpaper quality while macOS is in Low Power Mode.
         lowPowerModeAction = "reduceQuality";
+        # Mute wallpapers while another app plays audio.
         otherAudioAction = "mute";
+        # Apply the low-battery action at 20 percent.
         lowBatteryThreshold = 20;
       };
     };
@@ -36,8 +41,10 @@ Add `inputs.wallpapermachine.homeManagerModules.default` to your Home Manager
 }
 ```
 
-Quit WallpaperMachine, activate your Home Manager configuration, then reopen
-it to apply the preferences.
+The settings in this example are optional. Choose only the ones you want to
+configure, and replace the example values as needed. You can omit `settings`
+entirely. Quit WallpaperMachine, activate your Home Manager configuration,
+then reopen it to apply the preferences.
 
 ## Home Manager inside nix-darwin
 
