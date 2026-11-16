@@ -1963,6 +1963,52 @@ export function update(value) {
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
+TEST(ScriptRuntimeCompat, NestedTemplateAsyncBodiesKeepTheirOwnLayer) {
+    for (const bool load_from_job : {false, true}) {
+        SCOPED_TRACE(load_from_job);
+        Scene scene;
+        auto runtime = MakeRuntimeWithScene(scene);
+        auto owner = std::make_shared<SceneNode>();
+        auto loaded = std::make_shared<SceneNode>();
+        runtime->RegisterNode("owner", owner.get());
+        runtime->RegisterNode("loaded", loaded.get());
+        scene.sceneGraph->AppendChild(owner);
+        runtime->SetLayerTemplateLoader([&](std::string_view path) {
+            auto mesh = std::make_shared<SceneMesh>();
+            mesh->AddMaterial(SceneMaterial {});
+            loaded->AddMesh(mesh);
+            runtime->RegisterMaterialConstant(mesh->MaterialSlotPtr(), "u_Value",
+                ResolveFloatSetting(*runtime, {
+                    {"value", 0.0f}, {"script", R"JS(
+(async function () {
+    await Promise.resolve();
+    thisLayer.origin = new Vec3(42, 0, 0);
+    thisObject.scale = new Vec3(3);
+})();
+export function update(value) { return value; }
+)JS"}
+                }, "loaded"));
+            runtime->RegisterLayerTemplate(std::string(path), loaded, linalg::Vector2f(16, 16));
+            return true;
+        });
+        const std::string load = "thisScene.createLayer('models/nested.json');";
+        const std::string trigger = load_from_job
+            ? "Promise.resolve().then(function () {" + load + "});" : load;
+        runtime->RegisterNodeVisibility("owner", owner.get(), ResolveBoolSetting(*runtime, {
+            {"value", true}, {"script",
+                "let made = false; export function update(value) {"
+                "if (!made) { made = true; " + trigger + "} return value; }"}
+        }, "owner"));
+
+        runtime->Tick(0.01);
+        EXPECT_FLOAT_EQ(loaded->Translate().x(), 42.0f);
+        EXPECT_TRUE(loaded->Scale().isApprox(linalg::Vector3f(3, 3, 3)));
+        EXPECT_FLOAT_EQ(owner->Translate().x(), 0.0f);
+        EXPECT_TRUE(owner->Scale().isApprox(linalg::Vector3f::Ones()));
+        EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+    }
+}
+
 TEST(ScriptRuntimeCompat, RecursiveTemplateLoadsAreGuardedAndMissingAssetsAreNotRetried) {
     Scene scene;
     auto runtime = MakeRuntimeWithScene(scene);

@@ -1565,7 +1565,7 @@ bool ScriptEngineContext::Call(ScriptGuard* guard, const char* entry, LibFn fn,
         } restore_call {active_call, previous_call};
         ++g_call_counts.library_calls;
         answer = JS_Call(ctx, lib[fn], JS_UNDEFINED, argc, argv);
-        if (! JS_IsException(answer) && PumpJobs()) {
+        if (! JS_IsException(answer) && previous_call == kLibFnCount && PumpJobs()) {
             // The call itself finished, but a job it queued did not: the call counts as
             // interrupted and its answer is not used.
             JS_FreeValue(ctx, answer);

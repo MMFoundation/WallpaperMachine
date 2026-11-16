@@ -195,8 +195,10 @@ saved layer reference still keeps its original target. Timers, registered event 
 animation/video callbacks, and Promise `then` handlers retain their registering
 program's context, and nested callbacks restore their caller even when they throw.
 Outside a host callback, the names retain the defining program's layer/object
-fallback, including ordinary asynchronous continuations. Script-local declarations
-still shadow these host names.
+fallback, including ordinary asynchronous continuations. Promise jobs drain after
+the outermost library call returns, not inside nested template loading, so an
+async template script cannot inherit its loader's active layer. Script-local
+declarations still shadow these host names.
 A property script without `update` (an `init` that plays an animation, a click handler)
 costs no call into the script runtime on a tick where no timer is due and no audio
 buffer is registered: that call would only have run those. Its parameters and the

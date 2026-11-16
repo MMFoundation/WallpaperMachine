@@ -524,7 +524,10 @@ Playback, backend, host and startup areas are in
   `SharedHelpersUseCallbackOwnersAndRestoreNestedCallers` covers timers, registered
   events, nested dispatch and exception restoration;
   `PromiseContinuationsKeepTheRegisteringProgramContext` covers immediate async
-  continuation and a Promise resolved by another script, and
+  continuation and a Promise resolved by another script;
+  `NestedTemplateAsyncBodiesKeepTheirOwnLayer` checks that an async template
+  script changes its own layer and object, not its loader's, whether loading
+  starts in an update or a Promise callback; and
   `LocalDeclarationsCanShadowContextualHostNames` preserves ordinary lexical
   shadowing. A Wallpaper Engine probe
   confirms that shared functions/constructors see the calling layer, a saved
