@@ -871,6 +871,9 @@ or depend on a second physical monitor.
   desktop following, retain missing choices without fallback, and reject saver-only
   readiness as evidence that a lock screen started. Native host transitions remain
   an authorized desktop check, not a result of these tests.
+  Missing-source regressions cover each mode independently at startup and after
+  activation, preserve the healthy native choice and its automatic refreshes, and
+  restore the failed mode after its source becomes available and Retry is pressed.
 
 - `LockScreenWallpaperTests` (selection journal) — per-display ownership with
   independent originals; external Desktop changes survive; a reload failure

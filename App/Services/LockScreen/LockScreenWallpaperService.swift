@@ -19,8 +19,7 @@ final class LockScreenWallpaperService {
   private(set) var screenSaverWallpaperID: String?
   var anyRequested: Bool { isRequested || screenSaverRequested }
   var canRefreshAutomatically: Bool {
-    anyRequested && screenSaverError == nil
-      && (errorMessage == nil || (screenSaverRequested && lockScreenActivationError != nil))
+    (isRequested && errorMessage == nil) || (screenSaverRequested && screenSaverError == nil)
   }
   /// Whether the native provider has the desktop picture, or an animated lock screen is on its way
   /// to taking it. Poster sync then stays out of the way; a screen saver chosen on its own and a
@@ -80,6 +79,8 @@ final class LockScreenWallpaperService {
   /// up. A refresh that interrupts the wait waits on for the same revision until that deadline.
   @ObservationIgnored private var unconfirmed: (revision: String, deadline: Date)?
   @ObservationIgnored private var lockScreenActivationError: String?
+  @ObservationIgnored private var lockScreenSourceError: String?
+  @ObservationIgnored private var screenSaverSourceError: String?
   /// The next update publishes a new revision even with unchanged scenes: the renderer that drew
   /// the committed one is gone, or that publication failed part way.
   @ObservationIgnored private var forceRepublish = false
@@ -381,7 +382,7 @@ final class LockScreenWallpaperService {
     let affectedScreenSaver = screenSaverRequested || screenSaverEnabled
     // Publication can select both modes before the first frame sets lastInputs. Capture
     // a disable before this update replaces the manifest, including during that wait.
-    let disablingPublishedMode = (published?.lockScreenEnabled == true && !isRequested)
+    var disablingPublishedMode = (published?.lockScreenEnabled == true && !isRequested)
       || (published?.screenSaverEnabled == true && !screenSaverRequested)
     defer {
       if generation == revision {
@@ -399,29 +400,7 @@ final class LockScreenWallpaperService {
       }
       // A disable must not wait for a waking display to regain its UUID.
       // Use the last committed mapping to relinquish only the disabled mode.
-      if var committed = published, let lastInputs,
-        (committed.lockScreenEnabled && !isRequested)
-          || (committed.screenSaverEnabled && !screenSaverRequested)
-      {
-        committed.revision = UUID().uuidString
-        committed.lockScreenEnabled = committed.lockScreenEnabled && isRequested
-        committed.screenSaverEnabled = committed.screenSaverEnabled && screenSaverRequested
-        if !committed.lockScreenEnabled && !committed.screenSaverEnabled {
-          committed.scenes.removeAll()
-          committed.lockScreenScenes = nil
-          committed.screenSaverScenes = nil
-        }
-        try publish(committed)
-        try await applySelection(committed, inputs: lastInputs)
-        if !committed.lockScreenEnabled {
-          cancelRendererWatches()
-          if ownsDesktopProvider {
-            ownsDesktopProvider = false
-            try afterDeactivation?()
-          }
-        }
-        updateStatuses(committed)
-      }
+      try await relinquishModes(lockScreen: isRequested, screenSaver: screenSaverRequested)
       guard (isRequested && lockScreenActivationError == nil) || screenSaverRequested else {
         status = String(localized: "Restoring system wallpapers…")
         screenSaverStatus = status
@@ -433,28 +412,52 @@ final class LockScreenWallpaperService {
         rendererFailure = nil
         throw LockScreenWallpaperFailure(message: failure)
       }
-      let desktopRecords = isRequested || screenSaverWallpaperID == nil ? try await scenes() : []
+      var lockSourceError: String?
+      var saverSourceError: String?
+      var desktopRecords: [BridgeLockScreenScene] = []
+      if isRequested || (screenSaverRequested && screenSaverWallpaperID == nil) {
+        do { desktopRecords = try await scenes() }
+        catch is CancellationError { throw CancellationError() }
+        catch {
+          if isRequested { lockSourceError = error.localizedDescription }
+          if screenSaverRequested, screenSaverWallpaperID == nil { saverSourceError = error.localizedDescription }
+        }
+      }
       var records = desktopRecords.map { (LockScreenContent.desktop, $0) }
-      if isRequested, let lockScreenWallpaperID {
-        let displays = Set(desktopRecords.map(\.displayId))
-        records += try await wallpaperScenes(lockScreenWallpaperID)
-          .filter { displays.contains($0.displayId) }.map { (.lockScreen, $0) }
+      if isRequested, lockSourceError == nil, let lockScreenWallpaperID {
+        do {
+          let displays = Set(desktopRecords.map(\.displayId))
+          records += try await wallpaperScenes(lockScreenWallpaperID)
+            .filter { displays.contains($0.displayId) }.map { (.lockScreen, $0) }
+        } catch is CancellationError { throw CancellationError() }
+        catch { lockSourceError = error.localizedDescription }
       }
       if screenSaverRequested, let screenSaverWallpaperID {
-        records += try await wallpaperScenes(screenSaverWallpaperID).map { (.screenSaver, $0) }
+        do { records += try await wallpaperScenes(screenSaverWallpaperID).map { (.screenSaver, $0) } }
+        catch is CancellationError { throw CancellationError() }
+        catch { saverSourceError = error.localizedDescription }
       }
-      if !isRequested, screenSaverWallpaperID != nil {
+      if (!isRequested || lockSourceError != nil), screenSaverWallpaperID != nil {
         records.removeAll { $0.0 == .desktop }
       }
       try Task.checkCancellation()
       guard generation == revision else { return }
+      lockScreenSourceError = lockSourceError
+      screenSaverSourceError = saverSourceError
+      disablingPublishedMode = disablingPublishedMode
+        || (published?.lockScreenEnabled == true && lockSourceError != nil)
+        || (published?.screenSaverEnabled == true && saverSourceError != nil)
+      try await relinquishModes(
+        lockScreen: isRequested && lockSourceError == nil,
+        screenSaver: screenSaverRequested && saverSourceError == nil)
       // A display that sleeps or drops off while the Mac is locked or dark is not removed:
       // that would hand its lock screen back to macOS just before the user wakes it. Asked
       // only when a display left: the session's state is a window-server round trip, and
       // the monitor's steady ticks find every display still named.
-      if let lastInputs {
+      if let lastInputs, let published {
         let named = Set(records.map { $0.1.displayId })
-        let departed = lastInputs.map(\.displayID).filter { !named.contains($0) }
+        let active = Set((published.scenes(for: .lockScreen) + published.scenes(for: .screenSaver)).map(\.displayID))
+        let departed = lastInputs.map(\.displayID).filter { active.contains($0) && !named.contains($0) }
         if !departed.isEmpty, displaysAreAway() {
           AppLog.debug("Native wallpaper topology held: display(s) \(departed) left while the Mac is locked or its displays sleep")
           return
@@ -531,10 +534,10 @@ final class LockScreenWallpaperService {
       if screenSaverRequested, screenSaverWallpaperID != nil, configuration.screenSaverScenes == nil {
         configuration.screenSaverScenes = []
       }
-      configuration.lockScreenEnabled = isRequested && lockScreenActivationError == nil
+      configuration.lockScreenEnabled = isRequested && lockScreenActivationError == nil && lockSourceError == nil
         && !configuration.scenes.isEmpty
         && !(configuration.lockScreenScenes ?? configuration.scenes).isEmpty
-      configuration.screenSaverEnabled = screenSaverRequested
+      configuration.screenSaverEnabled = screenSaverRequested && saverSourceError == nil
         && !(configuration.screenSaverScenes ?? configuration.scenes).isEmpty
       if (configuration.lockScreenEnabled || configuration.screenSaverEnabled)
         && ((published?.scenes(for: .lockScreen).isEmpty != false
@@ -718,12 +721,36 @@ final class LockScreenWallpaperService {
     try Task.checkCancellation()
   }
 
+  private func relinquishModes(lockScreen: Bool, screenSaver: Bool) async throws {
+    guard var committed = published, let lastInputs,
+      (committed.lockScreenEnabled && !lockScreen) || (committed.screenSaverEnabled && !screenSaver)
+    else { return }
+    committed.revision = UUID().uuidString
+    committed.lockScreenEnabled = committed.lockScreenEnabled && lockScreen
+    committed.screenSaverEnabled = committed.screenSaverEnabled && screenSaver
+    if !committed.lockScreenEnabled && !committed.screenSaverEnabled {
+      committed.scenes.removeAll()
+      committed.lockScreenScenes = nil
+      committed.screenSaverScenes = nil
+    }
+    try publish(committed)
+    try await applySelection(committed, inputs: lastInputs)
+    if !committed.lockScreenEnabled {
+      cancelRendererWatches()
+      if ownsDesktopProvider {
+        ownsDesktopProvider = false
+        try afterDeactivation?()
+      }
+    }
+    updateStatuses(committed)
+  }
+
   private func updateStatuses(_ configuration: LockScreenConfiguration) {
     let lockCount = configuration.scenes(for: .lockScreen).count
     isEnabled = isRequested && configuration.lockScreenEnabled && lockCount > 0
     screenSaverEnabled = screenSaverRequested && configuration.screenSaverEnabled
       && !configuration.scenes(for: .screenSaver).isEmpty
-    errorMessage = isRequested ? lockScreenActivationError : nil
+    errorMessage = isRequested ? (lockScreenSourceError ?? lockScreenActivationError) : nil
     status = !isRequested ? String(localized: "Off") : errorMessage != nil
       ? String(localized: "Not enabled — action required") : isEnabled
         ? String(localized: "Enabled for \(lockCount) display(s)")
@@ -732,12 +759,13 @@ final class LockScreenWallpaperService {
       status += " — " + held
     }
     let count = configuration.scenes(for: .screenSaver).count
-    screenSaverStatus = !screenSaverRequested ? String(localized: "Off") : screenSaverEnabled
+    screenSaverError = screenSaverRequested ? screenSaverSourceError : nil
+    screenSaverStatus = !screenSaverRequested ? String(localized: "Off") : screenSaverError != nil
+      ? String(localized: "Not enabled — action required") : screenSaverEnabled
       ? String(localized: "Selected for \(count) display(s) — starts when macOS is idle")
       : screenSaverWallpaperID == nil
         ? String(localized: "Waiting for an applied wallpaper on a connected display")
         : String(localized: "No compatible display available.")
-    screenSaverError = nil
   }
 
   /// The first note a display of `configuration` is held with, in display order, when the extension wrote one.

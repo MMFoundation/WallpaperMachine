@@ -25,6 +25,14 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-16 — Independent native wallpaper source failure isolation (#193)
+
+- Export errors are isolated to the affected native mode; the healthy mode retains its system selection, automatic refreshes and sleeping-display mapping. The unavailable saved choice and error remain visible until it can recover.
+- Both new service regressions failed before the fix, reproducing an unavailable lock source disabling a healthy saver and the inverse.
+- python3 scripts/test.py --only LockScreenWallpaperServiceTests: 85 passed, 0 failed, 0 skipped, including startup, deletion, refresh, sleep and Retry recovery for both independent modes.
+- python3 scripts/test.py: all Python modules passed; 5090 native tests passed, 0 failed, 70 opt-in tests skipped. Two runtime warnings were reported.
+- Swift service and tests only; renderer and bridge unchanged from their passing checks. Live desktop transitions remain unverified; no Release build or installation.
+
 ## 2026-11-16 — Independent lock-screen and screen-saver wallpapers (#193)
 
 - Added independent saved library choices with Same as desktop defaults, source-aware extension playback, and read-only native exports without changing desktop assignments.
@@ -122,15 +130,3 @@ Refs #198. This implements bounded pre-write retries; historical-Space scaling a
 - Seven new pagination cases cover cross-page refill, cached refiltering, search lookahead, retry, duplicates, empty ratings, in-flight filter changes and a fully filtered tail.
 - Opt-in media, live-network and snapshot checks remained skipped. Two runtime main-thread warnings were reported by the full suite.
 - Live pixiv and desktop presentation were not checked; no desktop control, Release build, installation or restart was performed.
-
-## 2026-11-14 — Shared wallpaper-store coordination (issue 199)
-
-- Implemented a shared FIFO transaction queue for native selection and desktop posters, with bounded verified WallpaperAgent turnover and selection readback.
-- Recovery retries preserve unrelated fields and reject foreign selections; cancelled writes and restarts remain admission barriers; both journals survive unconfirmed restoration.
-- Poster acknowledgements drain as a batch; native takeover and quit cancel and drain queued poster work before changing ownership.
-- python3 scripts/build.py --renderer-only — passed; prepared the missing test-link dependency and regenerated bindings; no renderer source changes.
-- Targeted native run across coordinator, lock-screen, desktop, panel-settings and native-video host tests — 436 passed, 0 failed, 0 skipped.
-- python3 scripts/test.py — passed all Python modules; native gate: 5017 passed, 0 failed, 70 skipped of 5087.
-- Three runtime main-thread warnings came from VideoFormatSupportTests, AppUpdateTests and WebMFilteredVideoSinkTests; compiler warnings remain in existing code.
-- Documentation links and git diff --check passed. Live desktop/WallpaperAgent behavior was not exercised; no desktop authorization, Release build, install, commit or push.
-- Removed this task’s disposable test result bundles and renderer-build logs after recording the verdicts; retained compiled build outputs.

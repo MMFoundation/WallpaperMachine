@@ -21,6 +21,9 @@ for that mode without applying it to the desktop. Choices survive disabling the
 switch and restarting the app; **Same as desktop** returns to following each
 display's applied wallpaper. An unavailable selection remains visible and reports
 an error rather than silently switching to a different wallpaper.
+If a selected wallpaper cannot be exported, only its native mode is restored to
+the previous system choice. The other mode keeps running and refreshing; Retry
+rechecks the unavailable source without forgetting its saved choice.
 
 An independent screen saver works on enabled, non-mirrored displays even when no
 WallpaperMachine wallpaper is applied, so macOS can keep a still desktop picture

@@ -259,6 +259,96 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     try await service.shutdown()
   }
 
+  @MainActor
+  func testUnavailableLockSourceKeepsIndependentSaverRunning() async throws {
+    try await checkIndependentSourceFailure(lockScreen: true)
+  }
+
+  @MainActor
+  func testUnavailableSaverSourceKeepsIndependentLockRunning() async throws {
+    try await checkIndependentSourceFailure(lockScreen: false)
+  }
+
+  @MainActor
+  private func checkIndependentSourceFailure(lockScreen: Bool) async throws {
+    let failedID = lockScreen ? "lock" : "saver"
+    var unavailable: String? = failedID
+    var fps: UInt32 = 30
+    var online = true
+    var away = false
+    var desktop = scene()
+    desktop.displayId = 1
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { online ? [desktop] : [] },
+      wallpaperScenes: { id in
+        if id == unavailable { throw LockScreenWallpaperFailure(message: "Wallpaper unavailable") }
+        if !online { return [] }
+        var record = desktop
+        record.wallpaperId = id
+        record.title = id
+        record.fps = fps
+        return [record]
+      },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in online ? "one" : nil }, displaysAreAway: { away })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    service.setWallpaper("lock", lockScreen: true)
+    service.setWallpaper("saver", lockScreen: false)
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("healthy mode starting despite an unavailable source") { !service.isBusy }
+    XCTAssertEqual(service.isEnabled, !lockScreen)
+    XCTAssertEqual(service.screenSaverEnabled, lockScreen)
+    XCTAssertEqual(service.errorMessage != nil, lockScreen)
+    XCTAssertEqual(service.screenSaverError != nil, !lockScreen)
+    XCTAssertTrue(service.canRefreshAutomatically)
+    unavailable = nil
+    service.retry(lockScreen: lockScreen)
+    await waitFor("both sources available") { !service.isBusy }
+    XCTAssertTrue(service.isEnabled)
+    XCTAssertTrue(service.screenSaverEnabled)
+
+    unavailable = failedID
+    service.refresh()
+    await waitFor("one source removed while both modes run") { !service.isBusy }
+    XCTAssertEqual(service.isEnabled, !lockScreen)
+    XCTAssertEqual(service.screenSaverEnabled, lockScreen)
+    XCTAssertEqual(service.ownsDesktopProvider, !lockScreen)
+    XCTAssertEqual(service.errorMessage != nil, lockScreen)
+    XCTAssertEqual(service.screenSaverError != nil, !lockScreen)
+    XCTAssertEqual(service.lockScreenWallpaperID, "lock")
+    XCTAssertEqual(service.screenSaverWallpaperID, "saver")
+    XCTAssertEqual(try selectedProvider("Desktop"), lockScreen ? "display-one-desktop" : LockScreenConfiguration.extensionIdentifier)
+    XCTAssertEqual(try selectedProvider("Idle"), lockScreen ? LockScreenConfiguration.extensionIdentifier : "display-one-idle")
+    XCTAssertTrue(service.canRefreshAutomatically)
+    fps = 24
+    try XCTUnwrap(timers.last).fire()
+    await waitFor("healthy source still refreshing") { !service.isBusy }
+    let configuration = try publishedConfiguration()
+    XCTAssertEqual(configuration.scenes(for: lockScreen ? .screenSaver : .lockScreen).map(\.fps), [24])
+    XCTAssertTrue(configuration.scenes(for: lockScreen ? .lockScreen : .screenSaver).isEmpty)
+    online = false
+    away = true
+    service.refresh()
+    await waitFor("healthy source held while displays sleep") { !service.isBusy }
+    XCTAssertEqual(service.isEnabled, !lockScreen)
+    XCTAssertEqual(service.screenSaverEnabled, lockScreen)
+    XCTAssertEqual(service.errorMessage != nil, lockScreen)
+    XCTAssertEqual(service.screenSaverError != nil, !lockScreen)
+    online = true
+    away = false
+    unavailable = nil
+    service.retry(lockScreen: lockScreen)
+    await waitFor("the missing source recovering on retry") { !service.isBusy }
+    XCTAssertTrue(service.isEnabled)
+    XCTAssertTrue(service.screenSaverEnabled)
+    XCTAssertNil(service.errorMessage)
+    XCTAssertNil(service.screenSaverError)
+    try await service.shutdown()
+  }
+
   /// The managed store as the app writes it, isolated per test through
   /// `WALLPAPER_MACHINE_HOME`.
   @discardableResult

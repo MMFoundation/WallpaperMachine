@@ -9,6 +9,18 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-14 — Shared wallpaper-store coordination (issue 199)
+
+- Implemented a shared FIFO transaction queue for native selection and desktop posters, with bounded verified WallpaperAgent turnover and selection readback.
+- Recovery retries preserve unrelated fields and reject foreign selections; cancelled writes and restarts remain admission barriers; both journals survive unconfirmed restoration.
+- Poster acknowledgements drain as a batch; native takeover and quit cancel and drain queued poster work before changing ownership.
+- python3 scripts/build.py --renderer-only — passed; prepared the missing test-link dependency and regenerated bindings; no renderer source changes.
+- Targeted native run across coordinator, lock-screen, desktop, panel-settings and native-video host tests — 436 passed, 0 failed, 0 skipped.
+- python3 scripts/test.py — passed all Python modules; native gate: 5017 passed, 0 failed, 70 skipped of 5087.
+- Three runtime main-thread warnings came from VideoFormatSupportTests, AppUpdateTests and WebMFilteredVideoSinkTests; compiler warnings remain in existing code.
+- Documentation links and git diff --check passed. Live desktop/WallpaperAgent behavior was not exercised; no desktop authorization, Release build, install, commit or push.
+- Removed this task’s disposable test result bundles and renderer-build logs after recording the verdicts; retained compiled build outputs.
+
 ## 2026-11-13 — Sign-in window hosts and sign-outs the keychain resists
 
 Security report on the Steam/pixiv sign-in (allowlist for the Steam sign-in window; Steam Community and pixiv sign-out emptying a keychain item another build saved, failing only when the session stays). The report's third finding, memory corruption in `SteamCMDRuntimeService.fingerprint` `readlinkat`, was not reproduced: SIL shows `&link` passing the element buffer (`_convertMutableArrayToPointerArgument<UInt8, UnsafeMutablePointer<Int8>>`), and the same pattern ran clean under AddressSanitizer with a 1022-byte target; the code is unchanged.
