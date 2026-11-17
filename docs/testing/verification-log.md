@@ -31,7 +31,7 @@ entry's recorded result is not allowed.
 - `python3 scripts/test.py` (Xcode 26.6, macOS 26.6.2): 5113 passed, 2 failed, 72 skipped. The two failures, `DesktopWidgetTests/testADateCanBeWrittenInAnotherCalendarInThatCalendarsOwnWords` ("九月30" for "九月三十") and `WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem`, fail the same way on `main` without this change.
 - Debug build by hand: Discover searched and paged a few pages, then the window closed. Footprint 213 MB open, 108 MB closed; `heap` showed 111 `DecodedPanelImage` open and none closed, no `WorkshopItem` arrays or `WorkshopPage` caches closed.
 - Before the change, the release app after several close/reopen cycles kept 502 `DecodedPanelImage` (187 MB of CG raster data) and six `PanelController`s after the window closed.
-- Each closed window still leaves its `PanelController` behind: `leaks --traceTree` roots it in the toolbar `Menu` (`AppKitPopUpAdaptor`) host, held by an `NSView` notification block. Not fixed here; `stop()` now empties what it holds.
+- Each closed window left its `PanelController` behind: `leaks --traceTree` rooted it in the toolbar `Menu` (`AppKitPopUpAdaptor`) host, held by an `NSView` notification block. `ControlPanelWindow.tearDown` now takes the toolbar off before the content; a scripted run of ten identical open, page and close cycles went from one more controller and about 1 MB of live heap per close to none left after any close.
 - Not checked: reopening on pixiv and Back after reopening by hand (covered by the unit tests); `check_renderer.py` (no renderer change).
 
 ## 2026-11-16 — Nix release pin and login-path integration

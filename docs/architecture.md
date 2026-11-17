@@ -112,13 +112,13 @@ belong to the `AppUpdateCoordinator` it owns (`App/Services/GitHub/`).
   language, then the repository, its releases and its issue list, through `ExternalLink`). What the navigation actions do is owned by
   [playlists](features/playlists.md) and [automation](features/automation.md).
 - **Closing the panel.** `windowWillClose` hands the window to `ControlPanelWindow.tearDown`, which
-  takes the bridged toolbar off before dropping the hosting controller: a SwiftUI toolbar item
-  left on a closed window keeps its observers, and with them its environment and the
-  `PanelController`. That releases the SwiftUI root and its `PanelController`; reopening builds a fresh view around the existing
-  stores and navigation, which also keeps Installed's filters and the grids' scroll offsets in
-  memory. `PanelController.stop()` empties the Workshop and pixiv results and the decoded
-  thumbnails, keeping only where each page was, which the next visit reads again
-  ([control panel](features/control-panel.md#reopening-the-panel)).
+  takes the bridged toolbar off before dropping the hosting controller: a SwiftUI toolbar item left
+  on a closed window keeps its observers, and with them its environment and the `PanelController`.
+  That releases the SwiftUI root and its `PanelController`; reopening builds a fresh view around the
+  existing stores and navigation, which also keeps Installed's filters and the grids' scroll offsets
+  in memory. `PanelController.stop()` empties the Workshop and pixiv results and the decoded
+  thumbnails, keeping only where each page was, which the next visit reads again ([control
+  panel](features/control-panel.md#reopening-the-panel)).
 - **Shutdown.** `applicationShouldTerminate` returns `.terminateLater` and hands an ordered
   asynchronous teardown to `QuitSupervisor`: lock-screen and desktop-poster restoration first,
   then the services, import, update, SteamCMD, Workshop and pixiv work, and the renderer bridge
