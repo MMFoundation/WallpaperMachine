@@ -56,16 +56,17 @@ final class PixivStore {
     @ObservationIgnored private var cacheID = UUID()
     @ObservationIgnored private var cachedPages: [Int: PixivResultPage] = [:]
     @ObservationIgnored private var fetches: [Int: Task<PixivResultPage, Error>] = [:]
-    @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var loadTask: Task<Void, Never>?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var failedPage: Int?
     /// The page asked for last, so `unload()` knows what a load still on its way was for.
     @ObservationIgnored private var lastLoad: (page: Int, query: PixivQuery)?
     /// What `unload()` left: the page the listing was on, read again by `loadIfNeeded()`.
     @ObservationIgnored private var resumeLoad: (page: Int, query: PixivQuery)?
+    @ObservationIgnored private var isUnloaded = false
     @ObservationIgnored private var pageLists: [String: [PixivPage]] = [:]
     @ObservationIgnored private var pageListOrder: [String] = []
-    @ObservationIgnored private var pagesTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var pagesTask: Task<Void, Never>?
     private static let pageListLimit = 64
 
     /// `sessions` is read only by `restoreSession()`, and written only when signing in or out
@@ -111,6 +112,7 @@ final class PixivStore {
     /// nor the selected work's page list; `loadIfNeeded()` reads them again on the next visit. A
     /// place an earlier close left stays until a visit reads it. Prefetching stops with the panel.
     func unload() {
+        isUnloaded = true
         prefetchesNextPage = false
         onThumbnailsAvailable = nil
         let resume: (page: Int, query: PixivQuery)? =
@@ -290,7 +292,7 @@ final class PixivStore {
             selectedWork = nil
             selectedPages = nil
             selectedPage = 0
-        } else if let selectedWork {
+        } else if let selectedWork, !isUnloaded {
             loadPages(of: selectedWork)
         }
         if session == nil {
@@ -380,6 +382,7 @@ final class PixivStore {
     }
 
     private func load(page number: Int, of query: PixivQuery) {
+        isUnloaded = false
         lastLoad = (page: number, query: query)
         resumeLoad = nil
         loadTask?.cancel()
@@ -397,7 +400,7 @@ final class PixivStore {
         let listing = query.listing
         isLoading = true
         loadTask = Task { [weak self] in
-            guard let self else { return }
+            guard let self, self.generation == requestID, !Task.isCancelled else { return }
             do {
                 var result = cached
                 while !result.complete && (!listing.isSearch || result.works.count <= number * result.pageSize) {

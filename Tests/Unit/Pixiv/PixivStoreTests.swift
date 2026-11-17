@@ -235,6 +235,71 @@ final class PixivStoreTests: XCTestCase {
         XCTAssertNil(transport.sessions.last ?? nil)
     }
 
+    func testUnloadStopsAListingBeforeItsTaskStarts() async throws {
+        let transport = PixivFixtureTransport { Self.ranking($0) }
+        let store = store(transport)
+        store.apply(PixivQuery())
+        let load = try XCTUnwrap(store.loadTask)
+
+        store.unload()
+        await load.value
+
+        XCTAssertTrue(transport.requests.isEmpty)
+        XCTAssertFalse(store.hasLoaded)
+        XCTAssertFalse(store.isLoading)
+        XCTAssertTrue(store.canResume)
+
+        store.loadIfNeeded()
+        await store.loadTask?.value
+        XCTAssertTrue(store.hasLoaded)
+        XCTAssertEqual(transport.requests.count, 1)
+    }
+
+    func testAnExpiredSessionDoesNotReloadSelectedPagesAfterUnload() async throws {
+        let ended = LockedFlag()
+        ended.value = true
+        let transport = Self.member(ended: ended)
+        let accountGate = PixivGate()
+        defer { accountGate.open() }
+        let library = FileManager.default.temporaryDirectory.appendingPathComponent("pixiv-store-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: library) }
+        let sessions = PixivMemorySessionStore(PixivFixtures.session)
+        let service = PixivService(
+            transport: PixivHeldTransport(fixture: transport, accounts: accountGate), minimumInterval: .zero)
+        let store = PixivStore(
+            service: service, packager: PixivWallpaperPackager(library: library) { data, _ in data }, sessions: sessions)
+
+        store.restoreSession()
+        try await waitUntil { accountGate.waiting == 1 }
+        XCTAssertTrue(store.isSignedIn)
+        store.apply(PixivQuery())
+        await store.loadTask?.value
+        let work = try XCTUnwrap(store.works.first)
+        store.select(work)
+        await store.pagesTask?.value
+        XCTAssertNotNil(store.selectedPageList)
+        let pageReads = transport.requests.filter { $0.path.hasSuffix("/pages") }.count
+
+        store.unload()
+        accountGate.open()
+        try await waitUntil { store.accountMessage != nil }
+        await store.pagesTask?.value
+
+        XCTAssertFalse(store.isSignedIn)
+        XCTAssertNil(sessions.session)
+        XCTAssertEqual(store.selectedWork?.id, work.id)
+        XCTAssertNil(store.selectedPages)
+        XCTAssertFalse(store.hasLoaded)
+        XCTAssertEqual(transport.requests.filter { $0.path.hasSuffix("/pages") }.count, pageReads)
+
+        store.loadIfNeeded()
+        await store.loadTask?.value
+        await store.pagesTask?.value
+        XCTAssertTrue(store.hasLoaded)
+        XCTAssertNotNil(store.selectedPageList)
+        XCTAssertEqual(transport.requests.filter { $0.path.hasSuffix("/pages") }.count, pageReads + 1)
+    }
+
     func testSearchReportsPixivsPageCountAndRetriesAfterAFailure() async throws {
         let failing = LockedFlag()
         failing.value = true

@@ -415,8 +415,10 @@ each page of screened collections starts among Steam's pages. The next visit to 
 reads the page on show again (`loadIfNeeded()`), and Back reads a list's page when it returns
 to it; closing again before that visit keeps the same place. A resumed pixiv listing is asked
 for as the account now allows. A search whose typing pause ends after the window closed is
-dropped. The thumbnails' disk caches stay, so those reads come back without downloading the
-pictures again.
+dropped, as is a queued pixiv load that has not started. A pixiv account check may finish
+after closing and update the sign-in state, but the selected work's pages remain unloaded
+until the next visit. The thumbnails' disk caches stay, so those reads come back without
+downloading the pictures again.
 
 ## Thumbnail corner marks
 
