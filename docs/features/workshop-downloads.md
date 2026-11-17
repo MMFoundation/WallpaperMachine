@@ -1160,8 +1160,11 @@ repeat can cost the whole five minutes again; a download whose connection gives 
 sign of life therefore fails after about ten minutes, and the three retries are for
 drops that Steam reports. The retry is a new SteamCMD launch in the same
 private staging, so Steam resumes from its partial manifests and the saved sign-in
-is still there: no password or Steam Guard prompt appears. The count starts over
-for a preset's base wallpaper. Pause and cancel work during the wait as at any
+is still there: no password or Steam Guard prompt appears. When the requested
+item already has staged download or content files, including a restored checkpoint,
+the command includes `validate` so Steam checks and reuses those files rather than
+starting that item as a fresh download. Fresh items do not request that extra pass.
+The count starts over for a preset's base wallpaper. Pause and cancel work during the wait as at any
 other time. Once the retries are spent, the download fails with **Try again** and
 keeps what was downloaded; a reported drop says the connection dropped, where it
 used to be reported with the purchase requirement below. Nothing the user has
@@ -1186,9 +1189,16 @@ away, since it compares wall-clock dates (from the code; not observed on a real
 sleep). The 45 seconds is a guess that leaves Wi-Fi time to rejoin; it has not
 been measured on a real sleep.
 
+SteamCMD's native `ERROR! Timeout downloading item <id>` output also enters the
+bounded transfer-retry path, including when it is joined to the preceding
+`Downloading item` line or followed immediately by `Unloading Steam API...`
+without a newline. This Workshop command timeout is separate from the app's
+inactivity limit; it must not be mistaken for an unexplained exit or a request
+to buy Wallpaper Engine or approve Steam Guard again.
+
 Parenthesized SteamCMD failures distinguish explicit credential rejection, Steam
 Guard, connection/service failures and rate limits, including compact result names
-such as `ServiceUnavailable` and `RateLimitExceeded`. A download failure line is
+such as `ServiceUnavailable` and `RateLimitExceeded`. A parenthesized download failure line is
 judged only once it is whole, because its reason comes last and decides whether
 the connection or the purchase is blamed: a read that ends at `failed` or inside
 the parentheses waits for the rest, and output that ends without a newline is

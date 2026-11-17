@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-16 — Independent lock-screen and screen-saver wallpapers (#193)
+
+- Added independent saved library choices with Same as desktop defaults, source-aware extension playback, and read-only native exports without changing desktop assignments.
+- Focused bridge tests: 8 new independent-export cases and 18 existing activation/export cases passed; python3 scripts/build.py --renderer-only passed and regenerated bindings.
+- Focused native settings/service checks: 114 passed; subsequent legacy-manifest, content-selection, diagnostics and GPU-energy checks: 109 passed.
+- python3 scripts/test.py: final full gate passed, 5088 native tests passed, 0 failed, 70 opt-in tests skipped; all Python modules passed.
+- The first full gate found a legacy-manifest compatibility regression (fixed with version-2 decoding) and a GPU-energy threshold failure; the unchanged energy test passed in isolation and in the final full gate without the renderer suite running concurrently.
+- python3 scripts/check_rust.py --output artifacts/issue-193/rust: all four groups passed; five desktop-window cases excluded, desktop/media/network opt-ins disabled.
+- python3 scripts/check_renderer.py: passed, 12 generated pooled/isolated comparisons matched, reload cycles passed; seven local-asset cases across five binaries skipped.
+- Live desktop/lock/idle transitions, screenshots and UI automation were not authorized and remain unverified. No Release app build, install, commit or push.
+
 ## 2026-11-16 — Replaceable shared state in scene scripts
 
 - Issue #216: allow a scene script to replace shared state so media visibility switches reach other scripts; no per-frame work added.

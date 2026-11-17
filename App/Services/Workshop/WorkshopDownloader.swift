@@ -928,6 +928,11 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         arguments += ["+force_install_dir", installDirectory.path, "+login", account]
         if let itemID {
             arguments += ["+workshop_download_item", "431960", itemID]
+            if ["downloads", "content"].contains(where: {
+                FileManager.default.fileExists(atPath: content.appendingPathComponent("steamapps/workshop/\($0)/431960/\(itemID)").path)
+            }) {
+                arguments.append("validate")
+            }
         } else {
             arguments += ["+download_depot", "431960", Self.sceneAssetsDepotID]
         }
@@ -1042,6 +1047,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         let cachedLine = text.contains("cached credential")
             && ["invalid", "expired", "revoked"].contains { text.contains($0) }
         let reason = Self.failureReason(in: text)
+            ?? (text.contains("error! timeout downloading item ") ? "timeout" : nil)
 
         if complete, isAuthenticating { noteSteamGuardMethod(text) }
 
@@ -1058,7 +1064,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 reason: reason, cachedCredentialsRejected: run.cachedCredentialsRejected,
                 awaitingSteamGuard: awaitingSteamGuard)
             AppLog.warn("SteamCMD \(run.label): reported failure (\(kind.rawValue))")
-            let transfer = text.contains("download item") || text.contains("app '431960'") || text.contains("app 431960")
+            let transfer = text.contains("download item") || text.contains("downloading item")
+                || text.contains("app '431960'") || text.contains("app 431960")
                 || text.contains("depot")
                 || text.contains("start downloading item") || text.contains("install app")
             if !transfer {

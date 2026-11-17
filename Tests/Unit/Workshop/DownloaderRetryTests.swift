@@ -36,6 +36,115 @@ final class DownloaderRetryTests: DownloaderTestCase {
       .flatMap { Int($0) } ?? 0
   }
 
+  private func makeNativeTimeoutRuntime(_ failure: String) throws -> URL {
+    try makeRetryRuntime(
+      """
+      validate=false
+      for argument in "$@"; do
+          if [ "$argument" = validate ]; then validate=true; fi
+      done
+      partial=steamapps/workshop/downloads/431960/123456/movie.mp4
+      if [ "$attempt" -eq 1 ]; then
+          mkdir -p "$(dirname "$partial")"
+          printf 'first chunk' > "$partial"
+          \(failure)
+          exit 10
+      fi
+      if [ "$validate" = false ]; then
+          printf 'redownloaded' > "$partial"
+      fi
+      \(deliverItem)
+      cat "$partial" > steamapps/workshop/content/431960/123456/movie.mp4
+      printf ' and remaining chunks' >> steamapps/workshop/content/431960/123456/movie.mp4
+      """)
+  }
+
+  func testNativeWorkshopTimeoutRetriesAndResumesPartialContent() async throws {
+    let failures = [
+      "printf 'ERROR! Timeout downloading item 123456\\n'",
+      "printf 'Downloading item 123456 ...ERROR! Timeout downloading item 123456Unloading Steam API...'",
+      "printf 'ERROR! Timeout down'; sleep 0.4; printf 'loading item 123456'",
+    ]
+    for failure in failures {
+      let root = try makeNativeTimeoutRuntime(failure)
+      defer { try? FileManager.default.removeItem(at: root) }
+      let downloader = startDownload(in: root)
+      try await assertImported(downloader, in: root, itemID: "123456")
+      XCTAssertEqual(attempts(in: root), 2)
+      XCTAssertEqual(downloader.retryAttempt, 1)
+      XCTAssertFalse(downloader.canRetryAuthentication)
+      XCTAssertEqual(
+        try String(contentsOf: root.appendingPathComponent("Library/123456/movie.mp4"), encoding: .utf8),
+        "first chunk and remaining chunks")
+      try assertNoStaging(in: root)
+    }
+  }
+
+  func testNativeWorkshopTimeoutPreservesPartialContentForTryAgain() async throws {
+    let root = try makeNativeTimeoutRuntime("printf 'ERROR! Timeout downloading item 123456'")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let checkpoint = root.appendingPathComponent("Checkpoint")
+    let first = startDownload(in: root, checkpointDirectory: checkpoint, retryDelays: [])
+    try await waitForStop(first)
+    XCTAssertNotNil(first.errorMessage)
+    XCTAssertFalse(first.canRetryAuthentication)
+    XCTAssertEqual(
+      try String(contentsOf: checkpoint.appendingPathComponent("steamapps/workshop/downloads/431960/123456/movie.mp4"), encoding: .utf8),
+      "first chunk")
+    let again = startDownload(in: root, checkpointDirectory: checkpoint, retryDelays: [])
+    try await assertImported(again, in: root, itemID: "123456")
+    XCTAssertEqual(attempts(in: root), 2)
+    XCTAssertEqual(
+      try String(contentsOf: root.appendingPathComponent("Library/123456/movie.mp4"), encoding: .utf8),
+      "first chunk and remaining chunks")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: checkpoint.path))
+    try assertNoStaging(in: root)
+  }
+
+  func testNativeWorkshopTimeoutRetriesAreBoundedAndKeepPartialContent() async throws {
+    let root = try makeRetryRuntime(
+      """
+      mkdir -p steamapps/workshop/downloads/431960/123456
+      printf 'partial' > steamapps/workshop/downloads/431960/123456/movie.mp4
+      printf 'ERROR! Timeout downloading item 123456Unloading Steam API...'
+      exit 10
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let checkpoint = root.appendingPathComponent("Checkpoint")
+    let downloader = startDownload(in: root, checkpointDirectory: checkpoint)
+    try await waitForStop(downloader)
+    XCTAssertEqual(attempts(in: root), 4)
+    XCTAssertEqual(downloader.retryAttempt, 3)
+    XCTAssertNotNil(downloader.errorMessage)
+    XCTAssertFalse(downloader.canRetryAuthentication)
+    XCTAssertNil(downloader.downloadedID)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("Library/123456").path))
+    XCTAssertEqual(
+      try String(contentsOf: checkpoint.appendingPathComponent("steamapps/workshop/downloads/431960/123456/movie.mp4"), encoding: .utf8),
+      "partial")
+    try assertNoStaging(in: root)
+  }
+
+  func testNativeWorkshopTimeoutDoesNotEstablishASuccessfulSignIn() async throws {
+    let root = try makeRuntime(
+      """
+      \(countLaunch)
+      printf 'ERROR! Timeout downloading item 123456'
+      sleep 0.4
+      exit 10
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let downloader = startDownload(in: root)
+    try await waitForStop(downloader)
+    XCTAssertEqual(attempts(in: root), 1)
+    XCTAssertEqual(downloader.retryAttempt, 0)
+    XCTAssertTrue(downloader.isAuthenticating)
+    XCTAssertTrue(downloader.canRetryAuthentication)
+    XCTAssertNotNil(downloader.errorMessage)
+    XCTAssertNil(downloader.downloadedID)
+    try assertNoStaging(in: root)
+  }
+
   func testTimeoutTwiceThenSuccessCompletesWithoutAskingAgain() async throws {
     // The first launch needs a password; a retry must find the sign-in it saved in staging, so
     // a launch that is asked again would hang here on its prompt.

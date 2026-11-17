@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-17 — Resume SteamCMD Workshop downloads after native timeouts
+
+- Replayed issue #228 output with a scripted SteamCMD on a real PTY; the new regression failed before the fix with the misleading ownership/Steam Guard error.
+- Added four regressions covering split and unterminated native timeout output, automatic retry, checkpoint recovery, bounded retries and no inferred sign-in.
+- python3 scripts/test.py --only DownloaderRetryTests --only DownloaderStorageTests — exit 0; 31 passed before isolating the change from PR #229.
+- On main, the first full run timed out in the existing retry-sign-in stall test; its isolated rerun passed (1 passed), with no assertion or timeout changes.
+- Final python3 scripts/test.py on main — exit 0; all 36 Python modules passed; 5119 native tests passed, 0 failed, 70 skipped; 3 runtime warnings.
+- Real Steam large-file transfer, desktop behavior and Release delivery were not exercised; no renderer or bridge changes.
+
 ## 2026-11-16 — Nix release pin and login-path integration
 
 - Nix regression against the original Home Manager module: expected failure; the corrected module passes.
@@ -116,14 +125,3 @@ Documented the release package, named settings and extraSettings, and Home Manag
 - python3 scripts/test.py --only LockScreenWallpaperServiceTests: 85 passed, 0 failed, 0 skipped, including startup, deletion, refresh, sleep and Retry recovery for both independent modes.
 - python3 scripts/test.py: all Python modules passed; 5090 native tests passed, 0 failed, 70 opt-in tests skipped. Two runtime warnings were reported.
 - Swift service and tests only; renderer and bridge unchanged from their passing checks. Live desktop transitions remain unverified; no Release build or installation.
-
-## 2026-11-16 — Independent lock-screen and screen-saver wallpapers (#193)
-
-- Added independent saved library choices with Same as desktop defaults, source-aware extension playback, and read-only native exports without changing desktop assignments.
-- Focused bridge tests: 8 new independent-export cases and 18 existing activation/export cases passed; python3 scripts/build.py --renderer-only passed and regenerated bindings.
-- Focused native settings/service checks: 114 passed; subsequent legacy-manifest, content-selection, diagnostics and GPU-energy checks: 109 passed.
-- python3 scripts/test.py: final full gate passed, 5088 native tests passed, 0 failed, 70 opt-in tests skipped; all Python modules passed.
-- The first full gate found a legacy-manifest compatibility regression (fixed with version-2 decoding) and a GPU-energy threshold failure; the unchanged energy test passed in isolation and in the final full gate without the renderer suite running concurrently.
-- python3 scripts/check_rust.py --output artifacts/issue-193/rust: all four groups passed; five desktop-window cases excluded, desktop/media/network opt-ins disabled.
-- python3 scripts/check_renderer.py: passed, 12 generated pooled/isolated comparisons matched, reload cycles passed; seven local-asset cases across five binaries skipped.
-- Live desktop/lock/idle transitions, screenshots and UI automation were not authorized and remain unverified. No Release app build, install, commit or push.
