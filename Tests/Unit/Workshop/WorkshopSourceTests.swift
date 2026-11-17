@@ -351,6 +351,190 @@ final class WorkshopSourceTests: XCTestCase {
     try await finished(store)
   }
 
+  /// Issue #226: Back from an author shows the list it was opened from as it was left (its page,
+  /// search, sort and filters, the selection and the grid's place) without asking Steam, and
+  /// pages it from what it read before. Refresh still reads it afresh.
+  func testBackShowsTheListAsItWasLeftWithoutAskingSteam() async throws {
+    let store = fixture.store
+    for page in 1...3 {
+      let rows = (0..<3).map { wallpaperRow(String(page * 100 + $0), tags: ["Scene", "Everyone"]) }
+      fixture.browsePages[page] = browseHTML(rows: rows, page: page, pages: 3, count: 9)
+    }
+    fixture.profiles[Self.author] = profileHTML(ids: ["900"], name: "Fixture Author", total: "1")
+    fixture.details = ["900": detailsRow("900", tags: ["Scene", "Everyone"])]
+
+    store.searchText = "night"
+    store.sort = .newest
+    store.search()
+    try await finished(store)
+    store.loadPage(2)
+    try await finished(store)
+    let left = store.items
+    XCTAssertEqual(left.map(\.id), ["200", "201", "202"])
+    store.selectedItem = left[1]
+    let shown = store.committedQuery
+
+    store.open(.creator(id: Self.author, name: "Fixture Author"), leavingAt: 640)
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["900"])
+    XCTAssertNil(store.selectedItem)
+    // A filter changed on the author's list is that list's own.
+    store.excludedTags.append("Video")
+    store.search()
+    try await finished(store)
+    let browseReads = fixture.browsePagesRequested
+    let detailsReads = fixture.detailsRequests
+    let steamReads = fixture.cookies.count
+
+    XCTAssertEqual(store.back(), 640, "the grid goes back to where it was")
+    XCTAssertFalse(store.isLoading, "the list is shown at once, never as loading")
+    XCTAssertEqual(store.source, .browse)
+    XCTAssertEqual(store.committedQuery, shown)
+    XCTAssertEqual(store.items, left)
+    XCTAssertEqual(store.page, 2)
+    XCTAssertEqual(store.totalPages, 3)
+    XCTAssertEqual(store.searchText, "night")
+    XCTAssertEqual(store.sort, .newest)
+    XCTAssertFalse(store.excludedTags.contains("Video"))
+    XCTAssertEqual(store.selectedItem, left[1])
+    XCTAssertEqual(store.sourceHistory, [])
+
+    store.loadPage(1)
+    XCTAssertFalse(store.isLoading, "a page read before is served from what was kept")
+    XCTAssertEqual(store.items.map(\.id), ["100", "101", "102"])
+    try await finished(store)
+    XCTAssertEqual(fixture.browsePagesRequested, browseReads, "Steam was not asked again")
+    XCTAssertEqual(fixture.detailsRequests, detailsReads)
+    XCTAssertEqual(fixture.cookies.count, steamReads)
+
+    store.search()
+    try await finished(store)
+    XCTAssertEqual(fixture.browsePagesRequested, browseReads + [1], "Refresh reads the list afresh")
+  }
+
+  /// Steam lists nearly every source differently for each account, so signing in or out lets go of
+  /// the pages Back keeps: Back still returns to the list, and reads it again as the account now
+  /// signed in (or anyone) sees it, from its first page.
+  func testSigningInOrOutReadsTheListBackReturnsToAgain() async throws {
+    let store = fixture.store
+    let signedIn = "steamLoginSecure=\(Self.author)||0123456789abcdef0123"
+    fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene", "Everyone"])])
+    fixture.profiles[Self.author] = profileHTML(ids: ["12"], name: "Fixture Author", total: "1")
+    fixture.details = ["12": detailsRow("12", tags: ["Scene", "Everyone"])]
+    store.search()
+    try await finished(store)
+    store.selectedItem = store.items.first
+    store.open(.creator(id: Self.author, name: "Fixture Author"), leavingAt: 300)
+    try await finished(store)
+
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    try await finished(store)
+    var reads = fixture.browsePagesRequested.count
+    XCTAssertEqual(store.sourceHistory, [.browse], "Back still returns to the list")
+    XCTAssertNil(store.back(), "a list read again starts at the top")
+    XCTAssertEqual(store.source, .browse)
+    XCTAssertNil(store.selectedItem)
+    try await finished(store)
+    XCTAssertEqual(fixture.browsePagesRequested.count, reads + 1)
+    XCTAssertEqual(fixture.cookies.last, signedIn)
+    XCTAssertEqual(store.items.map(\.id), ["12"])
+
+    store.open(.creator(id: Self.author, name: "Fixture Author"), leavingAt: 300)
+    try await finished(store)
+    try store.signOutOfSteamWeb()
+    try await finished(store)
+    reads = fixture.browsePagesRequested.count
+    XCTAssertNil(store.back())
+    try await finished(store)
+    XCTAssertEqual(fixture.browsePagesRequested.count, reads + 1)
+    XCTAssertNil(fixture.cookies.last ?? nil, "read as anyone sees it")
+  }
+
+  /// An author opened while the one opened before is still on its way leaves the list on show
+  /// as Back keeps it already; and Back keeps only the newest lists, so a long chain of authors
+  /// does not hold every page it read.
+  func testBackKeepsEachListOnceAndOnlyTheNewest() async throws {
+    let store = fixture.store
+    fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene", "Everyone"])])
+    fixture.profiles[Self.author] = profileHTML(ids: ["12"], name: "Fixture Author", total: "1")
+    fixture.details = ["12": detailsRow("12", tags: ["Scene", "Everyone"])]
+    store.search()
+    try await finished(store)
+
+    store.open(.creator(id: Self.author, name: "First"), leavingAt: 500)
+    store.open(.creator(id: Self.author, name: "Second"))
+    try await finished(store)
+    XCTAssertEqual(store.sourceHistory, [.browse])
+    XCTAssertEqual(store.back(), 500, "where the list was left, not where the second click found it")
+    XCTAssertEqual(store.items.map(\.id), ["12"])
+
+    for index in 0...WorkshopStore.maxHistory {
+      store.open(.creator(id: Self.author, name: "Author \(index)"))
+      try await finished(store)
+    }
+    XCTAssertEqual(store.sourceHistory.count, WorkshopStore.maxHistory)
+    XCTAssertEqual(store.sourceHistory.first, .creator(id: Self.author, name: "Author 0"), "the oldest was let go")
+  }
+
+  /// An author opened from the tiles of one search while the next is still on its way: Back
+  /// returns to the search made last, read from its first page, not to the tiles it was replacing.
+  func testBackReturnsToASearchStillOnItsWayWhenTheAuthorWasOpened() async throws {
+    let store = fixture.store
+    fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene", "Everyone"])])
+    fixture.profiles[Self.author] = profileHTML(ids: ["12"], name: "Fixture Author", total: "1")
+    fixture.details = ["12": detailsRow("12", tags: ["Scene", "Everyone"])]
+    store.searchText = "night"
+    store.search()
+    try await finished(store)
+
+    store.searchText = "dusk"
+    store.sort = .newest
+    store.search()
+    store.open(.creator(id: Self.author, name: "Fixture Author"), leavingAt: 300)
+    try await finished(store)
+
+    XCTAssertNil(store.back(), "a search that was never on show starts at the top")
+    XCTAssertEqual(store.searchText, "dusk")
+    XCTAssertEqual(store.sort, .newest)
+    try await finished(store)
+    XCTAssertEqual(store.committedQuery?.text, "dusk")
+    XCTAssertEqual(store.committedQuery?.sort, .newest)
+  }
+
+  /// A subscribe or unsubscribe changes what Your subscriptions lists, so Back reads that list
+  /// again instead of showing the pages it kept from before.
+  func testSubscribingOrUnsubscribingReadsTheSubscriptionsBackReturnsToAgain() async throws {
+    let store = fixture.store
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1", "2"], total: "2")]
+    fixture.profiles[Self.author] = profileHTML(ids: ["3"], name: "Fixture Author", total: "1")
+    fixture.details = [
+      "1": detailsRow("1", tags: ["Scene", "Everyone"]), "2": detailsRow("2", tags: ["Scene", "Everyone"]),
+      "3": detailsRow("3", tags: ["Scene", "Everyone"]),
+    ]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    store.open(.subscriptions)
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["1", "2"])
+
+    store.open(.creator(id: Self.author, name: "Fixture Author"), leavingAt: 200)
+    try await finished(store)
+    var reads = fixture.subscriptionReads
+    XCTAssertEqual(store.back(), 200, "unchanged, the subscriptions come back as they were left")
+    try await finished(store)
+    XCTAssertEqual(fixture.subscriptionReads, reads)
+
+    store.open(.creator(id: Self.author, name: "Fixture Author"), leavingAt: 200)
+    try await finished(store)
+    try await store.setSubscribed(false, itemID: "1")
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["2"], total: "1")]
+    reads = fixture.subscriptionReads
+    XCTAssertEqual(store.sourceHistory, [.subscriptions])
+    XCTAssertNil(store.back(), "changed, the subscriptions are read again from the top")
+    try await finished(store)
+    XCTAssertEqual(fixture.subscriptionReads, reads + 1)
+    XCTAssertEqual(store.items.map(\.id), ["2"])
+  }
+
   /// Subscribing and unsubscribing change the account's subscriptions on Steam: a POST to
   /// steamcommunity.com carrying the session and a CSRF token Steam checks against its cookie.
   /// The store's set of subscribed items, which the tiles mark, follows what Steam accepted.

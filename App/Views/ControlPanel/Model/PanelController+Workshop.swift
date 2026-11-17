@@ -130,19 +130,22 @@ extension PanelController {
     }
   }
 
-  /// Opens an author's wallpapers from a tile, so Back returns to the list it was opened from.
-  /// `id` is the author's SteamID64.
-  func openWorkshopAuthor(id: String, name: String) async throws {
-    guard SteamWebSession.isSteamID(id), name.count <= 256 else { throw InvalidControlValue() }
-    try await run(.immediate) { workshop.open(.creator(id: id, name: name)) }
-  }
-
-  /// Opens a collection's wallpapers. A collection is a list, never a download.
-  func openWorkshopCollection(id: String, title: String) async throws {
-    guard !id.isEmpty, id.count <= 20, UInt64(id) != nil, title.count <= 512 else {
+  /// Opens an author's wallpapers from a tile, so Back returns to the list it was opened from as
+  /// it was left, its grid at `scrollOffset`. `id` is the author's SteamID64.
+  func openWorkshopAuthor(id: String, name: String, leavingAt scrollOffset: Double = 0) async throws {
+    guard SteamWebSession.isSteamID(id), name.count <= 256, scrollOffset.isFinite, scrollOffset >= 0 else {
       throw InvalidControlValue()
     }
-    try await run(.immediate) { workshop.open(.collection(id: id, title: title)) }
+    try await run(.immediate) { workshop.open(.creator(id: id, name: name), leavingAt: scrollOffset) }
+  }
+
+  /// Opens a collection's wallpapers. A collection is a list, never a download. Back returns to the
+  /// list it was opened from as it was left, its grid at `scrollOffset`.
+  func openWorkshopCollection(id: String, title: String, leavingAt scrollOffset: Double = 0) async throws {
+    guard !id.isEmpty, id.count <= 20, UInt64(id) != nil, title.count <= 512, scrollOffset.isFinite,
+      scrollOffset >= 0
+    else { throw InvalidControlValue() }
+    try await run(.immediate) { workshop.open(.collection(id: id, title: title), leavingAt: scrollOffset) }
   }
 
   /// Installed's **Show in Steam Workshop**, for a Workshop link or id that is not installed:
@@ -162,9 +165,14 @@ extension PanelController {
     try await navigate(.workshop)
   }
 
-  /// Returns to the source the shown one was opened from; nothing when it was not opened from one.
-  func workshopGoBack() async throws {
-    try await run(.immediate) { workshop.back() }
+  /// Returns to the list the shown one was opened from, as it was left (`WorkshopStore.back`), and
+  /// answers where its grid was; nil when the list is read again from its first page, or when the
+  /// shown one was not opened from another.
+  @discardableResult
+  func workshopGoBack() async throws -> Double? {
+    var offset: Double?
+    try await run(.immediate) { offset = workshop.back() }
+    return offset
   }
 
   /// Loads a page of the list on show. A number outside Steam's 1,000 pages is clamped into them,
@@ -256,8 +264,8 @@ extension PanelController {
   }
 
   /// **More by this author** in the Installed inspector's menu: Discover with the author's
-  /// wallpapers, Back returning to the list it showed. The library keeps no author, so a wallpaper
-  /// Discover has not shown is looked up on Steam first.
+  /// wallpapers, Back returning to the list it showed as it was left, its grid where it was. The
+  /// library keeps no author, so a wallpaper Discover has not shown is looked up on Steam first.
   func openInstalledWorkshopAuthor(id: String) async throws {
     guard let itemID = TelemetryWallpaper.workshopID(id) else { throw InvalidControlValue() }
     var item = workshop.workshopItem(id: itemID)
@@ -280,7 +288,7 @@ extension PanelController {
         message: L("Steam did not say who made this wallpaper, so their other wallpapers can’t be shown."))
     }
     // Opened before the page is shown, so a first visit loads the author and not the browse list.
-    try await openWorkshopAuthor(id: author, name: item.creator)
+    try await openWorkshopAuthor(id: author, name: item.creator, leavingAt: workshopBrowser.scrollOffset)
     try await navigate(.workshop)
   }
 
