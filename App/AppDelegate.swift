@@ -1654,7 +1654,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let window = notification.object as? NSWindow, window === controlPanelWindow else { return }
 
         controlPanelWindow = nil
-        window.contentViewController = nil
+        ControlPanelWindow.tearDown(window)
         leaveDockUnlessAWindowIsOpen()
         rebuildMenu()
     }

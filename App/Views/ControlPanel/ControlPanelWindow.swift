@@ -35,6 +35,16 @@ enum ControlPanelWindow {
         return window
     }
 
+    /// Lets go of a closing panel window's content. The toolbar the hosted page bridged in comes
+    /// off first: its SwiftUI items (the target-display `Menu` among them) register notification
+    /// and key-value observers that are removed only when they leave a window, so a toolbar left on
+    /// the closed window keeps them, and everything in their environment, the `PanelController`
+    /// included, for as long as the app runs.
+    static func tearDown(_ window: NSWindow) {
+        window.toolbar = nil
+        window.contentViewController = nil
+    }
+
     /// Makes an ordinary window appear on the Space that is active when it is shown, instead
     /// of switching the person back to the Space it was last left on. For the control panel,
     /// What's New, preview and sign-in windows; wallpaper, overlay and probe windows keep
