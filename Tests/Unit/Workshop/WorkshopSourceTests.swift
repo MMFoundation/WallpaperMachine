@@ -119,14 +119,35 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertThrowsError(try WorkshopService.decodeProfileListing(html, requiresSignIn: true)) {
       XCTAssertTrue($0 is SteamSignInRequired)
     }
+
+    let ssrAnonymous = """
+      <html><head><title>Steam Community :: Me :: Workshop Items</title></head><body>
+      <div class="inventory_msg_content">No matching files were found for Me.</div>
+      <script type="application/json" id="valve-ssr-data">{"route":"/profiles/1/myworkshopfiles","UserConfig":{"logged_in":false,"steamid":"0"}}</script>
+      </body></html>
+      """
+    XCTAssertEqual(try WorkshopService.decodeProfileListing(ssrAnonymous).ids, [])
+    XCTAssertThrowsError(try WorkshopService.decodeProfileListing(ssrAnonymous, requiresSignIn: true)) {
+      XCTAssertTrue($0 is SteamSignInRequired)
+    }
   }
 
-  /// Every Steam page links to the sign-in page from its header, so only a page titled so means
-  /// the session is gone; an author with nothing published is simply empty.
+  /// Every Steam page links to the sign-in page from its header, so only a page titled or routed
+  /// so means the session is gone; an author with nothing published is simply empty.
   func testOnlySteamsSignInPageMeansSigningInAgain() throws {
-    XCTAssertThrowsError(try WorkshopService.decodeProfileListing(
-      "<html><head><title>Sign In</title></head><a href=\"https://steamcommunity.com/login/home/\">Sign in</a></html>"
-    )) { XCTAssertTrue($0 is SteamSignInRequired) }
+    for loginHTML in [
+      "<html><head><title>Sign In</title></head><a href=\"https://steamcommunity.com/login/home/\">Sign in</a></html>",
+      "<html><head><title>Steam Community :: Sign In</title></head><body></body></html>",
+      """
+      <html><head><title>Steam 社区 :: 登录</title></head><body>
+      <script type="application/json" id="valve-ssr-data">{"route":"/login/home","UserConfig":{"logged_in":false,"steamid":"0"}}</script>
+      </body></html>
+      """,
+    ] {
+      XCTAssertThrowsError(try WorkshopService.decodeProfileListing(loginHTML)) {
+        XCTAssertTrue($0 is SteamSignInRequired)
+      }
+    }
     let empty = try WorkshopService.decodeProfileListing(
       "<html><head><title>Steam Community :: Rabscuttle</title></head>"
         + "<a href=\"https://steamcommunity.com/login/home/?goto=\">Sign in</a>"
@@ -134,6 +155,12 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(empty.ids, [])
     XCTAssertEqual(empty.total, 0)
     XCTAssertEqual(empty.name, "Rabscuttle")
+
+    let authorNamedSignIn = try WorkshopService.decodeProfileListing(
+      "<html><head><title>Steam Community :: Sign In :: Workshop Items</title></head>"
+        + "<div class=\"inventory_msg_content\">No matching files were found for Sign In.</div></html>")
+    XCTAssertEqual(authorNamedSignIn.ids, [])
+    XCTAssertEqual(authorNamedSignIn.name, "Sign In")
   }
 
   func testCollectionIsListedInItsOwnOrderAndAGoneOneSaysSo() throws {
@@ -882,7 +909,7 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(relaunched.steamWebSession?.cookie, access)
     XCTAssertEqual(relaunched.items.map(\.id), ["1"])
     XCTAssertEqual(fixture.cookies.last, "steamLoginSecure=\(access)")
-    XCTAssertTrue(fixture.renewalForms.isEmpty, "a fresh cookie is not renewed")
+    XCTAssertTrue(fixture.renewalRequests.isEmpty, "a fresh cookie is not renewed")
 
     try relaunched.signOutOfSteamWeb()
     XCTAssertNil(fixture.webSessions.session)
@@ -927,7 +954,12 @@ final class WorkshopSourceTests: XCTestCase {
     let refreshToken = SteamWebFixtures.token(expiresIn: 86_400, salt: "r")
     let expired = SteamWebFixtures.cookie(SteamWebFixtures.token(expiresIn: -60))
     let fresh = SteamWebFixtures.token(expiresIn: 3600, salt: "n")
-    fixture.renewal = Data(#"{"response":{"access_token":"\#(fresh)"}}"#.utf8)
+    let renewedCookie = SteamWebFixtures.cookie(fresh)
+    fixture.renewal = try JSONSerialization.data(withJSONObject: [
+      "success": true, "login_url": "https://steamcommunity.com/login/settoken",
+      "nonce": "nonce+1", "auth": "auth+2/=", "steamID": SteamWebFixtures.account,
+    ])
+    fixture.transferCookie = renewedCookie
     fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
     fixture.details = ["1": detailsRow("1", tags: ["Scene", "Everyone"])]
     let store = fixture.store
@@ -938,28 +970,82 @@ final class WorkshopSourceTests: XCTestCase {
     try await finished(store)
 
     XCTAssertEqual(store.items.map(\.id), ["1"])
-    XCTAssertEqual(fixture.renewalForms.count, 1)
-    let form = try XCTUnwrap(fixture.renewalForms.first)
-    XCTAssertTrue(form.contains("refresh_token=\(refreshToken)"))
-    XCTAssertTrue(form.contains("steamid=\(SteamWebFixtures.account)"))
-    let renewedCookie = SteamWebFixtures.cookie(fresh)
+    XCTAssertEqual(fixture.renewalRequests.count, 1)
+    let renewal = try XCTUnwrap(fixture.renewalRequests.first)
+    XCTAssertEqual(renewal.cookie, "steamRefresh_steam=\(SteamWebFixtures.account)%7C%7C\(refreshToken)")
+    XCTAssertEqual(renewal.form, "redir=https%3A%2F%2Fsteamcommunity.com%2F")
+    let transfer = try XCTUnwrap(fixture.transferForms.first)
+    XCTAssertTrue(transfer.contains("auth=auth%2B2%2F%3D"), "base64 + is escaped rather than read as a space: \(transfer)")
+    XCTAssertTrue(transfer.contains("nonce=nonce%2B1"))
+    XCTAssertTrue(transfer.contains("steamID=\(SteamWebFixtures.account)"))
     XCTAssertEqual(fixture.cookies.last, "steamLoginSecure=\(renewedCookie)")
     XCTAssertFalse(fixture.cookies.contains("steamLoginSecure=\(expired)"), "the expired cookie is never sent")
     XCTAssertEqual(store.steamWebSession?.cookie, renewedCookie)
     XCTAssertEqual(fixture.webSessions.session?.cookie, renewedCookie)
     XCTAssertEqual(fixture.webSessions.session?.refreshToken, refreshToken)
 
-    // Steam refuses the token: the session ends, here and on this Mac.
-    try await store.signInToSteamWeb {
-      WebSignInCookies(session: expired, companion: SteamWebFixtures.cookie(refreshToken))
+    // Steam refuses the token, points elsewhere, or refuses settoken: the session ends, here and on this Mac.
+    for (renewalAnswer, transferResult) in [
+      (Data(#"{"success":false,"error":15}"#.utf8), 1),
+      (Data(#"{"success":true,"login_url":"https://example.invalid/login/settoken","nonce":"n","auth":"a"}"#.utf8), 1),
+      (fixture.renewal, 8),
+    ] {
+      try await store.signInToSteamWeb {
+        WebSignInCookies(session: expired, companion: SteamWebFixtures.cookie(refreshToken))
+      }
+      fixture.renewal = renewalAnswer
+      fixture.transferResult = transferResult
+      do {
+        _ = try await store.missingSubscriptions(installed: [])
+        XCTFail("A refused renewal must ask for a new sign-in")
+      } catch is SteamSignInRequired {}
+      XCTAssertNil(store.steamWebSession)
+      XCTAssertNil(fixture.webSessions.session)
     }
-    fixture.renewal = Data(#"{"response":{}}"#.utf8)
+  }
+
+  /// Issue #231: once a session without a renewal token expires, Steam redirects the
+  /// subscriptions page to `/login/home/` (its SSR sign-in page, titled `Steam Community :: Sign In`
+  /// or in the system language). That ends the session and clears stale personal tiles instead of
+  /// wedging with "Steam returned an unreadable Workshop page", while public browsing falls back
+  /// to reading as anyone.
+  func testARedirectToSteamsSSRSignInPageEndsTheSessionAndFallsBackForPublicBrowse() async throws {
+    let store = fixture.store
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1"], total: "1")]
+    fixture.details = ["1": detailsRow("1", tags: ["Scene", "Everyone"])]
+    fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene", "Everyone"])])
+
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    store.open(.subscriptions)
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["1"])
+
+    fixture.redirectsSubscriptionsToSignIn = true
     do {
-      _ = try await store.missingSubscriptions(installed: [])
-      XCTFail("A refused renewal must ask for a new sign-in")
+      _ = try await store.refreshSubscribedIDs()
+      XCTFail("A redirect to Steam's sign-in page must end the session")
     } catch is SteamSignInRequired {}
     XCTAssertNil(store.steamWebSession)
     XCTAssertNil(fixture.webSessions.session)
+    XCTAssertEqual(store.items, [], "stale personal tiles are cleared once the session ends")
+
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    store.open(.subscriptions)
+    try await finished(store)
+    XCTAssertNil(store.steamWebSession)
+    XCTAssertNil(fixture.webSessions.session)
+    XCTAssertEqual(store.errorMessage, SteamSignInRequired().localizedDescription)
+    XCTAssertEqual(store.items, [])
+
+    // A public list whose session Steam redirects to sign-in forgets the session and reads anonymously.
+    fixture.redirectsAuthenticatedBrowseToSignIn = true
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    store.open(.browse)
+    try await finished(store)
+    XCTAssertNil(store.errorMessage)
+    XCTAssertNil(store.steamWebSession)
+    XCTAssertEqual(store.items.map(\.id), ["12"])
+    XCTAssertNil(fixture.cookies.last ?? nil)
   }
 
   /// Issue #27: choosing subscriptions without a Steam Community session, while another list
@@ -1413,7 +1499,7 @@ final class WorkshopSourceTests: XCTestCase {
     fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene", "Everyone"])])
     store.open(.browse)
     try await finished(store)
-    XCTAssertEqual(fixture.renewalForms.count, 1)
+    XCTAssertEqual(fixture.renewalRequests.count, 1)
     XCTAssertNil(store.errorMessage)
     XCTAssertEqual(store.items.map(\.id), ["12"])
     XCTAssertNil(store.steamWebSession)
@@ -1617,13 +1703,29 @@ private final class SourceFixture {
   var browsePagesRequested: [Int] { answers.read { $0.browsePagesRequested } }
   var detailsRequests: Int { answers.read { $0.detailsRequests } }
   var cookies: [String?] { answers.read { $0.cookies } }
-  /// What Steam's token service answers a renewal with; empty refuses it, as Steam does.
+  /// What Steam's renewal endpoint answers; false refuses it, as Steam does.
   var renewal: Data {
     get { answers.read { $0.renewal } }
     set { answers.write { $0.renewal = newValue } }
   }
-  /// The form of each renewal request.
-  var renewalForms: [String] { answers.read { $0.renewalForms } }
+  var renewalRequests: [(form: String, cookie: String?)] { answers.read { $0.renewalRequests } }
+  var transferForms: [String] { answers.read { $0.transferForms } }
+  var transferCookie: String? {
+    get { answers.read { $0.transferCookie } }
+    set { answers.write { $0.transferCookie = newValue } }
+  }
+  var transferResult: Int {
+    get { answers.read { $0.transferResult } }
+    set { answers.write { $0.transferResult = newValue } }
+  }
+  var redirectsSubscriptionsToSignIn: Bool {
+    get { answers.read { $0.redirectsSubscriptionsToSignIn } }
+    set { answers.write { $0.redirectsSubscriptionsToSignIn = newValue } }
+  }
+  var redirectsAuthenticatedBrowseToSignIn: Bool {
+    get { answers.read { $0.redirectsAuthenticatedBrowseToSignIn } }
+    set { answers.write { $0.redirectsAuthenticatedBrowseToSignIn = newValue } }
+  }
   var subscribeAnswer: Data {
     get { answers.read { $0.subscribeAnswer } }
     set { answers.write { $0.subscribeAnswer = newValue } }
@@ -1696,8 +1798,13 @@ private final class SourceAnswers: @unchecked Sendable {
     var browsePagesRequested: [Int] = []
     var detailsRequests = 0
     var cookies: [String?] = []
-    var renewal = Data(#"{"response":{}}"#.utf8)
-    var renewalForms: [String] = []
+    var renewal = Data(#"{"success":false,"error":15}"#.utf8)
+    var renewalRequests: [(form: String, cookie: String?)] = []
+    var transferForms: [String] = []
+    var transferCookie: String?
+    var transferResult = 1
+    var redirectsSubscriptionsToSignIn = false
+    var redirectsAuthenticatedBrowseToSignIn = false
     /// What Steam answers a subscribe or unsubscribe with, and each such request.
     var subscribeAnswer = Data(#"{"success":1}"#.utf8)
     var subscribeRequests: [(path: String, form: String, cookie: String?)] = []
@@ -1723,35 +1830,57 @@ private final class SourceAnswers: @unchecked Sendable {
     }
   }
 
-  /// The status and body Steam would answer `request` with.
-  func answer(_ request: URLRequest, body: Data) -> (Int, Data) {
-    guard let url = request.url, let host = url.host else { return (404, Data()) }
+  /// The status, headers and body Steam would answer `request` with.
+  func answer(_ request: URLRequest, body: Data) -> (Int, [String: String], Data) {
+    guard let url = request.url, let host = url.host else { return (404, [:], Data()) }
     let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
     let value = { (name: String) in query.first { $0.name == name }?.value }
     // `URL.path` drops a trailing slash.
     let path = url.path.hasSuffix("/") ? String(url.path.dropLast()) : url.path
     if value("browsefilter") == "myfavorites", let gate = read({ $0.favoritesGate }) { gate.hold() }
+    let ssrLogin = Data("""
+      <!DOCTYPE html><html lang="en"><head><title>Steam Community :: Sign In</title></head><body>
+      <script type="application/json" id="valve-ssr-data">{"route":"/login/home","UserConfig":{"logged_in":false,"steamid":"0"}}</script>
+      </body></html>
+      """.utf8)
     return lock.withLock {
-      if host == "steamcommunity.com" { state.cookies.append(request.value(forHTTPHeaderField: "Cookie")) }
+      if host == "steamcommunity.com", path != "/login/settoken", !path.hasPrefix("/login") {
+        state.cookies.append(request.value(forHTTPHeaderField: "Cookie"))
+      }
       switch (host, path) {
+      case ("steamcommunity.com", "/login/home"), ("steamcommunity.com", "/login"):
+        return (200, [:], ssrLogin)
       case ("steamcommunity.com", "/workshop/browse"):
+        if state.redirectsAuthenticatedBrowseToSignIn, request.value(forHTTPHeaderField: "Cookie") != nil {
+          return (302, ["Location": "https://steamcommunity.com/login/home/?goto=%2Fworkshop%2Fbrowse%2F"], Data())
+        }
         state.browseSections.append(value("section") ?? "")
         let page = Int(value("p") ?? "1") ?? 1
         state.browsePagesRequested.append(page)
-        if !state.browseQueue.isEmpty { return (200, state.browseQueue.removeFirst()) }
-        return (200, state.browsePages[page] ?? state.browse)
+        if !state.browseQueue.isEmpty { return (200, [:], state.browseQueue.removeFirst()) }
+        return (200, [:], state.browsePages[page] ?? state.browse)
       case ("steamcommunity.com", "/sharedfiles/subscribe"), ("steamcommunity.com", "/sharedfiles/unsubscribe"):
         state.subscribeRequests.append(
           (path, String(decoding: body, as: UTF8.self), request.value(forHTTPHeaderField: "Cookie")))
-        return (200, state.subscribeAnswer)
+        return (200, [:], state.subscribeAnswer)
       case (_, _) where host == "steamcommunity.com" && path.hasPrefix("/comment/PublishedFile_Public/render/"):
         state.commentPaths.append(path + "?" + (url.query ?? ""))
-        return (200, state.comments)
-      case ("api.steampowered.com", "/IAuthenticationService/GenerateAccessTokenForApp/v1"):
-        state.renewalForms.append(String(decoding: body, as: UTF8.self))
-        return (200, state.renewal)
+        return (200, [:], state.comments)
+      case ("login.steampowered.com", "/jwt/ajaxrefresh"):
+        state.renewalRequests.append(
+          (String(decoding: body, as: UTF8.self), request.value(forHTTPHeaderField: "Cookie")))
+        return (200, [:], state.renewal)
+      case ("steamcommunity.com", "/login/settoken"):
+        state.transferForms.append(String(decoding: body, as: UTF8.self))
+        var headers: [String: String] = [:]
+        if let cookie = state.transferCookie {
+          headers["Set-Cookie"] =
+            "steamCountry=SG%7C1; path=/; secure; HttpOnly; SameSite=None, "
+            + "steamLoginSecure=\(cookie); Path=/; Expires=Wed, 17 Nov 2027 17:00:00 GMT; Secure; HttpOnly; SameSite=None"
+        }
+        return (200, headers, Data(#"{"result":\#(state.transferResult)}"#.utf8))
       case ("api.steampowered.com", "/ISteamRemoteStorage/GetCollectionDetails/v1"):
-        return (200, state.collection)
+        return (200, [:], state.collection)
       case ("api.steampowered.com", "/ISteamRemoteStorage/GetPublishedFileDetails/v1"):
         state.detailsRequests += 1
         let form = String(decoding: body, as: UTF8.self)
@@ -1759,21 +1888,24 @@ private final class SourceAnswers: @unchecked Sendable {
           .compactMap { $0.split(separator: "=").last.map(String.init) }
         let rows: [[String: Any]] = ids.map { state.details[$0] ?? ["publishedfileid": $0, "result": 9] }
         let json = try? JSONSerialization.data(withJSONObject: ["response": ["publishedfiledetails": rows]])
-        return (200, json ?? Data())
+        return (200, [:], json ?? Data())
       default:
         let parts = path.split(separator: "/")
         guard host == "steamcommunity.com", parts.count == 3, parts[0] == "profiles", parts[2] == "myworkshopfiles"
-        else { return (404, Data()) }
+        else { return (404, [:], Data()) }
         if value("browsefilter") == "mysubscriptions" {
-          return (200, state.subscriptionPages[Int(value("p") ?? "1") ?? 1] ?? Data())
+          if state.redirectsSubscriptionsToSignIn {
+            return (302, ["Location": "https://steamcommunity.com/login/home/?goto=%2Fprofiles%2F1%2Fmyworkshopfiles%2F"], Data())
+          }
+          return (200, [:], state.subscriptionPages[Int(value("p") ?? "1") ?? 1] ?? Data())
         }
         if value("browsefilter") == "myfavorites" {
           let order = value("sortmethod") ?? ""
           state.favoriteOrdersRequested.append(order)
           state.favoriteProfilesRequested.append(String(parts[1]))
-          return (200, state.favoritePages[order] ?? Data())
+          return (200, [:], state.favoritePages[order] ?? Data())
         }
-        return (200, state.profiles[String(parts[1])] ?? Data())
+        return (200, [:], state.profiles[String(parts[1])] ?? Data())
       }
     }
   }
@@ -1814,8 +1946,21 @@ private final class SourceFixtureProtocol: URLProtocol, @unchecked Sendable {
     }
     let body = Self.body(of: request)
     let finish = { [self] in
-      let (status, data) = answers.answer(request, body: body)
-      let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+      let (status, headers, data) = answers.answer(request, body: body)
+      let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+      if (300..<400).contains(status), let location = headers["Location"],
+         let destination = URL(string: location, relativeTo: url)?.absoluteURL {
+        var next = URLRequest(url: destination)
+        next.httpShouldHandleCookies = request.httpShouldHandleCookies
+        if let cookie = request.value(forHTTPHeaderField: "Cookie") {
+          next.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        if let testID = request.value(forHTTPHeaderField: "X-Source-Test") {
+          next.setValue(testID, forHTTPHeaderField: "X-Source-Test")
+        }
+        client?.urlProtocol(self, wasRedirectedTo: next, redirectResponse: response)
+        return
+      }
       client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
       client?.urlProtocol(self, didLoad: data)
       client?.urlProtocolDidFinishLoading(self)

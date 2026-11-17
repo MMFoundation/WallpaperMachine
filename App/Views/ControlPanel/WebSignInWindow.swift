@@ -45,7 +45,8 @@ struct WebSignInSite: Sendable {
             title: String(localized: "Sign in to Steam"),
             signInURL: URL(string: "https://steamcommunity.com/login/home/?goto=")!,
             cookieName: "steamLoginSecure", cookieDomains: ["steamcommunity.com", ".steamcommunity.com"],
-            companionName: "steamRefresh_steam", companionDomains: ["login.steampowered.com"],
+            companionName: "steamRefresh_steam",
+            companionDomains: ["login.steampowered.com", ".login.steampowered.com"],
             accepts: { SteamWebSession(cookie: $0) != nil },
             // The sign-in, its renewal host, and the help and sign-up pages its links open.
             pageHosts: ["steamcommunity.com", "login.steampowered.com", "help.steampowered.com", "store.steampowered.com"])
@@ -164,12 +165,13 @@ final class WebSignInWindowController: NSWindowController, NSWindowDelegate, WKN
         let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
         guard continuation != nil,
             let session = cookies.first(where: {
-                $0.name == site.cookieName && site.cookieDomains.contains($0.domain) && site.accepts($0.value)
+                $0.name == site.cookieName && site.cookieDomains.contains($0.domain.lowercased())
+                    && site.accepts($0.value)
             })?.value
         else { return }
         // Steam sets its renewal cookie before the session, so both are in the same snapshot.
         let companion = site.companionName.flatMap { name in
-            cookies.first { $0.name == name && site.companionDomains.contains($0.domain) }?.value
+            cookies.first { $0.name == name && site.companionDomains.contains($0.domain.lowercased()) }?.value
         }
         finish(WebSignInCookies(session: session, companion: companion))
     }

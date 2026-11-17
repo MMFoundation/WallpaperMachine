@@ -246,7 +246,13 @@ actor WorkshopService {
         }
         let (data, response) = try await fetch(request, delegate: redirects)
         try Task.checkCancellation()
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
+            throw WorkshopFailure(message: String(localized: "Steam could not load the Workshop. Check your connection or open Steam in your browser, then retry."))
+        }
+        if http.statusCode == 401 || http.statusCode == 403 || Self.isSignInURL(http.url) {
+            throw SteamSignInRequired()
+        }
+        guard (200..<300).contains(http.statusCode) else {
             throw WorkshopFailure(message: String(localized: "Steam could not load the Workshop. Check your connection or open Steam in your browser, then retry."))
         }
         guard data.count < 12_000_000, let html = String(data: data, encoding: .utf8) else {
@@ -270,8 +276,17 @@ actor WorkshopService {
 
     /// The Steam session cookie goes to steamcommunity.com over HTTPS and nowhere else.
     static func mayCarrySession(_ url: URL?) -> Bool {
-        guard let url else { return false }
-        return url.scheme == "https" && url.host == "steamcommunity.com" && url.port == nil && url.user == nil
+        guard let url, let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased() else { return false }
+        return scheme == "https" && host == "steamcommunity.com" && url.port == nil && url.user == nil
+    }
+
+    /// Whether `url` is Steam's sign-in page, which a personal Workshop page redirects to once
+    /// its session has ended.
+    static func isSignInURL(_ url: URL?) -> Bool {
+        guard let url, let host = url.host?.lowercased() else { return false }
+        if host == "login.steampowered.com" { return true }
+        let path = url.path.lowercased()
+        return host == "steamcommunity.com" && (path == "/login" || path.hasPrefix("/login/"))
     }
 
     /// A redirect keeps the session cookie only while it stays where `mayCarrySession` allows.
@@ -281,39 +296,120 @@ actor WorkshopService {
         return request
     }
 
-    /// Where Steam trades a session's renewal token for a new `steamLoginSecure` token.
-    static let renewalURL = URL(string: "https://api.steampowered.com/IAuthenticationService/GenerateAccessTokenForApp/v1/")!
+    /// Where Steam's sign-in page trades its `steamRefresh_steam` cookie for one-time fields
+    /// that set a fresh `steamLoginSecure` cookie on `steamcommunity.com`.
+    static let renewalURL = URL(string: "https://login.steampowered.com/jwt/ajaxrefresh")!
+    static let tokenTransferURL = URL(string: "https://steamcommunity.com/login/settoken")!
 
-    /// The session with a new cookie, from Steam's token service. The renewal token goes there
-    /// alone, in the body of a request that follows no redirect. Steam refusing it, or a session
-    /// without one, throws `SteamSignInRequired`; a connection failure throws its own error.
+    /// Whether `url` is Steam Community's own token-transfer endpoint and nowhere else.
+    static func isTokenTransferURL(_ url: URL?) -> Bool {
+        guard mayCarrySession(url), let path = url?.path else { return false }
+        return path == tokenTransferURL.path
+    }
+
+    /// The session with a new cookie, renewed the way Steam's own sign-in page renews a browser
+    /// session: `steamRefresh_steam` goes to `login.steampowered.com/jwt/ajaxrefresh` alone,
+    /// following no redirect, and the one-time transfer fields it answers go to
+    /// `steamcommunity.com/login/settoken` to set a fresh `steamLoginSecure` cookie. Steam
+    /// refusing either step, or a session without a renewal token, throws `SteamSignInRequired`;
+    /// a connection or server failure throws its own error so the saved session stays.
     func renew(_ account: SteamWebSession) async throws -> SteamWebSession {
         guard let refreshToken = account.refreshToken else { throw SteamSignInRequired() }
-        var request = URLRequest(url: Self.renewalURL)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 35
-        request.httpShouldHandleCookies = false
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        var form = URLComponents()
-        form.queryItems = [
-            URLQueryItem(name: "refresh_token", value: refreshToken),
-            URLQueryItem(name: "steamid", value: account.steamID),
-        ]
-        request.httpBody = Data((form.percentEncodedQuery ?? "").utf8)
-        let (data, response) = try await fetch(request, delegate: SteamNoRedirects())
+        var refreshRequest = URLRequest(url: Self.renewalURL)
+        refreshRequest.httpMethod = "POST"
+        refreshRequest.timeoutInterval = 35
+        refreshRequest.httpShouldHandleCookies = false
+        refreshRequest.setValue("WallpaperMachine/1.0 (macOS; public Workshop browser)", forHTTPHeaderField: "User-Agent")
+        refreshRequest.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        refreshRequest.setValue("https://steamcommunity.com", forHTTPHeaderField: "Origin")
+        refreshRequest.setValue("https://steamcommunity.com/", forHTTPHeaderField: "Referer")
+        refreshRequest.setValue("steamRefresh_steam=\(account.steamID)%7C%7C\(refreshToken)", forHTTPHeaderField: "Cookie")
+        refreshRequest.httpBody = Self.formEncoded([("redir", "https://steamcommunity.com/")])
+        let (refreshData, refreshResponse) = try await fetch(refreshRequest, delegate: SteamNoRedirects())
         try Task.checkCancellation()
+        let refreshHTTP = try Self.checkedRenewalResponse(refreshResponse)
+        guard let root = try? JSONSerialization.jsonObject(with: refreshData) as? [String: Any],
+              Self.isJSONTrue(root["success"]),
+              let transferAddress = root["login_url"] as? String,
+              let transferURL = URL(string: transferAddress),
+              Self.isTokenTransferURL(transferURL),
+              let transferBody = Self.transferForm(from: root, expectedSteamID: account.steamID)
+        else { throw SteamSignInRequired() }
+        let rotatedRefresh = Self.cookieValue(named: "steamRefresh_steam", in: refreshHTTP, for: Self.renewalURL)
+
+        var transferRequest = URLRequest(url: transferURL)
+        transferRequest.httpMethod = "POST"
+        transferRequest.timeoutInterval = 35
+        transferRequest.httpShouldHandleCookies = false
+        transferRequest.setValue("WallpaperMachine/1.0 (macOS; public Workshop browser)", forHTTPHeaderField: "User-Agent")
+        transferRequest.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        transferRequest.setValue("https://steamcommunity.com", forHTTPHeaderField: "Origin")
+        transferRequest.setValue("https://steamcommunity.com/", forHTTPHeaderField: "Referer")
+        transferRequest.httpBody = transferBody
+        let (transferData, transferResponse) = try await fetch(transferRequest, delegate: SteamNoRedirects())
+        try Task.checkCancellation()
+        let transferHTTP = try Self.checkedRenewalResponse(transferResponse)
+        guard let transferRoot = try? JSONSerialization.jsonObject(with: transferData) as? [String: Any],
+              (transferRoot["result"] as? NSNumber)?.intValue == 1,
+              let sessionCookie = Self.cookieValue(named: "steamLoginSecure", in: transferHTTP, for: transferURL),
+              let renewed = account.renewed(cookie: sessionCookie, refresh: rotatedRefresh)
+        else { throw SteamSignInRequired() }
+        return renewed
+    }
+
+    private static func checkedRenewalResponse(_ response: URLResponse) throws -> HTTPURLResponse {
         guard let http = response as? HTTPURLResponse else { throw SteamSignInRequired() }
         if http.statusCode == 401 || http.statusCode == 403 { throw SteamSignInRequired() }
         guard (200..<300).contains(http.statusCode) else {
             throw WorkshopFailure(message: String(localized: "Steam could not load the Workshop. Check your connection or open Steam in your browser, then retry."))
         }
-        // Steam answers a refused token with an empty response and the reason in a header.
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let body = root["response"] as? [String: Any],
-              let token = body["access_token"] as? String,
-              let renewed = account.renewed(accessToken: token)
-        else { throw SteamSignInRequired() }
-        return renewed
+        return http
+    }
+
+    private static func isJSONTrue(_ value: Any?) -> Bool {
+        if let flag = value as? Bool { return flag }
+        if let number = value as? NSNumber { return number.intValue == 1 }
+        return false
+    }
+
+    private static func transferForm(from root: [String: Any], expectedSteamID: String) -> Data? {
+        if let reported = root["steamID"] as? String, reported != expectedSteamID { return nil }
+        guard let nonce = root["nonce"] as? String, !nonce.isEmpty,
+              let auth = root["auth"] as? String, !auth.isEmpty
+        else { return nil }
+        let excluded: Set<String> = ["success", "login_url", "error"]
+        var pairs: [(String, String)] = []
+        var sawSteamID = false
+        for key in root.keys.sorted() where !excluded.contains(key) {
+            let value: String? = switch root[key] {
+            case let text as String: text
+            case let number as NSNumber: number.stringValue
+            default: nil
+            }
+            guard let value else { continue }
+            if key == "steamID" { sawSteamID = true }
+            pairs.append((key, value))
+        }
+        if !sawSteamID { pairs.append(("steamID", expectedSteamID)) }
+        return formEncoded(pairs)
+    }
+
+    private static func formEncoded(_ items: [(String, String)]) -> Data {
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        let encoded = items.map { name, value in
+            (name.addingPercentEncoding(withAllowedCharacters: unreserved) ?? name) + "="
+                + (value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? "")
+        }.joined(separator: "&")
+        return Data(encoded.utf8)
+    }
+
+    static func cookieValue(named name: String, in response: HTTPURLResponse, for url: URL) -> String? {
+        var headers: [String: String] = [:]
+        for (key, value) in response.allHeaderFields {
+            if let field = key as? String, let text = value as? String { headers[field] = text }
+        }
+        return HTTPCookie.cookies(withResponseHeaderFields: headers, for: url)
+            .first { $0.name == name && !$0.value.isEmpty }?.value
     }
 
     /// Steam's public details endpoint answers up to this many items per request without a key.
@@ -588,7 +684,9 @@ actor WorkshopService {
         let (data, response) = try await fetch(request, delegate: SteamCookieRedirectGuard())
         try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse else { throw SteamSignInRequired() }
-        if http.statusCode == 401 || http.statusCode == 403 { throw SteamSignInRequired() }
+        if http.statusCode == 401 || http.statusCode == 403 || Self.isSignInURL(http.url) {
+            throw SteamSignInRequired()
+        }
         if (200..<300).contains(http.statusCode),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let success = object["success"] as? Int {
@@ -600,7 +698,7 @@ actor WorkshopService {
             return
         }
         let page = String(decoding: data.prefix(200_000), as: UTF8.self)
-        if (Self.firstMatch(#"<title>([^<]*)</title>"#, in: page) ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == "Sign In" {
+        if Self.isSignInPage(page) {
             throw SteamSignInRequired()
         }
         throw WorkshopFailure(message: String(localized: "Steam could not be reached to change your subscription. Check your connection and try again."))
@@ -733,13 +831,14 @@ actor WorkshopService {
             let id = String(html[range])
             if !ids.contains(id) { ids.append(id) }
         }
-        let title = (firstMatch(#"<title>([^<]*)</title>"#, in: html) ?? "")
+        let title = (firstMatch(#"(?i)<title\b[^>]*>([^<]*)</title>"#, in: html) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        // Every page links to the sign-in page in its header; only the page itself is titled so.
-        if ids.isEmpty, title == "Sign In" { throw SteamSignInRequired() }
+        // Every page links to the sign-in page in its header; only the page itself is titled or
+        // routed so.
+        if ids.isEmpty, isSignInPage(html) { throw SteamSignInRequired() }
         // A personal list can also arrive as an anonymous Community page after a session ends.
         // The same page is valid for an author's public items, so only personal lists require it.
-        if requiresSignIn, firstMatch(#"\bg_steamID\s*=\s*(false)\s*;"#, in: html) != nil {
+        if requiresSignIn, isAnonymousCommunityPage(html) {
             throw SteamSignInRequired()
         }
         let paging = #"Showing\s+([\d,]+)\s*-\s*[\d,]+\s+of\s+([\d,]+)\s+entries"#
@@ -761,6 +860,30 @@ actor WorkshopService {
         }
         let name = firstMatch(#"^Steam Community :: (.+?)(?: :: [^:]*)?$"#, in: title).map(unescapeHTML)
         return (ids, max(total, ids.count), name)
+    }
+
+    /// Whether `html` is Steam's sign-in page: its classic `<title>Sign In</title>`, the SSR
+    /// page's `<title>Steam Community :: Sign In</title>`, or the SSR `/login` route in any
+    /// language.
+    static func isSignInPage(_ html: String) -> Bool {
+        let title = firstMatch(#"(?i)<title\b[^>]*>([^<]*)</title>"#, in: html)
+            .map(unescapeHTML)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if title == "Sign In" || title == "Steam Community :: Sign In" { return true }
+        if let route = (ssrObject(in: Array(html.utf8))?["route"] as? String)?.lowercased() {
+            return route == "/login" || route.hasPrefix("/login/")
+        }
+        return false
+    }
+
+    /// Whether `html` is a Steam Community page served to an anonymous visitor: the classic
+    /// `g_steamID = false;` script or the SSR `UserConfig.logged_in == false`.
+    private static func isAnonymousCommunityPage(_ html: String) -> Bool {
+        if firstMatch(#"\bg_steamID\s*=\s*(false)\s*;"#, in: html) != nil { return true }
+        if let user = ssrObject(in: Array(html.utf8))?["UserConfig"] as? [String: Any],
+           (user["logged_in"] as? Bool) == false {
+            return true
+        }
+        return false
     }
 
     private static func firstMatch(_ pattern: String, in text: String, group: Int = 1) -> String? {
@@ -812,13 +935,18 @@ actor WorkshopService {
     /// megabyte or more, as a page of collections holds, runs out of backtracking room.
     static func renderContext(in html: String) -> [String: Any]? {
         let bytes = Array(html.utf8)
-        if let data = ssrDataBlock(in: bytes) {
-            return (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["renderContext"] as? [String: Any]
+        if let context = ssrObject(in: bytes)?["renderContext"] as? [String: Any] {
+            return context
         }
         guard let encoded = renderContextLiteral(in: bytes),
               let contextString = try? JSONSerialization.jsonObject(with: encoded, options: .fragmentsAllowed) as? String
         else { return nil }
         return try? JSONSerialization.jsonObject(with: Data(contextString.utf8)) as? [String: Any]
+    }
+
+    private static func ssrObject(in bytes: [UInt8]) -> [String: Any]? {
+        guard let data = ssrDataBlock(in: bytes) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
     /// The text of the `valve-ssr-data` script element. JSON in a script element cannot hold

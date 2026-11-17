@@ -368,13 +368,16 @@ its first page (`WorkshopStore.signInToSteamWeb`, `signOutOfSteamWeb`); the deta
 
 The cookie's own token lasts about a day; the renewal token lasts months. Before a
 read with the session, a cookie whose token has run out (its JWT `exp`, read without
-checking the signature, within two minutes) is traded for a new one through
-`IAuthenticationService/GenerateAccessTokenForApp` on `api.steampowered.com`
-(`WorkshopService.renew`): the renewal token goes there alone, in a POST body, and the
-request follows no redirect. Concurrent readers wait for one renewal, and the new
-cookie is saved. Steam refusing the token (an empty `response`) ends the session like
-its sign-in page does; a public list being read then is read anonymously instead of
-failing. A session without a renewal token is used until Steam ends it.
+checking the signature, within two minutes) is traded for a new one the way Steam's
+own sign-in page renews a browser session (`WorkshopService.renew`): the
+`steamRefresh_steam` cookie goes to `login.steampowered.com/jwt/ajaxrefresh` alone,
+following no redirect, and the one-time transfer fields it answers go to
+`steamcommunity.com/login/settoken` to set a fresh `steamLoginSecure` cookie (keeping
+a rotated `steamRefresh_steam` cookie when Steam sets one). Concurrent readers wait
+for one renewal, and the new cookie is saved. Steam refusing either step ends the
+session like its sign-in page does; a public list being read then, or whose held
+session Steam refuses directly, is read anonymously instead of failing. A session
+without a renewal token is used until Steam ends it.
 The SteamCMD sign-in cannot be reused here: SteamCMD keeps its own machine-bound
 client token, which the app does not read.
 
@@ -386,10 +389,11 @@ read is reported as unreadable instead of being shown as an empty list. So is an
 empty, truncated or unrecognized response: zero entries need an explicit zero count,
 a page beyond the end, or Steam's empty-list message. A failed refresh keeps the
 last loaded tiles, count and subscription marks and offers retry. Without a
-session, or when Steam answers with its sign-in page or an explicitly anonymous
-personal-list page instead, the session is
-forgotten and the grid is emptied, so the panel offers **Sign in to Steam…** and
-says it is separate from SteamCMD's sign-in.
+session, or when Steam redirects to `/login` or answers with its sign-in page (classic
+or SSR, in any language) or an explicitly anonymous personal-list page (`g_steamID =
+false` or SSR `UserConfig.logged_in == false`) instead, the session is
+forgotten and any personal list on show is emptied, so the panel offers **Sign in to
+Steam…** and says it is separate from SteamCMD's sign-in.
 
 Signed in, the line above the grid says so, counts the subscriptions, and leads
 with **Download the ones not in your library** as the list's main action beside

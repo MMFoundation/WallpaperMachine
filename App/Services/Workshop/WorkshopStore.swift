@@ -1165,6 +1165,7 @@ final class WorkshopStore {
   /// Drops the session Steam ended, and the saved one with it.
   private func forgetSteamWebSession() {
     dropSteamWebSession()
+    if committedQuery?.source.isPersonal == true { clearResults() }
     // Steam ended it, so a saved copy the keychain keeps signs no one in; the store logs why.
     try? webSessions?.remove()
   }
@@ -1200,6 +1201,21 @@ final class WorkshopStore {
     if let query { cache = PageCache(query: query) }
   }
 
+  /// One Steam page of `query`. When Steam refuses the held session on a public list, the ended
+  /// session is forgotten and the page is read as anyone instead of failing.
+  private func readPage(_ number: Int, query: WorkshopQuery) async throws -> WorkshopPage {
+    let account = try await readingSession(for: query)
+    // Replaced while a saved sign-in or a renewal was awaited: Steam is not asked at all.
+    try Task.checkCancellation()
+    do {
+      return try await service.page(for: query, page: number, account: account)
+    } catch is SteamSignInRequired where !query.source.isPersonal && account != nil {
+      forgetSteamWebSession(endedWith: account)
+      try Task.checkCancellation()
+      return try await service.page(for: query, page: number, account: nil)
+    }
+  }
+
   /// Starts, or joins, the fetch of one panel page for the cache that asks, `cacheID`, which the
   /// caller takes when the page is asked for. A cache replaced since gets nothing, so a request
   /// made for an earlier search never reaches Steam or fills the new cache; and a fetch is only
@@ -1208,21 +1224,18 @@ final class WorkshopStore {
     guard cacheID == self.cacheID else { return Task { throw CancellationError() } }
     if let task = steamFetches[request] { return task }
     let (number, query) = (request.page, request.query)
-    let service = service
     let task = Task { [weak self] in
       defer { if let self, self.cacheID == cacheID { self.steamFetches[request] = nil } }
+      guard let self else { throw CancellationError() }
       let result: WorkshopPage
-      if Self.fillsPages(query), let self {
+      if Self.fillsPages(query) {
         result = try await self.filledPage(number, query: query, cacheID: cacheID)
       } else {
-        let account = try await self?.readingSession(for: query)
-        // Replaced while a saved sign-in or a renewal was awaited: Steam is not asked at all.
-        try Task.checkCancellation()
-        result = try await service.page(for: query, page: number, account: account)
+        result = try await self.readPage(number, query: query)
       }
       try Task.checkCancellation()
       // Only the cache that asked keeps the page; a superseded fetch is simply dropped.
-      if let self, self.cacheID == cacheID {
+      if self.cacheID == cacheID {
         self.cache.steamPages[number] = result
         self.onPreviewsAvailable?(result.items.compactMap(\.previewURL))
       }
@@ -1303,13 +1316,12 @@ final class WorkshopStore {
     guard cacheID == self.cacheID else { return Task { throw CancellationError() } }
     if let page = cache.screenedPages[number] { return Task { page } }
     if let task = screenedFetches[number] { return task }
-    let service = service
     let task = Task { [weak self] in
       defer { if let self, self.cacheID == cacheID { self.screenedFetches[number] = nil } }
-      let account = try await self?.readingSession(for: query)
-      let result = try await service.page(for: query, page: number, account: account)
+      guard let self else { throw CancellationError() }
+      let result = try await self.readPage(number, query: query)
       try Task.checkCancellation()
-      if let self, self.cacheID == cacheID { self.cache.screenedPages[number] = result }
+      if self.cacheID == cacheID { self.cache.screenedPages[number] = result }
       return result
     }
     screenedFetches[number] = task

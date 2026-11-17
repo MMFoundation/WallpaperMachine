@@ -91,11 +91,19 @@ final class SteamWebSessionTests: XCTestCase {
         let expired = try XCTUnwrap(
             SteamWebSession(cookie: SteamWebFixtures.cookie(SteamWebFixtures.token(expiresIn: -60, now: now)), refresh: refresh))
         XCTAssertTrue(expired.needsRenewal(at: now))
-        let renewed = try XCTUnwrap(expired.renewed(accessToken: SteamWebFixtures.token(expiresIn: 3600, now: now, salt: "n")))
+        let nextCookie = SteamWebFixtures.cookie(SteamWebFixtures.token(expiresIn: 3600, now: now, salt: "n"))
+        let renewed = try XCTUnwrap(expired.renewed(cookie: nextCookie))
         XCTAssertEqual(renewed.steamID, expired.steamID)
+        XCTAssertEqual(renewed.cookie, nextCookie)
         XCTAssertEqual(renewed.refreshToken, expired.refreshToken)
         XCTAssertFalse(renewed.needsRenewal(at: now))
-        XCTAssertNil(expired.renewed(accessToken: "not a token"))
+        let rotatedToken = SteamWebFixtures.token(expiresIn: 172_800, now: now, salt: "r2")
+        let rotated = try XCTUnwrap(expired.renewed(cookie: nextCookie, refresh: SteamWebFixtures.cookie(rotatedToken)))
+        XCTAssertEqual(rotated.refreshToken, rotatedToken)
+        let foreignRefresh = SteamWebFixtures.cookie(rotatedToken, account: SteamWebFixtures.otherAccount)
+        XCTAssertEqual(expired.renewed(cookie: nextCookie, refresh: foreignRefresh)?.refreshToken, expired.refreshToken)
+        XCTAssertNil(expired.renewed(cookie: SteamWebFixtures.cookie(rotatedToken, account: SteamWebFixtures.otherAccount)))
+        XCTAssertNil(expired.renewed(cookie: "not a token"))
 
         // Without a renewal token, or a token that names no expiry, there is nothing to renew.
         let alone = try XCTUnwrap(

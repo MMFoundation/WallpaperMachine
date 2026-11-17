@@ -14,6 +14,8 @@ final class WebSignInPolicyTests: XCTestCase {
         XCTAssertTrue(WebSignInSite.steam.allows(URL(string: "https://STEAMCOMMUNITY.com:443/login"), inPage: true))
         XCTAssertTrue(WebSignInSite.steam.allows(WebSignInSite.steam.signInURL, inPage: true))
         XCTAssertTrue(WebSignInSite.steam.allows(URL(string: "about:blank"), inPage: true))
+        XCTAssertEqual(
+            WebSignInSite.steam.companionDomains, ["login.steampowered.com", ".login.steampowered.com"])
     }
 
     func testNothingElseCanStandInForSteamsPage() {

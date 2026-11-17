@@ -14,6 +14,7 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     addTeardownBlock {
       SubscriptionsProtocol.subscribed = [:]
       SubscriptionsProtocol.unreachable = false
+      SubscriptionsProtocol.sessionEnded = false
     }
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [SubscriptionsProtocol.self]
@@ -78,6 +79,31 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     SubscriptionsProtocol.unreachable = false
     panel.controller.workshopBrowser.pageAppeared()
     try await waitFor { panel.workshop.subscribedIDs == ["111"] }
+  }
+
+  /// Issue #231: when a saved Steam Community session expires and Steam redirects the
+  /// subscriptions page to `/login/home/` (its SSR sign-in page), the marks read forgets the
+  /// ended session instead of reporting an unreadable Workshop page on every visit, and Your
+  /// subscriptions offers signing in again.
+  func testAnExpiredSessionRedirectedToSignInIsForgottenInsteadOfReportingAnUnreadablePage() async throws {
+    let panel = try makePanel(subscribed: ["111": "Video"])
+    try await panel.workshop.signInToSteamWeb {
+      WebSignInCookies(session: "76561198000000001%7C%7C0123456789abcdef0123")
+    }
+    SubscriptionsProtocol.sessionEnded = true
+    panel.controller.errors.actionError = nil
+    panel.controller.workshopBrowser.pageAppeared()
+    try await waitFor { panel.controller.errors.actionError != nil }
+    XCTAssertEqual(
+      panel.controller.errors.actionError,
+      "Steam asked you to sign in again. Sign in to Steam to see your subscriptions.")
+    XCTAssertNil(panel.workshop.steamWebSession)
+    XCTAssertFalse(panel.controller.workshopBrowse.isSignedInToSteam)
+
+    panel.controller.errors.actionError = nil
+    panel.controller.workshopBrowser.pageAppeared()
+    try await Task.sleep(for: .milliseconds(30))
+    XCTAssertNil(panel.controller.errors.actionError, "the forgotten session is not asked about again")
   }
 
   func testOnlyWhatTheLibraryLacksIsRequestedAndApplicationsAreSkipped() async throws {
@@ -190,12 +216,25 @@ private final class SubscriptionsProtocol: URLProtocol, @unchecked Sendable {
   nonisolated(unsafe) static var subscribed: [String: String] = [:]
   /// The subscriptions page cannot be reached while this is set.
   nonisolated(unsafe) static var unreachable = false
+  /// Steam redirects the subscriptions page to its SSR sign-in page while this is set.
+  nonisolated(unsafe) static var sessionEnded = false
 
   override class func canInit(with request: URLRequest) -> Bool { true }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
   override func startLoading() {
-    guard let url = request.url, let body = Self.body(for: url, request: request) else {
+    guard let url = request.url else {
+      client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+      return
+    }
+    if url.host == "steamcommunity.com", url.path.contains("myworkshopfiles"), Self.sessionEnded {
+      let login = URL(string: "https://steamcommunity.com/login/home/?goto=%2Fprofiles%2F1%2Fmyworkshopfiles%2F")!
+      let redirect = HTTPURLResponse(
+        url: url, statusCode: 302, httpVersion: "HTTP/1.1", headerFields: ["Location": login.absoluteString])!
+      client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: login), redirectResponse: redirect)
+      return
+    }
+    guard let body = Self.body(for: url, request: request) else {
       client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
       return
     }
@@ -208,6 +247,13 @@ private final class SubscriptionsProtocol: URLProtocol, @unchecked Sendable {
   override func stopLoading() {}
 
   private static func body(for url: URL, request: URLRequest) -> Data? {
+    if url.host == "steamcommunity.com", url.path.hasPrefix("/login") {
+      return Data("""
+        <!DOCTYPE html><html lang="en"><head><title>Steam Community :: Sign In</title></head><body>
+        <script type="application/json" id="valve-ssr-data">{"route":"/login/home","UserConfig":{"logged_in":false,"steamid":"0"}}</script>
+        </body></html>
+        """.utf8)
+    }
     if url.host == "steamcommunity.com", url.path.contains("myworkshopfiles") {
       if unreachable { return nil }
       // Without the session cookie Steam shows its sign-in page.

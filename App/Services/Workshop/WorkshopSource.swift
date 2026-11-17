@@ -99,12 +99,16 @@ struct SteamWebSession: Equatable, Sendable {
         refreshToken = refresh.flatMap(Self.parts(of:)).flatMap { $0.0 == id ? $0.1 : nil }
     }
 
-    /// The same session with the cookie Steam's token service made from `accessToken`; nil when
-    /// that is not a token.
-    func renewed(accessToken: String) -> SteamWebSession? {
-        guard let fresh = SteamWebSession(cookie: "\(steamID)%7C%7C\(accessToken)") else { return nil }
+    /// The same session with the `steamLoginSecure` cookie Steam set at renewal, and a rotated
+    /// `steamRefresh_steam` cookie when Steam set one for the same account; nil when the cookie
+    /// is not a session of this account's.
+    func renewed(cookie value: String, refresh: String? = nil) -> SteamWebSession? {
+        guard let fresh = SteamWebSession(cookie: value, refresh: refresh), fresh.steamID == steamID else {
+            return nil
+        }
         return SteamWebSession(
-            steamID: steamID, cookie: fresh.cookie, refreshToken: refreshToken, expiresAt: fresh.expiresAt)
+            steamID: steamID, cookie: fresh.cookie, refreshToken: fresh.refreshToken ?? refreshToken,
+            expiresAt: fresh.expiresAt)
     }
 
     /// Whether the cookie has run out, or will within `margin`, and can be renewed.
