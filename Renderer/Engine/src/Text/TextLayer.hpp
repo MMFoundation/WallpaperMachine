@@ -33,6 +33,11 @@ public:
         return *this;
     }
 
+    /// `data`, sharing the storage of a live font with the same bytes: text layers that name the
+    /// same font file keep one copy of it instead of one each. A match is confirmed byte for byte,
+    /// and the bytes go once nothing uses them.
+    static SharedFontData Interned(std::vector<uint8_t> data);
+
     bool empty() const { return m_bytes == nullptr || m_bytes->empty(); }
     std::size_t size() const { return m_bytes ? m_bytes->size() : 0; }
     const uint8_t* data() const { return empty() ? nullptr : m_bytes->data(); }
@@ -44,6 +49,8 @@ public:
     const_iterator end() const { return bytes().end(); }
 
 private:
+    explicit SharedFontData(std::shared_ptr<const std::vector<uint8_t>> bytes): m_bytes(std::move(bytes)) {}
+
     void assign(std::vector<uint8_t> data) {
         if (data.empty()) {
             m_bytes.reset();

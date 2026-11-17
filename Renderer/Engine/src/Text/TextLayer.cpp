@@ -29,6 +29,28 @@
 namespace wallpaper
 {
 
+SharedFontData SharedFontData::Interned(std::vector<uint8_t> data) {
+    if (data.empty()) return SharedFontData();
+    // Keyed by content, never by path: two wallpapers can ship different files under one name.
+    const std::size_t key =
+        std::hash<std::string_view> {}(
+            std::string_view(reinterpret_cast<const char*>(data.data()), data.size())) ^
+        data.size();
+    static std::mutex lock;
+    static std::unordered_multimap<std::size_t, std::weak_ptr<const std::vector<uint8_t>>> live;
+    std::lock_guard guard(lock);
+    for (auto it = live.begin(); it != live.end();) {
+        it = it->second.expired() ? live.erase(it) : std::next(it);
+    }
+    auto [first, last] = live.equal_range(key);
+    for (auto it = first; it != last; ++it) {
+        if (auto bytes = it->second.lock(); bytes && *bytes == data) return SharedFontData(std::move(bytes));
+    }
+    auto bytes = std::make_shared<const std::vector<uint8_t>>(std::move(data));
+    live.emplace(key, bytes);
+    return SharedFontData(std::move(bytes));
+}
+
 namespace
 {
 // Wallpaper Engine sets a face's size in points at 300 dpi, so one point of

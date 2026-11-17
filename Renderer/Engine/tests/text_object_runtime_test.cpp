@@ -5376,3 +5376,25 @@ TEST(TextObjectRuntime, AZwjSequenceIsOneColourGlyph) {
 }
 
 } // namespace wallpaper
+
+// Text layers that name the same font file keep one copy of its bytes; a file with other bytes
+// keeps its own, and the bytes go once no layer uses them.
+TEST(SharedFontDataTest, LayersNamingTheSameFontBytesShareOneCopy) {
+    std::vector<uint8_t> font(4096);
+    for (std::size_t i = 0; i < font.size(); ++i) font[i] = static_cast<uint8_t>(i * 31);
+    auto first  = wallpaper::SharedFontData::Interned(font);
+    auto second = wallpaper::SharedFontData::Interned(font);
+    EXPECT_EQ(first.data(), second.data());
+
+    auto other = font;
+    other.back() ^= 1;
+    auto different = wallpaper::SharedFontData::Interned(other);
+    EXPECT_NE(different.data(), first.data());
+    EXPECT_EQ(different.bytes(), other);
+
+    first  = wallpaper::SharedFontData();
+    second = wallpaper::SharedFontData();
+    auto again = wallpaper::SharedFontData::Interned(font);
+    EXPECT_EQ(again.bytes(), font);
+    EXPECT_TRUE(wallpaper::SharedFontData::Interned({}).empty());
+}

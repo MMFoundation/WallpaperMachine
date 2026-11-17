@@ -5010,7 +5010,7 @@ void ResolveTextFont(fs::VFS& vfs, TextLayerState& state, const std::string& key
             state.resolved_font_kind     = "asset";
             state.resolved_font_identity = key;
             state.resolved_font_path     = path;
-            state.resolved_font_data     = std::vector<uint8_t>(bytes.begin(), bytes.end());
+            state.resolved_font_data     = SharedFontData::Interned(std::vector<uint8_t>(bytes.begin(), bytes.end()));
             return;
         }
     }
