@@ -184,17 +184,22 @@ public:
     /// (one), as a text layer's mono glyph atlas is (decompiles/G-F8.md). Not for the cover.
     void SetImage(std::string name, uint32_t width, uint32_t height, TextureFormat format,
                   const uint8_t* bytes, std::size_t len) {
-        const std::size_t bpp = format == TextureFormat::R8 ? 1u : 4u;
-        if (name.empty() || name.front() == '$' || bytes == nullptr || width == 0 || height == 0 ||
-            (format != TextureFormat::R8 && format != TextureFormat::RGBA8) ||
-            width > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) ||
-            height > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) ||
-            std::size_t(width) > std::numeric_limits<std::size_t>::max() / height / bpp ||
-            len != std::size_t(width) * height * bpp) {
-            return;
-        }
+        if (bytes == nullptr || ! AcceptsImage(name, width, height, format, len)) return;
         std::lock_guard lock(m_mutex);
         const auto      made = MakeImageLocked(name, width, height, bytes, len, format);
+        PublishLocked(name, made.image, made.version);
+    }
+
+    /// `SetImage` for pixels their owner never changes again, such as a text atlas snapshot: the
+    /// image keeps them alive and reads them in place instead of holding a copy of its own.
+    void SetImage(std::string name, uint32_t width, uint32_t height, TextureFormat format,
+                  std::shared_ptr<const std::vector<uint8_t>> bytes) {
+        if (bytes == nullptr || ! AcceptsImage(name, width, height, format, bytes->size())) return;
+        std::lock_guard lock(m_mutex);
+        const std::size_t len  = bytes->size();
+        auto*             data = const_cast<uint8_t*>(bytes->data());
+        const auto made = MakeImageLocked(name, width, height,
+                                          ImageDataPtr(data, [keep = std::move(bytes)](uint8_t*) {}), len, format);
         PublishLocked(name, made.image, made.version);
     }
 
@@ -437,9 +442,27 @@ private:
         std::shared_ptr<Image> image;
         uint64_t               version { 0 };
     };
+    static bool AcceptsImage(const std::string& name, uint32_t width, uint32_t height, TextureFormat format,
+                             std::size_t len) {
+        const std::size_t bpp = format == TextureFormat::R8 ? 1u : 4u;
+        return ! name.empty() && name.front() != '$' && width != 0 && height != 0 &&
+               (format == TextureFormat::R8 || format == TextureFormat::RGBA8) &&
+               width <= static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) &&
+               height <= static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) &&
+               std::size_t(width) <= std::numeric_limits<std::size_t>::max() / height / bpp &&
+               len == std::size_t(width) * height * bpp;
+    }
+
     MadeImage MakeImageLocked(const std::string& name, uint32_t width, uint32_t height,
                               const uint8_t* rgba, std::size_t rgba_len,
                               TextureFormat format = TextureFormat::RGBA8) {
+        ImageDataPtr data(new uint8_t[rgba_len], [](uint8_t* bytes) { delete[] bytes; });
+        std::memcpy(data.get(), rgba, rgba_len);
+        return MakeImageLocked(name, width, height, std::move(data), rgba_len, format);
+    }
+
+    MadeImage MakeImageLocked(const std::string& name, uint32_t width, uint32_t height, ImageDataPtr data,
+                              std::size_t len, TextureFormat format) {
         const uint64_t version = ++m_version_counter;
         auto image             = std::make_shared<Image>();
         image->key             = name + "#" + std::to_string(version);
@@ -462,9 +485,8 @@ private:
         auto& level  = slot.mipmaps.emplace_back();
         level.width  = header.width;
         level.height = header.height;
-        level.size   = static_cast<isize>(rgba_len);
-        level.data   = ImageDataPtr(new uint8_t[rgba_len], [](uint8_t* data) { delete[] data; });
-        std::memcpy(level.data.get(), rgba, rgba_len);
+        level.size   = static_cast<isize>(len);
+        level.data   = std::move(data);
         return MadeImage { std::move(image), version };
     }
 

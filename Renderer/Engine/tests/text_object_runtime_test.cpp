@@ -20,6 +20,7 @@
 #include "SpecTexs.hpp"
 #include "Shader/RustShaderBridge.hpp"
 #include "Text/SystemFontResolver.hpp"
+#include "Runtime/RuntimeImageSource.hpp"
 #include "Text/TextLayer.hpp"
 #include "WPSceneParser.hpp"
 #include "WPPkgFs.hpp"
@@ -5397,4 +5398,27 @@ TEST(SharedFontDataTest, LayersNamingTheSameFontBytesShareOneCopy) {
     auto again = wallpaper::SharedFontData::Interned(font);
     EXPECT_EQ(again.bytes(), font);
     EXPECT_TRUE(wallpaper::SharedFontData::Interned({}).empty());
+}
+
+// A text atlas snapshot is published as it is, not copied: the image reads the snapshot's own
+// bytes and keeps them alive, and lets them go once a newer picture replaces it.
+TEST(RuntimeImageSourceTest, AnAtlasSnapshotIsPublishedWithoutACopy) {
+    wallpaper::RuntimeImageSource images(nullptr);
+    auto snapshot = std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>(64 * 32, 7));
+    const uint8_t* bytes = snapshot->data();
+    std::weak_ptr<const std::vector<uint8_t>> watch = snapshot;
+    images.SetImage("text_atlas", 64, 32, wallpaper::TextureFormat::R8, snapshot);
+    snapshot.reset();
+
+    auto image = images.Parse("text_atlas");
+    ASSERT_NE(image, nullptr);
+    ASSERT_FALSE(image->slots.empty());
+    EXPECT_EQ(image->slots[0].mipmaps[0].data.get(), bytes);
+    EXPECT_EQ(image->slots[0].mipmaps[0].size, 64 * 32);
+    EXPECT_FALSE(watch.expired());
+
+    images.SetImage("text_atlas", 1, 1, wallpaper::TextureFormat::R8,
+                    std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>(1, 0)));
+    image.reset();
+    EXPECT_TRUE(watch.expired());
 }
