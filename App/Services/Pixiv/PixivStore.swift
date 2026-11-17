@@ -108,13 +108,14 @@ final class PixivStore {
     var canResume: Bool { resumeLoad != nil }
 
     /// The panel closed: the query, page and selected work stay, but not the pages read for them
-    /// nor the selected work's page list; `loadIfNeeded()` reads them again on the next visit.
-    /// Prefetching stops with the panel.
+    /// nor the selected work's page list; `loadIfNeeded()` reads them again on the next visit. A
+    /// place an earlier close left stays until a visit reads it. Prefetching stops with the panel.
     func unload() {
         prefetchesNextPage = false
         onThumbnailsAvailable = nil
         let resume: (page: Int, query: PixivQuery)? =
-            isLoading ? lastLoad : committedQuery.map { (page: failedPage ?? page, query: $0) }
+            isLoading
+            ? lastLoad : committedQuery.map { (page: failedPage ?? page, query: $0) } ?? resumeLoad
         loadTask?.cancel()
         pagesTask?.cancel()
         generation = UUID()
@@ -132,10 +133,15 @@ final class PixivStore {
 
     /// A visit to the pixiv page: shows the listing `unload()` left at its page, with the selected
     /// work's pages, or asks for the query's first page, unless a listing is on show or loading.
+    /// The listing left is asked for as the account now allows, as `apply` would.
     func loadIfNeeded() {
         guard !hasLoaded, !isLoading else { return }
         if let selectedWork, selectedPages == nil { loadPages(of: selectedWork) }
-        if let resumeLoad { load(page: resumeLoad.page, of: resumeLoad.query) } else { apply(query) }
+        if let resumeLoad {
+            load(page: resumeLoad.page, of: resumeLoad.query.sanitized(signedIn: isSignedIn))
+        } else {
+            apply(query)
+        }
     }
 
     /// Resolves a work id against the page on show, the selection and the downloads, so a

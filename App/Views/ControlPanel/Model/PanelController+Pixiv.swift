@@ -79,11 +79,14 @@ extension PanelController {
   /// sanitizes it for the account: signed out, nothing R-18 is asked for. A repeat while one is
   /// pending should use `.latestWins`, so the newest query is the one on show.
   ///
-  /// Refused: a text of more than 256 characters, and a rating no box offers (R-18G).
+  /// Refused: a text of more than 256 characters, and a rating no box offers (R-18G). A search
+  /// whose typing pause ends after the window closed is dropped, so nothing reads a listing again
+  /// for a closed panel.
   func pixivSearch(_ query: PixivQuery, refresh: Bool = false) async throws {
     guard query.text.count <= 256, query.ratings.isSubset(of: PixivQuery.offeredRatings) else {
       throw InvalidControlValue()
     }
+    guard !isStopped else { return }
     try await run(.immediate) { pixiv.apply(query, refresh: refresh) }
   }
 

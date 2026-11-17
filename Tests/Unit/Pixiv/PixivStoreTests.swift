@@ -211,6 +211,30 @@ final class PixivStoreTests: XCTestCase {
         XCTAssertGreaterThan(transport.requests.count, asked, "pixiv is asked again")
     }
 
+    /// A second close before a visit keeps the place, and a listing the account no longer allows
+    /// is asked for as it now allows: signed out meanwhile, the R-18 ranking comes back all-ages.
+    func testASecondUnloadKeepsThePlaceAndASignOutMeanwhileResumesAllAges() async throws {
+        let transport = Self.member()
+        let store = store(transport)
+        store.signIn { PixivFixtures.session }
+        try await waitUntil { store.account != nil }
+        store.apply(PixivQuery(ranking: .weeklyR18, ratings: [.everyone, .mature]))
+        try await waitUntil { store.committedQuery?.ranking == .weeklyR18 && !store.isLoading }
+
+        store.unload()
+        store.unload()
+        XCTAssertTrue(store.canResume, "a second close keeps the place")
+        try store.signOut()
+        XCTAssertFalse(store.isLoading, "signing out of a closed panel reads nothing")
+
+        store.loadIfNeeded()
+        try await waitUntil { store.hasLoaded && !store.isLoading }
+        XCTAssertNil(store.errorMessage)
+        XCTAssertEqual(store.committedQuery?.ranking, .weekly)
+        XCTAssertEqual(mode(of: transport.requests.last), "weekly")
+        XCTAssertNil(transport.sessions.last ?? nil)
+    }
+
     func testSearchReportsPixivsPageCountAndRetriesAfterAFailure() async throws {
         let failing = LockedFlag()
         failing.value = true

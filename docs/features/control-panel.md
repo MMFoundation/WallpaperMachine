@@ -410,10 +410,13 @@ Closing the window lets go of what Discover and pixiv read for it
 (`WorkshopStore.unload()`, `PixivStore.unload()`) and of the decoded thumbnails
 (`PanelImagePipeline.releaseMemory()`); next-page prefetching stops with it. Each keeps
 its place: the search and filters, the page on show, the selected item, and for Discover
-the lists Back returns through with their pages, selections and scroll offsets. The next
-visit to the page reads the page on show again (`loadIfNeeded()`), and Back reads a list's
-page when it returns to it. The thumbnails' disk caches stay, so those reads come back
-without downloading the pictures again.
+the lists Back returns through with their pages, selections and scroll offsets, and where
+each page of screened collections starts among Steam's pages. The next visit to the page
+reads the page on show again (`loadIfNeeded()`), and Back reads a list's page when it returns
+to it; closing again before that visit keeps the same place. A resumed pixiv listing is asked
+for as the account now allows. A search whose typing pause ends after the window closed is
+dropped. The thumbnails' disk caches stay, so those reads come back without downloading the
+pictures again.
 
 ## Thumbnail corner marks
 

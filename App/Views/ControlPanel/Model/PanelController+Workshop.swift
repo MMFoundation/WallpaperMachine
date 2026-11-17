@@ -92,6 +92,8 @@ extension PanelController {
   ///
   /// `kind` is every type unless a caller narrows it; the panel narrows by tags alone. The limits
   /// are those the controls keep: 32 required and 64 excluded tags of at most 128 characters.
+  /// A search whose typing pause or translation ends after the window closed is dropped, so
+  /// nothing reads Steam again for a closed panel.
   func searchWorkshop(
     text: String, sort: WorkshopSort, tags: [String], excludedTags: [String],
     kind: WorkshopKind = .all
@@ -104,6 +106,7 @@ extension PanelController {
       if typed == workshop.declinedTranslationText { nil } else {
         await searchTranslation.translation(for: text)
       }
+    guard !isStopped else { return }
     try await run(.immediate) {
       workshop.searchText = text
       workshop.searchTranslation = translation

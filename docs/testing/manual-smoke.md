@@ -40,7 +40,10 @@ was run.
       each time, without quitting or crashing.
 - [ ] In Discover, search, go to page 3 and select a tile; open its author. Close the
       panel and reopen it: the author's list loads again, and Back returns to page 3 of
-      the search with the tile selected. Do the same on page 2 of a pixiv search.
+      the search with the tile selected. Close the panel again from Installed without
+      visiting Discover, reopen and visit it: still the author's list, Back still page 3.
+- [ ] In pixiv, search, go to page 2 and select a work. Close the panel and reopen it:
+      page 2 loads again with the work selected and its pages in the inspector.
 - [ ] On Installed, type a search, change the sort and direction, untick a type box
       and scroll down a long library, then close the panel and reopen it from the status
       menu: the search, sort, boxes and scroll position are as left. Quit and relaunch:

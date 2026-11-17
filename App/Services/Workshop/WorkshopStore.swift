@@ -1387,18 +1387,18 @@ final class WorkshopStore {
 
   /// The panel closed: the search, filters, selection, page and Back's lists stay, but not the
   /// pages read for them; `loadIfNeeded()` reads the page on show again on the next visit, and
-  /// Back reads its lists again at the page each was left on. Prefetching stops with the panel.
+  /// Back reads its lists again at the page each was left on. Where each panel page starts among
+  /// screened Steam pages stays too, so a page read again holds what it held. A place an earlier
+  /// close left stays until a visit reads it. Prefetching stops with the panel.
   func unload() {
     prefetchesNextPage = false
     onPreviewsAvailable = nil
     let resume = isLoading
-      ? lastRequest : committedQuery.map { WorkshopRequest(query: $0, page: page) } ?? failedRequest
+      ? lastRequest
+      : committedQuery.map { WorkshopRequest(query: $0, page: page) } ?? failedRequest ?? resumeRequest
     cancelSearch()
-    cache = PageCache()
-    for index in history.indices {
-      let query = history[index].query
-      history[index].kept?.cache = PageCache(query: query)
-    }
+    cache.dropPages()
+    for index in history.indices { history[index].kept?.cache.dropPages() }
     clearResults()
     failedRequest = nil
     errorMessage = nil
@@ -1437,6 +1437,12 @@ private struct PageCache {
   var pageStarts: [Int: SteamPosition] = [1: .start]
   /// How many collections each filled panel page showed, for the count once the last is reached.
   var pageCounts: [Int: Int] = [:]
+
+  /// Lets go of the pages read, keeping the query and where each panel page starts.
+  mutating func dropPages() {
+    steamPages = [:]
+    screenedPages = [:]
+  }
 }
 
 /// A list Discover showed, kept so Back can show it again as it was left.
