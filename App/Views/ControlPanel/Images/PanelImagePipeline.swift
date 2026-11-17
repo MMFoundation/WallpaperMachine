@@ -76,6 +76,8 @@ final class PanelImagePipeline {
   /// Covers that could not be made, by source: they show the downsampled preview instead and
   /// are not asked for again until their stamp, and so their key, changes.
   private var brokenCovers = Set<String>()
+  /// Moves on with each `releaseMemory()`, so a decode that began before it is not kept after it.
+  private var memoryGeneration = 0
 
   init(
     thumbnailCache: WorkshopThumbnailCache = WorkshopThumbnailCache(),
@@ -99,6 +101,13 @@ final class PanelImagePipeline {
     memory.totalCostLimit = Self.memoryLimit
   }
 
+  /// Lets go of every decoded still, for a panel that closed; the disk caches stay. A decode still
+  /// on its way returns its still to the caller but leaves the emptied cache as it is.
+  func releaseMemory() {
+    memoryGeneration += 1
+    memory.removeAllObjects()
+  }
+
   /// The decoded still for `source` if it is already in memory, for a view that wants to show it
   /// in its first frame instead of a placeholder.
   func cachedImage(for source: PanelImageSource, maxPixelSize: Int) -> DecodedPanelImage? {
@@ -110,13 +119,14 @@ final class PanelImagePipeline {
   func image(for source: PanelImageSource, maxPixelSize: Int) async throws -> DecodedPanelImage {
     let key = Self.memoryKey(source, maxPixelSize) as NSString
     if let cached = memory.object(forKey: key) { return cached }
+    let generation = memoryGeneration
     let data = try await stillData(for: source)
     try Task.checkCancellation()
     let image = try await Task.detached(priority: .userInitiated) {
       try Self.downsample(data, maxPixelSize: maxPixelSize)
     }.value
     try Task.checkCancellation()
-    memory.setObject(image, forKey: key, cost: image.cost)
+    if generation == memoryGeneration { memory.setObject(image, forKey: key, cost: image.cost) }
     return image
   }
 

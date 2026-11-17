@@ -111,10 +111,14 @@ belong to the `AppUpdateCoordinator` it owns (`App/Services/GitHub/`).
   Bring All to Front and the window list) and **Help** (the website's guides in the app's
   language, then the repository, its releases and its issue list, through `ExternalLink`). What the navigation actions do is owned by
   [playlists](features/playlists.md) and [automation](features/automation.md).
-- **Closing the panel.** `windowWillClose` drops the window's hosting controller, which releases
-  the SwiftUI root and its `PanelController`; reopening builds a fresh view around the existing
-  stores and navigation, which also keeps Installed's filters and the grids' scroll offsets in
-  memory ([control panel](features/control-panel.md#reopening-the-panel)).
+- **Closing the panel.** `windowWillClose` hands the window to `ControlPanelWindow.tearDown`, which
+  takes the bridged toolbar off before dropping the hosting controller: a SwiftUI toolbar item left
+  on a closed window keeps its observers, and with them its environment and the `PanelController`.
+  That releases the SwiftUI root and its `PanelController`; reopening builds a fresh view around the
+  existing stores and navigation, which also keeps Installed's filters and the grids' scroll offsets
+  in memory. `PanelController.stop()` empties the Workshop and pixiv results and the decoded
+  thumbnails, keeping only where each page was, which the next visit reads again ([control
+  panel](features/control-panel.md#reopening-the-panel)).
 - **Shutdown.** `applicationShouldTerminate` returns `.terminateLater` and hands an ordered
   asynchronous teardown to `QuitSupervisor`: lock-screen and desktop-poster restoration first,
   then the services, import, update, SteamCMD, Workshop and pixiv work, and the renderer bridge
@@ -177,7 +181,7 @@ It has no web view, and renderer content is never drawn into it. Coding rules fo
 | Piece | Responsibility |
 |---|---|
 | `ControlPanelView.swift` | The root `AppDelegate` builds (six store arguments; `defaults`, `appLanguage` and `searchTranslation` are test seams). Creates the window's `PanelController` in `@State`, starts it on appear and stops it on disappear, reports its window to `PanelPresentation`, and sets the image pipeline in the environment. Also declares `ControlPanelNavigation` (selection, target display, Settings section and reveal token, the last `PanelViewState`), shared with native menu commands, the status item and links |
-| `ControlPanelWindow.swift` | Builds the window, owns its 760×560 size floor, `moveToActiveSpace` and `bringForward` |
+| `ControlPanelWindow.swift` | Builds the window, owns its 760×560 size floor, `moveToActiveSpace`, `bringForward` and `tearDown` (the toolbar off before the content when it closes) |
 | `BridgeUnavailableView.swift` | What the window shows instead of the panel when the bridge or the library could not start, with **Use This Mac Instead…** when the library's drive is missing |
 | `PanelViewState.swift` | Installed's filters and the grids' scroll offsets as a `Codable` value, kept in memory on `ControlPanelNavigation` for the next window; `normalized()` applies the limits |
 | `Model/` | `PanelController` and its `PanelController+<Group>.swift` extensions (typed actions and derived state), `PanelPresentation`, `PanelStoreRevisions`, `PanelErrorState`, `PanelActionCoordinator`, `PanelDialogs`, `ExternalLink`, `TransferFormat`, `DisplayOptionsLoader`, `DragStepPump`, and the typed values several areas read (`LibraryRow`, `UpdatePresentation`, `TileDownloadState`, ...) |

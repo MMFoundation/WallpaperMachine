@@ -442,6 +442,11 @@ final class PanelController {
     errorLoop?.stop()
     stopInspectorContextObservation()
     workshop.updates.selectDetails(nil)
+    // What the panel read lives only as long as the panel: the stores keep where it was, and a
+    // later visit reads the page on show again.
+    workshop.unload()
+    pixiv.unload()
+    images.releaseMemory()
     presentation.onBecameKey = nil
     presentation.onClose = nil
   }

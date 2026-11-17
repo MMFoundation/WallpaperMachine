@@ -7,7 +7,8 @@ extension PanelController {
 
   /// Shows `selection`. A page opened for the first time starts its own first load, as every route
   /// to it (the tabs, a menu command, a link) always did: Discover searches and pixiv asks for
-  /// its default list, unless one is already loaded or loading.
+  /// its default list, unless one is already loaded or loading. After the window closed, each
+  /// reads again the page it was left on instead.
   ///
   /// An `E` action: it leaves an older banner showing. A view that fires it for every click starts
   /// it with `.latestWins` under `PanelActionCoordinator.key("navigate")`, so the newest page wins.
@@ -16,9 +17,9 @@ extension PanelController {
       navigation.selection = selection
       switch selection {
       case .workshop:
-        if !workshop.hasLoaded && !workshop.isLoading { workshop.search() }
+        workshop.loadIfNeeded()
       case .pixiv:
-        if !pixiv.hasLoaded && !pixiv.isLoading { pixiv.apply(pixiv.query) }
+        pixiv.loadIfNeeded()
       case .wallpaper, .settings:
         break
       }

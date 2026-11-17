@@ -206,6 +206,13 @@ final class PixivBrowserModel {
     guard !pixiv.hasLoaded, !pixiv.isLoading, pixiv.errorMessage == nil,
       !controller.isBusy("pixivSearch")
     else { return nil }
+    // A listing the closed panel left comes back at its page, as the shell's navigation brings it.
+    if pixiv.canResume {
+      return controller.launch(PanelActionCoordinator.key("navigate"), policy: .latestWins) {
+        [controller] in
+        try await controller.navigate(.pixiv)
+      }
+    }
     return commit()
   }
 

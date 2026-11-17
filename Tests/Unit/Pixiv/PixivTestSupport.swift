@@ -83,9 +83,11 @@ struct PixivHeldTransport: PixivTransport {
     let fixture: PixivFixtureTransport
     var originals: PixivGate?
     var listings: PixivGate?
+    var accounts: PixivGate?
 
     func data(from url: URL, session: String?) async throws -> Data {
         if url.path == "/ranking.php" || url.path.hasPrefix("/ajax/search/") { try await listings?.pass() }
+        if url.path == "/touch/ajax/user/self/status" { try await accounts?.pass() }
         return try await fixture.data(from: url, session: session)
     }
 

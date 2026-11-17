@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-17 — Panel close releases Discover and pixiv results
+
+- `python3 scripts/test.py --only WorkshopSourceTests --only PixivStoreTests`: 75 passed, including the two new unload/resume tests.
+- `python3 scripts/test.py` (Xcode 26.6, macOS 26.6.2): 5113 passed, 2 failed, 72 skipped. The two failures, `DesktopWidgetTests/testADateCanBeWrittenInAnotherCalendarInThatCalendarsOwnWords` ("九月30" for "九月三十") and `WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem`, fail the same way on `main` without this change.
+- Debug build by hand: Discover searched and paged a few pages, then the window closed. Footprint 213 MB open, 108 MB closed; `heap` showed 111 `DecodedPanelImage` open and none closed, no `WorkshopItem` arrays or `WorkshopPage` caches closed.
+- Before the change, the release app after several close/reopen cycles kept 502 `DecodedPanelImage` (187 MB of CG raster data) and six `PanelController`s after the window closed.
+- Each closed window left its `PanelController` behind: `leaks --traceTree` rooted it in the toolbar `Menu` (`AppKitPopUpAdaptor`) host, held by an `NSView` notification block. `ControlPanelWindow.tearDown` now takes the toolbar off before the content; a scripted run of ten identical open, page and close cycles went from one more controller and about 1 MB of live heap per close to none left after any close.
+- Not checked: reopening on pixiv and Back after reopening by hand (covered by the unit tests); `check_renderer.py` (no renderer change).
+
 ## 2026-11-17 — Resume SteamCMD Workshop downloads after native timeouts
 
 - Replayed issue #228 output with a scripted SteamCMD on a real PTY; the new regression failed before the fix with the misleading ownership/Steam Guard error.
@@ -117,11 +126,3 @@ Documented the release package, named settings and extraSettings, and Home Manag
 - Focused service, acquire-reply/policy, presentation authority, registry and panel suites: 128 passed, 0 failed, 0 skipped.
 - python3 scripts/test.py: all Python modules passed; 5098 native tests passed, 0 failed, 70 opt-in tests skipped; three main-thread runtime warnings were reported.
 - Heavy verification was serialized through the Review PR Captain. No Rust/C++ changes; their gates were not rerun. Callback/policy tests model inactive start counts, not real CAContext delivery or energy use. Live desktop/visual behavior remains unverified; no Release build, install or desktop action.
-
-## 2026-11-16 — Independent native wallpaper source failure isolation (#193)
-
-- Export errors are isolated to the affected native mode; the healthy mode retains its system selection, automatic refreshes and sleeping-display mapping. The unavailable saved choice and error remain visible until it can recover.
-- Both new service regressions failed before the fix, reproducing an unavailable lock source disabling a healthy saver and the inverse.
-- python3 scripts/test.py --only LockScreenWallpaperServiceTests: 85 passed, 0 failed, 0 skipped, including startup, deletion, refresh, sleep and Retry recovery for both independent modes.
-- python3 scripts/test.py: all Python modules passed; 5090 native tests passed, 0 failed, 70 opt-in tests skipped. Two runtime warnings were reported.
-- Swift service and tests only; renderer and bridge unchanged from their passing checks. Live desktop transitions remain unverified; no Release build or installation.

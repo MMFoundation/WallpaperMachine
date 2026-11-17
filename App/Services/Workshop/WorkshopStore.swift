@@ -838,6 +838,10 @@ final class WorkshopStore {
   /// by Steam's page number. A search always starts a fresh cache, even for the same query.
   @ObservationIgnored private var cache = PageCache()
   @ObservationIgnored private var cacheID = UUID()
+  /// The page asked for last, so `unload()` knows what a load still on its way was for.
+  @ObservationIgnored private var lastRequest: WorkshopRequest?
+  /// What `unload()` left: the page the list was on, read again by `loadIfNeeded()`.
+  @ObservationIgnored private var resumeRequest: WorkshopRequest?
   @ObservationIgnored private var steamFetches: [WorkshopRequest: Task<WorkshopPage, Error>] = [:]
   @ObservationIgnored private var screenedFetches: [Int: Task<WorkshopPage, Error>] = [:]
   /// How many Steam pages a panel page may read before it is shown with what it found, so a
@@ -1333,6 +1337,8 @@ final class WorkshopStore {
   }
 
   private func load(_ request: WorkshopRequest) {
+    lastRequest = request
+    resumeRequest = nil
     searchTask?.cancel()
     // A cache built for another query holds nothing this one can use.
     if cache.query != request.query { resetCache(for: request.query) }
@@ -1379,6 +1385,33 @@ final class WorkshopStore {
     isLoading = false
   }
 
+  /// The panel closed: the search, filters, selection, page and Back's lists stay, but not the
+  /// pages read for them; `loadIfNeeded()` reads the page on show again on the next visit, and
+  /// Back reads its lists again at the page each was left on. Where each panel page starts among
+  /// screened Steam pages stays too, so a page read again holds what it held. A place an earlier
+  /// close left stays until a visit reads it. Prefetching stops with the panel.
+  func unload() {
+    prefetchesNextPage = false
+    onPreviewsAvailable = nil
+    let resume = isLoading
+      ? lastRequest
+      : committedQuery.map { WorkshopRequest(query: $0, page: page) } ?? failedRequest ?? resumeRequest
+    cancelSearch()
+    cache.dropPages()
+    for index in history.indices { history[index].kept?.cache.dropPages() }
+    clearResults()
+    failedRequest = nil
+    errorMessage = nil
+    resumeRequest = resume
+  }
+
+  /// A visit to Discover: shows the list `unload()` left at its page, or starts the first search,
+  /// unless a list is already on show or loading.
+  func loadIfNeeded() {
+    guard !hasLoaded, !isLoading else { return }
+    if let resumeRequest { load(resumeRequest) } else { search() }
+  }
+
 }
 
 /// A place among Steam's screened pages: the page, and how many of the tiles it kept come before.
@@ -1404,6 +1437,12 @@ private struct PageCache {
   var pageStarts: [Int: SteamPosition] = [1: .start]
   /// How many collections each filled panel page showed, for the count once the last is reached.
   var pageCounts: [Int: Int] = [:]
+
+  /// Lets go of the pages read, keeping the query and where each panel page starts.
+  mutating func dropPages() {
+    steamPages = [:]
+    screenedPages = [:]
+  }
 }
 
 /// A list Discover showed, kept so Back can show it again as it was left.
