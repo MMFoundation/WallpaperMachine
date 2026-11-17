@@ -412,6 +412,53 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(fixture.browsePagesRequested, browseReads + [1], "Refresh reads the list afresh")
   }
 
+  /// A closed panel keeps where Discover was, not the pages it read: the next visit reads the page
+  /// on show again, and Back still returns to the list it left, at its page and selection.
+  func testUnloadKeepsThePlaceAndTheNextVisitReadsItAgain() async throws {
+    let store = fixture.store
+    for page in 1...3 {
+      let rows = (0..<3).map { wallpaperRow(String(page * 100 + $0), tags: ["Scene", "Everyone"]) }
+      fixture.browsePages[page] = browseHTML(rows: rows, page: page, pages: 3, count: 9)
+    }
+    fixture.profiles[Self.author] = profileHTML(ids: ["900"], name: "Fixture Author", total: "1")
+    fixture.details = ["900": detailsRow("900", tags: ["Scene", "Everyone"])]
+
+    store.searchText = "night"
+    store.search()
+    try await finished(store)
+    store.loadPage(2)
+    try await finished(store)
+    let left = store.items
+    store.selectedItem = left[1]
+    let shown = store.committedQuery
+    store.open(.creator(id: Self.author, name: "Fixture Author"), leavingAt: 640)
+    try await finished(store)
+    let author = store.committedQuery
+
+    store.prefetchesNextPage = true
+    store.onPreviewsAvailable = { _ in }
+    store.unload()
+    XCTAssertTrue(store.items.isEmpty)
+    XCTAssertFalse(store.hasLoaded)
+    XCTAssertFalse(store.prefetchesNextPage, "prefetching stops with the panel")
+    XCTAssertNil(store.onPreviewsAvailable)
+    XCTAssertEqual(store.sourceHistory, [.browse])
+    let reads = fixture.browsePagesRequested
+
+    store.loadIfNeeded()
+    try await finished(store)
+    XCTAssertEqual(store.committedQuery, author, "the list on show comes back")
+    XCTAssertEqual(store.items.map(\.id), ["900"])
+
+    XCTAssertEqual(store.back(), 640)
+    try await finished(store)
+    XCTAssertEqual(store.committedQuery, shown)
+    XCTAssertEqual(store.page, 2)
+    XCTAssertEqual(store.items, left)
+    XCTAssertEqual(store.selectedItem, left[1])
+    XCTAssertEqual(fixture.browsePagesRequested, reads + [2], "Back reads its page again, and only it")
+  }
+
   /// Steam lists nearly every source differently for each account, so signing in or out lets go of
   /// the pages Back keeps: Back still returns to the list, and reads it again as the account now
   /// signed in (or anyone) sees it, from its first page.

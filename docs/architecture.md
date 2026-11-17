@@ -114,7 +114,9 @@ belong to the `AppUpdateCoordinator` it owns (`App/Services/GitHub/`).
 - **Closing the panel.** `windowWillClose` drops the window's hosting controller, which releases
   the SwiftUI root and its `PanelController`; reopening builds a fresh view around the existing
   stores and navigation, which also keeps Installed's filters and the grids' scroll offsets in
-  memory ([control panel](features/control-panel.md#reopening-the-panel)).
+  memory. `PanelController.stop()` empties the Workshop and pixiv results and the decoded
+  thumbnails, keeping only where each page was, which the next visit reads again
+  ([control panel](features/control-panel.md#reopening-the-panel)).
 - **Shutdown.** `applicationShouldTerminate` returns `.terminateLater` and hands an ordered
   asynchronous teardown to `QuitSupervisor`: lock-screen and desktop-poster restoration first,
   then the services, import, update, SteamCMD, Workshop and pixiv work, and the renderer bridge

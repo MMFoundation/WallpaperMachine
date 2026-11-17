@@ -59,6 +59,10 @@ final class PixivStore {
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var failedPage: Int?
+    /// The page asked for last, so `unload()` knows what a load still on its way was for.
+    @ObservationIgnored private var lastLoad: (page: Int, query: PixivQuery)?
+    /// What `unload()` left: the page the listing was on, read again by `loadIfNeeded()`.
+    @ObservationIgnored private var resumeLoad: (page: Int, query: PixivQuery)?
     @ObservationIgnored private var pageLists: [String: [PixivPage]] = [:]
     @ObservationIgnored private var pageListOrder: [String] = []
     @ObservationIgnored private var pagesTask: Task<Void, Never>?
@@ -98,6 +102,40 @@ final class PixivStore {
 
     func retry() {
         load(page: failedPage ?? page, of: committedQuery ?? query)
+    }
+
+    /// Whether `loadIfNeeded()` would show a listing `unload()` left rather than start afresh.
+    var canResume: Bool { resumeLoad != nil }
+
+    /// The panel closed: the query, page and selected work stay, but not the pages read for them
+    /// nor the selected work's page list; `loadIfNeeded()` reads them again on the next visit.
+    /// Prefetching stops with the panel.
+    func unload() {
+        prefetchesNextPage = false
+        onThumbnailsAvailable = nil
+        let resume: (page: Int, query: PixivQuery)? =
+            isLoading ? lastLoad : committedQuery.map { (page: failedPage ?? page, query: $0) }
+        loadTask?.cancel()
+        pagesTask?.cancel()
+        generation = UUID()
+        isLoading = false
+        resetCache(for: query.listing)
+        pageLists = [:]
+        pageListOrder = []
+        selectedPages = nil
+        clearResults()
+        committedQuery = nil
+        errorMessage = nil
+        failedPage = nil
+        resumeLoad = resume
+    }
+
+    /// A visit to the pixiv page: shows the listing `unload()` left at its page, with the selected
+    /// work's pages, or asks for the query's first page, unless a listing is on show or loading.
+    func loadIfNeeded() {
+        guard !hasLoaded, !isLoading else { return }
+        if let selectedWork, selectedPages == nil { loadPages(of: selectedWork) }
+        if let resumeLoad { load(page: resumeLoad.page, of: resumeLoad.query) } else { apply(query) }
     }
 
     /// Resolves a work id against the page on show, the selection and the downloads, so a
@@ -336,6 +374,8 @@ final class PixivStore {
     }
 
     private func load(page number: Int, of query: PixivQuery) {
+        lastLoad = (page: number, query: query)
+        resumeLoad = nil
         loadTask?.cancel()
         if cacheListing != query.listing { resetCache(for: query.listing) }
         if committedQuery != query { clearResults() }

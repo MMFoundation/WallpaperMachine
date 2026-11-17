@@ -1708,7 +1708,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Discover, which lists the downloads; a first visit starts its search, as the link to it does.
     func showDiscover() {
-        if !workshopStore.hasLoaded && !workshopStore.isLoading { workshopStore.search() }
+        workshopStore.loadIfNeeded()
         showControlPanel(selection: .workshop)
     }
 
@@ -1971,7 +1971,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             case .discover?:
                 showDiscover()
             case .pixiv?:
-                if !pixivStore.hasLoaded && !pixivStore.isLoading { pixivStore.apply(pixivStore.query) }
+                pixivStore.loadIfNeeded()
                 showControlPanel(selection: .pixiv)
             case .settings?:
                 showControlPanel(selection: .settings)

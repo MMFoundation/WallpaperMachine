@@ -169,6 +169,48 @@ final class PixivStoreTests: XCTestCase {
         XCTAssertEqual(pages, ["1", "2", "3"], "each page is asked for once, the next one ahead of time")
     }
 
+    /// A closed panel keeps the query, the page and the selected work, not the pages read for them:
+    /// the next visit asks pixiv again for the page on show and the selected work's pages.
+    func testUnloadKeepsThePlaceAndTheNextVisitReadsItAgain() async throws {
+        let transport = PixivFixtureTransport { url in
+            if url.path.hasSuffix("/pages") { return PixivFixtures.pages(workID: 61, count: 2) }
+            let page = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name == "p" }?.value.flatMap(Int.init) ?? 1
+            return PixivFixtures.search(
+                (1...60).map { PixivFixtures.searchEntry(Work(id: (page - 1) * 60 + $0)) },
+                total: 180, lastPage: 3)
+        }
+        let store = store(transport)
+        store.prefetchesNextPage = true
+        store.onThumbnailsAvailable = { _ in }
+        store.apply(PixivQuery(text: "sky"))
+        try await waitUntil { store.hasLoaded }
+        store.loadPage(2)
+        try await waitUntil { store.page == 2 && !store.isLoading }
+        let shown = store.works
+        store.select(try XCTUnwrap(store.work(id: "61")))
+        try await waitUntil { store.selectedPages != nil }
+
+        store.unload()
+        XCTAssertTrue(store.works.isEmpty)
+        XCTAssertFalse(store.hasLoaded)
+        XCTAssertNil(store.selectedPages)
+        XCTAssertFalse(store.prefetchesNextPage, "prefetching stops with the panel")
+        XCTAssertNil(store.onThumbnailsAvailable)
+        XCTAssertTrue(store.canResume)
+        XCTAssertEqual(store.query, PixivQuery(text: "sky"))
+        XCTAssertEqual(store.selectedWork?.id, "61")
+        let asked = transport.requests.count
+
+        store.loadIfNeeded()
+        try await waitUntil { store.hasLoaded && store.selectedPages != nil }
+        XCTAssertEqual(store.page, 2, "the page on show comes back")
+        XCTAssertEqual(store.works, shown)
+        XCTAssertEqual(store.selectedPageList?.count, 2)
+        XCTAssertFalse(store.canResume)
+        XCTAssertGreaterThan(transport.requests.count, asked, "pixiv is asked again")
+    }
+
     func testSearchReportsPixivsPageCountAndRetriesAfterAFailure() async throws {
         let failing = LockedFlag()
         failing.value = true

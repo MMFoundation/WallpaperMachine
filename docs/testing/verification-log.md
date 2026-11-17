@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-17 — Panel close releases Discover and pixiv results
+
+- `python3 scripts/test.py --only WorkshopSourceTests --only PixivStoreTests`: 75 passed, including the two new unload/resume tests.
+- `python3 scripts/test.py` (Xcode 26.6, macOS 26.6.2): 5113 passed, 2 failed, 72 skipped. The two failures, `DesktopWidgetTests/testADateCanBeWrittenInAnotherCalendarInThatCalendarsOwnWords` ("九月30" for "九月三十") and `WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem`, fail the same way on `main` without this change.
+- Debug build by hand: Discover searched and paged a few pages, then the window closed. Footprint 213 MB open, 108 MB closed; `heap` showed 111 `DecodedPanelImage` open and none closed, no `WorkshopItem` arrays or `WorkshopPage` caches closed.
+- Before the change, the release app after several close/reopen cycles kept 502 `DecodedPanelImage` (187 MB of CG raster data) and six `PanelController`s after the window closed.
+- Each closed window still leaves its `PanelController` behind: `leaks --traceTree` roots it in the toolbar `Menu` (`AppKitPopUpAdaptor`) host, held by an `NSView` notification block. Not fixed here; `stop()` now empties what it holds.
+- Not checked: reopening on pixiv and Back after reopening by hand (covered by the unit tests); `check_renderer.py` (no renderer change).
+
 ## 2026-11-16 — Nix release pin and login-path integration
 
 - Nix regression against the original Home Manager module: expected failure; the corrected module passes.
@@ -116,14 +125,3 @@ Documented the release package, named settings and extraSettings, and Home Manag
 - python3 scripts/test.py --only LockScreenWallpaperServiceTests: 85 passed, 0 failed, 0 skipped, including startup, deletion, refresh, sleep and Retry recovery for both independent modes.
 - python3 scripts/test.py: all Python modules passed; 5090 native tests passed, 0 failed, 70 opt-in tests skipped. Two runtime warnings were reported.
 - Swift service and tests only; renderer and bridge unchanged from their passing checks. Live desktop transitions remain unverified; no Release build or installation.
-
-## 2026-11-16 — Independent lock-screen and screen-saver wallpapers (#193)
-
-- Added independent saved library choices with Same as desktop defaults, source-aware extension playback, and read-only native exports without changing desktop assignments.
-- Focused bridge tests: 8 new independent-export cases and 18 existing activation/export cases passed; python3 scripts/build.py --renderer-only passed and regenerated bindings.
-- Focused native settings/service checks: 114 passed; subsequent legacy-manifest, content-selection, diagnostics and GPU-energy checks: 109 passed.
-- python3 scripts/test.py: final full gate passed, 5088 native tests passed, 0 failed, 70 opt-in tests skipped; all Python modules passed.
-- The first full gate found a legacy-manifest compatibility regression (fixed with version-2 decoding) and a GPU-energy threshold failure; the unchanged energy test passed in isolation and in the final full gate without the renderer suite running concurrently.
-- python3 scripts/check_rust.py --output artifacts/issue-193/rust: all four groups passed; five desktop-window cases excluded, desktop/media/network opt-ins disabled.
-- python3 scripts/check_renderer.py: passed, 12 generated pooled/isolated comparisons matched, reload cycles passed; seven local-asset cases across five binaries skipped.
-- Live desktop/lock/idle transitions, screenshots and UI automation were not authorized and remain unverified. No Release app build, install, commit or push.

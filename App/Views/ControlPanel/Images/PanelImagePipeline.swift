@@ -99,6 +99,11 @@ final class PanelImagePipeline {
     memory.totalCostLimit = Self.memoryLimit
   }
 
+  /// Lets go of every decoded still, for a panel that closed; the disk caches stay.
+  func releaseMemory() {
+    memory.removeAllObjects()
+  }
+
   /// The decoded still for `source` if it is already in memory, for a view that wants to show it
   /// in its first frame instead of a placeholder.
   func cachedImage(for source: PanelImageSource, maxPixelSize: Int) -> DecodedPanelImage? {

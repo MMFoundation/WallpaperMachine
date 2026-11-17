@@ -838,6 +838,10 @@ final class WorkshopStore {
   /// by Steam's page number. A search always starts a fresh cache, even for the same query.
   @ObservationIgnored private var cache = PageCache()
   @ObservationIgnored private var cacheID = UUID()
+  /// The page asked for last, so `unload()` knows what a load still on its way was for.
+  @ObservationIgnored private var lastRequest: WorkshopRequest?
+  /// What `unload()` left: the page the list was on, read again by `loadIfNeeded()`.
+  @ObservationIgnored private var resumeRequest: WorkshopRequest?
   @ObservationIgnored private var steamFetches: [WorkshopRequest: Task<WorkshopPage, Error>] = [:]
   @ObservationIgnored private var screenedFetches: [Int: Task<WorkshopPage, Error>] = [:]
   /// How many Steam pages a panel page may read before it is shown with what it found, so a
@@ -1333,6 +1337,8 @@ final class WorkshopStore {
   }
 
   private func load(_ request: WorkshopRequest) {
+    lastRequest = request
+    resumeRequest = nil
     searchTask?.cancel()
     // A cache built for another query holds nothing this one can use.
     if cache.query != request.query { resetCache(for: request.query) }
@@ -1377,6 +1383,33 @@ final class WorkshopStore {
     resetCache(for: nil)
     generation = UUID()
     isLoading = false
+  }
+
+  /// The panel closed: the search, filters, selection, page and Back's lists stay, but not the
+  /// pages read for them; `loadIfNeeded()` reads the page on show again on the next visit, and
+  /// Back reads its lists again at the page each was left on. Prefetching stops with the panel.
+  func unload() {
+    prefetchesNextPage = false
+    onPreviewsAvailable = nil
+    let resume = isLoading
+      ? lastRequest : committedQuery.map { WorkshopRequest(query: $0, page: page) } ?? failedRequest
+    cancelSearch()
+    cache = PageCache()
+    for index in history.indices {
+      let query = history[index].query
+      history[index].kept?.cache = PageCache(query: query)
+    }
+    clearResults()
+    failedRequest = nil
+    errorMessage = nil
+    resumeRequest = resume
+  }
+
+  /// A visit to Discover: shows the list `unload()` left at its page, or starts the first search,
+  /// unless a list is already on show or loading.
+  func loadIfNeeded() {
+    guard !hasLoaded, !isLoading else { return }
+    if let resumeRequest { load(resumeRequest) } else { search() }
   }
 
 }
