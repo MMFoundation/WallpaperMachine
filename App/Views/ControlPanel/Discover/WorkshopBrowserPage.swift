@@ -58,8 +58,8 @@ struct WorkshopBrowserPage: View {
 // MARK: - Grid
 
 /// The tiles: a lazy grid that fills the width, at least three to a row. It keeps its place across a
-/// closed window, goes back to the top when another list or page opens, and tells the previews which
-/// tiles are on screen.
+/// closed window, goes back to the top when another list or page opens and to where a list was left
+/// when Back brings it back, and tells the previews which tiles are on screen.
 private struct WorkshopGrid: View {
   let items: [WorkshopItem]
   let isLoading: Bool
@@ -91,7 +91,7 @@ private struct WorkshopGrid: View {
       topInset = metric.inset
       model.scrolled(to: metric.offset)
     }
-    .onChange(of: model.scrollEpoch) { position.scrollTo(edge: .top) }
+    .onChange(of: model.scrollEpoch) { move(to: model.takeScrollTarget() ?? 0) }
     .onChange(of: tiles, initial: true) {
       let pixels = max(16, Int((WorkshopTileCell.pointSize * displayScale).rounded(.up)))
       model.previews.pageChanged(tiles, stillPixels: pixels)
@@ -125,10 +125,17 @@ private struct WorkshopGrid: View {
     }
   }
 
-  /// The grid returns to where the last window left it, once.
+  /// A grid made after the latest move, which it never heard, goes where that move went; the first
+  /// grid of a window otherwise returns to where the last window left it.
   private func restoreScroll(_ model: WorkshopBrowserModel) {
-    guard let stored = model.takeRestoredScroll(), stored > 0 else { return }
-    position.scrollTo(y: stored - topInset)
+    let target = model.takeScrollTarget()
+    let restored = model.takeRestoredScroll()
+    guard let offset = target ?? restored else { return }
+    move(to: offset)
+  }
+
+  private func move(to offset: Double) {
+    if offset > 0 { position.scrollTo(y: offset - topInset) } else { position.scrollTo(edge: .top) }
   }
 }
 

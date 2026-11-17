@@ -6,9 +6,10 @@ import Observation
 ///
 /// Steam does the searching, sorting and filtering, and `WorkshopStore` keeps what was last asked
 /// for, so a reopened panel shows it again. What lives here is the *draft*: what the controls hold
-/// before a search commits it. It is seeded from the store once, when the model is made, and never
-/// reseeded, so a result arriving cannot overwrite what the person is typing. Only a search commits
-/// it; typing alone does not search except by the rules of `WorkshopSearchTrigger`.
+/// before a search commits it. It is seeded from the store when the model is made, and again only
+/// by Back, which brings a list back with the search it was shown with, so a result arriving cannot
+/// overwrite what the person is typing. Only a search commits it; typing alone does not search
+/// except by the rules of `WorkshopSearchTrigger`.
 ///
 /// Every control starts its action through `controller.launch` under a key, so it can disable itself
 /// while the action is pending. A search, a page and a list use `.latestWins`: the newest value is the
@@ -31,9 +32,12 @@ final class WorkshopBrowserModel {
   var foldedFilterGroups: Set<String> = []
   /// What the jump field holds: the page on show until the person types another.
   var pageText = "1"
-  /// Bumped whenever the grid should go back to the top: another list, an author, a collection,
-  /// Back, another page.
+  /// Bumped whenever the grid should move: to the top for another list, an author, a collection or
+  /// another page, and back to where it was for Back.
   private(set) var scrollEpoch = 0
+  /// Where the latest move goes, in points from the grid's top, until a grid takes it: the one on
+  /// screen as it lands, or else the next one made (Back from a list that had no tiles).
+  @ObservationIgnored private var scrollTarget: Double?
   /// Loads the stills and the animations of the tiles.
   let previews: WorkshopPreviewCoordinator
 
@@ -65,7 +69,10 @@ final class WorkshopBrowserModel {
   @ObservationIgnored var openURL: (@MainActor (URL) -> Bool)?
   @ObservationIgnored private var pendingSearch: Task<Void, Never>?
   @ObservationIgnored private var scrollReport: Task<Void, Never>?
-  @ObservationIgnored private var lastScrollOffset: Double?
+  /// Where the grid was last seen, in points from its top: what an author or a collection opened
+  /// from it leaves for Back to return to.
+  @ObservationIgnored private(set) var scrollOffset: Double = 0
+  @ObservationIgnored private var hasUnreportedScroll = false
   /// The grid's offset was restored from the last window, once.
   @ObservationIgnored private(set) var restoredScroll = false
   /// Whether this launch has read the signed-in account's subscriptions for the tiles' marks,
@@ -239,29 +246,43 @@ final class WorkshopBrowserModel {
     }
   }
 
-  /// **More by this author**: the author's wallpapers, with Back returning here. Needs an author
-  /// whose SteamID is known.
+  /// **More by this author**: the author's wallpapers, with Back returning here as it was left.
+  /// Needs an author whose SteamID is known.
   func openAuthor(of item: WorkshopItem) {
     guard let id = item.authorProfileID else { return }
+    let offset = scrollOffset
     scrollToTop()
     controller.launch(PanelActionCoordinator.key("workshopCreator", id: id)) { [controller] in
-      try await controller.openWorkshopAuthor(id: id, name: item.creator)
+      try await controller.openWorkshopAuthor(id: id, name: item.creator, leavingAt: offset)
     }
   }
 
-  /// Opens a collection's wallpapers. A collection is a list, never a download.
+  /// Opens a collection's wallpapers, with Back returning here as it was left. A collection is a
+  /// list, never a download.
   func openCollection(_ item: WorkshopItem) {
+    let offset = scrollOffset
     scrollToTop()
     controller.launch(PanelActionCoordinator.key("workshopCollection", id: item.id)) {
       [controller] in
-      try await controller.openWorkshopCollection(id: item.id, title: item.title)
+      try await controller.openWorkshopCollection(id: item.id, title: item.title, leavingAt: offset)
     }
   }
 
-  func goBack() {
-    scrollToTop()
-    controller.launch(PanelActionCoordinator.key("workshopBack")) { [controller] in
-      try await controller.workshopGoBack()
+  /// Back. A list kept whole comes back at once with its tiles, page, selection and place in the
+  /// grid; one read again starts at the top. Either way the draft takes the search, sort and
+  /// filters the list comes back with.
+  @discardableResult
+  func goBack() -> Task<Void, Never> {
+    pendingSearch?.cancel()
+    pendingSearch = nil
+    return controller.launch(PanelActionCoordinator.key("workshopBack")) { [controller, weak self] in
+      let offset = try await controller.workshopGoBack()
+      guard let self else { return }
+      let workshop = controller.workshop
+      text = workshop.searchText
+      sort = workshop.sort
+      filters = WorkshopFilterDraft(tags: workshop.tags, excludedTags: workshop.excludedTags)
+      scroll(to: offset ?? 0)
     }
   }
 
@@ -296,7 +317,18 @@ final class WorkshopBrowserModel {
     }
   }
 
-  func scrollToTop() { scrollEpoch &+= 1 }
+  func scrollToTop() { scroll(to: 0) }
+
+  private func scroll(to offset: Double) {
+    scrollTarget = offset
+    scrollEpoch &+= 1
+  }
+
+  /// Where the latest move of the grid goes, once: the grid that takes it goes there.
+  func takeScrollTarget() -> Double? {
+    defer { scrollTarget = nil }
+    return scrollTarget
+  }
 
   // MARK: Tiles
 
@@ -438,7 +470,8 @@ final class WorkshopBrowserModel {
   /// hundred times, and once more when the page goes away.
   func scrolled(to offset: Double) {
     guard offset.isFinite, offset >= 0 else { return }
-    lastScrollOffset = offset
+    scrollOffset = offset
+    hasUnreportedScroll = true
     guard scrollReport == nil else { return }
     scrollReport = Task { @MainActor [weak self, sleep] in
       do { try await sleep(.milliseconds(400)) } catch { return }
@@ -451,11 +484,11 @@ final class WorkshopBrowserModel {
   func flushScrollReport() {
     scrollReport?.cancel()
     scrollReport = nil
-    guard let offset = lastScrollOffset else { return }
-    lastScrollOffset = nil
+    guard hasUnreportedScroll else { return }
+    hasUnreportedScroll = false
     // Installed's filters and the other pages' offsets are kept: only this page's offset changes.
     var state = controller.navigation.viewState ?? PanelViewState()
-    state.scroll["discover"] = offset
+    state.scroll["discover"] = scrollOffset
     controller.storeViewState(state)
   }
 }

@@ -84,15 +84,28 @@ final class WorkshopStore {
   var selectedItem: WorkshopItem?
   /// The order Steam lists the account's favorites in.
   var favoritesOrder: WorkshopFavoritesOrder = .dateFavorited
-  /// Where the next search looks. Opening an author or a collection remembers the source it
-  /// was opened from, so Back returns to it.
+  /// Where the next search looks. Opening an author or a collection keeps the list it was
+  /// opened from as it was left, so Back can show it again.
   var source: WorkshopSource = .browse
-  private(set) var sourceHistory: [WorkshopSource] = []
+  /// The lists Back returns through, nearest last, with their pages while those are kept.
+  private var history: [BrowsingState] = []
+  /// The sources Back returns through, nearest last.
+  var sourceHistory: [WorkshopSource] { history.map(\.query.source) }
+  /// How many lists Back can return through. Beyond it the oldest is let go, so a long chain of
+  /// authors and collections does not hold every page it read.
+  static let maxHistory = 10
   /// The shown source's own name when it has one Steam gave, such as an author's.
   private(set) var sourceTitle: String?
   /// The Steam Community session subscriptions are read with. `webSessions` keeps it between
   /// launches; it ends on Sign Out, or when Steam refuses to renew it.
-  private(set) var steamWebSession: SteamWebSession?
+  private(set) var steamWebSession: SteamWebSession? {
+    // Steam lists nearly every source differently for each account, so the pages Back keeps were
+    // read for an account that is no longer the one signed in: Back reads those lists again.
+    didSet {
+      guard steamWebSession?.steamID != oldValue?.steamID else { return }
+      for index in history.indices { history[index].kept = nil }
+    }
+  }
   /// What the signed-in account subscribes to on Steam, which the Workshop tiles mark: read
   /// by `refreshSubscribedIDs`, then kept by what `setSubscribed` changed. Empty signed out.
   private(set) var subscribedIDs: Set<String> = []
@@ -820,20 +833,13 @@ final class WorkshopStore {
   @ObservationIgnored private var generation = UUID()
   private(set) var committedQuery: WorkshopQuery?
   private(set) var failedRequest: WorkshopRequest?
-  /// Panel pages fetched for `cacheQuery`, keyed by page number, so paging back never touches
-  /// the network, plus fetches still in flight, keyed by their whole request. A search always
-  /// starts a fresh cache, even for the same query.
-  @ObservationIgnored private var cacheQuery: WorkshopQuery?
+  /// The pages read for one query (`PageCache`), so paging back never touches the network, plus
+  /// fetches still in flight: a panel page's keyed by its whole request, a screened Steam page's
+  /// by Steam's page number. A search always starts a fresh cache, even for the same query.
+  @ObservationIgnored private var cache = PageCache()
   @ObservationIgnored private var cacheID = UUID()
-  @ObservationIgnored private var steamPages: [Int: WorkshopPage] = [:]
   @ObservationIgnored private var steamFetches: [WorkshopRequest: Task<WorkshopPage, Error>] = [:]
-  /// For panel pages filled from several Steam pages: the screened Steam pages, keyed by
-  /// Steam's page number, with their fetches in flight, and where each panel page starts.
-  @ObservationIgnored private var screenedPages: [Int: WorkshopPage] = [:]
   @ObservationIgnored private var screenedFetches: [Int: Task<WorkshopPage, Error>] = [:]
-  @ObservationIgnored private var pageStarts: [Int: SteamPosition] = [1: .start]
-  /// How many collections each filled panel page showed, for the count once the last is reached.
-  @ObservationIgnored private var pageCounts: [Int: Int] = [:]
   /// How many Steam pages a panel page may read before it is shown with what it found, so a
   /// search whose collections are nearly all screened out does not read Steam to its end.
   static let maxSteamPagesPerPage = 10
@@ -859,7 +865,7 @@ final class WorkshopStore {
     switch query.source {
     case .browse, .collections:
       if let id = query.itemID { return WorkshopItem.pageURL(id: id) }
-      let steamPage = Self.fillsPages(query) ? pageStarts[page]?.page ?? page : page
+      let steamPage = Self.fillsPages(query) ? cache.pageStarts[page]?.page ?? page : page
       return WorkshopService.browseURL(
         search: query.text, kind: query.source == .browse ? query.kind : .all, sort: query.sort,
         page: steamPage, tags: query.tags, excludedTags: query.excludedTags,
@@ -902,26 +908,59 @@ final class WorkshopStore {
   }
 
   /// Shows another source from its first page. An author or a collection is opened from what
-  /// is on show, so Back can return there; choosing a list afresh starts a new history.
-  func open(_ next: WorkshopSource) {
+  /// is on show, which Back returns to as it was left, `scrollOffset` being where the panel's
+  /// grid was on it; choosing a list afresh starts a new history.
+  func open(_ next: WorkshopSource, leavingAt scrollOffset: Double = 0) {
     switch next {
     case .creator, .collection:
       let current = committedQuery?.source ?? source
-      if current != next { sourceHistory.append(current) }
+      // While the list opened last has not arrived, what is on show is the list Back already keeps
+      // as it was first left; it is not kept a second time.
+      if current != next, history.last?.query.source != current {
+        let shown = committedQuery
+        let isKept = shown != nil && cache.query == shown && cache.steamPages[page] != nil
+        let kept = isKept ? (page: page, cache: cache) : nil
+        history.append(
+          BrowsingState(
+            query: shown ?? draftQuery, kept: kept, selectedItem: selectedItem, scrollOffset: scrollOffset))
+        if history.count > Self.maxHistory { history.removeFirst() }
+      }
     case .browse, .collections, .subscriptions, .favorites:
-      sourceHistory = []
+      history = []
     }
     source = next
     selectedItem = nil
     search()
   }
 
-  /// Returns to the source the shown one was opened from, from its first page.
-  func back() {
-    guard let previous = sourceHistory.popLast() else { return }
-    source = previous
-    selectedItem = nil
-    search()
+  /// Returns to the list the shown one was opened from, and answers where the panel's grid was on
+  /// it. A list whose pages are kept comes back at once, without asking Steam: its page, search,
+  /// sort, filters and selection as they were. One whose pages are not (none had arrived, or a
+  /// sign-in or sign-out made them stale) is read again from its first page with its search, and
+  /// answers nil. The search's translation is left as it is, so a translation switch turned off
+  /// meanwhile still holds for the searches that follow.
+  @discardableResult
+  func back() -> Double? {
+    guard let previous = history.popLast() else { return nil }
+    let query = previous.query
+    searchText = query.translation?.original ?? query.text
+    kind = query.kind
+    sort = query.sort
+    tags = query.tags
+    excludedTags = query.excludedTags
+    favoritesOrder = query.favoritesOrder
+    source = query.source
+    guard let kept = previous.kept else {
+      selectedItem = nil
+      search()
+      return nil
+    }
+    persistBrowseFilters()
+    resetCache(for: nil)
+    cache = kept.cache
+    load(WorkshopRequest(query: query, page: kept.page))
+    selectedItem = previous.selectedItem
+    return previous.scrollOffset
   }
 
   /// Takes back the session saved by an earlier launch, once; a sign-in that finished first wins.
@@ -1149,13 +1188,7 @@ final class WorkshopStore {
     steamFetches = [:]
     screenedFetches = [:]
     cacheID = UUID()
-    if let query {
-      steamPages = [:]
-      screenedPages = [:]
-      pageStarts = [1: .start]
-      pageCounts = [:]
-      cacheQuery = query
-    }
+    if let query { cache = PageCache(query: query) }
   }
 
   /// Starts, or joins, the fetch of one panel page for the cache that asks, `cacheID`, which the
@@ -1181,7 +1214,7 @@ final class WorkshopStore {
       try Task.checkCancellation()
       // Only the cache that asked keeps the page; a superseded fetch is simply dropped.
       if let self, self.cacheID == cacheID {
-        self.steamPages[number] = result
+        self.cache.steamPages[number] = result
         self.onPreviewsAvailable?(result.items.compactMap(\.previewURL))
       }
       return result
@@ -1202,7 +1235,7 @@ final class WorkshopStore {
   /// A page jumped to before the one ahead of it was shown starts where the pages read so far
   /// suggest; that start, the page count and the result count are estimates.
   private func filledPage(_ number: Int, query: WorkshopQuery, cacheID: UUID) async throws -> WorkshopPage {
-    let start = pageStarts[number] ?? estimatedStart(of: number)
+    let start = cache.pageStarts[number] ?? estimatedStart(of: number)
     var position: SteamPosition? = start
     var items: [WorkshopItem] = []
     var steamPageCount = 1
@@ -1212,7 +1245,7 @@ final class WorkshopStore {
       // A search, refresh or another list replaced this cache: read no more of Steam for it.
       guard self.cacheID == cacheID, !Task.isCancelled else { throw CancellationError() }
       // The next Steam page is likely needed too; asking for it now overlaps the two fetches.
-      if let known = screenedPages.values.first?.totalPages, current.page < min(Self.maxPages, known) {
+      if let known = cache.screenedPages.values.first?.totalPages, current.page < min(Self.maxPages, known) {
         _ = fetchScreenedPage(current.page + 1, query: query, cacheID: cacheID)
       }
       let steam = try await fetchScreenedPage(current.page, query: query, cacheID: cacheID).value
@@ -1229,14 +1262,14 @@ final class WorkshopStore {
       }
     }
     guard self.cacheID == cacheID else { throw CancellationError() }
-    if pageStarts[number] == nil { pageStarts[number] = start }
-    pageCounts[number] = items.count
+    if cache.pageStarts[number] == nil { cache.pageStarts[number] = start }
+    cache.pageCounts[number] = items.count
     guard let next = position else {
       // A page cut short by the read limit holds fewer than 30, so count what each one showed.
-      let before = (1..<number).reduce(0) { $0 + (pageCounts[$1] ?? Self.pageSize) }
+      let before = (1..<number).reduce(0) { $0 + (cache.pageCounts[$1] ?? Self.pageSize) }
       return WorkshopPage(items: items, page: number, totalPages: number, totalCount: before + items.count)
     }
-    if pageStarts[number + 1] == nil { pageStarts[number + 1] = next }
+    if cache.pageStarts[number + 1] == nil { cache.pageStarts[number + 1] = next }
     let steamPagesPerPage = max(1, next.progress / Double(number))
     let remaining = Int(((Double(steamPageCount) - next.progress) / steamPagesPerPage).rounded())
     return WorkshopPage(
@@ -1247,11 +1280,11 @@ final class WorkshopStore {
   /// Where a panel page not reached from the one before it most likely starts: on from the
   /// nearest known start before it, at the rate the pages read so far consumed Steam's.
   private func estimatedStart(of number: Int) -> SteamPosition {
-    let before = pageStarts.filter { $0.key < number }.max { $0.key < $1.key } ?? (key: 1, value: .start)
-    let furthest = pageStarts.max { $0.key < $1.key } ?? (key: 1, value: .start)
+    let before = cache.pageStarts.filter { $0.key < number }.max { $0.key < $1.key } ?? (key: 1, value: .start)
+    let furthest = cache.pageStarts.max { $0.key < $1.key } ?? (key: 1, value: .start)
     let rate = furthest.key > 1 ? max(1, furthest.value.progress / Double(furthest.key - 1)) : 1
     let page = Int(before.value.progress + Double(number - before.key) * rate) + 1
-    let last = screenedPages.values.first.map { min(Self.maxPages, max(1, $0.totalPages)) } ?? page
+    let last = cache.screenedPages.values.first.map { min(Self.maxPages, max(1, $0.totalPages)) } ?? page
     return SteamPosition(page: min(page, last), offset: 0)
   }
 
@@ -1259,7 +1292,7 @@ final class WorkshopStore {
   /// asks, `cacheID`. A cache that was replaced gets nothing, so its query never reaches the new one.
   private func fetchScreenedPage(_ number: Int, query: WorkshopQuery, cacheID: UUID) -> Task<WorkshopPage, Error> {
     guard cacheID == self.cacheID else { return Task { throw CancellationError() } }
-    if let page = screenedPages[number] { return Task { page } }
+    if let page = cache.screenedPages[number] { return Task { page } }
     if let task = screenedFetches[number] { return task }
     let service = service
     let task = Task { [weak self] in
@@ -1267,7 +1300,7 @@ final class WorkshopStore {
       let account = try await self?.readingSession(for: query)
       let result = try await service.page(for: query, page: number, account: account)
       try Task.checkCancellation()
-      if let self, self.cacheID == cacheID { self.screenedPages[number] = result }
+      if let self, self.cacheID == cacheID { self.cache.screenedPages[number] = result }
       return result
     }
     screenedFetches[number] = task
@@ -1289,7 +1322,7 @@ final class WorkshopStore {
     sourceTitle = result.title
     failedRequest = nil
     // A failed prefetch is simply retried as an ordinary load when the user gets there.
-    if prefetchesNextPage, page < totalPages, steamPages[page + 1] == nil {
+    if prefetchesNextPage, page < totalPages, cache.steamPages[page + 1] == nil {
       _ = fetchSteamPage(WorkshopRequest(query: request.query, page: page + 1), cacheID: cacheID)
     }
   }
@@ -1297,7 +1330,7 @@ final class WorkshopStore {
   private func load(_ request: WorkshopRequest) {
     searchTask?.cancel()
     // A cache built for another query holds nothing this one can use.
-    if cacheQuery != request.query { resetCache(for: request.query) }
+    if cache.query != request.query { resetCache(for: request.query) }
     let token = UUID()
     generation = token
     errorMessage = nil
@@ -1305,7 +1338,7 @@ final class WorkshopStore {
     // below runs makes the request stale, and nothing of it reaches Steam or the new cache.
     let cacheID = cacheID
     // Paging back to a page already read shows it at once, never as loading.
-    if let cached = steamPages[request.page] {
+    if let cached = cache.steamPages[request.page] {
       isLoading = false
       publish(cached, for: request, cacheID: cacheID)
       return
@@ -1351,4 +1384,32 @@ private struct SteamPosition: Equatable {
 
   /// How many Steam pages lie before this place, a partly read one by the share read.
   var progress: Double { Double(page - 1) + Double(offset) / Double(WorkshopService.pageSize) }
+}
+
+/// The panel pages read for one query, which paging back is served from: what a search starts
+/// afresh, and what Back puts back with the list it returns to.
+private struct PageCache {
+  /// The query the pages were read for; nil before the first search.
+  var query: WorkshopQuery?
+  /// Panel pages, keyed by page number.
+  var steamPages: [Int: WorkshopPage] = [:]
+  /// For panel pages filled from several Steam pages: the screened Steam pages, keyed by
+  /// Steam's page number, and where each panel page starts.
+  var screenedPages: [Int: WorkshopPage] = [:]
+  var pageStarts: [Int: SteamPosition] = [1: .start]
+  /// How many collections each filled panel page showed, for the count once the last is reached.
+  var pageCounts: [Int: Int] = [:]
+}
+
+/// A list Discover showed, kept so Back can show it again as it was left.
+private struct BrowsingState {
+  /// What was on show, or what was asked for when nothing was.
+  let query: WorkshopQuery
+  /// The page on show and the pages read for its query, which Back shows without asking Steam.
+  /// Nil when none was on show, or once a sign-in or sign-out made them stale: Back then reads
+  /// the list again from its first page.
+  var kept: (page: Int, cache: PageCache)?
+  let selectedItem: WorkshopItem?
+  /// Where the panel's grid was on the list, in points from its top.
+  let scrollOffset: Double
 }

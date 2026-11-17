@@ -280,6 +280,40 @@ final class WorkshopBrowserModelTests: MediaPanelTestCase {
     XCTAssertFalse(source.canGoBack)
   }
 
+  /// Issue #226: Back shows the list as it was left, at once and without asking Steam again: its
+  /// tiles, the selected one and the grid's place. The draft takes back the filters the list was
+  /// shown with, whatever was chosen on the author's list.
+  func testBackShowsTheListAsItWasLeft() async throws {
+    let panel = try makePanel()
+    let model = panel.controller.workshopBrowser
+    let sleeper = ManualSleeper()
+    model.sleep = sleeper.closure
+    try await open(panel)
+    let tiles = panel.controller.workshopBrowse.items
+    let item = try XCTUnwrap(tiles.last)
+    try await panel.controller.selectWorkshopItem(id: item.id)
+    model.scrolled(to: 640)
+    let filters = model.filters
+
+    model.openAuthor(of: item)
+    try await waitFor { panel.workshop.source.key == "creator" && !panel.workshop.isLoading }
+    model.setRequired("Anime", true)
+    try await waitFor { panel.workshop.tags == ["Anime"] && !panel.workshop.isLoading }
+    let requests = WorkshopBrowseProtocol.requests.count
+    let epoch = model.scrollEpoch
+
+    await model.goBack().value
+    XCTAssertEqual(panel.controller.workshopBrowse.source.list, .browse)
+    XCTAssertEqual(panel.controller.workshopBrowse.items, tiles)
+    XCTAssertEqual(panel.controller.workshopSelectedItem?.id, item.id)
+    XCTAssertEqual(model.filters, filters)
+    XCTAssertEqual(panel.workshop.tags, [])
+    XCTAssertGreaterThan(model.scrollEpoch, epoch)
+    XCTAssertEqual(model.takeScrollTarget(), 640, "the grid goes back to where it was")
+    XCTAssertEqual(WorkshopBrowseProtocol.requests.count, requests, "Steam was not asked again")
+    sleeper.fireAll()
+  }
+
   func testAnItemWithNoKnownAuthorOpensNothing() async throws {
     let panel = try makePanel(rows: rows(1, creator: "not a steam id"))
     let model = panel.controller.workshopBrowser

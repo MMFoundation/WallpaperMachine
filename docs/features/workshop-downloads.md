@@ -125,8 +125,9 @@ which searches the words as typed; a sort, a filter, another list or a reopened 
 then keeps them as typed until the text changes (the Workshop store keeps that choice, not
 the panel window). Open on Steam opens the English search. Turning the switch off applies
 from the next search: the one on show keeps its line, whose **Search “…” instead** still
-works, and a list the Workshop opens or reads again by itself (another list, Back, a Steam
-sign-in) is searched as typed.
+works, and a list the Workshop opens or reads again by itself (another list, Back to a list
+it reads again, a Steam sign-in) is searched as typed; Back to a list it kept shows that list
+as it was, line included.
 
 The language is read on the device (`WorkshopSearchLanguage`): kana makes a search
 Japanese and Hangul Korean; Han characters alone are Japanese only when Apple's language
@@ -258,9 +259,17 @@ A segmented control leading Discover's header chooses what it lists: **Wallpaper
 column it becomes one menu; the arrow keys move between the segments, and Space or
 Return chooses one. An author's wallpapers and a
 collection's items are opened from a tile instead: no segment is current, and the
-search field gives way to a back button and what is on show; back returns to the
-list, page 1, they were opened from (`WorkshopStore.open`, `back` and
-`sourceHistory`). Choosing a segment starts a new history. A list that fails to open
+search field gives way to a back button and what is on show. Back returns to the
+list they were opened from as it was left (`WorkshopStore.open`, `back` and
+`sourceHistory`): its tiles, page, search, sort and filters, the selected tile and the
+grid's scroll position come back at once, from the pages it read before, without
+asking Steam for them again, and paging it is served from those pages too. The way
+back is kept in memory only, at most `WorkshopStore.maxHistory` (10) lists deep, the
+oldest let go first. A list that had not arrived when it was left, or whose pages a
+Steam Community sign-in or sign-out made stale (Steam lists nearly every source
+differently for each account), is read again from its first page with its search, at
+the top of the grid. Refresh reads the list on show afresh, as always. Choosing a
+segment starts a new history. A list that fails to open
 empties the grid rather than leaving the list it was to replace on show under its
 segment, where Next would page that other list; its error offers **Try again** for the
 list that failed.
