@@ -917,12 +917,13 @@ final class WorkshopStore {
       // While the list opened last has not arrived, what is on show is the list Back already keeps
       // as it was first left; it is not kept a second time.
       if current != next, history.last?.query.source != current {
-        let shown = committedQuery
-        let isKept = shown != nil && cache.query == shown && cache.steamPages[page] != nil
+        // Back returns to what was asked for last: a search still on its way replaces the tiles on
+        // show, so Back reads that search and not the list it was replacing.
+        let asked = cache.query ?? committedQuery ?? draftQuery
+        let isKept = asked == committedQuery && cache.steamPages[page] != nil
         let kept = isKept ? (page: page, cache: cache) : nil
         history.append(
-          BrowsingState(
-            query: shown ?? draftQuery, kept: kept, selectedItem: selectedItem, scrollOffset: scrollOffset))
+          BrowsingState(query: asked, kept: kept, selectedItem: selectedItem, scrollOffset: scrollOffset))
         if history.count > Self.maxHistory { history.removeFirst() }
       }
     case .browse, .collections, .subscriptions, .favorites:
@@ -1072,6 +1073,10 @@ final class WorkshopStore {
       if steamWebSession?.steamID == session.steamID {
         if subscribed { subscribedIDs.insert(itemID) } else { subscribedIDs.remove(itemID) }
         if subscriptionReads > 0 { editsDuringReads.append((itemID, subscribed)) }
+        // The subscriptions Back keeps no longer list what the account subscribes to: Back reads them again.
+        for index in history.indices where history[index].query.source == .subscriptions {
+          history[index].kept = nil
+        }
       }
     } catch is SteamSignInRequired {
       forgetSteamWebSession(endedWith: used)
@@ -1403,7 +1408,7 @@ private struct PageCache {
 
 /// A list Discover showed, kept so Back can show it again as it was left.
 private struct BrowsingState {
-  /// What was on show, or what was asked for when nothing was.
+  /// What was asked for last: the list on show, or a search on its way to replace it.
   let query: WorkshopQuery
   /// The page on show and the pages read for its query, which Back shows without asking Steam.
   /// Nil when none was on show, or once a sign-in or sign-out made them stale: Back then reads

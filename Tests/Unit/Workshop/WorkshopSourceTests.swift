@@ -476,6 +476,65 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(store.sourceHistory.first, .creator(id: Self.author, name: "Author 0"), "the oldest was let go")
   }
 
+  /// An author opened from the tiles of one search while the next is still on its way: Back
+  /// returns to the search made last, read from its first page, not to the tiles it was replacing.
+  func testBackReturnsToASearchStillOnItsWayWhenTheAuthorWasOpened() async throws {
+    let store = fixture.store
+    fixture.browse = browseHTML(rows: [wallpaperRow("12", tags: ["Scene", "Everyone"])])
+    fixture.profiles[Self.author] = profileHTML(ids: ["12"], name: "Fixture Author", total: "1")
+    fixture.details = ["12": detailsRow("12", tags: ["Scene", "Everyone"])]
+    store.searchText = "night"
+    store.search()
+    try await finished(store)
+
+    store.searchText = "dusk"
+    store.sort = .newest
+    store.search()
+    store.open(.creator(id: Self.author, name: "Fixture Author"), leavingAt: 300)
+    try await finished(store)
+
+    XCTAssertNil(store.back(), "a search that was never on show starts at the top")
+    XCTAssertEqual(store.searchText, "dusk")
+    XCTAssertEqual(store.sort, .newest)
+    try await finished(store)
+    XCTAssertEqual(store.committedQuery?.text, "dusk")
+    XCTAssertEqual(store.committedQuery?.sort, .newest)
+  }
+
+  /// A subscribe or unsubscribe changes what Your subscriptions lists, so Back reads that list
+  /// again instead of showing the pages it kept from before.
+  func testSubscribingOrUnsubscribingReadsTheSubscriptionsBackReturnsToAgain() async throws {
+    let store = fixture.store
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["1", "2"], total: "2")]
+    fixture.profiles[Self.author] = profileHTML(ids: ["3"], name: "Fixture Author", total: "1")
+    fixture.details = [
+      "1": detailsRow("1", tags: ["Scene", "Everyone"]), "2": detailsRow("2", tags: ["Scene", "Everyone"]),
+      "3": detailsRow("3", tags: ["Scene", "Everyone"]),
+    ]
+    try await store.signInToSteamWeb { WebSignInCookies(session: "\(Self.author)||0123456789abcdef0123") }
+    store.open(.subscriptions)
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["1", "2"])
+
+    store.open(.creator(id: Self.author, name: "Fixture Author"), leavingAt: 200)
+    try await finished(store)
+    var reads = fixture.subscriptionReads
+    XCTAssertEqual(store.back(), 200, "unchanged, the subscriptions come back as they were left")
+    try await finished(store)
+    XCTAssertEqual(fixture.subscriptionReads, reads)
+
+    store.open(.creator(id: Self.author, name: "Fixture Author"), leavingAt: 200)
+    try await finished(store)
+    try await store.setSubscribed(false, itemID: "1")
+    fixture.subscriptionPages = [1: subscriptionsHTML(ids: ["2"], total: "1")]
+    reads = fixture.subscriptionReads
+    XCTAssertEqual(store.sourceHistory, [.subscriptions])
+    XCTAssertNil(store.back(), "changed, the subscriptions are read again from the top")
+    try await finished(store)
+    XCTAssertEqual(fixture.subscriptionReads, reads + 1)
+    XCTAssertEqual(store.items.map(\.id), ["2"])
+  }
+
   /// Subscribing and unsubscribing change the account's subscriptions on Steam: a POST to
   /// steamcommunity.com carrying the session and a CSRF token Steam checks against its cookie.
   /// The store's set of subscribed items, which the tiles mark, follows what Steam accepted.

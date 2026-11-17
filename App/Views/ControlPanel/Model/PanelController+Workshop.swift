@@ -264,8 +264,8 @@ extension PanelController {
   }
 
   /// **More by this author** in the Installed inspector's menu: Discover with the author's
-  /// wallpapers, Back returning to the list it showed. The library keeps no author, so a wallpaper
-  /// Discover has not shown is looked up on Steam first.
+  /// wallpapers, Back returning to the list it showed as it was left, its grid where it was. The
+  /// library keeps no author, so a wallpaper Discover has not shown is looked up on Steam first.
   func openInstalledWorkshopAuthor(id: String) async throws {
     guard let itemID = TelemetryWallpaper.workshopID(id) else { throw InvalidControlValue() }
     var item = workshop.workshopItem(id: itemID)
@@ -288,7 +288,7 @@ extension PanelController {
         message: L("Steam did not say who made this wallpaper, so their other wallpapers can’t be shown."))
     }
     // Opened before the page is shown, so a first visit loads the author and not the browse list.
-    try await openWorkshopAuthor(id: author, name: item.creator)
+    try await openWorkshopAuthor(id: author, name: item.creator, leavingAt: workshopBrowser.scrollOffset)
     try await navigate(.workshop)
   }
 

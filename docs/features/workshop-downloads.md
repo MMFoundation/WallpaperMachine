@@ -265,10 +265,12 @@ list they were opened from as it was left (`WorkshopStore.open`, `back` and
 grid's scroll position come back at once, from the pages it read before, without
 asking Steam for them again, and paging it is served from those pages too. The way
 back is kept in memory only, at most `WorkshopStore.maxHistory` (10) lists deep, the
-oldest let go first. A list that had not arrived when it was left, or whose pages a
-Steam Community sign-in or sign-out made stale (Steam lists nearly every source
-differently for each account), is read again from its first page with its search, at
-the top of the grid. Refresh reads the list on show afresh, as always. Choosing a
+oldest let go first. A list is read again from its first page with its search, at
+the top of the grid, when it had not arrived when it was left (Back returns to the
+search still on its way, not to the tiles it was replacing), when a Steam Community
+sign-in or sign-out made its pages stale (Steam lists nearly every source differently
+for each account), and for **Your subscriptions** once a subscribe or unsubscribe has
+changed it. Refresh reads the list on show afresh, as always. Choosing a
 segment starts a new history. A list that fails to open
 empties the grid rather than leaving the list it was to replace on show under its
 segment, where Next would page that other list; its error offers **Try again** for the
@@ -328,7 +330,7 @@ in. A profile that is private or has nothing to show is simply empty. An install
 Workshop wallpaper's **More actions** menu offers **More by this author** too: the
 library keeps no author, so unless Discover still holds the item, its details are read
 from the public details endpoint first, and Discover then opens on the author's list
-with Back returning to the list it showed.
+with Back returning to the list it showed as it was left, its grid where it was.
 
 ### Subscriptions
 

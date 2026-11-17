@@ -314,6 +314,25 @@ final class WorkshopBrowserModelTests: MediaPanelTestCase {
     sleeper.fireAll()
   }
 
+  /// Installed's **More by this author** leaves Discover's list with its grid where it was, so
+  /// Back from the author returns there and not to the top.
+  func testBackFromAnAuthorOpenedInInstalledReturnsWhereTheGridWas() async throws {
+    let panel = try makePanel()
+    let model = panel.controller.workshopBrowser
+    let sleeper = ManualSleeper()
+    model.sleep = sleeper.closure
+    try await open(panel)
+    let item = try XCTUnwrap(panel.controller.workshopBrowse.items.last)
+    model.scrolled(to: 640)
+
+    try await panel.controller.openInstalledWorkshopAuthor(id: item.id)
+    try await waitFor { panel.workshop.source.key == "creator" && !panel.workshop.isLoading }
+    await model.goBack().value
+    XCTAssertEqual(panel.controller.workshopBrowse.source.list, .browse)
+    XCTAssertEqual(model.takeScrollTarget(), 640, "the grid goes back to where it was")
+    sleeper.fireAll()
+  }
+
   func testAnItemWithNoKnownAuthorOpensNothing() async throws {
     let panel = try makePanel(rows: rows(1, creator: "not a steam id"))
     let model = panel.controller.workshopBrowser
