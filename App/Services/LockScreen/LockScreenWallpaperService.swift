@@ -645,8 +645,6 @@ final class LockScreenWallpaperService {
         cancelRendererWatches()
         retiringRendererProcesses.removeAll()
       }
-      if isEnabled { defaults.set(true, forKey: Self.preference) }
-      if screenSaverEnabled { defaults.set(true, forKey: Self.screenSaverPreference) }
     } catch is CancellationError {
       // A newer request owns the next publication; keep the committed surfaces.
     } catch {
@@ -720,10 +718,14 @@ final class LockScreenWallpaperService {
     publishedInputs = inputs
     let desktopIDs = Set(configuration.scenes(for: .lockScreen).map(\.displayID))
     let saverIDs = Set(configuration.scenes(for: .screenSaver).map(\.displayID))
+    let saverDisplays = Set(inputs.lazy.filter { saverIDs.contains($0.displayID) }.map(\.displayUUID))
     try await selection.synchronize(
       desktopDisplays: Set(inputs.lazy.filter { desktopIDs.contains($0.displayID) }.map(\.displayUUID)),
-      screenSaverDisplays: Set(inputs.lazy.filter { saverIDs.contains($0.displayID) }.map(\.displayUUID)),
+      screenSaverDisplays: saverDisplays,
       revision: configuration.revision)
+    if screenSaverRequested && !saverDisplays.isEmpty && !defaults.bool(forKey: Self.screenSaverPreference) {
+      defaults.set(true, forKey: Self.screenSaverPreference)
+    }
     try Task.checkCancellation()
   }
 
@@ -758,6 +760,9 @@ final class LockScreenWallpaperService {
       && unconfirmed?.revision != configuration.revision
     screenSaverEnabled = screenSaverRequested && configuration.screenSaverEnabled
       && !configuration.scenes(for: .screenSaver).isEmpty
+    if isEnabled && !defaults.bool(forKey: Self.preference) {
+      defaults.set(true, forKey: Self.preference)
+    }
     errorMessage = isRequested ? (lockScreenSourceError ?? lockScreenActivationError) : nil
     status = !isRequested ? String(localized: "Off") : errorMessage != nil
       ? String(localized: "Not enabled — action required") : isEnabled

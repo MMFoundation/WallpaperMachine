@@ -260,6 +260,33 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testRefreshWithoutDisplayUUIDRemembersSelectedSaverBeforeLockScreenReadiness() async throws {
+    var record = scene()
+    record.displayId = 1
+    var uuid: String? = "one"
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in uuid }, runningExtensionBundles: { [] })
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("both selections before the first lock-screen frame") {
+      service.isBusy && (try? self.selectedProvider("Desktop")) == LockScreenConfiguration.extensionIdentifier
+        && (try? self.selectedProvider("Idle")) == LockScreenConfiguration.extensionIdentifier
+    }
+
+    uuid = nil
+    service.refresh()
+    await waitFor("refresh with the display unavailable") { !service.isBusy }
+    XCTAssertEqual(try selectedProvider("Idle"), LockScreenConfiguration.extensionIdentifier)
+    XCTAssertTrue(defaults.bool(forKey: "WallpaperMachineUseWallpaperAsScreenSaver"))
+    XCTAssertFalse(defaults.bool(forKey: preference))
+    XCTAssertFalse(service.isEnabled)
+    try await service.shutdown()
+  }
+
+  @MainActor
   func testSaverDisableBeforeInitialReadinessDoesNotWaitForDisplayUUID() async throws {
     try await checkDisableBeforeReadiness(lockScreen: false)
   }
@@ -305,6 +332,9 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertEqual(try selectedProvider("Idle"), lockScreen ? LockScreenConfiguration.extensionIdentifier : "display-one-idle")
     XCTAssertFalse(service.isEnabled, "a surviving Desktop selection is not confirmed before a frame")
     XCTAssertEqual(service.screenSaverEnabled, lockScreen)
+    XCTAssertFalse(defaults.bool(forKey: preference))
+    XCTAssertEqual(defaults.bool(forKey: "WallpaperMachineUseWallpaperAsScreenSaver"), lockScreen,
+      "a selected saver must survive relaunch even before the display UUID returns")
     XCTAssertNil(service.errorMessage)
     XCTAssertNil(service.screenSaverError)
     uuid = "one"

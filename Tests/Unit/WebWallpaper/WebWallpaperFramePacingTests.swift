@@ -407,17 +407,20 @@ final class WebWallpaperFramePacingTests: XCTestCase {
     let generation = page.documentGeneration
 
     let free = try await loopRate(page)
-    page.applyGeneralProperties(fps: 30)
+    let limit: UInt32 = 15
+    XCTAssertGreaterThan(free * 0.7, Double(limit), "the native loop must have headroom above the test limit")
+    page.applyGeneralProperties(fps: limit)
     try await pollPacing(page, expected: true)
     let limited = try await loopRate(page)
-    XCTAssertGreaterThan(free, 20, "the fixture must be animating freely before it is limited")
-    XCTAssertLessThan(limited, free * 0.7, "30 fps must visibly cut the callback rate (\(limited) vs \(free) per second)")
+    XCTAssertLessThan(limited, free * 0.7, "\(limit) fps must visibly cut the callback rate (\(limited) vs \(free) per second)")
     XCTAssertGreaterThanOrEqual(limited, 12, "a limited loop still runs (\(limited) per second)")
+    XCTAssertLessThanOrEqual(limited, Double(limit) + 2, "the one-second sample must stay near the requested limit")
 
     page.applyGeneralProperties(fps: 120)
     try await pollPacing(page, expected: false)
     let lifted = try await loopRate(page)
     XCTAssertGreaterThan(lifted, limited * 1.4, "lifting the limit frees the loop that was held (\(lifted) vs \(limited))")
+    XCTAssertGreaterThan(lifted, free * 0.7, "the loop must return near its native rate (\(lifted) vs \(free))")
     XCTAssertEqual(page.documentGeneration, generation, "a limit change must not reload the page")
   }
 

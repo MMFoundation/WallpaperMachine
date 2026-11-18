@@ -262,6 +262,17 @@ final class WebWallpaperSuspensionTests: XCTestCase {
 
     page.setPaused(true)
     try await poll { !page.isInWindowTree }
+    XCTAssertFalse(page.isInWindowTree)
+    var interruptionObserved = false
+    try await poll {
+      interruptionObserved = (try? await page.webView.callAsyncJavaScript(
+        """
+        return __played.state === "interrupted" && ["suspended", "interrupted"].includes(__own.state)
+          && __log.includes("played:interrupted");
+        """, arguments: [:], in: nil, contentWorld: .page) as? Bool) == true
+      return interruptionObserved
+    }
+    XCTAssertTrue(interruptionObserved, "the running context must report its interruption before the host resumes it")
     page.setPaused(false)
     var states = ""
     try await poll {
