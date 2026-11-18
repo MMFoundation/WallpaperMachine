@@ -76,15 +76,23 @@ struct WallpaperBackupPending: Codable, Sendable {
 }
 
 struct WallpaperBackupJournal: Codable, Sendable {
+    struct FileIdentity: Codable, Equatable, Sendable {
+        var volume: String
+        var file: UInt64
+        var birthSeconds: Int64
+        var birthNanoseconds: Int64
+    }
     struct Unit: Codable, Sendable {
         var path: String
         var existed: Bool
+        var originalIdentity: FileIdentity?
     }
     var version = 1
     var units: [Unit]
     var originalPreferences: [String: Data]
     var absentPreferences: [String]
     var preferencesCommitted = false
+    var rollbackComplete: Bool?
     /// The folder holding the live `Library` units and their own `old/` and `ready/`, when the
     /// library is not in the support root (`StorageLocation`); nil for the support root.
     var libraryRoot: String?

@@ -1,6 +1,25 @@
+import Darwin
 import Foundation
 
 struct WallpaperBackupService: Sendable {
+    enum RecoveryCheckpoint: Equatable {
+        case willRecordRollback
+        case didRecordRollback
+        case willRestoreUnit(String)
+        case didRemoveLiveUnit(String)
+        case didRestoreUnit(String)
+        case willRestorePreference(String)
+        case didRestorePreference(String)
+        case willSynchronizePreferences
+        case didSynchronizePreferences
+        case willCompleteRollback
+        case didCompleteRollback
+        case willRemoveLibraryTransaction
+        case didRemoveLibraryTransaction
+        case willRemoveTransaction
+        case didRemoveTransactionContents
+        case didRemoveJournal
+    }
     static let packageTypeIdentifier = "app.wallpapermachine.backup"
     static let packageExtension = "wmbackup"
     static let pendingDirectoryName = ".PendingBackupRestore"
@@ -193,11 +212,12 @@ struct WallpaperBackupService: Sendable {
     @MainActor
     func applyPendingRestore(defaults: UserDefaults,
                              domainName: String = ClientPreferences.domainName,
-                             beforePublish: ((String) throws -> Void)? = nil) throws -> WallpaperBackupRestoreReport? {
+                             beforePublish: ((String) throws -> Void)? = nil,
+                             recoveryCheckpoint: ((RecoveryCheckpoint) throws -> Void)? = nil) throws -> WallpaperBackupRestoreReport? {
         let transaction = supportRoot.appendingPathComponent(Self.transactionDirectoryName)
         var recovered = false
         if manager.fileExists(atPath: transaction.path) {
-            try recover(transaction: transaction, defaults: defaults)
+            try recover(transaction: transaction, defaults: defaults, checkpoint: recoveryCheckpoint)
             recovered = true
         }
         let libraryTransaction = libraryTransaction(libraryRoot: storageRoot, transaction: transaction)
@@ -301,11 +321,11 @@ struct WallpaperBackupService: Sendable {
                 journal.preferencesCommitted = true
                 try writeJSON(journal, to: transaction.appendingPathComponent("journal.json"))
             } catch {
-                try recover(transaction: transaction, defaults: defaults)
+                try recover(transaction: transaction, defaults: defaults, checkpoint: recoveryCheckpoint)
                 throw error
             }
             // A committed journal is a durable completion marker; recovery only cleans it.
-            try finishCommitted(transaction: transaction, libraryTransaction: libraryTransaction)
+            try finishRecovery(transaction: transaction, libraryTransaction: libraryTransaction, committed: true, checkpoint: recoveryCheckpoint)
             return .init(restoredPaths: selected, warnings: warnings, recoveredInterruptedRestore: recovered)
         } catch {
             if !manager.fileExists(atPath: transaction.appendingPathComponent("journal.json").path) {
@@ -515,8 +535,37 @@ struct WallpaperBackupService: Sendable {
         }
     }
 
+    private func recoveryItemExists(at url: URL) throws -> Bool {
+        var status = stat()
+        if lstat(url.path, &status) == 0 { return true }
+        if errno == ENOENT { return false }
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+
+    private func validateRecoveryParents(of path: String, root: URL) throws {
+        var directory = root
+        for component in [""] + path.split(separator: "/").dropLast().map(String.init) {
+            if !component.isEmpty { directory.appendPathComponent(component) }
+            guard try recoveryItemExists(at: directory) else { return }
+            guard try files.kind(at: directory).0 == .directory else { throw files.unsafe(path) }
+        }
+    }
+
+    private func recoveryIdentity(at url: URL) throws -> WallpaperBackupJournal.FileIdentity? {
+        guard try recoveryItemExists(at: url) else { return nil }
+        _ = try files.kind(at: url)
+        var status = stat()
+        guard lstat(url.path, &status) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        guard let volume = try url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString else {
+            throw files.unsafe(url.lastPathComponent)
+        }
+        return .init(volume: volume, file: UInt64(status.st_ino),
+                     birthSeconds: Int64(status.st_birthtimespec.tv_sec), birthNanoseconds: Int64(status.st_birthtimespec.tv_nsec))
+    }
+
     @MainActor
-    private func recover(transaction: URL, defaults: UserDefaults) throws {
+    private func recover(transaction: URL, defaults: UserDefaults,
+                         checkpoint: ((RecoveryCheckpoint) throws -> Void)?) throws {
         guard try files.kind(at: transaction).0 == .directory else { throw files.unsafe(transaction.lastPathComponent) }
         let journalURL = transaction.appendingPathComponent("journal.json")
         guard manager.fileExists(atPath: journalURL.path) else {
@@ -528,12 +577,20 @@ struct WallpaperBackupService: Sendable {
             try manager.removeItem(at: transaction)
             return
         }
-        let journal = try readJSON(WallpaperBackupJournal.self, at: transaction, name: "journal.json")
+        var journal = try readJSON(WallpaperBackupJournal.self, at: transaction, name: "journal.json")
         let recoveryKeys = WallpaperBackupPreferences.allowedKeys.union(WallpaperBackupPreferences.localRecoveryKeys)
-        guard journal.version == 1,
+        guard [1, 2].contains(journal.version),
               Set(journal.absentPreferences).isSubset(of: recoveryKeys),
               Set(journal.absentPreferences).isDisjoint(with: journal.originalPreferences.keys),
               journal.units.count <= limits.maximumEntries else { throw files.unsafe("journal.json") }
+        if journal.version == 1 {
+            guard journal.rollbackComplete == nil, journal.units.allSatisfy({ $0.originalIdentity == nil }) else {
+                throw files.unsafe("journal.json")
+            }
+        } else {
+            guard !journal.preferencesCommitted, journal.rollbackComplete != nil,
+                  journal.units.allSatisfy({ $0.existed == ($0.originalIdentity != nil) }) else { throw files.unsafe("journal.json") }
+        }
         // The journal is our exact old state, including preferences an old app could
         // not hydrate. Recovery must not reject those originals under a newer schema.
         guard Set(journal.originalPreferences.keys).isSubset(of: recoveryKeys) else { throw files.unsafe("journal.json") }
@@ -545,71 +602,118 @@ struct WallpaperBackupService: Sendable {
             libraryRoot = URL(fileURLWithPath: recorded, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath()
             // A folder that is merely there is not enough: a disconnected drive can leave its
             // empty mount point behind.
-            guard recorded.hasPrefix("/"), manager.fileExists(atPath: libraryRoot.path),
+            guard recorded.hasPrefix("/"), recorded == libraryRoot.path, manager.fileExists(atPath: libraryRoot.path),
                   journal.libraryMarker == nil || StorageLocation.marker(at: libraryRoot) == journal.libraryMarker else { throw drive }
+            guard try files.kind(at: libraryRoot).0 == .directory else { throw files.unsafe(recorded) }
         } else {
             libraryRoot = supportRoot
         }
         let libraryTransaction = libraryTransaction(libraryRoot: libraryRoot, transaction: transaction)
-        // Every library unit was prepared there before the journal was written.
-        if let libraryTransaction, journal.units.contains(where: { Self.isLibrary($0.path) }),
-           !manager.fileExists(atPath: libraryTransaction.path) { throw drive }
         func staged(_ unit: String) -> URL { unitTransaction(unit, transaction: transaction, libraryRoot: libraryRoot) }
         func liveRoot(_ unit: String) -> URL { Self.isLibrary(unit) ? libraryRoot : supportRoot }
         var paths = Set<String>()
         for unit in journal.units {
             try files.validateRelative(unit.path)
-            try ensureSafeParents(of: "old/" + unit.path, root: staged(unit.path))
-            try ensureSafeParents(of: "ready/" + unit.path, root: staged(unit.path))
             let parts = unit.path.split(separator: "/")
             guard paths.insert(unit.path).inserted,
                   unit.path == "config.toml" || (parts.count == 2 && ["wallpapers", "Library", "UserAssets", "SceneStorage"].contains(String(parts[0])) && unit.path != "UserAssets/PresetAssets")
                     || (parts.count == 3 && parts[0] == "UserAssets" && parts[1] == "PresetAssets") else {
                 throw files.unsafe(unit.path)
             }
+            try validateRecoveryParents(of: unit.path, root: liveRoot(unit.path))
+            try validateRecoveryParents(of: "old/" + unit.path, root: staged(unit.path))
+            try validateRecoveryParents(of: "ready/" + unit.path, root: staged(unit.path))
         }
-        if journal.preferencesCommitted {
-            try finishCommitted(transaction: transaction, libraryTransaction: libraryTransaction)
+        if journal.preferencesCommitted || journal.rollbackComplete == true {
+            try finishRecovery(transaction: transaction, libraryTransaction: libraryTransaction,
+                               committed: journal.preferencesCommitted, checkpoint: checkpoint)
             return
         }
-        // A unit that was here is moved aside before its replacement is published, so one of the
-        // two copies is always there. Neither means the copies are not where the journal says:
-        // nothing is rolled back and the journal is kept.
-        for unit in journal.units where unit.existed {
+        if let libraryTransaction, journal.units.contains(where: { Self.isLibrary($0.path) }),
+           !manager.fileExists(atPath: libraryTransaction.path) { throw drive }
+        let missing = WallpaperBackupFailure(message: String(localized: "Restore recovery could not find the copies it set aside. The restore folder has been kept and nothing has been deleted."))
+        for index in journal.units.indices {
+            let unit = journal.units[index]
             let staging = staged(unit.path)
-            guard manager.fileExists(atPath: staging.appendingPathComponent("old/" + unit.path).path)
-                    || manager.fileExists(atPath: staging.appendingPathComponent("ready/" + unit.path).path) else {
-                throw WallpaperBackupFailure(message: String(localized: "Restore recovery could not find the copies it set aside. The restore folder has been kept and nothing has been deleted."))
+            let old = try recoveryIdentity(at: staging.appendingPathComponent("old/" + unit.path))
+            let ready = try recoveryIdentity(at: staging.appendingPathComponent("ready/" + unit.path))
+            let live = try recoveryIdentity(at: liveRoot(unit.path).appendingPathComponent(unit.path))
+            if unit.existed {
+                if let expected = unit.originalIdentity {
+                    guard (old ?? live) == expected else { throw missing }
+                } else {
+                    guard let original = old ?? (ready == nil ? nil : live) else { throw missing }
+                    journal.units[index].originalIdentity = original
+                }
+            } else {
+                guard old == nil, ready == nil || live == nil else { throw files.unsafe(unit.path) }
             }
         }
+        if journal.version == 1 {
+            journal.version = 2
+            journal.rollbackComplete = false
+            try checkpoint?(.willRecordRollback)
+            try writeJSON(journal, to: journalURL)
+            try checkpoint?(.didRecordRollback)
+        }
         for unit in journal.units.reversed() {
+            try checkpoint?(.willRestoreUnit(unit.path))
             try ensureSafeParents(of: unit.path, root: liveRoot(unit.path))
             let live = liveRoot(unit.path).appendingPathComponent(unit.path)
             let old = staged(unit.path).appendingPathComponent("old/" + unit.path)
             let ready = staged(unit.path).appendingPathComponent("ready/" + unit.path)
-            if manager.fileExists(atPath: old.path) {
-                _ = try files.kind(at: old)
-                if manager.fileExists(atPath: live.path) { try manager.removeItem(at: live) }
-                try manager.moveItem(at: old, to: live)
-            } else if !unit.existed && !manager.fileExists(atPath: ready.path) {
-                // No old state and ready moved: this unit was newly published.
-                if manager.fileExists(atPath: live.path) { try manager.removeItem(at: live) }
+            if let original = try recoveryIdentity(at: old) {
+                guard unit.existed, original == unit.originalIdentity else { throw missing }
+                if try recoveryIdentity(at: live) != nil { try manager.removeItem(at: live) }
+                try checkpoint?(.didRemoveLiveUnit(unit.path))
+                guard rename(old.path, live.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            } else if unit.existed {
+                guard try recoveryIdentity(at: live) == unit.originalIdentity else { throw missing }
+            } else if try recoveryIdentity(at: ready) == nil {
+                if try recoveryIdentity(at: live) != nil { try manager.removeItem(at: live) }
+                try checkpoint?(.didRemoveLiveUnit(unit.path))
             }
+            try checkpoint?(.didRestoreUnit(unit.path))
         }
-        for (key, data) in journal.originalPreferences { defaults.set(try WallpaperBackupPreferences.decode(data), forKey: key) }
-        for key in journal.absentPreferences { defaults.removeObject(forKey: key) }
+        for (key, data) in journal.originalPreferences {
+            try checkpoint?(.willRestorePreference(key))
+            defaults.set(try WallpaperBackupPreferences.decode(data), forKey: key)
+            try checkpoint?(.didRestorePreference(key))
+        }
+        for key in journal.absentPreferences {
+            try checkpoint?(.willRestorePreference(key))
+            defaults.removeObject(forKey: key)
+            try checkpoint?(.didRestorePreference(key))
+        }
+        try checkpoint?(.willSynchronizePreferences)
         guard defaults.synchronize() else {
             throw WallpaperBackupFailure(message: String(localized: "The previous preferences could not be saved. Restore recovery will retry at the next launch."))
         }
-        // The library's folder first: the journal beside the support root is what names it.
-        if let libraryTransaction, manager.fileExists(atPath: libraryTransaction.path) { try manager.removeItem(at: libraryTransaction) }
-        try manager.removeItem(at: transaction)
+        try checkpoint?(.didSynchronizePreferences)
+        journal.rollbackComplete = true
+        try checkpoint?(.willCompleteRollback)
+        try writeJSON(journal, to: journalURL)
+        try checkpoint?(.didCompleteRollback)
+        try finishRecovery(transaction: transaction, libraryTransaction: libraryTransaction, committed: false, checkpoint: checkpoint)
     }
 
-    private func finishCommitted(transaction: URL, libraryTransaction: URL?) throws {
+    private func finishRecovery(transaction: URL, libraryTransaction: URL?, committed: Bool,
+                                checkpoint: ((RecoveryCheckpoint) throws -> Void)?) throws {
         // Delete pending first: a crash cannot leave a completed restore to repeat.
-        try cancelPendingRestore()
-        if let libraryTransaction, manager.fileExists(atPath: libraryTransaction.path) { try manager.removeItem(at: libraryTransaction) }
+        if committed { try cancelPendingRestore() }
+        try checkpoint?(.willRemoveLibraryTransaction)
+        if let libraryTransaction, try recoveryItemExists(at: libraryTransaction) {
+            guard try files.kind(at: libraryTransaction).0 == .directory else { throw files.unsafe(libraryTransaction.lastPathComponent) }
+            try manager.removeItem(at: libraryTransaction)
+        }
+        try checkpoint?(.didRemoveLibraryTransaction)
+        try checkpoint?(.willRemoveTransaction)
+        for item in try manager.contentsOfDirectory(at: transaction, includingPropertiesForKeys: nil) where item.lastPathComponent != "journal.json" {
+            try manager.removeItem(at: item)
+        }
+        try checkpoint?(.didRemoveTransactionContents)
+        try manager.removeItem(at: transaction.appendingPathComponent("journal.json"))
+        try checkpoint?(.didRemoveJournal)
         try manager.removeItem(at: transaction)
     }
 

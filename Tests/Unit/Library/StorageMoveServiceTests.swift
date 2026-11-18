@@ -170,6 +170,25 @@ final class StorageMoveServiceTests: XCTestCase {
         XCTAssertThrowsError(try service.plan(moveTo: drive))
     }
 
+    @MainActor
+    func testMoveIsUnblockedAfterRetryingAnInterruptedBackupRollback() throws {
+        let transaction = support.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+        try put("old settings", "old/config.toml", in: transaction)
+        let journal = WallpaperBackupJournal(units: [.init(path: "config.toml", existed: true)],
+            originalPreferences: [:], absentPreferences: [])
+        try JSONEncoder().encode(journal).write(to: transaction.appendingPathComponent("journal.json"))
+        let (defaults, domain) = try TemporaryDefaults.make(for: self)
+        let backup = WallpaperBackupService(supportRoot: support)
+        XCTAssertThrowsError(try backup.applyPendingRestore(defaults: defaults, domainName: domain, recoveryCheckpoint: {
+            if $0 == .didRestoreUnit("config.toml") { throw CocoaError(.fileWriteOutOfSpace) }
+        }))
+        let move = StorageMoveService(support: support, volumes: FakeVolumes(drive: drive))
+        XCTAssertThrowsError(try move.plan(moveTo: drive))
+        _ = try backup.applyPendingRestore(defaults: defaults, domainName: domain)
+        XCTAssertNoThrow(try move.plan(moveTo: drive))
+        XCTAssertEqual(try read("config.toml"), "old settings")
+    }
+
     func testOnlyOneMoveWaitsAtATime() throws {
         let service = StorageMoveService(support: support, volumes: FakeVolumes(drive: drive))
         let plan = try service.plan(moveTo: drive)

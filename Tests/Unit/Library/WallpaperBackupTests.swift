@@ -490,6 +490,266 @@ final class WallpaperBackupTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: transaction.path))
     }
 
+    private func interruptedRestore(libraryRoot: URL) throws -> (WallpaperBackupService, UserDefaults) {
+        let transaction = destination.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+        let libraryTransaction = libraryRoot.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+        try put("old library", "old/Library/101/project.json", in: libraryTransaction)
+        try put("new library", "Library/101/project.json", in: libraryRoot)
+        try put("old scene state", "old/SceneStorage/101/state.json", in: transaction)
+        try put("ready scene state", "ready/SceneStorage/101/state.json", in: transaction)
+        try put("new asset", "UserAssets/101/photo.png", in: destination)
+        try put("ready preset", "ready/UserAssets/PresetAssets/\(presetID)/photo.png", in: transaction)
+        try put("old config", "old/config.toml", in: transaction)
+        try put("new config", "config.toml", in: destination)
+        try put("old wallpaper", "wallpapers/101.json", in: destination)
+        try put("ready wallpaper", "ready/wallpapers/101.json", in: transaction)
+        let preferences = try defaults()
+        preferences.set("mute", forKey: PlaybackPreferences.otherAudioKey)
+        preferences.set(Data("partial value".utf8), forKey: WallpaperAutomationStore.focusRestoreKey)
+        preferences.set(Data("new collections".utf8), forKey: WallpaperCollectionStore.storageKey)
+        let journal = WallpaperBackupJournal(units: [
+            .init(path: "Library/101", existed: true),
+            .init(path: "SceneStorage/101", existed: true),
+            .init(path: "UserAssets/101", existed: false),
+            .init(path: "UserAssets/PresetAssets/\(presetID)", existed: false),
+            .init(path: "config.toml", existed: true),
+            .init(path: "wallpapers/101.json", existed: true)
+        ], originalPreferences: [
+            PlaybackPreferences.otherAudioKey: try WallpaperBackupPreferences.encode("pause"),
+            WallpaperAutomationStore.focusRestoreKey: try WallpaperBackupPreferences.encode(Data("old local state".utf8))
+        ], absentPreferences: [WallpaperCollectionStore.storageKey],
+            libraryRoot: libraryRoot == destination ? nil : libraryRoot.path,
+            libraryMarker: libraryRoot == destination ? nil : "test-drive")
+        if libraryRoot != destination { try StorageLocation.writeMarker("test-drive", at: libraryRoot) }
+        try JSONEncoder().encode(journal).write(to: transaction.appendingPathComponent("journal.json"))
+        return (WallpaperBackupService(supportRoot: destination, storageRoot: libraryRoot), preferences)
+    }
+
+    private func assertOriginalRestoreState(libraryRoot: URL, preferences: UserDefaults,
+                                            file: StaticString = #filePath, line: UInt = #line) throws {
+        for (directory, path, content) in [
+            (libraryRoot, "Library/101/project.json", "old library"),
+            (destination, "SceneStorage/101/state.json", "old scene state"),
+            (destination, "config.toml", "old config"),
+            (destination, "wallpapers/101.json", "old wallpaper")
+        ] {
+            XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent(path), encoding: .utf8), content, file: file, line: line)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent("UserAssets/101").path), file: file, line: line)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent("UserAssets/PresetAssets/\(presetID)").path), file: file, line: line)
+        XCTAssertEqual(preferences.string(forKey: PlaybackPreferences.otherAudioKey), "pause", file: file, line: line)
+        XCTAssertEqual(preferences.data(forKey: WallpaperAutomationStore.focusRestoreKey), Data("old local state".utf8), file: file, line: line)
+        XCTAssertNil(preferences.object(forKey: WallpaperCollectionStore.storageKey), file: file, line: line)
+        for directory in [destination, libraryRoot] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent(WallpaperBackupService.transactionDirectoryName).path), file: file, line: line)
+        }
+    }
+
+    func testRollbackCanRetryAfterEveryUnitPreferenceAndCleanupBoundary() throws {
+        typealias Checkpoint = WallpaperBackupService.RecoveryCheckpoint
+        let paths = ["Library/101", "SceneStorage/101", "UserAssets/101", "UserAssets/PresetAssets/\(presetID)", "config.toml", "wallpapers/101.json"]
+        let keys = [PlaybackPreferences.otherAudioKey, WallpaperAutomationStore.focusRestoreKey, WallpaperCollectionStore.storageKey]
+        let checkpoints: [Checkpoint] = paths.flatMap { [.willRestoreUnit($0), .didRestoreUnit($0)] }
+            + ["Library/101", "SceneStorage/101", "UserAssets/101", "config.toml"].map { .didRemoveLiveUnit($0) }
+            + keys.flatMap { [.willRestorePreference($0), .didRestorePreference($0)] }
+            + [.willRecordRollback, .didRecordRollback, .willSynchronizePreferences, .didSynchronizePreferences,
+               .willCompleteRollback, .didCompleteRollback, .willRemoveLibraryTransaction, .didRemoveLibraryTransaction,
+               .willRemoveTransaction, .didRemoveTransactionContents, .didRemoveJournal]
+        let parent = root!
+        defer { root = parent }
+        for moved in [false, true] {
+            for (index, boundary) in checkpoints.enumerated() {
+                root = parent.appendingPathComponent("\(moved)-\(index)")
+                let libraryRoot = moved ? root.appendingPathComponent("drive") : destination
+                let (service, preferences) = try interruptedRestore(libraryRoot: libraryRoot)
+                var interrupted = false
+                XCTAssertThrowsError(try service.applyPendingRestore(defaults: preferences, recoveryCheckpoint: { step in
+                    if step == boundary {
+                        interrupted = true
+                        throw CocoaError(.fileWriteOutOfSpace)
+                    }
+                }), "\(boundary)")
+                XCTAssertTrue(interrupted, "\(boundary)")
+                do {
+                    let report = try service.applyPendingRestore(defaults: preferences)
+                    XCTAssertEqual(report?.recoveredInterruptedRestore, true)
+                    try assertOriginalRestoreState(libraryRoot: libraryRoot, preferences: preferences)
+                    XCTAssertNil(try service.applyPendingRestore(defaults: preferences))
+                } catch {
+                    XCTFail("Retry failed at \(boundary), moved library: \(moved): \(error)")
+                }
+            }
+        }
+    }
+
+    func testPublishedRestoreRollbackCanBeInterruptedAndRetriedWithoutReapplyingPending() async throws {
+        let original = try fixture()
+        let target = try defaults()
+        try put("old config", "config.toml", in: destination)
+        target.set("pause", forKey: PlaybackPreferences.otherAudioKey)
+        try WallpaperBackupService(supportRoot: source).export(to: package, includeLibrary: true,
+            preferences: .init(defaults: original, domainName: domainName(for: original)))
+        let service = WallpaperBackupService(supportRoot: destination)
+        let preview = try service.preview(package: package, preferences: .init(defaults: target, domainName: domainName(for: target)))
+        try service.stageRestore(package: package, preview: preview, policy: .replace)
+        XCTAssertThrowsError(try service.applyPendingRestore(defaults: target, domainName: domainName(for: target),
+            beforePublish: { if $0 == "Preferences" { throw CocoaError(.fileWriteOutOfSpace) } },
+            recoveryCheckpoint: { if $0 == .didRestoreUnit("config.toml") { throw CocoaError(.fileWriteOutOfSpace) } }))
+        try put(#""prior startup failure""#, ".BackupRestoreFailure.json", in: destination)
+        _ = try service.applyPendingRestore(defaults: target)
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("config.toml"), encoding: .utf8), "old config")
+        XCTAssertEqual(target.string(forKey: PlaybackPreferences.otherAudioKey), "pause")
+        XCTAssertTrue(service.pendingRestore)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent("Library/101").path))
+        try service.cancelPendingRestore()
+        XCTAssertFalse(service.pendingRestore)
+        XCTAssertNil(try service.applyPendingRestore(defaults: target))
+    }
+
+    func testCommittedMovedLibraryCleanupCanRetryAfterItsTransactionWasRemoved() throws {
+        let libraryRoot = root.appendingPathComponent("drive")
+        let (service, preferences) = try interruptedRestore(libraryRoot: libraryRoot)
+        let transaction = destination.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+        let journalURL = transaction.appendingPathComponent("journal.json")
+        var journal = try JSONDecoder().decode(WallpaperBackupJournal.self, from: Data(contentsOf: journalURL))
+        journal.preferencesCommitted = true
+        try JSONEncoder().encode(journal).write(to: journalURL)
+        try put("stale pending", "manifest.json", in: destination.appendingPathComponent(WallpaperBackupService.pendingDirectoryName))
+        XCTAssertThrowsError(try service.applyPendingRestore(defaults: preferences, recoveryCheckpoint: {
+            if $0 == .didRemoveLibraryTransaction { throw CocoaError(.fileWriteOutOfSpace) }
+        }))
+        XCTAssertFalse(service.pendingRestore)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: libraryRoot.appendingPathComponent(WallpaperBackupService.transactionDirectoryName).path))
+        _ = try service.applyPendingRestore(defaults: preferences)
+        XCTAssertEqual(try String(contentsOf: libraryRoot.appendingPathComponent("Library/101/project.json"), encoding: .utf8), "new library")
+        XCTAssertEqual(preferences.string(forKey: PlaybackPreferences.otherAudioKey), "mute")
+        XCTAssertNil(try service.applyPendingRestore(defaults: preferences))
+    }
+
+    func testCommittedCleanupKeepsTheJournalUntilAllOtherTransactionContentsAreGone() throws {
+        let parent = root!
+        defer { root = parent }
+        let checkpoints: [WallpaperBackupService.RecoveryCheckpoint] = [
+            .willRemoveLibraryTransaction, .didRemoveLibraryTransaction, .willRemoveTransaction,
+            .didRemoveTransactionContents, .didRemoveJournal
+        ]
+        for (index, boundary) in checkpoints.enumerated() {
+            root = parent.appendingPathComponent("cleanup-\(index)")
+            let libraryRoot = root.appendingPathComponent("drive")
+            let (service, preferences) = try interruptedRestore(libraryRoot: libraryRoot)
+            let transaction = destination.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+            let journalURL = transaction.appendingPathComponent("journal.json")
+            var journal = try JSONDecoder().decode(WallpaperBackupJournal.self, from: Data(contentsOf: journalURL))
+            journal.preferencesCommitted = true
+            try JSONEncoder().encode(journal).write(to: journalURL)
+            XCTAssertThrowsError(try service.applyPendingRestore(defaults: preferences, recoveryCheckpoint: {
+                if $0 == boundary { throw CocoaError(.fileWriteOutOfSpace) }
+            }))
+            if boundary == .didRemoveJournal {
+                XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: transaction.path).isEmpty)
+            }
+            _ = try service.applyPendingRestore(defaults: preferences)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: transaction.path))
+            XCTAssertEqual(try String(contentsOf: libraryRoot.appendingPathComponent("Library/101/project.json"), encoding: .utf8), "new library")
+            XCTAssertEqual(preferences.string(forKey: PlaybackPreferences.otherAudioKey), "mute")
+        }
+    }
+
+    func testCompletedRecoveryStillWaitsForTheRecordedLibraryDrive() throws {
+        let parent = root!
+        defer { root = parent }
+        for committed in [false, true] {
+            root = parent.appendingPathComponent("offline-\(committed)")
+            let libraryRoot = root.appendingPathComponent("drive")
+            let (service, preferences) = try interruptedRestore(libraryRoot: libraryRoot)
+            let transaction = destination.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+            let journalURL = transaction.appendingPathComponent("journal.json")
+            if committed {
+                var journal = try JSONDecoder().decode(WallpaperBackupJournal.self, from: Data(contentsOf: journalURL))
+                journal.preferencesCommitted = true
+                try JSONEncoder().encode(journal).write(to: journalURL)
+            }
+            XCTAssertThrowsError(try service.applyPendingRestore(defaults: preferences, recoveryCheckpoint: {
+                if $0 == .didRemoveLibraryTransaction { throw CocoaError(.fileWriteOutOfSpace) }
+            }))
+            let unplugged = root.appendingPathComponent("unplugged")
+            try FileManager.default.moveItem(at: libraryRoot, to: unplugged)
+            try FileManager.default.createDirectory(at: libraryRoot, withIntermediateDirectories: false)
+            XCTAssertThrowsError(try service.applyPendingRestore(defaults: preferences))
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: libraryRoot.path).isEmpty)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+            try FileManager.default.removeItem(at: libraryRoot)
+            try FileManager.default.moveItem(at: unplugged, to: libraryRoot)
+            _ = try service.applyPendingRestore(defaults: preferences)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: transaction.path))
+            if !committed { try assertOriginalRestoreState(libraryRoot: libraryRoot, preferences: preferences) }
+        }
+    }
+
+    func testRecoveryDoesNotAcceptNewLiveDataWhenTheOldCopyIsMissing() throws {
+        let (service, preferences) = try interruptedRestore(libraryRoot: destination)
+        let transaction = destination.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+        try FileManager.default.removeItem(at: transaction.appendingPathComponent("old/config.toml"))
+        XCTAssertThrowsError(try service.applyPendingRestore(defaults: preferences))
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("config.toml"), encoding: .utf8), "new config")
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("Library/101/project.json"), encoding: .utf8), "new library")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: transaction.appendingPathComponent("old/Library/101").path))
+        XCTAssertEqual(preferences.string(forKey: PlaybackPreferences.otherAudioKey), "mute")
+    }
+
+    func testRecoveryDoesNotConfuseAnUnpublishedReplacementWithTheMissingOriginal() throws {
+        let (service, preferences) = try interruptedRestore(libraryRoot: destination)
+        try FileManager.default.removeItem(at: destination.appendingPathComponent("wallpapers/101.json"))
+        XCTAssertThrowsError(try service.applyPendingRestore(defaults: preferences))
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("config.toml"), encoding: .utf8), "new config")
+        XCTAssertEqual(preferences.string(forKey: PlaybackPreferences.otherAudioKey), "mute")
+    }
+
+    func testRecoveryRejectsAReplacedLiveFileAfterReturningTheOriginal() throws {
+        let (service, preferences) = try interruptedRestore(libraryRoot: destination)
+        XCTAssertThrowsError(try service.applyPendingRestore(defaults: preferences, recoveryCheckpoint: {
+            if $0 == .didRestoreUnit("config.toml") { throw CocoaError(.fileWriteOutOfSpace) }
+        }))
+        let original = destination.appendingPathComponent("config.toml")
+        try FileManager.default.moveItem(at: original, to: root.appendingPathComponent("removed-original"))
+        try put("unrelated live file", "config.toml", in: destination)
+        XCTAssertThrowsError(try service.applyPendingRestore(defaults: preferences))
+        XCTAssertEqual(try String(contentsOf: original, encoding: .utf8), "unrelated live file")
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("Library/101/project.json"), encoding: .utf8), "new library")
+        XCTAssertEqual(preferences.string(forKey: PlaybackPreferences.otherAudioKey), "mute")
+    }
+
+    func testRecoveryRejectsLinkedCopiesBeforeChangingAnyUnits() throws {
+        let parent = root!
+        defer { root = parent }
+        for (index, path) in ["old/config.toml", "ready/wallpapers/101.json", "old/Library"].enumerated() {
+            root = parent.appendingPathComponent("links-\(index)")
+            let (service, preferences) = try interruptedRestore(libraryRoot: destination)
+            let transaction = destination.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+            let copy = transaction.appendingPathComponent(path)
+            let outside = root.appendingPathComponent("outside")
+            try FileManager.default.moveItem(at: copy, to: outside)
+            try FileManager.default.createSymbolicLink(at: copy, withDestinationURL: outside)
+            XCTAssertThrowsError(try service.applyPendingRestore(defaults: preferences))
+            XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("config.toml"), encoding: .utf8), "new config")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path))
+            XCTAssertEqual(preferences.string(forKey: PlaybackPreferences.otherAudioKey), "mute")
+        }
+    }
+
+    private final class UnsynchronizedDefaults: UserDefaults, @unchecked Sendable {
+        override func synchronize() -> Bool { false }
+    }
+
+    func testRecoveryRetriesAfterPreferencesSynchronizationFails() throws {
+        let (service, preferences) = try interruptedRestore(libraryRoot: destination)
+        let failing = try XCTUnwrap(UnsynchronizedDefaults(suiteName: domainName(for: preferences)))
+        XCTAssertThrowsError(try service.applyPendingRestore(defaults: failing))
+        _ = try service.applyPendingRestore(defaults: preferences)
+        try assertOriginalRestoreState(libraryRoot: destination, preferences: preferences)
+    }
+
     func testChangedPackageCannotStageOverAnExistingPendingRestore() async throws {
         let original = try fixture()
         let targetDefaults = try defaults()
