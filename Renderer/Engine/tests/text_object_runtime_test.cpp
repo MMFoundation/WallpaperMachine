@@ -4295,14 +4295,18 @@ TEST(TextObjectRuntime, ASystemFontIsOpenedOnceAndNotForEveryLayout) {
 #endif
 }
 
+static std::string SinglePixelBdf(int codepoint, const std::string& pixel) {
+    return
+        "STARTFONT 2.3\nFONT fixture\nSIZE 8 72 72 8\nFONTBOUNDINGBOX 1 1 0 0\n"
+        "STARTPROPERTIES 4\nFONT_ASCENT 1\nFONT_DESCENT 0\nCHARSET_REGISTRY \"ISO10646\"\n"
+        "CHARSET_ENCODING \"1\"\nENDPROPERTIES\nCHARS 1\nSTARTCHAR mark\nENCODING " +
+        std::to_string(codepoint) + "\nSWIDTH 125 0\nDWIDTH 1 0\nBBX 1 1 0 0\nBITMAP\n" +
+        pixel + "\nENDCHAR\nENDFONT\n";
+}
+
 TEST(TextObjectRuntime, SharedPrimaryAtlasKeepsEachWallpapersFallbackGlyphsDistinct) {
     const auto font = [](int codepoint, std::string pixel) {
-        const std::string bdf =
-            "STARTFONT 2.3\nFONT fixture\nSIZE 8 72 72 8\nFONTBOUNDINGBOX 1 1 0 0\n"
-            "STARTPROPERTIES 4\nFONT_ASCENT 1\nFONT_DESCENT 0\nCHARSET_REGISTRY \"ISO10646\"\n"
-            "CHARSET_ENCODING \"1\"\nENDPROPERTIES\nCHARS 1\nSTARTCHAR mark\nENCODING " +
-            std::to_string(codepoint) + "\nSWIDTH 125 0\nDWIDTH 1 0\nBBX 1 1 0 0\nBITMAP\n" +
-            pixel + "\nENDCHAR\nENDFONT\n";
+        const auto bdf = SinglePixelBdf(codepoint, pixel);
         return SharedFontData::Interned({ bdf.begin(), bdf.end() });
     };
     TextLayerState state;
@@ -4330,6 +4334,39 @@ TEST(TextObjectRuntime, SharedPrimaryAtlasKeepsEachWallpapersFallbackGlyphsDisti
         EXPECT_EQ(InkMass(RasterOf(state)), isolated);
         EXPECT_EQ(TextGlyphCellsMadeForTests(), cells);
     }
+}
+
+TEST(TextObjectRuntime, ReplacingAnInstalledFallbackRefreshesItsCachedGlyphs) {
+    const auto path = std::filesystem::temp_directory_path() / ("text-fallback-" + std::to_string(::getpid()) + ".bdf");
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            SetInstalledFamilyLookupForTests({});
+            ResetTextFontCacheForTests();
+            std::filesystem::remove(path);
+        }
+    } cleanup { path };
+    std::ofstream(path) << SinglePixelBdf(0xF0001, "40");
+    const auto stamp = std::filesystem::last_write_time(path);
+    SetInstalledFamilyLookupForTests([&](std::string_view family) {
+        return family == "Apple Color Emoji" ? SystemFontFace { .path = path.string() } : SystemFontFace {};
+    });
+    TextLayerState state;
+    const auto primary = SinglePixelBdf('A', "FF");
+    state.resolved_font_data = SharedFontData::Interned({primary.begin(), primary.end()});
+    state.text = "\U000F0001";
+    ResetTextAtlasesForTests();
+    const auto dim = InkMass(RasterOf(state));
+    ASSERT_GT(dim, 0u);
+    EXPECT_EQ(InkMass(RasterOf(state)), dim);
+    EXPECT_EQ(TextGlyphCellsMadeForTests(), 1u);
+    std::ofstream(path) << SinglePixelBdf(0xF0001, "FF");
+    std::filesystem::last_write_time(path, stamp + std::chrono::seconds(1));
+    const auto refreshed = InkMass(RasterOf(state));
+    ResetTextAtlasesForTests();
+    const auto fresh = InkMass(RasterOf(state));
+    ASSERT_GT(fresh, dim);
+    EXPECT_EQ(refreshed, fresh);
 }
 
 TEST(TextObjectRuntime, AFontTheWallpaperShipsIsNotOpenedFromAFile) {

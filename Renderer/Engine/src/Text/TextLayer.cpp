@@ -294,9 +294,9 @@ public:
 
     // The face of `path` that has `postscript_name`, or the file's first face when
     // the name is empty or the file has no such face. Null when it cannot be opened.
-    FT_Face Acquire(const std::string& path, const std::string& postscript_name) {
+    FT_Face Acquire(const std::string& path, const std::string& postscript_name, std::string& glyph_key) {
         if (path.empty()) return nullptr;
-        if (Entry* entry = Find(path, postscript_name)) return Use(*entry);
+        if (Entry* entry = Find(path, postscript_name)) return Use(*entry, glyph_key);
 
         FT_Library library = FtLibrary::Get().handle();
         if (library == nullptr) return nullptr;
@@ -324,22 +324,25 @@ public:
         if (held != m_entries.end()) {
             FT_Done_Face(face);
             held->names.push_back(postscript_name);
-            return Use(*held);
+            return Use(*held, glyph_key);
         }
 
 #ifdef WESCENE_BUILD_TESTS
         ++m_files_opened;
 #endif
-        m_entries.push_back(Entry { .path = path, .index = index, .face = face,
-                                    .used = ++m_clock, .stamp = FileStamp::Of(path),
-                                    .names = { postscript_name } });
-        if (m_entries.size() > kCapacity) {
+        if (m_entries.size() == kCapacity) {
             const auto oldest = std::ranges::min_element(
                 m_entries, {}, [](const Entry& entry) { return entry.used; });
             FT_Done_Face(oldest->face);
             m_entries.erase(oldest);
         }
-        return face;
+        const auto stamp = FileStamp::Of(path);
+        m_entries.push_back(Entry { .path = path, .index = index, .face = face, .stamp = stamp,
+                                    .glyph_key = path + "#" + std::to_string(index) + ":" +
+                                                 std::to_string(stamp.size) + ":" +
+                                                 std::to_string(static_cast<int64_t>(stamp.time.time_since_epoch().count())),
+                                    .names = { postscript_name } });
+        return Use(m_entries.back(), glyph_key);
     }
 
 #ifdef WESCENE_BUILD_TESTS
@@ -381,6 +384,7 @@ private:
         FT_Face     face { nullptr };
         uint64_t    used { 0 };
         FileStamp   stamp;
+        std::string glyph_key;
         // What the face has been asked for by; the empty name is a request with none.
         std::vector<std::string> names;
     };
@@ -407,8 +411,9 @@ private:
         return nullptr;
     }
 
-    FT_Face Use(Entry& entry) {
+    FT_Face Use(Entry& entry, std::string& glyph_key) {
         entry.used = ++m_clock;
+        glyph_key = entry.glyph_key;
         return entry.face;
     }
 
@@ -418,14 +423,6 @@ private:
     uint64_t m_files_opened { 0 };
 #endif
 };
-
-// An installed face at `point_size`, from the cache. Null where the file does not
-// open or the face cannot be sized.
-FT_Face OpenInstalledFace(const std::string& path, const std::string& postscript_name,
-                          float point_size) {
-    FT_Face face = FaceCache::Get().Acquire(path, postscript_name);
-    return face != nullptr && SetFaceSize(face, point_size) ? face : nullptr;
-}
 
 // What draws a glyph the layer's font does not have: Wallpaper Engine tries a fixed list of
 // fonts for it, opening each only when no face it holds has the glyph, and draws the glyph
@@ -491,16 +488,14 @@ public:
             Hold(m_owned.get(), state.resolved_font_data.faceKey(), m_point_size);
         } else if (! state.resolved_font_path.empty()) {
             m_fit = state.resolved_font_fit;
-            Hold(OpenFitted(state.resolved_font_path, state.resolved_font_face, m_fit),
-                 state.resolved_font_path + "#" + state.resolved_font_face, m_point_size * m_fit.size_adjust);
+            HoldFitted(state.resolved_font_path, state.resolved_font_face);
         }
         if (primary() != nullptr) return;
         // Wallpaper Engine draws what it cannot load in Arial.
         for (const auto& key : { state.font_key, std::string(kDefaultSceneFontKey) }) {
             const auto font = ResolveSceneFont(key);
             m_fit           = font.fit;
-            Hold(OpenFitted(font.path, font.postscript_name, m_fit), font.path + "#" + font.postscript_name,
-                 m_point_size * m_fit.size_adjust);
+            HoldFitted(font.path, font.postscript_name);
             if (primary() != nullptr) return;
         }
         m_fit = {};
@@ -544,13 +539,12 @@ public:
             } else {
                 const auto font = entry.source == ChainSource::SceneKey ? ResolveSceneFont(entry.name)
                                                                         : ResolveInstalledFamily(entry.name);
-                other = FaceCache::Get().Acquire(font.path, font.postscript_name);
+                other = FaceCache::Get().Acquire(font.path, font.postscript_name, key);
                 // A face that is held already has been asked for the glyph, and is sized for the
                 // layer's font: the cache hands out one face per file, so it is left alone.
                 if (other == nullptr || std::ranges::find(m_held, other) != m_held.end()) continue;
                 size = m_point_size * font.fit.size_adjust;
                 if (! SetFaceSize(other, size)) continue;
-                key = font.path + "#" + font.postscript_name;
             }
             Hold(other, std::move(key), size, entry.not_for_cjk_punctuation);
             if (Declines(m_held.size() - 1, codepoint)) continue;
@@ -561,9 +555,11 @@ public:
 
 private:
     // The installed face, sized for the layout at the point size its fit gives it.
-    FT_Face OpenFitted(const std::string& path, const std::string& postscript_name,
-                       const SystemFontFit& fit) const {
-        return OpenInstalledFace(path, postscript_name, m_point_size * fit.size_adjust);
+    void HoldFitted(const std::string& path, const std::string& postscript_name) {
+        std::string key;
+        const auto face = FaceCache::Get().Acquire(path, postscript_name, key);
+        const auto size = m_point_size * m_fit.size_adjust;
+        if (face && SetFaceSize(face, size)) Hold(face, std::move(key), size);
     }
 
     void Hold(FT_Face face, std::string key, float size, bool not_for_cjk_punctuation = false) {
