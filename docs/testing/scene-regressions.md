@@ -3005,8 +3005,15 @@ texture entrances are not decoded-image or native-rendering evidence.
   with RGBA writes (`sub_1401ECB20`, `sub_140207B50`); a layer's own picture into the
   composite another layer samples keeps `As + Ad*(1-As)`, because Wallpaper Engine's
   composite is that layer's first chain buffer (`sub_1401EA500`). The write mask is RGB
-  unless a pass asks for alpha: `alphawriting: enabled`, alpha MAX, or any draw into a
-  layer or chain buffer; `alphawriting: disabled` keeps RGB. The GPU test rebuilds the
+  unless a pass asks for alpha: `alphawriting: enabled`, alpha MAX, or a draw into a
+  layer or chain buffer; `alphawriting: disabled` keeps RGB unless alpha MAX is active.
+  A closing effect redirected from the scene into a copying
+  composition keeps the scene's default RGB write mask.
+  `LayerComposite.AProcessedChildPreservesTheAlphaOfACopiedBackground` reads back
+  the composition after a half-alpha card: the plain child leaves 96 and 191 over
+  destination alpha 64 and 255, while the child with a pass-through effect leaves
+  64 and 255, as in Wallpaper Engine 2.8.0.42. The layer's own sampled composite
+  and a puppet's mask targets still store alpha. `AlphaProbeCellsMatchWallpaperEngine` rebuilds the
   cells of Wallpaper Engine's alpha probe and reads them against its frame
   (`artifacts/we-render-re/probe-shots/alpha-1.png`): two half children of a
   no-copybackground compose layer stand at 128 (source-over gave 192), one and two

@@ -108,6 +108,51 @@ TEST_F(LayerComposite, TheAlphaOfTheChainIsWhatAnotherLayerReads)
         << "an alpha of 0.25, neither squared nor lost";
 }
 
+TEST_F(LayerComposite, AProcessedChildPreservesTheAlphaOfACopiedBackground)
+{
+    ScenePackage package;
+    ImageLayer   group;
+    group.model = package.AddImageModel("util/composelayer", "_rt_FullFrameBuffer");
+    package.PutJson(group.model, { { "passthrough", true }, { "material", "materials/util/composelayer.json" } });
+    group.effects = { EffectUse(AddFragmentEffect(package, "read_alpha", kShowAlpha)) };
+
+    ImageLayer backing;
+    backing.id     = 2;
+    backing.parent = group.id;
+    backing.origin = { 0, 0, 0 };
+    backing.model  = AddShaderModel(package, "backing", "backing", R"(
+varying vec2 v_TexCoord;
+void main() {
+    float alpha = abs(v_TexCoord.y - 0.5) < 0.1 ? 0.25 : 1.0;
+    gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);
+}
+)", nullptr, "normal");
+
+    ImageLayer patch;
+    patch.id     = 3;
+    patch.parent = group.id;
+    patch.origin = { -64, 0, 0 };
+    patch.size   = { 96, 96 };
+    patch.model  = AddShaderModel(package, "half", "half",
+                                  "void main(){ gl_FragColor = vec4(1.0, 1.0, 1.0, 0.5); }\n", nullptr);
+    ImageLayer processed = patch;
+    processed.id         = 4;
+    processed.origin[0]  = 64;
+    processed.effects    = { EffectUse(package.AddTintEffect("identity"), { { "tint", "1 1 1" } }) };
+
+    package.SetProject();
+    package.SetScene(SceneJson({}, { ImageLayerJson(group), ImageLayerJson(backing),
+                                     ImageLayerJson(patch), ImageLayerJson(processed) }));
+    GpuScene scene(package);
+    ASSERT_TRUE(scene.ok()) << scene.error();
+    const Image picture = scene.Run(3);
+    ASSERT_FALSE(picture.empty()) << scene.error();
+    EXPECT_TRUE(ExpectPixel(picture, 64, 45, { 191, 191, 191, 255 }, 1));
+    EXPECT_TRUE(ExpectPixel(picture, 64, 72, { 96, 96, 96, 255 }, 1));
+    EXPECT_TRUE(ExpectPixel(picture, 192, 45, { 255, 255, 255, 255 }, 1));
+    EXPECT_TRUE(ExpectPixel(picture, 192, 72, { 64, 64, 64, 255 }, 1));
+}
+
 TEST_F(LayerComposite, ALayerWithNoHeightFillsItsCompositeAndShowsNothing)
 {
     for (const bool hidden : { true, false }) {

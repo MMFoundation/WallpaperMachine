@@ -481,6 +481,12 @@ foreground part such as an eyelid can cover an already clipped iris. Parts that 
 the same mask coverage reuse it until another mask replaces it. Puppets without
 clipping masks do not draw a mask target.
 
+When a composition copies the background, a child's closing effect draws its colour
+without changing the destination alpha by default. This keeps translucent edges of
+overlapping puppet parts from cutting seams in an otherwise opaque image. A plain
+child still blends its alpha into the copy; a composition without a background copy
+still takes the maximum alpha of its children.
+
 A scene follows the cursor anywhere on its display, but, as in Wallpaper Engine, a
 mouse press counts only where it lands on the desktop: the wallpaper, Finder's icons or
 a desktop widget. A click in another app's window, in the menu bar or the Dock, or in

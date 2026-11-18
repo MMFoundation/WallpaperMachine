@@ -78,6 +78,7 @@ struct Route {
     std::string camera;
     // The destination came from a submesh's output override, not from the layer's routing.
     bool overridden { false };
+    bool closes_into_composition { false };
 };
 
 // What the load-action rules remember about one render target.
@@ -716,6 +717,7 @@ private:
             if (! isCompose(node)) continue;
             SceneCamera* camera = cameraOf(node);
             route.dest          = resolve(camera->GetImgEffect()->FirstTarget());
+            route.closes_into_composition = source.role == PictureRole::ChainFinal;
             if (! camera->ChildrenUseSceneCamera()) route.camera = node->Camera();
             return route;
         }
@@ -788,8 +790,8 @@ private:
 
     // Wallpaper Engine's colour write mask is RGB unless a pass asks for alpha
     // (sub_140099F60): `alphawriting: enabled` (sub_140155FC0) or alpha MAX, which
-    // forces RGBA. Its layer and chain buffers are written with alpha, the scene
-    // output is not.
+    // forces RGBA. A chain's closing draw keeps the scene output's write mask
+    // even when a composition receives it; the intermediate buffers store alpha.
     static bool ResolveWriteAlpha(bool scene_output, AlphaWriting writing, bool alpha_max) {
         if (writing == AlphaWriting::Enabled || alpha_max) return true;
         if (writing == AlphaWriting::Disabled) return false;
@@ -829,7 +831,8 @@ private:
         // Native rgb888 has no stored alpha. Metal's RGBA8 backing keeps the
         // clear's opaque alpha even when a material explicitly writes alpha.
         desc.write_alpha = route.dest != kReflectionTarget &&
-            ResolveWriteAlpha(route.dest == SpecTex_Default, material.alpha_writing, alpha_max);
+            ResolveWriteAlpha(route.dest == SpecTex_Default || route.closes_into_composition,
+                              material.alpha_writing, alpha_max);
         // What a chain leaves in its layer's composite is its last pass as written.
         desc.replace_target = source.role == PictureRole::ChainFinal && source.node->Mesh()->MaterialSlots().size() == 1 &&
                               std::string_view(route.dest).starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX);
