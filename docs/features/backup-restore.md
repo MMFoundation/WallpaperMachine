@@ -43,6 +43,17 @@ Packages reject traversal, links, special files, ambiguous filenames, changed
 bytes and unsupported configuration schemas. Publication is journaled and rolls
 back on failure. A failed pending restore is shown in Storage and is not retried
 every launch without explicit reconfirmation; **Cancel restore** removes staging.
+An interrupted rollback retries before a new restore: it records the originals'
+volume, file identity and creation time before returning them, without copying
+their contents. Returning a file, restoring preferences and cleaning up can each
+be retried. A completed transaction keeps its journal until its other temporary
+contents are gone, including when the library lives on another drive. That drive
+must still be connected; missing or replaced originals remain an error, not a
+reason to accept whatever is at the live path. Recovery reads legacy version-1
+journals and upgrades them to version 2 before rollback; older app versions refuse
+that in-progress journal. A legacy rollback that already lost both its saved copy
+and preparation evidence cannot be identified safely and remains preserved for
+manual recovery.
 Managed resource paths relocate, while ordinary property text stays unchanged.
 Backed-up copies are portable; original external files are read or watched only
 after a matching local authorization or an explicit reselection, so restoring
