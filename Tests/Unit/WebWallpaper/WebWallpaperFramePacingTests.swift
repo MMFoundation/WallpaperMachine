@@ -414,6 +414,7 @@ final class WebWallpaperFramePacingTests: XCTestCase {
     let limited = try await loopRate(page)
     XCTAssertLessThan(limited, free * 0.7, "\(limit) fps must visibly cut the callback rate (\(limited) vs \(free) per second)")
     XCTAssertGreaterThanOrEqual(limited, 12, "a limited loop still runs (\(limited) per second)")
+    XCTAssertLessThanOrEqual(limited, Double(limit) + 2, "the one-second sample must stay near the requested limit")
 
     page.applyGeneralProperties(fps: 120)
     try await pollPacing(page, expected: false)
