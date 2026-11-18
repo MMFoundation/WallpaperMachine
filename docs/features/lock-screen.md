@@ -296,6 +296,8 @@ The published display mapping is kept before first-frame readiness, so disabling
 either mode during the initial activation wait also restores its native choice
 without waiting for a display UUID to return. A surviving lock-screen selection
 keeps its original readiness deadline and is not reported enabled before a frame.
+A surviving screen saver is already selected, so the app remembers it for the next
+launch even if the display UUID has not returned.
 Disabled source fields are removed consistently from the committed and freshly
 prepared manifests. Returning display UUIDs or repeated refreshes therefore do not
 reload an unchanged surviving mode or restart its unfinished readiness timeout.

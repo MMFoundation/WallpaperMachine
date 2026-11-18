@@ -645,8 +645,6 @@ final class LockScreenWallpaperService {
         cancelRendererWatches()
         retiringRendererProcesses.removeAll()
       }
-      if isEnabled { defaults.set(true, forKey: Self.preference) }
-      if screenSaverEnabled { defaults.set(true, forKey: Self.screenSaverPreference) }
     } catch is CancellationError {
       // A newer request owns the next publication; keep the committed surfaces.
     } catch {
@@ -758,6 +756,12 @@ final class LockScreenWallpaperService {
       && unconfirmed?.revision != configuration.revision
     screenSaverEnabled = screenSaverRequested && configuration.screenSaverEnabled
       && !configuration.scenes(for: .screenSaver).isEmpty
+    if isEnabled && !defaults.bool(forKey: Self.preference) {
+      defaults.set(true, forKey: Self.preference)
+    }
+    if screenSaverEnabled && !defaults.bool(forKey: Self.screenSaverPreference) {
+      defaults.set(true, forKey: Self.screenSaverPreference)
+    }
     errorMessage = isRequested ? (lockScreenSourceError ?? lockScreenActivationError) : nil
     status = !isRequested ? String(localized: "Off") : errorMessage != nil
       ? String(localized: "Not enabled — action required") : isEnabled

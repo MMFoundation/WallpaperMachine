@@ -305,6 +305,9 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertEqual(try selectedProvider("Idle"), lockScreen ? LockScreenConfiguration.extensionIdentifier : "display-one-idle")
     XCTAssertFalse(service.isEnabled, "a surviving Desktop selection is not confirmed before a frame")
     XCTAssertEqual(service.screenSaverEnabled, lockScreen)
+    XCTAssertFalse(defaults.bool(forKey: preference))
+    XCTAssertEqual(defaults.bool(forKey: "WallpaperMachineUseWallpaperAsScreenSaver"), lockScreen,
+      "a selected saver must survive relaunch even before the display UUID returns")
     XCTAssertNil(service.errorMessage)
     XCTAssertNil(service.screenSaverError)
     uuid = "one"
