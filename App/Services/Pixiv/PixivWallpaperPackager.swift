@@ -113,7 +113,7 @@ actor PixivWallpaperPackager {
         let entries = (try? fm.contentsOfDirectory(
             at: root, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey]))
             ?? []
-        for entry in entries where entry.lastPathComponent.hasPrefix(stagingPrefix) {
+        for entry in entries where FileLocation.hasStagingName(entry, prefix: stagingPrefix) {
             guard let values = try? entry.resourceValues(
                 forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey]),
                 values.isDirectory == true, values.isSymbolicLink != true,

@@ -35,7 +35,7 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
                 try files.setAttributes([.modificationDate: date], ofItemAtPath: path)
             }
         }
-        func staging(_ name: String, stillWriting: Bool) throws -> URL {
+        func staging(_ name: String = UUID().uuidString, stillWriting: Bool) throws -> URL {
             let url = root.appendingPathComponent(WorkshopDownloader.stagingPrefix + name, isDirectory: true)
             let content = url.appendingPathComponent("steamapps/workshop/content/431960", isDirectory: true)
             try files.createDirectory(at: content, withIntermediateDirectories: true)
@@ -48,10 +48,11 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
             return url
         }
 
-        let abandoned = try staging("abandoned", stillWriting: false)
-        let claimed = try staging("claimed", stillWriting: false)
-        let occupied = try staging("occupied", stillWriting: false)
-        let writing = try staging("writing", stillWriting: true)
+        let abandoned = try staging(stillWriting: false)
+        let claimed = try staging(stillWriting: false)
+        let occupied = try staging(stillWriting: false)
+        let writing = try staging(stillWriting: true)
+        let backup = try staging(UUID().uuidString + "-backup", stillWriting: false)
         let unrelated = root.appendingPathComponent("SteamSession", isDirectory: true)
         try files.createDirectory(at: unrelated, withIntermediateDirectories: false)
 
@@ -82,6 +83,8 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
         XCTAssertTrue(files.fileExists(atPath: occupied.path), "A claim inherited by a surviving child must survive")
         XCTAssertTrue(files.fileExists(atPath: writing.path), "A stale directory timestamp must not condemn a live download")
         XCTAssertTrue(files.fileExists(atPath: unrelated.path), "Only staging directories are swept")
+        XCTAssertEqual(try Data(contentsOf: backup.appendingPathComponent("steamapps/workshop/content/431960/item")),
+                       Data("payload".utf8))
     }
 
     func testStagingSweepKeepsWhatItCannotInspect() throws {
@@ -89,8 +92,8 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
         let root = files.temporaryDirectory.appendingPathComponent("mwe-staging-faults-\(UUID().uuidString)")
         defer { try? files.removeItem(at: root) }
         try files.createDirectory(at: root, withIntermediateDirectories: true)
-        func staging(_ name: String) throws -> URL {
-            let url = root.appendingPathComponent(WorkshopDownloader.stagingPrefix + name, isDirectory: true)
+        func staging() throws -> URL {
+            let url = root.appendingPathComponent(WorkshopDownloader.stagingPrefix + UUID().uuidString, isDirectory: true)
             try files.createDirectory(at: url.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
             try Data("payload".utf8).write(to: url.appendingPathComponent("steamapps/item"))
             var paths = [url.path]
@@ -104,19 +107,19 @@ final class DownloaderLifecycleTests: DownloaderTestCase {
         }
 
         // Otherwise reclaimable: quiet, unclaimed, and nothing working inside it.
-        let unreadableTree = try staging("unreadable-tree")
+        let unreadableTree = try staging()
         let locked = unreadableTree.appendingPathComponent("steamapps/locked", isDirectory: true)
         try files.createDirectory(at: locked, withIntermediateDirectories: false)
         try files.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
         defer { try? files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
 
-        let unreadableClaim = try staging("unreadable-claim")
+        let unreadableClaim = try staging()
         let owner = unreadableClaim.appendingPathComponent("owner")
         try Data().write(to: owner)
         try files.setAttributes([.posixPermissions: 0], ofItemAtPath: owner.path)
         defer { try? files.setAttributes([.posixPermissions: 0o600], ofItemAtPath: owner.path) }
 
-        let quiet = try staging("quiet")
+        let quiet = try staging()
         WorkshopDownloader.removeAbandonedStaging(in: root, quietFor: 60)
         XCTAssertTrue(files.fileExists(atPath: unreadableTree.path), "A tree that cannot be walked is not known to be idle")
         XCTAssertTrue(files.fileExists(atPath: unreadableClaim.path), "A claim that cannot be read is not known to be released")

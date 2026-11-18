@@ -1378,7 +1378,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     nonisolated static func removeAbandonedStaging(in root: URL, quietFor quiet: TimeInterval = 600) {
         let files = FileManager.default
         let candidates = ((try? files.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.lastPathComponent.hasPrefix(stagingPrefix) }
+            .filter { FileLocation.hasStagingName($0, prefix: stagingPrefix) }
         let deadline = Date().addingTimeInterval(-quiet)
         for entry in candidates {
             var metadata = stat()
