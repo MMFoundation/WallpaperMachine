@@ -1235,8 +1235,9 @@ optional extra validation pass. These choices reduce local disk work; network
 throughput still depends on Steam and your connection. Manual file imports remain
 non-destructive copies.
 
-A download interrupted by a crash leaves staging behind. The app reclaims only
-staging directories it can prove nothing is writing to.
+A download interrupted by a crash leaves staging behind. The app checks only
+directories named `.WallpaperMachine-workshop-<UUID>` and reclaims them only
+when unclaimed and quiet. A renamed backup with an added suffix is left alone.
 
 **Free space.** Before SteamCMD starts, the downloader checks that the disk holding
 the library can take the download, so one that cannot fit fails at once instead of
