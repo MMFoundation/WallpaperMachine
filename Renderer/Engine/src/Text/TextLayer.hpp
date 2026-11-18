@@ -22,37 +22,40 @@ public:
     using const_iterator = std::vector<uint8_t>::const_iterator;
 
     SharedFontData() = default;
-    SharedFontData(std::vector<uint8_t> data) { assign(std::move(data)); }
+    SharedFontData(std::vector<uint8_t> data): SharedFontData(Interned(std::move(data))) {}
     SharedFontData(const SharedFontData&) noexcept            = default;
     SharedFontData(SharedFontData&&) noexcept                 = default;
     SharedFontData& operator=(const SharedFontData&) noexcept = default;
     SharedFontData& operator=(SharedFontData&&) noexcept      = default;
 
     SharedFontData& operator=(std::vector<uint8_t> data) {
-        assign(std::move(data));
-        return *this;
+        return *this = Interned(std::move(data));
     }
 
-    bool empty() const { return m_bytes == nullptr || m_bytes->empty(); }
-    std::size_t size() const { return m_bytes ? m_bytes->size() : 0; }
-    const uint8_t* data() const { return empty() ? nullptr : m_bytes->data(); }
+    /// `data`, sharing the storage of a live font with the same bytes: text layers that name the
+    /// same font file keep one copy of it instead of one each. A match is confirmed byte for byte,
+    /// and the bytes go once nothing uses them.
+    static SharedFontData Interned(std::vector<uint8_t> data);
+
+    bool empty() const { return !m_storage; }
+    std::size_t size() const { return bytes().size(); }
+    const uint8_t* data() const { return m_storage ? m_storage->bytes.data() : nullptr; }
+    std::string faceKey() const { return m_storage ? m_storage->face_key : std::string(); }
     const std::vector<uint8_t>& bytes() const {
         static const std::vector<uint8_t> none;
-        return m_bytes ? *m_bytes : none;
+        return m_storage ? m_storage->bytes : none;
     }
     const_iterator begin() const { return bytes().begin(); }
     const_iterator end() const { return bytes().end(); }
 
 private:
-    void assign(std::vector<uint8_t> data) {
-        if (data.empty()) {
-            m_bytes.reset();
-        } else {
-            m_bytes = std::make_shared<const std::vector<uint8_t>>(std::move(data));
-        }
-    }
+    struct Storage {
+        std::vector<uint8_t> bytes;
+        std::string face_key;
+    };
+    explicit SharedFontData(std::shared_ptr<const Storage> storage): m_storage(std::move(storage)) {}
 
-    std::shared_ptr<const std::vector<uint8_t>> m_bytes;
+    std::shared_ptr<const Storage> m_storage;
 };
 
 /// The look Wallpaper Engine gives text through its font shader (`font.frag`): an outline

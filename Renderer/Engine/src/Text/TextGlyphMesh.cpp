@@ -119,7 +119,7 @@ void PublishTextAtlases(RuntimeImageSource& images, std::string_view layer_key, 
                                 picture.bytes->size())) {
             return;
         }
-        images.SetImage(name, picture.width, picture.height, format, picture.bytes->data(), picture.bytes->size());
+        images.SetImage(name, picture.width, picture.height, format, picture.bytes);
     };
     publish(TextAtlasName(layer_key), build.atlas);
     publish(TextColorAtlasName(layer_key), build.color_atlas);

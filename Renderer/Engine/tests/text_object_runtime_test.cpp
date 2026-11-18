@@ -20,6 +20,7 @@
 #include "SpecTexs.hpp"
 #include "Shader/RustShaderBridge.hpp"
 #include "Text/SystemFontResolver.hpp"
+#include "Runtime/RuntimeImageSource.hpp"
 #include "Text/TextLayer.hpp"
 #include "WPSceneParser.hpp"
 #include "WPPkgFs.hpp"
@@ -4294,6 +4295,80 @@ TEST(TextObjectRuntime, ASystemFontIsOpenedOnceAndNotForEveryLayout) {
 #endif
 }
 
+static std::string SinglePixelBdf(int codepoint, const std::string& pixel) {
+    return
+        "STARTFONT 2.3\nFONT fixture\nSIZE 8 72 72 8\nFONTBOUNDINGBOX 1 1 0 0\n"
+        "STARTPROPERTIES 4\nFONT_ASCENT 1\nFONT_DESCENT 0\nCHARSET_REGISTRY \"ISO10646\"\n"
+        "CHARSET_ENCODING \"1\"\nENDPROPERTIES\nCHARS 1\nSTARTCHAR mark\nENCODING " +
+        std::to_string(codepoint) + "\nSWIDTH 125 0\nDWIDTH 1 0\nBBX 1 1 0 0\nBITMAP\n" +
+        pixel + "\nENDCHAR\nENDFONT\n";
+}
+
+TEST(TextObjectRuntime, SharedPrimaryAtlasKeepsEachWallpapersFallbackGlyphsDistinct) {
+    const auto font = [](int codepoint, std::string pixel) {
+        const auto bdf = SinglePixelBdf(codepoint, pixel);
+        return SharedFontData::Interned({ bdf.begin(), bdf.end() });
+    };
+    TextLayerState state;
+    state.text = "\U000F0001";
+    state.resolved_font_data = font('A', "FF");
+    state.asset_emoji_font = font(0xF0001, "40");
+    ResetTextAtlasesForTests();
+    const auto dim = InkMass(RasterOf(state));
+    ASSERT_GT(dim, 0u);
+    state.asset_emoji_font = font(0xF0001, "FF");
+    const auto bright = InkMass(RasterOf(state));
+    ResetTextAtlasesForTests();
+    const auto isolated = InkMass(RasterOf(state));
+    ASSERT_GT(isolated, dim);
+    EXPECT_EQ(bright, isolated);
+    const auto cells = TextGlyphCellsMadeForTests();
+    ASSERT_EQ(cells, 1u);
+    for (int reload = 0; reload < 3; ++reload) {
+        state.asset_emoji_font = SharedFontData();
+        if (reload != 0) {
+            state.resolved_font_data = SharedFontData();
+            state.resolved_font_data = font('A', "FF");
+        }
+        state.asset_emoji_font = font(0xF0001, "FF");
+        EXPECT_EQ(InkMass(RasterOf(state)), isolated);
+        EXPECT_EQ(TextGlyphCellsMadeForTests(), cells);
+    }
+}
+
+TEST(TextObjectRuntime, ReplacingAnInstalledFallbackRefreshesItsCachedGlyphs) {
+    const auto path = std::filesystem::temp_directory_path() / ("text-fallback-" + std::to_string(::getpid()) + ".bdf");
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            SetInstalledFamilyLookupForTests({});
+            ResetTextFontCacheForTests();
+            std::filesystem::remove(path);
+        }
+    } cleanup { path };
+    std::ofstream(path) << SinglePixelBdf(0xF0001, "40");
+    const auto stamp = std::filesystem::last_write_time(path);
+    SetInstalledFamilyLookupForTests([&](std::string_view family) {
+        return family == "Apple Color Emoji" ? SystemFontFace { .path = path.string() } : SystemFontFace {};
+    });
+    TextLayerState state;
+    const auto primary = SinglePixelBdf('A', "FF");
+    state.resolved_font_data = SharedFontData::Interned({primary.begin(), primary.end()});
+    state.text = "\U000F0001";
+    ResetTextAtlasesForTests();
+    const auto dim = InkMass(RasterOf(state));
+    ASSERT_GT(dim, 0u);
+    EXPECT_EQ(InkMass(RasterOf(state)), dim);
+    EXPECT_EQ(TextGlyphCellsMadeForTests(), 1u);
+    std::ofstream(path) << SinglePixelBdf(0xF0001, "FF");
+    std::filesystem::last_write_time(path, stamp + std::chrono::seconds(1));
+    const auto refreshed = InkMass(RasterOf(state));
+    ResetTextAtlasesForTests();
+    const auto fresh = InkMass(RasterOf(state));
+    ASSERT_GT(fresh, dim);
+    EXPECT_EQ(refreshed, fresh);
+}
+
 TEST(TextObjectRuntime, AFontTheWallpaperShipsIsNotOpenedFromAFile) {
 #ifdef __APPLE__
     const auto path = ResolveInstalledFamily("Helvetica").path;
@@ -5376,3 +5451,48 @@ TEST(TextObjectRuntime, AZwjSequenceIsOneColourGlyph) {
 }
 
 } // namespace wallpaper
+
+// Text layers that name the same font file keep one copy of its bytes; a file with other bytes
+// keeps its own, and the bytes go once no layer uses them.
+TEST(SharedFontDataTest, LayersNamingTheSameFontBytesShareOneCopy) {
+    std::vector<uint8_t> font(4096);
+    for (std::size_t i = 0; i < font.size(); ++i) font[i] = static_cast<uint8_t>(i * 31);
+    auto first  = wallpaper::SharedFontData::Interned(font);
+    auto second = wallpaper::SharedFontData::Interned(font);
+    EXPECT_EQ(first.data(), second.data());
+
+    auto other = font;
+    other.back() ^= 1;
+    auto different = wallpaper::SharedFontData::Interned(other);
+    EXPECT_NE(different.data(), first.data());
+    EXPECT_EQ(different.bytes(), other);
+
+    first  = wallpaper::SharedFontData();
+    second = wallpaper::SharedFontData();
+    auto again = wallpaper::SharedFontData::Interned(font);
+    EXPECT_EQ(again.bytes(), font);
+    EXPECT_TRUE(wallpaper::SharedFontData::Interned({}).empty());
+}
+
+// A text atlas snapshot is published as it is, not copied: the image reads the snapshot's own
+// bytes and keeps them alive, and lets them go once a newer picture replaces it.
+TEST(RuntimeImageSourceTest, AnAtlasSnapshotIsPublishedWithoutACopy) {
+    wallpaper::RuntimeImageSource images(nullptr);
+    auto snapshot = std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>(64 * 32, 7));
+    const uint8_t* bytes = snapshot->data();
+    std::weak_ptr<const std::vector<uint8_t>> watch = snapshot;
+    images.SetImage("text_atlas", 64, 32, wallpaper::TextureFormat::R8, snapshot);
+    snapshot.reset();
+
+    auto image = images.Parse("text_atlas");
+    ASSERT_NE(image, nullptr);
+    ASSERT_FALSE(image->slots.empty());
+    EXPECT_EQ(image->slots[0].mipmaps[0].data.get(), bytes);
+    EXPECT_EQ(image->slots[0].mipmaps[0].size, 64 * 32);
+    EXPECT_FALSE(watch.expired());
+
+    images.SetImage("text_atlas", 1, 1, wallpaper::TextureFormat::R8,
+                    std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>(1, 0)));
+    image.reset();
+    EXPECT_TRUE(watch.expired());
+}

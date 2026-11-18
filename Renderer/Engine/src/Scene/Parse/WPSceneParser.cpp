@@ -5040,7 +5040,7 @@ void ResolveTextFont(fs::VFS& vfs, TextLayerState& state, const std::string& key
             state.resolved_font_kind     = "asset";
             state.resolved_font_identity = key;
             state.resolved_font_path     = path;
-            state.resolved_font_data     = std::vector<uint8_t>(bytes.begin(), bytes.end());
+            state.resolved_font_data     = SharedFontData::Interned(std::vector<uint8_t>(bytes.begin(), bytes.end()));
             return;
         }
     }
@@ -5236,7 +5236,7 @@ bool LoadTextEntry(ParseContext& context, std::size_t at, const nlohmann::json& 
         constexpr std::string_view kTwemoji = "/assets/fonts/TwemojiMozilla.ttf";
         const std::string bytes =
             context.vfs->Contains(kTwemoji) ? fs::GetFileContent(*context.vfs, std::string(kTwemoji)) : std::string();
-        if (! bytes.empty()) context.twemoji_font = std::vector<uint8_t>(bytes.begin(), bytes.end());
+        if (! bytes.empty()) context.twemoji_font = SharedFontData::Interned({bytes.begin(), bytes.end()});
     }
     state.asset_emoji_font        = context.twemoji_font;
     ResolveTextFont(*context.vfs, state, SettingText(obj.font).empty() ? std::string(kDefaultSceneFontKey)
