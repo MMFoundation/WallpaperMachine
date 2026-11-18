@@ -29,6 +29,11 @@
 namespace wallpaper
 {
 
+SharedFontData::Storage::Storage(std::vector<uint8_t> data): bytes(std::move(data)) {
+    static std::atomic<uint64_t> next { 1 };
+    identity = next.fetch_add(1, std::memory_order_relaxed);
+}
+
 SharedFontData SharedFontData::Interned(std::vector<uint8_t> data) {
     if (data.empty()) return SharedFontData();
     // Keyed by content, never by path: two wallpapers can ship different files under one name.
@@ -37,18 +42,20 @@ SharedFontData SharedFontData::Interned(std::vector<uint8_t> data) {
             std::string_view(reinterpret_cast<const char*>(data.data()), data.size())) ^
         data.size();
     static std::mutex lock;
-    static std::unordered_multimap<std::size_t, std::weak_ptr<const std::vector<uint8_t>>> live;
+    static std::unordered_multimap<std::size_t, std::weak_ptr<const Storage>> live;
     std::lock_guard guard(lock);
     for (auto it = live.begin(); it != live.end();) {
         it = it->second.expired() ? live.erase(it) : std::next(it);
     }
     auto [first, last] = live.equal_range(key);
     for (auto it = first; it != last; ++it) {
-        if (auto bytes = it->second.lock(); bytes && *bytes == data) return SharedFontData(std::move(bytes));
+        if (auto storage = it->second.lock(); storage && storage->bytes == data) {
+            return SharedFontData(std::move(storage));
+        }
     }
-    auto bytes = std::make_shared<const std::vector<uint8_t>>(std::move(data));
-    live.emplace(key, bytes);
-    return SharedFontData(std::move(bytes));
+    auto storage = std::make_shared<const Storage>(std::move(data));
+    live.emplace(key, storage);
+    return SharedFontData(std::move(storage));
 }
 
 namespace
@@ -488,8 +495,7 @@ public:
         // the same real face in all of these cases, not placeholder rectangles.
         if (! state.resolved_font_data.empty()) {
             m_owned = CreateFreeTypeFaceFromBytes(state.resolved_font_data.bytes(), state.point_size);
-            Hold(m_owned.get(), "mem:" + std::to_string(reinterpret_cast<std::uintptr_t>(
-                                             state.resolved_font_data.data())),
+            Hold(m_owned.get(), "mem:" + std::to_string(state.resolved_font_data.identity()),
                  m_point_size);
         } else if (! state.resolved_font_path.empty()) {
             m_fit = state.resolved_font_fit;
@@ -541,7 +547,7 @@ public:
                 if (m_emoji_bytes.empty() || m_emoji != nullptr) continue;
                 m_emoji = CreateFreeTypeFaceFromBytes(m_emoji_bytes.bytes(), m_point_size);
                 other   = m_emoji.get();
-                key     = "asset:TwemojiMozilla.ttf";
+                key     = "mem:" + std::to_string(m_emoji_bytes.identity());
                 if (other == nullptr) continue;
             } else {
                 const auto font = entry.source == ChainSource::SceneKey ? ResolveSceneFont(entry.name)

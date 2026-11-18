@@ -38,28 +38,34 @@ public:
     /// and the bytes go once nothing uses them.
     static SharedFontData Interned(std::vector<uint8_t> data);
 
-    bool empty() const { return m_bytes == nullptr || m_bytes->empty(); }
-    std::size_t size() const { return m_bytes ? m_bytes->size() : 0; }
-    const uint8_t* data() const { return empty() ? nullptr : m_bytes->data(); }
+    bool empty() const { return !m_storage; }
+    std::size_t size() const { return bytes().size(); }
+    const uint8_t* data() const { return m_storage ? m_storage->bytes.data() : nullptr; }
+    uint64_t identity() const { return m_storage ? m_storage->identity : 0; }
     const std::vector<uint8_t>& bytes() const {
         static const std::vector<uint8_t> none;
-        return m_bytes ? *m_bytes : none;
+        return m_storage ? m_storage->bytes : none;
     }
     const_iterator begin() const { return bytes().begin(); }
     const_iterator end() const { return bytes().end(); }
 
 private:
-    explicit SharedFontData(std::shared_ptr<const std::vector<uint8_t>> bytes): m_bytes(std::move(bytes)) {}
+    struct Storage {
+        explicit Storage(std::vector<uint8_t> data);
+        std::vector<uint8_t> bytes;
+        uint64_t identity;
+    };
+    explicit SharedFontData(std::shared_ptr<const Storage> storage): m_storage(std::move(storage)) {}
 
     void assign(std::vector<uint8_t> data) {
         if (data.empty()) {
-            m_bytes.reset();
+            m_storage.reset();
         } else {
-            m_bytes = std::make_shared<const std::vector<uint8_t>>(std::move(data));
+            m_storage = std::make_shared<const Storage>(std::move(data));
         }
     }
 
-    std::shared_ptr<const std::vector<uint8_t>> m_bytes;
+    std::shared_ptr<const Storage> m_storage;
 };
 
 /// The look Wallpaper Engine gives text through its font shader (`font.frag`): an outline

@@ -4295,6 +4295,31 @@ TEST(TextObjectRuntime, ASystemFontIsOpenedOnceAndNotForEveryLayout) {
 #endif
 }
 
+TEST(TextObjectRuntime, SharedPrimaryAtlasKeepsEachWallpapersFallbackGlyphsDistinct) {
+    const auto font = [](int codepoint, std::string pixel) {
+        const std::string bdf =
+            "STARTFONT 2.3\nFONT fixture\nSIZE 8 72 72 8\nFONTBOUNDINGBOX 1 1 0 0\n"
+            "STARTPROPERTIES 4\nFONT_ASCENT 1\nFONT_DESCENT 0\nCHARSET_REGISTRY \"ISO10646\"\n"
+            "CHARSET_ENCODING \"1\"\nENDPROPERTIES\nCHARS 1\nSTARTCHAR mark\nENCODING " +
+            std::to_string(codepoint) + "\nSWIDTH 125 0\nDWIDTH 1 0\nBBX 1 1 0 0\nBITMAP\n" +
+            pixel + "\nENDCHAR\nENDFONT\n";
+        return SharedFontData::Interned({ bdf.begin(), bdf.end() });
+    };
+    TextLayerState state;
+    state.text = "\U000F0001";
+    state.resolved_font_data = font('A', "FF");
+    state.asset_emoji_font = font(0xF0001, "40");
+    ResetTextAtlasesForTests();
+    const auto dim = InkMass(RasterOf(state));
+    ASSERT_GT(dim, 0u);
+    state.asset_emoji_font = font(0xF0001, "FF");
+    const auto bright = InkMass(RasterOf(state));
+    ResetTextAtlasesForTests();
+    const auto isolated = InkMass(RasterOf(state));
+    ASSERT_GT(isolated, dim);
+    EXPECT_EQ(bright, isolated);
+}
+
 TEST(TextObjectRuntime, AFontTheWallpaperShipsIsNotOpenedFromAFile) {
 #ifdef __APPLE__
     const auto path = ResolveInstalledFamily("Helvetica").path;
