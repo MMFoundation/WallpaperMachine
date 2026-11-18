@@ -4318,6 +4318,18 @@ TEST(TextObjectRuntime, SharedPrimaryAtlasKeepsEachWallpapersFallbackGlyphsDisti
     const auto isolated = InkMass(RasterOf(state));
     ASSERT_GT(isolated, dim);
     EXPECT_EQ(bright, isolated);
+    const auto cells = TextGlyphCellsMadeForTests();
+    ASSERT_EQ(cells, 1u);
+    for (int reload = 0; reload < 3; ++reload) {
+        state.asset_emoji_font = SharedFontData();
+        if (reload != 0) {
+            state.resolved_font_data = SharedFontData();
+            state.resolved_font_data = font('A', "FF");
+        }
+        state.asset_emoji_font = font(0xF0001, "FF");
+        EXPECT_EQ(InkMass(RasterOf(state)), isolated);
+        EXPECT_EQ(TextGlyphCellsMadeForTests(), cells);
+    }
 }
 
 TEST(TextObjectRuntime, AFontTheWallpaperShipsIsNotOpenedFromAFile) {

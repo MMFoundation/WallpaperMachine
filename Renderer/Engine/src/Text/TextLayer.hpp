@@ -22,15 +22,14 @@ public:
     using const_iterator = std::vector<uint8_t>::const_iterator;
 
     SharedFontData() = default;
-    SharedFontData(std::vector<uint8_t> data) { assign(std::move(data)); }
+    SharedFontData(std::vector<uint8_t> data): SharedFontData(Interned(std::move(data))) {}
     SharedFontData(const SharedFontData&) noexcept            = default;
     SharedFontData(SharedFontData&&) noexcept                 = default;
     SharedFontData& operator=(const SharedFontData&) noexcept = default;
     SharedFontData& operator=(SharedFontData&&) noexcept      = default;
 
     SharedFontData& operator=(std::vector<uint8_t> data) {
-        assign(std::move(data));
-        return *this;
+        return *this = Interned(std::move(data));
     }
 
     /// `data`, sharing the storage of a live font with the same bytes: text layers that name the
@@ -41,7 +40,7 @@ public:
     bool empty() const { return !m_storage; }
     std::size_t size() const { return bytes().size(); }
     const uint8_t* data() const { return m_storage ? m_storage->bytes.data() : nullptr; }
-    uint64_t identity() const { return m_storage ? m_storage->identity : 0; }
+    std::string faceKey() const { return m_storage ? m_storage->face_key : std::string(); }
     const std::vector<uint8_t>& bytes() const {
         static const std::vector<uint8_t> none;
         return m_storage ? m_storage->bytes : none;
@@ -51,19 +50,10 @@ public:
 
 private:
     struct Storage {
-        explicit Storage(std::vector<uint8_t> data);
         std::vector<uint8_t> bytes;
-        uint64_t identity;
+        std::string face_key;
     };
     explicit SharedFontData(std::shared_ptr<const Storage> storage): m_storage(std::move(storage)) {}
-
-    void assign(std::vector<uint8_t> data) {
-        if (data.empty()) {
-            m_storage.reset();
-        } else {
-            m_storage = std::make_shared<const Storage>(std::move(data));
-        }
-    }
 
     std::shared_ptr<const Storage> m_storage;
 };

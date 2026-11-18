@@ -2,6 +2,7 @@
 #include "Text/TextLayer.hpp"
 #include "Text/SystemFontResolver.hpp"
 #include "Text/TextShaper.hpp"
+#include "Utils/Sha.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -29,20 +30,12 @@
 namespace wallpaper
 {
 
-SharedFontData::Storage::Storage(std::vector<uint8_t> data): bytes(std::move(data)) {
-    static std::atomic<uint64_t> next { 1 };
-    identity = next.fetch_add(1, std::memory_order_relaxed);
-}
-
 SharedFontData SharedFontData::Interned(std::vector<uint8_t> data) {
     if (data.empty()) return SharedFontData();
     // Keyed by content, never by path: two wallpapers can ship different files under one name.
-    const std::size_t key =
-        std::hash<std::string_view> {}(
-            std::string_view(reinterpret_cast<const char*>(data.data()), data.size())) ^
-        data.size();
+    const auto key = utils::genSha1({reinterpret_cast<const char*>(data.data()), data.size()});
     static std::mutex lock;
-    static std::unordered_multimap<std::size_t, std::weak_ptr<const Storage>> live;
+    static std::unordered_multimap<std::string, std::weak_ptr<const Storage>> live;
     std::lock_guard guard(lock);
     for (auto it = live.begin(); it != live.end();) {
         it = it->second.expired() ? live.erase(it) : std::next(it);
@@ -53,7 +46,7 @@ SharedFontData SharedFontData::Interned(std::vector<uint8_t> data) {
             return SharedFontData(std::move(storage));
         }
     }
-    auto storage = std::make_shared<const Storage>(std::move(data));
+    auto storage = std::make_shared<const Storage>(std::move(data), "mem:" + key);
     live.emplace(key, storage);
     return SharedFontData(std::move(storage));
 }
@@ -495,8 +488,7 @@ public:
         // the same real face in all of these cases, not placeholder rectangles.
         if (! state.resolved_font_data.empty()) {
             m_owned = CreateFreeTypeFaceFromBytes(state.resolved_font_data.bytes(), state.point_size);
-            Hold(m_owned.get(), "mem:" + std::to_string(state.resolved_font_data.identity()),
-                 m_point_size);
+            Hold(m_owned.get(), state.resolved_font_data.faceKey(), m_point_size);
         } else if (! state.resolved_font_path.empty()) {
             m_fit = state.resolved_font_fit;
             Hold(OpenFitted(state.resolved_font_path, state.resolved_font_face, m_fit),
@@ -547,7 +539,7 @@ public:
                 if (m_emoji_bytes.empty() || m_emoji != nullptr) continue;
                 m_emoji = CreateFreeTypeFaceFromBytes(m_emoji_bytes.bytes(), m_point_size);
                 other   = m_emoji.get();
-                key     = "mem:" + std::to_string(m_emoji_bytes.identity());
+                key     = m_emoji_bytes.faceKey();
                 if (other == nullptr) continue;
             } else {
                 const auto font = entry.source == ChainSource::SceneKey ? ResolveSceneFont(entry.name)
