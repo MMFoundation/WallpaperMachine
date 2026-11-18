@@ -237,8 +237,8 @@ enum ShellFixtures {
     }
     store.librarySnapshot.wallpapers = entries
     store.settingsSnapshot.displays = [
-      display("primary", "Studio Display (primary - Primary)"),
-      display("secondary", "Built-in Retina Display (secondary - Secondary)"),
+      display("primary", "Studio Display (1 - Primary)"),
+      display("secondary", "Built-in Retina Display (2)"),
     ]
     store.monitorInformationSnapshot.rows = [("primary", primary), ("secondary", secondary)].map {
       BridgeMonitorInfoRow(

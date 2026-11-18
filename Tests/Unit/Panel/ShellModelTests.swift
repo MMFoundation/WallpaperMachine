@@ -76,36 +76,36 @@ final class ShellModelTests: PanelTestCase {
       XCTAssertEqual(panel.navigation.targetDisplayID, "primary")
       XCTAssertNotNil(panel.controller.errors.message)
       XCTAssertEqual(
-        panel.controller.targetDisplays[1].menuLabel, L("\(panel.controller.targetDisplays[1].title) (mirrored)"))
+        panel.controller.targetDisplays[1].fullLabel, L("\(panel.controller.targetDisplays[1].title) (mirrored)"))
       panel.store.settingsSnapshot.displays[1].mode = .standalone
       panel.store.settingsSnapshot.displays[1].enabled = false
       XCTAssertEqual(
-        panel.controller.targetDisplays[1].menuLabel, L("\(panel.controller.targetDisplays[1].title) (disabled)"))
-      XCTAssertEqual(panel.controller.targetDisplays[0].menuLabel, panel.controller.targetDisplays[0].title)
+        panel.controller.targetDisplays[1].fullLabel, L("\(panel.controller.targetDisplays[1].title) (disabled)"))
+      XCTAssertEqual(panel.controller.targetDisplays[0].fullLabel, panel.controller.targetDisplays[0].title)
     }
   }
 
   func testTheToolbarNamesTheTargetByItsScreenNameUnlessAnotherDisplaySharesIt() async throws {
     try await withPanel { panel in
       panel.store.settingsSnapshot.displays = [
-        ShellFixtures.display("primary", "Studio Display (primary - Primary)"),
-        ShellFixtures.display("secondary", "Built-in Retina Display (secondary - Secondary)"),
+        ShellFixtures.display("primary", "Studio Display (1 - Primary)"),
+        ShellFixtures.display("secondary", "Built-in Retina Display (42)"),
       ]
       let displays = panel.controller.targetDisplays
       XCTAssertEqual(displays[0].shortLabel(among: displays), "Studio Display")
       XCTAssertEqual(displays[1].shortLabel(among: displays), "Built-in Retina Display")
       XCTAssertEqual(
-        displays[0].menuLabel, "Studio Display (primary - Primary)", "the menu keeps the full title")
+        displays[0].fullLabel, "Studio Display (1 - Primary)", "help and VoiceOver keep the full title")
 
       // Two monitors of one model: only the renderer's group tells them apart.
       panel.store.settingsSnapshot.displays = [
         ShellFixtures.display("1", "DELL U2720Q (1 - Primary)"),
-        ShellFixtures.display("2", "DELL U2720Q (2 - Secondary)", enabled: false),
+        ShellFixtures.display("2", "DELL U2720Q (2)", enabled: false),
       ]
       let twins = panel.controller.targetDisplays
       XCTAssertEqual(twins[0].shortLabel(among: twins), "DELL U2720Q (1 - Primary)")
       XCTAssertEqual(
-        twins[1].shortLabel(among: twins), L("\("DELL U2720Q (2 - Secondary)") (disabled)"),
+        twins[1].shortLabel(among: twins), L("\("DELL U2720Q (2)") (disabled)"),
         "a disabled display still says so")
     }
   }
@@ -114,7 +114,9 @@ final class ShellModelTests: PanelTestCase {
     XCTAssertEqual(TargetDisplayOption.name(of: "Studio Display (2 - Primary)"), "Studio Display")
     XCTAssertEqual(
       TargetDisplayOption.name(of: "LG HDR 4K (DisplayPort) (3 - Secondary)"), "LG HDR 4K (DisplayPort)")
-    XCTAssertEqual(TargetDisplayOption.name(of: "Projector (2)"), "Projector (2)", "not a renderer group")
+    XCTAssertEqual(TargetDisplayOption.name(of: "Projector (2)"), "Projector")
+    XCTAssertEqual(TargetDisplayOption.name(of: "Projector (HDR - Cinema)"), "Projector (HDR - Cinema)")
+    XCTAssertEqual(TargetDisplayOption.name(of: "Projector (2) (42)"), "Projector (2)")
     XCTAssertEqual(TargetDisplayOption.name(of: "(1 - Primary)"), "(1 - Primary)", "nothing in front of it")
     XCTAssertEqual(TargetDisplayOption.name(of: "primary"), "primary")
   }

@@ -223,7 +223,7 @@ final class PanelLibraryStateTests: PanelTestCase {
     let names = DisplayTitleResolver(names: { ["primary": "Built-in Retina Display"] })
     try await withPanel(displayTitles: names) { panel in
       panel.configureDisplays()
-      panel.store.settingsSnapshot.displays[0].title = "Vendor 1552 - Model 41055 (primary - Primary)"
+      panel.store.settingsSnapshot.displays[0].title = "Vendor 1552 - Model 41055 (1 - Primary)"
       XCTAssertEqual(
         panel.controller.applyTargetName, "Built-in Retina Display", "the renderer's suffix is left off")
 

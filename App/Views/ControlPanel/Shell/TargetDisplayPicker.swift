@@ -1,16 +1,13 @@
 import SwiftUI
 
 extension TargetDisplayOption {
-  /// The display as the menu lists it. A mirror or a disabled display says so, and a mirror's word
+  /// The full display title for help and VoiceOver. A mirror or a disabled display says so, and a mirror's word
   /// wins when it is both; they are whole phrases so a language can place the word where it
   /// belongs.
   @MainActor
-  var menuLabel: String { label(naming: title) }
+  var fullLabel: String { label(naming: title) }
 
-  /// The display as the toolbar button names it, which has room for little more than a name: the
-  /// screen's name without the renderer's `(id - Role)` group, unless another display has the
-  /// same name, when only the full title tells them apart. The menu, the help and VoiceOver keep
-  /// the full title.
+  /// The button and menu use the screen name unless two displays need the full title to tell them apart.
   @MainActor
   func shortLabel(among displays: [TargetDisplayOption]) -> String {
     let name = Self.name(of: title)
@@ -18,15 +15,13 @@ extension TargetDisplayOption {
     return label(naming: isShared ? title : name)
   }
 
-  /// A display title without the renderer's trailing `(id - Role)` group (`Studio Display
+  /// A display title without the renderer's trailing `(id)` or `(id - Role)` group (`Studio Display
   /// (2 - Primary)` is `Studio Display`). A title without one, or with nothing in front of it, is
   /// returned as it is.
   static func name(of title: String) -> String {
     let trimmed = title.trimmingCharacters(in: .whitespaces)
-    guard trimmed.hasSuffix(")"), let open = trimmed.lastIndex(of: "("),
-      trimmed[open...].contains(" - ")
-    else { return title }
-    let name = trimmed[..<open].trimmingCharacters(in: .whitespaces)
+    guard let suffix = trimmed.firstMatch(of: #/ \([0-9]+(?: - [^()]+)?\)$/#) else { return title }
+    let name = trimmed[..<suffix.range.lowerBound].trimmingCharacters(in: .whitespaces)
     return name.isEmpty ? title : name
   }
 
@@ -62,7 +57,7 @@ struct TargetDisplayPicker: View {
     Menu {
       Picker(selection: selection) {
         ForEach(displays) { display in
-          Text(verbatim: display.menuLabel).tag(display.id).disabled(!display.isSelectable)
+          Text(verbatim: display.shortLabel(among: displays)).tag(display.id).disabled(!display.isSelectable)
         }
       } label: {
         Text("Target display")
@@ -94,7 +89,7 @@ struct TargetDisplayPicker: View {
     .disabled(controller.isStoreBusy)
     .help(helpText(current, desktop: desktop))
     .accessibilityLabel(Text(verbatim: L("Target display")))
-    .accessibilityValue(Text(verbatim: [current?.menuLabel, desktop].compactMap { $0 }.joined(separator: ", ")))
+    .accessibilityValue(Text(verbatim: [current?.fullLabel, desktop].compactMap { $0 }.joined(separator: ", ")))
     .accessibilityIdentifier("target-display")
   }
 
@@ -103,7 +98,7 @@ struct TargetDisplayPicker: View {
     let purpose = desktop.map { L("Wallpapers you apply go to \($0) of this display") }
       ?? L("Wallpapers you apply go to this display")
     guard let current else { return purpose }
-    return "\(current.menuLabel)\n\(purpose)"
+    return "\(current.fullLabel)\n\(purpose)"
   }
 
   /// The desktop the person is on, while the display keeps a wallpaper for each desktop.
