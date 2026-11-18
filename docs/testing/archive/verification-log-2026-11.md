@@ -9,6 +9,14 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-16 — Native source lifecycle and inactive preparation fixes (#193)
+
+- Revision-scoped handled exits cannot rearm a stale PID; the existing live-survivor policy remains unchanged. Pending acquire replies survive renderer replacement and complete once for the current generation.
+- Invisible existing surfaces defer source preparation until presentation resumes; explicit pending host acquires still receive their readiness frame. The source picker adopts the panel presentation locale.
+- Focused service, acquire-reply/policy, presentation authority, registry and panel suites: 128 passed, 0 failed, 0 skipped.
+- python3 scripts/test.py: all Python modules passed; 5098 native tests passed, 0 failed, 70 opt-in tests skipped; three main-thread runtime warnings were reported.
+- Heavy verification was serialized through the Review PR Captain. No Rust/C++ changes; their gates were not rerun. Callback/policy tests model inactive start counts, not real CAContext delivery or energy use. Live desktop/visual behavior remains unverified; no Release build, install or desktop action.
+
 ## 2026-11-16 — Independent native wallpaper source failure isolation (#193)
 
 - Export errors are isolated to the affected native mode; the healthy mode retains its system selection, automatic refreshes and sleeping-display mapping. The unavailable saved choice and error remain visible until it can recover.

@@ -116,6 +116,25 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     return found
   }
 
+  func testPublicBrowsingOffersSignInOnlyWithoutAWorkshopSession() async throws {
+    let panel = try await makePanel()
+    let host = PanelHost(controller: panel.controller)
+    defer { host.close() }
+    try await settle(host, size: NSSize(width: 900, height: 640))
+    func offersSignIn() -> Bool {
+      identifiers(in: host.hosting.view).contains("workshop-browse-sign-in")
+    }
+    XCTAssertTrue(offersSignIn())
+    try await panel.workshop.signInToSteamWeb {
+      WebSignInCookies(session: "76561198000000001%7C%7C0123456789abcdef0123")
+    }
+    try await settle(host, until: { !offersSignIn() })
+    XCTAssertFalse(offersSignIn())
+    try await panel.controller.steamWebSignOut()
+    try await settle(host, until: offersSignIn)
+    XCTAssertTrue(offersSignIn())
+  }
+
   func testThePageAndItsInspectorFitTheWindowInEveryLanguageAndAppearanceAtBothSizes() async throws {
     for language in AppLanguage.supported.map(\.tag) {
       let panel = try await makePanel(language: language)

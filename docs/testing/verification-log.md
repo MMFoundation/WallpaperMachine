@@ -25,6 +25,12 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-18 — Steam Workshop sign-in from Browse and Settings
+
+- Offscreen Workshop regression: the public list offers sign-in when anonymous, hides it after sign-in and offers it again after sign-out.
+- Full gate: python3 scripts/test.py (Homebrew Python 3.15); Python checks passed, native tests: 5,128 passed, 70 skipped, 0 failed.
+- No live Steam login or on-desktop visual check; no Release build.
+
 ## 2026-11-17 — Panel close releases Discover and pixiv results
 
 - `python3 scripts/test.py --only WorkshopSourceTests --only PixivStoreTests`: 75 passed, including the two new unload/resume tests.
@@ -118,11 +124,3 @@ Documented the release package, named settings and extraSettings, and Home Manag
 - python3 scripts/test.py --only LockScreenWallpaperServiceTests: 89 passed, 0 failed, 0 skipped; the two new cases withhold initial readiness and then remove the UUID before disabling each independent mode.
 - python3 scripts/test.py: all Python modules passed; 5100 native tests passed, 0 failed, 70 opt-in tests skipped; two runtime warnings were reported.
 - The native gate used the Captain-authorized serial Mac slot, which was released afterward. No renderer/Rust changes or gates; no desktop actions, Release build or installation. This gate predates the separate explicit-error acknowledgement correction.
-
-## 2026-11-16 — Native source lifecycle and inactive preparation fixes (#193)
-
-- Revision-scoped handled exits cannot rearm a stale PID; the existing live-survivor policy remains unchanged. Pending acquire replies survive renderer replacement and complete once for the current generation.
-- Invisible existing surfaces defer source preparation until presentation resumes; explicit pending host acquires still receive their readiness frame. The source picker adopts the panel presentation locale.
-- Focused service, acquire-reply/policy, presentation authority, registry and panel suites: 128 passed, 0 failed, 0 skipped.
-- python3 scripts/test.py: all Python modules passed; 5098 native tests passed, 0 failed, 70 opt-in tests skipped; three main-thread runtime warnings were reported.
-- Heavy verification was serialized through the Review PR Captain. No Rust/C++ changes; their gates were not rerun. Callback/policy tests model inactive start counts, not real CAContext delivery or energy use. Live desktop/visual behavior remains unverified; no Release build, install or desktop action.

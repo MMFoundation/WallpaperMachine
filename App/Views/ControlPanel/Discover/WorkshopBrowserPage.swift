@@ -154,17 +154,9 @@ struct WorkshopEmptyStateView: View {
     let model = controller.workshopBrowser
     switch state {
     case .signInToSeeSubscriptions(let isSigningIn):
-      signIn(
-        title: L("Sign in to see your subscriptions"),
-        description: L(
-          "Steam shows the wallpapers you subscribe to only to you. You sign in on Steam’s own page; WallpaperMachine keeps the session only until it quits, and uses it only to read this list."
-        ), isSigningIn: isSigningIn, model: model)
+      signIn(title: L("Sign in to see your subscriptions"), isSigningIn: isSigningIn, model: model)
     case .signInToSeeFavorites(let isSigningIn):
-      signIn(
-        title: L("Sign in to see your favorites"),
-        description: L(
-          "Your favorites are read from your own Steam account. You sign in on Steam’s own page, and WallpaperMachine uses the session only to read your lists."
-        ), isSigningIn: isSigningIn, model: model)
+      signIn(title: L("Sign in to see your favorites"), isSigningIn: isSigningIn, model: model)
     case .loading:
       PanelEmptyState(
         verbatim: L("Loading Workshop"), systemImage: "storefront",
@@ -192,11 +184,14 @@ struct WorkshopEmptyStateView: View {
   /// A personal list with no Steam session: why it needs one, and the sign-in.
   @ViewBuilder
   private func signIn(
-    title: String, description: String, isSigningIn: Bool, model: WorkshopBrowserModel
+    title: String, isSigningIn: Bool, model: WorkshopBrowserModel
   ) -> some View {
-    PanelEmptyState(verbatim: title, systemImage: "person.crop.circle", description: description) {
+    PanelEmptyState(
+      verbatim: title, systemImage: "person.crop.circle",
+      description: L("Sign in on Steam’s own page. This Mac remembers your Workshop session.")
+    ) {
       VStack(spacing: 12) {
-        Text("This is separate from the SteamCMD sign-in in Settings, which only downloads wallpapers.")
+        Text("Workshop browsing uses a separate sign-in from downloads.")
           .font(.callout)
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)

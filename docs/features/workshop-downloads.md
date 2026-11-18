@@ -334,6 +334,11 @@ with Back returning to the list it showed as it was left, its grid where it was.
 
 ### Subscriptions
 
+Public Workshop lists can be browsed anonymously. When signed out, the link above the
+results lets you sign in to browse with your Steam content preferences. **Settings →
+Library & Steam → Steam Workshop account** manages the same browsing session without
+changing the account used for downloads.
+
 Steam shows an account's subscriptions only to that account, so **Your
 subscriptions** needs a Steam Community sign-in. This is a different sign-in from
 SteamCMD's (see [Steam sign-in](#steam-sign-in)), and the app never sees the

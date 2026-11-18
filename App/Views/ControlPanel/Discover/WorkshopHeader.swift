@@ -37,6 +37,19 @@ struct WorkshopHeader: View {
       if let translation = browse.translation {
         WorkshopTranslationBar(translation: translation)
       }
+      if !source.source.isPersonal, !browse.isSignedInToSteam {
+        Button {
+          model.signInToSteam()
+        } label: {
+          if browse.isSigningInToSteam {
+            Label("Show sign-in window", systemImage: "person.crop.circle")
+          } else {
+            Label("Sign in to browse with your Steam content preferences", systemImage: "person.crop.circle")
+          }
+        }
+        .buttonStyle(.panelLink)
+        .accessibilityIdentifier("workshop-browse-sign-in")
+      }
       if source.source == .subscriptions, browse.isSignedInToSteam {
         WorkshopSubscriptionBar(browse: browse)
       }

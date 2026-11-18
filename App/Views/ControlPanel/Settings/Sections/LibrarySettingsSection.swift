@@ -72,6 +72,10 @@ struct LibrarySettingsSection: View {
   static let steamAccount = SettingsItem(
     id: "library.steam-account", section: .library, group: account, title: "Steam account",
     note: "You sign in when a download starts.", keywords: ["Log out…", "Not signed in"])
+  static let workshopAccount = SettingsItem(
+    id: "library.workshop-account", section: .library, group: account, title: "Steam Workshop account",
+    note: "Workshop browsing uses a separate sign-in from downloads.",
+    keywords: ["Sign in to Steam…", "Show sign-in window", "Sign out of Steam"])
   static let context = SettingsItem(
     id: "library.context", section: .library, group: account,
     title: "Setup, compatibility & account privacy",
@@ -79,7 +83,7 @@ struct LibrarySettingsSection: View {
 
   static let items = [
     libraryFolder, steamStatus, steamActions, steamCandidate, sceneStatus, sceneActions,
-    updatesDaily, updatesCheck, downloadsAtOnce, steamAccount, context,
+    updatesDaily, updatesCheck, downloadsAtOnce, steamAccount, workshopAccount, context,
   ]
 
   var body: some View {
@@ -91,6 +95,7 @@ struct LibrarySettingsSection: View {
       SettingsGroup(Self.downloads, in: .library) { LibraryDownloadsRow() }
       SettingsGroup(Self.account, in: .library) {
         LibraryAccountRow()
+        LibraryWorkshopAccountRow()
         SettingsDisclosure(Self.context) { LibraryContextContent() }
       }
     }
@@ -404,6 +409,22 @@ private struct LibraryDownloadsRow: View {
 }
 
 // MARK: - Steam account
+
+private struct LibraryWorkshopAccountRow: View {
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    DisplaysRow(item: LibrarySettingsSection.workshopAccount, labelsControl: false) {
+      if controller.workshop.steamWebSession != nil {
+        Button("Sign out of Steam") { controller.workshopBrowser.signOutOfSteam() }
+      } else if controller.workshop.isSigningInToSteamWeb {
+        Button("Show sign-in window") { controller.workshopBrowser.signInToSteam() }
+      } else {
+        Button("Sign in to Steam…") { controller.workshopBrowser.signInToSteam() }
+      }
+    }
+  }
+}
 
 private struct LibraryAccountRow: View {
   @Environment(PanelController.self) private var controller
