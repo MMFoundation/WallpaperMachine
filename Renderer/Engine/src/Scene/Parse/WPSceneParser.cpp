@@ -3651,12 +3651,19 @@ wpscene::WPMaterial MakeClippedCopy(wpscene::WPMaterial material) {
 /// Loads every slot of a puppet drawn directly, in submesh order: the mesh's own material,
 /// then for each mask its mask material and its clipped copy. False abandons the whole set.
 bool LoadPuppetSlots(ParseContext& context, const wpscene::WPImageObject& image, const WPMdl& mdl,
-                     bool has_bones, bool additive, SceneMesh& mesh, std::vector<PuppetSlot>& slots) {
+                     bool has_bones, bool additive, SceneMesh& mesh, std::vector<PuppetSlot>& slots,
+                     const wpscene::WPMaterial* closing = nullptr, std::string_view previous = {}) {
     const auto load = [&](wpscene::WPMaterial authored, bool tint) -> bool {
         SceneMaterial scene_material;
         PuppetSlot    slot;
-        if (! LoadMaterial(context, authored, scene_material, slot.loaded)) return false;
+        MaterialLoadOptions options;
+        options.required_texture0 = previous;
+        if (! LoadMaterial(context, authored, scene_material, slot.loaded, options)) return false;
         if (tint) SetLayerTint(context, scene_material, image, false);
+        if (closing != nullptr) {
+            LoadStaticMaterialConstants(scene_material, authored, slot.loaded.info, false,
+                                        MaterialConstantWrite::Overlay);
+        }
         if (additive) scene_material.blenmode = BlendMode::Additive;
         slot.authored = std::move(authored);
         mesh.AddMaterial(std::move(scene_material));
@@ -3677,7 +3684,8 @@ bool LoadPuppetSlots(ParseContext& context, const wpscene::WPImageObject& image,
     };
     for (const auto& source : mdl.meshes) {
         if (source.positions.empty()) continue;
-        auto base = ReadPuppetMaterial(*context.vfs, source.mat_json_file, mdl, has_bones);
+        auto base = closing != nullptr ? std::optional(*closing)
+                                       : ReadPuppetMaterial(*context.vfs, source.mat_json_file, mdl, has_bones);
         if (! base.has_value()) {
             LOG_ERROR("puppet mesh names no usable material ('%s')", source.mat_json_file.c_str());
             return false;
@@ -4065,6 +4073,8 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     // Under effects the chain works on the flat sheet and closes with one pass that draws
     // the assembled model (R72); a model with bones takes the colour blend into that pass.
     const bool puppet_closing = puppet_ok && ! puppet_direct;
+    const bool masked_closing = puppet_closing && std::any_of(mdl.meshes.begin(), mdl.meshes.end(),
+        [](const WPMdl::Mesh& mesh) { return !mesh.positions.empty() && !mesh.masks.empty(); });
     const bool blend_closing  = puppet_closing && puppet_bones && blend_pass;
     bool       blend_separate = blend_pass && ! blend_closing;
     if (blend_closing) chain_sources.pop_back();
@@ -4224,12 +4234,12 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     std::vector<PuppetSlot>    puppet_slots;
     if (puppet_direct) {
         mesh = std::make_shared<SceneMesh>();
-        WPMdlParser::GenPuppetMesh(*mesh, mdl, true);
+        WPMdlParser::GenPuppetMesh(*mesh, mdl);
         if (! LoadPuppetSlots(context, image, mdl, puppet_bones, additive_blend, *mesh, puppet_slots)) {
             // The whole slot set is abandoned: every submesh draws with the layer's material.
             puppet_slots.clear();
             mesh = std::make_shared<SceneMesh>();
-            WPMdlParser::GenPuppetMesh(*mesh, mdl, false);
+            WPMdlParser::GenPuppetMesh(*mesh, mdl, WPMdlParser::MaskDraw::Omit);
             for (auto& submesh : mesh->Submeshes()) submesh.material_slot = 0;
         }
     } else if (passthrough_card) {
@@ -4288,6 +4298,29 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
             target.has_puppet   = true;
         }
     }
+    const auto bind_puppet_slots = [&](SceneNode& draw, std::vector<PuppetSlot>& slots) {
+        std::vector<std::string> textures;
+        for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+            auto material = draw.Mesh()->MaterialSlotPtr(slot);
+            RegisterDrivenMaterialConstants(context, material, slots[slot].authored, slots[slot].loaded.info, plan.key);
+            tinted.push_back(material);
+            all_materials.push_back(material);
+            textures.insert(textures.end(), material->textures.begin(), material->textures.end());
+            if (context.shader_updater != nullptr) {
+                WPShaderValueData data;
+                if (&draw != node.get()) {
+                    data.effect_owner = node.get();
+                    data.effect_extent = linalg::Vector2f(geometry.extent[0], geometry.extent[1]);
+                    data.parallax_layer = node.get();
+                }
+                data.parallaxDepth = image.parallaxDepth;
+                data.renderTargets = std::move(slots[slot].loaded.render_targets);
+                data.puppet_layer  = puppet_layer;
+                context.shader_updater->SetNodeData(&draw, static_cast<uint32_t>(slot), data);
+            }
+        }
+        RegisterLayerVideos(context, plan.key, textures);
+    };
     if (puppet_slots.empty()) {
         RegisterDrivenMaterialConstants(context, own_material, image.material, own_loaded.info, plan.key);
         tinted.push_back(own_material);
@@ -4301,23 +4334,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         }
         RegisterLayerVideos(context, plan.key, own_material->textures);
     } else {
-        std::vector<std::string> textures;
-        for (std::size_t slot = 0; slot < puppet_slots.size(); ++slot) {
-            auto material = mesh->MaterialSlotPtr(slot);
-            RegisterDrivenMaterialConstants(context, material, puppet_slots[slot].authored,
-                                      puppet_slots[slot].loaded.info, plan.key);
-            tinted.push_back(material);
-            all_materials.push_back(material);
-            textures.insert(textures.end(), material->textures.begin(), material->textures.end());
-            if (context.shader_updater != nullptr) {
-                WPShaderValueData data;
-                data.parallaxDepth = image.parallaxDepth;
-                data.renderTargets = puppet_slots[slot].loaded.render_targets;
-                data.puppet_layer  = puppet_layer;
-                context.shader_updater->SetNodeData(node.get(), static_cast<uint32_t>(slot), data);
-            }
-        }
-        RegisterLayerVideos(context, plan.key, textures);
+        bind_puppet_slots(*node, puppet_slots);
     }
 
     if (draws_nothing) {
@@ -4361,8 +4378,11 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         std::shared_ptr<SceneMesh> final_card;
         if (puppet_closing) {
             final_card = std::make_shared<SceneMesh>();
-            WPMdlParser::GenPuppetMesh(*final_card, mdl, false);
-            for (auto& submesh : final_card->Submeshes()) submesh.material_slot = 0;
+            WPMdlParser::GenPuppetMesh(*final_card, mdl, masked_closing ? WPMdlParser::MaskDraw::InPartOrder
+                                                                      : WPMdlParser::MaskDraw::Omit);
+            if (!masked_closing) {
+                for (auto& submesh : final_card->Submeshes()) submesh.material_slot = 0;
+            }
         } else {
             final_card = MakeCardMesh(card_size[0], card_size[1], 1.0f, 1.0f);
         }
@@ -4443,7 +4463,17 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
             any_fixed = true;
         }
 
-        if (puppet_closing) {
+        if (masked_closing) {
+            auto writer = std::make_shared<SceneNode>();
+            if (!LoadPuppetSlots(context, image, mdl, puppet_bones, false, *final_card,
+                                 puppet_slots, &closing_material, first)) return false;
+            writer->AddMesh(final_card);
+            bind_puppet_slots(*writer, puppet_slots);
+            auto closing = std::make_shared<SceneImageEffect>();
+            closing->nodes.push_back({ .output = other, .sceneNode = writer });
+            chain->AddEffect(closing);
+            any_fixed = true;
+        } else if (puppet_closing) {
             // The last pass: the layer's own material over what the chain made, skinned.
             wpscene::WPImageEffect closing;
             closing.materials.push_back(closing_material);
@@ -4689,7 +4719,7 @@ bool LoadModelEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         RegisterPuppetMorphImages(mdl, *images, model.model, false);
 
     auto mesh = std::make_shared<SceneMesh>();
-    WPMdlParser::GenPuppetMesh(*mesh, mdl, false);
+    WPMdlParser::GenPuppetMesh(*mesh, mdl, WPMdlParser::MaskDraw::Omit);
     struct Slot {
         wpscene::WPMaterial authored;
         WPShaderInfo        info;

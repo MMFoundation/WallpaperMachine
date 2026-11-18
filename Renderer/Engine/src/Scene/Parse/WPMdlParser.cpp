@@ -1593,71 +1593,103 @@ void WPMdlParser::AddMeshIndices(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
     }
 }
 
-void WPMdlParser::GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
-                                        std::span<const uint32_t> part_indices) {
-    GenMeshFromMdl(submesh, src);
-    // The entries are positions in the parts table; each part is drawn once.
-    std::vector<bool> chosen(src.parts.size(), false);
-    for (const uint32_t position : part_indices) {
-        if (position < chosen.size()) chosen[position] = true;
-    }
-    submesh.SetDrawRanges(CollectRanges(src, [&](usize pos) { return chosen[pos]; }));
-}
-
-void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, const bool include_masks) {
+void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, MaskDraw masks) {
     auto& submeshes = mesh.Submeshes();
     submeshes.clear();
     uint32_t slot = 0;
     for (const auto& src : mdl.meshes) {
         if (src.positions.empty()) continue;
+        const auto geometry = submeshes.size();
+        auto& base = submeshes.emplace_back();
+        GenMeshFromMdl(base, src);
+        const auto base_slot = slot++;
+        base.material_slot = base_slot;
+        if (masks == MaskDraw::Omit || src.masks.empty()) continue;
 
-        submeshes.emplace_back();
-        GenMeshFromMdl(submeshes.back(), src);
-        submeshes.back().material_slot = slot++;
-        if (! include_masks || src.masks.empty()) continue;
+        bool first = true;
+        const auto piece = [&](uint32_t material, const std::vector<Range>& ranges) -> SceneMesh::Submesh& {
+            auto& draw = first ? submeshes[geometry] : submeshes.emplace_back();
+            if (masks == MaskDraw::InPartOrder) draw.geometry_source = geometry;
+            else if (!first) GenMeshFromMdl(draw, src);
+            first = false;
+            draw.material_slot = material;
+            draw.SetDrawRanges(ranges);
+            return draw;
+        };
 
-        // The base draw leaves out the pieces a mask clips; those come back in
-        // their own, clipped, submesh below.
-        std::vector<bool> clipped(src.parts.size(), false);
-        bool              any = false;
-        for (const auto& mask : src.masks) {
-            for (const uint32_t position : mask.part_ids_a) {
-                if (position < clipped.size()) {
-                    clipped[position] = true;
-                    any               = true;
+        const auto selected = [&](const std::vector<uint32_t>& parts) {
+            std::vector<bool> chosen(src.parts.size(), false);
+            for (auto p : parts) {
+                if (p < chosen.size()) chosen[p] = true;
+            }
+            return CollectRanges(src, [&](usize p) { return chosen[p]; });
+        };
+        const auto draw_mask = [&](const std::vector<uint32_t>& chain, uint32_t first_slot) {
+            for (std::size_t d = 0; d < chain.size(); ++d) {
+                auto& draw = piece(first_slot++, selected(src.masks[chain[d]].part_ids_b));
+                draw.output_override = std::string(d == 0 ? kMaskTarget : kMaskIntermediateTarget);
+                draw.clear_output = true;
+                if (d == 0) continue;
+                auto& multiply = submeshes.emplace_back();
+                GenFullscreenQuad(multiply);
+                multiply.material_slot = first_slot++;
+                multiply.output_override = std::string(kMaskTarget);
+            }
+            return first_slot;
+        };
+
+        if (masks == MaskDraw::Grouped) {
+            first = false;
+            std::vector<bool> clipped(src.parts.size(), false);
+            for (const auto& mask : src.masks) {
+                for (auto p : mask.part_ids_a) {
+                    if (p < clipped.size()) clipped[p] = true;
                 }
             }
-        }
-        if (any) {
-            submeshes.back().SetDrawRanges(
-                CollectRanges(src, [&](usize pos) { return ! clipped[pos]; }));
-        }
-
-        for (std::size_t m = 0; m < src.masks.size(); ++m) {
-            const auto& mask = src.masks[m];
-            // Wallpaper Engine draws the mask cleared into _rt_FullAlphaMask; a nested
-            // mask draws the masks enclosing it first, then each further one cleared
-            // into an intermediate that is multiplied into the mask (sub_140208670,
-            // sub_14020D6A0).
-            std::vector<uint32_t> draws = MaskChain(src, m);
-            draws.push_back(static_cast<uint32_t>(m));
-            for (std::size_t d = 0; d < draws.size(); ++d) {
-                submeshes.emplace_back();
-                GenMaskSubmeshFromMdl(submeshes.back(), src, src.masks[draws[d]].part_ids_b);
-                submeshes.back().material_slot   = slot++;
-                submeshes.back().output_override =
-                    std::string(d == 0 ? kMaskTarget : kMaskIntermediateTarget);
-                submeshes.back().clear_output = true;
-                if (d == 0) continue;
-                submeshes.emplace_back();
-                GenFullscreenQuad(submeshes.back());
-                submeshes.back().material_slot   = slot++;
-                submeshes.back().output_override = std::string(kMaskTarget);
+            if (!src.parts.empty())
+                base.SetDrawRanges(CollectRanges(src, [&](usize p) { return !clipped[p]; }));
+            for (uint32_t m = 0; m < src.masks.size(); ++m) {
+                auto chain = MaskChain(src, m);
+                chain.push_back(m);
+                slot = draw_mask(chain, slot);
+                piece(slot++, selected(src.masks[m].part_ids_a));
             }
+            continue;
+        }
 
-            submeshes.emplace_back();
-            GenMaskSubmeshFromMdl(submeshes.back(), src, mask.part_ids_a);
-            submeshes.back().material_slot = slot++;
+        std::vector<uint32_t> mask_slots;
+        std::vector<std::vector<uint32_t>> memberships(src.parts.size());
+        for (uint32_t m = 0; m < src.masks.size(); ++m) {
+            mask_slots.push_back(slot);
+            slot += 2 * (1 + static_cast<uint32_t>(MaskChain(src, m).size()));
+            for (auto p : src.masks[m].part_ids_a) {
+                if (p < memberships.size() && (memberships[p].empty() || memberships[p].back() != m))
+                    memberships[p].push_back(m);
+            }
+        }
+        const WPMdl::Mesh::MaskBlock* active_mask = nullptr;
+        for (std::size_t p = 0; p < memberships.size();) {
+            const auto& owners = memberships[p];
+            std::vector<Range> ranges;
+            do {
+                Range range;
+                if (PartRange(src.parts[p], TotalIndices(src), range)) ranges.push_back(range);
+            } while (++p < memberships.size() && memberships[p] == owners);
+            if (ranges.empty()) continue;
+            if (owners.empty()) piece(base_slot, ranges);
+            for (uint32_t m : owners) {
+                const auto& mask = src.masks[m];
+                if (active_mask == nullptr || active_mask->parent != mask.parent ||
+                    active_mask->flags != mask.flags || active_mask->mat_json_file != mask.mat_json_file ||
+                    active_mask->part_ids_b != mask.part_ids_b) {
+                    auto chain = MaskChain(src, m);
+                    chain.push_back(m);
+                    draw_mask(chain, mask_slots[m]);
+                    active_mask = &mask;
+                }
+                const auto clipped_slot = (m + 1 < mask_slots.size() ? mask_slots[m + 1] : slot) - 1;
+                piece(clipped_slot, ranges);
+            }
         }
     }
 }

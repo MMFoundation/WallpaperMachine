@@ -3063,7 +3063,7 @@ varying vec3 v_ScreenPos;
 void main() {
     vec4 color = v_TexCoord.x > 0.75 ? vec4(1.0, 0.0, 0.0, 1.0)
                : (v_TexCoord.x > 0.25 ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(0.0, 0.0, 1.0, 1.0));
-    color.a *= texSample2D(g_Texture0, v_TexCoord).a;
+    color *= texSample2D(g_Texture0, v_TexCoord);
 #if CLIPPINGTARGET
     vec2 screenUV = (v_ScreenPos.xy / v_ScreenPos.z) * 0.5 + 0.5;
     color.a *= texSample2D(g_Texture8, screenUV).r;
@@ -3152,6 +3152,49 @@ TEST_F(MetalSceneDraw, EachPuppetMaskStartsFromAClearedTarget)
         { 96, { 0, 128, 127 }, "mask 0 only: green at half, no red" },
         { 192, { 128, 64, 63 }, "both masks: green, then red, each at half" },
         { 288, { 128, 0, 127 }, "mask 1 only: red at half, no green" },
+    };
+    for (const auto& cell : cells) {
+        const auto got = CardColourAt(picture, cell.x);
+        for (std::size_t c = 0; c < 3; ++c) EXPECT_NEAR(got[c], cell.rgb[c], 1) << cell.where << " channel " << c;
+    }
+}
+
+TEST_F(MetalSceneDraw, APuppetEffectPreservesClippingWhenDrawingTheProcessedPicture)
+{
+    const auto dir = root_ / "puppet-effect-mask";
+    const auto project = WriteMaskedPuppetFixture(
+        dir, { { -128, 64, 0.125f }, { -80, 128, 0.875f }, { 0, 32, 0.5f } },
+        { { { 1 }, { 0 } } });
+    std::filesystem::create_directories(dir / "effects");
+    std::ofstream(dir / "effects/dim.json") <<
+        R"({"name":"dim","passes":[{"material":"materials/dim.json"}]})";
+    std::ofstream(dir / "materials/dim.json") <<
+        R"({"passes":[{"shader":"dim","blending":"normal","cullmode":"nocull",)"
+        R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})";
+    std::ofstream(dir / "shaders/dim.vert") << kStandInVertexShader;
+    std::ofstream(dir / "shaders/dim.frag") << R"(
+uniform sampler2D g_Texture0;
+varying vec2 v_TexCoord;
+void main() {
+    gl_FragColor = texSample2D(g_Texture0, v_TexCoord) * vec4(0.5, 0.5, 0.5, 1.0);
+}
+)";
+    auto layout = nlohmann::json::parse(std::ifstream(dir / "layout.json"));
+    layout["objects"][0]["effects"] = nlohmann::json::array({
+        { { "file", "effects/dim.json" }, { "visible", true } } });
+    std::ofstream(dir / "layout.json") << layout;
+
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, dir / "cache", loaded, error)) << error;
+    const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 2, 1.0 / 60.0);
+    ASSERT_TRUE(picture.error.empty()) << picture.error;
+    ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+    const struct { uint32_t x; std::array<int, 3> rgb; const char* where; } cells[] = {
+        { 80, { 0, 0, 128 }, "only the dimmed blue base" },
+        { 144, { 64, 0, 64 }, "half-masked, dimmed red over the blue base" },
+        { 208, { 0, 128, 0 }, "the later opaque green piece covers the masked red piece" },
+        { 288, { 0, 0, 0 }, "the red piece extends here but its mask does not" },
     };
     for (const auto& cell : cells) {
         const auto got = CardColourAt(picture, cell.x);
@@ -6080,7 +6123,7 @@ std::shared_ptr<SceneMesh> MakeMdlQuadMesh(std::shared_ptr<SceneMaterial> materi
     mdl.meshes.push_back(std::move(quad));
 
     auto mesh = std::make_shared<SceneMesh>();
-    WPMdlParser::GenPuppetMesh(*mesh, mdl, false);
+    WPMdlParser::GenPuppetMesh(*mesh, mdl, WPMdlParser::MaskDraw::Omit);
     mesh->MaterialSlots().push_back(std::move(material));
     return mesh;
 }

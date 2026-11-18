@@ -171,6 +171,12 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             for (auto& texture : material->textures) {
                 if (sstart_with(texture, WE_EFFECT_PPONG_PREFIX_A)) texture = input;
             }
+            const auto& slots = pass.sceneNode->Mesh()->MaterialSlots();
+            for (std::size_t i = 1; i < slots.size(); ++i) {
+                auto& textures = slots[i]->textures;
+                if (!textures.empty() && (textures[0] == m_pingpong_a || textures[0] == m_pingpong_b))
+                    textures[0] = input;
+            }
             if (pass.output == output) last_writer = &pass;
             ApplyBaseline(*pass.sceneNode, *material, baseline);
         }
@@ -186,7 +192,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
     // its constants hold that object and a copy would keep the values it had now.
     if (closing.Mesh()->UpdateDriver() != m_final_mesh->UpdateDriver()) {
         auto swapped = std::make_shared<SceneMesh>(m_final_mesh->UpdateDriver());
-        swapped->MaterialSlots().push_back(closing.Mesh()->MaterialSlotPtr(0));
+        swapped->MaterialSlots() = closing.Mesh()->MaterialSlots();
         closing.AddMesh(std::move(swapped));
     }
     SceneMaterial& material = *closing.Mesh()->Material();
@@ -197,6 +203,15 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
     }
     if (m_final_depth_test.has_value()) material.depth_test = *m_final_depth_test;
     closing.Mesh()->ChangeMeshDataFrom(*m_final_mesh);
+    if (closing.Mesh()->MaterialSlots().size() > 1) {
+        for (const auto& sub : closing.Mesh()->Submeshes()) {
+            if (sub.material_slot == 0 || !sub.output_override.empty()) continue;
+            auto* piece = closing.Mesh()->MaterialForSlot(sub.material_slot);
+            piece->blenmode = material.blenmode;
+            piece->depth_test = material.depth_test;
+            piece->depth_write = material.depth_write;
+        }
+    }
     closing.CopyTrans(*m_final_node);
     closing.SetCamera(m_final_camera);
     m_resolved_final = &closing;

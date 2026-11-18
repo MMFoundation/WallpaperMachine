@@ -672,7 +672,7 @@ private:
 
     // ---- draws -------------------------------------------------------------------
 
-    void drawNode(const DrawSource& source) {
+    void drawNode(const DrawSource& source, const Route* fixed_route = nullptr) {
         SceneNode* node = source.node;
         if (node == nullptr || node->Mesh() == nullptr) return;
         SceneMesh* mesh = node->Mesh();
@@ -681,16 +681,29 @@ private:
             return;
         }
         const auto& submeshes = mesh->Submeshes();
+        if (fixed_route == nullptr && source.role == PictureRole::ChainFinal &&
+            source.destination == SpecTex_Default && mesh->MaterialSlots().size() > 1 && referenced(source.image_id)) {
+            Route local { LayerCompositeTargetKey(source.image_id), LayerCompositeCameraKey(source.image_id) };
+            Route plain = redirect(source);
+            if (m_reflection_pass && plain.dest == SpecTex_Default) plain.dest = std::string(kReflectionTarget);
+            if (!m_scene.cameras.contains(local.camera)) local.camera = plain.camera;
+            ensureCompositeRecord(local.dest);
+            clearTarget(local.dest);
+            drawNode(source, &local);
+            if (!source.visibility_node->CompositeOnly() && !hiddenForGood(source.visibility_node))
+                drawNode(source, &plain);
+            return;
+        }
         if (submeshes.size() > 1) {
             for (std::size_t index = 0; index < submeshes.size(); ++index) {
                 const uint32_t slot = submeshes[index].material_slot;
                 if (mesh->MaterialForSlot(slot) == nullptr) continue;
                 if (submeshes[index].clear_output && ! submeshes[index].output_override.empty())
                     clearTarget(resolve(submeshes[index].output_override));
-                emitDraw(source, index, slot, submeshes[index].output_override);
+                emitDraw(source, index, slot, submeshes[index].output_override, fixed_route);
             }
         } else if (mesh->MaterialForSlot(0) != nullptr) {
-            emitDraw(source, 0, 0, {});
+            emitDraw(source, 0, 0, {}, fixed_route);
         }
     }
 
@@ -726,10 +739,17 @@ private:
     }
 
     void emitDraw(const DrawSource& source, std::size_t submesh, uint32_t slot,
-                  const std::string& output_override) {
+                  const std::string& output_override, const Route* fixed_route) {
         SelectSceneShadowMaterial(m_scene, source.node, slot);
         SceneMaterial* material = source.node->Mesh()->MaterialForSlot(slot);
         if (material == nullptr) return;
+        if (fixed_route != nullptr) {
+            const Route route = output_override.empty() ? *fixed_route
+                : Route { resolve(output_override), fixed_route->camera, true };
+            emitPass(source, submesh, slot, *material, route,
+                     std::string_view(route.dest).starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX));
+            return;
+        }
 
         std::vector<Route> routes;
         Route plain = redirect(source);
@@ -811,7 +831,7 @@ private:
         desc.write_alpha = route.dest != kReflectionTarget &&
             ResolveWriteAlpha(route.dest == SpecTex_Default, material.alpha_writing, alpha_max);
         // What a chain leaves in its layer's composite is its last pass as written.
-        desc.replace_target = source.role == PictureRole::ChainFinal &&
+        desc.replace_target = source.role == PictureRole::ChainFinal && source.node->Mesh()->MaterialSlots().size() == 1 &&
                               std::string_view(route.dest).starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX);
         desc.textures.assign(material.textures.size(), std::string {});
 

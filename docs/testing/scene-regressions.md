@@ -2963,6 +2963,12 @@ texture entrances are not decoded-image or native-rendering evidence.
 
 ## Alpha compositing
 
+- **Clipping an effect-bearing puppet** — `MetalSceneDraw.APuppetEffectPreservesClippingWhenDrawingTheProcessedPicture`
+  samples the processed texture on both sides of a half-strength mask, including a
+  later opaque part. The masked part must disappear outside the mask, retain the
+  effect's colour inside it and stay behind that later part. The closing draw must
+  not sort all masked parts to the front.
+
 - **Nested puppet masks and the multiply blend** — Wallpaper Engine's device keeps four more
   blend flags (`sub_14009B070` 0x80, `sub_14009B0A0` 0x20, `sub_14009B0D0` 0x40,
   `sub_14009B100` 0x100); only 0x100 is ever set, by `sub_14020D6A0`, which multiplies a

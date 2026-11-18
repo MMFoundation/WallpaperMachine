@@ -72,6 +72,7 @@ public:
 		}
 
 		uint32_t material_slot {0};
+		std::optional<std::size_t> geometry_source;
 		std::string output_override;
 		/// Clear output_override to transparent right before this submesh draws.
 		bool clear_output {false};
@@ -150,6 +151,13 @@ public:
 
 	const std::vector<Submesh>& Submeshes() const { return *m_geometry; }
 	std::vector<Submesh>& Submeshes() { return *m_geometry; }
+	const Submesh* GeometryFor(const Submesh& draw) const {
+		if (!draw.geometry_source) return &draw;
+		const auto index = *draw.geometry_source;
+		if (index >= m_geometry->size()) return nullptr;
+		const auto& source = (*m_geometry)[index];
+		return !source.geometry_source || *source.geometry_source == index ? &source : nullptr;
+	}
 
 	const std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() const { return m_materials; }
 	std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() { return m_materials; }

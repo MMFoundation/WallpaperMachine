@@ -220,8 +220,10 @@ std::string RejectShaders(const Scene& scene, const SceneNode* node, bool& saw_a
                     if (matched_slot && submesh.material_slot != slot_index) continue;
                     any_checked = true;
                     bool has_weights = false;
-                    for (std::size_t i = 0; i < submesh.VertexCount(); ++i) {
-                        const auto& vertices = submesh.GetVertexArray(i);
+                    const auto* streams = geometry.GeometryFor(submesh);
+                    if (streams == nullptr) return "a draw step names an invalid geometry source";
+                    for (std::size_t i = 0; i < streams->VertexCount(); ++i) {
+                        const auto& vertices = streams->GetVertexArray(i);
                         if (HasAttribute(vertices, WE_IN_BLENDINDICES, VertexType::UINT4) &&
                             HasAttribute(vertices, WE_IN_BLENDWEIGHTS, VertexType::FLOAT4)) {
                             has_weights = true;

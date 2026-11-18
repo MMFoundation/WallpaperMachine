@@ -514,7 +514,8 @@ inline Parsed parse(const Bytes& b) { return parse(b.data()); }
 inline std::unique_ptr<wallpaper::SceneMesh> generate(const wallpaper::WPMdl& mdl,
                                                       bool masks = true) {
     auto mesh = std::make_unique<wallpaper::SceneMesh>();
-    wallpaper::WPMdlParser::GenPuppetMesh(*mesh, mdl, masks);
+    using Parser = wallpaper::WPMdlParser;
+    Parser::GenPuppetMesh(*mesh, mdl, masks ? Parser::MaskDraw::Grouped : Parser::MaskDraw::Omit);
     return mesh;
 }
 

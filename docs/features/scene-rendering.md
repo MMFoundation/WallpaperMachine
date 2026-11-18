@@ -475,6 +475,12 @@ layer's own pass and again by the skinned pass its chain ends in, and both carry
 layer's colour and alpha, as an authored alpha always did and a script's write now
 does ([known limitations](../testing/renderer.md#known-limitations)).
 
+When an effect-bearing puppet has clipping masks, the effects still run on its flat
+texture. The closing draw clips the animated parts in their authored order, so a
+foreground part such as an eyelid can cover an already clipped iris. Parts that use
+the same mask coverage reuse it until another mask replaces it. Puppets without
+clipping masks do not draw a mask target.
+
 A scene follows the cursor anywhere on its display, but, as in Wallpaper Engine, a
 mouse press counts only where it lands on the desktop: the wallpaper, Finder's icons or
 a desktop widget. A click in another app's window, in the menu bar or the Dock, or in

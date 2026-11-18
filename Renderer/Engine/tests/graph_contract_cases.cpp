@@ -167,6 +167,59 @@ TEST(RenderGraph, aMaskSubmeshThatClearsItsTargetIsDrawnOntoAClearedTarget) {
     REQUIRE(g.draw("multiply").preserve_target_contents);
     REQUIRE(g.draw("nested_mask").clear_on_first_use);
 }
+TEST(RenderGraph, aReferencedMaskedFinalBuildsItsMaskInEachDestinationCamera) {
+    for (const bool composite_only : { false, true }) {
+        SCOPED_TRACE(composite_only);
+        Scene s;
+        defaults(s);
+        target(s, maskTarget);
+        auto owner = append(s, "producer");
+        owner->ID() = 7;
+        owner->SetCompositeOnly(composite_only);
+        s.layer_texture_sources.insert(7);
+        const auto composite = LayerCompositeTargetKey(7);
+        const auto local_camera = LayerCompositeCameraKey(7);
+        s.cameras[local_camera] = std::make_shared<SceneCamera>(80, 48, -1, 1);
+        s.cameras["scene_view"] = std::make_shared<SceneCamera>(640, 360, -1, 1);
+
+        auto layer = effectLayer(s, owner);
+        layer->SetFinalCamera("scene_view");
+        layer->SetFinalBlend(BlendMode::Translucent);
+        auto closing = node("masked_final", { maskTarget });
+        closing->Mesh()->AddMaterial(material("mask_writer"));
+        submesh(layer->FinalMesh(), 1, maskTarget);
+        layer->FinalMesh().Submeshes().back().clear_output = true;
+        submesh(layer->FinalMesh(), 0);
+        layer->AddEffect(oneEffect(closing));
+
+        Observation g(s);
+        const auto draws = g.nodeDraws("masked_final");
+        const std::size_t routes = composite_only ? 1 : 2;
+        ASSERT_EQ(draws.size(), 2 * routes);
+        for (std::size_t i = 0; i < routes; ++i) {
+            const auto& mask = *draws[2 * i];
+            const auto& colour = *draws[2 * i + 1];
+            const auto camera = i == 0 ? local_camera : "scene_view";
+            for (const auto* draw : { &mask, &colour })
+                EXPECT_EQ(draw->camera_override.empty() ? draw->node->Camera() : draw->camera_override, camera);
+            EXPECT_EQ(mask.output, maskTarget);
+            EXPECT_TRUE(mask.clear_on_first_use);
+            EXPECT_EQ(colour.output, i == 0 ? std::string_view(composite) : SpecTex_Default);
+            ASSERT_FALSE(colour.textures.empty());
+            EXPECT_EQ(colour.textures[0], maskTarget);
+            EXPECT_FALSE(colour.replace_target);
+        }
+        std::size_t mask_clears = 0, composite_clears = 0;
+        for (const auto& step : g.steps) {
+            const auto* clear = dynamic_cast<const ClearPass*>(g.graph->getPass(step.id));
+            if (clear == nullptr || !clear->desc().transparent) continue;
+            if (clear->desc().result == maskTarget) ++mask_clears;
+            if (clear->desc().result == composite) ++composite_clears;
+        }
+        EXPECT_EQ(mask_clears, routes);
+        EXPECT_EQ(composite_clears, 1u);
+    }
+}
 TEST(RenderGraph, parsedMaskedPuppetMaterialSlotsReachRenderGraph) {
     auto files = ordinaryAssets();
     asset(

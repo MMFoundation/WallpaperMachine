@@ -5701,8 +5701,12 @@ bool SceneRuntimeContext::SetNodeSize(std::string_view name, const linalg::Vecto
     stretched->SetPointSize(mesh->PointSize());
     for (const auto& submesh : mesh->Submeshes()) {
         SceneMesh::Submesh copy;
-        copy.material_slot   = submesh.material_slot;
-        copy.output_override = submesh.output_override;
+        copy.material_slot    = submesh.material_slot;
+        copy.geometry_source  = submesh.geometry_source;
+        copy.output_override  = submesh.output_override;
+        copy.clear_output     = submesh.clear_output;
+        copy.dynamic_vertices = submesh.dynamic_vertices;
+        copy.dynamic_indices  = submesh.dynamic_indices;
         copy.SetDrawRanges(submesh.DrawRanges());
         for (std::size_t a = 0; a < submesh.VertexCount(); ++a) {
             const auto&       source = submesh.GetVertexArray(a);

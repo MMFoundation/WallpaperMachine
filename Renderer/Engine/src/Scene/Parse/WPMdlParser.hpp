@@ -160,9 +160,8 @@ public:
     static void AddPuppetMatInfo(wpscene::WPMaterial& mat, const WPMdl& mdl, std::size_t mesh = 0);
 
     static void GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src);
-    static void GenMaskSubmeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
-                                      std::span<const uint32_t> part_indices);
-    static void GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, bool include_masks = true);
+    enum class MaskDraw { Omit, Grouped, InPartOrder };
+    static void GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, MaskDraw masks = MaskDraw::Grouped);
     /// The masks that clip mask `mask`, nearest first: its parent, the parent's parent...
     static std::vector<uint32_t> MaskChain(const WPMdl::Mesh& src, std::size_t mask);
     /// A texture channel mesh as the `puppettexturechannels` shader reads it: the position, moved

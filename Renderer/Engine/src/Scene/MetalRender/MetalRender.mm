@@ -5170,7 +5170,10 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
     if (desc.submesh_index >= mesh->Submeshes().size()) {
         return fail("a draw step names a submesh that does not exist");
     }
-    const auto& submesh  = mesh->Submeshes()[desc.submesh_index];
+    const auto& draw = mesh->Submeshes()[desc.submesh_index];
+    const auto* geometry = mesh->GeometryFor(draw);
+    if (geometry == nullptr) return fail("a draw step names an invalid geometry source");
+    const auto& submesh = *geometry;
     const auto* material = mesh->MaterialForSlot(desc.material_slot);
     if (material == nullptr || material->customShader.shader == nullptr) {
         return fail("a draw step lost its material");
@@ -5351,12 +5354,13 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
     const bool dynamic_indices = mesh->Dynamic() && submesh.IndexCount() != 0 &&
         submesh.dynamic_indices.value_or(true);
     out.dynamic_mesh = dynamic_vertices || dynamic_indices;
-    const auto geometry_owner = mesh->SharesGeometryUpdates() ? mesh->GeometryStorage()
+    const bool shared_streams = mesh->SharesGeometryUpdates() || draw.geometry_source.has_value();
+    const auto geometry_owner = shared_streams ? mesh->GeometryStorage()
         : scene.reflection.requested && scene.reflection_enabled
             ? std::shared_ptr<const void>(scene.sceneGraph, mesh)
                                      : std::shared_ptr<const void>{};
     const GeometryKey geometry_key {reinterpret_cast<uintptr_t>(geometry_owner.get()),
-        desc.submesh_index, dynamic_vertices, dynamic_indices};
+        draw.geometry_source.value_or(desc.submesh_index), dynamic_vertices, dynamic_indices};
     std::shared_ptr<SharedGeometry> cached_geometry;
     if (geometry_owner) {
         if (const auto found = shared_geometry.find(geometry_key); found != shared_geometry.end())
@@ -5509,7 +5513,7 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
                 return fail("index byte capacity overflowed");
             }
             out.index_count = static_cast<uint32_t>(count);
-            out.draw_ranges = submesh.DrawRanges();
+            out.draw_ranges = draw.DrawRanges();
             if (out.index_count > 0) {
                 out.index_buffer = cached_geometry ? cached_geometry->index :
                                    [device newBufferWithBytes:indices.Data()
@@ -5918,7 +5922,10 @@ bool MetalRender::Impl::uploadDynamicMesh(PreparedPass& pass, const ScenePassDes
     if (desc.submesh_index >= mesh->Submeshes().size()) {
         return set_error("a draw step names a submesh that does not exist");
     }
-    auto& submesh = mesh->Submeshes()[desc.submesh_index];
+    const auto& draw = mesh->Submeshes()[desc.submesh_index];
+    const auto* geometry = mesh->GeometryFor(draw);
+    if (geometry == nullptr) return set_error("a draw step names an invalid geometry source");
+    const auto& submesh = *geometry;
     // Indexed or not is a property of the shape prepared, so both have to still
     // agree: a mesh that grew or lost an index stream would otherwise be
     // reinterpreted against storage built for the other shape.
@@ -5945,7 +5952,7 @@ bool MetalRender::Impl::uploadDynamicMesh(PreparedPass& pass, const ScenePassDes
             return set_error("a dynamic mesh's index count is not addressable");
         }
         pass.index_count = static_cast<uint32_t>(count);
-        pass.draw_ranges = submesh.DrawRanges();
+        pass.draw_ranges = draw.DrawRanges();
     } else {
         pass.vertex_count = static_cast<uint32_t>(submesh.GetVertexArray(0).VertexCount());
     }
