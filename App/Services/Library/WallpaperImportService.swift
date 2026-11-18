@@ -397,10 +397,9 @@ actor WallpaperImportService {
         let files = FileManager.default
         guard let candidates = try? files.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return }
         let deadline = Date().addingTimeInterval(-max(0, quiet)).timeIntervalSince1970
-        for staging in candidates where staging.lastPathComponent.hasPrefix(stagingPrefix) {
-            let suffix = String(staging.lastPathComponent.dropFirst(stagingPrefix.count))
+        for staging in candidates where FileLocation.hasStagingName(staging, prefix: stagingPrefix) {
             var metadata = stat()
-            guard UUID(uuidString: suffix) != nil, lstat(staging.path, &metadata) == 0,
+            guard lstat(staging.path, &metadata) == 0,
                   metadata.st_mode & S_IFMT == S_IFDIR else { continue }
             let descriptor = open(staging.appendingPathComponent(stagingOwnerName).path, O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
             if descriptor >= 0 {

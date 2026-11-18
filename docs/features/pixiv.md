@@ -149,8 +149,9 @@ with blurred backdrop. The labels stay English in the manifest like any
 wallpaper's, and the panel translates exactly these for `pixiv-` and `image-` wallpapers (see
 [localization](../localization.md)). The project is written to a staging folder
 beside the library and moved in whole, so the library never lists a half-written
-wallpaper; a copy already in the library is kept with its saved options, and
-staging a crash left behind is removed at the next launch. After the move the
+wallpaper; a copy already in the library is kept with its saved options. At
+launch, cleanup removes old staging folders named `.WallpaperMachine-pixiv-<UUID>`
+but leaves renamed copies such as a folder with an added `-backup` suffix. After the move the
 library reloads, waiting for any wallpaper being applied to finish first.
 
 ## Signing in and R-18 works

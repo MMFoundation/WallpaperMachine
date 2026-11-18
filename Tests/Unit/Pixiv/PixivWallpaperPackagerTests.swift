@@ -149,15 +149,16 @@ final class PixivWallpaperPackagerTests: XCTestCase {
 
     func testLaunchRemovesOnlyStagingACrashLeftBehind() throws {
         let fm = FileManager.default
-        let abandoned = root.appendingPathComponent(PixivWallpaperPackager.stagingPrefix + "old")
-        let fresh = root.appendingPathComponent(PixivWallpaperPackager.stagingPrefix + "new")
+        let abandoned = root.appendingPathComponent(PixivWallpaperPackager.stagingPrefix + UUID().uuidString)
+        let fresh = root.appendingPathComponent(PixivWallpaperPackager.stagingPrefix + UUID().uuidString)
+        let backup = root.appendingPathComponent(abandoned.lastPathComponent + "-backup")
         let unrelated = root.appendingPathComponent(".WallpaperMachine-import-old")
-        for folder in [abandoned, fresh, unrelated] {
+        for folder in [abandoned, fresh, unrelated, backup] {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
             try Data("x".utf8).write(to: folder.appendingPathComponent("illustration.jpg"))
         }
         let hourAgo = Date().addingTimeInterval(-3600)
-        for folder in [abandoned, unrelated] {
+        for folder in [abandoned, unrelated, backup] {
             try fm.setAttributes([.modificationDate: hourAgo], ofItemAtPath: folder.path)
         }
 
@@ -166,6 +167,7 @@ final class PixivWallpaperPackagerTests: XCTestCase {
         XCTAssertFalse(fm.fileExists(atPath: abandoned.path))
         XCTAssertTrue(fm.fileExists(atPath: fresh.path), "a page being written right now is left alone")
         XCTAssertTrue(fm.fileExists(atPath: unrelated.path))
+        XCTAssertEqual(try Data(contentsOf: backup.appendingPathComponent("illustration.jpg")), Data("x".utf8))
     }
 
     func testASymlinkedLibraryStagesBesideItsTarget() async throws {
