@@ -75,6 +75,7 @@ struct StatusPanelView: View {
     }
     .padding(16)
     .frame(width: Self.width, alignment: .leading)
+    .background { theme.surface.background.color.ignoresSafeArea() }
     .announcesChanges(of: controller.failure)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("status-panel")

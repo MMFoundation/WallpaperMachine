@@ -72,6 +72,8 @@ belong to the `AppUpdateCoordinator` it owns (`App/Services/GitHub/`).
   `NSPopover` built at each opening and torn down at its close, [control
   panel](features/control-panel.md#menu-bar-panel)) unless Settings › General chooses the menu;
   a right click or a Control-click opens the menu either way (`AppDelegate+StatusPanel`). The
+  panel draws an opaque theme background behind its theme text in both appearances, so windows
+  behind the popover cannot reduce status and caption contrast. The
   panel's buttons carry the menu's own `StatusMenuModel.Command`s, run through the same
   `AppAutomation` path; `StatusPanelModel` decides what it shows and `StatusItemClick` what a
   click opens (both `App/Services/Automation/`). The status item's menu (`rebuildMenu`) offers Control Panel, playback and
