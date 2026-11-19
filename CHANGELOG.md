@@ -12,6 +12,113 @@ app's update window shows the sections of every version newer than the installed
 one, in the app's language; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.14.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.13.0...v1.14.0) (2026-11-19)
+
+### English
+
+This release makes browsing the Steam Workshop smoother, with sign-in right where you browse and a Back button that remembers your place, and it trims memory use
+
+#### Highlights
+
+- You can now sign in to Steam right where you browse the Workshop (closes [#225](https://github.com/MMFoundation/WallpaperMachine/issues/225)) ([f66d263](https://github.com/MMFoundation/WallpaperMachine/commit/f66d2631bcd252b3bade28866d426e0b869cef28))
+- Back from an author or collection takes you to exactly where you were browsing (closes [#226](https://github.com/MMFoundation/WallpaperMachine/issues/226)) ([6237444](https://github.com/MMFoundation/WallpaperMachine/commit/6237444189a77861bba3c3266164b2dcc27b0cbc), [fbe6731](https://github.com/MMFoundation/WallpaperMachine/commit/fbe67314d7d01d2b78b0e990ff40242786b156c5))
+- Scenes with text layers and the closed control panel now use much less memory ([a05d198](https://github.com/MMFoundation/WallpaperMachine/commit/a05d1988b7c3cb8b14c1acfcc68830c2f5265c39), [eb1361d](https://github.com/MMFoundation/WallpaperMachine/commit/eb1361d3749f28b5b08f1ac6f0d0361e7cdfe81a))
+- Workshop downloads and browsing recover from Steam timeouts and expired sign-ins instead of showing misleading errors (closes [#228](https://github.com/MMFoundation/WallpaperMachine/issues/228), closes [#231](https://github.com/MMFoundation/WallpaperMachine/issues/231)) ([fcb1c08](https://github.com/MMFoundation/WallpaperMachine/commit/fcb1c0859efb0d220c4c04da6a6f28caa9f4b076), [a27c032](https://github.com/MMFoundation/WallpaperMachine/commit/a27c032953dca2909b270d760d98bc6ba71ae4bd))
+
+#### Features
+
+- Sign in to Steam from the Steam Workshop lists or in Settings under Library & Steam to browse with your own content preferences, while anonymous browsing stays available (closes [#225](https://github.com/MMFoundation/WallpaperMachine/issues/225)) ([f66d263](https://github.com/MMFoundation/WallpaperMachine/commit/f66d2631bcd252b3bade28866d426e0b869cef28))
+- Back from an author's wallpapers or a collection returns to the list exactly as you left it, with its page, search, filters, selection and scroll position (closes [#226](https://github.com/MMFoundation/WallpaperMachine/issues/226)) ([6237444](https://github.com/MMFoundation/WallpaperMachine/commit/6237444189a77861bba3c3266164b2dcc27b0cbc), [fbe6731](https://github.com/MMFoundation/WallpaperMachine/commit/fbe67314d7d01d2b78b0e990ff40242786b156c5))
+
+#### Improvements
+
+- Scene wallpapers with several text layers use far less memory, because those layers now share one copy of their font and glyphs ([a05d198](https://github.com/MMFoundation/WallpaperMachine/commit/a05d1988b7c3cb8b14c1acfcc68830c2f5265c39))
+- Closing the control panel window now frees the memory its Workshop and pixiv pages and thumbnails held, and browsing picks up where you left off when you return ([eb1361d](https://github.com/MMFoundation/WallpaperMachine/commit/eb1361d3749f28b5b08f1ac6f0d0361e7cdfe81a))
+- Display pickers show just the screen name, adding the display ID only when two screens share the same name (closes [#232](https://github.com/MMFoundation/WallpaperMachine/issues/232)) ([5d24539](https://github.com/MMFoundation/WallpaperMachine/commit/5d245397fb7d7450caf72b8e454362fe988cef93))
+
+#### Bug Fixes
+
+- Workshop downloads that hit a Steam timeout now resume from what was already downloaded instead of reporting an account or Steam Guard problem (closes [#228](https://github.com/MMFoundation/WallpaperMachine/issues/228)) ([fcb1c08](https://github.com/MMFoundation/WallpaperMachine/commit/fcb1c0859efb0d220c4c04da6a6f28caa9f4b076))
+- When your Steam session ends, Workshop browsing renews it or falls back to anonymous lists instead of failing with an unreadable page error (closes [#231](https://github.com/MMFoundation/WallpaperMachine/issues/231)) ([a27c032](https://github.com/MMFoundation/WallpaperMachine/commit/a27c032953dca2909b270d760d98bc6ba71ae4bd))
+- Text in the menu bar panel stays readable over light or dark windows behind it, while the panel keeps its translucent look (closes [#240](https://github.com/MMFoundation/WallpaperMachine/issues/240)) ([e1b05bc](https://github.com/MMFoundation/WallpaperMachine/commit/e1b05bc2d83a7337237033ee7fa249f7c5efcf50), [7753188](https://github.com/MMFoundation/WallpaperMachine/commit/77531881ee05cb24a3fc1ce5f216699183b0cdbf))
+- Scene wallpapers no longer draw false outlines around translucent edges (closes [#239](https://github.com/MMFoundation/WallpaperMachine/issues/239)) ([37b9a47](https://github.com/MMFoundation/WallpaperMachine/commit/37b9a47fd1f6b0ff12d4c95c87670390128ed044))
+- Animated characters' eyelids now cover their irises throughout a blink instead of letting the iris show through (closes [#223](https://github.com/MMFoundation/WallpaperMachine/issues/223)) ([b2f0074](https://github.com/MMFoundation/WallpaperMachine/commit/b2f0074d4f11b5b5054ef2ee8e6aa881ce0f0edb))
+- The screen saver chosen for the experimental lock screen stays selected on the next launch, even if a display was briefly unavailable or setup was canceled ([15dca4b](https://github.com/MMFoundation/WallpaperMachine/commit/15dca4b53428721623f3fb3882fc8ce085116e2f))
+- Download cleanup no longer deletes renamed Workshop and pixiv backups whose names merely resemble an unfinished download ([6d80d14](https://github.com/MMFoundation/WallpaperMachine/commit/6d80d148d163f9e0bfba4038613d217d4aa0809d))
+- An interrupted backup rollback or cleanup now resumes and finishes instead of being left halfway ([28e526c](https://github.com/MMFoundation/WallpaperMachine/commit/28e526cbb45389af272316c98a4c8759ae74fb7b))
+
+Thanks to [@joyzhang14-14](https://github.com/joyzhang14-14) for contributing to this release.
+
+### 简体中文
+
+本次更新让浏览 Steam 创意工坊更顺畅：可在浏览处直接登录，返回时也会回到原来的位置，同时减少了内存占用
+
+#### 亮点
+
+- 现在可以直接在浏览创意工坊的地方登录 Steam (closes [#225](https://github.com/MMFoundation/WallpaperMachine/issues/225)) ([f66d263](https://github.com/MMFoundation/WallpaperMachine/commit/f66d2631bcd252b3bade28866d426e0b869cef28))
+- 从作者或合集返回时，会准确回到你之前浏览的位置 (closes [#226](https://github.com/MMFoundation/WallpaperMachine/issues/226)) ([6237444](https://github.com/MMFoundation/WallpaperMachine/commit/6237444189a77861bba3c3266164b2dcc27b0cbc), [fbe6731](https://github.com/MMFoundation/WallpaperMachine/commit/fbe67314d7d01d2b78b0e990ff40242786b156c5))
+- 含文字图层的场景和关闭后的控制面板现在占用的内存大幅减少 ([a05d198](https://github.com/MMFoundation/WallpaperMachine/commit/a05d1988b7c3cb8b14c1acfcc68830c2f5265c39), [eb1361d](https://github.com/MMFoundation/WallpaperMachine/commit/eb1361d3749f28b5b08f1ac6f0d0361e7cdfe81a))
+- 创意工坊的下载和浏览遇到 Steam 超时或登录失效时会自动恢复，不再显示误导性错误 (closes [#228](https://github.com/MMFoundation/WallpaperMachine/issues/228), closes [#231](https://github.com/MMFoundation/WallpaperMachine/issues/231)) ([fcb1c08](https://github.com/MMFoundation/WallpaperMachine/commit/fcb1c0859efb0d220c4c04da6a6f28caa9f4b076), [a27c032](https://github.com/MMFoundation/WallpaperMachine/commit/a27c032953dca2909b270d760d98bc6ba71ae4bd))
+
+#### 新功能
+
+- 现在可直接在 Steam 创意工坊列表中或在“设置”的“壁纸库与 Steam”中登录 Steam，按你的内容偏好浏览，也仍可匿名浏览 (closes [#225](https://github.com/MMFoundation/WallpaperMachine/issues/225)) ([f66d263](https://github.com/MMFoundation/WallpaperMachine/commit/f66d2631bcd252b3bade28866d426e0b869cef28))
+- 从作者的壁纸或合集返回时，列表会完全保持离开时的样子，包括页码、搜索、筛选、所选壁纸和滚动位置 (closes [#226](https://github.com/MMFoundation/WallpaperMachine/issues/226)) ([6237444](https://github.com/MMFoundation/WallpaperMachine/commit/6237444189a77861bba3c3266164b2dcc27b0cbc), [fbe6731](https://github.com/MMFoundation/WallpaperMachine/commit/fbe67314d7d01d2b78b0e990ff40242786b156c5))
+
+#### 改进
+
+- 包含多个文字图层的场景壁纸占用内存大幅减少，这些图层现在共用同一份字体和字形 ([a05d198](https://github.com/MMFoundation/WallpaperMachine/commit/a05d1988b7c3cb8b14c1acfcc68830c2f5265c39))
+- 关闭控制面板窗口后，会释放创意工坊和 pixiv 页面及缩略图占用的内存，再次打开时浏览位置保持不变 ([eb1361d](https://github.com/MMFoundation/WallpaperMachine/commit/eb1361d3749f28b5b08f1ac6f0d0361e7cdfe81a))
+- 显示器选择按钮和菜单只显示屏幕名称，仅在两台屏幕同名时才附加显示器编号 (closes [#232](https://github.com/MMFoundation/WallpaperMachine/issues/232)) ([5d24539](https://github.com/MMFoundation/WallpaperMachine/commit/5d245397fb7d7450caf72b8e454362fe988cef93))
+
+#### 问题修复
+
+- 创意工坊下载遇到 Steam 超时后会从已下载的部分继续，不再误报账户或 Steam 令牌问题 (closes [#228](https://github.com/MMFoundation/WallpaperMachine/issues/228)) ([fcb1c08](https://github.com/MMFoundation/WallpaperMachine/commit/fcb1c0859efb0d220c4c04da6a6f28caa9f4b076))
+- Steam 登录状态失效时，创意工坊浏览会自动续期或改为匿名浏览，不再提示页面无法读取 (closes [#231](https://github.com/MMFoundation/WallpaperMachine/issues/231)) ([a27c032](https://github.com/MMFoundation/WallpaperMachine/commit/a27c032953dca2909b270d760d98bc6ba71ae4bd))
+- 菜单栏面板后方有深色或浅色窗口时，其中的文字依然清晰可读，面板也保持半透明效果 (closes [#240](https://github.com/MMFoundation/WallpaperMachine/issues/240)) ([e1b05bc](https://github.com/MMFoundation/WallpaperMachine/commit/e1b05bc2d83a7337237033ee7fa249f7c5efcf50), [7753188](https://github.com/MMFoundation/WallpaperMachine/commit/77531881ee05cb24a3fc1ce5f216699183b0cdbf))
+- 场景壁纸的半透明边缘不再出现多余的轮廓线 (closes [#239](https://github.com/MMFoundation/WallpaperMachine/issues/239)) ([37b9a47](https://github.com/MMFoundation/WallpaperMachine/commit/37b9a47fd1f6b0ff12d4c95c87670390128ed044))
+- 动态角色眨眼时，眼睑会始终盖住虹膜，不再露出眼珠 (closes [#223](https://github.com/MMFoundation/WallpaperMachine/issues/223)) ([b2f0074](https://github.com/MMFoundation/WallpaperMachine/commit/b2f0074d4f11b5b5054ef2ee8e6aa881ce0f0edb))
+- 为实验性锁定屏幕选择的屏幕保护程序在下次启动时仍会保留，即使显示器曾短暂断开或设置被取消 ([15dca4b](https://github.com/MMFoundation/WallpaperMachine/commit/15dca4b53428721623f3fb3882fc8ce085116e2f))
+- 清理下载时不再误删名称与未完成下载相似的已重命名创意工坊和 pixiv 备份 ([6d80d14](https://github.com/MMFoundation/WallpaperMachine/commit/6d80d148d163f9e0bfba4038613d217d4aa0809d))
+- 备份回滚或清理被中断后，现在会继续完成，而不会停在半途 ([28e526c](https://github.com/MMFoundation/WallpaperMachine/commit/28e526cbb45389af272316c98a4c8759ae74fb7b))
+
+感谢 [@joyzhang14-14](https://github.com/joyzhang14-14) 为本版本做出的贡献。
+
+### 한국어
+
+이번 릴리스는 Steam 창작마당 탐색을 더 편하게 만듭니다. 둘러보는 곳에서 바로 로그인하고 뒤로 가면 원래 위치로 돌아가며, 메모리 사용량도 줄었습니다
+
+#### 주요 변경 사항
+
+- 이제 창작마당을 둘러보는 곳에서 바로 Steam에 로그인할 수 있습니다 (closes [#225](https://github.com/MMFoundation/WallpaperMachine/issues/225)) ([f66d263](https://github.com/MMFoundation/WallpaperMachine/commit/f66d2631bcd252b3bade28866d426e0b869cef28))
+- 작성자나 컬렉션에서 뒤로 가면 보던 위치로 정확히 돌아갑니다 (closes [#226](https://github.com/MMFoundation/WallpaperMachine/issues/226)) ([6237444](https://github.com/MMFoundation/WallpaperMachine/commit/6237444189a77861bba3c3266164b2dcc27b0cbc), [fbe6731](https://github.com/MMFoundation/WallpaperMachine/commit/fbe67314d7d01d2b78b0e990ff40242786b156c5))
+- 텍스트 레이어가 있는 장면과 닫힌 제어판이 이제 메모리를 훨씬 적게 사용합니다 ([a05d198](https://github.com/MMFoundation/WallpaperMachine/commit/a05d1988b7c3cb8b14c1acfcc68830c2f5265c39), [eb1361d](https://github.com/MMFoundation/WallpaperMachine/commit/eb1361d3749f28b5b08f1ac6f0d0361e7cdfe81a))
+- 창작마당 다운로드와 탐색이 Steam 시간 초과나 만료된 로그인에서 스스로 회복하며, 엉뚱한 오류를 더 이상 표시하지 않습니다 (closes [#228](https://github.com/MMFoundation/WallpaperMachine/issues/228), closes [#231](https://github.com/MMFoundation/WallpaperMachine/issues/231)) ([fcb1c08](https://github.com/MMFoundation/WallpaperMachine/commit/fcb1c0859efb0d220c4c04da6a6f28caa9f4b076), [a27c032](https://github.com/MMFoundation/WallpaperMachine/commit/a27c032953dca2909b270d760d98bc6ba71ae4bd))
+
+#### 새로운 기능
+
+- Steam 창작마당 목록이나 설정의 보관함 및 Steam에서 바로 Steam에 로그인해 내 콘텐츠 설정대로 둘러볼 수 있으며, 익명으로 둘러보기도 계속 가능합니다 (closes [#225](https://github.com/MMFoundation/WallpaperMachine/issues/225)) ([f66d263](https://github.com/MMFoundation/WallpaperMachine/commit/f66d2631bcd252b3bade28866d426e0b869cef28))
+- 작성자의 배경화면이나 컬렉션에서 뒤로 가면 페이지, 검색, 필터, 선택 항목, 스크롤 위치까지 떠날 때 그대로인 목록으로 돌아갑니다 (closes [#226](https://github.com/MMFoundation/WallpaperMachine/issues/226)) ([6237444](https://github.com/MMFoundation/WallpaperMachine/commit/6237444189a77861bba3c3266164b2dcc27b0cbc), [fbe6731](https://github.com/MMFoundation/WallpaperMachine/commit/fbe67314d7d01d2b78b0e990ff40242786b156c5))
+
+#### 개선 사항
+
+- 텍스트 레이어가 여러 개인 장면 배경화면이 이제 글꼴과 글리프를 한 벌만 공유해 메모리를 훨씬 적게 사용합니다 ([a05d198](https://github.com/MMFoundation/WallpaperMachine/commit/a05d1988b7c3cb8b14c1acfcc68830c2f5265c39))
+- 제어판 창을 닫으면 창작마당과 pixiv 페이지 및 썸네일이 차지하던 메모리를 비우고, 다시 열면 보던 위치에서 그대로 이어집니다 ([eb1361d](https://github.com/MMFoundation/WallpaperMachine/commit/eb1361d3749f28b5b08f1ac6f0d0361e7cdfe81a))
+- 디스플레이 선택 버튼과 메뉴에 화면 이름만 표시하고, 이름이 같은 화면이 있을 때만 디스플레이 ID를 함께 보여 줍니다 (closes [#232](https://github.com/MMFoundation/WallpaperMachine/issues/232)) ([5d24539](https://github.com/MMFoundation/WallpaperMachine/commit/5d245397fb7d7450caf72b8e454362fe988cef93))
+
+#### 버그 수정
+
+- 창작마당 다운로드가 Steam 시간 초과를 만나면 이제 받은 부분부터 이어 받으며, 계정이나 Steam Guard 문제로 잘못 알리지 않습니다 (closes [#228](https://github.com/MMFoundation/WallpaperMachine/issues/228)) ([fcb1c08](https://github.com/MMFoundation/WallpaperMachine/commit/fcb1c0859efb0d220c4c04da6a6f28caa9f4b076))
+- Steam 로그인 세션이 끝나면 창작마당 탐색이 세션을 갱신하거나 익명 목록으로 전환하며, 페이지를 읽을 수 없다는 오류가 더 이상 나지 않습니다 (closes [#231](https://github.com/MMFoundation/WallpaperMachine/issues/231)) ([a27c032](https://github.com/MMFoundation/WallpaperMachine/commit/a27c032953dca2909b270d760d98bc6ba71ae4bd))
+- 메뉴 막대 패널 뒤에 밝거나 어두운 창이 있어도 글자가 잘 읽히며, 패널은 반투명한 모습을 유지합니다 (closes [#240](https://github.com/MMFoundation/WallpaperMachine/issues/240)) ([e1b05bc](https://github.com/MMFoundation/WallpaperMachine/commit/e1b05bc2d83a7337237033ee7fa249f7c5efcf50), [7753188](https://github.com/MMFoundation/WallpaperMachine/commit/77531881ee05cb24a3fc1ce5f216699183b0cdbf))
+- 장면 배경화면의 반투명 가장자리에 잘못된 윤곽선이 더 이상 생기지 않습니다 (closes [#239](https://github.com/MMFoundation/WallpaperMachine/issues/239)) ([37b9a47](https://github.com/MMFoundation/WallpaperMachine/commit/37b9a47fd1f6b0ff12d4c95c87670390128ed044))
+- 움직이는 캐릭터가 눈을 깜빡일 때 눈꺼풀이 홍채를 끝까지 가려 홍채가 비쳐 보이지 않습니다 (closes [#223](https://github.com/MMFoundation/WallpaperMachine/issues/223)) ([b2f0074](https://github.com/MMFoundation/WallpaperMachine/commit/b2f0074d4f11b5b5054ef2ee8e6aa881ce0f0edb))
+- 실험적 잠금 화면용으로 고른 화면 보호기가 디스플레이가 잠시 끊기거나 설정이 취소되어도 다음 실행 때 그대로 유지됩니다 ([15dca4b](https://github.com/MMFoundation/WallpaperMachine/commit/15dca4b53428721623f3fb3882fc8ce085116e2f))
+- 다운로드 정리 시 이름만 미완료 다운로드와 비슷한, 이름을 바꾼 창작마당 및 pixiv 백업을 더 이상 지우지 않습니다 ([6d80d14](https://github.com/MMFoundation/WallpaperMachine/commit/6d80d148d163f9e0bfba4038613d217d4aa0809d))
+- 백업 롤백이나 정리가 중단되어도 이제 이어서 끝까지 완료되며, 중간에 멈춘 채로 남지 않습니다 ([28e526c](https://github.com/MMFoundation/WallpaperMachine/commit/28e526cbb45389af272316c98a4c8759ae74fb7b))
+
+이번 릴리스에 기여해 주신 [@joyzhang14-14](https://github.com/joyzhang14-14) 님께 감사드립니다.
+
 ## [1.13.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.12.0...v1.13.0) (2026-11-16)
 
 ### English
