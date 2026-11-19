@@ -22,6 +22,9 @@ struct SurfacePalette: Equatable, Sendable {
   let mediaWell: PanelColor
   let text: PanelColor
   let muted: PanelColor
+  /// Secondary text on a translucent system material (the menu bar popover), whose brightness
+  /// follows whatever is behind it: the strongest ink, so size and weight carry the hierarchy.
+  var onGlass: PanelColor { text }
   let faint: PanelColor
   let tagInk: PanelColor
   let badge: PanelColor
