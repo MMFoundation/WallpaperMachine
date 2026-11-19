@@ -15,6 +15,9 @@ final class SurfacePaletteTests: XCTestCase {
   func testTextAndSemanticColoursStayReadableInEveryToneSeasonAndAppearance() {
     for appearance in appearances {
       for (context, palette) in palettes(appearance) {
+        XCTAssertEqual(palette.background.alpha, 1, context)
+        XCTAssertEqual(palette.text.alpha, 1, context)
+        XCTAssertEqual(palette.muted.alpha, 1, context)
         for ground in [
           palette.background, palette.surface, palette.card, palette.raised, palette.well,
           palette.sunken,
