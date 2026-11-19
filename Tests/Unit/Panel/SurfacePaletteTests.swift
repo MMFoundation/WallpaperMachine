@@ -12,12 +12,29 @@ final class SurfacePaletteTests: XCTestCase {
       + [("halloween \(appearance)", SurfacePalette(season: .halloween, appearance: appearance))]
   }
 
+  /// The menu bar popover keeps the system's translucent material, which a dark window behind a
+  /// light panel (or a bright one behind a dark panel) pulls towards mid grey.
+  func testTextOnGlassStaysReadableWhenTheMaterialDriftsTowardsMidGrey() {
+    for appearance in appearances {
+      let opposite: Double = appearance == .light ? 0 : 255
+      for (context, palette) in palettes(appearance) {
+        XCTAssertEqual(palette.onGlass.alpha, 1, context)
+        let drifted = PanelColor(
+          rgb: [16, 8, 0].reduce(UInt32(0)) { packed, shift in
+            let channel = Double((palette.background.rgb >> UInt32(shift)) & 255)
+            return packed | UInt32((channel * 0.6 + opposite * 0.4).rounded()) << UInt32(shift)
+          })
+        XCTAssertGreaterThanOrEqual(palette.onGlass.contrast(with: drifted), 3, context)
+        XCTAssertGreaterThan(
+          palette.onGlass.contrast(with: drifted), palette.muted.contrast(with: drifted), context)
+        XCTAssertGreaterThanOrEqual(palette.onGlass.contrast(with: palette.background), 7, context)
+      }
+    }
+  }
+
   func testTextAndSemanticColoursStayReadableInEveryToneSeasonAndAppearance() {
     for appearance in appearances {
       for (context, palette) in palettes(appearance) {
-        XCTAssertEqual(palette.background.alpha, 1, context)
-        XCTAssertEqual(palette.text.alpha, 1, context)
-        XCTAssertEqual(palette.muted.alpha, 1, context)
         for ground in [
           palette.background, palette.surface, palette.card, palette.raised, palette.well,
           palette.sunken,

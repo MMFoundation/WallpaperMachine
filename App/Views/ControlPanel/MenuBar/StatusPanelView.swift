@@ -40,7 +40,7 @@ struct StatusPanelView: View {
       if panel.state == .unavailable {
         Text("WallpaperMachine is still starting, or its renderer could not start. Try again in a moment.")
           .font(.system(size: 12))
-          .foregroundStyle(theme.surface.muted.color)
+          .foregroundStyle(theme.surface.onGlass.color)
           .fixedSize(horizontal: false, vertical: true)
       } else {
         StatusPanelNowPlaying()
@@ -75,7 +75,6 @@ struct StatusPanelView: View {
     }
     .padding(16)
     .frame(width: Self.width, alignment: .leading)
-    .background { theme.surface.background.color.ignoresSafeArea() }
     .announcesChanges(of: controller.failure)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("status-panel")
@@ -91,7 +90,7 @@ private struct StatusPanelCaption: View {
   var body: some View {
     text
       .panelFont(.eyebrow)
-      .foregroundStyle(theme.surface.muted.color)
+      .foregroundStyle(theme.surface.onGlass.color)
       .accessibilityAddTraits(.isHeader)
   }
 }
@@ -120,7 +119,7 @@ private struct StatusPanelNowPlaying: View {
             .fixedSize(horizontal: false, vertical: true)
           Text(verbatim: panel.stateLine)
             .font(.system(size: 11.5))
-            .foregroundStyle(theme.surface.muted.color)
+            .foregroundStyle(theme.surface.onGlass.color)
             .lineLimit(3)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -220,7 +219,7 @@ private struct StatusPanelSound: View {
               .frame(maxWidth: .infinity, alignment: .leading)
             Text(verbatim: volume == nil ? "" : output)
               .font(.system(size: 11.5).monospacedDigit())
-              .foregroundStyle(theme.surface.muted.color)
+              .foregroundStyle(theme.surface.onGlass.color)
               .accessibilityHidden(true)
           }
         }
@@ -231,7 +230,7 @@ private struct StatusPanelSound: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           Text("Mute All is on, so every wallpaper is silent.")
             .font(.system(size: 11.5))
-            .foregroundStyle(theme.surface.muted.color)
+            .foregroundStyle(theme.surface.onGlass.color)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
           Button("Unmute Wallpapers") {
@@ -266,7 +265,7 @@ private struct StatusPanelSwitcher: View {
     if panel.isLibraryEmpty {
       Text("Your wallpaper library is empty")
         .font(.system(size: 12))
-        .foregroundStyle(theme.surface.muted.color)
+        .foregroundStyle(theme.surface.onGlass.color)
     } else if !panel.strip.isEmpty {
       VStack(alignment: .leading, spacing: 6) {
         HStack(spacing: 6) {
@@ -281,7 +280,7 @@ private struct StatusPanelSwitcher: View {
           } label: {
             Image(systemName: "arrow.triangle.2.circlepath")
               .font(.system(size: 11, weight: .semibold))
-              .foregroundStyle(theme.surface.muted.color)
+              .foregroundStyle(theme.surface.onGlass.color)
           }
           .buttonStyle(.plain)
           .disabled(!panel.canShowOthers)
@@ -410,20 +409,20 @@ struct StatusPanelEnergyReading: View {
       StatusPanelCaption(text: Text("Energy use"))
       switch reading.status {
       case .unavailable:
-        Text("Unavailable on this Mac").font(.system(size: 12)).foregroundStyle(theme.surface.muted.color)
+        Text("Unavailable on this Mac").font(.system(size: 12)).foregroundStyle(theme.surface.onGlass.color)
       case .measuring:
-        Text("Measuring…").font(.system(size: 12)).foregroundStyle(theme.surface.muted.color)
+        Text("Measuring…").font(.system(size: 12)).foregroundStyle(theme.surface.onGlass.color)
       case .ready:
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           Text(verbatim: EnergyReadout.milliwatts(reading.totalMilliwatts))
             .font(.system(size: 15, weight: .semibold).monospacedDigit())
-            .foregroundStyle(reading.caveats.isEmpty ? theme.surface.text.color : theme.surface.muted.color)
+            .foregroundStyle(theme.surface.text.color)
             .lineLimit(1)
             .fixedSize()
           if let caveat = reading.caveats.first {
             Text(verbatim: caveat.title)
               .font(.system(size: 11.5))
-              .foregroundStyle(theme.surface.muted.color)
+              .foregroundStyle(theme.surface.onGlass.color)
               .lineLimit(1)
               .truncationMode(.tail)
           } else if let level = reading.level, let title = reading.levelTitle {
@@ -431,14 +430,14 @@ struct StatusPanelEnergyReading: View {
               Circle().fill(tint(for: level)).frame(width: 7, height: 7)
               Text(verbatim: title).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
             }
-            .foregroundStyle(tint(for: level))
+            .foregroundStyle(theme.surface.onGlass.color)
           }
           Spacer(minLength: 0)
         }
         if reading.caveats.isEmpty, let share = reading.batteryShareNote {
           Text(verbatim: share)
             .font(.system(size: 11.5))
-            .foregroundStyle(theme.surface.muted.color)
+            .foregroundStyle(theme.surface.onGlass.color)
             .fixedSize(horizontal: false, vertical: true)
         }
       }
