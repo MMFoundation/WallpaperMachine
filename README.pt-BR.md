@@ -319,6 +319,37 @@ Os documentos abaixo estão em inglês.
 | [SPONSORS.md](SPONSORS.md) | Patrocínio no Open Collective, Suporte Prioritário e outras formas de ajudar |
 | [AGENTS.md](AGENTS.md) | Regras para agentes que trabalham neste repositório |
 
+## Também da MMFoundation.
+
+<!-- MMFoundation's other Mac app. The icon is the one on MMFoundation's GitHub profile
+     (MMFoundation/.github, profile/assets) and the sentence follows OhMyShot's README and
+     repository description: change them together. README.md, README.zh-CN.md, README.ko.md and
+     README.pt-BR.md carry the same block; the website link goes to its Chinese pages from Chinese. -->
+<p align="center">
+  <a href="https://www.ohmyshot.org">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MMFoundation/.github/main/profile/assets/ohmyshot-dark.png">
+      <img src="https://raw.githubusercontent.com/MMFoundation/.github/main/profile/assets/ohmyshot-light.png" width="72" height="72" alt="Ícone do app OhMyShot">
+    </picture>
+  </a>
+</p>
+
+<h3 align="center"><a href="https://www.ohmyshot.org">OhMyShot</a></h3>
+
+<p align="center">
+  Uma ferramenta de captura nativa para macOS, de quem faz o WallpaperMachine: capturas de tela, gravações,
+  anotações, imagens fixadas na tela e OCR no próprio dispositivo, feita para não gastar nada enquanto espera
+  na barra de menus. Gratuita e de código aberto, como o WallpaperMachine.
+</p>
+
+<p align="center">
+  <a href="https://github.com/MMFoundation/OhMyShot/releases/latest"><img src="https://img.shields.io/badge/Download_OhMyShot-free-3D7FEA?style=for-the-badge&logo=apple&logoColor=white" height="28" alt="Baixar o OhMyShot, grátis"></a>
+</p>
+
+<p align="center">
+  <sub>macOS 26 Tahoe ou posterior&ensp;·&ensp;Apple silicon&ensp;·&ensp;<a href="https://www.ohmyshot.org">Site</a>&ensp;·&ensp;<a href="https://github.com/MMFoundation/OhMyShot">Código-fonte no GitHub</a></sub>
+</p>
+
 ## Patrocinadores. No Open Collective.
 
 O WallpaperMachine é um projeto da [MMFoundation](https://mmfoundation.dev/), que recebe

@@ -321,6 +321,37 @@ no code needed ([how it reaches the app](docs/localization.md#contributing-trans
 | [SPONSORS.md](SPONSORS.md) | Sponsoring on Open Collective, Priority Support and other ways to help |
 | [AGENTS.md](AGENTS.md) | Rules for agents working in this repository |
 
+## Also from MMFoundation.
+
+<!-- MMFoundation's other Mac app. The icon is the one on MMFoundation's GitHub profile
+     (MMFoundation/.github, profile/assets) and the sentence follows OhMyShot's README and
+     repository description: change them together. README.md, README.zh-CN.md, README.ko.md and
+     README.pt-BR.md carry the same block; the website link goes to its Chinese pages from Chinese. -->
+<p align="center">
+  <a href="https://www.ohmyshot.org">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MMFoundation/.github/main/profile/assets/ohmyshot-dark.png">
+      <img src="https://raw.githubusercontent.com/MMFoundation/.github/main/profile/assets/ohmyshot-light.png" width="72" height="72" alt="OhMyShot app icon">
+    </picture>
+  </a>
+</p>
+
+<h3 align="center"><a href="https://www.ohmyshot.org">OhMyShot</a></h3>
+
+<p align="center">
+  A native macOS capture tool from the people who make WallpaperMachine: screenshots, recordings,
+  annotation, pins and on-device OCR, built to cost nothing while it waits in the menu bar.
+  Free and open source, like WallpaperMachine.
+</p>
+
+<p align="center">
+  <a href="https://github.com/MMFoundation/OhMyShot/releases/latest"><img src="https://img.shields.io/badge/Download_OhMyShot-free-3D7FEA?style=for-the-badge&logo=apple&logoColor=white" height="28" alt="Download OhMyShot, free"></a>
+</p>
+
+<p align="center">
+  <sub>macOS 26 Tahoe or later&ensp;·&ensp;Apple silicon&ensp;·&ensp;<a href="https://www.ohmyshot.org">Website</a>&ensp;·&ensp;<a href="https://github.com/MMFoundation/OhMyShot">Source on GitHub</a></sub>
+</p>
+
 ## Sponsors. On Open Collective.
 
 WallpaperMachine is a project of [MMFoundation](https://mmfoundation.dev/), which takes

@@ -14,7 +14,8 @@ WallpaperMachine is free and open source. The signed download costs nothing,
 and the complete source is here to build.
 
 It is a project of [MMFoundation](https://github.com/MMFoundation), the
-open-source organization that also makes OhMyShot. Sponsoring happens on
+open-source organization that also makes [OhMyShot](https://www.ohmyshot.org), a capture
+tool for the Mac. Sponsoring happens on
 MMFoundation's Open Collective, where every contribution and expense is public.
 
 <p align="center">

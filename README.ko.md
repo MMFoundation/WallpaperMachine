@@ -311,6 +311,37 @@ python3 scripts/build.py --configuration Release   # 렌더러, 바인딩, Xcode
 | [SPONSORS.md](SPONSORS.md) | Open Collective 후원, 우선 지원, 그 밖의 도움 방법 |
 | [AGENTS.md](AGENTS.md) | 이 저장소에서 작업하는 AI 에이전트를 위한 규칙 |
 
+## MMFoundation의 다른 앱
+
+<!-- MMFoundation's other Mac app. The icon is the one on MMFoundation's GitHub profile
+     (MMFoundation/.github, profile/assets) and the sentence follows OhMyShot's README and
+     repository description: change them together. README.md, README.zh-CN.md, README.ko.md and
+     README.pt-BR.md carry the same block; the website link goes to its Chinese pages from Chinese. -->
+<p align="center">
+  <a href="https://www.ohmyshot.org">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MMFoundation/.github/main/profile/assets/ohmyshot-dark.png">
+      <img src="https://raw.githubusercontent.com/MMFoundation/.github/main/profile/assets/ohmyshot-light.png" width="72" height="72" alt="OhMyShot 앱 아이콘">
+    </picture>
+  </a>
+</p>
+
+<h3 align="center"><a href="https://www.ohmyshot.org">OhMyShot</a></h3>
+
+<p align="center">
+  WallpaperMachine을 만드는 팀의 네이티브 macOS 캡처 도구입니다. 스크린샷, 화면 녹화, 주석, 화면 고정,
+  온디바이스 OCR을 지원하며, 메뉴 막대에서 대기하는 동안에는 자원을 거의 쓰지 않도록 만들었습니다.
+  WallpaperMachine처럼 무료 오픈 소스입니다.
+</p>
+
+<p align="center">
+  <a href="https://github.com/MMFoundation/OhMyShot/releases/latest"><img src="https://img.shields.io/badge/OhMyShot-%EB%AC%B4%EB%A3%8C_%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C-3D7FEA?style=for-the-badge&logo=apple&logoColor=white" height="28" alt="OhMyShot 무료 다운로드"></a>
+</p>
+
+<p align="center">
+  <sub>macOS 26 Tahoe 이상&ensp;·&ensp;Apple 실리콘&ensp;·&ensp;<a href="https://www.ohmyshot.org">웹사이트</a>&ensp;·&ensp;<a href="https://github.com/MMFoundation/OhMyShot">GitHub 소스 코드</a></sub>
+</p>
+
 ## Open Collective 후원
 
 WallpaperMachine은 [MMFoundation](https://mmfoundation.dev/)의 프로젝트입니다.

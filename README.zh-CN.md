@@ -232,6 +232,35 @@ python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 
 | [SPONSORS.md](SPONSORS.md) | 在 Open Collective 上赞助、优先支持及其他支持方式 |
 | [AGENTS.md](AGENTS.md) | 在本仓库中工作的 AI 代理须遵守的规则 |
 
+## MMFoundation 的另一款应用
+
+<!-- MMFoundation's other Mac app. The icon is the one on MMFoundation's GitHub profile
+     (MMFoundation/.github, profile/assets) and the sentence follows OhMyShot's README and
+     repository description: change them together. README.md, README.zh-CN.md, README.ko.md and
+     README.pt-BR.md carry the same block; the website link goes to its Chinese pages from Chinese. -->
+<p align="center">
+  <a href="https://www.ohmyshot.org/zh/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MMFoundation/.github/main/profile/assets/ohmyshot-dark.png">
+      <img src="https://raw.githubusercontent.com/MMFoundation/.github/main/profile/assets/ohmyshot-light.png" width="72" height="72" alt="OhMyShot 应用图标">
+    </picture>
+  </a>
+</p>
+
+<h3 align="center"><a href="https://www.ohmyshot.org/zh/">OhMyShot</a></h3>
+
+<p align="center">
+  WallpaperMachine 团队做的原生 macOS 截图工具：截图、录屏、标注、贴图和端侧 OCR，常驻菜单栏时几乎不耗电。和 WallpaperMachine 一样免费、开源。
+</p>
+
+<p align="center">
+  <a href="https://github.com/MMFoundation/OhMyShot/releases/latest"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD_OhMyShot-%E5%85%8D%E8%B4%B9-3D7FEA?style=for-the-badge&logo=apple&logoColor=white" height="28" alt="免费下载 OhMyShot"></a>
+</p>
+
+<p align="center">
+  <sub>macOS 26 Tahoe 或更高版本&ensp;·&ensp;Apple 芯片&ensp;·&ensp;<a href="https://www.ohmyshot.org/zh/">官网</a>&ensp;·&ensp;<a href="https://github.com/MMFoundation/OhMyShot">GitHub 源代码</a></sub>
+</p>
+
 ## Open Collective 赞助者
 
 WallpaperMachine 是 [MMFoundation](https://mmfoundation.dev/zh/) 的项目。MMFoundation 在 [Open Collective](https://opencollective.com/mmfoundation) 上接受赞助，每一笔赞助和每一笔开销都在那里公开。赞助者会出现在这里：公司展示标志和链接，个人展示头像。赞助不会解锁任何功能，应用对每个人都一样。如何赞助见 [SPONSORS.md](SPONSORS.md)（英文）。
