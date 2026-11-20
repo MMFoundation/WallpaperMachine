@@ -19,9 +19,18 @@ struct DownloadDialogView: View {
   /// What the person typed in the password or code field. It lives only here, is cleared the moment
   /// it is submitted and never reaches an observable model.
   @State private var response = ""
-  @FocusState private var focus: Field?
+  /// The field the dialog last asked to take keyboard focus, paired with a monotonic token so
+  /// unrelated redraws never steal focus back after the person moves it.
+  @State private var focusRequest: FocusRequest?
+  @State private var nextFocusToken = 0
+  @State private var focusTask: Task<Void, Never>?
 
   enum Field: Hashable { case account, response }
+
+  struct FocusRequest: Equatable {
+    var field: Field
+    var token: Int
+  }
 
   /// A session and resolution to draw instead of the model's, for a test that renders a stage the
   /// stores would need a live Steam sign-in to reach.
@@ -69,17 +78,27 @@ struct DownloadDialogView: View {
       response = ""
       moveFocus(model.resolution)
     }
+    .onDisappear { focusTask?.cancel() }
   }
 
   private func moveFocus(_ resolution: DownloadDialogResolution?) {
+    focusTask?.cancel()
     let target: Field?
     switch resolution?.stage {
     case .account: target = .account
     case .auth: target = resolution?.job?.prompt != nil ? .response : nil
     default: target = nil
     }
+    guard let target else {
+      focusRequest = nil
+      return
+    }
     // The sheet is not key yet on its first pass; the next turn is.
-    Task { @MainActor in focus = target }
+    focusTask = Task { @MainActor in
+      guard !Task.isCancelled else { return }
+      nextFocusToken &+= 1
+      focusRequest = FocusRequest(field: target, token: nextFocusToken)
+    }
   }
 
   // MARK: Header
@@ -165,12 +184,16 @@ struct DownloadDialogView: View {
       case .setup:
         DownloadSetupStage()
       case .account:
-        DownloadAccountStage(session: session, focus: $focus)
+        DownloadAccountStage(
+          session: session,
+          focusRequest: focusRequest?.field == .account ? focusRequest?.token ?? 0 : 0)
       case .resources:
         DownloadResourcesStage()
       case .auth:
         if let job = resolution.job {
-          DownloadAuthStage(session: session, job: job, response: $response, focus: $focus)
+          DownloadAuthStage(
+            session: session, job: job, response: $response,
+            focusRequest: focusRequest?.field == .response ? focusRequest?.token ?? 0 : 0)
         }
       case .started:
         if let job = resolution.job { DownloadStartedStage(resolution: resolution, job: job) }

@@ -199,7 +199,7 @@ struct DownloadAccountStage: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
   @Bindable var session: DownloadsModel.Session
-  var focus: FocusState<DownloadDialogView.Field?>.Binding
+  var focusRequest: Int
 
   var body: some View {
     let working = controller.isBusy(
@@ -246,19 +246,18 @@ struct DownloadAccountStage: View {
         Text("Steam account name")
           .font(.system(size: 12, weight: .medium))
           .foregroundStyle(theme.surface.muted.color)
-        TextField(text: $session.account, prompt: Text(verbatim: "")) { Text("Steam account name") }
-          .labelsHidden()
-          .textFieldStyle(.roundedBorder)
-          .textContentType(.username)
-          .autocorrectionDisabled()
-          .focused(focus, equals: .account)
-          .disabled(working)
-          .accessibilityLabel(Text("Steam account name"))
-          .onSubmit {
-            if !trimmed.isEmpty && !working {
-              controller.downloads.continueDownload(includeResources: false)
-            }
+        RomanTextField(
+          text: $session.account,
+          contentType: .username,
+          accessibilityLabel: L("Steam account name"),
+          focusRequest: focusRequest
+        ) {
+          let account = session.account.trimmingCharacters(in: .whitespacesAndNewlines)
+          if !account.isEmpty && !working {
+            controller.downloads.continueDownload(includeResources: false)
           }
+        }
+        .disabled(working)
       }
       Toggle("Keep me signed in on this Mac", isOn: $session.remembersSession)
         .toggleStyle(.checkbox)
@@ -404,7 +403,7 @@ struct DownloadAuthStage: View {
   @Bindable var session: DownloadsModel.Session
   let job: DownloadRow
   @Binding var response: String
-  var focus: FocusState<DownloadDialogView.Field?>.Binding
+  var focusRequest: Int
 
   var body: some View {
     let model = controller.downloads
@@ -482,25 +481,19 @@ struct DownloadAuthStage: View {
     return VStack(alignment: .leading, spacing: 8) {
       VStack(alignment: .leading, spacing: 6) {
         // Steam's own words ("Steam password", "Steam Guard code"), translated at run time.
-        Text(verbatim: PanelLocale.shared.catalogString(prompt.rawValue))
+        let label = PanelLocale.shared.catalogString(prompt.rawValue)
+        Text(verbatim: label)
           .font(.system(size: 12, weight: .medium))
           .foregroundStyle(theme.surface.muted.color)
-        Group {
-          // Steam's own words ("Steam password", "Steam Guard code"), translated at run time.
-          let label = Text(verbatim: PanelLocale.shared.catalogString(prompt.rawValue))
-          // The label sits above the field; the field itself shows no second copy of it.
-          if secret {
-            SecureField(text: $response, prompt: Text(verbatim: "")) { label }
-          } else {
-            TextField(text: $response, prompt: Text(verbatim: "")) { label }.autocorrectionDisabled()
-          }
-        }
-        .labelsHidden()
-        .textFieldStyle(.roundedBorder)
-        .focused(focus, equals: .response)
+        RomanTextField(
+          text: $response,
+          isSecure: secret,
+          contentType: secret ? .password : .oneTimeCode,
+          accessibilityLabel: label,
+          focusRequest: focusRequest,
+          onSubmit: submit
+        )
         .disabled(working)
-        .accessibilityLabel(Text(verbatim: PanelLocale.shared.catalogString(prompt.rawValue)))
-        .onSubmit(submit)
       }
       DialogActions {
         cancelButton(controller.downloads)
