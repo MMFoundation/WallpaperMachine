@@ -58,6 +58,23 @@ final class ExternalLinkTests: XCTestCase {
     XCTAssertNil(ExternalLink.allowed("not a url"))
   }
 
+  /// OhMyShot needs macOS 26, so an older Mac is never offered it; its website opens in Chinese for
+  /// either Chinese and in English otherwise, through the allowlist.
+  func testOhMyShotIsOfferedFromMacOS26OnItsWebsiteInThePanelLanguage() {
+    XCTAssertFalse(ExternalLink.offersOhMyShot(on: OperatingSystemVersion(majorVersion: 15, minorVersion: 7, patchVersion: 0)))
+    XCTAssertTrue(ExternalLink.offersOhMyShot(on: OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)))
+    XCTAssertTrue(ExternalLink.offersOhMyShot(on: OperatingSystemVersion(majorVersion: 27, minorVersion: 1, patchVersion: 0)))
+    for tag in ["zh-Hans", "zh-Hant"] {
+      XCTAssertEqual(ExternalLink.ohmyshot(languageTag: tag).absoluteString, "https://www.ohmyshot.org/zh/", tag)
+    }
+    for tag in ["en", "ja", "ko", "pt-BR"] {
+      XCTAssertEqual(ExternalLink.ohmyshot(languageTag: tag).absoluteString, "https://www.ohmyshot.org/", tag)
+    }
+    for tag in ["en", "zh-Hans"] {
+      XCTAssertTrue(ExternalLink.isAllowed(ExternalLink.ohmyshot(languageTag: tag)), tag)
+    }
+  }
+
   func testIdsThatAreNotDigitsBuildNoLink() {
     for id in ["", "12 34", "12/../34", "abc", "１２３", "12\n"] {
       XCTAssertNil(ExternalLink.workshopItem(id: id), id)

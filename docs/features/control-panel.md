@@ -329,6 +329,10 @@ canvas, the widgets' layers and an inspector with tabs, which do not scroll as o
   for 24 hours across launches, and **Skip This Version** prevents its automatic update.
   The application menu item **Check for Updates…** opens this section. **Spread the word** has **Share WallpaperMachine…** and **Star on
   GitHub** ([one-time prompts](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer)).
+  On macOS 26 and later, **More from MMFoundation** shows OhMyShot, the capture app the same
+  organization makes, and **Get OhMyShot** opens its website (https://www.ohmyshot.org/, the
+  Chinese pages for either Chinese); **Help → OhMyShot Screenshot Tool** opens the same page.
+  An older macOS, which OhMyShot does not run on, shows neither, and a search there does not find it.
   The section ends with the licence note and three links: **GNU General Public License
   v3**, **MMFoundation**, the website of the organization that makes the app
   (https://mmfoundation.dev/), and **Join Discord**, its Discord server

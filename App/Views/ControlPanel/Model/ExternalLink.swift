@@ -2,7 +2,8 @@ import AppKit
 import Foundation
 
 /// Every address the panel opens outside the app goes through here: Steam, GitHub, pixiv, Apple's
-/// support pages, the licence text, MMFoundation's website, its Discord and its Open Collective. A link built from remote data (a Workshop item, an author's
+/// support pages, the licence text, MMFoundation's website, its Discord and its Open Collective, and the
+/// website of OhMyShot, the other app MMFoundation makes. A link built from remote data (a Workshop item, an author's
 /// profile, a pixiv work) is only as trustworthy as the host it names, so `isAllowed` is the one
 /// gate for `Link`, `openURL` and every button that opens one. Support-prompt links go through
 /// their own injected opener and are not covered by it.
@@ -12,7 +13,7 @@ enum ExternalLink {
   static let allowedHosts: Set<String> = [
     "steamcommunity.com", "store.steampowered.com", "help.steampowered.com", "github.com",
     "www.gnu.org", "support.apple.com", "space.bilibili.com", "www.bilibili.com", "www.pixiv.net",
-    "mmfoundation.dev", "opencollective.com",
+    "mmfoundation.dev", "opencollective.com", "www.ohmyshot.org",
   ]
 
   /// Whether the panel may open `url`: https, a host on the list, and no user, password or port.
@@ -64,6 +65,22 @@ enum ExternalLink {
   static var repository: URL { AppUpdateConfiguration.repositoryURL }
   /// The repository's issue list.
   static var repositoryIssues: URL { repository.appendingPathComponent("issues") }
+
+  /// The website of OhMyShot, the capture app MMFoundation also makes, in Chinese for either Chinese
+  /// and in English otherwise, the two languages it is written in: **Get OhMyShot** in Settings ›
+  /// About and **Help › OhMyShot Screenshot Tool**.
+  static func ohmyshot(languageTag: String) -> URL {
+    URL(
+      string: languageTag.lowercased().hasPrefix("zh")
+        ? "https://www.ohmyshot.org/zh/" : "https://www.ohmyshot.org/")!
+  }
+
+  /// Whether this Mac can run OhMyShot, which needs macOS 26 or later. The app offers it only there.
+  static func offersOhMyShot(
+    on version: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+  ) -> Bool {
+    version.majorVersion >= 26
+  }
 
   /// A wallpaper's page on the Steam Workshop. Nil unless `id` is a Workshop item id.
   static func workshopItem(id: String) -> URL? {

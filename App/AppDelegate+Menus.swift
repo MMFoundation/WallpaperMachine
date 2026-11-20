@@ -193,6 +193,9 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
         helpMenu.addItem(menuItem("Report an Issue…", action: #selector(openIssues)))
         helpMenu.addItem(.separator())
         helpMenu.addItem(menuItem("Join Discord", action: #selector(openDiscord)))
+        if ExternalLink.offersOhMyShot() {
+            helpMenu.addItem(menuItem("OhMyShot Screenshot Tool", action: #selector(openOhMyShot)))
+        }
         helpItem.submenu = helpMenu
         main.addItem(helpItem)
         NSApp.helpMenu = helpMenu
@@ -471,6 +474,11 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
     /// MMFoundation's Discord, which also answers the panel's one-time Discord invitation.
     @objc private func openDiscord() {
         if ExternalLink.open(ExternalLink.discord) { store?.supportPrompt?.recordDiscordChosen() }
+    }
+
+    /// The website of OhMyShot, MMFoundation's capture app, offered only on a Mac that can run it.
+    @objc private func openOhMyShot() {
+        ExternalLink.open(ExternalLink.ohmyshot(languageTag: AppLanguageStore.shared.effective.tag))
     }
 
     /// Ticks the View menu's page on show; titles Show or Hide Filters and Wallpaper Details for what

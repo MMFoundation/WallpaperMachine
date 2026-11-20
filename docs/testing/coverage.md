@@ -1360,7 +1360,8 @@ never to `.shared`.
   told); `PanelInspectorObservationTests`; `PanelPreferencesTests` (the keys earlier builds wrote,
   favorites as the JSON of the sorted array, unreadable favorites read as none);
   `ExternalLinkTests` (every fixed and built link passes the allowlist, https to an exact host
-  without credentials or a port only, the opener reached only for an allowed link);
+  without credentials or a port only, the opener reached only for an allowed link, OhMyShot
+  offered from macOS 26 on and its website in Chinese for either Chinese);
   `TransferFormatTests`, `DragStepPumpTests` (the first value at once, later ones after 100 ms,
   never two steps in flight, the release waits for the step on its way and always saves, a
   deferred first step for a colour), `DisplayOptionsLoaderTests` (fetched only while Settings is

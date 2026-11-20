@@ -9,6 +9,13 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-16 — Disable native modes before initial readiness (#193)
+
+- Published display mappings are retained separately from successful-readiness inputs. Either native mode can be disabled during initial activation without a current display UUID, while preserving the other selection and its outstanding first-frame deadline.
+- python3 scripts/test.py --only LockScreenWallpaperServiceTests: 89 passed, 0 failed, 0 skipped; the two new cases withhold initial readiness and then remove the UUID before disabling each independent mode.
+- python3 scripts/test.py: all Python modules passed; 5100 native tests passed, 0 failed, 70 opt-in tests skipped; two runtime warnings were reported.
+- The native gate used the Captain-authorized serial Mac slot, which was released afterward. No renderer/Rust changes or gates; no desktop actions, Release build or installation. This gate predates the separate explicit-error acknowledgement correction.
+
 ## 2026-11-16 — Native source lifecycle and inactive preparation fixes (#193)
 
 - Revision-scoped handled exits cannot rearm a stale PID; the existing live-survivor policy remains unchanged. Pending acquire replies survive renderer replacement and complete once for the current generation.

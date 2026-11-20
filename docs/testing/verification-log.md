@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-20 — OhMyShot in Settings › About and the Help menu
+
+Settings › About gains More from MMFoundation (OhMyShot's icon, a line about it and Get OhMyShot, which opens www.ohmyshot.org, /zh/ for either Chinese) and Help gains OhMyShot Screenshot Tool. Both appear only on macOS 26 and later, which OhMyShot needs; an older macOS shows neither and Settings search does not find the row.
+
+- `python3 scripts/test.py` (run by the developer in Terminal) — 5148 passed, 0 failed, 70 skipped of 5218; every script test OK
+- `ExternalLinkTests.testOhMyShotIsOfferedFromMacOS26OnItsWebsiteInThePanelLanguage` — new, passed
+- The agent's shell could not run native tests: `IOPMAssertionCreateWithName` fails there (even `caffeinate`), and `xcodebuild test` needs that assertion; an unsigned `build-for-testing` there succeeded
+- System Python 3.9 fails several script tests (no `hashlib.file_digest`); Homebrew's python3 passes them all
+- Not checked: how the About row looks in light and dark, and the Help menu on macOS 15; no Release build
+
 ## 2026-11-18 — Steam Workshop sign-in from Browse and Settings
 
 - Offscreen Workshop regression: the public list offers sign-in when anonymous, hides it after sign-in and offers it again after sign-out.
@@ -117,10 +127,3 @@ Documented the release package, named settings and extraSettings, and Home Manag
 - python3 scripts/test.py --only LockScreenWallpaperServiceTests --only LockScreenContentSelectionTests: 98 passed, 0 failed, 0 skipped, covering both disable directions, withheld frames, monitor/cancelled refreshes, original timeout and explicit retry.
 - python3 scripts/test.py: all Python modules passed; 5106 native tests passed, 0 failed, 70 opt-in tests skipped; two runtime warnings. No failed-gate retry was needed on the corrected source.
 - Native work used the Captain-authorized exclusive Mac slot, released after completion. No renderer/Rust changes, Release build, desktop actions or feature-level energy measurement.
-
-## 2026-11-16 — Disable native modes before initial readiness (#193)
-
-- Published display mappings are retained separately from successful-readiness inputs. Either native mode can be disabled during initial activation without a current display UUID, while preserving the other selection and its outstanding first-frame deadline.
-- python3 scripts/test.py --only LockScreenWallpaperServiceTests: 89 passed, 0 failed, 0 skipped; the two new cases withhold initial readiness and then remove the UUID before disabling each independent mode.
-- python3 scripts/test.py: all Python modules passed; 5100 native tests passed, 0 failed, 70 opt-in tests skipped; two runtime warnings were reported.
-- The native gate used the Captain-authorized serial Mac slot, which was released afterward. No renderer/Rust changes or gates; no desktop actions, Release build or installation. This gate predates the separate explicit-error acknowledgement correction.

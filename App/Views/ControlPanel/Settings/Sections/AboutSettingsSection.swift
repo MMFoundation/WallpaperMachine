@@ -8,6 +8,7 @@ struct AboutSettingsSection: View {
   private static let updates = SettingsItem.Group("updates", title: "Updates")
   static let releaseNotes = SettingsItem.Group("release-notes", title: "Release notes")
   private static let share = SettingsItem.Group("share", title: "Spread the word")
+  private static let moreApps = SettingsItem.Group("more-apps", title: "More from MMFoundation")
   private static let credits = SettingsItem.Group("credits")
 
   static let appVersion = SettingsItem(
@@ -44,6 +45,11 @@ struct AboutSettingsSection: View {
   static let shareApp = SettingsItem(
     id: "about.share", section: .about, group: share, title: "Share WallpaperMachine…",
     keywords: ["Star on GitHub"])
+  static let ohmyshot = SettingsItem(
+    id: "about.ohmyshot", section: .about, group: moreApps, title: "Get OhMyShot",
+    note:
+      "Screenshots, recordings, annotation and on-device text recognition for your Mac, from the people who make WallpaperMachine. Free and open source."
+  )
 
   static let creditsItem = SettingsItem(
     id: "about.credits", section: .about, group: credits, title: "GNU General Public License v3",
@@ -56,15 +62,19 @@ struct AboutSettingsSection: View {
     appVersion, gitRevision, updateStatus, updateActions, updateAutomatic, updateNotes,
     earlierReleases,
     shareApp,
+    ohmyshot,
     creditsItem,
   ]
 
-  /// The release notes rows while there are no notes to show, or no version before the newest.
+  /// The release notes rows while there are no notes to show, or no version before the newest, and
+  /// OhMyShot on a Mac too old to run it.
   @MainActor
   static func unofferedItems(_ controller: PanelController) -> Set<String> {
     let count = controller.updater.notesReleases.count
-    if count == 0 { return [updateNotes.id, earlierReleases.id] }
-    return count == 1 ? [earlierReleases.id] : []
+    var unoffered: Set<String> =
+      count == 0 ? [updateNotes.id, earlierReleases.id] : count == 1 ? [earlierReleases.id] : []
+    if !ExternalLink.offersOhMyShot() { unoffered.insert(ohmyshot.id) }
+    return unoffered
   }
 
   @Environment(PanelController.self) private var controller
@@ -77,6 +87,9 @@ struct AboutSettingsSection: View {
       SettingsGroup(Self.updates, in: .about) { AboutUpdatesRows() }
       AboutReleaseNotesGroup()
       SettingsGroup(Self.share, in: .about) { AboutShareRow() }
+      if ExternalLink.offersOhMyShot() {
+        SettingsGroup(Self.moreApps, in: .about) { AboutOhMyShotRow() }
+      }
       SettingsGroup(Self.credits, in: .about) { AboutCreditsRow() }
     }
     // Row buttons share one size across Settings.
@@ -441,6 +454,45 @@ private struct AboutShareRow: View {
           }
         }
         Spacer(minLength: 0)
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 10)
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier(item.id)
+    }
+  }
+}
+
+/// OhMyShot, the capture app MMFoundation also makes: its icon, what it does and its website, in
+/// the panel's language. The page shows it only on a Mac that can run it.
+private struct AboutOhMyShotRow: View {
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    let settings = controller.settings
+    let item = AboutSettingsSection.ohmyshot
+    if settings.search.shows(item) {
+      let website = ExternalLink.ohmyshot(languageTag: controller.appLanguage.effective.tag)
+      HStack(spacing: 12) {
+        Image("OhMyShotIcon")
+          .resizable()
+          .interpolation(.high)
+          .frame(width: 40, height: 40)
+          .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(verbatim: "OhMyShot")
+            .font(.panel(.sectionHeader))
+          if let note = item.note {
+            Text(verbatim: settings.text(note))
+              .font(.panel(.callout))
+              .foregroundStyle(theme.surface.muted.color)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+        Spacer(minLength: 8)
+        Button("Get OhMyShot") { ExternalLink.open(website) }
+          .help(website.absoluteString)
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 10)
