@@ -501,21 +501,19 @@ TEST(MdlGeometry, PartRangeOverflowingThirtyTwoBitsIsOutOfRange) {
 }
 
 TEST(MdlGeometry, MasksProduceClippedBaseMaskPassAndClippedDraw) {
-    // A: one part, one mask whose both lists name it.
+    // A: one part, one mask whose both lists name it (nothing unclipped, so only mask + clipped).
     {
         const auto p = parse(mdlFile(23, { maskedMesh({ { 4, 0, 3 } }, { { 7, "masks/m.json", { 0 }, { 0 } } }) }, 0));
         ASSERT_TRUE(p.ok);
         const auto mesh = generate(p.mdl);
-        ASSERT_EQ(mesh->Submeshes().size(), 3u);
+        ASSERT_EQ(mesh->Submeshes().size(), 2u);
         const auto& s = mesh->Submeshes();
-        EXPECT_EQ(s[0].material_slot, 0u);
-        EXPECT_EQ(rangesOf(s[0]), (std::vector<Range> { { 0, 0 } }));
-        EXPECT_EQ(s[1].material_slot, 1u);
-        EXPECT_EQ(s[1].output_override, "_rt_puppet_mask");
+        EXPECT_EQ(s[0].material_slot, 1u);
+        EXPECT_EQ(s[0].output_override, "_rt_puppet_mask");
+        EXPECT_EQ(rangesOf(s[0]), (std::vector<Range> { { 0, 3 } }));
+        EXPECT_EQ(s[1].material_slot, 2u);
+        EXPECT_TRUE(s[1].output_override.empty());
         EXPECT_EQ(rangesOf(s[1]), (std::vector<Range> { { 0, 3 } }));
-        EXPECT_EQ(s[2].material_slot, 2u);
-        EXPECT_TRUE(s[2].output_override.empty());
-        EXPECT_EQ(rangesOf(s[2]), (std::vector<Range> { { 0, 3 } }));
 
         const auto bare = generate(p.mdl, false);
         ASSERT_EQ(bare->Submeshes().size(), 1u);
@@ -595,13 +593,165 @@ TEST(MdlGeometry, MasksThatEncloseEachOtherAreNotLinkedInALoop) {
 }
 
 TEST(MdlGeometry, MaskListsNamingMissingPartsStillProduceRenderableSubmeshes) {
-    const auto p = parse(mdlFile(23, { maskedMesh({ { 4, 0, 3 } }, { { 7, "masks/m.json", { 99 }, { 100 } } }) }, 0));
-    ASSERT_TRUE(p.ok);
-    const auto mesh = generate(p.mdl);
-    ASSERT_EQ(mesh->Submeshes().size(), 3u);
-    EXPECT_EQ(rangesOf(mesh->Submeshes()[0]), (std::vector<Range> { { 0, 3 } }));
-    EXPECT_EQ(rangesOf(mesh->Submeshes()[1]), (std::vector<Range> { { 0, 0 } }));
-    EXPECT_EQ(rangesOf(mesh->Submeshes()[2]), (std::vector<Range> { { 0, 0 } }));
+    // A mask naming only out-of-range parts leaves the unclipped base intact without empty passes.
+    {
+        const auto p = parse(mdlFile(23, { maskedMesh({ { 4, 0, 3 } }, { { 7, "masks/m.json", { 99 }, { 100 } } }) }, 0));
+        ASSERT_TRUE(p.ok);
+        const auto mesh = generate(p.mdl);
+        ASSERT_EQ(mesh->Submeshes().size(), 1u);
+        EXPECT_EQ(mesh->Submeshes()[0].material_slot, 0u);
+        EXPECT_EQ(rangesOf(mesh->Submeshes()[0]), (std::vector<Range> { { 0, 3 } }));
+    }
+    // A part clipped by a mask whose source list names only missing parts draws nothing unclipped.
+    {
+        const auto p = parse(mdlFile(23, { maskedMesh({ { 4, 0, 3 } }, { { 7, "masks/m.json", { 0 }, { 100 } } }) }, 0));
+        ASSERT_TRUE(p.ok);
+        const auto mesh = generate(p.mdl);
+        ASSERT_EQ(mesh->Submeshes().size(), 1u);
+        EXPECT_EQ(mesh->Submeshes()[0].material_slot, 0u);
+        EXPECT_EQ(rangesOf(mesh->Submeshes()[0]), (std::vector<Range> { { 0, 0 } }));
+    }
+}
+
+TEST(MdlGeometry, MaskedPartsDrawRightAfterTheirHighestMaskSourceInPartOrder) {
+    const auto makeMesh = [](std::size_t part_count, std::vector<MaskSpec> masks) {
+        std::vector<PartSpec> parts;
+        std::vector<uint32_t> indices;
+        parts.reserve(part_count);
+        indices.reserve(part_count * 3);
+        for (std::size_t i = 0; i < part_count; ++i) {
+            parts.push_back({ static_cast<uint32_t>(i + 1), static_cast<uint32_t>(i * 3), 3u });
+            indices.push_back(0);
+            indices.push_back(1);
+            indices.push_back(2);
+        }
+        MeshSpec m = maskedMesh(std::move(parts), std::move(masks));
+        m.vertices = 3;
+        m.indices  = std::move(indices);
+        return m;
+    };
+
+    // Clipped parts before their mask source draw after the mask source and before later
+    // unclipped parts; two masks with identical coverage reuse the mask target.
+    {
+        MeshSpec m = makeMesh(5, { { 7, "masks/m.json", { 0 }, { 2, 3 } },
+                                   { 7, "masks/m.json", { 1 }, { 2, 3 } } });
+        const auto p = parse(mdlFile(23, { m }, 0));
+        ASSERT_TRUE(p.ok);
+        const auto  mesh = generate(p.mdl);
+        const auto& s    = mesh->Submeshes();
+        ASSERT_EQ(s.size(), 5u);
+        for (const auto& sub : s) EXPECT_EQ(sub.geometry_source, std::optional<std::size_t>(0u));
+        EXPECT_EQ(s[0].material_slot, 0u);
+        EXPECT_EQ(rangesOf(s[0]), (std::vector<Range> { { 6, 6 } }));
+        EXPECT_EQ(s[1].material_slot, 1u);
+        EXPECT_EQ(s[1].output_override, "_rt_puppet_mask");
+        EXPECT_EQ(rangesOf(s[1]), (std::vector<Range> { { 6, 6 } }));
+        EXPECT_EQ(s[2].material_slot, 2u);
+        EXPECT_EQ(rangesOf(s[2]), (std::vector<Range> { { 0, 3 } }));
+        EXPECT_EQ(s[3].material_slot, 4u);
+        EXPECT_EQ(rangesOf(s[3]), (std::vector<Range> { { 3, 3 } }));
+        EXPECT_EQ(s[4].material_slot, 0u);
+        EXPECT_EQ(rangesOf(s[4]), (std::vector<Range> { { 12, 3 } }));
+    }
+
+    // A clipped part after an intermediate unclipped part still draws right after its mask
+    // source, before the intermediate unclipped part.
+    {
+        MeshSpec   m = makeMesh(3, { { 7, "masks/m.json", { 2 }, { 0 } } });
+        const auto p = parse(mdlFile(23, { m }, 0));
+        ASSERT_TRUE(p.ok);
+        const auto  mesh = generate(p.mdl);
+        const auto& s    = mesh->Submeshes();
+        ASSERT_EQ(s.size(), 4u);
+        EXPECT_EQ(s[0].material_slot, 0u);
+        EXPECT_EQ(rangesOf(s[0]), (std::vector<Range> { { 0, 3 } }));
+        EXPECT_EQ(s[1].material_slot, 1u);
+        EXPECT_EQ(s[1].output_override, "_rt_puppet_mask");
+        EXPECT_EQ(rangesOf(s[1]), (std::vector<Range> { { 0, 3 } }));
+        EXPECT_EQ(s[2].material_slot, 2u);
+        EXPECT_EQ(rangesOf(s[2]), (std::vector<Range> { { 6, 3 } }));
+        EXPECT_EQ(s[3].material_slot, 0u);
+        EXPECT_EQ(rangesOf(s[3]), (std::vector<Range> { { 3, 3 } }));
+    }
+
+    // Multi-part mask sources anchor at the highest part index regardless of list order;
+    // multiple masks sharing an anchor draw in ascending clipped part index order.
+    {
+        MeshSpec m = makeMesh(5, { { 7, "masks/m0.json", { 4 }, { 3, 0 } },
+                                   { 7, "masks/m1.json", { 1 }, { 3 } } });
+        const auto p = parse(mdlFile(23, { m }, 0));
+        ASSERT_TRUE(p.ok);
+        const auto  mesh = generate(p.mdl);
+        const auto& s    = mesh->Submeshes();
+        ASSERT_EQ(s.size(), 5u);
+        EXPECT_EQ(s[0].material_slot, 0u);
+        EXPECT_EQ(rangesOf(s[0]), (std::vector<Range> { { 0, 3 }, { 6, 6 } }));
+        EXPECT_EQ(s[1].material_slot, 3u);
+        EXPECT_EQ(s[1].output_override, "_rt_puppet_mask");
+        EXPECT_EQ(rangesOf(s[1]), (std::vector<Range> { { 9, 3 } }));
+        EXPECT_EQ(s[2].material_slot, 4u);
+        EXPECT_EQ(rangesOf(s[2]), (std::vector<Range> { { 3, 3 } }));
+        EXPECT_EQ(s[3].material_slot, 1u);
+        EXPECT_EQ(s[3].output_override, "_rt_puppet_mask");
+        EXPECT_EQ(rangesOf(s[3]), (std::vector<Range> { { 0, 3 }, { 9, 3 } }));
+        EXPECT_EQ(s[4].material_slot, 2u);
+        EXPECT_EQ(rangesOf(s[4]), (std::vector<Range> { { 12, 3 } }));
+    }
+
+    // A nested mask anchors at the highest source across its enclosing chain: when nested
+    // mask 1 (b={1}) is enclosed in mask 0 (b={2}), both anchor at part 2 and draw in
+    // ascending clipped part order (part 0 under mask 1 before part 1 under mask 0).
+    {
+        MeshSpec m = makeMesh(4, { { 7, "masks/outer.json", { 1 }, { 2 } },
+                                   { 7, "masks/inner.json", { 0 }, { 1 } } });
+        const auto p = parse(mdlFile(23, { m }, 0));
+        ASSERT_TRUE(p.ok);
+        ASSERT_EQ(p.mesh().masks[1].parent, 0);
+        const auto  mesh = generate(p.mdl);
+        const auto& s    = mesh->Submeshes();
+        // base(2), inner chain (mask0, mask1, mul), clipped(0), outer mask0, clipped(1), base(3)
+        ASSERT_EQ(s.size(), 8u);
+        EXPECT_EQ(s[0].material_slot, 0u);
+        EXPECT_EQ(rangesOf(s[0]), (std::vector<Range> { { 6, 3 } }));
+        EXPECT_EQ(s[1].material_slot, 3u);
+        EXPECT_EQ(s[1].output_override, "_rt_puppet_mask");
+        EXPECT_EQ(s[2].material_slot, 4u);
+        EXPECT_EQ(s[2].output_override, "_rt_puppet_mask_intermediate");
+        EXPECT_EQ(s[3].material_slot, 5u);
+        EXPECT_EQ(s[3].output_override, "_rt_puppet_mask");
+        EXPECT_EQ(s[4].material_slot, 6u);
+        EXPECT_EQ(rangesOf(s[4]), (std::vector<Range> { { 0, 3 } }));
+        EXPECT_EQ(s[5].material_slot, 1u);
+        EXPECT_EQ(s[5].output_override, "_rt_puppet_mask");
+        EXPECT_EQ(s[6].material_slot, 2u);
+        EXPECT_EQ(rangesOf(s[6]), (std::vector<Range> { { 3, 3 } }));
+        EXPECT_EQ(s[7].material_slot, 0u);
+        EXPECT_EQ(rangesOf(s[7]), (std::vector<Range> { { 9, 3 } }));
+    }
+
+    // When a nested mask's source lies past an unclipped part (part 1 unclipped, part 2
+    // clipped by mask 0 on part 0, part 3 clipped by mask 1 on part 2), part 2 draws right
+    // after part 0, then part 1 draws unclipped, then part 3 draws at anchor 2.
+    {
+        MeshSpec m = makeMesh(4, { { 7, "masks/outer.json", { 2 }, { 0 } },
+                                   { 7, "masks/inner.json", { 3 }, { 2 } } });
+        const auto p = parse(mdlFile(23, { m }, 0));
+        ASSERT_TRUE(p.ok);
+        ASSERT_EQ(p.mesh().masks[1].parent, 0);
+        const auto  mesh = generate(p.mdl);
+        const auto& s    = mesh->Submeshes();
+        // base(0), outer mask0, clipped(2), base(1), inner chain (mask0, mask1, mul), clipped(3)
+        ASSERT_EQ(s.size(), 8u);
+        EXPECT_EQ(s[0].material_slot, 0u);
+        EXPECT_EQ(rangesOf(s[0]), (std::vector<Range> { { 0, 3 } }));
+        EXPECT_EQ(s[2].material_slot, 2u);
+        EXPECT_EQ(rangesOf(s[2]), (std::vector<Range> { { 6, 3 } }));
+        EXPECT_EQ(s[3].material_slot, 0u);
+        EXPECT_EQ(rangesOf(s[3]), (std::vector<Range> { { 3, 3 } }));
+        EXPECT_EQ(s[7].material_slot, 6u);
+        EXPECT_EQ(rangesOf(s[7]), (std::vector<Range> { { 9, 3 } }));
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

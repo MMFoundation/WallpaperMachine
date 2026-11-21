@@ -4378,8 +4378,8 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         std::shared_ptr<SceneMesh> final_card;
         if (puppet_closing) {
             final_card = std::make_shared<SceneMesh>();
-            WPMdlParser::GenPuppetMesh(*final_card, mdl, masked_closing ? WPMdlParser::MaskDraw::InPartOrder
-                                                                      : WPMdlParser::MaskDraw::Omit);
+            WPMdlParser::GenPuppetMesh(*final_card, mdl, masked_closing ? WPMdlParser::MaskDraw::Include
+                                                                        : WPMdlParser::MaskDraw::Omit);
             if (!masked_closing) {
                 for (auto& submesh : final_card->Submeshes()) submesh.material_slot = 0;
             }

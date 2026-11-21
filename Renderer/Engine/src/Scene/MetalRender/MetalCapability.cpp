@@ -215,6 +215,9 @@ std::string RejectShaders(const Scene& scene, const SceneNode* node, bool& saw_a
                         break;
                     }
                 }
+                if (! matched_slot && slots.size() > 1 && ! geometry.Submeshes().empty()) {
+                    continue;
+                }
                 bool any_checked = false;
                 for (const auto& submesh : geometry.Submeshes()) {
                     if (matched_slot && submesh.material_slot != slot_index) continue;

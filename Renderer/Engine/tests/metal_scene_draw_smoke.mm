@@ -3147,10 +3147,12 @@ TEST_F(MetalSceneDraw, EachPuppetMaskStartsFromAClearedTarget)
     const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 2, 1.0 / 60.0);
     ASSERT_TRUE(picture.error.empty()) << picture.error;
     ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
-    // a = 128/255 over the blue base: green 128 / blue 127, then red 128 over that.
+    // WE 2.8.0.42 (probe M12) draws each mask right after its source part: piece 2 (blue),
+    // mask 0 + piece 0 (green at 128/255), piece 3 (opaque blue, covering piece 0 where they
+    // overlap), then mask 1 (cleared) + piece 1 (red at 128/255).
     const struct { uint32_t x; std::array<int, 3> rgb; const char* where; } cells[] = {
         { 96, { 0, 128, 127 }, "mask 0 only: green at half, no red" },
-        { 192, { 128, 64, 63 }, "both masks: green, then red, each at half" },
+        { 192, { 128, 0, 127 }, "overlap: piece 3 covers piece 0 before red draws at half over piece 3" },
         { 288, { 128, 0, 127 }, "mask 1 only: red at half, no green" },
     };
     for (const auto& cell : cells) {
@@ -3195,6 +3197,87 @@ void main() {
         { 144, { 64, 0, 64 }, "half-masked, dimmed red over the blue base" },
         { 208, { 0, 128, 0 }, "the later opaque green piece covers the masked red piece" },
         { 288, { 0, 0, 0 }, "the red piece extends here but its mask does not" },
+    };
+    for (const auto& cell : cells) {
+        const auto got = CardColourAt(picture, cell.x);
+        for (std::size_t c = 0; c < 3; ++c) EXPECT_NEAR(got[c], cell.rgb[c], 1) << cell.where << " channel " << c;
+    }
+}
+
+TEST_F(MetalSceneDraw, AClippedPuppetPartDrawsAfterItsMaskSourceAndBeforeLaterPartsBothDirectlyAndWithEffects)
+{
+    // A clipped part whose part index precedes its mask source (e.g. iris before sclera, with
+    // lashes after sclera) draws after its mask source and before later unclipped parts, both
+    // directly and through an effect chain (WE 2.8.0.42 probe Q1 / direct vs effect parity).
+    for (const bool with_effect : { false, true }) {
+        SCOPED_TRACE(with_effect ? "with_effect" : "direct");
+        const auto dir = root_ / (with_effect ? "puppet-clipped-before-source-effect"
+                                              : "puppet-clipped-before-source-direct");
+        // Piece 0: red (clipped by piece 1), Piece 1: blue (mask source), Piece 2: green (later foreground).
+        const auto project = WriteMaskedPuppetFixture(
+            dir, { { -128, 128, 0.875f }, { -128, 64, 0.125f }, { 0, 32, 0.5f } },
+            { { { 0 }, { 1 } } });
+        if (with_effect) {
+            std::filesystem::create_directories(dir / "effects");
+            std::ofstream(dir / "effects/dim.json") <<
+                R"({"name":"dim","passes":[{"material":"materials/dim.json"}]})";
+            std::ofstream(dir / "materials/dim.json") <<
+                R"({"passes":[{"shader":"dim","blending":"normal","cullmode":"nocull",)"
+                R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})";
+            std::ofstream(dir / "shaders/dim.vert") << kStandInVertexShader;
+            std::ofstream(dir / "shaders/dim.frag") << R"(
+uniform sampler2D g_Texture0;
+varying vec2 v_TexCoord;
+void main() {
+    gl_FragColor = texSample2D(g_Texture0, v_TexCoord) * vec4(0.5, 0.5, 0.5, 1.0);
+}
+)";
+            auto layout = nlohmann::json::parse(std::ifstream(dir / "layout.json"));
+            layout["objects"][0]["effects"] = nlohmann::json::array({
+                { { "file", "effects/dim.json" }, { "visible", true } } });
+            std::ofstream(dir / "layout.json") << layout;
+        }
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, dir / "cache", loaded, error)) << error;
+        const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 2, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+        const std::array<int, 3> masked_red = with_effect ? std::array<int, 3> { 64, 0, 64 }
+                                                          : std::array<int, 3> { 128, 0, 127 };
+        const std::array<int, 3> foreground = with_effect ? std::array<int, 3> { 0, 128, 0 }
+                                                          : std::array<int, 3> { 0, 255, 0 };
+        const struct { uint32_t x; std::array<int, 3> rgb; const char* where; } cells[] = {
+            { 144, masked_red, "clipped red draws over its later blue mask source" },
+            { 208, foreground, "later opaque green foreground covers the masked red piece" },
+            { 288, { 0, 0, 0 }, "outside the mask source, the red piece is clipped away" },
+        };
+        for (const auto& cell : cells) {
+            const auto got = CardColourAt(picture, cell.x);
+            for (std::size_t c = 0; c < 3; ++c) EXPECT_NEAR(got[c], cell.rgb[c], 1) << cell.where << " channel " << c;
+        }
+    }
+}
+
+TEST_F(MetalSceneDraw, AClippedPuppetPartDrawsAtItsMaskAnchorBeforeInterveningUnclippedParts)
+{
+    // WE 2.8.0.42 probe Q3: piece 0 blue (mask source), piece 1 green (unclipped), piece 2 red
+    // (clipped by piece 0). Because piece 2 anchors at piece 0, draw order is 0 -> 2 -> 1, so
+    // piece 1 covers the clipped piece 2 where they overlap.
+    const auto dir = root_ / "puppet-clipped-anchored-before-unclipped";
+    const auto project = WriteMaskedPuppetFixture(
+        dir, { { -128, 64, 0.125f }, { -64, 128, 0.5f }, { -128, 128, 0.875f } },
+        { { { 2 }, { 0 } } });
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, dir / "cache", loaded, error)) << error;
+    const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 2, 1.0 / 60.0);
+    ASSERT_TRUE(picture.error.empty()) << picture.error;
+    ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+    const struct { uint32_t x; std::array<int, 3> rgb; const char* where; } cells[] = {
+        { 96, { 128, 0, 127 }, "piece 0 and clipped piece 2 only: red at half over blue" },
+        { 192, { 0, 255, 0 }, "intervening unclipped piece 1 covers clipped piece 2" },
+        { 288, { 0, 255, 0 }, "piece 1 outside mask source" },
     };
     for (const auto& cell : cells) {
         const auto got = CardColourAt(picture, cell.x);

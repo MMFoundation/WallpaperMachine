@@ -115,8 +115,9 @@ constexpr std::uint32_t kMeshOnlyFlags = 0x00000001u | 0x00000008u;
 // The three corners every test mesh uses, as (x, y, u).
 constexpr float kCorners[3][3] = { { 0.0f, 0.0f, 0.0f }, { 1.0f, 0.0f, 0.5f }, { 0.0f, 1.0f, 1.0f } };
 
-// One mesh record of a version-21+ model.
-void WriteMesh(ByteWriter& out, std::string_view material, std::uint32_t part_id, bool skinned)
+// One mesh record of a version-21+ model with `part_count` single-triangle parts.
+void WriteMesh(ByteWriter& out, std::string_view material, std::uint32_t part_id, bool skinned,
+               std::uint32_t part_count = 1)
 {
     out.Str(material);
     out.U32(0);
@@ -134,11 +135,13 @@ void WriteMesh(ByteWriter& out, std::string_view material, std::uint32_t part_id
             out.F32(corner[2]).F32(0.5f);
         }
     }
-    out.U32(6).U16(0).U16(1).U16(2);
+    out.U32(part_count * 6);
+    for (std::uint32_t p = 0; p < part_count; ++p) out.U16(0).U16(1).U16(2);
     // The second texture-coordinate payload, then the parts table.
     out.U8(1).U8(1).U16(0).U8(0).U32(36);
     for (int i = 0; i < 3; ++i) out.F32(0.25f * static_cast<float>(i)).F32(0.5f).U32(0);
-    out.U8(1).U32(16).U32(part_id).U32(0).U32(0).U32(3);
+    out.U8(1).U32(part_count * 16);
+    for (std::uint32_t p = 0; p < part_count; ++p) out.U32(part_id + p).U32(0).U32(p * 3).U32(3);
 }
 
 // A skeleton block holding `bones` (name, parent index or -1), every bind matrix the identity.
@@ -179,8 +182,9 @@ std::string MdlMaskedHead()
 {
     ByteWriter out;
     out.Stamp("MDLV", 23).U32(kSkinnedFlags).U32(1).U32(2);
-    WriteMesh(out, "mat/head.json", 10, true);
-    out.U32(1).U32(7).U32(0).Str("mat/head_mask.json").U32(0).U32(1).U32(0).U32(1).U32(0);
+    WriteMesh(out, "mat/head.json", 10, true, 2);
+    // Piece 0 is the unclipped mask source; piece 1 is clipped by it.
+    out.U32(1).U32(7).U32(0).Str("mat/head_mask.json").U32(0).U32(1).U32(1).U32(1).U32(0);
     WriteMesh(out, "mat/eyes.json", 20, true);
     out.U32(0);
     WriteSkeleton(out, { { "root", -1 } });
@@ -192,12 +196,12 @@ std::string MdlNestedMaskedHead()
 {
     ByteWriter out;
     out.Stamp("MDLV", 23).U32(kSkinnedFlags).U32(1).U32(2);
-    WriteMesh(out, "mat/head.json", 10, true);
-    // Mask 0 clips piece 0 and is drawn from nothing; mask 1 is drawn from piece 0,
-    // which mask 0 clips, so it is nested in mask 0.
+    WriteMesh(out, "mat/head.json", 10, true, 3);
+    // Mask 0 is drawn from piece 0 and clips piece 1; mask 1 is drawn from piece 1 (which
+    // mask 0 clips, so it is nested in mask 0) and clips piece 2.
     out.U32(2);
-    out.U32(7).U32(0).Str("mat/head_mask.json").U32(0).U32(1).U32(0).U32(0);
-    out.U32(7).U32(0).Str("mat/head_mask.json").U32(0).U32(0).U32(1).U32(0);
+    out.U32(7).U32(0).Str("mat/head_mask.json").U32(0).U32(1).U32(1).U32(1).U32(0);
+    out.U32(7).U32(0).Str("mat/head_mask.json").U32(0).U32(1).U32(2).U32(1).U32(1);
     WriteMesh(out, "mat/eyes.json", 20, true);
     out.U32(0);
     WriteSkeleton(out, { { "root", -1 } });

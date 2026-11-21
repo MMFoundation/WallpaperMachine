@@ -175,9 +175,9 @@ inline void skinMesh(Bytes& out, unsigned version, std::string_view material,
 inline std::vector<uint8_t> maskedModel(std::string_view material, std::string maskTexture) {
     Bytes out;
     modelHeader(out, 23);
-    const std::array<uint32_t, 3> indices { 0, 1, 2 };
-    const std::array<Part, 1>     parts { { { 73, 0, 0, 3 } } };
-    const std::array<Mask, 1> masks { { { 17, 29, 41, std::move(maskTexture), { 0 }, { 0 } } } };
+    const std::array<uint32_t, 6> indices { 0, 1, 2, 0, 1, 2 };
+    const std::array<Part, 2>     parts { { { 73, 0, 0, 3 }, { 74, 0, 3, 3 } } };
+    const std::array<Mask, 1> masks { { { 17, 29, 41, std::move(maskTexture), { 1 }, { 0 } } } };
     skinMesh(out, 23, material, triangle(), indices, parts, masks);
     out.u8(0);
     return std::move(out.data);

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <string>
 
 #include "Fs/IBinaryStream.h"
@@ -1606,23 +1607,51 @@ void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, MaskDraw mask
         base.material_slot = base_slot;
         if (masks == MaskDraw::Omit || src.masks.empty()) continue;
 
+        const uint64_t total_indices = TotalIndices(src);
+        const auto     part_count    = src.parts.size();
+
+        // Advance material slots in lockstep with LoadPuppetSlots regardless of which masks emit draws.
+        std::vector<uint32_t>              mask_slots;
+        std::vector<std::vector<uint32_t>> chains(src.masks.size());
+        mask_slots.reserve(src.masks.size());
+        for (uint32_t m = 0; m < src.masks.size(); ++m) {
+            mask_slots.push_back(slot);
+            chains[m] = MaskChain(src, m);
+            chains[m].push_back(m);
+            slot += 2 * static_cast<uint32_t>(chains[m].size());
+        }
+        if (part_count == 0) continue;
+
         bool first = true;
         const auto piece = [&](uint32_t material, const std::vector<Range>& ranges) -> SceneMesh::Submesh& {
             auto& draw = first ? submeshes[geometry] : submeshes.emplace_back();
-            if (masks == MaskDraw::InPartOrder) draw.geometry_source = geometry;
-            else if (!first) GenMeshFromMdl(draw, src);
+            draw.geometry_source = geometry;
             first = false;
             draw.material_slot = material;
             draw.SetDrawRanges(ranges);
             return draw;
         };
-
-        const auto selected = [&](const std::vector<uint32_t>& parts) {
-            std::vector<bool> chosen(src.parts.size(), false);
-            for (auto p : parts) {
-                if (p < chosen.size()) chosen[p] = true;
+        const auto append_range = [](std::vector<Range>& ranges, Range range) {
+            if (! ranges.empty() &&
+                static_cast<uint64_t>(ranges.back().indexOffset) + ranges.back().indexCount == range.indexOffset &&
+                ranges.back().indexCount <= std::numeric_limits<uint32_t>::max() - range.indexCount) {
+                ranges.back().indexCount += range.indexCount;
+            } else {
+                ranges.push_back(range);
             }
-            return CollectRanges(src, [&](usize p) { return chosen[p]; });
+        };
+        const auto selected = [&](const std::vector<uint32_t>& parts) {
+            std::vector<bool> chosen(part_count, false);
+            for (auto p : parts) {
+                if (p < part_count) chosen[p] = true;
+            }
+            std::vector<Range> ranges;
+            for (usize p = 0; p < part_count; ++p) {
+                Range range;
+                if (chosen[p] && PartRange(src.parts[p], total_indices, range)) append_range(ranges, range);
+            }
+            if (ranges.empty()) return NoDraw();
+            return ranges;
         };
         const auto draw_mask = [&](const std::vector<uint32_t>& chain, uint32_t first_slot) {
             for (std::size_t d = 0; d < chain.size(); ++d) {
@@ -1638,59 +1667,80 @@ void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, MaskDraw mask
             return first_slot;
         };
 
-        if (masks == MaskDraw::Grouped) {
-            first = false;
-            std::vector<bool> clipped(src.parts.size(), false);
-            for (const auto& mask : src.masks) {
-                for (auto p : mask.part_ids_a) {
-                    if (p < clipped.size()) clipped[p] = true;
+        // Wallpaper Engine draws each mask's clipped pieces right after the highest source part
+        // across that mask's enclosing chain, sorted in ascending part index order at each anchor,
+        // both for direct puppets and for puppets closed after an effect chain.
+        std::vector<bool> clipped(part_count, false);
+        struct ClippedDraw {
+            uint32_t part;
+            uint32_t mask;
+            bool operator<(const ClippedDraw& o) const {
+                return part != o.part ? part < o.part : mask < o.mask;
+            }
+            bool operator==(const ClippedDraw& o) const {
+                return part == o.part && mask == o.mask;
+            }
+        };
+        std::vector<std::vector<ClippedDraw>> anchored(part_count);
+        for (uint32_t m = 0; m < src.masks.size(); ++m) {
+            for (auto p : src.masks[m].part_ids_a) {
+                if (p < part_count) clipped[p] = true;
+            }
+            std::optional<uint32_t> anchor;
+            for (uint32_t c : chains[m]) {
+                for (auto p : src.masks[c].part_ids_b) {
+                    if (p < part_count && (! anchor.has_value() || p > *anchor)) anchor = p;
                 }
             }
-            if (!src.parts.empty())
-                base.SetDrawRanges(CollectRanges(src, [&](usize p) { return !clipped[p]; }));
-            for (uint32_t m = 0; m < src.masks.size(); ++m) {
-                auto chain = MaskChain(src, m);
-                chain.push_back(m);
-                slot = draw_mask(chain, slot);
-                piece(slot++, selected(src.masks[m].part_ids_a));
+            if (! anchor.has_value()) continue;
+            auto& bucket = anchored[*anchor];
+            for (auto p : src.masks[m].part_ids_a) {
+                Range range;
+                if (p < part_count && PartRange(src.parts[p], total_indices, range)) bucket.push_back({ p, m });
             }
-            continue;
         }
 
-        std::vector<uint32_t> mask_slots;
-        std::vector<std::vector<uint32_t>> memberships(src.parts.size());
-        for (uint32_t m = 0; m < src.masks.size(); ++m) {
-            mask_slots.push_back(slot);
-            slot += 2 * (1 + static_cast<uint32_t>(MaskChain(src, m).size()));
-            for (auto p : src.masks[m].part_ids_a) {
-                if (p < memberships.size() && (memberships[p].empty() || memberships[p].back() != m))
-                    memberships[p].push_back(m);
-            }
-        }
         const WPMdl::Mesh::MaskBlock* active_mask = nullptr;
-        for (std::size_t p = 0; p < memberships.size();) {
-            const auto& owners = memberships[p];
-            std::vector<Range> ranges;
-            do {
+        std::vector<Range>            unclipped;
+        const auto flush_unclipped = [&]() {
+            if (unclipped.empty()) return;
+            piece(base_slot, unclipped);
+            unclipped.clear();
+        };
+
+        for (std::size_t p = 0; p < part_count; ++p) {
+            if (! clipped[p]) {
                 Range range;
-                if (PartRange(src.parts[p], TotalIndices(src), range)) ranges.push_back(range);
-            } while (++p < memberships.size() && memberships[p] == owners);
-            if (ranges.empty()) continue;
-            if (owners.empty()) piece(base_slot, ranges);
-            for (uint32_t m : owners) {
+                if (PartRange(src.parts[p], total_indices, range)) append_range(unclipped, range);
+            }
+            auto& bucket = anchored[p];
+            if (bucket.empty()) continue;
+            std::sort(bucket.begin(), bucket.end());
+            bucket.erase(std::unique(bucket.begin(), bucket.end()), bucket.end());
+
+            flush_unclipped();
+            for (std::size_t i = 0; i < bucket.size();) {
+                const uint32_t m = bucket[i].mask;
+                std::vector<Range> ranges;
+                do {
+                    Range range;
+                    if (PartRange(src.parts[bucket[i].part], total_indices, range))
+                        append_range(ranges, range);
+                } while (++i < bucket.size() && bucket[i].mask == m);
+                if (ranges.empty()) continue;
                 const auto& mask = src.masks[m];
                 if (active_mask == nullptr || active_mask->parent != mask.parent ||
                     active_mask->flags != mask.flags || active_mask->mat_json_file != mask.mat_json_file ||
                     active_mask->part_ids_b != mask.part_ids_b) {
-                    auto chain = MaskChain(src, m);
-                    chain.push_back(m);
-                    draw_mask(chain, mask_slots[m]);
+                    draw_mask(chains[m], mask_slots[m]);
                     active_mask = &mask;
                 }
                 const auto clipped_slot = (m + 1 < mask_slots.size() ? mask_slots[m + 1] : slot) - 1;
                 piece(clipped_slot, ranges);
             }
         }
+        flush_unclipped();
+        if (first) submeshes[geometry].SetDrawRanges(NoDraw());
     }
 }
 

@@ -2963,11 +2963,25 @@ texture entrances are not decoded-image or native-rendering evidence.
 
 ## Alpha compositing
 
-- **Clipping an effect-bearing puppet** — `MetalSceneDraw.APuppetEffectPreservesClippingWhenDrawingTheProcessedPicture`
-  samples the processed texture on both sides of a half-strength mask, including a
-  later opaque part. The masked part must disappear outside the mask, retain the
-  effect's colour inside it and stay behind that later part. The closing draw must
-  not sort all masked parts to the front.
+- **Puppet clipping-mask draw order (direct and effect-bearing)** —
+  `MdlGeometry.MaskedPartsDrawRightAfterTheirHighestMaskSourceInPartOrder`,
+  `MetalSceneDraw.APuppetEffectPreservesClippingWhenDrawingTheProcessedPicture`,
+  `MetalSceneDraw.AClippedPuppetPartDrawsAfterItsMaskSourceAndBeforeLaterPartsBothDirectlyAndWithEffects`,
+  `MetalSceneDraw.AClippedPuppetPartDrawsAtItsMaskAnchorBeforeInterveningUnclippedParts`,
+  and `MetalCapability.AnUnusedSkinnedSlotOnAMaskedPuppetWithANestedMultiplyQuadIsAccepted`.
+  Wallpaper Engine 2.8.0.42 draws direct and effect-bearing masked puppets in the same
+  order: unclipped parts draw in ascending part order, and each mask's clipped parts
+  draw right after the highest valid part index in `part_ids_b` across that mask's
+  enclosing chain, sorted in ascending clipped part order at each anchor (verified
+  across 28 probe configurations covering direct/effect parity, clipped parts before
+  and after mask sources, unsorted multi-part sources, multi-mask anchor ties, shared
+  mask reuse, and nested masks). Sorting clipped parts strictly in authored part order
+  hid clipped parts whose index preceded their opaque mask source (e.g. iris before
+  sclera), while grouping all clipped parts at the end drew them over later foreground
+  parts (e.g. eyelashes/sparkles on direct puppets). Reusing the mask target across
+  identical mask coverage leaves unused skinned slots on multi-slot meshes, which the
+  Metal capability check ignores rather than validating against an unskinned nested
+  multiply quad.
 
 - **Nested puppet masks and the multiply blend** — Wallpaper Engine's device keeps four more
   blend flags (`sub_14009B070` 0x80, `sub_14009B0A0` 0x20, `sub_14009B0D0` 0x40,

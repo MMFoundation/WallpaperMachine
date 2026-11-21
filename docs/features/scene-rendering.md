@@ -475,11 +475,17 @@ layer's own pass and again by the skinned pass its chain ends in, and both carry
 layer's colour and alpha, as an authored alpha always did and a script's write now
 does ([known limitations](../testing/renderer.md#known-limitations)).
 
-When an effect-bearing puppet has clipping masks, the effects still run on its flat
-texture. The closing draw clips the animated parts in their authored order, so a
-foreground part such as an eyelid can cover an already clipped iris. Parts that use
-the same mask coverage reuse it until another mask replaces it. Puppets without
-clipping masks do not draw a mask target.
+When a puppet has clipping masks — drawn directly or through an effect chain —
+unclipped parts draw in authored part order, and each mask's clipped parts draw
+immediately after the highest source part across that mask's enclosing chain, in
+ascending clipped part order at each anchor. This keeps a clipped part whose
+authored index precedes its mask source (such as an iris before a sclera) visible
+over that source while letting later unclipped parts (such as eyelashes or eyelids)
+cover it. Consecutive clipped draws with identical mask coverage reuse the mask
+target until another mask replaces it, and every submesh of a masked puppet shares
+its geometry buffers. Under an effect chain, effects still run on the flat texture
+and the closing pass applies the same clipping order. Puppets without clipping masks
+do not draw a mask target.
 
 When a composition copies the background, a child's closing effect draws its colour
 without changing the destination alpha by default. This keeps translucent edges of

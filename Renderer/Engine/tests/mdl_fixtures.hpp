@@ -515,7 +515,7 @@ inline std::unique_ptr<wallpaper::SceneMesh> generate(const wallpaper::WPMdl& md
                                                       bool masks = true) {
     auto mesh = std::make_unique<wallpaper::SceneMesh>();
     using Parser = wallpaper::WPMdlParser;
-    Parser::GenPuppetMesh(*mesh, mdl, masks ? Parser::MaskDraw::Grouped : Parser::MaskDraw::Omit);
+    Parser::GenPuppetMesh(*mesh, mdl, masks ? Parser::MaskDraw::Include : Parser::MaskDraw::Omit);
     return mesh;
 }
 

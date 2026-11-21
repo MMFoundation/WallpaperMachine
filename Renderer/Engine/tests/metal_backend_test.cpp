@@ -517,6 +517,45 @@ TEST(MetalCapability, APuppetUnderAnEffectChainIsJudgedByTheMeshTheChainResolves
               "a puppet shader is bound to a mesh without bone weights");
 }
 
+TEST(MetalCapability, AnUnusedSkinnedSlotOnAMaskedPuppetWithANestedMultiplyQuadIsAccepted)
+{
+    // A masked puppet whose nested mask adds an unskinned fullscreen multiply quad may also
+    // leave a skinned material slot unused (for example, a mask pass skipped when the mask
+    // target is reused or a base slot when every part is clipped). That unused slot is never
+    // bound to any draw and must not be rejected against the unskinned multiply quad.
+    ImageScene fixture;
+    auto       mesh = SkinnedMesh();
+    mesh->Submeshes()[0].material_slot   = 0;
+    mesh->Submeshes()[0].geometry_source = 0;
+
+    SceneMesh::Submesh multiply;
+    multiply.material_slot   = 1;
+    multiply.output_override = "_rt_puppet_mask";
+    SceneVertexArray quad_vertices(
+        { { std::string(WE_IN_POSITION), VertexType::FLOAT3 },
+          { std::string(WE_IN_TEXCOORD), VertexType::FLOAT2 } },
+        3);
+    multiply.AddVertexArray(std::move(quad_vertices));
+    mesh->Submeshes().push_back(std::move(multiply));
+
+    const auto makeMaterial = [](std::string_view reflection) {
+        SceneMaterial material;
+        material.name     = "materials/puppet";
+        material.textures = { "materials/puppet.tex" };
+        material.customShader.shader                = std::make_shared<SceneShader>();
+        material.customShader.shader->name          = "genericimage2";
+        material.customShader.shader->metal_program = TranslatedProgram(reflection);
+        return material;
+    };
+    // SkinnedMesh() already populates slot 0 with a skinned material (bound to submesh 0).
+    mesh->AddMaterial(makeMaterial(kReflectionJson));      // slot 1: unskinned multiply quad
+    mesh->AddMaterial(makeMaterial(kBonesReflectionJson)); // slot 2: unused skinned mask slot
+    fixture.node->AddMesh(mesh);
+
+    const auto selection = EvaluateMetalSupport(fixture.scene);
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
+}
+
 TEST(MetalCapability, ASceneWithLightsIsAccepted)
 {
     // Lighting is the author's shader reading uniforms the shared value updater
