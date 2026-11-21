@@ -351,4 +351,32 @@ final class PanelLibraryRowsTests: PanelTestCase {
       XCTAssertTrue(try fires { controller.revisions.bump(.libraryCovers) }, "cover stamps")
     }
   }
+
+  func testRefreshEnergyRatingsRebuildsAndNotifiesOnlyWhenRatingsMoved() async throws {
+    try await withPanel { panel in
+      let ratings = WallpaperEnergyRatings(file: panel.root.appendingPathComponent("EnergyRatings.json"))
+      panel.store.wallpaperEnergyRatings = ratings
+      panel.store.librarySnapshot.wallpapers = [entry("first"), entry("second")]
+      let controller = panel.controller
+      let cache = controller.libraryRowsCache
+      XCTAssertNil(controller.libraryRow(id: "first")?.energy)
+      XCTAssertEqual(cache.rebuilds, 1)
+
+      let idle = Flag()
+      withObservationTracking({ MainActor.assumeIsolated { _ = controller.libraryRows } }, onChange: { idle.raise() })
+      controller.refreshEnergyRatings()
+      XCTAssertFalse(idle.raised, "no rating changed, so nothing is invalidated")
+      XCTAssertEqual(cache.rebuilds, 1)
+
+      let conditions = WallpaperEnergyConditions(displays: 1, frameRateCap: nil, renderScale: 1)
+      ratings.record(.init(wallpaperID: "first", conditions: conditions), milliwatts: 1_500, seconds: 180)
+
+      let changed = Flag()
+      withObservationTracking({ MainActor.assumeIsolated { _ = controller.libraryRows } }, onChange: { changed.raise() })
+      controller.refreshEnergyRatings()
+      XCTAssertTrue(changed.raised, "returning to the window after a background rating notifies SwiftUI")
+      XCTAssertEqual(controller.libraryRow(id: "first")?.energy?.milliwatts, 1_500)
+      XCTAssertEqual(cache.rebuilds, 2)
+    }
+  }
 }

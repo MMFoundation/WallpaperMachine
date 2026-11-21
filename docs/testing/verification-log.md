@@ -25,6 +25,13 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-21 — Installed library sort by Energy use (#251)
+
+- `python3 scripts/test.py --python-only` — exit 0; all 36 Python modules passed (including `test_panel_localization.py`, `test_localization_catalogs.py`, `test_doc_links.py`).
+- `xcodebuild -project WallpaperMachine.xcodeproj -scheme WallpaperMachine -configuration Debug -derivedDataPath build -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO build-for-testing` — exit 0 (`TEST BUILD SUCCEEDED`, zero warnings in touched files).
+- `python3 scripts/test.py --only LibrarySortTests --only InstalledBrowserModelTests --only PanelLibraryRowsTests --only PanelViewStateTests --only InstalledPageRenderTests` — blocked (exit 70): `xcodebuild` failed in this sandbox with `Failed to prevent system sleep during UI testing. Error code: -536870211` (`IOPMAssertionCreateWithName`).
+- Native XCTest execution and live UI visual verification of the Energy use sort menu remain to be run outside the sandbox; the Release app was not rebuilt.
+
 ## 2026-11-20 — OhMyShot in Settings › About and the Help menu
 
 Settings › About gains More from MMFoundation (OhMyShot's icon, a line about it and Get OhMyShot, which opens www.ohmyshot.org, /zh/ for either Chinese) and Help gains OhMyShot Screenshot Tool. Both appear only on macOS 26 and later, which OhMyShot needs; an older macOS shows neither and Settings search does not find the row.
@@ -119,11 +126,3 @@ Documented the release package, named settings and extraSettings, and Home Manag
 - `we_reference.py capture/render/compare` used Wallpaper Engine frames for the reported item. Static before/after output was unchanged: MAD 32.90/33.68 and off48 25.5%/26.1% versus the two references. Existing scene-image differences remain; muted static captures do not verify live music or capture startup.
 - The actual wallpaper rendered synthetic song/artist/cover input with 63 generated spectrum bars, nonzero audio response and zero script errors. Lifecycle regressions verify the host fixes without opening an audio device.
 - No Release build, installed-app restart, live player, system audio capture, permission prompt or Mac desktop test. The VM was already running for another task and was returned to that task after capture.
-
-## 2026-11-16 — Preserve native readiness across disabled-source normalization (#193)
-
-- Normalize only disabled source fields consistently in partial-disable and prepared manifests; retain active absent-versus-empty semantics. Update the successful-input cache only after readiness is confirmed.
-- Controlled red proof on 3ef3427c production files: both new service regressions failed, exposing a redundant saver publication and a restarted lock-screen wait after UUID recovery. The complete six-file prepared patch was preserved and restored byte-for-byte before fixed-source checks.
-- python3 scripts/test.py --only LockScreenWallpaperServiceTests --only LockScreenContentSelectionTests: 98 passed, 0 failed, 0 skipped, covering both disable directions, withheld frames, monitor/cancelled refreshes, original timeout and explicit retry.
-- python3 scripts/test.py: all Python modules passed; 5106 native tests passed, 0 failed, 70 opt-in tests skipped; two runtime warnings. No failed-gate retry was needed on the corrected source.
-- Native work used the Captain-authorized exclusive Mac slot, released after completion. No renderer/Rust changes, Release build, desktop actions or feature-level energy measurement.

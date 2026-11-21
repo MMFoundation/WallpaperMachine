@@ -25,19 +25,28 @@ extension PanelController {
     return libraryRowsCache.row(id: id)
   }
 
+  /// Checks whether background energy ratings moved while the window was away, and tells SwiftUI
+  /// to rebuild `libraryRows` only when they did.
+  func refreshEnergyRatings() {
+    let current = store.wallpaperEnergyRatings?.revision ?? 0
+    guard let built = libraryRowsCache.key, built.energy != current else { return }
+    energyRatingsRevision &+= 1
+  }
+
   private var libraryRowsKey: LibraryRowsCache.Key {
     // The services report through closures, so their counters are read first for observation.
     _ = revisions.libraryMetrics
     _ = revisions.libraryCovers
     _ = revisions.navigation
     _ = revisions.language
+    _ = energyRatingsRevision
     return LibraryRowsCache.Key(
       content: store.libraryPresentationRevision, refresh: store.libraryRefreshRevision,
       metrics: libraryMetrics.contentRevision, covers: libraryCovers.contentRevision,
       updates: workshop.updates.availableRevision,
       details: workshop.updates.detailsRevision,
-      // Nothing announces a new rating: one earned in the background shows with the next change
-      // of anything above, as it did before.
+      // Background ratings are recorded only while the window is away; returning to it calls
+      // `refreshEnergyRatings()`, so Installed (including Energy use sort) and the inspector update.
       energy: store.wallpaperEnergyRatings?.revision ?? 0,
       target: navigation.targetDisplayID, language: appLanguage.effective.tag)
   }

@@ -1073,16 +1073,19 @@ tags are not claimed to be represented by the sum of visible group counts.
   id finds it through its description. A search that is a local collection's whole
   name (case, accents and surrounding spaces aside) also shows that collection's
   wallpapers. Filtering never activates a wallpaper. The header's
-  sort menu offers Name, Type, Favorites, File size, Date added and Last used, with
+  sort menu offers Name, Type, Favorites, File size, Date added, Last used and Energy use, with
   a direction button beside it; choosing a key starts in the direction people ask
-  for it (names A→Z; favorites, largest, newest and most recently used first), and
+  for it (names A→Z; favorites, largest, newest, most recently used and heaviest first), and
   names break ties. File size is the wallpaper folder's total and Date added is when
   the folder entered the library (download or import), both measured off the main
   thread by `LibraryMetricsService` and re-checked only after a library reload;
   wallpapers not yet measured sort last. Last used is when the wallpaper was last
   put on a display, the newest across displays ([history](#previous-next-and-recently-used));
   a wallpaper never used since that was recorded sorts last either way, and the
-  list sorts again when a wallpaper is applied.
+  list sorts again when a wallpaper is applied. Energy use sorts by the wallpaper's
+  measured power ([Per-wallpaper energy rating](performance.md#per-wallpaper-energy-rating));
+  wallpapers without a shown rating sort last in either direction, and returning to
+  the window refreshes ratings recorded in the background while it was away.
 - **Discover:** the sidebar is Wallpaper Engine's own filter list — Show only
   (required tags), then Type, Age rating and Resolution as tick boxes whose
   unticked entries are excluded, and the Tags chips (see [workshop-downloads](workshop-downloads.md)).

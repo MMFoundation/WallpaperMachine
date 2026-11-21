@@ -127,7 +127,9 @@ which also remains the way to compare builds; this readout is for users.
 The inspector of an installed wallpaper shows, once measured, a line such as
 **Medium energy use, about 1.2 W. About 1% of a full battery charge per hour.
 Measured while it played alone on 1 display at 60 fps, 75% render scale, with this
-window closed.** It is measured in the
+window closed.** Installed's **Energy use** sort
+([Filtering](control-panel.md#filtering)) orders the library by the same measured
+power, placing unrated wallpapers last in either direction. It is measured in the
 background by `WallpaperEnergyRecorder` and kept by `WallpaperEnergyRatings` (both
 in `App/Services/Diagnostics/WallpaperEnergyRatings.swift`), owned by the app
 delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings`:

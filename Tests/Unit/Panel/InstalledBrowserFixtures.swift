@@ -204,9 +204,9 @@ final class HostedPanel {
 enum LibraryRows {
   static func row(
     _ id: String, _ title: String? = nil, kind: LibraryRow.Kind = .video, size: Int64? = nil,
-    added: TimeInterval? = nil, tags: [String] = [], approved: Bool = false, active: Bool = false,
-    update: Bool = false, supported: Bool = true, preview: URL? = nil,
-    cover: LibraryRow.Cover = .none, manifest: [String: Any] = [:]
+    added: TimeInterval? = nil, energy: LibraryEnergyRating? = nil, tags: [String] = [],
+    approved: Bool = false, active: Bool = false, update: Bool = false, supported: Bool = true,
+    preview: URL? = nil, cover: LibraryRow.Cover = .none, manifest: [String: Any] = [:]
   ) -> LibraryRow {
     LibraryRow(
       id: id, title: title ?? id, kind: kind, previewFile: preview, cover: cover,
@@ -216,7 +216,7 @@ enum LibraryRows {
       searchText: LibraryRow.searchText(
         title: title ?? id, words: LibraryMetricsService.searchText(project: manifest, tags: tags)),
       isApproved: approved, size: size, addedAt: added.map { Date(timeIntervalSince1970: $0) },
-      energy: nil, isUpdateAvailable: update, updatedAt: nil)
+      energy: energy, isUpdateAvailable: update, updatedAt: nil)
   }
 
   static func titles(_ rows: [LibraryRow]) -> [String] { rows.map(\.title) }

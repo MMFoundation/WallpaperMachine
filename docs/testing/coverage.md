@@ -1433,13 +1433,14 @@ never to `.shared`.
   their exact retry), `PanelLibraryImportTests`, `PanelLibraryRemovalTests` (confirmation, no
   window means no deletion, one question for a batch, partial failures named),
   `PanelLibraryRowsTests` (rows joined with measured facts, covers only once stamped, a rescan that
-  replaced no preview leaves every row alone, 10,000 rows built once whatever else changes),
+  replaced no preview leaves every row alone, 10,000 rows built once whatever else changes, and
+  background energy ratings rebuilding only when their revision moved),
   `PanelLibraryStateTests` (Now Playing, Random needing a usable target and a wallpaper that is
   not held back, the target menu, display names, the target the Apply
   help names only with two or more displays that can take a wallpaper, history, library counts,
   the update dot, the issue report's facts, the changed properties it lists without typed text
   or paths and capped, marked not applied only while they wait for Apply changes, and the files a check found missing), `PanelCollectionActionsTests`,
-  `LibrarySortTests` (Last used with never-used wallpapers last either way),
+  `LibrarySortTests` (Last used with never-used wallpapers last either way, Energy use with unrated wallpapers last either way),
   `LibraryFilterTests` (search folding case, accents and width; author and description; a
   Workshop link, or an installed id, matching only that id, and a number no wallpaper has
   for its id searched as words; a collection's name), `LibrarySelectionTests`
@@ -1454,7 +1455,7 @@ never to `.shared`.
   give their grids one is checked by hand in [manual smoke](manual-smoke.md)),
   `InstalledBrowserModelTests` (the reopen state and its
   cadence, Favorites and collections as views, a 10,000-wallpaper library filtered as the user
-  types, Last used following the history and the search reading descriptions, links and
+  types, Last used following the history, Energy use following background ratings and surviving reopen, and the search reading descriptions, links and
   collection names, each empty state and its recovery, a typed id saying it is not installed only
   once pasted, confirmed with Return or restored, covers, the selection's life, clicks, keys, Delete, batch actions and notices, the sweep
   and edge scrolling, every tile on screen playing its preview and the hover-only setting, the

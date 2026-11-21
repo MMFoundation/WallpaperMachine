@@ -9,6 +9,14 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-16 — Preserve native readiness across disabled-source normalization (#193)
+
+- Normalize only disabled source fields consistently in partial-disable and prepared manifests; retain active absent-versus-empty semantics. Update the successful-input cache only after readiness is confirmed.
+- Controlled red proof on 3ef3427c production files: both new service regressions failed, exposing a redundant saver publication and a restarted lock-screen wait after UUID recovery. The complete six-file prepared patch was preserved and restored byte-for-byte before fixed-source checks.
+- python3 scripts/test.py --only LockScreenWallpaperServiceTests --only LockScreenContentSelectionTests: 98 passed, 0 failed, 0 skipped, covering both disable directions, withheld frames, monitor/cancelled refreshes, original timeout and explicit retry.
+- python3 scripts/test.py: all Python modules passed; 5106 native tests passed, 0 failed, 70 opt-in tests skipped; two runtime warnings. No failed-gate retry was needed on the corrected source.
+- Native work used the Captain-authorized exclusive Mac slot, released after completion. No renderer/Rust changes, Release build, desktop actions or feature-level energy measurement.
+
 ## 2026-11-16 — Disable native modes before initial readiness (#193)
 
 - Published display mappings are retained separately from successful-readiness inputs. Either native mode can be disabled during initial activation without a current display UUID, while preserving the other selection and its outstanding first-frame deadline.

@@ -137,6 +137,8 @@ final class PanelController {
 
   /// The Installed rows, kept until one of their inputs moves.
   @ObservationIgnored let libraryRowsCache = LibraryRowsCache()
+  /// Moves when `refreshEnergyRatings()` sees background ratings changed while the window was away.
+  var energyRatingsRevision: UInt64 = 0
   /// Why the last Apply of each wallpaper failed, until an apply of that wallpaper succeeds. The
   /// inspector and the tile offer a report beside it; the banner shows the same failure once.
   var activationFailures: [String: String] = [:]
@@ -459,7 +461,10 @@ final class PanelController {
     updateEnergyMonitoring()
     displayOptions.refresh()
     // A day the panel was on screen, for the star prompt; each calendar day counts once.
-    if isStarted, presentation.isVisible { store.supportPrompt?.recordPanelUse() }
+    if isStarted, presentation.isVisible {
+      store.supportPrompt?.recordPanelUse()
+      refreshEnergyRatings()
+    }
   }
 
   /// Sampling costs about 3 ms of kernel calls every two seconds, so it runs only while the panel
@@ -470,13 +475,15 @@ final class PanelController {
   }
 
   /// The panel's window became key. Assets Steam installed, or someone removed, while the panel was
-  /// away show up when the user comes back to it, and so do a Login Items approval and the system
-  /// readings that post no change of their own (battery level, the desktop-click preference).
+  /// away show up when the user comes back to it, and so do a Login Items approval, background
+  /// energy ratings recorded while the window was away, and the system readings that post no change
+  /// of their own (battery level, the desktop-click preference).
   func windowDidBecomeKey() {
     guard isStarted else { return }
     workshop.refreshSceneAssetsReadiness()
     refreshLoginItemApproval()
     refreshSystemReadings()
+    refreshEnergyRatings()
   }
 
   /// A login item waiting for approval is allowed in System Settings, which does not tell the app.

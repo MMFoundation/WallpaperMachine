@@ -2,7 +2,7 @@ import XCTest
 
 @testable import WallpaperMachine
 
-/// Installed's six sort keys, in both directions.
+/// Installed's seven sort keys, in both directions.
 @MainActor
 final class LibrarySortTests: XCTestCase {
   private let locale = Locale(identifier: "en_US")
@@ -66,10 +66,41 @@ final class LibrarySortTests: XCTestCase {
       "a wallpaper never used sorts last in both directions, and equal dates read A to Z")
   }
 
+  func testEnergyUseSortsHeaviestFirstWithUnratedRowsLastEitherWayAndTiesByName() {
+    func rating(_ milliwatts: Double) -> LibraryEnergyRating {
+      LibraryEnergyRating(snapshot: [
+        "level": EnergyLevel(milliwatts: milliwatts).rawValue,
+        "milliwatts": milliwatts,
+        "displays": 1,
+        "renderScale": 1.0,
+      ])!
+    }
+    let rated = [
+      LibraryRows.row("b", "Beta", kind: .scene, energy: rating(1_200)),
+      LibraryRows.row("a", "alpha", kind: .scene, energy: nil),
+      LibraryRows.row("c", "Gamma", kind: .scene, energy: rating(1_200)),
+      LibraryRows.row("d", "Delta", kind: .scene, energy: rating(3_400)),
+      LibraryRows.row("e", "Epsilon", kind: .scene, energy: rating(450)),
+      LibraryRows.row("f", "Zeta", kind: .scene, energy: rating(.nan)),
+    ]
+    func order(descending: Bool) -> [String] {
+      LibraryRows.titles(
+        LibrarySort.energy.sorted(rated, descending: descending, favorites: [], locale: locale))
+    }
+    XCTAssertTrue(LibrarySort.energy.startsDescending)
+    XCTAssertEqual(LibrarySort.energy.name, L("Energy use"))
+    XCTAssertEqual(
+      order(descending: true), ["Delta", "Beta", "Gamma", "Epsilon", "alpha", "Zeta"],
+      "heaviest first, equal power reads A to Z, and unrated or non-finite rows stay last")
+    XCTAssertEqual(
+      order(descending: false), ["Epsilon", "Beta", "Gamma", "Delta", "alpha", "Zeta"],
+      "lightest first, with ties still A to Z and unrated rows still last")
+  }
+
   func testChoosingAKeyStartsItInItsNaturalDirection() {
     XCTAssertEqual(
-      LibrarySort.allCases.filter(\.startsDescending), [.favorites, .size, .added, .lastUsed],
-      "names and types read A to Z; favorites, size and the dates start with the most")
+      LibrarySort.allCases.filter(\.startsDescending), [.favorites, .size, .added, .lastUsed, .energy],
+      "names and types read A to Z; favorites, size, dates and energy use start with the most")
   }
 
   func testNumbersInTitlesCountAsNumbersAndAccentsAndCaseAreIgnored() {

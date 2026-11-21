@@ -1,8 +1,8 @@
 import Foundation
 
-/// Installed's six sort keys, each with the direction it starts in: names read A to Z, while
-/// favorites, size and the dates are asked for to see the starred, biggest, newest or most
-/// recently used first.
+/// Installed's seven sort keys, each with the direction it starts in: names read A to Z, while
+/// favorites, size, dates, last used and energy use are asked for to see the starred, biggest,
+/// newest, most recently used or heaviest first.
 ///
 /// The raw value is the key `PanelViewState` stores, so a reopened window restores it.
 enum LibrarySort: String, CaseIterable, Identifiable, Sendable {
@@ -13,6 +13,8 @@ enum LibrarySort: String, CaseIterable, Identifiable, Sendable {
   case added
   /// When the wallpaper was last put on a display (`WallpaperHistoryStore.lastUsedDates()`).
   case lastUsed
+  /// The wallpaper's measured energy use (`LibraryRow.energy`), in milliwatts.
+  case energy
 
   var id: String { rawValue }
 
@@ -20,7 +22,7 @@ enum LibrarySort: String, CaseIterable, Identifiable, Sendable {
   var startsDescending: Bool {
     switch self {
     case .title, .type: false
-    case .favorites, .size, .added, .lastUsed: true
+    case .favorites, .size, .added, .lastUsed, .energy: true
     }
   }
 
@@ -34,6 +36,7 @@ enum LibrarySort: String, CaseIterable, Identifiable, Sendable {
     case .size: L("File size")
     case .added: L("Date added")
     case .lastUsed: L("Last used")
+    case .energy: L("Energy use")
     }
   }
 }
@@ -49,8 +52,8 @@ extension LibrarySort {
 
   /// `rows` in this key's order.
   ///
-  /// The key decides first and the title breaks ties. A row whose size or date has not been
-  /// measured yet, or that was never used, sorts last in both directions, and the type sort
+  /// The key decides first and the title breaks ties. A row whose size, date or energy use has not
+  /// been measured yet, or that was never used, sorts last in both directions, and the type sort
   /// breaks its ties by title in the natural direction whichever way the list runs. Rows equal in
   /// everything keep the order they came in, so the same library always lists the same way.
   ///
@@ -80,6 +83,7 @@ extension LibrarySort {
       case .size: row.size.map(Double.init)
       case .added: row.addedAt?.timeIntervalSince1970
       case .lastUsed: lastUsed[row.id]?.timeIntervalSince1970
+      case .energy: row.energy.flatMap { $0.milliwatts.isFinite ? $0.milliwatts : nil }
       case .title, .type: nil
       }
     }
@@ -90,7 +94,7 @@ extension LibrarySort {
       case .type:
         let kinds = lhs.kind.rawValue.compare(rhs.kind.rawValue)
         return order(kinds) * direction != 0 ? order(kinds) * direction : byTitle(lhs, rhs)
-      case .favorites, .size, .added, .lastUsed:
+      case .favorites, .size, .added, .lastUsed, .energy:
         let (left, right) = (value(lhs), value(rhs))
         guard let left, let right else {
           if (left == nil) != (right == nil) { return left == nil ? 1 : -1 }

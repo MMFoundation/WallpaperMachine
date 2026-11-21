@@ -443,6 +443,49 @@ final class InstalledBrowserModelTests: PanelTestCase {
     XCTAssertEqual(titles(model), ["Mango", "Apple"], "a collection's name finds its wallpapers")
   }
 
+  func testEnergyUseSortFollowsBackgroundRatingsAndRestoresAcrossReopen() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    panel.controller.start()
+    let ratings = WallpaperEnergyRatings(file: panel.root.appendingPathComponent("EnergyRatings.json"))
+    panel.store.wallpaperEnergyRatings = ratings
+    let conditions = WallpaperEnergyConditions(displays: 1, frameRateCap: 60, renderScale: 1)
+    ratings.record(.init(wallpaperID: "a", conditions: conditions), milliwatts: 800, seconds: 180)
+    // Below minimumSeconds: not yet shown in the inspector, so it must sort as unrated.
+    ratings.record(.init(wallpaperID: "b", conditions: conditions), milliwatts: 5_000, seconds: 60)
+    ratings.record(.init(wallpaperID: "c", conditions: conditions), milliwatts: 2_500, seconds: 180)
+
+    let model = panel.controller.library
+    try panel.installLibrary([
+      LibrarySpec("a", "Alpha", kind: .projectScene, preview: .none),
+      LibrarySpec("b", "Beta", kind: .projectScene, preview: .none),
+      LibrarySpec("c", "Gamma", kind: .projectScene, preview: .none),
+    ])
+    try await panel.loadLibrary()
+    try await panel.settleLibrary()
+
+    model.setSort(.energy)
+    XCTAssertEqual(titles(model), ["Gamma", "Alpha", "Beta"], "heaviest first, under-threshold unrated last")
+    model.toggleSortDirection()
+    XCTAssertEqual(titles(model), ["Alpha", "Gamma", "Beta"], "lightest first, unrated still last")
+    model.toggleSortDirection()
+    XCTAssertEqual(titles(model), ["Gamma", "Alpha", "Beta"])
+
+    // Returning to the window after Beta finishes its minimum measurement re-sorts immediately.
+    ratings.record(.init(wallpaperID: "b", conditions: conditions), milliwatts: 5_000, seconds: 120)
+    panel.controller.windowDidBecomeKey()
+    XCTAssertEqual(titles(model), ["Beta", "Gamma", "Alpha"], "newly rated Beta moves to the front")
+
+    let saved = try XCTUnwrap(panel.navigation.viewState)
+    XCTAssertEqual(saved.installed.sort, "energy")
+    XCTAssertTrue(saved.installed.descending)
+    let reopened = try makeController()
+    defer { Task { await reopened.shutdown() } }
+    reopened.navigation.viewState = saved
+    XCTAssertEqual(reopened.controller.library.sort, .energy)
+    XCTAssertTrue(reopened.controller.library.descending)
+  }
+
   func testAClearedSearchAndEachEmptyStateRecovers() async throws {
     let panel = try makeController()
     defer { Task { await panel.shutdown() } }
