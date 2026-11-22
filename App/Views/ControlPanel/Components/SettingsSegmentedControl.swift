@@ -72,7 +72,6 @@ private struct SegmentButton: View {
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .onHover { isHovering = $0 }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isSelected)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     } else {
       // Not a disabled button: a disabled button draws its label dimmed, which made the selected
@@ -86,9 +85,10 @@ private struct SegmentButton: View {
   }
 
   private var label: some View {
+    let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
     // Sized by the title's semibold form, which the selected segment uses, so choosing a segment
     // never moves its neighbours.
-    Text(verbatim: title)
+    return Text(verbatim: title)
       .font(.system(size: 12.5, weight: .semibold))
       .lineLimit(1)
       .hidden()
@@ -103,15 +103,16 @@ private struct SegmentButton: View {
       .padding(.horizontal, 10)
       .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: 24)
       .background {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .fill(fill)
-          .shadow(color: .black.opacity(isSelected ? 0.14 : 0), radius: 1, y: 0.5)
+        shape.fill(isHovering && isChoosable && isEnabled ? theme.surface.selected.color : .clear)
+          .overlay {
+            // Keep geometry out of the animation when a display change resizes the popover.
+            shape.fill(theme.surface.segmentSelected.color)
+              .shadow(color: .black.opacity(0.14), radius: 1, y: 0.5)
+              .animation(isChoosable && !reduceMotion ? .easeOut(duration: 0.15) : nil) { highlight in
+                highlight.opacity(isSelected ? 1 : 0)
+              }
+          }
       }
-      .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-  }
-
-  private var fill: Color {
-    if isSelected { return theme.surface.segmentSelected.color }
-    return isHovering && isChoosable && isEnabled ? theme.surface.selected.color : .clear
+      .contentShape(shape)
   }
 }
