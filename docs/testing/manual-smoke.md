@@ -689,8 +689,8 @@ unit-tested; how the menu draws and reads on real screens is not.
       hit-testing regression ([#171](https://github.com/MMFoundation/WallpaperMachine/issues/171)).
 - [ ] Use two displays where one has no **Recently used** section and the other shows at least
       one row in it. Confirm the popover changes height when you switch, then click back and
-      forth quickly. Both display names and highlights stay in the picker track throughout
-      the resize.
+      forth quickly. Both display names and highlights stay inside the picker track and hold
+      the same vertical position relative to it throughout the resize.
 - [ ] Open the menu bar item: there is one submenu per display instead of the flat
       Previous / Next / Recently used, the main display first and the others left to
       right as the screens sit on the desk. Long display names stay readable, and
