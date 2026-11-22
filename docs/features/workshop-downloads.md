@@ -848,7 +848,10 @@ work.
 - **Prompts.** Passwords and Steam Guard codes belong to that exact job; the
   dialog seeds the account per request, so switching requests cannot submit
   another one's sign-in. A submitted secret is cleared from the field immediately
-  and is not retained by the panel. **Change account** cancels that job and hands
+  and is not retained by the panel. A focused password field temporarily uses the
+  current ASCII-capable keyboard layout, restoring the previous input source on blur,
+  window deactivation or dialog dismissal; it reacquires the layout on activation only
+  if the password field remains focused. **Change account** cancels that job and hands
   the same intent back at the sign-in step. A job on the QR sign-in does not offer it
   (`DownloadRow.signsInWithQRCode`): its account is the QR sign-in's, changed by
   logging out in Settings.

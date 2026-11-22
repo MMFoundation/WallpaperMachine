@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Shared pieces
@@ -402,6 +403,8 @@ struct DownloadAuthStage: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
   @Bindable var session: DownloadsModel.Session
+  @State private var passwordInputSourceSwitcher = PasswordInputSourceSwitcher.system()
+  @State private var isApplicationActive = false
   let job: DownloadRow
   @Binding var response: String
   var focus: FocusState<DownloadDialogView.Field?>.Binding
@@ -479,6 +482,8 @@ struct DownloadAuthStage: View {
   private func promptForm(_ prompt: WorkshopDownloader.Prompt) -> some View {
     let working = controller.isBusy(PanelActionCoordinator.key("downloadInput", id: job.id))
     let secret = job.promptIsSecret
+    let passwordFieldActive = controller.presentation.isKey && isApplicationActive
+      && focus.wrappedValue == .response && secret
     return VStack(alignment: .leading, spacing: 8) {
       VStack(alignment: .leading, spacing: 6) {
         // Steam's own words ("Steam password", "Steam Guard code"), translated at run time.
@@ -501,6 +506,26 @@ struct DownloadAuthStage: View {
         .disabled(working)
         .accessibilityLabel(Text(verbatim: PanelLocale.shared.catalogString(prompt.rawValue)))
         .onSubmit(submit)
+        .onChange(
+          of: passwordFieldActive,
+          initial: true
+        ) { _, focused in
+          if focused {
+            passwordInputSourceSwitcher.focus()
+          } else {
+            passwordInputSourceSwitcher.blur()
+          }
+        }
+        .onAppear { isApplicationActive = NSApp.isActive }
+        .onReceive(
+          NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+          isApplicationActive = false
+        }
+        .onReceive(
+          NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+          isApplicationActive = true
+        }
+        .onDisappear { passwordInputSourceSwitcher.blur() }
       }
       DialogActions {
         cancelButton(controller.downloads)
