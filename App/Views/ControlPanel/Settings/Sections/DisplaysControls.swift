@@ -192,7 +192,7 @@ struct DisplaysScaleSlider: View {
       )
       .frame(width: 130)
       Text(verbatim: readout)
-        .font(.system(size: 12).monospacedDigit())
+        .font(.panel(.callout).monospacedDigit())
         .foregroundStyle(theme.surface.muted.color)
         .frame(width: 38, alignment: .trailing)
         .accessibilityHidden(true)
