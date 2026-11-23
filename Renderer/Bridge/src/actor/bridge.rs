@@ -712,6 +712,10 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
         match origin {
             PlaybackChangeOrigin::Manual => {
+                log::info!(
+                    "wallpaper playback {} by the user",
+                    if playback_state == BridgePlaybackState::Paused { "paused" } else { "resumed" }
+                );
                 // The user's latest choice is what the next launch restores, and it
                 // overrides a restored pause that has not come back yet.
                 self.state.pending_user_pause_after_initial_frame = false;

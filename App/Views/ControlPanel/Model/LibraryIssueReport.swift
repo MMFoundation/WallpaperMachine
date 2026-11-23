@@ -9,12 +9,14 @@ enum LibraryIssueReport {
   ///   - row: The installed wallpaper the report is about.
   ///   - failure: Why applying it just failed, when it did.
   ///   - renderers: What drew it, one entry for each backend that did (see `renderers(for:in:)`).
+  ///   - paused: Whether playback is paused, so a wallpaper that holds one frame is not taken for
+  ///     a renderer that stopped.
   ///   - properties: Its property rows, when the panel has them; the ones changed from the author's
   ///     default are listed (see `changedProperties(_:)`).
   ///   - missingFiles: The files the scene names and lacks, from the last compatibility check of it.
   ///   - version: The running app's version; "unknown" when the bundle has none.
   static func url(
-    for row: LibraryRow, failure: String? = nil, renderers: [String] = [],
+    for row: LibraryRow, failure: String? = nil, renderers: [String] = [], paused: Bool = false,
     properties: [BridgePropertyDescriptor] = [], missingFiles: [MissingSceneFile] = [],
     version: String? = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
       as? String
@@ -22,6 +24,7 @@ enum LibraryIssueReport {
     let workshop = ExternalLink.workshopItem(id: row.id)?.absoluteString ?? row.id
     var facts = ["**Wallpaper:** \(row.title)", "**Type:** \(row.kind.rawValue)"]
     if !renderers.isEmpty { facts.append("**Renderer:** \(renderers.joined(separator: "; "))") }
+    if paused { facts.append("**Playback:** paused") }
     if let failure { facts.append("**Error:** \(failure)") }
     let changed = changedProperties(properties)
     if !changed.isEmpty { facts.append(contentsOf: ["**Changed properties:**"] + changed) }

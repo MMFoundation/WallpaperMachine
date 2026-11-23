@@ -373,6 +373,7 @@ final class PanelLibraryStateTests: PanelTestCase {
       let version = try XCTUnwrap(
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
 
+      panel.store.appSnapshot.playbackState = .playing
       let plainFields = try fields(panel.controller.issueReportURL(for: "ghost"))
       XCTAssertEqual(plainFields["version"], version)
       XCTAssertEqual(plainFields["wallpaper"], "ghost")
@@ -380,6 +381,12 @@ final class PanelLibraryStateTests: PanelTestCase {
       XCTAssertTrue(plain.contains("**Renderer:** native_metal"), "each backend once: \(plain)")
       XCTAssertTrue(plain.contains("**Type:** Scene"))
       XCTAssertFalse(plain.contains { $0.hasPrefix("**Error:**") }, "\(plain)")
+      XCTAssertFalse(plain.contains { $0.hasPrefix("**Playback:**") }, "playing is not worth a line: \(plain)")
+
+      panel.store.appSnapshot.playbackState = .paused
+      let paused = try details(panel.controller.issueReportURL(for: "ghost"))
+      XCTAssertTrue(paused.contains("**Playback:** paused"), "\(paused)")
+      panel.store.appSnapshot.playbackState = .playing
 
       let failed = try details(panel.controller.issueReportURL(for: "ghost", failure: "The scene file is damaged."))
       XCTAssertTrue(failed.contains("**Error:** The scene file is damaged."), "\(failed)")

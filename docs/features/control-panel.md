@@ -620,7 +620,8 @@ pixiv** instead), and an installed wallpaper that can run (not
 Application) shows **Not working? Report on GitHub**. It opens the repository's
 bug report form in the browser with the wallpaper's title, Workshop link or id,
 type, app version, while it is on screen the backend drawing it (with the
-renderer's fallback reason) and, when its options are loaded in the inspector, the properties
+renderer's fallback reason), **Playback: paused** while wallpapers are paused (a paused
+wallpaper holds one frame, which reads like a stalled renderer) and, when its options are loaded in the inspector, the properties
 changed from the author's defaults pre-filled: each with its value and default, marked not
 applied only while the change still waits for **Apply changes** (a change that was applied is
 what the wallpaper uses), at most 20 with the rest counted. Typed text and the paths of chosen
@@ -671,7 +672,9 @@ shows the wallpaper selected on Installed. Its controls:
   disabled and reports **No wallpaper playing**. The choice outlives a quit: it is
   saved as `paused` under `[general]` in `config.toml`, and an app that quit paused
   pauses again at its next launch once the first wallpaper has drawn its first frame,
-  so no display starts without a picture. Pressing play or pause before then wins. A
+  so no display starts without a picture. Pressing play or pause before then wins. The
+  log records each press (`wallpaper playback paused by the user`, `… resumed by the user`)
+  and each restored pause, so a diagnostics report shows when playback was stopped. A
   pause that a playback rule made (battery, Low Power Mode, another app's sound) is not
   saved, and a saved pause with no wallpaper assigned is dropped, so it never holds
   still a wallpaper applied later. Bridge tests: `Renderer/Bridge/src/tests/saved_pause.rs`.

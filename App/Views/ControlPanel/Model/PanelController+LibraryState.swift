@@ -121,7 +121,7 @@ extension PanelController {
   }
 
   /// The problem report of an installed wallpaper: GitHub's bug report form with the app version,
-  /// the backend drawing it, the properties changed from their defaults when its options are the
+  /// the backend drawing it, whether playback is paused, the properties changed from their defaults when its options are the
   /// ones loaded, the files a scene lacks when its compatibility check found any, and `failure`
   /// when applying it just failed. Nil for a wallpaper that is not installed or when the repository
   /// address cannot carry the draft.
@@ -132,6 +132,7 @@ extension PanelController {
     return LibraryIssueReport.url(
       for: row, failure: failure,
       renderers: LibraryIssueReport.renderers(for: id, in: store.settingsSnapshot),
+      paused: isPlaybackPaused,
       properties: options?.properties ?? [],
       missingFiles: checked.first { $0.id == "missingFiles" }?.missingFiles ?? [])
   }
