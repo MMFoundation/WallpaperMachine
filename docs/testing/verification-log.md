@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-23 — Scale percentage slider for a display (#248)
+
+A slider from 10% to 100% that sets a display's scale factor, in the inspector's display card and in Settings › Displays.
+
+- `python3 scripts/test.py` (Python 3.15) — exit 0; 36 Python modules passed; native 5223 tests: 5153 passed, 70 skipped, 0 failed. Run with the energy-ratings refresh fix applied, which ships as its own change.
+- The same gate without that fix — 5152 passed, 1 failed: `PanelLibraryRowsTests/testRefreshEnergyRatingsRebuildsAndNotifiesOnlyWhenRatingsMoved`, which fails the same way on `main` at `2f7cd127` without this change.
+- `python3 scripts/test.py --only InspectorInputTests --only InspectorRenderTests/testADisplayCardsScaleSliderSendsTheScaleFactorOfThePercentageItSettlesOn` — 7 passed.
+- Not checked: the slider on a real display (no desktop run was requested), the row's layout by eye in the five languages, and the Settings › Displays slider, which no automated test drives. No Release build.
+
 ## 2026-11-21 — Installed library sort by Energy use (#251)
 
 - `python3 scripts/test.py --python-only` — exit 0; all 36 Python modules passed (including `test_panel_localization.py`, `test_localization_catalogs.py`, `test_doc_links.py`).
@@ -113,16 +122,3 @@ Documented the release package, named settings and extraSettings, and Home Manag
 - `python3 scripts/check_renderer.py`: 3,530 tests passed, seven optional corpus/media skips; all 12 synthetic pixel cases and reload cycles passed. The earlier pipeline was deliberately stopped before the combined correction and is not final-source evidence.
 - The combined pipeline survived a device disconnect; surviving processes and exact-source logs were checked before continuing. No duplicate suite was started. Heavy processes were confirmed absent before releasing the shared Mac slot.
 - No Release app, live audio/player test, permission prompt, desktop action or energy measurement. Media replay remains driven by host reconciliation; automatic surface recovery without a snapshot waits for the next reconciliation trigger.
-
-## 2026-11-16 — Issue #215: audio startup and media replay
-
-- Issue #215: repair activation-time audio capture and replay system media to a replacement renderer on a retained display handle; no wallpaper-specific conditions or per-frame work.
-- Both audio ordering regressions failed before the fix (capture left suspended; response/registration overwritten); the same-handle media replay regression also failed before comparing renderer load IDs.
-- Targeted native media tests: 23 passed. Targeted bridge operation/audio/media tests: 168 passed, including the new media-instance consent and presentation test.
-- `python3 scripts/check_rust.py` passed: core 436, bridge 975, integration and shader suites all passed. Five desktop-window tests excluded; live media/network opt-ins disabled.
-- `python3 scripts/build.py --renderer-only` passed and regenerated Swift/FFI bindings from the changed bridge API.
-- `python3 scripts/test.py` ran once as the final routine gate: 718 Python tests across 35 modules and 5,071 native tests passed; 70 native skips, no failures. Four main-thread runtime warnings had no source location; compiler/linker warnings also remain.
-- `python3 scripts/check_renderer.py` passed: 3,530 tests, seven optional corpus/media skips; all 12 generated pixel cases and reload cycles passed.
-- `we_reference.py capture/render/compare` used Wallpaper Engine frames for the reported item. Static before/after output was unchanged: MAD 32.90/33.68 and off48 25.5%/26.1% versus the two references. Existing scene-image differences remain; muted static captures do not verify live music or capture startup.
-- The actual wallpaper rendered synthetic song/artist/cover input with 63 generated spectrum bars, nonzero audio response and zero script errors. Lifecycle regressions verify the host fixes without opening an audio device.
-- No Release build, installed-app restart, live player, system audio capture, permission prompt or Mac desktop test. The VM was already running for another task and was returned to that task after capture.

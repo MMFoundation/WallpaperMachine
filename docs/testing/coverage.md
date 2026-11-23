@@ -1471,7 +1471,9 @@ never to `.shared`.
   problem leads the line and is never said to play; nothing named before the runtime reports it,
   and no such line promised for a web page; a collapsed display card's summary, part by part,
   with the frame-rate limit named in place of the rate and what waits left to the Not applied
-  mark), `InspectorInputTests` (among the typed numbers, the
+  mark), `InspectorInputTests` (among the typed numbers, the Scale percentage slider as
+  the scale factor in whole percentages from 10 to 100 that asks for nothing where the factor
+  already holds the thumb, the
   Modified and Not applied pills drawn at the width a row counts for them in every language, so
   neither moves a control), `InspectorEngineOptionsTests` (among the engine rows, the section open
   for an option that waits even at its default, Not applied for
@@ -1489,7 +1491,8 @@ never to `.shared`.
   aloud only while an edit waits; the Compatibility card's renderer lines, with a problem, wrap in the narrowest column
   in every language; the Presets and Collections cards' buttons (Apply, the Delete confirmation, the
   name forms) as wide in the narrowest column as with all the room they want, in every language;
-  a slider's VoiceOver, key and pointer changes reach the bridge; the row whose
+  a slider's VoiceOver, key and pointer changes reach the bridge; a display card's Scale
+  percentage slider sends the scale factor at a key press and at the release of a drag; the row whose
   edit brings the footer in scrolled clear of it, and Apply changes and Revert said aloud once done),
   `PropertyLabelDocumentTests` (the label allowlist: entities, emphasis, colours, lists, broken
   markup, scripts and controls dropped, links only to allowed hosts, registered images only,

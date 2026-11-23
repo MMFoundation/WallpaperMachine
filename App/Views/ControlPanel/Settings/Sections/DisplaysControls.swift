@@ -1,7 +1,7 @@
 import SwiftUI
 
-// The controls the Displays page's rows hold (`DisplaysRow`): number fields, the Volume slider, the
-// naming form, result lines and menus of the user's own titles.
+// The controls the Displays page's rows hold (`DisplaysRow`): number fields, the Volume and Scale
+// percentage sliders, the naming form, result lines and menus of the user's own titles.
 
 /// A number field that commits when it is submitted or left, never per keystroke. A text that is not
 /// a number the control accepts sends nothing: it stays in the field, which says what it accepts
@@ -119,9 +119,11 @@ struct DisplaysUnitLabel: View {
   }
 }
 
-/// The Volume slider: the readout follows the drag, and the change is sent when it is let go.
-struct DisplaysVolumeSlider: View {
+/// The Volume and Scale percentage sliders, a fraction shown as a percentage: the readout follows the drag, and
+/// the change is sent when it is let go.
+struct DisplaysPercentSlider: View {
   let value: Double
+  var range: ClosedRange<Double> = 0...1
   let commit: @MainActor (Double) async -> Void
 
   @Environment(\.panelTheme) private var theme
@@ -132,7 +134,7 @@ struct DisplaysVolumeSlider: View {
   var body: some View {
     HStack(spacing: 8) {
       Slider(
-        value: Binding(get: { live ?? value }, set: { live = $0 }), in: 0...1,
+        value: Binding(get: { live ?? value }, set: { live = $0 }), in: range,
         onEditingChanged: { editing in
           guard !editing, let final = live else { return }
           Task {

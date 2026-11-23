@@ -4706,6 +4706,12 @@
     "Zooms the wallpaper after scaling: 1 keeps its size, more than 1 enlarges it and crops what no longer fits, less than 1 shrinks it." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Aplica zoom ao papel de parede depois da escala: 1 mantém o tamanho, mais que 1 o amplia e corta o que não cabe mais, menos que 1 o reduz."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "크기 조절 후 배경화면을 확대·축소합니다: 1은 크기를 유지하고, 1보다 크면 확대되어 화면을 벗어나는 부분이 잘리며, 1보다 작으면 축소됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "拡大縮小の後に壁紙をズームします：1でそのまま、1より大きいと拡大してはみ出す部分を切り取り、1より小さいと縮小します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "在缩放之后再放大或缩小壁纸：1 保持大小，大于 1 会放大并裁掉超出的部分，小于 1 会缩小。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "在縮放之後再放大或縮小桌布：1 維持大小，大於 1 會放大並裁掉超出的部分，小於 1 會縮小。"}}}
     },
+    "Scale percentage" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Porcentagem de escala"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배율 백분율"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "スケールの割合"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "缩放百分比"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "縮放百分比"}}}
+    },
+    "Shrinks the wallpaper to a percentage of its size after scaling. It sets Scale factor: 80% is a factor of 0.8." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reduz o papel de parede a uma porcentagem do tamanho que ele tem depois da escala. Define o Fator de escala: 80% é um fator de 0,8."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면을 크기 조절 후 크기의 일정 비율로 축소합니다. 배율 계수를 설정하며, 80%는 계수 0.8입니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙を拡大縮小後のサイズに対する割合まで縮小します。スケール倍率を設定します：80% は倍率 0.8 です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "把壁纸缩小到缩放后大小的一定百分比。它设置的就是缩放系数：80% 即系数 0.8。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "將桌布縮小到縮放後大小的一定百分比。它設定的就是縮放係數：80% 即係數 0.8。"}}}
+    },
     "Frame rate" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Taxa de quadros"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "프레임률"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "フレームレート"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "帧率"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影格率"}}}
     },

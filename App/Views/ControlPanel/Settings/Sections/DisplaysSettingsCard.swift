@@ -224,6 +224,24 @@ struct DisplaysPlaybackDisclosure: View {
       }
 
       DisplaysRow(
+        item: DisplaysSettingsSection.scale, forced: forced, identity: display.id,
+        controlLabel: label(DisplaysSettingsSection.scale.title)
+      ) {
+        DisplaysPercentSlider(
+          value: ScaleSlider.percent(for: display.scalingFactor) / 100,
+          range: (ScaleSlider.range.lowerBound / 100)...(ScaleSlider.range.upperBound / 100),
+          commit: { fraction in
+            guard let factor = ScaleSlider.factor(for: fraction * 100, current: display.scalingFactor)
+            else { return }
+            await controller.launch(
+              PanelActionCoordinator.key("displaySetting", id: display.id, detail: "scalingFactor")
+            ) { try await controller.setDisplay(display.id, .scalingFactor(factor)) }.value
+          }
+        )
+        .disabled(playbackOff)
+      }
+
+      DisplaysRow(
         item: DisplaysSettingsSection.frameRate, forced: forced, identity: display.id,
         controlLabel: label(DisplaysSettingsSection.frameRate.title)
       ) {
@@ -277,7 +295,7 @@ struct DisplaysPlaybackDisclosure: View {
         item: DisplaysSettingsSection.volume, forced: forced, identity: display.id,
         controlLabel: label(DisplaysSettingsSection.volume.title)
       ) {
-        DisplaysVolumeSlider(
+        DisplaysPercentSlider(
           value: Double(display.volume),
           commit: { volume in
             await controller.launch(

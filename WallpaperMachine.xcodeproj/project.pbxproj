@@ -1094,6 +1094,7 @@
 		EC7843083E138A46563C7E42 /* LibraryPreviewFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C77B3407E1AF330E1B8A2DC /* LibraryPreviewFetcher.swift */; };
 		EC7F08DFB281415098CCF0AE /* PanelShellActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAF02A3FA12DA36B5F1C3BCF /* PanelShellActionsTests.swift */; };
 		EC9865F1C1DC505A15A01388 /* PropertyLabelDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050D7D0C63C6579931606404 /* PropertyLabelDocumentTests.swift */; };
+		ECB932CCCDCA2EB453A351C6 /* ScaleSlider.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9D0C5FCD7AEDC58DC441333 /* ScaleSlider.swift */; };
 		ECEBB465C479BF63EED2D0EC /* RuntimeCounters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37504A9CCC0640CBE43CC077 /* RuntimeCounters.swift */; };
 		ED04FDD478D0031D954376DB /* PanelPropertyDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B36492D920F54AE6A713CC4 /* PanelPropertyDraftTests.swift */; };
 		ED0D2CDA03552FBD3181229A /* repeat.m in Sources */ = {isa = PBXBuildFile; fileRef = B870733BCBDD61F25FF8AB2E /* repeat.m */; };
@@ -2257,6 +2258,7 @@
 		D910CA2D9662F6DE0E413529 /* WallpaperBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperBridge.swift; sourceTree = "<group>"; };
 		D921EE757E3966ADDFC9F67E /* DisplaysSettingsSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplaysSettingsSearchTests.swift; sourceTree = "<group>"; };
 		D986C419D783E7B02F4E7598 /* ApplyOffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplyOffer.swift; sourceTree = "<group>"; };
+		D9D0C5FCD7AEDC58DC441333 /* ScaleSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScaleSlider.swift; sourceTree = "<group>"; };
 		D9E8F28638A847066FF135C0 /* PanelController+InspectorSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelController+InspectorSync.swift"; sourceTree = "<group>"; };
 		D9FCB5623311B5A4822C2DFD /* PanelLibraryRemovalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelLibraryRemovalTests.swift; sourceTree = "<group>"; };
 		DA0A75C634AFC0EA2C95BCDD /* DesktopClickRevealPreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopClickRevealPreference.swift; sourceTree = "<group>"; };
@@ -3801,6 +3803,7 @@
 				2B6548F220EBEE20BFF6CEAE /* QualityPreset.swift */,
 				0387C0FFD431890B30059AF5 /* QualityReport.swift */,
 				40DC35273D6D601C20EA2DE8 /* ResultPager.swift */,
+				D9D0C5FCD7AEDC58DC441333 /* ScaleSlider.swift */,
 				D37AD48DBA63459A4F904B89 /* SceneQualityChoices.swift */,
 				0316B4FC6110C8C80F69B6F6 /* SceneReports.swift */,
 				47C03C5ED9FAF0D3D8D7CF88 /* SearchTranslationSettings.swift */,
@@ -5476,6 +5479,7 @@
 				674E0B7F1AEA29DEA8B4A7CA /* RomanTextField.swift in Sources */,
 				992FF06C1A7340982190EDCA /* RuntimeCounters.swift in Sources */,
 				2BBEEB18CDA5302152321AD4 /* RuntimeDiagnosticsSession.swift in Sources */,
+				ECB932CCCDCA2EB453A351C6 /* ScaleSlider.swift in Sources */,
 				944E342683953E3C89A839AB /* SceneDrawVerdicts.swift in Sources */,
 				8E8A49423E4D3434D0491AA7 /* SceneEngineOptionsBinding.swift in Sources */,
 				03C71384C6CFB98AD13A834C /* SceneMediaSink.swift in Sources */,

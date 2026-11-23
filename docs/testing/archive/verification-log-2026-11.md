@@ -9,6 +9,19 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-16 — Issue #215: audio startup and media replay
+
+- Issue #215: repair activation-time audio capture and replay system media to a replacement renderer on a retained display handle; no wallpaper-specific conditions or per-frame work.
+- Both audio ordering regressions failed before the fix (capture left suspended; response/registration overwritten); the same-handle media replay regression also failed before comparing renderer load IDs.
+- Targeted native media tests: 23 passed. Targeted bridge operation/audio/media tests: 168 passed, including the new media-instance consent and presentation test.
+- `python3 scripts/check_rust.py` passed: core 436, bridge 975, integration and shader suites all passed. Five desktop-window tests excluded; live media/network opt-ins disabled.
+- `python3 scripts/build.py --renderer-only` passed and regenerated Swift/FFI bindings from the changed bridge API.
+- `python3 scripts/test.py` ran once as the final routine gate: 718 Python tests across 35 modules and 5,071 native tests passed; 70 native skips, no failures. Four main-thread runtime warnings had no source location; compiler/linker warnings also remain.
+- `python3 scripts/check_renderer.py` passed: 3,530 tests, seven optional corpus/media skips; all 12 generated pixel cases and reload cycles passed.
+- `we_reference.py capture/render/compare` used Wallpaper Engine frames for the reported item. Static before/after output was unchanged: MAD 32.90/33.68 and off48 25.5%/26.1% versus the two references. Existing scene-image differences remain; muted static captures do not verify live music or capture startup.
+- The actual wallpaper rendered synthetic song/artist/cover input with 63 generated spectrum bars, nonzero audio response and zero script errors. Lifecycle regressions verify the host fixes without opening an audio device.
+- No Release build, installed-app restart, live player, system audio capture, permission prompt or Mac desktop test. The VM was already running for another task and was returned to that task after capture.
+
 ## 2026-11-16 — Preserve native readiness across disabled-source normalization (#193)
 
 - Normalize only disabled source fields consistently in partial-disable and prepared manifests; retain active absent-versus-empty semantics. Update the successful-input cache only after readiness is confirmed.

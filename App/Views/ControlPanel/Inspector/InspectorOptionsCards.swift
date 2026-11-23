@@ -152,8 +152,8 @@ struct DisplaysCard: View {
   }
 }
 
-/// One display's playback of the wallpaper: Enabled, Scaling mode and Scale factor, Frame rate,
-/// where the wallpaper sits, and Remove from display. Scaling mode, Frame rate and the position are
+/// One display's playback of the wallpaper: Enabled, Scaling mode, Scale factor and its Scale
+/// percentage slider, Frame rate, where the wallpaper sits, and Remove from display. Scaling mode, Frame rate and the position are
 /// saved at once; Enabled and the Scale factor are drafts that wait for Apply changes, and while
 /// one of them does the card shows the **Not applied** mark under its name, apart from any line
 /// that could be cut short.
@@ -283,6 +283,10 @@ struct DisplayCard: View {
 /// The scale factor is a number the person types: parsed in the panel's locale, held until Return or
 /// the end of editing, and refused in place (never sent as 0) when it is not a finite number above
 /// zero. It is a draft, so Apply changes saves it and Revert undoes it.
+///
+/// Under the field the Scale percentage slider sets the same draft as a whole percentage from 10 to 100
+/// (`ScaleSlider`), to shrink the wallpaper below the size its scaling mode gives it. It sends the
+/// factor when the thumb is released or at each key step; nothing follows a drag before that.
 private struct ScaleFactorRow: View {
   let options: InspectorOptions
   let display: InspectorOptions.DisplayRow
@@ -298,6 +302,13 @@ private struct ScaleFactorRow: View {
   private var explanation: String {
     L(
       "Zooms the wallpaper after scaling: 1 keeps its size, more than 1 enlarges it and crops what no longer fits, less than 1 shrinks it."
+    )
+  }
+
+  /// What the slider does; Settings → Displays says it as the Scale percentage row's note.
+  private var sliderExplanation: String {
+    L(
+      "Shrinks the wallpaper to a percentage of its size after scaling. It sets Scale factor: 80% is a factor of 0.8."
     )
   }
 
@@ -332,6 +343,13 @@ private struct ScaleFactorRow: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .accessibilityAddTraits(.updatesFrequently)
       }
+      InspectorSliderRow(
+        title: "Scale percentage", value: ScaleSlider.percent(for: display.scalingFactor),
+        range: ScaleSlider.range, step: 1, accessibilityLabel: L("Scale percentage"),
+        format: { InspectorWording.percent($0 / 100) },
+        onRelease: slide, onStep: slide
+      )
+      .help(sliderExplanation)
     }
     .disabled(controller.isInspectorControlDisabled(options, key: key))
     .onAppear { refresh() }
@@ -353,11 +371,21 @@ private struct ScaleFactorRow: View {
     }
     issue = nil
     guard value != display.scalingFactor else { return }
+    send(value)
+  }
+
+  /// The slider settled on `percent`, by a release or a key step.
+  private func slide(_ percent: Double) -> Task<Void, Never>? {
+    ScaleSlider.factor(for: percent, current: display.scalingFactor).map(send)
+  }
+
+  @discardableResult
+  private func send(_ factor: Double) -> Task<Void, Never> {
     let id = options.wallpaperID
     let key = InspectorAction.displayConfig(id, display: display.id, "scalingFactor")
     editedRow?.note(key)
-    controller.launch(key, policy: .latestWins) {
-      try await controller.setScalingFactor(value, on: display.id, for: id)
+    return controller.launch(key, policy: .latestWins) {
+      try await controller.setScalingFactor(factor, on: display.id, for: id)
     }
   }
 }
