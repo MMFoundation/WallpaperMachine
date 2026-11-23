@@ -156,6 +156,7 @@ when the thumb is released, or at each keyboard step, and waits for **Apply chan
 typed one, and the field shows it at once. The row stays usable while a factor is on its way,
 and the value chosen last is the one that stays. A factor above 1 holds the thumb at 100% and
 the field keeps the exact number; letting the thumb go where it already was changes nothing.
+A web page always fills its window, so a web wallpaper's card has the field but no slider.
 **Settings › Displays** has the same slider under its **Scale factor** row, for every display
 whose playback can be adjusted. Like that page's other playback rows it does not wait: the
 factor is applied when the thumb is released, together with anything else of that wallpaper

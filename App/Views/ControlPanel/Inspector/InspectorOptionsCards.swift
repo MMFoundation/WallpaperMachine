@@ -286,7 +286,8 @@ struct DisplayCard: View {
 ///
 /// Under the field the Scale percentage slider sets the same draft as a whole percentage from 10 to 100
 /// (`ScaleSlider`), to shrink the wallpaper below the size its scaling mode gives it. It sends the
-/// factor when the thumb is released or at each key step; nothing follows a drag before that.
+/// factor when the thumb is released or at each key step; nothing follows a drag before that. A web
+/// page always fills its window, so its card has no slider (`InspectorPolicy.offersScalePercentage`).
 ///
 /// The row stays enabled while its own edit is on its way, so both controls compare a new value with
 /// the factor last asked for until that is answered (`RequestedValue`), not with the saved one: a
@@ -351,13 +352,15 @@ private struct ScaleFactorRow: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .accessibilityAddTraits(.updatesFrequently)
       }
-      InspectorSliderRow(
-        title: "Scale percentage", value: ScaleSlider.percent(for: factor),
-        range: ScaleSlider.range, step: 1, accessibilityLabel: L("Scale percentage"),
-        format: { InspectorWording.percent($0 / 100) },
-        onRelease: slide, onStep: slide
-      )
-      .help(sliderExplanation)
+      if InspectorPolicy.offersScalePercentage(options) {
+        InspectorSliderRow(
+          title: "Scale percentage", value: ScaleSlider.percent(for: factor),
+          range: ScaleSlider.range, step: 1, accessibilityLabel: L("Scale percentage"),
+          format: { InspectorWording.percent($0 / 100) },
+          onRelease: slide, onStep: slide
+        )
+        .help(sliderExplanation)
+      }
     }
     .disabled(controller.isInspectorControlDisabled(options, key: key))
     .onAppear { refresh() }

@@ -1466,7 +1466,8 @@ never to `.shared`.
   views row and Play side by side inside the narrowest page column in every language with the
   collection keeping a readable name and its whole name as the tooltip).
 - Inspector: `InspectorPolicyTests` (among its rules, the Revert and Apply changes footer and its
-  accent Apply changes only while an edit waits), `InspectorWordingTests` (among its sentences, what draws
+  accent Apply changes only while an edit waits, and the Scale percentage slider offered for a
+  scene or a video and not for a web page), `InspectorWordingTests` (among its sentences, what draws
   the wallpaper said in words, with the renderer's id kept as it is on the detail line; a reported
   problem leads the line and is never said to play; nothing named before the runtime reports it,
   and no such line promised for a web page; a collapsed display card's summary, part by part,

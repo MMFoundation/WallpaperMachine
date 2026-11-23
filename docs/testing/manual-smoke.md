@@ -393,7 +393,8 @@ reuse, or visual behavior, which is why these items are manual.
       stays, and the mark goes. Type a factor of 1.5: the slider stays at 100%, and clicking its
       thumb without moving it leaves 1.5. The slider's ends are 10% and 100%, arrow keys move
       it a percent at a time, and the **Scale percentage** slider in **Settings › Displays**
-      shows and sets the same value.
+      shows and sets the same value. A web wallpaper's display card has **Scale factor** and no
+      slider.
 - [ ] The Position sliders by keyboard and screen reader: arrow keys on a focused slider move
       it a step at a time and keep the focus, VoiceOver reads each slider's name and
       percentage and **Center**, and at the narrowest panel width the sliders, the **Center**
