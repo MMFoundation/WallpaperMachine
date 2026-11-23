@@ -389,10 +389,11 @@ reuse, or visual behavior, which is why these items are manual.
       **Scale percentage** slider to 80% and let go. The **Scale factor** field reads 0.8, the
       card shows **Not applied**, the wallpaper shrinks to four fifths of its Fill size on the
       display, and the Position sliders move it inside the room that leaves. **Revert** restores
-      1 and 100%; **Apply changes** keeps it. Type a factor of 1.5: the slider stays at 100%, and
-      clicking its thumb without moving it leaves 1.5. The slider's ends are 10% and 100%, arrow
-      keys move it a percent at a time, and the **Scale percentage** slider in **Settings ›
-      Displays** shows and sets the same value.
+      1 and 100% on the card and on the display. Set 80% again and choose **Apply changes**: it
+      stays, and the mark goes. Type a factor of 1.5: the slider stays at 100%, and clicking its
+      thumb without moving it leaves 1.5. The slider's ends are 10% and 100%, arrow keys move
+      it a percent at a time, and the **Scale percentage** slider in **Settings › Displays**
+      shows and sets the same value.
 - [ ] The Position sliders by keyboard and screen reader: arrow keys on a focused slider move
       it a step at a time and keep the focus, VoiceOver reads each slider's name and
       percentage and **Center**, and at the narrowest panel width the sliders, the **Center**

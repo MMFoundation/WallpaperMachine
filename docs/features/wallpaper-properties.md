@@ -155,8 +155,11 @@ factor of 0.8); the [position sliders](#display-position) then place it. The fac
 when the thumb is released, or at each keyboard step, and waits for **Apply changes** like a
 typed one, and the field shows it at once. The row stays usable while a factor is on its way,
 and the value chosen last is the one that stays. A factor above 1 holds the thumb at 100% and
-the field keeps the exact number; letting the thumb go where it already was changes nothing. **Settings › Displays** has the
-same slider under its **Scale factor** row.
+the field keeps the exact number; letting the thumb go where it already was changes nothing.
+**Settings › Displays** has the same slider under its **Scale factor** row, for every display
+whose playback can be adjusted. Like that page's other playback rows it does not wait: the
+factor is applied when the thumb is released, together with anything else of that wallpaper
+still waiting for **Apply changes**.
 General, display and property disclosures keep their state while the same
 wallpaper stays selected; another wallpaper starts at the top with its sections at their
 defaults.
@@ -507,7 +510,7 @@ A scene or video wallpaper's card for each display, in the inspector's **Display
 section, has **Horizontal position** and **Vertical position** sliders (0 to 100%, 50% is
 the middle) and a **Center** link, below the frame rate. They decide where the wallpaper
 sits when the display leaves room around it (Fit, Fit with blurred backdrop, Original
-size, or a Scale factor or Scale percentage below 1) and which part stays in view when it is larger than the
+size, or a Scale factor below 1, which is a Scale percentage below 100%) and which part stays in view when it is larger than the
 display (Fill, or a factor above 1). Nothing moves when it already fits the display exactly, and an axis
 with no room to spare does not move; the note under the sliders says so. The block is
 not offered for a web wallpaper (an image page keeps **Position on screen**, above),
