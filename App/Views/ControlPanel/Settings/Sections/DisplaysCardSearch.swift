@@ -125,7 +125,7 @@ struct DisplaysCardSearch {
       }
       return [S.automationMode] + body + [S.automationFooter]
     case S.playback.id:
-      return [S.scaling, S.scaleFactor, S.frameRate, S.mute, S.volume]
+      return [S.scaling, S.scaleFactor, S.scale, S.frameRate, S.mute, S.volume]
     default:
       return []
     }

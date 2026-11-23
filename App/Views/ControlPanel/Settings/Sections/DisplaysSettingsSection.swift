@@ -186,6 +186,11 @@ struct DisplaysSettingsSection: View {
     note:
       "Zooms the wallpaper after scaling: 1 keeps its size, more than 1 enlarges it and crops what no longer fits, less than 1 shrinks it."
   )
+  static let scale = SettingsItem(
+    id: "displays.scale", section: .displays, inside: playback, title: "Scale percentage",
+    note:
+      "Shrinks the wallpaper to a percentage of its size after scaling. It sets Scale factor: 80% is a factor of 0.8."
+  )
   static let frameRate = SettingsItem(
     id: "displays.frame-rate", section: .displays, inside: playback, title: "Frame rate",
     keywords: [
@@ -245,7 +250,7 @@ struct DisplaysSettingsSection: View {
     transfer, transferPeer,
     automation, automationMode, automationLight, automationDark,
     automationSchedule, automationFooter,
-    playback, scaling, scaleFactor, frameRate, mute, volume,
+    playback, scaling, scaleFactor, scale, frameRate, mute, volume,
     layoutsSave, plansList, solarIntro, solarSource, solarSunrise, solarSunset,
     solarLongitude, solarActions,
   ]

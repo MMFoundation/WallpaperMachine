@@ -343,6 +343,16 @@ final class InspectorPolicyTests: InspectorTestCase {
       "a clip plays at its own rate on the native player; another display of it keeps the row")
   }
 
+  func testTheScalePercentageSliderIsOfferedWhereTheScaleFactorSizesAPicture() {
+    func offered(_ kind: BridgeWallpaperKind) -> Bool {
+      InspectorPolicy.offersScalePercentage(
+        InspectorOptions.make(BridgeSnapshotFixtures.options(wallpaperId: "w", kind: kind)))
+    }
+    XCTAssertTrue(offered(.projectScene))
+    XCTAssertTrue(offered(.video))
+    XCTAssertFalse(offered(.webpage), "a web page always fills its window")
+  }
+
   func testFitWithBlurredBackdropIsOfferedWhereAScalingModeMovesThePicture() {
     let configurations = [
       InspectorRenderFixture.config("primary", "Studio Display (1 - Primary)", mode: .fill, factor: 1, pan: (0.5, 0.5)),

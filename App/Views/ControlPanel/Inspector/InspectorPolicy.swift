@@ -143,6 +143,12 @@ enum InspectorPolicy {
     !display.isDrawnByNativePlayer
   }
 
+  // MARK: Scale percentage
+
+  /// The Scale percentage slider is offered where the scale factor sizes a picture: scene and video
+  /// wallpapers. A web page always fills its window, so a slider for shrinking it would do nothing.
+  static func offersScalePercentage(_ options: InspectorOptions) -> Bool { options.offersPosition }
+
   // MARK: Fit with blurred backdrop
 
   /// Fit with blurred backdrop is offered where the scaling mode moves a picture: scene and video wallpapers. A

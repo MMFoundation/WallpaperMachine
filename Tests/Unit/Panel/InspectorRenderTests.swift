@@ -856,4 +856,118 @@ final class InspectorRenderTests: InspectorTestCase {
     window.contentView = nil
     await fixture.shutdown()
   }
+
+  /// A display card's Scale percentage slider sets the display's scale factor: a key press at once,
+  /// a pointer drag when it is released and never before, and a drag that ends where the factor
+  /// already put the thumb sends nothing.
+  func testADisplayCardsScaleSliderSendsTheScaleFactorOfThePercentageItSettlesOn() async throws {
+    let fixture = try InspectorRenderFixture()
+    try await prepare(fixture)
+    var snapshot = try XCTUnwrap(fixture.store.wallpaperOptionsSnapshot)
+    snapshot.displayConfigurations = [
+      InspectorRenderFixture.config(
+        "primary", "Studio Display (1 - Primary)", mode: .fill, factor: 1.34, pan: (0.5, 0.5))
+    ]
+    let options = InspectorOptions.make(snapshot)
+    let (window, view) = fixture.host(size: NSSize(width: 320, height: 900)) {
+      DisplayCard(options: options, display: options.displays[0])
+    }
+    try await settle(300)
+    view.layoutSubtreeIfNeeded()
+    let scale = try slider("Scale percentage", in: view)
+    XCTAssertEqual(scale.minValue, 10)
+    XCTAssertEqual(scale.maxValue, 100)
+    XCTAssertEqual(scale.doubleValue, 100, "a factor above 1 holds the thumb at the top")
+
+    // A drag away and back to the top leaves ×1.34 alone.
+    scale.beginPointer()
+    scale.doubleValue = 60
+    scale.valueDidChange(nil)
+    scale.doubleValue = 100
+    scale.valueDidChange(nil)
+    scale.endPointer()
+    try await settle(200)
+    XCTAssertTrue(fixture.bridge.scalingFactorCalls.isEmpty)
+
+    // A key press is sent at once.
+    scale.keyDown(
+      with: NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+        context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 123)!)
+    // Before the renderer has heard of it, the field beside the slider shows the factor the slider
+    // chose, so nothing older is left in it to send. (This card's options are fixed, so once the
+    // save is answered the field shows their 1.34 again.)
+    let format = WallpaperEditorState.scalingFormat(locale: PanelLocale.shared.locale)
+    view.layoutSubtreeIfNeeded()
+    let typed = views(NSTextField.self, in: view).filter(\.isEditable).map(\.stringValue)
+    XCTAssertTrue(fixture.bridge.scalingFactorCalls.isEmpty)
+    XCTAssertTrue(typed.contains(0.99.formatted(format)), "\(typed)")
+    XCTAssertFalse(typed.contains(1.34.formatted(format)), "\(typed)")
+    try await fixture.panel.waitUntil(timeout: 5) { fixture.bridge.scalingFactorCalls.count == 1 }
+    XCTAssertEqual(fixture.bridge.scalingFactorCalls.last?.displayId, "primary")
+    XCTAssertEqual(fixture.bridge.scalingFactorCalls.last?.factor, 0.99)
+
+    // A drag sends nothing until the pointer comes up, then the factor of where it settled.
+    scale.beginPointer()
+    scale.doubleValue = 80
+    scale.valueDidChange(nil)
+    try await settle(200)
+    XCTAssertEqual(fixture.bridge.scalingFactorCalls.count, 1, "dragging sends nothing")
+    scale.endPointer()
+    try await fixture.panel.waitUntil(timeout: 5) { fixture.bridge.scalingFactorCalls.count == 2 }
+    XCTAssertEqual(fixture.bridge.scalingFactorCalls.last?.factor, 0.8)
+    XCTAssertNil(fixture.controller.errors.message)
+    window.contentView = nil
+    await fixture.shutdown()
+  }
+
+  /// The row stays enabled while its own edit is on its way. A step up and straight back down,
+  /// before the first has reached the renderer, asks for the starting factor again: compared with
+  /// the saved factor the step back would look like no change, and the step up would stay.
+  func testAScaleSliderStepTakenBackBeforeItIsAnsweredAsksForTheOlderFactorAgain() async throws {
+    let fixture = try InspectorRenderFixture()
+    try await prepare(fixture)
+    var snapshot = try XCTUnwrap(fixture.store.wallpaperOptionsSnapshot)
+    snapshot.displayConfigurations = [
+      InspectorRenderFixture.config(
+        "primary", "Studio Display (1 - Primary)", mode: .fill, factor: 0.8, pan: (0.5, 0.5))
+    ]
+    let options = InspectorOptions.make(snapshot)
+    let (window, view) = fixture.host(size: NSSize(width: 320, height: 900)) {
+      DisplayCard(options: options, display: options.displays[0])
+    }
+    try await settle(300)
+    view.layoutSubtreeIfNeeded()
+    let scale = try slider("Scale percentage", in: view)
+    XCTAssertEqual(scale.doubleValue, 80)
+    func press(_ keyCode: UInt16) {
+      scale.keyDown(
+        with: NSEvent.keyEvent(
+          with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+          context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
+          keyCode: keyCode)!)
+    }
+
+    // Both presses land in one turn of the main actor, so the first edit has not started.
+    press(124)  // right: 81%
+    press(123)  // left: 80%
+    XCTAssertTrue(fixture.bridge.scalingFactorCalls.isEmpty)
+    try await fixture.panel.waitUntil(timeout: 5) { fixture.bridge.scalingFactorCalls.count == 2 }
+    XCTAssertEqual(fixture.bridge.scalingFactorCalls.map(\.factor), [0.81, 0.8], "the newest lands last")
+    try await settle(300)
+    XCTAssertEqual(fixture.bridge.scalingFactorCalls.count, 2)
+
+    // Answered, the row compares with the saved factor again: where it is, nothing is asked for.
+    scale.beginPointer()
+    scale.doubleValue = 60
+    scale.valueDidChange(nil)
+    scale.doubleValue = 80
+    scale.valueDidChange(nil)
+    scale.endPointer()
+    try await settle(300)
+    XCTAssertEqual(fixture.bridge.scalingFactorCalls.count, 2)
+    XCTAssertNil(fixture.controller.errors.message)
+    window.contentView = nil
+    await fixture.shutdown()
+  }
 }

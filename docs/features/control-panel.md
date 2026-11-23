@@ -940,7 +940,9 @@ wallpaper** help names it too. Disabled and mirrored displays are listed but not
 can no longer be chosen stays stored (the menu bar and automation read it) and the menu reads
 **Target display** until another is picked.
 Per-display enablement, independent/mirror mode, mirror source, scaling (No scaling,
-Stretch, Match, Match with blurred backdrop, Fill), scale factor, frame rate, mute and
+Stretch, Match, Match with blurred backdrop, Fill), scale factor, scale percentage (a slider
+from 10% to 100% that sets the scale factor, see
+[wallpaper properties](wallpaper-properties.md)), frame rate, mute and
 volume live in **Settings → Displays**, beside each
 independent display's **Playlist** (see [playlists](playlists.md)). When the frame-rate
 ceiling in force is below the saved frame rate, the field notes it and names what set

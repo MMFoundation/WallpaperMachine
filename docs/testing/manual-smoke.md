@@ -385,6 +385,17 @@ reuse, or visual behavior, which is why these items are manual.
       release. With **Fit** and a **Scale factor** below 1 the picture slides inside the
       bars. **Center** puts it back and is disabled while both sliders read 50%. With
       **Stretch** at a factor of 1, or a wallpaper that exactly fits, nothing moves.
+- [ ] Scale percentage: with **Fill** and a **Scale factor** of 1, drag the display card's
+      **Scale percentage** slider to 80% and let go. The **Scale factor** field reads 0.8, the
+      card shows **Not applied**, the wallpaper shrinks to four fifths of its Fill size on the
+      display, and the Position sliders move it inside the room that leaves. **Revert** restores
+      1 and 100% on the card and on the display. Set 80% again and choose **Apply changes**: it
+      stays, and the mark goes. Type a factor of 1.5: the slider stays at 100%, and clicking its
+      thumb without moving it leaves 1.5. The slider's ends are 10% and 100%, and arrow keys move
+      it a percent at a time. A web wallpaper's display card has **Scale factor** and no slider.
+- [ ] Scale percentage in **Settings › Displays**: the slider under **Scale factor** shows the
+      same value. Releasing it at 60%, or an arrow key, which moves it one percent, resizes the
+      wallpaper at once with nothing left to apply, and the inspector's card follows.
 - [ ] The Position sliders by keyboard and screen reader: arrow keys on a focused slider move
       it a step at a time and keep the focus, VoiceOver reads each slider's name and
       percentage and **Center**, and at the narrowest panel width the sliders, the **Center**

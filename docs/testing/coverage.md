@@ -1466,12 +1466,15 @@ never to `.shared`.
   views row and Play side by side inside the narrowest page column in every language with the
   collection keeping a readable name and its whole name as the tooltip).
 - Inspector: `InspectorPolicyTests` (among its rules, the Revert and Apply changes footer and its
-  accent Apply changes only while an edit waits), `InspectorWordingTests` (among its sentences, what draws
+  accent Apply changes only while an edit waits, and the Scale percentage slider offered for a
+  scene or a video and not for a web page), `InspectorWordingTests` (among its sentences, what draws
   the wallpaper said in words, with the renderer's id kept as it is on the detail line; a reported
   problem leads the line and is never said to play; nothing named before the runtime reports it,
   and no such line promised for a web page; a collapsed display card's summary, part by part,
   with the frame-rate limit named in place of the rate and what waits left to the Not applied
-  mark), `InspectorInputTests` (among the typed numbers, the
+  mark), `InspectorInputTests` (among the typed numbers, the Scale percentage slider as
+  the scale factor in whole percentages from 10 to 100 that asks for nothing where the factor
+  already holds the thumb, a value asked for twice waiting for both of its saves, the
   Modified and Not applied pills drawn at the width a row counts for them in every language, so
   neither moves a control), `InspectorEngineOptionsTests` (among the engine rows, the section open
   for an option that waits even at its default, Not applied for
@@ -1489,7 +1492,10 @@ never to `.shared`.
   aloud only while an edit waits; the Compatibility card's renderer lines, with a problem, wrap in the narrowest column
   in every language; the Presets and Collections cards' buttons (Apply, the Delete confirmation, the
   name forms) as wide in the narrowest column as with all the room they want, in every language;
-  a slider's VoiceOver, key and pointer changes reach the bridge; the row whose
+  a slider's VoiceOver, key and pointer changes reach the bridge; a display card's Scale
+  percentage slider sends the scale factor at a key press and at the release of a drag, shows it in
+  the field beside it at once, and asks for the older factor again when a step is taken back before
+  it is answered; the row whose
   edit brings the footer in scrolled clear of it, and Apply changes and Revert said aloud once done),
   `PropertyLabelDocumentTests` (the label allowlist: entities, emphasis, colours, lists, broken
   markup, scripts and controls dropped, links only to allowed hosts, registered images only,
@@ -1588,7 +1594,9 @@ never to `.shared`.
   `PanelHotKeyActionsTests`, `ShortcutsRecorderModelTests` (only the recording row takes a press, a
   registered shortcut's press is read as its combination and never runs its action),
   `LibrarySettingsPresentationTests`, `SettingsSectionsRenderTests` and `SettingsBRenderTests`
-  (every section in the narrowest and widest column, light and dark, in every language).
+  (every section in the narrowest and widest column, light and dark, in every language; a
+  display's Scale percentage slider moving one percent per arrow key and sending each step, a
+  step taken back before the first is saved included).
 - First-run guide and the one-time prompts: `FirstRunModelTests` (**Skip setup** ending the
   guide from every page but Start and keeping what applied, unsaved drafts sending it to the
   Start recap instead and saving nothing, Escape as Skip setup while the guide is open),

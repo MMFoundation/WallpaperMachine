@@ -20,6 +20,32 @@ final class InspectorInputTests: XCTestCase {
     }
   }
 
+  /// The Scale percentage slider shows the scale factor as a whole percentage from 10 to 100 and
+  /// asks for the factor of the percentage it settles on. Settling where the factor already puts
+  /// the thumb asks for nothing, so a click on a slider held at its top never turns 1.34 into 1.
+  func testTheScaleSliderIsTheScaleFactorAsAWholePercentageFromTenToOneHundred() {
+    XCTAssertEqual(ScaleSlider.range, 10...100)
+    XCTAssertEqual(ScaleSlider.percent(for: 1), 100)
+    XCTAssertEqual(ScaleSlider.percent(for: 0.8), 80)
+    XCTAssertEqual(ScaleSlider.percent(for: 0.855), 86, "a fraction of a percent sits at the nearest one")
+    XCTAssertEqual(ScaleSlider.percent(for: 1.34), 100, "a factor above 1 is the top of the slider")
+    XCTAssertEqual(ScaleSlider.percent(for: 0.02), 10, "and one below a tenth is the bottom")
+    XCTAssertEqual(ScaleSlider.percent(for: .nan), 100)
+
+    XCTAssertEqual(ScaleSlider.factor(for: 80, current: 1), 0.8)
+    XCTAssertEqual(ScaleSlider.factor(for: 79.6, current: 1), 0.8, "a drag settles on a whole percentage")
+    XCTAssertEqual(ScaleSlider.factor(for: 100, current: 0.5), 1)
+    XCTAssertEqual(ScaleSlider.factor(for: 99, current: 1.34), 0.99)
+    XCTAssertEqual(ScaleSlider.factor(for: 4, current: 1), 0.1, "never below the range")
+    XCTAssertNil(ScaleSlider.factor(for: 100, current: 1.34), "the thumb did not leave the top")
+    XCTAssertNil(ScaleSlider.factor(for: 80, current: 0.8))
+    XCTAssertNil(ScaleSlider.factor(for: 86, current: 0.855), "nor does it round a typed factor")
+    for percent in stride(from: 10.0, through: 100, by: 1) {
+      let factor = ScaleSlider.factor(for: percent, current: percent == 100 ? 0.5 : 1)
+      XCTAssertEqual(factor.map(ScaleSlider.percent(for:)), percent, "\(percent)% comes back as itself")
+    }
+  }
+
   func testAFrameRateIsAWholeNumberHeldToTheDisplaysRangeAndAnEmptyFieldIsNothing() {
     XCTAssertEqual(FrameRateInput.parse("30", maximum: 60), 30)
     XCTAssertEqual(FrameRateInput.parse(" 45 ", maximum: 60), 45)
@@ -51,6 +77,26 @@ final class InspectorInputTests: XCTestCase {
     draft.ask(33)
     draft.answered(33)
     XCTAssertEqual(draft.shown(saved: 32), 32, "a refused save shows the renderer's value again")
+  }
+
+  /// A value asked for again while its first save is still on its way waits for both: 81%, back to
+  /// 80% and 81% again are three saves, and the first one finishing does not end the wait for the
+  /// third, so the next step is still compared with 81% and not with a saved factor about to change.
+  func testAValueAskedForAgainKeepsWaitingUntilEachOfItsSavesHasFinished() {
+    var draft = RequestedValue<Double>()
+    draft.ask(0.81)
+    draft.ask(0.8)
+    draft.ask(0.81)
+    draft.answered(0.81)
+    XCTAssertTrue(draft.isWaiting, "the first 81% is saved; 80% and the second 81% are on their way")
+    draft.answered(0.8)
+    XCTAssertTrue(draft.isWaiting)
+    XCTAssertEqual(draft.shown(saved: 0.8), 0.81, "a step back to 80% from here is a change")
+    draft.answered(0.81)
+    XCTAssertFalse(draft.isWaiting)
+    XCTAssertEqual(draft.shown(saved: 0.81), 0.81)
+    draft.answered(0.81)
+    XCTAssertFalse(draft.isWaiting, "an answer nothing waits for changes nothing")
   }
 
   /// A switch, choice or colour stays beside its label while the label fits on one line; otherwise

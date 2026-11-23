@@ -149,6 +149,19 @@ A display's **Scale factor** says what it does in its help, on its name and on t
 itself, as the same row in **Settings › Displays** does in its note: it zooms the wallpaper
 after the scaling mode, 1 keeping its size, more than 1 enlarging it and cropping the edges,
 less than 1 shrinking it.
+Under the field, the **Scale percentage** slider sets the same factor as a whole percentage
+from 10% to 100%, to shrink the wallpaper below the size its scaling mode gives it (80% is a
+factor of 0.8); the [position sliders](#display-position) then place it. The factor is sent
+when the thumb is released, or at each keyboard step, and waits for **Apply changes** like a
+typed one, and the field shows it at once. The row stays usable while a factor is on its way,
+and the value chosen last is the one that stays. A factor above 1 holds the thumb at 100% and
+the field keeps the exact number; letting the thumb go where it already was changes nothing.
+A web page always fills its window, so a web wallpaper's card has the field but no slider.
+**Settings › Displays** has the same slider under its **Scale factor** row, for every display
+whose playback can be adjusted. Like that page's other playback rows it does not wait: the
+factor is applied when the thumb is released or at each keyboard step, together with anything
+else of that wallpaper still waiting for **Apply changes**. An arrow key moves either slider
+one percent.
 General, display and property disclosures keep their state while the same
 wallpaper stays selected; another wallpaper starts at the top with its sections at their
 defaults.
@@ -499,7 +512,7 @@ A scene or video wallpaper's card for each display, in the inspector's **Display
 section, has **Horizontal position** and **Vertical position** sliders (0 to 100%, 50% is
 the middle) and a **Center** link, below the frame rate. They decide where the wallpaper
 sits when the display leaves room around it (Fit, Fit with blurred backdrop, Original
-size, or a Scale factor below 1) and which part stays in view when it is larger than the
+size, or a Scale factor below 1, which is a Scale percentage below 100%) and which part stays in view when it is larger than the
 display (Fill, or a factor above 1). Nothing moves when it already fits the display exactly, and an axis
 with no room to spare does not move; the note under the sliders says so. The block is
 not offered for a web wallpaper (an image page keeps **Position on screen**, above),

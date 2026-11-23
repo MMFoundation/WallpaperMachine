@@ -224,6 +224,22 @@ struct DisplaysPlaybackDisclosure: View {
       }
 
       DisplaysRow(
+        item: DisplaysSettingsSection.scale, forced: forced, identity: display.id,
+        controlLabel: label(DisplaysSettingsSection.scale.title)
+      ) {
+        DisplaysScaleSlider(
+          factor: display.scalingFactor, label: label(DisplaysSettingsSection.scale.title)
+        ) { factor in
+          // A later choice waits for the save before it instead of being dropped as a duplicate.
+          controller.launch(
+            PanelActionCoordinator.key("displaySetting", id: display.id, detail: "scalingFactor"),
+            policy: .latestWins
+          ) { try await controller.setDisplay(display.id, .scalingFactor(factor)) }
+        }
+        .disabled(playbackOff)
+      }
+
+      DisplaysRow(
         item: DisplaysSettingsSection.frameRate, forced: forced, identity: display.id,
         controlLabel: label(DisplaysSettingsSection.frameRate.title)
       ) {

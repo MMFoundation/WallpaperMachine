@@ -152,6 +152,43 @@ final class SettingsBRenderTests: SettingsBTestCase {
     }
   }
 
+  /// The Scale percentage slider of a display's Playback group moves one percent per arrow key and
+  /// sends that factor at once. A step taken back before the first is saved is sent as well, not
+  /// dropped as a repeat of the factor the display still has.
+  func testTheDisplaysScaleSliderStepsOnePercentPerKeyAndSendsEachStep() async throws {
+    try await withPanel { panel in
+      try SettingsBFixtures.populate(panel)
+      panel.show()
+      panel.controller.displaysSettings.setOpen(true, DisplaysSettingsSection.playback, display: "primary")
+      let host = SettingsBHost(panel: panel)
+      try await host.show(.displays, size: NSSize(width: 760, height: 1_600))
+      let slider = try XCTUnwrap(
+        PanelNSSlider.all(in: host.hosting.view).first {
+          $0.accessibilityLabel() == "Scale percentage for Studio Display (1 - Primary)"
+        }, "the primary display's Scale percentage slider is drawn")
+      XCTAssertEqual([slider.minValue, slider.maxValue, slider.doubleValue], [10, 100, 100])
+      XCTAssertEqual(slider.numberOfTickMarks, 0)
+      func press(_ keyCode: UInt16) {
+        slider.keyDown(
+          with: NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+            context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
+            keyCode: keyCode)!)
+      }
+
+      // Both presses land in one turn of the main actor, so the first save has not started.
+      press(123)  // left: 99%
+      press(124)  // right: 100%
+      XCTAssertTrue(panel.bridge.scalingFactorCalls.isEmpty)
+      try await panel.waitUntil(timeout: 5) { panel.bridge.scalingFactorCalls.count == 2 }
+      XCTAssertEqual(panel.bridge.scalingFactorCalls.map(\.wallpaperId), ["w1", "w1"])
+      XCTAssertEqual(panel.bridge.scalingFactorCalls.map(\.displayId), ["primary", "primary"])
+      XCTAssertEqual(panel.bridge.scalingFactorCalls.map(\.factor), [0.99, 1], "the newest lands last")
+      XCTAssertNil(panel.controller.errors.message)
+      host.close()
+    }
+  }
+
   func testTheDisplaysPageWithNoDisplayStillSaysSoAndFits() async throws {
     try await withPanel { panel in
       try SettingsBFixtures.populate(panel)
