@@ -227,17 +227,15 @@ struct DisplaysPlaybackDisclosure: View {
         item: DisplaysSettingsSection.scale, forced: forced, identity: display.id,
         controlLabel: label(DisplaysSettingsSection.scale.title)
       ) {
-        DisplaysPercentSlider(
-          value: ScaleSlider.percent(for: display.scalingFactor) / 100,
-          range: (ScaleSlider.range.lowerBound / 100)...(ScaleSlider.range.upperBound / 100),
-          commit: { fraction in
-            guard let factor = ScaleSlider.factor(for: fraction * 100, current: display.scalingFactor)
-            else { return }
-            await controller.launch(
-              PanelActionCoordinator.key("displaySetting", id: display.id, detail: "scalingFactor")
-            ) { try await controller.setDisplay(display.id, .scalingFactor(factor)) }.value
-          }
-        )
+        DisplaysScaleSlider(
+          factor: display.scalingFactor, label: label(DisplaysSettingsSection.scale.title)
+        ) { factor in
+          // A later choice waits for the save before it instead of being dropped as a duplicate.
+          controller.launch(
+            PanelActionCoordinator.key("displaySetting", id: display.id, detail: "scalingFactor"),
+            policy: .latestWins
+          ) { try await controller.setDisplay(display.id, .scalingFactor(factor)) }
+        }
         .disabled(playbackOff)
       }
 
@@ -295,7 +293,7 @@ struct DisplaysPlaybackDisclosure: View {
         item: DisplaysSettingsSection.volume, forced: forced, identity: display.id,
         controlLabel: label(DisplaysSettingsSection.volume.title)
       ) {
-        DisplaysPercentSlider(
+        DisplaysVolumeSlider(
           value: Double(display.volume),
           commit: { volume in
             await controller.launch(

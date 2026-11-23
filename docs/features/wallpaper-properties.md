@@ -159,8 +159,9 @@ the field keeps the exact number; letting the thumb go where it already was chan
 A web page always fills its window, so a web wallpaper's card has the field but no slider.
 **Settings › Displays** has the same slider under its **Scale factor** row, for every display
 whose playback can be adjusted. Like that page's other playback rows it does not wait: the
-factor is applied when the thumb is released, together with anything else of that wallpaper
-still waiting for **Apply changes**.
+factor is applied when the thumb is released or at each keyboard step, together with anything
+else of that wallpaper still waiting for **Apply changes**. An arrow key moves either slider
+one percent.
 General, display and property disclosures keep their state while the same
 wallpaper stays selected; another wallpaper starts at the top with its sections at their
 defaults.

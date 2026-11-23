@@ -119,11 +119,9 @@ struct DisplaysUnitLabel: View {
   }
 }
 
-/// The Volume and Scale percentage sliders, a fraction shown as a percentage: the readout follows the drag, and
-/// the change is sent when it is let go.
-struct DisplaysPercentSlider: View {
+/// The Volume slider: the readout follows the drag, and the change is sent when it is let go.
+struct DisplaysVolumeSlider: View {
   let value: Double
-  var range: ClosedRange<Double> = 0...1
   let commit: @MainActor (Double) async -> Void
 
   @Environment(\.panelTheme) private var theme
@@ -134,7 +132,7 @@ struct DisplaysPercentSlider: View {
   var body: some View {
     HStack(spacing: 8) {
       Slider(
-        value: Binding(get: { live ?? value }, set: { live = $0 }), in: range,
+        value: Binding(get: { live ?? value }, set: { live = $0 }), in: 0...1,
         onEditingChanged: { editing in
           guard !editing, let final = live else { return }
           Task {
@@ -151,6 +149,64 @@ struct DisplaysPercentSlider: View {
         .foregroundStyle(theme.surface.muted.color)
         .frame(width: 38, alignment: .trailing)
         .accessibilityHidden(true)
+    }
+  }
+}
+
+/// The Scale percentage slider: the display's scale factor as a whole percentage (`ScaleSlider`).
+///
+/// It is the panel's AppKit slider (`PanelSlider`), not SwiftUI's as Volume is: without a step an
+/// arrow key moves a SwiftUI slider a twentieth of its range, four and a half percent here, so the
+/// keyboard could not reach the percentage next to the one shown. An arrow key or a VoiceOver
+/// adjustment moves one percent and is sent at once; a drag moves the readout and is sent where it
+/// is let go.
+///
+/// Until a factor it sent has been saved, the slider shows that factor and compares the next
+/// choice with it (`RequestedValue`), so a step taken back before the first is saved is sent too.
+struct DisplaysScaleSlider: View {
+  let factor: Double
+  /// What VoiceOver calls the slider: "Scale percentage for Studio Display".
+  let label: String
+  /// Starts the save of a factor and returns its task.
+  let commit: @MainActor (Double) -> Task<Void, Never>
+
+  @Environment(\.panelTheme) private var theme
+  @State private var dragged: Double?
+  @State private var draft = RequestedValue<Double>()
+
+  var body: some View {
+    let percent = dragged ?? ScaleSlider.percent(for: draft.shown(saved: factor))
+    let readout = "\(Int(percent.rounded()))%"
+    HStack(spacing: 8) {
+      PanelSlider(
+        value: percent, range: ScaleSlider.range, step: 1,
+        // The slider says its value itself, so the readout beside it is not read twice.
+        accessibilityLabel: label, accessibilityValue: readout,
+        events: PanelSliderEvents(
+          onDrag: { dragged = $0 },
+          onRelease: { percent in
+            dragged = nil
+            send(percent)
+          },
+          onStep: send)
+      )
+      .frame(width: 130)
+      Text(verbatim: readout)
+        .font(.system(size: 12).monospacedDigit())
+        .foregroundStyle(theme.surface.muted.color)
+        .frame(width: 38, alignment: .trailing)
+        .accessibilityHidden(true)
+    }
+  }
+
+  private func send(_ percent: Double) {
+    guard let chosen = ScaleSlider.factor(for: percent, current: draft.shown(saved: factor))
+    else { return }
+    draft.ask(chosen)
+    let task = commit(chosen)
+    Task { @MainActor in
+      await task.value
+      draft.answered(chosen)
     }
   }
 }

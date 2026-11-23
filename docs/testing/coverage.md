@@ -1594,7 +1594,9 @@ never to `.shared`.
   `PanelHotKeyActionsTests`, `ShortcutsRecorderModelTests` (only the recording row takes a press, a
   registered shortcut's press is read as its combination and never runs its action),
   `LibrarySettingsPresentationTests`, `SettingsSectionsRenderTests` and `SettingsBRenderTests`
-  (every section in the narrowest and widest column, light and dark, in every language).
+  (every section in the narrowest and widest column, light and dark, in every language; a
+  display's Scale percentage slider moving one percent per arrow key and sending each step, a
+  step taken back before the first is saved included).
 - First-run guide and the one-time prompts: `FirstRunModelTests` (**Skip setup** ending the
   guide from every page but Start and keeping what applied, unsaved drafts sending it to the
   Start recap instead and saving nothing, Escape as Skip setup while the guide is open),
