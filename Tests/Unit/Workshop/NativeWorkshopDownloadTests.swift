@@ -86,6 +86,34 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     XCTAssertNil(store.token, "a token Steam refused is removed from the keychain")
   }
 
+  /// A logon Steam refuses for too many sign-ins pauses the downloads still waiting: each would
+  /// open another logon and meet the same refusal. The sign-in itself is still good.
+  func testARateLimitedLogOnPausesTheDownloadsStillWaiting() async throws {
+    let root = try makeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let steam = try FakeSteam(item: itemID, files: [:])
+    steam.logOnResult = 84
+    let session = steam.session(store: MemorySteamTokenStore(SteamTestToken.token()))
+    await session.restore()
+    let manager = WorkshopDownloadManager(
+      sessionDirectory: root.appendingPathComponent("SteamSession"), runtimeProvider: ShellRuntimeProvider(),
+      maximumConcurrentDownloads: 1, downloadRegion: { .steamsChoice })
+    let next = WorkshopItem(
+      id: String(itemID + 1), title: "Next", creator: "Test", summary: "", previewURL: nil,
+      tags: ["Video"], size: 0, subscriptions: 0)
+    for requested in [item(), next] {
+      manager.startNative(item: requested, session: session, library: root.appendingPathComponent("Library")) {}
+    }
+    let first = try XCTUnwrap(manager.download(for: String(itemID)))
+    let waiting = try XCTUnwrap(manager.download(for: next.id))
+    try await waitUntil { !manager.isRunning }
+
+    XCTAssertEqual(first.errorMessage, NativeWorkshopDownloader.message(for: SteamCMConnection.Failure.logOnRefused(84)))
+    XCTAssertTrue(waiting.isPaused)
+    XCTAssertEqual(steam.connectionsOpened, 1, "no further logon after Steam's limit")
+    XCTAssertTrue(session.isSignedIn, "a rate limit is no reason to forget the sign-in")
+  }
+
   func testDownloadsWaitingOnTheSameLogOnAllLearnTheSignInExpired() async throws {
     let steam = try FakeSteam(item: itemID, files: [:])
     steam.logOnResult = 5
