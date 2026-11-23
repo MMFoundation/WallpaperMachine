@@ -108,7 +108,7 @@ final class NativeWorkshopDownloadTests: DownloaderTestCase {
     let waiting = try XCTUnwrap(manager.download(for: next.id))
     try await waitUntil { !manager.isRunning }
 
-    XCTAssertEqual(first.errorMessage, NativeWorkshopDownloader.message(for: SteamCMConnection.Failure.logOnRefused(84)))
+    XCTAssertEqual(first.errorMessage, NativeWorkshopDownloader.message(for: SteamCMConnection.Failure.logOnRefused(eresult: 84)))
     XCTAssertTrue(waiting.isPaused)
     XCTAssertEqual(steam.connectionsOpened, 1, "no further logon after Steam's limit")
     XCTAssertTrue(session.isSignedIn, "a rate limit is no reason to forget the sign-in")
