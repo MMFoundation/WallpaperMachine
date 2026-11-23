@@ -26,11 +26,13 @@ extension PanelController {
   }
 
   /// Checks whether background energy ratings moved while the window was away, and tells SwiftUI
-  /// to rebuild `libraryRows` only when they did.
+  /// to read `libraryRows` again only when they did. It compares with the revision it last
+  /// announced, not with the one the rows were built for: anything that asks for a row in between
+  /// (the live preview, the recents) rebuilds the cache without telling a view, and the views that
+  /// drew the older rows would never hear of the change.
   func refreshEnergyRatings() {
     let current = store.wallpaperEnergyRatings?.revision ?? 0
-    guard let built = libraryRowsCache.key, built.energy != current else { return }
-    energyRatingsRevision &+= 1
+    if energyRatingsRevision != current { energyRatingsRevision = current }
   }
 
   private var libraryRowsKey: LibraryRowsCache.Key {

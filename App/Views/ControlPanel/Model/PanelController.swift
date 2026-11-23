@@ -137,7 +137,8 @@ final class PanelController {
 
   /// The Installed rows, kept until one of their inputs moves.
   @ObservationIgnored let libraryRowsCache = LibraryRowsCache()
-  /// Moves when `refreshEnergyRatings()` sees background ratings changed while the window was away.
+  /// The energy ratings' revision the views were last told of. `refreshEnergyRatings()` moves it
+  /// when background ratings changed while the window was away.
   var energyRatingsRevision: UInt64 = 0
   /// Why the last Apply of each wallpaper failed, until an apply of that wallpaper succeeds. The
   /// inspector and the tile offer a report beside it; the banner shows the same failure once.
