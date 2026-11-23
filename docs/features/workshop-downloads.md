@@ -795,6 +795,15 @@ work.
   (`sessionConflictDetected`). A session Steam ends while no sibling is running is
   reported as an ordinary failure with a retry. Settings says when the queue is
   running one at a time.
+- **Sign-in limit.** When Steam refuses a sign-in because too many were tried
+  (SteamCMD's "Rate Limit Exceeded", or EResult 84 for a QR sign-in), every job
+  still waiting is paused instead of starting a sign-in of its own, which Steam
+  would refuse as well and which keeps the limit in place
+  (`WorkshopDownloadManager.settleRateLimit`). Downloads already running finish on
+  their own. The job that met the limit says so; once Steam's limit has passed,
+  **Resume download** starts a paused row again, and **Download the ones not in
+  your library** on the Subscriptions page asks for all of them at once. The paused
+  jobs are saved with the queue like any other.
 - **Order.** Waiting jobs start in the order they were asked for. **Download next** on a
   waiting row moves that job to the front of the line, ahead of every other waiting job and
   behind those that run, so it takes the next free slot; it is offered only when another
@@ -1154,8 +1163,9 @@ when Steam asks: rejected requests are never reused, approval is never bypassed,
 and authentication retries are automatic only once, after a sign-in that ended
 for no reason Steam gave brought in a different SteamCMD
 ([Keeping SteamCMD current](#keeping-steamcmd-current)); Steam then asks again as
-for any new sign-in. If Steam reports rate limiting,
-wait before retrying. Workshop content-access errors are a separate failure and
+for any new sign-in. If Steam reports rate limiting, the downloads still waiting
+are paused ([Sign-in limit](#the-download-queue)); wait before resuming or
+retrying. Workshop content-access errors are a separate failure and
 offer no authentication retry.
 
 **Dropped connections.** Once Steam has accepted the sign-in, a Workshop item or

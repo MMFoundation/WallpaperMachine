@@ -31,6 +31,7 @@ final class NativeWorkshopDownloader: WorkshopDownloadWorker {
     let sessionWarning: String? = nil
     let endedBySessionConflict = false
     let endedBeforeSignInUnexplained = false
+    private(set) var endedByRateLimit = false
     @ObservationIgnored private(set) var failureOutput: String?
     @ObservationIgnored var onAuthenticated: (@MainActor () -> Void)?
     @ObservationIgnored var onFinished: (@MainActor () -> Void)?
@@ -103,6 +104,7 @@ final class NativeWorkshopDownloader: WorkshopDownloadWorker {
         completedSuccessfully = false
         errorMessage = nil
         failureOutput = nil
+        endedByRateLimit = false
         isAuthenticating = true
         phase = .connecting
         status = String(localized: "Connecting to Steam")
@@ -198,6 +200,9 @@ final class NativeWorkshopDownloader: WorkshopDownloadWorker {
         AppLog.warn("Steam download failed (\(error.localizedDescription))")
         failureOutput = "native Steam client: \(error.localizedDescription)"
         if Self.meansNotOwned(error) { wallpaperEngineOwnership = .notOwned }
+        if case SteamCMConnection.Failure.logOnRefused(84)? = error as? SteamCMConnection.Failure {
+            endedByRateLimit = true
+        }
         errorMessage = Self.message(for: error)
         status = errorMessage ?? status
     }
