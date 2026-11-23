@@ -153,8 +153,9 @@ Under the field, the **Scale percentage** slider sets the same factor as a whole
 from 10% to 100%, to shrink the wallpaper below the size its scaling mode gives it (80% is a
 factor of 0.8); the [position sliders](#display-position) then place it. The factor is sent
 when the thumb is released, or at each keyboard step, and waits for **Apply changes** like a
-typed one. A factor above 1 holds the thumb at 100% and the field keeps the exact number;
-letting the thumb go where it already was changes nothing. **Settings › Displays** has the
+typed one, and the field shows it at once. The row stays usable while a factor is on its way,
+and the value chosen last is the one that stays. A factor above 1 holds the thumb at 100% and
+the field keeps the exact number; letting the thumb go where it already was changes nothing. **Settings › Displays** has the
 same slider under its **Scale factor** row.
 General, display and property disclosures keep their state while the same
 wallpaper stays selected; another wallpaper starts at the top with its sections at their

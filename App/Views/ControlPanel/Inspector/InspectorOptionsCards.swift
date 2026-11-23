@@ -287,6 +287,10 @@ struct DisplayCard: View {
 /// Under the field the Scale percentage slider sets the same draft as a whole percentage from 10 to 100
 /// (`ScaleSlider`), to shrink the wallpaper below the size its scaling mode gives it. It sends the
 /// factor when the thumb is released or at each key step; nothing follows a drag before that.
+///
+/// The row stays enabled while its own edit is on its way, so both controls compare a new value with
+/// the factor last asked for until that is answered (`RequestedValue`), not with the saved one: a
+/// step from 80% to 81% and back before the first lands asks for 0.8 again instead of dropping it.
 private struct ScaleFactorRow: View {
   let options: InspectorOptions
   let display: InspectorOptions.DisplayRow
@@ -296,7 +300,11 @@ private struct ScaleFactorRow: View {
   @Environment(\.inspectorEditedRow) private var editedRow
   @State private var text = ""
   @State private var issue: String?
+  @State private var draft = RequestedValue<Double>()
   @FocusState private var isFocused: Bool
+
+  /// The factor both controls show and compare with: the one last asked for while it is on its way.
+  private var factor: Double { draft.shown(saved: display.scalingFactor) }
 
   /// What the number does; Settings → Displays says it as the row's note.
   private var explanation: String {
@@ -344,7 +352,7 @@ private struct ScaleFactorRow: View {
           .accessibilityAddTraits(.updatesFrequently)
       }
       InspectorSliderRow(
-        title: "Scale percentage", value: ScaleSlider.percent(for: display.scalingFactor),
+        title: "Scale percentage", value: ScaleSlider.percent(for: factor),
         range: ScaleSlider.range, step: 1, accessibilityLabel: L("Scale percentage"),
         format: { InspectorWording.percent($0 / 100) },
         onRelease: slide, onStep: slide
@@ -354,13 +362,16 @@ private struct ScaleFactorRow: View {
     .disabled(controller.isInspectorControlDisabled(options, key: key))
     .onAppear { refresh() }
     .onChange(of: display.scalingFactor) { if !isFocused { refresh() } }
+    // An answered request, also a refused one: the field shows the saved factor again.
+    .onChange(of: draft) { if !isFocused { refresh() } }
     .onChange(of: isFocused) { _, focused in if !focused { commit() } }
     .id(key)
   }
 
-  private func refresh() {
-    text = display.scalingFactor.formatted(
-      WallpaperEditorState.scalingFormat(locale: PanelLocale.shared.locale))
+  private func refresh() { show(factor) }
+
+  private func show(_ factor: Double) {
+    text = factor.formatted(WallpaperEditorState.scalingFormat(locale: PanelLocale.shared.locale))
     issue = nil
   }
 
@@ -370,13 +381,17 @@ private struct ScaleFactorRow: View {
       return
     }
     issue = nil
-    guard value != display.scalingFactor else { return }
+    guard value != factor else { return }
     send(value)
   }
 
-  /// The slider settled on `percent`, by a release or a key step.
+  /// The slider settled on `percent`, by a release or a key step. The field shows the new factor at
+  /// once, focused or not: text left in it from before would be sent when it loses the focus and
+  /// undo the slider.
   private func slide(_ percent: Double) -> Task<Void, Never>? {
-    ScaleSlider.factor(for: percent, current: display.scalingFactor).map(send)
+    guard let chosen = ScaleSlider.factor(for: percent, current: factor) else { return nil }
+    show(chosen)
+    return send(chosen)
   }
 
   @discardableResult
@@ -384,9 +399,16 @@ private struct ScaleFactorRow: View {
     let id = options.wallpaperID
     let key = InspectorAction.displayConfig(id, display: display.id, "scalingFactor")
     editedRow?.note(key)
-    return controller.launch(key, policy: .latestWins) {
+    draft.ask(factor)
+    let task = controller.launch(key, policy: .latestWins) {
       try await controller.setScalingFactor(factor, on: display.id, for: id)
     }
+    // Saved, or refused: the row compares with the saved factor again once nothing newer waits.
+    Task { @MainActor in
+      await task.value
+      draft.answered(factor)
+    }
+    return task
   }
 }
 
@@ -467,25 +489,30 @@ private struct FrameRateRow: View {
   }
 }
 
-/// The value a Frame rate row shows and steps from: the one it last asked for while that is on its
-/// way, then the renderer's again. Without it a second click of the stepper before the first save
-/// lands would step from the old value and ask for the same rate twice (30, 31, 31 instead of 32).
-struct FrameRateDraft: Equatable {
-  /// The rate last asked for, until its save has finished.
-  private(set) var asked: Int?
+/// The value a row shows and steps from while it stays enabled during its own save: the one it last
+/// asked for while that is on its way, then the renderer's again. Without it a second click of the
+/// Frame rate stepper before the first save lands would step from the old value and ask for the
+/// same rate twice (30, 31, 31 instead of 32), and a Scale percentage step back to the saved value
+/// would be taken for no change and dropped, leaving the step before it as the last word.
+struct RequestedValue<Value: Equatable>: Equatable {
+  /// The value last asked for, until its save has finished.
+  private(set) var asked: Value?
 
   var isWaiting: Bool { asked != nil }
 
-  func shown(saved: Int) -> Int { asked ?? saved }
+  func shown(saved: Value) -> Value { asked ?? saved }
 
-  mutating func ask(_ value: Int) { asked = value }
+  mutating func ask(_ value: Value) { asked = value }
 
   /// The save of `value` finished, whatever came of it. One for an older value leaves the newer
   /// request waiting.
-  mutating func answered(_ value: Int) {
+  mutating func answered(_ value: Value) {
     if asked == value { asked = nil }
   }
 }
+
+/// The Frame rate row's requested value.
+typealias FrameRateDraft = RequestedValue<Int>
 
 /// The text a Scale factor field accepts.
 enum ScaleFactorInput {

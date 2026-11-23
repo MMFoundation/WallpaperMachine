@@ -1492,7 +1492,9 @@ never to `.shared`.
   in every language; the Presets and Collections cards' buttons (Apply, the Delete confirmation, the
   name forms) as wide in the narrowest column as with all the room they want, in every language;
   a slider's VoiceOver, key and pointer changes reach the bridge; a display card's Scale
-  percentage slider sends the scale factor at a key press and at the release of a drag; the row whose
+  percentage slider sends the scale factor at a key press and at the release of a drag, shows it in
+  the field beside it at once, and asks for the older factor again when a step is taken back before
+  it is answered; the row whose
   edit brings the footer in scrolled clear of it, and Apply changes and Revert said aloud once done),
   `PropertyLabelDocumentTests` (the label allowlist: entities, emphasis, colours, lists, broken
   markup, scripts and controls dropped, links only to allowed hosts, registered images only,
