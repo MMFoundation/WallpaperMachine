@@ -79,6 +79,26 @@ final class InspectorInputTests: XCTestCase {
     XCTAssertEqual(draft.shown(saved: 32), 32, "a refused save shows the renderer's value again")
   }
 
+  /// A value asked for again while its first save is still on its way waits for both: 81%, back to
+  /// 80% and 81% again are three saves, and the first one finishing does not end the wait for the
+  /// third, so the next step is still compared with 81% and not with a saved factor about to change.
+  func testAValueAskedForAgainKeepsWaitingUntilEachOfItsSavesHasFinished() {
+    var draft = RequestedValue<Double>()
+    draft.ask(0.81)
+    draft.ask(0.8)
+    draft.ask(0.81)
+    draft.answered(0.81)
+    XCTAssertTrue(draft.isWaiting, "the first 81% is saved; 80% and the second 81% are on their way")
+    draft.answered(0.8)
+    XCTAssertTrue(draft.isWaiting)
+    XCTAssertEqual(draft.shown(saved: 0.8), 0.81, "a step back to 80% from here is a change")
+    draft.answered(0.81)
+    XCTAssertFalse(draft.isWaiting)
+    XCTAssertEqual(draft.shown(saved: 0.81), 0.81)
+    draft.answered(0.81)
+    XCTAssertFalse(draft.isWaiting, "an answer nothing waits for changes nothing")
+  }
+
   /// A switch, choice or colour stays beside its label while the label fits on one line; otherwise
   /// it moves under it. The hidden Modified mark counts, so changing the value never moves it.
   func testASmallControlMovesUnderItsLabelOnlyWhenTheLabelWouldNotFitBesideIt() {

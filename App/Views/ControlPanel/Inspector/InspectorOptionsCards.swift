@@ -494,20 +494,25 @@ private struct FrameRateRow: View {
 /// Frame rate stepper before the first save lands would step from the old value and ask for the
 /// same rate twice (30, 31, 31 instead of 32), and a Scale percentage step back to the saved value
 /// would be taken for no change and dropped, leaving the step before it as the last word.
+///
+/// Every request waits for its own answer. A value asked for twice (81%, 80%, 81%) is on its way
+/// twice, and the answer to the first leaves the second waiting; told apart by value alone, that
+/// answer would end the wait early and the next step back would again be compared with a saved
+/// factor that is about to change.
 struct RequestedValue<Value: Equatable>: Equatable {
-  /// The value last asked for, until its save has finished.
-  private(set) var asked: Value?
+  /// The values asked for whose saves have not finished, oldest first.
+  private var waiting: [Value] = []
 
-  var isWaiting: Bool { asked != nil }
+  var isWaiting: Bool { !waiting.isEmpty }
 
-  func shown(saved: Value) -> Value { asked ?? saved }
+  func shown(saved: Value) -> Value { waiting.last ?? saved }
 
-  mutating func ask(_ value: Value) { asked = value }
+  mutating func ask(_ value: Value) { waiting.append(value) }
 
-  /// The save of `value` finished, whatever came of it. One for an older value leaves the newer
-  /// request waiting.
+  /// One save of `value` finished, whatever came of it: one request for it stops waiting, and any
+  /// other, newer or for the same value again, keeps waiting.
   mutating func answered(_ value: Value) {
-    if asked == value { asked = nil }
+    if let index = waiting.firstIndex(of: value) { waiting.remove(at: index) }
   }
 }
 

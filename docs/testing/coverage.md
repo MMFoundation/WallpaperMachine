@@ -1473,7 +1473,7 @@ never to `.shared`.
   with the frame-rate limit named in place of the rate and what waits left to the Not applied
   mark), `InspectorInputTests` (among the typed numbers, the Scale percentage slider as
   the scale factor in whole percentages from 10 to 100 that asks for nothing where the factor
-  already holds the thumb, the
+  already holds the thumb, a value asked for twice waiting for both of its saves, the
   Modified and Not applied pills drawn at the width a row counts for them in every language, so
   neither moves a control), `InspectorEngineOptionsTests` (among the engine rows, the section open
   for an option that waits even at its default, Not applied for
