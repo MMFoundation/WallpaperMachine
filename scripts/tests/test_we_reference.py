@@ -143,6 +143,19 @@ class FetchTests(unittest.TestCase):
         self.assertIn("+login someone +workshop_download_item 431960 111", (self.into / "args").read_text())
 
     @unittest.skipUnless(sys.platform == "darwin", "fetch clears quarantine with xattr")
+    def test_a_folder_named_relative_to_the_working_directory_receives_the_item(self):
+        self.steamcmd('mkdir -p "$dir/steamapps/workshop/content/431960/$item" && '
+                      'echo {} > "$dir/steamapps/workshop/content/431960/$item/project.json"')
+        here = os.getcwd()
+        os.chdir(self.temp.name)
+        try:
+            we_reference.fetch_item("111", Path("artifacts/issue-1"), app_home=self.home)
+        finally:
+            os.chdir(here)
+        self.assertTrue((self.into / "111/project.json").is_file())
+        self.assertEqual(sorted(p.name for p in self.into.iterdir()), ["111", "args"])
+
+    @unittest.skipUnless(sys.platform == "darwin", "fetch clears quarantine with xattr")
     def test_an_expired_sign_in_is_reported_and_never_answered(self):
         self.steamcmd('printf "Cached credentials not found.\\npassword: "; exit 5')
         with self.assertRaisesRegex(RuntimeError, "signs in again"):

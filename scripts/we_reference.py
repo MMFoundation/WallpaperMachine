@@ -386,7 +386,7 @@ def fetch_item(item: str, into: Path, app_home: Path = APP_HOME, timeout: float 
         raise SystemExit(f"{MARK.missing} no SteamCMD or saved Steam sign-in in {app_home}: sign in once in the "
                          "app (Settings > Library & Steam); fetch never signs in")
     into.mkdir(parents=True, exist_ok=True)
-    scratch = Path(tempfile.mkdtemp(prefix=".steamcmd-", dir=into))
+    scratch = Path(tempfile.mkdtemp(prefix=".steamcmd-", dir=into)).absolute()
     try:
         shutil.copytree(runtime, scratch, symlinks=True, dirs_exist_ok=True)
         shutil.copytree(session, scratch / "Library", symlinks=True)
