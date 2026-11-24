@@ -24,6 +24,21 @@ impl AudioSpectrum128 {
     pub const BIN_COUNT: usize = 128;
 }
 
+/// Full-resolution system-audio analysis across all three Wallpaper Engine band
+/// layouts, unclamped, in channel-major order:
+/// `left64, right64, left32, right32, left16, right16` (224 floats).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AudioSpectrumFull {
+    pub generation: u64,
+    /// True only when the captured signal genuinely had two channels.
+    pub stereo: bool,
+    pub bands: [f32; AudioSpectrumFull::BAND_COUNT],
+}
+
+impl AudioSpectrumFull {
+    pub const BAND_COUNT: usize = 224;
+}
+
 
 use crate::{
     EngineError,
@@ -338,6 +353,32 @@ impl OweBackend {
             stereo: stereo == 1,
             bins,
         }))
+    }
+
+    /// Latest full-resolution (224-band, unclamped) system-audio spectrum, or
+    /// `None` when no analysis has run yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] if the call unwinds.
+    pub fn current_audio_spectrum_full(&self) -> Result<Option<AudioSpectrumFull>, EngineError> {
+        let mut bands = [0.0f32; AudioSpectrumFull::BAND_COUNT];
+        let mut generation: u64 = 0;
+        let mut stereo = false;
+        let written = unsafe {
+            UnwindSafeFFI::new("owe_audio_current_spectrum_full").call(|| {
+                sys::owe_audio_current_spectrum_full(
+                    bands.as_mut_ptr(),
+                    AudioSpectrumFull::BAND_COUNT,
+                    &raw mut generation,
+                    &raw mut stereo,
+                )
+            })?
+        };
+        if written != 0 || generation == 0 {
+            return Ok(None);
+        }
+        Ok(Some(AudioSpectrumFull { generation, stereo, bands }))
     }
 
     /// Copies process-wide renderer counters, in `owe_renderer_shared_counter`

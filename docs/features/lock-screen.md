@@ -216,11 +216,33 @@ unverified.
 
 ### Audio, media and the Enabled state
 
-Lock-screen audio, audio input and media integration are disabled (see
-[Audio response](audio-response.md) and [Media integration](media-integration.md));
-the bridge exports lock-screen scenes with media off and the extension turns audio
-and media off again after applying the configuration, so a desktop Scene that uses
-now-playing does not keep that feed on the lock screen.
+Wallpaper sound output and pointer/keyboard input remain disabled in the lock-screen
+extension. Live [media integration](media-integration.md#lock-screen-and-screen-saver)
+and [audio response](audio-response.md#what-wallpapers-receive) follow each wallpaper's
+own saved settings on active, unpaused lock-screen and screen-saver Scene and Web
+surfaces; previews, unlocked desktop settle surfaces and plain videos always keep both
+off.
+
+The extension never accesses MediaRemote, AppleScript or CoreAudio itself. While an
+unpaused lock-screen or screen-saver surface needs media or reads system audio (detected
+for scenes via `owe_scene_wallpaper_set_audio_requirement_callback` and for web pages via
+`wallpaperRegisterAudioListener` / `wallpaperRegisterMedia*Listener`), the extension
+writes `live-demand.json` and posts `app.wallpapermachine.lock-screen.demand.changed`.
+The main app's `LockScreenLiveFeedCoordinator` then keeps the shared `DesktopMediaSession`
+and/or CoreAudio tap running even while desktop presentation is suspended:
+
+- **Media:** `media-state.json` (plus `media-artwork.rgba` and `media-artwork.png` on
+  artwork changes) is written only on track, playback, artwork or seek changes; the
+  extension interpolates playback progress locally at 1 Hz while playing so ordinary
+  ticks write nothing to disk. Transport buttons (`usershortcut`) do not trigger because
+  macOS delivers no pointer input to lock-screen or screen-saver extensions.
+- **Audio spectrum:** all 224 unclamped bands (`64`/`32`/`16` left+right) are written at
+  30 Hz into a 4096-byte `mmap` seqlock file (`audio-spectrum.shm`, never `msync`'d) and
+  read by the extension into its scene `AudioResponseService` and clamped 128-bin web
+  listeners.
+- **Power and cleanup:** display sleep, system sleep, user or battery pause, unlock,
+  disabling lock screen and screen saver, extension exit or app shutdown immediately drop
+  both feeds and delete the transient exchange files.
 
 "Enabled" is not claimed optimistically: it requires the system extension to
 acknowledge a rendered frame. Every snapshot refreshes the service, so refreshes
@@ -317,15 +339,17 @@ restoration can roll back both selections.
 
 Web and still wallpapers use a live WebKit layer tree, not a recorded video or a
 periodic screenshot. Only their staged project and referenced imports are granted file
-access. Audio, media integration, camera/microphone/display capture, interaction and
-author dialogs are disabled. Pause freezes page execution and retains the compositor
+access. Sound output, camera/microphone/display capture, interaction and author dialogs
+are disabled; live media integration and audio response follow the wallpaper's saved
+settings on active lock-screen and screen-saver surfaces (see
+[Audio, media and the Enabled state](#audio-media-and-the-enabled-state)). Pause freezes page execution and retains the compositor
 tree; it does not resume playback the user paused. **Animate lock screen** takes them like
 a scene: the page loads and draws its first frame live, settles as the desktop picture,
 then holds a frame and runs again while the Mac is locked. The page's paused state is the
 one the surface tracks: a page loaded paused while the surface counted it as playing kept
 its first frame (often black or grey) through the settling and through a lock in its first
 seconds. A page with an audio listener hears silence (128 zeros) once a second while it
-plays, the desktop's spacing for a quiet stretch: Wallpaper Engine keeps calling the listener
+plays without live system audio, the desktop's spacing for a quiet stretch: Wallpaper Engine keeps calling the listener
 through silence, and a visualiser that starts its idle animation only after the first call
 otherwise never moves. Its `requestAnimationFrame` is held to the published frame rate,
 as on the desktop ([frame-rate limit](web-wallpapers.md#frame-rate-limit)), so a 30 fps
@@ -743,11 +767,12 @@ links or special files; this does not broaden the extension's read grant.
 ## Verification
 
 The offscreen suites (service, selection journal, extension registration, frame
-backing, presentation authority, the protocol comparison, and the screen saver's
-native-context/WebKit surface) are inventoried under *Lock screen* in
+backing, presentation authority, the protocol comparison, `LockScreenLiveFeedTests`, and
+the screen saver's native-context/WebKit surface) are inventoried under *Lock screen* in
 [coverage](../testing/coverage.md). They never mutate LaunchServices or PlugInKit and
 select no real wallpaper. Real idle transitions, password UI, multi-monitor compositor
-delivery, sleep/wake visuals, live registration repair, ending a genuinely stale
+delivery, live Now Playing and CoreAudio spectrum delivery across lock/unlock/sleep,
+sleep/wake visuals, live registration repair, ending a genuinely stale
 extension process, macOS choosing the intended extension, switching a really ignored
 renderer back on from Retry, the wallpaper service's wake and time-change notices
 completing without an error in WallpaperAgent's log, what the timing, connection and

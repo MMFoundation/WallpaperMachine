@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var desktopWallpaperSync: DesktopWallpaperSync?
     private var desktopMediaSession: DesktopMediaSession?
     private var sceneMediaSink: SceneMediaSink?
+    private var lockScreenLiveFeed: LockScreenLiveFeedCoordinator?
     private(set) var webWallpaperHost: WebWallpaperHost?
     private(set) var nativeVideoHost: NativeVideoWallpaperHost?
     private var wallpaperHosts: WallpaperHosts {
@@ -382,6 +383,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 nextShortcut: {
                     try await store.bridge.nextUserShortcut()
                 })
+            if let lockScreen {
+                let liveFeed = LockScreenLiveFeedCoordinator(
+                    bridge: store.bridge,
+                    session: mediaSession,
+                    canDeliver: { [weak lockScreen, weak store] in
+                        guard let lockScreen,
+                            lockScreen.anyRequested || lockScreen.isEnabled || lockScreen.screenSaverEnabled
+                        else { return false }
+                        return store?.appSnapshot.playbackState != .paused
+                    }
+                )
+                lockScreenLiveFeed = liveFeed
+                lockScreen.onAvailabilityChanged = { [weak liveFeed] in
+                    liveFeed?.reconcile()
+                }
+                liveFeed.start()
+            }
             // The panel distinguishes the user's setting from what is actually
             // being delivered, which only the host knows. The provider is
             // process-wide, so a scene wallpaper can populate it too.
@@ -440,6 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 // the poster sync and the presentation policy look at the desktop.
                 self.webWallpaperHost?.reconcile()
                 self.sceneMediaSink?.reconcile()
+                self.lockScreenLiveFeed?.reconcile()
                 self.nativeVideoHost?.reconcile()
                 self.presentationPolicy?.evaluate()
                 self.observeWallpaperSettling()
@@ -1415,6 +1434,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         previewWindow = nil
         sceneMediaSink?.shutdown()
         sceneMediaSink = nil
+        lockScreenLiveFeed?.shutdown()
+        lockScreenLiveFeed = nil
         webWallpaperHost?.shutdown()
         webWallpaperHost = nil
         nativeVideoHost?.shutdown()

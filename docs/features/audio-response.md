@@ -154,6 +154,18 @@ Its exact formula is not published; where this differs, it is an estimate.
 Scenes receive the values as analysed; web pages receive them clamped to 0.0–1.0 (see
 [Web wallpapers](web-wallpapers.md#audio-response)).
 
+On an active, unpaused [lock screen or screen saver](lock-screen.md#audio-media-and-the-enabled-state),
+Scene and Web wallpapers with audio response enabled that actually read audio
+(`owe_scene_wallpaper_set_audio_requirement_callback` or `wallpaperRegisterAudioListener`)
+receive the main app's single shared analysis rather than opening a second capture tap.
+The main app exports all 224 unclamped bands (`left64`, `right64`, `left32`, `right32`,
+`left16`, `right16`) into a 4096-byte `mmap` seqlock file (`audio-spectrum.shm`, never
+`msync`'d) at 30 Hz only while the extension reports active demand and displays are awake;
+the extension injects all three resolutions into its scene `AudioResponseService` and
+delivers the clamped 128-bin view to subscribed web surfaces. Display sleep, system sleep,
+user or battery pause, unlock, extension exit or app shutdown close the tap and remove the
+shared file immediately.
+
 ## Supported effect paths
 
 | Path | Notes |
@@ -166,14 +178,19 @@ Scenes receive the values as analysed; web pages receive them clamped to 0.0–1
 ## Non-goals
 
 - Pre-rendered video wallpapers do not gain reactive effects.
-- The [lock-screen extension](lock-screen.md) does not capture system audio.
+- The [lock-screen extension](lock-screen.md) never opens CoreAudio capture itself; it only consumes spectra forwarded from the running main app.
 
 ## Verification
 
 Synthetic offscreen checks cover the analysis against tone measurements
-(`AudioResponseMonoTest`, see [renderer testing](../testing/renderer.md)), audio-driven
-shader color and SceneScript scale. Device-free controller and bridge tests cover web-only
-capture startup, permission, shared ownership, suspension and shutdown.
+(`AudioResponseMonoTest`, `SpectrumExport128Test` including full 224-band export/inject
+round-trips and staleness clearing, see [renderer testing](../testing/renderer.md)),
+audio-driven shader color and SceneScript scale. Device-free controller and bridge tests
+cover web-only capture startup, lock-screen audio demand during desktop presentation
+suspension (`web_audio_media`), permission, shared ownership, suspension and shutdown.
+`LockScreenLiveFeedTests` and `ScreenSaverWebSurfaceTests` cover the `mmap` seqlock
+channel, staleness expiry, inode replacement, sleep/exit teardown and web listener
+delivery.
 The `api::operation_contract_tests::audio_capture_contract_tests` regressions deliver
 audio requirements before the first frame, between capture registration and the
 worker's response write, and after the worker registers capture. They check response,

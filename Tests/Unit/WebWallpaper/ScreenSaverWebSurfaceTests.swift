@@ -49,6 +49,8 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
       window.wallpaperRegisterAudioListener(bins => state.capture.push(
         bins.length === 128 && Array.from(bins).every(value => value === 0) ? 'silence' : 'sound'));
       window.wallpaperRegisterMediaStatusListener(value => state.media = value);
+      window.wallpaperRegisterMediaPropertiesListener(value => state.mediaProps = value);
+      window.wallpaperRegisterMediaPlaybackListener(value => state.mediaPlayback = value);
       </script></body></html>
       """.write(to: project.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
   }
@@ -479,5 +481,48 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
       "The lock screen captures no audio: its listener only ever hears silence")
     XCTAssertEqual((reply["media"] as? [String: Any])?["enabled"] as? Bool, false)
     XCTAssertEqual(surface.webView.value(forKey: "_mediaMutedState") as? UInt, 7)
+  }
+
+  func testLiveMediaAndAudioForwardingReachSubscribedWebSurface() async throws {
+    let surface = try ScreenSaverWebSurface(
+      projectURL: project, entryFile: "index.html", readAccessURL: rootURL,
+      size: CGSize(width: 128, height: 96), scale: 1, propertiesJSON: "{}", fps: 30,
+      paused: false, mediaIntegrationEnabled: true, audioResponseEnabled: true)
+    surfaces.append(surface)
+    let layer = CALayer()
+    layer.frame = CGRect(x: 0, y: 0, width: 128, height: 96)
+    try surface.attach(to: layer)
+    roots.append(layer)
+
+    try await start(surface)
+    try await poll { surface.isAudioSubscribed && surface.isMediaSubscribed }
+
+    let initial = try await state(surface)
+    XCTAssertEqual((initial["media"] as? [String: Any])?["enabled"] as? Bool, true)
+
+    surface.deliverMediaEvents([
+      ("properties", ["title": "PLAY DICE!", "artist": "Hakos Baelz"]),
+      ("playback", ["state": 0]),
+    ])
+    try await poll {
+      let current = try await self.state(surface)
+      return (current["mediaProps"] as? [String: Any])?["title"] as? String == "PLAY DICE!"
+        && (current["mediaPlayback"] as? [String: Any])?["state"] as? Int == 0
+    }
+
+    surface.setLiveAudioActive(true)
+    var bins = [Double](repeating: 0, count: 128)
+    bins[4] = 0.85
+    surface.deliverAudio(bins)
+    try await poll {
+      let current = try await self.state(surface)
+      return (current["capture"] as? [String])?.contains("sound") == true
+    }
+
+    surface.setMediaIntegrationEnabled(false)
+    try await poll {
+      let current = try await self.state(surface)
+      return (current["media"] as? [String: Any])?["enabled"] as? Bool == false
+    }
   }
 }

@@ -360,6 +360,12 @@ pub struct SetWebAudioSubscribed {
     pub subscribed: bool,
 }
 
+/// The lock-screen / screen-saver extension started or stopped needing live
+/// system-audio spectrum forwarding from the main app.
+pub struct SetLockScreenAudioDemand {
+    pub active: bool,
+}
+
 /// Live scenes whose renderers started or stopped reading system audio. The
 /// handler re-reads each one's current requirement rather than trusting an
 /// order of events, so coalesced deliveries are safe.
@@ -539,6 +545,7 @@ pub type SetMetalFxUpscalingEnabledReply = AllSnapshotsReply;
 pub type SetSceneVideoPlaneSamplingEnabledReply = AllSnapshotsReply;
 pub type SetSceneDisplayFramingEnabledReply = AllSnapshotsReply;
 pub type SetWebAudioSubscribedReply = Result<(), BridgeError>;
+pub type SetLockScreenAudioDemandReply = Result<(), BridgeError>;
 pub type AudioRequirementChangedReply = Result<(), BridgeError>;
 pub type SetMediaIntegrationEnabledReply = WallpaperMutationReply;
 pub type FanOutSystemMediaEventReply = Result<(), BridgeError>;

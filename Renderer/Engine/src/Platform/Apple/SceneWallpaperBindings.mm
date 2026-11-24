@@ -1520,6 +1520,51 @@ extern "C" int owe_audio_current_spectrum_128(
     return 0;
 }
 
+extern "C" int owe_audio_current_spectrum_full(
+    float* out_bands,
+    uintptr_t out_len,
+    uint64_t* out_generation,
+    bool* out_stereo)
+{
+    clear_last_error();
+    if (out_bands == nullptr) return fail("the spectrum buffer is NULL");
+    if (out_len < wallpaper::audio::kAudioSpectrumFullBandCount) {
+        return fail("the spectrum buffer must hold at least 224 values");
+    }
+    const auto snapshot = wallpaper::audio::CurrentAudioSpectrumSnapshot();
+    const auto usable = [](float level) {
+        return (std::isfinite(level) && level > 0.0f) ? level : 0.0f;
+    };
+    const auto copy_bands = [&usable](const auto& src, float* dst) {
+        for (std::size_t i = 0; i < src.size(); ++i) dst[i] = usable(src[i]);
+    };
+    copy_bands(snapshot.left64, out_bands);
+    copy_bands(snapshot.right64, out_bands + 64);
+    copy_bands(snapshot.left32, out_bands + 128);
+    copy_bands(snapshot.right32, out_bands + 160);
+    copy_bands(snapshot.left16, out_bands + 192);
+    copy_bands(snapshot.right16, out_bands + 208);
+    if (out_generation != nullptr) *out_generation = snapshot.generation;
+    if (out_stereo != nullptr) *out_stereo = snapshot.stereo;
+    return 0;
+}
+
+extern "C" int owe_audio_submit_spectrum_full(
+    const float* bands,
+    uintptr_t len,
+    bool stereo)
+{
+    clear_last_error();
+    return guarded([&] {
+        std::string error;
+        if (! wallpaper::audio::SubmitAudioSpectrumSnapshot(bands, static_cast<size_t>(len), stereo, &error)) {
+            return fail(error.empty() ? std::string_view("the spectrum bands were refused")
+                                      : std::string_view(error));
+        }
+        return 0;
+    });
+}
+
 extern "C" int owe_renderer_counters_set_enabled(bool enabled)
 {
     clear_last_error();

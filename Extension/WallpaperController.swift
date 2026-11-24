@@ -16,11 +16,22 @@ final class WallpaperController {
     self.surfaces.values.forEach { self.refresh($0) }
   })
   private var started = false
+  private var latestMedia: LockScreenMediaSnapshot?
+  private var latestArtworkRGBA: Data?
+  private var latestArtworkPNGDataURL = ""
+  private var cachedArtworkRevision: UInt64 = 0
+  private var lastPublishedDemand: (needsMedia: Bool, needsAudio: Bool)?
+  private var timelineTask: Task<Void, Never>?
+  private var audioTask: Task<Void, Never>?
+  private let spectrumReader = LockScreenAudioSpectrumReader(exchange: WallpaperRuntime.exchange)
+  private var lastForwardedAudioGeneration: UInt64 = 0
+  private var webReceivedLiveAudio = false
   /// Static so the extension's listener can count a connection off the main queue.
   nonisolated static let idleExit = LockScreenIdleExit(
     grace: .seconds(30),
     isBusy: { !WallpaperController.shared.surfaces.values.isEmpty },
     exit: {
+      WallpaperController.shared.clearLiveDemandOnExit()
       WallpaperRuntime.log("Exiting: no wallpaper host or surface remains.")
       Darwin.exit(0)
     })
@@ -63,6 +74,13 @@ final class WallpaperController {
         let controller = Unmanaged<WallpaperController>.fromOpaque(observer).takeUnretainedValue()
         DispatchQueue.main.async { controller.reload() }
       }, LockScreenConfiguration.changedNotification as CFString, nil, .deliverImmediately)
+    CFNotificationCenterAddObserver(
+      CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque(),
+      { _, observer, _, _, _ in
+        guard let observer else { return }
+        let controller = Unmanaged<WallpaperController>.fromOpaque(observer).takeUnretainedValue()
+        DispatchQueue.main.async { controller.reloadMedia() }
+      }, LockScreenMediaSnapshot.changedNotification as CFString, nil, .deliverImmediately)
   }
 
   func reload() {
@@ -78,6 +96,7 @@ final class WallpaperController {
       // A removed/corrupt manifest must never keep rendering a previously private scene.
       configuration = nil
       surfaces.values.forEach { $0.clear() }
+      reconcileLiveFeed()
       WallpaperRuntime.log("Configuration unavailable: \(error.localizedDescription)")
     }
   }
@@ -321,6 +340,199 @@ final class WallpaperController {
 
   private func remove(_ id: UUID) {
     surfaces.remove(id)
+    reconcileLiveFeed()
     Self.idleExit.surfacesChanged()
+  }
+
+  // MARK: - Live Media & Audio Forwarding
+
+  func reloadMedia() {
+    guard loadMediaFromDisk() else {
+      updateTimelineTimer()
+      return
+    }
+    guard let snapshot = latestMedia else { return }
+    let now = Date()
+    for surface in Array(surfaces.values) where surface.isLiveMediaEligible {
+      surface.deliverMedia(
+        snapshot: snapshot,
+        artworkRGBA: latestArtworkRGBA,
+        artworkPNGDataURL: latestArtworkPNGDataURL,
+        timelineAt: now,
+        forceReplay: false)
+    }
+    updateTimelineTimer()
+  }
+
+  func replayMedia(to surface: WallpaperSurface) {
+    guard surface.isLiveMediaEligible else { return }
+    if latestMedia == nil {
+      _ = loadMediaFromDisk()
+    }
+    guard let snapshot = latestMedia else { return }
+    surface.deliverMedia(
+      snapshot: snapshot,
+      artworkRGBA: latestArtworkRGBA,
+      artworkPNGDataURL: latestArtworkPNGDataURL,
+      timelineAt: Date(),
+      forceReplay: true)
+    updateTimelineTimer()
+  }
+
+  func reconcileLiveFeed() {
+    let activeSurfaces = Array(surfaces.values)
+    let needsMedia = activeSurfaces.contains { $0.isLiveMediaEligible }
+    let needsAudio = activeSurfaces.contains { $0.isLiveAudioEligible }
+    publishDemandIfChanged(needsMedia: needsMedia, needsAudio: needsAudio)
+    updateTimelineTimer()
+    updateAudioTimer(active: needsAudio)
+  }
+
+  private func clearLiveDemandOnExit() {
+    timelineTask?.cancel()
+    timelineTask = nil
+    audioTask?.cancel()
+    audioTask = nil
+    spectrumReader.close()
+    publishDemandIfChanged(needsMedia: false, needsAudio: false)
+  }
+
+  @discardableResult
+  private func loadMediaFromDisk() -> Bool {
+    guard let snapshot = LockScreenMediaSnapshot.read(from: WallpaperRuntime.exchange) else {
+      latestMedia = nil
+      latestArtworkRGBA = nil
+      latestArtworkPNGDataURL = ""
+      cachedArtworkRevision = 0
+      return false
+    }
+    if let thumb = snapshot.thumbnail {
+      if thumb.artworkRevision != cachedArtworkRevision {
+        cachedArtworkRevision = thumb.artworkRevision
+        latestArtworkRGBA = LockScreenMediaSnapshot.readArtworkRGBA(
+          from: WallpaperRuntime.exchange, thumbnail: thumb)
+        latestArtworkPNGDataURL = LockScreenMediaSnapshot.readArtworkPNGDataURL(
+          from: WallpaperRuntime.exchange, thumbnail: thumb)
+      }
+    } else if cachedArtworkRevision != 0 || latestArtworkRGBA != nil || !latestArtworkPNGDataURL.isEmpty {
+      cachedArtworkRevision = 0
+      latestArtworkRGBA = nil
+      latestArtworkPNGDataURL = ""
+    }
+    latestMedia = snapshot
+    return true
+  }
+
+  private func publishDemandIfChanged(needsMedia: Bool, needsAudio: Bool) {
+    if let last = lastPublishedDemand,
+      last.needsMedia == needsMedia, last.needsAudio == needsAudio
+    {
+      return
+    }
+    lastPublishedDemand = (needsMedia, needsAudio)
+    let url = WallpaperRuntime.exchange.appendingPathComponent(LockScreenLiveDemand.fileName)
+    if needsMedia || needsAudio {
+      let demand = LockScreenLiveDemand(
+        processID: getpid(), needsMedia: needsMedia, needsAudio: needsAudio)
+      do {
+        let data = try JSONEncoder().encode(demand)
+        try data.write(to: url, options: .atomic)
+      } catch {
+        WallpaperRuntime.log("Live demand write failed: \(error.localizedDescription)")
+      }
+    } else {
+      try? FileManager.default.removeItem(at: url)
+    }
+    CFNotificationCenterPostNotification(
+      CFNotificationCenterGetDarwinNotifyCenter(),
+      CFNotificationName(LockScreenLiveDemand.changedNotification as CFString),
+      nil, nil, true)
+  }
+
+  private func updateTimelineTimer() {
+    let shouldTick = latestMedia?.playbackState == 0
+      && latestMedia?.timeline != nil
+      && surfaces.values.contains { $0.isLiveMediaEligible }
+    guard shouldTick != (timelineTask != nil) else { return }
+    timelineTask?.cancel()
+    timelineTask = nil
+    guard shouldTick else { return }
+    timelineTask = Task { @MainActor [weak self] in
+      while let self, !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+        guard let snapshot = self.latestMedia, snapshot.playbackState == 0,
+          let timeline = snapshot.interpolatedTimeline(at: Date())
+        else {
+          self.updateTimelineTimer()
+          return
+        }
+        let eligible = Array(self.surfaces.values).filter { $0.isLiveMediaEligible }
+        guard !eligible.isEmpty else {
+          self.updateTimelineTimer()
+          return
+        }
+        for surface in eligible {
+          surface.deliverTimelineTick(position: timeline.position, duration: timeline.duration)
+        }
+      }
+    }
+  }
+
+  private func updateAudioTimer(active: Bool) {
+    guard active != (audioTask != nil) else { return }
+    audioTask?.cancel()
+    audioTask = nil
+    if !active {
+      spectrumReader.close()
+      lastForwardedAudioGeneration = 0
+      if webReceivedLiveAudio {
+        webReceivedLiveAudio = false
+        for surface in Array(surfaces.values) where surface.isWebSurface {
+          surface.deliverWebAudio(bins: nil, liveActive: false)
+        }
+      }
+      return
+    }
+    lastForwardedAudioGeneration = 0
+    audioTask = Task { @MainActor [weak self] in
+      while let self, !Task.isCancelled {
+        self.pumpAudioOnce()
+        do { try await Task.sleep(for: .milliseconds(33)) } catch { return }
+      }
+    }
+  }
+
+  private func pumpAudioOnce() {
+    let eligible = Array(surfaces.values).filter { $0.isLiveAudioEligible }
+    guard !eligible.isEmpty else {
+      updateAudioTimer(active: false)
+      return
+    }
+    let hasScene = eligible.contains { $0.isSceneSurface }
+    let webSurfaces = eligible.filter { $0.isWebSurface }
+    if let frame = spectrumReader.read() {
+      guard frame.generation != lastForwardedAudioGeneration else { return }
+      lastForwardedAudioGeneration = frame.generation
+      if hasScene {
+        frame.bands.withUnsafeBufferPointer { buffer in
+          if let pointer = buffer.baseAddress {
+            _ = owe_audio_submit_spectrum_full(pointer, UInt(buffer.count), frame.stereo)
+          }
+        }
+      }
+      if !webSurfaces.isEmpty {
+        let bins = frame.clampedWebBins128()
+        for surface in webSurfaces {
+          surface.deliverWebAudio(bins: bins, liveActive: true)
+        }
+        webReceivedLiveAudio = true
+      }
+    } else if webReceivedLiveAudio {
+      webReceivedLiveAudio = false
+      let silence = [Double](repeating: 0, count: LockScreenAudioSpectrumChannel.webBinCount)
+      for surface in webSurfaces {
+        surface.deliverWebAudio(bins: silence, liveActive: false)
+      }
+    }
   }
 }

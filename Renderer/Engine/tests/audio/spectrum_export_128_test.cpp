@@ -203,5 +203,91 @@ TEST_F(SpectrumExport128Test, TheGenerationIsTheOneOfTheAnalysisTheLevelsCameFro
     EXPECT_EQ(exported.generation, snapshot.generation);
 }
 
+TEST_F(SpectrumExport128Test, FullSpectrumExportAndSubmitRoundTripAllThreeResolutionsUnclamped)
+{
+    std::array<float, kAudioSpectrumFullBandCount> bands {};
+    uint64_t                                       generation = 99;
+    bool                                           stereo     = true;
+    EXPECT_NE(owe_audio_current_spectrum_full(nullptr, bands.size(), &generation, &stereo), 0);
+    EXPECT_NE(owe_audio_current_spectrum_full(bands.data(), bands.size() - 1u, &generation, &stereo), 0);
+    EXPECT_NE(owe_audio_submit_spectrum_full(nullptr, bands.size(), true), 0);
+    EXPECT_NE(owe_audio_submit_spectrum_full(bands.data(), bands.size() - 1u, true), 0);
+    EXPECT_EQ(generation, 99u);
+
+    SubmitStereo(8.0f, 0.25f);
+    ASSERT_TRUE(testing::PollSnapshot(std::chrono::milliseconds(1000), [](const auto& s) {
+        return s.generation > 0u && *std::max_element(s.left64.begin(), s.left64.end()) > 1.0f;
+    }).generation > 0u);
+
+    AudioSpectrumSnapshot original {};
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        const AudioSpectrumSnapshot before = CurrentAudioSpectrumSnapshot();
+        ASSERT_EQ(owe_audio_current_spectrum_full(bands.data(), bands.size(), &generation, &stereo), 0);
+        const AudioSpectrumSnapshot after = CurrentAudioSpectrumSnapshot();
+        if (before.generation == after.generation && generation == after.generation) {
+            original = after;
+            break;
+        }
+    }
+    ASSERT_GT(original.generation, 0u);
+    ASSERT_TRUE(stereo);
+    EXPECT_GT(*std::max_element(bands.begin(), bands.begin() + 64), 1.0f)
+        << "full scene export preserves levels above 1.0";
+
+    // Reset and inject the exported snapshot as a sandboxed extension process would.
+    ResetAudioResponseServiceForTesting();
+    ASSERT_EQ(owe_audio_submit_spectrum_full(bands.data(), bands.size(), stereo), 0);
+    const AudioSpectrumSnapshot replayed = CurrentAudioSpectrumSnapshot();
+    EXPECT_EQ(replayed.generation, 1u);
+    EXPECT_TRUE(replayed.stereo);
+    EXPECT_EQ(owe_audio_spectrum_is_stereo(), 1);
+    EXPECT_EQ(replayed.left64, original.left64);
+    EXPECT_EQ(replayed.right64, original.right64);
+    EXPECT_EQ(replayed.average64, original.average64);
+    EXPECT_EQ(replayed.left32, original.left32);
+    EXPECT_EQ(replayed.right32, original.right32);
+    EXPECT_EQ(replayed.average32, original.average32);
+    EXPECT_EQ(replayed.left16, original.left16);
+    EXPECT_EQ(replayed.right16, original.right16);
+    EXPECT_EQ(replayed.average16, original.average16);
+}
+
+TEST_F(SpectrumExport128Test, SubmittedFullSpectrumSanitizesMonoAndClearsWhenStale)
+{
+    std::array<float, kAudioSpectrumFullBandCount> bands {};
+    bands[0]   = 1.35f;
+    bands[1]   = -0.5f;
+    bands[2]   = std::numeric_limits<float>::quiet_NaN();
+    bands[3]   = std::numeric_limits<float>::infinity();
+    bands[64]  = 0.9f; // ignored for mono
+    bands[128] = 0.8f;
+    bands[192] = 0.6f;
+
+    ASSERT_EQ(owe_audio_submit_spectrum_full(bands.data(), bands.size(), false), 0);
+    const AudioSpectrumSnapshot first = CurrentAudioSpectrumSnapshot();
+    EXPECT_FALSE(first.stereo);
+    EXPECT_EQ(owe_audio_spectrum_is_stereo(), 0);
+    EXPECT_FLOAT_EQ(first.left64[0], 1.35f);
+    EXPECT_FLOAT_EQ(first.right64[0], 1.35f);
+    EXPECT_FLOAT_EQ(first.average64[0], 1.35f);
+    EXPECT_FLOAT_EQ(first.left64[1], 0.0f);
+    EXPECT_FLOAT_EQ(first.left64[2], 0.0f);
+    EXPECT_FLOAT_EQ(first.left64[3], 0.0f);
+    EXPECT_FLOAT_EQ(first.left32[0], 0.8f);
+    EXPECT_FLOAT_EQ(first.right32[0], 0.8f);
+    EXPECT_FLOAT_EQ(first.left16[0], 0.6f);
+    EXPECT_FLOAT_EQ(first.right16[0], 0.6f);
+
+    // Without further submissions, the 250 ms staleness rule clears the spectrum to silence.
+    const AudioSpectrumSnapshot cleared = testing::PollSnapshot(
+        std::chrono::milliseconds(1000),
+        [gen = first.generation](const AudioSpectrumSnapshot& s) {
+            return s.generation > gen && s.average64[0] == 0.0f && s.average32[0] == 0.0f &&
+                   s.average16[0] == 0.0f;
+        });
+    EXPECT_GT(cleared.generation, first.generation);
+    EXPECT_FLOAT_EQ(cleared.average64[0], 0.0f);
+}
+
 } // namespace
 } // namespace wallpaper::audio

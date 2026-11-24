@@ -1548,6 +1548,11 @@ impl EngineFacade for ControlledEngine {
     ) -> Result<Option<wallpaper_core::AudioSpectrum128>, EngineError> {
         panic!("audio spectrum outside mounted scenario")
     }
+    fn current_audio_spectrum_full(
+        &self,
+    ) -> Result<Option<wallpaper_core::AudioSpectrumFull>, EngineError> {
+        panic!("full audio spectrum outside mounted scenario")
+    }
 }
 
 struct ObserveWeak;

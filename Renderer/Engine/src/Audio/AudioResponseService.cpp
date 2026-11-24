@@ -336,6 +336,57 @@ bool SubmitAudioFrames(
         sample_rate, frame_count, pcm_frames, static_cast<size_t>(frame_count), true);
 }
 
+bool SubmitAudioSpectrumSnapshot(
+    const float* bands,
+    size_t band_count,
+    bool stereo,
+    std::string* error)
+{
+    const auto fail = [error](const char* message) {
+        if (error != nullptr) {
+            *error = message;
+        }
+        return false;
+    };
+    if (bands == nullptr) {
+        return fail("audio spectrum bands must not be null");
+    }
+    if (band_count < kAudioSpectrumFullBandCount) {
+        return fail("audio spectrum bands must hold at least 224 values");
+    }
+    const auto sanitize_level = [](float value) {
+        return (std::isfinite(value) && value > 0.0f) ? value : 0.0f;
+    };
+    const auto fill_resolution = [&sanitize_level, stereo](
+        const float* left_in, const float* right_in, auto& left_out, auto& right_out, auto& avg_out) {
+        for (size_t i = 0; i < left_out.size(); ++i) {
+            const float l = sanitize_level(left_in[i]);
+            const float r = stereo ? sanitize_level(right_in[i]) : l;
+            left_out[i]  = l;
+            right_out[i] = r;
+            avg_out[i]   = 0.5f * (l + r);
+        }
+    };
+
+    AudioSpectrumSnapshot next {};
+    next.sample_rate = kAnalysisSampleRate;
+    next.stereo      = stereo;
+    fill_resolution(bands, bands + 64, next.left64, next.right64, next.average64);
+    fill_resolution(bands + 128, bands + 160, next.left32, next.right32, next.average32);
+    fill_resolution(bands + 192, bands + 208, next.left16, next.right16, next.average16);
+
+    std::lock_guard<std::mutex> lock(g_state.mutex);
+    EnsureWorkerStartedLocked();
+    ClearFifosLocked();
+    next.generation             = g_state.snapshot.generation + 1u;
+    next.last_submit_sample_rate = g_state.snapshot.last_submit_sample_rate;
+    next.accepted_frame_count   = g_state.snapshot.accepted_frame_count;
+    g_state.snapshot            = next;
+    g_state.last_submit_time    = std::chrono::steady_clock::now();
+    g_state.condition.notify_all();
+    return true;
+}
+
 AudioSpectrumSnapshot CurrentAudioSpectrumSnapshot()
 {
     std::lock_guard<std::mutex> lock(g_state.mutex);

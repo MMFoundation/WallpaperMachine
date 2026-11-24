@@ -32,6 +32,7 @@ final class LockScreenWallpaperService {
   var locksDesktopPictureChoice: Bool { isRequested || ownsDesktopProvider }
   @ObservationIgnored var beforeActivation: (() async throws -> Void)?
   @ObservationIgnored var afterDeactivation: (() throws -> Void)?
+  @ObservationIgnored var onAvailabilityChanged: (() -> Void)?
 
   private static let preference = "WallpaperMachineAnimateLockScreen"
   private static let screenSaverPreference = "WallpaperMachineUseWallpaperAsScreenSaver"
@@ -234,6 +235,7 @@ final class LockScreenWallpaperService {
     dropRepairOfferIfNothingIsRequested()
     updateMonitor()
     if !enabled { defaults.set(false, forKey: Self.preference) }
+    onAvailabilityChanged?()
     refresh(retryingLockScreen: true)
   }
 
@@ -246,6 +248,7 @@ final class LockScreenWallpaperService {
     dropRepairOfferIfNothingIsRequested()
     updateMonitor()
     if !enabled { defaults.set(false, forKey: Self.screenSaverPreference) }
+    onAvailabilityChanged?()
     refresh()
   }
 
@@ -375,6 +378,7 @@ final class LockScreenWallpaperService {
       ownsDesktopProvider = false
       isEnabled = false
       screenSaverEnabled = false
+      onAvailabilityChanged?()
       lastInputs = nil
       // The native journal can restore a poster. Its owner must then
       // restore the user's original after WallpaperAgent has reloaded.
@@ -504,7 +508,9 @@ final class LockScreenWallpaperService {
           propertiesJSON: record.propertiesJson, paused: record.paused,
           engineOptions: record.engineOptions.map(WallpaperEngineOptions.init),
           sceneQuality: record.sceneQuality.map(SceneQualitySettings.init),
-          borderColor: record.borderColor.map { [Double($0.red), Double($0.green), Double($0.blue)] }))
+          borderColor: record.borderColor.map { [Double($0.red), Double($0.green), Double($0.blue)] },
+          mediaIntegrationEnabled: record.mediaIntegrationEnabled,
+          audioResponseEnabled: record.audioResponseEnabled))
       }
       inputs.sort { ($0.content.rawValue, $0.displayID) < ($1.content.rawValue, $1.displayID) }
       let currentContentRevision = contentRevision()
@@ -796,6 +802,7 @@ final class LockScreenWallpaperService {
       && unconfirmed?.revision != configuration.revision
     screenSaverEnabled = screenSaverRequested && configuration.screenSaverEnabled
       && !configuration.scenes(for: .screenSaver).isEmpty
+    onAvailabilityChanged?()
     if isEnabled && !defaults.bool(forKey: Self.preference) {
       defaults.set(true, forKey: Self.preference)
     }
@@ -859,6 +866,7 @@ final class LockScreenWallpaperService {
     forceRepublish = false
     isEnabled = false
     screenSaverEnabled = false
+    onAvailabilityChanged?()
     lastInputs = nil
     try await restoreNativeSelection()
     if ownsDesktopProvider {
@@ -1151,6 +1159,8 @@ private struct LockScreenPublishInput: Equatable, Sendable {
   var engineOptions: WallpaperEngineOptions? = nil
   var sceneQuality: SceneQualitySettings? = nil
   var borderColor: [Double]? = nil
+  var mediaIntegrationEnabled: Bool = false
+  var audioResponseEnabled: Bool = false
 }
 
 /// A source-tree metadata fingerprint reuses immutable snapshots without reading
@@ -1271,7 +1281,9 @@ private enum LockScreenAssetPublisher {
           engineOptions: isWeb ? nil : input.engineOptions,
           sceneQuality: type.lowercased() == "scene" ? input.sceneQuality : nil,
           lutFile: lutFile,
-          borderColor: isVideo ? input.borderColor : nil)
+          borderColor: isVideo ? input.borderColor : nil,
+          mediaIntegrationEnabled: isVideo ? false : input.mediaIntegrationEnabled,
+          audioResponseEnabled: isVideo ? false : input.audioResponseEnabled)
       switch input.content {
       case .desktop: configuration.scenes.append(scene)
       case .lockScreen: configuration.lockScreenScenes = (configuration.lockScreenScenes ?? []) + [scene]

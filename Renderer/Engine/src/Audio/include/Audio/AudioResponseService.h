@@ -14,6 +14,9 @@ inline constexpr uint32_t kAudioResponseSampleRate = 48000;
 // Frames one analysis reads, back to back: 30 spectra a second, the rate
 // Wallpaper Engine publishes at.
 inline constexpr uint32_t kAudioResponseWindowFrames = 1600;
+// Total bands in a full cross-process spectrum transfer: left64, right64,
+// left32, right32, left16, right16.
+inline constexpr size_t kAudioSpectrumFullBandCount = 64u + 64u + 32u + 32u + 16u + 16u;
 
 struct AudioSpectrumSnapshot
 {
@@ -44,6 +47,12 @@ bool SubmitAudioFrames(
     uint32_t sample_rate,
     uint32_t frame_count,
     const float* pcm_frames,
+    std::string* error);
+
+bool SubmitAudioSpectrumSnapshot(
+    const float* bands,
+    size_t band_count,
+    bool stereo,
     std::string* error);
 
 AudioSpectrumSnapshot CurrentAudioSpectrumSnapshot();

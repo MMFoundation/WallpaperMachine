@@ -135,6 +135,14 @@ pub struct BridgeLockScreenScene {
     /// A plain video's border colour in Fit-style modes: the project's `schemecolor`
     /// property (WE `sub_1400FFCB0`); `None` when the project has none, which is black.
     pub border_color: Option<BridgeRgb>,
+    /// Whether this wallpaper allows system media integration on the lock screen
+    /// or screen saver. Plain videos are always false.
+    #[uniffi(default = false)]
+    pub media_integration_enabled: bool,
+    /// Whether this wallpaper allows system audio response on the lock screen
+    /// or screen saver. Plain videos are always false.
+    #[uniffi(default = false)]
+    pub audio_response_enabled: bool,
 }
 
 /// The window of one open scene wallpaper: the live scene of a display, or
@@ -272,6 +280,16 @@ pub struct BridgeAudioSpectrum {
     pub generation: u64,
     pub stereo: bool,
     pub bins: Vec<f32>,
+}
+
+/// Full-resolution process-wide system audio spectrum (224 unclamped floats:
+/// `left64, right64, left32, right32, left16, right16`), for forwarding
+/// desktop analysis directly into the lock-screen / screen-saver extension.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct BridgeAudioSpectrumFull {
+    pub generation: u64,
+    pub stereo: bool,
+    pub bands: Vec<f32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]

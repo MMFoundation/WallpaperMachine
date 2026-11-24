@@ -885,8 +885,8 @@ only on macOS 26 and later (`LockScreenConfiguration.isSupportedBySystem`).
 |---|---|
 | `WallpaperExtension.swift` | `@main AppExtension`; XPC handler for the whole system protocol (21 requests on macOS 27.0): `acquire`/`update`/`invalidate`/`snapshot`/`provideSettingsViewModels`/`isChoiceDownloaded`/`selectedChoicesDidChange`/`handleNotification` do the work, the rest reply "nothing to do"; connection acceptance |
 | `WallpaperRuntime.swift` | Loads and checks the private hosting ABI, verifies the caller's code signature via its audit token, resolves `CAContext`, compares the exported XPC protocol with the system's (`verifyXPCProtocol`), reads the published configuration and asset paths, logging |
-| `WallpaperController.swift` | Singleton surface registry; screen and system sleep/wake, `com.apple.screenIsLocked`/`Unlocked` and the wallpaper service's `hostDidWake` notice each start a bounded re-check burst of every surface (display power and lock state are read from the system, never remembered); reloads on the Darwin notification `app.wallpapermachine.lock-screen.changed` |
-| `WallpaperSurface.swift` | One `WallpaperID` to one `CAContext` with a scene/video `CAMetalLayer`, an AVFoundation `AVPlayerLayer` or the WebM player (`LockScreenWebMPlayer`) for a plain video (held with its reason when `LockScreenVideoPlanner` finds no player for it), otherwise the scene engine or live WebKit layer tree; bounded geometry, readiness and snapshots |
+| `WallpaperController.swift` | Singleton surface registry; screen and system sleep/wake, `com.apple.screenIsLocked`/`Unlocked` and the wallpaper service's `hostDidWake` notice each start a bounded re-check burst of every surface (display power and lock state are read from the system, never remembered); reloads configuration on `app.wallpapermachine.lock-screen.changed`, reloads forwarded media on `app.wallpapermachine.lock-screen.media.changed`, publishes aggregate `live-demand.json`, and runs demand-gated 1 Hz timeline interpolation and 30 Hz shared-memory audio spectrum forwarding |
+| `WallpaperSurface.swift` | One `WallpaperID` to one `CAContext` with a scene/video `CAMetalLayer`, an AVFoundation `AVPlayerLayer` or the WebM player (`LockScreenWebMPlayer`) for a plain video (held with its reason when `LockScreenVideoPlanner` finds no player for it), otherwise the scene engine or live WebKit layer tree; bounded geometry, readiness, snapshots, and live media/audio capability sync |
 | `WallpaperSettingsProvider.swift` | Encodes the private wallpaper settings view-model payload |
 | `WallpaperExtensionBridge.h` | Objective-C bridging header declaring the private `CAContext`, `NSXPCConnection.auditToken` and the XPC protocol, selector for selector as the system declares it; also includes `SceneWallpaperBindings.h` |
 
@@ -905,9 +905,18 @@ contracts they must agree on:
   mark a video and name its clip, and `sceneStoragePath`/`sceneStorageScreenKey`, a read-only
   publish-time copy of a scene's script `localStorage`, and `engineOptions`, `sceneQuality`,
   `lutFile` (a video's published image filter) and `borderColor` (a video's `schemecolor`
-  border), the saved Wallpaper Engine options; a `sceneRenderer` key an older app wrote is read past), so the version stays and an extension
+  border), the saved Wallpaper Engine options, plus optional `mediaIntegrationEnabled` and
+  `audioResponseEnabled` (applied live to running surfaces without replacing the renderer); a `sceneRenderer` key an older app wrote is read past), so the version stays and an extension
   copy that predates it ignores the key within that contract version; `LockScreenScene.sharesRenderer(with:)` names which
   differences make the extension replace a renderer rather than update it.
+- `LockScreenLiveDemand`, `LockScreenMediaExchange` and `LockScreenAudioSpectrumChannel`
+  define the demand-gated live media and audio forwarding contract between the app
+  (`LockScreenLiveFeedCoordinator`) and the extension: the extension writes `live-demand.json`
+  only when active unpaused lock-screen/screen-saver surfaces need media or read audio; the app
+  writes `media-state.json` (plus `media-artwork.rgba` / `media-artwork.png` on artwork change)
+  only on non-tick changes and streams 224 unclamped spectrum bands through a 4096-byte `mmap`
+  seqlock (`audio-spectrum.shm`, no `msync`). Both feeds tear down and delete transient files on
+  display sleep, pause, unlock, extension exit or shutdown.
 - `LockScreenExtensionStatus` is a separate diagnostic exchange (`activation-request.json`,
   `extension-status.json`) that reports a configuration error even when the scene schema cannot
   be decoded; configuration success never substitutes for a rendered-frame acknowledgement. See
@@ -984,8 +993,9 @@ Rules of the exchange:
   signed extension back against that file, so a dropped entitlement fails packaging instead of
   showing as a lock screen that never starts ([bundle contract](build.md#bundle-contract)).
 - Web wallpapers in the extension get a project-specific WebKit file grant, never the common
-  revisions directory. Network-client access allows wallpaper resources, but capture, audio and
-  author dialogs are disabled. The page's un-ordered scheduling window does not present on the
+  revisions directory. Network-client access allows wallpaper resources, while sound output,
+  capture and author dialogs remain disabled; media integration and audio response follow the
+  wallpaper's saved settings on active lock-screen and screen-saver surfaces. The page's un-ordered scheduling window does not present on the
   desktop; the existing remote context owns the live layer tree, and suspension freezes it,
   accelerated content included. What goes into that context is the scheduling window's frame
   view layer, the top of the window's own tree: AppKit takes a view's backing layer straight back

@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-15 — Nix package and Home Manager documentation
+
+Documented the release package, named settings and extraSettings, and Home Manager standalone or inside nix-darwin. This update changes documentation only.
+
+- nix flake check --print-build-logs: passed on x86_64-linux; existing package and module check results were reused from the Nix store.
+- Parsed all four Nix examples with their external arguments bound. Evaluated the standalone, extraSettings and Home Manager inside nix-darwin examples to their activation or system derivations using the locked inputs. No activation ran.
+- nix fmt -- --check flake.nix nix/*.nix: passed.
+- python3 scripts/tests/test_doc_links.py: passed, 11 tests.
+- Earlier implementation checks evaluated all exported systems and passed all 35 Python test modules. The native test gate stopped at missing XcodeGen on Linux and did not pass. Native tests were not rerun for this documentation update.
+- macOS signing, activation, wallpaper playback and extension registration remain unverified. The native app was not rebuilt or launched.
+
 ## 2026-11-16 — PR #218: preserve audio rollback after a save failure
 
 - A failed audio activation followed by failed rollback persistence no longer splits the restored draft from the authoritative map or skips live cleanup and operation invalidation.

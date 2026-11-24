@@ -925,6 +925,14 @@ or depend on a second physical monitor.
   from switching a mode off and on again; a scene or video publishes its display's position
   and a web page none, and moving the picture publishes a new revision that reuses the
   project while the same position publishes nothing.
+- `LockScreenLiveFeedTests` — lock-screen and screen-saver live media/audio exchange:
+  224-band unclamped `mmap` seqlock round-trip and clamped 128-bin web export, 250 ms
+  staleness expiry, deactivation and automatic reader recovery after file replacement;
+  media snapshot timeline interpolation, SceneScript vs Web playback numbering, legacy
+  `LockScreenScene` decoding and in-place renderer sharing; `LockScreenLiveFeedCoordinator`
+  lifecycle, zero-disk-write suppression of ordinary 1 Hz timeline ticks vs real seeks,
+  already-active desktop media replay, and immediate teardown on display sleep, pause or
+  extension exit.
 - `LockScreenVideoPlannerTests` — which player plays a plain video on the lock screen: the
   AVFoundation layer when admission accepts the clip (the frame rate it was given takes no
   part), the WebM player for a file AVFoundation cannot open that the project's reader takes,

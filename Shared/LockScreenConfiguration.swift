@@ -134,8 +134,20 @@ struct LockScreenScene: Codable, Equatable {
   var sceneQuality: SceneQualitySettings? = nil
   var lutFile: String? = nil
   var borderColor: [Double]? = nil
+  /// Whether this wallpaper allows system media integration on the lock screen or
+  /// screen saver. Absent from older apps and always false for plain videos.
+  var mediaIntegrationEnabled: Bool? = nil
+  /// Whether this wallpaper allows system audio response on the lock screen or
+  /// screen saver. Absent from older apps and always false for plain videos.
+  var audioResponseEnabled: Bool? = nil
 
   var effectiveFraming: LockScreenFraming { framing ?? .centered }
+  var effectiveMediaIntegrationEnabled: Bool {
+    plainVideo != true && (mediaIntegrationEnabled ?? false)
+  }
+  var effectiveAudioResponseEnabled: Bool {
+    plainVideo != true && (audioResponseEnabled ?? false)
+  }
 
   /// The border colour as a layer takes it; nil (black) when absent or malformed.
   var borderCGColor: CGColor? {
@@ -144,10 +156,11 @@ struct LockScreenScene: Codable, Equatable {
   }
 
   /// Whether a surface already showing `other` can take this scene without a new
-  /// renderer. Frame rate, title and pause apply to the running renderer, and the
-  /// preview path is not read by it. The scaling and the position are, like the
-  /// project, only read when the renderer is built, so a change of either replaces it.
-  /// So are the kind of wallpaper and the file a video plays.
+  /// renderer. Frame rate, title, pause, media integration and audio response apply
+  /// to the running renderer, and the preview path is not read by it. The scaling
+  /// and the position are, like the project, only read when the renderer is built,
+  /// so a change of either replaces it. So are the kind of wallpaper and the file
+  /// a video plays.
   func sharesRenderer(with other: LockScreenScene) -> Bool {
     projectPath == other.projectPath && assetsPath == other.assetsPath
       && webEntryFile == other.webEntryFile && propertiesJSON == other.propertiesJSON
@@ -221,4 +234,16 @@ struct LockScreenReadiness: Codable {
 enum LockScreenHostRelease {
   static func fileName(processID: Int32) -> String { "released-\(processID)" }
   static let prefix = "released-"
+}
+
+/// Published by the sandboxed extension whenever its aggregate live media or audio
+/// demand changes, so the main app keeps Now Playing and CoreAudio capture running
+/// during lock screen or screen saver only while an unpaused surface actually needs them.
+struct LockScreenLiveDemand: Codable, Equatable, Sendable {
+  static let fileName = "live-demand.json"
+  static let changedNotification = "app.wallpapermachine.lock-screen.demand.changed"
+
+  var processID: Int32
+  var needsMedia: Bool
+  var needsAudio: Bool
 }

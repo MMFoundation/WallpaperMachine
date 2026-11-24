@@ -131,6 +131,10 @@ pub struct BridgeActorState {
     /// handle-based audio accounting. Without this the system capture tap
     /// would stay shut for a display showing nothing but web wallpapers.
     pub web_audio_subscribers: BTreeMap<String, BTreeSet<u32>>,
+    /// The sandboxed lock-screen / screen-saver extension currently has an
+    /// active, unpaused audio-reading surface and needs the main app's system
+    /// audio tap to stay open even while desktop presentation is suspended.
+    pub lock_screen_audio_active: bool,
     /// The image filters the shared assets offer, read again when their folder
     /// changes (see [`crate::engine::lut_catalog::LutCatalog::refreshed`]).
     /// Refreshed when a wallpaper is selected or its options are asked for,
@@ -197,6 +201,7 @@ impl Default for BridgeActorState {
             filter_webpage: true,
             filter_unknown: true,
             web_audio_subscribers: BTreeMap::new(),
+            lock_screen_audio_active: false,
             lut_catalog: None,
             scene_traits: crate::engine::scene_traits::SceneTraitsCache::default(),
         }

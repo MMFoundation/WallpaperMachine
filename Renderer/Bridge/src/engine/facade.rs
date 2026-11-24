@@ -17,7 +17,7 @@ use futures_util::future::{BoxFuture, FutureExt};
 #[cfg(test)]
 use wallpaper_core::project::SceneTemplate;
 use wallpaper_core::{
-    AudioSpectrum128, DisplaySelector, SceneCapabilityProbe, DisplaySnapshotEntry, EngineError, FirstFrameCallback,
+    AudioSpectrum128, AudioSpectrumFull, DisplaySelector, SceneCapabilityProbe, DisplaySnapshotEntry, EngineError, FirstFrameCallback,
     PropertyPreview, RecoveryOutcome, RecoveryReason, SceneBackend, SceneDemandReasons, SceneWindowEntry,
     SceneResolution, SceneUpdateMode, WallpaperAssignment, WallpaperEngine,
     media::audio::{
@@ -373,6 +373,15 @@ pub trait EngineFacade: Send + Sync + 'static {
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         Ok(None)
     }
+    /// Full-resolution (224-band, unclamped) process-wide audio analysis, or
+    /// `None` when no analysis has been produced yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the renderer rejects the call.
+    fn current_audio_spectrum_full(&self) -> Result<Option<AudioSpectrumFull>, EngineError> {
+        Ok(None)
+    }
     /// Reads an installed scene without drawing it (see
     /// [`wallpaper_core::probe_scene_capability`]). Blocks for as long as the parse takes, so it is
     /// called on a thread that may wait, never on the actor. A facade without a scene engine
@@ -696,6 +705,10 @@ impl EngineFacade for RealEngineFacade {
 
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         self.engine.current_audio_spectrum()
+    }
+
+    fn current_audio_spectrum_full(&self) -> Result<Option<AudioSpectrumFull>, EngineError> {
+        self.engine.current_audio_spectrum_full()
     }
 
     fn probe_scene_capability(
@@ -1372,6 +1385,7 @@ pub struct FakeEngineFacade {
     recover_calls: Observation<(u32, RecoveryReason)>,
     recover_result: Reading<Option<Result<RecoveryOutcome, String>>>,
     audio_spectrum: Reading<Option<AudioSpectrum128>>,
+    audio_spectrum_full: Reading<Option<AudioSpectrumFull>>,
     /// Every scene the bridge asked to read, and what reading one answers.
     scene_probe_calls: Observation<SceneProbeRequest>,
     scene_probe_answer: Reading<SceneCapabilityProbe>,
@@ -1579,6 +1593,7 @@ impl Default for FakeEngineFacade {
             recover_calls: Observation::new(),
             recover_result: Reading::new(Default::default()),
             audio_spectrum: Reading::new(Default::default()),
+            audio_spectrum_full: Reading::new(Default::default()),
             scene_probe_calls: Observation::new(),
             scene_probe_answer: Reading::new(Default::default()),
             mouse_poll_calls: Observation::new(),
@@ -2034,6 +2049,11 @@ impl FakeEngineFacade {
     /// Sets what the next spectrum read returns. `None` is "no analysis yet".
     pub fn set_audio_spectrum(&self, spectrum: Option<AudioSpectrum128>) {
         self.audio_spectrum.set(spectrum);
+    }
+
+    /// Sets what the next full-resolution (224-band) spectrum read returns.
+    pub fn set_audio_spectrum_full(&self, spectrum: Option<AudioSpectrumFull>) {
+        self.audio_spectrum_full.set(spectrum);
     }
 
     /// Sets what reading a scene answers from now on.
@@ -2753,6 +2773,10 @@ impl EngineFacade for FakeEngineFacade {
 
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         Ok(self.audio_spectrum.read())
+    }
+
+    fn current_audio_spectrum_full(&self) -> Result<Option<AudioSpectrumFull>, EngineError> {
+        Ok(self.audio_spectrum_full.read())
     }
 
     fn probe_scene_capability(

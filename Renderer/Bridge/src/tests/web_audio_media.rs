@@ -438,6 +438,92 @@ async fn the_spectrum_a_page_reads_is_the_one_the_renderer_produced() {
 }
 
 #[tokio::test]
+async fn lock_screen_audio_demand_keeps_capture_open_while_desktop_is_suspended() {
+    use crate::engine::AudioCaptureDemand;
+    let engine = FakeEngineFacade::default();
+    let bridge = web_bridge(&engine).await;
+
+    // Desktop locked: presentation is suspended, no desktop audio consumer runs.
+    bridge.set_presentation_suspended(true).await.unwrap();
+    assert_eq!(audio_consumers(&bridge).await, 0);
+
+    // Extension reports an active lock-screen audio consumer: tap opens even
+    // while desktop presentation stays suspended.
+    bridge.set_lock_screen_audio_demand(true).await.unwrap();
+    assert_eq!(
+        engine.audio_capture_demands().last().copied(),
+        Some(AudioCaptureDemand {
+            suspended: false,
+            external_consumers: true,
+        })
+    );
+    assert_eq!(audio_consumers(&bridge).await, 1);
+
+    // User pause overrides lock-screen audio demand and closes the tap.
+    bridge.pause_all().await.unwrap();
+    assert_eq!(
+        engine.audio_capture_demands().last().copied(),
+        Some(AudioCaptureDemand {
+            suspended: true,
+            external_consumers: false,
+        })
+    );
+    assert_eq!(audio_consumers(&bridge).await, 0);
+
+    // Resuming playback while lock-screen demand is still active re-opens the tap.
+    bridge.play_all().await.unwrap();
+    assert_eq!(
+        engine.audio_capture_demands().last().copied(),
+        Some(AudioCaptureDemand {
+            suspended: false,
+            external_consumers: true,
+        })
+    );
+    assert_eq!(audio_consumers(&bridge).await, 1);
+
+    // Dropping lock-screen demand closes the tap again.
+    bridge.set_lock_screen_audio_demand(false).await.unwrap();
+    assert_eq!(
+        engine.audio_capture_demands().last().copied(),
+        Some(AudioCaptureDemand {
+            suspended: true,
+            external_consumers: false,
+        })
+    );
+    assert_eq!(audio_consumers(&bridge).await, 0);
+}
+
+#[tokio::test]
+async fn lock_screen_full_spectrum_preserves_all_224_unclamped_bands() {
+    let engine = FakeEngineFacade::default();
+    let bridge = web_bridge(&engine).await;
+
+    assert!(bridge.lock_screen_audio_spectrum().unwrap().is_none());
+
+    let mut bands = [0.0_f32; wallpaper_core::AudioSpectrumFull::BAND_COUNT];
+    bands[0] = 1.45;
+    bands[64] = 0.8;
+    bands[128] = 1.25;
+    bands[192] = 0.6;
+    bands[223] = 0.35;
+    engine.set_audio_spectrum_full(Some(wallpaper_core::AudioSpectrumFull {
+        generation: 99,
+        stereo: true,
+        bands,
+    }));
+
+    let exported = bridge.lock_screen_audio_spectrum().unwrap().unwrap();
+    assert_eq!(exported.generation, 99);
+    assert!(exported.stereo);
+    assert_eq!(exported.bands.len(), 224);
+    assert_eq!(exported.bands[0], 1.45);
+    assert_eq!(exported.bands[64], 0.8);
+    assert_eq!(exported.bands[128], 1.25);
+    assert_eq!(exported.bands[192], 0.6);
+    assert_eq!(exported.bands[223], 0.35);
+}
+
+#[tokio::test]
 async fn web_wallpapers_report_their_media_integration_consent() {
     let engine = FakeEngineFacade::default();
     let bridge = web_bridge(&engine).await;

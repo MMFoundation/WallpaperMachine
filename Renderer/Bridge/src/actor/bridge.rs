@@ -59,7 +59,8 @@ use crate::{
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneQuality,
             SetSceneDisplayFramingEnabled, SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
-            SetTargetFps, SetVerboseLogging, SetVolume, SetWebAudioSubscribed,
+            SetTargetFps, SetVerboseLogging, SetVolume, SetLockScreenAudioDemand,
+            SetWebAudioSubscribed,
             Shutdown,
         },
         state::BridgeActorState,
@@ -402,6 +403,22 @@ impl<E: EngineFacade> BridgeActor<E> {
     fn playback_paused(&self) -> bool {
         self.state.presentation_suspended
             || self.state.playback_state == crate::api::BridgePlaybackState::Paused
+    }
+
+    /// Whether playback policy (user pause or battery pause) holds the lock
+    /// screen still, independent of transient desktop presentation suspension.
+    fn lock_screen_paused(&self) -> bool {
+        self.state.playback_state == BridgePlaybackState::Paused
+            || self.state.pending_user_pause_after_initial_frame
+            || (self.state.power_source == crate::power::PowerSource::Battery
+                && self.state.app_config.power.on_battery == crate::config::BatteryModeCfg::Pause
+                && !self.state.battery_pause_suppressed)
+    }
+
+    /// True while the lock-screen / screen-saver extension is actively
+    /// forwarding audio to an unpaused surface and playback policy allows it.
+    fn lock_screen_audio_consumer(&self) -> bool {
+        self.state.lock_screen_audio_active && !self.lock_screen_paused()
     }
 
     /// True when no connected display can present: either a global reason, or
@@ -1389,11 +1406,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             })
             .collect();
         let no_suspended_displays = BTreeSet::new();
-        let paused = self.state.playback_state == BridgePlaybackState::Paused
-            || self.state.pending_user_pause_after_initial_frame
-            || (self.state.power_source == crate::power::PowerSource::Battery
-                && self.state.app_config.power.on_battery == crate::config::BatteryModeCfg::Pause
-                && !self.state.battery_pause_suppressed);
+        let paused = self.lock_screen_paused();
         self.native_scenes_from(ActivationInputs {
             app_config: &app_config,
             wallpapers: &wallpapers,
@@ -1440,7 +1453,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     .project_models
                     .get(&wallpaper_id)
                     .is_some_and(|model| model.project_type == wallpaper_core::project::WallpaperProjectType::Video);
-                scene.media_integration_enabled = false;
                 for path in [&mut scene.scene_path, &mut scene.assets_path] {
                     if !std::path::Path::new(path.as_str()).is_absolute() {
                         *path = std::path::absolute(&*path)
@@ -1492,6 +1504,8 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                         })
                         .flatten()
                         .map(Into::into),
+                    media_integration_enabled: !is_video && scene.media_integration_enabled,
+                    audio_response_enabled: !is_video && scene.audio_response_enabled,
                 })
             })
             .collect::<Result<Vec<_>, BridgeError>>()?;
@@ -1531,6 +1545,12 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 .clone();
             let properties_json =
                 self.web_properties_json(&desc.wallpaper_id, &desc.properties);
+            let media_integration_enabled = inputs
+                .wallpapers
+                .get(&desc.wallpaper_id)
+                .map_or(crate::config::MEDIA_INTEGRATION_DEFAULT, |config| {
+                    config.media_integration_enabled
+                });
             scenes.push(BridgeLockScreenScene {
                 display_id: desc.display.display_id,
                 wallpaper_id: desc.wallpaper_id,
@@ -1547,6 +1567,8 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 engine_options: None,
                 scene_quality: None,
                 border_color: None,
+                media_integration_enabled,
+                audio_response_enabled: desc.audio_response_enabled,
             });
         }
         Ok(scenes)
@@ -1614,11 +1636,17 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     fn audio_capture_demand(&self, paused: bool) -> AudioCaptureDemand {
         let displays = self.engine.display_snapshot();
         let inputs = self.activation_inputs(&displays, paused);
-        let external_consumers = web_audio_consumers(&inputs, &self.state.web_audio_subscribers) > 0;
+        let lock_screen_audio = self.lock_screen_audio_consumer();
+        let external_consumers =
+            web_audio_consumers(&inputs, &self.state.web_audio_subscribers) > 0
+                || lock_screen_audio;
         let Ok(scenes) = inputs.build() else {
             // Without a resolvable scene list, fall back to the coarse global
             // condition rather than guessing that nothing consumes audio.
-            return AudioCaptureDemand { suspended: paused, external_consumers };
+            return AudioCaptureDemand {
+                suspended: paused && !lock_screen_audio,
+                external_consumers,
+            };
         };
 
         let scene_consumers = scenes.iter().any(|scene| {
@@ -1685,6 +1713,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         u32::try_from(scene_consumers)
             .unwrap_or(u32::MAX)
             .saturating_add(web_audio_consumers(&inputs, &self.state.web_audio_subscribers))
+            .saturating_add(u32::from(self.lock_screen_audio_consumer()))
     }
 
     async fn apply_engine_pause(&self, previous_paused: bool) -> Result<(), BridgeError> {
@@ -2924,6 +2953,31 @@ impl<E: EngineFacade + Clone> Message<SetWebAudioSubscribed> for BridgeActor<E> 
     }
 }
 
+impl<E: EngineFacade + Clone> Message<SetLockScreenAudioDemand> for BridgeActor<E> {
+    type Reply = messages::SetLockScreenAudioDemandReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetLockScreenAudioDemand,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let previous = self.state.lock_screen_audio_active;
+        if previous == msg.active {
+            return Ok(());
+        }
+        self.state.lock_screen_audio_active = msg.active;
+        if let Err(error) = self
+            .engine
+            .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused()))
+            .await
+        {
+            self.state.lock_screen_audio_active = previous;
+            return Err(BridgeError::engine(error.to_string()));
+        }
+        Ok(())
+    }
+}
+
 impl<E: EngineFacade + Clone> Message<AudioRequirementChanged> for BridgeActor<E> {
     type Reply = messages::AudioRequirementChangedReply;
 
@@ -3449,6 +3503,7 @@ impl<E: EngineFacade + Clone> Message<Shutdown> for BridgeActor<E> {
     ) -> Self::Reply {
         // Quitting while a scene is still loading is not a crash.
         self.load_journal.clean_shutdown();
+        self.state.lock_screen_audio_active = false;
         self.mouse_polling.set_policy_enabled(false);
         let mut active_handles = Vec::new();
         for display in self.engine.display_snapshot() {

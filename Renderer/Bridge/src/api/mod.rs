@@ -25,7 +25,8 @@ use first_frame_handoff::FirstFrameHandoff;
 pub(crate) use first_frame_handoff::{FirstFrameDelivery, FirstFrameTarget};
 use futures_util::Future;
 pub use types::{
-    BridgeAppSnapshot, BridgeAudioSpectrum, BridgeComboOption, BridgeDirectoryMode,
+    BridgeAppSnapshot, BridgeAudioSpectrum, BridgeAudioSpectrumFull, BridgeComboOption,
+    BridgeDirectoryMode,
     BridgeDisplayConfigRow, BridgeDisplayMode, BridgeDisplayMutationBundle,
     BridgeDisplaySettingsRow, BridgeEngineOptionEdit, BridgeEngineOptionId, BridgeEngineOptionRow,
     BridgeEngineOptionValues, BridgeRgb, BridgeEngineOptions, BridgeFileFilter, BridgeFraming,
@@ -106,7 +107,7 @@ use crate::{
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneQuality,
             SetSceneDisplayFramingEnabled, SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
             SetTargetFps, SetVolume,
-            SetWebAudioSubscribed, Shutdown,
+            SetLockScreenAudioDemand, SetWebAudioSubscribed, Shutdown,
         },
         state::BridgeActorState,
     },
@@ -921,6 +922,12 @@ impl EngineFacade for ArcEngineFacade {
         &self,
     ) -> Result<Option<wallpaper_core::AudioSpectrum128>, wallpaper_core::EngineError> {
         self.0.current_audio_spectrum()
+    }
+
+    fn current_audio_spectrum_full(
+        &self,
+    ) -> Result<Option<wallpaper_core::AudioSpectrumFull>, wallpaper_core::EngineError> {
+        self.0.current_audio_spectrum_full()
     }
 
     fn renderer_counters(
@@ -2395,6 +2402,42 @@ impl WallpaperBridge {
             stereo: spectrum.stereo,
             bins: spectrum.bins.to_vec(),
         }))
+    }
+
+    /// Full-resolution (224-band, unclamped) system-audio analysis for the
+    /// lock-screen / screen-saver extension, or `None` when none has been
+    /// produced.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the renderer rejects the read.
+    pub fn lock_screen_audio_spectrum(
+        &self,
+    ) -> Result<Option<BridgeAudioSpectrumFull>, BridgeError> {
+        let spectrum = self
+            .engine
+            .current_audio_spectrum_full()
+            .map_err(|error| BridgeError::engine(error.to_string()))?;
+
+        Ok(spectrum.map(|spectrum| BridgeAudioSpectrumFull {
+            generation: spectrum.generation,
+            stereo: spectrum.stereo,
+            bands: spectrum.bands.to_vec(),
+        }))
+    }
+
+    /// Records or withdraws the lock-screen / screen-saver extension as an
+    /// active consumer of system audio capture.
+    ///
+    /// Keeps the single shared CoreAudio tap running even while desktop
+    /// presentation is suspended for screen lock, unless playback is paused by
+    /// the user or battery policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the renderer rejects the capture change.
+    pub async fn set_lock_screen_audio_demand(&self, active: bool) -> Result<(), BridgeError> {
+        self.actor.ask(SetLockScreenAudioDemand { active }).await
     }
 
     /// Records or withdraws one web page as a live consumer of the system

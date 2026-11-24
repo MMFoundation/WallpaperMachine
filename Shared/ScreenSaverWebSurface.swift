@@ -78,14 +78,31 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
   /// How long WebKit's own suspend or resume of the page may take before the surface counts as broken.
   private let suspensionWait: Duration = .seconds(15)
   /// Whether the page has an audio listener registered.
-  private var audioSubscribed = false
-  /// Feeds a subscribed page silence while it plays; see `updateSilence()`.
+  private(set) var isAudioSubscribed = false
+  /// Whether the page has at least one media listener registered.
+  private(set) var isMediaSubscribed = false
+  private var mediaIntegrationEnabled: Bool
+  private var audioResponseEnabled: Bool
+  /// True while the host is actively pushing live audio frames; suspends the 1 Hz
+  /// silence heartbeat so it never overwrites live spectrum frames.
+  private var liveAudioActive = false
+  /// Prevents piling up 30 Hz JavaScript evaluations if a slow page falls behind.
+  private var audioDeliveryInFlight = false
+  /// Serializes media deliveries so state changes reach the page in order.
+  private var mediaDeliveryChain: Task<Void, Never>?
+  var onAudioSubscriptionChanged: ((Bool) -> Void)?
+  var onMediaSubscriptionChanged: ((Bool) -> Void)?
+  /// Fired whenever the page finishes loading or resuming into an active (unpaused) state,
+  /// so the host can replay live media state after `_resumePage:` completes.
+  var onBecameActive: (() -> Void)?
+  /// Feeds a subscribed page silence while it plays without live audio; see `updateSilence()`.
   private var silence: Task<Void, Never>?
   /// How often silence reaches a subscribed page: the desktop's spacing for a quiet stretch.
   static let silenceInterval: Duration = .seconds(1)
 
   init(projectURL: URL, entryFile: String, readAccessURL: URL, size: CGSize,
-       scale: CGFloat, propertiesJSON: String, fps: UInt32, paused: Bool) throws {
+       scale: CGFloat, propertiesJSON: String, fps: UInt32, paused: Bool,
+       mediaIntegrationEnabled: Bool = false, audioResponseEnabled: Bool = false) throws {
     guard fps > 0 else { throw Failure.invalidProperties }
     guard let entry = WebWallpaperProtocol.canonicalEntryURL(projectURL: projectURL, entryFile: entryFile),
       Self.contains(entry, in: readAccessURL),
@@ -96,6 +113,8 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     self.readAccessURL = readAccessURL.standardizedFileURL.resolvingSymlinksInPath()
     self.fps = fps
     desiredPaused = paused
+    self.mediaIntegrationEnabled = mediaIntegrationEnabled
+    self.audioResponseEnabled = audioResponseEnabled
     properties = try Self.validatedProperties(propertiesJSON, root: self.readAccessURL, project: self.projectURL)
     self.propertiesJSON = propertiesJSON
     let configuration = WKWebViewConfiguration()
@@ -214,13 +233,64 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     reconcile()
   }
 
+  func setMediaIntegrationEnabled(_ enabled: Bool) {
+    guard mediaIntegrationEnabled != enabled else { return }
+    mediaIntegrationEnabled = enabled
+    if isReady, !isStopped, !isPaused, !desiredPaused {
+      deliverMediaEvents([("status", ["enabled": enabled])])
+    }
+  }
+
+  func setAudioResponseEnabled(_ enabled: Bool) {
+    guard audioResponseEnabled != enabled else { return }
+    audioResponseEnabled = enabled
+    if !enabled {
+      setLiveAudioActive(false)
+    }
+  }
+
+  func setLiveAudioActive(_ active: Bool) {
+    guard liveAudioActive != active else { return }
+    liveAudioActive = active
+    updateSilence()
+  }
+
+  func deliverMediaEvents(_ events: [(slot: String, payload: [String: Any])]) {
+    guard isReady, !isStopped, !isPaused, !desiredPaused, !events.isEmpty else { return }
+    let encoded: [[String: Any]] = events.map { ["slot": $0.slot, "payload": $0.payload] }
+    let previous = mediaDeliveryChain
+    mediaDeliveryChain = Task { @MainActor [weak self] in
+      await previous?.value
+      guard let self, self.isReady, !self.isStopped, !self.isPaused, !self.desiredPaused else { return }
+      _ = try? await self.webView.callAsyncJavaScript("""
+        for (const item of events)
+          \(WebWallpaperProtocol.hostCall(.deliverMedia, "item.slot", "item.payload"));
+        """, arguments: ["events": encoded], in: nil, contentWorld: .page)
+    }
+  }
+
+  func deliverAudio(_ bins: [Double]) {
+    guard isAudioSubscribed, audioResponseEnabled, isReady, !isStopped, !isPaused, !desiredPaused,
+      !audioDeliveryInFlight, bins.count == LockScreenAudioSpectrumChannel.webBinCount
+    else { return }
+    audioDeliveryInFlight = true
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      defer { self.audioDeliveryInFlight = false }
+      guard !self.isStopped, !self.isPaused, !self.desiredPaused else { return }
+      _ = try? await self.webView.callAsyncJavaScript(
+        WebWallpaperProtocol.deliverAudioScript,
+        arguments: ["bins": bins], in: nil, contentWorld: .page)
+    }
+  }
+
   /// Wallpaper Engine calls a page's audio listener on its fixed cadence whether or not anything is
-  /// playing, and the desktop keeps a quiet stretch fed once a second. The lock screen captures no
-  /// audio, so a subscribed page is fed silence on that spacing while it plays. A page that only
-  /// starts its idle animation once the listener has been called (an audio visualiser that waits
-  /// for the host's first spectrum) otherwise never moves off its first frame.
+  /// playing, and the desktop keeps a quiet stretch fed once a second. When no live system audio is
+  /// being forwarded to this surface, a subscribed page is fed silence on that spacing while it plays.
+  /// A page that only starts its idle animation once the listener has been called (an audio visualiser
+  /// that waits for the host's first spectrum) otherwise never moves off its first frame.
   private func updateSilence() {
-    let wanted = audioSubscribed && isReady && !isStopped && !isPaused && !desiredPaused
+    let wanted = isAudioSubscribed && !liveAudioActive && isReady && !isStopped && !isPaused && !desiredPaused
     guard wanted != (silence != nil) else { return }
     silence?.cancel()
     silence = nil
@@ -248,6 +318,7 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     operation = Task { @MainActor [weak self] in
       guard let self else { return }
       do {
+        let wasPaused = self.isPaused
         if self.isPaused {
           try await self.changePageSuspension(false, within: self.suspensionWait)
           guard !self.isStopped else { return }
@@ -273,6 +344,9 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
         }
         self.transitioning = false
         self.updateSilence()
+        if wasPaused && !self.isPaused && !self.desiredPaused {
+          self.onBecameActive?()
+        }
         if revision != self.commitRevision { self.reconcile() }
       } catch { if !self.isStopped { self.fail(error) } }
     }
@@ -317,14 +391,15 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
       \(WebWallpaperProtocol.hostCall(.setFrameLimit, "limit"));
       \(WebWallpaperProtocol.hostCall(.applyUserProperties, "properties"));
       \(WebWallpaperProtocol.hostCall(.setPaused, "paused"));
-      \(WebWallpaperProtocol.hostCall(.deliverMedia, "'status'", "{enabled:false}"));
+      \(WebWallpaperProtocol.hostCall(.deliverMedia, "'status'", "mediaStatus"));
       for (const [property, files] of Object.entries(removed))
         \(WebWallpaperProtocol.hostCall(.userDirectoryFilesRemoved, "property", "files"));
       for (const [property, files] of Object.entries(directories))
         \(WebWallpaperProtocol.hostCall(.userDirectoryFilesAddedOrChanged, "property", "files"));
       """, arguments: ["general": ["fps": Int(fps)], "limit": WebWallpaperProtocol.frameLimit(forFPS: fps),
                          "properties": properties,
-                         "paused": paused, "directories": currentDirectories, "removed": removed], in: nil, contentWorld: .page)
+                         "paused": paused, "mediaStatus": ["enabled": mediaIntegrationEnabled],
+                         "directories": currentDirectories, "removed": removed], in: nil, contentWorld: .page)
     deliveredDirectories = currentDirectories
   }
 
@@ -404,6 +479,10 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     operation = nil
     silence?.cancel()
     silence = nil
+    mediaDeliveryChain?.cancel()
+    mediaDeliveryChain = nil
+    liveAudioActive = false
+    audioDeliveryInFlight = false
     let reply = firstReply
     firstReply = nil
     reply?(CancellationError())
@@ -442,6 +521,9 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
         self.deadline?.cancel()
         self.deadline = nil
         self.updateSilence()
+        if !self.isPaused && !self.desiredPaused {
+          self.onBecameActive?()
+        }
         self.reconcile()
         let reply = self.firstReply
         self.firstReply = nil
@@ -483,13 +565,26 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     guard !isStopped, case .success(let message) = WebWallpaperProtocol.PageMessage.parse(body) else { return }
     switch message {
     case .audioSubscribed:
-      audioSubscribed = true
+      guard !isAudioSubscribed else { return }
+      isAudioSubscribed = true
       updateSilence()
+      onAudioSubscriptionChanged?(true)
     case .audioUnsubscribed:
-      audioSubscribed = false
+      guard isAudioSubscribed else { return }
+      isAudioSubscribed = false
+      liveAudioActive = false
       updateSilence()
+      onAudioSubscriptionChanged?(false)
+    case .mediaSubscribed:
+      guard !isMediaSubscribed else { return }
+      isMediaSubscribed = true
+      onMediaSubscriptionChanged?(true)
+    case .mediaUnsubscribed:
+      guard isMediaSubscribed else { return }
+      isMediaSubscribed = false
+      onMediaSubscriptionChanged?(false)
     case .randomFileRequest(let id, let property): receiveRandomFileRequest(id: id, property: property)
-    case .mediaSubscribed, .mediaUnsubscribed, .pageDiagnostic: return
+    case .pageDiagnostic: return
     }
   }
 

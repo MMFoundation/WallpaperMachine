@@ -738,6 +738,17 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func librarySnapshot() async throws  -> BridgeLibrarySnapshot
 
     /**
+     * Full-resolution (224-band, unclamped) system-audio analysis for the
+     * lock-screen / screen-saver extension, or `None` when none has been
+     * produced.
+     *
+     * # Errors
+     *
+     * Returns an error when the renderer rejects the read.
+     */
+    func lockScreenAudioSpectrum() throws  -> BridgeAudioSpectrumFull?
+
+    /**
      * Returns committed wallpaper inputs for native lock-screen and screen-saver
      * displays, including web projects, native-preferred videos and mirrors.
      * Drafts and transient desktop suspension/unload do not affect these inputs.
@@ -1248,6 +1259,20 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * `ServiceManagement` rejects the update.
      */
     func setLaunchAtLogin(enabled: Bool) async throws  -> BridgeDisplayMutationBundle
+
+    /**
+     * Records or withdraws the lock-screen / screen-saver extension as an
+     * active consumer of system audio capture.
+     *
+     * Keeps the single shared CoreAudio tap running even while desktop
+     * presentation is suspended for screen lock, unless playback is paused by
+     * the user or battery policy.
+     *
+     * # Errors
+     *
+     * Returns an error when the renderer rejects the capture change.
+     */
+    func setLockScreenAudioDemand(active: Bool) async throws
 
     /**
      * Turns system media integration on or off for one wallpaper.
@@ -2113,6 +2138,22 @@ open func librarySnapshot()async throws  -> BridgeLibrarySnapshot {
             liftFunc: FfiConverterTypeBridgeLibrarySnapshot.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
+}
+
+    /**
+     * Full-resolution (224-band, unclamped) system-audio analysis for the
+     * lock-screen / screen-saver extension, or `None` when none has been
+     * produced.
+     *
+     * # Errors
+     *
+     * Returns an error when the renderer rejects the read.
+     */
+open func lockScreenAudioSpectrum()throws  -> BridgeAudioSpectrumFull? {
+    return try  FfiConverterOptionTypeBridgeAudioSpectrumFull.lift(try rustCallWithError(FfiConverterTypeBridgeError.lift) {
+    uniffi_wallpaper_bridge_fn_method_wallpaperbridge_lock_screen_audio_spectrum(self.uniffiClonePointer(),$0
+    )
+})
 }
 
     /**
@@ -3267,6 +3308,35 @@ open func setLaunchAtLogin(enabled: Bool)async throws  -> BridgeDisplayMutationB
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeDisplayMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+
+    /**
+     * Records or withdraws the lock-screen / screen-saver extension as an
+     * active consumer of system audio capture.
+     *
+     * Keeps the single shared CoreAudio tap running even while desktop
+     * presentation is suspended for screen lock, unless playback is paused by
+     * the user or battery policy.
+     *
+     * # Errors
+     *
+     * Returns an error when the renderer rejects the capture change.
+     */
+open func setLockScreenAudioDemand(active: Bool)async throws  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_lock_screen_audio_demand(
+                    self.uniffiClonePointer(),
+                    FfiConverterBool.lower(active)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_void,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_void,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_void,
+            liftFunc: { $0 },
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -4494,6 +4564,85 @@ public func FfiConverterTypeBridgeAudioSpectrum_lift(_ buf: RustBuffer) throws -
 #endif
 public func FfiConverterTypeBridgeAudioSpectrum_lower(_ value: BridgeAudioSpectrum) -> RustBuffer {
     return FfiConverterTypeBridgeAudioSpectrum.lower(value)
+}
+
+
+/**
+ * Full-resolution process-wide system audio spectrum (224 unclamped floats:
+ * `left64, right64, left32, right32, left16, right16`), for forwarding
+ * desktop analysis directly into the lock-screen / screen-saver extension.
+ */
+public struct BridgeAudioSpectrumFull {
+    public var generation: UInt64
+    public var stereo: Bool
+    public var bands: [Float]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(generation: UInt64, stereo: Bool, bands: [Float]) {
+        self.generation = generation
+        self.stereo = stereo
+        self.bands = bands
+    }
+}
+
+
+
+extension BridgeAudioSpectrumFull: Equatable, Hashable {
+    public static func ==(lhs: BridgeAudioSpectrumFull, rhs: BridgeAudioSpectrumFull) -> Bool {
+        if lhs.generation != rhs.generation {
+            return false
+        }
+        if lhs.stereo != rhs.stereo {
+            return false
+        }
+        if lhs.bands != rhs.bands {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(generation)
+        hasher.combine(stereo)
+        hasher.combine(bands)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBridgeAudioSpectrumFull: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BridgeAudioSpectrumFull {
+        return
+            try BridgeAudioSpectrumFull(
+                generation: FfiConverterUInt64.read(from: &buf),
+                stereo: FfiConverterBool.read(from: &buf),
+                bands: FfiConverterSequenceFloat.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BridgeAudioSpectrumFull, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.generation, into: &buf)
+        FfiConverterBool.write(value.stereo, into: &buf)
+        FfiConverterSequenceFloat.write(value.bands, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeAudioSpectrumFull_lift(_ buf: RustBuffer) throws -> BridgeAudioSpectrumFull {
+    return try FfiConverterTypeBridgeAudioSpectrumFull.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBridgeAudioSpectrumFull_lower(_ value: BridgeAudioSpectrumFull) -> RustBuffer {
+    return FfiConverterTypeBridgeAudioSpectrumFull.lower(value)
 }
 
 
@@ -5837,6 +5986,16 @@ public struct BridgeLockScreenScene {
      * property (WE `sub_1400FFCB0`); `None` when the project has none, which is black.
      */
     public var borderColor: BridgeRgb?
+    /**
+     * Whether this wallpaper allows system media integration on the lock screen
+     * or screen saver. Plain videos are always false.
+     */
+    public var mediaIntegrationEnabled: Bool
+    /**
+     * Whether this wallpaper allows system audio response on the lock screen
+     * or screen saver. Plain videos are always false.
+     */
+    public var audioResponseEnabled: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -5863,7 +6022,15 @@ public struct BridgeLockScreenScene {
         /**
          * A plain video's border colour in Fit-style modes: the project's `schemecolor`
          * property (WE `sub_1400FFCB0`); `None` when the project has none, which is black.
-         */borderColor: BridgeRgb?) {
+         */borderColor: BridgeRgb?,
+        /**
+         * Whether this wallpaper allows system media integration on the lock screen
+         * or screen saver. Plain videos are always false.
+         */mediaIntegrationEnabled: Bool = false,
+        /**
+         * Whether this wallpaper allows system audio response on the lock screen
+         * or screen saver. Plain videos are always false.
+         */audioResponseEnabled: Bool = false) {
         self.displayId = displayId
         self.wallpaperId = wallpaperId
         self.title = title
@@ -5878,6 +6045,8 @@ public struct BridgeLockScreenScene {
         self.engineOptions = engineOptions
         self.sceneQuality = sceneQuality
         self.borderColor = borderColor
+        self.mediaIntegrationEnabled = mediaIntegrationEnabled
+        self.audioResponseEnabled = audioResponseEnabled
     }
 }
 
@@ -5927,6 +6096,12 @@ extension BridgeLockScreenScene: Equatable, Hashable {
         if lhs.borderColor != rhs.borderColor {
             return false
         }
+        if lhs.mediaIntegrationEnabled != rhs.mediaIntegrationEnabled {
+            return false
+        }
+        if lhs.audioResponseEnabled != rhs.audioResponseEnabled {
+            return false
+        }
         return true
     }
 
@@ -5945,6 +6120,8 @@ extension BridgeLockScreenScene: Equatable, Hashable {
         hasher.combine(engineOptions)
         hasher.combine(sceneQuality)
         hasher.combine(borderColor)
+        hasher.combine(mediaIntegrationEnabled)
+        hasher.combine(audioResponseEnabled)
     }
 }
 
@@ -5969,7 +6146,9 @@ public struct FfiConverterTypeBridgeLockScreenScene: FfiConverterRustBuffer {
                 paused: FfiConverterBool.read(from: &buf),
                 engineOptions: FfiConverterOptionTypeBridgeEngineOptionValues.read(from: &buf),
                 sceneQuality: FfiConverterOptionTypeBridgeSceneQuality.read(from: &buf),
-                borderColor: FfiConverterOptionTypeBridgeRgb.read(from: &buf)
+                borderColor: FfiConverterOptionTypeBridgeRgb.read(from: &buf),
+                mediaIntegrationEnabled: FfiConverterBool.read(from: &buf),
+                audioResponseEnabled: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -5988,6 +6167,8 @@ public struct FfiConverterTypeBridgeLockScreenScene: FfiConverterRustBuffer {
         FfiConverterOptionTypeBridgeEngineOptionValues.write(value.engineOptions, into: &buf)
         FfiConverterOptionTypeBridgeSceneQuality.write(value.sceneQuality, into: &buf)
         FfiConverterOptionTypeBridgeRgb.write(value.borderColor, into: &buf)
+        FfiConverterBool.write(value.mediaIntegrationEnabled, into: &buf)
+        FfiConverterBool.write(value.audioResponseEnabled, into: &buf)
     }
 }
 
@@ -12056,6 +12237,30 @@ fileprivate struct FfiConverterOptionTypeBridgeAudioSpectrum: FfiConverterRustBu
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeBridgeAudioSpectrumFull: FfiConverterRustBuffer {
+    typealias SwiftType = BridgeAudioSpectrumFull?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeBridgeAudioSpectrumFull.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeBridgeAudioSpectrumFull.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeBridgeEngineOptionValues: FfiConverterRustBuffer {
     typealias SwiftType = BridgeEngineOptionValues?
 
@@ -13063,6 +13268,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_library_snapshot() != 36547) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_lock_screen_audio_spectrum() != 23787) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_lock_screen_scenes() != 25596) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -13196,6 +13404,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_launch_at_login() != 35969) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_lock_screen_audio_demand() != 40919) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_media_integration_enabled() != 29153) {

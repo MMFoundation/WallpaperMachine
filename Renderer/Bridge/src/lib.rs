@@ -27,7 +27,8 @@ mod tests;
 
 pub use api::{
     validate_backup_renderer_configuration,
-    BridgeAppSnapshot, BridgeAudioSpectrum, BridgeComboOption, BridgeDirectoryMode,
+    BridgeAppSnapshot, BridgeAudioSpectrum, BridgeAudioSpectrumFull, BridgeComboOption,
+    BridgeDirectoryMode,
     BridgeDisplayConfigRow, BridgeDisplayMode, BridgeDisplayMutationBundle,
     BridgeDisplaySettingsRow, BridgeEngineOptionEdit, BridgeEngineOptionId, BridgeEngineOptionRow,
     BridgeEngineOptionValues, BridgeRgb, BridgeEngineOptions, BridgeError, BridgeErrorKind, BridgeFileFilter,

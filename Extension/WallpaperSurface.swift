@@ -46,6 +46,41 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   var isLoading: Bool { firstFrameReply != nil }
   let pendingAcquires = LockScreenAcquireReplies()
   private var rendererPaused = false
+  private(set) var sceneRequiresAudio = false
+  private var appliedMediaIntegrationEnabled = false
+  private var appliedAudioResponseEnabled = false
+  private var lastDeliveredMediaGeneration: UInt64 = 0
+  private var lastDeliveredArtworkRevision: UInt64 = 0
+  private var isLivePresentationContent: Bool {
+    content == .lockScreen || content == .screenSaver
+  }
+  private var desiredWebMediaEnabled: Bool {
+    !preview && !stopped && !rendererPaused && isLivePresentationContent
+      && scene.effectiveMediaIntegrationEnabled
+  }
+  /// Whether this surface is presenting an unpaused lock screen or screen saver that
+  /// should receive live Now Playing media updates. Never true for previews, unlocked
+  /// desktop settle surfaces, plain videos, or paused surfaces.
+  var isLiveMediaEligible: Bool {
+    guard !preview, !stopped, !rendererPaused, firstFrameReply == nil,
+      isLivePresentationContent, scene.effectiveMediaIntegrationEnabled
+    else { return false }
+    if renderer != nil { return true }
+    if let web, contentError == nil { return web.isMediaSubscribed }
+    return false
+  }
+  /// Whether this surface is presenting an unpaused lock screen or screen saver that
+  /// reads system audio and needs live spectrum forwarding from the main app.
+  var isLiveAudioEligible: Bool {
+    guard !preview, !stopped, !rendererPaused, firstFrameReply == nil,
+      isLivePresentationContent, scene.effectiveAudioResponseEnabled
+    else { return false }
+    if renderer != nil { return sceneRequiresAudio }
+    if let web, contentError == nil { return web.isAudioSubscribed }
+    return false
+  }
+  var isSceneSurface: Bool { renderer != nil && !stopped }
+  var isWebSurface: Bool { web != nil && !stopped && contentError == nil }
   /// When this surface started presenting, set once its first frame arrived.
   /// Kept apart from readiness so rendering one frame for a snapshot or a
   /// readiness reply cannot become a permanent right to keep rendering.
@@ -155,7 +190,9 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       owe_scene_wallpaper_init_metal(
         renderer, Unmanaged.passUnretained(metal).toOpaque(), UInt32(metal.drawableSize.width),
         UInt32(metal.drawableSize.height), 0, 0, Double(scale)))
-    // The lock-screen process never plays sound, reads input, or receives media data.
+    // The lock-screen process never plays sound or reads pointer input; media integration
+    // and audio response stay off until `syncLiveCapabilities()` confirms an unpaused
+    // lock-screen or screen-saver presentation.
     try check(
       owe_scene_wallpaper_set_property_bool(
         renderer, owe_property_audio_response_enabled(), false))
@@ -205,6 +242,11 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     init(_ fire: @escaping () -> Void) { self.fire = fire }
   }
 
+  private final class AudioRequirementBox {
+    let fire: (Bool) -> Void
+    init(_ fire: @escaping (Bool) -> Void) { self.fire = fire }
+  }
+
   private func installEngineSignals(_ renderer: OpaquePointer?) throws {
     func callback(_ signal: EngineSignal) -> UnsafeMutableRawPointer {
       Unmanaged.passRetained(
@@ -229,6 +271,29 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     let failedResult = owe_scene_wallpaper_set_render_failure_callback(renderer, fire, failed, drop)
     if failedResult != 0 { drop(failed) }
     try check(failedResult)
+
+    let audioBox = Unmanaged.passRetained(
+      AudioRequirementBox { [weak self] required in
+        Task { @MainActor in self?.audioRequirementChanged(required) }
+      }
+    ).toOpaque()
+    let audioFire: @convention(c) (UnsafeMutableRawPointer?, Bool) -> Void = { pointer, required in
+      guard let pointer else { return }
+      Unmanaged<AudioRequirementBox>.fromOpaque(pointer).takeUnretainedValue().fire(required)
+    }
+    let audioDrop: @convention(c) (UnsafeMutableRawPointer?) -> Void = { pointer in
+      if let pointer { Unmanaged<AudioRequirementBox>.fromOpaque(pointer).release() }
+    }
+    let audioResult = owe_scene_wallpaper_set_audio_requirement_callback(
+      renderer, audioFire, audioBox, audioDrop)
+    if audioResult != 0 { audioDrop(audioBox) }
+    try check(audioResult)
+  }
+
+  private func audioRequirementChanged(_ required: Bool) {
+    guard !stopped, renderer != nil, sceneRequiresAudio != required else { return }
+    sceneRequiresAudio = required
+    syncLiveCapabilities()
   }
 
   private func engineSignalled(_ signal: EngineSignal) {
@@ -505,9 +570,25 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       // pauses it after that frame. Created paused it would hold its first frame while this
       // surface counted it as playing, and the settling desktop and a lock in its first
       // seconds would never resume it.
-      paused: rendererPaused)
+      paused: rendererPaused,
+      mediaIntegrationEnabled: desiredWebMediaEnabled,
+      audioResponseEnabled: !preview && isLivePresentationContent && scene.effectiveAudioResponseEnabled)
     web = page
     firstFrameReply = completion
+    page.onAudioSubscriptionChanged = { [weak self] _ in
+      self?.syncLiveCapabilities()
+    }
+    page.onMediaSubscriptionChanged = { [weak self] subscribed in
+      guard let self else { return }
+      self.syncLiveCapabilities()
+      if subscribed, self.isLiveMediaEligible {
+        WallpaperController.shared.replayMedia(to: self)
+      }
+    }
+    page.onBecameActive = { [weak self] in
+      guard let self, self.isLiveMediaEligible else { return }
+      WallpaperController.shared.replayMedia(to: self)
+    }
     page.onFrame = { [weak self] image in
       guard let self, !self.stopped else { throw CancellationError() }
       guard let pixels = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
@@ -635,6 +716,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     guard firstFrameReply == nil, !stopped, renderer != nil || web != nil || video != nil else {
       return
     }
+    defer { syncLiveCapabilities() }
     let request = authorityRequest
     // Keep the last drawable and scene state through unlock/sleep. Replacing
     // them with a poster forces a cold load after the display is already lit.
@@ -660,6 +742,156 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
         "Playback display=\(scene.displayID) mode=\(presentation) activity=\(activity) locked=\(request.sessionLocked) console=\(request.sessionOnConsole) paused=\(shouldPause) reasons=\(reasons.rawValue)"
       )
     } catch { WallpaperRuntime.log(error.localizedDescription) }
+  }
+
+  /// Syncs live media-integration and audio-response switches on the running scene or
+  /// web surface and updates `WallpaperController`'s aggregate demand.
+  func syncLiveCapabilities() {
+    if let renderer {
+      let wantAudio = isLiveAudioEligible
+      if appliedAudioResponseEnabled != wantAudio {
+        appliedAudioResponseEnabled = wantAudio
+        _ = owe_scene_wallpaper_set_property_bool(
+          renderer, owe_property_audio_response_enabled(), wantAudio)
+      }
+      let wantMedia = isLiveMediaEligible
+      if appliedMediaIntegrationEnabled != wantMedia {
+        if !wantMedia {
+          if let status = LockScreenMediaCodec.sceneStatusJSON(enabled: false) {
+            _ = owe_scene_wallpaper_submit_media_event_json(renderer, status)
+          }
+          _ = owe_scene_wallpaper_apply_system_media_artwork(renderer, 0, 0, nil, 0)
+        }
+        appliedMediaIntegrationEnabled = wantMedia
+        _ = owe_scene_wallpaper_set_property_bool(
+          renderer, owe_property_media_integration_enabled(), wantMedia)
+        lastDeliveredMediaGeneration = 0
+        lastDeliveredArtworkRevision = 0
+        if wantMedia {
+          if let status = LockScreenMediaCodec.sceneStatusJSON(enabled: true) {
+            _ = owe_scene_wallpaper_submit_media_event_json(renderer, status)
+          }
+          WallpaperController.shared.replayMedia(to: self)
+        }
+      }
+    } else if let web {
+      let wantWebMedia = desiredWebMediaEnabled
+      let wantWebAudio = isLiveAudioEligible
+      web.setMediaIntegrationEnabled(wantWebMedia)
+      web.setAudioResponseEnabled(wantWebAudio)
+      if !wantWebAudio {
+        web.setLiveAudioActive(false)
+      }
+      let wantLiveMedia = isLiveMediaEligible
+      if appliedMediaIntegrationEnabled != wantLiveMedia {
+        appliedMediaIntegrationEnabled = wantLiveMedia
+        lastDeliveredMediaGeneration = 0
+        lastDeliveredArtworkRevision = 0
+        if wantLiveMedia {
+          WallpaperController.shared.replayMedia(to: self)
+        }
+      }
+      appliedAudioResponseEnabled = wantWebAudio
+    }
+    WallpaperController.shared.reconcileLiveFeed()
+  }
+
+  func deliverMedia(
+    snapshot: LockScreenMediaSnapshot,
+    artworkRGBA: Data?,
+    artworkPNGDataURL: String,
+    timelineAt now: Date,
+    forceReplay: Bool
+  ) {
+    guard isLiveMediaEligible else { return }
+    guard forceReplay || snapshot.generation != lastDeliveredMediaGeneration else { return }
+    lastDeliveredMediaGeneration = snapshot.generation
+
+    if let renderer {
+      if let status = LockScreenMediaCodec.sceneStatusJSON(enabled: true) {
+        _ = owe_scene_wallpaper_submit_media_event_json(renderer, status)
+      }
+      if let props = LockScreenMediaCodec.scenePropertiesJSON(snapshot.properties) {
+        _ = owe_scene_wallpaper_submit_media_event_json(renderer, props)
+      }
+      if let thumb = snapshot.thumbnail {
+        if forceReplay || thumb.artworkRevision != lastDeliveredArtworkRevision {
+          lastDeliveredArtworkRevision = thumb.artworkRevision
+          if let rgba = artworkRGBA, thumb.width > 0, thumb.height > 0 {
+            rgba.withUnsafeBytes { raw in
+              let pointer = raw.bindMemory(to: UInt8.self).baseAddress
+              _ = owe_scene_wallpaper_apply_system_media_artwork(
+                renderer, UInt32(thumb.width), UInt32(thumb.height), pointer, UInt(rgba.count))
+            }
+          } else {
+            _ = owe_scene_wallpaper_apply_system_media_artwork(renderer, 0, 0, nil, 0)
+          }
+        }
+        if let thumbJSON = LockScreenMediaCodec.sceneThumbnailJSON(thumb) {
+          _ = owe_scene_wallpaper_submit_media_event_json(renderer, thumbJSON)
+        }
+      } else if forceReplay || lastDeliveredArtworkRevision != 0 {
+        lastDeliveredArtworkRevision = 0
+        _ = owe_scene_wallpaper_apply_system_media_artwork(renderer, 0, 0, nil, 0)
+      }
+      if let playback = LockScreenMediaCodec.scenePlaybackJSON(webRawState: snapshot.playbackState) {
+        _ = owe_scene_wallpaper_submit_media_event_json(renderer, playback)
+      }
+      if let timeline = snapshot.interpolatedTimeline(at: now),
+        let timelineJSON = LockScreenMediaCodec.sceneTimelineJSON(
+          position: timeline.position, duration: timeline.duration)
+      {
+        _ = owe_scene_wallpaper_submit_media_event_json(renderer, timelineJSON)
+      }
+    } else if let web {
+      var events: [(slot: String, payload: [String: Any])] = [
+        ("status", ["enabled": true]),
+        ("properties", LockScreenMediaCodec.webPropertiesPayload(snapshot.properties)),
+      ]
+      if let thumb = snapshot.thumbnail {
+        events.append((
+          "thumbnail",
+          LockScreenMediaCodec.webThumbnailPayload(thumb, dataURL: artworkPNGDataURL)
+        ))
+      }
+      events.append((
+        "playback",
+        LockScreenMediaCodec.webPlaybackPayload(webRawState: snapshot.playbackState)
+      ))
+      if let timeline = snapshot.interpolatedTimeline(at: now) {
+        events.append((
+          "timeline",
+          LockScreenMediaCodec.webTimelinePayload(
+            position: timeline.position, duration: timeline.duration)
+        ))
+      }
+      web.deliverMediaEvents(events)
+    }
+  }
+
+  func deliverTimelineTick(position: Double, duration: Double) {
+    guard isLiveMediaEligible else { return }
+    if let renderer {
+      if let json = LockScreenMediaCodec.sceneTimelineJSON(position: position, duration: duration) {
+        _ = owe_scene_wallpaper_submit_media_event_json(renderer, json)
+      }
+    } else if let web {
+      web.deliverMediaEvents([
+        ("timeline", LockScreenMediaCodec.webTimelinePayload(position: position, duration: duration))
+      ])
+    }
+  }
+
+  func deliverWebAudio(bins: [Double]?, liveActive: Bool) {
+    guard let web else { return }
+    guard isLiveAudioEligible else {
+      web.setLiveAudioActive(false)
+      return
+    }
+    web.setLiveAudioActive(liveActive)
+    if let bins {
+      web.deliverAudio(bins)
+    }
   }
 
   /// Re-evaluates a preview when its budget runs out, or a desktop when it has
@@ -832,12 +1064,18 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       reply(CancellationError())
     }
     rendererPaused = true
+    sceneRequiresAudio = false
+    appliedMediaIntegrationEnabled = false
+    appliedAudioResponseEnabled = false
+    lastDeliveredMediaGeneration = 0
+    lastDeliveredArtworkRevision = 0
     let waiters = readyWaiters
     readyWaiters.removeAll()
     waiters.forEach { $0(CancellationError()) }
     finishSnapshots(error: CancellationError())
     latestSnapshot = nil
     if !keepingFrame { root.contents = nil }
+    WallpaperController.shared.reconcileLiveFeed()
   }
 
   func clear() {

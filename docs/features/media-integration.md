@@ -211,6 +211,25 @@ status stays `enabled: true` while properties are empty, playback is
 `PLAYBACK_STOPPED`, and the timeline listener does not fire at all. The listener
 contract is in [Web wallpapers](web-wallpapers.md#host-protocol).
 
+## Lock screen and screen saver
+
+Scene and Web wallpapers shown on an active, unpaused [lock screen or screen saver](lock-screen.md#audio-media-and-the-enabled-state)
+follow each wallpaper's own media-integration setting. Previews, unlocked desktop
+settle surfaces and plain videos never receive media updates, and `usershortcut`
+transport buttons do not trigger there because macOS delivers no pointer input to
+lock-screen or screen-saver extensions.
+
+The sandboxed extension never touches MediaRemote or AppleScript directly: while an
+eligible surface is presenting, the extension publishes `live-demand.json` in
+`LockScreenExchange/` and the main app's `LockScreenLiveFeedCoordinator` keeps the
+shared `DesktopMediaSession` alive even while desktop presentation is suspended.
+`media-state.json` (plus `media-artwork.rgba` and `media-artwork.png` when cover art
+changes) is written only on track, playback, artwork or seek changes; while playing,
+the extension interpolates playback time locally at 1 Hz so ordinary progress writes
+nothing to disk. Display sleep, system sleep, user pause, unlock, disabling the
+native provider, extension exit or app shutdown immediately stop consumption and
+delete the exchange media files.
+
 ## Verification
 
 The provider, fallback, artwork and sink tests run against fake streams and injected
@@ -218,8 +237,12 @@ script results (see *SystemMedia* in [coverage](../testing/coverage.md)); Rust b
 tests cover consent, disabling and clearing, invalid states, nonfinite times and
 artwork bounds, and `tests::media_integration_default` the default (a new
 configuration, an older file without the field, saved choices kept, web pages, a
-scene that receives events with no setup step, previews and the lock screen left out); `scenescript_media_event_smoke` and `media_thumbnail_texture_smoke`
+scene that receives events with no setup step, previews left out, and lock-screen
+scenes/web wallpapers inheriting the saved choice while plain videos stay off);
+`LockScreenLiveFeedTests` and `ScreenSaverWebSurfaceTests` cover exchange snapshots,
+timeline interpolation, zero-disk-write tick suppression, sleep/exit teardown and web
+surface media delivery; `scenescript_media_event_smoke` and `media_thumbnail_texture_smoke`
 exercise script delivery and runtime textures without a real player. Live Spotify,
-Apple Music, browser and local-player integration requires an explicit desktop run:
-passing the simulated tests is not proof that a particular player or OS version
-publishes all fields.
+Apple Music, browser, local-player and real macOS lock-screen/screen-saver integration
+requires an explicit desktop run: passing the simulated tests is not proof that a
+particular player or OS version publishes all fields.

@@ -272,6 +272,14 @@ int owe_audio_submit_mono_frames(uint32_t sample_rate, uint32_t frame_count,
 int owe_audio_submit_frames(uint32_t sample_rate, uint32_t frame_count, const float* pcm_frames);
 int owe_audio_current_spectrum_128(float* out_bins, uintptr_t out_len, uint64_t* out_generation);
 /*
+ * Raw unclamped spectrum across all three resolutions (224 floats: left64, right64,
+ * left32, right32, left16, right16) for forwarding analysed system audio from the app
+ * process to the sandboxed lock-screen extension, and its counterpart setter.
+ */
+int owe_audio_current_spectrum_full(float* out_bands, uintptr_t out_len, uint64_t* out_generation,
+                                    bool* out_stereo);
+int owe_audio_submit_spectrum_full(const float* bands, uintptr_t len, bool stereo);
+/*
  * Whether the analysis behind `owe_audio_current_spectrum_128` genuinely
  * carried two channels. Returns 1 for stereo, 0 for a mono source whose
  * left and right halves are therefore equal, and -1 when no analysis has run.

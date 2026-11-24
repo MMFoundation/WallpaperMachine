@@ -34,7 +34,7 @@ use crate::{
         AudioCaptureError, AudioFrameConsumer, AudioResponseBlock, AudioResponseResampler,
         AudioVolume, InterleavedStereoF32, MonoPcmF32,
     },
-    owe::backend::{AudioSpectrum128, OweBackend},
+    owe::backend::{AudioSpectrum128, AudioSpectrumFull, OweBackend},
     project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SceneResult, SerdeValudeExt},
     window::{MouseButtonEdges, MouseButtonTracker, MouseButtons, NormalizedMousePosition},
 };
@@ -816,6 +816,16 @@ impl WallpaperEngine {
     /// Returns an error if the renderer rejects the call.
     pub fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         self.backend.current_audio_spectrum()
+    }
+
+    /// Latest full-resolution (224-band, unclamped) system-audio spectrum, or
+    /// `None` when no analysis has run.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the renderer rejects the call.
+    pub fn current_audio_spectrum_full(&self) -> Result<Option<AudioSpectrumFull>, EngineError> {
+        self.backend.current_audio_spectrum_full()
     }
 
     /// Reads renderer work counters for every open scene, plus the process-wide

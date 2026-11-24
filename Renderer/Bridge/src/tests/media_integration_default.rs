@@ -262,7 +262,7 @@ async fn a_web_wallpaper_inherits_the_choice() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn previews_and_the_lock_screen_do_not_take_the_media_choice() {
+async fn previews_ignore_media_choice_while_lock_screen_inherits_scene_and_web_settings() {
     let engine = FakeEngineFacade::default();
     engine.set_snapshot(vec![main_display()]);
     let mut app = AppConfig::default();
@@ -278,28 +278,82 @@ async fn previews_and_the_lock_screen_do_not_take_the_media_choice() {
     );
     let fixture = bridge(&engine, state, false);
 
-    let mut exports = Vec::new();
+    let mut previews = Vec::new();
     for choice in [true, false] {
         fixture
             .bridge
             .set_media_integration_enabled(NOCTURNE.into(), choice)
             .await
             .expect("media choice");
+        fixture
+            .bridge
+            .set_audio_response_enabled(NOCTURNE.into(), choice)
+            .await
+            .expect("audio choice");
         let lock = fixture
             .bridge
             .lock_screen_scenes()
             .await
             .expect("lock screen");
         assert_eq!(lock.len(), 1);
+        assert_eq!(lock[0].media_integration_enabled, choice);
+        assert_eq!(lock[0].audio_response_enabled, choice);
         let preview = fixture
             .bridge
             .wallpaper_preview(NOCTURNE.into(), "primary".into(), Vec::new(), Vec::new())
             .await
             .expect("preview");
-        exports.push((lock, preview));
+        previews.push(preview);
     }
     assert_eq!(
-        exports[0], exports[1],
-        "the media choice reaches neither export"
+        previews[0], previews[1],
+        "previews never depend on media integration or audio response"
     );
+
+    // Web wallpapers also export their saved media and audio choices to the lock screen.
+    let web_engine = FakeEngineFacade::default();
+    web_engine.set_snapshot(vec![main_display()]);
+    let mut web_fixture_state = web_state(Some(false));
+    web_fixture_state
+        .wallpaper_configs
+        .get_mut("lantern")
+        .unwrap()
+        .audio
+        .response_enabled = true;
+    let web_fixture = bridge(&web_engine, web_fixture_state, false);
+    let web_lock = web_fixture
+        .bridge
+        .lock_screen_scenes()
+        .await
+        .expect("web lock screen");
+    assert_eq!(web_lock.len(), 1);
+    assert!(!web_lock[0].media_integration_enabled);
+    assert!(web_lock[0].audio_response_enabled);
+
+    // Plain videos never enable media integration or audio response on the lock screen.
+    let video_engine = FakeEngineFacade::default();
+    video_engine.set_snapshot(vec![main_display()]);
+    let mut video_app = AppConfig::default();
+    video_app.monitors = vec![showing(SerializedSelector::Primary, NOCTURNE)];
+    let mut video_config = WallpaperConfig::new_for(NOCTURNE, "video");
+    video_config.media_integration_enabled = true;
+    video_config.audio.response_enabled = true;
+    let mut video_state = installed(video_app, vec![(NOCTURNE, Some(video_config))]);
+    video_state.project_models.insert(
+        NOCTURNE.into(),
+        ProjectModel::parse(
+            NOCTURNE,
+            r#"{"title":"Nocturne","type":"video","file":"clip.mp4","general":{"properties":{}}}"#,
+        )
+        .expect("video project"),
+    );
+    let video_fixture = bridge(&video_engine, video_state, false);
+    let video_lock = video_fixture
+        .bridge
+        .lock_screen_scenes()
+        .await
+        .expect("video lock screen");
+    assert_eq!(video_lock.len(), 1);
+    assert!(!video_lock[0].media_integration_enabled);
+    assert!(!video_lock[0].audio_response_enabled);
 }
