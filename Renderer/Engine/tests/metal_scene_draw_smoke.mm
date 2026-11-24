@@ -11227,6 +11227,51 @@ TEST_F(MetalSceneDraw, AnEffectsUvOffsetIsAFractionOfTheCard)
     }
 }
 
+TEST_F(MetalSceneDraw, ATallOrWideTextLayerBeyond4096TexelsDrawsItsEndsThroughAnEffect)
+{
+    // A text layer authored at a large point size and scaled down (such as 5572x544 or
+    // 706x10659) can exceed 4096 card texels on an axis. Its effect buffers match the card
+    // up to the GPU's 16384 texture limit, as Wallpaper Engine does, so glyphs near either
+    // end of the card are not clipped off.
+    for (const bool vertical : { false, true }) {
+        SCOPED_TRACE(vertical ? "vertical" : "horizontal");
+        const std::string text =
+            vertical ? "M\\n\\n\\n\\n\\n\\n\\nM" : ("M" + std::string(28, ' ') + "M");
+        const std::string style =
+            vertical
+                ? R"(,"pointsize":160,"scale":[0.03,0.03,1],"horizontalalign":"center","verticalalign":"center","padding":32)"
+                : R"(,"pointsize":160,"scale":[0.05,0.05,1],"horizontalalign":"center","verticalalign":"center","padding":32)";
+        std::map<bool, LitBox> boxes;
+        for (const bool with_effect : { false, true }) {
+            const std::string name = std::string("text-over-4096-") + (vertical ? "v-" : "h-") +
+                                     (with_effect ? "effect" : "plain");
+            const auto project = WriteTextFixture(root_ / name, text, with_effect, {}, style);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            ASSERT_NE(loaded.scene->runtime, nullptr);
+            const auto layout = loaded.scene->runtime->NodeTextLayout("caption");
+            ASSERT_TRUE(layout.has_value());
+            if (vertical) {
+                ASSERT_GT(layout->card.y(), 4096.0f);
+                ASSERT_LT(layout->card.y(), 16384.0f);
+            } else {
+                ASSERT_GT(layout->card.x(), 4096.0f);
+                ASSERT_LT(layout->card.x(), 16384.0f);
+            }
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            boxes[with_effect] = LitBoxOf(picture);
+            ASSERT_TRUE(boxes[with_effect].any())
+                << (with_effect ? "effect clipped both ends of the text" : "plain baseline missing");
+        }
+        EXPECT_NEAR(boxes[true].left, boxes[false].left, 2);
+        EXPECT_NEAR(boxes[true].right, boxes[false].right, 2);
+        EXPECT_NEAR(boxes[true].top, boxes[false].top, 2);
+        EXPECT_NEAR(boxes[true].bottom, boxes[false].bottom, 2);
+    }
+}
+
 namespace
 {
 

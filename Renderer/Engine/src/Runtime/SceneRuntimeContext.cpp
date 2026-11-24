@@ -1059,7 +1059,9 @@ void SceneRuntimeContext::FitTextLayerComposite(SceneNode& node,
     const auto found = m_scene->renderTargets.find(LayerCompositeTargetKey(node.ID()));
     if (found == m_scene->renderTargets.end()) return;
     auto&      target = found->second;
-    const auto [width, height] = TextCardTexelExtent(card.size);
+    const auto extent = TextCardTexelExtent(card.size);
+    const int32_t width  = std::min(extent[0], kTextEffectExtentLimit);
+    const int32_t height = std::min(extent[1], kTextEffectExtentLimit);
     const auto current_width  = target.authored_width > 0 ? target.authored_width : target.width;
     const auto current_height = target.authored_height > 0 ? target.authored_height : target.height;
     if (current_width == width && current_height == height) return;

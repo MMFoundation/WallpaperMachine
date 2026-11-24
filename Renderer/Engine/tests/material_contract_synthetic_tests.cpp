@@ -327,8 +327,8 @@ protected:
         EXPECT_TRUE(state.has_value()); EXPECT_TRUE(layout.has_value());
         if (!state || !layout) return {};
         const auto frame = TextLayerRenderFrameForLayout(*state,*layout);
-        return {std::clamp(static_cast<int32_t>(std::floor(frame.size.x())),4,4096),
-                std::clamp(static_cast<int32_t>(std::floor(frame.size.y())),4,4096)};
+        return {std::clamp(static_cast<int32_t>(std::floor(frame.size.x())),4,kTextEffectExtentLimit),
+                std::clamp(static_cast<int32_t>(std::floor(frame.size.y())),4,kTextEffectExtentLimit)};
     }
     void TargetExtent(Scene& scene,const std::string& key,const std::array<int32_t,2>& extent) {
         const auto* target = scene.FindRenderTarget(key);

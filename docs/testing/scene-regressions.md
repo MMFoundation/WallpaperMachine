@@ -3434,9 +3434,15 @@ texture entrances are not decoded-image or native-rendering evidence.
   target dimensions; comparing two equally wrong renders cannot pass it. These cases
   failed when the text binding forced every FBO's scale to one, and when Metal resolved
   a bound target from its parent's previous physical size before scaling that parent.
-  `.ACardPastTheBufferLimitIsCutOffToIt` there (formerly `.OversizedTextEffectClipsFinalMeshToBoundedTarget`) keeps the
-  one clamp that is left: a card past 4096 texels on a side, which Wallpaper Engine has no
-  limit for, is drawn into buffers cut to 4096. `MetalSceneDraw.AnEffectsUvOffsetIsAFractionOfTheCard` puts a layer
+  `TextEffectChain.CardsBetween4096AndTheGpuLimitKeepTheirFullEffectBuffers` and
+  `MetalSceneDraw.ATallOrWideTextLayerBeyond4096TexelsDrawsItsEndsThroughAnEffect` pin the
+  Wallpaper Engine probe `probetext-extent` rule: Wallpaper Engine allocates a text effect
+  chain's buffers at the exact card extent past 4096 up to the GPU's 16384 2D texture limit
+  (2097×294, 5526×524, 9260×754 and 14231×1022 kept exact card texels without clipping, while
+  20034×1280 failed past 16384), so high-point-size scaled-down captions and dates draw
+  unclipped on both axes; `.ACardPastTheBufferLimitIsCutOffToIt` keeps the clamp at 16384
+  (`kTextEffectExtentLimit`, with Metal also capping any non-screen-bound target to the
+  device's `MaxTextureDimension`). `MetalSceneDraw.AnEffectsUvOffsetIsAFractionOfTheCard` puts a layer
   through an effect that reads its input 0.25 along, across and down, and requires the text
   to move by a quarter of the card's width, and up by a quarter of its height (`v` runs
   from the top), within 1.5 pixels; with buffers sized from the canvas the

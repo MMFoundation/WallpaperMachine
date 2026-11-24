@@ -471,22 +471,70 @@ TEST_F(TextEffectChain, AStaticAlignedTextWithAnEffectCoversItsRasterWithoutScal
 
 // ---- G. the buffer limit -----------------------------------------------------------------
 
+TEST_F(TextEffectChain, CardsBetween4096AndTheGpuLimitKeepTheirFullEffectBuffers)
+{
+    // Wallpaper Engine allocates a text effect chain's buffers at the full card extent up to
+    // the GPU's 16384 2D texture limit (probe `probetext-extent`: 5526x524, 9260x754 and
+    // 14231x1022 kept exact card texels and unclipped geometry). Wide and tall text layers
+    // authored at large point sizes and scaled down must not be cut off at 4096.
+    PutPassThroughEffect(world, true);
+    ASSERT_TRUE(Load(SceneDocument({
+        EffectCaption(std::string(36, 'W'),
+                      { { "pointsize", 40 }, { "padding", 0 } }),
+        TextObject(2, "tall", "T\n1\n2\n3\n4\n5\n6\n7\n8\nB",
+                   { { "effects", Json::array({ EffectEntry({ { "id", 3 } }) }) },
+                     { "pointsize", 120 },
+                     { "padding", 0 } }),
+    })));
+    {
+        Chain chain(*scene, "caption");
+        ASSERT_TRUE(chain.Ok());
+        const auto layout = Runtime().NodeTextLayout("caption");
+        ASSERT_TRUE(layout.has_value());
+        ASSERT_GT(layout->card.x(), 4096.0f);
+        ASSERT_LT(layout->card.x(), 16384.0f);
+
+        const int32_t expected_w = static_cast<int32_t>(layout->card.x());
+        ASSERT_NE(chain.PingPong(), nullptr);
+        EXPECT_EQ(chain.PingPong()->width, expected_w);
+        EXPECT_DOUBLE_EQ(chain.camera->Width(), static_cast<double>(expected_w));
+        EXPECT_NEAR(chain.FinalBox().W(), static_cast<float>(expected_w), 1.0f);
+        ASSERT_NE(chain.Buffer(), nullptr);
+        ExpectHalfBufferCoversFinalCard(*chain.Buffer(), chain.layer->FinalMesh(),
+                                        chain.PingPong()->width, chain.PingPong()->height);
+    }
+    {
+        Chain chain(*scene, "tall");
+        ASSERT_TRUE(chain.Ok());
+        const auto layout = Runtime().NodeTextLayout("tall");
+        ASSERT_TRUE(layout.has_value());
+        ASSERT_GT(layout->card.y(), 4096.0f);
+        ASSERT_LT(layout->card.y(), 16384.0f);
+
+        const int32_t expected_h = static_cast<int32_t>(layout->card.y());
+        ASSERT_NE(chain.PingPong(), nullptr);
+        EXPECT_EQ(chain.PingPong()->height, expected_h);
+        EXPECT_DOUBLE_EQ(chain.camera->Height(), static_cast<double>(expected_h));
+        EXPECT_NEAR(chain.FinalBox().H(), static_cast<float>(expected_h), 1.0f);
+    }
+}
+
 TEST_F(TextEffectChain, ACardPastTheBufferLimitIsCutOffToIt)
 {
     PutPassThroughEffect(world, true);
-    ASSERT_TRUE(Load(SceneDocument({ EffectCaption(std::string(260, 'W'),
-                                                   { { "pointsize", 40 }, { "padding", 0 } }) })));
+    ASSERT_TRUE(Load(SceneDocument({ EffectCaption(std::string(120, 'W'),
+                                                   { { "pointsize", 100 }, { "padding", 0 } }) })));
     Chain chain(*scene);
     ASSERT_TRUE(chain.Ok());
     const auto layout = Runtime().NodeTextLayout("caption");
     ASSERT_TRUE(layout.has_value());
-    ASSERT_GT(layout->card.x(), 4096.0f);
+    ASSERT_GT(layout->card.x(), static_cast<float>(kTextEffectExtentLimit));
 
-    EXPECT_LE(chain.camera->Width(), 4096.0);
-    EXPECT_LE(chain.camera->Height(), 4096.0);
+    EXPECT_LE(chain.camera->Width(), static_cast<double>(kTextEffectExtentLimit));
+    EXPECT_LE(chain.camera->Height(), static_cast<double>(kTextEffectExtentLimit));
     ASSERT_NE(chain.PingPong(), nullptr);
-    EXPECT_LE(chain.PingPong()->width, 4096);
-    EXPECT_LE(chain.PingPong()->height, 4096);
+    EXPECT_LE(chain.PingPong()->width, kTextEffectExtentLimit);
+    EXPECT_LE(chain.PingPong()->height, kTextEffectExtentLimit);
     EXPECT_GT(chain.TextBox().W(), static_cast<float>(chain.PingPong()->width))
         << "the text card itself is not cut";
     ASSERT_NE(chain.Buffer(), nullptr);

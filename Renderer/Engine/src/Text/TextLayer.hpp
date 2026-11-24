@@ -383,9 +383,11 @@ TextLayerRenderFrame TextLayerRenderFrameForLayout(const TextLayerState& state,
 /// built for a card, as the scene loads and again when the card changes, takes its size
 /// from here, so that none rounds where another cuts.
 std::array<int32_t, 2> TextCardTexelExtent(linalg::Vector2f card);
-/// The most texels a side of the buffers an effect chain draws into holds. Wallpaper Engine
-/// has no limit of its own on them; a card past this is drawn cut off to it, centred.
-constexpr int32_t kTextEffectExtentLimit = 4096;
+/// The most texels a side of the buffers an effect chain draws into holds: matches the
+/// 16384 2D texture dimension limit of D3D11 (Wallpaper Engine's own backend, confirmed by
+/// the `probetext-extent` probe up to 14231x1022 and failing past 16384) and of Apple
+/// Silicon Metal. A card past this is drawn cut off to it, centred.
+constexpr int32_t kTextEffectExtentLimit = 16384;
 /// The buffers the effect chain of a text layer draws into, as a frame: `TextCardTexelExtent`
 /// of the card (at most `kTextEffectExtentLimit`) wide and tall, centred on the card. They are
 /// the card and nothing wider, so the chain's texture coordinates 0 to 1 span the card, and

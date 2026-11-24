@@ -280,7 +280,9 @@ std::shared_ptr<Image> RenderTextEmissionImage(
     bool distance_field, const TextStyleUniforms& style, uint32_t width, uint32_t height,
     const SceneMaterial* background) {
     if (!width || !height || width > 960 || height > 540 || !frame.size.allFinite() || !frame.center.allFinite() ||
-        frame.size.x() < 1 || frame.size.y() < 1 || frame.size.x() > 4096 || frame.size.y() > 4096) return nullptr;
+        frame.size.x() < 1 || frame.size.y() < 1 ||
+        frame.size.x() > static_cast<float>(kTextEffectExtentLimit) ||
+        frame.size.y() > static_cast<float>(kTextEffectExtentLimit)) return nullptr;
     const auto source_width = uint32_t(frame.size.x()), source_height = uint32_t(frame.size.y());
     std::array<std::array<AtlasSampler, 2>, 2> atlases;
     std::vector<EmissionGlyph> glyphs;

@@ -3757,6 +3757,16 @@ void MetalRender::Impl::resolveTargetSizes(Scene& scene)
             target->authored_height = int32_t(resolved.size.height);
             render::ResolveRenderScaledSize(*target, render_scale);
         }
+        if (surface.max_dimension > 0 &&
+            (static_cast<uint32_t>(std::max(1, target->width)) > surface.max_dimension ||
+             static_cast<uint32_t>(std::max(1, target->height)) > surface.max_dimension)) {
+            const auto capped = render::CapRasterExtent(
+                { static_cast<uint32_t>(std::max(1, target->width)),
+                  static_cast<uint32_t>(std::max(1, target->height)) },
+                surface.max_dimension);
+            target->width  = static_cast<int32_t>(capped.width);
+            target->height = static_cast<int32_t>(capped.height);
+        }
     }
 
     for (auto& [name, target] : scene.renderTargets) {
