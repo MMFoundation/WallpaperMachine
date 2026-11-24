@@ -12,6 +12,107 @@ app's update window shows the sections of every version newer than the installed
 one, in the app's language; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.15.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.14.0...v1.15.0) (2026-11-24)
+
+### English
+
+This release brings song info and audio visualizers to the experimental lock screen and adds finer control over wallpaper size, with steadier Workshop downloads and Steam sign-in
+
+#### Highlights
+
+- The experimental lock screen can now show the song playing and a live audio visualizer while the Mac is locked (closes [#258](https://github.com/MMFoundation/WallpaperMachine/issues/258)) ([33394f0](https://github.com/MMFoundation/WallpaperMachine/commit/33394f0395553063eb98c96b5409f39eb17ee763))
+- Shrink a scene or video wallpaper on any display with the new Scale percentage slider (closes [#248](https://github.com/MMFoundation/WallpaperMachine/issues/248)) ([448c6d0](https://github.com/MMFoundation/WallpaperMachine/commit/448c6d0157e9dfae8c9ffafcc58d3f2bcddf937b))
+- Sort installed wallpapers by energy use to spot the heaviest ones at a glance ([59f4e7c](https://github.com/MMFoundation/WallpaperMachine/commit/59f4e7c68e6640e574a2f5d83c1286444f933080), [5d68025](https://github.com/MMFoundation/WallpaperMachine/commit/5d6802530ccdaf8c55d31b10ea84309dc1467c62))
+- Big Workshop downloads now pause when Steam limits sign-ins instead of failing one by one (closes [#256](https://github.com/MMFoundation/WallpaperMachine/issues/256)) ([9b10edc](https://github.com/MMFoundation/WallpaperMachine/commit/9b10edc49ab8ce8d7d7bb3ed16c7d6e0e0898181))
+
+#### Features
+
+- On the experimental lock screen and screen saver, scene and web wallpapers keep showing song titles, artwork, progress and audio visualizers while the Mac is locked (closes [#258](https://github.com/MMFoundation/WallpaperMachine/issues/258)) ([33394f0](https://github.com/MMFoundation/WallpaperMachine/commit/33394f0395553063eb98c96b5409f39eb17ee763))
+- A new Scale percentage slider from 10% to 100% lets you shrink a scene or video wallpaper on a display and place it with the Position sliders (closes [#248](https://github.com/MMFoundation/WallpaperMachine/issues/248)) ([448c6d0](https://github.com/MMFoundation/WallpaperMachine/commit/448c6d0157e9dfae8c9ffafcc58d3f2bcddf937b))
+- Installed wallpapers can be sorted by energy use, heaviest first, and ratings measured in the background appear as soon as you return to the window ([59f4e7c](https://github.com/MMFoundation/WallpaperMachine/commit/59f4e7c68e6640e574a2f5d83c1286444f933080), [5d68025](https://github.com/MMFoundation/WallpaperMachine/commit/5d6802530ccdaf8c55d31b10ea84309dc1467c62))
+- On macOS 26 and later, About in Settings and the Help menu introduce OhMyShot, a free screenshot and recording app from the makers of WallpaperMachine ([b456aa3](https://github.com/MMFoundation/WallpaperMachine/commit/b456aa3fefc659b915efbfbf339fd238df9051fa))
+
+#### Improvements
+
+- Problem reports and the app log now show when playback was paused, so a held frame is not mistaken for a stalled wallpaper ([1a3999f](https://github.com/MMFoundation/WallpaperMachine/commit/1a3999f03e6bb1299ee72614b8689d318f36d404))
+
+#### Bug Fixes
+
+- Large Workshop download batches now pause when Steam limits sign-ins, instead of failing item after item and keeping your account locked longer (closes [#256](https://github.com/MMFoundation/WallpaperMachine/issues/256)) ([9b10edc](https://github.com/MMFoundation/WallpaperMachine/commit/9b10edc49ab8ce8d7d7bb3ed16c7d6e0e0898181))
+- Switching desktop wallpapers quickly with Same as desktop turned on no longer leaves the lock screen and screen saver marked as not enabled (closes [#259](https://github.com/MMFoundation/WallpaperMachine/issues/259)) ([195510f](https://github.com/MMFoundation/WallpaperMachine/commit/195510fd743d7ebb1b980ff1b855e2128c6a3be0))
+- Chinese, Japanese and Korean input methods no longer swallow keystrokes in the Steam sign-in fields, which now switch to a Roman keyboard while you type (closes [#243](https://github.com/MMFoundation/WallpaperMachine/issues/243)) ([3d5ebc6](https://github.com/MMFoundation/WallpaperMachine/commit/3d5ebc6934510081f37428a34a6cd78394a08a12))
+- Eyes and other clipped parts of animated characters in scene wallpapers are visible again instead of hiding behind other parts (closes [#247](https://github.com/MMFoundation/WallpaperMachine/issues/247)) ([4ddd26b](https://github.com/MMFoundation/WallpaperMachine/commit/4ddd26b95b4022664a809682ec6951cd038e5a9f))
+- Wide or tall text layers with effects, such as large captions or dates, are no longer cut off at both ends in scene wallpapers (closes [#260](https://github.com/MMFoundation/WallpaperMachine/issues/260)) ([745eedd](https://github.com/MMFoundation/WallpaperMachine/commit/745eedd3b42fb8b6f09f3e9556b78bd48de91371))
+- Display tabs in the popover stay in place when it changes height ([83dcd7a](https://github.com/MMFoundation/WallpaperMachine/commit/83dcd7a671571f38f4b52b6e4917809ec309cc3a))
+
+Thanks to [@jmalinkiewicz](https://github.com/jmalinkiewicz) and [@Rayhanson-Git](https://github.com/Rayhanson-Git) for contributing to this release.
+
+### 简体中文
+
+本次更新让实验性锁定屏幕也能显示歌曲信息和音频可视化效果，提供更细致的壁纸尺寸调节，创意工坊下载和 Steam 登录也更加稳定
+
+#### 亮点
+
+- 实验性锁定屏幕现在可以在 Mac 锁定时显示正在播放的歌曲和实时音频可视化效果 (closes [#258](https://github.com/MMFoundation/WallpaperMachine/issues/258)) ([33394f0](https://github.com/MMFoundation/WallpaperMachine/commit/33394f0395553063eb98c96b5409f39eb17ee763))
+- 使用新的缩放百分比滑块，即可在任意显示器上缩小场景或视频壁纸 (closes [#248](https://github.com/MMFoundation/WallpaperMachine/issues/248)) ([448c6d0](https://github.com/MMFoundation/WallpaperMachine/commit/448c6d0157e9dfae8c9ffafcc58d3f2bcddf937b))
+- 已安装的壁纸可按能耗排序，一眼找出最耗资源的壁纸 ([59f4e7c](https://github.com/MMFoundation/WallpaperMachine/commit/59f4e7c68e6640e574a2f5d83c1286444f933080), [5d68025](https://github.com/MMFoundation/WallpaperMachine/commit/5d6802530ccdaf8c55d31b10ea84309dc1467c62))
+- Steam 限制登录时，大批量创意工坊下载会自动暂停，不再逐个失败 (closes [#256](https://github.com/MMFoundation/WallpaperMachine/issues/256)) ([9b10edc](https://github.com/MMFoundation/WallpaperMachine/commit/9b10edc49ab8ce8d7d7bb3ed16c7d6e0e0898181))
+
+#### 新功能
+
+- 在实验性锁定屏幕和屏幕保护程序上，场景和网页壁纸会在 Mac 锁定时继续显示歌曲名、专辑封面、播放进度和音频可视化效果 (closes [#258](https://github.com/MMFoundation/WallpaperMachine/issues/258)) ([33394f0](https://github.com/MMFoundation/WallpaperMachine/commit/33394f0395553063eb98c96b5409f39eb17ee763))
+- 新增 10% 至 100% 的缩放百分比滑块，可在显示器上缩小场景或视频壁纸，再用位置滑块调整摆放 (closes [#248](https://github.com/MMFoundation/WallpaperMachine/issues/248)) ([448c6d0](https://github.com/MMFoundation/WallpaperMachine/commit/448c6d0157e9dfae8c9ffafcc58d3f2bcddf937b))
+- 已安装的壁纸现在可按能耗排序，默认从高到低，后台测得的能耗评级会在回到窗口时立即显示 ([59f4e7c](https://github.com/MMFoundation/WallpaperMachine/commit/59f4e7c68e6640e574a2f5d83c1286444f933080), [5d68025](https://github.com/MMFoundation/WallpaperMachine/commit/5d6802530ccdaf8c55d31b10ea84309dc1467c62))
+- 在 macOS 26 及更高版本中，设置的关于页和帮助菜单会介绍 OhMyShot，这是 WallpaperMachine 团队推出的免费截图与录屏应用 ([b456aa3](https://github.com/MMFoundation/WallpaperMachine/commit/b456aa3fefc659b915efbfbf339fd238df9051fa))
+
+#### 改进
+
+- 问题报告和应用日志现在会记录播放暂停，避免把静止的画面误认为壁纸卡住 ([1a3999f](https://github.com/MMFoundation/WallpaperMachine/commit/1a3999f03e6bb1299ee72614b8689d318f36d404))
+
+#### 问题修复
+
+- Steam 限制登录时，大批量创意工坊下载会暂停等待，不再逐个失败并让账户被锁定更久 (closes [#256](https://github.com/MMFoundation/WallpaperMachine/issues/256)) ([9b10edc](https://github.com/MMFoundation/WallpaperMachine/commit/9b10edc49ab8ce8d7d7bb3ed16c7d6e0e0898181))
+- 开启“与桌面相同”后快速切换桌面壁纸，锁定屏幕和屏幕保护程序不再被标记为未启用 (closes [#259](https://github.com/MMFoundation/WallpaperMachine/issues/259)) ([195510f](https://github.com/MMFoundation/WallpaperMachine/commit/195510fd743d7ebb1b980ff1b855e2128c6a3be0))
+- Steam 登录输入框现在会在输入时切换到英文键盘，中文、日文和韩文输入法不再拦截按键 (closes [#243](https://github.com/MMFoundation/WallpaperMachine/issues/243)) ([3d5ebc6](https://github.com/MMFoundation/WallpaperMachine/commit/3d5ebc6934510081f37428a34a6cd78394a08a12))
+- 场景壁纸中角色的眼睛等被裁切部件重新正常显示，不再被其他部件遮住 (closes [#247](https://github.com/MMFoundation/WallpaperMachine/issues/247)) ([4ddd26b](https://github.com/MMFoundation/WallpaperMachine/commit/4ddd26b95b4022664a809682ec6951cd038e5a9f))
+- 场景壁纸中带效果的超宽或超高文字图层（如大号标题或日期）不再两端被截断 (closes [#260](https://github.com/MMFoundation/WallpaperMachine/issues/260)) ([745eedd](https://github.com/MMFoundation/WallpaperMachine/commit/745eedd3b42fb8b6f09f3e9556b78bd48de91371))
+- 弹出面板改变高度时，其中的显示器标签不再错位 ([83dcd7a](https://github.com/MMFoundation/WallpaperMachine/commit/83dcd7a671571f38f4b52b6e4917809ec309cc3a))
+
+感谢 [@jmalinkiewicz](https://github.com/jmalinkiewicz) 和 [@Rayhanson-Git](https://github.com/Rayhanson-Git) 为本版本做出的贡献。
+
+### 한국어
+
+이번 업데이트로 실험적 잠금 화면에서도 곡 정보와 오디오 시각화를 볼 수 있고, 배경화면 크기를 더 세밀하게 조절할 수 있으며, 창작마당 다운로드와 Steam 로그인이 더 안정적입니다
+
+#### 주요 변경 사항
+
+- 실험적 잠금 화면에서 Mac이 잠긴 동안에도 재생 중인 곡과 실시간 오디오 시각화를 볼 수 있습니다 (closes [#258](https://github.com/MMFoundation/WallpaperMachine/issues/258)) ([33394f0](https://github.com/MMFoundation/WallpaperMachine/commit/33394f0395553063eb98c96b5409f39eb17ee763))
+- 새 배율 백분율 슬라이더로 어떤 디스플레이에서든 장면 또는 동영상 배경화면을 줄일 수 있습니다 (closes [#248](https://github.com/MMFoundation/WallpaperMachine/issues/248)) ([448c6d0](https://github.com/MMFoundation/WallpaperMachine/commit/448c6d0157e9dfae8c9ffafcc58d3f2bcddf937b))
+- 설치된 배경화면을 에너지 사용량순으로 정렬해 가장 무거운 배경화면을 한눈에 찾을 수 있습니다 ([59f4e7c](https://github.com/MMFoundation/WallpaperMachine/commit/59f4e7c68e6640e574a2f5d83c1286444f933080), [5d68025](https://github.com/MMFoundation/WallpaperMachine/commit/5d6802530ccdaf8c55d31b10ea84309dc1467c62))
+- Steam이 로그인을 제한하면 대량의 창작마당 다운로드가 하나씩 실패하지 않고 일시 정지됩니다 (closes [#256](https://github.com/MMFoundation/WallpaperMachine/issues/256)) ([9b10edc](https://github.com/MMFoundation/WallpaperMachine/commit/9b10edc49ab8ce8d7d7bb3ed16c7d6e0e0898181))
+
+#### 새로운 기능
+
+- 실험적 잠금 화면과 화면 보호기에서 장면 및 웹 배경화면이 Mac이 잠긴 동안에도 곡 제목, 앨범 아트, 재생 진행률과 오디오 시각화를 계속 표시합니다 (closes [#258](https://github.com/MMFoundation/WallpaperMachine/issues/258)) ([33394f0](https://github.com/MMFoundation/WallpaperMachine/commit/33394f0395553063eb98c96b5409f39eb17ee763))
+- 새 배율 백분율 슬라이더(10%~100%)로 디스플레이에서 장면 또는 동영상 배경화면을 줄이고 위치 슬라이더로 배치할 수 있습니다 (closes [#248](https://github.com/MMFoundation/WallpaperMachine/issues/248)) ([448c6d0](https://github.com/MMFoundation/WallpaperMachine/commit/448c6d0157e9dfae8c9ffafcc58d3f2bcddf937b))
+- 설치된 배경화면을 에너지 사용량순으로 정렬할 수 있으며, 백그라운드에서 측정된 등급은 창으로 돌아오면 바로 표시됩니다 ([59f4e7c](https://github.com/MMFoundation/WallpaperMachine/commit/59f4e7c68e6640e574a2f5d83c1286444f933080), [5d68025](https://github.com/MMFoundation/WallpaperMachine/commit/5d6802530ccdaf8c55d31b10ea84309dc1467c62))
+- macOS 26 이상에서는 설정의 정보와 도움말 메뉴에서 WallpaperMachine 제작진이 만든 무료 스크린샷 및 화면 녹화 앱 OhMyShot을 소개합니다 ([b456aa3](https://github.com/MMFoundation/WallpaperMachine/commit/b456aa3fefc659b915efbfbf339fd238df9051fa))
+
+#### 개선 사항
+
+- 문제 보고서와 앱 로그에 재생 일시 정지가 기록되어 멈춰 있는 화면을 배경화면 오류로 오인하지 않게 됩니다 ([1a3999f](https://github.com/MMFoundation/WallpaperMachine/commit/1a3999f03e6bb1299ee72614b8689d318f36d404))
+
+#### 버그 수정
+
+- Steam이 로그인을 제한하면 대량의 창작마당 다운로드가 일시 정지되어, 항목마다 실패하며 계정 잠금이 길어지는 일이 없어집니다 (closes [#256](https://github.com/MMFoundation/WallpaperMachine/issues/256)) ([9b10edc](https://github.com/MMFoundation/WallpaperMachine/commit/9b10edc49ab8ce8d7d7bb3ed16c7d6e0e0898181))
+- ‘데스크탑과 동일’을 켠 상태에서 배경화면을 빠르게 바꿔도 잠금 화면과 화면 보호기가 더 이상 사용 안 함으로 표시되지 않습니다 (closes [#259](https://github.com/MMFoundation/WallpaperMachine/issues/259)) ([195510f](https://github.com/MMFoundation/WallpaperMachine/commit/195510fd743d7ebb1b980ff1b855e2128c6a3be0))
+- Steam 로그인 입력란이 입력하는 동안 영문 자판으로 전환되어 한중일 입력기가 더 이상 키 입력을 가로채지 않습니다 (closes [#243](https://github.com/MMFoundation/WallpaperMachine/issues/243)) ([3d5ebc6](https://github.com/MMFoundation/WallpaperMachine/commit/3d5ebc6934510081f37428a34a6cd78394a08a12))
+- 장면 배경화면 속 캐릭터의 눈 등 클리핑된 부분이 다른 부분 뒤에 가려지지 않고 다시 보입니다 (closes [#247](https://github.com/MMFoundation/WallpaperMachine/issues/247)) ([4ddd26b](https://github.com/MMFoundation/WallpaperMachine/commit/4ddd26b95b4022664a809682ec6951cd038e5a9f))
+- 장면 배경화면에서 효과가 적용된 넓거나 긴 텍스트 레이어(큰 자막이나 날짜 등)의 양 끝이 더 이상 잘리지 않습니다 (closes [#260](https://github.com/MMFoundation/WallpaperMachine/issues/260)) ([745eedd](https://github.com/MMFoundation/WallpaperMachine/commit/745eedd3b42fb8b6f09f3e9556b78bd48de91371))
+- 팝오버의 높이가 바뀌어도 디스플레이 탭이 제자리에 머무릅니다 ([83dcd7a](https://github.com/MMFoundation/WallpaperMachine/commit/83dcd7a671571f38f4b52b6e4917809ec309cc3a))
+
+이번 릴리스에 기여해 주신 [@jmalinkiewicz](https://github.com/jmalinkiewicz), [@Rayhanson-Git](https://github.com/Rayhanson-Git) 님께 감사드립니다.
+
 ## [1.14.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.13.0...v1.14.0) (2026-11-19)
 
 ### English
