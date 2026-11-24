@@ -62,6 +62,8 @@ class CaptureServerTests(unittest.TestCase):
         status, script = self.request("/worker.ps1")
         self.assertEqual(status, 200)
         self.assertIn(b"'http://vm-host'", script)
+        self.assertIn(b"Wallpaper Engine has crashed", script)
+        self.assertIn(b"WeReferenceCrashCheck", script)
         first = json.loads(self.request("/next")[1])
         self.assertEqual(first["id"], "111")
         self.assertEqual(first["shots"], [8, 7])

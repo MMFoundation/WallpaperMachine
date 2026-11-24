@@ -89,6 +89,51 @@ public static class WeReferenceScreen {
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
 }'
 }
+if (-not ('WeReferenceCrashCheck' -as [type])) {
+    Add-Type 'using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
+public static class WeReferenceCrashCheck {
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd, uint msg, IntPtr wParam, StringBuilder lParam, uint flags, uint timeout, out IntPtr result);
+    private const uint WM_GETTEXT = 0x000D;
+    private const uint SMTO_ABORTIFHUNG = 0x0002;
+    private static string ReadText(IntPtr hWnd) {
+        var sb = new StringBuilder(512);
+        IntPtr ignored;
+        SendMessageTimeout(hWnd, WM_GETTEXT, (IntPtr)sb.Capacity, sb, SMTO_ABORTIFHUNG, 200, out ignored);
+        return sb.ToString();
+    }
+    public static uint[] CrashedPids(uint[] candidatePids) {
+        var allowed = new HashSet<uint>(candidatePids);
+        var found = new HashSet<uint>();
+        EnumWindows((hWnd, _) => {
+            if (!IsWindowVisible(hWnd)) return true;
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+            if (!allowed.Contains(pid)) return true;
+            bool crashed = ReadText(hWnd).IndexOf("Wallpaper Engine has crashed", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!crashed) {
+                EnumChildWindows(hWnd, (child, __) => {
+                    if (ReadText(child).IndexOf("Wallpaper Engine has crashed", StringComparison.OrdinalIgnoreCase) >= 0) {
+                        crashed = true;
+                        return false;
+                    }
+                    return true;
+                }, IntPtr.Zero);
+            }
+            if (crashed) found.Add(pid);
+            return true;
+        }, IntPtr.Zero);
+        var result = new uint[found.Count];
+        found.CopyTo(result);
+        return result;
+    }
+}'
+}
 [WeReferenceScreen]::SetProcessDPIAware() | Out-Null
 $we = $null
 $candidates = @((Join-Path ${env:ProgramFiles(x86)} 'Steam\steamapps\common\wallpaper_engine\wallpaper64.exe'),
@@ -99,6 +144,19 @@ if ($steam -and $steam.SteamPath) {
 }
 foreach ($c in $candidates) { if ($c -and (Test-Path $c)) { $we = $c; break } }
 if (-not $we) { Log 'wallpaper64.exe not found'; Invoke-RestMethod -Method Post -Uri "$srv/abort" -Body 'wallpaper64.exe not found' | Out-Null; return }
+$weDir = Split-Path $we
+$wePids = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+    try { $_.Path -and $_.Path.StartsWith($weDir, [StringComparison]::OrdinalIgnoreCase) } catch { $false }
+} | ForEach-Object { [uint32]$_.Id })
+if ($wePids.Count -gt 0) {
+    $crashed = [WeReferenceCrashCheck]::CrashedPids([uint32[]]$wePids)
+    if ($crashed.Count -gt 0) {
+        Log ("closing crashed Wallpaper Engine (pids: {0})" -f ($crashed -join ','))
+        foreach ($p in $crashed) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }
+        Get-Process wallpaper64,wallpaper32 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+}
 if (-not (Get-Process wallpaper64 -ErrorAction SilentlyContinue)) {
     # Mute as soon as it answers commands (it resumes its last wallpaper), then let it settle.
     Log 'starting Wallpaper Engine'; Start-Process $we; Start-Sleep -Seconds 5
