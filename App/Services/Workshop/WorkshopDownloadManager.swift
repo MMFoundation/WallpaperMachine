@@ -422,6 +422,7 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
       }
       if let output = job.worker.failureOutput { self.failureLog.append(output) }
       self.settleSessionConflict(for: job)
+      self.settleRateLimit(for: job)
       if !job.isQueued && !job.isPaused { job.begin = nil }
       self.persist()
       self.startQueuedDownloads()
@@ -458,6 +459,20 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
     job.retriesAfterSessionConflict = true
     job.isQueued = true
     job.hold = .previous
+  }
+
+  /// Steam limits sign-ins after too many and refuses each further one, which keeps the limit in
+  /// place. The jobs still waiting are paused, as a relaunch leaves them, instead of each spending
+  /// another sign-in; running ones finish on their own and a person resumes the rest.
+  private func settleRateLimit(for job: WorkshopDownload) {
+    guard job.worker.endedByRateLimit, !isShuttingDown else { return }
+    let waiting = downloads.filter { $0.isQueued && !$0.isPaused }
+    guard !waiting.isEmpty else { return }
+    AppLog.warn("Steam is limiting sign-ins (download \(job.id)); \(waiting.count) queued Workshop downloads paused")
+    for queued in waiting {
+      queued.isQueued = false
+      queued.isPaused = true
+    }
   }
 
   /// Fills free slots in queue order. The queue holds, in order, rather than skipping a job.

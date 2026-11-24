@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-23 — Workshop queue pauses after Steam limits sign-ins (#256)
+
+Fix for #256: a rate-limited sign-in (SteamCMD .rateLimited, QR logOnRefused(84)) pauses the jobs still waiting instead of each spending another sign-in. Verified on a fork's Test workflow (hosted macOS 26) because the contributor's machine has no Xcode.
+
+- Test workflow, --only the two new tests, tests-only commit 76246585 — both failed as expected: SteamCMD launched ["1","2","3"] instead of ["1"]; QR path opened 2 logons instead of 1
+- Test workflow, full, fix commit 3790b0bb — native: 5153 passed, 2 failed, 74 skipped of 5229; both new tests pass
+- The 2 native failures are pre-existing on hosted runners, not this change: DesktopWidgetTests/testADateCanBeWrittenInAnotherCalendarInThatCalendarsOwnWords (九月30 vs 九月三十) and WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem; upstream Test run 43986617796 (2026-11-17) failed both the same way
+- Test workflow rust job — passed; renderer job — blocked: check_renderer.py's cmake build of the test targets timed out after 600 s on the fork's cold cache (no renderer or bridge change here)
+- `python3 scripts/test.py --python-only` (Python 3.13, local) — exit 0, 36 script test files OK
+- Not verified: a real Steam rate limit (scripted SteamCMD and fake Steam only), no desktop/UI run, nothing checked visually
+
 ## 2026-11-23 — Scale percentage slider for a display (#248)
 
 A slider from 10% to 100% that sets a display's scale factor, in the inspector's display card and in Settings › Displays.
@@ -109,16 +120,3 @@ Documented the release package, named settings and extraSettings, and Home Manag
 - python3 scripts/check_renderer.py passed 3535 tests with seven optional skips; all 12 generated pixel cases and eight projects x two reload cycles passed. The timer benchmark is diagnostic, not energy evidence.
 - A focused compile was interrupted with exit 143 during a device disconnect. Source/log/process inspection after reconnect confirmed no surviving run before retry; no interrupted or partial result was counted as passing.
 - No Release app, installed-app restart, live capture/player, permission prompt, desktop or energy check. Source fingerprints remained unchanged across the final gates.
-
-## 2026-11-16 — PR #218: resilient capture publication
-
-- PR #218 follow-up: isolate per-display registration errors and verify actual capture ownership before skipping publication repair; no polling or per-frame work.
-- The partial-registration regression failed before the fix because the second display retained no owner. Synchronization now attempts every handle and shared demand while preserving the first error.
-- The independent-review between-writes schedule was reproduced in the real bridge actor with the worker held after capture registration but before its response write; the descriptor matched while ownership was absent.
-- Publication now reads the capture controller through its existing serialized worker lane. Healthy registrations are not repeated; the read does not query permissions or start/restart hardware.
-- Nine targeted Rust tests passed, including both new failure regressions, capture-lane read idempotence and the existing saved-audio initializes-once contract.
-- `python3 scripts/check_rust.py` passed on the combined source: core 436, bridge 978, integration and shader suites all passed. Five desktop-window cases excluded; the primary-display sanity probe explicitly skipped with no active display; live media/network opt-ins off.
-- `python3 scripts/build.py --renderer-only` passed. `python3 scripts/test.py`: 718 Python tests and 5,071 native tests passed, 70 native skips, zero failures; two runtime warnings plus compiler/linker warnings remain.
-- `python3 scripts/check_renderer.py`: 3,530 tests passed, seven optional corpus/media skips; all 12 synthetic pixel cases and reload cycles passed. The earlier pipeline was deliberately stopped before the combined correction and is not final-source evidence.
-- The combined pipeline survived a device disconnect; surviving processes and exact-source logs were checked before continuing. No duplicate suite was started. Heavy processes were confirmed absent before releasing the shared Mac slot.
-- No Release app, live audio/player test, permission prompt, desktop action or energy measurement. Media replay remains driven by host reconciliation; automatic surface recovery without a snapshot waits for the next reconciliation trigger.

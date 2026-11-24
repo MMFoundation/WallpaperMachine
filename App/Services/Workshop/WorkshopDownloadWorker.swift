@@ -29,6 +29,8 @@ protocol WorkshopDownloadWorker: AnyObject {
     var endedBySessionConflict: Bool { get }
     /// The sign-in ended before Steam accepted it and Steam gave no reason.
     var endedBeforeSignInUnexplained: Bool { get }
+    /// Steam refused the sign-in because too many were tried; another one only keeps that limit.
+    var endedByRateLimit: Bool { get }
     /// What to keep in the failure log when a run fails.
     var failureOutput: String? { get }
 

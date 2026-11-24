@@ -251,6 +251,10 @@ was run.
 - [ ] If Steam ends a session with "logged in elsewhere", the ended item goes
       back in line, the footer reads "Downloads run one at a time", and it
       retries after the running item without a click.
+- [ ] If Steam limits sign-ins ("Steam has temporarily limited sign-in attempts"),
+      the items still waiting read "Download paused". Once the items that were already
+      running have ended, no further item starts (the app log gains no new "Starting
+      Workshop download" line) until one is resumed.
 - [ ] With the panel closed and two or more downloads running, open the menu bar item: the
       line right under **Control Panel** reads "Downloads: N in progress" with a percent
       once every running download has a size (it stays out while one is still signing in

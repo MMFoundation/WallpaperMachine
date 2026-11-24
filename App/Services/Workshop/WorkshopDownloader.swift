@@ -163,6 +163,8 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
     /// SteamCMD ended before Steam accepted the sign-in, without a word from Steam about why:
     /// no rejected password or code, no failure reason. An outdated SteamCMD ends this way.
     private(set) var endedBeforeSignInUnexplained = false
+    /// Steam reported that it is limiting sign-ins (`SteamCMDReportedFailure.rateLimited`).
+    private(set) var endedByRateLimit = false
     /// What SteamCMD printed before the last run failed, redacted (`SteamCMDFailureLog`); nil after
     /// a run that did not fail.
     @ObservationIgnored private(set) var failureOutput: String?
@@ -348,6 +350,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
         sessionWarning = nil
         endedBySessionConflict = false
         endedBeforeSignInUnexplained = false
+        endedByRateLimit = false
         failureOutput = nil
         diskSampleTask?.cancel()
         diskSampleTask = nil
@@ -1064,6 +1067,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 reason: reason, cachedCredentialsRejected: run.cachedCredentialsRejected,
                 awaitingSteamGuard: awaitingSteamGuard)
             AppLog.warn("SteamCMD \(run.label): reported failure (\(kind.rawValue))")
+            if kind == .rateLimited { endedByRateLimit = true }
             let transfer = text.contains("download item") || text.contains("downloading item")
                 || text.contains("app '431960'") || text.contains("app 431960")
                 || text.contains("depot")

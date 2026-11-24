@@ -503,6 +503,52 @@ final class DownloadQueueTests: DownloaderTestCase {
     }
   }
 
+  /// Past Steam's sign-in limit every further sign-in is refused and keeps the limit in place, so
+  /// the jobs still waiting are paused instead of each spending another one.
+  func testRateLimitedSignInPausesTheQueueInsteadOfSigningInAgain() async throws {
+    let root = try makeRuntime(
+      """
+      set -eu
+      item=''
+      while [ "$#" -gt 0 ]; do
+          if [ "$1" = +workshop_download_item ]; then shift; shift; item="$1"; fi
+          shift
+      done
+      touch "../launched-$item"
+      printf 'Logging in user to Steam Public...ERROR (Rate Limit Exceeded)\\n'
+      exit 1
+      """)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let manager = WorkshopDownloadManager(
+      sessionDirectory: root.appendingPathComponent("SteamSession"),
+      runtimeProvider: ShellRuntimeProvider(), maximumConcurrentDownloads: 1, downloadRegion: { .steamsChoice })
+    let jobs = try ["1", "2", "3"].map { id in
+      manager.start(
+        item: WorkshopItem(
+          id: id, title: id, creator: "Test", summary: "", previewURL: nil, tags: ["Video"], size: 0,
+          subscriptions: 0),
+        username: "localtest", executable: root.appendingPathComponent("runtime/steamcmd"),
+        library: root.appendingPathComponent("Library"), onImported: {})
+      return try XCTUnwrap(manager.download(for: id))
+    }
+    let launched = { (id: String) in
+      FileManager.default.fileExists(atPath: root.appendingPathComponent("launched-\(id)").path)
+    }
+    do {
+      try await waitUntil { !manager.isRunning }
+      XCTAssertEqual(jobs[0].errorMessage, SteamCMDReportedFailure.rateLimited.message)
+      XCTAssertTrue(jobs[1].isPaused)
+      XCTAssertTrue(jobs[2].isPaused)
+      XCTAssertNil(jobs[1].errorMessage, "a job held back is not a failure")
+      try await Task.sleep(for: .milliseconds(300))
+      XCTAssertEqual(["1", "2", "3"].filter(launched), ["1"], "no sign-in after Steam's limit")
+      try assertNoStaging(in: root)
+    } catch {
+      await manager.shutdown()
+      throw error
+    }
+  }
+
   func testPendingDownloadsPreventSessionPreferenceChanges() async throws {
     let root = try makeSessionRuntime()
     defer { try? FileManager.default.removeItem(at: root) }
