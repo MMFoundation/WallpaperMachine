@@ -493,6 +493,98 @@ final class SystemWallpaperStoreTests: XCTestCase {
         XCTAssertEqual(try fixture.desktop(), "foreign")
     }
 
+    func testReloadConfirmsSelectionWhenWallpaperAgentUpdatesLastUse() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let oldDate = Date(timeIntervalSince1970: 1_000)
+        let setDate = Date(timeIntervalSince1970: 2_000)
+        let original: [String: Any] = [
+            "Content": ["Choices": [["Provider": "original", "Configuration": Data("old".utf8), "Files": [String]()]], "Shuffle": "$null"],
+            "LastSet": oldDate, "LastUse": oldDate,
+        ]
+        let intended: [String: Any] = [
+            "Content": ["Choices": [["Provider": "ours", "Configuration": Data("current:rev-1".utf8), "Files": [String]()]], "Shuffle": "$null"],
+            "LastSet": setDate, "LastUse": setDate,
+        ]
+        var used = intended
+        used["LastUse"] = setDate.addingTimeInterval(0.3)
+        try fixture.write(["Display": ["Desktop": original, "Idle": original]])
+        let store = fixture.store()
+        let expected = try store.read()
+        try store.replace(Fixture.encode(["Display": ["Desktop": intended, "Idle": intended]]), expected: expected)
+        fixture.onWait = { state in
+            try state.write(["Display": ["Desktop": used, "Idle": intended]])
+            state.startReplacement()
+        }
+        try await store.reload()
+        XCTAssertEqual(fixture.signals.count, 1)
+        let actual = try XCTUnwrap((fixture.root()["Display"] as? [String: Any])?["Desktop"] as? [String: Any])
+        XCTAssertEqual(actual["LastUse"] as? Date, setDate.addingTimeInterval(0.3))
+    }
+
+    func testStaleSaveWithUpdatedLastUseStillReplaysOwnedChange() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let oldDate = Date(timeIntervalSince1970: 1_000)
+        let setDate = Date(timeIntervalSince1970: 2_000)
+        let original: [String: Any] = [
+            "Content": ["Choices": [["Provider": "original", "Configuration": Data("old".utf8), "Files": [String]()]], "Shuffle": "$null"],
+            "LastSet": oldDate, "LastUse": oldDate,
+        ]
+        var staleOriginal = original
+        staleOriginal["LastUse"] = oldDate.addingTimeInterval(50)
+        let intended: [String: Any] = [
+            "Content": ["Choices": [["Provider": "ours", "Configuration": Data("current:rev-1".utf8), "Files": [String]()]], "Shuffle": "$null"],
+            "LastSet": setDate, "LastUse": setDate,
+        ]
+        try fixture.write(["Display": ["Desktop": original, "Idle": "saver"], "other": 1])
+        let store = fixture.store()
+        let expected = try store.read()
+        try store.replace(Fixture.encode(["Display": ["Desktop": intended, "Idle": "saver"], "other": 1]), expected: expected)
+        fixture.onWait = { state in
+            if state.waits == 1 {
+                try state.write(["Display": ["Desktop": staleOriginal, "Idle": "external saver"], "other": 9])
+            }
+            state.startReplacement()
+        }
+        try await store.reload()
+        let root = try fixture.root()
+        let display = try XCTUnwrap(root["Display"] as? [String: Any])
+        XCTAssertTrue(NSDictionary(dictionary: try XCTUnwrap(display["Desktop"] as? [String: Any])).isEqual(to: intended))
+        XCTAssertEqual(display["Idle"] as? String, "external saver")
+        XCTAssertEqual(root["other"] as? Int, 9)
+        XCTAssertEqual(fixture.signals.count, 2)
+    }
+
+    func testChangedLastSetOnChoiceIsStillPreservedAsForeign() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let oldDate = Date(timeIntervalSince1970: 1_000)
+        let setDate = Date(timeIntervalSince1970: 2_000)
+        let original: [String: Any] = [
+            "Content": ["Choices": [["Provider": "original", "Configuration": Data("old".utf8), "Files": [String]()]], "Shuffle": "$null"],
+            "LastSet": oldDate, "LastUse": oldDate,
+        ]
+        let intended: [String: Any] = [
+            "Content": ["Choices": [["Provider": "ours", "Configuration": Data("current:rev-1".utf8), "Files": [String]()]], "Shuffle": "$null"],
+            "LastSet": setDate, "LastUse": setDate,
+        ]
+        var reselected = original
+        reselected["LastSet"] = setDate.addingTimeInterval(1)
+        try fixture.write(["Display": ["Desktop": original, "Idle": "saver"]])
+        let store = fixture.store()
+        let expected = try store.read()
+        try store.replace(Fixture.encode(["Display": ["Desktop": intended, "Idle": "saver"]]), expected: expected)
+        fixture.onWait = { state in
+            try state.write(["Display": ["Desktop": reselected, "Idle": "saver"]])
+            state.startReplacement()
+        }
+        do { try await store.reload(); XCTFail("A choice with a newer LastSet must not be overwritten") } catch {}
+        let actual = try XCTUnwrap((fixture.root()["Display"] as? [String: Any])?["Desktop"] as? [String: Any])
+        XCTAssertTrue(NSDictionary(dictionary: actual).isEqual(to: reselected))
+        XCTAssertEqual(fixture.signals.count, 1)
+    }
+
     private enum TestFailure: Error { case expected }
 
     private func until(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {

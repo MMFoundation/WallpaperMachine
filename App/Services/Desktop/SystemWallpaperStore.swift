@@ -127,7 +127,8 @@ final class SystemWallpaperStore {
             let root = try Self.decode(data)
             if changes.contains(where: { change in
                 let value = Self.value(root, path: change.path)
-                return !Self.equal(value, change.before) && !Self.equal(value, change.after)
+                return !Self.matches(value, change.before, path: change.path)
+                    && !Self.matches(value, change.after, path: change.path)
             }) {
                 changes = []
                 invalidated = true
@@ -177,7 +178,9 @@ final class SystemWallpaperStore {
             let data = try read()
             guard !invalidated else { throw Self.conflict() }
             var root = try Self.decode(data)
-            let stale = changes.filter { !Self.equal(Self.value(root, path: $0.path), $0.after) }
+            let stale = changes.filter {
+                !Self.matches(Self.value(root, path: $0.path), $0.after, path: $0.path)
+            }
             if stale.isEmpty {
                 changes = []
                 writtenAt = nil
@@ -188,7 +191,7 @@ final class SystemWallpaperStore {
                 throw Self.unconfirmed()
             }
             for change in stale {
-                guard Self.equal(Self.value(root, path: change.path), change.before),
+                guard Self.matches(Self.value(root, path: change.path), change.before, path: change.path),
                       Self.canSet(root, path: change.path) else {
                     changes = []
                     invalidated = true
@@ -263,6 +266,8 @@ final class SystemWallpaperStore {
         return root
     }
 
+    private static let choiceFields: Set<String> = ["Desktop", "Idle", "Linked"]
+
     private static func equal(_ lhs: Any?, _ rhs: Any?) -> Bool {
         switch (lhs, rhs) {
         case (nil, nil): return true
@@ -271,12 +276,26 @@ final class SystemWallpaperStore {
         }
     }
 
+    /// `WallpaperAgent` advances `LastUse` when it loads or shows a selection without changing the
+    /// wallpaper choice itself; `LastSet`, `Content` and other fields still detect real edits.
+    private static func matches(_ lhs: Any?, _ rhs: Any?, path: [String]) -> Bool {
+        guard let field = path.last, choiceFields.contains(field),
+              let left = lhs as? [String: Any], let right = rhs as? [String: Any] else {
+            return equal(lhs, rhs)
+        }
+        var normalizedLeft = left
+        var normalizedRight = right
+        normalizedLeft.removeValue(forKey: "LastUse")
+        normalizedRight.removeValue(forKey: "LastUse")
+        return equal(normalizedLeft, normalizedRight)
+    }
+
     private static func differences(before: [String: Any], after: [String: Any], path: [String] = []) -> [Change] {
         Set(before.keys).union(after.keys).sorted().flatMap { key -> [Change] in
             let old = before[key]
             let new = after[key]
             guard !equal(old, new) else { return [] }
-            if !["Desktop", "Idle", "Linked"].contains(key),
+            if !choiceFields.contains(key),
                (old == nil || old is [String: Any]), (new == nil || new is [String: Any]),
                !(old as? [String: Any] ?? [:]).isEmpty || !(new as? [String: Any] ?? [:]).isEmpty {
                 return differences(before: old as? [String: Any] ?? [:],

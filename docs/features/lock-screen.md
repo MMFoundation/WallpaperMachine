@@ -562,7 +562,10 @@ saved original (poster ownership and the quit wait are described in
 Both writers use `SystemWallpaperStore`'s explicit transaction queue, which stays
 held across asynchronous waits. Native takeover first cancels and drains pending
 poster writes. A reload waits for the verified old WallpaperAgent process to exit
-and a replacement to start after the store write, then checks the changed selections.
+and a replacement to start after the store write, then checks the changed selections;
+a `LastUse` timestamp updated by WallpaperAgent as it loads or shows a choice is ignored
+during that check, while changes to `Content`, `LastSet` or other fields still detect an
+external edit.
 A stale save is retried only where the selection still matches the pre-write value;
 a different external choice is preserved and reported, never overwritten by a retry.
 The native journal is pruned only after confirmation, including partial restores.
@@ -606,7 +609,10 @@ hits modes that are already committed and still requested: WallpaperAgent rewrit
 its store between the app's read and write, WallpaperAgent between a restart and its
 relaunch, or no first frame within the readiness wait. The committed selection stays
 on the lock screen and the monitor publishes again after 2, 4, 8, 16 and 32 seconds,
-the status keeping its last progress text. A sixth failure in a row is reported and
+the status keeping its last progress text. Unrelated refreshes for the same desired scenes
+wait out that back-off instead of burning attempts early, while a newer wallpaper or
+configuration supersedes the pending retry and starts a fresh retry budget. A sixth
+failure in a row for the same target is reported and
 restored like any other, with **Retry**. A store race also does not fail an activation
 that turns no committed mode off (a first activation, at launch too, a switch or
 **Retry**): the journal can still restore everything, so the same back-off tries

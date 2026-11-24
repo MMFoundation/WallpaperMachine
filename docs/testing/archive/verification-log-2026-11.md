@@ -9,6 +9,19 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-16 — PR #218: preserve audio rollback after a save failure
+
+- A failed audio activation followed by failed rollback persistence no longer splits the restored draft from the authoritative map or skips live cleanup and operation invalidation.
+- Two real-actor regressions failed on unchanged production head 2d436018: audio stayed enabled immediately after rollback-save failure and after a subsequent failed Apply with a late audio report.
+- Four new cases cover registration/response and demand failures, original plus persistence/cleanup errors, unchanged on-disk optimistic data, downstream callbacks, fresh/stale Apply tickets and multi-display cleanup.
+- The complete focused selection passed 15 tests, retaining healthy initialize-once, ownership-read idempotence, earlier publication races and per-display failure isolation; no existing assertion was weakened.
+- python3 scripts/check_rust.py passed: core 436, bridge 990, core integration 20 and shader 1098. Five desktop-window cases excluded; desktop/media/network opt-ins disabled.
+- python3 scripts/build.py --renderer-only passed and regenerated unchanged public bridge bindings. No API schema, new UI literal, polling or per-frame work was introduced.
+- python3 scripts/test.py passed 718 Python and 5108 native tests, with 70 native skips and two runtime warnings without source locations. An initial Python failure was caused by the harness placing TMPDIR inside the checkout; normal temporary-directory isolation fixed it without changing tests or production code.
+- python3 scripts/check_renderer.py passed 3535 tests with seven optional skips; all 12 generated pixel cases and eight projects x two reload cycles passed. The timer benchmark is diagnostic, not energy evidence.
+- A focused compile was interrupted with exit 143 during a device disconnect. Source/log/process inspection after reconnect confirmed no surviving run before retry; no interrupted or partial result was counted as passing.
+- No Release app, installed-app restart, live capture/player, permission prompt, desktop or energy check. Source fingerprints remained unchanged across the final gates.
+
 ## 2026-11-16 — PR #218: resilient capture publication
 
 - PR #218 follow-up: isolate per-display registration errors and verify actual capture ownership before skipping publication repair; no polling or per-frame work.

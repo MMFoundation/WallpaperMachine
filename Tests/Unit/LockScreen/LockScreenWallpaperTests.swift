@@ -247,6 +247,68 @@ final class LockScreenWallpaperTests: XCTestCase {
   }
 
   @MainActor
+  func testRapidRevisionsConfirmWhenWallpaperAgentUpdatesLastUseOnEachReload() async throws {
+    let original = fixture()
+    try write(original)
+    var clock: TimeInterval = 1_000
+    var process = SystemWallpaperStore.AgentIdentity(
+      pid: 10, userID: 501, realUserID: 501, executable: SystemWallpaperStore.agentExecutable,
+      startSeconds: 900, startMicroseconds: 0)
+    let coordinator = SystemWallpaperStore(
+      storeURL: store, agents: { [process] }, signal: { _ in },
+      isRunning: { $0 == process }, now: { clock },
+      wait: { interval in
+        clock += interval
+        process.pid += 1
+        process.startSeconds = UInt64(clock)
+        process.startMicroseconds = UInt64((clock - floor(clock)) * 1_000_000)
+        // Simulate WallpaperAgent advancing LastUse on the active display as soon as it starts.
+        var current = try self.readStore()
+        if var displays = current["Displays"] as? [String: Any],
+          var display = displays["one"] as? [String: Any]
+        {
+          for field in ["Desktop", "Idle"] {
+            if var choice = display[field] as? [String: Any] {
+              choice["LastUse"] = Date(timeIntervalSince1970: clock + 0.25)
+              display[field] = choice
+            }
+          }
+          displays["one"] = display
+          current["Displays"] = displays
+          try self.write(current)
+        }
+      }, userID: 501)
+    let selection = LockScreenWallpaperSelection(
+      storeURL: store, journalURL: journal, reload: { try await coordinator.reload() },
+      coordinator: coordinator)
+    for index in 1...6 {
+      try await selection.synchronize(
+        desktopDisplays: ["one"], screenSaverDisplays: ["one"], revision: "wallpaper-\(index)")
+    }
+    let final = try readStore()
+    let display = try XCTUnwrap((final["Displays"] as? [String: Any])?["one"] as? [String: Any])
+    let content = try XCTUnwrap((display["Desktop"] as? [String: Any])?["Content"] as? [String: Any])
+    let choices = try XCTUnwrap(content["Choices"] as? [[String: Any]])
+    XCTAssertEqual(choices.first?["Configuration"] as? Data, Data("current:wallpaper-6".utf8))
+    try await selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
+    XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+    var restored = try readStore()
+    if var displays = restored["Displays"] as? [String: Any],
+      var restoredDisplay = displays["one"] as? [String: Any]
+    {
+      for field in ["Desktop", "Idle"] {
+        if var choice = restoredDisplay[field] as? [String: Any] {
+          XCTAssertNotNil(choice.removeValue(forKey: "LastUse"))
+          restoredDisplay[field] = choice
+        }
+      }
+      displays["one"] = restoredDisplay
+      restored["Displays"] = displays
+    }
+    XCTAssertEqual(restored as NSDictionary, original as NSDictionary)
+  }
+
+  @MainActor
   func testLargeStoreRevisionsAndRecoveryPreserveEverySpaceAndUnownedChoice() async throws {
     var original = fixture()
     let spaceIDs = [""] + (0..<256).map { "space-\($0)" }

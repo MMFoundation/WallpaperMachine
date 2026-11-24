@@ -87,8 +87,18 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private var forceRepublish = false
   /// Consecutive transient failures that kept a committed selection, and the monitor ticks to
   /// let pass before the next attempt.
+  private struct TransientRetryTarget: Equatable {
+    var inputs: [LockScreenPublishInput]
+    var contentRevision: UInt64
+    var lockScreenRequested: Bool
+    var screenSaverRequested: Bool
+  }
   @ObservationIgnored private var transientFailures = 0
   @ObservationIgnored private var retrySkipsRemaining = 0
+  @ObservationIgnored private var transientRetryTarget: TransientRetryTarget?
+  /// True after a transient failure defers to the monitor's back-off so unrelated snapshot
+  /// refreshes with the same target cannot burn retries ahead of schedule.
+  @ObservationIgnored private var awaitingMonitorRetry = false
   /// Exit watches on the extension processes that acknowledged the committed lock screen. macOS
   /// keeps a renderer whose process died as its wallpaper and shows nothing, never reloading it.
   @ObservationIgnored private var rendererWatches: [Int32: () -> Void] = [:]
@@ -271,6 +281,8 @@ final class LockScreenWallpaperService {
   private func resetAutomaticRecovery() {
     transientFailures = 0
     retrySkipsRemaining = 0
+    transientRetryTarget = nil
+    awaitingMonitorRetry = false
     rendererLosses.removeAll()
     rendererReleases.removeAll()
     rendererFailure = nil
@@ -292,6 +304,7 @@ final class LockScreenWallpaperService {
       if lockScreenActivationError != nil { lastLockScreenRequested = nil }
       lockScreenActivationError = nil
       errorMessage = nil
+      awaitingMonitorRetry = false
     }
     generation &+= 1
     let revision = generation
@@ -320,6 +333,7 @@ final class LockScreenWallpaperService {
         self.retrySkipsRemaining -= 1
         return
       }
+      self.awaitingMonitorRetry = false
       // The bridge applies battery policy without opening the control panel.
       self.refresh()
     }
@@ -386,6 +400,7 @@ final class LockScreenWallpaperService {
     // a disable before this update replaces the manifest, including during that wait.
     var disablingPublishedMode = (published?.lockScreenEnabled == true && !isRequested)
       || (published?.screenSaverEnabled == true && !screenSaverRequested)
+    var currentRetryTarget: TransientRetryTarget?
     defer {
       if generation == revision {
         isBusy = false
@@ -493,6 +508,21 @@ final class LockScreenWallpaperService {
       }
       inputs.sort { ($0.content.rawValue, $0.displayID) < ($1.content.rawValue, $1.displayID) }
       let currentContentRevision = contentRevision()
+      let retryTarget = TransientRetryTarget(
+        inputs: inputs, contentRevision: currentContentRevision,
+        lockScreenRequested: isRequested, screenSaverRequested: screenSaverRequested)
+      currentRetryTarget = retryTarget
+      if let failedTarget = transientRetryTarget {
+        if retryTarget != failedTarget {
+          // A newer selection supersedes any pending retry for an earlier one.
+          transientFailures = 0
+          retrySkipsRemaining = 0
+          transientRetryTarget = nil
+          awaitingMonitorRetry = false
+        } else if awaitingMonitorRetry {
+          return
+        }
+      }
       if inputs == lastInputs, !forceRepublish, let published,
         unconfirmed?.revision != published.revision,
         lastContentRevision == currentContentRevision,
@@ -641,6 +671,8 @@ final class LockScreenWallpaperService {
       forceRepublish = false
       transientFailures = 0
       retrySkipsRemaining = 0
+      transientRetryTarget = nil
+      awaitingMonitorRetry = false
       if !configuration.lockScreenEnabled {
         cancelRendererWatches()
         retiringRendererProcesses.removeAll()
@@ -682,6 +714,8 @@ final class LockScreenWallpaperService {
         // attempt publishes again, instead of falling back to macOS's wallpaper.
         transientFailures += 1
         retrySkipsRemaining = Self.transientRetrySkips[transientFailures - 1]
+        transientRetryTarget = currentRetryTarget
+        awaitingMonitorRetry = true
         forceRepublish = true
         // The attempt covered every requested mode, so earlier errors are stale; left set, they
         // would stop the monitor that runs the next attempt.
@@ -694,6 +728,8 @@ final class LockScreenWallpaperService {
       }
       transientFailures = 0
       retrySkipsRemaining = 0
+      transientRetryTarget = nil
+      awaitingMonitorRetry = false
       lockScreenActivationError = nil
       electionRepairOffered = (failure as? LockScreenWallpaperFailure)?.reason == .extensionTurnedOff
       var message = failure.localizedDescription

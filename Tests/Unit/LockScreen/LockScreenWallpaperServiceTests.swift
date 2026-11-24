@@ -1747,6 +1747,107 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertFalse(try storeOwnsDisplayOne())
   }
 
+  /// Rapidly switching desktop wallpapers while previous updates hit transient store races must
+  /// supersede the older retry instead of sharing its failure budget and disabling both modes.
+  @MainActor
+  func testSwitchingWallpapersResetsTransientRetryBudgetAndSupersedesPendingRetry() async throws {
+    var record = scene()
+    record.displayId = 1
+    var failReload = false
+    var reloads = 0
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(
+        storeURL: store, journalURL: journal,
+        reload: {
+          reloads += 1
+          if failReload {
+            throw LockScreenWallpaperFailure(
+              message: "The system wallpaper changed during native selection. Please retry; no concurrent changes were overwritten.",
+              reason: .transient)
+          }
+        }),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { [1: "one"][$0] })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try await service.start()
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("both modes enabled") { service.isEnabled && service.screenSaverEnabled && !service.isBusy }
+
+    failReload = true
+    for step in 1...(LockScreenWallpaperService.transientRetrySkips.count + 2) {
+      record.propertiesJson = #"{"step":\#(step)}"#
+      let before = reloads
+      service.refresh()
+      await waitFor("switch \(step) transient failure") { !service.isBusy && reloads > before }
+      XCTAssertNil(service.errorMessage, "switch \(step) must not disable lock screen")
+      XCTAssertNil(service.screenSaverError, "switch \(step) must not disable screen saver")
+      XCTAssertTrue(service.isEnabled)
+      XCTAssertTrue(service.screenSaverEnabled)
+    }
+
+    failReload = false
+    let failedRevision = try publishedRevision()
+    try XCTUnwrap(timers.last).fire()
+    await waitFor("final wallpaper settled") { !service.isBusy && (try? self.publishedRevision()) != failedRevision }
+    XCTAssertNil(service.errorMessage)
+    XCTAssertNil(service.screenSaverError)
+    XCTAssertTrue(service.isEnabled)
+    XCTAssertTrue(service.screenSaverEnabled)
+    XCTAssertTrue(try storeOwnsDisplayOne())
+  }
+
+  /// Unrelated snapshot refreshes with the same desired scenes must not bypass transient back-off
+  /// and burn through the retry budget ahead of the monitor's schedule.
+  @MainActor
+  func testUnrelatedRefreshDuringTransientBackoffDoesNotBurnRetryBudget() async throws {
+    var record = scene()
+    record.displayId = 1
+    var failReload = false
+    var reloads = 0
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(
+        storeURL: store, journalURL: journal,
+        reload: {
+          reloads += 1
+          if failReload {
+            throw LockScreenWallpaperFailure(message: "agent relaunching", reason: .transient)
+          }
+        }),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { [1: "one"][$0] })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try await service.start()
+    service.setEnabled(true)
+    await waitFor("lock screen ready") { service.isEnabled && !service.isBusy }
+    let timer = try XCTUnwrap(timers.last)
+
+    failReload = true
+    record.propertiesJson = #"{"speed":2}"#
+    let initialReloads = reloads
+    service.refresh()
+    await waitFor("first transient failure") { !service.isBusy && reloads == initialReloads + 1 }
+
+    // Unrelated snapshot refreshes while awaiting the monitor's retry must not burn attempts.
+    for _ in 0..<(LockScreenWallpaperService.transientRetrySkips.count + 2) {
+      service.refresh()
+      await waitFor("unrelated refresh settled") { !service.isBusy }
+    }
+    XCTAssertEqual(reloads, initialReloads + 1, "unrelated refreshes must wait for the monitor's back-off")
+    XCTAssertNil(service.errorMessage)
+    XCTAssertTrue(service.isEnabled)
+
+    // The monitor's scheduled retry still runs and recovers once the transient condition clears.
+    failReload = false
+    timer.fire()
+    await waitFor("monitor retry succeeded") { !service.isBusy && reloads == initialReloads + 2 }
+    XCTAssertNil(service.errorMessage)
+    XCTAssertTrue(service.isEnabled)
+    XCTAssertTrue(try storeOwnsDisplayOne())
+  }
+
   /// An activation that exhausts its immediate store-race attempts wrote nothing, so it is
   /// retried by the monitor like a committed one. Errors on both rows must not stop that monitor.
   @MainActor

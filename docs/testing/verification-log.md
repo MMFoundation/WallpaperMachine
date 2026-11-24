@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-24 — Ignore WallpaperAgent LastUse updates and isolate lock-screen transient retries (#259)
+
+Fix for #259: SystemWallpaperStore ignores WallpaperAgent LastUse timestamp advances when confirming or replaying Desktop/Idle/Linked choices, and LockScreenWallpaperService resets transient failure budgets on new targets while keeping unrelated refreshes from bypassing back-off.
+
+- Red before fix (python3 scripts/test.py --only SystemWallpaperStoreTests --only LockScreenWallpaperServiceTests/...): 4 new regression tests failed (26 passed, 4 failed of 30) reproducing both LastUse reload conflicts and burned/shared retry budgets.
+- Targeted after fix (SystemWallpaperStoreTests, LockScreenWallpaperServiceTests, LockScreenWallpaperTests): 208 passed, 0 failed, 0 skipped.
+- Full gate (python3 scripts/test.py, macOS 27.3): all 36 Python test modules passed; native 5,165 passed, 0 failed, 70 skipped of 5,235 (1 runtime warning).
+- Not verified: live WallpaperAgent reload on the desktop, visual lock-screen check, or Release app build.
+
 ## 2026-11-23 — Workshop queue pauses after Steam limits sign-ins (#256)
 
 Fix for #256: a rate-limited sign-in (SteamCMD .rateLimited, QR logOnRefused(84)) pauses the jobs still waiting instead of each spending another sign-in. Verified on a fork's Test workflow (hosted macOS 26) because the contributor's machine has no Xcode.
@@ -107,16 +116,3 @@ Documented the release package, named settings and extraSettings, and Home Manag
 - python3 scripts/tests/test_doc_links.py: passed, 11 tests.
 - Earlier implementation checks evaluated all exported systems and passed all 35 Python test modules. The native test gate stopped at missing XcodeGen on Linux and did not pass. Native tests were not rerun for this documentation update.
 - macOS signing, activation, wallpaper playback and extension registration remain unverified. The native app was not rebuilt or launched.
-
-## 2026-11-16 — PR #218: preserve audio rollback after a save failure
-
-- A failed audio activation followed by failed rollback persistence no longer splits the restored draft from the authoritative map or skips live cleanup and operation invalidation.
-- Two real-actor regressions failed on unchanged production head 2d436018: audio stayed enabled immediately after rollback-save failure and after a subsequent failed Apply with a late audio report.
-- Four new cases cover registration/response and demand failures, original plus persistence/cleanup errors, unchanged on-disk optimistic data, downstream callbacks, fresh/stale Apply tickets and multi-display cleanup.
-- The complete focused selection passed 15 tests, retaining healthy initialize-once, ownership-read idempotence, earlier publication races and per-display failure isolation; no existing assertion was weakened.
-- python3 scripts/check_rust.py passed: core 436, bridge 990, core integration 20 and shader 1098. Five desktop-window cases excluded; desktop/media/network opt-ins disabled.
-- python3 scripts/build.py --renderer-only passed and regenerated unchanged public bridge bindings. No API schema, new UI literal, polling or per-frame work was introduced.
-- python3 scripts/test.py passed 718 Python and 5108 native tests, with 70 native skips and two runtime warnings without source locations. An initial Python failure was caused by the harness placing TMPDIR inside the checkout; normal temporary-directory isolation fixed it without changing tests or production code.
-- python3 scripts/check_renderer.py passed 3535 tests with seven optional skips; all 12 generated pixel cases and eight projects x two reload cycles passed. The timer benchmark is diagnostic, not energy evidence.
-- A focused compile was interrupted with exit 143 during a device disconnect. Source/log/process inspection after reconnect confirmed no surviving run before retry; no interrupted or partial result was counted as passing.
-- No Release app, installed-app restart, live capture/player, permission prompt, desktop or energy check. Source fingerprints remained unchanged across the final gates.
