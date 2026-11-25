@@ -463,4 +463,107 @@ final class WallpaperDisplayTransferIntegrationTests: XCTestCase {
         try await manual.value
         XCTAssertEqual(bridge.assignments, ["primary": "c", "secondary": "a"])
     }
+
+    // MARK: Display-topology auto-apply
+
+    func testTopologyAutoApplyRunsOnlyOnRealTopologyChangeAndAvoidsLoops() async throws {
+        let layoutDefaults = try TemporaryDefaults.make(for: self).defaults
+        let layoutStore = WallpaperDisplayLayoutStore(defaults: layoutDefaults)
+        let dualLayout = try layoutStore.save(
+            name: "Desk",
+            assignments: [
+                WallpaperDisplayAssignment(displayID: "primary", displayTitle: "Primary", wallpaperID: "c"),
+                WallpaperDisplayAssignment(displayID: "secondary", displayTitle: "Secondary", wallpaperID: "a"),
+            ],
+            autoApplyOnConnect: true)
+        let singleLayout = try layoutStore.save(
+            name: "Mobile",
+            assignments: [
+                WallpaperDisplayAssignment(displayID: "primary", displayTitle: "Primary", wallpaperID: "b"),
+            ],
+            autoApplyOnConnect: true)
+
+        // Start on single display ("primary"), seeded after bootstrap.
+        bridge.eligible = ["primary"]
+        try await store.refreshAllAsync()
+        let applier = DisplayTopologyLayoutAutoApplier(
+            snapshot: { self.store.displayTransferSnapshot() },
+            matchingLayout: { layoutStore.autoApplyLayout(for: $0) },
+            applyLayout: { layout in
+                try await self.store.applyDisplayTransferAsync(.layout(layout.assignments))
+            })
+        applier.seedTopology()
+
+        // Screen refresh with the same topology (e.g. scaling or refresh-rate change) does nothing.
+        let unchanged = await applier.handleTopologySettled()
+        XCTAssertNil(unchanged)
+        XCTAssertTrue(bridge.applications.isEmpty)
+
+        // Second display connects -> topology changes to [primary, secondary] -> Desk auto-applies.
+        bridge.eligible = ["primary", "secondary"]
+        try await store.refreshAllAsync()
+        let appliedDual = await applier.handleTopologySettled()
+        XCTAssertEqual(appliedDual, dualLayout.id)
+        XCTAssertEqual(bridge.assignments, ["primary": "c", "secondary": "a"])
+        let applicationsAfterDual = bridge.applications.count
+
+        // Repeated settled refreshes on the same topology must NOT re-trigger.
+        let repeatDual = await applier.handleTopologySettled()
+        XCTAssertNil(repeatDual)
+        XCTAssertEqual(bridge.applications.count, applicationsAfterDual)
+
+        // Second display disconnects -> topology changes to [primary] -> Mobile auto-applies.
+        bridge.eligible = ["primary"]
+        try await store.refreshAllAsync()
+        let appliedSingle = await applier.handleTopologySettled()
+        XCTAssertEqual(appliedSingle, singleLayout.id)
+        XCTAssertEqual(bridge.assignments["primary"], "b")
+        let applicationsAfterSingle = bridge.applications.count
+
+        // Reconnect when wallpapers already match the Desk layout -> skips without bridge work.
+        bridge.eligible = ["primary", "secondary"]
+        bridge.assignments = ["primary": "c", "secondary": "a"]
+        try await store.refreshAllAsync()
+        let alreadySatisfied = await applier.handleTopologySettled()
+        XCTAssertNil(alreadySatisfied)
+        XCTAssertEqual(bridge.applications.count, applicationsAfterSingle, "no redundant apply when already satisfied")
+    }
+
+    // MARK: Collection random wallpaper
+
+    func testRandomWallpaperInCollectionStaysWithinCollectionAndKeepsPlaylistRoundsUntouched() async throws {
+        let playlists = PlaylistStore(defaults: try TemporaryDefaults.make(for: self).defaults)
+        try await store.activateRandomWallpaperAsync(
+            displayId: "primary",
+            pool: .all,
+            favorites: [],
+            playlists: playlists,
+            collectionID: "col-1",
+            collectionWallpaperIDs: ["a", "c"])
+        XCTAssertEqual(bridge.assignments["primary"], "c", "a is already shown, b is outside the collection")
+        XCTAssertTrue(playlists.randomRounds.isEmpty, "collection rounds stay separate from global PlaylistStore rounds")
+
+        try await store.activateRandomWallpaperAsync(
+            displayId: "primary",
+            pool: .all,
+            favorites: [],
+            playlists: playlists,
+            collectionID: "col-1",
+            collectionWallpaperIDs: ["a", "c"])
+        XCTAssertEqual(bridge.assignments["primary"], "a")
+
+        // Combining favorites + collection with no other matching item throws cleanly.
+        do {
+            try await store.activateRandomWallpaperAsync(
+                displayId: "primary",
+                pool: .favorites,
+                favorites: ["b"],
+                playlists: playlists,
+                collectionID: "col-1",
+                collectionWallpaperIDs: ["a", "c"])
+            XCTFail("b is not in the collection")
+        } catch let error as WallpaperActionError {
+            XCTAssertEqual(error.message, String(localized: "There is no other wallpaper to choose from."))
+        }
+    }
 }

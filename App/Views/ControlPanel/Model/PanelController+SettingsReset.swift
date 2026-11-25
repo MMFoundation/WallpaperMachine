@@ -73,6 +73,8 @@ extension PanelController {
     for action in HotKeyAction.allCases where hotKeys.bindings[action] != nil {
       await attempt { try hotKeys.set(nil, for: action) }
     }
+    hotKeys.clearAllLayoutBindings()
+    PresentationModeController.setHidesDesktopIcons(false, in: defaults)
 
     // Desktop and lock screen. The lock screen goes first: while on, it holds the desktop
     // picture choice that the playback reset returns to its default.

@@ -80,6 +80,9 @@ enum ClientPaths {
     static var sceneDrawVerdictsURL: URL { supportURL.appendingPathComponent("SceneDrawVerdicts.json") }
     /// Each wallpaper's measured energy use.
     static var energyRatingsURL: URL { supportURL.appendingPathComponent("EnergyRatings.json") }
+    /// Event-driven read-only snapshot of active wallpapers, playback, mute and presentation mode
+    /// for external tools such as Raycast, SketchyBar or Stream Deck.
+    static var automationStatusURL: URL { supportURL.appendingPathComponent("status.json") }
     /// A wallpaper's saved settings file: its properties, framing and engine options.
     static func wallpaperSettingsURL(wallpaperID: String) -> URL {
         supportURL.appendingPathComponent("wallpapers", isDirectory: true).appendingPathComponent(wallpaperID + ".json")

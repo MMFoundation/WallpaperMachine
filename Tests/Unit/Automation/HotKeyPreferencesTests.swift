@@ -77,4 +77,34 @@ final class HotKeyPreferencesTests: XCTestCase {
         XCTAssertEqual(HotKeyPreferences(defaults: defaults).bindings[.randomWallpaper], playPause)
         XCTAssertThrowsError(try preferences.set(playPause, for: .nextWallpaper), "it shares the one-action-per-combination rule")
     }
+
+    func testNewDesktopAndPresentationHotKeysHaveStableIDsAndLayoutBindingsStayBackwardCompatible() throws {
+        XCTAssertEqual(HotKeyAction.toggleDesktopWidgets.command, .toggleDesktopWidgets)
+        XCTAssertEqual(HotKeyAction.toggleDesktopWidgets.identifier, 7)
+        XCTAssertEqual(HotKeyAction.toggleDesktopIcons.command, .toggleDesktopIcons)
+        XCTAssertEqual(HotKeyAction.toggleDesktopIcons.identifier, 8)
+        XCTAssertEqual(HotKeyAction.togglePresentationMode.command, .togglePresentationMode)
+        XCTAssertEqual(HotKeyAction.togglePresentationMode.identifier, 9)
+
+        let preferences = HotKeyPreferences(defaults: defaults)
+        let presentationKey = HotKey(keyCode: 35, modifiers: 6400, label: "⌃⌥⌘P")
+        let layoutKey = HotKey(keyCode: 37, modifiers: 6400, label: "⌃⌥⌘L")
+        try preferences.set(presentationKey, for: .togglePresentationMode)
+        try preferences.set(layoutKey, forLayout: "desk-1", layoutTitles: ["desk-1": "Desk"])
+
+        // Action and layout bindings share the one-shortcut-per-combination conflict rule.
+        XCTAssertThrowsError(try preferences.set(layoutKey, for: .toggleDesktopWidgets, layoutTitles: ["desk-1": "Desk"]))
+        XCTAssertThrowsError(try preferences.set(presentationKey, forLayout: "desk-2"))
+        XCTAssertThrowsError(try preferences.set(layoutKey, forLayout: "desk-2", layoutTitles: ["desk-1": "Desk"]))
+
+        // Action bindings stay isolated in `bindingsKey` (so backups remain valid); layout bindings persist separately.
+        let rawActions = try JSONDecoder().decode([String: HotKey].self, from: try XCTUnwrap(defaults.data(forKey: HotKeyPreferences.bindingsKey)))
+        XCTAssertEqual(Set(rawActions.keys), ["togglePresentationMode"])
+        let reloaded = HotKeyPreferences(defaults: defaults)
+        XCTAssertEqual(reloaded.bindings[.togglePresentationMode], presentationKey)
+        XCTAssertEqual(reloaded.layoutBindings["desk-1"], layoutKey)
+
+        reloaded.removeLayoutBinding("desk-1")
+        XCTAssertNil(HotKeyPreferences(defaults: defaults).layoutBindings["desk-1"])
+    }
 }

@@ -131,44 +131,76 @@ private struct DisplaysLayoutRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(verbatim: L("Delete layout")))
       } else {
-        DisplaysRowLayout {
-          VStack(alignment: .leading, spacing: 2) {
-            Text(verbatim: layout.name)
-              .font(.system(size: 13, weight: .semibold))
-              .lineLimit(1)
-            ForEach(layout.assignments.indices, id: \.self) { index in
-              let assignment = layout.assignments[index]
-              Text(verbatim: L("\(assignment.displayTitle): \(assignment.wallpaperTitle)"))
-                .font(.system(size: 11.5))
-                .foregroundStyle(theme.surface.muted.color)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            }
-            if let reason = layout.unavailableReason {
-              Text(verbatim: reason)
-                .font(.system(size: 11.5))
-                .foregroundStyle(theme.surface.warning.color)
-            }
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-          HStack(spacing: 8) {
-            Button("Apply") {
-              controller.launch(PanelActionCoordinator.key("displayLayoutApply", id: layout.id)) {
-                await model.applyLayout(layout.id)
+        VStack(alignment: .leading, spacing: 6) {
+          DisplaysRowLayout {
+            VStack(alignment: .leading, spacing: 2) {
+              HStack(spacing: 6) {
+                Text(verbatim: layout.name)
+                  .font(.system(size: 13, weight: .semibold))
+                  .lineLimit(1)
+                if layout.autoApplyOnConnect {
+                  Text("Auto-apply")
+                    .font(.panel(.badge))
+                    .foregroundStyle(theme.accent.accent.color)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(theme.surface.well.color, in: Capsule())
+                    .overlay {
+                      Capsule().strokeBorder(theme.surface.divider.color, lineWidth: 0.5)
+                    }
+                    .lineLimit(1)
+                }
+              }
+              ForEach(layout.assignments.indices, id: \.self) { index in
+                let assignment = layout.assignments[index]
+                Text(verbatim: L("\(assignment.displayTitle): \(assignment.wallpaperTitle)"))
+                  .font(.system(size: 11.5))
+                  .foregroundStyle(theme.surface.muted.color)
+                  .lineLimit(1)
+                  .truncationMode(.middle)
+              }
+              if let reason = layout.unavailableReason {
+                Text(verbatim: reason)
+                  .font(.system(size: 11.5))
+                  .foregroundStyle(theme.surface.warning.color)
               }
             }
-            .accessibilityLabel(Text(verbatim: L("Apply layout “\(layout.name)”")))
-            .focused(focus, equals: .apply(layout.id))
-            .disabled(locked || layout.unavailableReason != nil)
-            Button("Rename…") { model.beginRenaming(layout) }
-              .accessibilityLabel(Text(verbatim: L("Rename layout “\(layout.name)”")))
-              .focused(focus, equals: .rename(layout.id))
-              .disabled(locked)
-            Button("Delete…") { model.askToDelete(layout.id) }
-              .accessibilityLabel(Text(verbatim: L("Delete layout “\(layout.name)”")))
-              .focused(focus, equals: .delete(layout.id))
-              .disabled(locked)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+              Button("Apply") {
+                controller.launch(PanelActionCoordinator.key("displayLayoutApply", id: layout.id)) {
+                  await model.applyLayout(layout.id)
+                }
+              }
+              .accessibilityLabel(Text(verbatim: L("Apply layout “\(layout.name)”")))
+              .focused(focus, equals: .apply(layout.id))
+              .disabled(locked || layout.unavailableReason != nil)
+              Button("Rename…") { model.beginRenaming(layout) }
+                .accessibilityLabel(Text(verbatim: L("Rename layout “\(layout.name)”")))
+                .focused(focus, equals: .rename(layout.id))
+                .disabled(locked)
+              Button("Delete…") { model.askToDelete(layout.id) }
+                .accessibilityLabel(Text(verbatim: L("Delete layout “\(layout.name)”")))
+                .focused(focus, equals: .delete(layout.id))
+                .disabled(locked)
+            }
           }
+          Toggle(
+            "Apply automatically when connected",
+            isOn: Binding(
+              get: { layout.autoApplyOnConnect },
+              set: { enabled in
+                controller.launch(PanelActionCoordinator.key("displayLayoutAutoApply", id: layout.id)) {
+                  await model.setLayoutAutoApply(layout.id, enabled: enabled)
+                }
+              })
+          )
+          .toggleStyle(.switch)
+          .font(.panel(.footnote))
+          .foregroundStyle(theme.surface.muted.color)
+          .disabled(locked)
+          .accessibilityLabel(Text(verbatim: L("Apply layout “\(layout.name)” automatically when connected")))
+          .accessibilityIdentifier("displays.layout-auto-apply.\(layout.id)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

@@ -242,6 +242,16 @@ final class DisplaysSettingsModel {
     }
   }
 
+  func setLayoutAutoApply(_ id: String, enabled: Bool) async {
+    await performLayoutAction {
+      try await controller.setDisplayLayoutAutoApply(id, enabled: enabled)
+    } onSuccess: {
+      enabled
+        ? L("Layout will apply automatically when these displays connect.")
+        : L("Automatic layout apply turned off.")
+    }
+  }
+
   func copyWallpaper(from source: String, to target: String) async {
     await performLayoutAction(from: source) {
       try await controller.copyWallpaper(from: source, to: target)

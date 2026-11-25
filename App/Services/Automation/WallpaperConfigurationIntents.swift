@@ -1,5 +1,27 @@
 import AppIntents
 
+struct WallpaperCollectionEntity: AppEntity {
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Collection"
+    static let defaultQuery = WallpaperCollectionQuery()
+    let id: String
+    let name: String
+    var displayRepresentation: DisplayRepresentation { .init(title: "\(name)") }
+}
+
+struct WallpaperCollectionQuery: EntityStringQuery {
+    func entities(for identifiers: [String]) async throws -> [WallpaperCollectionEntity] {
+        let wanted = Set(identifiers)
+        return await all().filter { wanted.contains($0.id) }
+    }
+    func entities(matching string: String) async throws -> [WallpaperCollectionEntity] {
+        await all().filter { $0.name.localizedCaseInsensitiveContains(string) }
+    }
+    func suggestedEntities() async throws -> [WallpaperCollectionEntity] { await all() }
+    private func all() async -> [WallpaperCollectionEntity] {
+        await AppAutomation.shared.availableCollections().map { .init(id: $0.id, name: $0.name) }
+    }
+}
+
 struct WallpaperDisplayLayoutEntity: AppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Display layout"
     static let defaultQuery = WallpaperDisplayLayoutQuery()

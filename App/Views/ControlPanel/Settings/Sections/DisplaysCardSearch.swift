@@ -238,7 +238,9 @@ enum DisplaysSearchUnits {
   /// Everything a saved layout's row says, which a search finds it by.
   @MainActor
   static func text(of layout: DisplayLayoutsState.Layout) -> String {
-    ([layout.name] + layout.assignments.map { L("\($0.displayTitle): \($0.wallpaperTitle)") }
+    ([layout.name] + (layout.autoApplyOnConnect ? [L("Auto-apply")] : [])
+      + [L("Apply automatically when connected")]
+      + layout.assignments.map { L("\($0.displayTitle): \($0.wallpaperTitle)") }
       + [layout.unavailableReason].compactMap { $0 }).joined(separator: "\n")
   }
 

@@ -17,6 +17,8 @@ struct DisplayLayoutsState: Equatable, Sendable {
   struct Layout: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
+    /// Whether this layout applies automatically when its normalized display topology connects.
+    let autoApplyOnConnect: Bool
     /// Why the layout cannot be applied now (a display or a wallpaper is gone), or nil. An
     /// unavailable layout stays listed, with this reason and no Apply.
     let unavailableReason: String?
@@ -61,7 +63,8 @@ extension PanelController {
           unavailable = error.localizedDescription
         }
         return DisplayLayoutsState.Layout(
-          id: layout.id, name: layout.name, unavailableReason: unavailable,
+          id: layout.id, name: layout.name, autoApplyOnConnect: layout.autoApplyOnConnect,
+          unavailableReason: unavailable,
           assignments: layout.assignments.map { value in
             DisplayLayoutsState.Assignment(
               displayID: value.displayID,
@@ -100,7 +103,16 @@ extension PanelController {
 
   /// `displayLayoutDelete`. The wallpapers on the displays stay as they are.
   func deleteDisplayLayout(_ id: String) async throws {
-    try await run(.immediate) { try displayLayouts.delete(id) }
+    try await run(.immediate) {
+      try displayLayouts.delete(id)
+      hotKeys.removeLayoutBinding(id)
+    }
+  }
+
+  /// `displayLayoutAutoApply`: sets whether `id` applies automatically when its displays connect.
+  /// At most one layout per normalized display topology stays enabled.
+  func setDisplayLayoutAutoApply(_ id: String, enabled: Bool) async throws {
+    try await run(.immediate) { try displayLayouts.setAutoApplyOnConnect(enabled, for: id) }
   }
 
   /// `displayLayoutApply`: gives every display of the layout its wallpaper, or none of them. All the

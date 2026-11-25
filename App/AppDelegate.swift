@@ -76,6 +76,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var notchMask: NotchMaskController?
     /// Settings › Desktop Widgets: the clocks, dates and other widgets drawn on the desktop.
     private var desktopWidgets: DesktopWidgetController?
+    /// Temporarily hides desktop widgets via automation/Presentation Mode without editing individual widget settings.
+    private var desktopWidgetsHidden = false
+    /// Auto-applies a matching saved display layout when the connected display topology changes.
+    private var displayTopologyAutoApplier: DisplayTopologyLayoutAutoApplier?
+    /// Event-driven atomic writer for `status.json` read by Raycast, SketchyBar, and Stream Deck.
+    private var automationStatusWriter: AutomationStatusWriter?
+    /// One-click Presentation Mode controller (pauses, mutes, hides widgets, and optionally hides icons).
+    private var presentationMode: PresentationModeController?
+    private var favoritesStatusObserver: NSObjectProtocol?
+    private var displayLayoutsHotKeyObserver: NSObjectProtocol?
     /// Keeps the windows of a display that follows desktop Spaces on its current desktop only.
     private(set) var spacePinning: WallpaperSpacePinning?
     private var spaceParking: WallpaperSpaceParking?
@@ -493,6 +503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                         AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
                     }
                 }
+                self.publishAutomationStatus()
             }
             let preferences = PlaybackPreferences.shared
             // Pause on battery reads the source the power source monitor last reported (the
@@ -519,6 +530,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self?.presentationPolicy?.evaluate()
                     self?.desktopWallpaperSync?.refreshesPeriodically = preferences.refreshesDesktopPicturePeriodically
                     self?.applyDesktopPicturePreference()
+                    self?.publishAutomationStatus()
                 }
             }
             appLanguageObserver = NotificationCenter.default.addObserver(
@@ -797,9 +809,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             powerSourceResampler?.start()
             let playlists = startPlaylistScheduler(store: store)
             startAutomaticWallpapers(store: store, playlists: playlists, spaces: spaces, pressure: pressure)
+            let statusWriter = AutomationStatusWriter(fileURL: ClientPaths.automationStatusURL)
+            automationStatusWriter = statusWriter
+            let topologyAutoApplier = DisplayTopologyLayoutAutoApplier(
+                snapshot: { [weak store] in
+                    store?.displayTransferSnapshot() ?? .init(displays: [], wallpapers: [], reliable: false)
+                },
+                matchingLayout: { topology in
+                    WallpaperDisplayLayoutStore.shared.autoApplyLayout(for: topology)
+                },
+                applyLayout: { [weak store] layout in
+                    guard let store else { return }
+                    try await store.applyDisplayTransferAsync(.layout(layout.assignments))
+                })
+            displayTopologyAutoApplier = topologyAutoApplier
+            let presentation = PresentationModeController(
+                isPaused: { [weak store] in store?.appSnapshot.playbackState == .paused },
+                setPaused: { [weak self] paused in
+                    try await self?.performAutomation(paused ? .pause : .play)
+                },
+                isMuted: { PlaybackPreferences.shared.wallpapersMuted },
+                setMuted: { PlaybackPreferences.shared.wallpapersMuted = $0 },
+                areDesktopWidgetsHidden: { [weak self] in self?.desktopWidgetsHidden ?? false },
+                setDesktopWidgetsHidden: { [weak self] hidden in self?.setDesktopWidgetsHidden(hidden) })
+            presentation.onChange = { [weak self] in
+                self?.publishAutomationStatus()
+                self?.rebuildMenu()
+            }
+            presentationMode = presentation
+            favoritesStatusObserver = NotificationCenter.default.addObserver(
+                forName: PanelPreferences.favoritesDidChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.publishAutomationStatus() }
+            }
+            displayLayoutsHotKeyObserver = NotificationCenter.default.addObserver(
+                forName: WallpaperDisplayLayoutStore.didChangeNotification, object: WallpaperDisplayLayoutStore.shared, queue: .main
+            ) { _ in
+                MainActor.assumeIsolated {
+                    let validIDs = Set(WallpaperDisplayLayoutStore.shared.layouts.map(\.id))
+                    for id in Array(HotKeyPreferences.shared.layoutBindings.keys) where !validIDs.contains(id) {
+                        HotKeyPreferences.shared.removeLayoutBinding(id)
+                    }
+                }
+            }
             // The Shortcuts app lists these; commands wait for the handler set after bootstrap.
             AppAutomation.shared.wallpapers = {
                 store.librarySnapshot.wallpapers.filter(\.supported).map { (id: $0.id, title: $0.title) }
+            }
+            AppAutomation.shared.wallpaperCatalog = {
+                let favorites = PanelPreferences.favorites()
+                let collections = WallpaperCollectionStore.shared.collections
+                return store.librarySnapshot.wallpapers.filter(\.supported).map { wallpaper in
+                    let memberships = collections.filter { $0.wallpaperIDs.contains(wallpaper.id) }
+                    return AppAutomation.WallpaperInfo(
+                        id: wallpaper.id,
+                        title: wallpaper.title,
+                        kind: AppAutomation.WallpaperKind(wallpaper.kind),
+                        isFavorite: favorites.contains(wallpaper.id),
+                        collectionIDs: memberships.map(\.id),
+                        collectionNames: memberships.map(\.name))
+                }
+            }
+            AppAutomation.shared.collections = {
+                WallpaperCollectionStore.shared.collections.map { (id: $0.id, name: $0.name) }
+            }
+            AppAutomation.shared.currentStatus = { [weak self] requestedDisplay in
+                guard let self else { throw AutomationError.notReady }
+                return try self.currentAutomationWallpaperStatus(display: requestedDisplay, store: store)
             }
             AppAutomation.shared.displays = {
                 let titles = DisplayTitleResolver.system.resolved()
@@ -818,6 +894,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             let hotKeys = GlobalHotKeys(preferences: .shared)
             hotKeys.onPress = { [weak self] action in self?.runAutomation(action.command) }
+            hotKeys.onPressLayout = { [weak self] layoutID in
+                self?.runAutomation(.applyDisplayLayout(layoutID: layoutID))
+            }
             globalHotKeys = hotKeys
             hotKeys.start()
             Task { await WallpaperFocusFilter.refreshState() }
@@ -1422,7 +1501,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func tearDownServices(restoringDesktop: Bool) {
         libraryDrive?.stop()
         globalHotKeys?.stop()
+        presentationMode?.restoreMuteForTermination()
+        presentationMode = nil
+        displayTopologyAutoApplier = nil
+        automationStatusWriter = nil
+        if let favoritesStatusObserver {
+            NotificationCenter.default.removeObserver(favoritesStatusObserver)
+            self.favoritesStatusObserver = nil
+        }
+        if let displayLayoutsHotKeyObserver {
+            NotificationCenter.default.removeObserver(displayLayoutsHotKeyObserver)
+            self.displayLayoutsHotKeyObserver = nil
+        }
         AppAutomation.shared.handler = nil
+        AppAutomation.shared.wallpapers = nil
+        AppAutomation.shared.wallpaperCatalog = nil
+        AppAutomation.shared.collections = nil
+        AppAutomation.shared.currentStatus = nil
         AppAutomation.shared.displays = nil
         AppAutomation.shared.playlistPlans = nil
         AppAutomation.shared.displayLayouts = nil
@@ -2000,11 +2095,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 guard let id = store.nextWallpaperID(displayId: displayId) else { return }
                 try await store.activateWallpaperAsync(id: id, displayId: displayId, origin: .user)
             }
-        case .random(let display, let pool):
+        case .random(let display, let pool, let collectionQuery):
+            let displayId = try automationDisplay(display, store: store)
+            let resolvedCollection: WallpaperCollection?
+            if let collectionQuery {
+                guard let found = WallpaperCollectionStore.shared.collection(matching: collectionQuery) else {
+                    throw AutomationError(message: String(localized: "No collection named “\(collectionQuery)” was found."))
+                }
+                resolvedCollection = found
+            } else {
+                resolvedCollection = nil
+            }
             // The pick is made when the display's turn comes; see `activateRandomWallpaperAsync`.
             try await store.activateRandomWallpaperAsync(
-                displayId: try automationDisplay(display, store: store), pool: pool,
-                favorites: PanelPreferences.favorites(), playlists: .shared)
+                displayId: displayId, pool: pool,
+                favorites: PanelPreferences.favorites(), playlists: .shared,
+                collectionID: resolvedCollection?.id,
+                collectionWallpaperIDs: resolvedCollection?.wallpaperIDs)
         case .apply(let id, let display):
             let displayId = try automationDisplay(display, store: store)
             guard store.librarySnapshot.wallpapers.contains(where: { $0.id == id }) else {
@@ -2044,6 +2151,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .applyDisplayLayout(let id):
             let layout = try WallpaperDisplayLayoutStore.shared.layout(id)
             try await store.applyDisplayTransferAsync(.layout(layout.assignments))
+        case .toggleFavorite(let wallpaperID, let display):
+            let targetID: String
+            if let wallpaperID {
+                guard store.librarySnapshot.wallpapers.contains(where: { $0.id == wallpaperID }) else {
+                    throw AutomationError(message: String(localized: "No installed wallpaper has the id “\(wallpaperID)”."))
+                }
+                targetID = wallpaperID
+            } else {
+                let displayId = try automationDisplay(display, store: store)
+                guard let shown = store.shownWallpaperID(on: displayId) else {
+                    throw AutomationError(message: String(localized: "This display does not have a wallpaper right now."))
+                }
+                targetID = shown
+            }
+            try PanelPreferences.toggleFavorite(targetID, in: ClientPreferences.defaults)
+            publishAutomationStatus()
+        case .setVolume(let volume, let displayID):
+            guard volume.isFinite, (0...1).contains(volume) else {
+                throw AutomationError(message: String(localized: "Volume must be between 0% and 100%."))
+            }
+            let resolvedDisplay = try automationDisplay(displayID, store: store)
+            try await store.commands.run(slot: BridgeStore.activationSlot(displayId: resolvedDisplay)) {
+                _ = try self.automationDisplay(resolvedDisplay, store: store)
+                guard let wallpaperID = store.shownWallpaperID(on: resolvedDisplay) else {
+                    throw AutomationError(message: String(localized: "This display does not have a wallpaper right now."))
+                }
+                try await store.setDisplayVolumeAsync(wallpaperId: wallpaperID, displayId: resolvedDisplay, volume: volume)
+            }
+        case .toggleDesktopWidgets:
+            setDesktopWidgetsHidden(!desktopWidgetsHidden)
+            publishAutomationStatus()
+        case .toggleDesktopIcons:
+            let icons = FinderDesktopIcons()
+            try icons.setShown(!icons.areShown)
+        case .togglePresentationMode:
+            guard let presentationMode else { throw AutomationError.notReady }
+            try await presentationMode.toggle()
         case .open(let page):
             switch page {
             case .discover?:
@@ -2074,6 +2218,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             throw AutomationError(message: String(localized: "No enabled display showing its own wallpaper has the id “\(id)”."))
         }
         return id
+    }
+
+    private func setDesktopWidgetsHidden(_ hidden: Bool) {
+        guard desktopWidgetsHidden != hidden else { return }
+        desktopWidgetsHidden = hidden
+        if hidden {
+            desktopWidgets?.stop()
+        } else {
+            desktopWidgets?.start()
+        }
+        AppLog.info("desktop widgets \(hidden ? "hidden" : "shown")")
+    }
+
+    private func currentAutomationWallpaperStatus(
+        display requested: String?,
+        store: BridgeStore
+    ) throws -> AppAutomation.CurrentWallpaperStatus {
+        let available = Self.availableAutomationDisplays(store: store)
+        let resolvedID: String
+        if let requested {
+            resolvedID = try automationDisplay(requested, store: store)
+        } else if available.contains(where: { $0.displayId == controlPanelNavigation.targetDisplayID }) {
+            resolvedID = controlPanelNavigation.targetDisplayID
+        } else if let primary = available.first(where: { $0.displayId == "primary" }) ?? available.first {
+            resolvedID = primary.displayId
+        } else {
+            resolvedID = try automationDisplay(nil, store: store)
+        }
+        let titles = DisplayTitleResolver.system.resolved()
+        let displayRow = available.first { $0.displayId == resolvedID }
+        let displayTitle = displayRow.map { titles.title($0.title, displayId: $0.displayId) } ?? resolvedID
+        let wallpaperID = store.shownWallpaperID(on: resolvedID)
+        let entry = wallpaperID.flatMap { id in store.librarySnapshot.wallpapers.first { $0.id == id } }
+        let favorites = PanelPreferences.favorites()
+        return AppAutomation.CurrentWallpaperStatus(
+            displayID: resolvedID,
+            displayTitle: displayTitle,
+            wallpaperID: wallpaperID,
+            wallpaperTitle: entry?.title ?? wallpaperID,
+            wallpaperKind: entry.map { AppAutomation.WallpaperKind($0.kind) },
+            isFavorite: wallpaperID.map(favorites.contains) ?? false,
+            isPlaying: store.appSnapshot.playbackState == .playing,
+            isMuted: PlaybackPreferences.shared.wallpapersMuted,
+            isPresentationMode: presentationMode?.isActive ?? false)
+    }
+
+    /// Event-driven update of `status.json`; unchanged snapshots do not touch disk.
+    private func publishAutomationStatus() {
+        guard let store, let writer = automationStatusWriter, !shutdownInProgress, !shutdownComplete else { return }
+        let titles = DisplayTitleResolver.system.resolved()
+        let favorites = PanelPreferences.favorites()
+        let libraryByID = Dictionary(
+            store.librarySnapshot.wallpapers.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
+        let displays = Self.availableAutomationDisplays(store: store).map { row -> AutomationStatusWriter.DisplayStatus in
+            let wallpaperID = store.shownWallpaperID(on: row.displayId)
+            let entry = wallpaperID.flatMap { libraryByID[$0] }
+            return AutomationStatusWriter.DisplayStatus(
+                displayID: row.displayId,
+                displayTitle: titles.title(row.title, displayId: row.displayId),
+                wallpaperID: wallpaperID,
+                wallpaperTitle: entry?.title ?? wallpaperID,
+                wallpaperKind: entry.map { AppAutomation.WallpaperKind($0.kind).rawValue },
+                isFavorite: wallpaperID.map(favorites.contains) ?? false)
+        }
+        let state = AutomationStatusWriter.State(
+            isPlaying: store.appSnapshot.playbackState == .playing,
+            isPaused: store.appSnapshot.playbackState == .paused,
+            isMuted: PlaybackPreferences.shared.wallpapersMuted,
+            isPresentationMode: presentationMode?.isActive ?? false,
+            desktopWidgetsHidden: desktopWidgetsHidden,
+            displays: displays)
+        writer.update(state)
     }
 
     /// The library's drive is gone for good: from the next launch the library is WallpaperMachine's
@@ -2172,6 +2389,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 lastError = nil
                 playbackSnapshotCurrent = true
                 AppLog.info("startup: bootstrapAsync completed successfully")
+                displayTopologyAutoApplier?.seedTopology()
+                publishAutomationStatus()
                 checkWorkshopUpdatesIfDue()
                 // Links, keyboard shortcuts and the Shortcuts app act from here on.
                 AppAutomation.shared.handler = { [weak self] command in
@@ -2219,6 +2438,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             lastError = nil
             playbackSnapshotCurrent = true
             accepted = true
+            await displayTopologyAutoApplier?.handleTopologySettled()
+            publishAutomationStatus()
         } catch {
             lastError = error
             playbackSnapshotCurrent = false

@@ -99,6 +99,9 @@ final class BridgeStore {
     let editorState = WallpaperEditorState()
     /// The user's commands, from the control panel and the menu bar, run through here.
     let commands = UserCommandQueue()
+    /// Per-(display, collection, pool) random rounds kept apart from `PlaylistStore`'s global
+    /// rounds so collection random picks never repeat prematurely or disturb `.all`/`.favorites`.
+    @ObservationIgnored private var collectionRandomRounds: [String: [String]] = [:]
     /// A wallpaper switch keeps the picture it replaces on screen until the successor has drawn
     /// ([WallpaperSwitchHold]). The ids are the live CoreGraphics ids of the displays the switch
     /// changes, mirrors included. `willSwitch` runs before the apply and may take a moment (it
@@ -1511,23 +1514,46 @@ final class BridgeStore {
     /// `playlists` remembers the pick only once it has been shown, so a pick that failed to
     /// apply takes nothing out of the round. Throws when the pool holds no other wallpaper.
     func activateRandomWallpaperAsync(
-        displayId: String, pool: AutomationCommand.RandomPool, favorites: Set<String>, playlists: PlaylistStore,
-        excluded: Set<String>? = nil
+        displayId: String,
+        pool: AutomationCommand.RandomPool,
+        favorites: Set<String>,
+        playlists: PlaylistStore,
+        excluded: Set<String>? = nil,
+        collectionID: String? = nil,
+        collectionWallpaperIDs: [String]? = nil
     ) async throws {
         try await commands.run(slot: Self.activationSlot(displayId: displayId)) {
             try validateActivationTarget(displayId)
             let excludedIDs = excluded ?? WallpaperMetadataStore.shared.excludedIDs
+            let memberSet = collectionWallpaperIDs.map(Set.init)
             let candidates = pool.candidates(
                 library: librarySnapshot.wallpapers.filter(\.supported).map(\.id),
                 favorites: favorites, held: Set(heldWallpaperIDs),
-                excluded: excludedIDs)
-            guard let id = playlists.randomPick(
-                on: displayId, pool: pool, from: candidates, after: shownWallpaperID(on: displayId))
-            else {
-                throw WallpaperActionError(message: String(localized: "There is no other wallpaper to choose from."))
+                excluded: excludedIDs, collectionIDs: memberSet)
+            let current = shownWallpaperID(on: displayId)
+            let id: String?
+            if let collectionID {
+                let roundKey = "\(displayId)|\(collectionID)|\(pool.rawValue)"
+                var random = SystemRandomNumberGenerator()
+                id = PlaylistPlanner.next(
+                    after: current, in: candidates, order: .shuffle,
+                    recent: collectionRandomRounds[roundKey] ?? [], using: &random)
+                guard let picked = id else {
+                    throw WallpaperActionError(message: String(localized: "There is no other wallpaper to choose from."))
+                }
+                try await activateWallpaperAsync(id: picked, displayId: displayId, origin: .user)
+                let updatedRound = PlaylistPlanner.remember(
+                    picked, in: collectionRandomRounds[roundKey] ?? [], candidates: candidates)
+                collectionRandomRounds[roundKey] = updatedRound.isEmpty ? nil : updatedRound
+            } else {
+                guard let picked = playlists.randomPick(
+                    on: displayId, pool: pool, from: candidates, after: current)
+                else {
+                    throw WallpaperActionError(message: String(localized: "There is no other wallpaper to choose from."))
+                }
+                try await activateWallpaperAsync(id: picked, displayId: displayId, origin: .user)
+                playlists.recordRandomPick(picked, on: displayId, pool: pool, candidates: candidates)
             }
-            try await activateWallpaperAsync(id: id, displayId: displayId, origin: .user)
-            playlists.recordRandomPick(id, on: displayId, pool: pool, candidates: candidates)
         }
     }
 

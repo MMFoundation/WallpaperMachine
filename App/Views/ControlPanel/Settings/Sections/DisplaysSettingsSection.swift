@@ -240,7 +240,7 @@ struct DisplaysSettingsSection: View {
     note:
       "Save wallpaper choices for enabled independent displays. Empty and mirrored displays are left out. Playlists, automatic rules, properties and scaling are not saved in a layout.",
     keywords: [
-      "Layout name", "Apply", "Rename…", "Delete…",
+      "Layout name", "Apply", "Rename…", "Delete…", "Apply automatically when connected", "Auto-apply",
       "No saved layouts yet. Arrange your wallpapers, then save the layout.",
       "The limit of \(64) layouts is reached. Delete one before saving another.",
     ])

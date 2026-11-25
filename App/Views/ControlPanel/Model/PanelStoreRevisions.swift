@@ -155,6 +155,7 @@ final class PanelStoreRevisions {
     isStarted = true
     observe(PlaybackPreferences.didChangeNotification, playbackStore, .playback)
     observe(HotKeyPreferences.didChangeNotification, hotKeyStore, .hotKeys)
+    observe(PresentationModeController.didChangeNotification, nil, .hotKeys)
     observe(PlaylistStore.didChangeNotification, playlistStore, .playlists)
     // A change waiting for a video changes what Next change says, and only the panel follows it.
     observe(PlaylistStore.clipWaitsDidChangeNotification, playlistStore, .playlists)

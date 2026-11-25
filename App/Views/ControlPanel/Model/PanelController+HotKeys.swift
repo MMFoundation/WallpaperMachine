@@ -16,6 +16,16 @@ struct HotKeyRow: Identifiable, Equatable, Sendable {
   var id: String { action.rawValue }
 }
 
+/// A global keyboard shortcut bound to a saved display layout, as Keyboard shortcuts lists it.
+struct DisplayLayoutHotKeyRow: Identifiable, Equatable, Sendable {
+  let layoutID: String
+  let name: String
+  let shortcut: String?
+  let error: String?
+
+  var id: String { layoutID }
+}
+
 /// What a key press means while a shortcut row is recording.
 enum HotKeyRecording: Equatable, Sendable {
   /// A modifier key on its own: keep waiting for the key it modifies.
@@ -53,6 +63,26 @@ extension PanelController {
     }
   }
 
+  /// One row per saved display layout, in the order Display layouts lists them, with its recorded shortcut.
+  var displayLayoutHotKeyRows: [DisplayLayoutHotKeyRow] {
+    _ = revisions.hotKeys
+    _ = revisions.displayLayouts
+    return displayLayouts.layouts.map { layout in
+      DisplayLayoutHotKeyRow(
+        layoutID: layout.id,
+        name: layout.name,
+        shortcut: hotKeys.layoutBindings[layout.id]?.label,
+        error: hotKeys.layoutFailures[layout.id])
+    }
+  }
+
+  /// Whether Presentation Mode also hides Finder's desktop icons (which restarts Finder).
+  /// Strictly off by default.
+  var presentationHidesDesktopIcons: Bool {
+    _ = revisions.hotKeys
+    return PresentationModeController.hidesDesktopIcons(in: defaults)
+  }
+
   /// What `action` does, in the panel's language.
   private func title(of action: HotKeyAction) -> String {
     switch action {
@@ -62,6 +92,9 @@ extension PanelController {
     case .nextWallpaper: L("Next wallpaper")
     case .randomWallpaper: L("Random wallpaper")
     case .openControlPanel: L("Open the control panel")
+    case .toggleDesktopWidgets: L("Toggle desktop widgets")
+    case .toggleDesktopIcons: L("Toggle desktop icons")
+    case .togglePresentationMode: L("Presentation mode")
     }
   }
 
@@ -77,11 +110,34 @@ extension PanelController {
   /// changed by a refusal. macOS may still refuse the registration later, which the row then shows.
   func setHotKey(_ action: HotKeyAction, keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) async throws {
     let hotKey = try GlobalHotKeys.hotKey(keyCode: keyCode, modifierFlags: modifierFlags)
-    try await run(.immediate) { try hotKeys.set(hotKey, for: action) }
+    let layoutTitles = Dictionary(uniqueKeysWithValues: displayLayouts.layouts.map { ($0.id, $0.name) })
+    try await run(.immediate) { try hotKeys.set(hotKey, for: action, layoutTitles: layoutTitles) }
   }
 
   /// `hotkeyClear`: the action has no shortcut again.
   func clearHotKey(_ action: HotKeyAction) async throws {
     try await run(.immediate) { try hotKeys.set(nil, for: action) }
+  }
+
+  /// `layoutHotkeySet`: records a global keyboard shortcut for a saved display layout.
+  func setLayoutHotKey(_ layoutID: String, keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) async throws {
+    _ = try displayLayouts.layout(layoutID)
+    let hotKey = try GlobalHotKeys.hotKey(keyCode: keyCode, modifierFlags: modifierFlags)
+    let layoutTitles = Dictionary(uniqueKeysWithValues: displayLayouts.layouts.map { ($0.id, $0.name) })
+    try await run(.immediate) { try hotKeys.set(hotKey, forLayout: layoutID, layoutTitles: layoutTitles) }
+  }
+
+  /// `layoutHotkeyClear`: clears the global keyboard shortcut for a saved display layout.
+  func clearLayoutHotKey(_ layoutID: String) async throws {
+    try await run(.immediate) { try hotKeys.set(nil, forLayout: layoutID) }
+  }
+
+  /// `presentationHideIcons`: opt-in toggle controlling whether Presentation Mode also hides
+  /// Finder's desktop icons (which restarts Finder).
+  func setPresentationHidesDesktopIcons(_ hide: Bool) async throws {
+    try await run(.immediate) {
+      PresentationModeController.setHidesDesktopIcons(hide, in: defaults)
+      revisions.bump(.hotKeys)
+    }
   }
 }

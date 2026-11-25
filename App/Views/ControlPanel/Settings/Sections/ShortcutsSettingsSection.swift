@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// Settings › Keyboard shortcuts: the six shortcuts that work in any app, recorded by pressing the
-/// keys, and what the Shortcuts app and links can do.
+/// Settings › Keyboard shortcuts: the shortcuts that work in any app, recorded by pressing the
+/// keys, Presentation Mode options, display layout shortcuts, and what the Shortcuts app and links can do.
 struct ShortcutsSettingsSection: View {
   // The card has no title of its own: the page's header already says "Keyboard shortcuts". The
   // words stay searchable as a keyword of every row, which a group title used to give them.
   private static let hotkeys = SettingsItem.Group("hotkeys")
+  private static let presentation = SettingsItem.Group("presentation", title: "Presentation mode")
+  private static let layoutHotkeys = SettingsItem.Group("layout-hotkeys", title: "Display layout shortcuts")
   private static let automation = SettingsItem.Group("automation")
 
   private static let recordWords: [LocalizedStringResource] = [
@@ -30,17 +32,37 @@ struct ShortcutsSettingsSection: View {
   static let openControlPanel = SettingsItem(
     id: "shortcuts.open-control-panel", section: .shortcuts, group: hotkeys,
     title: "Open the control panel", keywords: recordWords)
+  static let toggleDesktopWidgets = SettingsItem(
+    id: "shortcuts.toggle-desktop-widgets", section: .shortcuts, group: hotkeys,
+    title: "Toggle desktop widgets", keywords: recordWords)
+  static let toggleDesktopIcons = SettingsItem(
+    id: "shortcuts.toggle-desktop-icons", section: .shortcuts, group: hotkeys,
+    title: "Toggle desktop icons", keywords: recordWords)
+  static let togglePresentationMode = SettingsItem(
+    id: "shortcuts.toggle-presentation-mode", section: .shortcuts, group: hotkeys,
+    title: "Presentation mode", keywords: recordWords)
   static let footnote = SettingsItem(
     id: "shortcuts.footnote", section: .shortcuts, group: hotkeys, title: "Keyboard shortcuts",
     note:
       "They work whichever app is in front. Hold ⌘, ⌥ or ⌃ with the key; F13 to F20 work alone. No permission is needed."
   )
+  static let presentationHideIcons = SettingsItem(
+    id: "shortcuts.presentation-hide-icons", section: .shortcuts, group: presentation,
+    title: "Also hide desktop icons (restarts Finder)",
+    note:
+      "By default, presentation mode pauses and mutes wallpapers and hides desktop widgets. Enabling this option also hides Finder’s desktop icons and restarts Finder when entering or leaving presentation mode.")
+  static let layoutShortcutsItem = SettingsItem(
+    id: "shortcuts.display-layout-shortcuts", section: .shortcuts, group: layoutHotkeys,
+    title: "Display layout shortcuts",
+    note: "Apply a saved display layout with a global keyboard shortcut.",
+    keywords: recordWords)
   static let links = SettingsItem(
     id: "shortcuts.links", section: .shortcuts, group: automation, title: "Shortcuts app and links")
 
   static let items = [
     togglePlayback, toggleMute, previousWallpaper, nextWallpaper, randomWallpaper, openControlPanel,
-    footnote, links,
+    toggleDesktopWidgets, toggleDesktopIcons, togglePresentationMode,
+    footnote, presentationHideIcons, layoutShortcutsItem, links,
   ]
 
   /// The item of a shortcut's row.
@@ -52,20 +74,50 @@ struct ShortcutsSettingsSection: View {
     case .nextWallpaper: nextWallpaper
     case .randomWallpaper: randomWallpaper
     case .openControlPanel: openControlPanel
+    case .toggleDesktopWidgets: toggleDesktopWidgets
+    case .toggleDesktopIcons: toggleDesktopIcons
+    case .togglePresentationMode: togglePresentationMode
     }
   }
 
   @Environment(PanelController.self) private var controller
   @State private var recorder = ShortcutsRecorderModel()
   @FocusState private var focus: HotKeyAction?
+  @FocusState private var layoutFocus: String?
 
   var body: some View {
+    let layoutRows = controller.displayLayoutHotKeyRows
     SettingsPage(.shortcuts) {
       SettingsGroup(Self.hotkeys, in: .shortcuts) {
         ForEach(controller.hotKeyRows) { row in
           ShortcutsRow(row: row, recorder: recorder, focus: $focus)
         }
         DisplaysItemNote(item: Self.footnote)
+      }
+      SettingsGroup(Self.presentation, in: .shortcuts) {
+        DisplaysRow(item: Self.presentationHideIcons) {
+          Toggle(
+            noLabel,
+            isOn: Binding(
+              get: { controller.presentationHidesDesktopIcons },
+              set: { enabled in
+                controller.launch(PanelActionCoordinator.key("presentationHideIcons")) {
+                  try await controller.setPresentationHidesDesktopIcons(enabled)
+                }
+              })
+          )
+          .labelsHidden()
+          .toggleStyle(.switch)
+          .accessibilityIdentifier("shortcuts.presentation-hide-icons.toggle")
+        }
+      }
+      if !layoutRows.isEmpty {
+        SettingsGroup(Self.layoutHotkeys, in: .shortcuts) {
+          DisplaysItemNote(item: Self.layoutShortcutsItem)
+          ForEach(layoutRows) { row in
+            ShortcutsLayoutRow(row: row, recorder: recorder, focus: $layoutFocus)
+          }
+        }
       }
       SettingsGroup(Self.automation, in: .shortcuts) {
         SettingsDisclosure(Self.links) { ShortcutsLinksContent() }
@@ -74,7 +126,7 @@ struct ShortcutsSettingsSection: View {
     // Row buttons share one size across Settings.
     .controlSize(.small)
     // The prompt is a status the page reads out as the row starts recording.
-    .announcesChanges(of: recorder.recording == nil ? nil : L("Press the new shortcut…"))
+    .announcesChanges(of: recorder.isRecordingAny ? L("Press the new shortcut…") : nil)
     .onAppear { recorder.controller = controller }
     // A recording belongs to the page: leaving it, or the window losing focus, ends it.
     .onDisappear { recorder.end() }
@@ -82,6 +134,11 @@ struct ShortcutsSettingsSection: View {
       guard let action else { return }
       focus = action
       recorder.consumeFocus()
+    }
+    .onChange(of: recorder.focusLayoutID) { _, layoutID in
+      guard let layoutID else { return }
+      layoutFocus = layoutID
+      recorder.consumeLayoutFocus()
     }
   }
 }
@@ -176,6 +233,89 @@ private struct ShortcutsRow: View {
   }
 }
 
+/// One saved display layout shortcut row, sharing the exact column alignment of `ShortcutsRow`.
+private struct ShortcutsLayoutRow: View {
+  let row: DisplayLayoutHotKeyRow
+  let recorder: ShortcutsRecorderModel
+  var focus: FocusState<String?>.Binding
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  private static let keysWidth: CGFloat = 76
+  private static let buttonTitleWidth: CGFloat = 52
+
+  var body: some View {
+    let isRecording = recorder.recordingLayoutID == row.layoutID
+    DisplaysRow(
+      item: ShortcutsSettingsSection.layoutShortcutsItem, title: row.name, note: "",
+      alert: row.error, identity: row.layoutID, labelsControl: false
+    ) {
+      HStack(spacing: 8) {
+        if isRecording {
+          Text("Press the new shortcut…")
+            .font(.panel(.callout))
+            .foregroundStyle(theme.accent.accent.color)
+            .frame(minWidth: Self.keysWidth, alignment: .trailing)
+          Button { recorder.cancel() } label: { slotTitle("Cancel") }
+            .focused(focus, equals: row.layoutID)
+          clearSlot
+        } else {
+          keys.frame(minWidth: Self.keysWidth, alignment: .trailing)
+          Button { recorder.beginLayout(row.layoutID) } label: {
+            slotTitle(row.shortcut == nil ? "Record…" : "Change…")
+          }
+          .focused(focus, equals: row.layoutID)
+          .disabled(controller.isBusy(PanelActionCoordinator.key("layoutHotkeySet", id: row.layoutID)))
+          if row.shortcut != nil {
+            Button {
+              controller.launch(PanelActionCoordinator.key("layoutHotkeyClear", id: row.layoutID)) {
+                try await controller.clearLayoutHotKey(row.layoutID)
+              }
+            } label: {
+              slotTitle("Clear")
+            }
+          } else {
+            clearSlot
+          }
+        }
+      }
+    }
+    .announcesChanges(of: row.error)
+    .accessibilityIdentifier("hotkey-layout-\(row.layoutID)")
+  }
+
+  private func slotTitle(_ title: LocalizedStringKey) -> some View {
+    Text(title).frame(minWidth: Self.buttonTitleWidth)
+  }
+
+  private var clearSlot: some View {
+    Button {} label: { slotTitle("Clear") }
+      .hidden()
+      .accessibilityHidden(true)
+  }
+
+  @ViewBuilder
+  private var keys: some View {
+    if let shortcut = row.shortcut {
+      Text(verbatim: shortcut)
+        .font(.panel(.callout).weight(.medium))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(theme.surface.well.color, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay {
+          RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .strokeBorder(theme.surface.divider.color, lineWidth: 0.5)
+        }
+        .accessibilityLabel(Text(verbatim: shortcut))
+    } else {
+      Text("Not set")
+        .font(.panel(.callout))
+        .foregroundStyle(theme.surface.muted.color)
+    }
+  }
+}
+
 /// The Shortcuts app and links disclosure: what the actions do and the links that run them.
 private struct ShortcutsLinksContent: View {
   @Environment(\.panelTheme) private var theme
@@ -185,7 +325,8 @@ private struct ShortcutsLinksContent: View {
     "wallpapermachine://toggle", "wallpapermachine://play", "wallpapermachine://pause",
     "wallpapermachine://mute", "wallpapermachine://unmute", "wallpapermachine://togglemute",
     "wallpapermachine://next", "wallpapermachine://previous", "wallpapermachine://random",
-    "wallpapermachine://random?from=favorites", "wallpapermachine://apply?id=…",
+    "wallpapermachine://random?from=favorites", "wallpapermachine://random?collection=…",
+    "wallpapermachine://apply?id=…",
     "wallpapermachine://apply?id=…&display=all", "wallpapermachine://playlist?id=…",
     "wallpapermachine://preset?id=…", "wallpapermachine://layout?id=…",
     "wallpapermachine://open?page=settings",
@@ -201,6 +342,9 @@ private struct ShortcutsLinksContent: View {
       )
       Text(
         "Random Wallpaper changes a display to a wallpaper other than the one it shows, and goes through all of them before it repeats one. It can draw from your favorites only: choose Favorites in Shortcuts, or use from=favorites in a link."
+      )
+      Text(
+        "Shortcuts also supports querying the current wallpaper, finding installed wallpapers, adjusting volume, toggling favorites, desktop widgets, desktop icons or presentation mode, and picking a random wallpaper from a collection (also via collection= in a random link). Desktop icons and presentation mode are never available through links."
       )
       Text(
         "Links can run the same actions. Wallpaper and playlist actions accept display= for a specific screen; otherwise they use the target display. An apply link also accepts display=all, and Apply Wallpaper has an On all displays option, to use every display at once. Property presets affect their wallpaper on every display. Choose saved items by name in Shortcuts."

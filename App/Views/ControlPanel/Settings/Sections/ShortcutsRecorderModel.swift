@@ -16,15 +16,22 @@ import Observation
 @MainActor
 @Observable
 final class ShortcutsRecorderModel {
-  /// The row that is recording.
+  /// The action row that is recording.
   private(set) var recording: HotKeyAction?
+  /// The display layout row that is recording, if any.
+  private(set) var recordingLayoutID: String?
   /// The row whose first button should take focus: the view moves it there and then calls
   /// `consumeFocus`.
   private(set) var focus: HotKeyAction?
+  /// The display layout row whose first button should take focus.
+  private(set) var focusLayoutID: String?
 
   @ObservationIgnored weak var controller: PanelController?
   @ObservationIgnored private let installsMonitors: Bool
   @ObservationIgnored private var session: ShortcutsRecorderSession?
+
+  /// Whether any shortcut row (action or display layout) is currently recording.
+  var isRecordingAny: Bool { recording != nil || recordingLayoutID != nil }
 
   /// - Parameter installsMonitors: Whether recording listens to the keyboard. A test turns it off
   ///   and feeds `handle(keyCode:modifierFlags:)` itself.
@@ -34,31 +41,35 @@ final class ShortcutsRecorderModel {
   }
 
   func consumeFocus() { focus = nil }
+  func consumeLayoutFocus() { focusLayoutID = nil }
 
   /// Starts recording for `action`. A row that was recording gives way.
   func begin(_ action: HotKeyAction) {
     end()
     recording = action
     focus = action
-    guard installsMonitors, let controller else { return }
-    let session = ShortcutsRecorderSession(
-      bindings: { controller.hotKeys.bindings },
-      onKey: { [weak self] keyCode, flags in self?.handle(keyCode: keyCode, modifierFlags: flags) ?? false },
-      onRegisteredPress: { [weak self] action in self?.handleRegisteredPress(of: action) },
-      onEnd: { [weak self] in self?.end() })
-    session.start()
-    self.session = session
+    startSessionIfNeeded()
+  }
+
+  /// Starts recording for a saved display layout. A row that was recording gives way.
+  func beginLayout(_ layoutID: String) {
+    end()
+    recordingLayoutID = layoutID
+    focusLayoutID = layoutID
+    startSessionIfNeeded()
   }
 
   /// Stops recording and changes nothing.
   func cancel() {
     if let recording { focus = recording }
+    if let recordingLayoutID { focusLayoutID = recordingLayoutID }
     end()
   }
 
   /// Ends the recording without moving focus: the page left, or the window lost focus.
   func end() {
     recording = nil
+    recordingLayoutID = nil
     session?.stop()
     session = nil
   }
@@ -67,22 +78,41 @@ final class ShortcutsRecorderModel {
   /// monitor then swallows: a modifier on its own is not used (the recorder keeps waiting).
   @discardableResult
   func handle(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
-    guard let action = recording, let controller else { return false }
-    switch HotKeyRecording.press(keyCode: keyCode, modifierFlags: modifierFlags) {
-    case .ignored:
-      return false
-    case .cancelled:
-      cancel()
-      return true
-    case .recorded:
-      focus = action
-      end()
-      // A refusal (a key that cannot be a shortcut, a combination already used) reaches the banner.
-      controller.launch(PanelActionCoordinator.key("hotkeySet", id: action.rawValue)) {
-        try await controller.setHotKey(action, keyCode: keyCode, modifierFlags: modifierFlags)
+    guard let controller else { return false }
+    if let action = recording {
+      switch HotKeyRecording.press(keyCode: keyCode, modifierFlags: modifierFlags) {
+      case .ignored:
+        return false
+      case .cancelled:
+        cancel()
+        return true
+      case .recorded:
+        focus = action
+        end()
+        // A refusal (a key that cannot be a shortcut, a combination already used) reaches the banner.
+        controller.launch(PanelActionCoordinator.key("hotkeySet", id: action.rawValue)) {
+          try await controller.setHotKey(action, keyCode: keyCode, modifierFlags: modifierFlags)
+        }
+        return true
       }
-      return true
     }
+    if let layoutID = recordingLayoutID {
+      switch HotKeyRecording.press(keyCode: keyCode, modifierFlags: modifierFlags) {
+      case .ignored:
+        return false
+      case .cancelled:
+        cancel()
+        return true
+      case .recorded:
+        focusLayoutID = layoutID
+        end()
+        controller.launch(PanelActionCoordinator.key("layoutHotkeySet", id: layoutID)) {
+          try await controller.setLayoutHotKey(layoutID, keyCode: keyCode, modifierFlags: modifierFlags)
+        }
+        return true
+      }
+    }
+    return false
   }
 
   /// The press of a shortcut that is registered with the system arrived while recording: the
@@ -91,6 +121,25 @@ final class ShortcutsRecorderModel {
   func handleRegisteredPress(of registered: HotKeyAction) {
     guard let binding = controller?.hotKeys.bindings[registered] else { return }
     handle(keyCode: UInt16(binding.keyCode), modifierFlags: Self.modifierFlags(carbon: binding.modifiers))
+  }
+
+  /// The same interception for a registered display layout shortcut pressed while recording.
+  func handleRegisteredLayoutPress(of layoutID: String) {
+    guard let binding = controller?.hotKeys.layoutBindings[layoutID] else { return }
+    handle(keyCode: UInt16(binding.keyCode), modifierFlags: Self.modifierFlags(carbon: binding.modifiers))
+  }
+
+  private func startSessionIfNeeded() {
+    guard installsMonitors, let controller else { return }
+    let session = ShortcutsRecorderSession(
+      bindings: { controller.hotKeys.bindings },
+      layoutBindings: { controller.hotKeys.layoutBindings },
+      onKey: { [weak self] keyCode, flags in self?.handle(keyCode: keyCode, modifierFlags: flags) ?? false },
+      onRegisteredPress: { [weak self] action in self?.handleRegisteredPress(of: action) },
+      onRegisteredLayoutPress: { [weak self] layoutID in self?.handleRegisteredLayoutPress(of: layoutID) },
+      onEnd: { [weak self] in self?.end() })
+    session.start()
+    self.session = session
   }
 
   /// The modifier flags a Carbon modifier mask stands for.
@@ -110,8 +159,10 @@ final class ShortcutsRecorderModel {
 @MainActor
 final class ShortcutsRecorderSession {
   private let bindings: () -> [HotKeyAction: HotKey]
+  private let layoutBindings: () -> [String: HotKey]
   private let onKey: (UInt16, NSEvent.ModifierFlags) -> Bool
   private let onRegisteredPress: (HotKeyAction) -> Void
+  private let onRegisteredLayoutPress: (String) -> Void
   private let onEnd: () -> Void
   private var monitors: [Any] = []
   private var observers: [NSObjectProtocol] = []
@@ -120,12 +171,18 @@ final class ShortcutsRecorderSession {
   private static let signature: OSType = 0x574D_4B59
 
   init(
-    bindings: @escaping () -> [HotKeyAction: HotKey], onKey: @escaping (UInt16, NSEvent.ModifierFlags) -> Bool,
-    onRegisteredPress: @escaping (HotKeyAction) -> Void, onEnd: @escaping () -> Void
+    bindings: @escaping () -> [HotKeyAction: HotKey],
+    layoutBindings: @escaping () -> [String: HotKey] = { [:] },
+    onKey: @escaping (UInt16, NSEvent.ModifierFlags) -> Bool,
+    onRegisteredPress: @escaping (HotKeyAction) -> Void,
+    onRegisteredLayoutPress: @escaping (String) -> Void = { _ in },
+    onEnd: @escaping () -> Void
   ) {
     self.bindings = bindings
+    self.layoutBindings = layoutBindings
     self.onKey = onKey
     self.onRegisteredPress = onRegisteredPress
+    self.onRegisteredLayoutPress = onRegisteredLayoutPress
     self.onEnd = onEnd
   }
 
@@ -192,12 +249,25 @@ final class ShortcutsRecorderSession {
         let status = GetEventParameter(
           event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
           MemoryLayout<EventHotKeyID>.size, nil, &pressed)
-        guard status == noErr, pressed.signature == ShortcutsRecorderSession.signature,
-          let action = HotKeyAction.allCases.first(where: { $0.identifier == pressed.id })
-        else { return OSStatus(eventNotHandledErr) }
+        guard status == noErr, pressed.signature == ShortcutsRecorderSession.signature else {
+          return OSStatus(eventNotHandledErr)
+        }
         let session = Unmanaged<ShortcutsRecorderSession>.fromOpaque(userData).takeUnretainedValue()
-        MainActor.assumeIsolated { session.onRegisteredPress(action) }
-        return noErr
+        if let action = HotKeyAction.allCases.first(where: { $0.identifier == pressed.id }) {
+          MainActor.assumeIsolated { session.onRegisteredPress(action) }
+          return noErr
+        }
+        if pressed.id >= GlobalHotKeys.layoutIdentifierBase {
+          let offset = Int(pressed.id - GlobalHotKeys.layoutIdentifierBase)
+          let handled: Bool = MainActor.assumeIsolated {
+            let ordered = session.layoutBindings().keys.sorted()
+            guard offset < ordered.count else { return false }
+            session.onRegisteredLayoutPress(ordered[offset])
+            return true
+          }
+          if handled { return noErr }
+        }
+        return OSStatus(eventNotHandledErr)
       },
       1, &spec, Unmanaged.passUnretained(self).toOpaque(), &handler)
     if status != noErr { handler = nil }

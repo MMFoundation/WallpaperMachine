@@ -44,6 +44,7 @@ final class PanelHotKeyActionsTests: PanelTestCase {
       [
         L("Play or pause wallpapers"), L("Mute or unmute wallpapers"), L("Previous wallpaper"), L("Next wallpaper"),
         L("Random wallpaper"), L("Open the control panel"),
+        L("Toggle desktop widgets"), L("Toggle desktop icons"), L("Presentation mode"),
       ])
     XCTAssertEqual(Set(titles).count, HotKeyAction.allCases.count)
   }
@@ -160,5 +161,30 @@ final class PanelHotKeyActionsTests: PanelTestCase {
     }
     XCTAssertEqual(HotKeyRecording.press(keyCode: UInt16(kVK_ANSI_A), modifierFlags: []), .recorded)
     XCTAssertEqual(HotKeyRecording.press(keyCode: UInt16(kVK_Space), modifierFlags: [.command]), .recorded)
+  }
+
+  func testPresentationHideIconsPreferenceDefaultsOffAndLayoutHotKeysRecordClearAndPrune() async throws {
+    try await withTwoDisplayPanel { panel, _ in
+      let controller = panel.controller
+      XCTAssertFalse(controller.presentationHidesDesktopIcons, "hiding desktop icons in Presentation Mode is off by default")
+      try await controller.setPresentationHidesDesktopIcons(true)
+      XCTAssertTrue(controller.presentationHidesDesktopIcons)
+      try await controller.setPresentationHidesDesktopIcons(false)
+      XCTAssertFalse(controller.presentationHidesDesktopIcons)
+
+      let layout = try await controller.saveDisplayLayout(name: "Desk")
+      XCTAssertEqual(controller.displayLayoutHotKeyRows.map(\.layoutID), [layout.id])
+      try await controller.setLayoutHotKey(layout.id, keyCode: UInt16(kVK_ANSI_L), modifierFlags: allThree)
+      XCTAssertEqual(controller.displayLayoutHotKeyRows.first?.shortcut, "⌃⌥⌘L")
+
+      // Action shortcut cannot collide with a display layout shortcut.
+      do {
+        try await controller.setHotKey(.togglePresentationMode, keyCode: UInt16(kVK_ANSI_L), modifierFlags: allThree)
+        XCTFail("layout shortcut collision must be refused")
+      } catch {}
+
+      try await controller.deleteDisplayLayout(layout.id)
+      XCTAssertNil(controller.hotKeys.layoutBindings[layout.id], "deleting a layout removes its hotkey")
+    }
   }
 }

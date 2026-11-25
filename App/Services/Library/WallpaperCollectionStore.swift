@@ -31,6 +31,14 @@ final class WallpaperCollectionStore {
         collections.first { $0.id == id }
     }
 
+    /// Finds a collection by exact id first, then by case-insensitive trimmed name.
+    func collection(matching query: String) -> WallpaperCollection? {
+        if let byID = collection(id: query) { return byID }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return collections.first { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }
+    }
+
     @discardableResult
     func create(name: String, wallpaperIDs: [String] = []) throws -> WallpaperCollection {
         let collection = WallpaperCollection(

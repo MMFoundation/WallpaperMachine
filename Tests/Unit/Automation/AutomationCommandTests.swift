@@ -61,6 +61,10 @@ final class AutomationCommandTests: XCTestCase {
                        .random(display: "identity:{}", pool: .favorites), "the command and the pool ignore case")
         XCTAssertEqual(command("wallpapermachine://random?display=all"), .random(display: "all", pool: .all),
                        "all is not a display here; running it reports an unknown display")
+        XCTAssertEqual(command("wallpapermachine://random?collection=Nature"),
+                       .random(display: nil, pool: .all, collection: "Nature"))
+        XCTAssertEqual(command("wallpapermachine://random?display=primary&from=favorites&collection=Calm%20Scenes"),
+                       .random(display: "primary", pool: .favorites, collection: "Calm Scenes"))
     }
 
     /// A pick is made at random, so a link that names a wallpaper, an unknown pool or anything
@@ -71,6 +75,8 @@ final class AutomationCommandTests: XCTestCase {
             "wallpapermachine://random?id=1", "wallpapermachine://random?from=", "wallpapermachine://random?display=a&display=b",
             "wallpapermachine://random?from=favorites&volume=1", "wallpapermachine://random/extra",
             "wallpapermachine://random?from=collection",
+            "wallpapermachine://random?collection=",
+            "wallpapermachine://random?collection=a&collection=b",
         ] {
             XCTAssertNil(command(link), link)
         }
@@ -83,8 +89,18 @@ final class AutomationCommandTests: XCTestCase {
                        ["a", "b"], "a favorite that left the library is not offered")
         XCTAssertEqual(AutomationCommand.RandomPool.favorites.candidates(library: library, favorites: [], held: []), [])
         XCTAssertEqual(
+            AutomationCommand.RandomPool.all.candidates(library: library, favorites: [], held: ["c"], collectionIDs: ["a", "c", "b", "missing"]),
+            ["a", "b"], "collection narrows candidates in library order and excludes held or missing wallpapers")
+        XCTAssertEqual(
+            AutomationCommand.RandomPool.favorites.candidates(library: library, favorites: ["b", "d"], held: [], collectionIDs: ["a", "b"]),
+            ["b"])
+        XCTAssertEqual(
             AutomationCommand.RandomPool.all.candidates(library: library, favorites: [], held: [], excluded: ["a", "d"]),
             ["c", "b"], "wallpapers excluded from rotation are skipped by Random Wallpaper")
+        XCTAssertEqual(
+            AutomationCommand.RandomPool.all.candidates(
+                library: library, favorites: [], held: [], excluded: ["a"], collectionIDs: ["a", "b"]),
+            ["b"])
     }
 
     /// A pick is the user's own choice and so releases a wallpaper the app is holding back after
@@ -119,6 +135,15 @@ final class AutomationCommandTests: XCTestCase {
             // Removing a wallpaper from a display is the menu bar's own command: no link blanks a display.
             "wallpapermachine://remove", "wallpapermachine://remove?display=primary", "wallpapermachine://removewallpaper",
             "wallpapermachine://eject?display=primary", "wallpapermachine://clear",
+            // Security boundary: desktop icons (which restart Finder), desktop widgets, presentation
+            // mode, volume and favorite toggles are App Intents / HotKeys only, never URL links.
+            "wallpapermachine://toggledesktopicons", "wallpapermachine://desktopicons",
+            "wallpapermachine://hideicons", "wallpapermachine://toggle-desktop-icons",
+            "wallpapermachine://toggledesktopwidgets", "wallpapermachine://desktopwidgets",
+            "wallpapermachine://presentation", "wallpapermachine://togglepresentation",
+            "wallpapermachine://togglepresentationmode",
+            "wallpapermachine://togglefavorite", "wallpapermachine://favorite?id=1",
+            "wallpapermachine://setvolume?level=50", "wallpapermachine://volume?value=0.5",
         ] {
             XCTAssertNil(command(link), link)
         }

@@ -8,13 +8,18 @@ import Foundation
 @MainActor
 final class GlobalHotKeys {
     var onPress: (@MainActor (HotKeyAction) -> Void)?
+    var onPressLayout: (@MainActor (String) -> Void)?
 
     private let preferences: HotKeyPreferences
     private var handler: EventHandlerRef?
     private var registered: [HotKeyAction: EventHotKeyRef] = [:]
+    private var registeredLayouts: [String: EventHotKeyRef] = [:]
+    private var layoutIDByIdentifier: [UInt32: String] = [:]
     private var observer: NSObjectProtocol?
     /// Marks the app's own hot keys in the events the system sends back ("WMKY").
     private static let signature: OSType = 0x574D_4B59
+    /// First dynamic Carbon event ID reserved for saved display layout shortcuts.
+    static let layoutIdentifierBase: UInt32 = 1000
 
     init(preferences: HotKeyPreferences) {
         self.preferences = preferences
@@ -54,6 +59,9 @@ final class GlobalHotKeys {
         observer = nil
         for ref in registered.values { UnregisterEventHotKey(ref) }
         registered.removeAll()
+        for ref in registeredLayouts.values { UnregisterEventHotKey(ref) }
+        registeredLayouts.removeAll()
+        layoutIDByIdentifier.removeAll()
         if let handler { RemoveEventHandler(handler) }
         handler = nil
     }
@@ -83,14 +91,43 @@ final class GlobalHotKeys {
                     for: action)
             }
         }
+        for ref in registeredLayouts.values { UnregisterEventHotKey(ref) }
+        registeredLayouts.removeAll()
+        layoutIDByIdentifier.removeAll()
+        let orderedLayoutIDs = preferences.layoutBindings.keys.sorted()
+        for (offset, layoutID) in orderedLayoutIDs.enumerated() {
+            guard let wanted = preferences.layoutBindings[layoutID] else { continue }
+            let identifier = Self.layoutIdentifierBase &+ UInt32(offset)
+            var ref: EventHotKeyRef?
+            let status = RegisterEventHotKey(
+                wanted.keyCode, wanted.modifiers, EventHotKeyID(signature: Self.signature, id: identifier),
+                GetApplicationEventTarget(), 0, &ref)
+            if status == noErr, let ref {
+                registeredLayouts[layoutID] = ref
+                layoutIDByIdentifier[identifier] = layoutID
+                preferences.recordLayoutFailure(nil, for: layoutID)
+            } else {
+                AppLog.warn("keyboard shortcut \(wanted.label) for display layout \(layoutID) was refused (\(status))")
+                preferences.recordLayoutFailure(
+                    status == OSStatus(eventHotKeyExistsErr)
+                        ? String(localized: "Another app already uses this shortcut. Record a different one.")
+                        : String(localized: "macOS did not accept this shortcut (error \(Int(status))). Record a different one."),
+                    for: layoutID)
+            }
+        }
     }
 
     private func fire(_ pressed: EventHotKeyID) -> OSStatus {
-        guard pressed.signature == Self.signature,
-              let action = HotKeyAction.allCases.first(where: { $0.identifier == pressed.id })
-        else { return OSStatus(eventNotHandledErr) }
-        onPress?(action)
-        return noErr
+        guard pressed.signature == Self.signature else { return OSStatus(eventNotHandledErr) }
+        if let action = HotKeyAction.allCases.first(where: { $0.identifier == pressed.id }) {
+            onPress?(action)
+            return noErr
+        }
+        if let layoutID = layoutIDByIdentifier[pressed.id] {
+            onPressLayout?(layoutID)
+            return noErr
+        }
+        return OSStatus(eventNotHandledErr)
     }
 
     /// The shortcut a key press in the panel names: `keyCode` is `NSEvent.keyCode`, the key's

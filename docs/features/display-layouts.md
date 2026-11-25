@@ -13,6 +13,21 @@ each wallpaper's existing options for its destination. The user's Play/Pause sta
 unchanged. Playlists and automatic rules keep running, just as after a manual Apply;
 a later scheduled event can change the restored wallpaper.
 
+## Automatic apply when displays connect
+
+Each saved layout offers an **Apply automatically when connected** toggle (`autoApplyOnConnect`,
+off by default and backward-compatible with older stored JSON and backups). At most one saved
+layout can have automatic apply enabled for a given normalized display topology (the sorted set
+of unique display selectors): turning it on for a layout clears it on any other layout sharing
+the same normalized topology.
+
+After `DisplayRefreshCoalescer` settles on a connected display topology change (such as docking
+or undocking an external monitor), `DisplayTopologyLayoutAutoApplier` checks for a matching
+auto-apply layout and applies it through `BridgeStore.applyDisplayTransferAsync`. Resolution or
+refresh-rate changes that keep the same connected topology, initial launch, unavailable layouts,
+and layouts whose wallpapers are already showing are skipped so auto-apply never re-triggers in
+a loop.
+
 ## Copy and swap
 
 Each enabled independent display that has a wallpaper offers **Copy or swap
@@ -166,8 +181,8 @@ renderer instances.
 | --- | --- |
 | Records, bounded persistence and backup validation | `App/Services/Library/WallpaperDisplayLayoutStore.swift` |
 | Capture, planning, preflight and verified recovery | `App/Services/Desktop/WallpaperDisplayTransfer.swift` |
-| Bridge queue, clean-option checks and final history | `App/ViewModels/BridgeStoreDisplayLayouts.swift` |
-| Panel actions and state | `saveDisplayLayout`, `renameDisplayLayout`, `deleteDisplayLayout`, `applyDisplayLayout`, `copyWallpaper`, `swapWallpapers` in `App/Views/ControlPanel/Model/PanelController+DisplayLayouts.swift` |
+| Bridge queue, clean-option checks, topology auto-apply and final history | `App/ViewModels/BridgeStoreDisplayLayouts.swift` |
+| Panel actions and state | `saveDisplayLayout`, `renameDisplayLayout`, `deleteDisplayLayout`, `setDisplayLayoutAutoApply`, `applyDisplayLayout`, `copyWallpaper`, `swapWallpapers` in `App/Views/ControlPanel/Model/PanelController+DisplayLayouts.swift` |
 | Settings UI | The Display layouts group in `App/Views/ControlPanel/Settings/Sections/DisplaysGroups.swift`, Copy or swap in `DisplaysSettingsCard.swift`, the page state in `Settings/DisplaysSettingsModel.swift` |
 | Apply to all displays | The inspector's **More actions** menu (`Inspector/InspectorHeader.swift`), `activateAll` in `Model/PanelController+Library.swift` |
 | Shortcuts and links | `App/Services/Automation/WallpaperConfigurationIntents.swift`, `WallpaperIntents.swift` (Apply Wallpaper's **On all displays**), `AutomationCommand.swift`, `AppDelegate.performAutomation` |

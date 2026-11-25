@@ -196,4 +196,23 @@ final class PanelDisplayLayoutActionsTests: PanelTestCase {
       XCTAssertEqual(controller.displayLayoutsState.layouts.map(\.name), ["Behind the panel's back"])
     }
   }
+
+  func testAutoApplyToggleEnforcesOneLayoutPerNormalizedTopology() async throws {
+    try await withTwoDisplayPanel { panel, _ in
+      let controller = panel.controller
+      let first = try await controller.saveDisplayLayout(name: "Desk A")
+      let second = try await controller.saveDisplayLayout(name: "Desk B")
+      XCTAssertFalse(controller.displayLayoutsState.layouts[0].autoApplyOnConnect)
+      XCTAssertFalse(controller.displayLayoutsState.layouts[1].autoApplyOnConnect)
+
+      try await controller.setDisplayLayoutAutoApply(first.id, enabled: true)
+      XCTAssertEqual(controller.displayLayoutsState.layouts.map(\.autoApplyOnConnect), [true, false])
+
+      try await controller.setDisplayLayoutAutoApply(second.id, enabled: true)
+      XCTAssertEqual(controller.displayLayoutsState.layouts.map(\.autoApplyOnConnect), [false, true])
+
+      try await controller.setDisplayLayoutAutoApply(second.id, enabled: false)
+      XCTAssertEqual(controller.displayLayoutsState.layouts.map(\.autoApplyOnConnect), [false, false])
+    }
+  }
 }

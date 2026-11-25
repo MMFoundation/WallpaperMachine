@@ -17,9 +17,10 @@ enum AutomationCommand: Equatable, Sendable {
     case next(display: String?)
     /// Walks back through successful switches on this display.
     case previous(display: String?)
-    /// A wallpaper from `pool` other than the one `display` shows (or the target display, when
-    /// nil), going through the whole pool before it repeats one.
-    case random(display: String?, pool: RandomPool)
+    /// A wallpaper from `pool` (optionally restricted to `collection`, by id or name) other than
+    /// the one `display` shows (or the target display, when nil), going through the whole pool
+    /// before it repeats one.
+    case random(display: String?, pool: RandomPool, collection: String? = nil)
     /// Applies an installed wallpaper on `display`, or on the target display when nil.
     case apply(wallpaperID: String, display: String?)
     /// Applies an installed wallpaper on every enabled independent display in one step: all of
@@ -32,6 +33,23 @@ enum AutomationCommand: Equatable, Sendable {
     case applyPlaylist(planID: String, display: String?)
     case applyPreset(presetID: String)
     case applyDisplayLayout(layoutID: String)
+    /// Toggles favorite status for `wallpaperID`, or for the wallpaper shown on `display` (or
+    /// the target display when nil). Internal / App Intents only; refused from external links.
+    case toggleFavorite(wallpaperID: String? = nil, display: String? = nil)
+    /// Sets the wallpaper audio volume (0...1) on `displayID`, or on the target display when nil.
+    /// Internal / App Intents only; refused from external links.
+    case setVolume(Float, displayID: String?)
+    /// Toggles visibility of desktop widgets without altering individual widget settings.
+    /// Internal / App Intents / Global Hotkeys only; refused from external links.
+    case toggleDesktopWidgets
+    /// Shows or hides Finder's desktop icons (which restarts Finder).
+    /// SECURITY BOUNDARY: App Intents and user-configured Global Hotkeys ONLY; NEVER exposed to
+    /// `wallpapermachine://` URL links.
+    case toggleDesktopIcons
+    /// Enters or leaves Presentation Mode (pauses playback, mutes wallpapers, hides desktop
+    /// widgets, and hides Finder icons only when explicitly opted in), restoring prior state on exit.
+    /// Internal / App Intents / Global Hotkeys only; refused from external links.
+    case togglePresentationMode
     /// Brings up the control panel, on one of its pages when named.
     case open(page: Page?)
 
@@ -45,18 +63,20 @@ enum AutomationCommand: Equatable, Sendable {
         case all, favorites
 
         /// The wallpapers a pick may be, in `library` order: those that can play, narrowed to
-        /// the favorites for `.favorites`, never one the app is holding back after a crash, and
-        /// never one the user excluded from rotation and Random Wallpaper.
+        /// the favorites for `.favorites`, narrowed to `collectionIDs` when provided, never one
+        /// the app is holding back after a crash, and never one the user excluded from rotation
+        /// and Random Wallpaper.
         /// Picking is the user's own choice, which would release a crash hold, so a roll of the
         /// dice must not be able to reopen the wallpaper that killed the app.
         func candidates(
             library: [String], favorites: Set<String>, held: Set<String>,
-            excluded: Set<String> = []
+            excluded: Set<String> = [], collectionIDs: Set<String>? = nil
         ) -> [String] {
             library.filter { id in
                 !held.contains(id)
                     && !excluded.contains(id)
                     && (self == .all || favorites.contains(id))
+                    && (collectionIDs == nil || collectionIDs!.contains(id))
             }
         }
     }
@@ -65,13 +85,14 @@ enum AutomationCommand: Equatable, Sendable {
     /// What `display=` says to mean every display rather than one.
     private static let everyDisplay = "all"
 
-    /// Reads a `wallpapermachine://` link: the command is the host, and `display`, `id` and
-    /// `page` are query items. Anything else answers nil rather than guessing.
+    /// Reads a `wallpapermachine://` link: the command is the host, and `display`, `id`,
+    /// `collection` and `page` are query items. Anything else answers nil rather than guessing.
     ///
     ///     wallpapermachine://toggle
     ///     wallpapermachine://togglemute
     ///     wallpapermachine://next?display=primary
     ///     wallpapermachine://random?from=favorites
+    ///     wallpapermachine://random?collection=Nature
     ///     wallpapermachine://apply?id=3632513108
     ///     wallpapermachine://apply?id=3632513108&display=all
     ///     wallpapermachine://open?page=settings
@@ -97,13 +118,13 @@ enum AutomationCommand: Equatable, Sendable {
         case "togglemute" where values.isEmpty: self = .toggleMute
         case "next" where Set(values.keys).isSubset(of: ["display"]): self = .next(display: display)
         case "previous" where Set(values.keys).isSubset(of: ["display"]): self = .previous(display: display)
-        case "random" where Set(values.keys).isSubset(of: ["display", "from"]):
+        case "random" where Set(values.keys).isSubset(of: ["display", "from", "collection"]):
             var pool = RandomPool.all
             if let from = values["from"] {
                 guard let known = RandomPool(rawValue: from.lowercased()) else { return nil }
                 pool = known
             }
-            self = .random(display: display, pool: pool)
+            self = .random(display: display, pool: pool, collection: values["collection"])
         case "apply" where Set(values.keys).isSubset(of: ["id", "display"]):
             guard let id = values["id"] else { return nil }
             // `all` cannot be a display's own selector (`primary`, a number or `identity:{…}`).

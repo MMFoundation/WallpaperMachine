@@ -126,12 +126,17 @@ over 2 MiB, or holds more than 64 displays is still dropped whole.
 | Mute, Unmute, Mute or unmute | Silences every wallpaper, lets them play as they were saved, or switches whichever applies. It sets the local `wallpapersMuted` preference ([Mute all wallpapers](performance.md#playback)) and takes no turn in the command queue. It never changes a wallpaper's or display's saved mute and volume, and the mute app rules, Focus filters and other-app audio keep muting after Unmute while they apply. |
 | Previous wallpaper | Returns to an earlier successful switch on the chosen display; repeated requests keep walking back, skipping deleted or unsupported wallpapers. History is consumed only after Apply succeeds. |
 | Next wallpaper | Changes a display to its playlist's next when it rotates (see [playlists](playlists.md)), otherwise to the next playable wallpaper in library order. |
-| Random wallpaper | Changes a display to a wallpaper picked at random from all the wallpapers that can play, or from the favorites only, other than the one the display shows. The display's own round remembers what it has picked, so every wallpaper of the pool comes round before one repeats; the playlist's order and shuffle round are not touched ([Random Wallpaper](playlists.md#random-wallpaper)). It is the user's own choice, so a playlist gives way to it. A wallpaper the app is holding back after a crash is never picked. With no other wallpaper to choose from it fails with "There is no other wallpaper to choose from." instead of changing nothing quietly. |
+| Random wallpaper | Changes a display to a wallpaper picked at random from all the wallpapers that can play, from favorites only, or narrowed to a local collection (by name or id), other than the one the display shows. The display's own round remembers what it has picked, so every wallpaper of the pool comes round before one repeats; the playlist's order and shuffle round are not touched ([Random Wallpaper](playlists.md#random-wallpaper)). It is the user's own choice, so a playlist gives way to it. A wallpaper the app is holding back after a crash is never picked. With no other wallpaper to choose from it fails with "There is no other wallpaper to choose from." instead of changing nothing quietly. |
 | Apply a wallpaper | Applies an installed wallpaper, named by its id (its folder name in the library). |
 | Apply a wallpaper to all displays | Applies an installed wallpaper to every enabled independent display in one step: all of them change or none does, and each is put back as it was after a failure. Refuses a wallpaper with unapplied edits. See [Apply to every display](display-layouts.md#apply-to-every-display). |
 | Apply saved playlist | Copies a saved plan to the chosen display and starts it when playback can run. |
 | Apply wallpaper property preset | Applies a saved preset to its owning wallpaper on every display using it; rejects unapplied editor drafts. |
 | Apply display layout | Restores the saved wallpaper arrangement across its named displays, with full preflight and verified failure recovery. |
+| Toggle favorite wallpaper | App Intents only (no link): adds or removes a chosen wallpaper, or the wallpaper currently shown on the target or named display, from Favorites. |
+| Set wallpaper volume | App Intents only (no link): sets the audio volume (0–100%) for the wallpaper currently shown on the target or named display. |
+| Toggle desktop widgets | App Intents and global shortcuts only (no link): temporarily hides all desktop widgets or shows them again without altering individual widget settings. |
+| Toggle desktop icons | App Intents and global shortcuts only (never exposed to links): shows or hides Finder's desktop icons, restarting Finder to apply the change. |
+| Presentation mode | App Intents and global shortcuts only (no link): pauses playback, mutes wallpapers, and hides desktop widgets, restoring each prior state when turned off. Hiding Finder's desktop icons is strictly opt-in and off by default (`WallpaperMachine.presentationHidesDesktopIcons`), because it restarts Finder. |
 | Open | Brings up the control panel, on Installed, Steam Workshop (`page=discover`), pixiv or Settings when named. |
 | Remove from display | Menu bar only, with no link: takes whatever the named display shows off it and leaves it empty, so its playlist waits ([a display you cleared](playlists.md#a-display-you-cleared)). It takes the display's turn in the command queue and removes what the display shows then; an empty display is left as it is. |
 
@@ -150,7 +155,7 @@ the foot of the menu bar menu; the Shortcuts app shows its own.
 
 **Settings → Keyboard shortcuts** records one shortcut each for
 **Play or pause wallpapers**, **Mute or unmute wallpapers**, **Previous wallpaper**, **Next wallpaper**, **Random wallpaper** (from every
-wallpaper, on the target display) and **Open the control panel**.
+wallpaper, on the target display), **Open the control panel**, **Toggle desktop widgets**, **Toggle desktop icons**, and **Presentation mode**, plus optional per-layout shortcuts for saved display layouts.
 None is set until recorded, so the app never takes a combination another app
 expects. **Record…** takes the next key pressed in that row (Escape alone, or
 moving focus away, gives up); the key must be held with ⌘, ⌥ or ⌃, except F13
@@ -158,29 +163,42 @@ to F20, which type nothing and may stand alone. The recorder takes the key's
 position (`NSEvent.keyCode`, which is Carbon's virtual key code), which
 `GlobalHotKeys.hotKey(keyCode:modifierFlags:)` checks against the keys a shortcut
 may use, so a shortcut stays on the same key whatever the keyboard layout. One
-combination serves one action.
+combination serves one action or saved layout.
 
 `GlobalHotKeys` registers them with `RegisterEventHotKey`, which works whichever
 app is in front, needs no Accessibility permission and delivers only those
 combinations. A combination another app already holds is refused by macOS; the
-row says so, and says it again after a relaunch until it is changed. Shortcuts
-are kept in the `WallpaperMachine.hotKeys` default.
+row says so, and says it again after a relaunch until it is changed. Action shortcuts
+are kept in the `WallpaperMachine.hotKeys` default; saved display layout shortcuts are
+kept separately in `WallpaperMachine.displayLayoutHotKeys` so existing backup validation
+stays compatible.
+
+Under **Presentation mode**, **Also hide desktop icons (restarts Finder)** is off by
+default (`WallpaperMachine.presentationHidesDesktopIcons`). When left off, Presentation Mode
+pauses playback, mutes wallpapers and hides desktop widgets without touching Finder; turning
+it on also hides Finder's desktop icons when entering Presentation Mode and restores them on
+exit (only if Presentation Mode hid them), restarting Finder each time.
 
 ## Shortcuts app, Siri and Spotlight
 
-App Intents in `App/Services/Automation/WallpaperIntents.swift` add **Pause
-Wallpapers**, **Resume Wallpapers**, **Play or Pause Wallpapers**, **Mute Wallpapers**,
+App Intents in `App/Services/Automation/WallpaperIntents.swift` add read-only query actions —
+**Get Current Wallpaper** (`GetCurrentWallpaperIntent`, returning a structured `CurrentWallpaperEntity`
+with the wallpaper, display, playback, mute, favorite and presentation-mode states) and
+**Find Wallpapers** (`FindWallpapersIntent` and `WallpaperQuery`'s `EntityPropertyQuery`,
+filtering installed playable wallpapers by name, type, favorite status and collection) — as well
+as action intents: **Pause Wallpapers**, **Resume Wallpapers**, **Play or Pause Wallpapers**, **Mute Wallpapers**,
 **Unmute Wallpapers**, **Mute or Unmute Wallpapers**, **Previous Wallpaper**, **Next
-Wallpaper**, **Random Wallpaper**, **Apply Wallpaper** (with the wallpaper chosen from, or searched in,
-the installed ones that can play), **Apply Saved Playlist**, **Apply Wallpaper
-Property Preset**, and **Open WallpaperMachine**. The latter two configuration
-actions and their searchable entities live in `WallpaperConfigurationIntents.swift`.
+Wallpaper**, **Random Wallpaper** (with optional **Collection** picker), **Apply Wallpaper** (with the wallpaper chosen from, or searched in,
+the installed ones that can play), **Toggle Favorite Wallpaper**, **Set Wallpaper Volume**,
+**Toggle Desktop Widgets**, **Toggle Desktop Icons**, **Toggle Presentation Mode**, **Apply Saved Playlist**, **Apply Wallpaper
+Property Preset**, and **Open WallpaperMachine**. Configuration entities (collections, saved layouts,
+saved playlists and property presets) live in `WallpaperConfigurationIntents.swift`.
 That file also supplies **Apply Display Layout** with a saved-layout picker and
 no display parameter; the layout itself identifies its target screens.
-`WallpaperMachineShortcuts` offers play/pause, mute/unmute, previous, next, random and the wallpaper,
-playlist, property preset and display layout actions to Siri and Spotlight without
+`WallpaperMachineShortcuts` offers ten built-in actions (play/pause, mute/unmute, previous, next, random, wallpaper,
+playlist, property preset, display layout and presentation mode) to Siri and Spotlight without
 building a shortcut ("Next wallpaper in WallpaperMachine", "Random wallpaper in
-WallpaperMachine", "Mute wallpapers with WallpaperMachine", "Apply a wallpaper with WallpaperMachine"). The actions run in the app's own process; if it is not running,
+WallpaperMachine", "Mute wallpapers with WallpaperMachine", "Apply a wallpaper with WallpaperMachine", "Toggle presentation mode in WallpaperMachine"). The actions run in the app's own process; if it is not running,
 macOS starts it first.
 
 **Apply Wallpaper** also has an **On all displays** option, off by default, that
@@ -188,7 +206,18 @@ applies the wallpaper to every enabled independent display instead of one; it wi
 over a chosen **Display**.
 
 **Random Wallpaper** also has a **Choose from** option, **All wallpapers** by default or
-**Favorites**, for the pool it draws from.
+**Favorites**, and an optional **Collection** picker to narrow the pool.
+
+## Read-only status file
+
+`AutomationStatusWriter` (`App/Services/Automation/AutomationStatusWriter.swift`) writes an
+event-driven, read-only JSON snapshot atomically to `status.json` inside `ClientPaths.supportURL`
+(`~/Library/Application Support/WallpaperMachine/status.json`, or `$WALLPAPER_MACHINE_HOME/status.json`
+when overridden). External tools such as Raycast, SketchyBar or Stream Deck can read this file
+directly with no polling inside WallpaperMachine, no extra macOS permissions, no open sockets
+and no standalone CLI binary. Disk writes occur only when active wallpapers, playback pause
+state, global mute, presentation mode, desktop-widget visibility or favorite membership actually
+changes.
 
 **Previous Wallpaper**, **Next Wallpaper**, **Random Wallpaper**, **Apply Wallpaper** and **Apply Saved
 Playlist** have an optional **Display** picker.
@@ -203,7 +232,7 @@ offered; deletion between selection and execution is checked again.
 ## Links
 
 `Info.plist` claims the `wallpapermachine` scheme (`CFBundleURLTypes`). The
-command is the host, and `display`, `id` and `page` are query values:
+command is the host, and `display`, `id`, `from`, `collection` and `page` are query values:
 
 ```
 wallpapermachine://play
@@ -217,6 +246,7 @@ wallpapermachine://next
 wallpapermachine://next?display=primary
 wallpapermachine://random
 wallpapermachine://random?display=primary&from=favorites
+wallpapermachine://random?collection=Nature
 wallpapermachine://apply?id=3632513108
 wallpapermachine://apply?id=3632513108&display=all
 wallpapermachine://playlist?id=PLAN_ID&display=primary
@@ -227,11 +257,14 @@ wallpapermachine://open?page=settings
 
 `mute`, `unmute` and `togglemute` take no query at all, like `play`, `pause` and `toggle`:
 there is no per-display or per-wallpaper mute link, and no link that sets a volume.
+Desktop icons (which restart Finder), desktop widgets, presentation mode, volume and favorite
+toggles are never exposed through `wallpapermachine://` links; use Shortcuts or global
+keyboard shortcuts instead.
 
 `display=all` is accepted by `apply` only and cannot be a display's own selector
 (`primary`, a number or `identity:{…}`); `next`, `previous`, `random` and `playlist` treat it as
 an unknown display and fail. `random` takes `from=all` (the default) or `from=favorites`, in
-any case; any other value, or a name given twice, is refused rather than guessed at.
+any case, and an optional `collection=` (collection id or name); any other value, or a name given twice, is refused rather than guessed at.
 
 A link with an unknown command, a query value the command does not take, a value
 given twice, or a path is ignored and logged rather than guessed at. A browser
@@ -268,7 +301,7 @@ interrupted recovery), the panel's validation and queued manual playlist edits
 (`PanelPlaylistActionsTests`), the rule actions, reordering, today's solar readout and
 editor (`PanelAutomationActionsTests`, `DisplaysSettingsModelTests`,
 `DisplaysSettingsDraftsTests`), the shortcut recorder
-(`PanelHotKeyActionsTests`, `ShortcutsRecorderModelTests`) and
+(`PanelHotKeyActionsTests`, `ShortcutsRecorderModelTests`), event-driven status JSON writes (`AutomationStatusWriterTests`), Presentation Mode save/restore and opt-in Finder icon guardrails (`PresentationModeControllerTests`), and
 rule merging and rollback in backups (`WallpaperBackupTests`) each have their own suite;
 the Space tests are listed in [Spaces verification](spaces.md#storage-and-verification).
 The domain inventory is in [coverage](../testing/coverage.md).
