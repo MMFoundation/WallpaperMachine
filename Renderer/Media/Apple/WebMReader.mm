@@ -5,6 +5,7 @@
 #include "Media/ByteSource.hpp"
 #include "Media/DisplayMatrix.hpp"
 #include "Media/Matroska/MatroskaReader.hpp"
+#include "Sound/ChannelRemix.hpp"
 #include "Sound/Matroska/MatroskaAudio.hpp"
 
 #import <CoreVideo/CoreVideo.h>
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -278,8 +280,10 @@ CGAffineTransform Placed(CGAffineTransform linear, CGSize size)
         } else if (candidate.codec == media::MatroskaCodec::Opus &&
                    (candidate.codecPrivate.size() < 19 || candidate.codecPrivate[18] != 0 || candidate.codecPrivate[9] > 2)) {
             _audioWhy = @"Opus audio with more than two channels is not played";
-        } else if (candidate.codec != media::MatroskaCodec::Opus && candidate.codec != media::MatroskaCodec::Vorbis &&
-                   candidate.channels > 2) {
+        } else if ((candidate.codec == media::MatroskaCodec::Aac || candidate.codec == media::MatroskaCodec::Vorbis) &&
+                   candidate.channels > 8) {
+            _audioWhy = [NSString stringWithFormat:@"%@ audio with %u channels is not played", _audioName, candidate.channels];
+        } else if (candidate.codec == media::MatroskaCodec::Mp3 && candidate.channels > 2) {
             _audioWhy = [NSString stringWithFormat:@"%@ audio with %u channels is not played", _audioName, candidate.channels];
         } else {
             _audioPlayable = YES;
@@ -488,26 +492,34 @@ CGAffineTransform Placed(CGAffineTransform linear, CGSize size)
 // MARK: - Audio
 
 @implementation WMWebMAudioReader {
-    WMWebMFile*                  _file;
+    WMWebMFile*                        _file;
     std::unique_ptr<sound::PcmDecoder> _decoder;
-    sound::PcmFormat             _format;
-    CMAudioFormatDescriptionRef  _description;
-    std::int64_t                 _startNs;
-    std::int64_t                 _offsetNs;
-    std::uint64_t                _frames;
-    std::uint64_t                _limitFrames;
-    bool                         _ended;
-    NSError*                     _error;
-    std::vector<float>           _samples;
+    sound::PcmFormat                   _sourceFormat;
+    sound::PcmFormat                   _format;
+    std::optional<sound::ChannelRemix> _remix;
+    CMAudioFormatDescriptionRef        _description;
+    std::int64_t                       _startNs;
+    std::int64_t                       _offsetNs;
+    std::uint64_t                      _frames;
+    std::uint64_t                      _limitFrames;
+    bool                               _ended;
+    NSError*                           _error;
+    std::vector<float>                 _decoded;
+    std::vector<float>                 _samples;
 }
 
 - (instancetype)initWithFile:(WMWebMFile*)file decoder:(std::unique_ptr<sound::PcmDecoder>)decoder startNs:(std::int64_t)startNs
 {
     if ((self = [super init])) {
-        _file    = file;
-        _decoder = std::move(decoder);
-        _format  = _decoder->format();
-        _startNs = startNs;
+        _file         = file;
+        _decoder      = std::move(decoder);
+        _sourceFormat = _decoder->format();
+        _format       = _sourceFormat;
+        if (_sourceFormat.channels > 2) {
+            _format.channels = 2;
+            _remix.emplace(_sourceFormat.channels, _format.channels);
+        }
+        _startNs     = startNs;
         _limitFrames = std::numeric_limits<std::uint64_t>::max();
         AudioStreamBasicDescription asbd {};
         asbd.mSampleRate       = _format.sampleRate;
@@ -519,7 +531,9 @@ CGAffineTransform Placed(CGAffineTransform linear, CGSize size)
         asbd.mFramesPerPacket  = 1;
         asbd.mBytesPerPacket   = asbd.mBytesPerFrame;
         if (CMAudioFormatDescriptionCreate(kCFAllocatorDefault, &asbd, 0, nullptr, 0, nullptr, nullptr, &_description) != noErr) return nil;
-        _samples.resize(static_cast<std::size_t>(_format.sampleRate / 10) * _format.channels);
+        const std::size_t chunkFrames = std::max<std::size_t>(1, static_cast<std::size_t>(_format.sampleRate / 10));
+        _samples.resize(chunkFrames * _format.channels);
+        if (_remix) _decoded.resize(chunkFrames * _sourceFormat.channels);
     }
     return self;
 }
@@ -561,12 +575,13 @@ CGAffineTransform Placed(CGAffineTransform linear, CGSize size)
     const std::size_t channels = _format.channels;
     std::size_t want = _samples.size() / channels;
     want = static_cast<std::size_t>(std::min<std::uint64_t>(want, _limitFrames - _frames));
-    const std::size_t got = _decoder->read(_samples.data(), want);
+    const std::size_t got = _remix ? _decoder->read(_decoded.data(), want) : _decoder->read(_samples.data(), want);
     if (got == 0) {
         _ended = true;
         if (_decoder->failed()) _error = MakeError(WMWebMErrorDamaged, _decoder->failure());
         return nullptr;
     }
+    if (_remix) _remix->apply(_decoded.data(), _samples.data(), got);
     const std::size_t bytes = got * channels * sizeof(float);
     CMBlockBufferRef block = nullptr;
     if (CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault, nullptr, bytes, kCFAllocatorDefault, nullptr, 0, bytes,

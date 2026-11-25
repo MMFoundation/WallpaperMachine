@@ -263,6 +263,26 @@ void AddColourExtensions(NSMutableDictionary* extensions, const ColourDescriptio
     if (colour.fullRange) extensions[(__bridge NSString*)kCMFormatDescriptionExtension_FullRangeVideo] = @YES;
 }
 
+void AddHdrMetadataExtensions(NSMutableDictionary* extensions, const VideoStreamInfo& info)
+{
+    if (info.masteringDisplayColorVolume) {
+        const auto& mdcv = *info.masteringDisplayColorVolume;
+        CFDataRef   data = CFDataCreate(kCFAllocatorDefault, mdcv.data(), static_cast<CFIndex>(mdcv.size()));
+        if (data != nullptr) {
+            extensions[(__bridge NSString*)kCMFormatDescriptionExtension_MasteringDisplayColorVolume] = (__bridge NSData*)data;
+            CFRelease(data);
+        }
+    }
+    if (info.contentLightLevelInfo) {
+        const auto& clli = *info.contentLightLevelInfo;
+        CFDataRef   data = CFDataCreate(kCFAllocatorDefault, clli.data(), static_cast<CFIndex>(clli.size()));
+        if (data != nullptr) {
+            extensions[(__bridge NSString*)kCMFormatDescriptionExtension_ContentLightLevelInfo] = (__bridge NSData*)data;
+            CFRelease(data);
+        }
+    }
+}
+
 // --- vpcC ------------------------------------------------------------------------
 
 /// A level that covers `width x height`; WebM does not state one and the decoder only needs a plausible value.
@@ -433,6 +453,7 @@ bool MakeStreamFormat(const VideoStreamInfo& info, const Vp9FrameHeader* vp9, co
         const ColourDescription colour = ColourOf(info, vp9);
         NSMutableDictionary* extensions = [NSMutableDictionary dictionary];
         AddColourExtensions(extensions, colour);
+        AddHdrMetadataExtensions(extensions, info);
 
         FormatDescription description;
         const NSString* atomsKey = (__bridge NSString*)kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms;

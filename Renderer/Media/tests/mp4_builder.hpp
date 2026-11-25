@@ -162,6 +162,19 @@ inline Bytes Pasp(std::uint32_t horizontal, std::uint32_t vertical)
     return Box("pasp", out);
 }
 
+inline Bytes Mdcv(const std::array<std::uint8_t, 24>& payload)
+{
+    return Box("mdcv", Bytes(payload.begin(), payload.end()));
+}
+
+inline Bytes Clli(std::uint16_t maxContentLightLevel, std::uint16_t maxFrameAverageLightLevel)
+{
+    Bytes out;
+    Put16(out, maxContentLightLevel);
+    Put16(out, maxFrameAverageLightLevel);
+    return Box("clli", out);
+}
+
 struct SampleSpec {
     std::uint32_t size { 10 };
     std::uint32_t delta { 40 };

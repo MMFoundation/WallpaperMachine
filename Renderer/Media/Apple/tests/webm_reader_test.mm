@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -253,6 +254,85 @@ TEST(WebMReaderTest, AnAudioTrackThatCannotBeDecodedIsReportedAndLeftOut)
     EXPECT_NE(file.audioUnavailableReason, nil);
     EXPECT_EQ([file makeAudioReaderWithError:&error], nil);
     EXPECT_EQ(error.code, WMWebMErrorUnsupportedFormat);
+}
+
+TEST(WebMReaderTest, MultiChannelAacAndVorbisTracksDownmixToStereo)
+{
+    auto drainStereo = [](WMWebMAudioReader* audio) {
+        std::vector<float> samples;
+        while (CMSampleBufferRef buffer = [audio copyNextSampleBuffer]) {
+            CMBlockBufferRef block = CMSampleBufferGetDataBuffer(buffer);
+            EXPECT_NE(block, nullptr);
+            if (block != nullptr) {
+                const std::size_t bytes = CMBlockBufferGetDataLength(block);
+                const std::size_t start = samples.size();
+                samples.resize(start + bytes / sizeof(float));
+                EXPECT_EQ(CMBlockBufferCopyDataBytes(block, 0, bytes, samples.data() + start), kCMBlockBufferNoErr);
+            }
+            CFRelease(buffer);
+        }
+        return samples;
+    };
+
+    auto verifyFiveDotOne = [&](WMWebMFile* file, const char* expectedCodec) {
+        ASSERT_NE(file, nil);
+        EXPECT_TRUE(file.hasPlayableAudio) << expectedCodec;
+        EXPECT_STREQ(file.audioCodecName.UTF8String, expectedCodec);
+        EXPECT_EQ(file.audioUnavailableReason, nil) << expectedCodec;
+
+        NSError* error = nil;
+        WMWebMAudioReader* audio = [file makeAudioReaderWithError:&error];
+        ASSERT_NE(audio, nil) << expectedCodec << ": " << error.localizedDescription.UTF8String;
+        EXPECT_EQ(audio.sampleRate, 48000);
+        EXPECT_EQ(audio.channelCount, 2);
+        const AudioStreamBasicDescription* asbd = CMAudioFormatDescriptionGetStreamBasicDescription(audio.formatDescription);
+        ASSERT_NE(asbd, nullptr);
+        EXPECT_EQ(asbd->mChannelsPerFrame, 2u);
+
+        const std::vector<float> pcm = drainStereo(audio);
+        EXPECT_TRUE(audio.atEnd);
+        EXPECT_EQ(audio.error, nil);
+        const std::size_t frames = pcm.size() / 2;
+        ASSERT_GT(frames, 12000u) << expectedCodec;
+
+        // The 5.1 fixtures carry 440 Hz @ 0.5 on Front Center and 80 Hz @ 0.4 on LFE.
+        // Downmixing via ChannelRemix folds FC into L and R at -3 dB (~0.354) and drops LFE.
+        const std::size_t from = 2000;
+        const std::size_t to   = frames - 2000;
+        float peakL = 0.0f;
+        float peakR = 0.0f;
+        std::size_t crossingsL = 0;
+        std::size_t crossingsR = 0;
+        for (std::size_t frame = from; frame < to; ++frame) {
+            peakL = std::max(peakL, std::fabs(pcm[frame * 2]));
+            peakR = std::max(peakR, std::fabs(pcm[frame * 2 + 1]));
+            if (frame > from) {
+                if ((pcm[(frame - 1) * 2] < 0) != (pcm[frame * 2] < 0)) ++crossingsL;
+                if ((pcm[(frame - 1) * 2 + 1] < 0) != (pcm[frame * 2 + 1] < 0)) ++crossingsR;
+            }
+        }
+        const double hzL = static_cast<double>(crossingsL) / 2.0 / (static_cast<double>(to - from) / 48000.0);
+        const double hzR = static_cast<double>(crossingsR) / 2.0 / (static_cast<double>(to - from) / 48000.0);
+        EXPECT_NEAR(peakL, 0.354f, 0.06f) << expectedCodec;
+        EXPECT_NEAR(peakR, 0.354f, 0.06f) << expectedCodec;
+        EXPECT_NEAR(peakL, peakR, 0.02f) << expectedCodec;
+        EXPECT_NEAR(hzL, 440.0, 10.0) << expectedCodec;
+        EXPECT_NEAR(hzR, 440.0, 10.0) << expectedCodec;
+
+        // Rewinding repeats the downmixed stereo stream identically.
+        [audio rewindWithTimeOffset:kCMTimeZero limit:kCMTimeInvalid];
+        EXPECT_EQ(drainStereo(audio), pcm) << expectedCodec;
+    };
+
+    NSError* error = nil;
+    WMWebMFile* aacFile = Open(wallpaper::sound::fixtures::kAac51Matroska, &error);
+    ASSERT_NE(aacFile, nil) << error.localizedDescription.UTF8String;
+    verifyFiveDotOne(aacFile, "AAC");
+
+    error = nil;
+    WMWebMFile* vorbisFile = Open(wallpaper::sound::fixtures::kVorbis51Webm, &error);
+    ASSERT_NE(vorbisFile, nil) << error.localizedDescription.UTF8String;
+    verifyFiveDotOne(vorbisFile, "Vorbis");
 }
 
 TEST(WebMReaderTest, RefusesFormatsThisMacDoesNotPlayAndNamesThem)

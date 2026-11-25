@@ -1,8 +1,10 @@
 // The audio of Matroska and WebM files as PCM: Opus, AAC and Vorbis tracks of real
 // encoder output, the Ogg framing Vorbis needs, Opus trimming and refusals. Nothing
 // plays: samples are read from the decoder and measured.
+#include "Sound/ChannelRemix.hpp"
 #include "Sound/Matroska/MatroskaAudio.hpp"
 #include "Sound/Matroska/OggVorbisFraming.hpp"
+#include "Sound/PcmPipeline.hpp"
 #include "Sound/Vorbis/VorbisDecoder.hpp"
 
 #include "Media/tests/mkv_builder.hpp"
@@ -80,6 +82,41 @@ float Peak(const Decoded& decoded, std::size_t from, std::size_t to)
     float peak = 0;
     for (std::size_t at = from * decoded.format.channels; at < to * decoded.format.channels; ++at) peak = std::max(peak, std::fabs(decoded.samples[at]));
     return peak;
+}
+
+float ChannelPeak(const Decoded& decoded, std::uint32_t channel, std::size_t from, std::size_t to)
+{
+    float peak = 0;
+    for (std::size_t at = from; at < to; ++at) {
+        peak = std::max(peak, std::fabs(decoded.samples[at * decoded.format.channels + channel]));
+    }
+    return peak;
+}
+
+double ChannelToneHz(const Decoded& decoded, std::uint32_t channel, std::size_t from, std::size_t to)
+{
+    std::size_t crossings = 0;
+    for (std::size_t at = from + 1; at < to; ++at) {
+        const float before = decoded.samples[(at - 1) * decoded.format.channels + channel];
+        const float after  = decoded.samples[at * decoded.format.channels + channel];
+        if ((before < 0) != (after < 0)) ++crossings;
+    }
+    return static_cast<double>(crossings) / 2.0 / (static_cast<double>(to - from) / decoded.format.sampleRate);
+}
+
+Decoded DownmixViaPipeline(std::unique_ptr<PcmDecoder> decoder)
+{
+    const PcmFormat target { 2, decoder->format().sampleRate };
+    PcmPipeline     pipeline(std::move(decoder), target, false);
+    Decoded         out;
+    out.format = target;
+    std::vector<float> buffer(1000 * target.channels);
+    for (;;) {
+        const std::size_t got = pipeline.read(buffer.data(), 1000);
+        if (got == 0) break;
+        out.samples.insert(out.samples.end(), buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(got * target.channels));
+    }
+    return out;
 }
 
 // --- Opus packet durations -----------------------------------------------------
@@ -230,6 +267,46 @@ TEST(MatroskaAudioTest, DecodesAnAacTrack)
     EXPECT_NEAR(ToneHz(decoded, 4000, 20000), 440.0, 10.0);
 }
 
+TEST(MatroskaAudioTest, DecodesFiveDotOneAacInNativeOrderAndDownmixesToStereo)
+{
+    auto reader = OpenClip(fixtures::kAac51Matroska);
+    ASSERT_NE(reader, nullptr);
+    std::string error;
+    auto        decoder = OpenMatroskaAudio(reader, AudioTrackOf(*reader), &error);
+    ASSERT_NE(decoder, nullptr) << error;
+    EXPECT_EQ(decoder->format(), (PcmFormat { 6, 48000 }));
+
+    const Decoded raw = DecodeAll(*decoder);
+    ASSERT_GT(raw.frames(), 12000u);
+    EXPECT_FALSE(decoder->failed()) << decoder->failure();
+    // Native WAV 5.1 order (FL, FR, FC, LFE, SL, SR): FC carries 440 Hz @ 0.5, LFE carries 80 Hz @ 0.4, others silent.
+    const std::size_t from = 2000;
+    const std::size_t to   = raw.frames() - 2000;
+    EXPECT_LT(ChannelPeak(raw, 0, from, to), 0.05f);
+    EXPECT_LT(ChannelPeak(raw, 1, from, to), 0.05f);
+    const float fcPeak = ChannelPeak(raw, 2, from, to);
+    EXPECT_NEAR(fcPeak, 0.5f, 0.08f);
+    EXPECT_NEAR(ChannelToneHz(raw, 2, from, to), 440.0, 10.0);
+    EXPECT_NEAR(ChannelPeak(raw, 3, from, to), 0.4f, 0.08f);
+    EXPECT_NEAR(ChannelToneHz(raw, 3, from, to), 80.0, 10.0);
+    EXPECT_LT(ChannelPeak(raw, 4, from, to), 0.05f);
+    EXPECT_LT(ChannelPeak(raw, 5, from, to), 0.05f);
+
+    // Rewinding recreates the converter with the same native channel layout.
+    ASSERT_TRUE(decoder->rewind());
+    EXPECT_EQ(DecodeAll(*decoder, 777).samples, raw.samples);
+
+    // Folding 5.1 to stereo via PcmPipeline/ChannelRemix maps FC at -3 dB into both L and R and drops LFE.
+    ASSERT_TRUE(decoder->rewind());
+    const Decoded stereo = DownmixViaPipeline(std::move(decoder));
+    ASSERT_EQ(stereo.frames(), raw.frames());
+    const float expectedStereoPeak = fcPeak * 0.70710678f;
+    EXPECT_NEAR(ChannelPeak(stereo, 0, from, to), expectedStereoPeak, 0.02f);
+    EXPECT_NEAR(ChannelPeak(stereo, 1, from, to), expectedStereoPeak, 0.02f);
+    EXPECT_NEAR(ChannelToneHz(stereo, 0, from, to), 440.0, 10.0);
+    EXPECT_NEAR(ChannelToneHz(stereo, 1, from, to), 440.0, 10.0);
+}
+
 TEST(MatroskaAudioTest, DecodesAnMp3Track)
 {
     auto reader = OpenClip(fixtures::kMp3Matroska);
@@ -258,6 +335,45 @@ TEST(MatroskaAudioTest, DecodesAVorbisTrackThroughOggFraming)
     EXPECT_NEAR(ToneHz(decoded, 3000, 19000), 440.0, 10.0);
     ASSERT_TRUE(decoder->rewind());
     EXPECT_EQ(DecodeAll(*decoder).samples, decoded.samples);
+}
+
+TEST(MatroskaAudioTest, DecodesFiveDotOneVorbisInNativeOrderAndDownmixesToStereo)
+{
+    auto reader = OpenClip(fixtures::kVorbis51Webm);
+    ASSERT_NE(reader, nullptr);
+    std::string error;
+    auto        decoder = OpenMatroskaAudio(reader, AudioTrackOf(*reader), &error);
+    ASSERT_NE(decoder, nullptr) << error;
+    EXPECT_EQ(decoder->format(), (PcmFormat { 6, 48000 }));
+
+    const Decoded raw = DecodeAll(*decoder);
+    ASSERT_GT(raw.frames(), 12000u);
+    EXPECT_FALSE(decoder->failed()) << decoder->failure();
+    // Vorbis 5.1 (FL, FC, FR, RL, RR, LFE) is reordered to WAV 5.1 (FL, FR, FC, LFE, SL, SR).
+    const std::size_t from = 2000;
+    const std::size_t to   = raw.frames() - 2000;
+    EXPECT_LT(ChannelPeak(raw, 0, from, to), 0.05f);
+    EXPECT_LT(ChannelPeak(raw, 1, from, to), 0.05f);
+    const float fcPeak = ChannelPeak(raw, 2, from, to);
+    EXPECT_NEAR(fcPeak, 0.5f, 0.08f);
+    EXPECT_NEAR(ChannelToneHz(raw, 2, from, to), 440.0, 10.0);
+    EXPECT_NEAR(ChannelPeak(raw, 3, from, to), 0.4f, 0.08f);
+    EXPECT_NEAR(ChannelToneHz(raw, 3, from, to), 80.0, 10.0);
+    EXPECT_LT(ChannelPeak(raw, 4, from, to), 0.05f);
+    EXPECT_LT(ChannelPeak(raw, 5, from, to), 0.05f);
+
+    ASSERT_TRUE(decoder->rewind());
+    EXPECT_EQ(DecodeAll(*decoder, 777).samples, raw.samples);
+
+    // Folding 5.1 to stereo via PcmPipeline/ChannelRemix maps FC at -3 dB into both L and R and drops LFE.
+    ASSERT_TRUE(decoder->rewind());
+    const Decoded stereo = DownmixViaPipeline(std::move(decoder));
+    ASSERT_EQ(stereo.frames(), raw.frames());
+    const float expectedStereoPeak = fcPeak * 0.70710678f;
+    EXPECT_NEAR(ChannelPeak(stereo, 0, from, to), expectedStereoPeak, 0.02f);
+    EXPECT_NEAR(ChannelPeak(stereo, 1, from, to), expectedStereoPeak, 0.02f);
+    EXPECT_NEAR(ChannelToneHz(stereo, 0, from, to), 440.0, 10.0);
+    EXPECT_NEAR(ChannelToneHz(stereo, 1, from, to), 440.0, 10.0);
 }
 
 /// The packets of the Ogg Vorbis fixture: split the pages' segments into packets.

@@ -12,6 +12,7 @@
 #include "Media/IsoBmff/IsoBmffReader.hpp"
 #include "Media/Matroska/MatroskaReader.hpp"
 #include "Media/SampleOrder.hpp"
+#include "Media/tests/mp4_builder.hpp"
 #include "embedded_clips.hpp"
 #include "synthetic_video.hpp"
 
@@ -25,9 +26,11 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -988,6 +991,77 @@ TEST_F(VtFrameDecoderTest, AStatedContentLightLevelIsReportedWhereTheDecoderCarr
     const auto* bytes = CFDataGetBytePtr(static_cast<CFDataRef>(light));
     EXPECT_EQ(bytes[0] << 8 | bytes[1], 600);
     CFRelease(light);
+}
+
+TEST_F(VtFrameDecoderTest, ForwardsMdcvAndClliExtensionsToVideoFormatDescription)
+{
+    const std::array<std::uint8_t, 24> expectedMdcv {
+        0x34, 0x58, 0x86, 0xC4, 0x1D, 0x4C, 0x0B, 0xB8, 0x8A, 0x48, 0x39, 0x08,
+        0x3D, 0x13, 0x40, 0x42, 0x00, 0x98, 0x96, 0x80, 0x00, 0x00, 0x00, 0x32,
+    };
+    const std::array<std::uint8_t, 4> expectedClli { 0x03, 0xE8, 0x01, 0x90 };  // 1000 / 400 nits
+
+    // Use a real hvcC record from the embedded HEVC clip wrapped in an MP4 carrying colr + mdcv + clli.
+    Error sourceError;
+    auto  hevcSource = IsoBmffReader::Open(
+        MakeMemoryByteSource(std::vector<std::uint8_t>(tm::kHevcFullRangeMp4, tm::kHevcFullRangeMp4 + sizeof(tm::kHevcFullRangeMp4))),
+        &sourceError);
+    ASSERT_NE(hevcSource, nullptr) << Describe(sourceError);
+
+    namespace mt = wallpaper::media::testing;
+    mt::Mp4Spec spec;
+    spec.entry         = "hvc1";
+    spec.width         = hevcSource->info().codedWidth;
+    spec.height        = hevcSource->info().codedHeight;
+    spec.config        = hevcSource->info().codecConfig;
+    spec.samples       = mt::Samples(2);
+    spec.entryChildren = { mt::ColrNclx(9, 16, 9, false), mt::Mdcv(expectedMdcv), mt::Clli(1000, 400) };
+
+    Error openError;
+    auto  reader = IsoBmffReader::Open(MakeMemoryByteSource(mt::BuildMp4(spec).bytes), &openError);
+    ASSERT_NE(reader, nullptr) << Describe(openError);
+    ASSERT_EQ(reader->info().masteringDisplayColorVolume, std::optional { expectedMdcv });
+    ASSERT_EQ(reader->info().contentLightLevelInfo, std::optional { expectedClli });
+
+    StreamFormat format;
+    std::string  why;
+    ASSERT_TRUE(MakeStreamFormat(reader->info(), nullptr, nullptr, 0, &format, &why)) << why;
+    auto* desc = static_cast<CMVideoFormatDescriptionRef>(format.description.get());
+    ASSERT_NE(desc, nullptr);
+
+    // Colour extensions remain present alongside the HDR mastering and light-level extensions.
+    CFTypeRef primaries = CMFormatDescriptionGetExtension(desc, kCMFormatDescriptionExtension_ColorPrimaries);
+    CFTypeRef transfer  = CMFormatDescriptionGetExtension(desc, kCMFormatDescriptionExtension_TransferFunction);
+    CFTypeRef matrix    = CMFormatDescriptionGetExtension(desc, kCMFormatDescriptionExtension_YCbCrMatrix);
+    ASSERT_NE(primaries, nullptr);
+    ASSERT_NE(transfer, nullptr);
+    ASSERT_NE(matrix, nullptr);
+    EXPECT_TRUE(CFEqual(primaries, kCMFormatDescriptionColorPrimaries_ITU_R_2020));
+    EXPECT_TRUE(CFEqual(transfer, kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ));
+    EXPECT_TRUE(CFEqual(matrix, kCMFormatDescriptionYCbCrMatrix_ITU_R_2020));
+
+    CFTypeRef mdcvExt = CMFormatDescriptionGetExtension(desc, kCMFormatDescriptionExtension_MasteringDisplayColorVolume);
+    ASSERT_NE(mdcvExt, nullptr);
+    ASSERT_EQ(CFGetTypeID(mdcvExt), CFDataGetTypeID());
+    ASSERT_EQ(CFDataGetLength(static_cast<CFDataRef>(mdcvExt)), 24);
+    EXPECT_EQ(std::memcmp(CFDataGetBytePtr(static_cast<CFDataRef>(mdcvExt)), expectedMdcv.data(), expectedMdcv.size()), 0);
+
+    CFTypeRef clliExt = CMFormatDescriptionGetExtension(desc, kCMFormatDescriptionExtension_ContentLightLevelInfo);
+    ASSERT_NE(clliExt, nullptr);
+    ASSERT_EQ(CFGetTypeID(clliExt), CFDataGetTypeID());
+    ASSERT_EQ(CFDataGetLength(static_cast<CFDataRef>(clliExt)), 4);
+    EXPECT_EQ(std::memcmp(CFDataGetBytePtr(static_cast<CFDataRef>(clliExt)), expectedClli.data(), expectedClli.size()), 0);
+
+    // Absent mdcv/clli boxes must not attach empty or stale extensions.
+    VideoStreamInfo withoutHdr = reader->info();
+    withoutHdr.masteringDisplayColorVolume.reset();
+    withoutHdr.contentLightLevelInfo.reset();
+    StreamFormat plainFormat;
+    ASSERT_TRUE(MakeStreamFormat(withoutHdr, nullptr, nullptr, 0, &plainFormat, &why)) << why;
+    auto* plainDesc = static_cast<CMVideoFormatDescriptionRef>(plainFormat.description.get());
+    ASSERT_NE(plainDesc, nullptr);
+    EXPECT_EQ(CMFormatDescriptionGetExtension(plainDesc, kCMFormatDescriptionExtension_MasteringDisplayColorVolume), nullptr);
+    EXPECT_EQ(CMFormatDescriptionGetExtension(plainDesc, kCMFormatDescriptionExtension_ContentLightLevelInfo), nullptr);
 }
 
 } // namespace

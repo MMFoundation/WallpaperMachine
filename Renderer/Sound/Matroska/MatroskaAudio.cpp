@@ -106,6 +106,36 @@ std::unique_ptr<PcmDecoder> OpenVorbis(const std::shared_ptr<media::MatroskaRead
 
 // 'nomo': what the supply function answers when the converter asks for input past the one packet.
 constexpr OSStatus kNoMoreInput = static_cast<OSStatus>(0x6E6F6D6F);
+constexpr UInt32   kMaxAacChannels = 8;
+
+/// Maps an AudioToolbox AAC multi-channel input layout tag to the matching WAV/native
+/// layout tag so decoded PCM matches `ChannelRemix`'s channel order (FL FR FC LFE ...).
+/// Returns 0 when no reordering is needed or the input layout is non-standard.
+AudioChannelLayoutTag NativeAacOutputLayoutTag(UInt32 channels, AudioChannelLayoutTag inputTag)
+{
+    switch (channels) {
+    case 3:
+        if (inputTag == kAudioChannelLayoutTag_AAC_3_0) return kAudioChannelLayoutTag_MPEG_3_0_A;
+        return 0;
+    case 4:
+        if (inputTag == kAudioChannelLayoutTag_AAC_4_0) return kAudioChannelLayoutTag_MPEG_4_0_A;
+        return 0;
+    case 5:
+        if (inputTag == kAudioChannelLayoutTag_AAC_5_0) return kAudioChannelLayoutTag_MPEG_5_0_A;
+        return 0;
+    case 6:
+        if (inputTag == kAudioChannelLayoutTag_AAC_5_1) return kAudioChannelLayoutTag_MPEG_5_1_A;
+        return 0;
+    case 7:
+        if (inputTag == kAudioChannelLayoutTag_AAC_6_1) return kAudioChannelLayoutTag_WAVE_6_1;
+        return 0;
+    case 8:
+        if (inputTag == kAudioChannelLayoutTag_AAC_7_1_B) return kAudioChannelLayoutTag_WAVE_7_1;
+        if (inputTag == kAudioChannelLayoutTag_AAC_7_1) return kAudioChannelLayoutTag_MPEG_7_1_A;
+        return 0;
+    default: return 0;
+    }
+}
 
 /// One Matroska audio track decoded packet by packet with an AudioToolbox converter.
 class PacketDecoder final : public PcmDecoder {
@@ -137,6 +167,24 @@ public:
         if (!m_config.cookie.empty()) {
             AudioConverterSetProperty(m_converter, kAudioConverterDecompressionMagicCookie,
                                       static_cast<UInt32>(m_config.cookie.size()), m_config.cookie.data());
+        }
+        if (m_config.input.mFormatID == kAudioFormatMPEG4AAC && m_format.channels > 2) {
+            UInt32 layoutSize = 0;
+            if (AudioConverterGetPropertyInfo(m_converter, kAudioConverterInputChannelLayout, &layoutSize, nullptr) == noErr &&
+                layoutSize >= sizeof(AudioChannelLayout)) {
+                std::vector<std::uint8_t> layoutBytes(layoutSize);
+                if (AudioConverterGetProperty(m_converter, kAudioConverterInputChannelLayout, &layoutSize, layoutBytes.data()) == noErr) {
+                    AudioChannelLayout inputLayout {};
+                    std::memcpy(&inputLayout, layoutBytes.data(), sizeof(inputLayout));
+                    const AudioChannelLayoutTag outTag = NativeAacOutputLayoutTag(m_format.channels, inputLayout.mChannelLayoutTag);
+                    if (outTag != 0) {
+                        AudioChannelLayout outputLayout {};
+                        outputLayout.mChannelLayoutTag = outTag;
+                        AudioConverterSetProperty(m_converter, kAudioConverterOutputChannelLayout,
+                                                  static_cast<UInt32>(sizeof(outputLayout)), &outputLayout);
+                    }
+                }
+            }
         }
         m_calibrated = false;
         return noErr;
@@ -375,7 +423,8 @@ std::unique_ptr<PcmDecoder> OpenPacketDecoder(const std::shared_ptr<media::Matro
         break;
     default: return Fail(error, "audio codec " + track.codecId + " is not decoded");
     }
-    if (input.mSampleRate < 8000 || input.mSampleRate > 192000 || input.mChannelsPerFrame < 1 || input.mChannelsPerFrame > 2) {
+    const UInt32 maxChannels = track.codec == media::MatroskaCodec::Aac ? kMaxAacChannels : 2U;
+    if (input.mSampleRate < 8000 || input.mSampleRate > 192000 || input.mChannelsPerFrame < 1 || input.mChannelsPerFrame > maxChannels) {
         return Fail(error, track.codecId + " audio with " + std::to_string(input.mChannelsPerFrame) + " channels at " +
                                std::to_string(static_cast<long>(input.mSampleRate)) + " Hz is not decoded");
     }

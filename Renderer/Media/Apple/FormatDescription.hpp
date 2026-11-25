@@ -1,6 +1,7 @@
 // Turns what a container reader reports about a video track into what
 // VideoToolbox needs to decode it: a CMVideoFormatDescription carrying the
-// codec's configuration record, the colour description, and the pixel format
+// codec's configuration record, the colour description, any HDR mastering
+// display / content light level metadata (`mdcv` / `clli`), and the pixel format
 // the decoded frames should arrive in. This is the Apple side of the
 // container readers: ObjC++ over Core Media, written from Apple's headers and
 // the codec bindings (ISO/IEC 14496-15, the AV1 and VP9 ISO-BMFF bindings).

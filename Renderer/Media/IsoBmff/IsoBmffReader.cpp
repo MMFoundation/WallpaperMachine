@@ -5,6 +5,8 @@
 #include "Media/CodecConfig.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <limits>
 #include <set>
 #include <utility>
@@ -42,6 +44,8 @@ constexpr std::uint32_t kVide = FourCC('v', 'i', 'd', 'e');
 constexpr std::uint32_t kColr = FourCC('c', 'o', 'l', 'r');
 constexpr std::uint32_t kNclx = FourCC('n', 'c', 'l', 'x');
 constexpr std::uint32_t kNclc = FourCC('n', 'c', 'l', 'c');
+constexpr std::uint32_t kMdcv = FourCC('m', 'd', 'c', 'v');
+constexpr std::uint32_t kClli = FourCC('c', 'l', 'l', 'i');
 constexpr std::uint32_t kPasp = FourCC('p', 'a', 's', 'p');
 constexpr std::uint32_t kAvcC = FourCC('a', 'v', 'c', 'C');
 constexpr std::uint32_t kHvcC = FourCC('h', 'v', 'c', 'C');
@@ -827,6 +831,20 @@ private:
                 }
                 break;
             case kColr: parseColr(child); break;
+            case kMdcv:
+                if (! info.masteringDisplayColorVolume && child.payload.size() == 24) {
+                    std::array<std::uint8_t, 24> mdcv {};
+                    std::memcpy(mdcv.data(), child.payload.cursor(), mdcv.size());
+                    info.masteringDisplayColorVolume = mdcv;
+                }
+                break;
+            case kClli:
+                if (! info.contentLightLevelInfo && child.payload.size() == 4) {
+                    std::array<std::uint8_t, 4> clli {};
+                    std::memcpy(clli.data(), child.payload.cursor(), clli.size());
+                    info.contentLightLevelInfo = clli;
+                }
+                break;
             case kPasp: {
                 const std::uint32_t horizontal = child.payload.U32();
                 const std::uint32_t vertical   = child.payload.U32();

@@ -1,7 +1,8 @@
 // The sound of a Matroska or WebM file's audio track as PCM, through the same
 // `PcmDecoder` interface the scene sounds use: interleaved 32-bit float frames at
-// the track's own channel count and sample rate, back to the first frame on
-// `rewind()`.
+// the track's own channel count (up to 8 channels in WAV/native channel order for
+// AAC and Vorbis; mono or stereo for Opus and MP3) and sample rate, back to the
+// first frame on `rewind()`.
 //
 // Opus, AAC and MP3 packets are decoded one at a time by an AudioToolbox converter.
 // Vorbis has no system decoder, so its packets are put into an in-memory Ogg stream

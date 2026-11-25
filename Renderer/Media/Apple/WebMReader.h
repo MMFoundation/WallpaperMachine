@@ -76,8 +76,9 @@ NS_SWIFT_NAME(WebMFile)
 @property (nonatomic, readonly, copy) NSArray<NSString *> *warnings;
 
 /// Whether the file has an audio track this reader can decode: the codec is Opus, Vorbis,
-/// AAC or MP3, and Opus is mono or stereo. `audioCodecName` is "Opus", "Vorbis", "AAC" or
-/// "MP3" for any audio track the file has, decodable or not.
+/// AAC or MP3, Opus and MP3 are mono or stereo, and AAC and Vorbis have at most 8 channels
+/// (tracks with more than two channels are folded down to stereo). `audioCodecName` is
+/// "Opus", "Vorbis", "AAC" or "MP3" for any audio track the file has, decodable or not.
 @property (nonatomic, readonly) BOOL hasPlayableAudio;
 @property (nonatomic, readonly, nullable, copy) NSString *audioCodecName;
 /// Why the audio is not played, when the file has an audio track that is not decodable.
@@ -120,6 +121,7 @@ NS_SWIFT_NAME(WebMVideoReader)
 @end
 
 /// The audio track decoded to float PCM, as sample buffers of about a tenth of a second.
+/// Multi-channel AAC and Vorbis tracks (3 to 8 channels) are folded down to stereo.
 NS_SWIFT_NAME(WebMAudioReader)
 @interface WMWebMAudioReader : NSObject
 

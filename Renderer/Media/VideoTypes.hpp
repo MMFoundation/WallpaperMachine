@@ -7,7 +7,9 @@
 #include "Media/DisplayMatrix.hpp"
 #include "Media/Rational.hpp"
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -73,6 +75,12 @@ struct VideoStreamInfo {
     Rational pixelAspect;
 
     ColourDescription colour;
+    /// Raw 24-byte payload of an ISO-BMFF `mdcv` (Mastering Display Color Volume,
+    /// SMPTE ST 2086) box, verbatim big-endian bytes; nullopt when absent or malformed.
+    std::optional<std::array<std::uint8_t, 24>> masteringDisplayColorVolume;
+    /// Raw 4-byte payload of an ISO-BMFF `clli` (Content Light Level Information,
+    /// CTA-861.3) box, verbatim big-endian bytes; nullopt when absent or malformed.
+    std::optional<std::array<std::uint8_t, 4>> contentLightLevelInfo;
     /// Bits per luma sample if the codec configuration says, else 0.
     std::uint8_t bitDepth { 0 };
 

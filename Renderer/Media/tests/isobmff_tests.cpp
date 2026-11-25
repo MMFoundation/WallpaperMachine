@@ -118,6 +118,8 @@ TEST(IsoBmffReader, ReadsTheSampleTableAndStreamDescriptionOfAPlainFile)
     EXPECT_EQ(info.minFramePeriod, MakeRational(1, 25));
     EXPECT_EQ(info.avgFramePeriod, MakeRational(1, 25));
     EXPECT_FALSE(info.colour.present());
+    EXPECT_FALSE(info.masteringDisplayColorVolume.has_value());
+    EXPECT_FALSE(info.contentLightLevelInfo.has_value());
     EXPECT_FALSE(info.pixelAspect.valid());
     EXPECT_EQ(info.displayMatrix, kIdentityDisplayMatrix);
     EXPECT_EQ(reader->majorBrand(), FourCC('i', 's', 'o', 'm'));
@@ -335,6 +337,95 @@ TEST(IsoBmffReader, ReadsColrNclxNclcAndPasp)
     reader             = OpenSpec(spec);
     ASSERT_NE(reader, nullptr);
     EXPECT_FALSE(reader->info().pixelAspect.valid());
+}
+
+TEST(IsoBmffReader, ReadsMdcvAndClliFromVisualSampleEntries)
+{
+    // DCI-P3 D65 primaries in SMPTE ST 2086 (G, B, R, white point), 1000 nits max / 0.005 nits min.
+    const std::array<std::uint8_t, 24> expectedMdcv {
+        0x34, 0x58, 0x86, 0xC4, 0x1D, 0x4C, 0x0B, 0xB8, 0x8A, 0x48, 0x39, 0x08,
+        0x3D, 0x13, 0x40, 0x42, 0x00, 0x98, 0x96, 0x80, 0x00, 0x00, 0x00, 0x32,
+    };
+    const std::array<std::uint8_t, 4> expectedClli { 0x03, 0xE8, 0x01, 0x90 };  // 1000 / 400 nits
+
+    for (const std::string& entry : { std::string("avc1"), std::string("hvc1"), std::string("hev1"),
+                                      std::string("av01"), std::string("vp09") }) {
+        Mp4Spec spec;
+        spec.entry   = entry;
+        spec.samples = Samples(3);
+        if (entry == "hvc1" || entry == "hev1") spec.config = HvcC(10);
+        else if (entry == "av01") spec.config = Av1C(10);
+        else if (entry == "vp09") spec.config = VpcC(10, false, 9, 16, 9);
+        spec.entryChildren = { ColrNclx(9, 16, 9, false), Mdcv(expectedMdcv), Clli(1000, 400) };
+
+        Error error;
+        auto  reader = OpenSpec(spec, nullptr, &error);
+        ASSERT_NE(reader, nullptr) << entry << ": " << Describe(error);
+        ASSERT_TRUE(reader->info().masteringDisplayColorVolume.has_value()) << entry;
+        EXPECT_EQ(*reader->info().masteringDisplayColorVolume, expectedMdcv) << entry;
+        ASSERT_TRUE(reader->info().contentLightLevelInfo.has_value()) << entry;
+        EXPECT_EQ(*reader->info().contentLightLevelInfo, expectedClli) << entry;
+    }
+
+    // Absent mdcv/clli boxes leave both optionals empty.
+    Mp4Spec plain;
+    plain.entry         = "hvc1";
+    plain.config        = HvcC(10);
+    plain.samples       = Samples(3);
+    plain.entryChildren = { ColrNclx(9, 16, 9, false) };
+    auto reader         = OpenSpec(plain);
+    ASSERT_NE(reader, nullptr);
+    EXPECT_FALSE(reader->info().masteringDisplayColorVolume.has_value());
+    EXPECT_FALSE(reader->info().contentLightLevelInfo.has_value());
+}
+
+TEST(IsoBmffReader, MalformedLengthMdcvAndClliBoxesAreGracefullyIgnored)
+{
+    const std::array<std::uint8_t, 24> validMdcv {
+        0x34, 0x58, 0x86, 0xC4, 0x1D, 0x4C, 0x0B, 0xB8, 0x8A, 0x48, 0x39, 0x08,
+        0x3D, 0x13, 0x40, 0x42, 0x00, 0x98, 0x96, 0x80, 0x00, 0x00, 0x00, 0x32,
+    };
+    const std::array<std::uint8_t, 4> validClli { 0x02, 0x58, 0x00, 0xC8 };  // 600 / 200 nits
+
+    for (const std::size_t badLen : { std::size_t { 0 }, std::size_t { 4 }, std::size_t { 23 }, std::size_t { 25 } }) {
+        Mp4Spec spec;
+        spec.entry         = "hvc1";
+        spec.config        = HvcC(10);
+        spec.samples       = Samples(3);
+        spec.entryChildren = { Box("mdcv", Bytes(badLen, 0xAB)), Clli(600, 200) };
+        Error error;
+        auto  reader = OpenSpec(spec, nullptr, &error);
+        ASSERT_NE(reader, nullptr) << "mdcv len " << badLen << ": " << Describe(error);
+        EXPECT_FALSE(reader->info().masteringDisplayColorVolume.has_value()) << "mdcv len " << badLen;
+        ASSERT_TRUE(reader->info().contentLightLevelInfo.has_value()) << "mdcv len " << badLen;
+        EXPECT_EQ(*reader->info().contentLightLevelInfo, validClli) << "mdcv len " << badLen;
+    }
+
+    for (const std::size_t badLen : { std::size_t { 0 }, std::size_t { 2 }, std::size_t { 3 }, std::size_t { 5 }, std::size_t { 8 } }) {
+        Mp4Spec spec;
+        spec.entry         = "hvc1";
+        spec.config        = HvcC(10);
+        spec.samples       = Samples(3);
+        spec.entryChildren = { Mdcv(validMdcv), Box("clli", Bytes(badLen, 0xCD)) };
+        Error error;
+        auto  reader = OpenSpec(spec, nullptr, &error);
+        ASSERT_NE(reader, nullptr) << "clli len " << badLen << ": " << Describe(error);
+        ASSERT_TRUE(reader->info().masteringDisplayColorVolume.has_value()) << "clli len " << badLen;
+        EXPECT_EQ(*reader->info().masteringDisplayColorVolume, validMdcv) << "clli len " << badLen;
+        EXPECT_FALSE(reader->info().contentLightLevelInfo.has_value()) << "clli len " << badLen;
+    }
+
+    // A malformed duplicate after a valid box must not overwrite the valid payload.
+    Mp4Spec trailingBad;
+    trailingBad.entry         = "hvc1";
+    trailingBad.config        = HvcC(10);
+    trailingBad.samples       = Samples(3);
+    trailingBad.entryChildren = { Mdcv(validMdcv), Box("mdcv", Bytes(12, 0xFF)), Clli(600, 200), Box("clli", Bytes(2, 0xFF)) };
+    Error error;
+    auto  reader = OpenSpec(trailingBad, nullptr, &error);
+    ASSERT_NE(reader, nullptr) << Describe(error);
+    EXPECT_EQ(reader->info().masteringDisplayColorVolume, std::optional { validMdcv });
+    EXPECT_EQ(reader->info().contentLightLevelInfo, std::optional { validClli });
 }
 
 TEST(IsoBmffReader, AnUnfamiliarVideoEntryIsReportedByTypeOnly)

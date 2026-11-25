@@ -77,8 +77,11 @@ size, dts, pts, duration, sync, in decode order) and a `VideoStreamInfo`.
   else the end of the last sample. `minFramePeriod` and `avgFramePeriod` are exact
   fractions of a second from the sample durations.
 - **Picture:** coded size from the sample entry, display size and matrix from
-  `tkhd`, `colr` (`nclx` and `nclc`), `pasp`, and the bit depth the config record
-  states (a `vpcC` also supplies colour when there is no `colr`).
+  `tkhd`, `colr` (`nclx` and `nclc`), `mdcv` (24-byte mastering display colour
+  volume), `clli` (4-byte content light level information), `pasp`, and the bit
+  depth the config record states (a `vpcC` also supplies colour when there is no
+  `colr`). Malformed `mdcv` or `clli` boxes with unexpected payload lengths are
+  ignored without failing playback.
 - **Seeking:** `findKeyframeAtOrBefore(pts)` binary-searches the sync samples by
   presentation time (a linear scan when the file's sync samples are not in
   presentation order) and answers the first sync sample for a time before all of
@@ -164,9 +167,12 @@ the engine's CMake adds it (the readers' standalone build stays pure C++).
   function, matrix) goes into the format description, and VideoToolbox puts it on every decoded
   frame as attachments; that is where a scene's 10-bit video import reads whether a stream is
   PQ or HLG ([scene rendering](features/scene-rendering.md#10-bit-and-hdr-video-textures)).
-  The `mdcv` (mastering display) and `clli` (content light level) boxes of a sample entry are
-  not read or forwarded, so a stream's own peak reaches the tone map only when VideoToolbox
-  takes it from the bitstream's SEI messages.
+  The `mdcv` (mastering display colour volume) and `clli` (content light level
+  information) boxes of a sample entry are forwarded on the format description as
+  `kCMFormatDescriptionExtension_MasteringDisplayColorVolume` and
+  `kCMFormatDescriptionExtension_ContentLightLevelInfo`, so VideoToolbox attaches
+  the stream's mastering display and peak metadata to decoded frames for tone
+  mapping even when the bitstream carries no SEI messages.
   It refuses, with a message that starts "format not supported: ", VP8, AV1 without
   hardware decoding, 4:2:2 and 4:4:4 chroma, bit depths other than 8 and 10 and
   unknown codecs; a damaged record is a different message. VP9 registers
@@ -213,9 +219,12 @@ and Swift imports it as the Clang module `WallpaperMedia` (`WallpaperMedia.modul
   the key frame at or before a time.
 - **`WebMAudioReader`** decodes the audio track to 32-bit float PCM buffers of about a tenth of a
   second on the same timeline (`rewindWithTimeOffset:limit:` restarts it for a loop and cuts it at
-  the picture's length). Opus, Vorbis, AAC and MP3 are decoded; Opus with more than two channels and
-  audio with more than two channels in the other codecs are reported by `audioUnavailableReason`
-  and left out (the video plays without sound).
+  the picture's length). Opus (mono/stereo), MP3 (mono/stereo), AAC (up to 8 channels) and Vorbis
+  (up to 8 channels) are decoded; multi-channel AAC and Vorbis tracks (3 to 8 channels) are decoded
+  in standard WAV/native channel order and folded down to stereo through `ChannelRemix`. Opus with
+  more than two channels (RFC 7845 multi-stream mapping family != 0, unsupported by Apple
+  AudioToolbox), MP3 with more than two channels, and tracks above 8 channels are reported by
+  `audioUnavailableReason` and left out (the video plays without sound).
 - **`copyPosterImageAtTime:`** decodes the key frame at or before a time with `VtFrameDecoder` and
   returns it upright and at the shown size, for a desktop poster or the lock screen's first frame.
 
@@ -254,9 +263,9 @@ player keeps its last picture. FFmpeg decoded the videos these refuse until 2026
 | Binary | Covers |
 |---|---|
 | `media_core_tests` | error, checked arithmetic, fractions, byte cursor, memory and file byte sources, which pictures nothing refers to (`DisposableSample.*`) |
-| `media_isobmff_tests` | the ISO-BMFF reader on files built in memory by `tests/mp4_builder.hpp`: tables and layouts, every codec entry, composition offsets, edit lists, all eight orientations, seeking, fragmented/unsupported/oversized/truncated/junk input and a deterministic random-mutation loop; plus corpus A/B checks: the bundled starter wallpaper against recorded expectations, and the local library against `ffprobe` |
-| `vt_frame_decoder_test` (engine tests, source in `Renderer/Media/Apple/tests`) | the Apple layer on real VideoToolbox decoding of the synthetic clips: display order on a clip with B-frames (and on H.264 in Matroska), a VP9 clip from WebM, seek epochs, draining, bounds, prompt cancellation, format description building (in-band parameter sets, colour range, 10-bit), Main 10 clips (PQ, HLG, BT.709) that decode to `x420` frames carrying their curve, primaries and matrix, and every refusal |
-| `webm_reader_test` (engine tests, source in `Renderer/Media/Apple/tests`) | `WebMReader` on the embedded VP9 WebM, H.264 Matroska and Opus WebM clips: the properties, the sample buffers (timing, key frames, the time offset, seeking) decoded by a VideoToolbox session, the audio buffers and their limit and offset, the refusals and the quarter-turn maths, and the poster |
+| `media_isobmff_tests` | the ISO-BMFF reader on files built in memory by `tests/mp4_builder.hpp`: tables and layouts, every codec entry, `colr`/`mdcv`/`clli`/`pasp` metadata (including malformed lengths), composition offsets, edit lists, all eight orientations, seeking, fragmented/unsupported/oversized/truncated/junk input and a deterministic random-mutation loop; plus corpus A/B checks: the bundled starter wallpaper against recorded expectations, and the local library against `ffprobe` |
+| `vt_frame_decoder_test` (engine tests, source in `Renderer/Media/Apple/tests`) | the Apple layer on real VideoToolbox decoding of the synthetic clips: display order on a clip with B-frames (and on H.264 in Matroska), a VP9 clip from WebM, seek epochs, draining, bounds, prompt cancellation, format description building (in-band parameter sets, colour range, 10-bit, `mdcv`/`clli` HDR metadata extensions), Main 10 clips (PQ, HLG, BT.709) that decode to `x420` frames carrying their curve, primaries and matrix, and every refusal |
+| `webm_reader_test` (engine tests, source in `Renderer/Media/Apple/tests`) | `WebMReader` on the embedded VP9 WebM, H.264 Matroska, Opus WebM, 5.1 AAC Matroska and 5.1 Vorbis WebM clips: the properties, the sample buffers (timing, key frames, the time offset, seeking) decoded by a VideoToolbox session, the audio buffers (including 5.1 downmix to stereo) and their limit and offset, the refusals (including >2-channel Opus) and the quarter-turn maths, and the poster |
 | `media_matroska_tests` | the Matroska reader on files built in memory by `tests/mkv_builder.hpp`: the index, SimpleBlock and BlockGroup, lacing, unknown-size Segment and Clusters, Cues present or absent, EBML header checks, codecs and encodings, limits, truncation at every length, malformed elements and a deterministic random-mutation loop; the VP9 header parser on the first frames of real libvpx clips; plus a corpus A/B check of `.webm`/`.mkv` files against `ffprobe` |
 
 The corpus checks read the local wallpaper library, or the folder in
