@@ -119,6 +119,51 @@ library is on, without reading anything for them:
 A drive renamed while the library is on it is not followed to its new name: the
 library is then missing at the next launch, as above.
 
+## Storage health and cleanup
+
+Settings → **Storage** → **Storage health** opens an on-demand, cancellable cleanup center
+(`LibraryStorageHealthService`, `StorageHealthModel`, `StorageHealthSheet`). Nothing runs at
+app launch or in the background until you click **Scan library…**; closing the sheet or panel
+cancels an in-progress scan.
+
+The audit checks three areas:
+
+1. **Exact duplicates** — a three-stage background pipeline:
+   - Stage 1 groups installed wallpapers by total content byte size, skipping empty or
+     metadata-only folders.
+   - Stage 2 computes a fast 64 KB head + 64 KB tail SHA-256 fingerprint only for size
+     collisions.
+   - Stage 3 verifies fast-hash matches with a full streaming SHA-256 checksum.
+   For multi-file Scene folders, hashing covers `scene.pkg` and all non-metadata asset files in
+   deterministic sorted relative-path order (excluding root `project.json` and preview thumbnails,
+   never matching on a manifest or thumbnail alone). Video and packaged still-image wallpapers
+   hash their primary media file directly so identical copies with different titles or filenames
+   still match. One recommended copy per group is marked **Keep** (preferring active, Lock
+   Screen / Screen Saver, favorited, referenced, and newest copies), and the UI prevents
+   selecting every copy of a duplicate group at once.
+2. **Large, not-recently-used wallpapers** — cross-references library disk sizes,
+   `WallpaperHistoryStore` last-used dates, and full reference protection sets across active
+   displays, Favorites, Collections, Playlists (display lists, day/night slots and saved plans),
+   Automation rules, Saved Display Layouts, and Lock Screen / Screen Saver assignments. Any
+   active or referenced wallpaper is excluded. Because `WallpaperHistoryStore` keeps a bounded
+   window of recent entries per display (up to 1,000), entries without a timestamp always display
+   **No recent use recorded** rather than claiming a wallpaper was never used. Filterable by
+   minimum size (`100 MB`, `250 MB`, `500 MB`, or any size) and recency (`30+ days`, `90+ days`,
+   or unrecorded only).
+3. **Broken references and orphaned storage**:
+   - Detects dangling wallpaper IDs pointing to removed wallpapers across Favorites, Collections,
+     Playlists, Automation rules, Metadata, Presets, and Saved Display Layouts, with one-click
+     repair (pruning missing layout assignments and removing layouts left empty while preserving
+     the single auto-apply-per-topology rule).
+   - Detects orphaned `SceneStorage/` subdirectories (no matching installed wallpaper) and
+     orphaned `Cache/SpacePosters/` files (not matching an active Space wallpaper assignment for
+     an installed wallpaper), reports reclaimable bytes, and validates strict directory containment
+     with no symlink escapes before removing selected internal artifacts.
+
+All wallpaper removals from Storage Health are confirmed and routed through
+`WallpaperDeletionService.moveToTrash` (moving library copies to the Trash rather than deleting
+them permanently).
+
 ## Backups
 
 A backup reads `Library/` from the storage root and a restore writes it there
@@ -140,7 +185,12 @@ folder is remapped to the library's place on the Mac it is restored to.
 different drive at launch, refused folders, cancelling, a copy cut short, a launch
 that stopped after the commit), `StorageCopierTests`, `StorageLocationTests`,
 `DownloaderStorageTests` (SteamCMD's home beside the sign-in, content on the
-library's disk), `WallpaperBackupTests.testMovedLibraryIsBackedUpFromAndRestoredToWhereItIsKept`
+library's disk), `WallpaperBackupTests.testMovedLibraryIsBackedUpFromAndRestoredToWhereItIsKept`,
+`LibraryStorageHealthServiceTests` (3-stage duplicate pipeline including multi-file Scene
+`scene.pkg` folders and same-size non-duplicates, reference-set protection, bounded-history
+recency filters, broken-reference detection, display layout pruning, and symlink-resistant orphan
+cleanup), `StorageHealthTests` (on-demand launch invariant, duplicate keep-one guard, Trash-based
+deletion, one-click repair, orphan cleanup, and Settings search),
 and the move actions and the drive's banner row in `PanelStorageActionsTests`.
 `StorageVolumeMonitorTests` cover the drive while the app runs: an eject stops the
 wallpapers through the real presentation policy and connecting the drive plays them

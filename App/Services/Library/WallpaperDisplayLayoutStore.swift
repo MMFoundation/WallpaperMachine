@@ -132,6 +132,34 @@ final class WallpaperDisplayLayoutStore {
         try commit(layouts.filter { $0.id != id })
     }
 
+    /// Removes assignments pointing to `missingIDs`, deleting any layout that would be left with
+    /// no assignments. Preserves the single-auto-apply-per-topology invariant. Returns the number
+    /// of dangling assignments removed.
+    @discardableResult
+    func pruneWallpapers(_ missingIDs: Set<String>) throws -> Int {
+        guard !missingIDs.isEmpty else { return 0 }
+        var removedCount = 0
+        var updated: [WallpaperDisplayLayout] = []
+        var seenAutoTopologies = Set<[String]>()
+        for var layout in layouts {
+            let kept = layout.assignments.filter { !missingIDs.contains($0.wallpaperID) }
+            let pruned = layout.assignments.count - kept.count
+            removedCount += pruned
+            guard !kept.isEmpty else { continue }
+            layout.assignments = kept
+            if layout.autoApplyOnConnect {
+                let topology = layout.normalizedDisplayTopology()
+                if !seenAutoTopologies.insert(topology).inserted {
+                    layout.autoApplyOnConnect = false
+                }
+            }
+            updated.append(layout)
+        }
+        guard removedCount > 0 else { return 0 }
+        try commit(updated)
+        return removedCount
+    }
+
     // Keep removed wallpapers as unavailable references so restoring never silently applies
     // only half a saved arrangement. The user may delete the layout or reinstall its content.
     nonisolated static func decode(_ data: Data) throws -> [WallpaperDisplayLayout] {

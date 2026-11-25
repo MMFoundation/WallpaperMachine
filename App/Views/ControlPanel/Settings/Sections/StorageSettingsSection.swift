@@ -6,6 +6,7 @@ struct StorageSettingsSection: View {
   private static let location = SettingsItem.Group("location", title: "Wallpaper library location")
   private static let userFiles = SettingsItem.Group("user-files", title: "Wallpaper files you chose")
   private static let caches = SettingsItem.Group("caches")
+  private static let health = SettingsItem.Group("health", title: "Storage health")
   static let backup = SettingsItem.Group("backup", title: "Backup")
   private static let troubleshooting = SettingsItem.Group("troubleshooting", title: "Troubleshooting")
 
@@ -40,6 +41,16 @@ struct StorageSettingsSection: View {
     keywords: ["Clear history"])
   static let context = SettingsItem(
     id: "storage.context", section: .storage, group: caches, title: "What gets removed")
+
+  static let storageHealth = SettingsItem(
+    id: "storage.health", section: .storage, group: health,
+    title: "Library storage health",
+    note:
+      "Scan on demand for exact duplicate wallpapers, large wallpapers not used recently, broken references and orphaned storage. Nothing runs at launch.",
+    keywords: [
+      "Scan library…", "Review…", "Scan again", "Duplicates", "Not used recently",
+      "Broken references", "Orphaned storage",
+    ])
 
   static let backupExport = SettingsItem(
     id: "storage.backup-export", section: .storage, group: backup, title: "Back up settings",
@@ -94,9 +105,9 @@ struct StorageSettingsSection: View {
     title: "Data to be sent", keywords: ["Show in Finder", "What is sent", "Nothing sent yet."])
 
   static let items = [
-    libraryLocation, userFilesFolder, userFilesClear, shaderCache, logs, downloadHistory, context, backupExport,
-    backupLibrary, backupRestore, verbose, webInspection, diagnostics, performanceData,
-    performanceDataFile,
+    libraryLocation, userFilesFolder, userFilesClear, shaderCache, logs, downloadHistory, context,
+    storageHealth, backupExport, backupLibrary, backupRestore, verbose, webInspection, diagnostics,
+    performanceData, performanceDataFile,
   ] + SetupPackSection.items
 
   var body: some View {
@@ -107,12 +118,21 @@ struct StorageSettingsSection: View {
         StorageCacheRows()
         SettingsDisclosure(Self.context) { StorageContextContent() }
       }
+      SettingsGroup(Self.health, in: .storage) { StorageHealthRows() }
       SetupPackSection()
       SettingsGroup(Self.backup, in: .storage) { StorageBackupRows() }
       SettingsGroup(Self.troubleshooting, in: .storage) { StorageTroubleshootingRows() }
     }
     // Row buttons and switches share one size across Settings.
     .controlSize(.small)
+    .sheet(
+      isPresented: Binding(
+        get: { controller.storageHealthModel?.isSheetPresented ?? false },
+        set: { shown in if !shown { controller.storageHealthModel?.closeSheet() } }
+      )
+    ) {
+      StorageHealthSheet().panelPresentationLocale()
+    }
     .onAppear { controller.refreshStorageMetrics() }
     .onChange(of: controller.store.libraryRefreshRevision) { _, _ in
       controller.refreshStorageMetrics()
@@ -316,6 +336,69 @@ private struct StorageContextContent: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 12)
     .padding(.vertical, 10)
+  }
+}
+
+// MARK: - Storage health
+
+/// On-demand entry point for the Library Storage Health & Cleanup Center. Never starts a scan on
+/// appear; opens `StorageHealthSheet` when requested and summarizes the latest session report.
+private struct StorageHealthRows: View {
+  @Environment(PanelController.self) private var controller
+  @Environment(\.locale) private var locale
+
+  var body: some View {
+    let model = controller.storageHealthModel
+    let details = [model?.summaryLine(locale: locale)].compactMap { $0 }
+    let isScanning = model?.isScanning == true
+    let hasReport = model?.report != nil
+
+    DisplaysRow(
+      item: StorageSettingsSection.storageHealth,
+      details: details,
+      labelsControl: false
+    ) {
+      HStack(spacing: 8) {
+        if isScanning {
+          Button("Review…") {
+            controller.launch(PanelActionCoordinator.key("openStorageHealth")) {
+              try await controller.openStorageHealth()
+            }
+          }
+          Button("Cancel") {
+            controller.launch(PanelActionCoordinator.key("storageHealthCancel")) {
+              try await controller.cancelStorageHealthScan()
+            }
+          }
+        } else if hasReport {
+          Button("Scan again") {
+            controller.launch(PanelActionCoordinator.key("storageHealthScan")) {
+              try await controller.scanStorageHealth()
+            }
+          }
+          Button("Review…") {
+            controller.launch(PanelActionCoordinator.key("openStorageHealth")) {
+              try await controller.openStorageHealth()
+            }
+          }
+          .buttonStyle(.panelPrimary(size: .small))
+        } else {
+          Button("Scan library…") {
+            controller.launch(PanelActionCoordinator.key("openStorageHealth")) {
+              try await controller.openStorageHealth()
+            }
+          }
+          .buttonStyle(.panelPrimary(size: .small))
+        }
+      }
+    }
+
+    if let progress = model?.scanProgress {
+      ProgressBar(value: progress.fraction)
+        .accessibilityLabel(Text("Storage health scan progress"))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
   }
 }
 

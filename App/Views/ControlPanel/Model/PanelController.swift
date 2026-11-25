@@ -253,6 +253,8 @@ final class PanelController {
   @ObservationIgnored var storageMetricsTask: Task<Void, Never>?
   /// Test seam for reading volume free space without touching a real external drive.
   @ObservationIgnored var storageVolumeInspector: any StorageVolumeInspecting = FileSystemVolumes()
+  /// On-demand Storage Health center model, created lazily only when opened in Settings › Storage.
+  var storageHealthModel: StorageHealthModel?
   // MARK: end M-settings state
 
   // MARK: Initialization
@@ -453,6 +455,7 @@ final class PanelController {
     loginItemRefresh = nil
     storageMetricsTask?.cancel()
     storageMetricsTask = nil
+    storageHealthModel?.cancelScan()
     if let favoritesObserver { NotificationCenter.default.removeObserver(favoritesObserver) }
     favoritesObserver = nil
     displayOptions.cancel()

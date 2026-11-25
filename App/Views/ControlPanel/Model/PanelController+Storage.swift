@@ -286,4 +286,301 @@ extension PanelController {
   func cancelPendingRestore() async throws {
     try await run(.immediate) { try backup.cancelRestore() }
   }
+
+  // MARK: Storage health
+
+  /// On-demand Storage Health center model, lazily initialized so app launch and normal Settings
+  /// visits allocate and scan nothing until the user asks.
+  var storageHealth: StorageHealthModel {
+    if let existing = storageHealthModel { return existing }
+    let created = StorageHealthModel(controller: self)
+    storageHealthModel = created
+    return created
+  }
+
+  /// Captures an immutable, Sendable snapshot of installed wallpapers, usage history and all
+  /// reference sets on the main actor so background scanning performs zero UI-thread disk I/O.
+  func makeStorageHealthInput(now: Date = Date()) -> LibraryStorageHealthService.Input {
+    let displayTitlesByID = Dictionary(
+      store.settingsSnapshot.displays.map { ($0.displayId, $0.title) },
+      uniquingKeysWith: { first, _ in first })
+    let wallpapers = store.librarySnapshot.wallpapers.map { entry in
+      let measured = libraryMetrics.measured[entry.id]
+      return LibraryStorageHealthService.WallpaperRecord(
+        id: entry.id,
+        title: entry.title,
+        kind: entry.kind,
+        cachedSizeBytes: measured?.size,
+        addedAt: measured?.addedAt)
+    }
+
+    let activeDisplays = Set(
+      store.monitorInformationSnapshot.rows.map(\.wallpaperId).filter { !$0.isEmpty })
+
+    let collectionRefs = collections.collections.map {
+      LibraryStorageHealthService.CollectionRef(
+        id: $0.id, name: $0.name, wallpaperIDs: $0.wallpaperIDs)
+    }
+    let displayPlaylistRefs = playlists.playlists.map { displayID, playlist in
+      LibraryStorageHealthService.DisplayPlaylistRef(
+        displayID: displayID,
+        displayTitle: displayTitlesByID[displayID] ?? displayID,
+        wallpaperIDs: playlist.wallpaperIDs,
+        dayWallpaperID: playlist.dayWallpaperID,
+        nightWallpaperID: playlist.nightWallpaperID)
+    }
+    let playlistPlanRefs = playlists.plans.map { plan in
+      LibraryStorageHealthService.PlaylistPlanRef(
+        id: plan.id,
+        name: plan.name,
+        wallpaperIDs: plan.playlist.wallpaperIDs,
+        dayWallpaperID: plan.playlist.dayWallpaperID,
+        nightWallpaperID: plan.playlist.nightWallpaperID)
+    }
+    let automationRefs = automations.configurations.map { displayID, configuration in
+      LibraryStorageHealthService.AutomationRef(
+        displayID: displayID,
+        displayTitle: displayID == WallpaperAutomationStore.globalDisplayID
+          ? L("All displays") : (displayTitlesByID[displayID] ?? displayID),
+        mode: configuration.mode,
+        usesSpaces: configuration.usesSpaces,
+        ruleWallpaperIDs: configuration.rules.compactMap {
+          $0.target.kind == .wallpaper ? $0.target.id : nil
+        },
+        enabledRuleWallpaperIDs: configuration.rules.compactMap {
+          $0.isEnabled && $0.target.kind == .wallpaper ? $0.target.id : nil
+        },
+        lightWallpaperID: configuration.light?.kind == .wallpaper ? configuration.light?.id : nil,
+        darkWallpaperID: configuration.dark?.kind == .wallpaper ? configuration.dark?.id : nil,
+        batteryWallpaperID: configuration.batteryTarget?.kind == .wallpaper
+          ? configuration.batteryTarget?.id : nil,
+        spaceWallpaperIDs: configuration.spaces.compactMapValues {
+          $0.kind == .wallpaper ? $0.id : nil
+        })
+    }
+    let appRuleWallpaperIDs = Set(
+      playback.appRules.compactMap { rule -> String? in
+        guard rule.action == .switchWallpaper, rule.wallpaperTarget?.kind == .wallpaper else {
+          return nil
+        }
+        return rule.wallpaperTarget?.id
+      })
+    let layoutRefs = displayLayouts.layouts.map { layout in
+      LibraryStorageHealthService.DisplayLayoutRef(
+        id: layout.id,
+        name: layout.name,
+        wallpaperIDs: layout.assignments.map(\.wallpaperID))
+    }
+    let presetRefs = presets.items.map { preset in
+      LibraryStorageHealthService.PresetRef(
+        id: preset.id, name: preset.name, wallpaperID: preset.wallpaperID)
+    }
+
+    var lockScreenIDs = Set<String>()
+    if let liveLock = store.lockScreenWallpaper {
+      lockScreenIDs.formUnion(liveLock.lockScreenSources.referencedWallpaperIDs)
+    } else {
+      if let data = defaults.data(forKey: LockScreenWallpaperService.lockScreenSourcesPreference),
+        let decoded = try? LockScreenModeSources.decode(data)
+      {
+        lockScreenIDs.formUnion(decoded.referencedWallpaperIDs)
+      }
+      if let savedLock = defaults.string(forKey: "WallpaperMachineLockScreenWallpaperID"),
+        !savedLock.isEmpty
+      {
+        lockScreenIDs.insert(savedLock)
+      }
+    }
+    var screenSaverIDs = Set<String>()
+    if let liveSaver = store.lockScreenWallpaper {
+      screenSaverIDs.formUnion(liveSaver.screenSaverSources.referencedWallpaperIDs)
+    } else {
+      if let data = defaults.data(forKey: LockScreenWallpaperService.screenSaverSourcesPreference),
+        let decoded = try? LockScreenModeSources.decode(data)
+      {
+        screenSaverIDs.formUnion(decoded.referencedWallpaperIDs)
+      }
+      if let savedSaver = defaults.string(forKey: "WallpaperMachineScreenSaverWallpaperID"),
+        !savedSaver.isEmpty
+      {
+        screenSaverIDs.insert(savedSaver)
+      }
+    }
+
+    let references = LibraryStorageHealthService.ReferenceSnapshot(
+      activeDisplayWallpaperIDs: activeDisplays,
+      favoriteIDs: favoriteIDs,
+      collections: collectionRefs,
+      displayPlaylists: displayPlaylistRefs,
+      playlistPlans: playlistPlanRefs,
+      automations: automationRefs,
+      appRuleWallpaperIDs: appRuleWallpaperIDs,
+      displayLayouts: layoutRefs,
+      metadataWallpaperIDs: Set(metadata.entries.keys),
+      presets: presetRefs,
+      lockScreenWallpaperIDs: lockScreenIDs,
+      screenSaverWallpaperIDs: screenSaverIDs)
+
+    return LibraryStorageHealthService.Input(
+      libraryURL: ClientPaths.libraryURL,
+      sceneStorageURL: ClientPaths.sceneStorageURL,
+      spacePosterCacheURL: ClientPaths.spacePosterCacheURL,
+      now: now,
+      wallpapers: wallpapers,
+      lastUsedDates: store.history.lastUsedDates(),
+      references: references)
+  }
+
+  /// Opens the Storage Health sheet and starts an on-demand scan if no report is ready yet.
+  func openStorageHealth() async throws {
+    try await run(.direct) {
+      storageHealth.openAndScan()
+    }
+  }
+
+  /// Starts or restarts an on-demand Storage Health scan.
+  func scanStorageHealth() async throws {
+    try await run(.direct) {
+      await storageHealth.scanNow()
+    }
+  }
+
+  /// Cancels an in-progress Storage Health scan.
+  func cancelStorageHealthScan() async throws {
+    try await run(.direct) {
+      storageHealth.cancelScan()
+    }
+  }
+
+  /// Moves selected wallpapers from Storage Health to the Trash through `WallpaperDeletionService`
+  /// (never permanently deleting user wallpapers), updates library stores, and refreshes metrics.
+  /// Returns nil when the user declines the confirmation dialog.
+  @discardableResult
+  func trashStorageHealthWallpapers(_ ids: [String]) async throws -> WallpaperDeletionReport? {
+    var result: WallpaperDeletionReport?
+    try await run(.direct) {
+      let validIDs = try installedWallpaperIDs(ids)
+      let name = store.librarySnapshot.wallpapers.first { $0.id == validIDs[0] }?.title ?? validIDs[0]
+      let title =
+        validIDs.count == 1
+        ? L("Move \(name) to Trash?") : L("Move \(validIDs.count) wallpapers to Trash?")
+      guard
+        await dialogs.confirm(
+          title,
+          detail: L(
+            "Affected displays switch to another available wallpaper when possible. The original files you imported are not affected."
+          ),
+          button: L("Move to Trash"))
+      else { return }
+      let slots = store.settingsSnapshot.displays.filter(\.isIndependent).map {
+        BridgeStore.activationSlot(displayId: $0.displayId)
+      }
+      try await store.commands.run(choosing: slots) {
+        let report = try await store.deleteWallpapersAsync(
+          ids: validIDs, recycle: recycleWallpaperFolder)
+        result = report
+        if !report.deleted.isEmpty {
+          storageHealthModel?.recordDeletedWallpapers(Set(report.deleted))
+          try await forgetLibraryMetadata(report.deleted)
+          refreshStorageMetrics(force: true)
+        }
+        if !report.failures.isEmpty {
+          let titles = Dictionary(
+            store.librarySnapshot.wallpapers.map { ($0.id, $0.title) },
+            uniquingKeysWith: { first, _ in first })
+          let details = report.failures.map {
+            "\(titles[$0.id] ?? $0.id): \($0.error.localizedDescription)"
+          }
+          let message = L(
+            "Moved \(report.deleted.count) of \(validIDs.count) wallpapers to Trash. Couldn’t move \(details.joined(separator: "; "))"
+          )
+          if let playback = report.playbackError {
+            throw WallpaperActionError(message: "\(message)\n\n\(playback.localizedDescription)")
+          }
+          throw WallpaperActionError(message: message)
+        }
+        if let playback = report.playbackError { throw playback }
+      }
+    }
+    return result
+  }
+
+  /// Repairs dangling wallpaper IDs across persisted stores (Favorites, Collections, Playlists,
+  /// Automations, Metadata, Presets, Display Layouts) in one step.
+  @discardableResult
+  func repairBrokenReferences(
+    _ items: [LibraryStorageHealthService.BrokenReferenceItem]
+  ) async throws -> Int {
+    guard !items.isEmpty else { return 0 }
+    var repairedIDs = Set<String>()
+    var firstError: Error?
+    try await run(.direct) {
+      let grouped = Dictionary(grouping: items, by: \.source)
+      for source in LibraryStorageHealthService.BrokenReferenceSource.allCases {
+        guard let entries = grouped[source], !entries.isEmpty else { continue }
+        let missingIDs = Array(Set(entries.map(\.wallpaperID))).sorted()
+        do {
+          switch source {
+          case .favorites:
+            try forgetFavorites(missingIDs)
+          case .collections:
+            try collections.forget(missingIDs)
+          case .playlists:
+            playlists.forget(missingIDs)
+          case .automation:
+            try automations.forgetWallpapers(Set(missingIDs))
+          case .metadata:
+            metadata.forget(missingIDs)
+          case .presets:
+            try await presets.forget(wallpaperIDs: missingIDs)
+          case .displayLayouts:
+            try displayLayouts.pruneWallpapers(Set(missingIDs))
+          }
+          repairedIDs.formUnion(entries.map(\.id))
+        } catch {
+          firstError = firstError ?? error
+        }
+      }
+      if !repairedIDs.isEmpty {
+        storageHealthModel?.recordRepairedBrokenReferences(repairedIDs)
+      }
+      if let firstError { throw firstError }
+    }
+    return repairedIDs.count
+  }
+
+  /// Safely removes verified orphaned `SceneStorage` directories and `SpacePosters` cache files
+  /// after user confirmation. Returns nil when cancelled.
+  @discardableResult
+  func cleanOrphanedStorage(
+    _ items: [LibraryStorageHealthService.OrphanedStorageItem]
+  ) async throws -> LibraryStorageHealthService.OrphanCleanupReport? {
+    guard !items.isEmpty else { return nil }
+    var outcome: LibraryStorageHealthService.OrphanCleanupReport?
+    try await run(.direct) {
+      guard
+        await dialogs.confirm(
+          L("Remove orphaned storage?"),
+          detail: L(
+            "Only unused internal scene data and cached Space posters with no matching wallpaper are removed. Installed wallpapers and settings are not affected."
+          ),
+          button: L("Remove"))
+      else { return }
+      let report = try await storageHealth.service.cleanOrphanedStorage(
+        items,
+        sceneStorageURL: ClientPaths.sceneStorageURL,
+        spacePosterCacheURL: ClientPaths.spacePosterCacheURL)
+      outcome = report
+      if !report.removedIDs.isEmpty {
+        storageHealthModel?.recordCleanedOrphans(Set(report.removedIDs))
+        refreshStorageMetrics(force: true)
+      }
+      if !report.failures.isEmpty {
+        let details = report.failures.map { "\($0.name): \($0.message)" }.joined(separator: "; ")
+        throw WallpaperActionError(
+          message: L("Some orphaned storage items could not be removed: \(details)"))
+      }
+    }
+    return outcome
+  }
 }
