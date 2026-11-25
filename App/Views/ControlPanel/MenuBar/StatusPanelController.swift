@@ -49,10 +49,11 @@ final class StatusPanelController {
     report: { [weak self] error in self?.failure = error.localizedDescription },
     succeeded: { [weak self] in self?.failure = nil })
 
-  /// The preferences that announce a change instead of being observable.
+  /// The preferences and stores that announce a change instead of being observable.
   static let notifications = [
     PlaybackPreferences.didChangeNotification, SystemConditionState.didChangeNotification,
-    PanelPreferences.favoritesDidChangeNotification,
+    PanelPreferences.favoritesDidChangeNotification, PlaylistStore.didChangeNotification,
+    WallpaperCollectionStore.didChangeNotification,
   ]
 
   @ObservationIgnored private weak var source: (any StatusPanelSource)?
@@ -282,7 +283,7 @@ final class StatusPanelController {
 
   /// Play/Pause acts on every display, as the menu's does.
   func togglePlayback() async throws { try await send(.menu(.playPause)) }
-  func unmuteAll() async throws { try await send(.unmuteAll) }
+  func setWallpapersMuted(_ muted: Bool) async throws { try await send(.setWallpapersMuted(muted)) }
 
   func toggleFavorite() async throws {
     try await send(.toggleFavorite(wallpaper: try shownWallpaper()))
@@ -301,6 +302,14 @@ final class StatusPanelController {
   @discardableResult
   func openControlPanel() -> Task<Void, Never> {
     dismissThen(panel.displayID.map { .menu(.openInPanel(display: $0)) } ?? .menu(.openControlPanel))
+  }
+
+  /// Opens the control panel with the display on show as its target and its wallpaper selected in
+  /// the inspector. Does nothing when the display has no installed wallpaper.
+  @discardableResult
+  func openWallpaperInInspector() -> Task<Void, Never>? {
+    guard let wallpaper = panel.wallpaper?.id, let display = panel.displayID else { return nil }
+    return dismissThen(.openWallpaperInInspector(wallpaper: wallpaper, display: display))
   }
 
   @discardableResult

@@ -137,11 +137,12 @@ final class StatusPanelControllerTests: PanelTestCase {
     try await controller.toggleFavorite()
     try await controller.setVolume(0.25)
     try await controller.setMuted(true)
-    try await controller.unmuteAll()
+    try await controller.setWallpapersMuted(true)
+    try await controller.setWallpapersMuted(false)
 
     XCTAssertEqual(source.performed, [
       .toggleFavorite(wallpaper: "w1"), .setVolume(wallpaper: "w1", volume: 0.25),
-      .setMuted(wallpaper: "w1", muted: true), .unmuteAll,
+      .setMuted(wallpaper: "w1", muted: true), .setWallpapersMuted(true), .setWallpapersMuted(false),
     ])
   }
 
@@ -171,6 +172,74 @@ final class StatusPanelControllerTests: PanelTestCase {
     XCTAssertEqual(source.log, ["dismiss", "perform", "dismiss", "perform", "dismiss", "perform"])
     XCTAssertEqual(source.performed, [.menu(.openInPanel(display: "2")), .openSettings, .quit],
                    "The control panel opens with the panel's display as its target")
+  }
+
+  func testOpeningWallpaperInInspectorClosesPopoverAndTargetsShownWallpaper() async throws {
+    let source = Source(input())
+    let controller = makeController(source) { source.log.append("dismiss") }
+    controller.start()
+    controller.chooseDisplay("2")
+
+    let task = try XCTUnwrap(controller.openWallpaperInInspector())
+    await task.value
+    XCTAssertEqual(source.log, ["dismiss", "perform"])
+    XCTAssertEqual(source.performed, [.openWallpaperInInspector(wallpaper: "w2", display: "2")])
+
+    // An empty display has no wallpaper to inspect and leaves the popover alone.
+    let emptySource = Source(input(displays: [display("primary", shows: nil)]))
+    let emptyController = makeController(emptySource) { emptySource.log.append("dismiss") }
+    emptyController.start()
+    XCTAssertNil(emptyController.openWallpaperInInspector())
+    XCTAssertTrue(emptySource.log.isEmpty)
+    XCTAssertTrue(emptySource.performed.isEmpty)
+  }
+
+  func testPopoverMaxContentHeightUsesScreenVisibleFrameWithFloorAndFallback() {
+    XCTAssertEqual(
+      StatusPanelPopover.maxContentHeight(for: nil), StatusPanelPopover.defaultMaxHeight)
+    XCTAssertEqual(
+      StatusPanelPopover.maxContentHeight(for: NSRect(x: 0, y: 0, width: 1280, height: 0)),
+      StatusPanelPopover.defaultMaxHeight)
+    XCTAssertEqual(
+      StatusPanelPopover.maxContentHeight(for: NSRect(x: 0, y: 50, width: 1280, height: 700)),
+      700 - StatusPanelPopover.verticalMargin)
+    XCTAssertEqual(
+      StatusPanelPopover.maxContentHeight(for: NSRect(x: 0, y: 70, width: 1512, height: 875)),
+      875 - StatusPanelPopover.verticalMargin)
+    XCTAssertEqual(
+      StatusPanelPopover.maxContentHeight(for: NSRect(x: 0, y: 0, width: 800, height: 300)),
+      StatusPanelPopover.minimumMaxHeight,
+      "Even a tiny visible frame never collapses the popover below its usable floor")
+  }
+
+  func testRevealingWallpaperFromNavigationSelectsItAndOpensInspectorOnce() async throws {
+    try await withApplyingPanel { panel, _, _ in
+      let shell = panel.controller.shell
+      shell.windowWidthChanged(.compact)
+      shell.setFiltersShown(true)
+      XCTAssertFalse(shell.isInspectorShown, "Compact windows start with the inspector closed")
+      XCTAssertTrue(shell.areFiltersShown)
+
+      await shell.open(.settings).value
+      panel.navigation.revealWallpaper("c")
+      let task = try XCTUnwrap(shell.adoptWallpaperReveal())
+      await task.value
+
+      XCTAssertEqual(shell.selection, .wallpaper)
+      XCTAssertEqual(panel.controller.selectedWallpaperID, "c")
+      XCTAssertTrue(shell.isInspectorShown, "Revealing from the menu bar opens the inspector")
+      XCTAssertFalse(shell.areFiltersShown, "In compact mode opening the inspector closes Filters")
+      XCTAssertNil(shell.adoptWallpaperReveal(), "The same reveal is not repeated")
+
+      let reopened = panel.buildController()
+      XCTAssertNil(reopened.shell.adoptWallpaperReveal(), "A handled reveal is not repeated on reopen")
+      withExtendedLifetime(reopened) {}
+
+      panel.navigation.revealWallpaper("b")
+      let second = try XCTUnwrap(shell.adoptWallpaperReveal())
+      await second.value
+      XCTAssertEqual(panel.controller.selectedWallpaperID, "b", "A fresh reveal selects the new wallpaper")
+    }
   }
 
   func testQuitWithoutARendererLetsShutdownRunAfterThePanelCloses() async throws {
@@ -252,6 +321,14 @@ final class StatusPanelControllerTests: PanelTestCase {
     let reads = source.reads
     center.post(name: PlaybackPreferences.didChangeNotification, object: nil)
     try await waitUntil("a preference change is read") { source.reads > reads }
+
+    let playlistReads = source.reads
+    center.post(name: PlaylistStore.didChangeNotification, object: nil)
+    try await waitUntil("a playlist change is read") { source.reads > playlistReads }
+
+    let collectionReads = source.reads
+    center.post(name: WallpaperCollectionStore.didChangeNotification, object: nil)
+    try await waitUntil("a collection change is read") { source.reads > collectionReads }
 
     controller.stop()
     let closed = source.reads

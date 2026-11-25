@@ -276,6 +276,20 @@ final class ShellModel {
     }
   }
 
+  /// Selects the wallpaper the app asked to reveal in the inspector (for example from the menu bar
+  /// panel), once, and opens the inspector column even in a narrow window. A reveal made before
+  /// the window existed is picked up as the window opens; one already acted on is not repeated.
+  @discardableResult
+  func adoptWallpaperReveal() -> Task<Void, Never>? {
+    let navigation = controller.navigation
+    guard navigation.wallpaperRevealToken != navigation.handledWallpaperRevealToken else { return nil }
+    navigation.handledWallpaperRevealToken = navigation.wallpaperRevealToken
+    guard let id = navigation.revealedWallpaperID else { return nil }
+    if isCompact && isFiltersChoice { isFiltersChoice = false }
+    inspectorChoice = true
+    return showInstalled(id)
+  }
+
   /// A row of Recently used: applies the wallpaper to the target display.
   @discardableResult
   func apply(_ id: String) -> Task<Void, Never> {

@@ -794,12 +794,20 @@ all settings** returns it to the panel.
 Opening the panel does not bring the app forward; the buttons that open a window or quit close
 it first.
 
-The panel is about one display at a time. With two or more displays that can show their own
-wallpaper (the menu's displays, in its order) it starts with a picker of their names, the
-renderer's `(id - Role)` left off unless two share a name. It opens on the display it showed
-last, else the control panel's target display, else the main one. Below the picker:
+The panel is about one display at a time. With two displays that can show their own wallpaper
+(the menu's displays, in its order) it starts with a segmented picker of their names, the
+renderer's `(id - Role)` left off unless two share a name, with full-title hover tooltips; with
+three or more displays it switches to a compact display picker menu with checkmarks so names
+stay readable. On shorter screens the body scrolls above the pinned footer within a maximum
+height computed from the anchor screen's `visibleFrame`, while taller screens size the popover
+naturally to its content. It opens on the display it showed last, else the control panel's
+target display, else the main one. Below the picker:
 
-- The display's wallpaper: its still at 16:9, its title, its kind and a state line. The line
+- The display's wallpaper: its still at 16:9, its title, its kind and a state line. Clicking the
+  16:9 artwork or title closes the popover, opens the Control Panel with that display targeted,
+  opens the inspector, and selects the wallpaper. When the display runs a rotating playlist or
+  **Day and night**, a compact badge below the state line names it (`repeat` / `shuffle` /
+  `sunrise`, plus **Playlist paused** when held). The line
   says **Playback running**; **Playback paused** for your own Pause, named before any rule;
   **Changing wallpaper…** while a switch for that display waits or runs. Of what else holds
   every wallpaper, it names the most specific first: **The wallpaper library’s drive is
@@ -823,10 +831,10 @@ last, else the control panel's target display, else the main one. Below the pick
 - The wallpaper's own sound: a mute button and a **Volume** slider, the inspector's **Mute this
   wallpaper** and **Volume** defaults, saved when the slider is let go or moved by a key.
   Displays with their own sound choices keep them; the controls' help points to
-  **Settings → Displays** to adjust those. While **Mute
-  All** is on both are locked, the note says so, and **Unmute Wallpapers** turns it off. An open
-  control panel's inspector showing another wallpaper keeps its options, and a drag on them goes
-  on.
+  **Settings → Displays** to adjust those. A **Mute All** switch below the slider turns global
+  mute on or off directly from the popover; while **Mute All** is on, the wallpaper's own mute
+  button and slider lock and the note says why. An open control panel's inspector showing
+  another wallpaper keeps its options, and a drag on them goes on.
 - A quick switcher of eight wallpapers that can play (supported and not held back after a
   crash), under **Favorites**, or **All wallpapers** when no favorite other than the shown one
   can play. The shown wallpaper is always first and ringed; the others are shuffled. **Show
@@ -861,8 +869,8 @@ the wallpaper's volume only from opening to closing, and each opening builds it 
 `StatusPanelModel` (`App/Services/Automation/`) decides what it shows and the switcher's draw
 without AppKit; `StatusPanelController` and `StatusPanelView` (`App/Views/ControlPanel/MenuBar/`)
 hold and draw it; `AppDelegate+StatusPanel` routes the click and carries out its commands.
-The large cover ignores pointer hit testing so aspect-filled artwork cropped to 16:9 cannot
-intercept clicks on the display picker above it.
+The artwork button keeps its inner cover non-hit-testing and clips its hit area strictly to the
+16:9 frame so aspect-filled covers never intercept clicks on the display picker above it.
 Tests: `StatusPanelModelTests`, `StatusPanelControllerTests` and `StatusPanelRenderTests`.
 
 #### Energy use in the menu bar

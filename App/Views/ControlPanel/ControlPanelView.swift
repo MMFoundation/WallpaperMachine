@@ -23,6 +23,8 @@ final class ControlPanelNavigation: ObservableObject {
   @Published var targetDisplayID = "primary"
   @Published private(set) var settingsSection = SettingsSection.quick
   @Published private(set) var settingsSectionToken: UInt64 = 0
+  @Published private(set) var revealedWallpaperID: String?
+  @Published private(set) var wallpaperRevealToken: UInt64 = 0
   /// Installed's filters and the library scroll offsets the last window had, handed to the next
   /// window when the panel is reopened. Memory only, and not `@Published`: nothing in SwiftUI
   /// reads it, the window writes it as the person types and scrolls.
@@ -33,12 +35,20 @@ final class ControlPanelNavigation: ObservableObject {
   /// The Settings reveal a panel last acted on, so a window opened afterwards starts on Quick
   /// Settings instead of repeating it. Not `@Published`: only `SettingsModel.adoptReveal` uses it.
   var handledSettingsRevealToken: UInt64 = 0
+  /// The wallpaper reveal a panel last acted on, so a window opened afterwards does not repeat it.
+  /// Not `@Published`: only `ShellModel.adoptWallpaperReveal` uses it.
+  var handledWallpaperRevealToken: UInt64 = 0
 
   init(selection: SidebarSelection? = .wallpaper) { self.selection = selection }
 
   func revealSettingsSection(_ section: SettingsSection) {
     settingsSection = section
     settingsSectionToken &+= 1
+  }
+
+  func revealWallpaper(_ id: String) {
+    revealedWallpaperID = id
+    wallpaperRevealToken &+= 1
   }
 }
 

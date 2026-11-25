@@ -30,6 +30,13 @@ private struct PanelWindowContent: View {
     return controller.navigation.settingsSectionToken
   }
 
+  /// Counts the wallpaper-inspector reveals the app asked for (the menu bar panel's artwork/title
+  /// click), which arrive through the navigation model from outside the window.
+  private var wallpaperRevealToken: UInt64 {
+    let _ = controller.revisions.navigation
+    return controller.navigation.wallpaperRevealToken
+  }
+
   var body: some View {
     let shell = controller.shell
     VStack(spacing: 0) {
@@ -59,6 +66,7 @@ private struct PanelWindowContent: View {
     // A popover belongs to the page it was opened on.
     .onChange(of: shell.selection, initial: true) { shell.closePopover() }
     .onChange(of: revealToken, initial: true) { controller.settings.adoptReveal() }
+    .onChange(of: wallpaperRevealToken, initial: true) { controller.shell.adoptWallpaperReveal() }
     // Escape, for what the shell owns; a name field and a popover handle their own first.
     .onExitCommand { shell.handleEscape() }
   }

@@ -52,16 +52,48 @@ enum StatusPanelModel {
         case playing
     }
 
+    /// The chosen display's active playlist, when it rotates or follows Day and night; nil while off.
+    struct PlaylistBadge: Equatable, Sendable {
+        enum Source: Equatable, Sendable {
+            case all
+            case favorites
+            case list(count: Int)
+            case collection(name: String)
+            case missingCollection
+        }
+
+        enum Kind: Equatable, Sendable {
+            case rotate(source: Source, order: PlaylistOrder)
+            case dayNight
+        }
+
+        var kind: Kind
+        /// The playlist waits because the user removed this display's wallpaper.
+        var isPaused: Bool = false
+
+        /// The symbol matching `NowPlayingRotation.systemImage`.
+        var systemImage: String {
+            switch kind {
+            case .dayNight: "sunrise"
+            case .rotate(_, .shuffle): "shuffle"
+            case .rotate(_, .sequential): "repeat"
+            }
+        }
+    }
+
     enum Command: Equatable, Sendable {
         /// What the menu bar menu does for the same item.
         case menu(StatusMenuModel.Command)
-        /// Lets every wallpaper play its saved sound again after Mute Wallpapers.
-        case unmuteAll
+        /// Mutes every wallpaper (`true`) or lets them play their saved sound again (`false`).
+        case setWallpapersMuted(Bool)
         case toggleFavorite(wallpaper: String)
         /// The wallpaper's own saved volume, from 0 to 1, as the inspector's slider sets it.
         case setVolume(wallpaper: String, volume: Double)
         /// The wallpaper's own saved mute, as the inspector's Mute this wallpaper sets it.
         case setMuted(wallpaper: String, muted: Bool)
+        /// Opens the control panel on Installed with `display` as its target and `wallpaper`
+        /// selected in the inspector.
+        case openWallpaperInInspector(wallpaper: String, display: String)
         case openSettings
         case openUpdates
         case quit
@@ -95,6 +127,8 @@ enum StatusPanelModel {
         var hold: Hold? = nil
         /// Displays with a wallpaper switch waiting or running.
         var switching: Set<String> = []
+        /// Each display's active playlist badge, when rotating or following Day and night.
+        var playlists: [String: PlaylistBadge] = [:]
         /// The control panel's target display, which the panel starts on when it can.
         var targetDisplayID: String? = nil
         /// Moves with every renderer snapshot, so the shown wallpaper's volume is read again.
@@ -122,6 +156,8 @@ enum StatusPanelModel {
         /// What the display shows, when it is installed.
         var wallpaper: Wallpaper?
         var state = State.unavailable
+        /// Active playlist rotation or Day and night schedule on this display, nil when off.
+        var playlist: PlaylistBadge? = nil
         var isFavorite = false
         var canPrevious = false
         var canNext = false
@@ -143,10 +179,14 @@ enum StatusPanelModel {
         var update: AppUpdateNotice? = nil
 
         var showsDisplayPicker: Bool { displays.count > 1 }
+        /// Three or more displays switch from the equal-width segmented control to a compact menu
+        /// so display names stay readable.
+        var usesCompactDisplayPicker: Bool { displays.count >= StatusPanelModel.compactDisplayPickerThreshold }
     }
 
     static let stripSize = 8
     static let recentLimit = 4
+    static let compactDisplayPickerThreshold = 3
 
     // MARK: The panel
 
@@ -187,6 +227,7 @@ enum StatusPanelModel {
         panel.displayTitle = display.title
         panel.wallpaper = display.wallpaperID.flatMap { installed[$0] }
         panel.state = state(of: display, in: input)
+        panel.playlist = input.playlists[display.id]
         panel.isFavorite = panel.wallpaper.map { input.favorites.contains($0.id) } ?? false
         panel.canPrevious = display.canPrevious
         panel.canNext = display.canNext
@@ -196,6 +237,39 @@ enum StatusPanelModel {
             .compactMap { installed[$0.id] }
             .prefix(recentLimit))
         return panel
+    }
+
+    /// Builds a display's playlist badge from its stored playlist, hold state, local collections
+    /// and installed library ids; nil while the display's playlist is off.
+    static func playlistBadge(
+        for playlist: DisplayPlaylist,
+        isHeld: Bool,
+        collections: [WallpaperCollection],
+        installedIDs: Set<String>
+    ) -> PlaylistBadge? {
+        switch playlist.mode {
+        case .off:
+            return nil
+        case .dayNight:
+            return PlaylistBadge(kind: .dayNight, isPaused: isHeld)
+        case .rotate:
+            let source: PlaylistBadge.Source =
+                switch playlist.source {
+                case .all:
+                    .all
+                case .favorites:
+                    .favorites
+                case .list:
+                    .list(count: Set(playlist.wallpaperIDs).intersection(installedIDs).count)
+                case .collection:
+                    if let id = playlist.collectionID, let collection = collections.first(where: { $0.id == id }) {
+                        .collection(name: collection.name)
+                    } else {
+                        .missingCollection
+                    }
+                }
+            return PlaylistBadge(kind: .rotate(source: source, order: playlist.order), isPaused: isHeld)
+        }
     }
 
     /// What holds every wallpaper still besides the user's Pause, in the most specific words there

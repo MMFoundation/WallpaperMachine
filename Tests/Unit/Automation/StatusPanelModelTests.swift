@@ -24,13 +24,15 @@ final class StatusPanelModelTests: XCTestCase {
     private func input(
         displays: [StatusMenuModel.Display], library: [String] = [], unplayable: Set<String> = [],
         favorites: Set<String> = [], active: Bool = true, paused: Bool = false, muted: Bool = false,
-        hold: Model.Hold? = nil, switching: Set<String> = [], target: String? = nil
+        hold: Model.Hold? = nil, switching: Set<String> = [],
+        playlists: [String: Model.PlaylistBadge] = [:], target: String? = nil
     ) -> Model.Input {
         Model.Input(
             menu: .init(playbackIsCurrent: true, hasActiveWallpapers: active, paused: paused,
                         wallpapersMuted: muted, displays: displays, canLockScreen: true),
             library: library.map { wallpaper($0, playable: !unplayable.contains($0)) },
-            favorites: favorites, hold: hold, switching: switching, targetDisplayID: target)
+            favorites: favorites, hold: hold, switching: switching, playlists: playlists,
+            targetDisplayID: target)
     }
 
     private func draw(_ input: Model.Input, display: String? = nil, avoiding previous: Set<String> = [],
@@ -205,6 +207,77 @@ final class StatusPanelModelTests: XCTestCase {
         ]
         XCTAssertEqual(Model.choices(twins).map(\.shortTitle),
                        ["Studio Display (1 - Primary)", "Studio Display (2 - Secondary)"])
+    }
+
+    func testThreeOrMoreDisplaysSwitchToTheCompactDisplayPicker() {
+        let one = Model.make(input(displays: [display("1")], library: ["a"]), display: nil, strip: [])
+        let two = Model.make(input(displays: [display("1"), display("2")], library: ["a"]), display: nil, strip: [])
+        let three = Model.make(
+            input(displays: [display("1"), display("2"), display("3")], library: ["a"]), display: nil, strip: [])
+        let four = Model.make(
+            input(displays: [display("1"), display("2"), display("3"), display("4")], library: ["a"]),
+            display: nil, strip: [])
+
+        XCTAssertFalse(one.showsDisplayPicker)
+        XCTAssertFalse(one.usesCompactDisplayPicker)
+        XCTAssertTrue(two.showsDisplayPicker)
+        XCTAssertFalse(two.usesCompactDisplayPicker, "Two displays stay on the equal-width segmented control")
+        XCTAssertTrue(three.showsDisplayPicker)
+        XCTAssertTrue(three.usesCompactDisplayPicker, "Three or more displays use the compact picker menu")
+        XCTAssertTrue(four.usesCompactDisplayPicker)
+    }
+
+    func testPlaylistBadgeCoversRotateSourcesDayNightPausedAndOff() {
+        let off = DisplayPlaylist()
+        XCTAssertNil(Model.playlistBadge(for: off, isHeld: false, collections: [], installedIDs: ["a"]))
+
+        var dayNight = DisplayPlaylist()
+        dayNight.mode = .dayNight
+        let activeDayNight = Model.playlistBadge(for: dayNight, isHeld: false, collections: [], installedIDs: [])
+        XCTAssertEqual(activeDayNight, Model.PlaylistBadge(kind: .dayNight, isPaused: false))
+        XCTAssertEqual(activeDayNight?.systemImage, "sunrise")
+
+        let heldDayNight = Model.playlistBadge(for: dayNight, isHeld: true, collections: [], installedIDs: [])
+        XCTAssertEqual(heldDayNight, Model.PlaylistBadge(kind: .dayNight, isPaused: true))
+
+        var favoritesShuffle = DisplayPlaylist()
+        favoritesShuffle.mode = .rotate
+        favoritesShuffle.source = .favorites
+        favoritesShuffle.order = .shuffle
+        let favBadge = Model.playlistBadge(for: favoritesShuffle, isHeld: false, collections: [], installedIDs: [])
+        XCTAssertEqual(favBadge, Model.PlaylistBadge(kind: .rotate(source: .favorites, order: .shuffle)))
+        XCTAssertEqual(favBadge?.systemImage, "shuffle")
+
+        var displayList = DisplayPlaylist()
+        displayList.mode = .rotate
+        displayList.source = .list
+        displayList.order = .sequential
+        displayList.wallpaperIDs = ["a", "b", "gone", "a"]
+        let listBadge = Model.playlistBadge(
+            for: displayList, isHeld: false, collections: [], installedIDs: ["a", "b", "c"])
+        XCTAssertEqual(listBadge, Model.PlaylistBadge(kind: .rotate(source: .list(count: 2), order: .sequential)))
+        XCTAssertEqual(listBadge?.systemImage, "repeat")
+
+        let collection = WallpaperCollection(id: "col-1", name: "Night <City>", wallpaperIDs: ["a"])
+        var byCollection = DisplayPlaylist()
+        byCollection.mode = .rotate
+        byCollection.source = .collection
+        byCollection.collectionID = "col-1"
+        XCTAssertEqual(
+            Model.playlistBadge(for: byCollection, isHeld: false, collections: [collection], installedIDs: ["a"]),
+            Model.PlaylistBadge(kind: .rotate(source: .collection(name: "Night <City>"), order: .sequential)))
+        XCTAssertEqual(
+            Model.playlistBadge(for: byCollection, isHeld: false, collections: [], installedIDs: ["a"]),
+            Model.PlaylistBadge(kind: .rotate(source: .missingCollection, order: .sequential)))
+
+        // `make` exposes only the selected display's badge.
+        let panelInput = input(
+            displays: [display("primary", shows: "a"), display("2", shows: "b")],
+            library: ["a", "b"],
+            playlists: ["2": Model.PlaylistBadge(kind: .dayNight)])
+        XCTAssertNil(Model.make(panelInput, display: "primary", strip: []).playlist)
+        XCTAssertEqual(Model.make(panelInput, display: "2", strip: []).playlist,
+                       Model.PlaylistBadge(kind: .dayNight))
     }
 
     // MARK: Recently used

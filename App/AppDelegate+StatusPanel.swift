@@ -69,9 +69,24 @@ extension AppDelegate: StatusPanelSource {
         let switching = menu.displays.map(\.id).filter {
             store.commands.isActive(slot: BridgeStore.activationSlot(displayId: $0))
         }
+        let installedIDs = Set(library.map(\.id))
+        let collections = WallpaperCollectionStore.shared.collections
+        var playlists: [String: StatusPanelModel.PlaylistBadge] = [:]
+        for display in menu.displays {
+            let playlist = PlaylistStore.shared.playlist(for: display.id)
+            if let badge = StatusPanelModel.playlistBadge(
+                for: playlist,
+                isHeld: PlaylistStore.shared.holds[display.id] != nil,
+                collections: collections,
+                installedIDs: installedIDs
+            ) {
+                playlists[display.id] = badge
+            }
+        }
         return StatusPanelModel.Input(
             menu: menu, library: library, favorites: PanelPreferences.favorites(),
             hold: statusPanelHold(store: store), switching: Set(switching),
+            playlists: playlists,
             targetDisplayID: controlPanelNavigation.targetDisplayID,
             snapshotRevision: store.snapshotRevision, libraryRevision: store.libraryRefreshRevision,
             update: AppUpdateNotice(store: updates.updater))
@@ -86,8 +101,8 @@ extension AppDelegate: StatusPanelSource {
             } else {
                 openStatusMenuDestination(menuCommand)
             }
-        case .unmuteAll:
-            try await performStatusPanelAutomation(.unmute)
+        case .setWallpapersMuted(let muted):
+            try await performStatusPanelAutomation(muted ? .mute : .unmute)
         case .toggleFavorite(let id):
             // Not a renderer command, so it does not wait behind one, as the panel's heart does not.
             try PanelPreferences.toggleFavorite(try statusPanelWallpaper(id, store: statusPanelStore()),
@@ -106,6 +121,14 @@ extension AppDelegate: StatusPanelSource {
                 try await store.setMutedAsync(
                     wallpaperId: try self.statusPanelWallpaper(id, store: store), muted: muted, keepingOpenOptions: true)
             }
+        case .openWallpaperInInspector(let wallpaper, let display):
+            if let store, store.settingsSnapshot.displays.contains(where: {
+                $0.displayId == display && $0.isIndependent
+            }) {
+                controlPanelNavigation.targetDisplayID = display
+            }
+            controlPanelNavigation.revealWallpaper(wallpaper)
+            showControlPanel(selection: .wallpaper)
         case .openSettings:
             openSettings()
         case .openUpdates:

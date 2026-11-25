@@ -13,6 +13,8 @@ struct SettingsSegmentedControl<Value: Hashable>: View {
   struct Segment: Identifiable {
     let value: Value
     let title: String
+    /// Tooltip shown on hover; defaults to `title` so truncated labels stay readable.
+    var help: String? = nil
     /// A segment that can be the selection but never be chosen by the user.
     var isEnabled = true
     var id: Value { value }
@@ -37,7 +39,8 @@ struct SettingsSegmentedControl<Value: Hashable>: View {
     HStack(spacing: 2) {
       ForEach(segments) { segment in
         SegmentButton(
-          title: segment.title, isSelected: segment.value == selection,
+          title: segment.title, help: segment.help ?? segment.title,
+          isSelected: segment.value == selection,
           isChoosable: segment.isEnabled, isEnabled: isEnabled, fillsWidth: fillsWidth
         ) { onSelect(segment.value) }
         .settingsRadioKeys(segment.value, in: chooseable, focus: $focused) { onSelect($0) }
@@ -53,6 +56,7 @@ struct SettingsSegmentedControl<Value: Hashable>: View {
 
 private struct SegmentButton: View {
   let title: String
+  let help: String
   let isSelected: Bool
   /// False for a segment that is only ever a state (Quality's Custom): it shows as the selection
   /// when it is one, and is never a button.
@@ -72,6 +76,7 @@ private struct SegmentButton: View {
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .onHover { isHovering = $0 }
+        .help(help)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     } else {
       // Not a disabled button: a disabled button draws its label dimmed, which made the selected
@@ -81,6 +86,7 @@ private struct SegmentButton: View {
       label
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isSelected, .isStaticText] : .isStaticText)
+        .help(help)
     }
   }
 

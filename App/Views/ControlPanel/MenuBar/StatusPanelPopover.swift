@@ -20,9 +20,25 @@ final class StatusPanelPopover: NSObject, NSPopoverDelegate {
   private var closedAt: TimeInterval?
   /// How soon after a close a click on the icon is the one that closed it rather than a new one.
   private static let closingClick: TimeInterval = 0.3
+  /// Space reserved for the popover arrow and breathing room below the menu bar and above the Dock.
+  nonisolated static let verticalMargin: CGFloat = 48
+  /// Floor so the popover remains usable even on an unexpectedly small visible frame.
+  nonisolated static let minimumMaxHeight: CGFloat = 320
+  /// Fallback maximum height when no screen visible frame is available.
+  nonisolated static let defaultMaxHeight: CGFloat = 720
 
   init(source: any StatusPanelSource) {
     self.source = source
+  }
+
+  /// Maximum content height for a popover anchored on a screen with `visibleFrame`.
+  ///
+  /// `NSHostingController.sizingOptions = [.preferredContentSize]` sizes the popover to its
+  /// content; passing this cap lets `StatusPanelView` size naturally when it fits and scroll its
+  /// body above the pinned footer on shorter screens without ever collapsing.
+  nonisolated static func maxContentHeight(for visibleFrame: NSRect?) -> CGFloat {
+    guard let visibleFrame, visibleFrame.height > 0 else { return defaultMaxHeight }
+    return max(minimumMaxHeight, (visibleFrame.height - verticalMargin).rounded(.down))
   }
 
   var isShown: Bool { popover?.isShown ?? false }
@@ -49,7 +65,10 @@ final class StatusPanelPopover: NSObject, NSPopoverDelegate {
     let controller = StatusPanelController(
       source: source, display: lastDisplayID, previousStrip: lastStrip,
       dismiss: { [weak self] in self?.close() })
-    let hosting = NSHostingController(rootView: StatusPanelRoot(controller: controller))
+    let screen = button.window?.screen ?? NSScreen.main ?? NSScreen.screens.first
+    let maxHeight = Self.maxContentHeight(for: screen?.visibleFrame)
+    let hosting = NSHostingController(
+      rootView: StatusPanelRoot(controller: controller, maxHeight: maxHeight))
     hosting.sizingOptions = [.preferredContentSize]
     let popover = NSPopover()
     popover.behavior = .transient
