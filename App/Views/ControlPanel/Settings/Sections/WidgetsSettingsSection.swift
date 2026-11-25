@@ -28,7 +28,7 @@ struct WidgetsSettingsSection: View {
       "Widgets stay on the desktop when you change the wallpaper. They sit above the wallpaper and below your desktop icons, on every desktop.",
     keywords: [
       "Add Widget", "Clock", "Date", "Text", "Countdown", "Greeting", "Battery", "Sunrise and sunset",
-      "Analog clock", "Month calendar",
+      "Analog clock", "Month calendar", "Now Playing", "Image",
     ])
 
   static let readyMade = SettingsItem(
@@ -36,7 +36,7 @@ struct WidgetsSettingsSection: View {
     note: "Add a finished widget in one click, then change anything about it.",
     keywords: [
       "Big clock", "Clock and date", "Neon clock", "Clock face", "World clocks", "Lunar date",
-      "Greeting and date", "Gradient note", "Battery and sun",
+      "Greeting and date", "Gradient note", "Battery and sun", "Now Playing",
     ])
 
   static let shown = SettingsItem(
@@ -44,6 +44,16 @@ struct WidgetsSettingsSection: View {
   static let display = SettingsItem(
     id: "widgets.display", section: .widgets, group: arrange, title: "Display",
     keywords: ["Main display", "All displays"])
+  static let scope = SettingsItem(
+    id: "widgets.scope", section: .widgets, group: arrange, title: "Visibility",
+    note: "Show this widget everywhere, only with specific wallpapers, or only on specific desktops.",
+    keywords: ["Everywhere", "Specific wallpapers", "Specific desktops"])
+  static let scopeWallpapers = SettingsItem(
+    id: "widgets.scope-wallpapers", section: .widgets, group: arrange, title: "Wallpapers",
+    note: "The widget appears only on displays showing one of these wallpapers.")
+  static let scopeSpaces = SettingsItem(
+    id: "widgets.scope-spaces", section: .widgets, group: arrange, title: "Desktops",
+    note: "Pins the widget to selected macOS Spaces, falling back to every desktop if Spaces cannot be read.")
   static let preview = SettingsItem(
     id: "widgets.preview", section: .widgets, group: arrange, title: "Arrange",
     note:
@@ -186,34 +196,64 @@ struct WidgetsSettingsSection: View {
     id: "widgets.sun", section: .widgets, group: format, title: "Sun times",
     note: "Uses the location set in Settings › Displays › Sunrise and sunset.",
     keywords: ["Next sunrise or sunset", "Today’s sunrise and sunset"])
+  static let showsArtwork = SettingsItem(
+    id: "widgets.now-playing.artwork", section: .widgets, group: format, title: "Show artwork")
+  static let hidesWhenIdle = SettingsItem(
+    id: "widgets.now-playing.hide-idle", section: .widgets, group: format,
+    title: "Hide when nothing is playing",
+    note: "Automatically hides the widget when playback stops.")
+  static let tintsFromArtwork = SettingsItem(
+    id: "widgets.now-playing.tint-artwork", section: .widgets, group: format,
+    title: "Match album colors",
+    note: "Uses colors from the album cover for the card and text.")
+  static let imageFile = SettingsItem(
+    id: "widgets.image.file", section: .widgets, group: format, title: "Image",
+    note: "Choose a PNG, JPEG, WebP or HEIC image. A copy is kept in your managed assets folder.")
+  static let imageFit = SettingsItem(
+    id: "widgets.image.fit", section: .widgets, group: format, title: "Image fit",
+    keywords: ["Fit", "Fill"])
+  static let imageCornerRadius = SettingsItem(
+    id: "widgets.image.corner-radius", section: .widgets, group: format, title: "Corner radius")
 
   /// The rows that edit the selected widget.
   static let editorItems = [
-    shown, display, preview, center, horizontal, vertical, alignment, rotation, style, size, typeface, weight,
-    italic, letterSpacing, lineHeight, textCase, color, accent, gradient, gradientColor, gradientAngle, opacity,
-    outline, outlineColor, glow, glowColor, shadow, shadowColor, shadowOpacity, shadowBlur, shadowDistance,
-    shadowAngle, background, backgroundColor, backgroundOpacity, backgroundPadding, resetEffects, timeFormat,
-    clockLayout, padsHour, showsPeriod, seconds, dialMarks, dialRing, dateFormat, calendarSystem, timeZone, label,
-    content, event, targetDay, name, sunStyle,
+    shown, display, scope, scopeWallpapers, scopeSpaces, preview, center, horizontal, vertical, alignment,
+    rotation, style, size, typeface, weight, italic, letterSpacing, lineHeight, textCase, color, accent,
+    gradient, gradientColor, gradientAngle, opacity, outline, outlineColor, glow, glowColor, shadow,
+    shadowColor, shadowOpacity, shadowBlur, shadowDistance, shadowAngle, background, backgroundColor,
+    backgroundOpacity, backgroundPadding, resetEffects, timeFormat, clockLayout, padsHour, showsPeriod,
+    seconds, dialMarks, dialRing, dateFormat, calendarSystem, timeZone, label, content, event, targetDay,
+    name, sunStyle, showsArtwork, hidesWhenIdle, tintsFromArtwork, imageFile, imageFit, imageCornerRadius,
   ]
   static let items = [add, readyMade] + editorItems
 
   /// The rows only some kinds of widget have, and those kinds.
   static let kindRows: [String: Set<DesktopWidget.Kind>] = [
-    letterSpacing.id: Set(DesktopWidget.Kind.allCases).subtracting([.analog]),
-    textCase.id: Set(DesktopWidget.Kind.allCases).subtracting([.analog]),
-    lineHeight.id: [.text, .time], accent.id: [.analog, .calendar],
+    typeface.id: Set(DesktopWidget.Kind.allCases).subtracting([.image]),
+    weight.id: Set(DesktopWidget.Kind.allCases).subtracting([.image]),
+    italic.id: Set(DesktopWidget.Kind.allCases).subtracting([.image]),
+    letterSpacing.id: Set(DesktopWidget.Kind.allCases).subtracting([.analog, .image]),
+    textCase.id: Set(DesktopWidget.Kind.allCases).subtracting([.analog, .image]),
+    lineHeight.id: [.text, .time],
+    color.id: Set(DesktopWidget.Kind.allCases).subtracting([.image]),
+    gradient.id: Set(DesktopWidget.Kind.allCases).subtracting([.image]),
+    accent.id: [.analog, .calendar],
     timeFormat.id: [.time, .sun], seconds.id: [.time, .analog], dateFormat.id: [.date],
     clockLayout.id: [.time], padsHour.id: [.time], showsPeriod.id: [.time],
     dialMarks.id: [.analog], dialRing.id: [.analog],
     calendarSystem.id: [.date], timeZone.id: [.time, .date, .analog], label.id: [.time, .date],
     content.id: [.text], event.id: [.countdown], targetDay.id: [.countdown], name.id: [.greeting],
     sunStyle.id: [.sun],
+    showsArtwork.id: [.nowPlaying], hidesWhenIdle.id: [.nowPlaying], tintsFromArtwork.id: [.nowPlaying],
+    imageFile.id: [.image], imageFit.id: [.image], imageCornerRadius.id: [.image],
   ]
 
   /// The rows that only matter once another choice is made, each with that choice.
   static let dependentRows: [String: @Sendable (DesktopWidget) -> Bool] = [
-    gradientColor.id: { $0.fill == .gradient }, gradientAngle.id: { $0.fill == .gradient },
+    scopeWallpapers.id: { if case .wallpapers = $0.scope { return true }; return false },
+    scopeSpaces.id: { if case .spaces = $0.scope { return true }; return false },
+    gradientColor.id: { $0.kind != .image && $0.fill == .gradient },
+    gradientAngle.id: { $0.kind != .image && $0.fill == .gradient },
     outlineColor.id: { $0.outlineWidth > 0 }, glowColor.id: { $0.glowSize > 0 },
     shadowColor.id: { $0.hasShadow }, shadowOpacity.id: { $0.hasShadow }, shadowBlur.id: { $0.hasShadow },
     shadowDistance.id: { $0.hasShadow }, shadowAngle.id: { $0.hasShadow },
@@ -288,6 +328,8 @@ struct WidgetsSettingsSection: View {
     case .sun: L("Sunrise and sunset")
     case .analog: L("Analog clock")
     case .calendar: L("Month calendar")
+    case .nowPlaying: L("Now Playing")
+    case .image: L("Image")
     }
   }
 
@@ -302,6 +344,23 @@ struct WidgetsSettingsSection: View {
     case .sun: "sunrise"
     case .analog: "clock.circle"
     case .calendar: "calendar.day.timeline.left"
+    case .nowPlaying: "music.note"
+    case .image: "photo"
+    }
+  }
+
+  static func title(of scopeMode: DesktopWidgetsSettingsModel.ScopeMode) -> String {
+    switch scopeMode {
+    case .everywhere: L("Everywhere")
+    case .wallpapers: L("Specific wallpapers")
+    case .spaces: L("Specific desktops")
+    }
+  }
+
+  static func title(of fit: DesktopWidget.ImageFit) -> String {
+    switch fit {
+    case .fit: L("Fit")
+    case .fill: L("Fill")
     }
   }
 
@@ -476,7 +535,8 @@ struct WidgetEditor: View {
       ForEach(panes) { pane in
         switch pane {
         case .position: positionGroup
-        case .text: lookGroup
+        case .text:
+          if !compact || DesktopWidgetPane.panes(for: widget.kind).contains(.text) { lookGroup }
         case .style: styleGroups
         case .content:
           if DesktopWidgetPane.panes(for: widget.kind).contains(.content) { formatGroup }
@@ -548,6 +608,30 @@ struct WidgetEditor: View {
           policy: .latestWins
         ) { try await controller.changeDesktopWidget(id, .placement($0)) }
       }
+      row(Section.scope) {
+        SettingsMenuControl(
+          key: DesktopWidgetsSettingsModel.key(id, "scopeMode"),
+          saved: model.scopeMode(for: widget),
+          options: DesktopWidgetsSettingsModel.ScopeMode.allCases.map {
+            .init(value: $0, title: Section.title(of: $0))
+          },
+          waitsForMac: false,
+          policy: .latestWins
+        ) { mode in
+          let next = model.defaultScope(for: mode, widget: widget, among: screens)
+          try await controller.changeDesktopWidget(id, .scope(next))
+        }
+      }
+      if Section.offers(Section.scopeWallpapers, for: widget), case .wallpapers(let ids) = widget.scope {
+        row(Section.scopeWallpapers) {
+          WidgetScopeWallpapersControl(widgetID: id, selectedIDs: ids)
+        }
+      }
+      if Section.offers(Section.scopeSpaces, for: widget), case .spaces(let ids) = widget.scope {
+        row(Section.scopeSpaces) {
+          WidgetScopeSpacesControl(widget: widget, screens: screens, selectedIDs: ids)
+        }
+      }
       if !compact, let screen {
         SettingsRow(Section.preview, stacked: true) {
           DesktopWidgetPreview(screen: screen, limit: DesktopWidgetPreview.rowLimit)
@@ -609,18 +693,24 @@ struct WidgetEditor: View {
           .size($0)
         }
       }
-      row(Section.typeface) {
-        WidgetFontMenu(widget: widget)
+      if Section.offers(Section.typeface, for: widget) {
+        row(Section.typeface) {
+          WidgetFontMenu(widget: widget)
+        }
       }
-      row(Section.weight) {
-        WidgetSliderControl(
-          id: id, control: "weight", saved: widget.weight / 100,
-          range: (DesktopWidget.weightRange.lowerBound / 100)...(DesktopWidget.weightRange.upperBound / 100),
-          width: sliderWidth, readout: { String($0 * 100) }
-        ) { .weight($0 * 100) }
+      if Section.offers(Section.weight, for: widget) {
+        row(Section.weight) {
+          WidgetSliderControl(
+            id: id, control: "weight", saved: widget.weight / 100,
+            range: (DesktopWidget.weightRange.lowerBound / 100)...(DesktopWidget.weightRange.upperBound / 100),
+            width: sliderWidth, readout: { String($0 * 100) }
+          ) { .weight($0 * 100) }
+        }
       }
-      row(Section.italic, inline: true) {
-        WidgetSwitch(id: id, control: "italic", saved: widget.isItalic) { .italic($0) }
+      if Section.offers(Section.italic, for: widget) {
+        row(Section.italic, inline: true) {
+          WidgetSwitch(id: id, control: "italic", saved: widget.isItalic) { .italic($0) }
+        }
       }
       if Section.offers(Section.letterSpacing, for: widget) {
         row(Section.letterSpacing) {
@@ -664,8 +754,10 @@ struct WidgetEditor: View {
   private var colorsGroup: some View {
     let id = widget.id
     return SettingsGroup(Section.colors, in: .widgets) {
-      row(Section.color, inline: true) {
-        WidgetColorControl(id: id, control: "color", saved: widget.color) { .color($0) }
+      if Section.offers(Section.color, for: widget) {
+        row(Section.color, inline: true) {
+          WidgetColorControl(id: id, control: "color", saved: widget.color) { .color($0) }
+        }
       }
       if Section.offers(Section.accent, for: widget) {
         row(Section.accent, inline: true) {
@@ -682,9 +774,11 @@ struct WidgetEditor: View {
           }
         }
       }
-      row(Section.gradient, inline: true) {
-        WidgetSwitch(id: id, control: "gradient", saved: widget.fill == .gradient) {
-          .fill($0 ? .gradient : .solid)
+      if Section.offers(Section.gradient, for: widget) {
+        row(Section.gradient, inline: true) {
+          WidgetSwitch(id: id, control: "gradient", saved: widget.fill == .gradient) {
+            .fill($0 ? .gradient : .solid)
+          }
         }
       }
       if Section.offers(Section.gradientColor, for: widget) {
@@ -883,10 +977,62 @@ struct WidgetEditor: View {
           sunLocationRow
         }
         row(Section.timeFormat, inline: true) { timeFormatMenu }
+      case .nowPlaying:
+        row(Section.showsArtwork, inline: true) {
+          WidgetSwitch(id: id, control: "showsArtwork", saved: widget.showsArtwork) { .showsArtwork($0) }
+        }
+        row(Section.hidesWhenIdle, inline: true) {
+          WidgetSwitch(id: id, control: "hidesWhenIdle", saved: widget.hidesWhenIdle) { .hidesWhenIdle($0) }
+        }
+        row(Section.tintsFromArtwork, inline: true) {
+          WidgetSwitch(id: id, control: "tintsFromArtwork", saved: widget.tintsFromArtwork) { .tintsFromArtwork($0) }
+        }
+        if controller.settings.search.shows(Section.showsArtwork) {
+          nowPlayingIntegrationNote
+        }
+      case .image:
+        row(Section.imageFile) {
+          WidgetImageFileControl(widget: widget)
+        }
+        row(Section.imageFit, inline: true) {
+          SettingsSegmentedControl(
+            segments: DesktopWidget.ImageFit.allCases.map { .init(value: $0, title: Section.title(of: $0)) },
+            selection: model.value(id, "imageFit", saved: widget.imageFit), fillsWidth: false
+          ) { value in
+            model.commit(id, "imageFit", to: value) { .imageFit($0) }
+          }
+        }
+        row(Section.imageCornerRadius) {
+          slider(
+            "imageCornerRadius", saved: widget.imageCornerRadius, range: DesktopWidget.imageCornerRadiusRange,
+            readout: { L("\($0)%") }
+          ) { .imageCornerRadius($0) }
+        }
+        if compact {
+          row(Section.size) {
+            slider("size", saved: widget.size, range: DesktopWidget.sizeRange, readout: { L("\($0) pt") }) {
+              .size($0)
+            }
+          }
+        }
       case .battery, .calendar:
         EmptyView()
       }
     }
+  }
+
+  /// Brief note explaining how macOS Now Playing is read (MediaRemote + AppleScript fallback)
+  /// without polling or progress-bar animation.
+  private var nowPlayingIntegrationNote: some View {
+    Text(
+      "Reads macOS Now Playing via MediaRemote, with an AppleScript fallback for running Music or Spotify players. Redraws only on track, artwork or playback changes."
+    )
+    .font(.panel(.footnote))
+    .foregroundStyle(theme.surface.muted.color)
+    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .accessibilityIdentifier("widgets.now-playing.integration-note")
   }
 
   /// Direct jump to Settings › Displays where the Sunrise and sunset location is configured.
@@ -1032,6 +1178,10 @@ struct WidgetLayerRow: View {
     let model = controller.widgetsSettings
     let kind = WidgetsSettingsSection.title(of: widget.kind)
     let place = model.placementTitle(for: widget, among: screens)
+    let scope = model.scopeSummary(for: widget, among: screens)
+    var details = [kind, place]
+    if let scope { details.append(scope) }
+    if !widget.isShown { details.append(L("Hidden")) }
     return HStack(spacing: 10) {
       Image(systemName: WidgetsSettingsSection.symbol(of: widget.kind))
         .font(.system(size: 14))
@@ -1042,7 +1192,7 @@ struct WidgetLayerRow: View {
           .font(.panel(.body))
           .foregroundStyle(widget.isShown ? theme.surface.text.color : theme.surface.muted.color)
           .lineLimit(1)
-        Text(verbatim: widget.isShown ? "\(kind) · \(place)" : "\(kind) · \(place) · \(L("Hidden"))")
+        Text(verbatim: details.joined(separator: " · "))
           .font(.panel(.footnote))
           .foregroundStyle(theme.surface.muted.color)
           .lineLimit(1)
@@ -1371,5 +1521,232 @@ private struct WidgetFontMenu: View {
     .frame(maxWidth: 240)
     .settingsRowAccessibility(row)
     .controlSize(.small)
+  }
+}
+
+/// File picker and status control for a static `.image` sticker widget.
+private struct WidgetImageFileControl: View {
+  let widget: DesktopWidget
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    let id = widget.id
+    let chooseKey = PanelActionCoordinator.key("chooseDesktopWidgetImage", id: id)
+    let clearKey = PanelActionCoordinator.key("clearDesktopWidgetImage", id: id)
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 8) {
+        if let asset = widget.imageAsset {
+          Text(verbatim: asset.displayName)
+            .font(.panel(.callout))
+            .foregroundStyle(theme.surface.text.color)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        } else {
+          Text("No image selected")
+            .font(.panel(.callout))
+            .foregroundStyle(theme.surface.muted.color)
+            .lineLimit(1)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        }
+      }
+      HStack(spacing: 6) {
+        Button("Choose Image…") {
+          controller.launch(chooseKey) { try await controller.chooseDesktopWidgetImage(id) }
+        }
+        .buttonStyle(.panelSecondary(size: .small))
+        .disabled(controller.isBusy(chooseKey))
+        .accessibilityIdentifier("widgets.image.choose")
+        if widget.imageAsset != nil {
+          Button("Clear") {
+            controller.launch(clearKey) { try await controller.changeDesktopWidget(id, .imageAsset(nil)) }
+          }
+          .buttonStyle(.panelSecondary(size: .small))
+          .disabled(controller.isBusy(clearKey))
+          .accessibilityIdentifier("widgets.image.clear")
+        }
+      }
+    }
+    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .contain)
+  }
+}
+
+/// Manages the wallpaper list for a `.wallpapers` scoped widget, reusing `WallpaperThumbnailChooser`.
+private struct WidgetScopeWallpapersControl: View {
+  let widgetID: String
+  let selectedIDs: [String]
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+  @State private var showsChooser = false
+
+  var body: some View {
+    let model = controller.widgetsSettings
+    let availableChoices = controller.automationTargets.wallpapers.filter { !selectedIDs.contains($0.target.id) }
+    VStack(alignment: .leading, spacing: 6) {
+      if selectedIDs.isEmpty {
+        Text("Choose at least one wallpaper to show this widget.")
+          .font(.panel(.footnote))
+          .foregroundStyle(theme.surface.muted.color)
+          .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+      } else {
+        ForEach(selectedIDs, id: \.self) { wallpaperID in
+          let title = model.wallpaperTitle(for: wallpaperID)
+          HStack(spacing: 8) {
+            if let row = controller.libraryRow(id: wallpaperID) {
+              PanelImage(source: row.coverSource, pointSize: 36)
+                .frame(width: 24, height: 16)
+                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                .overlay {
+                  RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .strokeBorder(theme.surface.line.color, lineWidth: 0.5)
+                }
+                .accessibilityHidden(true)
+            } else {
+              Image(systemName: "photo")
+                .font(.panel(.caption))
+                .foregroundStyle(theme.surface.muted.color)
+                .frame(width: 24, height: 16)
+                .accessibilityHidden(true)
+            }
+            Text(verbatim: title)
+              .font(.panel(.callout))
+              .foregroundStyle(theme.surface.text.color)
+              .lineLimit(1)
+              .truncationMode(.tail)
+              .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            Button {
+              let remaining = selectedIDs.filter { $0 != wallpaperID }
+              model.commit(widgetID, "scope", to: DesktopWidget.Scope.wallpapers(remaining)) { .scope($0) }
+            } label: {
+              Image(systemName: "xmark")
+                .font(.panel(.caption))
+            }
+            .buttonStyle(.panelSecondary(size: .small))
+            .help(L("Remove"))
+            .accessibilityLabel(Text(verbatim: L("Remove \(title)")))
+            .accessibilityIdentifier("widgets.scope.wallpaper.remove.\(wallpaperID)")
+          }
+        }
+      }
+      Button("Add Wallpaper…") {
+        showsChooser = true
+      }
+      .buttonStyle(.panelSecondary(size: .small))
+      .disabled(availableChoices.isEmpty || selectedIDs.count >= DesktopWidget.scopeLimit)
+      .accessibilityIdentifier("widgets.scope.wallpaper.add")
+      .popover(isPresented: $showsChooser, arrowEdge: .bottom) {
+        WallpaperThumbnailChooser(
+          title: L("Choose a wallpaper"),
+          wallpapers: availableChoices,
+          selected: nil,
+          onSelect: { target in
+            guard target.kind == .wallpaper, !selectedIDs.contains(target.id) else { return }
+            let next = selectedIDs + [target.id]
+            model.commit(widgetID, "scope", to: DesktopWidget.Scope.wallpapers(next)) { .scope($0) }
+          },
+          onDismiss: { showsChooser = false }
+        )
+        .panelPresentationLocale()
+      }
+      .onChange(of: showsChooser) { _, open in
+        controller.widgetsSettings.isScopePopoverOpen = open
+      }
+      .onDisappear {
+        controller.widgetsSettings.isScopePopoverOpen = false
+      }
+    }
+    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .contain)
+  }
+}
+
+/// Manages pinned macOS desktop Spaces for a `.spaces` scoped widget, with graceful unavailable fallback.
+private struct WidgetScopeSpacesControl: View {
+  let widget: DesktopWidget
+  let screens: [DesktopWidgetController.Screen]
+  let selectedIDs: [String]
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    let model = controller.widgetsSettings
+    let info = model.scopeDesktops(for: widget, among: screens)
+    let knownIDs = Set(info.desktops.map(\.id))
+    let missingIDs = selectedIDs.filter { !knownIDs.contains($0) }
+    VStack(alignment: .leading, spacing: 6) {
+      if info.available {
+        if let currentID = info.currentID {
+          Button("Use Current Desktop") {
+            model.commit(widget.id, "scope", to: DesktopWidget.Scope.spaces([currentID])) { .scope($0) }
+          }
+          .buttonStyle(.panelSecondary(size: .small))
+          .disabled(selectedIDs == [currentID])
+          .accessibilityIdentifier("widgets.scope.spaces.use-current")
+        }
+        ForEach(info.desktops) { desktop in
+          let isSelected = selectedIDs.contains(desktop.id)
+          let label = desktop.isCurrent
+            ? L("Desktop \(desktop.number) (current)")
+            : L("Desktop \(desktop.number)")
+          Toggle(
+            isOn: Binding(
+              get: { isSelected },
+              set: { on in
+                var next = selectedIDs.filter { $0 != desktop.id }
+                if on { next.append(desktop.id) }
+                model.commit(widget.id, "scope", to: DesktopWidget.Scope.spaces(next)) { .scope($0) }
+              })
+          ) {
+            Text(verbatim: label)
+              .font(.panel(.callout))
+              .foregroundStyle(theme.surface.text.color)
+              .lineLimit(1)
+          }
+          .toggleStyle(.checkbox)
+          .controlSize(.small)
+          .accessibilityIdentifier("widgets.scope.space.\(desktop.number)")
+        }
+        if selectedIDs.isEmpty {
+          Text("Choose at least one desktop to show this widget.")
+            .font(.panel(.footnote))
+            .foregroundStyle(theme.surface.muted.color)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        }
+      } else {
+        Text("Desktop information is unavailable. The widget will appear on every desktop until macOS Spaces can be read.")
+          .font(.panel(.footnote))
+          .foregroundStyle(theme.surface.muted.color)
+          .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        Button("Refresh Spaces") {
+          controller.launch(PanelActionCoordinator.key("widgetsRefreshSpaces")) {
+            try await controller.refreshSpaces()
+          }
+        }
+        .buttonStyle(.panelSecondary(size: .small))
+        .accessibilityIdentifier("widgets.scope.spaces.refresh")
+      }
+      ForEach(missingIDs, id: \.self) { spaceID in
+        HStack(spacing: 8) {
+          Text("Unavailable desktop")
+            .font(.panel(.callout))
+            .foregroundStyle(theme.surface.muted.color)
+            .lineLimit(1)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+          Button("Remove") {
+            let remaining = selectedIDs.filter { $0 != spaceID }
+            model.commit(widget.id, "scope", to: DesktopWidget.Scope.spaces(remaining)) { .scope($0) }
+          }
+          .buttonStyle(.panelSecondary(size: .small))
+          .accessibilityIdentifier("widgets.scope.space.remove.\(spaceID)")
+        }
+      }
+    }
+    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .contain)
   }
 }

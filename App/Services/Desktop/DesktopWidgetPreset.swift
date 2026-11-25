@@ -6,7 +6,7 @@ import Foundation
 /// preset they came from.
 enum DesktopWidgetPreset: String, CaseIterable, Sendable {
     case bigClock, clockAndDate, neonClock, clockFace, worldClocks, lunarDate, monthCalendar, countdown
-    case greeting, note, status
+    case greeting, note, status, nowPlaying
 
     /// How the preset's widgets sit together around the group's place.
     enum Arrangement: Equatable, Sendable {
@@ -139,6 +139,18 @@ enum DesktopWidgetPreset: String, CaseIterable, Sendable {
                 $0.alignment = .leading
             }
             return Layout(widgets: [battery, sun], arrangement: .column(gap: 2), x: 0.04, y: 0.9)
+        case .nowPlaying:
+            let card = widget(.nowPlaying) {
+                $0.size = 18
+                $0.weight = 600
+                $0.alignment = .leading
+                $0.showsArtwork = true
+                $0.hidesWhenIdle = true
+                DesktopWidget.StylePreset.badge.apply(to: &$0)
+                $0.tintsFromArtwork = true
+                $0.backgroundPadding = 65
+            }
+            return Layout(widgets: [card], arrangement: .column(gap: 0), x: 0.04, y: 0.88)
         }
     }
 

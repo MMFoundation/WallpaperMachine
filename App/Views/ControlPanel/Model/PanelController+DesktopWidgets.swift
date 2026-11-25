@@ -1,9 +1,12 @@
+import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 /// One change a Settings › Desktop Widgets control makes to a widget.
 enum DesktopWidgetChange: Hashable, Sendable {
   case shown(Bool)
   case placement(DesktopWidget.Placement)
+  case scope(DesktopWidget.Scope)
   case size(Int)
   case position(x: Double, y: Double)
   case x(Double)
@@ -49,6 +52,12 @@ enum DesktopWidgetChange: Hashable, Sendable {
   case clockLayout(DesktopWidget.ClockLayout)
   case dialMarks(DesktopWidget.DialMarks)
   case showsDialRing(Bool)
+  case showsArtwork(Bool)
+  case hidesWhenIdle(Bool)
+  case tintsFromArtwork(Bool)
+  case imageAsset(DesktopWidget.ImageAsset?)
+  case imageFit(DesktopWidget.ImageFit)
+  case imageCornerRadius(Int)
   /// A finished look from the Style menu.
   case style(DesktopWidget.StylePreset)
   /// Visual styling copied from another widget.
@@ -60,6 +69,7 @@ enum DesktopWidgetChange: Hashable, Sendable {
     switch self {
     case .shown(let value): widget.isShown = value
     case .placement(let value): widget.placement = value
+    case .scope(let value): widget.scope = value
     case .size(let value): widget.size = value
     case .position(let x, let y):
       widget.x = x
@@ -107,6 +117,12 @@ enum DesktopWidgetChange: Hashable, Sendable {
     case .clockLayout(let value): widget.clockLayout = value
     case .dialMarks(let value): widget.dialMarks = value
     case .showsDialRing(let value): widget.showsDialRing = value
+    case .showsArtwork(let value): widget.showsArtwork = value
+    case .hidesWhenIdle(let value): widget.hidesWhenIdle = value
+    case .tintsFromArtwork(let value): widget.tintsFromArtwork = value
+    case .imageAsset(let value): widget.imageAsset = value
+    case .imageFit(let value): widget.imageFit = value
+    case .imageCornerRadius(let value): widget.imageCornerRadius = value
     case .style(let preset): preset.apply(to: &widget)
     case .applyStyle(let style): style.apply(to: &widget)
     case .resetEffects: widget.resetEffects()
@@ -223,6 +239,36 @@ extension PanelController {
         button: L("Remove"))
     else { return }
     try await removeDesktopWidget(id)
+  }
+
+  /// Opens a file picker for a static image sticker (`.image`) widget, imports a managed copy
+  /// into `UserAssets/DesktopWidgets/`, and updates the widget as one undoable step.
+  func chooseDesktopWidgetImage(_ id: String) async throws {
+    try await run(.immediate) {
+      let existing = try desktopWidgets.widget(id)
+      guard existing.kind == .image else { throw InvalidControlValue() }
+      let panel = NSOpenPanel()
+      panel.title = String(localized: "Choose Image")
+      panel.canChooseFiles = true
+      panel.canChooseDirectories = false
+      panel.allowsMultipleSelection = false
+      panel.allowedContentTypes = DesktopWidgetImageStore.allowedContentTypes
+      guard let url = await dialogs.choose(panel) else { return }
+      let imageStore = widgetsSettings.imageStore
+      let imported = try await Task.detached(priority: .userInitiated) {
+        try imageStore.importImage(from: url)
+      }.value
+      // The picker and file copy suspended: confirm the widget still exists and is still an image.
+      let current = try desktopWidgets.widget(id)
+      guard current.kind == .image else {
+        widgetsSettings.pruneUnusedImages()
+        return
+      }
+      try widgetsSettings.recordMutation {
+        try desktopWidgets.update(id) { $0.imageAsset = imported }
+      }
+      widgetsSettings.pruneUnusedImages()
+    }
   }
 
   /// Undoes the last Desktop Widgets edit, restoring the previous widgets and selection.

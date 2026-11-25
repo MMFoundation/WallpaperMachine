@@ -329,7 +329,10 @@ final class WidgetsSettingsTests: PanelTestCase {
 
       typealias Section = WidgetsSettingsSection
       let kindRows = Set(Section.kindRows.keys)
-      let lettering: Set<String> = [Section.letterSpacing.id, Section.textCase.id]
+      let typography: Set<String> = [
+        Section.typeface.id, Section.weight.id, Section.italic.id, Section.color.id, Section.gradient.id,
+      ]
+      let lettering: Set<String> = typography.union([Section.letterSpacing.id, Section.textCase.id])
       let expected: [DesktopWidget.Kind: Set<String>] = [
         .time: lettering.union([
           Section.lineHeight.id, Section.timeFormat.id, Section.clockLayout.id, Section.padsHour.id,
@@ -341,11 +344,18 @@ final class WidgetsSettingsTests: PanelTestCase {
         .greeting: lettering.union([Section.name.id]),
         .battery: lettering,
         .sun: lettering.union([Section.sunStyle.id, Section.timeFormat.id]),
-        .analog: [Section.accent.id, Section.dialMarks.id, Section.dialRing.id, Section.seconds.id, Section.timeZone.id],
+        .analog: typography.union([
+          Section.accent.id, Section.dialMarks.id, Section.dialRing.id, Section.seconds.id, Section.timeZone.id,
+        ]),
         .calendar: lettering.union([Section.accent.id]),
+        .nowPlaying: lettering.union([
+          Section.showsArtwork.id, Section.hidesWhenIdle.id, Section.tintsFromArtwork.id,
+        ]),
+        .image: [Section.imageFile.id, Section.imageFit.id, Section.imageCornerRadius.id],
       ]
-      // A new widget has a shadow, a solid fill and no outline, glow or background.
+      // A new widget is shown everywhere, has a shadow, a solid fill and no outline, glow or background.
       let waiting: Set<String> = [
+        Section.scopeWallpapers.id, Section.scopeSpaces.id,
         Section.gradientColor.id, Section.gradientAngle.id, Section.outlineColor.id, Section.glowColor.id,
         Section.backgroundColor.id, Section.backgroundOpacity.id, Section.backgroundPadding.id,
       ]
@@ -1287,6 +1297,8 @@ final class WidgetsSettingsTests: PanelTestCase {
           try await controller.addDesktopWidget(.analog)
           try await controller.addDesktopWidget(.countdown)
           try await controller.addDesktopWidget(.sun)
+          try await controller.addDesktopWidget(.nowPlaying)
+          try await controller.addDesktopWidget(.image)
         }
         for language in ["en", "ja"] {
           PanelLocale.shared.bind(
@@ -1307,6 +1319,150 @@ final class WidgetsSettingsTests: PanelTestCase {
         }
       }
       XCTAssertFalse(window.isVisible, "layout stays off screen")
+    }
+  }
+
+  /// Now Playing and Image sticker widgets integrate cleanly with Settings controls, file import,
+  /// managed cleanup and scoped Undo/Redo.
+  func testNowPlayingAndImageWidgetsIntegrateWithPickerManagedAssetsAndUndoRedo() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop] in [laptop] }
+      let model = controller.widgetsSettings
+
+      // Now Playing ready-made preset + option toggles with Undo/Redo.
+      try await controller.addDesktopWidgetPreset(.nowPlaying)
+      let npID = try XCTUnwrap(model.selectedID)
+      let np = try XCTUnwrap(model.selected)
+      XCTAssertEqual(np.kind, .nowPlaying)
+      XCTAssertTrue(np.tintsFromArtwork)
+      XCTAssertTrue(np.showsArtwork)
+      XCTAssertTrue(np.hidesWhenIdle)
+
+      try await controller.changeDesktopWidget(npID, .showsArtwork(false))
+      try await controller.changeDesktopWidget(npID, .hidesWhenIdle(false))
+      try await controller.changeDesktopWidget(npID, .tintsFromArtwork(false))
+      XCTAssertEqual(model.selected?.showsArtwork, false)
+      XCTAssertEqual(model.selected?.hidesWhenIdle, false)
+      XCTAssertEqual(model.selected?.tintsFromArtwork, false)
+
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected?.tintsFromArtwork, true)
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected?.hidesWhenIdle, true)
+      try await controller.redoDesktopWidgets()
+      XCTAssertEqual(model.selected?.hidesWhenIdle, false)
+
+      // Image sticker widget: no Text tab, imports PNG via PanelDialogs, preserves asset across Undo.
+      XCTAssertEqual(DesktopWidgetPane.panes(for: .image), [.content, .style, .position])
+      try await controller.addDesktopWidget(.image)
+      let imageID = try XCTUnwrap(model.selectedID)
+
+      let pngURL = panel.root.appendingPathComponent("mascot.png")
+      let ctx = try XCTUnwrap(
+        CGContext(
+          data: nil, width: 32, height: 32, bitsPerComponent: 8, bytesPerRow: 32 * 4,
+          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+      ctx.setFillColor(red: 0.9, green: 0.3, blue: 0.4, alpha: 1)
+      ctx.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+      let rep = NSBitmapImageRep(cgImage: try XCTUnwrap(ctx.makeImage()))
+      try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: pngURL)
+
+      panel.dialogs.chosenURL = pngURL
+      try await controller.chooseDesktopWidgetImage(imageID)
+      let imported = try XCTUnwrap(model.selected?.imageAsset)
+      XCTAssertEqual(imported.displayName, "mascot.png")
+      XCTAssertNotNil(model.imageStore.url(for: imported))
+
+      // Preview content resolves the imported sticker image.
+      let previewContent = model.content(for: try XCTUnwrap(model.selected))
+      guard case .image(let sticker) = previewContent.drawing else { return XCTFail("expected image sticker") }
+      XCTAssertNotNil(sticker.image)
+      XCTAssertFalse(sticker.isPlaceholder)
+
+      // Fit/corner-radius edits and clearing image integrate with Undo/Redo without losing the file.
+      try await controller.changeDesktopWidget(imageID, .imageFit(.fill))
+      try await controller.changeDesktopWidget(imageID, .imageCornerRadius(50))
+      try await controller.changeDesktopWidget(imageID, .imageAsset(nil))
+      XCTAssertNil(model.selected?.imageAsset)
+      XCTAssertNotNil(model.imageStore.url(for: imported), "undo stack keeps the sticker file alive")
+
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected?.imageAsset, imported)
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected?.imageCornerRadius, 12)
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected?.imageFit, .fit)
+
+      // Removing the image widget and committing a new edit clears redo and prunes the orphaned asset.
+      try await controller.removeDesktopWidget(imageID)
+      // Still referenced in undo stack until history drops it, so confirm pruning cleans unreferenced assets.
+      model.imageStore.pruneUnused(keeping: [])
+      XCTAssertNil(model.imageStore.url(for: imported))
+    }
+  }
+
+  /// Visibility scope (Everywhere / Specific wallpapers / Specific desktops) seeds from the
+  /// current wallpaper or Space, offers the right rows, guards workspace shortcuts behind popovers,
+  /// and supports Undo/Redo.
+  func testWidgetScopeSeedsFromCurrentWallpaperAndSpaceAndSupportsUndoRedo() async throws {
+    let topology: [String: WallpaperDisplaySpaces] = [
+      "1": WallpaperDisplaySpaces(
+        displayUUID: "AAAA-1",
+        spaces: [
+          WallpaperDesktopSpace(id: "default", number: 1, managedID: 10),
+          WallpaperDesktopSpace(id: "space-2", number: 2, managedID: 20),
+        ],
+        current: "default", currentManagedID: 10),
+    ]
+    let spaces = WallpaperSpaceMonitor(provider: { topology })
+    spaces.refresh()
+    try await withPanel(spaces: spaces) { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop] in [laptop] }
+      Self.show("aurora", in: panel)
+      let model = controller.widgetsSettings
+
+      try await controller.addDesktopWidget(.time)
+      let id = try XCTUnwrap(model.selectedID)
+      let initial = try XCTUnwrap(model.selected)
+      XCTAssertEqual(model.scopeMode(for: initial), .everywhere)
+      XCTAssertNil(model.scopeSummary(for: initial, among: [laptop]))
+      XCTAssertFalse(WidgetsSettingsSection.offers(WidgetsSettingsSection.scopeWallpapers, for: initial))
+      XCTAssertFalse(WidgetsSettingsSection.offers(WidgetsSettingsSection.scopeSpaces, for: initial))
+
+      // Switching to Specific wallpapers seeds the previewed display's current wallpaper.
+      let wpScope = model.defaultScope(for: .wallpapers, widget: initial, among: [laptop])
+      XCTAssertEqual(wpScope, .wallpapers(["aurora"]))
+      try await controller.changeDesktopWidget(id, .scope(wpScope))
+      var updated = try XCTUnwrap(model.selected)
+      XCTAssertTrue(WidgetsSettingsSection.offers(WidgetsSettingsSection.scopeWallpapers, for: updated))
+      XCTAssertFalse(WidgetsSettingsSection.offers(WidgetsSettingsSection.scopeSpaces, for: updated))
+      XCTAssertEqual(model.scopeSummary(for: updated, among: [laptop]), L("1 wallpaper"))
+
+      // Adding a second wallpaper and undoing/redoing.
+      try await controller.changeDesktopWidget(id, .scope(.wallpapers(["aurora", "rain"])))
+      XCTAssertEqual(model.scopeSummary(for: try XCTUnwrap(model.selected), among: [laptop]), L("\(2) wallpapers"))
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected?.scope, .wallpapers(["aurora"]))
+
+      // Switching to Specific desktops seeds the current desktop Space.
+      let spaceScope = model.defaultScope(for: .spaces, widget: try XCTUnwrap(model.selected), among: [laptop])
+      XCTAssertEqual(spaceScope, .spaces(["default"]))
+      try await controller.changeDesktopWidget(id, .scope(spaceScope))
+      updated = try XCTUnwrap(model.selected)
+      XCTAssertTrue(WidgetsSettingsSection.offers(WidgetsSettingsSection.scopeSpaces, for: updated))
+      XCTAssertEqual(model.scopeSummary(for: updated, among: [laptop]), L("Desktop \(1)"))
+
+      // Scope popover suppresses workspace shortcuts.
+      panel.navigation.selection = .settings
+      controller.settings.select(.widgets)
+      XCTAssertTrue(model.isWorkspaceActiveForShortcuts)
+      model.isScopePopoverOpen = true
+      XCTAssertTrue(controller.shell.isPopoverOpen)
+      XCTAssertFalse(model.isWorkspaceActiveForShortcuts)
+      model.isScopePopoverOpen = false
+      XCTAssertTrue(model.isWorkspaceActiveForShortcuts)
     }
   }
 }

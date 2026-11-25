@@ -1,11 +1,12 @@
 # Desktop widgets
 
-Clocks, dates and the other widgets the app draws on the desktop, over whatever wallpaper is on
-show. A widget
-belongs to no wallpaper: applying another wallpaper, a playlist change or an automatic rule
-leaves it where it is. They are set up in **Settings › Desktop Widgets**. People who update
-from 1.10.0 or older are introduced to them once, in a window whose **Set Up Desktop Widgets**
-opens that page ([feature introductions](updates.md#feature-introductions)).
+Clocks, dates, Now Playing cards, image stickers and the other widgets the app draws on the desktop,
+over whatever wallpaper is on show. By default a widget belongs to no wallpaper (shown everywhere,
+across every Space): applying another wallpaper, a playlist change or an automatic rule leaves it
+where it is. Any widget can also be scoped to specific wallpapers or pinned to specific macOS
+desktop Spaces in its **Position** tab. They are set up in **Settings › Desktop Widgets**. People
+who update from 1.10.0 or older are introduced to them once, in a window whose **Set Up Desktop
+Widgets** opens that page ([feature introductions](updates.md#feature-introductions)).
 
 ## What the user sees
 
@@ -25,9 +26,9 @@ long scroll from the picture it changed. Without a search the page is a **worksp
 - an **inspector** beside the canvas, 340 points wide, naming the selected widget (what it says,
   its kind and display) above four tabs, **Content**, **Text**, **Style** and **Position**, and
   the rows of the tab chosen, which scroll on their own while the canvas and the layers stay put.
-  A battery and a month calendar have no **Content** tab; a widget without the tab chosen last
-  opens on its first. A wide control (a slider, a long menu, a field) sits under its row's title
-  there.
+  A battery and a month calendar have no **Content** tab, and an image sticker has no **Text** tab;
+  a widget without the tab chosen last opens on its first. A wide control (a slider, a long menu, a
+  field) sits under its row's title there.
 
 When the page is narrower than 800 points the inspector goes under the canvas, before the
 layers, and the canvas stays on show above them while they scroll. With no widget yet, the
@@ -44,7 +45,8 @@ display (`DesktopWidgetPreset`): **Big clock**, **Clock and date** (the date in 
 clock), **Neon clock**, **Clock face** (minute ticks on a glass disc), **World clocks** (New York,
 London and Tokyo side by side, each labelled with its city, as badges), **Lunar date** (the
 Chinese calendar), **Month calendar** (a badge at the top right), **Countdown**, **Greeting and
-date**, **Gradient note** and **Battery and sun** (bottom left). They are ordinary widgets once
+date**, **Gradient note**, **Battery and sun** (bottom left) and **Now Playing** (an
+artwork-tinted media card at the bottom left). They are ordinary widgets once
 added: nothing remembers the preset. A group goes in front of the others, in its order; one that
 would pass the limit is disabled, and adds nothing.
 
@@ -129,13 +131,18 @@ keyboard.
 | **Sunrise and sunset** | The next sunrise or sunset, or both of today's | At each of them and at midnight |
 | **Analog clock** | A clock face with hour marks and hands, a second hand if asked | Each minute, or each second with seconds |
 | **Month calendar** | This month's name, the weekdays and the days in a grid, today in bold and underlined; weeks start on the region's first weekday | At midnight |
+| **Now Playing** | A static media card showing album artwork, track title and artist from macOS Now Playing (`DesktopMediaSession`), automatically collapsed when nothing is playing | Only on discrete track, artwork or playback-state changes (never on a progress timer) |
+| **Image** | A user-chosen static PNG, JPEG, WebP or HEIC sticker with fit/fill framing and rounded corners | Never |
 
 The tabs of the inspector, and the groups they hold:
 
 - **Position** (the Position group): **Show on the desktop**; **Display** (**Main display**,
   which follows the menu bar, **All displays**, or one display by name; a display that is not
   connected stays in the menu as "*name* (not connected)" and the widget comes back when it
-  does); in the search results only, **Arrange** (the canvas as a row, 480 × 270 points at most)
+  does); **Visibility** (**Everywhere**, **Specific wallpapers** — picking one or more installed
+  wallpapers with thumbnails so the widget shows on a display only while one of them is active — or
+  **Specific desktops**, pinning the widget to chosen macOS Space UUIDs and falling back to every
+  Space when private Space APIs are unavailable); in the search results only, **Arrange** (the canvas as a row, 480 × 270 points at most)
   and **Center on the display**, which the workspace shows by the canvas; **Horizontal position**
   and **Vertical position**, the same place in whole percent from the left and the top edge, for
   the keyboard and VoiceOver; **Alignment** (**Left**, **Center**, **Right**), the edge of the
@@ -199,7 +206,16 @@ The tabs of the inspector, and the groups they hold:
     (Settings › Displays › Sunrise and sunset): worked out from the coordinates typed or found
     there, or the two clock times fixed there. Without a place it says so; on a polar day or
     night it says there is none today.
-  - a battery and a month calendar have no format of their own.
+  - a battery and a month calendar have no format of their own;
+  - **Now Playing**: **Show artwork**, **Hide when nothing is playing** (on by default, collapsing
+    the card automatically when playback stops), **Match album colors** (adapts card background and
+    text colors from the cover's WCAG-checked palette), and a note stating that macOS media
+    integration uses MediaRemote with an AppleScript fallback for running Music or Spotify players
+    ([media integration](media-integration.md));
+  - **Image**: **Image** (**Choose Image…** / **Clear**, accepting PNG, JPEG, WebP and HEIC stored
+    in the app's managed user-assets folder), **Image fit** (**Fit** or **Fill**), **Corner radius**
+    (0 to 50 % of the shorter side) and **Size** (in the workspace inspector, since an image sticker
+    has no **Text** tab).
 
   **Time zone** offers this Mac's own and fifty cities, one for each offset people live at, by
   the city's name in the panel's language and its offset from GMT now. Choosing a city for a
@@ -255,6 +271,22 @@ The windows cost nothing between changes of their words:
   when its frame did.
 - The battery's IOKit notification (`SystemBatteryLevel`) is registered only while a battery
   widget is placed, and redraws only when the reading changed; nothing polls it.
+- Now Playing widgets share the app's single `DesktopMediaSession` (`WebWallpaperMediaRelay`) and
+  consume from it **only** while at least one enabled `.nowPlaying` widget matches its wallpaper
+  and Space scope and sits on an uncovered screen (`isOnScreen`). When covered, asleep, locked,
+  hidden or scoped away, consumption drops to zero. Timeline events are deliberately ignored so
+  there is never a 1 Hz or 60 Hz progress-bar redraw: only discrete track, artwork or
+  playback-state changes redraw the card.
+- Image stickers (`DesktopWidgetImageStore`) copy user-chosen PNG, JPEG, WebP and HEIC files into
+  `UserAssets/DesktopWidgets/stickers/` via `ManagedUserAssetStore` (APFS-cloned and SHA-256
+  deduplicated), so they survive moving the original file, are preserved in `.wmbackup` backups
+  ([backup and restore](backup-restore.md)) and are kept safe from cache purges while referenced.
+  Unused sticker files are reclaimed once no saved widget or active Undo/Redo snapshot references
+  them. Image stickers draw statically with zero timers.
+- Space-scoped widgets pin their `DesktopWidgetWindow` to the chosen Space UUIDs via
+  `WallpaperSpaceWindowMoving.place(window:onSpaces:)`, lazily resolving the private mover only
+  when a Space-scoped widget is placed and falling back cleanly to `.canJoinAllSpaces` when
+  private Space APIs or topology are unavailable.
 - A change of the sunrise and sunset settings (`WallpaperAutomationStore.didChangeNotification`)
   reads them again from the preferences and redraws.
 - While none of the widget windows can be seen (windows cover them, the displays sleep, the
@@ -350,19 +382,23 @@ and replaced by a **settled** one once the wallpaper has played a moment:
   There is no blur of the wallpaper behind a background either: it would make the window server
   blur every frame of a moving wallpaper.
 - The kinds are the app's own: lifting a layer out of a scene wallpaper (such as another
-  wallpaper's clock) is a different feature this one does not do. Weather, calendar events,
-  system load and Now Playing are not offered: they would need a network service, a permission
-  prompt, polling or a private framework.
+  wallpaper's clock) is a different feature this one does not do. Weather, calendar events and
+  system load are not offered: they would need a network service, a permission prompt or polling.
+  **Now Playing** reuses the app's existing `DesktopMediaSession` (MediaRemote adapter with
+  AppleScript fallback for already-running Music or Spotify players, see
+  [media integration](media-integration.md)), draws statically only on discrete track, cover or
+  playback-state changes (no progress bar or 1 Hz redraws), and consumes nothing when hidden,
+  covered, asleep or locked.
 - The battery line in the panel's preview uses the level the panel last read and does not tell
   charging apart; the desktop does.
 - A display mirrored to another shows what that one shows.
 
 ## Code and verification
 
-- `App/Services/Desktop/`: `DesktopWidget` (the record and its validation),
-  `DesktopWidgetStore`, `DesktopWidgetRendering`, `DesktopWidgetController`,
-  `DesktopWidgetWindow`, and `DesktopWallpaperFrames` and `WallpaperSettleClock` (the preview's
-  backdrop).
+- `App/Services/Desktop/`: `DesktopWidget` (the record, `Scope`, `ImageAsset` and validation),
+  `DesktopWidgetStore`, `DesktopWidgetImageStore` (managed sticker storage under `UserAssets/`),
+  `DesktopWidgetRendering`, `DesktopWidgetController`, `DesktopWidgetWindow`, and
+  `DesktopWallpaperFrames` and `WallpaperSettleClock` (the preview's backdrop).
 - `App/Services/Desktop/DesktopWidgetPreset.swift`: the ready-made widgets and their layout.
 - `App/Views/ControlPanel/`: `Settings/Sections/WidgetsWorkspace.swift` (the workspace, the
   ready-made cards and the style swatches), `WidgetsSettingsSection.swift` (the searchable rows,

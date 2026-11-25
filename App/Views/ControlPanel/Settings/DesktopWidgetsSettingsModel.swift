@@ -16,10 +16,12 @@ enum DesktopWidgetPane: String, CaseIterable, Identifiable, Sendable {
 
   var id: String { rawValue }
 
-  /// The panes a widget of `kind` has: a battery and a month calendar say nothing of their own.
+  /// The panes a widget of `kind` has: a battery and a month calendar say nothing of their own,
+  /// and an image sticker has no typography pane.
   static func panes(for kind: DesktopWidget.Kind) -> [DesktopWidgetPane] {
     switch kind {
     case .battery, .calendar: [.text, .style, .position]
+    case .image: [.content, .style, .position]
     default: allCases
     }
   }
@@ -103,9 +105,26 @@ final class DesktopWidgetsSettingsModel {
   private(set) var redoStack: [HistorySnapshot] = []
   /// Live preview of a slider being dragged in the inspector; nil when none is dragging.
   private(set) var sliderPreview: SliderPreview?
+  /// Which kind of visibility scope a widget uses.
+  enum ScopeMode: String, CaseIterable, Hashable, Sendable {
+    case everywhere
+    case wallpapers
+    case spaces
+  }
+
+  /// One desktop Space shown in the widget's Scope inspector.
+  struct ScopeDesktop: Identifiable, Equatable, Sendable {
+    let id: String
+    let number: Int
+    let isCurrent: Bool
+  }
+
   /// True while the Ready-made widgets popover is presented; included in `ShellModel.isPopoverOpen`
   /// so workspace shortcuts and canvas Delete do not fire behind it.
   var isReadyMadePopoverOpen = false
+  /// True while a widget scope popover (wallpaper chooser) is presented.
+  var isScopePopoverOpen = false
+  var hasOpenPopover: Bool { isReadyMadePopoverOpen || isScopePopoverOpen }
   /// The drag in progress on the preview; nil when none is.
   var drag: Drag?
   @ObservationIgnored private var dragStart: DragStart?
@@ -114,6 +133,8 @@ final class DesktopWidgetsSettingsModel {
   @ObservationIgnored private var isRestoringHistory = false
   /// Clock seam so unit tests verify coalescing windows deterministically.
   @ObservationIgnored var now: () -> Date = Date.init
+  /// Managed image store for `.image` stickers (resolves `ClientPaths.userAssetsURL` dynamically).
+  @ObservationIgnored var imageStore = DesktopWidgetImageStore()
   @ObservationIgnored private let formatters = DesktopWidgetRendering.Formatters()
 
   init(controller: PanelController) { self.controller = controller }
@@ -174,8 +195,10 @@ final class DesktopWidgetsSettingsModel {
     activeTransaction = nil
     guard widgets != before.widgets else { return }
     pushUndo(before)
+    let droppedRedo = !redoStack.isEmpty
     redoStack.removeAll()
     lastCoalesce = nil
+    if droppedRedo { pruneUnusedImages() }
   }
 
   /// Discards an open gesture transaction without recording an undo step.
@@ -215,6 +238,7 @@ final class DesktopWidgetsSettingsModel {
       timestamp.timeIntervalSince(previous.lastEdit) <= Self.coalesceWindow,
       let top = undoStack.last
     {
+      let droppedRedo = !redoStack.isEmpty
       redoStack.removeAll()
       if top.widgets == widgets {
         undoStack.removeLast()
@@ -222,11 +246,14 @@ final class DesktopWidgetsSettingsModel {
       } else {
         lastCoalesce = CoalesceState(key: coalesceKey, lastEdit: timestamp)
       }
+      if droppedRedo { pruneUnusedImages() }
       return
     }
     pushUndo(before)
+    let droppedRedo = !redoStack.isEmpty
     redoStack.removeAll()
     lastCoalesce = coalesceKey.map { CoalesceState(key: $0, lastEdit: timestamp) }
+    if droppedRedo { pruneUnusedImages() }
   }
 
   /// Restores the most recent undo snapshot and pushes the current state onto the redo stack.
@@ -494,12 +521,115 @@ final class DesktopWidgetsSettingsModel {
   // MARK: Words
 
   /// What the widgets are drawn from now: this Mac's clock, language and region, the battery
-  /// level the panel last read, and the sunrise and sunset settings.
+  /// level the panel last read, the sunrise and sunset settings, sample media and managed stickers.
   func inputs(at date: Date = Date()) -> DesktopWidgetRendering.Inputs {
-    .init(
+    let store = imageStore
+    return .init(
       date: date, calendar: .autoupdatingCurrent, locale: .autoupdatingCurrent,
       battery: controller.batteryPercent.map { BatteryReading(percent: $0, isDischarging: true) },
-      solar: controller.automations.solar)
+      solar: controller.automations.solar,
+      isPreview: true,
+      resolveImage: { store.loadImage(for: $0) })
+  }
+
+  // MARK: Scope & images
+
+  func scopeMode(for widget: DesktopWidget) -> ScopeMode {
+    switch widget.scope {
+    case .everywhere: .everywhere
+    case .wallpapers: .wallpapers
+    case .spaces: .spaces
+    }
+  }
+
+  /// Active wallpaper ID shown on `displayID`, or nil when none is active.
+  func activeWallpaperID(on displayID: UInt32) -> String? {
+    frameRequest(on: displayID)?.wallpaperID
+  }
+
+  /// Default `DesktopWidget.Scope` when switching visibility mode in the inspector: seeds the
+  /// previewed display's current wallpaper or current Space when known so binding is one click.
+  func defaultScope(for mode: ScopeMode, widget: DesktopWidget, among screens: [Screen]) -> DesktopWidget.Scope {
+    let screen = previewScreen(for: widget, among: screens) ?? previewScreen(among: screens)
+    switch mode {
+    case .everywhere:
+      return .everywhere
+    case .wallpapers:
+      if case .wallpapers(let existing) = widget.scope { return .wallpapers(existing) }
+      if let displayID = screen?.displayID, let active = activeWallpaperID(on: displayID) {
+        return .wallpapers([active])
+      }
+      return .wallpapers([])
+    case .spaces:
+      if case .spaces(let existing) = widget.scope { return .spaces(existing) }
+      let info = scopeDesktops(for: widget, among: screens)
+      if let current = info.currentID { return .spaces([current]) }
+      return .spaces([])
+    }
+  }
+
+  /// Available macOS desktop Spaces for `widget`'s display, observing Space topology changes.
+  func scopeDesktops(
+    for widget: DesktopWidget, among screens: [Screen]
+  ) -> (available: Bool, desktops: [ScopeDesktop], currentID: String?) {
+    _ = controller.revisions.spaces
+    guard controller.spaces.available else { return (false, [], nil) }
+    let screen = previewScreen(for: widget, among: screens) ?? previewScreen(among: screens)
+    let displaySpaces: WallpaperDisplaySpaces? =
+      screen.flatMap { controller.spaces.displays[String($0.displayID)] }
+      ?? controller.spaces.displays.values.first
+    guard let displaySpaces else { return (false, [], nil) }
+    let desktops = displaySpaces.spaces.map { space in
+      ScopeDesktop(id: space.id, number: space.number, isCurrent: space.id == displaySpaces.current)
+    }
+    return (true, desktops, displaySpaces.current)
+  }
+
+  /// Short scope label for the Layers list and inspector header; nil for `.everywhere`.
+  func scopeSummary(for widget: DesktopWidget, among screens: [Screen]) -> String? {
+    switch widget.scope {
+    case .everywhere:
+      return nil
+    case .wallpapers(let ids):
+      if ids.isEmpty { return L("No wallpapers") }
+      if ids.count == 1 { return L("1 wallpaper") }
+      return L("\(ids.count) wallpapers")
+    case .spaces(let ids):
+      if ids.isEmpty { return L("No desktops") }
+      if ids.count == 1, let id = ids.first {
+        let info = scopeDesktops(for: widget, among: screens)
+        if let desktop = info.desktops.first(where: { $0.id == id }) {
+          return L("Desktop \(desktop.number)")
+        }
+        return L("1 desktop")
+      }
+      return L("\(ids.count) desktops")
+    }
+  }
+
+  func wallpaperTitle(for wallpaperID: String) -> String {
+    if let title = controller.automationTargets.wallpapers.first(where: { $0.target.id == wallpaperID })?.title {
+      return title
+    }
+    if let row = controller.libraryRow(id: wallpaperID) { return row.title }
+    return L("Unavailable wallpaper")
+  }
+
+  /// Asset IDs referenced by any live widget or Undo/Redo snapshot so undo never loses a sticker.
+  func referencedImageAssetIDs() -> Set<String> {
+    var ids = Set(widgets.compactMap { $0.imageAsset?.assetID })
+    for snapshot in undoStack {
+      ids.formUnion(snapshot.widgets.compactMap { $0.imageAsset?.assetID })
+    }
+    for snapshot in redoStack {
+      ids.formUnion(snapshot.widgets.compactMap { $0.imageAsset?.assetID })
+    }
+    return ids
+  }
+
+  /// Reclaims stored sticker images no longer referenced by any live widget or Undo/Redo snapshot.
+  func pruneUnusedImages() {
+    imageStore.pruneUnused(keeping: referencedImageAssetIDs())
   }
 
   /// What the widget shows at `date`, as the desktop draws it, at `scale` times its size.

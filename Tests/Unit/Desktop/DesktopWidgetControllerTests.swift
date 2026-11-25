@@ -19,6 +19,10 @@ final class DesktopWidgetControllerTests: XCTestCase {
     private final class FakeSurface: DesktopWidgetSurface {
         var frame: NSRect = .zero
         var text = ""
+        var drawing: DesktopWidgetRendering.Drawing = .empty
+        var showCount = 0
+        var pinnedSpaces: [UInt64]? = nil
+        var usedSpaceMover = false
         var isOnScreen = true
         var removed = false
         var raises = 0
@@ -30,10 +34,62 @@ final class DesktopWidgetControllerTests: XCTestCase {
             frame: NSRect
         ) {
             self.frame = frame
-            if case .text(let text) = drawing { self.text = text.string } else { self.text = "" }
+            if self.drawing != drawing { showCount += 1 }
+            self.drawing = drawing
+            switch drawing {
+            case .text(let text):
+                self.text = text.string
+            case .nowPlaying(let card):
+                self.text = [card.title.string, card.subtitle?.string]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " — ")
+            case .empty, .analog, .image:
+                self.text = ""
+            }
+        }
+
+        func applySpacePinning(_ managedSpaceIDs: [UInt64]?, using mover: (any WallpaperSpaceWindowMoving)?) {
+            pinnedSpaces = managedSpaceIDs
+            usedSpaceMover = mover != nil
         }
 
         func remove() { removed = true }
+    }
+
+    private final class FakeMediaProvider: SystemMediaProvider {
+        var availability: SystemMediaAvailability = .available
+        var onPropertiesChanged: ((SystemMediaProperties) -> Void)?
+        var onThumbnailChanged: ((SystemMediaThumbnail) -> Void)?
+        var onPlaybackChanged: ((SystemMediaPlaybackState) -> Void)?
+        var onTimelineChanged: ((SystemMediaTimeline?) -> Void)?
+        private(set) var consumers = 0
+        var currentProperties = SystemMediaProperties()
+        var currentThumbnail: SystemMediaThumbnail?
+        var currentPlayback = SystemMediaPlaybackState.stopped
+
+        func addConsumer() { consumers += 1 }
+        func removeConsumer() { consumers = max(consumers - 1, 0) }
+        func replayCurrentState() {
+            onPropertiesChanged?(currentProperties)
+            if let currentThumbnail { onThumbnailChanged?(currentThumbnail) }
+            onPlaybackChanged?(currentPlayback)
+        }
+    }
+
+    private final class FakeSpaceMover: WallpaperSpaceWindowMoving {
+        var canPlace = true
+        var windowSpaces: [Int: [UInt64]] = [:]
+        private(set) var placeCalls: [(window: Int, spaces: [UInt64])] = []
+
+        func spaces(ofWindow number: Int) -> [UInt64]? { windowSpaces[number] }
+        func move(windows: [Int], toSpace space: UInt64) {
+            for id in windows { windowSpaces[id] = [space] }
+        }
+        func place(window number: Int, onSpaces spaces: [UInt64]) -> Bool {
+            placeCalls.append((number, spaces))
+            guard canPlace else { return false }
+            windowSpaces[number] = spaces
+            return true
+        }
     }
 
     /// A battery whose reading the test sets, and which says whether anything listens to it.
@@ -59,10 +115,15 @@ final class DesktopWidgetControllerTests: XCTestCase {
         let center = NotificationCenter()
         let workspace = NotificationCenter()
         let defaults: UserDefaults
+        let imageStore: DesktopWidgetImageStore
         var screens: [Screen]
         var now = Date(timeIntervalSince1970: 1_794_171_907)  // 21:05:07 UTC
         var surfacesOnScreen = true
         let battery = FakeBattery()
+        let mediaProvider = FakeMediaProvider()
+        lazy var mediaSession = DesktopMediaSession(provider: mediaProvider)
+        var spaceTopology: [String: WallpaperDisplaySpaces]? = nil
+        var spaceMover: FakeSpaceMover? = FakeSpaceMover()
         private(set) var made: [FakeSurface] = []
         private(set) var scheduled: [Date] = []
         private(set) var cancelled = 0
@@ -90,10 +151,15 @@ final class DesktopWidgetControllerTests: XCTestCase {
                 pending = action
                 return { [unowned self] in cancelled += 1 }
             },
-            makeBattery: { [unowned self] in battery })
+            makeBattery: { [unowned self] in battery },
+            mediaSession: mediaSession,
+            spaceTopology: { [unowned self] in spaceTopology },
+            makeSpaceMover: { [unowned self] in spaceMover },
+            imageStore: imageStore)
 
-        init(defaults: UserDefaults, screens: [Screen]) {
+        init(defaults: UserDefaults, imageStore: DesktopWidgetImageStore, screens: [Screen]) {
             self.defaults = defaults
+            self.imageStore = imageStore
             self.screens = screens
         }
 
@@ -112,8 +178,18 @@ final class DesktopWidgetControllerTests: XCTestCase {
     }
 
     private func makeFixture(screens: [Screen]) throws -> Fixture {
-        let fixture = Fixture(defaults: try TemporaryDefaults.make(for: self).defaults, screens: screens)
-        addTeardownBlock { @MainActor in fixture.controller.stop() }
+        let assetRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wm-widget-controller-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: assetRoot, withIntermediateDirectories: true)
+        let imageStore = DesktopWidgetImageStore(managed: ManagedUserAssetStore(root: assetRoot))
+        let fixture = Fixture(
+            defaults: try TemporaryDefaults.make(for: self).defaults,
+            imageStore: imageStore,
+            screens: screens)
+        addTeardownBlock { @MainActor in
+            fixture.controller.stop()
+            try? FileManager.default.removeItem(at: assetRoot)
+        }
         return fixture
     }
 
@@ -316,5 +392,164 @@ final class DesktopWidgetControllerTests: XCTestCase {
         window.show(.text(text), look: .init(), padding: 4, frame: NSRect(x: 10, y: 20, width: 300, height: 140))
         XCTAssertEqual(window.frame, NSRect(x: 10, y: 20, width: 300, height: 140))
         XCTAssertEqual(window.shownText, "21:05")
+
+        // Space pinning removes `.canJoinAllSpaces` when mover places the window, and falls back when unavailable.
+        let mover = FakeSpaceMover()
+        window.applySpacePinning([42], using: mover)
+        XCTAssertFalse(window.collectionBehavior.contains(.canJoinAllSpaces))
+        XCTAssertEqual(mover.placeCalls.last?.spaces, [42])
+        mover.canPlace = false
+        window.applySpacePinning([99], using: mover)
+        XCTAssertTrue(window.collectionBehavior.contains(.canJoinAllSpaces), "falls back cleanly when place() fails")
+        window.applySpacePinning(nil, using: nil)
+        XCTAssertTrue(window.collectionBehavior.contains(.canJoinAllSpaces))
+    }
+
+    func testNowPlayingConsumesMediaLazilyOnlyWhileOnScreenAndIgnoresTimelineTicks() throws {
+        let fixture = try makeFixture(screens: [laptop])
+        fixture.surfacesOnScreen = false
+        fixture.controller.start()
+        XCTAssertEqual(fixture.mediaProvider.consumers, 0, "no media consumer without a Now Playing widget")
+        XCTAssertFalse(fixture.controller.isConsumingMediaSession)
+
+        // Covered screen: widget window exists, but media session is NOT consumed.
+        let np = try fixture.store.add(.nowPlaying)
+        XCTAssertEqual(fixture.mediaProvider.consumers, 0, "covered display must consume zero media energy")
+        XCTAssertTrue(fixture.scheduled.isEmpty, "Now Playing schedules zero timers")
+
+        // Uncover screen -> media consumption starts lazily.
+        let surface = try XCTUnwrap(fixture.live.first)
+        surface.isOnScreen = true
+        fixture.center.post(name: NSWindow.didChangeOcclusionStateNotification, object: surface)
+        XCTAssertEqual(fixture.mediaProvider.consumers, 1)
+        XCTAssertTrue(fixture.controller.isConsumingMediaSession)
+        XCTAssertEqual(surface.drawing, .empty, "idle collapses when hidesWhenIdle is on")
+
+        // Discrete track + playback events update the static card.
+        fixture.mediaProvider.currentProperties = SystemMediaProperties(title: "Time", artist: "Pink Floyd")
+        fixture.mediaProvider.currentPlayback = .playing
+        fixture.mediaProvider.onPropertiesChanged?(fixture.mediaProvider.currentProperties)
+        fixture.mediaProvider.onPlaybackChanged?(.playing)
+        XCTAssertEqual(surface.text, "Time — Pink Floyd")
+        XCTAssertTrue(fixture.scheduled.isEmpty, "playing track schedules zero timers")
+
+        // Timeline ticks NEVER trigger a redraw.
+        let drawsBeforeTicks = surface.showCount
+        for second in 1...10 {
+            fixture.mediaProvider.onTimelineChanged?(SystemMediaTimeline(position: Double(second), duration: 240))
+        }
+        XCTAssertEqual(surface.showCount, drawsBeforeTicks, "timeline ticks never redraw a static widget")
+
+        // Stopping playback collapses the card automatically.
+        fixture.mediaProvider.onPlaybackChanged?(.stopped)
+        XCTAssertEqual(surface.drawing, .empty)
+
+        // Covering the screen releases the media session immediately.
+        surface.isOnScreen = false
+        fixture.center.post(name: NSWindow.didChangeOcclusionStateNotification, object: surface)
+        XCTAssertEqual(fixture.mediaProvider.consumers, 0)
+        XCTAssertFalse(fixture.controller.isConsumingMediaSession)
+
+        // Hiding the widget also drops consumption.
+        surface.isOnScreen = true
+        fixture.center.post(name: NSWindow.didChangeOcclusionStateNotification, object: surface)
+        XCTAssertEqual(fixture.mediaProvider.consumers, 1)
+        try fixture.store.update(np.id) { $0.isShown = false }
+        XCTAssertEqual(fixture.mediaProvider.consumers, 0)
+    }
+
+    func testWallpaperScopedWidgetFiltersByActiveDisplayWallpaperAndGatesMediaSession() throws {
+        let fixture = try makeFixture(screens: [laptop, external])
+        fixture.controller.start()
+        let widget = try fixture.store.add(.nowPlaying)
+        try fixture.store.update(widget.id) {
+            $0.placement = .all
+            $0.scope = .wallpapers(["aurora"])
+        }
+        XCTAssertTrue(fixture.live.isEmpty, "no display currently shows aurora")
+        XCTAssertEqual(fixture.mediaProvider.consumers, 0)
+
+        fixture.controller.updateActiveWallpapers([1: "rain", 2: "aurora"])
+        XCTAssertEqual(fixture.controller.shown.map(\.displayID), [2], "only the display showing aurora")
+        XCTAssertEqual(fixture.mediaProvider.consumers, 1, "active on screen 2 -> consumes media")
+
+        fixture.controller.updateActiveWallpapers([1: "rain", 2: "night"])
+        XCTAssertTrue(fixture.live.isEmpty)
+        XCTAssertEqual(fixture.mediaProvider.consumers, 0, "matching wallpaper left -> stops consuming")
+
+        // Bridge monitor row mapping resolves standalone and mirrored displays.
+        let rows = [
+            BridgeMonitorInfoRow(
+                displayId: "1", title: "Built-in", wallpaperId: "aurora", wallpaperTitle: "Aurora",
+                mirrorTargetDisplayId: nil, mirrorTargetTitle: nil, scalingMode: "fill",
+                targetFps: "30", audioResponse: false),
+            BridgeMonitorInfoRow(
+                displayId: "2", title: "Mirror", wallpaperId: "", wallpaperTitle: "",
+                mirrorTargetDisplayId: "1", mirrorTargetTitle: "Built-in", scalingMode: "fill",
+                targetFps: "30", audioResponse: false),
+        ]
+        let mapped = DesktopWidgetController.activeWallpapers(from: rows)
+        XCTAssertEqual(mapped[1], "aurora")
+        XCTAssertEqual(mapped[2], "aurora")
+    }
+
+    func testSpaceScopedWidgetPinsWindowsAndFallsBackWhenPrivateSpaceAPIUnavailable() throws {
+        let fixture = try makeFixture(screens: [laptop])
+        fixture.spaceTopology = [
+            "1": WallpaperDisplaySpaces(
+                displayUUID: "AAAA-1",
+                spaces: [
+                    WallpaperDesktopSpace(id: "default", number: 1, managedID: 10),
+                    WallpaperDesktopSpace(id: "space-2", number: 2, managedID: 20),
+                ],
+                current: "default", currentManagedID: 10),
+        ]
+        fixture.controller.start()
+        let clock = try fixture.store.add(.time)
+        try fixture.store.update(clock.id) { $0.scope = .spaces(["space-2"]) }
+
+        let surface = try XCTUnwrap(fixture.live.first)
+        XCTAssertEqual(surface.pinnedSpaces, [20])
+        XCTAssertTrue(surface.usedSpaceMover)
+
+        // Pinning to a Space not present on this display removes the surface from this display.
+        try fixture.store.update(clock.id) { $0.scope = .spaces(["other-display-space"]) }
+        XCTAssertTrue(fixture.live.isEmpty)
+
+        // When Space topology becomes unavailable, falls back gracefully to all Spaces.
+        fixture.spaceTopology = nil
+        fixture.center.post(name: WallpaperSpaceMonitor.didChangeNotification, object: nil)
+        let fallbackSurface = try XCTUnwrap(fixture.live.first)
+        XCTAssertNil(fallbackSurface.pinnedSpaces, "graceful fallback to .canJoinAllSpaces")
+        XCTAssertFalse(fallbackSurface.usedSpaceMover)
+    }
+
+    func testStopAndStartPreservesUnreferencedStickerForUndoWhileLaunchPruneReclaimsIt() throws {
+        let fixture = try makeFixture(screens: [laptop])
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wm-sticker-\(UUID().uuidString).png")
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 4, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let pngData = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        try pngData.write(to: sourceURL)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+        // Imported sticker not currently in saved widgets (as when a deleted widget is still on Undo).
+        let asset = try fixture.imageStore.importImage(from: sourceURL)
+        XCTAssertNotNil(fixture.imageStore.loadImage(for: asset))
+
+        // Presentation Mode / Toggle Desktop Widgets cycles stop() + start() without pruning.
+        fixture.controller.start()
+        fixture.controller.stop()
+        fixture.controller.start()
+        XCTAssertNotNil(fixture.imageStore.loadImage(for: asset),
+                        "restarting the controller mid-session must keep stickers reachable by Undo")
+
+        // Launch-only cleanup reclaims orphaned stickers.
+        fixture.controller.pruneUnusedImagesOnLaunch()
+        XCTAssertNil(fixture.imageStore.loadImage(for: asset),
+                     "launch cleanup removes stickers no saved widget references")
     }
 }

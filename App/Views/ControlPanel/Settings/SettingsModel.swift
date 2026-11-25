@@ -123,6 +123,9 @@ final class SettingsModel {
 
   /// Display title of a desktop widget for Settings search results.
   static func widgetDisplayName(_ widget: DesktopWidget, controller: PanelController) -> String {
+    if widget.kind == .image, let name = widget.imageAsset?.displayName, !name.isEmpty {
+      return name
+    }
     let custom = widget.text
       .split(whereSeparator: \.isNewline)
       .joined(separator: " ")
@@ -131,10 +134,13 @@ final class SettingsModel {
     return WidgetsSettingsSection.title(of: widget.kind)
   }
 
-  /// Searchable phrases for a live desktop widget: its custom label/text, kind name, city/time
-  /// zone when set, and pinned display name when placed on a specific display.
+  /// Searchable phrases for a live desktop widget: its custom label/text, kind name, image file
+  /// name, city/time zone when set, bound wallpaper titles, and pinned display name.
   static func widgetSearchText(_ widget: DesktopWidget, controller: PanelController) -> String {
     var parts = [WidgetsSettingsSection.title(of: widget.kind)]
+    if widget.kind == .image, let name = widget.imageAsset?.displayName, !name.isEmpty {
+      parts.append(name)
+    }
     let custom = widget.text
       .split(whereSeparator: \.isNewline)
       .joined(separator: " ")
@@ -146,6 +152,13 @@ final class SettingsModel {
     }
     if case .display(_, let name) = widget.placement, !name.isEmpty {
       parts.append(name)
+    }
+    if case .wallpapers(let ids) = widget.scope {
+      for id in ids {
+        if let title = controller.automationTargets.wallpapers.first(where: { $0.target.id == id })?.title {
+          parts.append(title)
+        }
+      }
     }
     return parts.joined(separator: "\n")
   }

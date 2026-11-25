@@ -582,5 +582,231 @@ final class DesktopWidgetTests: XCTestCase {
         XCTAssertNotNil(DesktopWidget.rgb("#00ff7F"))
         XCTAssertNil(DesktopWidget.rgb("#00ff7"))
         XCTAssertNil(DesktopWidget.rgb("00ff7F0"))
+        XCTAssertNotNil(DesktopWidget.cssRGB("rgb(38, 46, 86)"))
+        XCTAssertNil(DesktopWidget.cssRGB("rgb(300, 0, 0)"))
+        XCTAssertNil(DesktopWidget.cssRGB("#FFFFFF"))
+    }
+
+    func testNowPlayingAndImageDecodeBackwardCompatiblyAndValidateScopesAndAssets() throws {
+        // Older widget records lacking `scope`, Now Playing options, or image fields keep defaults.
+        let legacy = Data(#"[{"id":"old","kind":"time"}]"#.utf8)
+        let decodedLegacy = try DesktopWidgetStore.decode(legacy)
+        XCTAssertEqual(decodedLegacy[0].scope, .everywhere)
+        XCTAssertTrue(decodedLegacy[0].showsArtwork)
+        XCTAssertTrue(decodedLegacy[0].hidesWhenIdle)
+        XCTAssertFalse(decodedLegacy[0].tintsFromArtwork)
+        XCTAssertNil(decodedLegacy[0].imageAsset)
+        XCTAssertEqual(decodedLegacy[0].imageFit, .fit)
+        XCTAssertEqual(decodedLegacy[0].imageCornerRadius, 12)
+
+        // Full round-trip of `.nowPlaying` (wallpaper scope) and `.image` (Space scope).
+        var media = DesktopWidget(id: "np-1", kind: .nowPlaying)
+        media.showsArtwork = false
+        media.hidesWhenIdle = false
+        media.tintsFromArtwork = true
+        media.scope = .wallpapers(["aurora", "rain"])
+
+        var sticker = DesktopWidget(id: "img-1", kind: .image)
+        sticker.imageAsset = .init(assetID: "abcdef0123456789", fileName: "sticker.png", displayName: "cat.png")
+        sticker.imageFit = .fill
+        sticker.imageCornerRadius = 50
+        sticker.scope = .spaces(["default", "space-2"])
+
+        let roundTripped = try DesktopWidgetStore.decode(JSONEncoder().encode([media, sticker]))
+        XCTAssertEqual(roundTripped, [media, sticker])
+
+        // Wallpaper matching helper.
+        XCTAssertTrue(media.matchesWallpaper("aurora"))
+        XCTAssertFalse(media.matchesWallpaper("night"))
+        XCTAssertFalse(media.matchesWallpaper(nil))
+        XCTAssertTrue(sticker.matchesWallpaper(nil))
+        XCTAssertEqual(sticker.pinnedSpaceIDs, ["default", "space-2"])
+        XCTAssertNil(media.pinnedSpaceIDs)
+
+        // Out-of-range / unsafe image asset or scope values are rejected.
+        for bad in [
+            #"[{"id":"a","kind":"image","imageCornerRadius":60}]"#,
+            #"[{"id":"a","kind":"image","imageAsset":{"assetID":"../bad","fileName":"sticker.png","displayName":"x.png"}}]"#,
+            #"[{"id":"a","kind":"image","imageAsset":{"assetID":"abc","fileName":"sub/a.png","displayName":"x.png"}}]"#,
+            #"[{"id":"a","kind":"time","scope":{"wallpapers":{"_0":["wp","wp"]}}}]"#,
+            #"[{"id":"a","kind":"time","scope":{"spaces":{"_0":[""]}}}]"#,
+        ] {
+            XCTAssertThrowsError(try DesktopWidgetStore.decode(Data(bad.utf8)), bad)
+        }
+
+        // Clamping sanitizes scope duplicates and invalid assets cleanly.
+        var dirty = DesktopWidget(kind: .image)
+        dirty.imageCornerRadius = 99
+        dirty.imageAsset = .init(assetID: "../escape", fileName: "a.png", displayName: "bad.png")
+        dirty.scope = .wallpapers(["wp-1", "", "wp-1", "wp-2"])
+        let clean = dirty.clamped()
+        XCTAssertEqual(clean.imageCornerRadius, DesktopWidget.imageCornerRadiusRange.upperBound)
+        XCTAssertNil(clean.imageAsset)
+        XCTAssertEqual(clean.scope, .wallpapers(["wp-1", "wp-2"]))
+        XCTAssertTrue(clean.isValid)
+    }
+
+    func testNowPlayingRenderingSupportsIdleCollapseAdaptivePaletteAndZeroTimers() throws {
+        let formatters = DesktopWidgetRendering.Formatters()
+        var widget = DesktopWidget(kind: .nowPlaying)
+        XCTAssertNil(
+            DesktopWidgetRendering.nextChange(after: inputs(), widgets: [widget]),
+            "Now Playing never schedules a timer")
+
+        // Live idle with default `hidesWhenIdle == true` collapses to `.empty`.
+        let collapsed = DesktopWidgetRendering.content(for: widget, inputs: inputs(), formatters: formatters)
+        XCTAssertEqual(collapsed.drawing, .empty)
+        let collapsedFrame = DesktopWidgetRendering.frame(for: collapsed, widget: widget, display: display)
+        XCTAssertEqual(collapsedFrame.size, NSSize(width: 1, height: 1))
+
+        // With `hidesWhenIdle == false`, idle shows a static fallback card.
+        widget.hidesWhenIdle = false
+        let idleShown = DesktopWidgetRendering.content(for: widget, inputs: inputs(), formatters: formatters)
+        guard case .nowPlaying(let idleCard) = idleShown.drawing else { return XCTFail("expected nowPlaying card") }
+        XCTAssertEqual(idleCard.title.string, String(localized: "Nothing playing"))
+        XCTAssertFalse(idleCard.showsArtwork)
+
+        // Settings preview renders crisp sample track and artwork even when nothing is playing.
+        var previewInputs = inputs()
+        previewInputs.isPreview = true
+        let previewContent = DesktopWidgetRendering.content(for: widget, inputs: previewInputs, formatters: formatters)
+        guard case .nowPlaying(let sampleCard) = previewContent.drawing else { return XCTFail("expected sample card") }
+        XCTAssertEqual(sampleCard.title.string, String(localized: "Midnight Echo"))
+        XCTAssertEqual(sampleCard.subtitle?.string, String(localized: "Luna Waves"))
+        XCTAssertNotNil(sampleCard.artwork)
+
+        // Live playing track with adaptive cover palette tints card plate and text color.
+        widget.tintsFromArtwork = true
+        widget.fill = .gradient
+        let thumb = SystemMediaThumbnail(
+            pngBase64DataURL: "",
+            primaryColor: "rgb(20, 40, 80)",
+            secondaryColor: "rgb(100, 120, 160)",
+            tertiaryColor: "rgb(200, 200, 220)",
+            textColor: "rgb(250, 250, 255)",
+            highContrastColor: "rgb(255, 255, 255)",
+            rgba: [20, 40, 80, 255, 20, 40, 80, 255, 20, 40, 80, 255, 20, 40, 80, 255],
+            width: 2, height: 2)
+        let artwork = DesktopWidgetRendering.MediaSnapshot.artwork(from: thumb, token: 1)
+        var liveInputs = inputs()
+        liveInputs.media = DesktopWidgetRendering.MediaSnapshot(
+            title: "Starlight", artist: "Muse", album: "Black Holes",
+            playback: .playing, artwork: artwork,
+            primaryColor: thumb.primaryColor, textColor: thumb.textColor)
+        let live = DesktopWidgetRendering.content(for: widget, inputs: liveInputs, formatters: formatters)
+        guard case .nowPlaying(let liveCard) = live.drawing else { return XCTFail("expected live card") }
+        XCTAssertEqual(liveCard.title.string, "Starlight")
+        XCTAssertEqual(liveCard.subtitle?.string, "Muse")
+        XCTAssertNotNil(liveCard.artwork)
+        XCTAssertNil(live.look.gradient, "adaptive tint clears gradient to preserve contrast")
+        XCTAssertNotNil(live.look.background, "adaptive tint supplies a tinted card plate")
+    }
+
+    func testImageStickerRenderingManagedStoreCleanupAndBackupPreservation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("widget-image-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let managed = ManagedUserAssetStore(root: root.appendingPathComponent("UserAssets", isDirectory: true))
+        let imageStore = DesktopWidgetImageStore(managed: managed)
+
+        // Write a valid 40×20 PNG (2:1 landscape aspect) and import it.
+        let pngURL = root.appendingPathComponent("banner.png")
+        try Self.writeTestPNG(to: pngURL, width: 40, height: 20)
+        let asset = try imageStore.importImage(from: pngURL)
+        XCTAssertEqual(asset.displayName, "banner.png")
+        XCTAssertEqual(asset.fileName, "sticker.png")
+        XCTAssertTrue(asset.isValid)
+        XCTAssertNotNil(imageStore.url(for: asset))
+
+        // Re-importing identical bytes deduplicates to the same asset ID.
+        let secondCopy = root.appendingPathComponent("duplicate.png")
+        try FileManager.default.copyItem(at: pngURL, to: secondCopy)
+        let secondAsset = try imageStore.importImage(from: secondCopy)
+        XCTAssertEqual(secondAsset.assetID, asset.assetID)
+
+        // Unsupported extensions and corrupt images are rejected.
+        let textFile = root.appendingPathComponent("notes.txt")
+        try Data("hello".utf8).write(to: textFile)
+        XCTAssertThrowsError(try imageStore.importImage(from: textFile)) {
+            XCTAssertEqual($0 as? DesktopWidgetImageError, .unsupportedFormat)
+        }
+        let corruptPNG = root.appendingPathComponent("corrupt.png")
+        try Data("not a png".utf8).write(to: corruptPNG)
+        XCTAssertThrowsError(try imageStore.importImage(from: corruptPNG)) {
+            XCTAssertEqual($0 as? DesktopWidgetImageError, .unreadableImage)
+        }
+
+        // Static rendering: `.fit` preserves 2:1 aspect, `.fill` fills a square, zero timers.
+        var widget = DesktopWidget(kind: .image)
+        widget.size = 100
+        widget.imageAsset = asset
+        widget.imageFit = .fit
+        widget.imageCornerRadius = 25
+        XCTAssertNil(DesktopWidgetRendering.nextChange(after: inputs(), widgets: [widget]))
+
+        var renderInputs = inputs()
+        renderInputs.resolveImage = { imageStore.loadImage(for: $0) }
+        let fitContent = DesktopWidgetRendering.content(
+            for: widget, inputs: renderInputs, formatters: DesktopWidgetRendering.Formatters())
+        guard case .image(let fitSticker) = fitContent.drawing else { return XCTFail("expected image sticker") }
+        XCTAssertNotNil(fitSticker.image)
+        XCTAssertEqual(fitContent.size.width, 200, accuracy: 1)
+        XCTAssertEqual(fitContent.size.height, 100, accuracy: 1)
+        XCTAssertEqual(fitSticker.cornerRadius, 25, accuracy: 0.5)
+
+        widget.imageFit = .fill
+        let fillContent = DesktopWidgetRendering.content(
+            for: widget, inputs: renderInputs, formatters: DesktopWidgetRendering.Formatters())
+        XCTAssertEqual(fillContent.size.width, 200, accuracy: 1)
+        XCTAssertEqual(fillContent.size.height, 200, accuracy: 1)
+
+        // Unconfigured image widget collapses on live desktop and shows a placeholder in Settings preview.
+        let emptySticker = DesktopWidget(kind: .image)
+        let liveEmpty = DesktopWidgetRendering.content(
+            for: emptySticker, inputs: renderInputs, formatters: DesktopWidgetRendering.Formatters())
+        XCTAssertEqual(liveEmpty.drawing, .empty)
+        renderInputs.isPreview = true
+        let previewEmpty = DesktopWidgetRendering.content(
+            for: emptySticker, inputs: renderInputs, formatters: DesktopWidgetRendering.Formatters())
+        guard case .image(let placeholder) = previewEmpty.drawing else { return XCTFail("expected placeholder") }
+        XCTAssertTrue(placeholder.isPlaceholder)
+        XCTAssertNil(placeholder.image)
+
+        // Managed sticker assets survive `.wmbackup` export and validation cleanly.
+        let backupURL = root.deletingLastPathComponent()
+            .appendingPathComponent("widget-backup-\(UUID().uuidString).wmbackup")
+        defer { try? FileManager.default.removeItem(at: backupURL) }
+        let defaults = try TemporaryDefaults.make(for: self).defaults
+        let widgetData = try JSONEncoder().encode([widget])
+        defaults.set(widgetData, forKey: DesktopWidgetStore.storageKey)
+        let backupService = WallpaperBackupService(supportRoot: root)
+        let prefs = WallpaperBackupPreferences(values: [
+            DesktopWidgetStore.storageKey: try WallpaperBackupPreferences.encode(widgetData),
+        ])
+        try backupService.export(to: backupURL, includeLibrary: false, preferences: prefs)
+        let preview = try backupService.preview(package: backupURL, preferences: WallpaperBackupPreferences(values: [:]))
+        XCTAssertGreaterThan(preview.byteCount, 0)
+
+        // Pruning removes unreferenced sticker assets from manifest and disk.
+        imageStore.pruneUnused(keeping: [asset.assetID])
+        XCTAssertNotNil(imageStore.url(for: asset), "live sticker is kept")
+        imageStore.pruneUnused(keeping: [])
+        XCTAssertNil(imageStore.url(for: asset), "unused sticker is reclaimed")
+    }
+
+    private static func writeTestPNG(to url: URL, width: Int, height: Int) throws {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(
+                  data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { throw XCTSkip("CGContext unavailable") }
+        ctx.setFillColor(CGColor(colorSpace: space, components: [0.2, 0.6, 0.9, 1])!)
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = try XCTUnwrap(ctx.makeImage())
+        let rep = NSBitmapImageRep(cgImage: image)
+        let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        try png.write(to: url)
     }
 }

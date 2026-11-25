@@ -6,12 +6,20 @@ protocol DesktopWidgetSurface: AnyObject {
     /// Shows `drawing` with `look` and `padding` around it, in `frame` (global screen coordinates).
     func show(
         _ drawing: DesktopWidgetRendering.Drawing, look: DesktopWidgetRendering.Look, padding: CGFloat, frame: NSRect)
+    /// Applies Space pinning for this widget window: `nil` joins every Space (`.canJoinAllSpaces`);
+    /// a non-empty list pins the window to those managed Space IDs via `mover`, falling back to
+    /// `.canJoinAllSpaces` when private Space APIs are unavailable.
+    func applySpacePinning(_ managedSpaceIDs: [UInt64]?, using mover: (any WallpaperSpaceWindowMoving)?)
     /// Whether any of it can be seen now: false while windows cover it, the display sleeps or the
     /// screen is locked.
     var isOnScreen: Bool { get }
     /// Puts it in front of the other widgets' surfaces, still behind Finder's icons.
     func raise()
     func remove()
+}
+
+extension DesktopWidgetSurface {
+    func applySpacePinning(_ managedSpaceIDs: [UInt64]?, using mover: (any WallpaperSpaceWindowMoving)?) {}
 }
 
 /// One desktop widget's window: transparent, the size of its text or clock face, just above the wallpaper windows
@@ -70,6 +78,23 @@ final class DesktopWidgetWindow: NSWindow, DesktopWidgetSurface {
         widgetView.update(drawing: drawing, look: look, padding: padding)
     }
 
+    func applySpacePinning(_ managedSpaceIDs: [UInt64]?, using mover: (any WallpaperSpaceWindowMoving)?) {
+        guard let spaces = managedSpaceIDs, !spaces.isEmpty, let mover else {
+            if !collectionBehavior.contains(.canJoinAllSpaces) {
+                collectionBehavior.insert(.canJoinAllSpaces)
+            }
+            return
+        }
+        if collectionBehavior.contains(.canJoinAllSpaces) {
+            collectionBehavior.remove(.canJoinAllSpaces)
+        }
+        if mover.spaces(ofWindow: windowNumber) == spaces { return }
+        if !mover.place(window: windowNumber, onSpaces: spaces) {
+            // Private Space placement API unavailable: fall back cleanly to joining every Space.
+            collectionBehavior.insert(.canJoinAllSpaces)
+        }
+    }
+
     var isOnScreen: Bool { occlusionState.contains(.visible) }
 
     func raise() { orderFrontRegardless() }
@@ -79,10 +104,19 @@ final class DesktopWidgetWindow: NSWindow, DesktopWidgetSurface {
         close()
     }
 
-    /// The words the window shows; empty for a clock face.
+    /// The words the window shows; empty for a clock face or image sticker.
     var shownText: String {
-        if case .text(let text) = widgetView.drawing { return text.string }
-        return ""
+        switch widgetView.drawing {
+        case .text(let text):
+            return text.string
+        case .nowPlaying(let card):
+            return [card.title.string, card.subtitle?.string]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .joined(separator: " — ")
+        case .empty, .analog, .image:
+            return ""
+        }
     }
 }
 
@@ -112,6 +146,7 @@ final class DesktopWidgetView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        if case .empty = drawing { return }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
@@ -138,6 +173,20 @@ final class DesktopWidgetView: NSView {
             value.set()
         }
         context.beginTransparencyLayer(auxiliaryInfo: nil)
+        switch drawing {
+        case .empty:
+            break
+        case .nowPlaying(let card):
+            drawNowPlaying(card, in: content, context: context)
+        case .image(let sticker):
+            drawSticker(sticker, in: content, context: context)
+        case .text, .analog:
+            drawForegroundWithGlow(in: content, context: context)
+        }
+        context.endTransparencyLayer()
+    }
+
+    private func drawForegroundWithGlow(in content: NSRect, context: CGContext) {
         if let glow = look.glow {
             // A shadow without offset is a glow; drawn twice, it reads as light, not as haze.
             for _ in 0..<2 {
@@ -153,7 +202,140 @@ final class DesktopWidgetView: NSView {
         } else {
             drawInk(in: content, context: context)
         }
-        context.endTransparencyLayer()
+    }
+
+    /// Draws the Now Playing card: full-color rounded album artwork beside styled track typography.
+    private func drawNowPlaying(
+        _ card: DesktopWidgetRendering.NowPlayingCard, in rect: NSRect, context: CGContext
+    ) {
+        let artOnRight = card.showsArtwork && card.alignment == .trailing
+        let textX: CGFloat
+        let textWidth: CGFloat
+        if card.showsArtwork {
+            let artX = artOnRight ? rect.maxX - card.artworkSide : rect.minX
+            let artY = rect.midY - card.artworkSide / 2
+            let artRect = NSRect(x: artX, y: artY, width: card.artworkSide, height: card.artworkSide)
+            Self.drawArtwork(card, in: artRect, context: context)
+            textX = artOnRight ? rect.minX : artRect.maxX + card.spacing
+            textWidth = max(rect.width - card.artworkSide - card.spacing, 0)
+        } else {
+            textX = rect.minX
+            textWidth = rect.width
+        }
+        let textRect = NSRect(x: textX, y: rect.minY, width: textWidth, height: rect.height)
+        drawForegroundWithGlow(in: textRect, context: context)
+    }
+
+    /// Draws a static image sticker clipped to rounded corners, preserving full color.
+    private func drawSticker(
+        _ sticker: DesktopWidgetRendering.ImageSticker, in rect: NSRect, context: CGContext
+    ) {
+        func renderSticker() {
+            if let rendered = sticker.image {
+                context.saveGState()
+                let clip = NSBezierPath(
+                    roundedRect: rect, xRadius: sticker.cornerRadius, yRadius: sticker.cornerRadius)
+                clip.addClip()
+                let targetRect = Self.imageRect(
+                    imageSize: NSSize(width: rendered.image.width, height: rendered.image.height),
+                    in: rect, fit: sticker.fit)
+                context.interpolationQuality = .high
+                context.draw(rendered.image, in: targetRect)
+                context.restoreGState()
+                if let outline = look.outline {
+                    context.saveGState()
+                    let stroke = NSBezierPath(
+                        roundedRect: rect, xRadius: sticker.cornerRadius, yRadius: sticker.cornerRadius)
+                    stroke.lineWidth = outline.width * 2
+                    outline.color.setStroke()
+                    stroke.stroke()
+                    context.restoreGState()
+                }
+            } else if sticker.isPlaceholder {
+                Self.drawStickerPlaceholder(in: rect, cornerRadius: sticker.cornerRadius)
+            }
+        }
+        if let glow = look.glow {
+            for _ in 0..<2 {
+                NSGraphicsContext.saveGraphicsState()
+                let value = NSShadow()
+                value.shadowBlurRadius = glow.radius
+                value.shadowOffset = .zero
+                value.shadowColor = glow.color
+                value.set()
+                renderSticker()
+                NSGraphicsContext.restoreGraphicsState()
+            }
+        } else {
+            renderSticker()
+        }
+    }
+
+    private static func drawArtwork(
+        _ card: DesktopWidgetRendering.NowPlayingCard, in rect: NSRect, context: CGContext
+    ) {
+        context.saveGState()
+        let clip = NSBezierPath(
+            roundedRect: rect, xRadius: card.artworkCornerRadius, yRadius: card.artworkCornerRadius)
+        clip.addClip()
+        if let rendered = card.artwork {
+            let target = imageRect(
+                imageSize: NSSize(width: rendered.image.width, height: rendered.image.height),
+                in: rect, fit: .fill)
+            context.interpolationQuality = .high
+            context.draw(rendered.image, in: target)
+        } else {
+            card.placeholderColor.setFill()
+            clip.fill()
+            if let glyph = NSImage(systemSymbolName: "music.note", accessibilityDescription: nil) {
+                let side = min(rect.width, rect.height) * 0.44
+                let config = NSImage.SymbolConfiguration(pointSize: max(side, 8), weight: .semibold)
+                    .applying(NSImage.SymbolConfiguration(paletteColors: [card.placeholderGlyphColor]))
+                let styled = glyph.withSymbolConfiguration(config) ?? glyph
+                let glyphSize = styled.size
+                let origin = NSPoint(
+                    x: rect.midX - glyphSize.width / 2, y: rect.midY - glyphSize.height / 2)
+                styled.draw(in: NSRect(origin: origin, size: glyphSize))
+            }
+        }
+        context.restoreGState()
+    }
+
+    private static func drawStickerPlaceholder(in rect: NSRect, cornerRadius: CGFloat) {
+        let shape = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
+        NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.14).setFill()
+        shape.fill()
+        let inset = rect.insetBy(dx: 1, dy: 1)
+        let border = NSBezierPath(
+            roundedRect: inset, xRadius: max(cornerRadius - 1, 0), yRadius: max(cornerRadius - 1, 0))
+        let dash: [CGFloat] = [5, 4]
+        border.setLineDash(dash, count: dash.count, phase: 0)
+        border.lineWidth = 1.5
+        NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.55).setStroke()
+        border.stroke()
+        if let glyph = NSImage(systemSymbolName: "photo", accessibilityDescription: nil) {
+            let side = min(rect.width, rect.height) * 0.34
+            let config = NSImage.SymbolConfiguration(pointSize: max(side, 10), weight: .regular)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.72)]))
+            let styled = glyph.withSymbolConfiguration(config) ?? glyph
+            let glyphSize = styled.size
+            styled.draw(
+                in: NSRect(
+                    x: rect.midX - glyphSize.width / 2, y: rect.midY - glyphSize.height / 2,
+                    width: glyphSize.width, height: glyphSize.height))
+        }
+    }
+
+    private static func imageRect(
+        imageSize: NSSize, in rect: NSRect, fit: DesktopWidget.ImageFit
+    ) -> NSRect {
+        guard fit == .fill, imageSize.width > 0, imageSize.height > 0, rect.width > 0, rect.height > 0 else {
+            return rect
+        }
+        let scale = max(rect.width / imageSize.width, rect.height / imageSize.height)
+        let width = imageSize.width * scale
+        let height = imageSize.height * scale
+        return NSRect(x: rect.midX - width / 2, y: rect.midY - height / 2, width: width, height: height)
     }
 
     /// The letters or the face, filled with the colour or the gradient, with the outline behind.
@@ -179,12 +361,37 @@ final class DesktopWidgetView: NSView {
     /// The drawing itself; with `outline`, its outline alone, in the outline's colour.
     private func drawShapes(in rect: NSRect, outline: DesktopWidgetRendering.Look.Outline?) {
         switch drawing {
+        case .empty, .image:
+            break
         case .text(let text):
             // Laid out from the top, so a widget cut to its display keeps its first lines.
             let shown = outline.map { Self.outlined(text, $0) } ?? text
             shown.draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading])
         case .analog(let face):
             Self.draw(face, in: rect, outline: outline)
+        case .nowPlaying(let card):
+            Self.draw(cardText: card, in: rect, outline: outline)
+        }
+    }
+
+    private static func draw(
+        cardText card: DesktopWidgetRendering.NowPlayingCard, in rect: NSRect,
+        outline: DesktopWidgetRendering.Look.Outline?
+    ) {
+        let gap = card.subtitle != nil ? max(ceil(card.titleSize.height * 0.12), 2) : 0
+        let totalHeight = card.titleSize.height + (card.subtitle != nil ? gap + card.subtitleSize.height : 0)
+        // AppKit view coordinates have y increasing upwards: title sits above subtitle.
+        let top = rect.midY + totalHeight / 2
+        let titleRect = NSRect(
+            x: rect.minX, y: top - card.titleSize.height, width: rect.width, height: card.titleSize.height)
+        let titleShown = outline.map { outlined(card.title, $0) } ?? card.title
+        titleShown.draw(with: titleRect, options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine])
+        if let subtitle = card.subtitle {
+            let subRect = NSRect(
+                x: rect.minX, y: titleRect.minY - gap - card.subtitleSize.height,
+                width: rect.width, height: card.subtitleSize.height)
+            let subShown = outline.map { outlined(subtitle, $0) } ?? subtitle
+            subShown.draw(with: subRect, options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine])
         }
     }
 

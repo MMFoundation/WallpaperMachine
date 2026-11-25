@@ -272,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Keeps no window and no timer until a widget is added.
         let desktopWidgets = DesktopWidgetController()
         self.desktopWidgets = desktopWidgets
+        desktopWidgets.pruneUnusedImagesOnLaunch()
         desktopWidgets.start()
     }
 
@@ -354,6 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     fallback: AppleScriptMediaProvider(scheduler: mediaScheduler),
                     scheduler: mediaScheduler))
             desktopMediaSession = mediaSession
+            desktopWidgets?.attachMediaSession(mediaSession)
             let webHost = WebWallpaperHost(bridge: store.bridge, mediaRelay: mediaSession.relay,
                 contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 },
                 switchHold: hold)
@@ -473,6 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.windowAuditor?.windowsMayHaveChanged()
                 self.spacePinning?.update()
                 self.spaceParking?.update()
+                if let store { self.desktopWidgets?.updateActiveWallpapers(from: store.monitorInformationSnapshot.rows) }
                 // Play, pause and a changed library or display set are when a waiting playlist
                 // change can happen.
                 self.automaticWallpapers?.scheduler.evaluate()
@@ -1449,6 +1452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         previewWindow?.session.close()
         previewWindow?.close()
         previewWindow = nil
+        desktopWidgets?.attachMediaSession(nil)
         sceneMediaSink?.shutdown()
         sceneMediaSink = nil
         lockScreenLiveFeed?.shutdown()

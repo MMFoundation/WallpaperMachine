@@ -285,6 +285,10 @@ struct WidgetsWorkspace: View {
     let text = model.text(for: widget)
     let kind = WidgetsSettingsSection.title(of: widget.kind)
     let place = model.placementTitle(for: widget, among: screens)
+    let scope = model.scopeSummary(for: widget, among: screens)
+    var details = [kind, place]
+    if let scope { details.append(scope) }
+    if !widget.isShown { details.append(L("Hidden")) }
     return HStack(spacing: 10) {
       SymbolTile(
         systemImage: WidgetsSettingsSection.symbol(of: widget.kind), color: SettingsSection.widgets.tileColor,
@@ -294,7 +298,7 @@ struct WidgetsWorkspace: View {
           .font(.panel(.calloutStrong))
           .lineLimit(1)
           .truncationMode(.tail)
-        Text(verbatim: widget.isShown ? "\(kind) · \(place)" : "\(kind) · \(place) · \(L("Hidden"))")
+        Text(verbatim: details.joined(separator: " · "))
           .font(.panel(.caption))
           .foregroundStyle(theme.surface.muted.color)
           .lineLimit(1)
@@ -515,6 +519,7 @@ struct ReadyMadeWidgetsGrid: View {
     case .greeting: L("Greeting and date")
     case .note: L("Gradient note")
     case .status: L("Battery and sun")
+    case .nowPlaying: L("Now Playing")
     }
   }
 }

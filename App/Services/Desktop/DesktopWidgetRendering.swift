@@ -1,10 +1,107 @@
 import AppKit
 import Foundation
+import ImageIO
 
 /// What a desktop widget shows and where: its words or clock face at a moment, its font, its frame
 /// on a display, and when what it shows next changes. Pure, so the desktop and the panel's arranging
 /// preview draw the same widget the same way.
 enum DesktopWidgetRendering {
+    /// A static bitmap drawn inside a widget (album cover or sticker image), compared by identity
+    /// key and dimensions so redraw checks stay O(1) without scanning pixels.
+    struct RenderedImage: Equatable {
+        var key: String
+        var image: CGImage
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.key == rhs.key && lhs.image.width == rhs.image.width && lhs.image.height == rhs.image.height
+        }
+    }
+
+    /// Discrete Now Playing state for a `.nowPlaying` widget. Deliberately excludes playback
+    /// timeline/position so the widget redraws only on track, artwork or playback-state changes.
+    struct MediaSnapshot: Equatable {
+        var title: String = ""
+        var artist: String = ""
+        var album: String = ""
+        var playback: SystemMediaPlaybackState = .stopped
+        var artwork: RenderedImage? = nil
+        var primaryColor: String? = nil
+        var textColor: String? = nil
+
+        var isIdle: Bool {
+            playback == .stopped
+                || (title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+
+        /// Crisp sample track shown in Settings' canvas, swatches and ready-made cards.
+        @MainActor
+        static func previewSample() -> MediaSnapshot {
+            MediaSnapshot(
+                title: String(localized: "Midnight Echo"),
+                artist: String(localized: "Luna Waves"),
+                album: "",
+                playback: .playing,
+                artwork: sampleArtwork(),
+                primaryColor: "rgb(38, 46, 86)",
+                textColor: "rgb(245, 247, 255)")
+        }
+
+        @MainActor private static let cachedSampleArtwork: RenderedImage? = {
+            let side = 96
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let ctx = CGContext(
+                      data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return nil }
+            let colors = [
+                CGColor(colorSpace: space, components: [0.16, 0.21, 0.44, 1])!,
+                CGColor(colorSpace: space, components: [0.49, 0.27, 0.62, 1])!,
+                CGColor(colorSpace: space, components: [0.92, 0.48, 0.45, 1])!,
+            ]
+            if let gradient = CGGradient(colorsSpace: space, colors: colors as CFArray, locations: [0, 0.55, 1]) {
+                ctx.drawLinearGradient(
+                    gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: side, y: side), options: [])
+            }
+            ctx.setFillColor(CGColor(colorSpace: space, components: [1, 1, 1, 0.16])!)
+            ctx.fillEllipse(in: CGRect(x: 18, y: 18, width: 60, height: 60))
+            ctx.setFillColor(CGColor(colorSpace: space, components: [0.12, 0.15, 0.30, 0.72])!)
+            ctx.fillEllipse(in: CGRect(x: 38, y: 38, width: 20, height: 20))
+            guard let image = ctx.makeImage() else { return nil }
+            return RenderedImage(key: "sample-now-playing-artwork", image: image)
+        }()
+
+        @MainActor
+        static func sampleArtwork() -> RenderedImage? { cachedSampleArtwork }
+
+        /// Decodes a `SystemMediaThumbnail` into a static `RenderedImage` once on artwork change.
+        static func artwork(from thumbnail: SystemMediaThumbnail, token: UInt64) -> RenderedImage? {
+            guard !thumbnail.isEmpty else { return nil }
+            if thumbnail.width > 0, thumbnail.height > 0,
+               thumbnail.rgba.count == thumbnail.width * thumbnail.height * 4,
+               let space = CGColorSpace(name: CGColorSpace.sRGB),
+               let provider = CGDataProvider(data: Data(thumbnail.rgba) as CFData),
+               let image = CGImage(
+                   width: thumbnail.width, height: thumbnail.height,
+                   bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: thumbnail.width * 4,
+                   space: space,
+                   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                   provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+            {
+                return RenderedImage(key: "media-rgba-\(token)", image: image)
+            }
+            let prefix = "data:image/png;base64,"
+            if thumbnail.pngBase64DataURL.hasPrefix(prefix),
+               let data = Data(base64Encoded: String(thumbnail.pngBase64DataURL.dropFirst(prefix.count))),
+               let source = CGImageSourceCreateWithData(data as CFData, nil),
+               let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+            {
+                return RenderedImage(key: "media-png-\(token)", image: image)
+            }
+            return nil
+        }
+    }
+
     /// What the widgets are drawn from: the moment, this Mac's calendar and time zone, the language
     /// and region, and the readings some kinds show.
     struct Inputs {
@@ -16,17 +113,55 @@ enum DesktopWidgetRendering {
         var battery: BatteryReading?
         /// Where and how the automatic wallpapers plan sunrise and sunset; nil when nothing is set.
         var solar: WallpaperSolarSettings?
+        /// Discrete Now Playing state; nil when no session is attached or nothing has reported yet.
+        var media: MediaSnapshot?
+        /// True when rendering inside Settings (canvas, swatches, ready-made cards), so unconfigured
+        /// stickers and idle Now Playing cards render clear samples instead of collapsing.
+        var isPreview: Bool
+        /// Resolves a static sticker image from its managed asset reference; nil falls back to
+        /// `DesktopWidgetImageStore.shared`.
+        var resolveImage: (@MainActor (DesktopWidget.ImageAsset) -> CGImage?)?
 
         init(
             date: Date, calendar: Calendar, locale: Locale, battery: BatteryReading? = nil,
-            solar: WallpaperSolarSettings? = nil
+            solar: WallpaperSolarSettings? = nil, media: MediaSnapshot? = nil, isPreview: Bool = false,
+            resolveImage: (@MainActor (DesktopWidget.ImageAsset) -> CGImage?)? = nil
         ) {
             self.date = date
             self.calendar = calendar
             self.locale = locale
             self.battery = battery
             self.solar = solar
+            self.media = media
+            self.isPreview = isPreview
+            self.resolveImage = resolveImage
         }
+    }
+
+    /// A static Now Playing card: optional rounded album artwork alongside track title and artist.
+    struct NowPlayingCard: Equatable {
+        var title: NSAttributedString
+        var subtitle: NSAttributedString?
+        var artwork: RenderedImage?
+        var showsArtwork: Bool
+        var artworkSide: CGFloat
+        var artworkCornerRadius: CGFloat
+        var spacing: CGFloat
+        var alignment: DesktopWidget.Alignment
+        var titleSize: NSSize
+        var subtitleSize: NSSize
+        var placeholderColor: NSColor
+        var placeholderGlyphColor: NSColor
+    }
+
+    /// A static image sticker: aspect-fit or aspect-fill inside rounded corners, or a subtle
+    /// placeholder in Settings before an image is chosen.
+    struct ImageSticker: Equatable {
+        var image: RenderedImage?
+        var size: NSSize
+        var fit: DesktopWidget.ImageFit
+        var cornerRadius: CGFloat
+        var isPlaceholder: Bool
     }
 
     /// A clock face: its size, its ink, and where its hands point, each as a fraction of a turn
@@ -53,8 +188,13 @@ enum DesktopWidgetRendering {
 
     /// How a widget is drawn.
     enum Drawing: Equatable {
+        /// Nothing drawn (for example, a Now Playing widget collapsed while idle, or an image
+        /// sticker with no file chosen yet on the live desktop).
+        case empty
         case text(NSAttributedString)
         case analog(AnalogFace)
+        case nowPlaying(NowPlayingCard)
+        case image(ImageSticker)
     }
 
     /// What is done to the whole drawing: its opacity and turn, the gradient that fills it, its
@@ -267,6 +407,17 @@ enum DesktopWidgetRendering {
             return sun(widget, inputs: inputs, calendar: calendar, format: format)
         case .calendar:
             return format("yMMMM")
+        case .nowPlaying:
+            let snapshot = resolvedMedia(for: inputs)
+            if !snapshot.isIdle {
+                let title = line(snapshot.title)
+                let artist = line(snapshot.artist)
+                let parts = [title, artist].filter { !$0.isEmpty }
+                if !parts.isEmpty { return parts.joined(separator: " — ") }
+            }
+            return widget.hidesWhenIdle ? String(localized: "Now Playing") : String(localized: "Nothing playing")
+        case .image:
+            return widget.imageAsset?.displayName ?? String(localized: "Image")
         }
     }
 
@@ -450,26 +601,203 @@ enum DesktopWidgetRendering {
         for widget: DesktopWidget, inputs: Inputs, formatters: Formatters, scale: CGFloat = 1
     ) -> Content {
         let text = text(for: widget, inputs: inputs, formatters: formatters)
-        let padding = padding(for: widget, scale: scale)
-        let drawing: Drawing
-        let size: NSSize
         switch widget.kind {
+        case .nowPlaying:
+            return nowPlayingContent(for: widget, text: text, inputs: inputs, scale: scale)
+        case .image:
+            return imageContent(for: widget, text: text, inputs: inputs, scale: scale)
         case .analog:
+            let padding = padding(for: widget, scale: scale)
             let face = analogFace(for: widget, inputs: inputs, scale: scale)
-            drawing = .analog(face)
-            size = NSSize(width: face.diameter, height: face.diameter)
+            let size = NSSize(width: face.diameter, height: face.diameter)
+            var look = look(for: widget, scale: scale)
+            look.size = size
+            return Content(text: text, drawing: .analog(face), size: size, padding: padding, look: look)
         case .calendar:
+            let padding = padding(for: widget, scale: scale)
             let grid = calendarGrid(for: widget, inputs: inputs, formatters: formatters, scale: scale)
-            drawing = .text(grid)
-            size = measure(grid)
+            let size = measure(grid)
+            var look = look(for: widget, scale: scale)
+            look.size = size
+            return Content(text: text, drawing: .text(grid), size: size, padding: padding, look: look)
         default:
+            let padding = padding(for: widget, scale: scale)
             let attributed = attributedText(cased(text, widget, inputs.locale), for: widget, scale: scale)
-            drawing = .text(attributed)
-            size = measure(attributed)
+            let size = measure(attributed)
+            var look = look(for: widget, scale: scale)
+            look.size = size
+            return Content(text: text, drawing: .text(attributed), size: size, padding: padding, look: look)
         }
+    }
+
+    @MainActor
+    private static func resolvedMedia(for inputs: Inputs) -> MediaSnapshot {
+        if let media = inputs.media {
+            if !media.isIdle || !inputs.isPreview { return media }
+        }
+        return inputs.isPreview ? MediaSnapshot.previewSample() : MediaSnapshot()
+    }
+
+    /// Static Now Playing card: rounded album artwork alongside track title and artist, with
+    /// optional adaptive palette tinting from `SystemMediaThumbnail.primaryColor` / `textColor`.
+    @MainActor
+    private static func nowPlayingContent(
+        for widget: DesktopWidget, text: String, inputs: Inputs, scale: CGFloat
+    ) -> Content {
+        let snapshot = resolvedMedia(for: inputs)
+        if !inputs.isPreview && snapshot.isIdle && widget.hidesWhenIdle {
+            return Content(text: "", drawing: .empty, size: .zero, padding: 0, look: Look(opacity: 0))
+        }
+
+        let fontSize = max(CGFloat(widget.size) * scale, 1)
+        let adaptivePrimary = widget.tintsFromArtwork ? snapshot.primaryColor.flatMap { DesktopWidget.cssRGB($0) } : nil
+        let adaptiveText = widget.tintsFromArtwork ? snapshot.textColor.flatMap { DesktopWidget.cssRGB($0) } : nil
+        let ink = adaptiveText ?? widget.textColor
+
+        let rawTitle: String
+        let rawSubtitle: String?
+        if snapshot.isIdle {
+            rawTitle = String(localized: "Nothing playing")
+            rawSubtitle = nil
+        } else {
+            let trimmedTitle = line(snapshot.title)
+            let trimmedArtist = line(snapshot.artist)
+            let trimmedAlbum = line(snapshot.album)
+            rawTitle = trimmedTitle.isEmpty ? trimmedArtist : trimmedTitle
+            let candidateSub = trimmedTitle.isEmpty ? trimmedAlbum : (trimmedArtist.isEmpty ? trimmedAlbum : trimmedArtist)
+            rawSubtitle = (!candidateSub.isEmpty && candidateSub != rawTitle) ? candidateSub : nil
+        }
+
+        let showsArt = widget.showsArtwork && !snapshot.isIdle
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        paragraph.alignment = switch widget.alignment {
+        case .leading: .left
+        case .center: showsArt ? .left : .center
+        case .trailing: .right
+        }
+
+        let titleFont = font(for: widget, pointSize: fontSize)
+        var titleAttributes = textAttributes(for: widget, font: titleFont, scale: scale)
+        titleAttributes[.foregroundColor] = ink
+        titleAttributes[.paragraphStyle] = paragraph
+        let titleString = NSAttributedString(
+            string: cased(rawTitle, widget, inputs.locale), attributes: titleAttributes)
+
+        let maxTextWidth = max(ceil(fontSize * 18), ceil(140 * scale))
+        let rawTitleSize = titleString.size()
+        let titleSize = NSSize(
+            width: min(ceil(rawTitleSize.width), maxTextWidth),
+            height: max(ceil(rawTitleSize.height), 1))
+
+        var subtitleString: NSAttributedString?
+        var subtitleSize = NSSize.zero
+        let lineGap = ceil(fontSize * 0.14)
+        if let rawSubtitle {
+            var subWidget = widget
+            subWidget.weight = max(widget.weight - 100, 300)
+            let subSize = max(fontSize * 0.78, 1)
+            let subFont = font(for: subWidget, pointSize: subSize)
+            var subAttributes = textAttributes(for: subWidget, font: subFont, scale: scale)
+            subAttributes[.foregroundColor] = ink.withAlphaComponent(0.78)
+            subAttributes[.paragraphStyle] = paragraph
+            let attributed = NSAttributedString(
+                string: cased(rawSubtitle, widget, inputs.locale), attributes: subAttributes)
+            let measured = attributed.size()
+            subtitleString = attributed
+            subtitleSize = NSSize(
+                width: min(ceil(measured.width), maxTextWidth),
+                height: max(ceil(measured.height), 1))
+        }
+
+        let textWidth = max(titleSize.width, subtitleSize.width)
+        let textHeight = titleSize.height + (subtitleString != nil ? lineGap + subtitleSize.height : 0)
+        let artworkSide = showsArt ? max(ceil(fontSize * 2.55), textHeight, ceil(18 * scale)) : 0
+        let spacing = showsArt ? max(ceil(fontSize * 0.6), 4) : 0
+        let totalSize = NSSize(
+            width: textWidth + (showsArt ? artworkSide + spacing : 0),
+            height: max(textHeight, artworkSide))
+
         var look = look(for: widget, scale: scale)
+        var padding = padding(for: widget, scale: scale)
+        if let adaptivePrimary {
+            // Preserve the WCAG-checked contrast between adaptive primary and text colors.
+            look.gradient = nil
+            if look.background != nil {
+                look.background?.color = adaptivePrimary.withAlphaComponent(CGFloat(widget.backgroundOpacity) / 100)
+            } else {
+                let inset = max(ceil(fontSize * 0.55), 4)
+                look.background = Look.Plate(
+                    shape: .rounded, color: adaptivePrimary.withAlphaComponent(0.78), inset: inset)
+                padding = max(padding, ceil(inset) + 1)
+            }
+        }
+        look.size = totalSize
+
+        let card = NowPlayingCard(
+            title: titleString,
+            subtitle: subtitleString,
+            artwork: showsArt ? snapshot.artwork : nil,
+            showsArtwork: showsArt,
+            artworkSide: artworkSide,
+            artworkCornerRadius: artworkSide * 0.18,
+            spacing: spacing,
+            alignment: widget.alignment,
+            titleSize: titleSize,
+            subtitleSize: subtitleSize,
+            placeholderColor: ink.withAlphaComponent(0.16),
+            placeholderGlyphColor: ink.withAlphaComponent(0.72))
+        return Content(text: text, drawing: .nowPlaying(card), size: totalSize, padding: padding, look: look)
+    }
+
+    /// A sticker's bounding side for each point of the widget's size.
+    static let imageScale: CGFloat = 2.0
+
+    /// Static image sticker: aspect-fit or square aspect-fill inside rounded corners, or a subtle
+    /// placeholder in Settings until an image is chosen.
+    @MainActor
+    private static func imageContent(
+        for widget: DesktopWidget, text: String, inputs: Inputs, scale: CGFloat
+    ) -> Content {
+        let resolved: CGImage? = widget.imageAsset.flatMap { asset in
+            if let resolver = inputs.resolveImage { return resolver(asset) }
+            return DesktopWidgetImageStore.shared.loadImage(for: asset)
+        }
+        if !inputs.isPreview && resolved == nil {
+            return Content(text: "", drawing: .empty, size: .zero, padding: 0, look: Look(opacity: 0))
+        }
+
+        let extent = max(CGFloat(widget.size) * Self.imageScale * scale, 1)
+        let size: NSSize
+        if let resolved, resolved.width > 0, resolved.height > 0 {
+            switch widget.imageFit {
+            case .fill:
+                size = NSSize(width: ceil(extent), height: ceil(extent))
+            case .fit:
+                let w = CGFloat(resolved.width), h = CGFloat(resolved.height)
+                let factor = extent / max(w, h)
+                size = NSSize(width: max(ceil(w * factor), 1), height: max(ceil(h * factor), 1))
+            }
+        } else {
+            let side = max(ceil(extent * 0.75), 1)
+            size = NSSize(width: side, height: side)
+        }
+
+        let cornerRadius = min(size.width, size.height) * CGFloat(widget.imageCornerRadius) / 100
+        var look = look(for: widget, scale: scale)
+        // Images keep their own full-color pixels; never replace them with a text gradient.
+        look.gradient = nil
         look.size = size
-        return Content(text: text, drawing: drawing, size: size, padding: padding, look: look)
+        let padding = padding(for: widget, scale: scale)
+        let rendered = resolved.map {
+            RenderedImage(
+                key: "\(widget.imageAsset?.assetID ?? "image")/\(widget.imageAsset?.fileName ?? "")",
+                image: $0)
+        }
+        let sticker = ImageSticker(
+            image: rendered, size: size, fit: widget.imageFit, cornerRadius: cornerRadius,
+            isPlaceholder: rendered == nil)
+        return Content(text: text, drawing: .image(sticker), size: size, padding: padding, look: look)
     }
 
     /// The size text takes, line breaks included.
@@ -764,7 +1092,17 @@ enum DesktopWidgetRendering {
 
     /// The frame of `content` on a display: as `frame(textSize:padding:widget:display:)` for a
     /// drawing that is not turned, else the box the turned drawing takes, placed the same way.
+    /// A collapsed `.empty` drawing keeps a 1×1 transparent frame at its anchor so AppKit occlusion
+    /// tracking still reports whether the display is covered or uncovered.
     static func frame(for content: Content, widget: DesktopWidget, display: NSRect) -> NSRect {
+        if case .empty = content.drawing {
+            let anchorX = display.minX + widget.x * display.width
+            let anchorY = display.maxY - widget.y * display.height
+            return NSRect(
+                x: min(max(anchorX, display.minX), max(display.maxX - 1, display.minX)).rounded(.down),
+                y: min(max(anchorY, display.minY), max(display.maxY - 1, display.minY)).rounded(.down),
+                width: 1, height: 1)
+        }
         guard content.look.rotation != 0 else {
             return frame(textSize: content.size, padding: content.padding, widget: widget, display: display)
         }
@@ -776,8 +1114,8 @@ enum DesktopWidgetRendering {
     /// When what any of `widgets` shows next changes after the moment of `inputs`: the next second
     /// for a clock with seconds, the next minute for any other clock, the next hour a greeting
     /// changes at, the next sunrise or sunset (or midnight) for the sun, the next midnight for
-    /// dates, countdowns and the month, each in the widget's own time zone. Text and the battery
-    /// never change on a timer. Nil when none of them does.
+    /// dates, countdowns and the month, each in the widget's own time zone. Text, battery, Now
+    /// Playing and image stickers never change on a timer. Nil when none of them does.
     static func nextChange(after inputs: Inputs, widgets: [DesktopWidget]) -> Date? {
         let now = inputs.date
         return widgets.compactMap { widget -> Date? in
@@ -800,7 +1138,7 @@ enum DesktopWidgetRendering {
                 guard let solar = inputs.solar else { return nil }
                 let event = nextSunEvent(after: now, solar: solar, calendar: calendar)?.1
                 return [event, end(of: .day)].compactMap { $0 }.min()
-            case .text, .battery:
+            case .text, .battery, .nowPlaying, .image:
                 return nil
             }
         }.min()

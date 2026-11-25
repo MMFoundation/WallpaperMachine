@@ -27,6 +27,10 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         case analog
         /// This month's days in a grid, today marked.
         case calendar
+        /// The current macOS Now Playing track (static card, redrawn only on discrete changes).
+        case nowPlaying
+        /// A static image sticker stored in the app's managed user-assets folder.
+        case image
     }
 
     /// Which displays show the widget.
@@ -37,6 +41,46 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         /// One display, by the UUID Core Graphics keeps for it across reboots and reconnections,
         /// with the name it had when chosen, for when it is not connected.
         case display(uuid: String, name: String)
+    }
+
+    /// When and on which Spaces or wallpapers the widget is shown.
+    enum Scope: Codable, Hashable, Sendable {
+        /// Shown everywhere on its placed displays, joining every Space.
+        case everywhere
+        /// Shown on a display only while that display's active wallpaper ID is in the list.
+        case wallpapers([String])
+        /// Pinned to specific macOS desktop Space UUIDs, falling back to every Space when private
+        /// Space APIs are unavailable.
+        case spaces([String])
+    }
+
+    /// Reference to a user-chosen static image sticker managed by `DesktopWidgetImageStore`.
+    struct ImageAsset: Codable, Hashable, Sendable {
+        var assetID: String
+        var fileName: String
+        var displayName: String
+
+        var isValid: Bool {
+            Self.isSafeComponent(assetID, limit: 64)
+                && Self.isSafeComponent(fileName, limit: 128)
+                && !displayName.isEmpty && displayName.count <= 256
+                && !displayName.contains(where: { $0.isNewline || $0 == "\0" })
+        }
+
+        private static func isSafeComponent(_ raw: String, limit: Int) -> Bool {
+            !raw.isEmpty && raw.count <= limit && raw != "." && raw != ".."
+                && !raw.contains("/") && !raw.contains(":") && !raw.contains("\\")
+                && !raw.contains("\0") && !raw.hasPrefix(".")
+                && !raw.contains(where: \.isNewline)
+        }
+    }
+
+    /// How a static image sticker fits inside its frame.
+    enum ImageFit: String, Codable, CaseIterable, Sendable {
+        /// Preserves the image's aspect ratio without cropping.
+        case fit
+        /// Fills a square frame, cropping overflow from the centre.
+        case fill
     }
 
     /// Which side of the text the position names.
@@ -105,6 +149,7 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         /// the look has its own.
         func apply(to widget: inout DesktopWidget) {
             widget.resetEffects()
+            widget.tintsFromArtwork = false
             switch self {
             case .soft:
                 break
@@ -315,11 +360,17 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
     static let backgroundPaddingRange = 0...100
     /// A turn of the whole widget, in degrees clockwise.
     static let rotationRange = -180...180
+    /// Corner radius of a static image sticker, in percent of its shorter side (50 is a circle/capsule).
+    static let imageCornerRadiusRange = 0...50
+    /// Maximum number of wallpaper or desktop Space IDs a widget scope holds.
+    static let scopeLimit = 64
 
     var id: String
     var kind: Kind
     var isShown = true
     var placement = Placement.main
+    /// Where the widget is shown: everywhere, only on specific wallpapers, or only on specific Spaces.
+    var scope = Scope.everywhere
     /// The point the alignment names, as a fraction of the display's width from its left edge.
     var x = 0.5
     /// The text's vertical centre, as a fraction of the display's height from its top edge.
@@ -390,6 +441,18 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
     /// The day a countdown counts to, as `yyyy-MM-dd` in the Gregorian calendar; empty for today.
     var targetDay = ""
     var sunStyle = SunStyle.next
+    /// Now Playing: whether to show album cover artwork beside the track title and artist.
+    var showsArtwork = true
+    /// Now Playing: whether to collapse automatically when nothing is playing.
+    var hidesWhenIdle = true
+    /// Now Playing: whether to adapt card/text colors from the album artwork's palette.
+    var tintsFromArtwork = false
+    /// Static image sticker: reference to the managed asset stored by `DesktopWidgetImageStore`.
+    var imageAsset: ImageAsset?
+    /// Static image sticker: aspect-fit or square aspect-fill.
+    var imageFit = ImageFit.fit
+    /// Static image sticker: corner rounding in percent of the shorter side (0…50).
+    var imageCornerRadius = 12
 
     /// A new widget of `kind`, laid out for it. `today` and `calendar` choose a countdown's first
     /// day, thirty days ahead.
@@ -433,17 +496,28 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
             y = 0.5
             size = 16
             weight = 500
+        case .nowPlaying:
+            x = 0.04
+            y = 0.86
+            alignment = .leading
+            size = 18
+            weight = 500
+        case .image:
+            y = 0.5
+            size = 120
+            weight = 400
         }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, isShown, placement, x, y, alignment, size, typeface, weight, color, opacity
+        case id, kind, isShown, placement, scope, x, y, alignment, size, typeface, weight, color, opacity
         case hasShadow, timeFormat, showsSeconds, dateStyle, calendarSystem, timeZone, text, targetDay
         case sunStyle, fontFamily, isItalic, letterSpacing, lineHeight, textCase, fill, gradientColor
         case gradientAngle, accentColor, outlineWidth, outlineColor, glowSize, glowColor, shadowColor
         case shadowOpacity, shadowBlur, shadowDistance, shadowAngle, background, backgroundColor
         case backgroundOpacity, backgroundPadding, rotation, padsHour, showsPeriod, clockLayout, dialMarks
-        case showsDialRing
+        case showsDialRing, showsArtwork, hidesWhenIdle, tintsFromArtwork, imageAsset, imageFit
+        case imageCornerRadius
     }
 
     init(from decoder: any Decoder) throws {
@@ -456,6 +530,7 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         }
         try read(.isShown, into: &isShown)
         try read(.placement, into: &placement)
+        try read(.scope, into: &scope)
         try read(.x, into: &x)
         try read(.y, into: &y)
         try read(.alignment, into: &alignment)
@@ -501,6 +576,12 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         try read(.clockLayout, into: &clockLayout)
         try read(.dialMarks, into: &dialMarks)
         try read(.showsDialRing, into: &showsDialRing)
+        try read(.showsArtwork, into: &showsArtwork)
+        try read(.hidesWhenIdle, into: &hidesWhenIdle)
+        try read(.tintsFromArtwork, into: &tintsFromArtwork)
+        imageAsset = try container.decodeIfPresent(ImageAsset.self, forKey: .imageAsset)
+        try read(.imageFit, into: &imageFit)
+        try read(.imageCornerRadius, into: &imageCornerRadius)
     }
 
     /// Whether every value is one the panel could have chosen.
@@ -510,7 +591,13 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         case .display(let uuid, let name):
             Self.validText(uuid, limit: 64) && name.count <= 256 && !name.contains("\0")
         }
-        return Self.validText(id, limit: 128) && placementIsValid
+        let scopeIsValid: Bool = switch scope {
+        case .everywhere: true
+        case .wallpapers(let ids), .spaces(let ids):
+            ids.count <= Self.scopeLimit && Set(ids).count == ids.count
+                && ids.allSatisfy { Self.validText($0, limit: 128) }
+        }
+        return Self.validText(id, limit: 128) && placementIsValid && scopeIsValid
             && (0...1).contains(x) && (0...1).contains(y)
             && Self.sizeRange.contains(size) && Self.opacityRange.contains(opacity)
             && Self.weightRange.contains(weight) && weight % 100 == 0
@@ -527,6 +614,8 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
             && Self.backgroundPaddingRange.contains(backgroundPadding) && Self.rotationRange.contains(rotation)
             && [gradientColor, outlineColor, glowColor, shadowColor, backgroundColor].allSatisfy { Self.rgb($0) != nil }
             && (accentColor.map { Self.rgb($0) != nil } ?? true)
+            && (imageAsset.map(\.isValid) ?? true)
+            && Self.imageCornerRadiusRange.contains(imageCornerRadius)
     }
 
     /// The widget with every number pulled into its range and an unreadable colour made white.
@@ -556,12 +645,28 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         copy.shadowDistance = clamp(shadowDistance, Self.shadowDistanceRange)
         copy.backgroundPadding = clamp(backgroundPadding, Self.backgroundPaddingRange)
         copy.rotation = clamp(rotation, Self.rotationRange)
+        copy.imageCornerRadius = clamp(imageCornerRadius, Self.imageCornerRadiusRange)
         if Self.rgb(gradientColor) == nil { copy.gradientColor = "#7AA7FF" }
         if Self.rgb(outlineColor) == nil { copy.outlineColor = "#000000" }
         if Self.rgb(glowColor) == nil { copy.glowColor = "#FFFFFF" }
         if Self.rgb(shadowColor) == nil { copy.shadowColor = "#000000" }
         if Self.rgb(backgroundColor) == nil { copy.backgroundColor = "#000000" }
         if let accentColor, Self.rgb(accentColor) == nil { copy.accentColor = nil }
+        if let imageAsset, !imageAsset.isValid { copy.imageAsset = nil }
+        func cleanIDs(_ ids: [String]) -> [String] {
+            var seen = Set<String>()
+            var result: [String] = []
+            for id in ids where Self.validText(id, limit: 128) && seen.insert(id).inserted {
+                result.append(id)
+                if result.count == Self.scopeLimit { break }
+            }
+            return result
+        }
+        switch scope {
+        case .everywhere: break
+        case .wallpapers(let ids): copy.scope = .wallpapers(cleanIDs(ids))
+        case .spaces(let ids): copy.scope = .spaces(cleanIDs(ids))
+        }
         return copy
     }
 
@@ -657,7 +762,39 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
+    /// Whether the widget's scope allows it on a display showing `activeWallpaperID`.
+    func matchesWallpaper(_ activeWallpaperID: String?) -> Bool {
+        switch scope {
+        case .everywhere, .spaces:
+            return true
+        case .wallpapers(let ids):
+            guard let activeWallpaperID, !activeWallpaperID.isEmpty else { return false }
+            return ids.contains(activeWallpaperID)
+        }
+    }
+
+    /// The Space UUIDs this widget is pinned to, or nil when it joins every Space.
+    var pinnedSpaceIDs: [String]? {
+        if case .spaces(let ids) = scope { return ids }
+        return nil
+    }
+
     // MARK: Colour
+
+    /// Parses a CSS `rgb(r, g, b)` colour string (as produced by `MediaArtworkRGB.css`) into sRGB.
+    static func cssRGB(_ css: String, alpha: CGFloat = 1) -> NSColor? {
+        let trimmed = css.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("rgb("), trimmed.hasSuffix(")") else { return nil }
+        let body = trimmed.dropFirst(4).dropLast()
+        let parts = body.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 3,
+              let r = Int(parts[0]), (0...255).contains(r),
+              let g = Int(parts[1]), (0...255).contains(g),
+              let b = Int(parts[2]), (0...255).contains(b)
+        else { return nil }
+        return NSColor(
+            srgbRed: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: alpha)
+    }
 
     /// The red, green and blue of `#RRGGBB`, each 0 to 255; nil for anything else.
     static func rgb(_ hex: String) -> (red: Int, green: Int, blue: Int)? {

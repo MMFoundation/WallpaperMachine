@@ -155,9 +155,9 @@ final class ShellModel {
   }
 
   /// The popovers areas present from their own state: the library's Import and Desktop Widgets'
-  /// Ready-made picker.
+  /// popovers (Ready-made picker and wallpaper scope chooser).
   private var isAreaPopoverOpen: Bool {
-    controller.library.importAnchor != nil || controller.widgetsSettings.isReadyMadePopoverOpen
+    controller.library.importAnchor != nil || controller.widgetsSettings.hasOpenPopover
   }
 
   /// What the shell contributes to the support prompt's conditions: the offer waits while the guide
