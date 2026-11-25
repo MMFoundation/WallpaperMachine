@@ -1435,6 +1435,20 @@ std::atomic<bool>& AudioReuseSwitch()
     return enabled;
 }
 
+/// Whether a pass whose only per-frame input is camera parallax (`kParallax`) may be reused
+/// while its parallax position and model offset are unchanged. On by default;
+/// `WALLPAPER_MACHINE_PARALLAX_REUSE=0` redraws every such pass on every frame, for an A/B in
+/// one binary. Both ways draw the same bytes. Read once, like the other A/B switches; a graph
+/// takes the value it was compiled with.
+std::atomic<bool>& ParallaxReuseSwitch()
+{
+    static std::atomic<bool> enabled { [] {
+        const char* value = std::getenv("WALLPAPER_MACHINE_PARALLAX_REUSE");
+        return value == nullptr || std::string_view(value) != "0";
+    }() };
+    return enabled;
+}
+
 /// Whether a pass drawn through a layer-local or effect camera folds into its reuse sample only
 /// the transforms and cameras its program's read uniforms are derived from
 /// (`IShaderValueUpdater::TransformInputs`), so a layer that moves or a camera that shakes
@@ -2299,6 +2313,8 @@ struct MetalRender::Impl
     uint32_t                   demand_reasons {
         static_cast<uint32_t>(render::DynamicReason::UnknownInput)
     };
+    /// Whether any pass in the compiled graph consumes camera parallax (`kParallax`).
+    bool                       has_parallax_pass { false };
 
     // ---- direct NV12 plane sampling
     /// Where a finished optional pipeline build leaves its result.
@@ -2355,6 +2371,10 @@ struct MetalRender::Impl
     /// (`AudioReuseSwitch` as the reuse table was built) instead of the pass counting as
     /// changing on every frame.
     std::vector<uint8_t>       audio_sampled;
+    /// Per description, whether its sample folds the parallax state its uniforms carry
+    /// (`ParallaxReuseSwitch` as the reuse table was built) instead of the pass counting as
+    /// changing on every frame.
+    std::vector<uint8_t>       parallax_sampled;
     /// Advanced once per reuse plan. Folded into the sample of an audio pass whose spectrum
     /// cannot be told this frame, so that pass is redrawn rather than reused.
     uint64_t                   audio_unknown_serial { 0 };
@@ -2838,6 +2858,8 @@ void MetalRender::Impl::releaseSceneOptimization()
     static_cache.Reset();
     static_samples.clear();
     static_skip.clear();
+    audio_sampled.clear();
+    parallax_sampled.clear();
     copy_elision.clear();
     target_aliases.clear();
     elided_copies         = 0;
@@ -2923,6 +2945,7 @@ void MetalRender::Impl::releaseGraph()
     uniform_ring_size = 0;
     graph_ready       = false;
     demand_reasons    = static_cast<uint32_t>(render::DynamicReason::UnknownInput);
+    has_parallax_pass = false;
 }
 
 void MetalRender::Impl::drainQueue()
@@ -6244,6 +6267,7 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
     // `UnknownInput` instead of contributing silence.
     uint32_t reasons              = 0;
     bool     saw_shader_pass      = false;
+    bool     saw_parallax_pass    = false;
     bool     understood_every_pass = true;
 
     const auto* updater       = scene.shaderValueUpdater.get();
@@ -6267,6 +6291,8 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
                 reasons |= render::DynamicReason::TimeUniform;
             if ((varying & frame_varying_uniform::kAudio) != 0)
                 reasons |= render::DynamicReason::AudioUniform;
+            if ((varying & frame_varying_uniform::kParallax) != 0)
+                saw_parallax_pass = true;
             if ((varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax)) !=
                 0)
                 reasons |= render::DynamicReason::PointerUniform;
@@ -6332,7 +6358,8 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
     if ((!saw_shader_pass && !only_clear) || !understood_every_pass) {
         reasons |= render::DynamicReason::UnknownInput;
     }
-    demand_reasons = reasons;
+    demand_reasons    = reasons;
+    has_parallax_pass = saw_parallax_pass;
 }
 
 /// Decides which copies this backend can reduce, by the shared
@@ -6527,8 +6554,10 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
     }
     optimization_compiled = false;
     video_reuse = VideoReuseSwitch().load(std::memory_order_relaxed);
-    const bool audio_reuse = AudioReuseSwitch().load(std::memory_order_relaxed);
+    const bool audio_reuse    = AudioReuseSwitch().load(std::memory_order_relaxed);
+    const bool parallax_reuse = ParallaxReuseSwitch().load(std::memory_order_relaxed);
     audio_sampled.assign(descriptions.size(), uint8_t { 0 });
+    parallax_sampled.assign(descriptions.size(), uint8_t { 0 });
     if (! render::SceneOptimizationEnabled() && execution_order.empty()) return;
 
     const auto* updater = scene.shaderValueUpdater.get();
@@ -6585,9 +6614,19 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
                 else
                     reasons |= render::DynamicReason::AudioUniform;
             }
-            if ((varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax)) !=
-                0)
+            if ((varying & frame_varying_uniform::kPointer) != 0)
                 reasons |= render::DynamicReason::PointerUniform;
+            if ((varying & frame_varying_uniform::kParallax) != 0) {
+                // The parallax offset and `g_ParallaxPosition` this frame's uniforms
+                // carry are folded into the sample instead (`frameSample`), so the
+                // pass is redrawn exactly when its parallax state changed. The scene
+                // clock does not depend on this: `computeDemandReasons` still reports
+                // `PointerUniform` so pointer events wake an idle scene.
+                if (parallax_reuse && updater != nullptr)
+                    parallax_sampled[i] = 1;
+                else
+                    reasons |= render::DynamicReason::PointerUniform;
+            }
             if ((varying & frame_varying_uniform::kBones) != 0)
                 reasons |= render::DynamicReason::BoneUniform;
             for (const auto& key : desc.texture_keys) {
@@ -6775,6 +6814,18 @@ render::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
                 const auto audio = updater->AudioStateHash(desc.node, desc.material_slot);
                 hash = render::StaticHashMix(hash, audio.has_value() ? 1u : 2u);
                 hash = render::StaticHashMix(hash, audio.value_or(audio_unknown_serial));
+            }
+            if (index < parallax_sampled.size() && parallax_sampled[index] != 0) {
+                // The parallax position and model displacement its uniforms were given
+                // this frame. A state the updater cannot vouch for is a new one every frame.
+                SceneCamera* original_active = scene.activeCamera;
+                if (desc.reflection_pass && scene.reflection.camera)
+                    scene.activeCamera = scene.reflection.camera.get();
+                const auto parallax = updater->ParallaxStateHash(
+                    desc.node, desc.material_slot, desc.camera_override);
+                scene.activeCamera = original_active;
+                hash = render::StaticHashMix(hash, parallax.has_value() ? 1u : 2u);
+                hash = render::StaticHashMix(hash, parallax.value_or(audio_unknown_serial));
             }
         }
     }
@@ -7854,6 +7905,8 @@ uint32_t MetalRender::ShaderUpdateDemandReasons() const
         reasons |= render::DynamicReason::Feedback;
     return reasons;
 }
+
+bool MetalRender::HasParallaxPasses() const { return pImpl->has_parallax_pass; }
 
 void MetalRender::SetCounters(RendererCounters* counters)
 {
@@ -9197,6 +9250,7 @@ bool MetalRender::SetLayerLocalSignaturesForTests(bool enabled)
 }
 
 void MetalRender::SetAudioReuseForTests(bool enabled) { AudioReuseSwitch().store(enabled); }
+void MetalRender::SetParallaxReuseForTests(bool enabled) { ParallaxReuseSwitch().store(enabled); }
 
 int MetalRender::SetSdrFramingOverrideForTests(int forced)
 {

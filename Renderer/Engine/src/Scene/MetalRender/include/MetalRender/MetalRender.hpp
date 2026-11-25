@@ -241,6 +241,8 @@ public:
     /// The video bit is evaluated on every call rather than latched at compile:
     /// pausing playback changes the answer without rebuilding the graph.
     [[nodiscard]] uint32_t ShaderUpdateDemandReasons() const;
+    /// Whether any pass in the compiled graph consumes camera parallax (`kParallax`).
+    [[nodiscard]] bool HasParallaxPasses() const;
 
     void SetCounters(RendererCounters* counters);
 
@@ -382,6 +384,10 @@ public:
     /// carry are the ones it drew, for graphs compiled from now on. On unless
     /// `WALLPAPER_MACHINE_AUDIO_REUSE=0`; process-wide, test-only.
     static void SetAudioReuseForTests(bool enabled);
+    /// Whether a pass whose only per-frame input is camera parallax (`kParallax`) is reused
+    /// while its parallax position and model offset are unchanged, for graphs compiled from
+    /// now on. On unless `WALLPAPER_MACHINE_PARALLAX_REUSE=0`; process-wide, test-only.
+    static void SetParallaxReuseForTests(bool enabled);
     /// Whether a pass drawn through a layer-local or effect camera leaves out of its reuse sample
     /// the node's world transform and the active camera when no uniform its program reads is
     /// derived from them, for graphs compiled from now on. On unless

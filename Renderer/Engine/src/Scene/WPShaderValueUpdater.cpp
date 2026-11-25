@@ -273,12 +273,20 @@ ShaderValue Vec(std::initializer_list<float> values) {
 /// The first four lanes of `slot`'s family in a table of 13 names, or null past it.
 bool SlotInRange(uint32_t slot) { return slot < 13; }
 
-uint64_t HashFloats(uint64_t hash, const float* values, std::size_t count) {
-    const auto* bytes = reinterpret_cast<const unsigned char*>(values);
-    for (std::size_t i = 0; i < count * sizeof(float); ++i) {
+/// Remaining normalized parallax travel at or below which easing snaps to the
+/// target cursor position (sub-pixel even on 4K canvases, and well above float32 ULP).
+constexpr float kParallaxSettleEpsilon = 1e-4f;
+
+uint64_t HashBytes(uint64_t hash, const void* data, std::size_t size) {
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    for (std::size_t i = 0; i < size; ++i) {
         hash = (hash ^ bytes[i]) * 0x100000001b3ULL;
     }
     return hash;
+}
+
+uint64_t HashFloats(uint64_t hash, const float* values, std::size_t count) {
+    return HashBytes(hash, values, count * sizeof(float));
 }
 
 bool ReadsAudioSpectrum(const WPUniformInfo& info) {
@@ -394,17 +402,39 @@ void WPShaderValueUpdater::FrameBegin() {
     // `cameraparallaxdelay: 0`) follows the cursor at once.
     m_mousePosLast = m_mousePos;
     m_mousePos     = m_mousePosInput;
-    const std::array<float, 2> target { std::clamp(m_mousePosInput[0], 0.0f, 1.0f),
-                                        std::clamp(m_mousePosInput[1], 0.0f, 1.0f) };
+    const std::array<float, 2> target {
+        std::isfinite(m_mousePosInput[0]) ? std::clamp(m_mousePosInput[0], 0.0f, 1.0f)
+                                          : m_parallaxPos[0],
+        std::isfinite(m_mousePosInput[1]) ? std::clamp(m_mousePosInput[1], 0.0f, 1.0f)
+                                          : m_parallaxPos[1],
+    };
     double step = 1.0;
     if (m_parallax.delay > 0.0f) {
         const double frame_time = m_scene != nullptr ? m_scene->frameTime : 0.0;
         step = std::clamp((1.0 - m_parallax.delay / 3.0) * 10.0 * frame_time, 0.0, 1.0);
     }
     for (std::size_t axis = 0; axis < 2; ++axis) {
-        m_parallaxPos[axis] = static_cast<float>(
-            algorism::lerp(step, m_parallaxPos[axis], target[axis]));
+        const float prev = m_parallaxPos[axis];
+        float       next = static_cast<float>(algorism::lerp(step, prev, target[axis]));
+        if (step > 0.0 && (std::abs(target[axis] - next) <= kParallaxSettleEpsilon ||
+                           (next == prev && prev != target[axis]))) {
+            next = target[axis];
+        }
+        m_parallaxPos[axis] = next;
     }
+}
+
+bool WPShaderValueUpdater::ParallaxEasingActive() const {
+    if (! m_parallax.enable || ! m_user_parallax || m_parallax.mouseinfluence == 0.0f ||
+        m_parallax.delay <= 0.0f || m_parallax.delay >= 3.0f) {
+        return false;
+    }
+    for (std::size_t axis = 0; axis < 2; ++axis) {
+        if (! std::isfinite(m_mousePosInput[axis])) continue;
+        const float target = std::clamp(m_mousePosInput[axis], 0.0f, 1.0f);
+        if (m_parallaxPos[axis] != target) return true;
+    }
+    return false;
 }
 
 void WPShaderValueUpdater::FrameEnd() {}
@@ -484,7 +514,7 @@ bool WPShaderValueUpdater::ParallaxMovesDraw(const WPUniformInfo& info, const Sc
         m_parallax.mouseinfluence == 0.0f) {
         return false;
     }
-    if (! (info.has_M || info.has_MVP || info.has_MI || info.has_MVPI)) return false;
+    if (! (info.has_M || info.has_AM || info.has_MVP || info.has_MI || info.has_MVPI)) return false;
     const SceneCamera* camera = CameraNamed(camera_name);
     if (camera == nullptr || camera_name == "effect" || camera->IsLayerLocal()) return false;
     // Without node data nothing says how deep the draw is.
@@ -572,6 +602,50 @@ uint64_t WPShaderValueUpdater::PointerStateHash(SceneNode* node, uint32_t materi
         const std::array<float, 4> state { depth[0], depth[1], m_parallax.amount,
                                          m_parallax.mouseinfluence };
         fold(state.data(), state.size());
+    }
+    return sampled ? (hash == 0 ? 1 : hash) : 0;
+}
+
+std::optional<uint64_t> WPShaderValueUpdater::ParallaxStateHash(
+    SceneNode* node, uint32_t material_slot, const std::string& camera_override) const {
+    if (m_scene == nullptr || node == nullptr) return std::nullopt;
+    const auto* info = FindUniformInfo(node, material_slot);
+    if (info == nullptr) return std::nullopt;
+    uint64_t hash    = 0xcbf29ce484222325ULL;
+    bool     sampled = false;
+    if (info->has_PARALLAXPOSITION) {
+        std::array<float, 2> position { 0.5f, 0.5f };
+        if (m_parallax.enable && m_user_parallax) {
+            position = { 0.5f + (m_parallaxPos[0] - 0.5f) * m_parallax.mouseinfluence,
+                         0.5f - (m_parallaxPos[1] - 0.5f) * m_parallax.mouseinfluence };
+        }
+        for (float& value : position) {
+            if (value == 0.0f) value = 0.0f;
+        }
+        const uint32_t tag = 1u;
+        hash               = HashBytes(hash, &tag, sizeof(tag));
+        hash               = HashFloats(hash, position.data(), position.size());
+        sampled            = true;
+    }
+    const auto& camera_name = camera_override.empty() ? node->Camera() : camera_override;
+    const auto* material =
+        node->Mesh() != nullptr ? node->Mesh()->MaterialForSlot(material_slot) : nullptr;
+    const bool               compose = material != nullptr && SamplesScreenBackground(*material);
+    const WPShaderValueData* data    = FindNodeData(node, material_slot);
+    if (ParallaxMovesDraw(*info, node, camera_name, data, compose, nullptr)) {
+        const SceneCamera* draw_camera = CameraNamed(camera_name);
+        const SceneCamera* view_camera =
+            compose && m_scene->activeCamera != nullptr ? m_scene->activeCamera : draw_camera;
+        if (view_camera == nullptr) return std::nullopt;
+        const Vector2d offset = DrawParallaxOffset(node, *view_camera, data, compose);
+        const std::array<double, 2> displacement {
+            offset.x() == 0.0 ? 0.0 : offset.x(),
+            offset.y() == 0.0 ? 0.0 : offset.y(),
+        };
+        const uint32_t tag = 2u;
+        hash               = HashBytes(hash, &tag, sizeof(tag));
+        hash               = HashBytes(hash, displacement.data(), sizeof(displacement));
+        sampled            = true;
     }
     return sampled ? (hash == 0 ? 1 : hash) : 0;
 }

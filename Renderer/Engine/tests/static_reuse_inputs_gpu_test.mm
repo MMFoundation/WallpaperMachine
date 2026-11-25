@@ -324,3 +324,152 @@ TEST_F(StaticReuseInputs, AnAudioPassThatSamplesAChangingBufferIsNeverReused)
         ExpectSamePictures(frames, reference);
     }
 }
+
+namespace
+{
+
+const char* kParallaxCard = R"(varying vec2 v_TexCoord;
+uniform vec2 g_ParallaxPosition;
+void main() {
+    gl_FragColor = vec4(g_ParallaxPosition.x, g_ParallaxPosition.y, 0.35, 1.0);
+}
+)";
+
+const char* kRawPointerCard = R"(varying vec2 v_TexCoord;
+uniform vec2 g_PointerPosition;
+void main() {
+    gl_FragColor = vec4(g_PointerPosition.x, g_PointerPosition.y, 0.35, 1.0);
+}
+)";
+
+struct ParallaxSwitchesRestored
+{
+    ~ParallaxSwitchesRestored() { metal::MetalRender::SetParallaxReuseForTests(true); }
+};
+
+struct PointerStep
+{
+    double x { 0.5 };
+    double y { 0.5 };
+    bool   reusable { false };
+};
+
+std::vector<Frame> DrawPointerScript(const char* fragment, bool enable_parallax, bool optimisation,
+                                     bool parallax_reuse, const std::vector<PointerStep>& steps,
+                                     std::string* error)
+{
+    const ParallaxSwitchesRestored restored;
+    metal::MetalRender::SetParallaxReuseForTests(parallax_reuse);
+
+    ScenePackage package;
+    ImageLayer   card;
+    card.id     = 1;
+    card.origin = { 32.0f, 32.0f, 0.0f };
+    card.size   = { 32.0f, 32.0f };
+    card.model  = AddShaderModel(package, "card", "card_probe", fragment,
+                                 Json::array({ "util/white" }), "translucent");
+    card.extra  = { { "parallaxDepth", enable_parallax ? "0.5 0.5" : "0 0" } };
+
+    SceneGeneral general;
+    general.canvas_width             = 64;
+    general.canvas_height            = 64;
+    general.parallax                 = enable_parallax;
+    general.parallax_amount          = 0.5f;
+    general.parallax_mouse_influence = 1.0f;
+    general.parallax_delay           = 0.0f;
+    package.SetProject();
+    package.SetScene(SceneJson(general, { ImageLayerJson(card) }));
+
+    GpuSceneOptions options;
+    options.width              = 64;
+    options.height             = 64;
+    options.scene_optimization = optimisation;
+
+    std::vector<Frame> frames;
+    GpuScene           scene(package, options);
+    if (! scene.ok()) {
+        *error = scene.error();
+        return frames;
+    }
+    for (const auto& step : steps) {
+        scene.SetPointer(step.x, step.y);
+        const auto before = render::CurrentSceneOptimizationTotals();
+        Frame      frame;
+        frame.picture = scene.Run(1);
+        if (frame.picture.empty()) {
+            *error = scene.error();
+            return frames;
+        }
+        const auto after = render::CurrentSceneOptimizationTotals();
+        frame.skipped    = after.skipped_passes - before.skipped_passes;
+        frames.push_back(std::move(frame));
+    }
+    return frames;
+}
+
+std::vector<PointerStep> ParallaxPointerScript()
+{
+    return {
+        { 0.5, 0.5, false },    // first frame
+        { 0.5, 0.5, true },     // stationary at centre
+        { 0.5, 0.5, true },     // still stationary
+        { 0.85, 0.25, false },  // pointer moved
+        { 0.85, 0.25, true },   // stationary at new point
+        { 0.8505, 0.25, false },// tiny movement must still invalidate
+        { 0.8505, 0.25, true }, // stationary again
+    };
+}
+
+} // namespace
+
+TEST_F(StaticReuseInputs, AParallaxPassIsReusedWhileStillAndRedrawnWhenTheCursorMoves)
+{
+    const auto  steps = ParallaxPointerScript();
+    std::string error;
+    const auto  reference = DrawPointerScript(kParallaxCard, true, false, true, steps, &error);
+    ASSERT_EQ(reference.size(), steps.size()) << error;
+    const auto frames = DrawPointerScript(kParallaxCard, true, true, true, steps, &error);
+    ASSERT_EQ(frames.size(), steps.size()) << error;
+
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        if (steps[i].reusable) {
+            EXPECT_GT(frames[i].skipped, 0u)
+                << "frame " << i << ": stationary parallax redrew its target";
+        } else {
+            EXPECT_EQ(frames[i].skipped, 0u)
+                << "frame " << i << ": changed parallax did not redraw its target";
+        }
+    }
+    ExpectSamePictures(frames, reference);
+    EXPECT_FALSE(frames[1].picture.rgba == frames[3].picture.rgba)
+        << "moving the pointer must produce a visibly different parallax frame";
+}
+
+TEST_F(StaticReuseInputs, WithParallaxReuseOffAParallaxPassIsDrawnEveryFrame)
+{
+    const auto  steps = ParallaxPointerScript();
+    std::string error;
+    const auto  reference = DrawPointerScript(kParallaxCard, true, false, true, steps, &error);
+    ASSERT_EQ(reference.size(), steps.size()) << error;
+    const auto frames = DrawPointerScript(kParallaxCard, true, true, false, steps, &error);
+    ASSERT_EQ(frames.size(), steps.size()) << error;
+
+    for (std::size_t i = 0; i < frames.size(); ++i) EXPECT_EQ(frames[i].skipped, 0u) << "frame " << i;
+    ExpectSamePictures(frames, reference);
+}
+
+TEST_F(StaticReuseInputs, ARawPointerUniformPassIsNotCachedWhenStationary)
+{
+    const auto  steps = ParallaxPointerScript();
+    std::string error;
+    const auto  reference = DrawPointerScript(kRawPointerCard, false, false, true, steps, &error);
+    ASSERT_EQ(reference.size(), steps.size()) << error;
+    const auto frames = DrawPointerScript(kRawPointerCard, false, true, true, steps, &error);
+    ASSERT_EQ(frames.size(), steps.size()) << error;
+
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        EXPECT_EQ(frames[i].skipped, 0u)
+            << "frame " << i << ": raw kPointer pass should stay uncached";
+    }
+    ExpectSamePictures(frames, reference);
+}

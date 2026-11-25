@@ -2147,6 +2147,19 @@ its buffer to itself instead of sharing it with other targets, inside the same r
 budget as any other reused pass (on 3784370784, two 768x768 buffers, about 2.4 MB); while
 music plays it is redrawn on most frames all the same.
 
+A pass whose only per-frame input is camera parallax (`kParallax`: `g_ParallaxPosition` or
+the parallax displacement added to a layer's model matrix) is reusable in the same way while
+its parallax state is unchanged: the exact `g_ParallaxPosition` vector and model-matrix
+displacement the pass's uniforms carry are folded into its per-frame sample
+(`WPShaderValueUpdater::ParallaxStateHash`), so any cursor movement, parallax-depth edit or
+root-origin shift that changes them redraws the target immediately, while stillness reuses it
+and lets a parallax-only scene skip redundant presents. Once eased parallax closes within a
+sub-pixel threshold (`1e-4` in normalized coordinates) of the cursor target, it snaps cleanly
+to the target so reuse resumes instead of chasing float32 tail noise. Passes that bind raw
+live pointer uniforms (`g_PointerPosition`, `g_PointerPositionLast`, `g_PointerState`) stay
+uncached. `WALLPAPER_MACHINE_PARALLAX_REUSE=0` redraws parallax passes on every frame, for
+comparison.
+
 A layer's own picture and its effects up to the last are drawn into the layer's own
 buffers, through a camera local to the layer, so where the layer sits and where the
 scene camera looks reach them only through the uniforms that say so: the effect
@@ -2378,7 +2391,13 @@ caption, a caption the user's own property supplies, an image replaced only when
 resource arrives, and any of those under a supported effect chain all stop their
 clocks; the same layer driven by a script does not.
 
-Pointer-reactive scenes do sleep, and pointer movement wakes them. Property
+Pointer-reactive scenes do sleep, and pointer movement wakes them. When camera parallax has
+easing delay (`cameraparallaxdelay > 0`), the clock stays active after a pointer move while
+the eased parallax offset is still converging toward the cursor, snaps once remaining travel
+drops within the sub-pixel settle threshold (`1e-4`), and stops again with zero idle frames;
+waking from idle uses one ideal frame step so sleep time is not fed into the easing step.
+Finished single-play timelines — including animated material constants — clear both
+`Animation` and `NodeBinding` demand once playback stops so the scene can sleep. Property
 changes, resizes, display reconfiguration, resource updates, poster requests and
 visibility changes all wake the scene, as does a text layout finishing on its own
 thread; a wallpaper the user paused is never woken by any of them. Writing a

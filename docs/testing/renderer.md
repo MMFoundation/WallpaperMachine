@@ -1588,35 +1588,6 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   its isolated twin by a few levels everywhere (no clock, label or single layer),
   in a pooled run only, so allocation reuse is not ruled out. Re-run it, and
   investigate if it repeats.
-- **A target a parallax layer draws into is never reused.** The
-  static pass sample (`MetalRender::Impl::frameSample`) does not include the parallax offset
-  `WPShaderValueUpdater::UpdateUniforms` adds to a layer's model matrix (a plain
-  text layer's too: it follows the cursor like an image layer of its depth, and so
-  is the first pass of a compose layer with effects, which reads the screen where
-  the layer's card is drawn), so
-  `FrameVaryingUniforms` reports such a pass as `kParallax`, which becomes
-  `PointerUniform` and keeps the whole target out of the cache
-  (`StaticSubgraphCache::Compile`), whether or not the cursor moves. With
-  on-demand rendering off, a scene whose only motion is parallax redraws its whole
-  frame at the frame cap, as it would with scene optimisation off. Without the
-  report the cache would reuse those targets while the cursor moved and parallax
-  would stop following it. Folding the offset itself into the sample would allow
-  reuse while the cursor is still.
-- **On-demand rendering stops parallax partway.** A scene that sleeps wakes for
-  one frame per pointer event (`wakeForPointer`), but nothing asks for frames
-  while the layers are still easing toward the cursor, so after the pointer stops
-  they rest partway and catch up at its next movement. Parallax eases as Wallpaper
-  Engine eases it, closing `(1 - cameraparallaxdelay / 3) * 10 * frametime` of the
-  remaining way each frame (`WPShaderValueUpdater::FrameBegin`), which approaches
-  the cursor without reaching it; a correct demand needs a threshold on the offset
-  still to travel.
-- **An animated material constant keeps a scene awake after its timeline ends.**
-  `DescribeTimeAdvancingWork` reports `NodeBinding` for every material-constant
-  binding that has an animation, playing or not. The timeline's clock is a
-  registered playback (`RegisterScalarAnimation` in the parser), which the
-  `Animation` reason already counts while it plays, so with on-demand rendering
-  on, a scene whose only motion was such a single-play timeline keeps ticking
-  after it ends.
 - **Layer-image source coverage.** `layerimage` reads CPU-backed RGBA8, BC1/2/3,
   R8/RG8 images and on-demand text glyph samples; encoded video payloads are never
   interpreted as image pixels, and video/render-target donor pixels have no CPU emission

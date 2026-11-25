@@ -1304,5 +1304,131 @@ TEST(ShaderUpdaterSignatures, EveryWrittenUniformThatMovesIsOneTheSampleFolds)
     EXPECT_GT(moved, 0u) << "nothing moved: the guard checked nothing";
 }
 
+// ---- parallax reuse hash and easing convergence -----------------------------------------------
+
+TEST(ShaderUpdaterParallaxHash, ParallaxStateHashTracksPositionOffsetAndDisabledState)
+{
+    Stage f;
+    // No uniform reflection recorded yet: updater cannot vouch for the pass.
+    EXPECT_FALSE(f.updater.ParallaxStateHash(f.node.get(), 0, "").has_value());
+
+    f.updater.InitUniforms(f.node.get(), 0, Declares({ "g_ParallaxPosition" }));
+    f.updater.InitUniforms(f.node.get(), 1, Declares({ kMvp }));
+    f.updater.SetCameraParallax({ .enable = true, .amount = 0.5f, .delay = 0.0f, .mouseinfluence = 1.0f });
+    WPShaderValueData data;
+    data.parallaxDepth = { 0.4f, 0.0f };
+    f.updater.SetNodeData(f.node.get(), 1, data);
+
+    // Slot 0: g_ParallaxPosition changes on cursor move, repeats when still, resets when disabled.
+    const auto pos_initial = f.updater.ParallaxStateHash(f.node.get(), 0, "");
+    ASSERT_TRUE(pos_initial.has_value());
+    EXPECT_NE(*pos_initial, 0u);
+    f.updater.FrameBegin();
+    EXPECT_EQ(f.updater.ParallaxStateHash(f.node.get(), 0, ""), pos_initial);
+
+    f.updater.MouseInput(0.75, 0.25);
+    f.updater.FrameBegin();
+    const auto pos_moved = f.updater.ParallaxStateHash(f.node.get(), 0, "");
+    ASSERT_TRUE(pos_moved.has_value());
+    EXPECT_NE(*pos_moved, *pos_initial);
+    f.updater.FrameBegin();
+    EXPECT_EQ(f.updater.ParallaxStateHash(f.node.get(), 0, ""), pos_moved);
+
+    // Slot 1: horizontal-only model parallax ignores purely vertical cursor movement and
+    // invalidates on horizontal movement or depth edits.
+    const auto model_after_xy = f.updater.ParallaxStateHash(f.node.get(), 1, "");
+    ASSERT_TRUE(model_after_xy.has_value());
+    EXPECT_NE(*model_after_xy, 0u);
+
+    f.updater.MouseInput(0.75, 0.9);
+    f.updater.FrameBegin();
+    EXPECT_EQ(f.updater.ParallaxStateHash(f.node.get(), 1, ""), model_after_xy)
+        << "zero vertical depth leaves the model displacement unchanged on vertical cursor motion";
+
+    f.updater.MouseInput(0.7505, 0.9);
+    f.updater.FrameBegin();
+    const auto model_nudged = f.updater.ParallaxStateHash(f.node.get(), 1, "");
+    ASSERT_TRUE(model_nudged.has_value());
+    EXPECT_NE(*model_nudged, *model_after_xy)
+        << "a small horizontal cursor move must invalidate the parallax sample";
+
+    f.updater.SetNodeParallaxDepth(f.node.get(), 0.8f, 0.0f);
+    const auto model_deeper = f.updater.ParallaxStateHash(f.node.get(), 1, "");
+    ASSERT_TRUE(model_deeper.has_value());
+    EXPECT_NE(*model_deeper, *model_nudged);
+
+    // Turning user mouse parallax off resets g_ParallaxPosition to centre and clears model parallax.
+    f.updater.SetUserMouseParallax(false);
+    EXPECT_EQ(f.updater.ParallaxStateHash(f.node.get(), 0, ""), pos_initial);
+    EXPECT_EQ(f.updater.ParallaxStateHash(f.node.get(), 1, ""), std::optional<uint64_t> { 0u });
+}
+
+TEST(ShaderUpdaterParallaxEasing, EasingReportsActiveUntilConvergedAndSnapsToTarget)
+{
+    Stage f;
+    f.updater.InitUniforms(f.node.get(), 0, Declares({ "g_ParallaxPosition" }));
+    f.updater.SetCameraParallax({ .enable = true, .amount = 0.5f, .delay = 1.0f, .mouseinfluence = 1.0f });
+    f.scene.frameTime = 1.0 / 60.0;
+
+    EXPECT_FALSE(f.updater.ParallaxEasingActive()) << "at the initial centre target nothing is easing";
+
+    f.updater.MouseInput(1.0, 0.25);
+    f.updater.FrameBegin();
+    EXPECT_TRUE(f.updater.ParallaxEasingActive());
+
+    int frames = 1;
+    while (f.updater.ParallaxEasingActive() && frames < 300) {
+        f.updater.FrameBegin();
+        ++frames;
+    }
+    EXPECT_FALSE(f.updater.ParallaxEasingActive()) << "easing failed to converge within 300 frames";
+    EXPECT_GT(frames, 10) << "easing must progress across multiple frames instead of snapping immediately";
+    EXPECT_LT(frames, 200);
+
+    const auto settled = f.Update(0);
+    ASSERT_EQ(settled.at("g_ParallaxPosition").size(), 2u);
+    EXPECT_FLOAT_EQ(settled.at("g_ParallaxPosition")[0], 1.0f);
+    EXPECT_FLOAT_EQ(settled.at("g_ParallaxPosition")[1], 0.75f);
+
+    // Once converged, subsequent frames keep the exact same hash and stay inactive.
+    const auto hash_settled = f.updater.ParallaxStateHash(f.node.get(), 0, "");
+    f.updater.FrameBegin();
+    EXPECT_FALSE(f.updater.ParallaxEasingActive());
+    EXPECT_EQ(f.updater.ParallaxStateHash(f.node.get(), 0, ""), hash_settled);
+
+    // Zero delay follows in a single frame and never keeps easing active.
+    f.updater.SetCameraParallax({ .enable = true, .amount = 0.5f, .delay = 0.0f, .mouseinfluence = 1.0f });
+    f.updater.MouseInput(0.1, 0.9);
+    f.updater.FrameBegin();
+    EXPECT_FALSE(f.updater.ParallaxEasingActive());
+
+    // Delay >= 3.0 produces a zero step and must never loop forever.
+    f.updater.SetCameraParallax({ .enable = true, .amount = 0.5f, .delay = 3.0f, .mouseinfluence = 1.0f });
+    f.updater.MouseInput(0.8, 0.2);
+    f.updater.FrameBegin();
+    EXPECT_FALSE(f.updater.ParallaxEasingActive());
+
+    // Extreme delay near 3.0 where float32 lerp rounds back to prev still settles cleanly.
+    f.updater.SetCameraParallax({ .enable = true, .amount = 0.5f, .delay = 0.0f, .mouseinfluence = 1.0f });
+    f.updater.MouseInput(0.8, 0.2);
+    f.updater.FrameBegin();
+    f.updater.SetCameraParallax({ .enable = true, .amount = 0.5f, .delay = 2.9999f, .mouseinfluence = 1.0f });
+    f.updater.MouseInput(0.8002, 0.2);
+    int tiny_step_frames = 0;
+    while (f.updater.ParallaxEasingActive() && tiny_step_frames < 50) {
+        f.updater.FrameBegin();
+        ++tiny_step_frames;
+    }
+    EXPECT_FALSE(f.updater.ParallaxEasingActive()) << "sub-ULP easing step must not stall";
+
+    // Disabling user mouse parallax mid-easing clears the active demand immediately.
+    f.updater.SetCameraParallax({ .enable = true, .amount = 0.5f, .delay = 1.0f, .mouseinfluence = 1.0f });
+    f.updater.MouseInput(0.0, 0.0);
+    f.updater.FrameBegin();
+    ASSERT_TRUE(f.updater.ParallaxEasingActive());
+    f.updater.SetUserMouseParallax(false);
+    EXPECT_FALSE(f.updater.ParallaxEasingActive());
+}
+
 } // namespace
 } // namespace wallpaper

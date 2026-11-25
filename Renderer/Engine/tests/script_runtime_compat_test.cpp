@@ -4,6 +4,7 @@
 #include "Runtime/ScriptedDynamicValue.hpp"
 #include "Scene/include/Scene/SceneFrameStep.hpp"
 #include "Scene/include/Scene/SceneImageEffectLayer.h"
+#include "Scene/include/Scene/SceneUpdateDemand.hpp"
 #include "Runtime/SceneSettingResolver.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneNode.h"
@@ -2416,6 +2417,59 @@ TEST(ScriptRuntimeCompat, PausedMaterialTimelinePlaysOnlyWhenScriptRequestsIt) {
     runtime->Tick(0.0);
     EXPECT_FLOAT_EQ(material->customShader.constValues.at("u_Opacity")[0], 1.5f);
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+TEST(ScriptRuntimeCompat, SingleShotMaterialConstantTimelineClearsNodeBindingWhenFinished) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    ASSERT_NE(runtime, nullptr);
+    auto material = std::make_shared<SceneMaterial>();
+    auto node     = std::make_shared<SceneNode>();
+    runtime->RegisterNode("subject", node.get());
+    const auto setting = nlohmann::json::parse(R"({
+        "value":0.0,
+        "animation":{
+            "options":{"fps":30,"length":6,"mode":"single","name":"fade"},
+            "c0":[{"frame":0,"value":0.0},{"frame":6,"value":1.0}]
+        }
+    })");
+    const auto animation = ResolveScalarAnimation(setting);
+    ASSERT_TRUE(animation.has_value());
+    auto timeline             = std::make_shared<MaterialConstantAnimation>();
+    timeline->components[0]   = *animation;
+    timeline->component_count = 1;
+    timeline->playback        = runtime->RegisterScalarAnimation("subject", *animation);
+    runtime->RegisterMaterialConstant(material, "u_Fade", std::make_unique<DynamicValue>(0.0f),
+                                      timeline);
+
+    // While playing, both Animation and NodeBinding keep the scene clock running.
+    const uint32_t playing = runtime->DescribeTimeAdvancingWork();
+    EXPECT_TRUE(playing & SceneDemandReason::Animation);
+    EXPECT_TRUE(playing & SceneDemandReason::NodeBinding);
+
+    runtime->Tick(3.0 / 30.0);
+    EXPECT_FLOAT_EQ(material->customShader.constValues.at("u_Fade")[0], 0.5f);
+    EXPECT_TRUE(runtime->DescribeTimeAdvancingWork() & SceneDemandReason::NodeBinding);
+
+    // Once the single-shot timeline reaches its end, both bits clear so on-demand rendering sleeps.
+    runtime->Tick(4.0 / 30.0);
+    EXPECT_FLOAT_EQ(material->customShader.constValues.at("u_Fade")[0], 1.0f);
+    EXPECT_EQ(runtime->DescribeTimeAdvancingWork(), 0u);
+
+    // A startpaused single-shot material timeline starts quiet and reports no demand.
+    auto paused_runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    ASSERT_NE(paused_runtime, nullptr);
+    auto paused_material = std::make_shared<SceneMaterial>();
+    auto paused_setting  = setting;
+    paused_setting["animation"]["options"]["startpaused"] = true;
+    const auto paused_anim = ResolveScalarAnimation(paused_setting);
+    ASSERT_TRUE(paused_anim.has_value());
+    auto paused_timeline             = std::make_shared<MaterialConstantAnimation>();
+    paused_timeline->components[0]   = *paused_anim;
+    paused_timeline->component_count = 1;
+    paused_timeline->playback        = paused_runtime->RegisterScalarAnimation("subject", *paused_anim);
+    paused_runtime->RegisterMaterialConstant(paused_material, "u_Fade",
+                                             std::make_unique<DynamicValue>(0.0f), paused_timeline);
+    EXPECT_EQ(paused_runtime->DescribeTimeAdvancingWork(), 0u);
 }
 
 // Vector constants animate per component, so a shader reading `xyzw` has to see

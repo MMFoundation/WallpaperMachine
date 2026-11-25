@@ -227,6 +227,10 @@ public:
         OWE_FORWARD(ShaderUpdateDemandReasons());
         return static_cast<uint32_t>(render::DynamicReason::UnknownInput);
     }
+    bool HasParallaxPasses() const {
+        OWE_FORWARD(HasParallaxPasses());
+        return false;
+    }
     void SetCounters(RendererCounters* counters) { OWE_FORWARD_VOID(SetCounters(counters)); }
     WallpaperCursorMapping CursorMapping(const Scene& scene) const {
         OWE_FORWARD(CursorMapping(scene));

@@ -536,7 +536,12 @@ public:
                                         ? scene.runtime->DescribeTimeAdvancingWork()
                                         : static_cast<uint32_t>(Reason::UnknownInput);
         const bool     emitting  = scene.paritileSys != nullptr && scene.paritileSys->HasTimeAdvancingWork();
-        result.reasons = from_gpu | from_logic | (emitting ? static_cast<uint32_t>(Reason::Particles) : 0u);
+        const bool     parallax_easing =
+            m_render->HasParallaxPasses() && scene.shaderValueUpdater != nullptr &&
+            scene.shaderValueUpdater->ParallaxEasingActive();
+        result.reasons = from_gpu | from_logic |
+                         (emitting ? static_cast<uint32_t>(Reason::Particles) : 0u) |
+                         (parallax_easing ? static_cast<uint32_t>(Reason::Animation) : 0u);
         if (result.reasons == 0) result.kind = Kind::WaitingForEvent;
         return result;
     }

@@ -147,6 +147,9 @@ public:
     uint64_t LightStateHash(SceneNode*, uint32_t material_slot) const override;
     uint64_t PointerStateHash(SceneNode*, uint32_t material_slot,
                               const std::string& camera_override) const override;
+    std::optional<uint64_t> ParallaxStateHash(SceneNode*, uint32_t material_slot,
+                                              const std::string& camera_override) const override;
+    bool ParallaxEasingActive() const override;
     std::optional<uint64_t> AudioStateHash(SceneNode*, uint32_t material_slot) const override;
     uint32_t FrameVaryingUniforms(SceneNode*, uint32_t material_slot,
                                   const std::string& camera_override) const override;

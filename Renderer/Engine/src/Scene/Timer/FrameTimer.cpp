@@ -195,7 +195,8 @@ void FrameTimer::FrameBegin(steady_clock::time_point now) {
     // suspended, not the content waiting, and must not feed hours into scene
     // simulation. The threshold follows the interval precisely so that a scene
     // paced to its content is not mistaken for a resume on every frame.
-    const bool reset = m_reset_frame_clock.exchange(false);
+    const bool reset = m_reset_frame_clock.exchange(false) ||
+                       m_demand_kind.load() == FrameDemand::Kind::Idle;
     m_elapsed_frametime.store(reset || elapsed > SuspensionThreshold()
                                  ? IdealStep()
                                  : elapsed);

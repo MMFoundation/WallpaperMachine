@@ -189,12 +189,14 @@ Playback, backend, host and startup areas are in
     leaves `parallaxDepth` out has depth (1, 1). A layer under a depth-0 group does
     not move. 3D scenes use each layer's own distance from the camera.
   - A pass parallax moves is reported as following the cursor (`kParallax`),
-    judged for the camera the pass draws through: static reuse redraws its
-    target, and an on-demand scene wakes for the pointer. A layer drawn into a
-    composite through its layer-local camera is not moved, so that composite stays
+    judged for the camera the pass draws through: static reuse folds its
+    parallax position and model displacement into the per-frame sample so the
+    target is reused while stationary and redrawn whenever parallax moves, and
+    an on-demand scene wakes for the pointer and keeps ticking until eased
+    parallax converges to the cursor target. A layer drawn into a composite
+    through its layer-local camera is not moved, so that composite stays
     reusable (`LayerTextureReference.AReferencedLayerIsItsCardWhereverTheSceneShowsIt`
-    in `layer_texture_reference_test`). What this costs is under
-    [Known limitations](renderer.md#known-limitations).
+    in `layer_texture_reference_test`).
   - A text layer is a parallax layer like any other: Wallpaper Engine's draw loop
     adds the offset to every object it draws, text included. A text layer its own
     card draws straight onto the scene (no effects, so no pass carries its depth)

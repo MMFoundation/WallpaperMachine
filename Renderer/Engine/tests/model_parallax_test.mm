@@ -371,17 +371,24 @@ TEST_F(ModelParallax, TheModelsPassReportsThatItFollowsTheCursor)
 
 TEST_F(ModelParallax, AModelInAScenePassWithStaticReuseRedrawsWhenThePointerMoves)
 {
-    // The first picture draws everything; with reuse on, a frame that follows a pointer move
-    // still opens the model's pass.
+    // The first picture draws everything; while the cursor stands still, static reuse skips the
+    // model's pass. A pointer move invalidates and redraws on the next frame, then reuse resumes
+    // once the cursor is still again.
     ScenePackage package;
     Build(package, {});
     GpuScene scene(package);
     ASSERT_TRUE(scene.ok()) << scene.error();
     scene.SetPointer(0.5, 0.5);
     ASSERT_TRUE(scene.Step(6)) << scene.error();
+    EXPECT_EQ(scene.LastFramePasses().total(), 0u)
+        << "a stationary parallax model should reuse its cached target";
     scene.SetPointer(1.0, 0.5);
-    ASSERT_TRUE(scene.Step(2)) << scene.error();
-    EXPECT_GT(scene.LastFramePasses().total(), 0u);
+    ASSERT_TRUE(scene.Step(1)) << scene.error();
+    EXPECT_GT(scene.LastFramePasses().total(), 0u)
+        << "moving the pointer must invalidate and redraw the parallax pass";
+    ASSERT_TRUE(scene.Step(1)) << scene.error();
+    EXPECT_EQ(scene.LastFramePasses().total(), 0u)
+        << "holding the new pointer position should reuse the cached target again";
 }
 
 TEST_F(ModelParallax, InAThreeDimensionalSceneAModelMovesByItsDistanceFromTheCamera)

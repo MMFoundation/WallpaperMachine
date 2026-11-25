@@ -988,6 +988,28 @@ TEST(ThreadTimerTest, AStopAndStartFromItsOwnTickKeepsItsLoop) {
     EXPECT_EQ(tickers.size(), 1u) << tickers.size() << " loops ticked";
 }
 
+TEST(FrameTimerTest, WakingFromIdleReportsOneIdealStepNotIdleSleepDuration) {
+    FrameTimer timer;
+    timer.SetRequiredFps(60);
+    const auto start = std::chrono::steady_clock::time_point(1s);
+
+    timer.FrameBegin(start);
+    timer.FrameEnd(start + 2ms);
+
+    // While idle, time spent waiting for an event is not animation delta for the woken frame.
+    timer.SetFrameDemand({ .kind = FrameTimer::FrameDemand::Kind::Idle });
+    timer.FrameBegin(start + 1500ms);
+    EXPECT_NEAR(timer.IdeaTime(), 1.0 / 60.0, 1e-4)
+        << "waking from idle should deliver one ideal step instead of the sleep gap";
+    timer.FrameEnd(start + 1502ms);
+
+    // Once back in continuous mode, elapsed time tracks actual frame intervals again.
+    timer.SetFrameDemand({ .kind = FrameTimer::FrameDemand::Kind::Continuous });
+    timer.FrameBegin(start + 1525ms);
+    EXPECT_DOUBLE_EQ(timer.IdeaTime(), 0.025);
+    timer.FrameEnd(start + 1527ms);
+}
+
 
 } // namespace
 } // namespace wallpaper

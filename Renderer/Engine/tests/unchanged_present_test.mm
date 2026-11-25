@@ -311,6 +311,35 @@ std::filesystem::path WriteHistoryScene(const std::filesystem::path& root)
     return project;
 }
 
+/// The static card with camera parallax enabled and `g_ParallaxPosition.x` written into the green
+/// channel (offset +1 in both RGBA and BGRA posters). The card spans the whole canvas with nonzero
+/// parallax depth so both model-matrix parallax and `g_ParallaxPosition` are active, while the
+/// centre pixel stays covered by the card at every pointer position.
+std::filesystem::path WriteParallaxScene(const std::filesystem::path& root, float delay)
+{
+    const auto project = WriteStaticScene(root);
+    WriteText(root / "models/card.json",
+              R"({"width":384,"height":256,"material":"materials/card.json"})");
+    WriteText(root / "shaders/card.frag",
+              "uniform vec2 g_ParallaxPosition;\n"
+              "varying vec2 v_TexCoord;\n"
+              "void main() {\n"
+              "gl_FragColor = vec4(0.1, g_ParallaxPosition.x, 0.25, 1.0);\n"
+              "}\n");
+    std::ostringstream layout;
+    layout << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           << R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],)"
+           << R"("clearcolor":[0.1,0.2,0.3],"cameraparallax":true,)"
+           << R"("cameraparallaxamount":0.2,"cameraparallaxdelay":)" << delay
+           << R"(,"cameraparallaxmouseinfluence":1.0,)"
+           << R"("orthogonalprojection":{"width":384,"height":256}},)"
+           << R"("objects":[{"id":1,"name":"card","image":"models/card.json",)"
+           << R"("origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+           << R"("parallaxDepth":"0.2 0.2"}]})";
+    WriteText(root / "layout.json", layout.str());
+    return project;
+}
+
 /// A running wallpaper on a layer no window owns.
 class RunningWallpaper {
 public:
@@ -844,6 +873,141 @@ TEST_F(UnchangedPresent, ASceneResizedOntoADisplayOfAnotherShapeFillsItLikeAFres
     ASSERT_EQ(moved.size(), fresh.size());
     EXPECT_EQ(rows_of_card(moved), std::vector<bool>(7, true))
         << "the resized scene left rows unfilled at the top or bottom";
+}
+
+// A scene whose only motion is camera parallax reuses its cached static subgraph while the
+// pointer is stationary, skipping redundant redraws and presents, and invalidates immediately
+// when the pointer moves.
+TEST_F(UnchangedPresent, AParallaxSceneSkipsPresentsWhileStillAndRedrawsWhenThePointerMoves)
+{
+    SetSceneOnDemandEnabled(false);
+    render::SetSceneOptimizationEnabled(true);
+    const auto project = WriteParallaxScene(root_ / "parallax-still", 0.0f);
+
+    RunningWallpaper running(project, root_ / "run-still");
+    ASSERT_TRUE(running.WaitForFirstFrame()) << "the parallax scene never reached the surface";
+    ASSERT_FALSE(running.wallpaper().sceneBackendSelection().failed())
+        << running.wallpaper().sceneBackendSelection().failure_reason;
+
+    // Wait for steady state at the initial centre pointer (0.5, 0.5).
+    std::this_thread::sleep_for(400ms);
+    const auto before_still = running.Read();
+    std::this_thread::sleep_for(600ms);
+    const auto after_still = running.Read();
+    const auto still_delta = Delta(before_still, after_still);
+    Print("parallax still:", still_delta);
+    ASSERT_GT(still_delta[OWE_RC_DRAWS_EXECUTED], 5u);
+    EXPECT_EQ(still_delta[OWE_RC_RENDER_FAILURES], 0u);
+    EXPECT_EQ(still_delta[OWE_RC_PRESENT_REQUESTS], 0u)
+        << "a stationary parallax scene kept presenting unchanged frames";
+    ExpectWithinOneDraw(still_delta[OWE_RC_PRESENTS_SKIPPED_UNCHANGED],
+                        still_delta[OWE_RC_DRAWS_EXECUTED],
+                        "stationary parallax ticks should all be skipped");
+
+    const auto centre_green = [&running](int delivery_index) -> int {
+        running.poster().Request(true);
+        if (! running.poster().WaitDelivered(delivery_index)) return -1;
+        std::scoped_lock lock(running.poster().mutex);
+        const auto&      pixels = running.poster().pixels;
+        if (pixels.size() != 1280u * 720u * 4u) return -2;
+        return static_cast<int>(pixels[(360u * 1280u + 640u) * 4u + 1u]);
+    };
+    EXPECT_NEAR(centre_green(1), 128, 2) << "centred parallax should show 0.5 in green";
+
+    // Moving the pointer must immediately invalidate and present the updated frame.
+    const auto before_move = running.Read();
+    running.wallpaper().mouseInput(1.0, 0.5);
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (Delta(before_move, running.Read())[OWE_RC_PRESENT_REQUESTS] == 0u &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(20ms);
+    }
+    const auto after_move = running.Read();
+    EXPECT_GE(Delta(before_move, after_move)[OWE_RC_PRESENT_REQUESTS], 1u)
+        << "moving the pointer did not redraw the cached parallax scene";
+    EXPECT_NEAR(centre_green(2), 255, 2) << "moved parallax should show 1.0 in green";
+
+    // Holding the new position goes back to skipping every redraw and present.
+    std::this_thread::sleep_for(200ms);
+    const auto before_settled = running.Read();
+    std::this_thread::sleep_for(600ms);
+    const auto settled_delta = Delta(before_settled, running.Read());
+    ASSERT_GT(settled_delta[OWE_RC_DRAWS_EXECUTED], 5u);
+    EXPECT_EQ(settled_delta[OWE_RC_PRESENT_REQUESTS], 0u)
+        << "after moving and stopping, parallax kept presenting unchanged frames";
+}
+
+// With on-demand updating enabled, a single pointer move on a delayed parallax scene must keep
+// waking frames until the eased parallax offset converges to the cursor target, then stop the
+// clock cleanly with zero idle frames.
+TEST_F(UnchangedPresent, OnDemandParallaxConvergesToTargetAndThenStopsTheClock)
+{
+    SetSceneOnDemandEnabled(true);
+    render::SetSceneOptimizationEnabled(true);
+    const auto project = WriteParallaxScene(root_ / "parallax-ondemand", 1.2f);
+
+    RunningWallpaper running(project, root_ / "run-ondemand");
+    ASSERT_TRUE(running.WaitForFirstFrame()) << "the parallax scene never reached the surface";
+    ASSERT_FALSE(running.wallpaper().sceneBackendSelection().failed())
+        << running.wallpaper().sceneBackendSelection().failure_reason;
+
+    const auto wait_idle = [&](std::chrono::seconds timeout) {
+        const auto end = std::chrono::steady_clock::now() + timeout;
+        while (std::chrono::steady_clock::now() < end) {
+            if (running.wallpaper().sceneUpdateKind() == SceneUpdateDemand::Kind::WaitingForEvent) {
+                return true;
+            }
+            std::this_thread::sleep_for(20ms);
+        }
+        return running.wallpaper().sceneUpdateKind() == SceneUpdateDemand::Kind::WaitingForEvent;
+    };
+    const auto centre_green = [&running](int delivery_index) -> int {
+        running.poster().Request(true);
+        if (! running.poster().WaitDelivered(delivery_index)) return -1;
+        std::scoped_lock lock(running.poster().mutex);
+        const auto&      pixels = running.poster().pixels;
+        if (pixels.size() != 1280u * 720u * 4u) return -2;
+        return static_cast<int>(pixels[(360u * 1280u + 640u) * 4u + 1u]);
+    };
+
+    ASSERT_TRUE(wait_idle(5s)) << "a parallax scene at rest never went idle (reasons="
+                               << running.wallpaper().sceneDemandReasons() << ")";
+    EXPECT_EQ(running.wallpaper().sceneDemandReasons(), 0u);
+    EXPECT_NEAR(centre_green(1), 128, 2);
+
+    // One pointer move to the right edge, then stillness. With delay=1.2 at 60 fps, easing needs
+    // dozens of frames to close from 0.5 to 1.0 before snapping and stopping the clock.
+    const auto before_move = running.Read();
+    running.wallpaper().mouseInput(1.0, 0.5);
+
+    // Wait for at least two draws after the pointer move: Frame 2 runs on the same render thread
+    // after Frame 1's `refreshFrameDemand()` has transitioned the scene into `Continuous`, so
+    // `wait_idle` cannot observe the pre-move `WaitingForEvent` state.
+    const auto wake_deadline = std::chrono::steady_clock::now() + 5s;
+    while (Delta(before_move, running.Read())[OWE_RC_DRAWS_EXECUTED] < 2u &&
+           std::chrono::steady_clock::now() < wake_deadline) {
+        std::this_thread::sleep_for(10ms);
+    }
+    ASSERT_GE(Delta(before_move, running.Read())[OWE_RC_DRAWS_EXECUTED], 2u)
+        << "on-demand parallax did not continue easing past the first woken frame";
+    ASSERT_TRUE(wait_idle(10s)) << "parallax easing never converged to idle (reasons="
+                                << running.wallpaper().sceneDemandReasons() << ")";
+    const auto after_converge = running.Read();
+    const auto easing_draws   = Delta(before_move, after_converge)[OWE_RC_DRAWS_EXECUTED];
+    EXPECT_GT(easing_draws, 5u)
+        << "on-demand parallax stopped partway or jumped instead of easing across multiple frames";
+    EXPECT_EQ(running.wallpaper().sceneDemandReasons(), 0u);
+    EXPECT_NEAR(centre_green(2), 255, 2)
+        << "on-demand parallax stopped partway before reaching the target cursor position";
+
+    // Once converged, the clock stays stopped with zero idle frames.
+    std::this_thread::sleep_for(100ms);
+    const auto before_idle = running.Read();
+    std::this_thread::sleep_for(500ms);
+    const auto idle_delta = Delta(before_idle, running.Read());
+    EXPECT_EQ(idle_delta[OWE_RC_RENDER_FAILURES], 0u);
+    EXPECT_LE(idle_delta[OWE_RC_DRAWS_EXECUTED], 1u)
+        << "the clock kept drawing after parallax converged";
 }
 
 namespace

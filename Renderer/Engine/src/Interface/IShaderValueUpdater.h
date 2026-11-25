@@ -139,6 +139,23 @@ public:
         (void)camera_override;
         return 0;
     }
+    /// The parallax inputs this frame's uniforms give this draw (`g_ParallaxPosition`
+    /// and any model-matrix parallax displacement), hashed, or 0 when parallax does not
+    /// affect the draw.
+    ///
+    /// `std::nullopt` when the updater cannot vouch for the parallax state -- the
+    /// default -- so a pass that folds this into its static sample is redrawn instead
+    /// of reused by omission.
+    virtual std::optional<uint64_t> ParallaxStateHash(SceneNode* node, uint32_t material_slot,
+                                                      const std::string& camera_override) const {
+        (void)node;
+        (void)material_slot;
+        (void)camera_override;
+        return std::nullopt;
+    }
+    /// Whether eased camera parallax still has distance left to close toward the
+    /// latest cursor input, so an on-demand scene keeps ticking until it settles.
+    virtual bool ParallaxEasingActive() const { return false; }
     /// The audio spectrum this frame's uniforms give this node's material, hashed: every
     /// `g_AudioSpectrum*` array it binds, as `UpdateUniforms` writes them, and 0 when it binds
     /// none. Silence is a spectrum of zeros, so it hashes the same on every frame.
