@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-26 — Wave 4A: MP4 HDR mdcv/clli & >2ch AAC/Vorbis downmix (#25a/#25c), video A-B trim (#25b), multi-display span phase 1 (#27), WebAudio GainNode & safe usershortcut (#26a/#26c), audio-response FFT tuning & per-app capture (#26b)
+
+- build.py --renderer-only: OK (C++ Media/Sound/Engine + Rust Core/Bridge rebuilt, App/Bridge/Generated regenerated)
+- check_rust.py: PASS (core 446, bridge 1003, core-integration 20, shader 1089; 0 failed; 5 desktop window opt-in tests excluded)
+- check_renderer.py: PASS (all C++ regression suites incl. isobmff/matroska/webm/audio_tests 86/86/scenescript_media_event_smoke, 12/12 GPU parity pixels_equal=True diagnostics=0, 8x2 reload cycles: 0; 7 opt-in local-asset skips)
+- test.py: PASS (36/36 Python suites / 731 tests; 5453 passed, 0 failed, 70 skipped of 5523 native tests in 165s)
+- verifier-w4a: PASS (19/19 [MUST-FIX] blockers fixed & re-verified: cross-wallpaper usershortcut isolation, non-blocking Shortcuts runner, WebAudio iframe/seed sync, WebM trimmed audio/DTS/live seek, still-span/Web host sequencing & posters, zero-I/O AudioResponse UI, CoreAudio rollback & helper matching)
+- Gaps: Release .app not rebuilt (unrequested); opt-in --ui/desktop/live-Steam/local-corpus/WE-VM visual checks not run; Wave 4B (#27 Scene compat w/ WE VM, #28 Pixiv B & manual sync folder) remains queued
+
 ## 2026-11-26 — Wave 3B: automation matrix (#17b), per-wallpaper quality & VRAM diagnostics (#21), storage health (#22), .wmpack & per-display lock screen playlists (#23)
 
 - build.py --renderer-only: OK (rebuilt C++/Rust renderer and regenerated App/Bridge/Generated bindings)
@@ -108,10 +117,3 @@ A slider from 10% to 100% that sets a display's scale factor, in the inspector's
 - The same gate without that fix — 5152 passed, 1 failed: `PanelLibraryRowsTests/testRefreshEnergyRatingsRebuildsAndNotifiesOnlyWhenRatingsMoved`, which fails the same way on `main` at `2f7cd127` without this change.
 - `python3 scripts/test.py --only InspectorInputTests --only InspectorRenderTests/testADisplayCardsScaleSliderSendsTheScaleFactorOfThePercentageItSettlesOn` — 7 passed.
 - Not checked: the slider on a real display (no desktop run was requested), the row's layout by eye in the five languages, and the Settings › Displays slider, which no automated test drives. No Release build.
-
-## 2026-11-21 — Installed library sort by Energy use (#251)
-
-- `python3 scripts/test.py --python-only` — exit 0; all 36 Python modules passed (including `test_panel_localization.py`, `test_localization_catalogs.py`, `test_doc_links.py`).
-- `xcodebuild -project WallpaperMachine.xcodeproj -scheme WallpaperMachine -configuration Debug -derivedDataPath build -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO build-for-testing` — exit 0 (`TEST BUILD SUCCEEDED`, zero warnings in touched files).
-- `python3 scripts/test.py --only LibrarySortTests --only InstalledBrowserModelTests --only PanelLibraryRowsTests --only PanelViewStateTests --only InstalledPageRenderTests` — blocked (exit 70): `xcodebuild` failed in this sandbox with `Failed to prevent system sleep during UI testing. Error code: -536870211` (`IOPMAssertionCreateWithName`).
-- Native XCTest execution and live UI visual verification of the Energy use sort menu remain to be run outside the sandbox; the Release app was not rebuilt.
