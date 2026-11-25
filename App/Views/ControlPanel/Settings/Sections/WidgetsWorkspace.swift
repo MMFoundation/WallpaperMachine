@@ -31,11 +31,10 @@ struct WidgetsWorkspace: View {
     let model = controller.widgetsSettings
     let screens = model.screens()
     let selected = model.selected
-    let screen =
-      model.lastChosen.flatMap { model.previewScreen(for: $0, among: screens) }
-      ?? screens.first(where: \.isMain) ?? screens.first
+    let screen = model.previewScreen(among: screens)
     let display = screen?.frame.size ?? .zero
     let aspect = display.width > 0 && display.height > 0 ? display.width / display.height : 16 / 10
+    let chrome = Self.chrome + (screens.count > 1 ? 28 : 0)
     GeometryReader { proxy in
       let width = max(proxy.size.width - 2 * Self.margin, 0)
       let height = max(proxy.size.height - 2 * Self.margin, 0)
@@ -44,10 +43,10 @@ struct WidgetsWorkspace: View {
         header
         if sideBySide {
           let left = max(width - Self.inspectorWidth - Self.gap, 0)
-          let canvas = min(left / aspect, max(height - Self.chrome, 0) * 0.66)
+          let canvas = min(left / aspect, max(height - chrome, 0) * 0.66)
           HStack(alignment: .top, spacing: Self.gap) {
             VStack(alignment: .leading, spacing: 12) {
-              stage(screen, selected: selected, height: canvas)
+              stage(screen, screens: screens, selected: selected, height: canvas)
               ScrollView {
                 layers(screens: screens)
                   .padding(.bottom, 8)
@@ -60,8 +59,8 @@ struct WidgetsWorkspace: View {
               .frame(maxHeight: .infinity, alignment: .top)
           }
         } else {
-          let canvas = min(width / aspect, max(height - Self.chrome, 0) * 0.45)
-          stage(screen, selected: selected, height: canvas)
+          let canvas = min(width / aspect, max(height - chrome, 0) * 0.45)
+          stage(screen, screens: screens, selected: selected, height: canvas)
           ScrollView {
             // The inspector first: a widget is picked on the canvas as well as in the layers.
             VStack(alignment: .leading, spacing: 18) {
@@ -102,12 +101,17 @@ struct WidgetsWorkspace: View {
 
   // MARK: Canvas
 
-  /// The canvas, the size the page leaves it, and under it how to use it and the Center buttons.
+  /// The preview-display switcher (when multiple displays are connected), the canvas at the size
+  /// the page leaves it, and under it how to use it and the Center buttons.
   @ViewBuilder
   private func stage(
-    _ screen: DesktopWidgetController.Screen?, selected: DesktopWidget?, height: CGFloat
+    _ screen: DesktopWidgetController.Screen?, screens: [DesktopWidgetController.Screen],
+    selected: DesktopWidget?, height: CGFloat
   ) -> some View {
     VStack(alignment: .leading, spacing: 8) {
+      if screens.count > 1, let screen {
+        previewDisplayBar(screen, among: screens)
+      }
       Group {
         if let screen {
           DesktopWidgetPreview(screen: screen)
@@ -124,12 +128,52 @@ struct WidgetsWorkspace: View {
           .foregroundStyle(theme.surface.muted.color)
           .lineLimit(3)
           .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-        if let selected, let screen {
+        if let selected, let screen,
+          selected.isPlaced(onDisplayUUID: screen.uuid, isMain: screen.isMain)
+        {
           WidgetCenterButtons(widget: selected, screen: screen)
         }
       }
     }
     .layoutPriority(1)
+  }
+
+  /// Lets the user inspect any connected display on the canvas (including secondary or portrait
+  /// displays) and directs newly added widgets to that display.
+  private func previewDisplayBar(
+    _ screen: DesktopWidgetController.Screen, among screens: [DesktopWidgetController.Screen]
+  ) -> some View {
+    let model = controller.widgetsSettings
+    return HStack(spacing: 8) {
+      Label {
+        Text("Preview display")
+      } icon: {
+        Image(systemName: "display")
+      }
+      .font(.panel(.footnote))
+      .foregroundStyle(theme.surface.muted.color)
+      .lineLimit(1)
+      Picker(
+        selection: Binding(
+          get: { screen.displayID },
+          set: { model.selectPreviewScreen($0) })
+      ) {
+        ForEach(screens, id: \.displayID) { candidate in
+          Text(verbatim: model.previewScreenTitle(candidate, among: screens))
+            .tag(candidate.displayID)
+        }
+      } label: {
+        EmptyView()
+      }
+      .pickerStyle(.menu)
+      .labelsHidden()
+      .controlSize(.small)
+      .frame(maxWidth: 240, alignment: .leading)
+      .accessibilityLabel(Text("Preview display"))
+      .accessibilityIdentifier("widgets.preview-display")
+      Spacer(minLength: 0)
+    }
+    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
   }
 
   // MARK: Layers
@@ -485,11 +529,11 @@ struct WidgetSampleBackdrop: View {
       .clipped()
   }
 
-  /// The frame of the main display's wallpaper the canvas has; nil before it has one.
+  /// The frame of the previewed display's wallpaper the canvas has; nil before it has one.
   @MainActor
   static func image(_ model: DesktopWidgetsSettingsModel) -> CGImage? {
     let screens = model.screens()
-    guard let screen = screens.first(where: \.isMain) ?? screens.first else { return nil }
+    guard let screen = model.previewScreen(among: screens) else { return nil }
     return model.wallpaperFrame(on: screen.displayID)
   }
 }

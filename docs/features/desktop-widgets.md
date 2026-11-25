@@ -15,10 +15,12 @@ long scroll from the picture it changed. Without a search the page is a **worksp
 (`WidgetsWorkspace`):
 
 - a header with the section's name, **Ready-made** and **Add Widget**;
-- a large **canvas** of the selected widget's display (of the main display while none is
-  selected), as wide as the page leaves it, which grows with the window (see
-  [the canvas](#the-canvas)); under it how to use it, and the **Center on the display** buttons
-  (**Center Horizontally**, **Center Vertically**) for the selected widget;
+- a large **canvas** of the previewed display (with a **Preview display** switcher above it
+  whenever two or more displays are connected, so `.all`, `.main`, and per-display widgets can
+  be inspected on any display, including secondary or portrait displays), as wide as the page
+  leaves it, which grows with the window (see [the canvas](#the-canvas)); under it how to use it,
+  and the **Center on the display** buttons (**Center Horizontally**, **Center Vertically**) when
+  the selected widget is placed on the previewed display;
 - the **Layers** list under the canvas;
 - an **inspector** beside the canvas, 340 points wide, naming the selected widget (what it says,
   its kind and display) above four tabs, **Content**, **Text**, **Style** and **Position**, and
@@ -35,9 +37,10 @@ other page: the list, then the rows of every tab one under another (Position, Te
 Content), with only those that match, and the Arrange picture as a row of Position.
 
 **Ready-made** opens a popover of finished widgets, each drawn as the desktop will draw it over
-the main display's wallpaper; a click adds it and opens it in the editor. Some are a group laid
-out together, the widgets spaced by their real size on the main display
-(`DesktopWidgetPreset`): **Big clock**, **Clock and date** (the date in spaced capitals under the
+the previewed display's wallpaper; a click adds it on the currently previewed display (`.main`
+when previewing the main display, otherwise pinned to that display's UUID) and opens it in the
+editor. Some are a group laid out together, the widgets spaced by their real size on the previewed
+display (`DesktopWidgetPreset`): **Big clock**, **Clock and date** (the date in spaced capitals under the
 clock), **Neon clock**, **Clock face** (minute ticks on a glass disc), **World clocks** (New York,
 London and Tokyo side by side, each labelled with its city, as badges), **Lunar date** (the
 Chinese calendar), **Month calendar** (a badge at the top right), **Countdown**, **Greeting and
@@ -45,9 +48,10 @@ date**, **Gradient note** and **Battery and sun** (bottom left). They are ordina
 added: nothing remembers the preset. A group goes in front of the others, in its order; one that
 would pass the limit is disabled, and adds nothing.
 
-**Add Widget** is a menu of the kinds; the one chosen goes on the main display (the one with the
-menu bar), a little below any widget already there, at the top of the list, and opens in the
-editor. Up to 24 widgets can be added.
+**Add Widget** is a menu of the kinds; the one chosen goes on the currently previewed display
+(`.main` when previewing the main display, otherwise pinned to that display), a little below any
+widget already placed there, at the top of the list, and opens in the editor. Up to 24 widgets
+can be added.
 
 The **Layers** list is the widgets' layers, front first: where two widgets overlap on the
 desktop, the one higher in the list covers the other (with two or more widgets, the list says
@@ -59,17 +63,23 @@ the next widget. A click picks the widget the inspector edits, and the selected 
 highlighted. Dragging a row's handle onto another row puts it in that row's place; a drop made
 from an order that has changed since is refused. The row's context menu has **Show on the
 desktop** or **Hide on the desktop**, **Duplicate** (a copy just in front of it, a little lower on
-the display, opened in the editor), **Bring to Front**, **Bring Forward**, **Send Backward**,
-**Send to Back** and **Remove**; VoiceOver offers Bring Forward and Send Backward as actions of
-the row. In the search results, the first group of the editor names the widget it edits on its
-title line.
+the display, opened in the editor), **Copy Style**, **Paste Style** (copies typography, italics,
+spacing, case, colours, fill, gradient, outline, glow, shadow and background plate without
+changing kind, content, size, position, alignment, rotation or display placement), **Bring to
+Front**, **Bring Forward**, **Send Backward**, **Send to Back** and **Remove**; VoiceOver offers
+Bring Forward and Send Backward as actions of the row. In the search results, the first group of
+the editor names the widget it edits on its title line.
 
 ### The canvas
 
-The canvas shows the display's wallpaper ([its backdrop](#the-previews-backdrop)) and every widget
-shown there, stacked as on the desktop. A click on a widget selects it; dragging it moves it,
-snapping to guides ([snapping](#snapping-and-guides)). The selected widget is outlined above every
-layer, so it can be found under another one, with:
+The canvas shows the previewed display's wallpaper ([its backdrop](#the-previews-backdrop)) and
+every widget shown there, stacked as on the desktop. When two or more displays are connected, the
+**Preview display** menu above the canvas switches the previewed display; a manual choice persists
+across selection changes (including `.all`, `.main`, and cleared selection) until changed or until
+a widget pinned to a different connected display is selected (or the selected widget is explicitly
+pinned to another connected display), which switches the preview to that widget's display. A click
+on a widget selects it; dragging it moves it, snapping to guides ([snapping](#snapping-and-guides)).
+The selected widget is outlined above every layer, so it can be found under another one, with:
 
 - a square **handle at each corner**: dragging one resizes the widget about its middle, by the
   pointer's distance from the middle over its distance when the drag began (10 to 320 points);
@@ -79,7 +89,9 @@ layer, so it can be found under another one, with:
 
 While a handle moves, its size ("128 pt") or turn ("15°") shows under the widget; the change is
 saved when it is let go, as a move is. Once the canvas has been clicked, the arrow keys move the
-selected widget one point of the display, ten with Shift.
+selected widget one point of the display, ten with Shift, and **⌘D** duplicates the selected widget
+on the canvas. `Tab` remains reserved for macOS focus navigation, and bare Delete/Backspace is not
+bound to unconfirmed deletion.
 
 A click on the wallpaper around the widgets, or Escape on the canvas, **selects nothing**, to see
 the widgets as the desktop will show them: no outline or handles, no highlighted layer, and no
@@ -87,9 +99,10 @@ hidden widget (one is drawn, faded, only while it is selected). The canvas stays
 showed, the arrow keys move nothing, and the inspector says no widget is selected above the
 ready-made widgets. Clicking a widget on the canvas or in the layers, or adding one, selects it
 again. The search results keep editing the widget chosen last. A widget's context menu on the canvas
-has **Hide on the desktop** or **Show on the desktop**, **Duplicate**, **Bring to Front** and
-**Send to Back**. The canvas is hidden from VoiceOver: the rows of the Position and Text tabs do
-the same from the keyboard.
+matches the layer row's menu: **Hide on the desktop** or **Show on the desktop**, **Duplicate**,
+**Copy Style**, **Paste Style**, **Bring to Front**, **Bring Forward**, **Send Backward**,
+**Send to Back** and **Remove** (which asks for confirmation before deleting). The canvas is hidden
+from VoiceOver: the rows of the Position and Text tabs do the same from the keyboard.
 
 | Kind | Shows | Changes |
 | --- | --- | --- |
@@ -354,7 +367,9 @@ and replaced by a **settled** one once the wallpaper has played a moment:
   (actions, layers and the preview's stacking, snapping a drag and the Center buttons, resizing
   and turning by the handles and nudging, the ready-made widgets' layout and limit, the
   inspector's tabs, the
-  Display, Date format, Time zone and Calendar menus, the rows each kind offers and those waiting
+  Display, Date format, Time zone and Calendar menus, multi-display preview switching, precedence
+  and default placement for new widgets, Copy/Paste Style and canvas removal confirmation, the
+  rows each kind offers and those waiting
   on another choice, the preview's wallpaper frame, search and layout of the workspace in a
   narrow, a middle and a wide column in every tab); `testSnapshotsOnRequest` writes offscreen
   renders of the workspace to the folder in `WALLPAPER_MACHINE_WIDGET_SNAPSHOTS` (pass it as

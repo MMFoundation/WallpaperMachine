@@ -1082,6 +1082,10 @@ struct WidgetLayerRow: View {
     }
     .disabled(order.count >= DesktopWidgetStore.limit)
     Divider()
+    Button("Copy Style") { controller.widgetsSettings.copyStyle(of: widget) }
+    Button("Paste Style") { controller.widgetsSettings.pasteStyle(to: widget.id) }
+      .disabled(!controller.widgetsSettings.canPasteStyle)
+    Divider()
     Button("Bring to Front") { move(widget.id, to: 0) }.disabled(index == 0)
     Button("Bring Forward") { moveBy(-1) }.disabled(index == 0)
     Button("Send Backward") { moveBy(1) }.disabled(index >= last)

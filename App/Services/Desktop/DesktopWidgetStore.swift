@@ -29,13 +29,15 @@ final class DesktopWidgetStore {
         return widget
     }
 
-    /// Adds a widget of `kind` on the main display, in front of the others and a little lower on the
-    /// display than those already there, so it does not cover them.
+    /// Adds a widget of `kind` with `placement` (the main display by default), in front of the
+    /// others and a little lower on the display than those already placed there, so it does not
+    /// cover them.
     @discardableResult
-    func add(_ kind: DesktopWidget.Kind) throws -> DesktopWidget {
+    func add(_ kind: DesktopWidget.Kind, placement: DesktopWidget.Placement = .main) throws -> DesktopWidget {
         guard widgets.count < Self.limit else { throw DesktopWidgetError.tooMany }
         var widget = DesktopWidget(kind: kind)
-        let taken = widgets.filter { $0.placement == .main }.map(\.y)
+        widget.placement = placement
+        let taken = widgets.filter { $0.placement == placement }.map(\.y)
         while taken.contains(where: { abs($0 - widget.y) < 0.05 }), widget.y < 0.9 {
             widget.y += 0.1
         }

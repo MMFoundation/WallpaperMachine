@@ -88,6 +88,20 @@ struct DesktopWidgetPreview: View {
       controller.widgetsSettings.clearSelection()
       return .handled
     }
+    .background {
+      if let selected = model.widgets(on: screen).first(where: { $0.id == model.selectedID }) {
+        Button {
+          duplicate(selected.id)
+        } label: {
+          EmptyView()
+        }
+        .keyboardShortcut("d", modifiers: .command)
+        .disabled(model.widgets.count >= DesktopWidgetStore.limit)
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
+      }
+    }
     .accessibilityHidden(true)
   }
 
@@ -149,25 +163,47 @@ struct DesktopWidgetPreview: View {
       }
   }
 
-  /// A widget's context menu on the canvas: the layer and visibility actions of its row in the list.
+  /// A widget's context menu on the canvas: in parity with `WidgetLayerRow.menu`, plus Copy/Paste Style.
   @ViewBuilder
   private func menu(_ widget: DesktopWidget) -> some View {
     let model = controller.widgetsSettings
     let order = model.widgets.map(\.id)
     let index = order.firstIndex(of: widget.id) ?? 0
+    let last = order.count - 1
     let id = widget.id
     Button(widget.isShown ? L("Hide on the desktop") : L("Show on the desktop")) {
       model.commit(id, "shown", to: !widget.isShown, policy: .dropDuplicates) { .shown($0) }
     }
-    Button("Duplicate") {
-      controller.launch(PanelActionCoordinator.key("duplicateDesktopWidget", id: id)) {
-        try await controller.duplicateDesktopWidget(id)
-      }
-    }
-    .disabled(order.count >= DesktopWidgetStore.limit)
+    Button("Duplicate") { duplicate(id) }
+      .disabled(order.count >= DesktopWidgetStore.limit)
+    Divider()
+    Button("Copy Style") { model.copyStyle(of: widget) }
+    Button("Paste Style") { model.pasteStyle(to: id) }
+      .disabled(!model.canPasteStyle)
     Divider()
     Button("Bring to Front") { move(id, to: 0) }.disabled(index == 0)
-    Button("Send to Back") { move(id, to: order.count - 1) }.disabled(index >= order.count - 1)
+    Button("Bring Forward") { moveBy(id, offset: -1, in: order) }.disabled(index == 0)
+    Button("Send Backward") { moveBy(id, offset: 1, in: order) }.disabled(index >= last)
+    Button("Send to Back") { move(id, to: last) }.disabled(index >= last)
+    Divider()
+    Button("Remove", role: .destructive) {
+      controller.launch(PanelActionCoordinator.key("removeDesktopWidget", id: id)) {
+        try await controller.confirmAndRemoveDesktopWidget(id)
+      }
+    }
+  }
+
+  private func duplicate(_ id: String) {
+    controller.launch(PanelActionCoordinator.key("duplicateDesktopWidget", id: id)) {
+      try await controller.duplicateDesktopWidget(id)
+    }
+  }
+
+  private func moveBy(_ id: String, offset: Int, in order: [String]) {
+    guard let index = order.firstIndex(of: id) else { return }
+    let target = index + offset
+    guard order.indices.contains(target) else { return }
+    move(id, to: target)
   }
 
   private func move(_ id: String, to index: Int) {

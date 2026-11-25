@@ -16,6 +16,9 @@ final class WidgetsSettingsTests: PanelTestCase {
   private let external = Screen(
     displayID: 2, uuid: "BBBB-2", name: "Studio Display",
     frame: NSRect(x: 1512, y: 0, width: 2560, height: 1440), isMain: false)
+  private let portrait = Screen(
+    displayID: 3, uuid: "CCCC-3", name: "Portrait Display",
+    frame: NSRect(x: 4072, y: 0, width: 1080, height: 1920), isMain: false)
 
   func testAddingOpensTheNewWidgetAndRemovingMovesToTheNextOne() async throws {
     try await withPanel { panel in
@@ -513,6 +516,173 @@ final class WidgetsSettingsTests: PanelTestCase {
       XCTAssertEqual(options.last?.title, "Old name (not connected)")
       XCTAssertEqual(options.last?.value, widget.placement)
       XCTAssertEqual(model.widgets(on: laptop).count, 0, "it is not drawn on another display")
+    }
+  }
+
+  /// Picking a preview display persists across `.all`/`.main`/cleared selection and directs new
+  /// blank and ready-made widgets to that display, while selecting a widget pinned to a different
+  /// connected display switches the preview to that widget's display.
+  func testMultiDisplayPreviewSwitcherPrecedenceAndDefaultPlacementForNewWidgets() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      var connected = [external, portrait, laptop]
+      controller.desktopWidgetScreens = { connected }
+      let model = controller.widgetsSettings
+      let screens = model.screens()
+      XCTAssertEqual(model.previewScreen(among: screens)?.displayID, laptop.displayID)
+      XCTAssertEqual(model.defaultPlacement(among: screens), .main)
+
+      // Manual switch to the portrait display lays out and places new widgets there.
+      model.selectPreviewScreen(portrait.displayID)
+      XCTAssertEqual(model.previewScreen(among: screens)?.displayID, portrait.displayID)
+      XCTAssertEqual(model.presetDisplay(), portrait.frame.size)
+      XCTAssertEqual(
+        model.defaultPlacement(among: screens),
+        .display(uuid: "CCCC-3", name: "Portrait Display"))
+
+      try await controller.addDesktopWidget(.time)
+      let portraitClock = try XCTUnwrap(model.selected)
+      XCTAssertEqual(portraitClock.placement, .display(uuid: "CCCC-3", name: "Portrait Display"))
+
+      try await controller.addDesktopWidgetPreset(.clockAndDate)
+      let presetWidgets = Array(model.widgets.prefix(2))
+      XCTAssertEqual(presetWidgets.count, 2)
+      XCTAssertTrue(
+        presetWidgets.allSatisfy { $0.placement == .display(uuid: "CCCC-3", name: "Portrait Display") },
+        "every widget of a preset defaults to the currently previewed display")
+
+      // Add an `.all` widget and a `.main` widget on the main display.
+      model.selectPreviewScreen(laptop.displayID)
+      try await controller.addDesktopWidget(.text)
+      let allWidget = try XCTUnwrap(model.selected)
+      try await controller.changeDesktopWidget(allWidget.id, .placement(.all))
+      try await controller.addDesktopWidget(.date)
+      let mainWidget = try XCTUnwrap(model.selected)
+      XCTAssertEqual(mainWidget.placement, .main)
+
+      // Manual pick to `external` persists across `.all`, `.main`, and cleared selection.
+      model.selectPreviewScreen(external.displayID)
+      XCTAssertEqual(model.previewScreen(among: screens)?.displayID, external.displayID)
+      model.select(allWidget.id)
+      XCTAssertEqual(model.previewScreen(among: screens)?.displayID, external.displayID)
+      XCTAssertTrue(model.widgets(on: external).contains { $0.id == allWidget.id })
+      model.select(mainWidget.id)
+      XCTAssertEqual(model.previewScreen(among: screens)?.displayID, external.displayID)
+      model.clearSelection()
+      XCTAssertEqual(model.previewScreen(among: screens)?.displayID, external.displayID)
+
+      // Selecting a widget pinned to a different connected display switches preview to it.
+      model.select(portraitClock.id)
+      XCTAssertEqual(model.previewScreen(among: screens)?.displayID, portrait.displayID)
+
+      // Disconnecting a manually chosen display falls back cleanly.
+      model.selectPreviewScreen(external.displayID)
+      connected = [laptop, portrait]
+      XCTAssertEqual(model.previewScreen(among: model.screens())?.displayID, portrait.displayID)
+
+      // Duplicate display names are numbered cleanly in the switcher.
+      let secondStudio = Screen(
+        displayID: 4, uuid: "DDDD-4", name: "Studio Display",
+        frame: NSRect(x: 0, y: 1440, width: 2560, height: 1440), isMain: false)
+      let dupes = [laptop, external, secondStudio]
+      XCTAssertEqual(model.previewScreenTitle(laptop, among: dupes), "Built-in Display")
+      XCTAssertEqual(model.previewScreenTitle(external, among: dupes), "Studio Display 1")
+      XCTAssertEqual(model.previewScreenTitle(secondStudio, among: dupes), "Studio Display 2")
+    }
+  }
+
+  /// Copy Style and Paste Style transfer visual styling properties without altering widget kind,
+  /// content, geometry, visibility or display placement; canvas removal asks confirmation first.
+  func testCopyAndPasteStylePreservesKindContentGeometryAndPlacementAndRemovalConfirms() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop, external] in [laptop, external] }
+      let model = controller.widgetsSettings
+      XCTAssertFalse(model.canPasteStyle)
+      XCTAssertNil(model.pasteStyle(to: "missing"))
+
+      try await controller.addDesktopWidget(.text)
+      let sourceID = try XCTUnwrap(model.selectedID)
+      for change: DesktopWidgetChange in [
+        .text("Styled quote"), .size(64), .position(x: 0.2, y: 0.8), .alignment(.leading), .rotation(25),
+        .placement(.display(uuid: "BBBB-2", name: "Studio Display")),
+        .font(.family("Avenir Next")), .weight(700), .italic(true), .letterSpacing(14), .lineHeight(140),
+        .textCase(.uppercase), .color("#FFE0AA"), .opacity(85), .accentColor("#00FFAA"),
+        .fill(.gradient), .gradientColor("#FF4E8A"), .gradientAngle(90),
+        .outlineWidth(4), .outlineColor("#112233"),
+        .glowSize(16), .glowColor("#00E5FF"),
+        .shadow(true), .shadowColor("#331122"), .shadowOpacity(70), .shadowBlur(10),
+        .shadowDistance(6), .shadowAngle(135),
+        .background(.capsule), .backgroundColor("#223344"), .backgroundOpacity(55), .backgroundPadding(35),
+      ] {
+        try await controller.changeDesktopWidget(sourceID, change)
+      }
+      let source = try XCTUnwrap(model.widgets.first { $0.id == sourceID })
+
+      try await controller.addDesktopWidget(.countdown)
+      let targetID = try XCTUnwrap(model.selectedID)
+      for change: DesktopWidgetChange in [
+        .text("Launch"), .targetDay("2030-01-01"), .size(30), .position(x: 0.75, y: 0.35),
+        .alignment(.trailing), .rotation(-15), .placement(.all), .shown(false),
+      ] {
+        try await controller.changeDesktopWidget(targetID, change)
+      }
+
+      model.copyStyle(of: source)
+      XCTAssertTrue(model.canPasteStyle)
+      await model.pasteStyle(to: targetID)?.value
+
+      let pasted = try XCTUnwrap(model.widgets.first { $0.id == targetID })
+      // Visual style copied.
+      XCTAssertEqual(DesktopWidget.Style(from: pasted), DesktopWidget.Style(from: source))
+      XCTAssertEqual(pasted.fontFamily, "Avenir Next")
+      XCTAssertEqual(pasted.weight, 700)
+      XCTAssertTrue(pasted.isItalic)
+      XCTAssertEqual(pasted.letterSpacing, 14)
+      XCTAssertEqual(pasted.lineHeight, 140)
+      XCTAssertEqual(pasted.textCase, .uppercase)
+      XCTAssertEqual(pasted.color, "#FFE0AA")
+      XCTAssertEqual(pasted.opacity, 85)
+      XCTAssertEqual(pasted.accentColor, "#00FFAA")
+      XCTAssertEqual(pasted.fill, .gradient)
+      XCTAssertEqual(pasted.gradientColor, "#FF4E8A")
+      XCTAssertEqual(pasted.gradientAngle, 90)
+      XCTAssertEqual(pasted.outlineWidth, 4)
+      XCTAssertEqual(pasted.outlineColor, "#112233")
+      XCTAssertEqual(pasted.glowSize, 16)
+      XCTAssertEqual(pasted.glowColor, "#00E5FF")
+      XCTAssertTrue(pasted.hasShadow)
+      XCTAssertEqual(pasted.shadowColor, "#331122")
+      XCTAssertEqual(pasted.shadowOpacity, 70)
+      XCTAssertEqual(pasted.shadowBlur, 10)
+      XCTAssertEqual(pasted.shadowDistance, 6)
+      XCTAssertEqual(pasted.shadowAngle, 135)
+      XCTAssertEqual(pasted.background, .capsule)
+      XCTAssertEqual(pasted.backgroundColor, "#223344")
+      XCTAssertEqual(pasted.backgroundOpacity, 55)
+      XCTAssertEqual(pasted.backgroundPadding, 35)
+      // Kind, content, geometry, visibility and display placement preserved.
+      XCTAssertEqual(pasted.id, targetID)
+      XCTAssertEqual(pasted.kind, .countdown)
+      XCTAssertEqual(pasted.text, "Launch")
+      XCTAssertEqual(pasted.targetDay, "2030-01-01")
+      XCTAssertEqual(pasted.size, 30)
+      XCTAssertEqual(pasted.x, 0.75)
+      XCTAssertEqual(pasted.y, 0.35)
+      XCTAssertEqual(pasted.alignment, .trailing)
+      XCTAssertEqual(pasted.rotation, -15)
+      XCTAssertEqual(pasted.placement, .all)
+      XCTAssertFalse(pasted.isShown)
+
+      // Canvas Remove asks confirmation first.
+      panel.dialogs.confirmAnswer = false
+      try await controller.confirmAndRemoveDesktopWidget(targetID)
+      XCTAssertEqual(panel.dialogs.confirmations.count, 1)
+      XCTAssertTrue(model.widgets.contains { $0.id == targetID }, "Cancel keeps the widget")
+
+      panel.dialogs.confirmAnswer = true
+      try await controller.confirmAndRemoveDesktopWidget(targetID)
+      XCTAssertFalse(model.widgets.contains { $0.id == targetID }, "Confirm removes the widget")
     }
   }
 

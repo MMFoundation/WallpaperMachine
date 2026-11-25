@@ -143,6 +143,99 @@ struct DesktopWidget: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
+    /// A widget's visual styling — typography, colours, fill, gradient, outline, glow, shadow and
+    /// background plate — without its identity, kind, visibility, content, format, size, position,
+    /// alignment, rotation or display placement.
+    struct Style: Hashable, Sendable {
+        var typeface: Typeface
+        var fontFamily: String?
+        var weight: Int
+        var isItalic: Bool
+        var letterSpacing: Int
+        var lineHeight: Int
+        var textCase: TextCase
+        var color: String
+        var opacity: Int
+        var accentColor: String?
+        var fill: Fill
+        var gradientColor: String
+        var gradientAngle: Int
+        var outlineWidth: Int
+        var outlineColor: String
+        var glowSize: Int
+        var glowColor: String
+        var hasShadow: Bool
+        var shadowColor: String
+        var shadowOpacity: Int
+        var shadowBlur: Int
+        var shadowDistance: Int
+        var shadowAngle: Int
+        var background: Background
+        var backgroundColor: String
+        var backgroundOpacity: Int
+        var backgroundPadding: Int
+
+        init(from widget: DesktopWidget) {
+            typeface = widget.typeface
+            fontFamily = widget.fontFamily
+            weight = widget.weight
+            isItalic = widget.isItalic
+            letterSpacing = widget.letterSpacing
+            lineHeight = widget.lineHeight
+            textCase = widget.textCase
+            color = widget.color
+            opacity = widget.opacity
+            accentColor = widget.accentColor
+            fill = widget.fill
+            gradientColor = widget.gradientColor
+            gradientAngle = widget.gradientAngle
+            outlineWidth = widget.outlineWidth
+            outlineColor = widget.outlineColor
+            glowSize = widget.glowSize
+            glowColor = widget.glowColor
+            hasShadow = widget.hasShadow
+            shadowColor = widget.shadowColor
+            shadowOpacity = widget.shadowOpacity
+            shadowBlur = widget.shadowBlur
+            shadowDistance = widget.shadowDistance
+            shadowAngle = widget.shadowAngle
+            background = widget.background
+            backgroundColor = widget.backgroundColor
+            backgroundOpacity = widget.backgroundOpacity
+            backgroundPadding = widget.backgroundPadding
+        }
+
+        func apply(to widget: inout DesktopWidget) {
+            widget.typeface = typeface
+            widget.fontFamily = fontFamily
+            widget.weight = weight
+            widget.isItalic = isItalic
+            widget.letterSpacing = letterSpacing
+            widget.lineHeight = lineHeight
+            widget.textCase = textCase
+            widget.color = color
+            widget.opacity = opacity
+            widget.accentColor = accentColor
+            widget.fill = fill
+            widget.gradientColor = gradientColor
+            widget.gradientAngle = gradientAngle
+            widget.outlineWidth = outlineWidth
+            widget.outlineColor = outlineColor
+            widget.glowSize = glowSize
+            widget.glowColor = glowColor
+            widget.hasShadow = hasShadow
+            widget.shadowColor = shadowColor
+            widget.shadowOpacity = shadowOpacity
+            widget.shadowBlur = shadowBlur
+            widget.shadowDistance = shadowDistance
+            widget.shadowAngle = shadowAngle
+            widget.background = background
+            widget.backgroundColor = backgroundColor
+            widget.backgroundOpacity = backgroundOpacity
+            widget.backgroundPadding = backgroundPadding
+        }
+    }
+
     enum TimeFormat: String, Codable, CaseIterable, Sendable {
         /// What System Settings › General › Date & Time says.
         case system, twelveHour, twentyFourHour

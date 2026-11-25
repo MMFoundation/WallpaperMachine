@@ -68,6 +68,11 @@ final class DesktopWidgetsSettingsModel {
 
   unowned let controller: PanelController
   private var chosenID: String?
+  /// The display chosen in the workspace's preview-display switcher; nil while the canvas follows
+  /// the selected widget's pinned display (or the main display).
+  private(set) var previewDisplayID: UInt32?
+  /// Visual styling copied with Copy Style, ready to paste onto another widget.
+  private(set) var copiedStyle: DesktopWidget.Style?
   /// The drag in progress on the preview; nil when none is.
   var drag: Drag?
   @ObservationIgnored private var dragStart: DragStart?
@@ -76,6 +81,22 @@ final class DesktopWidgetsSettingsModel {
   init(controller: PanelController) { self.controller = controller }
 
   var widgets: [DesktopWidget] { controller.desktopWidgets.widgets }
+
+  var canPasteStyle: Bool { copiedStyle != nil }
+
+  /// Copies the visual styling of `widget` without its kind, content, geometry or display placement.
+  func copyStyle(of widget: DesktopWidget) {
+    copiedStyle = DesktopWidget.Style(from: widget)
+  }
+
+  /// Applies the copied visual style to `id`; nil when nothing has been copied yet.
+  @discardableResult
+  func pasteStyle(to id: String) -> Task<Void, Never>? {
+    guard let copiedStyle else { return nil }
+    return controller.launch(PanelActionCoordinator.key("pasteDesktopWidgetStyle", id: id)) { [controller] in
+      try await controller.changeDesktopWidget(id, .applyStyle(copiedStyle))
+    }
+  }
 
   /// Whether a click on the canvas's backdrop has put the selection away, so the canvas shows the
   /// widgets as the desktop will, with no outline or handles over them. Picking a widget ends it.
@@ -94,13 +115,33 @@ final class DesktopWidgetsSettingsModel {
 
   var selectedID: String? { selected?.id }
 
+  /// Selects `id` for the inspector and canvas. Picking a widget pinned to a specific other
+  /// connected display switches the preview to that display; picking an `.all`, `.main`, or
+  /// disconnected widget keeps any manually chosen preview display intact.
   func select(_ id: String?) {
     chosenID = id
     isSelectionCleared = false
+    if let id, let widget = widgets.first(where: { $0.id == id }) {
+      followPinnedPlacementIfOtherDisplay(widget.placement)
+    }
   }
 
   /// Selects nothing, to see the widgets without the selection drawn over them.
   func clearSelection() { isSelectionCleared = true }
+
+  /// Follows the selected widget when its placement is explicitly changed to another connected
+  /// display in the inspector.
+  func didChangeSelectedPlacement(_ placement: DesktopWidget.Placement) {
+    followPinnedPlacementIfOtherDisplay(placement)
+  }
+
+  private func followPinnedPlacementIfOtherDisplay(_ placement: DesktopWidget.Placement) {
+    guard case .display(let uuid, _) = placement,
+      let own = screens().first(where: { $0.uuid?.caseInsensitiveCompare(uuid) == .orderedSame }),
+      previewDisplayID != own.displayID
+    else { return }
+    previewDisplayID = nil
+  }
 
   /// `widget` where the preview draws it: where a drag has it, at the size and turn its handles
   /// have it, or as it was let go while that is being saved.
@@ -126,6 +167,45 @@ final class DesktopWidgetsSettingsModel {
   /// The connected displays, the main one first.
   func screens() -> [Screen] {
     controller.desktopWidgetScreens().sorted { $0.isMain && !$1.isMain }
+  }
+
+  /// Manually picks the display the workspace's canvas previews. Persists across selection changes
+  /// until another display is picked or a widget pinned to a different connected display is selected.
+  func selectPreviewScreen(_ displayID: UInt32) {
+    previewDisplayID = displayID
+  }
+
+  /// The display the workspace's canvas shows: the user's manually chosen preview display when
+  /// still connected, else the last chosen widget's pinned display, else the main display.
+  func previewScreen(among screens: [Screen]) -> Screen? {
+    if let previewDisplayID,
+      let chosen = screens.first(where: { $0.displayID == previewDisplayID }) {
+      return chosen
+    }
+    if let widget = lastChosen {
+      return previewScreen(for: widget, among: screens)
+    }
+    return screens.first(where: \.isMain) ?? screens.first
+  }
+
+  /// The display's name in the preview switcher, disambiguated with a number when two displays
+  /// share a name.
+  func previewScreenTitle(_ screen: Screen, among screens: [Screen]) -> String {
+    let matching = screens.filter { $0.name == screen.name }
+    guard matching.count > 1,
+      let index = matching.firstIndex(where: { $0.displayID == screen.displayID })
+    else { return screen.name }
+    return "\(screen.name) \(index + 1)"
+  }
+
+  /// The placement a newly added widget or preset defaults to: the currently previewed display
+  /// when it is a non-main display with a UUID, else `.main`.
+  func defaultPlacement(among screens: [Screen]? = nil) -> DesktopWidget.Placement {
+    let list = screens ?? self.screens()
+    guard let screen = previewScreen(among: list), !screen.isMain, let uuid = screen.uuid else {
+      return .main
+    }
+    return .display(uuid: uuid, name: screen.name)
   }
 
   /// The display the preview shows for `widget`: its own when it has one and it is connected, else
@@ -506,15 +586,16 @@ final class DesktopWidgetsSettingsModel {
 
   // MARK: Ready-made widgets
 
-  /// The display a ready-made widget is laid out for: the main one, or a common laptop's when none
-  /// is known.
+  /// The display a ready-made widget is laid out for: the currently previewed one, else the main
+  /// one, or a common laptop's when none is known.
   func presetDisplay() -> CGSize {
     let screens = screens()
-    let size = (screens.first(where: \.isMain) ?? screens.first)?.frame.size ?? .zero
+    let size = previewScreen(among: screens)?.frame.size ?? .zero
     return size.width > 0 && size.height > 0 ? size : CGSize(width: 1512, height: 982)
   }
 
-  /// A ready-made preset's widgets, placed on the main display as the desktop will draw them.
+  /// A ready-made preset's widgets, laid out for the currently previewed display as the desktop
+  /// will draw them.
   func widgets(of preset: DesktopWidgetPreset, at date: Date = Date()) -> [DesktopWidget] {
     let display = presetDisplay()
     return preset.widgets(

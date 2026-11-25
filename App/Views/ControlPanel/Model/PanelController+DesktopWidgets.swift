@@ -51,6 +51,8 @@ enum DesktopWidgetChange: Hashable, Sendable {
   case showsDialRing(Bool)
   /// A finished look from the Style menu.
   case style(DesktopWidget.StylePreset)
+  /// Visual styling copied from another widget.
+  case applyStyle(DesktopWidget.Style)
   /// The effects back to a new widget's.
   case resetEffects
 
@@ -106,6 +108,7 @@ enum DesktopWidgetChange: Hashable, Sendable {
     case .dialMarks(let value): widget.dialMarks = value
     case .showsDialRing(let value): widget.showsDialRing = value
     case .style(let preset): preset.apply(to: &widget)
+    case .applyStyle(let style): style.apply(to: &widget)
     case .resetEffects: widget.resetEffects()
     }
   }
@@ -114,19 +117,29 @@ enum DesktopWidgetChange: Hashable, Sendable {
 /// Settings › Desktop Widgets' actions. A widget belongs to no wallpaper and the renderer never draws it,
 /// so none of them waits for a wallpaper command or clears an older banner.
 extension PanelController {
-  /// Adds a widget of `kind` on the main display, in front of the others, and opens it in the editor.
+  /// Adds a widget of `kind` on the currently previewed display (`.main` when previewing the main
+  /// display), in front of the others, and opens it in the editor.
   func addDesktopWidget(_ kind: DesktopWidget.Kind) async throws {
     _ = try await run(.immediate) {
-      let widget = try desktopWidgets.add(kind)
+      let placement = widgetsSettings.defaultPlacement()
+      let widget = try desktopWidgets.add(kind, placement: placement)
       widgetsSettings.select(widget.id)
     }
   }
 
-  /// Adds a ready-made preset's widgets on the main display, in front of the others, and opens the
-  /// first of them in the editor.
+  /// Adds a ready-made preset's widgets on the currently previewed display (`.main` when
+  /// previewing the main display), in front of the others, and opens the first of them in the
+  /// editor.
   func addDesktopWidgetPreset(_ preset: DesktopWidgetPreset) async throws {
     _ = try await run(.immediate) {
-      let added = try desktopWidgets.add(widgetsSettings.widgets(of: preset))
+      let screens = widgetsSettings.screens()
+      let placement = widgetsSettings.defaultPlacement(among: screens)
+      let widgets = widgetsSettings.widgets(of: preset).map { widget in
+        var placed = widget
+        placed.placement = placement
+        return placed
+      }
+      let added = try desktopWidgets.add(widgets)
       if let first = added.first { widgetsSettings.select(first.id) }
     }
   }
@@ -134,6 +147,9 @@ extension PanelController {
   func changeDesktopWidget(_ id: String, _ change: DesktopWidgetChange) async throws {
     _ = try await run(.immediate) {
       try desktopWidgets.update(id) { change.apply(to: &$0) }
+      if id == widgetsSettings.selectedID, case .placement(let placement) = change {
+        widgetsSettings.didChangeSelectedPlacement(placement)
+      }
     }
   }
 
@@ -177,5 +193,17 @@ extension PanelController {
         widgetsSettings.select(remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)])
       }
     }
+  }
+
+  /// Asks before removing a widget from the canvas context menu, since removal cannot be undone.
+  func confirmAndRemoveDesktopWidget(_ id: String) async throws {
+    guard desktopWidgets.widgets.contains(where: { $0.id == id }) else { return }
+    guard
+      await dialogs.confirm(
+        L("Remove widget?"),
+        detail: L("This widget will be removed from the desktop. This can’t be undone."),
+        button: L("Remove"))
+    else { return }
+    try await removeDesktopWidget(id)
   }
 }
