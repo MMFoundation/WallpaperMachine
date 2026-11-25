@@ -622,10 +622,8 @@ impl AppConfig {
     pub fn effective_render_scale(&self, in_force: QualityInForce) -> f32 {
         let preferred = clamp_render_scale(self.quality.render_scale);
         let profile = clamp_render_scale(self.quality.battery.render_scale);
-        if in_force.throttled {
+        if in_force.throttled || in_force.battery_profile {
             preferred.min(profile)
-        } else if in_force.battery_profile {
-            profile
         } else {
             preferred
         }

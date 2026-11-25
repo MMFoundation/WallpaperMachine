@@ -417,8 +417,15 @@ async fn web_wallpaper_descriptor_carries_the_effective_render_scale() {
         .await;
     let on_battery = bridge.web_wallpapers().await.unwrap();
     assert_eq!(
-        on_battery[0].render_scale, 0.75,
-        "the battery profile's default scale"
+        on_battery[0].render_scale, 0.5,
+        "unplugging power must never raise render scale above a lower saved scale"
+    );
+
+    bridge.set_render_scale(1.0).await.unwrap();
+    assert_eq!(
+        bridge.web_wallpapers().await.unwrap()[0].render_scale,
+        0.75,
+        "on battery with a higher saved scale, the battery profile's default scale applies"
     );
 
     bridge
@@ -426,7 +433,7 @@ async fn web_wallpaper_descriptor_carries_the_effective_render_scale() {
         .await;
     assert_eq!(
         bridge.web_wallpapers().await.unwrap()[0].render_scale,
-        0.5,
+        1.0,
         "leaving battery power hands back the scale the user saved"
     );
 }

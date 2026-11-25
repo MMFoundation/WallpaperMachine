@@ -1309,9 +1309,11 @@ fn effective_quality_clamps_values_but_never_mutates_saved_preferences() {
         }
     );
     for (preferred, profile, plain, battery, throttle) in [
-        (0.4, 0.9, 0.4, 0.9, 0.4),
+        (0.4, 0.9, 0.4, 0.4, 0.4),
         (0.9, 0.4, 0.9, 0.4, 0.4),
-        (-1.0, 2.0, 0.25, 1.0, 0.25),
+        (0.5, 0.75, 0.5, 0.5, 0.5),
+        (1.0, 0.75, 1.0, 0.75, 0.75),
+        (-1.0, 2.0, 0.25, 0.25, 0.25),
         (f32::NAN, 0.6, 1.0, 0.6, 0.6),
     ] {
         let mut config = AppConfig::default();

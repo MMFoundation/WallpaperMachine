@@ -993,10 +993,15 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
         preferences.thermalAction = .reduceQuality
         var thermal = ProcessInfo.ThermalState.nominal
         let systemCenter = NotificationCenter()
+        var pendingRecovery: (@MainActor () -> Void)?
         let monitor = SystemConditionMonitor(
             preferences: preferences, focus: FocusFilterState(defaults: defaults),
             systemCenter: systemCenter, isLowPowerModeEnabled: { false }, thermalState: { thermal },
-            battery: NoBattery())
+            battery: NoBattery(),
+            scheduleThermalRecovery: { _, fire in
+                pendingRecovery = fire
+                return { pendingRecovery = nil }
+            })
         let probe = CompositionProbe()
         let policy = makePolicy(probe, conditions: monitor)
         monitor.onChange = { policy.evaluate() }
@@ -1029,6 +1034,9 @@ final class PlaybackPolicyCompositionTests: XCTestCase {
         XCTAssertEqual(probe.quality.count, 1, "Cooling to serious does not release the reduction")
 
         announce(.nominal)
+        XCTAssertEqual(probe.quality, [[.heat]], "Cooling holds through the thermal recovery window")
+        let recover = try XCTUnwrap(pendingRecovery)
+        recover()
         XCTAssertEqual(probe.quality, [[.heat], []])
         XCTAssertEqual(probe.presentations, [.suspended, .running])
     }

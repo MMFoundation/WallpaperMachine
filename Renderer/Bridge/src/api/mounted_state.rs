@@ -1269,7 +1269,7 @@ fn m16_quality_queries_use_actor_scoped_forwards_and_genuine_scale_clamps() {
                 battery_profile: true,
                 throttled: false,
             },
-            0.86,
+            0.31,
         ),
         (
             0.31,
@@ -1314,7 +1314,7 @@ fn m16_quality_queries_use_actor_scoped_forwards_and_genuine_scale_clamps() {
                 battery_profile: true,
                 throttled: false,
             },
-            1.0,
+            0.82,
         ),
     ] {
         app.quality.render_scale = saved;

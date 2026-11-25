@@ -272,10 +272,8 @@ async fn the_throttle_and_the_battery_profile_never_stack_into_something_higher(
                     };
                     let snapshot = bridge.set_quality_throttle(causes).await.unwrap().settings;
 
-                    let scale = if throttled {
+                    let scale = if throttled || battery {
                         preferred.min(PROFILE_SCALE)
-                    } else if battery {
-                        PROFILE_SCALE
                     } else {
                         preferred
                     };

@@ -874,16 +874,21 @@ is never saved, a restart begins without one, and nothing is polled for it (the
 conditions are observed as above).
 
 - **It only lowers.** The frame-rate ceiling is the lowest of your global cap and the
-  profile's rate, and with a condition holding the render scale is the lower of your
-  saved scale and the profile's, so a cap or scale you already set below the profile
-  stays where it is. When a condition and the battery profile hold together, the
-  stricter rule wins and quality never rises. On battery alone the profile's scale
-  is used as it is, as it always was, so a saved scale lower than the profile's is
-  raised to it there; that difference from the conditions was left as it is.
-- **Heat escalates.** Serious reduces. Critical reduces and also pauses the
-  wallpapers, because reducing is no longer enough; choosing Reduced quality is not
-  a promise never to pause, and the row's note says so. The fair ("warm") state is
-  ignored, as it is for **Pause** and **Stop**, which act from serious.
+  profile's rate, and both on battery and while a reduced-quality condition holds the
+  render scale is the lower of your saved scale and the profile's (`preferred.min(profile)`),
+  so unplugging power or triggering a condition never raises a cap or scale you already set
+  below the profile. When a condition and the battery profile hold together, the stricter
+  rule wins and quality never rises.
+- **Heat escalates and holds before recovering.** Serious reduces. Critical reduces and
+  also pauses the wallpapers, because reducing is no longer enough; choosing Reduced quality
+  is not a promise never to pause, and the row's note says so. The fair ("warm") state is
+  ignored on entry, as it is for **Pause** and **Stop**, which act from serious. Entering
+  elevated heat throttling is immediate, while leaving it uses an asymmetric 45-second
+  recovery hold window: once the thermal state drops from serious/critical to fair/nominal,
+  the heat rule stays engaged until the Mac stays below serious continuously for 45 seconds
+  (any spike back to serious or critical cancels the pending recovery). Cooling from
+  critical to serious or below still lifts the critical-heat pause immediately while keeping
+  Reduced quality held through the recovery window.
 - **It follows the cause.** **Effective now**, the **Reduced quality** line and Quick
   Settings' Quality and On battery modules name the cause (heat, Low Power Mode, a
   low battery or the battery, in that order when several hold), and the frame-rate
@@ -891,12 +896,14 @@ conditions are observed as above).
   frame rate whichever reason lowered it, names that reason and opens Playback &
   Power rather than Performance.
 - **Cost.** Each change of the render scale rebuilds a scene's render graph, the
-  same cost as unplugging the Mac with **On battery** set to Reduced quality, and
-  there is no hold-down: a Mac whose thermal state flaps at the serious boundary
-  would pay it each time, which is not measured. A Web wallpaper drawing at the full
-  refresh of a display above 60 Hz pays more: its cadence is fixed when the page is
-  created, so the lower rate reloads the page, with the loss of what it kept in
-  memory, and the end of the request reloads it again
+  same cost as unplugging the Mac with **On battery** set to Reduced quality. The
+  45-second asymmetric thermal recovery hold window keeps a Mac hovering around the
+  serious thermal boundary from flapping across it and paying repeated render-graph
+  rebuilds or page reloads; the hold uses a single one-shot timer only while cooling
+  down, with zero per-frame work. A Web wallpaper drawing at the full
+  refresh of a display above 60 Hz pays more when a rate change crosses that refresh:
+  its cadence is fixed when the page is created, so the lower rate reloads the page,
+  with the loss of what it kept in memory, and the end of the request reloads it again
   ([frame rate](web-wallpapers.md#runtime-shape)). Nothing is added per frame.
 - **Saving.** The renderer's half was measured headlessly (`perf_bench.py cost`, the
   default profile of 30 fps and 75 % against 60 fps and 100 %, as a `--variant` setting

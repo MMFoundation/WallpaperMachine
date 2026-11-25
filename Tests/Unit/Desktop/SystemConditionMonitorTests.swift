@@ -12,6 +12,7 @@ final class SystemConditionMonitorTests: XCTestCase {
     private var battery: FakeBatteryLevel!
     private var state: SystemConditionState!
     private var input: ManualInactivityInput!
+    private var thermalTimer: ManualThermalTimer!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -24,6 +25,7 @@ final class SystemConditionMonitorTests: XCTestCase {
         battery = FakeBatteryLevel()
         state = SystemConditionState()
         input = ManualInactivityInput()
+        thermalTimer = ManualThermalTimer()
     }
 
     override func tearDown() {
@@ -34,14 +36,21 @@ final class SystemConditionMonitorTests: XCTestCase {
         battery = nil
         state = nil
         input = nil
+        thermalTimer = nil
         super.tearDown()
     }
 
-    private func makeMonitor() -> SystemConditionMonitor {
+    private func makeMonitor(
+        thermalRecoveryHold: TimeInterval = SystemConditionMonitor.thermalRecoveryHold
+    ) -> SystemConditionMonitor {
         SystemConditionMonitor(
             preferences: preferences, focus: focus, systemCenter: systemCenter,
             isLowPowerModeEnabled: { self.lowPower }, thermalState: { self.thermal }, battery: battery,
-            state: state, inactivity: input.makeMonitor())
+            state: state, inactivity: input.makeMonitor(),
+            thermalRecoveryHold: thermalRecoveryHold,
+            scheduleThermalRecovery: { [thermalTimer = thermalTimer!] delay, fire in
+                thermalTimer.schedule(delay: delay, fire: fire)
+            })
     }
 
     func testLowPowerModeActsOnlyOnceTheUserChoseAnAction() {
@@ -138,8 +147,96 @@ final class SystemConditionMonitorTests: XCTestCase {
 
         announceHeat(.nominal)
         XCTAssertTrue(monitor.actions.isEmpty)
+        XCTAssertEqual(monitor.qualityReductions, [.heat], "Cooling below serious holds until recovery expires")
+        XCTAssertEqual(changes, 3)
+        XCTAssertEqual(thermalTimer.liveDelays, [SystemConditionMonitor.thermalRecoveryHold])
+
+        thermalTimer.fireNext()
+        XCTAssertTrue(monitor.actions.isEmpty)
         XCTAssertTrue(monitor.qualityReductions.isEmpty)
         XCTAssertEqual(changes, 4)
+    }
+
+    func testThermalExitHysteresisEntersImmediatelyCancelsOnBounceAndRecoversAfterSustainedCool() {
+        preferences.thermalAction = .reduceQuality
+        let monitor = makeMonitor()
+        var changes = 0
+        monitor.onChange = { changes += 1 }
+        monitor.start()
+        defer { monitor.stop() }
+
+        // Entering elevated heat is immediate with no recovery timer armed.
+        announceHeat(.serious)
+        XCTAssertEqual(monitor.qualityReductions, [.heat])
+        XCTAssertEqual(state.engaged.effect(of: .heat), .reducedQuality)
+        XCTAssertTrue(thermalTimer.entries.isEmpty)
+        XCTAssertEqual(changes, 1)
+
+        // Dropping to fair holds engagement and arms one 45s recovery timer.
+        announceHeat(.fair)
+        XCTAssertEqual(monitor.qualityReductions, [.heat])
+        XCTAssertEqual(state.engaged.effect(of: .heat), .reducedQuality)
+        XCTAssertEqual(thermalTimer.liveDelays, [45.0])
+        XCTAssertEqual(changes, 1)
+
+        // Cooling further from fair to nominal keeps the existing recovery countdown running.
+        announceHeat(.nominal)
+        XCTAssertEqual(monitor.qualityReductions, [.heat])
+        XCTAssertEqual(thermalTimer.entries.count, 1, "Cooling further below threshold must not reset the hold timer")
+        XCTAssertEqual(thermalTimer.liveDelays, [45.0])
+
+        // A spike back to serious cancels pending recovery immediately.
+        announceHeat(.serious)
+        XCTAssertEqual(monitor.qualityReductions, [.heat])
+        XCTAssertTrue(thermalTimer.entries[0].cancelled, "Spiking hot again must cancel pending recovery")
+        XCTAssertTrue(thermalTimer.liveDelays.isEmpty)
+        XCTAssertEqual(changes, 1)
+
+        // Cooling again arms a fresh recovery window; sustained cool releases once it completes.
+        announceHeat(.fair)
+        XCTAssertEqual(thermalTimer.entries.count, 2)
+        XCTAssertEqual(thermalTimer.liveDelays, [45.0])
+        XCTAssertEqual(monitor.qualityReductions, [.heat])
+
+        thermalTimer.fireNext()
+        XCTAssertTrue(monitor.qualityReductions.isEmpty)
+        XCTAssertNil(state.engaged.effect(of: .heat))
+        XCTAssertEqual(changes, 2)
+    }
+
+    func testThermalRecoveryHoldLiftsCriticalPauseImmediatelyAndCancelsOnKeepRunningOrStop() {
+        preferences.thermalAction = .reduceQuality
+        let monitor = makeMonitor()
+        monitor.start()
+
+        announceHeat(.critical)
+        XCTAssertEqual(monitor.actions, [.pause])
+        XCTAssertEqual(monitor.qualityReductions, [.heat])
+
+        // Jumping directly from critical to nominal lifts the critical pause while holding quality reduction.
+        announceHeat(.nominal)
+        XCTAssertTrue(monitor.actions.isEmpty)
+        XCTAssertEqual(monitor.qualityReductions, [.heat])
+        XCTAssertEqual(thermalTimer.liveDelays, [45.0])
+
+        // Switching to Keep running cancels the hold and does not resurrect it if re-enabled while cool.
+        preferences.thermalAction = .keepRunning
+        XCTAssertTrue(monitor.qualityReductions.isEmpty)
+        XCTAssertTrue(thermalTimer.liveDelays.isEmpty)
+        preferences.thermalAction = .reduceQuality
+        XCTAssertTrue(monitor.qualityReductions.isEmpty)
+
+        // Pause/Stop rules also hold through recovery until sustained cool or monitor.stop().
+        preferences.thermalAction = .pause
+        announceHeat(.serious)
+        XCTAssertEqual(monitor.actions, [.pause])
+        announceHeat(.fair)
+        XCTAssertEqual(monitor.actions, [.pause])
+        XCTAssertEqual(thermalTimer.liveDelays, [45.0])
+
+        monitor.stop()
+        XCTAssertTrue(monitor.actions.isEmpty)
+        XCTAssertTrue(thermalTimer.liveDelays.isEmpty)
     }
 
     func testPauseAndStopAtHeatStillAskForNoReduction() {
@@ -559,5 +656,42 @@ private final class FakeBatteryLevel: BatteryLevelSource {
     func change(to reading: BatteryReading?) {
         stored = reading
         onChange?()
+    }
+}
+
+/// Captures one-shot thermal recovery timers so hysteresis tests run deterministically with zero real sleeps.
+@MainActor
+private final class ManualThermalTimer {
+    final class Entry {
+        let delay: TimeInterval
+        let fire: @MainActor () -> Void
+        var cancelled = false
+        var fired = false
+
+        init(delay: TimeInterval, fire: @escaping @MainActor () -> Void) {
+            self.delay = delay
+            self.fire = fire
+        }
+    }
+
+    private(set) var entries: [Entry] = []
+
+    var liveDelays: [TimeInterval] {
+        entries.filter { !$0.cancelled && !$0.fired }.map(\.delay)
+    }
+
+    func schedule(delay: TimeInterval, fire: @escaping @MainActor () -> Void) -> @MainActor () -> Void {
+        let entry = Entry(delay: delay, fire: fire)
+        entries.append(entry)
+        return { entry.cancelled = true }
+    }
+
+    func fireNext() {
+        guard let next = entries.first(where: { !$0.cancelled && !$0.fired }) else {
+            XCTFail("Expected an active thermal recovery timer")
+            return
+        }
+        next.fired = true
+        next.fire()
     }
 }
