@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-26 — Wave 3B: automation matrix (#17b), per-wallpaper quality & VRAM diagnostics (#21), storage health (#22), .wmpack & per-display lock screen playlists (#23)
+
+- build.py --renderer-only: OK (rebuilt C++/Rust renderer and regenerated App/Bridge/Generated bindings)
+- check_rust.py: PASS (core 436, bridge 999, core-integration 20, shader 1090; 0 failed; 5 desktop window opt-in tests excluded)
+- check_renderer.py: PASS (C++ Metal tests incl. metal_vram_gauges_test, 12/12 generated GPU parity pixels_equal=True diagnostics=0, 8x2 reload cycles: 0; 7 opt-in local-asset/corpus tests skipped)
+- test.py: PASS (36/36 Python suites / 731 tests; 5392 passed, 0 failed, 70 skipped of 5462 native tests in 171s)
+- verifier-w3b: PASS after fixing Rust restart persistence, stacked-Spaces SpacePosters protection, parked-Space render_scale reset, lower-quality floor, .wmpack autoApplyOnConnect guard, and lock-screen rotation cancellation
+- Gaps: Release .app not rebuilt (unrequested); opt-in UI/desktop/local-corpus/WE-VM visual checks not run; 3 pre-existing XCTest main-thread runtime warnings in signature/keychain tests
+
 ## 2026-11-25 — Wave 3A Parallax power fix, Automation/Intents, Smart Playlists, and Media Widgets (#24, #17a, #20, #19, #18)
 
 - Scope: Parallax static subgraph cache & on-demand easing convergence (#24), display-topology auto-layout (#17a), query/action App Intents + status.json + extended hotkeys + Presentation Mode (#20), wallpaper metadata + Smart Playlists + skip-recent + weighted shuffle + Sleep Timer (#19), Now Playing & Image Sticker widgets + per-wallpaper/Space scope (#18).
@@ -106,13 +115,3 @@ A slider from 10% to 100% that sets a display's scale factor, in the inspector's
 - `xcodebuild -project WallpaperMachine.xcodeproj -scheme WallpaperMachine -configuration Debug -derivedDataPath build -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO build-for-testing` — exit 0 (`TEST BUILD SUCCEEDED`, zero warnings in touched files).
 - `python3 scripts/test.py --only LibrarySortTests --only InstalledBrowserModelTests --only PanelLibraryRowsTests --only PanelViewStateTests --only InstalledPageRenderTests` — blocked (exit 70): `xcodebuild` failed in this sandbox with `Failed to prevent system sleep during UI testing. Error code: -536870211` (`IOPMAssertionCreateWithName`).
 - Native XCTest execution and live UI visual verification of the Energy use sort menu remain to be run outside the sandbox; the Release app was not rebuilt.
-
-## 2026-11-20 — OhMyShot in Settings › About and the Help menu
-
-Settings › About gains More from MMFoundation (OhMyShot's icon, a line about it and Get OhMyShot, which opens www.ohmyshot.org, /zh/ for either Chinese) and Help gains OhMyShot Screenshot Tool. Both appear only on macOS 26 and later, which OhMyShot needs; an older macOS shows neither and Settings search does not find the row.
-
-- `python3 scripts/test.py` (run by the developer in Terminal) — 5148 passed, 0 failed, 70 skipped of 5218; every script test OK
-- `ExternalLinkTests.testOhMyShotIsOfferedFromMacOS26OnItsWebsiteInThePanelLanguage` — new, passed
-- The agent's shell could not run native tests: `IOPMAssertionCreateWithName` fails there (even `caffeinate`), and `xcodebuild test` needs that assertion; an unsigned `build-for-testing` there succeeded
-- System Python 3.9 fails several script tests (no `hashlib.file_digest`); Homebrew's python3 passes them all
-- Not checked: how the About row looks in light and dark, and the Help menu on macOS 15; no Release build

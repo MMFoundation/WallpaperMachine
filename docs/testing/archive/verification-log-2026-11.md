@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-20 — OhMyShot in Settings › About and the Help menu
+
+Settings › About gains More from MMFoundation (OhMyShot's icon, a line about it and Get OhMyShot, which opens www.ohmyshot.org, /zh/ for either Chinese) and Help gains OhMyShot Screenshot Tool. Both appear only on macOS 26 and later, which OhMyShot needs; an older macOS shows neither and Settings search does not find the row.
+
+- `python3 scripts/test.py` (run by the developer in Terminal) — 5148 passed, 0 failed, 70 skipped of 5218; every script test OK
+- `ExternalLinkTests.testOhMyShotIsOfferedFromMacOS26OnItsWebsiteInThePanelLanguage` — new, passed
+- The agent's shell could not run native tests: `IOPMAssertionCreateWithName` fails there (even `caffeinate`), and `xcodebuild test` needs that assertion; an unsigned `build-for-testing` there succeeded
+- System Python 3.9 fails several script tests (no `hashlib.file_digest`); Homebrew's python3 passes them all
+- Not checked: how the About row looks in light and dark, and the Help menu on macOS 15; no Release build
+
 ## 2026-11-18 — Steam Workshop sign-in from Browse and Settings
 
 - Offscreen Workshop regression: the public list offers sign-in when anonymous, hides it after sign-in and offers it again after sign-out.
