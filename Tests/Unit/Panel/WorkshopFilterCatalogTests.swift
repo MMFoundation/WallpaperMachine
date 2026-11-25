@@ -173,4 +173,33 @@ final class WorkshopFilterCatalogTests: XCTestCase {
     XCTAssertTrue(draft.excludedTags.contains("MMD"), "the tag, not the label 'MMD (Miku Miku Dance)'")
     XCTAssertFalse(draft.excludedTags.contains("Unspecified"))
   }
+
+  @MainActor
+  func testHideInstalledCountsInFilterBadgeAndShowOnlyWithoutAffectingServerFilterCount() {
+    var draft = WorkshopFilterDraft.cleared
+    XCTAssertFalse(draft.hideInstalled)
+    XCTAssertEqual(draft.count, 0)
+    XCTAssertEqual(draft.serverFilterCount, 0)
+    XCTAssertEqual(draft.requiredCount, 0)
+
+    draft.hideInstalled = true
+    XCTAssertEqual(draft.count, 1)
+    XCTAssertEqual(draft.serverFilterCount, 0, "Hide installed is client-side and never sent to Steam")
+    XCTAssertEqual(draft.requiredCount, 1, "Show only group counts Hide installed")
+
+    draft.setRequired("Approved", true)
+    XCTAssertEqual(draft.count, 2)
+    XCTAssertEqual(draft.serverFilterCount, 1)
+    XCTAssertEqual(draft.requiredCount, 2)
+
+    draft.clear()
+    XCTAssertEqual(draft, .cleared)
+    XCTAssertFalse(draft.hideInstalled)
+    XCTAssertEqual(draft.count, 0)
+
+    XCTAssertEqual(Catalog.canonicalTag("  anime "), "Anime")
+    XCTAssertEqual(Catalog.canonicalTag("Custom Tag"), "Custom Tag")
+    XCTAssertEqual(Catalog.displayName(for: "1920 x 1080"), "1920 x 1080")
+    XCTAssertEqual(Catalog.displayName(for: "Custom Tag"), "Custom Tag")
+  }
 }

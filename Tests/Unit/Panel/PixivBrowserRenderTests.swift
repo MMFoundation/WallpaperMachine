@@ -555,4 +555,35 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
     XCTAssertEqual(hosted.contentToolbarItems.count, idle + 1, "the pill leaves when the save is done")
     await hosted.close()
   }
+
+  func testActiveFilterChipsFitSmallestWindowBesideOpenInspectorAndHideWhenSidebarOpens()
+    async throws
+  {
+    let hosted = try host()
+    try await loadAndSelect(hosted)
+    let controller = hosted.controller
+    let model = controller.pixivBrowser
+    await model.choose(orientation: .landscape).value
+    await model.choose(minimumSize: .ultraHD).value
+    await model.set(hidesAIGenerated: true).value
+    controller.shell.setFiltersShown(false)
+    controller.shell.isInspectorShown = true
+
+    try await hosted.layout(at: sizes[0])
+    assertFits(hosted, sizes[0], "pixiv active filter chips beside open inspector")
+
+    let page = hosted.standalone(PixivBrowserPage(), size: NSSize(width: 360, height: 560))
+    try await Task.sleep(for: .milliseconds(250))
+    XCTAssertTrue(
+      identifiers(in: page).contains("pixiv-active-filters"),
+      "active filter chips appear when Filters sidebar is collapsed")
+
+    controller.shell.setFiltersShown(true)
+    page.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertFalse(
+      identifiers(in: page).contains("pixiv-active-filters"),
+      "active filter chips hide when Filters sidebar opens")
+    await hosted.close()
+  }
 }

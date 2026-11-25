@@ -583,4 +583,45 @@ final class InstalledPageRenderTests: PanelTestCase {
       AccessibilityElement.everything(in: headerHosting).first { $0.identifier == "installed-select" })
     XCTAssertEqual(resetSelect.label, L("Select"), "one click on Done clears selection and returns to Select")
   }
+
+  func testScopeCollectionsCapsuleAndActiveFilterChipsFitNarrowColumnAndFollowSidebar() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    try await prepare(panel)
+    let controller = panel.controller
+    let model = controller.library
+    _ = try panel.collections.create(name: "Night", wallpaperIDs: ["item1"])
+
+    let shell = controller.shell
+    shell.windowWidthChanged(.compact)
+    shell.toggleInspector()
+    shell.setFiltersShown(false)
+
+    // Favorites scope alone must not show ActiveFilterChipsBar; Collections dropdown stays visible.
+    model.show(.favorites)
+    let size = Self.sizes[0]
+    let hosted = HostedPanel(panel, size: size)
+    defer { hosted.close() }
+    try await hosted.settle(0.4)
+    hosted.layout(at: size)
+    assertFits(hosted, size, "scope collections dropdown + favorites without chips")
+    XCTAssertNotNil(element("scope-collections", in: hosted.hosting.view))
+    XCTAssertNil(
+      element("installed-active-filters", in: hosted.hosting.view),
+      "Favorites view scope alone does not show active filter chips")
+
+    // Adding narrowing filters while Filters sidebar is collapsed shows ActiveFilterChipsBar.
+    model.setChip("Anime", .required)
+    model.setIncluded("Web", false)
+    try await hosted.settle(0.4)
+    hosted.layout(at: size)
+    assertFits(hosted, size, "installed active filter chips beside open inspector")
+    XCTAssertNotNil(element("installed-active-filters", in: hosted.hosting.view))
+    XCTAssertNotNil(element("installed-active-filters-clear", in: hosted.hosting.view))
+
+    // Opening the Filters sidebar hides ActiveFilterChipsBar.
+    shell.setFiltersShown(true)
+    try await hosted.settle(0.3)
+    XCTAssertNil(element("installed-active-filters", in: hosted.hosting.view))
+  }
 }

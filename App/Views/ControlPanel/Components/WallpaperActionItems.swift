@@ -27,8 +27,11 @@ struct WallpaperActionItems: View {
 
   var body: some View {
     let target = controller.targetDisplay
+    let displays = controller.targetDisplays
+    let collections = controller.collectionRows
     let shared = controller.standaloneDisplayRows
     let offersAll = InspectorPolicy.offersApplyToAll(row, sharedDisplayCount: shared.count)
+    let offersDisplayMenu = InspectorPolicy.offersApplyToDisplay(row, displayCount: displays.count)
     let everywhere = InspectorPolicy.appliesEverywhereAlready(
       row.id, sharedDisplayWallpapers: shared.map(\.wallpaperID))
     let playlist = InspectorPolicy.playlistToggle(
@@ -90,6 +93,9 @@ struct WallpaperActionItems: View {
         }
       }
     }
+    if offersDisplayMenu {
+      applyToDisplayMenu(displays: displays)
+    }
     if offersAll {
       Button {
         controller.launch(PanelActionCoordinator.key("activateAll", id: row.id)) {
@@ -100,6 +106,7 @@ struct WallpaperActionItems: View {
       }
       .disabled(everywhere)
     }
+    collectionsMenu(collections: collections)
     switch playlist {
     case .hidden: EmptyView()
     case .enabled(let isListed), .disabled(let isListed):
@@ -181,5 +188,72 @@ struct WallpaperActionItems: View {
     }
     // Until Steam has answered for this account, a missing mark may be a subscription after all.
     .disabled(controller.isBusy(key) || !controller.workshop.subscriptionsKnown)
+  }
+
+  /// Direct multi-display apply submenu: lists each connected display and applies directly without
+  /// changing the target display.
+  private func applyToDisplayMenu(displays: [TargetDisplayOption]) -> some View {
+    Menu {
+      ForEach(displays) { display in
+        let isShowing = display.wallpaperID == row.id
+        let key = PanelActionCoordinator.key("activate", id: row.id, detail: display.id)
+        Toggle(
+          isOn: Binding(
+            get: { isShowing },
+            set: { _ in
+              controller.launch(key) {
+                try await controller.activate(row.id, on: display.id)
+              }
+            })
+        ) {
+          Text(verbatim: display.shortLabel(among: displays))
+        }
+        .disabled(!display.isSelectable || controller.isBusy(key))
+      }
+    } label: {
+      Label("Apply to display", systemImage: ApplyOffer.symbol)
+    }
+  }
+
+  /// Collections submenu: toggles membership of this wallpaper in any local collection or opens
+  /// creation of a new collection.
+  private func collectionsMenu(collections: [CollectionRow]) -> some View {
+    Menu {
+      if collections.isEmpty {
+        Text("No collections yet")
+      } else {
+        ForEach(collections) { collection in
+          let isMember = collection.wallpaperIDs.contains(row.id)
+          let key = PanelActionCoordinator.key(
+            "collectionMember", id: collection.id, detail: row.id)
+          Toggle(
+            isOn: Binding(
+              get: { isMember },
+              set: { member in
+                controller.launch(key) {
+                  if member {
+                    try await controller.addToCollection(collection.id, wallpaperIDs: [row.id])
+                  } else {
+                    try await controller.removeFromCollection(
+                      collection.id, wallpaperIDs: [row.id])
+                  }
+                }
+              })
+          ) {
+            Text(verbatim: collection.name)
+          }
+          .disabled(controller.isBusy(key))
+        }
+      }
+      Divider()
+      Button {
+        controller.library.beginCreatingCollectionInSidebar()
+      } label: {
+        Label("New collection…", systemImage: "plus")
+      }
+      .disabled(controller.shell.collectionEditor.isChanging)
+    } label: {
+      Label("Collections", systemImage: "folder")
+    }
   }
 }

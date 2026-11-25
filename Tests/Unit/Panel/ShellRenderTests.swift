@@ -530,6 +530,68 @@ final class ShellRenderTests: PanelTestCase {
       XCTAssertEqual(details.fittingSize.width, NowPlayingPlaylistDetails.width, accuracy: 1)
     }
   }
+
+  func testNowPlayingPlaylistDetailsExposesInlineStartOrderIntervalAndStopControls() async throws {
+    try await withPanel { panel in
+      try await ShellFixtures.seed(panel.store, bridge: panel.bridge)
+      let controller = panel.controller
+      panel.playlists.update("primary") {
+        $0.mode = .off
+        $0.source = .favorites
+        $0.order = .shuffle
+      }
+      controller.favoriteIDs = ["w0"]
+      let offState = controller.playlistState(for: "primary")
+      XCTAssertEqual(
+        NowPlayingPlaylistDetails.startSource(for: offState, controller: controller), .favorites,
+        "Play reuses the saved playable source")
+
+      // If the saved source has no playable wallpapers, Play falls back to All wallpapers.
+      controller.favoriteIDs = []
+      XCTAssertEqual(
+        NowPlayingPlaylistDetails.startSource(for: offState, controller: controller), .all)
+
+      @MainActor func renderIdentifiers() async throws -> (ids: Set<String>, width: CGFloat) {
+        let hosting = NSHostingView(
+          rootView: NowPlayingPlaylistDetails()
+            .panelPresentationLocale()
+            .environment(controller)
+            .panelTheme(theme: controller.theme, locale: PanelLocale.shared))
+        let size = NSRect(x: 0, y: 0, width: NowPlayingPlaylistDetails.width, height: 320)
+        hosting.frame = size
+        let window = NSWindow(
+          contentRect: size,
+          styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        defer {
+          window.contentView = nil
+          window.close()
+        }
+        hosting.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(200))
+        hosting.layoutSubtreeIfNeeded()
+        let ids = Set(AccessibilityElement.everything(in: hosting).map(\.identifier))
+        return (ids, hosting.fittingSize.width)
+      }
+
+      let offRender = try await renderIdentifiers()
+      XCTAssertEqual(offRender.width, NowPlayingPlaylistDetails.width, accuracy: 1)
+      XCTAssertTrue(offRender.ids.contains("now-playing-playlist-start"))
+      XCTAssertTrue(offRender.ids.contains("now-playing-playlist-order"))
+      XCTAssertTrue(offRender.ids.contains("now-playing-playlist-interval"))
+      XCTAssertFalse(offRender.ids.contains("now-playing-playlist-stop"))
+
+      panel.playlists.update("primary") { $0.mode = .rotate }
+      let rotatingRender = try await renderIdentifiers()
+      XCTAssertEqual(rotatingRender.width, NowPlayingPlaylistDetails.width, accuracy: 1)
+      XCTAssertTrue(rotatingRender.ids.contains("now-playing-playlist-skip"))
+      XCTAssertTrue(rotatingRender.ids.contains("now-playing-playlist-stop"))
+      XCTAssertTrue(rotatingRender.ids.contains("now-playing-playlist-order"))
+      XCTAssertTrue(rotatingRender.ids.contains("now-playing-playlist-interval"))
+      XCTAssertFalse(rotatingRender.ids.contains("now-playing-playlist-start"))
+    }
+  }
 }
 
 private struct NowPlayingWindowLookProbe: View {

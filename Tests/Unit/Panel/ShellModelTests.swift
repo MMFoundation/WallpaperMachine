@@ -121,6 +121,38 @@ final class ShellModelTests: PanelTestCase {
     XCTAssertEqual(TargetDisplayOption.name(of: "primary"), "primary")
   }
 
+  func testTargetDisplayMenuLabelIncludesCurrentWallpaperTitleAndAbbreviatesLongTitles()
+    async throws
+  {
+    let displays = [
+      TargetDisplayOption(
+        id: "primary", title: "Studio Display (1 - Primary)", isEnabled: true, isMirror: false,
+        wallpaperID: "w1", wallpaperTitle: "Aurora Drift"),
+      TargetDisplayOption(
+        id: "secondary", title: "Built-in Retina Display (2)", isEnabled: true, isMirror: false,
+        wallpaperID: "w2",
+        wallpaperTitle: "A very long wallpaper title that should be abbreviated neatly in the menu"),
+      TargetDisplayOption(
+        id: "off", title: "Projector (3)", isEnabled: false, isMirror: false,
+        wallpaperID: "w1", wallpaperTitle: "Aurora Drift"),
+    ]
+    XCTAssertEqual(displays[0].menuLabel(among: displays), "Studio Display · Aurora Drift")
+    let abbreviated = displays[1].menuLabel(among: displays)
+    XCTAssertTrue(abbreviated.hasPrefix("Built-in Retina Display · "))
+    XCTAssertTrue(abbreviated.hasSuffix("…"))
+    XCTAssertLessThanOrEqual(
+      TargetDisplayOption.abbreviatedWallpaperTitle(displays[1].wallpaperTitle!).count, 40)
+    XCTAssertEqual(
+      displays[2].menuLabel(among: displays), L("\("Projector") (disabled)"),
+      "disabled displays do not claim a running wallpaper title")
+
+    try await withPanel { panel in
+      try await ShellFixtures.seed(panel.store, bridge: panel.bridge)
+      let populated = panel.controller.targetDisplays
+      XCTAssertEqual(populated.first { $0.id == "primary" }?.wallpaperTitle, ShellFixtures.titles[0])
+    }
+  }
+
   func testTheArtworkOpensInstalledWithTheWallpaperSelected() async throws {
     try await withApplyingPanel { panel, _, _ in
       let shell = panel.controller.shell

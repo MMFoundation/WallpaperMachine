@@ -19,11 +19,17 @@ extension PanelController {
   /// does nothing; only `reapply` restarts it, so a double-click, Recently used and Previous keep
   /// leaving a running wallpaper alone. A scene while the shared resources are missing opens their
   /// setup instead (`getsSceneResourcesInstead(of:)`), as `reapply` and `activateAll` do.
-  func activate(_ id: String) async throws { try await applyToTarget(id, restarts: false) }
+  func activate(_ id: String) async throws { try await apply(id, to: nil, restarts: false) }
+
+  /// Applies `id` directly to an enabled independent display without changing `targetDisplayID`.
+  func activate(_ id: String, on displayID: String) async throws {
+    let displayID = try standaloneDisplayID(displayID)
+    try await apply(id, to: displayID, restarts: false)
+  }
 
   /// `reapplyWallpaper`: the inspector's Reapply wallpaper, which takes the wallpaper off the
   /// display and loads it afresh (or applies it plainly when the display does not show it).
-  func reapply(_ id: String) async throws { try await applyToTarget(id, restarts: true) }
+  func reapply(_ id: String) async throws { try await apply(id, to: nil, restarts: true) }
 
   /// An inspector's Apply wallpaper or Reapply wallpaper, as the offer decided it.
   func apply(_ offer: ApplyOffer) async throws {
@@ -104,12 +110,13 @@ extension PanelController {
     }
   }
 
-  /// Applies or restarts `id` on the display targeted *now*, which is the one the user means:
-  /// the command may wait behind others, and the target can change in the meantime. It is read
-  /// before anything here waits (the shared resources, reading a refused scene again), so the
-  /// display that is checked and the one applied to are the one the user had chosen.
-  private func applyToTarget(_ id: String, restarts: Bool) async throws {
-    let displayID = navigation.targetDisplayID
+  /// Applies or restarts `id` on `explicitDisplayID` (or the display targeted *now* when nil),
+  /// which is the one the user means: the command may wait behind others, and the target can change
+  /// in the meantime. It is read before anything here waits (the shared resources, reading a
+  /// refused scene again), so the display that is checked and the one applied to are the one the
+  /// user had chosen.
+  private func apply(_ id: String, to explicitDisplayID: String?, restarts: Bool) async throws {
+    let displayID = explicitDisplayID ?? navigation.targetDisplayID
     if try await getsSceneResourcesInstead(of: id) { return }
     // Restarting a scene, or choosing the one the display shows, puts up nothing new.
     if !restarts, !store.isWallpaperActive(id: id, displayId: displayID) {

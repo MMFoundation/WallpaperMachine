@@ -481,15 +481,20 @@ Deleting a wallpaper clears its cached details, and a reinstall replaces them.
 
 A right click on an Installed tile opens the actions for that tile without selecting it
 first: **Apply wallpaper**, **Add to favorites** or **Remove from favorites**, then what
-the inspector's **More actions** menu offers (Preview, **Show in Finder**, **Apply to all
-displays**, the display's list, **Reinstall from Workshop…** and **Move wallpaper to
-Trash**), under the same rules, with **View on Steam Workshop** after **Show in Finder** for
-a Workshop wallpaper. The two menus are one list of items
-(`WallpaperActionItems`); sharing, the Steam subscription, the author's page and the
-problem report stay in the inspector's. The menu acts on the tile that was clicked, never
-on the ticked selection, whose tools are in the bar under the grid. With the keyboard,
-`Return` or `Space` on a focused tile selects it and `Command`-`Return` applies it, as a
-double click does.
+the inspector's **More actions** menu offers (Preview, **Show in Finder**, **Apply to
+display** when two or more displays are connected, **Apply to all displays**,
+**Collections** to toggle membership in any local collection or start **New collection…**,
+the display's list, **Reinstall from Workshop…** and **Move wallpaper to Trash**), under
+the same rules, with **View on Steam Workshop** after **Show in Finder** for a Workshop
+wallpaper. Choosing a display in **Apply to display** applies the wallpaper directly to
+that display without changing the window's target display (disabled and mirrored displays
+are listed as unavailable). The two menus are one list of items (`WallpaperActionItems`);
+sharing, the Steam subscription, the author's page and the problem report stay in the
+inspector's. The menu acts on the tile that was clicked, never on the ticked selection,
+whose tools are in the bar under the grid. With the keyboard, `Return` or `Space` on a
+focused tile selects it, `Command`-`Return` applies it (as a double click does), and
+`Shift`-`Arrow` (or `Shift`-`Home` / `Shift`-`End`) extends or contracts a contiguous
+range selection in grid order around a fixed anchor.
 
 - **Apply wallpaper** activates the selected wallpaper on the current target
   display; for the wallpaper already active there it reads **Reapply wallpaper**, with a
@@ -696,10 +701,13 @@ shows the wallpaper selected on Installed. Its controls:
   symbol (repeat or shuffle) when rotating, or a sunrise for **Day and night** — and is
   unavailable for a mirror or a disabled display. It opens the target display's playlist
   above the bar (restoring the window's light or dark appearance over a dark seasonal
-  bar): what it plays, the order and how often when rotating, when it changes next (or
+  bar): what it plays, inline **In order** / **Shuffle** and **How often** rotation
+  controls (for rotating playlists and when starting rotation), when it changes next (or
   **Playlist paused**), **Change now** (or **Resume playlist**), **Stop**, which turns
   the playlist off and leaves the wallpaper on screen, and **Settings…**, which opens
-  Settings → Displays. A display whose playlist is off says to press Play on Installed.
+  Settings → Displays. When the target display's playlist is off, the popover lets you
+  choose order and interval and press **Play** to start rotating right away without leaving
+  the page.
 
 ## Previous, next and recently used
 
@@ -942,7 +950,9 @@ and reinstalling the wallpaper brings the assignment back.
 
 The toolbar's target-display menu chooses which display Apply acts on, and which display
 Now Playing shows. In a wide window the button names the chosen display next to its icon; a
-narrow window shows the icon alone and the help names the display. With two or more displays
+narrow window shows the icon alone and the help names the display. Inside the menu, each
+enabled display also shows its currently applied wallpaper title beside the display name.
+With two or more displays
 that can show their own wallpaper, the inspectors' **Apply wallpaper** and **Reapply
 wallpaper** help names it too. Disabled and mirrored displays are listed but not selectable, annotated
 `(disabled)` or `(mirrored)`; the menu waits while a wallpaper command runs. A target that
@@ -1046,12 +1056,19 @@ filters, and waits out Settings, which has none. In a window under 960 points
 there is no room for it beside the inspector, so opening one of them closes the
 other. It is not a popover: it holds neither the support prompt nor other popovers
 back. It starts closed and nothing is stored; closing never changes the search or
-the filters. Each page's groups are listed below. Tags render as chips that start
-out filtering nothing: a click selects one (accent fill and a check) so only
-wallpapers carrying that tag are shown, several selected must all be carried, and a
-second click lets it go. Option-click, or **Hide this tag** in the chip's context
-menu, hides every wallpaper carrying it instead (struck through in red); a click
-lets that go too. The Tags group's **Reset** puts its chips back.
+the filters. While the sidebar is collapsed and active filters narrow the current view
+(narrowing filters on Installed, excluding the Favorites and collection view scopes; any
+non-default filter on Discover or pixiv), a single-line horizontally scrollable active
+filter chips strip (`ActiveFilterChipsBar`) appears under the page header so each active
+filter can be removed individually or cleared together with **Clear** without reopening
+the sidebar. Each page's groups are listed below. Tags in the sidebar and in the
+Installed, Discover and pixiv inspectors render as clickable chips (`TagChip`): on
+Installed and Discover a click selects a tag (accent fill and a check) so only wallpapers
+carrying it are shown, several selected must all be carried, and a second click lets it go;
+Option-click, or **Hide this tag** in the chip's context menu, hides every wallpaper
+carrying it instead (struck through in red) and a click lets that go too; on pixiv a
+click searches pixiv for that tag immediately. The Tags group's **Reset** puts its chips
+back.
 Groups fold open and shut with a short animation (none under Reduce Motion).
 Collapsed groups retain their state and show their own active count:
 Show only counts selected tags, and exclude groups count visible boxes that differ
@@ -1142,19 +1159,25 @@ stops while the window is hidden and with Reduce Motion.
 
 The **Collections** group at the top of Installed's Filters sidebar lists named local
 collections with their sizes, separate from Steam's Workshop collections and the
-author's tags; choosing one shows it on Installed (its chip joins the view chips; the
+author's tags; the **Collections** dropdown capsule in Installed's scope bar offers the
+same quick switch (plus **All wallpapers** and **New collection…**) even while the Filters
+sidebar is closed. Choosing a collection shows it on Installed (the dropdown capsule takes
+its name and accent; the
 Filters sidebar count includes it, while the header's Filter badge counts only narrowing
-filters beyond the view scope), choosing it again or pressing its chip shows every
-wallpaper again, and a collection deleted while it is shown returns the page to All
-wallpapers. **New collection…** under the list creates one with an inline name field
+filters beyond the view scope), choosing it again or switching back to **All wallpapers**
+shows every wallpaper again, and a collection deleted while it is shown returns the page
+to All wallpapers. **New collection…** under the list (or from the scope bar's Collections
+menu or a wallpaper's **Collections** submenu, which opens the sidebar and expands
+Collections) creates one with an inline name field
 (a refused name says why under the field), and a collection's context menu
 (and its VoiceOver actions) offers **Play** and **Shuffle**
 ([playlists](playlists.md#playing-from-installed)), **Rename…**, inline, and **Delete…**, which asks
 in a confirmation sheet. Add selected wallpapers through **Add to collection…** in
 Installed's footer (or **New collection…** there, named from the selection), remove
-selected members of the shown collection, or toggle membership in the inspector's
-Collections card, whose **New collection…** creates one holding the wallpaper. A
-collection filter composes with search and the existing filters. Deleting a
+selected members of the shown collection, toggle membership from a tile's right-click
+**Collections** submenu (or the inspector's **More actions** menu), or toggle membership
+in the inspector's Collections card, whose **New collection…** creates one holding the
+wallpaper. A collection filter composes with search and the existing filters. Deleting a
 collection leaves its wallpapers installed. Collections can feed
 [playlists](playlists.md#collections-and-saved-playlists).
 

@@ -47,8 +47,13 @@ final class LibraryCollectionTests: PanelTestCase {
     return view.subviews.lazy.compactMap { self.grid(in: $0) }.first
   }
 
-  private func key(_ code: UInt16, command: Bool = false, window: NSWindow) -> NSEvent {
-    NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: command ? [.command] : [], timestamp: 0,
+  private func key(
+    _ code: UInt16, command: Bool = false, shift: Bool = false, window: NSWindow
+  ) -> NSEvent {
+    var flags: NSEvent.ModifierFlags = []
+    if command { flags.insert(.command) }
+    if shift { flags.insert(.shift) }
+    return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
       windowNumber: window.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "",
       isARepeat: false, keyCode: code)!
   }
@@ -181,5 +186,64 @@ final class LibraryCollectionTests: PanelTestCase {
     XCTAssertTrue(model.isChecked(coordinator.rows[2].id))
     model.tileClicked(coordinator.rows[2].id, clickCount: 1, modifiers: [])
     XCTAssertTrue(model.isChecked(coordinator.rows[2].id), "the ending click cannot undo the sweep")
+  }
+
+  func testShiftArrowExtendsContractsAndReversesContiguousSelectionWhileKeepingReturnAndSelectAll()
+    async throws
+  {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    try await prepare(panel, count: 24)
+    let hosted = HostedPanel(panel, size: NSSize(width: 1240, height: 800))
+    defer { hosted.close() }
+    try await hosted.settle(0.3)
+    let coordinator = try XCTUnwrap(grid(in: hosted.hosting.view))
+    let model = panel.controller.library
+    let cols = coordinator.gridLayout.geometry.columns
+    XCTAssertGreaterThanOrEqual(cols, 3)
+
+    XCTAssertTrue(hosted.window.makeFirstResponder(coordinator.collection))
+    coordinator.focus(coordinator.rows[1].id, byKeyboard: true)
+
+    // Shift+Right extends across rows[1...2] and anchors on rows[1].
+    XCTAssertTrue(coordinator.keyDown(key(124, shift: true, window: hosted.window)))
+    XCTAssertEqual(model.focusedID, coordinator.rows[2].id)
+    XCTAssertEqual(model.selection.anchor, coordinator.rows[1].id)
+    XCTAssertEqual(Set(model.selectedIDs), Set(coordinator.rows[1...2].map(\.id)))
+
+    // Shift+Down extends to the tile one row below rows[2].
+    XCTAssertTrue(coordinator.keyDown(key(125, shift: true, window: hosted.window)))
+    let downTarget = 2 + cols
+    XCTAssertEqual(model.focusedID, coordinator.rows[downTarget].id)
+    XCTAssertEqual(model.selection.anchor, coordinator.rows[1].id)
+    XCTAssertEqual(Set(model.selectedIDs), Set(coordinator.rows[1...downTarget].map(\.id)))
+
+    // Shift+Up contracts cleanly back to rows[1...2].
+    XCTAssertTrue(coordinator.keyDown(key(126, shift: true, window: hosted.window)))
+    XCTAssertEqual(model.focusedID, coordinator.rows[2].id)
+    XCTAssertEqual(Set(model.selectedIDs), Set(coordinator.rows[1...2].map(\.id)))
+
+    // Two Shift+Left presses shrink to anchor and cross to rows[0...1].
+    XCTAssertTrue(coordinator.keyDown(key(123, shift: true, window: hosted.window)))
+    XCTAssertEqual(model.selectedIDs, [coordinator.rows[1].id])
+    XCTAssertTrue(coordinator.keyDown(key(123, shift: true, window: hosted.window)))
+    XCTAssertEqual(Set(model.selectedIDs), Set(coordinator.rows[0...1].map(\.id)))
+    XCTAssertEqual(model.selection.anchor, coordinator.rows[1].id)
+
+    // Plain Right moves focus without changing selection, Escape clears, Return selects for inspector.
+    XCTAssertTrue(coordinator.keyDown(key(124, window: hosted.window)))
+    XCTAssertEqual(model.focusedID, coordinator.rows[1].id)
+    XCTAssertEqual(Set(model.selectedIDs), Set(coordinator.rows[0...1].map(\.id)))
+    XCTAssertTrue(coordinator.keyDown(key(53, window: hosted.window)))
+    XCTAssertTrue(model.selection.isEmpty)
+
+    // ⌘A still selects all visible tiles.
+    let selectAll = NSEvent.keyEvent(
+      with: .keyDown, location: .zero, modifierFlags: [.command], timestamp: 0,
+      windowNumber: hosted.window.windowNumber, context: nil, characters: "a",
+      charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
+    XCTAssertTrue(coordinator.keyDown(selectAll))
+    XCTAssertEqual(model.selectedIDs.count, 24)
+    XCTAssertFalse(hosted.window.isVisible)
   }
 }

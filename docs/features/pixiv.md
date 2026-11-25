@@ -48,7 +48,10 @@ A work is rated Mature when pixiv restricts it to adults (`xRestrict` 1, or any
 entry of an R-18 ranking), Questionable when pixiv's own site blurs it as
 sensitive or grades it suggestive (sanity level 4 or more, or a `sexual` grade
 above 0), and Everyone otherwise. R-18G (`xRestrict` 2, or `grotesque` in an
-R-18 ranking) is its own rating, which no box offers and no query admits.
+R-18 ranking) is its own rating, which no box offers and no query admits. While
+the Filters sidebar is collapsed and filters differ from the defaults, an active
+filter chips strip under the header lets you remove individual active filters or
+clear them together without reopening the sidebar.
 
 Source pages are cached per listing (`PixivStore`). Filters apply before matching
 works are divided into display pages (50 for rankings, 60 for search), preserving
@@ -103,7 +106,8 @@ R-18 ranking denials have the account-specific handling described below.
 Selecting a tile fetches the work's page list; the inspector shows the page
 whole, the artist's name (a link to their pixiv page), a page stepper for works with
 several (with the Library tab's grid symbol beside a page that is already in the library, the
-mark its tile wears too), **Download** (or **Download page N**) and **View on pixiv**; a saved page
+mark its tile wears too), **Download** (or **Download page N**), **View on pixiv**, and
+the work's clickable tags (clicking a tag immediately runs a pixiv tag search for it); a saved page
 offers **Apply wallpaper** (or **Reapply wallpaper**) as its primary button, the Installed
 inspector's own, whose help names the target display while two or more displays can show
 their own wallpaper ([Selection versus apply](control-panel.md#selection-versus-apply)), and

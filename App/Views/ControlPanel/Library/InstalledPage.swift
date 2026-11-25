@@ -78,9 +78,15 @@ private struct InstalledColumn: View {
 
   var body: some View {
     let model = controller.library
+    let activeChips = controller.shell.areFiltersShown ? [] : model.activeFilterChips
     VStack(spacing: 0) {
       InstalledScopeBar()
       InstalledHeaderRow()
+      if !activeChips.isEmpty {
+        ActiveFilterChipsBar(
+          chips: activeChips, identifierPrefix: "installed-active-filters",
+          onClear: { model.clearNarrowingFilters() })
+      }
       Group {
         if let empty = model.emptyState {
           InstalledEmptyState(state: empty)

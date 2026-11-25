@@ -14,6 +14,10 @@ enum WorkshopEmptyState: Equatable {
   case loading
   /// The load failed; the message is Steam's or the network's own and is never a catalog key.
   case unavailable(String)
+  /// Every item on the current Steam page is already installed in the local library, so the
+  /// client-side Hide installed filter left no tiles on this page (never falsely reported as no
+  /// results). `nextPage` is the next page to try when one exists.
+  case allInstalledOnPage(count: Int, nextPage: Int?)
   case noResults(Recovery)
 
   /// Why nothing matched, and the one thing most likely to fix it.
@@ -36,21 +40,25 @@ enum WorkshopEmptyState: Equatable {
   /// - Parameters:
   ///   - browse: The page's list state.
   ///   - draftText: The search field's text, which a list Steam does not search ignores.
-  ///   - filterCount: How many filters the Filter button counts.
-  static func make(browse: WorkshopBrowseState, draftText: String, filterCount: Int)
-    -> WorkshopEmptyState
-  {
+  ///   - filterCount: How many server-side filters differ from defaults.
+  ///   - allInstalledHiddenCount: Positive when Steam returned items on this page and the
+  ///     client-side Hide installed filter hid every one of them.
+  static func make(
+    browse: WorkshopBrowseState, draftText: String, filterCount: Int,
+    allInstalledHiddenCount: Int = 0
+  ) -> WorkshopEmptyState {
     make(
       source: browse.source, isSignedIn: browse.isSignedInToSteam,
       isSigningIn: browse.isSigningInToSteam, isLoading: browse.isLoading,
       errorMessage: browse.errorMessage, totalCount: browse.totalCount, page: browse.pager.page,
-      totalPages: browse.pager.totalPages, draftText: draftText, filterCount: filterCount)
+      totalPages: browse.pager.totalPages, draftText: draftText, filterCount: filterCount,
+      allInstalledHiddenCount: allInstalledHiddenCount)
   }
 
   static func make(
     source: WorkshopSourceState, isSignedIn: Bool, isSigningIn: Bool, isLoading: Bool,
     errorMessage: String?, totalCount: Int, page: Int, totalPages: Int, draftText: String,
-    filterCount: Int
+    filterCount: Int, allInstalledHiddenCount: Int = 0
   ) -> WorkshopEmptyState {
     if source.source.isPersonal, !isSignedIn, !isLoading {
       return source.source == .favorites
@@ -58,6 +66,10 @@ enum WorkshopEmptyState: Equatable {
     }
     if isLoading { return .loading }
     if let errorMessage { return .unavailable(errorMessage) }
+    if allInstalledHiddenCount > 0 {
+      return .allInstalledOnPage(
+        count: allInstalledHiddenCount, nextPage: page < totalPages ? page + 1 : nil)
+    }
 
     // Personal, author and collection totals are read before local filtering. A zero total
     // cannot be caused by the sidebar; its badge also counts choices that broaden the list.

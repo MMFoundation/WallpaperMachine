@@ -29,16 +29,23 @@ for tag, with Application and Asset excluded by default:
 
 | Group | Boxes | Default |
 | --- | --- | --- |
-| Show only | Approved, Audio responsive, Customizable | all off |
+| Show only | Approved, Audio responsive, Customizable, Hide installed (local) | all off |
 | Type | Scene, Video, Web, Application; Category: Wallpaper, Preset, Asset | Application and Asset off; others on |
 | Age rating | Everyone (G), Questionable (PG-13), Mature (R-18) | Everyone only |
 | Resolution | Widescreen (Standard definition, 1280 x 720, 1366 x 768, 1920 x 1080, 2560 x 1440, 3840 x 2160), Ultrawide (standard, 2560 x 1080, 3440 x 1440), Dual monitor (standard, 3840 x 1080, 5120 x 1440, 7680 x 2160), Triple monitor (standard, 4096 x 768, 5760 x 1080, 7680 x 1440, 11520 x 2160), Portrait monitor / phone (standard, 720 x 1280, 1080 x 1920, 1440 x 2560, 2160 x 3840), Other resolution, Dynamic resolution | all on |
 | Tags (chips) | Abstract, Animal, Anime, Cartoon, CGI, Cyberpunk, Fantasy, Game, Girls, Guys, Landscape, Medieval, Memes, MMD, Music, Nature, Pixel art, Relaxing, Retro, Sci-Fi, Sports, Technology, Television, Vehicle, Unspecified genre | none selected; Unspecified hidden |
 
-A ticked **Show only** box is sent to Steam as `requiredtags[]`, so every ticked
-one must be on an item. A selected Tags chip is sent the same way, so selecting
+A ticked **Show only** tag box is sent to Steam as `requiredtags[]`, so every ticked
+one must be on an item. **Hide installed** filters the current Steam page locally without
+re-querying Steam (and leaves direct link/id lookups visible); when every item on the
+current Steam page is already installed, the grid explains that the page is all installed
+and offers **Show installed** (plus **Next page** when another page exists) instead of
+claiming there are no results. A selected Tags chip (in the sidebar or clicked directly in
+the Workshop inspector) is sent as `requiredtags[]`, so selecting
 Anime shows only items tagged Anime; a hidden chip (Option-click or its context
-menu) is sent as `excludedtags[]`. An unticked checkbox
+menu) is sent as `excludedtags[]`. While the Filters sidebar is collapsed and filters are
+active, an active filter chips strip under the header lets you remove individual active
+filters or clear them at once. An unticked checkbox
 sends the tag as `excludedtags[]`: Steam drops an item carrying *any* excluded
 tag, so a group with everything ticked filters nothing and unticking Video hides
 every Video item. Resolution sub-groups have **All** / **None** shortcuts and
@@ -49,8 +56,8 @@ Windows applications playable (`WorkshopStore.defaultExcludedTags` holds
 the out-of-the-box list: Application, Asset, Questionable, Mature,
 Unspecified). A tag is never both required and excluded: selecting a chip stops
 hiding it and the other way round. The Filter button's
-count is the number of boxes that differ from the defaults; **Clear** restores
-them.
+count is the number of boxes that differ from the defaults (including **Hide installed**);
+**Clear** restores them.
 
 Results open on Most popular this year and can be sorted by Highest rated
 (Steam's all-time `toprated`), Most popular today / Trending this week / Most

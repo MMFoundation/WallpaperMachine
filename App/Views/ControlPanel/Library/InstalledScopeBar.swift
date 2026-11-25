@@ -1,35 +1,38 @@
 import SwiftUI
 
-/// The row of views above the Library grid: All wallpapers and Favorites, each with its count, and
-/// while a collection is on show, that collection too. One is lit: the view the grid shows.
+/// The row of views above the Library grid: All wallpapers, Favorites, and a Collections dropdown
+/// capsule (showing the active collection name and count while one is on show). One is lit: the
+/// view the grid shows.
 ///
-/// Collections are chosen, made, renamed and deleted in the filters panel's Collections group; the
-/// collection's chip here says which one is on show and puts it away. All wallpapers carries an
-/// accent dot while Workshop wallpapers have an update, with how many as its tooltip and for
-/// VoiceOver.
+/// The Collections dropdown switches directly between local collections or opens new-collection
+/// creation even when the Filters sidebar is closed. All wallpapers carries an accent dot while
+/// Workshop wallpapers have an update, with how many as its tooltip and for VoiceOver.
 ///
 /// Play at the end, with its order menu, turns the view on show into the target display's rotation,
 /// so a collection plays from where it is chosen rather than only from Settings › Displays.
 ///
 /// In a narrow page column the row gives up words in the header row's tiers (`HeaderTier`): first
-/// Play and its order become their symbols, then All wallpapers and Favorites keep only their
-/// symbol and count, their names staying as tooltip and VoiceOver name. The collection's chip keeps
-/// its name in every tier, since it is the only place that says which collection is on show; a name
-/// too long for the chip shows in full as its tooltip.
+/// Play and its order become their symbols, then All wallpapers, Favorites and an inactive
+/// Collections menu keep only their symbols (and counts), their names staying as tooltip and
+/// VoiceOver name. An active collection keeps its name in every tier, since it is the only place
+/// that says which collection is on show; a name too long for the capsule shows in full as its
+/// tooltip.
 struct InstalledScopeBar: View {
   @Environment(PanelController.self) private var controller
 
   var body: some View {
     // The counts say nothing while the library loads, when they would say there is nothing. Read
-    // once here, as Play's state is: every tier is built to be measured, and both walk the library.
+    // once here, along with collections and Play's state: every tier is built to be measured, and
+    // each read would otherwise repeat across all three tiers.
     let counts = controller.isLibraryLoading ? nil : controller.sidebarCounts
+    let collections = controller.collectionRows
     let play = ScopePlayButtons.Reading(controller: controller, scope: controller.library.scope)
     // One `ViewThatFits` around the whole row, as the header row has: one inside the row would be
     // offered the room its neighbours leave, which changes as they lay out.
     ViewThatFits(in: .horizontal) {
-      row(.regular, counts: counts, play: play).padding(.horizontal, 20)
-      row(.compact, counts: counts, play: play).padding(.horizontal, 20)
-      row(.tight, counts: counts, play: play).padding(.horizontal, 12)
+      row(.regular, counts: counts, collections: collections, play: play).padding(.horizontal, 20)
+      row(.compact, counts: counts, collections: collections, play: play).padding(.horizontal, 20)
+      row(.tight, counts: counts, collections: collections, play: play).padding(.horizontal, 12)
     }
     .frame(height: 34)
     .padding(.top, 6)
@@ -37,10 +40,11 @@ struct InstalledScopeBar: View {
     .accessibilityLabel(Text("Library"))
   }
 
-  /// The row in `tier`. The tight one is the last resort and must still shrink: the chips' names
-  /// truncate, and only the Play capsule, by then two symbols, keeps its size.
+  /// The row in `tier`. The tight one is the last resort and must still shrink: an active
+  /// collection's name truncates, and only the Play capsule, by then two symbols, keeps its size.
   private func row(
-    _ tier: HeaderTier, counts: SidebarCounts?, play: ScopePlayButtons.Reading
+    _ tier: HeaderTier, counts: SidebarCounts?, collections: [CollectionRow],
+    play: ScopePlayButtons.Reading
   ) -> some View {
     let model = controller.library
     let scope = model.scope
@@ -54,18 +58,105 @@ struct InstalledScopeBar: View {
         title: L("Favorites"), systemImage: "heart", count: counts?.favorites,
         isOn: scope == .favorites, showsTitle: tier != .tight, identifier: "scope-favorites"
       ) { model.show(.favorites) }
-      if let collection = model.shownCollection {
-        let count = counts?.collections.first { $0.id == collection.id }?.count
-        ScopeChip(
-          title: collection.name, systemImage: "folder", count: count,
-          isOn: true, closes: true, namesInTooltip: true, help: L("Show all wallpapers"),
-          identifier: "scope-collection"
-        ) { model.show(.all) }
-        .frame(maxWidth: 260, alignment: .leading)
-      }
+      ScopeCollectionsMenu(
+        tier: tier, collections: collections, shown: model.shownCollection, counts: counts)
       Spacer(minLength: 0)
       ScopePlayButtons(scope: scope, reading: play, showsWords: tier.showsLabels)
     }
+  }
+}
+
+/// The Collections dropdown capsule: switches directly between local collections, returns to All
+/// wallpapers, or starts creating a new collection even while the Filters sidebar is closed.
+/// When a collection is on show, it lights up with that collection's name and count.
+private struct ScopeCollectionsMenu: View {
+  let tier: HeaderTier
+  let collections: [CollectionRow]
+  let shown: CollectionRow?
+  let counts: SidebarCounts?
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    let model = controller.library
+    let shownCount = shown.flatMap { active in
+      counts?.collections.first { $0.id == active.id }?.count ?? active.count
+    }
+    Menu {
+      if shown != nil {
+        Button("Show all wallpapers") { model.show(.all) }
+        Divider()
+      }
+      if collections.isEmpty {
+        Text("No collections yet")
+      } else {
+        ForEach(collections) { item in
+          let isSelected = item.id == shown?.id
+          let formattedCount = item.count.formatted(.number.locale(PanelLocale.shared.locale))
+          Toggle(
+            isOn: Binding(
+              get: { isSelected },
+              set: { _ in model.show(isSelected ? .all : .collection(item.id)) })
+          ) {
+            Text(verbatim: "\(item.name) (\(formattedCount))")
+          }
+        }
+      }
+      Divider()
+      Button {
+        model.beginCreatingCollectionInSidebar()
+      } label: {
+        Label("New collection…", systemImage: "plus")
+      }
+      .disabled(controller.shell.collectionEditor.isChanging)
+    } label: {
+      HStack(spacing: 5) {
+        Image(systemName: shown == nil ? "folder" : "folder.fill")
+          .font(.system(size: 11, weight: .semibold))
+          .fixedSize()
+          .accessibilityHidden(true)
+        if let shown {
+          Text(verbatim: shown.name)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .layoutPriority(-1)
+          if let shownCount {
+            Text(shownCount, format: .number)
+              .monospacedDigit()
+              .foregroundStyle(theme.accent.accent.color)
+              .fixedSize()
+          }
+        } else if tier != .tight {
+          Text("Collections").lineLimit(1)
+        }
+        Image(systemName: "chevron.down")
+          .font(.system(size: 8.5, weight: .bold))
+          .fixedSize()
+          .accessibilityHidden(true)
+      }
+      .accessibilityElement(children: .combine)
+    }
+    .menuStyle(.button)
+    .menuIndicator(.hidden)
+    .buttonStyle(.panelCapsule(isActive: shown != nil, horizontalPadding: tier.capsulePadding))
+    .help(tooltip)
+    .accessibilityLabel(Text(verbatim: shown?.name ?? L("Collections")))
+    .accessibilityValue(accessibilityValue(count: shownCount))
+    .accessibilityAddTraits(shown != nil ? .isSelected : [])
+    .accessibilityIdentifier(shown != nil ? "scope-collection" : "scope-collections")
+    .frame(maxWidth: shown != nil ? 260 : nil, alignment: .leading)
+    .fixedSize(horizontal: shown == nil, vertical: true)
+  }
+
+  private var tooltip: String {
+    guard let shown else { return L("Collections") }
+    return [shown.name, L("Switch collection")].joined(separator: " · ")
+  }
+
+  private func accessibilityValue(count: Int?) -> Text {
+    guard let count else { return Text(verbatim: "") }
+    return Text(verbatim: count.formatted(.number.locale(PanelLocale.shared.locale)))
   }
 }
 

@@ -57,6 +57,20 @@ struct WorkshopFilters: View {
           }
           .toggleStyle(.checkbox)
         }
+        Toggle(
+          isOn: Binding(
+            get: { model.filters.hideInstalled },
+            set: { model.setHideInstalled($0) })
+        ) {
+          Label {
+            Text("Hide installed")
+          } icon: {
+            Image(systemName: WorkshopFilterCatalog.hideInstalledSystemImage)
+              .foregroundStyle(Color.secondary)
+          }
+        }
+        .toggleStyle(.checkbox)
+        .accessibilityIdentifier("workshop-hide-installed")
         let others = model.filters.otherRequiredTags
         if !others.isEmpty {
           VStack(alignment: .leading, spacing: 8) {

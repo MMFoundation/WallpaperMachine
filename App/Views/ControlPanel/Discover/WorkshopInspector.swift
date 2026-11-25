@@ -123,8 +123,16 @@ private struct ItemInspector: View {
   @ViewBuilder
   private var tags: some View {
     if !item.tags.isEmpty {
+      let model = controller.workshopBrowser
       TagFlow(spacing: 6) {
-        ForEach(item.tags, id: \.self) { TagChip(text: $0) }
+        ForEach(item.tags, id: \.self) { tag in
+          let canonical = WorkshopFilterCatalog.canonicalTag(tag)
+          TagChip(
+            text: tag,
+            selection: model.filters.chipSelection(canonical),
+            onSelect: { model.toggleTagFromInspector(tag, exclude: $0) }
+          )
+        }
       }
     }
   }

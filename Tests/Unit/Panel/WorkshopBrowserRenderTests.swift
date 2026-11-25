@@ -723,6 +723,54 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
       }
     }
   }
+
+  func testActiveFilterChipsAndAllInstalledEmptyPageFitSmallestWindowBesideInspector() async throws {
+    let panel = try await makePanel()
+    let controller = panel.controller
+    let model = controller.workshopBrowser
+    // Serve a page of non-collection wallpapers that are all installed in the local library.
+    let pageRows = (0..<6).map {
+      WorkshopBrowseProtocol.Row(id: String(1_000 + $0), title: "Wallpaper \($0)", kind: "Video")
+    }
+    panel.store.librarySnapshot.wallpapers = pageRows.map {
+      BridgeWallpaperEntry(
+        id: $0.id, title: $0.title, kind: .video, supported: true, active: false, selected: false,
+        previewPath: nil)
+    }
+    WorkshopBrowseProtocol.serve(pageRows, pages: 4, count: 120)
+    model.setRequired("Approved", true)
+    model.setIncluded("Anime", false)
+    model.setHideInstalled(true)
+    try await waitFor(timeout: 10) {
+      panel.workshop.tags == ["Approved"] && panel.workshop.excludedTags.contains("Anime")
+        && !panel.workshop.isLoading
+    }
+
+    controller.shell.setFiltersShown(false)
+    controller.shell.isInspectorShown = true
+    let host = PanelHost(controller: controller)
+    defer { host.close() }
+    let size = NSSize(width: 760, height: 560)
+    try await settle(host, size: size)
+    assertFits(host, size, "workshop active filter chips + all-installed page")
+
+    let shown = identifiers(in: host.hosting.view)
+    XCTAssertTrue(
+      shown.contains("workshop-active-filters"),
+      "active filter chips bar appears while Filters sidebar is collapsed")
+    XCTAssertTrue(
+      shown.contains("workshop-all-installed-page"),
+      "dedicated all-installed empty page appears instead of no results")
+    XCTAssertTrue(shown.contains("workshop-show-installed"))
+    XCTAssertTrue(shown.contains("workshop-all-installed-next-page"))
+    XCTAssertTrue(shown.contains("workshop-next-page"), "pager stays available for later pages")
+
+    // Opening the Filters sidebar hides the inline chips bar.
+    controller.shell.setFiltersShown(true)
+    try await settle(host, size: size)
+    assertFits(host, size, "workshop filters sidebar open")
+    XCTAssertFalse(identifiers(in: host.hosting.view).contains("workshop-active-filters"))
+  }
 }
 
 /// A Downloads list whose queue a test replaces while it is drawn, as the stores do while it is open.

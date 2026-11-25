@@ -26,10 +26,18 @@ struct WorkshopBrowserPage: View {
   private func page(density: WorkshopHeaderDensity) -> some View {
     let model = controller.workshopBrowser
     let browse = controller.workshopBrowse
-    let footer = WorkshopFooterContent.make(browse: browse)
+    let visibleItems = model.visibleItems(in: browse)
+    let activeChips = controller.shell.areFiltersShown ? [] : model.activeFilterChips
+    let footer = WorkshopFooterContent.make(
+      hasItems: !visibleItems.isEmpty, pages: browse.pager.pages)
     return VStack(spacing: 0) {
       WorkshopHeader(density: density)
-      content(browse: browse, model: model)
+      if !activeChips.isEmpty {
+        ActiveFilterChipsBar(
+          chips: activeChips, identifierPrefix: "workshop-active-filters",
+          onClear: { model.clearFilters() })
+      }
+      content(browse: browse, visibleItems: visibleItems, model: model)
       if !footer.isEmpty {
         Divider()
         WorkshopFooter(density: density, content: footer)
@@ -42,14 +50,19 @@ struct WorkshopBrowserPage: View {
   }
 
   @ViewBuilder
-  private func content(browse: WorkshopBrowseState, model: WorkshopBrowserModel) -> some View {
-    if browse.items.isEmpty {
+  private func content(
+    browse: WorkshopBrowseState, visibleItems: [WorkshopItem], model: WorkshopBrowserModel
+  ) -> some View {
+    if visibleItems.isEmpty {
+      let hiddenInstalled =
+        model.filters.hideInstalled && !browse.isLookup ? browse.items.count : 0
       let state = WorkshopEmptyState.make(
-        browse: browse, draftText: model.text, filterCount: model.filterCount)
+        browse: browse, draftText: model.text, filterCount: model.filters.serverFilterCount,
+        allInstalledHiddenCount: hiddenInstalled)
       WorkshopEmptyStateView(state: state, filtersAreOpen: controller.shell.areFiltersShown)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
-      WorkshopGrid(items: browse.items, isLoading: browse.isLoading)
+      WorkshopGrid(items: visibleItems, isLoading: browse.isLoading)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
   }
@@ -176,8 +189,53 @@ struct WorkshopEmptyStateView: View {
         }
         .buttonStyle(.panelSecondary)
       }
+    case .allInstalledOnPage(let count, let nextPage):
+      allInstalledOnPage(count: count, nextPage: nextPage, model: model)
     case .noResults(let recovery):
       noResults(recovery, model: model)
+    }
+  }
+
+  @ViewBuilder
+  private func allInstalledOnPage(
+    count: Int, nextPage: Int?, model: WorkshopBrowserModel
+  ) -> some View {
+    let description: String =
+      switch (count, nextPage != nil) {
+      case (1, true):
+        L("The wallpaper on this page is already in your library. Turn off Hide installed to see it, or try the next page.")
+      case (1, false):
+        L("The wallpaper on this page is already in your library. Turn off Hide installed to see it.")
+      case (_, true):
+        L("All \(count) wallpapers on this page are already in your library. Turn off Hide installed to see them, or try the next page.")
+      case (_, false):
+        L("All \(count) wallpapers on this page are already in your library. Turn off Hide installed to see them.")
+      }
+    PanelEmptyState(
+      verbatim: L("Every wallpaper on this page is installed"), systemImage: "checkmark.circle",
+      description: description
+    ) {
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 8) { allInstalledActions(nextPage: nextPage, model: model) }
+        VStack(spacing: 8) { allInstalledActions(nextPage: nextPage, model: model) }
+      }
+      .buttonStyle(.panelSecondary)
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("workshop-all-installed-page")
+  }
+
+  @ViewBuilder
+  private func allInstalledActions(nextPage: Int?, model: WorkshopBrowserModel) -> some View {
+    Button("Show installed") { model.setHideInstalled(false) }
+      .accessibilityIdentifier("workshop-show-installed")
+    if let nextPage {
+      Button {
+        model.showPage(nextPage)
+      } label: {
+        Label("Next page", systemImage: "chevron.right")
+      }
+      .accessibilityIdentifier("workshop-all-installed-next-page")
     }
   }
 

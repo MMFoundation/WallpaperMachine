@@ -15,6 +15,24 @@ extension TargetDisplayOption {
     return label(naming: isShared ? title : name)
   }
 
+  /// Menu item text: the display's short label, followed by its currently applied wallpaper title
+  /// when enabled, independent and showing one (capped so a long title never widens the menu).
+  @MainActor
+  func menuLabel(among displays: [TargetDisplayOption]) -> String {
+    let base = shortLabel(among: displays)
+    guard isSelectable, let title = wallpaperTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !title.isEmpty
+    else { return base }
+    return "\(base) · \(Self.abbreviatedWallpaperTitle(title))"
+  }
+
+  /// Caps a wallpaper title for a menu item while keeping short titles unchanged.
+  static func abbreviatedWallpaperTitle(_ title: String, limit: Int = 40) -> String {
+    guard title.count > limit else { return title }
+    let prefix = title.prefix(max(1, limit - 1)).trimmingCharacters(in: .whitespaces)
+    return "\(prefix)…"
+  }
+
   /// A display title without the renderer's trailing `(id)` or `(id - Role)` group (`Studio Display
   /// (2 - Primary)` is `Studio Display`). A title without one, or with nothing in front of it, is
   /// returned as it is.
@@ -57,7 +75,9 @@ struct TargetDisplayPicker: View {
     Menu {
       Picker(selection: selection) {
         ForEach(displays) { display in
-          Text(verbatim: display.shortLabel(among: displays)).tag(display.id).disabled(!display.isSelectable)
+          Text(verbatim: display.menuLabel(among: displays))
+            .tag(display.id)
+            .disabled(!display.isSelectable)
         }
       } label: {
         Text("Target display")

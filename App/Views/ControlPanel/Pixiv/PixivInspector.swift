@@ -237,9 +237,17 @@ private struct PixivInspectorDetail: View {
   }
 
   private var tags: some View {
-    TagFlow(spacing: 6) {
+    let model = controller.pixivBrowser
+    return TagFlow(spacing: 6) {
       ForEach(Array(work.tags.enumerated()), id: \.offset) { _, tag in
-        TagChip(text: tag).frame(maxWidth: 220)
+        TagChip(
+          text: tag,
+          selection: model.isSearchingTag(tag) ? .required : .plain,
+          supportsExclude: false,
+          helpText: L("Click to search pixiv for this tag."),
+          onSelect: { _ in model.searchTag(tag) }
+        )
+        .frame(maxWidth: 220)
       }
     }
   }

@@ -48,6 +48,14 @@ final class InstalledBrowserModel {
   /// What is ticked for a batch action. It outlives the view, search and filters (see
   /// `LibrarySelection`), and is dropped only for wallpapers that left the library.
   var selection = LibrarySelection()
+  /// Active uninterrupted Shift+Arrow range selection base, so reversing arrow direction shrinks the
+  /// range cleanly without losing ticks made before the gesture.
+  struct KeyboardRange: Equatable {
+    let anchor: String
+    let base: LibrarySelection
+    let lastSelection: LibrarySelection
+  }
+  @ObservationIgnored var keyboardRange: KeyboardRange?
   /// Selection mode: every tile shows its check, and a click ticks instead of choosing.
   var isSelecting = false
   /// The press-and-sweep gesture in progress, if any. Views never read it: it changes with every
@@ -293,20 +301,70 @@ final class InstalledBrowserModel {
 
   /// How the chip of `tag` stands: selected (required), hidden (excluded) or neither.
   func chipSelection(_ tag: String) -> TagChip.Selection {
-    if filter.requiredTags.contains(tag) { return .required }
-    return filter.excludedTags.contains(tag) ? .excluded : .plain
+    let lowered = LibraryFilterCatalog.canonicalTag(tag).lowercased()
+    if filter.requiredTags.contains(where: { $0.lowercased() == lowered }) { return .required }
+    return filter.excludedTags.contains(where: { $0.lowercased() == lowered }) ? .excluded : .plain
   }
 
   /// Selects, hides or lets go of a chip; a tag is never both required and excluded.
   func setChip(_ tag: String, _ selection: TagChip.Selection) {
-    filter.requiredTags.removeAll { $0 == tag }
-    filter.excludedTags.removeAll { $0 == tag }
+    let lowered = tag.lowercased()
+    filter.requiredTags.removeAll { $0.lowercased() == lowered }
+    filter.excludedTags.removeAll { $0.lowercased() == lowered }
     switch selection {
     case .plain: break
     case .required: filter.requiredTags.append(tag)
     case .excluded: filter.excludedTags.append(tag)
     }
     filtersChanged(immediately: true)
+  }
+
+  /// Toggles a tag clicked in the Installed inspector: a normal click toggles it as a required tag
+  /// and an Option-click toggles it as an excluded tag.
+  func toggleTagFromInspector(_ tag: String, exclude: Bool) {
+    let canonical = LibraryFilterCatalog.canonicalTag(tag)
+    guard !canonical.isEmpty else { return }
+    let current = chipSelection(canonical)
+    if exclude {
+      setChip(canonical, current == .excluded ? .plain : .excluded)
+    } else {
+      setChip(canonical, current == .required ? .plain : .required)
+    }
+  }
+
+  /// Removable active filter chips for `ActiveFilterChipsBar`, strictly aligned with
+  /// `narrowingFilterCount` (excluding the Favorites and collection view scopes themselves).
+  var activeFilterChips: [ActiveFilterChip] {
+    let effective = effectiveFilter
+    let required =
+      effective.collectionID == nil
+      ? effective.requiredTags.filter { $0 != LibraryFilterCatalog.favoriteTag }
+      : effective.requiredTags
+    var chips: [ActiveFilterChip] = required.map { tag in
+      ActiveFilterChip(
+        id: "req-\(tag)", title: LibraryFilterCatalog.displayName(for: tag), tone: .included
+      ) { [weak self] in
+        self?.setRequired(tag, false)
+      }
+    }
+    chips.append(
+      contentsOf: effective.excludedTags.map { tag in
+        ActiveFilterChip(
+          id: "exc-\(tag)", title: LibraryFilterCatalog.displayName(for: tag), tone: .excluded
+        ) { [weak self] in
+          self?.setIncluded(tag, true)
+        }
+      })
+    return chips
+  }
+
+  /// Opens the Filters sidebar with the Collections group expanded and begins naming a new
+  /// collection, so users can create one from the scope bar or a context menu even when Filters is
+  /// closed.
+  func beginCreatingCollectionInSidebar() {
+    openFilterGroups.insert("collections")
+    controller.shell.setFiltersShown(true)
+    controller.shell.collectionEditor.beginCreate()
   }
 
   /// Reset of a chip section: no chip of it selected or hidden.
@@ -354,6 +412,20 @@ final class InstalledBrowserModel {
   /// Clear: every tag and the collection go, the search text stays.
   func clearFilters() {
     filter = filter.clearingFilters()
+    filtersChanged(immediately: true)
+  }
+
+  /// Clears every narrowing filter while keeping the active Favorites or collection view scope
+  /// and the search text (used by `ActiveFilterChipsBar`'s Clear button).
+  func clearNarrowingFilters() {
+    if effectiveFilter.collectionID == nil,
+      filter.requiredTags.contains(LibraryFilterCatalog.favoriteTag)
+    {
+      filter.requiredTags = [LibraryFilterCatalog.favoriteTag]
+    } else {
+      filter.requiredTags = []
+    }
+    filter.excludedTags = []
     filtersChanged(immediately: true)
   }
 

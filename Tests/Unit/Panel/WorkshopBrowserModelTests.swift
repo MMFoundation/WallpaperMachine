@@ -656,4 +656,96 @@ final class WorkshopBrowserModelTests: MediaPanelTestCase {
     XCTAssertEqual(final.comments.map(\.text), ["Only comment"])
     XCTAssertFalse(hasMore, "a page that yields no new comments stops pagination cleanly")
   }
+
+  // MARK: Inspector tag toggle, active filter chips, and Hide installed
+
+  func testToggleTagFromInspectorTogglesRequiredAndExcludedAndSearches() async throws {
+    let panel = try makePanel()
+    let model = panel.controller.workshopBrowser
+    try await open(panel)
+
+    model.toggleTagFromInspector("anime", exclude: false)
+    try await waitFor { panel.workshop.tags == ["Anime"] && !panel.workshop.isLoading }
+    XCTAssertEqual(model.filters.chipSelection("Anime"), .required)
+
+    model.toggleTagFromInspector("Anime", exclude: false)
+    try await waitFor { panel.workshop.tags.isEmpty && !panel.workshop.isLoading }
+    XCTAssertEqual(model.filters.chipSelection("Anime"), .plain)
+
+    model.toggleTagFromInspector("Anime", exclude: true)
+    try await waitFor { panel.workshop.excludedTags.contains("Anime") && !panel.workshop.isLoading }
+    XCTAssertEqual(model.filters.chipSelection("Anime"), .excluded)
+
+    model.toggleTagFromInspector("Anime", exclude: true)
+    try await waitFor { !panel.workshop.excludedTags.contains("Anime") && !panel.workshop.isLoading }
+    XCTAssertEqual(model.filters.chipSelection("Anime"), .plain)
+  }
+
+  func testHideInstalledFiltersClientSideWithoutRefetchingAndActiveFilterChipsMatchCount()
+    async throws
+  {
+    var collection = WorkshopBrowseProtocol.Row(id: "900", title: "My Collection")
+    collection.collectionChildren = ["1000", "1001"]
+    let panel = try makePanel(rows: rows(2) + [collection], pages: 3, count: 90)
+    let model = panel.controller.workshopBrowser
+    try await open(panel)
+    panel.store.librarySnapshot.wallpapers = [
+      BridgeWallpaperEntry(
+        id: "1000", title: "Installed 0", kind: .video, supported: true, active: false,
+        selected: false, previewPath: nil),
+      BridgeWallpaperEntry(
+        id: "1001", title: "Installed 1", kind: .video, supported: true, active: false,
+        selected: false, previewPath: nil),
+    ]
+
+    let requestsBefore = WorkshopBrowseProtocol.requests.count
+    model.setHideInstalled(true)
+    XCTAssertEqual(
+      WorkshopBrowseProtocol.requests.count, requestsBefore,
+      "Hide installed filters client-side without asking Steam again")
+    let visible = model.visibleItems(in: panel.controller.workshopBrowse)
+    XCTAssertEqual(
+      visible.map(\.id), ["900"],
+      "installed wallpapers are hidden while collections stay visible")
+    XCTAssertEqual(model.filterCount, 1)
+    XCTAssertEqual(model.activeFilterChips.map(\.id), ["hide-installed"])
+
+    // Clearing when only Hide installed is active sends no unnecessary Steam request.
+    model.clearFilters()
+    XCTAssertFalse(model.filters.hideInstalled)
+    XCTAssertEqual(WorkshopBrowseProtocol.requests.count, requestsBefore)
+
+    // Combine Hide installed with required, included-against-default, and excluded filters.
+    model.setHideInstalled(true)
+    model.setRequired("Approved", true)
+    model.setIncluded("Mature", true)
+    model.setIncluded("Anime", false)
+    try await waitFor { !panel.workshop.isLoading && panel.workshop.tags == ["Approved"] }
+    let chips = model.activeFilterChips
+    XCTAssertEqual(chips.count, model.filterCount)
+    XCTAssertEqual(chips.map(\.id), ["hide-installed", "req-Approved", "inc-Mature", "exc-Anime"])
+    XCTAssertEqual(chips.last?.tone, .excluded)
+    chips.first?.onRemove()
+    XCTAssertFalse(model.filters.hideInstalled)
+  }
+
+  /// Removing a required chip for a default-excluded Workshop tag restores the tag to its default
+  /// excluded state in one click instead of leaving behind a duplicate included chip.
+  func testRemovingRequiredDefaultExcludedTagChipRestoresDefaultExclusionInOneClick() async throws {
+    let panel = try makePanel()
+    let model = panel.controller.workshopBrowser
+    try await open(panel)
+
+    model.setChip("Mature", .required)
+    try await waitFor { !panel.workshop.isLoading && panel.workshop.tags == ["Mature"] }
+    XCTAssertEqual(model.filterCount, 1)
+    XCTAssertEqual(model.activeFilterChips.map(\.id), ["req-Mature"])
+
+    model.activeFilterChips[0].onRemove()
+    try await waitFor { !panel.workshop.isLoading && panel.workshop.tags.isEmpty }
+    XCTAssertTrue(model.filters.tags.isEmpty)
+    XCTAssertTrue(model.filters.excludedTags.contains("Mature"))
+    XCTAssertEqual(model.filterCount, 0)
+    XCTAssertTrue(model.activeFilterChips.isEmpty)
+  }
 }

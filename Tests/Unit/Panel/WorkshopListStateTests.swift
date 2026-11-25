@@ -94,6 +94,26 @@ final class WorkshopListStateTests: MediaPanelTestCase {
     XCTAssertEqual(empty(.browse, total: 40), .noResults(.refresh), "Steam filters the browse list itself")
   }
 
+  func testAllInstalledOnPageUsesItsOwnEmptyStateAndNeverFalselyReportsNoResults() {
+    let withNext = WorkshopEmptyState.make(
+      source: source(.browse), isSignedIn: false, isSigningIn: false, isLoading: false,
+      errorMessage: nil, totalCount: 60, page: 1, totalPages: 2, draftText: "", filterCount: 0,
+      allInstalledHiddenCount: 30)
+    XCTAssertEqual(withNext, .allInstalledOnPage(count: 30, nextPage: 2))
+
+    let lastPage = WorkshopEmptyState.make(
+      source: source(.browse), isSignedIn: false, isSigningIn: false, isLoading: false,
+      errorMessage: nil, totalCount: 30, page: 2, totalPages: 2, draftText: "sky", filterCount: 2,
+      allInstalledHiddenCount: 1)
+    XCTAssertEqual(lastPage, .allInstalledOnPage(count: 1, nextPage: nil))
+
+    let loading = WorkshopEmptyState.make(
+      source: source(.browse), isSignedIn: false, isSigningIn: false, isLoading: true,
+      errorMessage: nil, totalCount: 30, page: 1, totalPages: 2, draftText: "", filterCount: 0,
+      allInstalledHiddenCount: 30)
+    XCTAssertEqual(loading, .loading, "loading still wins while a page is in flight")
+  }
+
   // MARK: Summary
 
   func testTheSummaryNamesWhatIsHappeningOrWhatIsOnShow() {

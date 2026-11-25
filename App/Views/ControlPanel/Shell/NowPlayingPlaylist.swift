@@ -59,18 +59,35 @@ struct NowPlayingRotation {
   }
 }
 
-/// The playlist above the bar: what the target display rotates through (or Day and night), its
-/// order and interval, when it changes next, and Change now, Stop and Settings…. A display whose
-/// playlist is off says how to start one.
+/// The playlist above the bar: what the target display rotates through (or Day and night), inline
+/// order and interval controls for rotation, when it changes next, and Play / Change now, Stop and
+/// Settings….
 struct NowPlayingPlaylistDetails: View {
   static let width: CGFloat = 300
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
 
+  /// The source starting rotation from the popover plays: the display's saved source when it still
+  /// has a playable wallpaper, otherwise All wallpapers.
+  @MainActor
+  static func startSource(for state: PlaylistState, controller: PanelController)
+    -> PlaylistSourceChoice
+  {
+    if state.source != .missingCollection, controller.canPlay(state.source) {
+      return state.source
+    }
+    return .all
+  }
+
   var body: some View {
     let display = controller.targetDisplayID
     let state = controller.playlistState(for: display)
+    let isDisabled = controller.isStoreBusy || controller.targetDisplay?.isSelectable != true
+    let startSource = Self.startSource(for: state, controller: controller)
+    let canStart =
+      !isDisabled && !controller.isBusy(PanelActionCoordinator.key("playlistPlay"))
+      && controller.canPlay(startSource)
     VStack(alignment: .leading, spacing: 12) {
       VStack(alignment: .leading, spacing: 3) {
         Text("Playlist")
@@ -81,24 +98,36 @@ struct NowPlayingPlaylistDetails: View {
           .foregroundStyle(theme.surface.text.color)
           .lineLimit(2)
           .fixedSize(horizontal: false, vertical: true)
-        if state.playlist.mode == .rotate {
-          let order = state.playlist.order == .shuffle ? L("Shuffle") : L("In order")
-          Text(verbatim: "\(order) · \(state.interval.title)")
-            .font(.system(size: 12))
-            .foregroundStyle(theme.surface.muted.color)
-        }
+      }
+      if state.playlist.mode != .dayNight {
+        rotationControls(display: display, state: state, isDisabled: isDisabled)
       }
       Text(verbatim: note(state))
         .font(.system(size: 12))
-        .foregroundStyle(theme.surface.text.color)
+        .foregroundStyle(theme.surface.muted.color)
         .fixedSize(horizontal: false, vertical: true)
       HStack(spacing: 8) {
-        if state.showsResume {
+        if state.playlist.mode == .off {
+          Button {
+            controller.launch(PanelActionCoordinator.key("playlistPlay")) { [controller] in
+              try await controller.playPlaylist(
+                startSource, order: state.playlist.order, display: display)
+            }
+          } label: {
+            Label("Play", systemImage: "play.fill")
+          }
+          .buttonStyle(.panelPrimary)
+          .disabled(!canStart)
+          .help(L("Start rotation"))
+          .accessibilityIdentifier("now-playing-playlist-start")
+        } else if state.showsResume {
           Button("Resume playlist") {
             controller.launch(PanelActionCoordinator.key("playlistResume", id: display)) {
               try await controller.resumePlaylist(display: display)
             }
           }
+          .buttonStyle(.panelSecondary)
+          .disabled(isDisabled)
           .accessibilityIdentifier("now-playing-playlist-resume")
         } else if state.playlist.mode == .rotate {
           Button("Change now") {
@@ -106,6 +135,8 @@ struct NowPlayingPlaylistDetails: View {
               try await controller.skipPlaylist(display: display)
             }
           }
+          .buttonStyle(.panelSecondary)
+          .disabled(isDisabled)
           .accessibilityIdentifier("now-playing-playlist-skip")
         }
         if state.playlist.mode != .off {
@@ -114,6 +145,8 @@ struct NowPlayingPlaylistDetails: View {
               try await controller.editPlaylist(.mode(.off), display: display)
             }
           }
+          .buttonStyle(.panelSecondary)
+          .disabled(isDisabled)
           .help(L("The wallpaper on screen stays until you change it."))
           .accessibilityIdentifier("now-playing-playlist-stop")
         }
@@ -124,13 +157,98 @@ struct NowPlayingPlaylistDetails: View {
             try await controller.openSettings(.displays)
           }
         }
+        .buttonStyle(.panelSecondary)
         .accessibilityIdentifier("now-playing-playlist-settings")
       }
-      .buttonStyle(.panelSecondary)
     }
     .padding(16)
     .frame(width: Self.width, alignment: .leading)
+    .accessibilityElement(children: .contain)
     .accessibilityIdentifier("now-playing-playlist-popover")
+  }
+
+  /// Inline Order (In order / Shuffle) and How often interval controls for rotation.
+  private func rotationControls(
+    display: String, state: PlaylistState, isDisabled: Bool
+  ) -> some View {
+    let orderKey = PanelActionCoordinator.key("playlistSetting", id: display, detail: "order")
+    let intervalKey = PanelActionCoordinator.key("playlistSetting", id: display, detail: "interval")
+    return VStack(alignment: .leading, spacing: 8) {
+      SettingsSegmentedControl(
+        segments: [
+          .init(value: PlaylistOrder.sequential, title: L("In order")),
+          .init(value: PlaylistOrder.shuffle, title: L("Shuffle")),
+        ],
+        selection: state.playlist.order,
+        isEnabled: !isDisabled && !controller.isBusy(orderKey),
+        fillsWidth: true
+      ) { order in
+        guard order != state.playlist.order else { return }
+        controller.launch(orderKey) { [controller] in
+          try await controller.editPlaylist(.order(order), display: display)
+        }
+      }
+      .accessibilityLabel(Text("Order"))
+      .accessibilityIdentifier("now-playing-playlist-order")
+
+      HStack(spacing: 8) {
+        Text("How often")
+          .font(.panel(.callout))
+          .foregroundStyle(theme.surface.muted.color)
+          .lineLimit(1)
+        Spacer(minLength: 8)
+        Menu {
+          ForEach(IntervalChoice.presets, id: \.self) { minutes in
+            Toggle(
+              isOn: Binding(
+                get: { state.interval == .preset(minutes) },
+                set: { _ in
+                  controller.launch(intervalKey) { [controller] in
+                    try await controller.editPlaylist(.interval(.preset(minutes)), display: display)
+                  }
+                })
+            ) {
+              Text(verbatim: IntervalChoice.title(minutes: minutes))
+            }
+          }
+          Toggle(
+            isOn: Binding(
+              get: { state.interval == .unlock },
+              set: { _ in
+                controller.launch(intervalKey) { [controller] in
+                  try await controller.editPlaylist(.interval(.unlock), display: display)
+                }
+              })
+          ) {
+            Text("Each time the Mac is unlocked")
+          }
+          if case .custom(let minutes) = state.interval {
+            Divider()
+            Toggle(isOn: .constant(true)) {
+              Text(verbatim: IntervalChoice.title(minutes: minutes))
+            }
+            .disabled(true)
+          }
+        } label: {
+          HStack(spacing: 4) {
+            Text(verbatim: state.interval.title)
+              .lineLimit(1)
+              .truncationMode(.tail)
+            Image(systemName: "chevron.down")
+              .font(.panel(.mark))
+              .accessibilityHidden(true)
+          }
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.panelCapsule)
+        .disabled(isDisabled || controller.isBusy(intervalKey))
+        .help(state.interval.title)
+        .accessibilityLabel(Text("How often"))
+        .accessibilityValue(Text(verbatim: state.interval.title))
+        .accessibilityIdentifier("now-playing-playlist-interval")
+      }
+    }
   }
 
   private func title(_ state: PlaylistState) -> String {

@@ -55,15 +55,54 @@ extension InstalledBrowserModel {
     switch LibraryTileClick.resolve(
       clickCount: clickCount, modifiers: modifiers, isSelecting: isSelecting)
     {
-    case .select: select(id)
-    case .activate: activate(id)
-    case .toggle: selection.toggle(id)
-    case .extendRange: selection.toggle(id, range: true, visible: visibleIDs)
+    case .select:
+      endKeyboardRange()
+      select(id)
+    case .activate:
+      endKeyboardRange()
+      activate(id)
+    case .toggle:
+      endKeyboardRange()
+      selection.toggle(id)
+    case .extendRange:
+      endKeyboardRange()
+      selection.toggle(id, range: true, visible: visibleIDs)
     }
   }
 
   /// Return or Space on the focused tile: a click with no modifiers.
   func tileActivated(_ id: String) { tileClicked(id, clickCount: 0, modifiers: []) }
+
+  /// Extends or contracts a contiguous range selection via Shift+Arrow (or Shift+Home/End) in
+  /// grid order. Keeps the anchor fixed across consecutive Shift+Arrow presses so reversing
+  /// direction shrinks the range cleanly without losing earlier ticks.
+  func extendSelectionByKeyboard(from fromID: String?, to toID: String) {
+    let visible = visibleIDs
+    guard visible.contains(toID) else { return }
+    let resolvedAnchor: String
+    let base: LibrarySelection
+    if let active = keyboardRange,
+      active.lastSelection == selection,
+      visible.contains(active.anchor)
+    {
+      resolvedAnchor = active.anchor
+      base = active.base
+    } else if let fromID, visible.contains(fromID) {
+      resolvedAnchor = fromID
+      base = selection
+    } else if let existingAnchor = selection.anchor, visible.contains(existingAnchor) {
+      resolvedAnchor = existingAnchor
+      base = selection
+    } else {
+      resolvedAnchor = toID
+      base = selection
+    }
+    selection.selectRange(from: resolvedAnchor, to: toID, in: visible, over: base)
+    keyboardRange = KeyboardRange(anchor: resolvedAnchor, base: base, lastSelection: selection)
+  }
+
+  /// Ends an uninterrupted keyboard range gesture (on plain focus movement or selection reset).
+  func endKeyboardRange() { keyboardRange = nil }
 
   /// The check on a tile: ticks or unticks it, never extends a range. A check held long enough to
   /// start a sweep has already ticked its tile, and the click that ends the press is swallowed.
@@ -72,6 +111,7 @@ extension InstalledBrowserModel {
       swallowsClick = false
       return
     }
+    endKeyboardRange()
     selection.toggle(id)
   }
 
@@ -108,6 +148,7 @@ extension InstalledBrowserModel {
     if hasActiveSelectionMode {
       isSelecting = false
       selection.clear()
+      endKeyboardRange()
       newCollectionName = nil
     } else {
       isSelecting = true
@@ -115,11 +156,15 @@ extension InstalledBrowserModel {
   }
 
   /// Select all ticks every tile on screen, not the ones a filter hides.
-  func selectAllVisible() { selection.selectAll(visible: visibleIDs) }
+  func selectAllVisible() {
+    endKeyboardRange()
+    selection.selectAll(visible: visibleIDs)
+  }
 
   /// Clear: unticks everything and stays in selection mode.
   func clearSelection() {
     selection.clear()
+    endKeyboardRange()
     newCollectionName = nil
   }
 
@@ -138,6 +183,7 @@ extension InstalledBrowserModel {
     }
     guard isSelecting || !selection.isEmpty else { return false }
     selection.clear()
+    endKeyboardRange()
     isSelecting = false
     return true
   }

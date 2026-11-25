@@ -28,6 +28,12 @@ enum InspectorPolicy {
     row.isSupported && canRun(row.kind) && sharedDisplayCount >= 2
   }
 
+  /// Direct apply to a chosen display submenu, offered when two or more displays are connected and
+  /// the wallpaper's type can run on macOS.
+  static func offersApplyToDisplay(_ row: LibraryRow, displayCount: Int) -> Bool {
+    canRun(row.kind) && displayCount >= 2
+  }
+
   /// Apply to all displays has nothing to do when every shared display already shows the wallpaper.
   static func appliesEverywhereAlready(_ wallpaperID: String, sharedDisplayWallpapers: [String?])
     -> Bool

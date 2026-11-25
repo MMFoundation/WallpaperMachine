@@ -924,6 +924,59 @@ final class PanelLibraryActionsTests: PanelTestCase {
       XCTAssertNil(controller.errors.message)
     }
   }
+
+  // MARK: Direct apply to a specific display
+
+  func testActivateOnSpecificDisplayAppliesDirectlyWithoutChangingTargetDisplayAndRefusesIneligibleDisplays()
+    async throws
+  {
+    try await withApplyingPanel { panel, bridge, _ in
+      let controller = panel.controller
+      panel.navigation.targetDisplayID = "primary"
+
+      try await controller.activate("c", on: "secondary")
+      XCTAssertEqual(bridge.assignments["secondary"], "c", "the chosen display receives the wallpaper")
+      XCTAssertEqual(bridge.assignments["primary"], "a", "the target display is left alone")
+      XCTAssertEqual(controller.targetDisplayID, "primary", "direct apply does not change the target display")
+
+      // A disabled, mirrored or unknown display is refused without touching any display.
+      bridge.eligible.remove("secondary")
+      try await panel.store.refreshAllAsync()
+      for badDisplay in ["secondary", "missing"] {
+        do {
+          try await controller.activate("a", on: badDisplay)
+          XCTFail("ineligible display \(badDisplay) must be refused")
+        } catch {
+          XCTAssertTrue(error is InvalidControlValue)
+        }
+      }
+
+      bridge.eligible.insert("secondary")
+      bridge.mirrors["secondary"] = "primary"
+      try await panel.store.refreshAllAsync()
+      do {
+        try await controller.activate("a", on: "secondary")
+        XCTFail("a mirrored display must be refused")
+      } catch {
+        XCTAssertTrue(error is InvalidControlValue)
+      }
+      XCTAssertEqual(bridge.assignments["secondary"], "c")
+    }
+  }
+
+  func testOffersApplyToDisplayRequiresTwoConnectedDisplaysAndARunnableKind() {
+    let video = LibraryRow(
+      id: "v", title: "Video", kind: .video, previewFile: nil, cover: .none, canAnimate: false,
+      isActive: false, isSupported: true, tags: [], searchText: "video", isApproved: false,
+      size: nil, addedAt: nil, energy: nil, isUpdateAvailable: false, updatedAt: nil)
+    let app = LibraryRow(
+      id: "a", title: "App", kind: .unknown, previewFile: nil, cover: .none, canAnimate: false,
+      isActive: false, isSupported: false, tags: [], searchText: "app", isApproved: false,
+      size: nil, addedAt: nil, energy: nil, isUpdateAvailable: false, updatedAt: nil)
+    XCTAssertFalse(InspectorPolicy.offersApplyToDisplay(video, displayCount: 1))
+    XCTAssertTrue(InspectorPolicy.offersApplyToDisplay(video, displayCount: 2))
+    XCTAssertFalse(InspectorPolicy.offersApplyToDisplay(app, displayCount: 2))
+  }
 }
 
 /// A bridge that answers play and pause with the app snapshot's playback state flipped.

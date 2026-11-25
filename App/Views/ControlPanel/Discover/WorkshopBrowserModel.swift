@@ -187,6 +187,70 @@ final class WorkshopBrowserModel {
     search()
   }
 
+  /// Turns the client-side Hide installed filter on or off without sending a new Steam query.
+  func setHideInstalled(_ hide: Bool) {
+    guard filters.hideInstalled != hide else { return }
+    filters.hideInstalled = hide
+  }
+
+  /// Toggles a tag clicked in the Workshop inspector: a normal click toggles it as a required tag
+  /// and an Option-click toggles it as an excluded tag.
+  func toggleTagFromInspector(_ tag: String, exclude: Bool) {
+    let canonical = WorkshopFilterCatalog.canonicalTag(tag)
+    guard !canonical.isEmpty else { return }
+    let current = filters.chipSelection(canonical)
+    if exclude {
+      setChip(canonical, current == .excluded ? .plain : .excluded)
+    } else {
+      setChip(canonical, current == .required ? .plain : .required)
+    }
+  }
+
+  /// Items on the current page after applying the client-side Hide installed filter. Direct item
+  /// lookups and collections are never hidden.
+  func visibleItems(in browse: WorkshopBrowseState) -> [WorkshopItem] {
+    guard filters.hideInstalled, !browse.isLookup else { return browse.items }
+    return browse.items.filter { $0.isCollection || !controller.mediaLibraryContains($0.id) }
+  }
+
+  /// Removable active filter chips for `ActiveFilterChipsBar`, matching every active filter
+  /// counted by `filterCount`.
+  var activeFilterChips: [ActiveFilterChip] {
+    var chips: [ActiveFilterChip] = []
+    if filters.hideInstalled {
+      chips.append(
+        ActiveFilterChip(id: "hide-installed", title: L("Hide installed"), tone: .included) {
+          [weak self] in self?.setHideInstalled(false)
+        })
+    }
+    let defaults = WorkshopFilterDraft.defaultExcludedTags
+    for tag in filters.tags {
+      chips.append(
+        ActiveFilterChip(
+          id: "req-\(tag)", title: WorkshopFilterCatalog.displayName(for: tag), tone: .included
+        ) { [weak self] in
+          if defaults.contains(tag) {
+            self?.setChip(tag, .excluded)
+          } else {
+            self?.setRequired(tag, false)
+          }
+        })
+    }
+    for tag in defaults where !filters.excludedTags.contains(tag) && !filters.tags.contains(tag) {
+      chips.append(
+        ActiveFilterChip(
+          id: "inc-\(tag)", title: WorkshopFilterCatalog.displayName(for: tag), tone: .included
+        ) { [weak self] in self?.setIncluded(tag, false) })
+    }
+    for tag in filters.excludedTags where !defaults.contains(tag) {
+      chips.append(
+        ActiveFilterChip(
+          id: "exc-\(tag)", title: WorkshopFilterCatalog.displayName(for: tag), tone: .excluded
+        ) { [weak self] in self?.setIncluded(tag, true) })
+    }
+    return chips
+  }
+
   func resetChips(in section: WorkshopFilterCatalog.Section) {
     filters.resetChips(in: section)
     search()
@@ -202,10 +266,12 @@ final class WorkshopBrowserModel {
     search()
   }
 
-  /// **Clear**: no required tag, the defaults excluded, and a search.
+  /// **Clear**: no required tag, the defaults excluded, Hide installed off, and a search when
+  /// server-side tag filters changed.
   func clearFilters() {
+    let hadServerFilters = filters.serverFilterCount > 0
     filters.clear()
-    search()
+    if hadServerFilters { search() }
   }
 
   /// **Clear search and filters** and **Clear search**: the text goes too, and the filters return to
@@ -285,7 +351,9 @@ final class WorkshopBrowserModel {
       let workshop = controller.workshop
       text = workshop.searchText
       sort = workshop.sort
-      filters = WorkshopFilterDraft(tags: workshop.tags, excludedTags: workshop.excludedTags)
+      filters = WorkshopFilterDraft(
+        tags: workshop.tags, excludedTags: workshop.excludedTags,
+        hideInstalled: filters.hideInstalled)
       scroll(to: offset ?? 0)
     }
   }

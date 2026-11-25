@@ -77,6 +77,29 @@ final class LibrarySelectionTests: XCTestCase {
     XCTAssertEqual(selection.ids, ["b"], "nothing to prune changes nothing")
   }
 
+  func testSelectRangeExpandsContractsAndPreservesBaseTicksAroundAnchor() {
+    var base = LibrarySelection()
+    base.toggle("a")
+    var selection = base
+    selection.selectRange(from: "c", to: "e", in: ids, over: base)
+    XCTAssertEqual(Set(selection.ids), ["a", "c", "d", "e"])
+    XCTAssertEqual(selection.anchor, "c")
+
+    // Contracting back toward the anchor drops "e" while keeping "a" from base.
+    selection.selectRange(from: "c", to: "d", in: ids, over: base)
+    XCTAssertEqual(Set(selection.ids), ["a", "c", "d"])
+    XCTAssertEqual(selection.anchor, "c")
+
+    // Crossing the anchor selects in the opposite direction.
+    selection.selectRange(from: "c", to: "b", in: ids, over: base)
+    XCTAssertEqual(Set(selection.ids), ["a", "b", "c"])
+    XCTAssertEqual(selection.anchor, "c")
+
+    // Unknown anchor or target changes nothing.
+    selection.selectRange(from: "missing", to: "e", in: ids, over: base)
+    XCTAssertEqual(Set(selection.ids), ["a", "b", "c"])
+  }
+
   // MARK: Sweep
 
   private func start(

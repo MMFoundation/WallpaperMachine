@@ -1,8 +1,12 @@
+import AppKit
 import SwiftUI
 
-/// A tag as a small capsule. It only draws the tag: a filter wraps it in a `Button`.
+/// A tag as a small capsule. Without `onSelect` it only draws the tag (for callers such as a
+/// filter that wrap it in their own `Button`); with `onSelect` it acts as an interactive filter or
+/// search chip, passing `exclude: true` on Option-click when `supportsExclude` is true.
 ///
-/// Tags come from wallpaper manifests, so the text is never read as a localization key.
+/// Tags come from wallpaper manifests or remote listings, so the text is never read as a
+/// localization key.
 struct TagChip: View {
   enum Selection {
     case plain
@@ -14,18 +18,93 @@ struct TagChip: View {
 
   let text: String
   var selection: Selection = .plain
+  /// Whether Option-click (and the context menu's Hide action) excludes this tag. False for pages
+  /// whose tags trigger a search instead of an include/exclude filter (pixiv).
+  var supportsExclude = true
+  /// Optional tooltip override when `onSelect` is set. Nil uses the standard filter hint when
+  /// `supportsExclude` is true.
+  var helpText: String? = nil
+  /// Optional tap handler. `exclude` is true when the user Option-clicked (or chose Hide this tag)
+  /// and `supportsExclude` is true. Default `nil` keeps the chip non-interactive.
+  var onSelect: ((_ exclude: Bool) -> Void)? = nil
 
   @Environment(\.panelTheme) private var theme
+  @State private var isHovering = false
 
   var body: some View {
-    Text(verbatim: text)
-      .font(.panel(.controlSmall))
-      .strikethrough(selection == .excluded)
-      .foregroundStyle(foreground)
-      .lineLimit(1)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 3)
-      .background(background, in: Capsule())
+    if let onSelect {
+      interactiveChip(onSelect: onSelect)
+    } else {
+      chipLabel(showsCheckmark: false)
+    }
+  }
+
+  @ViewBuilder
+  private func interactiveChip(onSelect: @escaping (_ exclude: Bool) -> Void) -> some View {
+    let base = Button {
+      onSelect(supportsExclude && NSEvent.modifierFlags.contains(.option))
+    } label: {
+      chipLabel(showsCheckmark: selection == .required)
+        .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .onHover { isHovering = $0 }
+    .help(resolvedHelp)
+    .accessibilityLabel(Text(verbatim: text))
+    .accessibilityAddTraits(selection == .required ? .isSelected : [])
+    .accessibilityValue(selection == .excluded ? Text("Hidden") : Text(verbatim: ""))
+
+    if supportsExclude {
+      base
+        .contextMenu {
+          Button("Show only this tag") {
+            if selection != .required { onSelect(false) }
+          }
+          .disabled(selection == .required)
+          Button("Hide this tag") {
+            if selection != .excluded { onSelect(true) }
+          }
+          .disabled(selection == .excluded)
+          Button("Don't filter by this tag") {
+            if selection == .required {
+              onSelect(false)
+            } else if selection == .excluded {
+              onSelect(true)
+            }
+          }
+          .disabled(selection == .plain)
+        }
+        .accessibilityAction(named: Text("Hide this tag")) {
+          if selection != .excluded { onSelect(true) }
+        }
+    } else {
+      base
+    }
+  }
+
+  private func chipLabel(showsCheckmark: Bool) -> some View {
+    HStack(spacing: 3) {
+      if showsCheckmark {
+        Image(systemName: "checkmark")
+          .font(.panel(.mark))
+          .accessibilityHidden(true)
+      }
+      Text(verbatim: text)
+        .font(.panel(.controlSmall))
+        .strikethrough(selection == .excluded)
+        .lineLimit(1)
+    }
+    .foregroundStyle(foreground)
+    .padding(.horizontal, 8)
+    .padding(.vertical, 3)
+    .background(background, in: Capsule())
+  }
+
+  private var resolvedHelp: String {
+    if let helpText { return helpText }
+    return supportsExclude
+      ? L("Click to show only wallpapers with this tag. Option-click to hide them.")
+      : ""
   }
 
   private var foreground: Color {
@@ -37,10 +116,11 @@ struct TagChip: View {
   }
 
   private var background: Color {
-    switch selection {
-    case .plain: theme.surface.badge.color
-    case .required: theme.accent.primary.color
-    case .excluded: theme.surface.danger.color.opacity(0.14)
+    let hovered = onSelect != nil && isHovering
+    return switch selection {
+    case .plain: hovered ? theme.surface.selected.color : theme.surface.badge.color
+    case .required: theme.accent.primary.color.opacity(hovered ? 0.85 : 1)
+    case .excluded: theme.surface.danger.color.opacity(hovered ? 0.2 : 0.14)
     }
   }
 }

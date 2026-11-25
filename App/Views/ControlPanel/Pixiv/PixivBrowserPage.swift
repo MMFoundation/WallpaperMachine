@@ -13,8 +13,16 @@ struct PixivBrowserPage: View {
   var body: some View {
     let model = controller.pixivBrowser
     let browse = controller.pixivBrowse
+    let activeChips = controller.shell.areFiltersShown ? [] : model.activeFilterChips
     VStack(spacing: 0) {
       PixivBar(height: 48) { PixivHeaderRow(browse: browse) }
+      if !activeChips.isEmpty {
+        // ActiveFilterChipsBar lays its content over a zero-min-width Color.clear filler,
+        // matching PixivBar so narrow columns beside an open inspector never loop constraints.
+        ActiveFilterChipsBar(
+          chips: activeChips, identifierPrefix: "pixiv-active-filters",
+          onClear: { _ = model.clearFilters() })
+      }
       content(browse)
       if PixivPagerBar.isShown(for: browse) {
         PixivPagerBar(browse: browse)
@@ -27,6 +35,7 @@ struct PixivBrowserPage: View {
       // once rather than at the end of its 400 ms wait.
       model.flushScrollReport()
     }
+    .accessibilityElement(children: .contain)
     .accessibilityIdentifier("pixiv-page")
   }
 

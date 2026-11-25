@@ -58,6 +58,20 @@ struct LibrarySelection: Equatable, Sendable {
     if anchor == nil { anchor = ids.first }
   }
 
+  /// Sets the contiguous range between `anchor` and `target` in `visible` on top of `base`,
+  /// preserving members already ticked in `base` outside the active range and keeping `anchor`.
+  /// Used by keyboard Shift+Arrow range selection so reversing direction shrinks the range cleanly.
+  mutating func selectRange(
+    from anchor: String, to target: String, in visible: [String], over base: LibrarySelection
+  ) {
+    guard let from = visible.firstIndex(of: anchor), let to = visible.firstIndex(of: target) else {
+      return
+    }
+    self = base
+    for each in visible[min(from, to)...max(from, to)] { insert(each) }
+    self.anchor = anchor
+  }
+
   mutating func clear() {
     ids = []
     members = []

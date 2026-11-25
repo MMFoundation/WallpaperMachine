@@ -190,12 +190,17 @@ extension PanelController {
   var targetDisplays: [TargetDisplayOption] {
     let titles = displayTitles.resolved()
     let monitors = store.monitorInformationSnapshot.rows
+    let wallpapers = store.librarySnapshot.wallpapers
     return store.settingsSnapshot.displays.map { display in
-      let wallpaperID = monitors.first { $0.displayId == display.displayId }?.wallpaperId
+      let rawID = monitors.first { $0.displayId == display.displayId }?.wallpaperId
+      let wallpaperID = rawID.flatMap { $0.isEmpty ? nil : $0 }
+      let wallpaperTitle = wallpaperID.flatMap { id in
+        wallpapers.first { $0.id == id }?.title
+      }
       return TargetDisplayOption(
         id: display.displayId, title: titles.title(display.title, displayId: display.displayId),
         isEnabled: display.enabled, isMirror: display.mode == .mirror,
-        wallpaperID: wallpaperID.flatMap { $0.isEmpty ? nil : $0 })
+        wallpaperID: wallpaperID, wallpaperTitle: wallpaperTitle)
     }
   }
 

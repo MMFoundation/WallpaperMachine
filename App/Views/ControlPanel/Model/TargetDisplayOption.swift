@@ -11,6 +11,8 @@ struct TargetDisplayOption: Identifiable, Equatable, Sendable {
   /// The wallpaper the display shows now; nil for a display that shows none. A mirror reports the
   /// wallpaper of the display it mirrors.
   var wallpaperID: String?
+  /// The library title of `wallpaperID` when known; nil while empty or not in the library.
+  var wallpaperTitle: String? = nil
 
   /// Only an enabled display that shows a wallpaper of its own can be the target. A disabled or a
   /// mirrored one stays in the list, and cannot be chosen.

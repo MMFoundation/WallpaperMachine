@@ -190,39 +190,102 @@ enum WorkshopFilterCatalog {
 
   /// Every box that starts unticked, in the catalog's order.
   static let defaultExcludedTags: [String] = entries.filter(\.isOffByDefault).map(\.tag)
+
+  /// SF Symbol for the client-side Hide installed filter in Discover's Filters sidebar.
+  static let hideInstalledSystemImage = "eye.slash"
+
+  /// Lower-cased catalog tag → canonical catalog spelling, so a tag clicked in the Workshop
+  /// inspector matches its sidebar box or chip regardless of casing.
+  private static let canonicalByLowercase: [String: String] = {
+    var map: [String: String] = [:]
+    for entry in showOnly { map[entry.tag.lowercased()] = entry.tag }
+    for entry in entries { map[entry.tag.lowercased()] = entry.tag }
+    return map
+  }()
+
+  /// Catalog tags whose localized display label differs from the English Steam tag spelling.
+  private static let localizedKeyOverrides: [String: String] = [
+    "everyone": "Everyone (G)",
+    "questionable": "Questionable (PG-13)",
+    "mature": "Mature (R-18)",
+    "standard definition": "Standard definition",
+    "ultrawide standard definition": "Ultrawide (standard)",
+    "dual standard definition": "Dual monitor (standard)",
+    "triple standard definition": "Triple monitor (standard)",
+    "portrait standard definition": "Portrait monitor / phone (standard)",
+    "mmd": "MMD (Miku Miku Dance)",
+    "unspecified": "Unspecified genre",
+  ]
+
+  /// Returns the catalog's canonical spelling for `tag` when it is a known Workshop filter tag,
+  /// otherwise the trimmed tag as-is.
+  static func canonicalTag(_ tag: String) -> String {
+    let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+    return canonicalByLowercase[trimmed.lowercased()] ?? trimmed
+  }
+
+  /// Localized display label for a known Workshop filter tag (resolution numbers and unknown tags
+  /// stay verbatim so untrusted Steam tags are never looked up as catalog keys).
+  @MainActor
+  static func displayName(for tag: String) -> String {
+    let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+    let lower = trimmed.lowercased()
+    if let override = localizedKeyOverrides[lower] {
+      return PanelLocale.shared.catalogString(override)
+    }
+    if let entry = entries.first(where: { $0.tag.lowercased() == lower }) {
+      if case .verbatim = entry.name { return entry.tag }
+      return PanelLocale.shared.catalogString(entry.tag)
+    }
+    if let required = showOnly.first(where: { $0.tag.lowercased() == lower }) {
+      return PanelLocale.shared.catalogString(required.tag)
+    }
+    return trimmed
+  }
 }
 
 /// The Workshop filters as the page edits them before and after asking Steam: the tags an item
-/// must carry and the tags that hide it.
+/// must carry, the tags that hide it, and the client-side Hide installed switch.
 ///
 /// A tag is never both required and excluded: requiring one stops excluding it and the other way
 /// round. The count the Filter button shows is every required tag plus every box or chip whose
-/// state differs from its default, so it reads zero right after **Clear**.
+/// state differs from its default plus Hide installed when enabled, so it reads zero right after
+/// **Clear**.
 struct WorkshopFilterDraft: Equatable {
   var tags: [String]
   var excludedTags: [String]
+  /// Client-side filter: hides items on the current Steam page that are already in the local
+  /// library. Never sent to Steam.
+  var hideInstalled = false
 
   static let defaultExcludedTags = WorkshopFilterCatalog.defaultExcludedTags
 
-  /// No required tag and the defaults excluded: what **Clear** restores.
+  /// No required tag, the defaults excluded, and installed items shown: what **Clear** restores.
   static var cleared: WorkshopFilterDraft {
-    WorkshopFilterDraft(tags: [], excludedTags: defaultExcludedTags)
+    WorkshopFilterDraft(tags: [], excludedTags: defaultExcludedTags, hideInstalled: false)
   }
 
-  /// How many filters are in effect.
-  var count: Int {
+  /// How many server-side Steam tag filters differ from their defaults (excluding client-side
+  /// `hideInstalled`).
+  var serverFilterCount: Int {
     let defaults = Self.defaultExcludedTags
     return tags.count + defaults.filter { !excludedTags.contains($0) && !tags.contains($0) }.count
       + excludedTags.filter { !defaults.contains($0) }.count
   }
+
+  /// How many filters are in effect, including client-side `hideInstalled`.
+  var count: Int { serverFilterCount + (hideInstalled ? 1 : 0) }
 
   /// Boxes and chips of `group` whose state differs from its default.
   func count(in group: WorkshopFilterCatalog.Group) -> Int {
     group.tags.filter { chipSelection($0) != Self.defaultSelection($0) }.count
   }
 
-  /// "Show only" boxes that are ticked, plus the tags that are required without a box or chip.
-  var requiredCount: Int { tags.filter { !WorkshopFilterCatalog.chipTags.contains($0) }.count }
+  /// "Show only" boxes that are ticked, the client-side Hide installed switch when on, plus any
+  /// tags that are required without a box or chip.
+  var requiredCount: Int {
+    tags.filter { !WorkshopFilterCatalog.chipTags.contains($0) }.count + (hideInstalled ? 1 : 0)
+  }
 
   /// Whether the box of `tag` is ticked: not excluded.
   func isIncluded(_ tag: String) -> Bool { !excludedTags.contains(tag) }

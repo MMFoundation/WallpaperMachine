@@ -82,6 +82,49 @@ final class PixivBrowserModel {
   /// How many filters differ from a fresh page: the badge of the Filter button.
   var filterCount: Int { query.activeFilterCount }
 
+  /// Whether the current pixiv search text matches `tag`.
+  func isSearchingTag(_ tag: String) -> Bool {
+    let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return false }
+    return query.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      .caseInsensitiveCompare(trimmed) == .orderedSame
+  }
+
+  /// Removable active filter chips for `ActiveFilterChipsBar`, matching every active filter
+  /// counted by `filterCount`.
+  var activeFilterChips: [ActiveFilterChip] {
+    let current = query
+    var chips: [ActiveFilterChip] = []
+    if current.orientation != .any {
+      chips.append(
+        ActiveFilterChip(id: "orientation", title: current.orientation.title, tone: .included) {
+          [weak self] in _ = self?.choose(orientation: .any)
+        })
+    }
+    if current.minimumSize != .any {
+      chips.append(
+        ActiveFilterChip(id: "size", title: current.minimumSize.title, tone: .included) {
+          [weak self] in _ = self?.choose(minimumSize: .any)
+        })
+    }
+    for rating in PixivQuery.offeredRatings
+    where current.ratings.contains(rating) != PixivQuery.defaultRatings.contains(rating) {
+      let isIncluded = current.ratings.contains(rating)
+      chips.append(
+        ActiveFilterChip(
+          id: "rating-\(rating.rawValue.lowercased())", title: rating.title,
+          tone: isIncluded ? .included : .excluded
+        ) { [weak self] in _ = self?.set(rating, isOn: !isIncluded) })
+    }
+    if current.hidesAIGenerated {
+      chips.append(
+        ActiveFilterChip(id: "hide-ai", title: L("Hide AI-generated works"), tone: .included) {
+          [weak self] in _ = self?.set(hidesAIGenerated: false)
+        })
+    }
+    return chips
+  }
+
   func count(in group: PixivFilterGroup) -> Int {
     let query = query
     switch group {
@@ -175,6 +218,15 @@ final class PixivBrowserModel {
   @discardableResult
   func clearSearch() -> Task<Void, Never> {
     draft.text = ""
+    return commit()
+  }
+
+  /// Searches pixiv immediately for a tag clicked in the pixiv inspector.
+  @discardableResult
+  func searchTag(_ tag: String) -> Task<Void, Never> {
+    let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return Task {} }
+    draft.text = String(trimmed.prefix(Self.textLimit))
     return commit()
   }
 

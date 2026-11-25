@@ -501,4 +501,40 @@ final class PixivBrowserModelTests: MediaPanelTestCase {
     XCTAssertEqual(PixivHeaderRow.signInStyle(forWidth: 280), .hidden)
     XCTAssertEqual(PixivHeaderRow.signInStyle(forWidth: 0), .hidden)
   }
+
+  func testSearchTagCommitsImmediatelyAndActiveFilterChipsMatchActiveFilters() async throws {
+    let transport = try fixture()
+    try await withPanel(pixivTransport: transport) { panel in
+      let model = panel.controller.pixivBrowser
+      try await openRanking(panel)
+
+      await model.searchTag("  sky  ").value
+      try await settle(panel)
+      XCTAssertEqual(panel.pixiv.query.text, "sky")
+      XCTAssertTrue(model.isSearchingTag("sky"))
+      XCTAssertTrue(model.isSearchingTag("SKY"))
+      XCTAssertFalse(model.isSearchingTag("ocean"))
+      XCTAssertTrue(transport.requests.contains { $0.path == "/ajax/search/illustrations/sky" })
+
+      XCTAssertTrue(model.activeFilterChips.isEmpty)
+      await model.choose(orientation: .landscape).value
+      await model.choose(minimumSize: .quadHD).value
+      await model.set(.questionable, isOn: true).value
+      await model.set(.everyone, isOn: false).value
+      await model.set(hidesAIGenerated: true).value
+      try await settle(panel)
+
+      let chips = model.activeFilterChips
+      XCTAssertEqual(chips.count, model.filterCount)
+      XCTAssertEqual(
+        chips.map(\.id),
+        ["orientation", "size", "rating-everyone", "rating-questionable", "hide-ai"])
+      XCTAssertEqual(chips.first { $0.id == "rating-everyone" }?.tone, .excluded)
+      XCTAssertEqual(chips.first { $0.id == "rating-questionable" }?.tone, .included)
+
+      chips.first { $0.id == "orientation" }?.onRemove()
+      try await waitFor { model.query.orientation == .any }
+      XCTAssertEqual(model.activeFilterChips.count, model.filterCount)
+    }
+  }
 }

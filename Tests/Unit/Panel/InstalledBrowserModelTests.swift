@@ -1691,4 +1691,127 @@ final class InstalledBrowserModelTests: PanelTestCase {
     XCTAssertEqual(model.importPill.state.report?.needsAttention, true)
     XCTAssertEqual(model.importPill.state.report?.failures.count, 1)
   }
+
+  /// Clicking an inspector tag toggles it as a required filter; Option-clicking toggles it as
+  /// excluded, canonicalizing catalog tags and keeping custom manifest tags verbatim.
+  func testToggleTagFromInspectorTogglesRequiredAndExcludedAndCanonicalizesCatalogTags() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    let model = panel.controller.library
+
+    model.toggleTagFromInspector("anime", exclude: false)
+    XCTAssertEqual(model.filter.requiredTags, ["Anime"])
+    XCTAssertEqual(model.chipSelection("Anime"), .required)
+
+    model.toggleTagFromInspector("Anime", exclude: false)
+    XCTAssertTrue(model.filter.requiredTags.isEmpty, "a second click clears the required tag")
+
+    model.toggleTagFromInspector("Anime", exclude: true)
+    XCTAssertEqual(model.filter.excludedTags, ["Anime"])
+    XCTAssertEqual(model.chipSelection("anime"), .excluded)
+
+    model.toggleTagFromInspector("Anime", exclude: false)
+    XCTAssertEqual(model.filter.requiredTags, ["Anime"], "requiring removes the exclusion")
+    XCTAssertTrue(model.filter.excludedTags.isEmpty)
+
+    model.toggleTagFromInspector("Neon City", exclude: false)
+    XCTAssertEqual(model.filter.requiredTags, ["Anime", "Neon City"], "custom tags stay verbatim")
+    model.toggleTagFromInspector("   ", exclude: false)
+    XCTAssertEqual(model.filter.requiredTags, ["Anime", "Neon City"], "blank tags are ignored")
+  }
+
+  /// Active filter chips stay aligned with narrowingFilterCount: view scopes (Favorites and a
+  /// collection) stay in the scope bar, removing a chip removes its filter, and clearing narrowing
+  /// filters keeps the active scope and search text intact.
+  func testActiveFilterChipsAlignWithNarrowingFilterCountAndPreserveScopeOnClear() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    let controller = panel.controller
+    let model = controller.library
+    try await installNames(panel, count: 3)
+
+    let collection = try await controller.createCollection(name: "Night", wallpaperIDs: ["w00"])
+    model.setText("w0")
+
+    // Favorites as the active view scope is not a narrowing chip.
+    model.setRequired(LibraryFilterCatalog.favoriteTag, true)
+    XCTAssertEqual(model.narrowingFilterCount, 0)
+    XCTAssertTrue(model.activeFilterChips.isEmpty)
+
+    // Narrowing tags appear as removable chips while Favorites stays as the scope.
+    model.setRequired("Anime", true)
+    model.setIncluded("Web", false)
+    XCTAssertEqual(model.narrowingFilterCount, 2)
+    XCTAssertEqual(model.activeFilterChips.map(\.id), ["req-Anime", "exc-Web"])
+    XCTAssertEqual(model.activeFilterChips.map(\.tone), [.included, .excluded])
+
+    model.activeFilterChips[0].onRemove()
+    XCTAssertEqual(model.filter.requiredTags, [LibraryFilterCatalog.favoriteTag])
+    XCTAssertEqual(model.activeFilterChips.map(\.id), ["exc-Web"])
+
+    model.setRequired("Approved", true)
+    model.clearNarrowingFilters()
+    XCTAssertEqual(model.narrowingFilterCount, 0)
+    XCTAssertTrue(model.activeFilterChips.isEmpty)
+    XCTAssertEqual(model.filter.requiredTags, [LibraryFilterCatalog.favoriteTag], "Favorites scope stays")
+    XCTAssertEqual(model.filter.text, "w0", "search text stays")
+
+    // Inside a collection scope, Favorites narrows that collection so it becomes a chip, while the
+    // collection scope itself does not; clearing narrowing filters keeps the collection.
+    model.show(.collection(collection.id))
+    model.setRequired(LibraryFilterCatalog.favoriteTag, true)
+    model.setIncluded("Scene", false)
+    XCTAssertEqual(model.narrowingFilterCount, 2)
+    XCTAssertEqual(model.activeFilterChips.map(\.id), ["req-\(LibraryFilterCatalog.favoriteTag)", "exc-Scene"])
+
+    model.clearNarrowingFilters()
+    XCTAssertEqual(model.filter.collectionID, collection.id, "collection scope stays")
+    XCTAssertTrue(model.filter.requiredTags.isEmpty)
+    XCTAssertTrue(model.filter.excludedTags.isEmpty)
+    XCTAssertEqual(model.filter.text, "w0")
+  }
+
+  /// Creating a collection from the scope bar or a context menu opens the Filters sidebar with the
+  /// Collections section expanded and starts the inline name editor.
+  func testBeginCreatingCollectionInSidebarOpensSidebarCollectionsAndEditor() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    let controller = panel.controller
+    let model = controller.library
+    controller.shell.setFiltersShown(false)
+    model.openFilterGroups.remove("collections")
+
+    model.beginCreatingCollectionInSidebar()
+    XCTAssertTrue(controller.shell.areFiltersShown)
+    XCTAssertTrue(model.openFilterGroups.contains("collections"))
+    XCTAssertEqual(controller.shell.collectionEditor.mode, .create)
+  }
+
+  /// Keyboard Shift+Arrow range selection extends, shrinks and reverses around a stable anchor and
+  /// preserves unrelated earlier ticks until a non-range action resets the gesture.
+  func testExtendSelectionByKeyboardExtendsContractsReversesAndPreservesBaseTicks() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    let model = panel.controller.library
+    try await installNames(panel, count: 6)
+
+    // Pre-existing tick outside the new keyboard range stays when Shift+Arrow starts from w02.
+    model.toggleChecked("w05")
+
+    model.extendSelectionByKeyboard(from: "w02", to: "w03")
+    XCTAssertEqual(model.selectedIDs, ["w05", "w02", "w03"])
+    XCTAssertEqual(model.selection.anchor, "w02")
+
+    model.extendSelectionByKeyboard(from: "w03", to: "w04")
+    XCTAssertEqual(model.selectedIDs, ["w05", "w02", "w03", "w04"])
+
+    model.extendSelectionByKeyboard(from: "w04", to: "w03")
+    XCTAssertEqual(model.selectedIDs, ["w05", "w02", "w03"], "stepping back shrinks the range")
+
+    model.extendSelectionByKeyboard(from: "w03", to: "w01")
+    XCTAssertEqual(model.selectedIDs, ["w05", "w01", "w02"], "reversing past the anchor keeps it fixed")
+
+    model.endKeyboardRange()
+    XCTAssertEqual(model.selectedIDs, ["w05", "w01", "w02"], "ending the gesture leaves ticks intact")
+  }
 }

@@ -210,4 +210,46 @@ enum LibraryFilterCatalog {
     hiddenExcludedTags + sections.flatMap(\.entries).filter(\.isOffByDefault).map(\.tag)
 
   static func section(key: String) -> Section? { sections.first { $0.key == key } }
+
+  /// Lower-cased catalog tag → canonical catalog spelling, so a tag clicked in the inspector
+  /// matches its sidebar box or chip regardless of manifest casing.
+  private static let canonicalByLowercase: [String: String] = {
+    var map: [String: String] = [:]
+    for entry in showOnly { map[entry.tag.lowercased()] = entry.tag }
+    for entry in sections.flatMap(\.entries) { map[entry.tag.lowercased()] = entry.tag }
+    return map
+  }()
+
+  /// Catalog tags whose localized catalog key differs from the English tag spelling.
+  private static let localizedKeyOverrides: [String: String] = [
+    "favorite": "Favorites",
+    "active": "Active on target display",
+    "update": "Update available",
+    "everyone": "Everyone (G)",
+    "questionable": "Questionable (PG-13)",
+    "mature": "Mature (R-18)",
+    "mmd": "MMD (Miku Miku Dance)",
+    "unspecified": "Unspecified genre",
+  ]
+
+  /// Returns the catalog's canonical spelling for `tag` if it is a known filter tag, otherwise the
+  /// trimmed tag as-is.
+  static func canonicalTag(_ tag: String) -> String {
+    let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+    return canonicalByLowercase[trimmed.lowercased()] ?? trimmed
+  }
+
+  /// Localized display label for a known catalog filter tag, or the tag verbatim for custom
+  /// manifest tags so untrusted text is never looked up as a localization key.
+  @MainActor
+  static func displayName(for tag: String) -> String {
+    let lower = tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if let override = localizedKeyOverrides[lower] {
+      return PanelLocale.shared.catalogString(override)
+    }
+    if let canonical = canonicalByLowercase[lower] {
+      return PanelLocale.shared.catalogString(canonical)
+    }
+    return tag
+  }
 }

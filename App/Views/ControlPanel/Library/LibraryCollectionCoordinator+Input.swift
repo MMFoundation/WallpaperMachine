@@ -154,17 +154,26 @@ extension LibraryCollectionCoordinator {
     case 119: move = .last
     default: return false
     }
+    guard !rows.isEmpty else { return true }
     let current = (model.focusedID ?? lastFocusedID).flatMap { id in rows.firstIndex { $0.id == id } } ?? 0
+    let extendsSelection = event.modifierFlags.contains(.shift)
     guard let target = TileGridLayout.destination(
       from: current, move, columns: gridLayout.geometry.columns, count: rows.count)
     else { return true }
-    focus(rows[target].id, byKeyboard: true)
+    let previousID = rows[current].id
+    let targetID = rows[target].id
+    focus(targetID, byKeyboard: true)
+    if extendsSelection {
+      model.extendSelectionByKeyboard(from: previousID, to: targetID)
+    } else {
+      model.endKeyboardRange()
+    }
     let frame = gridLayout.geometry.frame(ofIndex: target)
     let viewport = scrollView.contentView.bounds
     if frame.minY < viewport.minY { scroll(to: frame.minY) }
     else if frame.maxY > viewport.maxY { scroll(to: frame.maxY - viewport.height) }
     collection.layoutSubtreeIfNeeded()
-    if let item = item(for: rows[target].id) {
+    if let item = item(for: targetID) {
       item.tile.isFocused = true
       NSAccessibility.post(element: item.view, notification: .focusedUIElementChanged)
     }
