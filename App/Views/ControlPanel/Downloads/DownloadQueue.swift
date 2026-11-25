@@ -60,6 +60,18 @@ struct DownloadQueue: Equatable {
   var succeeded: [DownloadRow] { downloads.filter { !$0.isPending && !$0.needsReview } }
   /// Clearing removes what is not under way.
   var canClearFinished: Bool { downloads.count > pending.count }
+  /// Restored requests waiting for the user to resume them.
+  var pausedRequestCount: Int { requests.filter(\.isPaused).count }
+  /// Paused jobs across Steam and pixiv.
+  var pausedJobCount: Int { downloads.filter(\.canResume).count }
+  /// Everything Resume all would restart: paused requests and paused jobs together.
+  var resumableCount: Int { pausedRequestCount + pausedJobCount }
+  /// Active and waiting jobs that Pause all would pause.
+  var pausableCount: Int { downloads.filter(\.canPause).count }
+  /// Waiting jobs that Cancel queued would remove without touching active transfers.
+  var queuedCount: Int { queued.count }
+  /// Whether the header's batch controls have anything to act on.
+  var hasBatchActions: Bool { resumableCount > 0 || pausableCount > 0 || queuedCount > 0 }
 
   /// One row of the popover: a retained request or a job.
   enum Entry: Identifiable, Equatable {

@@ -40,25 +40,38 @@ extension PanelController {
       ring: ring.map { PixivTile.Ring(state: $0.state, jobID: $0.jobID) })
   }
 
+  /// Queueing more missing pages than this asks the user for confirmation first so a large
+  /// multi-page manga/series cannot flood the download queue by accident.
+  static let pixivBatchDownloadConfirmationThreshold = 10
+
   /// The selected work as the inspector shows it, or nil when nothing is selected.
   var pixivSelection: PixivSelection? {
     guard let work = pixiv.selectedWork else { return nil }
     let index = pixiv.selectedPage
-    let page = pixiv.selectedPageList?.first { $0.index == index }
+    let pageList = pixiv.selectedPageList
+    let page = pageList?.first { $0.index == index }
     let pages: PixivSelection.Pages
     switch pixiv.selectedPages {
     case nil: pages = .loading
     case .success: pages = .loaded
     case .failure(let failure): pages = .failed(failure.localizedDescription)
     }
+    let count = pixiv.pageCount(of: work)
+    let previewsByIndex = Dictionary(
+      (pageList ?? []).map { ($0.index, $0.previewURL.map { PanelImageSource.pixivThumbnail($0) }) },
+      uniquingKeysWith: { first, _ in first })
+    let pagePreviews = (0..<max(0, count)).map { previewsByIndex[$0] ?? nil }
+    let pendingPages = Set(
+      pixiv.downloads.downloads.lazy.filter { $0.work.id == work.id && $0.isPending }.map(\.pageIndex))
     let libraryID = work.libraryID(page: index)
     let job = pixiv.downloads.download(for: libraryID).map(PixivDownloadRow.init)
     return PixivSelection(
-      work: work, pageIndex: index, pageCount: pixiv.pageCount(of: work), pages: pages,
+      work: work, pageIndex: index, pageCount: count, pages: pages,
       preview: page?.previewURL.map { .pixivThumbnail($0) }, thumbnail: work.thumbnail,
       pageWidth: page?.width ?? (index == 0 ? work.width : 0),
       pageHeight: page?.height ?? (index == 0 ? work.height : 0), libraryID: libraryID,
-      savedPages: pixivInstalledPages[work.id] ?? [], job: job)
+      savedPages: pixivInstalledPages[work.id] ?? [], job: job,
+      pagePreviews: pagePreviews, pendingPages: pendingPages)
   }
 
   /// What double-clicking a pixiv tile does.
@@ -137,6 +150,51 @@ extension PanelController {
         (0...max(0, pixiv.pageCount(of: work) - 1)).contains(page)
       else { throw InvalidControlValue() }
       pixiv.requestDownload(work, page: page)
+    }
+  }
+
+  /// Saves every page of `workID` not already in the library or pending in the queue.
+  /// Asks for confirmation when queueing more than `pixivBatchDownloadConfirmationThreshold`
+  /// pages so a large multi-page series cannot flood the queue by accident. Answers how many
+  /// pages were queued.
+  @discardableResult
+  func pixivDownloadMissingPages(workID: String) async throws -> Int {
+    guard let work = pixiv.work(id: workID) else { throw InvalidControlValue() }
+    let missing = missingPixivPages(of: work)
+    guard !missing.isEmpty else { return 0 }
+    if missing.count > Self.pixivBatchDownloadConfirmationThreshold {
+      let confirmed = await dialogs.confirm(
+        L("Download \(missing.count) pages?"),
+        detail: L(
+          "This illustration has \(missing.count) pages not in your library yet. Queueing all of them adds \(missing.count) downloads to your queue."
+        ),
+        button: L("Download \(missing.count) Pages"))
+      guard confirmed else { return 0 }
+    }
+    var queued = 0
+    try await run(.immediate) {
+      guard let current = pixiv.work(id: workID) else { return }
+      for page in missingPixivPages(of: current) {
+        pixiv.requestDownload(current, page: page)
+        queued += 1
+      }
+    }
+    return queued
+  }
+
+  private func missingPixivPages(of work: PixivWork) -> [Int] {
+    let count = pixiv.pageCount(of: work)
+    guard count > 0 else { return [] }
+    let saved = Set(pixivInstalledPages[work.id] ?? [])
+    let pending = Set(
+      pixiv.downloads.downloads.lazy.filter { $0.work.id == work.id && $0.isPending }.map(\.pageIndex))
+    return (0..<count).filter { !saved.contains($0) && !pending.contains($0) }
+  }
+
+  /// **Download next**: moves a waiting pixiv save to the front of the line.
+  func pixivPrioritizeDownload(id: String) async throws {
+    try await run(.immediate) {
+      guard pixiv.downloads.prioritize(id) else { throw InvalidControlValue() }
     }
   }
 

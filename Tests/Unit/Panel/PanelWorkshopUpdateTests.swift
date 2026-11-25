@@ -167,6 +167,43 @@ final class PanelWorkshopUpdateTests: MediaPanelTestCase {
     await asking.value
     XCTAssertFalse(controller.isStoreBusy)
   }
+
+  func testDismissingAnUpdateHidesItsNoticeAndReducesTheUpdateCount() async throws {
+    let remoteUpdated = Date().addingTimeInterval(-3600)
+    let changed = WorkshopItem(
+      id: "123", title: "Changed", creator: "Creator", summary: "", previewURL: nil, tags: ["Video"],
+      size: 1, subscriptions: 0, timeUpdated: remoteUpdated)
+    let updates = WorkshopUpdateStore(
+      defaults: try TemporaryDefaults.make(for: self).defaults, fetch: { _ in [changed] })
+    let panel = try makeBrowsingPanel(service: WorkshopDetailsStub().service, updates: updates)
+    let controller = panel.controller
+    let folder = panel.root.appendingPathComponent("Library/123")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let manifest = folder.appendingPathComponent("project.json")
+    try Data("{}".utf8).write(to: manifest)
+    try FileManager.default.setAttributes(
+      [.modificationDate: Date().addingTimeInterval(-7200)], ofItemAtPath: manifest.path)
+    panel.store.librarySnapshot = installed(["123", "456"])
+
+    try await controller.checkWorkshopUpdates()
+    try await waitFor { !updates.isChecking }
+    XCTAssertEqual(controller.workshopUpdates.count, 1)
+    XCTAssertEqual(controller.workshopUpdateNotice(for: "123")?.canDismiss, true)
+
+    do {
+      try await controller.dismissWorkshopUpdate(id: "456")
+      XCTFail("an installed item with no available update cannot be dismissed")
+    } catch is InvalidControlValue {}
+    do {
+      try await controller.dismissWorkshopUpdate(id: "999")
+      XCTFail("an item that is not installed cannot be dismissed")
+    } catch is WallpaperActionError {}
+
+    try await controller.dismissWorkshopUpdate(id: "123")
+    XCTAssertEqual(controller.workshopUpdates.count, 0)
+    XCTAssertNil(controller.workshopUpdateNotice(for: "123"))
+    XCTAssertEqual(updates.dismissedUpdateDate(for: "123"), remoteUpdated)
+  }
 }
 
 /// Holds the confirmation sheet open until the test answers it.

@@ -655,6 +655,117 @@ final class PanelDownloadActionsTests: MediaPanelTestCase {
       XCTAssertEqual(controller.steamAccount.slotLimit, 5)
     }
   }
+
+  // MARK: Batch controls
+
+  func testBatchCancelQueuedAsksFirstAndLeavesActiveRunningWhilePauseAndResumeAllActTogether()
+    async throws
+  {
+    try await withPanel { panel in
+      let controller = panel.controller
+      try await useFakeSteamCMD(panel)
+      let first = item("222")
+      let second = item("223")
+      panel.workshop.username = "localtest"
+      controller.remembersSession = false
+      panel.workshop.selectedItem = first
+      try await controller.requestDownload(item: first)
+      panel.workshop.selectedItem = second
+      try await controller.requestDownload(item: second)
+      try await panel.waitUntil {
+        panel.workshop.downloader.download(for: "222")?.worker.prompt == .password
+          && panel.workshop.downloader.download(for: "223")?.isQueued == true
+      }
+
+      // Declining confirmation leaves queued work untouched.
+      panel.dialogs.confirmAnswer = false
+      try await controller.cancelQueuedDownloads()
+      XCTAssertEqual(panel.dialogs.confirmations.count, 1)
+      XCTAssertEqual(panel.dialogs.confirmations.first?.title, "Cancel 1 queued download?")
+      XCTAssertEqual(panel.dialogs.confirmations.first?.button, "Cancel Queued")
+      XCTAssertEqual(panel.workshop.downloader.download(for: "223")?.isQueued, true)
+
+      // Confirming cancels only waiting jobs; the active download stays running.
+      panel.dialogs.confirmAnswer = true
+      try await controller.cancelQueuedDownloads()
+      XCTAssertEqual(panel.workshop.downloader.download(for: "223")?.isCancelled, true)
+      XCTAssertEqual(panel.workshop.downloader.download(for: "222")?.isPending, true)
+
+      // Queue another waiting item, then Pause all and Resume all.
+      let third = item("224")
+      panel.workshop.selectedItem = third
+      try await controller.requestDownload(item: third)
+      try await panel.waitUntil { panel.workshop.downloader.download(for: "224")?.isQueued == true }
+
+      try await controller.pauseAllDownloads()
+      try await panel.waitUntil {
+        panel.workshop.downloader.download(for: "222")?.isPaused == true
+          && panel.workshop.downloader.download(for: "222")?.isPending == false
+          && panel.workshop.downloader.download(for: "224")?.isPaused == true
+          && panel.workshop.downloader.download(for: "224")?.isPending == false
+      }
+      XCTAssertEqual(controller.downloadQueue.resumableCount, 2)
+
+      try await controller.resumeAllDownloads()
+      try await panel.waitUntil {
+        panel.workshop.downloader.download(for: "222")?.isPending == true
+          && panel.workshop.downloader.download(for: "224")?.isPending == true
+      }
+    }
+  }
+
+  /// When resuming paused retained Steam requests hits a Steam error, `resumeAllDownloads()` stops
+  /// before resuming later paused Steam requests and leaves no unconsumed downloader error behind.
+  func testResumeAllStopsResumingRemainingPausedSteamRequestsAfterFirstSteamError() async throws {
+    try await withPanel { panel in
+      let requestFile = panel.root.appendingPathComponent("Downloads/workshop-requests.json")
+      try FileManager.default.createDirectory(
+        at: requestFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+      let requests = [
+        WorkshopDownloadRequest(
+          id: "301", item: item("301"), account: "anonymous", rememberSession: false,
+          includesResources: false),
+        WorkshopDownloadRequest(
+          id: "302", item: item("302"), account: "localtest", rememberSession: false,
+          includesResources: false),
+      ]
+      try JSONEncoder().encode(requests).write(to: requestFile, options: .atomic)
+
+      let restoredDownloader = WorkshopDownloadManager(
+        sessionDirectory: panel.root.appendingPathComponent("session-restored"),
+        runtimeProvider: PanelRuntime())
+      let restoredWorkshop = WorkshopStore(
+        service: WorkshopService(session: OfflineSteamProtocol.session()),
+        downloader: restoredDownloader, supportDirectory: panel.root, defaults: panel.defaults,
+        runtimeProvider: PanelRuntime(),
+        updates: OfflineSteamProtocol.updates(defaults: panel.defaults),
+        sceneAssetsAvailable: { _ in true })
+      restoredWorkshop.steamCMDSetup.selectExisting(at: panel.executable)
+      try await panel.waitUntil { restoredWorkshop.steamCMDSetup.selectedRuntime != nil }
+      XCTAssertEqual(restoredWorkshop.downloadRequests.map(\.id), ["301", "302"])
+      XCTAssertTrue(restoredWorkshop.downloadRequests.allSatisfy(\.isPaused))
+
+      let controller = PanelController(
+        store: panel.store, navigation: panel.navigation, workshop: restoredWorkshop,
+        pixiv: panel.pixiv, defaults: panel.defaults, dialogs: panel.dialogs)
+      defer { controller.stop() }
+
+      var thrown: WallpaperActionError?
+      do {
+        try await controller.resumeAllDownloads()
+        XCTFail("first paused request uses refused anonymous account and must throw")
+      } catch let error as WallpaperActionError {
+        thrown = error
+      }
+
+      let first = try XCTUnwrap(restoredWorkshop.downloadRequests.first { $0.id == "301" })
+      let second = try XCTUnwrap(restoredWorkshop.downloadRequests.first { $0.id == "302" })
+      XCTAssertTrue(first.refused, "first request failed with a Steam account error")
+      XCTAssertTrue(second.isPaused, "later paused Steam request must not be resumed after the first error")
+      XCTAssertNil(restoredDownloader.download(for: "302"))
+      XCTAssertEqual(thrown?.message, restoredDownloader.errorMessage, "first Steam error is surfaced intact")
+    }
+  }
 }
 
 /// The rows a view that observes the queue last read.

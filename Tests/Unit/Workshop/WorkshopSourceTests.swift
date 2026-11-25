@@ -163,6 +163,70 @@ final class WorkshopSourceTests: XCTestCase {
     XCTAssertEqual(authorNamedSignIn.name, "Sign In")
   }
 
+  func testAccountAndPersonaNameDecodersReadSteamHTMLAndRejectAnonymousPages() throws {
+    let headerHTML = """
+      <html><head><title>Steam Community :: Workshop</title></head><body>
+      <span id="account_pulldown">Night &amp; Day</span>
+      </body></html>
+      """
+    XCTAssertEqual(WorkshopService.decodeAccountName(headerHTML), "Night & Day")
+
+    let ssrHTML = """
+      <html><body>
+      <script type="application/json" id="valve-ssr-data">{"UserConfig":{"logged_in":true,"account_name":"skywalker"}}</script>
+      </body></html>
+      """
+    XCTAssertEqual(WorkshopService.decodeAccountName(ssrHTML), "skywalker")
+
+    let profileHomeHTML = """
+      <html><head><title>Steam Community :: Dr. Pixel</title></head><body>
+      <span class="actual_persona_name">Dr. Pixel &amp; Co</span>
+      </body></html>
+      """
+    XCTAssertEqual(WorkshopService.decodePersonaName(profileHomeHTML), "Dr. Pixel & Co")
+
+    let anonymous = """
+      <html><head><title>Steam Community :: Sign In</title></head><body>
+      <script type="application/json" id="valve-ssr-data">{"route":"/login/home","UserConfig":{"logged_in":false,"steamid":"0"}}</script>
+      </body></html>
+      """
+    XCTAssertNil(WorkshopService.decodeAccountName(anonymous))
+    XCTAssertNil(WorkshopService.decodePersonaName(anonymous))
+  }
+
+  func testFavoritesAndCollectionMissingItemQueriesSkipInstalledAndCachePersonaName() async throws {
+    let session = try XCTUnwrap(SteamWebSession(cookie: "\(Self.author)||0123456789abcdef0123"))
+    fixture.favoritePages = [
+      "subscriptiondate": Data("""
+        <html><head><title>Steam Community :: Starlight :: Favorites</title></head><body>
+        <span id="account_pulldown">Starlight</span>
+        <div class="workshopItemSubscription" id="Subscription101"></div>
+        <div class="workshopItemSubscription" id="Subscription102"></div>
+        Showing 1-2 of 2 entries</body></html>
+        """.utf8)
+    ]
+    fixture.collection = collectionJSON(children: [("202", 1), ("201", 0)])
+    fixture.details = [
+      "101": detailsRow("101", tags: ["Video", "Everyone"]),
+      "102": detailsRow("102", tags: ["Scene", "Everyone"]),
+      "201": detailsRow("201", tags: ["Video", "Everyone"]),
+      "202": detailsRow("202", tags: ["Scene", "Everyone"]),
+    ]
+
+    let favIDs = try await fixture.service.favoriteIDs(account: session, order: .dateFavorited)
+    XCTAssertEqual(favIDs, ["101", "102"])
+
+    let store = fixture.store
+    try await store.signInToSteamWeb { WebSignInCookies(session: session.cookie) }
+    let missingFavs = try await store.missingFavorites(installed: ["101"])
+    XCTAssertEqual(missingFavs.map(\.id), ["102"])
+    XCTAssertEqual(store.steamWebSession?.personaName, "Starlight")
+    XCTAssertEqual(fixture.webSessions.session?.personaName, "Starlight")
+
+    let missingCol = try await store.missingCollectionItems(id: "77", installed: ["201"])
+    XCTAssertEqual(missingCol.map(\.id), ["202"])
+  }
+
   func testCollectionIsListedInItsOwnOrderAndAGoneOneSaysSo() throws {
     let ids = try WorkshopService.decodeCollection(collectionJSON(children: [("30", 2), ("10", 0), ("20", 1)]))
     XCTAssertEqual(ids, ["10", "20", "30"])

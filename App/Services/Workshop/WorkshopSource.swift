@@ -87,16 +87,19 @@ struct SteamWebSession: Equatable, Sendable {
     let refreshToken: String?
     /// When the cookie's own token runs out, as the token says; nil when it does not say.
     let expiresAt: Date?
+    /// The account's Steam Community display name once read from Steam; nil until known.
+    let personaName: String?
 
     /// Reads a `steamLoginSecure` value, `<SteamID64>||<token>` with the bars percent-encoded or
     /// not; anything else is not a session. `refresh` is the `steamRefresh_steam` value, in the
     /// same form; one of another account, or of any other shape, is left out.
-    init?(cookie value: String, refresh: String? = nil) {
+    init?(cookie value: String, refresh: String? = nil, personaName: String? = nil) {
         guard let (id, token) = Self.parts(of: value) else { return nil }
         steamID = id
         cookie = value
         expiresAt = Self.expiry(of: token)
         refreshToken = refresh.flatMap(Self.parts(of:)).flatMap { $0.0 == id ? $0.1 : nil }
+        self.personaName = Self.normalizedPersonaName(personaName)
     }
 
     /// The same session with the `steamLoginSecure` cookie Steam set at renewal, and a rotated
@@ -108,7 +111,21 @@ struct SteamWebSession: Equatable, Sendable {
         }
         return SteamWebSession(
             steamID: steamID, cookie: fresh.cookie, refreshToken: fresh.refreshToken ?? refreshToken,
-            expiresAt: fresh.expiresAt)
+            expiresAt: fresh.expiresAt, personaName: personaName)
+    }
+
+    /// The same session carrying `name` as its Steam Community display name.
+    func withPersonaName(_ name: String?) -> SteamWebSession {
+        SteamWebSession(
+            steamID: steamID, cookie: cookie, refreshToken: refreshToken, expiresAt: expiresAt,
+            personaName: Self.normalizedPersonaName(name))
+    }
+
+    /// Whether `other` holds the same Steam credentials, ignoring cached display metadata such as
+    /// `personaName`.
+    func hasSameCredentials(as other: SteamWebSession?) -> Bool {
+        guard let other else { return false }
+        return steamID == other.steamID && cookie == other.cookie && refreshToken == other.refreshToken
     }
 
     /// Whether the cookie has run out, or will within `margin`, and can be renewed.
@@ -117,11 +134,20 @@ struct SteamWebSession: Equatable, Sendable {
         return expiresAt.timeIntervalSince(now) < margin
     }
 
-    private init(steamID: String, cookie: String, refreshToken: String?, expiresAt: Date?) {
+    private init(steamID: String, cookie: String, refreshToken: String?, expiresAt: Date?, personaName: String?) {
         self.steamID = steamID
         self.cookie = cookie
         self.refreshToken = refreshToken
         self.expiresAt = expiresAt
+        self.personaName = personaName
+    }
+
+    /// Trims whitespace and caps length so untrusted Steam nicknames stay bounded; empty becomes nil.
+    static func normalizedPersonaName(_ name: String?) -> String? {
+        guard let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed.count > 128 ? String(trimmed.prefix(128)) : trimmed
     }
 
     /// The SteamID64 and token of `<SteamID64>||<token>`.

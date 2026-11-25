@@ -114,4 +114,28 @@ final class SteamWebSessionTests: XCTestCase {
         XCTAssertNil(opaque.expiresAt)
         XCTAssertFalse(opaque.needsRenewal(at: now))
     }
+
+    func testPersonaNamePersistsSurvivesRenewalAndDoesNotChangeCredentialIdentity() throws {
+        let now = Date()
+        let cookie = SteamWebFixtures.cookie(SteamWebFixtures.token(expiresIn: 3600, now: now))
+        let refresh = SteamWebFixtures.cookie(SteamWebFixtures.token(expiresIn: 86_400, now: now, salt: "r"))
+        let base = try XCTUnwrap(SteamWebSession(cookie: cookie, refresh: refresh, personaName: "   "))
+        XCTAssertNil(base.personaName, "whitespace-only names normalize to nil")
+
+        let named = base.withPersonaName("  Dr. Pixel \n")
+        XCTAssertEqual(named.personaName, "Dr. Pixel")
+        XCTAssertTrue(named.hasSameCredentials(as: base), "caching a persona name keeps the same session credentials")
+        XCTAssertNotEqual(named, base)
+
+        let keychain = MemoryKeychain()
+        try KeychainSteamWebSessionStore(calls: keychain).save(named)
+        let loaded = try XCTUnwrap(KeychainSteamWebSessionStore(calls: keychain).load())
+        XCTAssertEqual(loaded, named)
+        XCTAssertEqual(loaded.personaName, "Dr. Pixel")
+
+        let nextCookie = SteamWebFixtures.cookie(SteamWebFixtures.token(expiresIn: 7200, now: now, salt: "next"))
+        let renewed = try XCTUnwrap(named.renewed(cookie: nextCookie))
+        XCTAssertEqual(renewed.personaName, "Dr. Pixel")
+        XCTAssertFalse(renewed.hasSameCredentials(as: named))
+    }
 }

@@ -547,4 +547,28 @@ final class DownloadsModelTests: MediaPanelTestCase {
     let bare = DownloadRow(id: "1", title: "T", status: "Downloading", isPending: true)
     XCTAssertEqual(DownloadsPopoverJobRow.statusLine(for: bare, locale: english), "Downloading")
   }
+
+  func testAvailableDiskSpaceRefreshesAsynchronouslyWhenThePopoverOpens() async throws {
+    try await withPanel { panel in
+      let downloads = panel.controller.downloads
+      let measured = LockedBox<URL?>(nil)
+      downloads.readAvailableDiskSpace = { url in
+        measured.set(url)
+        return 42_000_000_000
+      }
+      XCTAssertNil(downloads.availableDiskSpaceBytes)
+
+      downloads.isQueuePopoverOpen = true
+      try await panel.waitUntil { downloads.availableDiskSpaceBytes == 42_000_000_000 }
+      XCTAssertEqual(measured.get(), panel.controller.libraryLocation.current)
+    }
+  }
+}
+
+private final class LockedBox<Value>: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value: Value
+  init(_ value: Value) { self.value = value }
+  func get() -> Value { lock.withLock { value } }
+  func set(_ next: Value) { lock.withLock { value = next } }
 }

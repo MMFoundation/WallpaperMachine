@@ -190,6 +190,21 @@ enum LibraryAccountNote {
   }
 }
 
+/// How the Steam Workshop browsing account row identifies the signed-in session without mixing
+/// untrusted persona names into sentence-split notes.
+enum LibraryWorkshopAccountNote {
+  /// "Signed in as <persona>" when the browsing session's persona name is known, "Signed in to
+  /// Steam" while signed in without one, and nil when signed out.
+  @MainActor
+  static func identity(isSignedIn: Bool, personaName: String?) -> String? {
+    guard isSignedIn else { return nil }
+    if let name = SteamWebSession.normalizedPersonaName(personaName) {
+      return L("Signed in as \(name)")
+    }
+    return L("Signed in to Steam")
+  }
+}
+
 /// The counts the Downloads at once menu offers: the queue's whole range, and the count in use when
 /// it is above the range (a setting from a version that allowed more), so the menu can show it.
 enum LibraryDownloadsMenu {

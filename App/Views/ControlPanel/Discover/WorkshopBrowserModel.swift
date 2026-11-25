@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -69,6 +70,11 @@ final class WorkshopBrowserModel {
   /// Opens an address outside the app instead of `DesktopActions.current`, which `ExternalLink`
   /// uses while this is nil; a test that checks the address sets it.
   @ObservationIgnored var openURL: (@MainActor (URL) -> Bool)?
+  /// Copies a link to the clipboard; tests replace it so they never touch the system pasteboard.
+  @ObservationIgnored var copyURL: @MainActor (URL) -> Void = { url in
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(url.absoluteString, forType: .string)
+  }
   @ObservationIgnored private var pendingSearch: Task<Void, Never>?
   @ObservationIgnored private var scrollReport: Task<Void, Never>?
   @ObservationIgnored private var commentsTask: Task<Void, Never>?
@@ -452,6 +458,21 @@ final class WorkshopBrowserModel {
     }
   }
 
+  /// **Download missing** on Your favorites.
+  func downloadFavorites() {
+    controller.launch(PanelActionCoordinator.key("workshopDownloadFavorites")) { [controller] in
+      try await controller.downloadFavoriteWorkshopItems()
+    }
+  }
+
+  /// **Download missing** inside an open Workshop collection.
+  func downloadCollection(id: String) {
+    controller.launch(PanelActionCoordinator.key("workshopDownloadCollection", id: id)) {
+      [controller] in
+      try await controller.downloadCollectionWorkshopItems(id: id)
+    }
+  }
+
   // MARK: Links
 
   /// **Open on Steam**: the Steam page that lists what is on show.
@@ -462,6 +483,11 @@ final class WorkshopBrowserModel {
   /// **View on Steam Workshop**: the item's own page.
   func viewOnSteam(_ item: WorkshopItem) {
     if let url = ExternalLink.workshopItem(id: item.id) { ExternalLink.open(url, using: openURL) }
+  }
+
+  /// **Copy link**: copies the item's validated Steam Workshop URL to the clipboard.
+  func copyLink(for item: WorkshopItem) {
+    if let url = ExternalLink.workshopItem(id: item.id), ExternalLink.isAllowed(url) { copyURL(url) }
   }
 
   // MARK: Leaving and coming back
@@ -598,7 +624,7 @@ final class WorkshopBrowserModel {
   /// saved sign-in still being restored; with none, or after a failure, the next visit asks again.
   func readSubscriptionsOnce() {
     let session = controller.workshop.steamWebSession
-    if !subscriptionsRead || (session != nil && session != subscriptionsSession) {
+    if !subscriptionsRead || (session != nil && !(session?.hasSameCredentials(as: subscriptionsSession) ?? false)) {
       subscriptionsRead = true
       subscriptionsSession = session
       controller.launch(PanelActionCoordinator.key("workshop-subscriptions")) { [controller, weak self] in

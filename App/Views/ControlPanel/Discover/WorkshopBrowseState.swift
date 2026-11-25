@@ -76,6 +76,9 @@ struct WorkshopBrowseState: Equatable {
   /// A Steam Community session is held, which Your subscriptions needs.
   let isSignedInToSteam: Bool
   let isSigningInToSteam: Bool
+  /// The signed-in Steam Community browsing account's persona name once known; nil when signed out
+  /// or unavailable (fall back to generic signed-in wording).
+  let steamWebPersonaName: String?
   /// What the last search was sent with, which the page's draft is seeded from and which a reopened
   /// panel shows again.
   let lastSearch: Search
@@ -112,6 +115,7 @@ struct WorkshopBrowseState: Equatable {
     steamURL = workshop.browseURL
     isSignedInToSteam = workshop.steamWebSession != nil
     isSigningInToSteam = workshop.isSigningInToSteamWeb
+    steamWebPersonaName = workshop.steamWebSession?.personaName
     lastSearch = Search(
       text: workshop.searchText, sort: workshop.sort, tags: workshop.tags,
       excludedTags: workshop.excludedTags)

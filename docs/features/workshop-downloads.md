@@ -303,7 +303,14 @@ a list, not a download: its tile says Collection and has no download ring,
 double-clicking it or **Open collection** in its details opens it, and the
 panel's `requestDownload` refuses it. Opening one asks Steam's public
 `ISteamRemoteStorage/GetCollectionDetails` for its items in the collection's own
-order, then shows them 30 at a time through the details endpoint.
+order, then shows them 30 at a time through the details endpoint. While viewing an
+opened collection, the header bar offers **Download missing**
+(`WorkshopStore.missingCollectionItems`), which drops wallpapers already in the
+library, nested collections and Application items, and queues the rest through the
+same download pipeline and rate-limit handling as Subscriptions. Right-clicking any
+Discover tile opens a context menu with the tile's primary action (open collection,
+apply or download), **Subscribe/Unsubscribe on Steam** when signed in, **More by
+this author**, **View on Steam Workshop** and **Copy link**.
 
 Collections rarely carry tags, and an age rating is a tag. So while Questionable
 or Mature is unticked, a collection is shown only when it has a wallpaper among
@@ -344,7 +351,11 @@ with Back returning to the list it showed as it was left, its grid where it was.
 Public Workshop lists can be browsed anonymously. When signed out, the link above the
 results lets you sign in to browse with your Steam content preferences. **Settings →
 Library & Steam → Steam Workshop account** manages the same browsing session without
-changing the account used for downloads.
+changing the account used for downloads, showing the browsing account's cached Steam
+Community persona name (`SteamWebSession.personaName`, persisted in the keychain and
+refreshed asynchronously when absent, falling back to **Signed in to Steam** if
+unavailable) alongside the separation note; the **Wallpaper library** row above it
+also links directly to **Settings → Storage** (**Change in Storage…**).
 
 Steam shows an account's subscriptions only to that account, so **Your
 subscriptions** needs a Steam Community sign-in. This is a different sign-in from
@@ -453,9 +464,12 @@ there are, and its order menu offers Steam's four orders, **Date favorited** (St
 **Alphabetical**, **Date updated** and **Date created** (`WorkshopFavoritesOrder`, Steam's
 `sortmethod` values `subscriptiondate`, `alpha`, `lastupdated` and `creationorder`, read off
 Steam's own favorites page). Choosing one lists the favorites again from page 1; the order is
-kept for the rest of the app's run. Nothing is favorited or unfavorited on Steam from here, and
-the list offers no bulk download. A signed-in subscriptions page was not available to check its
-sort menu, so Your subscriptions keeps its own order.
+kept for the rest of the app's run. **Download missing** in the favorites bar reads
+every page of favorites (`WorkshopStore.missingFavorites`), drops wallpapers already
+in the library, collections and Application items, and queues the rest just like
+Subscriptions. Nothing is favorited or unfavorited on Steam from here. A signed-in
+subscriptions page was not available to check its sort menu, so Your subscriptions
+keeps its own order.
 
 ### Comments
 
@@ -815,10 +829,11 @@ work.
   your library** on the Subscriptions page asks for all of them at once. The paused
   jobs are saved with the queue like any other.
 - **Order.** Waiting jobs start in the order they were asked for. **Download next** on a
-  waiting row moves that job to the front of the line, ahead of every other waiting job and
-  behind those that run, so it takes the next free slot; it is offered only when another
-  waiting job is ahead of it (`WorkshopDownloadManager.prioritize`). The order is saved with
-  the queue (`queue.json`) and outlives a relaunch.
+  waiting row moves that job to the front of its line, ahead of every other waiting job and
+  behind those that run, so it takes the next free slot; it works for both Steam jobs
+  (`WorkshopDownloadManager.prioritize`) and pixiv saves (`PixivDownloadQueue.prioritize`)
+  whenever another waiting job in that queue is ahead of it. The order is saved with
+  each queue (`queue.json`) and outlives a relaunch.
 - **Retry failed.** Once two or more downloads stopped with a failure or were cancelled, the
   footer offers **Retry failed (N)**, which tries each again in list order, Steam's and
   pixiv's alike, exactly as its own **Try again** would: partial content is reused where it
@@ -896,6 +911,14 @@ work.
   manifests. Resuming a scene asks for shared-resource consent again when those
   assets are missing and no shared-resource job is running. Cancelling discards
   this job's partial data; removing a waiting request prevents it from starting.
+  The popover header also offers dynamic batch controls across both Steam and pixiv
+  queues without crowding the footer: **Resume all (N)** when paused requests or
+  jobs exist, **Pause all** when active or waiting jobs exist (pausing waiting jobs
+  first so active slots closing never promote another job), and **Cancel queued**
+  when waiting jobs exist (asking for confirmation and leaving active transfers
+  running). Beside the popover title, the library volume's available disk space is
+  measured asynchronously when the popover opens and cached so view rendering and
+  progress ticks never touch the filesystem.
 - **Persistence.** Pending, paused and failed jobs keep their order in
   `Downloads/Workshop/queue.json` beside the library (`ClientPaths.storageURL`, the
   app support directory unless the [library was moved](library-location.md));
@@ -1357,8 +1380,12 @@ cannot overwrite a newer download or restore an item that was deleted.
 
 An installed wallpaper with an update wears a download mark on its tile, matches
 **Show only → Update available** in Installed's filters, and says in its details
-when its author changed it, with **Update** and **View change notes** (opening the
-item's Steam Workshop changelog through `ExternalLink`). Installed's summary offers **Update N
+when its author changed it, with **Update**, **Skip this update**, and **View change
+notes** (opening the item's Steam Workshop changelog through `ExternalLink`).
+**Skip this update** (`WorkshopUpdateStore.dismissUpdate(for:remoteUpdated:)`)
+records the remote revision's timestamp so that version stays hidden across
+launches until the author publishes a newer update; updating the wallpaper manually
+or removing it from the library clears the skipped revision automatically. Installed's summary offers **Update N
 wallpapers** while any have updates. An update is an ordinary Workshop download
 (same queue, sign-in and prerequisites); once it has arrived whole, the importer
 swaps the new folder in and the old one out in one step (`renamex_np` with

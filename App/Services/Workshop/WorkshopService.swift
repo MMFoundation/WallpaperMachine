@@ -111,6 +111,9 @@ struct WorkshopPage: Sendable {
     /// Set when Steam's page could not be read the usual way and the items were found from the
     /// links it still carries: the list may be incomplete and its totals are estimates.
     var isDegraded = false
+    /// The signed-in Steam Community account's persona name when the page was read with a session
+    /// and carried it. Never taken from another author's public page.
+    var accountName: String? = nil
 }
 
 /// Wallpaper Engine's Steam app id; every Workshop request is scoped to it.
@@ -197,8 +200,11 @@ actor WorkshopService {
         let (html, decoded) = try await browsePage(url, account: account) { html -> (String, WorkshopPage?) in
             do { return (html, try Self.decodePage(html)) } catch is WorkshopLayoutChanged { return (html, nil) }
         }
-        if let decoded { return decoded }
-        return try await degradedPage(html: html, page: page, original: WorkshopLayoutChanged())
+        var result = if let decoded { decoded } else {
+            try await degradedPage(html: html, page: page, original: WorkshopLayoutChanged())
+        }
+        if account != nil { result.accountName = Self.decodeAccountName(html) }
+        return result
     }
 
     /// A browse page, decoded. While Steam answers it busy the page is requested again after
@@ -558,7 +564,9 @@ actor WorkshopService {
             let list: WorkshopProfileList =
                 query.source == .favorites ? .favorites(query.favoritesOrder) : .subscriptions
             let listing = try await profilePage(steamID: account.steamID, list: list, account: account, page: page)
-            return Self.matching(listing.page, tags: query.tags, excludedTags: query.excludedTags)
+            var matched = Self.matching(listing.page, tags: query.tags, excludedTags: query.excludedTags)
+            matched.accountName = listing.name
+            return matched
         }
     }
 
@@ -586,9 +594,13 @@ actor WorkshopService {
         search: String, sort: WorkshopSort, page: Int, tags: [String], excludedTags: [String],
         account: SteamWebSession? = nil
     ) async throws -> WorkshopPage {
-        var (listing, children) = try await browsePage(Self.browseURL(
+        let (html, browse) = try await browsePage(Self.browseURL(
             search: search, kind: .all, sort: sort, page: page, tags: tags, excludedTags: excludedTags,
-            section: "collections"), account: account, decode: Self.decodeBrowse)
+            section: "collections"), account: account) { html in
+            (html, try Self.decodeBrowse(html))
+        }
+        var (listing, children) = browse
+        if account != nil { listing.accountName = Self.decodeAccountName(html) }
         guard Self.screensRatings(tags: tags, excludedTags: excludedTags) else { return listing }
         let excluded = Self.hiddenTags(tags: tags, excludedTags: excludedTags)
         var samples: [String: [String]] = [:]
@@ -603,15 +615,20 @@ actor WorkshopService {
         return listing
     }
 
-    /// The items of one collection, a page at a time, in the collection's own order. A
-    /// collection inside it is shown as a collection unless an age rating is hidden, when there
-    /// is nothing to vouch for what it holds.
-    func collectionPage(id: String, page: Int, tags: [String], excludedTags: [String]) async throws -> WorkshopPage {
+    /// Every item id in a collection, in the collection's own order.
+    func collectionItemIDs(id: String) async throws -> [String] {
         let (data, response) = try await fetch(Self.collectionRequest(id: id))
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw WorkshopFailure(message: String(localized: "Steam did not answer the request for Workshop details. Check your connection and try again."))
         }
-        let children = try Self.decodeCollection(data)
+        return try Self.decodeCollection(data)
+    }
+
+    /// The items of one collection, a page at a time, in the collection's own order. A
+    /// collection inside it is shown as a collection unless an age rating is hidden, when there
+    /// is nothing to vouch for what it holds.
+    func collectionPage(id: String, page: Int, tags: [String], excludedTags: [String]) async throws -> WorkshopPage {
+        let children = try await collectionItemIDs(id: id)
         let totalPages = max(1, (children.count + Self.pageSize - 1) / Self.pageSize)
         let number = min(max(1, page), totalPages)
         let slice = Array(children.dropFirst((number - 1) * Self.pageSize).prefix(Self.pageSize))
@@ -811,20 +828,116 @@ actor WorkshopService {
 
     /// Every id the account subscribes to, page by page, at most `maxPages` pages.
     func subscribedIDs(account: SteamWebSession) async throws -> [String] {
+        try await subscribedIDsAndName(account: account).ids
+    }
+
+    /// Every id the account subscribes to along with its Steam Community persona name when carried.
+    func subscribedIDsAndName(account: SteamWebSession) async throws -> (ids: [String], name: String?) {
+        try await profileItemIDsAndName(account: account, list: .subscriptions)
+    }
+
+    /// Every id the account marked as a favorite, page by page, at most `maxPages` pages.
+    func favoriteIDs(
+        account: SteamWebSession, order: WorkshopFavoritesOrder = .dateFavorited
+    ) async throws -> [String] {
+        try await favoriteIDsAndName(account: account, order: order).ids
+    }
+
+    /// Every favorite id of `account` along with its Steam Community persona name when carried.
+    func favoriteIDsAndName(
+        account: SteamWebSession, order: WorkshopFavoritesOrder = .dateFavorited
+    ) async throws -> (ids: [String], name: String?) {
+        try await profileItemIDsAndName(account: account, list: .favorites(order))
+    }
+
+    /// Walks every page of one personal Workshop list (`subscriptions` or `favorites`) and collects
+    /// unique item ids along with the account's persona name from the page.
+    private func profileItemIDsAndName(
+        account: SteamWebSession, list: WorkshopProfileList
+    ) async throws -> (ids: [String], name: String?) {
         var ids: [String] = []
+        var name: String?
         var page = 1
         var pages = 1
         repeat {
             try Task.checkCancellation()
             let html = try await communityPage(
-                Self.profileURL(steamID: account.steamID, list: .subscriptions, page: page), account: account)
+                Self.profileURL(steamID: account.steamID, list: list, page: page), account: account)
             let listing = try Self.decodeProfileListing(html, requiresSignIn: true)
+            if name == nil, let found = listing.name { name = found }
             ids += listing.ids.filter { !ids.contains($0) }
             pages = min(Self.maxPages, max(1, (listing.total + Self.pageSize - 1) / Self.pageSize))
             if listing.ids.isEmpty { break }
             page += 1
         } while page <= pages
-        return ids
+        return (ids, name)
+    }
+
+    /// Fetches the signed-in account's Steam Community persona name from its own profile page.
+    /// Throws `SteamSignInRequired` if Steam ended the session; returns nil if the page carried
+    /// no readable persona name.
+    func fetchPersonaName(account: SteamWebSession) async throws -> String? {
+        guard SteamWebSession.isSteamID(account.steamID) else { return nil }
+        let url = URL(string: "https://steamcommunity.com/profiles/\(account.steamID)/?l=english")!
+        let html = try await communityPage(url, account: account)
+        if Self.isSignInPage(html) || Self.isAnonymousCommunityPage(html) {
+            throw SteamSignInRequired()
+        }
+        return Self.decodePersonaName(html)
+    }
+
+    /// The signed-in user's Steam Community display name from a global header (`account_pulldown`)
+    /// or SSR `UserConfig` on any signed-in Steam Community page. Safe to call on public browse
+    /// pages because it reads only the signed-in visitor's own header, never another author.
+    static func decodeAccountName(_ html: String) -> String? {
+        guard !isSignInPage(html), !isAnonymousCommunityPage(html) else { return nil }
+        if let raw = firstMatch(
+            #"<span\b[^>]*\bid\s*=\s*["']account_pulldown["'][^>]*>([^<]+)</span>"#, in: html)
+        {
+            if let cleaned = SteamWebSession.normalizedPersonaName(decodeNumericEntities(unescapeHTML(raw))) {
+                return cleaned
+            }
+        }
+        if let user = ssrObject(in: Array(html.utf8))?["UserConfig"] as? [String: Any],
+           (user["logged_in"] as? Bool) != false
+        {
+            for key in ["persona_name", "account_name"] {
+                if let candidate = SteamWebSession.normalizedPersonaName(user[key] as? String) {
+                    return candidate
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The signed-in account's persona name from its own Steam Community profile page, checking
+    /// the global account header, profile data JSON, persona header span, and page title.
+    static func decodePersonaName(_ html: String) -> String? {
+        guard !isSignInPage(html), !isAnonymousCommunityPage(html) else { return nil }
+        if let header = decodeAccountName(html) { return header }
+        if let raw = firstMatch(#"g_rgProfileData\s*=\s*\{[^}]*"personaname"\s*:\s*"((?:[^"\\]|\\.)*)""#, in: html),
+           let decoded = try? JSONSerialization.jsonObject(with: Data("\"\(raw)\"".utf8), options: .fragmentsAllowed) as? String,
+           let cleaned = SteamWebSession.normalizedPersonaName(decoded)
+        {
+            return cleaned
+        }
+        if let raw = firstMatch(
+            #"<span\b[^>]*\bclass\s*=\s*["'][^"']*\bactual_persona_name\b[^"']*["'][^>]*>([^<]+)</span>"#,
+            in: html),
+           let cleaned = SteamWebSession.normalizedPersonaName(decodeNumericEntities(unescapeHTML(raw)))
+        {
+            return cleaned
+        }
+        let title = (firstMatch(#"(?i)<title\b[^>]*>([^<]*)</title>"#, in: html) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let candidate = firstMatch(#"^Steam Community :: (.+?)(?: :: [^:]*)?$"#, in: title)
+            .map({ decodeNumericEntities(unescapeHTML($0)) })
+            .flatMap(SteamWebSession.normalizedPersonaName)
+        {
+            let generic: Set<String> = ["Error", "Sign In", "Steam Workshop"]
+            if !generic.contains(candidate) { return candidate }
+        }
+        return nil
     }
 
     /// The ids on a profile's Workshop items page, the number of entries in all, and the
@@ -871,7 +984,8 @@ actor WorkshopService {
                 throw WorkshopFailure(message: String(localized: "Steam returned an unreadable Workshop page. Try again or browse on Steam."))
             }
         }
-        let name = firstMatch(#"^Steam Community :: (.+?)(?: :: [^:]*)?$"#, in: title).map(unescapeHTML)
+        let titleName = firstMatch(#"^Steam Community :: (.+?)(?: :: [^:]*)?$"#, in: title).map(unescapeHTML)
+        let name = titleName ?? (requiresSignIn ? decodeAccountName(html) : nil)
         return (ids, max(total, ids.count), name)
     }
 

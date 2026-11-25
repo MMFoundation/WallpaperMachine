@@ -28,6 +28,9 @@ struct WorkshopUpdateNotice: Equatable {
   /// The item's change notes page on the Steam Workshop, when its id is a numeric Workshop id.
   let changelogURL: URL?
 
+  /// An update that has not started downloading yet can be skipped until an even newer revision arrives.
+  var canDismiss: Bool { action == .update }
+
   /// The notice for an installed wallpaper, or nil when it has no update and none is downloading.
   /// `update` is the Workshop's newer version, `request` and `job` the update's own download.
   static func make(

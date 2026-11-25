@@ -40,6 +40,7 @@ final class WorkshopUpdateStore {
     nonisolated static let tolerance: TimeInterval = 60
     private static let installedKey = "WallpaperMachine.workshopInstalledAt"
     private static let availableKey = "WallpaperMachine.workshopUpdates"
+    private static let dismissedKey = "WallpaperMachine.workshopUpdatesDismissed"
     private static let lastCheckedKey = "WallpaperMachine.workshopUpdatesCheckedAt"
     private static let detailsKey = "WallpaperMachine.workshopDetails"
     private static let detailsCheckedKey = "WallpaperMachine.workshopDetailsCheckedAt"
@@ -49,6 +50,11 @@ final class WorkshopUpdateStore {
     @ObservationIgnored private let fetch: @Sendable ([String]) async throws -> [WorkshopItem]
     @ObservationIgnored private let now: @MainActor () -> Date
     @ObservationIgnored private var installedAt: [String: Date]
+    /// Dismissed update timestamps by published file id: an update stays hidden until Steam
+    /// reports a newer `remoteUpdated > dismissedAt[id]`.
+    @ObservationIgnored private var dismissedAt: [String: Date]
+    /// The effective remote update date (own or preset base) of each currently available update.
+    @ObservationIgnored private var remoteUpdatedAt: [String: Date] = [:]
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var installedIDs: Set<String> = []
     @ObservationIgnored private var itemRevisions: [String: UInt64] = [:]
@@ -73,9 +79,15 @@ final class WorkshopUpdateStore {
         checksAutomatically = defaults.object(forKey: Self.automaticKey) as? Bool ?? true
         installedAt = (defaults.dictionary(forKey: Self.installedKey) as? [String: Double] ?? [:])
             .mapValues(Date.init(timeIntervalSince1970:))
-        available = (defaults.data(forKey: Self.availableKey))
+        dismissedAt = (defaults.dictionary(forKey: Self.dismissedKey) as? [String: Double] ?? [:])
+            .mapValues(Date.init(timeIntervalSince1970:))
+        let storedAvailable = (defaults.data(forKey: Self.availableKey))
             .flatMap { try? JSONDecoder().decode([WorkshopItem].self, from: $0) }
             .map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) } ?? [:]
+        available = storedAvailable.filter { id, item in
+            guard let skipped = dismissedAt[id], let updated = item.timeUpdated else { return true }
+            return updated > skipped
+        }
         lastChecked = (defaults.object(forKey: Self.lastCheckedKey) as? Double).map(Date.init(timeIntervalSince1970:))
         details = defaults.data(forKey: Self.detailsKey)
             .flatMap { try? JSONDecoder().decode([String: WorkshopItem].self, from: $0) } ?? available
@@ -96,6 +108,8 @@ final class WorkshopUpdateStore {
         for id in installedIDs.subtracting(currentIDs) {
             itemRevisions[id, default: 0] &+= 1
             available[id] = nil
+            dismissedAt[id] = nil
+            remoteUpdatedAt[id] = nil
         }
         details = details.filter { currentIDs.contains($0.key) }
         detailsCheckedAt = detailsCheckedAt.filter { currentIDs.contains($0.key) }
@@ -103,6 +117,7 @@ final class WorkshopUpdateStore {
         installedIDs = currentIDs
         guard task == nil else { persist(); return }
         let recorded = installedAt
+        let dismissed = dismissedAt
         let revisions = itemRevisions
         let fetch = fetch
         isChecking = true
@@ -115,8 +130,9 @@ final class WorkshopUpdateStore {
                 }.value
                 let asked = ids + Set(bases.values).subtracting(ids).sorted()
                 let remote = asked.isEmpty ? [] : try await fetch(asked)
-                self?.finish(Self.outdated(remote: remote, local: local, bases: bases),
-                             remote: remote, recorded: recorded, revisions: revisions)
+                let outdated = Self.outdated(remote: remote, local: local, bases: bases, dismissed: dismissed)
+                let effective = Self.effectiveUpdatedDates(remote: remote, ids: Array(outdated.keys), bases: bases)
+                self?.finish(outdated, effectiveUpdated: effective, remote: remote, recorded: recorded, revisions: revisions)
             } catch {
                 self?.fail(error)
             }
@@ -130,12 +146,32 @@ final class WorkshopUpdateStore {
         check(installed: installed, library: library)
     }
 
-    /// Records that `id` was just downloaded, which makes it current.
+    /// Hides the available update for `id` until Steam reports an even newer revision
+    /// (`remoteUpdated > dismissedRemoteUpdated`). Automatically cleared if the user updates
+    /// manually or removes the wallpaper.
+    func dismissUpdate(for id: String, remoteUpdated: Date? = nil) {
+        let version = remoteUpdated ?? remoteUpdatedAt[id] ?? available[id]?.timeUpdated ?? now()
+        dismissedAt[id] = version
+        if available[id] != nil { available[id] = nil }
+        remoteUpdatedAt[id] = nil
+        persist()
+    }
+
+    /// The dismissed remote update timestamp for `id`, if any.
+    func dismissedUpdateDate(for id: String) -> Date? { dismissedAt[id] }
+
+    /// The effective remote update timestamp (own or preset base) of the currently available update
+    /// for `id`, if known.
+    func remoteUpdatedDate(for id: String) -> Date? { remoteUpdatedAt[id] ?? available[id]?.timeUpdated }
+
+    /// Records that `id` was just downloaded, which makes it current and clears any dismissed version.
     func recordInstalled(_ id: String) {
         installedIDs.insert(id)
         itemRevisions[id, default: 0] &+= 1
         installedAt[id] = now()
         available[id] = nil
+        dismissedAt[id] = nil
+        remoteUpdatedAt[id] = nil
         // Reinstalling can replace the tags too. The download's details or the next selection
         // will supply the new version; an older request must not publish over it.
         details[id] = nil
@@ -196,6 +232,8 @@ final class WorkshopUpdateStore {
             itemRevisions[id, default: 0] &+= 1
             installedAt[id] = nil
             available[id] = nil
+            dismissedAt[id] = nil
+            remoteUpdatedAt[id] = nil
             details[id] = nil
             detailsCheckedAt[id] = nil
             if detailsContext?.id == id { selectDetails(nil) }
@@ -204,20 +242,50 @@ final class WorkshopUpdateStore {
     }
 
     /// The items whose Workshop version is newer than the one installed, and the presets (by
-    /// `bases`, preset to base) whose base is.
+    /// `bases`, preset to base) whose base is, omitting versions the user dismissed until an even
+    /// newer revision arrives (`remoteUpdated > dismissedRemoteUpdated`).
     nonisolated static func outdated(remote: [WorkshopItem], local: [String: Date],
-                                     bases: [String: String] = [:]) -> [String: WorkshopItem] {
+                                     bases: [String: String] = [:],
+                                     dismissed: [String: Date] = [:]) -> [String: WorkshopItem] {
         let byID = Dictionary(remote.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let newer = { (id: String, installed: Date) -> Bool in
-            guard let changed = byID[id]?.timeUpdated else { return false }
-            return changed > installed.addingTimeInterval(tolerance)
+        let effective = { (id: String) -> Date? in
+            Self.effectiveUpdatedDate(for: id, byID: byID, bases: bases)
         }
         var outdated: [String: WorkshopItem] = [:]
         for (id, installed) in local {
-            guard let item = byID[id] else { continue }
-            if newer(id, installed) || bases[id].map({ newer($0, installed) }) == true { outdated[id] = item }
+            guard let item = byID[id], let changed = effective(id) else { continue }
+            guard changed > installed.addingTimeInterval(tolerance) else { continue }
+            if let skipped = dismissed[id], changed <= skipped { continue }
+            outdated[id] = item
         }
         return outdated
+    }
+
+    /// The newest `timeUpdated` between `id` itself and its preset base (if any).
+    nonisolated private static func effectiveUpdatedDate(
+        for id: String, byID: [String: WorkshopItem], bases: [String: String]
+    ) -> Date? {
+        let own = byID[id]?.timeUpdated
+        let base = bases[id].flatMap { byID[$0]?.timeUpdated }
+        switch (own, base) {
+        case let (a?, b?): return max(a, b)
+        case let (a?, nil): return a
+        case let (nil, b?): return b
+        case (nil, nil): return nil
+        }
+    }
+
+    nonisolated private static func effectiveUpdatedDates(
+        remote: [WorkshopItem], ids: [String], bases: [String: String]
+    ) -> [String: Date] {
+        let byID = Dictionary(remote.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var dates: [String: Date] = [:]
+        for id in ids {
+            if let date = effectiveUpdatedDate(for: id, byID: byID, bases: bases) {
+                dates[id] = date
+            }
+        }
+        return dates
     }
 
     /// The base each installed preset names in its `project.json` (`dependency`), by the
@@ -251,14 +319,23 @@ final class WorkshopUpdateStore {
         return versions
     }
 
-    /// `recorded` is what the check compared against; an item downloaded while it ran is current.
-    private func finish(_ outdated: [String: WorkshopItem], remote: [WorkshopItem],
-                        recorded: [String: Date], revisions: [String: UInt64]) {
-        available = outdated.filter {
-            installedIDs.contains($0.key)
-                && itemRevisions[$0.key, default: 0] == revisions[$0.key, default: 0]
-                && installedAt[$0.key] == recorded[$0.key]
+    /// `recorded` is what the check compared against; an item downloaded or dismissed while it ran
+    /// stays hidden.
+    private func finish(_ outdated: [String: WorkshopItem], effectiveUpdated: [String: Date],
+                        remote: [WorkshopItem], recorded: [String: Date], revisions: [String: UInt64]) {
+        available = outdated.filter { id, item in
+            guard installedIDs.contains(id),
+                  itemRevisions[id, default: 0] == revisions[id, default: 0],
+                  installedAt[id] == recorded[id]
+            else { return false }
+            if let skipped = dismissedAt[id],
+               let updated = effectiveUpdated[id] ?? item.timeUpdated,
+               updated <= skipped {
+                return false
+            }
+            return true
         }
+        remoteUpdatedAt = effectiveUpdated.filter { available[$0.key] != nil }
         for item in remote where installedIDs.contains(item.id)
             && itemRevisions[item.id, default: 0] == revisions[item.id, default: 0] {
             details[item.id] = item
@@ -280,6 +357,7 @@ final class WorkshopUpdateStore {
 
     private func persist() {
         defaults.set(installedAt.mapValues(\.timeIntervalSince1970), forKey: Self.installedKey)
+        defaults.set(dismissedAt.mapValues(\.timeIntervalSince1970), forKey: Self.dismissedKey)
         if let data = try? JSONEncoder().encode(available.values.sorted { $0.id < $1.id }) {
             defaults.set(data, forKey: Self.availableKey)
         }

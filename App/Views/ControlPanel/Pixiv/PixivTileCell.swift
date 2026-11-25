@@ -14,6 +14,7 @@ struct PixivTileCell: View {
   let isSelected: Bool
 
   @Environment(PanelController.self) private var controller
+  @Environment(\.locale) private var locale
   /// The tile is too small for every corner mark (`PixivTileCorners`). It starts roomy, the size
   /// most windows draw, and changes only when the tile crosses the threshold.
   @State private var isCompact = false
@@ -38,6 +39,12 @@ struct PixivTileCell: View {
     // queue it again).
     .onTapGesture {
       if NSApp.currentEvent?.clickCount == 2 { model.doubleClick(work) } else { model.select(work) }
+    }
+    // Built lazily when the menu opens so tiles scrolling through the grid pay nothing.
+    .contextMenu {
+      PixivTileContextMenu(work: work)
+        .environment(controller)
+        .environment(\.locale, locale)
     }
     .onGeometryChange(for: Bool.self) {
       PixivTileCorners.isCompact(side: $0.size.width)
@@ -163,6 +170,115 @@ private struct PixivTilePageCount: View {
         Text(verbatim: "\(pages)")
       }
       .accessibilityHidden(true)
+    }
+  }
+}
+
+/// Right-click actions for a pixiv tile, evaluated lazily only when opened.
+struct PixivTileContextMenu: View {
+  let work: PixivWork
+
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    let model = controller.pixivBrowser
+    let pixiv = controller.pixiv
+    let page = pixiv.selectedWork?.id == work.id ? pixiv.selectedPage : 0
+    let count = pixiv.pageCount(of: work)
+    let savedPages = controller.pixivInstalledPages[work.id] ?? []
+    let libraryID = work.libraryID(page: page)
+    let isSaved = savedPages.contains(page)
+    let job = pixiv.downloads.download(for: libraryID)
+    let pendingPages = Set(
+      pixiv.downloads.downloads.lazy.filter { $0.work.id == work.id && $0.isPending }.map(\.pageIndex))
+    let missingCount = (0..<max(0, count)).filter {
+      !savedPages.contains($0) && !pendingPages.contains($0)
+    }.count
+
+    if isSaved {
+      Button {
+        controller.launch(PanelActionCoordinator.key("activate", id: libraryID)) { [controller] in
+          try await controller.activate(libraryID)
+        }
+      } label: {
+        Label("Apply wallpaper", systemImage: ApplyOffer.symbol)
+      }
+      .disabled(!controller.mediaApplyTarget.canShowWallpaper)
+      Button {
+        controller.launch(PanelActionCoordinator.key("showInstalled", id: libraryID)) { [controller] in
+          try await controller.showInstalled(libraryID)
+        }
+      } label: {
+        Label("Show in library", systemImage: "photo")
+      }
+    } else if job?.isPending == true {
+      Button {
+        controller.downloads.showDownloads()
+      } label: {
+        Label("Show in downloads", systemImage: "arrow.down.circle")
+      }
+    } else if job?.status == .paused {
+      Button {
+        controller.launch(DownloadRowAction.resume.key(.pixiv, id: libraryID)) { [controller] in
+          try await controller.pixivResume(id: libraryID)
+        }
+      } label: {
+        Label("Resume download", systemImage: DownloadRowAction.resume.systemImage)
+      }
+    } else {
+      Button {
+        let id = work.id
+        controller.launch(PanelActionCoordinator.key("pixivDownload", id: id)) { [controller] in
+          try await controller.pixivDownload(workID: id, page: page)
+        }
+      } label: {
+        if count > 1 {
+          Label("Download page \(page + 1)", systemImage: "arrow.down.circle")
+        } else {
+          Label("Download", systemImage: "arrow.down.circle")
+        }
+      }
+    }
+
+    if count > 1, missingCount > 0 {
+      Button {
+        model.downloadAllPages(of: work)
+      } label: {
+        if savedPages.isEmpty && pendingPages.isEmpty {
+          Label("Download all pages (\(count))", systemImage: "square.and.arrow.down.on.square")
+        } else if missingCount == 1 {
+          Label("Download 1 missing page", systemImage: "square.and.arrow.down.on.square")
+        } else {
+          Label("Download missing pages (\(missingCount))", systemImage: "square.and.arrow.down.on.square")
+        }
+      }
+      .disabled(controller.isBusy(PanelActionCoordinator.key("pixivDownloadAll", id: work.id)))
+    }
+
+    if ExternalLink.pixivArtwork(id: work.id) != nil {
+      Divider()
+      Button {
+        model.viewOnPixiv(work)
+      } label: {
+        Label("View on pixiv", systemImage: "arrow.up.right.square")
+      }
+      Button {
+        model.copyLink(for: work)
+      } label: {
+        Label("Copy link", systemImage: "link")
+      }
+    }
+
+    if !work.authorName.isEmpty, let profile = work.authorProfileURL, ExternalLink.isAllowed(profile) {
+      Button {
+        ExternalLink.open(profile, using: model.openURL)
+      } label: {
+        Label {
+          Text(verbatim: work.authorName)
+        } icon: {
+          Image(systemName: "person.crop.circle")
+        }
+      }
     }
   }
 }

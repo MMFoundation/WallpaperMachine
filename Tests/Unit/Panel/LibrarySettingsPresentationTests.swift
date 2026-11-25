@@ -202,6 +202,19 @@ final class LibrarySettingsPresentationTests: SettingsBTestCase {
     XCTAssertEqual(LibraryAccountNote.text(account: nil, hasPendingDownload: true), "You sign in when a download starts.")
   }
 
+  func testWorkshopAccountIdentityHandlesSignedOutPersonaNameAndFallback() {
+    XCTAssertNil(LibraryWorkshopAccountNote.identity(isSignedIn: false, personaName: "Dr. Pixel"))
+    XCTAssertEqual(
+      LibraryWorkshopAccountNote.identity(isSignedIn: true, personaName: "  Dr. Pixel  "),
+      "Signed in as Dr. Pixel")
+    XCTAssertEqual(
+      LibraryWorkshopAccountNote.identity(isSignedIn: true, personaName: "   "),
+      "Signed in to Steam")
+    XCTAssertEqual(
+      LibraryWorkshopAccountNote.identity(isSignedIn: true, personaName: nil),
+      "Signed in to Steam")
+  }
+
   // MARK: Through the controller
 
   func testTheControllerGivesTheStatesTheRulesAreWrittenOver() async throws {
@@ -227,6 +240,14 @@ final class LibrarySettingsPresentationTests: SettingsBTestCase {
       var above = settings
       above.concurrentDownloads = 8
       XCTAssertEqual(LibraryDownloadsMenu.choices(above), [1, 2, 3, 4, 5, 6, 7, 8])
+    }
+  }
+
+  func testOpeningStorageSettingsFromLibraryTargetsTheStorageSection() async throws {
+    try await withPanel { panel in
+      try await panel.controller.openSettings(.storage)
+      XCTAssertEqual(panel.controller.navigation.selection, .settings)
+      XCTAssertEqual(panel.controller.navigation.settingsSection, .storage)
     }
   }
 }

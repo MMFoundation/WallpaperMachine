@@ -13,6 +13,9 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     SubscriptionsProtocol.subscribed = subscribed
     addTeardownBlock {
       SubscriptionsProtocol.subscribed = [:]
+      SubscriptionsProtocol.favorites = [:]
+      SubscriptionsProtocol.collections = [:]
+      SubscriptionsProtocol.accountName = nil
       SubscriptionsProtocol.unreachable = false
       SubscriptionsProtocol.sessionEnded = false
     }
@@ -195,6 +198,51 @@ final class PanelWorkshopSubscriptionsTests: MediaPanelTestCase {
     XCTAssertEqual(panel.workshop.downloadRequests.map(\.id), ["333"])
     XCTAssertNil(panel.controller.errors.message)
   }
+
+  // MARK: Favorites and collections batch download
+
+  func testDownloadFavoriteWorkshopItemsSkipsInstalledAndApplicationsAndCachesPersonaName() async throws {
+    let panel = try makePanel(subscribed: ["111": "Video"])
+    SubscriptionsProtocol.favorites = ["111": "Video", "222": "Application", "333": "Scene", "444": "Video"]
+    SubscriptionsProtocol.accountName = "Stargazer"
+    panel.store.librarySnapshot = installed(["111"])
+    try await signIn(panel)
+
+    try await panel.controller.downloadFavoriteWorkshopItems()
+    XCTAssertEqual(
+      Set(panel.workshop.downloadRequests.map(\.id)), ["333", "444"],
+      "111 is installed and 222 is an Application")
+    XCTAssertEqual(panel.controller.workshopBrowse.steamWebPersonaName, "Stargazer")
+
+    panel.store.librarySnapshot = installed(["111", "333", "444"])
+    await panel.controller.launch("favorites") {
+      try await panel.controller.downloadFavoriteWorkshopItems()
+    }.value
+    XCTAssertEqual(
+      panel.controller.errors.message,
+      "Every favorite wallpaper is already in your library.")
+  }
+
+  func testDownloadCollectionWorkshopItemsSkipsInstalledAndApplicationsAndReportsWhenComplete() async throws {
+    let panel = try makePanel(subscribed: [:])
+    SubscriptionsProtocol.collections["999"] = [
+      ("111", "Video"), ("222", "Application"), ("333", "Scene"), ("444", "Video"),
+    ]
+    panel.store.librarySnapshot = installed(["111"])
+
+    try await panel.controller.downloadCollectionWorkshopItems(id: "999")
+    XCTAssertEqual(
+      Set(panel.workshop.downloadRequests.map(\.id)), ["333", "444"],
+      "111 is installed and 222 is an Application")
+
+    panel.store.librarySnapshot = installed(["111", "333", "444"])
+    await panel.controller.launch("collection:999") {
+      try await panel.controller.downloadCollectionWorkshopItems(id: "999")
+    }.value
+    XCTAssertEqual(
+      panel.controller.errors.message,
+      "Every wallpaper in this collection is already in your library.")
+  }
 }
 
 private actor Gate {
@@ -211,9 +259,12 @@ private actor Gate {
   }
 }
 
-/// Steam: the subscriptions profile page of one account, and the details of any item asked about.
+/// Steam: the subscriptions/favorites profile page of one account, collections, and item details.
 private final class SubscriptionsProtocol: URLProtocol, @unchecked Sendable {
   nonisolated(unsafe) static var subscribed: [String: String] = [:]
+  nonisolated(unsafe) static var favorites: [String: String] = [:]
+  nonisolated(unsafe) static var collections: [String: [(id: String, kind: String)]] = [:]
+  nonisolated(unsafe) static var accountName: String?
   /// The subscriptions page cannot be reached while this is set.
   nonisolated(unsafe) static var unreachable = false
   /// Steam redirects the subscriptions page to its SSR sign-in page while this is set.
@@ -260,33 +311,47 @@ private final class SubscriptionsProtocol: URLProtocol, @unchecked Sendable {
       guard request.value(forHTTPHeaderField: "Cookie")?.hasPrefix("steamLoginSecure=") == true else {
         return Data("<html><head><title>Sign In</title></head><body></body></html>".utf8)
       }
-      let rows = subscribed.keys.sorted().map {
+      let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+      let filter = query.first { $0.name == "browsefilter" }?.value
+      let items = filter == "myfavorites" ? favorites : subscribed
+      let rows = items.keys.sorted().map {
         "<div class=\"workshopItemSubscription \" id=\"Subscription\($0)\"></div>"
       }.joined()
-      let count = subscribed.count
-      return Data("<html><head><title>Steam Community</title></head><body>\(rows)Showing 1-\(count) of \(count) entries</body></html>".utf8)
+      let count = items.count
+      let header = accountName.map { "<span id=\"account_pulldown\">\($0)</span>" } ?? ""
+      return Data("<html><head><title>Steam Community</title></head><body>\(header)\(rows)Showing 1-\(count) of \(count) entries</body></html>".utf8)
+    }
+    if url.host == "api.steampowered.com", url.path.contains("/ISteamRemoteStorage/GetCollectionDetails/") {
+      let bodyData = readBody(of: request)
+      let id = String(decoding: bodyData, as: UTF8.self).split(separator: "&").compactMap { field -> String? in
+        let pair = field.split(separator: "=", maxSplits: 1)
+        return pair.count == 2 && pair[0].hasPrefix("publishedfileids[") ? String(pair[1]) : nil
+      }.first ?? ""
+      let children = (collections[id] ?? []).enumerated().map { index, entry in
+        ["publishedfileid": entry.id, "sortorder": index, "filetype": 0] as [String: Any]
+      }
+      return try? JSONSerialization.data(withJSONObject: [
+        "response": [
+          "result": 1, "resultcount": 1,
+          "collectiondetails": [["publishedfileid": id, "result": 1, "children": children]],
+        ]
+      ])
     }
     if url.host == "api.steampowered.com", url.path.contains("/ISteamRemoteStorage/GetPublishedFileDetails/") {
-      let stream = request.httpBodyStream
-      var data = request.httpBody ?? Data()
-      if data.isEmpty, let stream {
-        stream.open()
-        defer { stream.close() }
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        while stream.hasBytesAvailable {
-          let count = stream.read(&buffer, maxLength: buffer.count)
-          if count <= 0 { break }
-          data.append(buffer, count: count)
-        }
-      }
+      let data = readBody(of: request)
       let ids = String(decoding: data, as: UTF8.self).split(separator: "&").compactMap { field -> String? in
         let pair = field.split(separator: "=", maxSplits: 1)
         return pair.count == 2 && pair[0].hasPrefix("publishedfileids[") ? String(pair[1]) : nil
       }
+      var kinds = subscribed
+      for (id, kind) in favorites { kinds[id] = kind }
+      for entries in collections.values {
+        for entry in entries { kinds[entry.id] = entry.kind }
+      }
       let rows: [[String: Any]] = ids.map { id in
         [
           "publishedfileid": id, "result": 1, "consumer_app_id": WorkshopApp.id, "title": "W\(id)",
-          "tags": [["tag": subscribed[id] ?? "Video"]], "file_size": "2048", "subscriptions": 3,
+          "tags": [["tag": kinds[id] ?? "Video"]], "file_size": "2048", "subscriptions": 3,
           "time_updated": 1_700_000_000,
         ]
       }
@@ -294,5 +359,20 @@ private final class SubscriptionsProtocol: URLProtocol, @unchecked Sendable {
         withJSONObject: ["response": ["result": 1, "resultcount": rows.count, "publishedfiledetails": rows]])
     }
     return nil
+  }
+
+  private static func readBody(of request: URLRequest) -> Data {
+    var data = request.httpBody ?? Data()
+    if data.isEmpty, let stream = request.httpBodyStream {
+      stream.open()
+      defer { stream.close() }
+      var buffer = [UInt8](repeating: 0, count: 4096)
+      while stream.hasBytesAvailable {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        if count <= 0 { break }
+        data.append(buffer, count: count)
+      }
+    }
+    return data
   }
 }

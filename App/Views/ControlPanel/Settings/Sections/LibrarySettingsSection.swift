@@ -12,7 +12,7 @@ struct LibrarySettingsSection: View {
 
   static let libraryFolder = SettingsItem(
     id: "library.folder", section: .library, group: folder, title: "Wallpaper library",
-    keywords: ["Show in Finder"])
+    keywords: ["Show in Finder", "Change in Storage…"])
 
   static let steamStatus = SettingsItem(
     id: "library.steamcmd-status", section: .library, group: steamCMD, title: "Installation",
@@ -117,10 +117,18 @@ private struct LibraryFolderRow: View {
       item: LibrarySettingsSection.libraryFolder, note: "", details: [path.isEmpty ? L("Unavailable") : path],
       labelsControl: false
     ) {
-      Button("Show in Finder") {
-        controller.launch(PanelActionCoordinator.key("showLibrary")) { try await controller.showLibrary() }
+      HStack(spacing: 8) {
+        Button("Change in Storage…") {
+          controller.launch(PanelActionCoordinator.key("navigate"), policy: .latestWins) {
+            try await controller.openSettings(.storage)
+          }
+        }
+        .accessibilityIdentifier("library.folder.openStorage")
+        Button("Show in Finder") {
+          controller.launch(PanelActionCoordinator.key("showLibrary")) { try await controller.showLibrary() }
+        }
+        .disabled(controller.isStoreBusy)
       }
-      .disabled(controller.isStoreBusy)
     }
   }
 }
@@ -440,13 +448,26 @@ private struct LibraryWorkshopAccountRow: View {
   @Environment(PanelController.self) private var controller
 
   var body: some View {
-    DisplaysRow(item: LibrarySettingsSection.workshopAccount, labelsControl: false) {
-      if controller.workshop.steamWebSession != nil {
+    let session = controller.workshop.steamWebSession
+    let identity = LibraryWorkshopAccountNote.identity(
+      isSignedIn: session != nil, personaName: session?.personaName)
+    DisplaysRow(
+      item: LibrarySettingsSection.workshopAccount,
+      details: identity.map { [$0] } ?? [],
+      labelsControl: false
+    ) {
+      if session != nil {
         Button("Sign out of Steam") { controller.workshopBrowser.signOutOfSteam() }
       } else if controller.workshop.isSigningInToSteamWeb {
         Button("Show sign-in window") { controller.workshopBrowser.signInToSteam() }
       } else {
         Button("Sign in to Steam…") { controller.workshopBrowser.signInToSteam() }
+      }
+    }
+    .task(id: session?.steamID) {
+      guard session != nil, session?.personaName == nil else { return }
+      controller.launch(PanelActionCoordinator.key("steamWebPersona")) {
+        try await controller.refreshSteamWebPersonaName()
       }
     }
   }

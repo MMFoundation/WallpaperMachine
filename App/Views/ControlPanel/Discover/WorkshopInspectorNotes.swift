@@ -189,16 +189,31 @@ private struct UpdateNotice: View {
         }
         .buttonStyle(.panelPrimary(size: .compact))
       case .update:
-        Button {
-          let id = item.id
-          controller.launch(PanelActionCoordinator.key("workshopUpdate", id: id)) { [controller] in
-            try await controller.updateWorkshopItem(id: id)
+        let updateKey = PanelActionCoordinator.key("workshopUpdate", id: item.id)
+        let dismissKey = PanelActionCoordinator.key("workshopDismissUpdate", id: item.id)
+        TagFlow(spacing: 8) {
+          Button {
+            let id = item.id
+            controller.launch(updateKey) { [controller] in
+              try await controller.updateWorkshopItem(id: id)
+            }
+          } label: {
+            Label("Update", systemImage: "arrow.down.circle")
           }
-        } label: {
-          Label("Update", systemImage: "arrow.down.circle")
+          .buttonStyle(.panelPrimary(size: .compact))
+          .disabled(controller.isBusy(updateKey))
+          if notice.canDismiss {
+            Button("Skip this update") {
+              let id = item.id
+              controller.launch(dismissKey) { [controller] in
+                try await controller.dismissWorkshopUpdate(id: id)
+              }
+            }
+            .buttonStyle(.panelSecondary(size: .compact))
+            .disabled(controller.isBusy(dismissKey))
+            .accessibilityIdentifier("workshop.updateDismiss")
+          }
         }
-        .buttonStyle(.panelPrimary(size: .compact))
-        .disabled(controller.isBusy(PanelActionCoordinator.key("workshopUpdate", id: item.id)))
       }
       if let changelogURL = notice.changelogURL {
         Button {

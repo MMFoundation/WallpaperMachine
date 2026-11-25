@@ -172,6 +172,68 @@ final class PixivDownloadQueue {
         persist()
     }
 
+    /// Pauses every waiting and running save. Waiting saves are paused before active ones so
+    /// cancelling an active task cannot start another save behind it.
+    func pauseAll() {
+        let waiting = downloads.filter { $0.status == .waiting && $0.task == nil && !$0.cancelRequested }
+        let running = downloads.filter { $0.isPending && $0.task != nil && !$0.cancelRequested }
+        guard !waiting.isEmpty || !running.isEmpty else { return }
+        for job in waiting {
+            job.pauseRequested = true
+            job.status = .paused
+        }
+        for job in running {
+            job.pauseRequested = true
+            job.task?.cancel()
+        }
+        persist()
+    }
+
+    /// Cancels every waiting save without disturbing active transfers, returning their ids.
+    @discardableResult
+    func cancelQueued() -> [String] {
+        let waiting = downloads.filter { $0.status == .waiting && $0.task == nil && !$0.cancelRequested }
+        guard !waiting.isEmpty else { return [] }
+        for job in waiting {
+            job.pauseRequested = false
+            job.cancelRequested = true
+            job.status = .cancelled
+            discardCheckpoint(for: job)
+        }
+        persist()
+        return waiting.map(\.id)
+    }
+
+    /// **Download next**: moves a waiting save to the front of the line, ahead of every other
+    /// waiting save and behind those that run, so it takes the next free slot. The order is saved
+    /// with the queue, so it outlives a relaunch.
+    @discardableResult
+    func prioritize(_ id: String) -> Bool {
+        guard let index = downloads.firstIndex(where: { $0.id == id }),
+              downloads[index].status == .waiting, downloads[index].task == nil,
+              !downloads[index].cancelRequested,
+              let front = downloads.firstIndex(where: {
+                  $0.status == .waiting && $0.task == nil && !$0.cancelRequested
+              }),
+              front < index
+        else { return false }
+        let job = downloads.remove(at: index)
+        downloads.insert(job, at: front)
+        AppLog.info("pixiv download \(job.id) moved to the front of the queue")
+        persist()
+        pump()
+        return true
+    }
+
+    /// Whether `prioritize` would move `id`: it waits, and another waiting save is ahead of it.
+    func canPrioritize(_ id: String) -> Bool {
+        guard let job = download(for: id), job.status == .waiting, job.task == nil, !job.cancelRequested
+        else { return false }
+        return downloads.first(where: {
+            $0.status == .waiting && $0.task == nil && !$0.cancelRequested
+        }) !== job
+    }
+
     @discardableResult
     func resume(_ id: String) -> Bool {
         guard let job = download(for: id), job.status == .paused, job.task == nil else { return false }

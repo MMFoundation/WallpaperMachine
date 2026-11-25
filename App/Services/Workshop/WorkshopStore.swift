@@ -125,6 +125,10 @@ final class WorkshopStore {
   @ObservationIgnored private var editsDuringReads: [(id: String, subscribed: Bool)] = []
   /// The renewal in flight, which every reader of an expired session waits for.
   @ObservationIgnored private var webSessionRenewal: Task<SteamWebSession, Error>?
+  /// The persona-name fetch in flight and the session cookie it was attempted for, so a missing
+  /// or unreachable profile never retries in a loop for the same sign-in.
+  @ObservationIgnored private var personaTask: Task<Void, Never>?
+  @ObservationIgnored private var personaAttemptedCookie: String?
   private(set) var isSigningInToSteamWeb = false
   private(set) var sceneAssetsReady: Bool
   /// Where scene wallpapers read the shared assets from. Finding it probes up to four
@@ -435,6 +439,11 @@ final class WorkshopStore {
     dropApplyChoice(id)
     removeDownloadRequest(id: id)
     if let job = downloader.downloads.first(where: { $0.id == id }) { downloader.cancel(job) }
+  }
+
+  /// Cancels every waiting download without disturbing active transfers, dropping their apply intents.
+  func cancelQueuedDownloads() {
+    for id in downloader.cancelQueued() { dropApplyChoice(id) }
   }
 
   /// "Change account" stops exactly this job and keeps its wallpaper as an intent with no
@@ -1048,22 +1057,70 @@ final class WorkshopStore {
       guard let session = try await currentSteamWebSession() else { return nil }
       used = session
       let start = editsDuringReads.count
-      let ids = try await service.subscribedIDs(account: session)
+      let result = try await service.subscribedIDsAndName(account: session)
+      rememberSteamWebPersonaName(result.name, for: session)
       // A sign-out or another sign-in while Steam answered keeps what that set; a subscribe
       // or unsubscribe made meanwhile is laid over what Steam sent.
-      if steamWebSession == session {
-        var marked = Set(ids)
+      if steamWebSession?.hasSameCredentials(as: session) == true {
+        var marked = Set(result.ids)
         for edit in editsDuringReads[start...] {
           if edit.subscribed { marked.insert(edit.id) } else { marked.remove(edit.id) }
         }
         subscribedIDs = marked
         subscriptionsReadFor = session.steamID
       }
-      return session
+      return steamWebSession?.hasSameCredentials(as: session) == true ? steamWebSession : session
     } catch is SteamSignInRequired {
       forgetSteamWebSession(endedWith: used)
       throw SteamSignInRequired()
     }
+  }
+
+  /// Caches the signed-in account's Steam Community display name on the current session (and in
+  /// the keychain) when it matches the session still held and carries a new non-empty name.
+  func rememberSteamWebPersonaName(_ name: String?, for session: SteamWebSession) {
+    guard let cleaned = SteamWebSession.normalizedPersonaName(name),
+      let current = steamWebSession, current.hasSameCredentials(as: session),
+      current.personaName != cleaned
+    else { return }
+    let updated = current.withPersonaName(cleaned)
+    steamWebSession = updated
+    persist(updated)
+  }
+
+  /// Fetches the signed-in Steam Community account's persona name when not yet cached, at most
+  /// once per session cookie. Transient network errors leave the session intact and fall back
+  /// cleanly; an ended session is forgotten as anywhere else.
+  func refreshSteamWebPersonaName() async {
+    guard let current = steamWebSession, current.personaName == nil,
+      personaAttemptedCookie != current.cookie
+    else { return }
+    if let existing = personaTask {
+      await existing.value
+      return
+    }
+    personaAttemptedCookie = current.cookie
+    let task = Task { @MainActor [weak self] in
+      guard let self else { return }
+      var used: SteamWebSession?
+      do {
+        guard let session = try await self.currentSteamWebSession(),
+          session.personaName == nil
+        else { return }
+        used = session
+        let name = try await self.service.fetchPersonaName(account: session)
+        self.rememberSteamWebPersonaName(name, for: session)
+      } catch is SteamSignInRequired {
+        self.forgetSteamWebSession(endedWith: used)
+      } catch is CancellationError {
+        if self.personaAttemptedCookie == current.cookie { self.personaAttemptedCookie = nil }
+      } catch {
+        AppLog.debug("Steam web persona name unavailable: \(error.localizedDescription)")
+      }
+    }
+    personaTask = task
+    await task.value
+    if personaTask == task { personaTask = nil }
   }
 
   /// Subscribes the signed-in account to an item on Steam, or unsubscribes it, and marks what
@@ -1101,13 +1158,38 @@ final class WorkshopStore {
     do {
       guard let session = try await currentSteamWebSession() else { throw SteamSignInRequired() }
       used = session
-      let ids = try await service.subscribedIDs(account: session).filter { !installed.contains($0) }
+      let result = try await service.subscribedIDsAndName(account: session)
+      rememberSteamWebPersonaName(result.name, for: session)
+      let ids = result.ids.filter { !installed.contains($0) }
       return try await service.details(ids: ids).filter { $0.collectionSize == nil }
     } catch is SteamSignInRequired {
       // Only the session Steam refused: a sign-in made while it answered stays.
       forgetSteamWebSession(endedWith: used)
       throw SteamSignInRequired()
     }
+  }
+
+  /// The favorite wallpapers not in `installed`, asking Steam for every page of favorites.
+  /// Throws `SteamSignInRequired` when the session has ended.
+  func missingFavorites(installed: Set<String>) async throws -> [WorkshopItem] {
+    var used: SteamWebSession?
+    do {
+      guard let session = try await currentSteamWebSession() else { throw SteamSignInRequired() }
+      used = session
+      let result = try await service.favoriteIDsAndName(account: session, order: favoritesOrder)
+      rememberSteamWebPersonaName(result.name, for: session)
+      let ids = result.ids.filter { !installed.contains($0) }
+      return try await service.details(ids: ids).filter { $0.collectionSize == nil }
+    } catch is SteamSignInRequired {
+      forgetSteamWebSession(endedWith: used)
+      throw SteamSignInRequired()
+    }
+  }
+
+  /// The wallpapers in collection `id` not in `installed`, in the collection's own order.
+  func missingCollectionItems(id: String, installed: Set<String>) async throws -> [WorkshopItem] {
+    let ids = try await service.collectionItemIDs(id: id).filter { !installed.contains($0) }
+    return try await service.details(ids: ids).filter { $0.collectionSize == nil }
   }
 
   /// The session to read with: the one held, renewed first when its cookie has run out. Readers
@@ -1124,9 +1206,10 @@ final class WorkshopStore {
       if webSessionRenewal == renewal {
         webSessionRenewal = nil
         // A sign-out or another sign-in while Steam answered keeps what it set.
-        if steamWebSession == session {
-          steamWebSession = renewed
-          persist(renewed)
+        if let current = steamWebSession, current.hasSameCredentials(as: session) {
+          let merged = current.personaName.map(renewed.withPersonaName) ?? renewed
+          steamWebSession = merged
+          persist(merged)
         }
       }
       return steamWebSession
@@ -1158,7 +1241,7 @@ final class WorkshopStore {
   /// Forgets `session` once Steam has ended it, unless another sign-in has replaced it since;
   /// nil (no request had a session yet) forgets the current one.
   private func forgetSteamWebSession(endedWith session: SteamWebSession?) {
-    guard session == nil || steamWebSession == session else { return }
+    guard session == nil || steamWebSession?.hasSameCredentials(as: session) == true else { return }
     forgetSteamWebSession()
   }
 
@@ -1175,6 +1258,9 @@ final class WorkshopStore {
     webSessionRestore?.cancel()
     webSessionRenewal?.cancel()
     webSessionRenewal = nil
+    personaTask?.cancel()
+    personaTask = nil
+    personaAttemptedCookie = nil
     steamWebSession = nil
     subscribedIDs = []
     subscriptionsReadFor = nil
@@ -1208,7 +1294,9 @@ final class WorkshopStore {
     // Replaced while a saved sign-in or a renewal was awaited: Steam is not asked at all.
     try Task.checkCancellation()
     do {
-      return try await service.page(for: query, page: number, account: account)
+      let page = try await service.page(for: query, page: number, account: account)
+      if let account { rememberSteamWebPersonaName(page.accountName, for: account) }
+      return page
     } catch is SteamSignInRequired where !query.source.isPersonal && account != nil {
       forgetSteamWebSession(endedWith: account)
       try Task.checkCancellation()

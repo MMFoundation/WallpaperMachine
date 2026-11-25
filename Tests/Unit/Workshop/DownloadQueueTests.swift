@@ -685,6 +685,58 @@ final class DownloadQueueTests: DownloaderTestCase {
       throw error
     }
   }
+
+  func testPauseAllPausesWaitingBeforeActiveAndCancelQueuedLeavesActiveRunning() async throws {
+    let root = try makeParallelRuntime()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let manager = WorkshopDownloadManager(
+      sessionDirectory: root.appendingPathComponent("SteamSession"),
+      runtimeProvider: ShellRuntimeProvider(), maximumConcurrentDownloads: 1,
+      downloadRegion: { .steamsChoice })
+    func enqueue(_ id: String) throws -> WorkshopDownload {
+      manager.start(
+        item: WorkshopItem(
+          id: id, title: "Batch \(id)", creator: "Test", summary: "", previewURL: nil,
+          tags: ["Video"], size: 0, subscriptions: 0),
+        username: "localtest", executable: root.appendingPathComponent("runtime/steamcmd"),
+        library: root.appendingPathComponent("Library")
+      ) {}
+      return try XCTUnwrap(manager.download(for: id))
+    }
+    let started = { (id: String) in
+      FileManager.default.fileExists(atPath: root.appendingPathComponent("running-\(id)").path)
+    }
+    do {
+      let active = try enqueue("1")
+      let queuedA = try enqueue("2")
+      let queuedB = try enqueue("3")
+      try await waitUntil { active.worker.prompt == .password }
+      XCTAssertTrue(queuedA.isQueued)
+      XCTAssertTrue(queuedB.isQueued)
+
+      let cancelled = manager.cancelQueued()
+      XCTAssertEqual(cancelled, ["2", "3"])
+      XCTAssertTrue(active.isPending && !active.isQueued, "active transfer keeps running")
+      XCTAssertTrue(queuedA.isCancelled)
+      XCTAssertTrue(queuedB.isCancelled)
+
+      let waitingA = try enqueue("4")
+      let waitingB = try enqueue("5")
+      XCTAssertTrue(waitingA.isQueued)
+      XCTAssertTrue(waitingB.isQueued)
+
+      manager.pauseAll()
+      XCTAssertTrue(waitingA.isPaused && !waitingA.isPending, "waiting jobs pause before active slots clear")
+      XCTAssertTrue(waitingB.isPaused && !waitingB.isPending)
+      try await waitUntil { active.isPaused && !active.isPending }
+      XCTAssertFalse(started("4"), "pausing active work never promotes a waiting job")
+      XCTAssertFalse(started("5"))
+      await manager.shutdown()
+    } catch {
+      await manager.shutdown()
+      throw error
+    }
+  }
 }
 
 /// Counts the observers a notification center is given and takes back.

@@ -37,6 +37,14 @@ final class PixivBrowserModel {
   /// What the page field holds: the page on show until the person types another.
   var pageText = "1"
 
+  /// Opens an address outside the app instead of `DesktopActions.current`, which `ExternalLink`
+  /// uses while this is nil; a test that checks the address sets it.
+  @ObservationIgnored var openURL: (@MainActor (URL) -> Bool)?
+  /// Copies a link to the clipboard; tests replace it so they never touch the system pasteboard.
+  @ObservationIgnored var copyURL: @MainActor (URL) -> Void = { url in
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(url.absoluteString, forType: .string)
+  }
   /// Test seam: the clock of the search debounce and of the scroll report.
   @ObservationIgnored var sleep: @Sendable (Duration) async throws -> Void = {
     try await Task.sleep(for: $0)
@@ -388,5 +396,25 @@ final class PixivBrowserModel {
         try await controller.pixivDownload(workID: workID, page: page)
       }
     }
+  }
+
+  /// **Download all pages** / **Download missing pages**: queues every page of `work` not yet in
+  /// the library or downloading, asking first when more than 10 pages are missing.
+  @discardableResult
+  func downloadAllPages(of work: PixivWork) -> Task<Void, Never> {
+    let controller = controller
+    return controller.launch(PanelActionCoordinator.key("pixivDownloadAll", id: work.id)) {
+      _ = try await controller.pixivDownloadMissingPages(workID: work.id)
+    }
+  }
+
+  /// **View on pixiv**: opens the work's own page through `ExternalLink`.
+  func viewOnPixiv(_ work: PixivWork) {
+    if let url = ExternalLink.pixivArtwork(id: work.id) { ExternalLink.open(url, using: openURL) }
+  }
+
+  /// **Copy link**: copies the validated pixiv artwork URL to the clipboard.
+  func copyLink(for work: PixivWork) {
+    if let url = ExternalLink.pixivArtwork(id: work.id), ExternalLink.isAllowed(url) { copyURL(url) }
   }
 }

@@ -17,10 +17,11 @@ struct KeychainSteamWebSessionStore: SteamWebSessionStoring {
     static let service = "app.wallpapermachine.steam-community"
     static let account = "session"
 
-    /// What is saved: the two cookie values, as Steam set them.
+    /// What is saved: the two cookie values as Steam set them, and the cached persona name once known.
     private struct Saved: Codable {
         var cookie: String
         var refresh: String?
+        var personaName: String?
     }
 
     private let item: KeychainGenericPassword
@@ -40,11 +41,14 @@ struct KeychainSteamWebSessionStore: SteamWebSessionStoring {
             return nil
         }
         guard let data, let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return nil }
-        return SteamWebSession(cookie: saved.cookie, refresh: saved.refresh)
+        return SteamWebSession(cookie: saved.cookie, refresh: saved.refresh, personaName: saved.personaName)
     }
 
     func save(_ session: SteamWebSession) throws {
-        let saved = Saved(cookie: session.cookie, refresh: session.refreshToken.map { "\(session.steamID)%7C%7C\($0)" })
+        let saved = Saved(
+            cookie: session.cookie,
+            refresh: session.refreshToken.map { "\(session.steamID)%7C%7C\($0)" },
+            personaName: session.personaName)
         let data = try JSONEncoder().encode(saved)
         do {
             try item.write(data)

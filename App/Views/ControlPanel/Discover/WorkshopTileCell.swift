@@ -36,6 +36,12 @@ struct WorkshopTileCell: View {
     .onTapGesture {
       if NSApp.currentEvent?.clickCount == 2 { model.doubleClick(item) } else { model.select(item) }
     }
+    // Built lazily when the menu opens so tiles scrolling through the grid pay nothing.
+    .contextMenu {
+      WorkshopTileContextMenu(item: item)
+        .environment(controller)
+        .environment(\.locale, locale)
+    }
     .accessibilityLabel(Text(verbatim: accessibilityLabel(marks: marks)))
     .accessibilityAddTraits(isSelected ? .isSelected : [])
     .accessibilityActionIfNamed(Self.doubleClickName(controller.workshopDoubleClick(for: item))) {
@@ -146,5 +152,159 @@ private extension View {
     } else {
       self
     }
+  }
+}
+
+/// Right-click actions for a Steam Workshop tile, evaluated lazily only when opened.
+struct WorkshopTileContextMenu: View {
+  let item: WorkshopItem
+
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    let model = controller.workshopBrowser
+    let download = controller.workshopItemDownload(for: item)
+    if item.isCollection {
+      Button {
+        model.openCollection(item)
+      } label: {
+        Label("Open collection", systemImage: "square.stack")
+      }
+    } else if download.isInstalled {
+      Button {
+        let id = item.id
+        controller.launch(PanelActionCoordinator.key("activate", id: id)) { [controller] in
+          try await controller.activate(id)
+        }
+      } label: {
+        Label("Apply wallpaper", systemImage: ApplyOffer.symbol)
+      }
+      .disabled(!controller.mediaApplyTarget.canShowWallpaper || !item.canRunOnMac)
+      Button {
+        let id = item.id
+        controller.launch(PanelActionCoordinator.key("showInstalled", id: id)) { [controller] in
+          try await controller.showInstalled(id)
+        }
+      } label: {
+        Label("Show in library", systemImage: "photo")
+      }
+    } else {
+      downloadItems(download)
+    }
+
+    if controller.workshop.steamWebSession != nil, !item.isCollection {
+      subscriptionButton
+    }
+
+    if let authorID = item.authorProfileID, !isShowingAuthor(authorID) {
+      Button {
+        model.openAuthor(of: item)
+      } label: {
+        if !item.creator.isEmpty,
+          item.creator != L("Workshop creator"),
+          item.creator != String(localized: "Workshop creator"),
+          item.creator != "Workshop creator"
+        {
+          Label {
+            Text(verbatim: item.creator)
+          } icon: {
+            Image(systemName: "person.crop.rectangle.stack")
+          }
+        } else {
+          Label("More by this author", systemImage: "person.crop.rectangle.stack")
+        }
+      }
+    }
+
+    if ExternalLink.workshopItem(id: item.id) != nil {
+      Divider()
+      Button {
+        model.viewOnSteam(item)
+      } label: {
+        Label("View on Steam Workshop", systemImage: "arrow.up.right.square")
+      }
+      Button {
+        model.copyLink(for: item)
+      } label: {
+        Label("Copy link", systemImage: "link")
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func downloadItems(_ download: WorkshopItemDownload) -> some View {
+    let downloads = controller.downloads
+    let key = PanelActionCoordinator.key("requestDownload", id: item.id)
+    switch download.action {
+    case .openCollection:
+      EmptyView()
+    case .resume:
+      Button {
+        downloads.perform(.resume, forItem: item.id)
+      } label: {
+        Label("Resume download", systemImage: DownloadRowAction.resume.systemImage)
+      }
+      .disabled(controller.isBusy(DownloadRowAction.resume.key(.steam, id: item.id)))
+    case .continueSetup:
+      Button {
+        downloads.openDialog(for: item.id)
+      } label: {
+        Label("Continue setup", systemImage: "checkmark.shield")
+      }
+    case .finishSignIn:
+      Button {
+        downloads.openDialog(for: item.id)
+      } label: {
+        Label("Finish sign-in", systemImage: "checkmark.shield")
+      }
+    case .inProgress:
+      Button {
+        downloads.showDownloads()
+      } label: {
+        Label("Show in downloads", systemImage: "arrow.down.circle")
+      }
+    case .download(let again, _):
+      Button {
+        downloads.requestDownload(item)
+      } label: {
+        if again {
+          Label("Download again", systemImage: "arrow.down.circle")
+        } else {
+          Label("Download", systemImage: "arrow.down.circle")
+        }
+      }
+      .disabled(controller.isBusy(key))
+      if download.offersDownloadAndApply {
+        Button {
+          downloads.requestDownload(item, apply: true)
+        } label: {
+          Label("Download and apply", systemImage: ApplyOffer.symbol)
+        }
+        .disabled(controller.isBusy(key))
+      }
+    }
+  }
+
+  private var subscriptionButton: some View {
+    let subscribed = controller.workshop.subscribedIDs.contains(item.id)
+    let key = PanelActionCoordinator.key("workshopSubscription", id: item.id)
+    return Button {
+      let item = item
+      controller.launch(key) { [controller] in
+        try await controller.setWorkshopSubscribed(!subscribed, item: item)
+      }
+    } label: {
+      if subscribed {
+        Label("Unsubscribe on Steam", systemImage: "bookmark.slash")
+      } else {
+        Label("Subscribe on Steam", systemImage: "bookmark")
+      }
+    }
+    .disabled(controller.isBusy(key) || !controller.workshop.subscriptionsKnown)
+  }
+
+  private func isShowingAuthor(_ authorID: String) -> Bool {
+    if case .creator(let shown, _) = controller.workshop.source { return shown == authorID }
+    return false
   }
 }

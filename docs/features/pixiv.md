@@ -104,20 +104,26 @@ R-18 ranking denials have the account-specific handling described below.
 ## Saving a page
 
 Selecting a tile fetches the work's page list; the inspector shows the page
-whole, the artist's name (a link to their pixiv page), a page stepper for works with
-several (with the Library tab's grid symbol beside a page that is already in the library, the
-mark its tile wears too), **Download** (or **Download page N**), **View on pixiv**, and
+whole, the artist's name (a link to their pixiv page), a page stepper and horizontal
+page thumbnail strip for works with several pages (clickable to jump directly to any
+page, marking pages already in the library with the Library tab's grid symbol, the
+mark its tile wears too), **Download** (or **Download page N**), **Download all
+pages (N)** / **Download missing pages (N)** for multi-page works (skipping saved
+and already-pending pages, and asking for confirmation before queueing more than 10
+missing pages), **View on pixiv**, and
 the work's clickable tags (clicking a tag immediately runs a pixiv tag search for it); a saved page
 offers **Apply wallpaper** (or **Reapply wallpaper**) as its primary button, the Installed
 inspector's own, whose help names the target display while two or more displays can show
 their own wallpaper ([Selection versus apply](control-panel.md#selection-versus-apply)), and
-**Show in library**. Double-clicking a tile, or `Command`-`Return` on a focused one, downloads
+**Show in library**. Right-clicking a tile opens a context menu with its primary
+download/apply action, multi-page batch download when applicable, **View on pixiv**,
+**Copy link** and the artist's profile link. Double-clicking a tile, or `Command`-`Return` on a focused one, downloads
 the page the inspector shows (the first page of a work it does not show), and applies it once it
 is in the library. While a page downloads, **Pause download** and an icon-only **Cancel** take
 the place of Download, drawn like the Steam Workshop inspector's plain buttons, and the
 inspector's links and type follow the other inspectors'. Downloads run two at a time in the order asked
 for, each with progress on its tile and in the toolbar's downloads button and shared
-Downloads popover; while one runs, a toolbar pill leads back to this page. They can be paused, resumed, cancelled or retried. Queue order and original-image checkpoints survive quitting and
+Downloads popover; while one runs, a toolbar pill leads back to this page. They can be paused, resumed, cancelled, retried, or moved to the front of the waiting line with **Download next** (`PixivDownloadQueue.prioritize`), and they participate in the popover header's **Resume all**, **Pause all**, and **Cancel queued** batch controls. Queue order and original-image checkpoints survive quitting and
 relaunch in the app's `Downloads/Pixiv` directory; restored jobs wait for an
 explicit **Resume download**. No pixiv session cookie is stored with the queue.
 

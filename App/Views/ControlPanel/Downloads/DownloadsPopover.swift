@@ -9,6 +9,7 @@ import SwiftUI
 struct DownloadsPopover: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.locale) private var locale
 
   /// A queue to list instead of the controller's, for a test that renders states the stores would
   /// need live downloads to reach.
@@ -42,31 +43,79 @@ struct DownloadsPopover: View {
             }
           }
         }
-        .frame(maxHeight: 360)
+        .frame(maxHeight: queue.hasBatchActions ? 320 : 360)
       }
       Divider()
       footer(queue)
     }
     .frame(width: 360)
     .foregroundStyle(theme.surface.text.color)
+    .onAppear {
+      if fixedQueue == nil { controller.downloads.refreshAvailableDiskSpace() }
+    }
   }
 
   // MARK: Header and footer
 
   private func header(_ queue: DownloadQueue) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text("Downloads")
-        .font(.system(size: 13, weight: .semibold))
-        .accessibilityAddTraits(.isHeader)
-      // The batch in one line: how many, how far, how fast, how long.
-      Text(verbatim: queue.summary)
-        .font(.system(size: 11.5))
-        .foregroundStyle(theme.surface.muted.color)
-        .lineLimit(2)
+    let model = controller.downloads
+    return VStack(alignment: .leading, spacing: 6) {
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text("Downloads")
+            .font(.system(size: 13, weight: .semibold))
+            .accessibilityAddTraits(.isHeader)
+          Spacer(minLength: 8)
+          if let freeBytes = model.availableDiskSpaceBytes, freeBytes >= 0 {
+            let formatted = ByteSize.text(Double(freeBytes), locale: locale)
+            Text(verbatim: L("\(formatted) free"))
+              .font(.panel(.caption).monospacedDigit())
+              .foregroundStyle(theme.surface.muted.color)
+              .lineLimit(1)
+              .fixedSize()
+              .accessibilityIdentifier("downloads-disk-space")
+          }
+        }
+        // The batch in one line: how many, how far, how fast, how long.
+        Text(verbatim: queue.summary)
+          .font(.system(size: 11.5))
+          .foregroundStyle(theme.surface.muted.color)
+          .lineLimit(2)
+      }
+      if queue.hasBatchActions {
+        batchActions(queue, model: model)
+      }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.horizontal, 12)
     .padding(.vertical, 10)
+  }
+
+  private func batchActions(_ queue: DownloadQueue, model: DownloadsModel) -> some View {
+    TagFlow(spacing: 6) {
+      if queue.resumableCount > 0 {
+        Button(L("Resume all (\(queue.resumableCount))")) { model.resumeAll() }
+          .buttonStyle(.panelPrimary(size: .compact))
+          .fixedSize()
+          .disabled(controller.isBusy(PanelActionCoordinator.key("resumeAllDownloads")))
+          .accessibilityIdentifier("downloads-resume-all")
+      }
+      if queue.pausableCount > 0 {
+        Button("Pause all") { model.pauseAll() }
+          .buttonStyle(.panelSecondary(size: .compact))
+          .fixedSize()
+          .disabled(controller.isBusy(PanelActionCoordinator.key("pauseAllDownloads")))
+          .accessibilityIdentifier("downloads-pause-all")
+      }
+      if queue.queuedCount > 0 {
+        Button("Cancel queued") { model.cancelQueued() }
+          .buttonStyle(.panelSecondary(size: .compact))
+          .fixedSize()
+          .disabled(controller.isBusy(PanelActionCoordinator.key("cancelQueuedDownloads")))
+          .accessibilityIdentifier("downloads-cancel-queued")
+      }
+    }
+    .font(.panel(.caption))
   }
 
   private func footer(_ queue: DownloadQueue) -> some View {

@@ -398,6 +398,83 @@ final class PanelPixivActionsTests: MediaPanelTestCase {
       }
     }
   }
+
+  func testDownloadMissingPagesSkipsSavedAndPendingAndConfirmsLargeBatches() async throws {
+    let gate = PixivGate()
+    defer { gate.open() }
+    let image = try PanelTestCase.gif(frames: 1, brightness: 0.6)
+    let fixture = PixivFixtureTransport { url in
+      if url.host == "i.pximg.net" { return image }
+      if url.path.hasSuffix("/pages") {
+        let id = Int(url.pathComponents.dropLast().last ?? "") ?? 0
+        return PixivFixtures.pages(workID: id, count: id == 401 ? 12 : 3)
+      }
+      return PixivFixtures.ranking([
+        PixivFixtures.rankingEntry(.init(id: 401, pages: 12), rank: 1),
+        PixivFixtures.rankingEntry(.init(id: 402, pages: 3), rank: 2),
+      ])
+    }
+    let transport = PixivHeldTransport(fixture: fixture, originals: gate)
+    try await withPanel(pixivTransport: transport) { panel in
+      let controller = panel.controller
+      try await loadRanking(panel)
+      panel.store.librarySnapshot.wallpapers = [savedPage(0, of: "402")]
+      try await controller.pixivDownload(workID: "402", page: 1)
+
+      let queuedSmall = try await controller.pixivDownloadMissingPages(workID: "402")
+      XCTAssertEqual(queuedSmall, 1, "page 0 is saved and page 1 is already pending")
+      XCTAssertTrue(panel.dialogs.confirmations.isEmpty, "small batches need no confirmation")
+      XCTAssertNotNil(panel.pixiv.downloads.download(for: "pixiv-402-p2"))
+      XCTAssertNil(panel.pixiv.downloads.download(for: "pixiv-402-p0"))
+
+      // More than 10 missing pages asks before queueing.
+      panel.dialogs.confirmAnswer = false
+      let declined = try await controller.pixivDownloadMissingPages(workID: "401")
+      XCTAssertEqual(declined, 0)
+      XCTAssertEqual(panel.dialogs.confirmations.count, 1)
+      XCTAssertEqual(panel.dialogs.confirmations.first?.title, "Download 12 pages?")
+      XCTAssertNil(panel.pixiv.downloads.download(for: "pixiv-401-p0"))
+
+      panel.dialogs.confirmAnswer = true
+      let approved = try await controller.pixivDownloadMissingPages(workID: "401")
+      XCTAssertEqual(approved, 12)
+      XCTAssertEqual(
+        (0..<12).compactMap { panel.pixiv.downloads.download(for: "pixiv-401-p\($0)") }.count, 12)
+    }
+  }
+
+  func testDownloadNextPrioritizesWaitingPixivSavesInTheSharedQueue() async throws {
+    let gate = PixivGate()
+    defer { gate.open() }
+    let image = try PanelTestCase.gif(frames: 1, brightness: 0.6)
+    let fixture = PixivFixtureTransport { url in
+      if url.host == "i.pximg.net" { return image }
+      if url.path.hasSuffix("/pages") {
+        let id = Int(url.pathComponents.dropLast().last ?? "") ?? 0
+        return PixivFixtures.pages(workID: id, count: 4)
+      }
+      return PixivFixtures.ranking([PixivFixtures.rankingEntry(.init(id: 501, pages: 4), rank: 1)])
+    }
+    let transport = PixivHeldTransport(fixture: fixture, originals: gate)
+    try await withPanel(pixivTransport: transport) { panel in
+      let controller = panel.controller
+      try await loadRanking(panel)
+      for page in 0..<4 { try await controller.pixivDownload(workID: "501", page: page) }
+      try await panel.waitUntil { gate.waiting == 2 }
+
+      let rows = controller.downloadQueue.downloads
+      XCTAssertEqual(rows.map(\.id), ["pixiv-501-p0", "pixiv-501-p1", "pixiv-501-p2", "pixiv-501-p3"])
+      XCTAssertFalse(controller.canPrioritizeDownload(rows[0]))
+      XCTAssertFalse(controller.canPrioritizeDownload(rows[1]))
+      XCTAssertFalse(controller.canPrioritizeDownload(rows[2]))
+      XCTAssertTrue(controller.canPrioritizeDownload(rows[3]))
+
+      try await controller.prioritizeDownload(rows[3])
+      XCTAssertEqual(
+        controller.downloadQueue.downloads.map(\.id),
+        ["pixiv-501-p0", "pixiv-501-p1", "pixiv-501-p3", "pixiv-501-p2"])
+    }
+  }
 }
 
 /// Counts the changes an observation reports.

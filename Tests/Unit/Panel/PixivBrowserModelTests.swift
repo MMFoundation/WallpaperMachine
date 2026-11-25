@@ -537,4 +537,25 @@ final class PixivBrowserModelTests: MediaPanelTestCase {
       XCTAssertEqual(model.activeFilterChips.count, model.filterCount)
     }
   }
+
+  func testCopyLinkAndViewOnPixivUseAllowedArtworkURLs() async throws {
+    try await withPanel(pixivTransport: try fixture()) { panel in
+      let model = panel.controller.pixivBrowser
+      var opened: [URL] = []
+      var copied: [URL] = []
+      model.openURL = {
+        opened.append($0)
+        return true
+      }
+      model.copyURL = { copied.append($0) }
+      try await openRanking(panel)
+      let work = try XCTUnwrap(panel.pixiv.works.first { $0.id == "301" })
+
+      model.viewOnPixiv(work)
+      model.copyLink(for: work)
+      let expected = URL(string: "https://www.pixiv.net/artworks/301")
+      XCTAssertEqual(opened, [try XCTUnwrap(expected)])
+      XCTAssertEqual(copied, [try XCTUnwrap(expected)])
+    }
+  }
 }

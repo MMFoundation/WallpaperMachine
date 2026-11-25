@@ -28,9 +28,33 @@ struct PixivSelection: Equatable {
   let savedPages: [Int]
   /// The download job of the page on show, in any state.
   let job: PixivDownloadRow?
+  /// Preview thumbnails of every page (indexed 0..<pageCount) once the page list has loaded.
+  var pagePreviews: [PanelImageSource?] = []
+  /// Page indexes of the work that currently have a pending download job.
+  var pendingPages: Set<Int> = []
 
   /// The page on show is in the library: the inspector offers to apply it instead of downloading.
   var isSaved: Bool { savedPages.contains(pageIndex) }
+
+  /// Page indexes of the work that are neither in the library nor currently queued/downloading.
+  var missingPages: [Int] {
+    guard pageCount > 0 else { return [] }
+    return (0..<pageCount).filter { !savedPages.contains($0) && !pendingPages.contains($0) }
+  }
+
+  /// Whether the multi-page batch save button should appear.
+  var offersDownloadAllPages: Bool { pageCount > 1 && !missingPages.isEmpty }
+
+  /// Whether at least one page of the work is already saved or downloading, distinguishing
+  /// "Download all pages" from "Download missing pages".
+  var hasAnySavedOrPendingPages: Bool { !savedPages.isEmpty || !pendingPages.isEmpty }
+
+  /// Preview image for thumbnail slot `index`, falling back to the work's cover for page 0 while
+  /// the page list is still loading.
+  func pagePreview(at index: Int) -> PanelImageSource? {
+    if pagePreviews.indices.contains(index), let preview = pagePreviews[index] { return preview }
+    return index == 0 ? thumbnail : nil
+  }
 
   /// What the inspector's download area offers, in this order: nothing for a saved page; pause
   /// and cancel for a pending job; resume and cancel for a paused one; otherwise a Download button.

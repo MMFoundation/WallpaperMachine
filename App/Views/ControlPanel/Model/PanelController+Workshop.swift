@@ -232,6 +232,16 @@ extension PanelController {
     if workshop.steamWebSession != nil {
       store.supportPrompt?.recordSubscriptionsOffered()
       try? await workshop.refreshSubscribedIDs()
+      if workshop.steamWebSession?.personaName == nil {
+        await workshop.refreshSteamWebPersonaName()
+      }
+    }
+  }
+
+  /// Fetches the signed-in Steam Community browsing account's persona name when not yet cached.
+  func refreshSteamWebPersonaName() async throws {
+    try await run(.direct) {
+      await workshop.refreshSteamWebPersonaName()
     }
   }
 
@@ -344,19 +354,52 @@ extension PanelController {
     }
   }
 
+  /// Downloads every favorite wallpaper of the signed-in account that the library lacks, reusing
+  /// Subscriptions' Application-exclusion, already-installed skip and queue rate-limit handling.
+  func downloadFavoriteWorkshopItems() async throws {
+    try await run(.direct) {
+      let installed = Set(store.librarySnapshot.wallpapers.map(\.id))
+      let missing = try await workshop.missingFavorites(installed: installed)
+      guard try await queueMissingWorkshopItems(missing) > 0 else {
+        throw WallpaperActionError(
+          message: L("Every favorite wallpaper is already in your library."))
+      }
+    }
+  }
+
+  /// Downloads every wallpaper in collection `id` that the library lacks, reusing Subscriptions'
+  /// Application-exclusion, already-installed skip and queue rate-limit handling.
+  func downloadCollectionWorkshopItems(id: String) async throws {
+    guard !id.isEmpty, id.count <= 20, UInt64(id) != nil else { throw InvalidControlValue() }
+    try await run(.direct) {
+      let installed = Set(store.librarySnapshot.wallpapers.map(\.id))
+      let missing = try await workshop.missingCollectionItems(id: id, installed: installed)
+      guard try await queueMissingWorkshopItems(missing) > 0 else {
+        throw WallpaperActionError(
+          message: L("Every wallpaper in this collection is already in your library."))
+      }
+    }
+  }
+
   /// Queues the subscribed wallpapers the library lacks and answers how many there were.
   private func queueMissingSubscriptions() async throws -> Int {
     let installed = Set(store.librarySnapshot.wallpapers.map(\.id))
     let missing = try await workshop.missingSubscriptions(installed: installed)
-      .filter { $0.kind != .application }
-    guard !missing.isEmpty else { return 0 }
+    return try await queueMissingWorkshopItems(missing)
+  }
+
+  /// Queues `items` after dropping Applications, collections and already-pending downloads,
+  /// answering how many eligible missing items there were.
+  private func queueMissingWorkshopItems(_ items: [WorkshopItem]) async throws -> Int {
+    let eligible = items.filter { $0.kind != .application && !$0.isCollection }
+    guard !eligible.isEmpty else { return 0 }
     try await store.commands.run {
-      for item in missing where workshop.downloader.download(for: item.id)?.isPending != true {
+      for item in eligible where workshop.downloader.download(for: item.id)?.isPending != true {
         workshop.requestDownload(item: item, rememberSession: remembersSession, bridge: store)
         try checkDownloadError()
       }
     }
-    return missing.count
+    return eligible.count
   }
 
   // MARK: Updates and reinstalling
@@ -378,6 +421,17 @@ extension PanelController {
       guard let item = workshop.updates.available[id] else { throw InvalidControlValue() }
       workshop.requestDownload(item: item, rememberSession: remembersSession, bridge: store)
       try checkDownloadError()
+    }
+  }
+
+  /// Skips the currently available update for `id` until the author publishes an even newer
+  /// revision (`remoteUpdated > dismissedRemoteUpdated`).
+  func dismissWorkshopUpdate(id: String) async throws {
+    let id = try installedWallpaperID(id)
+    try await run(.immediate) {
+      guard let item = workshop.updates.available[id] else { throw InvalidControlValue() }
+      let remoteUpdated = workshop.updates.remoteUpdatedDate(for: id) ?? item.timeUpdated
+      workshop.updates.dismissUpdate(for: id, remoteUpdated: remoteUpdated)
     }
   }
 

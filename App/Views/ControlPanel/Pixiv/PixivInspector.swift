@@ -115,6 +115,7 @@ private struct PixivInspectorDetail: View {
       VStack(alignment: .leading, spacing: 8) {
         if isMultiPage {
           PixivPageStepper(selection: selection)
+          PixivPageStrip(selection: selection)
           if selection.pages == .loading {
             Text("Loading pages…").font(.panel(.caption)).foregroundStyle(theme.surface.muted.color)
           }
@@ -143,22 +144,46 @@ private struct PixivInspectorDetail: View {
 
   @ViewBuilder
   private var actions: some View {
-    switch selection.download {
-    case .saved:
-      applyButton
-    case .pending(let job):
-      HStack(spacing: 8) {
-        pauseButton(job)
-        cancelButton(job)
+    VStack(alignment: .leading, spacing: 8) {
+      switch selection.download {
+      case .saved:
+        applyButton
+      case .pending(let job):
+        HStack(spacing: 8) {
+          pauseButton(job)
+          cancelButton(job)
+        }
+      case .paused(let job):
+        HStack(spacing: 8) {
+          resumeButton(job)
+          cancelButton(job)
+        }
+      case .available(let label):
+        downloadButton(label)
       }
-    case .paused(let job):
-      HStack(spacing: 8) {
-        resumeButton(job)
-        cancelButton(job)
+      if selection.offersDownloadAllPages {
+        downloadAllPagesButton
       }
-    case .available(let label):
-      downloadButton(label)
     }
+  }
+
+  private var downloadAllPagesButton: some View {
+    let key = PanelActionCoordinator.key("pixivDownloadAll", id: work.id)
+    let missingCount = selection.missingPages.count
+    return Button {
+      controller.pixivBrowser.downloadAllPages(of: work)
+    } label: {
+      if !selection.hasAnySavedOrPendingPages {
+        Label("Download all pages (\(selection.pageCount))", systemImage: "square.and.arrow.down.on.square")
+      } else if missingCount == 1 {
+        Label("Download 1 missing page", systemImage: "square.and.arrow.down.on.square")
+      } else {
+        Label("Download missing pages (\(missingCount))", systemImage: "square.and.arrow.down.on.square")
+      }
+    }
+    .buttonStyle(.panelSecondary(size: .regular, expands: true))
+    .disabled(controller.isBusy(key))
+    .accessibilityIdentifier("pixiv-download-all-pages")
   }
 
   /// The same button the Installed and Steam Workshop inspectors lead with.
@@ -396,5 +421,90 @@ private struct PixivPageStepper: View {
     .help(title)
     .accessibilityLabel(title)
     .accessibilityIdentifier(delta < 0 ? "pixiv-previous-work-page" : "pixiv-next-work-page")
+  }
+}
+
+/// Compact horizontal thumbnail strip for multi-page illustrations: clicking a thumbnail jumps
+/// directly to that page, and stepping through pages scrolls the selected thumbnail into view.
+private struct PixivPageStrip: View {
+  let selection: PixivSelection
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    ScrollViewReader { proxy in
+      ScrollView(.horizontal, showsIndicators: false) {
+        LazyHStack(spacing: 6) {
+          ForEach(0..<selection.pageCount, id: \.self) { index in
+            pageButton(index)
+              .id(index)
+          }
+        }
+        .padding(.vertical, 2)
+      }
+      .frame(height: 52)
+      .onChange(of: selection.pageIndex) { _, next in
+        proxy.scrollTo(next, anchor: .center)
+      }
+      .onChange(of: selection.work.id) { _, _ in
+        proxy.scrollTo(selection.pageIndex, anchor: .center)
+      }
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel(L("Page thumbnails"))
+    .accessibilityIdentifier("pixiv-page-strip")
+  }
+
+  private func pageButton(_ index: Int) -> some View {
+    let isSelected = index == selection.pageIndex
+    let isSaved = selection.savedPages.contains(index)
+    let workID = selection.work.id
+    return Button {
+      controller.launch("pixivSelectPage", policy: .latestWins) {
+        try await controller.pixivSelectPage(workID: workID, page: index)
+      }
+    } label: {
+      ZStack {
+        theme.surface.mediaWell.color
+        PanelImage(source: selection.pagePreview(at: index), pointSize: 48)
+      }
+      .frame(width: 46, height: 46)
+      .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+      .overlay(alignment: .topLeading) {
+        if isSaved {
+          Image(systemName: TileMark.inLibrary.systemImage)
+            .font(.panel(.mark))
+            .foregroundStyle(theme.surface.markGlyph.color)
+            .padding(3)
+            .background(theme.surface.controlFill.color, in: Circle())
+            .padding(3)
+        }
+      }
+      .overlay(alignment: .bottomTrailing) {
+        Text(verbatim: "\(index + 1)")
+          .font(.panel(.mark).monospacedDigit())
+          .foregroundStyle(theme.surface.markGlyph.color)
+          .padding(.horizontal, 4)
+          .padding(.vertical, 1)
+          .background(theme.surface.scrimStrong.color, in: Capsule())
+          .padding(3)
+      }
+      .overlay {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+          .strokeBorder(
+            isSelected ? theme.accent.focus.color : theme.surface.divider.color,
+            lineWidth: isSelected ? 2 : 0.5)
+      }
+      .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(
+      Text(
+        verbatim: isSaved
+          ? "\(L("Page \(index + 1) of \(selection.pageCount)")), \(L("In your library"))"
+          : L("Page \(index + 1) of \(selection.pageCount)")))
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
+    .accessibilityIdentifier("pixiv-page-thumb-\(index)")
   }
 }

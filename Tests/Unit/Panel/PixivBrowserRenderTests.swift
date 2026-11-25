@@ -586,4 +586,21 @@ final class PixivBrowserRenderTests: MediaPanelTestCase {
       "active filter chips hide when Filters sidebar opens")
     await hosted.close()
   }
+
+  func testMultiPageInspectorShowsThumbnailStripAndDownloadAllPagesAction() async throws {
+    let hosted = try host()
+    try await loadAndSelect(hosted)
+    let inspector = hosted.standalone(PixivInspector(), size: NSSize(width: 280, height: 760))
+    try await Task.sleep(for: .milliseconds(300))
+
+    let shown = identifiers(in: inspector)
+    XCTAssertTrue(shown.contains("pixiv-page-strip"), "multi-page works show the thumbnail strip: \(shown.sorted())")
+    XCTAssertTrue(shown.contains("pixiv-page-thumb-0"))
+    XCTAssertTrue(shown.contains("pixiv-page-thumb-1"))
+    XCTAssertTrue(shown.contains("pixiv-download-all-pages"))
+
+    press(try XCTUnwrap(element("pixiv-page-thumb-1", in: inspector)))
+    try await hosted.fixture.waitUntil(timeout: 5) { hosted.controller.pixivSelection?.pageIndex == 1 }
+    await hosted.close()
+  }
 }

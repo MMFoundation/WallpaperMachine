@@ -63,16 +63,25 @@ final class DownloadsModel {
       // The finished downloads fold away on every opening and closing, as they always did.
       showsCompleted = false
       controller.shell.popover(.downloads).wrappedValue = newValue
+      if newValue { refreshAvailableDiskSpace() }
     }
   }
   /// The Downloads popover lists finished downloads too, until it closes.
   var showsCompleted = false
+  /// Cached available space on the library volume, refreshed asynchronously when the popover opens
+  /// so neither view bodies nor download progress ticks touch the filesystem.
+  private(set) var availableDiskSpaceBytes: Int64?
 
   /// How the timers wait; tests give it a clock they fire by hand.
   @ObservationIgnored var sleep: @Sendable (Duration) async throws -> Void = {
     try await Task.sleep(for: $0)
   }
+  /// How available disk space is measured off the main actor; tests replace it.
+  @ObservationIgnored var readAvailableDiskSpace: @Sendable (URL) -> Int64? = {
+    WorkshopDownloader.availableCapacity(at: $0)
+  }
   @ObservationIgnored private var handoffTask: Task<Void, Never>?
+  @ObservationIgnored private var diskSpaceTask: Task<Void, Never>?
   @ObservationIgnored private var loop: ObservationLoop?
 
   init(controller: PanelController) { self.controller = controller }
@@ -198,6 +207,25 @@ final class DownloadsModel {
     loop?.stop()
     handoffTask?.cancel()
     handoffTask = nil
+    diskSpaceTask?.cancel()
+    diskSpaceTask = nil
+  }
+
+  /// Measures the library volume's available space on a background task and caches the result.
+  @discardableResult
+  func refreshAvailableDiskSpace() -> Task<Void, Never> {
+    diskSpaceTask?.cancel()
+    let libraryURL = controller.libraryLocation.current
+    let reader = readAvailableDiskSpace
+    let task = Task { @MainActor [weak self] in
+      let bytes = await Task.detached(priority: .utility) { reader(libraryURL) }.value
+      guard let self, !Task.isCancelled else { return }
+      if self.availableDiskSpaceBytes != bytes {
+        self.availableDiskSpaceBytes = bytes
+      }
+    }
+    diskSpaceTask = task
+    return task
   }
 
   /// Registers what `reconcile` reads: while closed, whether any job is waiting on the user (and
@@ -420,7 +448,25 @@ final class DownloadsModel {
 
   func prioritize(_ row: DownloadRow) {
     controller.launch(PanelActionCoordinator.key("downloadPrioritize", id: row.id)) { [controller] in
-      try await controller.prioritizeDownload(id: row.id)
+      try await controller.prioritizeDownload(row)
+    }
+  }
+
+  func resumeAll() {
+    controller.launch(PanelActionCoordinator.key("resumeAllDownloads")) { [controller] in
+      try await controller.resumeAllDownloads()
+    }
+  }
+
+  func pauseAll() {
+    controller.launch(PanelActionCoordinator.key("pauseAllDownloads")) { [controller] in
+      try await controller.pauseAllDownloads()
+    }
+  }
+
+  func cancelQueued() {
+    controller.launch(PanelActionCoordinator.key("cancelQueuedDownloads")) { [controller] in
+      try await controller.cancelQueuedDownloads()
     }
   }
 

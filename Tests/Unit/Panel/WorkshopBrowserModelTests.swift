@@ -748,4 +748,16 @@ final class WorkshopBrowserModelTests: MediaPanelTestCase {
     XCTAssertEqual(model.filterCount, 0)
     XCTAssertTrue(model.activeFilterChips.isEmpty)
   }
+
+  func testCopyLinkValidatesThroughExternalLinkAndUsesCopySeam() async throws {
+    let panel = try makePanel()
+    let model = panel.controller.workshopBrowser
+    var copied: [URL] = []
+    model.copyURL = { copied.append($0) }
+    try await open(panel)
+    let item = try XCTUnwrap(panel.controller.workshopBrowse.items.first)
+
+    model.copyLink(for: item)
+    XCTAssertEqual(copied, [try XCTUnwrap(ExternalLink.workshopItem(id: item.id))])
+  }
 }

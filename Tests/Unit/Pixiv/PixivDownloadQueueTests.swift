@@ -233,6 +233,51 @@ final class PixivDownloadQueueTests: XCTestCase {
         let afterCancel = self.queue(PixivFixtureTransport { _ in PixivFixtures.imageBytes("jpg") })
         XCTAssertEqual(afterCancel.downloads.map(\.id), [jobs[2].id])
     }
+
+    func testDownloadNextMovesAWaitingSaveToTheFrontAndPersistsOrder() async throws {
+        let gate = PixivGate()
+        defer { gate.open() }
+        let queue = queue(PixivGatedTransport(gate: gate))
+        let jobs = [31, 32, 33, 34].map { queue.enqueue(work($0), page: 0) }
+        try await waitUntil { gate.waiting == 2 }
+
+        XCTAssertFalse(queue.canPrioritize(jobs[0].id), "a running save is not waiting")
+        XCTAssertFalse(queue.canPrioritize(jobs[1].id))
+        XCTAssertFalse(queue.canPrioritize(jobs[2].id), "the first waiting save is already next")
+        XCTAssertTrue(queue.canPrioritize(jobs[3].id))
+
+        XCTAssertTrue(queue.prioritize(jobs[3].id))
+        XCTAssertEqual(queue.downloads.map(\.id), [jobs[0].id, jobs[1].id, jobs[3].id, jobs[2].id])
+        XCTAssertFalse(queue.canPrioritize(jobs[3].id))
+        XCTAssertTrue(queue.canPrioritize(jobs[2].id))
+        XCTAssertFalse(queue.prioritize("no-such-job"))
+
+        let restored = self.queue(PixivFixtureTransport { _ in PixivFixtures.imageBytes("jpg") })
+        XCTAssertEqual(restored.downloads.map(\.id), [jobs[0].id, jobs[1].id, jobs[3].id, jobs[2].id])
+        await queue.shutdown()
+    }
+
+    func testPauseAllAndCancelQueuedActOnlyOnTheirTargetStates() async throws {
+        let gate = PixivGate()
+        defer { gate.open() }
+        let queue = queue(PixivGatedTransport(gate: gate))
+        let jobs = [41, 42, 43, 44].map { queue.enqueue(work($0), page: 0) }
+        try await waitUntil { gate.waiting == 2 }
+
+        let cancelled = queue.cancelQueued()
+        XCTAssertEqual(cancelled, [jobs[2].id, jobs[3].id])
+        XCTAssertEqual(jobs[0].status, .downloading, "active transfers stay running")
+        XCTAssertEqual(jobs[1].status, .downloading)
+        XCTAssertEqual(jobs[2].status, .cancelled)
+        XCTAssertEqual(jobs[3].status, .cancelled)
+
+        let waiting = [45, 46].map { queue.enqueue(work($0), page: 0) }
+        XCTAssertEqual(waiting.map(\.status), [.waiting, .waiting])
+        queue.pauseAll()
+        XCTAssertEqual(waiting.map(\.status), [.paused, .paused], "waiting saves pause before active slots clear")
+        try await waitUntil { jobs[0].status == .paused && jobs[1].status == .paused }
+        XCTAssertEqual(waiting.map(\.status), [.paused, .paused])
+    }
 }
 
 final class LockedFlag: @unchecked Sendable {

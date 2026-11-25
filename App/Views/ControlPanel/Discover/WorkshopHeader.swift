@@ -32,7 +32,9 @@ struct WorkshopHeader: View {
         .fixedSize()
       }
       if source.list == nil {
-        WorkshopSourceBar(source: source, isLoading: browse.isLoading)
+        WorkshopSourceBar(
+          source: source, isLoading: browse.isLoading, hasLoaded: browse.hasLoaded,
+          totalCount: browse.totalCount)
       }
       if let translation = browse.translation {
         WorkshopTranslationBar(translation: translation)
@@ -299,39 +301,84 @@ private struct SortMenu: View {
 
 // MARK: - Sources
 
-/// An author's or a collection's wallpapers are open: the way back, and what is open.
+/// An author's or a collection's wallpapers are open: the way back, what is open, and for a
+/// collection, the one-click download of what the library lacks.
 struct WorkshopSourceBar: View {
   let source: WorkshopSourceState
   let isLoading: Bool
+  var hasLoaded = true
+  var totalCount = 1
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
 
   var body: some View {
     let model = controller.workshopBrowser
-    HStack(spacing: 8) {
-      Button {
-        model.goBack()
-      } label: {
-        Image(systemName: "chevron.left")
-          .font(.system(size: 12, weight: .semibold))
-          .frame(width: 22, height: 22)
+    if case .collection(let id, _) = source.source {
+      let busy = controller.isBusy(PanelActionCoordinator.key("workshopDownloadCollection", id: id))
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 8) {
+          leading(model: model)
+          Spacer(minLength: 8)
+          downloadMissingButton(model: model, collectionID: id, busy: busy)
+        }
+        VStack(alignment: .leading, spacing: 8) {
+          HStack(spacing: 8) {
+            leading(model: model)
+            Spacer(minLength: 0)
+          }
+          downloadMissingButton(model: model, collectionID: id, busy: busy)
+        }
       }
-      .buttonStyle(.panelCapsule)
-      .disabled(!source.canGoBack || isLoading)
-      .help(L("Go back"))
-      .accessibilityLabel(Text("Go back"))
-      // The name is Steam's own, so it is never a catalog key.
-      Text(verbatim: source.heading)
-        .font(.system(size: 15, weight: .semibold))
-        .foregroundStyle(theme.surface.text.color)
-        .lineLimit(1)
-        .truncationMode(.tail)
-        .help(source.heading)
-        .accessibilityAddTraits(.isHeader)
-      Spacer(minLength: 0)
+      .frame(minHeight: 30)
+    } else {
+      HStack(spacing: 8) {
+        leading(model: model)
+        Spacer(minLength: 0)
+      }
+      .frame(minHeight: 30)
     }
-    .frame(minHeight: 30)
+  }
+
+  @ViewBuilder
+  private func leading(model: WorkshopBrowserModel) -> some View {
+    Button {
+      model.goBack()
+    } label: {
+      Image(systemName: "chevron.left")
+        .font(.system(size: 12, weight: .semibold))
+        .frame(width: 22, height: 22)
+    }
+    .buttonStyle(.panelCapsule)
+    .disabled(!source.canGoBack || isLoading)
+    .help(L("Go back"))
+    .accessibilityLabel(Text("Go back"))
+    // The name is Steam's own, so it is never a catalog key.
+    Text(verbatim: source.heading)
+      .font(.system(size: 15, weight: .semibold))
+      .foregroundStyle(theme.surface.text.color)
+      .lineLimit(1)
+      .truncationMode(.tail)
+      .help(source.heading)
+      .accessibilityAddTraits(.isHeader)
+  }
+
+  private func downloadMissingButton(
+    model: WorkshopBrowserModel, collectionID: String, busy: Bool
+  ) -> some View {
+    Button {
+      model.downloadCollection(id: collectionID)
+    } label: {
+      Label("Download missing", systemImage: "arrow.down.circle")
+    }
+    .buttonStyle(.panelPrimary(size: .compact))
+    .fixedSize()
+    .disabled(
+      !WorkshopSubscriptionBar.canDownloadMissing(
+        isBusy: busy, hasLoaded: hasLoaded, totalCount: totalCount)
+    )
+    .help(L("Downloads every wallpaper in this collection that isn’t in your library yet"))
+    .accessibilityIdentifier("workshop-collection-download-missing")
   }
 }
 
@@ -369,12 +416,7 @@ struct WorkshopSubscriptionBar: View {
   /// Whose list it is, and how many are in it.
   private var account: some View {
     HStack(spacing: 12) {
-      Label {
-        Text("Signed in to Steam")
-      } icon: {
-        Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.surface.approved.color)
-      }
-      .font(.system(size: 12.5, weight: .medium))
+      WorkshopWebAccountBadge(personaName: browse.steamWebPersonaName)
       if browse.hasLoaded {
         Text("\(browse.totalCount) subscribed")
           .font(.system(size: 12.5))
@@ -403,8 +445,9 @@ struct WorkshopSubscriptionBar: View {
   }
 }
 
-/// Your favorites, signed in: whose list it is, how many, the order Steam lists them in, and the
-/// way to sign out. Nothing is favorited or unfavorited from here.
+/// Your favorites, signed in: whose list it is, how many, the order Steam lists them in, the
+/// one-click download of what the library lacks, and the way to sign out. Nothing is favorited or
+/// unfavorited from here.
 struct WorkshopFavoritesBar: View {
   let browse: WorkshopBrowseState
 
@@ -413,27 +456,23 @@ struct WorkshopFavoritesBar: View {
 
   var body: some View {
     let model = controller.workshopBrowser
+    let busy = controller.isBusy(PanelActionCoordinator.key("workshopDownloadFavorites"))
     ViewThatFits(in: .horizontal) {
       HStack(spacing: 12) {
         account
         Spacer(minLength: 8)
-        actions(model: model)
+        HStack(spacing: 10) { actions(model: model, busy: busy) }
       }
       VStack(alignment: .leading, spacing: 8) {
         account
-        HStack(spacing: 12) { actions(model: model) }
+        TagFlow(spacing: 8, centersRows: true) { actions(model: model, busy: busy) }
       }
     }
   }
 
   private var account: some View {
     HStack(spacing: 12) {
-      Label {
-        Text("Signed in to Steam")
-      } icon: {
-        Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.surface.approved.color)
-      }
-      .font(.system(size: 12.5, weight: .medium))
+      WorkshopWebAccountBadge(personaName: browse.steamWebPersonaName)
       if browse.hasLoaded {
         Text("\(browse.totalCount) favorites")
           .font(.system(size: 12.5))
@@ -443,8 +482,21 @@ struct WorkshopFavoritesBar: View {
   }
 
   @ViewBuilder
-  private func actions(model: WorkshopBrowserModel) -> some View {
+  private func actions(model: WorkshopBrowserModel, busy: Bool) -> some View {
     let order = controller.workshop.favoritesOrder
+    Button {
+      model.downloadFavorites()
+    } label: {
+      Label("Download missing", systemImage: "arrow.down.circle")
+    }
+    .buttonStyle(.panelPrimary(size: .compact))
+    .fixedSize()
+    .disabled(
+      !WorkshopSubscriptionBar.canDownloadMissing(
+        isBusy: busy, hasLoaded: browse.hasLoaded, totalCount: browse.totalCount)
+    )
+    .help(L("Downloads every favorite wallpaper that isn’t in your library yet"))
+    .accessibilityIdentifier("workshop-favorites-download-missing")
     Menu {
       Picker(selection: Binding(get: { order }, set: { model.choose(favoritesOrder: $0) })) {
         ForEach(WorkshopFavoritesOrder.allCases) { order in
@@ -466,6 +518,33 @@ struct WorkshopFavoritesBar: View {
     Button("Sign out of Steam") { model.signOutOfSteam() }
       .buttonStyle(.panelLink)
       .font(.system(size: 12))
+      .fixedSize()
       .help(L("Forgets the Steam session this app read your subscriptions with"))
+  }
+}
+
+/// Shows the signed-in Steam Community browsing persona name verbatim when known, falling back
+/// cleanly to "Signed in to Steam", and clarifying in its tooltip that Workshop browsing is
+/// separate from downloads.
+private struct WorkshopWebAccountBadge: View {
+  let personaName: String?
+
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    Label {
+      if let name = personaName, !name.isEmpty {
+        Text(verbatim: L("Signed in as \(name)"))
+          .lineLimit(1)
+          .truncationMode(.tail)
+      } else {
+        Text("Signed in to Steam")
+      }
+    } icon: {
+      Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.surface.approved.color)
+    }
+    .font(.panel(.label))
+    .help(L("Workshop browsing uses a separate sign-in from downloads."))
+    .accessibilityIdentifier("workshop-web-account")
   }
 }

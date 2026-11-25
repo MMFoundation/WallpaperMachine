@@ -186,4 +186,25 @@ final class PanelDownloadQueueTests: MediaPanelTestCase {
       "a queue of pixiv saves alone says how those run")
     XCTAssertTrue(queue(steam: [job], pixiv: [pixiv]).note.hasPrefix("Up to 3"))
   }
+
+  func testBatchActionCountsTrackResumablePausableAndQueuedEntries() {
+    XCTAssertFalse(queue().hasBatchActions)
+    let active = running("a")
+    let waiting = DownloadRow(id: "w", title: "W", isPending: true, isQueued: true)
+    let pausedJob = DownloadRow(id: "p", title: "P", isPaused: true)
+    let pausedRequest = DownloadRequestRow(id: "r1", title: "R1", stage: .setup, isPaused: true)
+    let waitingRequest = DownloadRequestRow(id: "r2", title: "R2", stage: .account, isPaused: false)
+    let finished = DownloadRow(id: "done", title: "Done")
+
+    let mixed = queue(
+      steam: [active, waiting, pausedJob, finished],
+      requests: [pausedRequest, waitingRequest])
+    XCTAssertEqual(mixed.pausedRequestCount, 1)
+    XCTAssertEqual(mixed.pausedJobCount, 1)
+    XCTAssertEqual(mixed.resumableCount, 2)
+    XCTAssertEqual(mixed.pausableCount, 2)
+    XCTAssertEqual(mixed.queuedCount, 1)
+    XCTAssertTrue(mixed.hasBatchActions)
+    XCTAssertFalse(queue(steam: [finished], requests: [waitingRequest]).hasBatchActions)
+  }
 }

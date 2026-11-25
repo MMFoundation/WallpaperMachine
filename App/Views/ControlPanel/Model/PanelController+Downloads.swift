@@ -284,6 +284,68 @@ extension PanelController {
     }
   }
 
+  /// **Download next**: moves a waiting Steam or pixiv download to the front of its line.
+  func prioritizeDownload(_ row: DownloadRow) async throws {
+    switch row.source {
+    case .steam: try await prioritizeDownload(id: row.id)
+    case .pixiv: try await pixivPrioritizeDownload(id: row.id)
+    }
+  }
+
+  /// **Pause all**: pauses every running or waiting Steam and pixiv download. Waiting jobs pause
+  /// first so cancelling active work never starts another job behind it.
+  func pauseAllDownloads() async throws {
+    try await run(.immediate) {
+      workshop.downloader.pauseAll()
+      pixiv.downloads.pauseAll()
+    }
+  }
+
+  /// **Resume all**: resumes every paused retained request and every paused Steam and pixiv
+  /// download, in list order. A Steam failure stops the remaining Steam resumes and reports why;
+  /// paused pixiv saves still resume.
+  func resumeAllDownloads() async throws {
+    try await run(.queued) {
+      let pausedRequestIDs = workshop.downloadRequests.filter(\.isPaused).map(\.id)
+      let pausedSteamJobs = workshop.downloader.downloads.filter { $0.isPaused && !$0.isPending }
+      let pausedPixivIDs = pixiv.downloads.downloads.filter { $0.status == .paused }.map(\.id)
+      var steamError: Error?
+      for id in pausedRequestIDs {
+        guard steamError == nil else { break }
+        _ = workshop.resumeDownloadRequest(id: id, bridge: store)
+        do { try checkDownloadError() } catch { steamError = error }
+      }
+      for job in pausedSteamJobs {
+        guard steamError == nil else { break }
+        workshop.resumeDownload(job, bridge: store)
+        do { try checkDownloadError() } catch { steamError = error }
+      }
+      for id in pausedPixivIDs {
+        _ = pixiv.downloads.resume(id)
+      }
+      if let steamError { throw steamError }
+    }
+  }
+
+  /// **Cancel queued**: removes waiting Steam and pixiv downloads after confirmation. Active
+  /// downloads are left running.
+  func cancelQueuedDownloads() async throws {
+    errors.clearAction()
+    let count = downloadQueue.queuedCount
+    guard count > 0 else { return }
+    let title =
+      count == 1 ? L("Cancel 1 queued download?") : L("Cancel \(count) queued downloads?")
+    let detail =
+      count == 1
+      ? L("The waiting download will be removed from the queue. Active downloads will keep running.")
+      : L("Waiting downloads will be removed from the queue. Active downloads will keep running.")
+    guard await dialogs.confirm(title, detail: detail, button: L("Cancel Queued")) else { return }
+    try await run(.immediate) {
+      workshop.cancelQueuedDownloads()
+      _ = pixiv.downloads.cancelQueued()
+    }
+  }
+
   /// **Retry failed**: tries every failed or cancelled download again, Steam's and pixiv's, in
   /// the order the list shows them. Steam's are left out while SteamCMD is not ready, as their
   /// own Try again is. The first that cannot start stops the batch and says why.
@@ -291,12 +353,18 @@ extension PanelController {
     for row in retryableDownloads { try await retryDownload(row) }
   }
 
-  /// Whether **Download next** would move this row's job: a Steam job waits behind another.
+  /// Whether **Download next** would move this row's job: a Steam or pixiv job waits behind another.
   func canPrioritizeDownload(_ row: DownloadRow) -> Bool {
-    guard row.source == .steam, row.isQueued,
-      let job = workshop.downloader.downloads.first(where: { $0.id == row.id })
-    else { return false }
-    return workshop.downloader.canPrioritize(job)
+    guard row.isQueued else { return false }
+    switch row.source {
+    case .steam:
+      guard let job = workshop.downloader.downloads.first(where: { $0.id == row.id }) else {
+        return false
+      }
+      return workshop.downloader.canPrioritize(job)
+    case .pixiv:
+      return pixiv.downloads.canPrioritize(row.id)
+    }
   }
 
   /// The downloads **Retry failed** would try again.

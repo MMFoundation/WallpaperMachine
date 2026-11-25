@@ -321,6 +321,40 @@ final class WorkshopDownloadManager: SteamCMDDownloadActivity {
     persist()
   }
 
+  /// Pauses every waiting and running download. Queued jobs are paused before active ones so
+  /// freeing an active slot never starts another job behind them.
+  func pauseAll() {
+    let waiting = downloads.filter { $0.isQueued && !$0.isPaused }
+    let running = downloads.filter { $0.occupiesSlot && !$0.isPaused }
+    guard !waiting.isEmpty || !running.isEmpty else { return }
+    for job in waiting {
+      job.isQueued = false
+      job.isPaused = true
+    }
+    for job in running {
+      job.isPaused = true
+      job.worker.pause()
+    }
+    persist()
+  }
+
+  /// Cancels every job waiting for a slot without disturbing active downloads, returning their ids.
+  @discardableResult
+  func cancelQueued() -> [String] {
+    let waiting = downloads.filter { $0.isQueued && !$0.isPaused }
+    guard !waiting.isEmpty else { return [] }
+    for job in waiting {
+      job.isQueued = false
+      job.isPaused = false
+      job.wasCancelled = true
+      job.begin = nil
+      job.worker.discardCheckpoint()
+    }
+    persist()
+    startQueuedDownloads()
+    return waiting.map(\.id)
+  }
+
   /// **Download next**: moves a job that waits for a slot to the front of the line, ahead of
   /// every other waiting job and behind those that run, so it starts at the next free slot.
   /// The order is saved with the queue, so it outlives a relaunch.

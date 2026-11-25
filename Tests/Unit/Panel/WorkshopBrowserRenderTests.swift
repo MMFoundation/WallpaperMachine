@@ -608,6 +608,44 @@ final class WorkshopBrowserRenderTests: MediaPanelTestCase {
     }
   }
 
+  func testTheDownloadsPopoverShowsBatchControlsAndCachedDiskSpaceWithin360Points() async throws {
+    let requests = [
+      DownloadRequestRow(id: "11", title: "Cozy Cabin", stage: .setup, isPaused: true),
+    ]
+    let steam = [
+      DownloadRow(id: "1", title: "Aurora Fjord", status: "Downloading", phase: .transferring, progress: 0.42, isPending: true),
+      DownloadRow(id: "2", title: "Orbital", status: "Waiting for a free download slot", isPending: true, isQueued: true),
+      DownloadRow(id: "5", title: "Glacier Lake", status: "Download paused", isPaused: true),
+    ]
+    let queue = DownloadQueue.make(requests: requests, steam: steam, pixiv: [], slotLimit: 3)
+    let panel = try makeDiscoverPanel()
+    panel.controller.downloads.readAvailableDiskSpace = { _ in 128_000_000_000 }
+    await panel.controller.downloads.refreshAvailableDiskSpace().value
+    let hosting = NSHostingView(
+      rootView: AnyView(
+        DownloadsPopover(queue: queue).environment(panel.controller)
+          .environment(\.panelImages, panel.controller.images)
+          .panelTheme(theme: panel.controller.theme, locale: PanelLocale.shared)))
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 360, height: 600), styleMask: [.titled],
+      backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = hosting
+    defer {
+      window.contentView = nil
+      window.close()
+    }
+    hosting.layoutSubtreeIfNeeded()
+    let size = hosting.fittingSize
+    XCTAssertLessThanOrEqual(size.width, 361)
+    XCTAssertLessThanOrEqual(size.height, 600)
+    let ids = Set(AccessibilityElement.everything(in: hosting).map(\.identifier))
+    XCTAssertTrue(ids.contains("downloads-disk-space"), "cached disk space is shown: \(ids.sorted())")
+    XCTAssertTrue(ids.contains("downloads-resume-all"), "Resume all appears when paused items exist")
+    XCTAssertTrue(ids.contains("downloads-pause-all"), "Pause all appears when pending items exist")
+    XCTAssertTrue(ids.contains("downloads-cancel-queued"), "Cancel queued appears when waiting items exist")
+  }
+
   func testAResumedDownloadRedrawsAsRunningWhileTheListIsOpen() async throws {
     let panel = try makeDiscoverPanel()
     let paused = DownloadRow(id: "1", title: "Aurora Fjord", status: "Download paused", isPaused: true)

@@ -287,6 +287,58 @@ final class WorkshopUpdateStoreTests: XCTestCase {
         try await settleDetails(store)
         XCTAssertEqual(store.details["704"], old)
     }
+
+    func testDismissingAnUpdateHidesThatVersionUntilANewerUpdateArrivesAndClearsOnInstall() async throws {
+        let installedAt = clock.addingTimeInterval(-7200)
+        let firstUpdate = clock.addingTimeInterval(-3600)
+        let newerUpdate = clock.addingTimeInterval(-600)
+        try installed("801", writtenAt: installedAt)
+        answer = [item("801", updated: firstUpdate)]
+        let store = makeStore()
+        store.check(installed: ["801"], library: root)
+        try await settle(store)
+        XCTAssertNotNil(store.available["801"])
+        XCTAssertEqual(store.remoteUpdatedDate(for: "801"), firstUpdate)
+
+        store.dismissUpdate(for: "801", remoteUpdated: firstUpdate)
+        XCTAssertNil(store.available["801"])
+        XCTAssertEqual(store.dismissedUpdateDate(for: "801"), firstUpdate)
+
+        let reopened = makeStore()
+        XCTAssertNil(reopened.available["801"], "dismissal survives relaunch")
+        XCTAssertEqual(reopened.dismissedUpdateDate(for: "801"), firstUpdate)
+        reopened.check(installed: ["801"], library: root)
+        try await settle(reopened)
+        XCTAssertNil(reopened.available["801"], "the same remote version stays hidden on re-check")
+
+        // A newer publication from the author supersedes the dismissed version.
+        answer = [item("801", updated: newerUpdate)]
+        let rechecking = makeStore()
+        rechecking.check(installed: ["801"], library: root)
+        try await settle(rechecking)
+        XCTAssertEqual(rechecking.available["801"]?.timeUpdated, newerUpdate)
+
+        // Dismissing the newer version and then manually installing clears the dismissal record.
+        rechecking.dismissUpdate(for: "801", remoteUpdated: newerUpdate)
+        XCTAssertNotNil(rechecking.dismissedUpdateDate(for: "801"))
+        rechecking.recordInstalled("801")
+        XCTAssertNil(rechecking.dismissedUpdateDate(for: "801"))
+        XCTAssertNil(makeStore().dismissedUpdateDate(for: "801"))
+
+        // An in-flight check finishing after dismissal cannot resurface the dismissed version.
+        try installed("802", writtenAt: installedAt)
+        let inFlight = [item("802", updated: firstUpdate)]
+        let gate = Gate()
+        let racing = WorkshopUpdateStore(
+            defaults: defaults, fetch: { _ in await gate.wait(); return inFlight }, now: { self.clock })
+        racing.check(installed: ["802"], library: root)
+        racing.dismissUpdate(for: "802", remoteUpdated: firstUpdate)
+        await gate.open()
+        try await settle(racing)
+        XCTAssertNil(racing.available["802"], "dismissal made during an in-flight check is respected")
+        racing.forget(["802"])
+        XCTAssertNil(makeStore().dismissedUpdateDate(for: "802"), "forgetting a removed wallpaper clears its dismissal")
+    }
 }
 
 /// Answers the store's details requests in place of Steam.

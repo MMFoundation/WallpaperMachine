@@ -142,12 +142,13 @@ final class WorkshopUpdateNoticeTests: MediaPanelTestCase {
 
   func testARequestWaitingForSetupContinuesAndADownloadUnderWayShowsItsProgress() throws {
     let request = DownloadRequestRow(id: "123", title: "Changed", stage: .setup)
-    XCTAssertEqual(
-      try XCTUnwrap(WorkshopUpdateNotice.make(update: update(), request: request, job: nil)).action,
-      .continueSetup)
+    let setup = try XCTUnwrap(WorkshopUpdateNotice.make(update: update(), request: request, job: nil))
+    XCTAssertEqual(setup.action, .continueSetup)
+    XCTAssertFalse(setup.canDismiss, "once setup has started, skip is not offered")
 
     let waiting = try XCTUnwrap(WorkshopUpdateNotice.make(update: update(), request: nil, job: job(queued: true)))
     XCTAssertEqual(waiting.action, .showInDownloads)
+    XCTAssertFalse(waiting.canDismiss)
     XCTAssertEqual(waiting.progress, .waiting)
     XCTAssertEqual(waiting.message(), "The update is waiting to download.")
     let unknown = try XCTUnwrap(WorkshopUpdateNotice.make(update: update(), request: nil, job: job()))
@@ -155,6 +156,8 @@ final class WorkshopUpdateNoticeTests: MediaPanelTestCase {
     let measured = try XCTUnwrap(WorkshopUpdateNotice.make(update: update(), request: nil, job: job(progress: 0.42)))
     XCTAssertEqual(measured.progress, .downloading(percent: 42))
     XCTAssertEqual(measured.message(), "Downloading the update… 42%")
+    XCTAssertTrue(
+      try XCTUnwrap(WorkshopUpdateNotice.make(update: update(), request: nil, job: nil)).canDismiss)
   }
 
   func testAnUpdateThatIsDownloadingNeedsNoUpdateRecordAndNothingToSayMeansNoNotice() {

@@ -193,4 +193,35 @@ final class PixivPanelStateTests: MediaPanelTestCase {
     XCTAssertEqual(PixivRating.mature.title, "Mature (R-18)")
     XCTAssertEqual(PixivRanking.dailyR18.title, "Daily R-18 ranking")
   }
+
+  func testMultiPageSelectionTracksMissingPagesAndPerPagePreviews() {
+    let preview0 = PanelImageSource.pixivThumbnail(URL(string: "https://i.pximg.net/img-master/p0.jpg")!)
+    let preview1 = PanelImageSource.pixivThumbnail(URL(string: "https://i.pximg.net/img-master/p1.jpg")!)
+    let single = PixivSelection(
+      work: work(pages: 1), pageIndex: 0, pageCount: 1, pages: .loaded, preview: preview0,
+      thumbnail: preview0, pageWidth: 1920, pageHeight: 1080,
+      libraryID: PixivWork.libraryID(workID: "301", page: 0), savedPages: [], job: nil)
+    XCTAssertFalse(single.offersDownloadAllPages, "a single-page work has no batch action")
+
+    let multi = PixivSelection(
+      work: work(pages: 4), pageIndex: 0, pageCount: 4, pages: .loaded, preview: preview0,
+      thumbnail: preview0, pageWidth: 1920, pageHeight: 1080,
+      libraryID: PixivWork.libraryID(workID: "301", page: 0), savedPages: [0], job: nil,
+      pagePreviews: [preview0, preview1, nil, nil], pendingPages: [2])
+    XCTAssertEqual(multi.missingPages, [1, 3])
+    XCTAssertTrue(multi.offersDownloadAllPages)
+    XCTAssertTrue(multi.hasAnySavedOrPendingPages)
+    XCTAssertEqual(multi.pagePreview(at: 0), preview0)
+    XCTAssertEqual(multi.pagePreview(at: 1), preview1)
+    XCTAssertNil(multi.pagePreview(at: 2))
+    XCTAssertNil(multi.pagePreview(at: 99), "out-of-bounds indices never crash")
+
+    let allAccountedFor = PixivSelection(
+      work: work(pages: 2), pageIndex: 0, pageCount: 2, pages: .loaded, preview: preview0,
+      thumbnail: preview0, pageWidth: 1920, pageHeight: 1080,
+      libraryID: PixivWork.libraryID(workID: "301", page: 0), savedPages: [0], job: nil,
+      pendingPages: [1])
+    XCTAssertEqual(allAccountedFor.missingPages, [])
+    XCTAssertFalse(allAccountedFor.offersDownloadAllPages)
+  }
 }
