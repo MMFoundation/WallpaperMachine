@@ -139,7 +139,7 @@ struct LibrarySceneResourcesPresentation: Equatable {
 
 /// The Last check line of the Workshop updates group.
 enum LibraryUpdatesNote {
-  /// "Not checked yet.", or when the check ran, when and what it found.
+  /// "Not checked yet.", or when the check ran and what it found.
   @MainActor
   static func text(_ updates: WorkshopUpdatesState, now: Date = Date(), locale: Locale) -> String {
     text(lastChecked: updates.lastChecked, count: updates.count, now: now, locale: locale)
@@ -151,9 +151,30 @@ enum LibraryUpdatesNote {
     let time = PlaylistState.changeTime(lastChecked, now: now, locale: locale)
     switch count {
     case 0: return L("\(time): everything is up to date.")
-    case 1: return L("\(time): 1 wallpaper has an update. Update it from Installed.")
-    default: return L("\(time): \(count) wallpapers have updates. Update them from Installed.")
+    case 1: return L("\(time): 1 wallpaper has an update.")
+    default: return L("\(time): \(count) wallpapers have updates.")
     }
+  }
+}
+
+/// The actionable buttons of the Workshop updates group while updates are available.
+struct LibraryUpdatesPresentation: Equatable {
+  var showsActions: Bool
+  var updateCount: Int
+  var updateAllIsDisabled: Bool
+
+  static func make(
+    updates: WorkshopUpdatesState, isUpdatingAll: Bool, isStoreBusy: Bool
+  ) -> LibraryUpdatesPresentation {
+    make(updateCount: updates.count, isUpdatingAll: isUpdatingAll, isStoreBusy: isStoreBusy)
+  }
+
+  static func make(
+    updateCount: Int, isUpdatingAll: Bool, isStoreBusy: Bool
+  ) -> LibraryUpdatesPresentation {
+    LibraryUpdatesPresentation(
+      showsActions: updateCount > 0, updateCount: max(0, updateCount),
+      updateAllIsDisabled: isStoreBusy || isUpdatingAll)
   }
 }
 

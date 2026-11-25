@@ -93,12 +93,12 @@ struct UpdateWindowView: View {
     let state = store.state
     VStack(alignment: .leading, spacing: 16) {
       header(state)
-      VStack(alignment: .leading, spacing: 8) {
-        notesBar
-        UpdateNotesBox(releases: store.notesReleases, language: notesLanguage.selection)
-        if store.notesReleases.isEmpty {
-          Text("No release notes are available for this version.").font(.caption)
-        } else {
+      if store.notesReleases.isEmpty {
+        emptyNotesPlaceholder
+      } else {
+        VStack(alignment: .leading, spacing: 8) {
+          notesBar
+          UpdateNotesBox(releases: store.notesReleases, language: notesLanguage.selection)
           Text("Release notes include up to 20 recent versions. Older changes are available on GitHub.")
             .font(.caption).foregroundStyle(theme.surface.muted.color)
         }
@@ -114,6 +114,24 @@ struct UpdateWindowView: View {
     .ignoresSafeArea(.container, edges: .top)
     // Release notes link issues and commits on GitHub; nothing else opens from here.
     .environment(\.openURL, OpenURLAction { url in ExternalLink.open(url) ? .handled : .discarded })
+  }
+
+  /// Clean centered placeholder shown when a release has no parsed changelog or notes.
+  private var emptyNotesPlaceholder: some View {
+    VStack(spacing: 8) {
+      Image(systemName: "doc.text")
+        .font(.panel(.title))
+        .foregroundStyle(theme.surface.muted.color)
+        .accessibilityHidden(true)
+      Text("No release notes are available for this version.")
+        .font(.panel(.callout))
+        .foregroundStyle(theme.surface.muted.color)
+        .multilineTextAlignment(.center)
+    }
+    .padding(24)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("update-notes-empty")
   }
 
   /// **English / 简体中文 / 한국어** above the notes: the translation this window shows.
@@ -205,14 +223,18 @@ struct UpdateWindowView: View {
       }
       HStack(spacing: 10) {
         Button("Skip This Version", action: actions.skip)
+          .buttonStyle(.panelSecondary)
           .disabled(state.isBusy)
         Spacer(minLength: 12)
-        if state.isBusy { Button("Cancel", action: actions.cancel) }
+        if state.isBusy {
+          Button("Cancel", action: actions.cancel)
+            .buttonStyle(.panelSecondary)
+        }
         Button("Remind Me Later", action: actions.later)
+          .buttonStyle(.panelSecondary)
           .keyboardShortcut(.cancelAction)
         primary(state)
       }
-      .controlSize(.large)
     }
   }
 

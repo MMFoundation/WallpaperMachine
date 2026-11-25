@@ -515,4 +515,145 @@ final class WorkshopBrowserModelTests: MediaPanelTestCase {
     model.pageDisappeared()
     XCTAssertTrue(model.previews.animations.isEmpty)
   }
+
+  // MARK: Comments retry and pagination
+
+  /// Pure fixture builder: called from `serveComments` closures, which run off the main actor.
+  nonisolated private static func commentsPayload(
+    total: Int, entries: [(id: String?, author: String, timestamp: Int, text: String)]
+  ) -> Data {
+    let html = entries.map { entry in
+      let idAttr = entry.id.map { #" id="comment_\#($0)""# } ?? ""
+      let bodyIDAttr = entry.id.map { #" id="comment_content_\#($0)""# } ?? ""
+      return """
+        <div class="commentthread_comment responsive_body_text"\(idAttr)>
+          <a class="hoverunderline commentthread_author_link" href="x"><bdi>\(entry.author)</bdi></a>
+          <span class="commentthread_comment_timestamp" data-timestamp="\(entry.timestamp)">now</span>
+          <div class="commentthread_comment_text"\(bodyIDAttr)>\(entry.text)</div>
+        </div>
+        """
+    }.joined()
+    return (try? JSONSerialization.data(withJSONObject: [
+      "success": true, "total_count": total, "comments_html": html,
+    ])) ?? Data()
+  }
+
+  func testCommentsRetryRecoversFromInitialFailure() async throws {
+    addTeardownBlock { WorkshopBrowseProtocol.serveComments(nil) }
+    let panel = try makePanel()
+    let model = panel.controller.workshopBrowser
+    try await open(panel)
+    let item = try XCTUnwrap(panel.controller.workshopBrowse.items.first)
+
+    WorkshopBrowseProtocol.serveComments { _ in .success(Data("not json".utf8)) }
+    await model.loadComments(for: item)
+    guard case .failed(item.id, let message) = model.comments else {
+      return XCTFail("expected failed comments state, got \(model.comments)")
+    }
+    XCTAssertFalse(message.isEmpty)
+
+    WorkshopBrowseProtocol.serveComments { _ in
+      .success(Self.commentsPayload(total: 1, entries: [("101", "Alice", 1_759_312_800, "Great!")]))
+    }
+    await model.retryComments(for: item).value
+    guard case .loaded(item.id, let thread, let nextStart, let hasMore, false, nil) = model.comments else {
+      return XCTFail("expected loaded comments after retry, got \(model.comments)")
+    }
+    XCTAssertEqual(thread.total, 1)
+    XCTAssertEqual(thread.comments.map(\.text), ["Great!"])
+    XCTAssertEqual(nextStart, 1)
+    XCTAssertFalse(hasMore)
+  }
+
+  func testCommentsPaginationAppendsPagesDeduplicatesAndStopsCleanly() async throws {
+    addTeardownBlock { WorkshopBrowseProtocol.serveComments(nil) }
+    let panel = try makePanel()
+    let model = panel.controller.workshopBrowser
+    try await open(panel)
+    let item = try XCTUnwrap(panel.controller.workshopBrowse.items.first)
+
+    WorkshopBrowseProtocol.serveComments { url in
+      let start = Int(WorkshopBrowseProtocol.values("start", in: url) ?? "0") ?? 0
+      switch start {
+      case 0:
+        return .success(Self.commentsPayload(total: 4, entries: [
+          ("1", "A", 1000, "First"),
+          ("2", "B", 900, "Second"),
+        ]))
+      case 2:
+        // Comment #2 overlaps from a newly posted comment shifting offsets; #3 and #4 are new.
+        return .success(Self.commentsPayload(total: 5, entries: [
+          ("2", "B", 900, "Second"),
+          ("3", "C", 800, "Third"),
+          ("4", "D", 700, "Fourth"),
+        ]))
+      default:
+        return .success(Self.commentsPayload(total: 5, entries: []))
+      }
+    }
+
+    await model.loadComments(for: item)
+    guard case .loaded(item.id, let page1, let start1, let more1, false, nil) = model.comments else {
+      return XCTFail("expected page 1 loaded, got \(model.comments)")
+    }
+    XCTAssertEqual(page1.comments.map(\.id), ["1", "2"])
+    XCTAssertEqual(start1, 2)
+    XCTAssertTrue(more1)
+
+    await model.requestMoreComments(for: item).value
+    guard case .loaded(item.id, let page2, let start2, let more2, false, nil) = model.comments else {
+      return XCTFail("expected page 2 loaded, got \(model.comments)")
+    }
+    XCTAssertEqual(page2.comments.map(\.id), ["1", "2", "3", "4"], "overlapping comment is deduplicated")
+    XCTAssertEqual(page2.total, 5)
+    XCTAssertEqual(start2, 5)
+    XCTAssertFalse(more2, "stops cleanly once nextStart reaches total")
+    XCTAssertEqual(
+      WorkshopBrowseProtocol.commentRequests.compactMap { WorkshopBrowseProtocol.values("start", in: $0) },
+      ["0", "2"])
+
+    // Calling again once exhausted makes no further request.
+    await model.loadMoreComments(for: item)
+    XCTAssertEqual(WorkshopBrowseProtocol.commentRequests.count, 2)
+  }
+
+  func testCommentsLoadMoreFailureKeepsLoadedCommentsAndStopsOnEmptyOrDuplicatePage() async throws {
+    addTeardownBlock { WorkshopBrowseProtocol.serveComments(nil) }
+    let panel = try makePanel()
+    let model = panel.controller.workshopBrowser
+    try await open(panel)
+    let item = try XCTUnwrap(panel.controller.workshopBrowse.items.first)
+
+    WorkshopBrowseProtocol.serveComments { url in
+      let start = Int(WorkshopBrowseProtocol.values("start", in: url) ?? "0") ?? 0
+      if start == 0 {
+        return .success(Self.commentsPayload(total: 10, entries: [
+          (nil, "A", 1000, "Only comment"),
+        ]))
+      }
+      return .success(Data("broken".utf8))
+    }
+
+    await model.loadComments(for: item)
+    await model.loadMoreComments(for: item)
+    guard case .loaded(item.id, let kept, let startAfterFail, true, false, let error) = model.comments else {
+      return XCTFail("expected existing comments kept with loadMoreError, got \(model.comments)")
+    }
+    XCTAssertEqual(kept.comments.map(\.text), ["Only comment"])
+    XCTAssertEqual(startAfterFail, 1)
+    XCTAssertNotNil(error)
+
+    // Retrying with only a duplicate comment (no id) stops cleanly instead of looping forever.
+    WorkshopBrowseProtocol.serveComments { _ in
+      .success(Self.commentsPayload(total: 10, entries: [
+        (nil, "A", 1000, "Only comment"),
+      ]))
+    }
+    await model.requestMoreComments(for: item).value
+    guard case .loaded(item.id, let final, _, let hasMore, false, nil) = model.comments else {
+      return XCTFail("expected loaded state after duplicate page, got \(model.comments)")
+    }
+    XCTAssertEqual(final.comments.map(\.text), ["Only comment"])
+    XCTAssertFalse(hasMore, "a page that yields no new comments stops pagination cleanly")
+  }
 }

@@ -284,7 +284,8 @@ Portuguese on the English ones; section headings the catalogs know are translate
 Japanese, Traditional Chinese and Brazilian Portuguese. When the manifest has no changelog (the API path,
 or a release published before it carried one), when it does not parse, or when it
 lacks the available version, the window shows the release body's English notes for
-the available version alone. `AppReleaseHistory` parses the changelog with the same
+the available version alone; if no release notes are available at all, the language
+switch and scrolling notes box are replaced by a centered placeholder. `AppReleaseHistory` parses the changelog with the same
 strict rules publishing applies ([release](../release.md#release-notes-and-the-changelog)).
 
 - **Download Update** downloads and verifies the package without immediately quitting.

@@ -259,4 +259,22 @@ final class WorkshopInspectorTests: MediaPanelTestCase {
     XCTAssertFalse(ExternalLink.open(URL(string: "https://example.com/x")!, using: model.openURL))
     XCTAssertTrue(opened.isEmpty)
   }
+
+  func testUpdatedLabelFormatsPositiveTimestampsAndOmitsMissingOrZero() {
+    var dated = item("222")
+    let timestamp = Date(timeIntervalSince1970: 1_790_000_000)
+    dated.timeUpdated = timestamp
+    let expectedDate = timestamp.formatted(
+      Date.FormatStyle(date: .abbreviated, time: .omitted).locale(english))
+    XCTAssertEqual(
+      WorkshopInspector.updatedLabel(for: dated, locale: english), "Updated \(expectedDate)")
+
+    var undated = item("222")
+    undated.timeUpdated = nil
+    XCTAssertNil(WorkshopInspector.updatedLabel(for: undated, locale: english))
+
+    var epoch = item("222")
+    epoch.timeUpdated = Date(timeIntervalSince1970: 0)
+    XCTAssertNil(WorkshopInspector.updatedLabel(for: epoch, locale: english))
+  }
 }

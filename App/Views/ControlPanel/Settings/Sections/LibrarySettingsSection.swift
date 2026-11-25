@@ -58,6 +58,7 @@ struct LibrarySettingsSection: View {
     keywords: [
       "Check Now", "Checking…", "Not checked yet.",
       "\("12:00"): everything is up to date.",
+      "View in Installed", "Update All (\(1))",
     ])
 
   static let downloadsAtOnce = SettingsItem(
@@ -345,6 +346,9 @@ private struct LibraryUpdatesRows: View {
     let settings = controller.librarySteamSettings
     let updates = controller.workshopUpdates
     let busy = controller.isStoreBusy
+    let updateAllKey = PanelActionCoordinator.key("workshopUpdateAll")
+    let presentation = LibraryUpdatesPresentation.make(
+      updates: updates, isUpdatingAll: controller.isBusy(updateAllKey), isStoreBusy: busy)
 
     SettingsRow(LibrarySettingsSection.updatesDaily) {
       Toggle(
@@ -370,6 +374,28 @@ private struct LibraryUpdatesRows: View {
       .disabled(busy || updates.isChecking)
     }
     .announcesChanges(of: updates.errorMessage)
+    if presentation.showsActions && controller.settings.search.shows(LibrarySettingsSection.updatesCheck) {
+      TagFlow(spacing: 8, centersRows: true) {
+        Button("Update All (\(presentation.updateCount))") {
+          controller.launch(updateAllKey) {
+            try await controller.updateAllWorkshopItems()
+          }
+        }
+        .buttonStyle(.panelPrimary(size: .small))
+        .disabled(presentation.updateAllIsDisabled)
+        .accessibilityIdentifier("library.updates.updateAll")
+        Button("View in Installed") {
+          controller.launch(PanelActionCoordinator.key("navigate"), policy: .latestWins) {
+            try await controller.showInstalledUpdates()
+          }
+        }
+        .buttonStyle(.panelSecondary(size: .small))
+        .accessibilityIdentifier("library.updates.viewInInstalled")
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+    }
     if let error = updates.errorMessage, !error.isEmpty {
       DisplaysMessageRow(text: error, isError: true)
     }

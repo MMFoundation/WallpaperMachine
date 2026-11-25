@@ -200,6 +200,17 @@ private struct UpdateNotice: View {
         .buttonStyle(.panelPrimary(size: .compact))
         .disabled(controller.isBusy(PanelActionCoordinator.key("workshopUpdate", id: item.id)))
       }
+      if let changelogURL = notice.changelogURL {
+        Button {
+          ExternalLink.open(changelogURL)
+        } label: {
+          Label("View change notes", systemImage: "arrow.up.right.square")
+            .labelStyle(.panelLinkRow)
+        }
+        .buttonStyle(.panelLink)
+        .font(.panel(.callout))
+        .accessibilityIdentifier("workshop.updateChangelog")
+      }
     }
     .padding(10)
     .background(

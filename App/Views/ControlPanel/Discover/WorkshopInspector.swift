@@ -12,6 +12,14 @@ import SwiftUI
 struct WorkshopInspector: View {
   @Environment(PanelController.self) private var controller
 
+  /// Formatted update date when Steam provided a positive timestamp; nil otherwise.
+  @MainActor
+  static func updatedLabel(for item: WorkshopItem, locale: Locale) -> String? {
+    guard let updated = item.timeUpdated, updated.timeIntervalSince1970 > 0 else { return nil }
+    let date = updated.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(locale))
+    return L("Updated \(date)")
+  }
+
   var body: some View {
     if let item = controller.workshopSelectedItem {
       ItemInspector(item: item)
@@ -91,8 +99,9 @@ private struct ItemInspector: View {
     return true
   }
 
-  /// "Scene · 268 MB · 48,200 subscribers": the kind, how big, how many people subscribe. The count
-  /// is a number of the panel's language, grouped as it groups its numbers.
+  /// "Scene · 268 MB · 48,200 subscribers · Updated Sep 21, 2026": the kind, how big, how many
+  /// people subscribe, and when it was last updated if Steam provided a timestamp. The count is a
+  /// number of the panel's language, grouped as it groups its numbers.
   private var meta: Text {
     var parts = [item.kindLabel]
     if item.isCollection, let size = item.collectionSize, size > 0 {
@@ -101,8 +110,12 @@ private struct ItemInspector: View {
       let bytes = TransferFormat.bytes(Double(item.size), locale: locale)
       if !bytes.isEmpty { parts.append(bytes) }
     }
-    return Text(verbatim: parts.joined(separator: " · ") + " · ")
+    var line = Text(verbatim: parts.joined(separator: " · ") + " · ")
       + Text("\(item.subscriptions) subscribers")
+    if let updated = WorkshopInspector.updatedLabel(for: item, locale: locale) {
+      line = line + Text(verbatim: " · \(updated)")
+    }
+    return line
   }
 
   // MARK: Tags and description

@@ -49,7 +49,7 @@ extension PanelController {
   func workshopUpdateNotice(for id: String) -> WorkshopUpdateNotice? {
     WorkshopUpdateNotice.make(
       update: workshopUpdate(for: id), request: downloadRequestRow(for: id),
-      job: steamDownloadRow(for: id))
+      job: steamDownloadRow(for: id), id: id)
   }
 
   /// Why a wallpaper that arrived through **Download and apply** was left alone ("you chose another

@@ -1088,10 +1088,10 @@ final class WorkshopStore {
     }
   }
 
-  /// The newest comments on `item` from Steam's public thread; no sign-in is needed.
-  func comments(for item: WorkshopItem) async throws -> WorkshopComments {
+  /// Comments on `item` starting at `start` from Steam's public thread; no sign-in is needed.
+  func comments(for item: WorkshopItem, start: Int = 0, count: Int = 10) async throws -> WorkshopComments {
     guard let creator = item.creatorID else { return WorkshopComments(total: 0, comments: []) }
-    return try await service.comments(itemID: item.id, creatorID: creator)
+    return try await service.comments(itemID: item.id, creatorID: creator, start: start, count: count)
   }
 
   /// The ids of subscribed wallpapers not in `installed`, asking Steam for every page of

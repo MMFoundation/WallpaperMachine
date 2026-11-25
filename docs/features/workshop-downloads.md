@@ -455,13 +455,16 @@ sort menu, so Your subscriptions keeps its own order.
 The inspector of an item that is not a collection and whose author's SteamID is known
 shows its newest ten comments, read-only, from Steam's public comment thread
 (`steamcommunity.com/comment/PublishedFile_Public/render/<author>/<item>/`, no sign-in and
-no cookie), when the inspector shows the item, with how many there are in all and
-**Read all comments on Steam**, which opens the item's page. Each comment is the
-author's name, how long ago it was posted and its text, read as plain text from the
-thread's HTML (`WorkshopService.decodeComments`): markup dropped, `<br>` kept as a line
-break, entities decoded. All of it is Steam's text, shown verbatim. Posting is not
-offered. A thread that cannot be read says so in place of the comments. Like
-subscribing, this was pinned against fixtures, not tried against live Steam.
+no cookie), when the inspector shows the item, with how many there are in all, **Load more
+comments** while older comments remain on the thread, and **Read all comments on Steam**,
+which opens the item's page. Paging advances Steam's `start` parameter, deduplicates
+comments that shifted across page boundaries, and stops once no more comments remain. Each
+comment is the author's name, how long ago it was posted and its text, read as plain text
+from the thread's HTML (`WorkshopService.decodeComments`): markup dropped, `<br>` kept as a
+line break, entities decoded. All of it is Steam's text, shown verbatim. Posting is not
+offered. A thread or page that cannot be read shows the error with **Try again** in place
+(keeping already-loaded comments when a later page fails). Like subscribing, this was
+pinned against fixtures, not tried against live Steam.
 
 ## One decision per download
 
@@ -1331,7 +1334,9 @@ own, which then has to be updated first.
 
 It checks at most once a day on its own, after the library loads and from the same
 six-hourly loop as app updates, unless **Settings → Library & Steam → Workshop
-updates → Check once a day** is off; **Check Now** checks at once. The result is
+updates → Check once a day** is off; **Check Now** checks at once. While updates are
+available, the same group offers **Update All (N)** to queue them directly and **View in
+Installed** to open Installed filtered to **Update available**. The result is
 kept across launches, and a failed check keeps what was known and says why beneath
 the row.
 
@@ -1345,7 +1350,8 @@ cannot overwrite a newer download or restore an item that was deleted.
 
 An installed wallpaper with an update wears a download mark on its tile, matches
 **Show only → Update available** in Installed's filters, and says in its details
-when its author changed it, with **Update**. Installed's summary offers **Update N
+when its author changed it, with **Update** and **View change notes** (opening the
+item's Steam Workshop changelog through `ExternalLink`). Installed's summary offers **Update N
 wallpapers** while any have updates. An update is an ordinary Workshop download
 (same queue, sign-in and prerequisites); once it has arrived whole, the importer
 swaps the new folder in and the old one out in one step (`renamex_np` with

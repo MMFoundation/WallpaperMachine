@@ -129,8 +129,15 @@ final class WorkshopUpdateNoticeTests: MediaPanelTestCase {
     XCTAssertEqual(notice.action, .update)
     XCTAssertNil(notice.progress)
     XCTAssertEqual(notice.message(locale: english), "Its author updated it on the Workshop on 9/21/2026.")
+    XCTAssertEqual(
+      notice.changelogURL,
+      URL(string: "https://steamcommunity.com/sharedfiles/filedetails/changelog/123"))
+    XCTAssertTrue(try ExternalLink.isAllowed(XCTUnwrap(notice.changelogURL)))
     let undated = try XCTUnwrap(WorkshopUpdateNotice.make(update: update(changed: nil), request: nil, job: nil))
     XCTAssertEqual(undated.message(locale: english), "Its author updated it on the Workshop.")
+    XCTAssertEqual(
+      undated.changelogURL,
+      URL(string: "https://steamcommunity.com/sharedfiles/filedetails/changelog/123"))
   }
 
   func testARequestWaitingForSetupContinuesAndADownloadUnderWayShowsItsProgress() throws {
@@ -151,7 +158,15 @@ final class WorkshopUpdateNoticeTests: MediaPanelTestCase {
   }
 
   func testAnUpdateThatIsDownloadingNeedsNoUpdateRecordAndNothingToSayMeansNoNotice() {
-    XCTAssertNotNil(WorkshopUpdateNotice.make(update: nil, request: nil, job: job()), "an update the store forgot is still on its way")
+    let underway = WorkshopUpdateNotice.make(update: nil, request: nil, job: job())
+    XCTAssertNotNil(underway, "an update the store forgot is still on its way")
+    XCTAssertEqual(
+      underway?.changelogURL,
+      URL(string: "https://steamcommunity.com/sharedfiles/filedetails/changelog/123"))
+    let nonWorkshop = WorkshopUpdateNotice.make(
+      update: nil, request: nil,
+      job: DownloadRow(id: "local-folder", title: "Local", isPending: true))
+    XCTAssertNil(nonWorkshop?.changelogURL, "non-numeric ids build no Workshop changelog link")
     XCTAssertNil(WorkshopUpdateNotice.make(update: nil, request: nil, job: nil))
     let finished = DownloadRow(id: "123", title: "Changed")
     XCTAssertNil(WorkshopUpdateNotice.make(update: nil, request: nil, job: finished))

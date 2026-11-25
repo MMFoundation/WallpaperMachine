@@ -25,12 +25,14 @@ struct WorkshopUpdateNotice: Equatable {
   /// Nil until the update is asked for.
   let progress: Progress?
   let action: Action
+  /// The item's change notes page on the Steam Workshop, when its id is a numeric Workshop id.
+  let changelogURL: URL?
 
   /// The notice for an installed wallpaper, or nil when it has no update and none is downloading.
   /// `update` is the Workshop's newer version, `request` and `job` the update's own download.
-  static func make(update: WorkshopItem?, request: DownloadRequestRow?, job: DownloadRow?)
-    -> WorkshopUpdateNotice?
-  {
+  static func make(
+    update: WorkshopItem?, request: DownloadRequestRow?, job: DownloadRow?, id: String? = nil
+  ) -> WorkshopUpdateNotice? {
     let underway = job?.isPending == true
     guard update != nil || underway else { return nil }
     var progress: Progress?
@@ -38,9 +40,11 @@ struct WorkshopUpdateNotice: Equatable {
       let percent = job.clampedProgress.map { Int(($0 * 100).rounded()) }
       progress = job.isQueued ? .waiting : .downloading(percent: percent)
     }
+    let publishedFileID = id ?? update?.id ?? request?.id ?? job?.id
     return WorkshopUpdateNotice(
       updatedAt: update?.timeUpdated, progress: progress,
-      action: underway ? .showInDownloads : request != nil ? .continueSetup : .update)
+      action: underway ? .showInDownloads : request != nil ? .continueSetup : .update,
+      changelogURL: publishedFileID.flatMap(ExternalLink.workshopChangelog(id:)))
   }
 
   /// The notice's sentence. The date is the numeric one of `locale`.

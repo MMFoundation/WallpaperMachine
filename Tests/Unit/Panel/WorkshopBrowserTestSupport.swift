@@ -38,10 +38,15 @@ final class WorkshopBrowseProtocol: URLProtocol, @unchecked Sendable {
 
   nonisolated(unsafe) private static var current = Page(rows: [], pages: 1, count: 0)
   nonisolated(unsafe) private static var served: [URL] = []
+  nonisolated(unsafe) private static var commentsHandler: (@Sendable (URL) -> Result<Data, Error>)?
+  nonisolated(unsafe) private static var servedComments: [URL] = []
   private static let lock = NSLock()
 
   /// The browse requests answered since the last `serve`, oldest first.
   static var requests: [URL] { lock.withLock { served } }
+
+  /// The comment thread requests answered since the last `serveComments`, oldest first.
+  static var commentRequests: [URL] { lock.withLock { servedComments } }
 
   /// The `p` (page) of each request, and the `searchtext`.
   static func values(_ name: String, in url: URL) -> String? {
@@ -63,11 +68,43 @@ final class WorkshopBrowseProtocol: URLProtocol, @unchecked Sendable {
     }
   }
 
+  /// What comment thread requests answer; nil restores the default offline failure.
+  static func serveComments(_ handler: (@Sendable (URL) -> Result<Data, Error>)?) {
+    lock.withLock {
+      commentsHandler = handler
+      servedComments = []
+    }
+  }
+
   override class func canInit(with request: URLRequest) -> Bool { true }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
   override func startLoading() {
     guard let url = request.url else { return }
+    if url.host == "steamcommunity.com",
+      url.path.hasPrefix("/comment/PublishedFile_Public/render/")
+    {
+      let answer = Self.lock.withLock { () -> Result<Data, Error>? in
+        Self.servedComments.append(url)
+        return Self.commentsHandler?(url)
+      }
+      guard let answer else {
+        client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+        return
+      }
+      switch answer {
+      case .success(let body):
+        client?.urlProtocol(
+          self,
+          didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!,
+          cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+      case .failure(let error):
+        client?.urlProtocol(self, didFailWithError: error)
+      }
+      return
+    }
     guard url.host == "steamcommunity.com", url.path.contains("/workshop/browse") else {
       client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
       return

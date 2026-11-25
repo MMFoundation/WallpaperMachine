@@ -33,6 +33,13 @@ extension PanelController {
     try await select(id)
   }
 
+  /// Opens Installed filtered to wallpapers with available Workshop updates: Settings › Library
+  /// & Steam's View in Installed.
+  func showInstalledUpdates() async throws {
+    library.showUpdates()
+    try await navigate(.wallpaper)
+  }
+
   /// Sets the target display, then shows Installed: Settings › Displays' Choose wallpaper.
   func chooseDisplayWallpaper(on displayID: String) async throws {
     try await setTargetDisplay(displayID)

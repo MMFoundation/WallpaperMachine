@@ -770,13 +770,21 @@ final class WorkshopSourceTests: XCTestCase {
     let thread = try await fixture.service.comments(itemID: "55", creatorID: Self.author)
     XCTAssertEqual(thread.total, 12)
     XCTAssertEqual(thread.comments.count, 2)
+    XCTAssertEqual(thread.comments[0].id, "1")
     XCTAssertEqual(thread.comments[0].author, "Tom & Jerry")
     XCTAssertEqual(thread.comments[0].text, "Lovely <3\nSecond line link")
     XCTAssertEqual(thread.comments[0].date, Date(timeIntervalSince1970: 1_759_312_800))
+    XCTAssertEqual(thread.comments[1].id, "2")
     XCTAssertEqual(thread.comments[1].author, "B")
     XCTAssertEqual(thread.comments[1].text, "Nice")
     XCTAssertEqual(fixture.commentPaths, ["/comment/PublishedFile_Public/render/\(Self.author)/55?start=0&count=10"])
     XCTAssertEqual(fixture.cookies.compactMap { $0 }, [], "the public thread is read without the session")
+
+    _ = try await fixture.service.comments(itemID: "55", creatorID: Self.author, start: 10, count: 10)
+    XCTAssertEqual(
+      fixture.commentPaths.last,
+      "/comment/PublishedFile_Public/render/\(Self.author)/55?start=10&count=10",
+      "pagination forwards start to Steam")
 
     fixture.comments = Data("not json".utf8)
     do {

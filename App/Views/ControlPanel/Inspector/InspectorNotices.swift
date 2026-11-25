@@ -120,6 +120,16 @@ struct UpdateNoticeView: View {
         .buttonStyle(.panelPrimary(size: .compact))
         .disabled(controller.isBusy(updateKey))
       }
+      if let changelogURL = notice.changelogURL {
+        Button {
+          ExternalLink.open(changelogURL)
+        } label: {
+          Label("View change notes", systemImage: "arrow.up.right.square")
+            .labelStyle(.panelLinkRow)
+        }
+        .buttonStyle(.panelLink)
+        .accessibilityIdentifier("inspector.workshopUpdateChangelog")
+      }
     }
     .accessibilityElement(children: .contain)
     .announcing(message)

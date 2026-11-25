@@ -88,6 +88,12 @@ enum ExternalLink {
     return URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(id)")
   }
 
+  /// A wallpaper's change notes page on the Steam Workshop. Nil unless `id` is a Workshop item id.
+  static func workshopChangelog(id: String) -> URL? {
+    guard !id.isEmpty, id.allSatisfy(\.isASCII), id.allSatisfy(\.isNumber) else { return nil }
+    return URL(string: "https://steamcommunity.com/sharedfiles/filedetails/changelog/\(id)")
+  }
+
   /// A work's page on pixiv. Nil unless `id` is a work id.
   static func pixivArtwork(id: String) -> URL? {
     guard !id.isEmpty, id.allSatisfy(\.isASCII), id.allSatisfy(\.isNumber) else { return nil }

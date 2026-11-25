@@ -47,14 +47,16 @@ final class WorkshopBrowserModel {
     /// No item's comments are held or being read.
     case idle
     case loading(itemID: String)
-    case loaded(itemID: String, thread: WorkshopComments)
+    case loaded(
+      itemID: String, thread: WorkshopComments, nextStart: Int, hasMore: Bool,
+      isLoadingMore: Bool = false, loadMoreError: String? = nil)
     case failed(itemID: String, message: String)
 
     /// The item these comments belong to; nil when idle.
     var itemID: String? {
       switch self {
       case .idle: nil
-      case .loading(let id), .loaded(let id, _), .failed(let id, _): id
+      case .loading(let id), .loaded(let id, _, _, _, _, _), .failed(let id, _): id
       }
     }
   }
@@ -69,6 +71,8 @@ final class WorkshopBrowserModel {
   @ObservationIgnored var openURL: (@MainActor (URL) -> Bool)?
   @ObservationIgnored private var pendingSearch: Task<Void, Never>?
   @ObservationIgnored private var scrollReport: Task<Void, Never>?
+  @ObservationIgnored private var commentsTask: Task<Void, Never>?
+  @ObservationIgnored private var commentsGeneration: UInt64 = 0
   /// Where the grid was last seen, in points from its top: what an author or a collection opened
   /// from it leaves for Back to return to.
   @ObservationIgnored private(set) var scrollOffset: Double = 0
@@ -396,19 +400,115 @@ final class WorkshopBrowserModel {
 
   /// Reads `item`'s newest comments for its inspector, unless they are held already. A newer
   /// selection while Steam answers wins.
-  func loadComments(for item: WorkshopItem) async {
-    if case .loaded(item.id, _) = comments { return }
+  func loadComments(for item: WorkshopItem, force: Bool = false) async {
+    if !force, case .loaded(item.id, _, _, _, _, _) = comments { return }
+    commentsTask?.cancel()
+    commentsTask = nil
+    await fetchComments(for: item)
+  }
+
+  /// **Try again** after comments failed to load: asks Steam again from the start.
+  @discardableResult
+  func retryComments(for item: WorkshopItem) -> Task<Void, Never> {
+    commentsTask?.cancel()
+    let task = Task { @MainActor [weak self] in
+      guard let self else { return }
+      await self.fetchComments(for: item)
+    }
+    commentsTask = task
+    return task
+  }
+
+  /// **Load more comments**: asks Steam for the next page and appends unique comments in place.
+  @discardableResult
+  func requestMoreComments(for item: WorkshopItem) -> Task<Void, Never> {
+    if case .loaded(item.id, _, _, true, true, _) = comments {
+      return commentsTask ?? Task {}
+    }
+    let task = Task { @MainActor [weak self] in
+      guard let self else { return }
+      await self.loadMoreComments(for: item)
+    }
+    commentsTask = task
+    return task
+  }
+
+  /// Fetches the next page of comments for `item`, appending unique items and stopping cleanly once
+  /// no more remain.
+  func loadMoreComments(for item: WorkshopItem) async {
+    guard case .loaded(item.id, let existing, let nextStart, true, false, _) = comments else {
+      return
+    }
+    commentsGeneration &+= 1
+    let generation = commentsGeneration
+    comments = .loaded(
+      itemID: item.id, thread: existing, nextStart: nextStart, hasMore: true,
+      isLoadingMore: true, loadMoreError: nil)
+    do {
+      let page = try await controller.workshop.comments(for: item, start: nextStart)
+      guard commentsGeneration == generation, comments.itemID == item.id else { return }
+      let merged = Self.appendUnique(page.comments, to: existing.comments)
+      let addedCount = merged.count - existing.comments.count
+      let advancedStart = nextStart + page.comments.count
+      let total = max(page.total, merged.count)
+      let hasMore = !page.comments.isEmpty && addedCount > 0 && advancedStart < total
+      comments = .loaded(
+        itemID: item.id, thread: WorkshopComments(total: total, comments: merged),
+        nextStart: advancedStart, hasMore: hasMore)
+    } catch is CancellationError {
+      if commentsGeneration == generation, comments.itemID == item.id {
+        comments = .loaded(
+          itemID: item.id, thread: existing, nextStart: nextStart, hasMore: true,
+          isLoadingMore: false, loadMoreError: nil)
+      }
+    } catch {
+      guard commentsGeneration == generation, comments.itemID == item.id else { return }
+      comments = .loaded(
+        itemID: item.id, thread: existing, nextStart: nextStart, hasMore: true,
+        isLoadingMore: false, loadMoreError: error.localizedDescription)
+    }
+  }
+
+  private func fetchComments(for item: WorkshopItem) async {
+    commentsGeneration &+= 1
+    let generation = commentsGeneration
     comments = .loading(itemID: item.id)
     do {
-      let thread = try await controller.workshop.comments(for: item)
-      guard comments.itemID == item.id else { return }
-      comments = .loaded(itemID: item.id, thread: thread)
+      let thread = try await controller.workshop.comments(for: item, start: 0)
+      guard commentsGeneration == generation, comments.itemID == item.id else { return }
+      let unique = Self.appendUnique(thread.comments, to: [])
+      let fetchedCount = thread.comments.count
+      let total = max(thread.total, unique.count)
+      let hasMore = fetchedCount > 0 && fetchedCount < total
+      comments = .loaded(
+        itemID: item.id, thread: WorkshopComments(total: total, comments: unique),
+        nextStart: fetchedCount, hasMore: hasMore)
     } catch is CancellationError {
-      if comments.itemID == item.id { comments = .idle }
+      if commentsGeneration == generation, comments.itemID == item.id { comments = .idle }
     } catch {
-      guard comments.itemID == item.id else { return }
+      guard commentsGeneration == generation, comments.itemID == item.id else { return }
       comments = .failed(itemID: item.id, message: error.localizedDescription)
     }
+  }
+
+  /// Appends `incoming` to `existing`, skipping any comment already present by Steam comment id
+  /// (when parsed) or by author, timestamp and body text.
+  private static func appendUnique(
+    _ incoming: [WorkshopComment], to existing: [WorkshopComment]
+  ) -> [WorkshopComment] {
+    var result = existing
+    var seenIDs = Set(existing.compactMap(\.id))
+    for comment in incoming {
+      if let id = comment.id {
+        guard seenIDs.insert(id).inserted else { continue }
+      } else if result.contains(where: {
+        $0.author == comment.author && $0.date == comment.date && $0.text == comment.text
+      }) {
+        continue
+      }
+      result.append(comment)
+    }
+    return result
   }
 
   /// The page appeared: a Workshop that was never loaded starts its first search, whichever way the
@@ -453,6 +553,8 @@ final class WorkshopBrowserModel {
 
   /// The page went away: every animation is released and the grid's place is stored.
   func pageDisappeared() {
+    commentsTask?.cancel()
+    commentsTask = nil
     previews.releaseAll()
     flushScrollReport()
   }

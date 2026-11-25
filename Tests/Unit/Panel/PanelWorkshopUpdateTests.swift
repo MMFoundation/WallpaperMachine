@@ -81,6 +81,40 @@ final class PanelWorkshopUpdateTests: MediaPanelTestCase {
     XCTAssertEqual(panel.workshop.downloadRequests.count, 1, "asking again keeps the one request")
   }
 
+  /// Settings' **View in Installed** switches to Installed filtered to wallpapers with available
+  /// updates, clearing any prior search or conflicting filter so none of them are hidden.
+  func testShowInstalledUpdatesNavigatesToInstalledFilteredToUpdates() async throws {
+    let changed = WorkshopItem(
+      id: "123", title: "Changed", creator: "Creator", summary: "", previewURL: nil, tags: ["Video"],
+      size: 1, subscriptions: 0, timeUpdated: Date().addingTimeInterval(-3600))
+    let updates = WorkshopUpdateStore(
+      defaults: try TemporaryDefaults.make(for: self).defaults, fetch: { _ in [changed] })
+    let panel = try makeBrowsingPanel(service: WorkshopDetailsStub().service, updates: updates)
+    let controller = panel.controller
+    let folder = panel.root.appendingPathComponent("Library/123")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let manifest = folder.appendingPathComponent("project.json")
+    try Data("{}".utf8).write(to: manifest)
+    try FileManager.default.setAttributes(
+      [.modificationDate: Date().addingTimeInterval(-7200)], ofItemAtPath: manifest.path)
+    panel.store.librarySnapshot = installed(["123", "456"])
+    try await controller.checkWorkshopUpdates()
+    try await waitFor { !updates.isChecking }
+
+    controller.library.setText("nonexistent")
+    controller.library.setRequired(LibraryFilterCatalog.favoriteTag, true)
+    try await controller.navigate(.settings)
+    XCTAssertEqual(controller.navigation.selection, .settings)
+
+    try await controller.showInstalledUpdates()
+    XCTAssertEqual(controller.navigation.selection, .wallpaper)
+    XCTAssertEqual(controller.library.filter.text, "")
+    XCTAssertEqual(controller.library.filter.requiredTags, [LibraryFilterCatalog.updateTag])
+    XCTAssertEqual(controller.library.filter.excludedTags, [])
+    XCTAssertNil(controller.library.filter.collectionID)
+    XCTAssertEqual(controller.library.visibleRows.map(\.id), ["123"])
+  }
+
   /// Reinstalling downloads an installed wallpaper again, so it needs a wallpaper that is installed
   /// and the user's yes. Until both are there, Steam is not asked and nothing is queued.
   func testReinstallNeedsAnInstalledWallpaperAndAConfirmation() async throws {

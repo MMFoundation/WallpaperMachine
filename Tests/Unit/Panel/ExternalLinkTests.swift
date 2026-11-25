@@ -14,6 +14,11 @@ final class ExternalLinkTests: XCTestCase {
     let workshop = try XCTUnwrap(ExternalLink.workshopItem(id: "1234567890"))
     XCTAssertEqual(workshop.absoluteString, "https://steamcommunity.com/sharedfiles/filedetails/?id=1234567890")
     XCTAssertTrue(ExternalLink.isAllowed(workshop))
+    let changelog = try XCTUnwrap(ExternalLink.workshopChangelog(id: "1234567890"))
+    XCTAssertEqual(
+      changelog.absoluteString,
+      "https://steamcommunity.com/sharedfiles/filedetails/changelog/1234567890")
+    XCTAssertTrue(ExternalLink.isAllowed(changelog))
     let artwork = try XCTUnwrap(ExternalLink.pixivArtwork(id: "301"))
     XCTAssertEqual(artwork.absoluteString, "https://www.pixiv.net/artworks/301")
     XCTAssertTrue(ExternalLink.isAllowed(artwork))
@@ -78,6 +83,7 @@ final class ExternalLinkTests: XCTestCase {
   func testIdsThatAreNotDigitsBuildNoLink() {
     for id in ["", "12 34", "12/../34", "abc", "１２３", "12\n"] {
       XCTAssertNil(ExternalLink.workshopItem(id: id), id)
+      XCTAssertNil(ExternalLink.workshopChangelog(id: id), id)
       XCTAssertNil(ExternalLink.pixivArtwork(id: id), id)
     }
   }

@@ -381,6 +381,18 @@ final class InstalledBrowserModel {
     filtersChanged(immediately: true)
   }
 
+  /// Shows every installed wallpaper that has a Workshop update: clears any search, collection
+  /// and other filters so none of the updates are hidden, requires the Update tag, and scrolls
+  /// to the top.
+  func showUpdates() {
+    filter = LibraryFilter(requiredTags: [LibraryFilterCatalog.updateTag])
+    isTextWhole = false
+    restoredTags = []
+    scrollOffset = 0
+    scrollToTopCount += 1
+    filtersChanged(immediately: true)
+  }
+
   private func filtersChanged(immediately: Bool) {
     hasUnreportedChange = true
     if immediately {

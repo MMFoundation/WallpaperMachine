@@ -173,8 +173,24 @@ final class LibrarySettingsPresentationTests: SettingsBTestCase {
     XCTAssertEqual(line(count: 0, checked: nil), "Not checked yet.")
     let time = PlaylistState.changeTime(noon, now: noon, locale: english)
     XCTAssertEqual(line(count: 0, checked: noon), "\(time): everything is up to date.")
-    XCTAssertEqual(line(count: 1, checked: noon), "\(time): 1 wallpaper has an update. Update it from Installed.", "no \"1 wallpapers\"")
-    XCTAssertEqual(line(count: 3, checked: noon), "\(time): 3 wallpapers have updates. Update them from Installed.")
+    XCTAssertEqual(line(count: 1, checked: noon), "\(time): 1 wallpaper has an update.", "no \"1 wallpapers\"")
+    XCTAssertEqual(line(count: 3, checked: noon), "\(time): 3 wallpapers have updates.")
+  }
+
+  func testWorkshopUpdatesActionsAppearOnlyWhenUpdatesAreAvailableAndRespectBusyState() {
+    let none = LibraryUpdatesPresentation.make(updateCount: 0, isUpdatingAll: false, isStoreBusy: false)
+    XCTAssertFalse(none.showsActions)
+    XCTAssertEqual(none.updateCount, 0)
+
+    let available = LibraryUpdatesPresentation.make(updateCount: 3, isUpdatingAll: false, isStoreBusy: false)
+    XCTAssertTrue(available.showsActions)
+    XCTAssertEqual(available.updateCount, 3)
+    XCTAssertFalse(available.updateAllIsDisabled)
+
+    XCTAssertTrue(
+      LibraryUpdatesPresentation.make(updateCount: 3, isUpdatingAll: true, isStoreBusy: false).updateAllIsDisabled)
+    XCTAssertTrue(
+      LibraryUpdatesPresentation.make(updateCount: 3, isUpdatingAll: false, isStoreBusy: true).updateAllIsDisabled)
   }
 
   func testTheAccountRowSaysWhoIsSignedInAndWhyLogOutWaits() {

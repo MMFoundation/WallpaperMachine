@@ -27,9 +27,17 @@ struct WorkshopItem: Identifiable, Codable, Equatable, Sendable {
 
 /// One comment on a Workshop item, as plain text; Steam's text, never a catalog key.
 struct WorkshopComment: Equatable, Sendable {
+    let id: String?
     let author: String
     let date: Date?
     let text: String
+
+    init(id: String? = nil, author: String, date: Date?, text: String) {
+        self.id = id
+        self.author = author
+        self.date = date
+        self.text = text
+    }
 }
 
 /// The newest comments on an item and how many it has in all.
@@ -709,15 +717,18 @@ actor WorkshopService {
         (0..<12).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
     }
 
-    /// The newest comments on an item, from Steam's public comment thread (no sign-in, no
+    /// Comments on an item starting at `start`, from Steam's public comment thread (no sign-in, no
     /// cookie), with how many there are in all. `creatorID` is the author's SteamID, which names
     /// the thread.
-    func comments(itemID: String, creatorID: String, count: Int = 10) async throws -> WorkshopComments {
+    func comments(itemID: String, creatorID: String, start: Int = 0, count: Int = 10) async throws -> WorkshopComments {
         guard !itemID.isEmpty, itemID.allSatisfy({ $0.isASCII && $0.isNumber }), SteamWebSession.isSteamID(creatorID) else {
             throw WorkshopFailure(message: String(localized: "Steam has no comments to show for this item."))
         }
         var components = URLComponents(string: "https://steamcommunity.com/comment/PublishedFile_Public/render/\(creatorID)/\(itemID)/")!
-        components.queryItems = [URLQueryItem(name: "start", value: "0"), URLQueryItem(name: "count", value: String(max(1, min(count, 50))))]
+        components.queryItems = [
+            URLQueryItem(name: "start", value: String(max(0, start))),
+            URLQueryItem(name: "count", value: String(max(1, min(count, 50)))),
+        ]
         var request = URLRequest(url: components.url!)
         request.timeoutInterval = 35
         request.httpShouldHandleCookies = false
@@ -744,9 +755,11 @@ actor WorkshopService {
             guard let body = firstMatch(#"(?s)class="commentthread_comment_text"[^>]*>(.*?)</div>"#, in: block) else { return nil }
             let text = plainText(body)
             guard !text.isEmpty else { return nil }
+            let id = firstMatch(#"id="comment_(\d+)""#, in: block)
+                ?? firstMatch(#"id="comment_content_(\d+)""#, in: block)
             let author = firstMatch(#"(?s)commentthread_author_link[^>]*>\s*<bdi>(.*?)</bdi>"#, in: block).map(plainText) ?? ""
             let date = firstMatch(#"data-timestamp="(\d+)""#, in: block).flatMap(TimeInterval.init).map(Date.init(timeIntervalSince1970:))
-            return WorkshopComment(author: author, date: date, text: text)
+            return WorkshopComment(id: id, author: author, date: date, text: text)
         }
     }
 
