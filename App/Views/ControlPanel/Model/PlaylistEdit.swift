@@ -8,10 +8,16 @@ enum PlaylistEdit: Equatable, Sendable {
   case source(PlaylistSource)
   /// Picks a collection: sets the collection and the source together. It must exist.
   case collection(id: String)
+  /// Updates the Smart Dynamic Playlist filter query.
+  case smartQuery(SmartPlaylistQuery)
   case order(PlaylistOrder)
   case interval(IntervalChoice)
   /// Whether a timed change waits for the video on screen to finish.
   case waitsForClipEnd(Bool)
+  /// Skip wallpapers used within the last N days (0 turns filtering off).
+  case skipRecentDays(Int)
+  /// Whether Shuffle favors 4- and 5-star wallpapers.
+  case preferHigherRated(Bool)
   /// An installed wallpaper that can play, or nil to leave the day as it is.
   case dayWallpaper(String?)
   case nightWallpaper(String?)
@@ -110,6 +116,8 @@ enum PlaylistSourceChoice: Hashable, Sendable {
   /// This display's own list.
   case list
   case collection(id: String)
+  /// Dynamic rule-based query evaluated in memory.
+  case smart
   /// The playlist's source is a collection that is gone. Listed so the menu has a row to show,
   /// but choosing it changes nothing.
   case missingCollection
@@ -122,6 +130,7 @@ enum PlaylistSourceChoice: Hashable, Sendable {
     case .list: .list
     case .collection:
       if let id = playlist.collectionID, collectionExists(id) { .collection(id: id) } else { .missingCollection }
+    case .smart: .smart
     }
   }
 
@@ -132,7 +141,77 @@ enum PlaylistSourceChoice: Hashable, Sendable {
     case .favorites: .source(.favorites)
     case .list: .source(.list)
     case .collection(let id): .collection(id: id)
+    case .smart: .source(.smart)
     case .missingCollection: nil
+    }
+  }
+}
+
+/// Formatting and offered values for the "Skip recently used" menu.
+enum SkipRecentChoice {
+  static let presets = DisplayPlaylist.skipRecentDayChoices
+
+  @MainActor static func title(days: Int) -> String {
+    switch days {
+    case ...0: L("Off")
+    case 1: L("1 day")
+    default: L("\(days) days")
+    }
+  }
+}
+
+/// Formatting and offered values for the one-shot Sleep Timer in Now Playing.
+enum SleepTimerChoice {
+  static let presets = PlaylistStore.sleepTimerPresets
+
+  @MainActor static func title(minutes: Int) -> String {
+    switch minutes {
+    case 60: L("1 hour")
+    case _ where minutes % 60 == 0: L("\(minutes / 60) hours")
+    default: L("\(minutes) minutes")
+    }
+  }
+
+  /// Remaining time until `end`, rounded up to whole minutes so it never claims 0 minutes while active.
+  @MainActor static func remainingText(until end: Date, now: Date = Date()) -> String {
+    let totalMinutes = max(1, Int(ceil(max(0, end.timeIntervalSince(now)) / 60)))
+    if totalMinutes == 1 { return L("Pauses in 1 minute") }
+    if totalMinutes < 60 { return L("Pauses in \(totalMinutes) minutes") }
+    let hours = totalMinutes / 60
+    let mins = totalMinutes % 60
+    if mins == 0 {
+      return hours == 1 ? L("Pauses in 1 hour") : L("Pauses in \(hours) hours")
+    }
+    return L("Pauses in \(hours) hr \(mins) min")
+  }
+}
+
+/// Display titles for Smart Dynamic Playlist filter choices.
+enum SmartPlaylistFormatting {
+  @MainActor static func typeTitle(_ type: SmartWallpaperType) -> String {
+    switch type {
+    case .scene: L("Scene")
+    case .video: L("Video")
+    case .web: L("Web")
+    case .still: L("Still image")
+    }
+  }
+
+  @MainActor static func minimumRatingTitle(_ rating: Int?) -> String {
+    switch rating {
+    case nil: L("Any")
+    case 1: L("At least 1 star")
+    case 5: L("5 stars")
+    case let value?: L("At least \(value) stars")
+    }
+  }
+
+  @MainActor static func maximumEnergyTitle(_ level: EnergyLevel?) -> String {
+    switch level {
+    case nil: L("Any")
+    case .low: L("Low only")
+    case .medium: L("Low & Medium")
+    case .high: L("Up to High")
     }
   }
 }

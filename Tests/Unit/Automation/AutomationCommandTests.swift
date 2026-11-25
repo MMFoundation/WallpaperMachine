@@ -82,6 +82,9 @@ final class AutomationCommandTests: XCTestCase {
         XCTAssertEqual(AutomationCommand.RandomPool.favorites.candidates(library: library, favorites: ["a", "b", "x"], held: []),
                        ["a", "b"], "a favorite that left the library is not offered")
         XCTAssertEqual(AutomationCommand.RandomPool.favorites.candidates(library: library, favorites: [], held: []), [])
+        XCTAssertEqual(
+            AutomationCommand.RandomPool.all.candidates(library: library, favorites: [], held: [], excluded: ["a", "d"]),
+            ["c", "b"], "wallpapers excluded from rotation are skipped by Random Wallpaper")
     }
 
     /// A pick is the user's own choice and so releases a wallpaper the app is holding back after

@@ -19,7 +19,7 @@ import Observation
 @Observable
 final class PanelStoreRevisions {
   enum Source: CaseIterable, Sendable {
-    case playback, hotKeys, playlists, collections, presets, imagePlacement
+    case playback, hotKeys, playlists, collections, metadata, presets, imagePlacement
     case automationSettings, automationStatus, displayLayouts, spaces, focus
     /// Low Power Mode and the thermal state, which the Playback section reports "in effect now".
     case power
@@ -33,6 +33,7 @@ final class PanelStoreRevisions {
   private(set) var hotKeys: UInt64 = 0
   private(set) var playlists: UInt64 = 0
   private(set) var collections: UInt64 = 0
+  private(set) var metadata: UInt64 = 0
   private(set) var presets: UInt64 = 0
   private(set) var imagePlacement: UInt64 = 0
   /// The automation rules and settings changed.
@@ -55,6 +56,7 @@ final class PanelStoreRevisions {
   @ObservationIgnored private let hotKeyStore: HotKeyPreferences
   @ObservationIgnored private let playlistStore: PlaylistStore
   @ObservationIgnored private let collectionStore: WallpaperCollectionStore
+  @ObservationIgnored private let metadataStore: WallpaperMetadataStore
   @ObservationIgnored private let presetStore: WallpaperPresetStore
   @ObservationIgnored private let imagePlacementStore: StillImagePlacementStore
   @ObservationIgnored private let automationStore: WallpaperAutomationStore
@@ -70,7 +72,8 @@ final class PanelStoreRevisions {
 
   init(
     playback: PlaybackPreferences, hotKeys: HotKeyPreferences, playlists: PlaylistStore,
-    collections: WallpaperCollectionStore, presets: WallpaperPresetStore,
+    collections: WallpaperCollectionStore, metadata: WallpaperMetadataStore? = nil,
+    presets: WallpaperPresetStore,
     imagePlacement: StillImagePlacementStore, automations: WallpaperAutomationStore,
     displayLayouts: WallpaperDisplayLayoutStore, spaces: WallpaperSpaceMonitor,
     conditions: SystemConditionState, theme: AppThemeStore, appLanguage: AppLanguageStore,
@@ -80,6 +83,7 @@ final class PanelStoreRevisions {
     hotKeyStore = hotKeys
     playlistStore = playlists
     collectionStore = collections
+    metadataStore = metadata ?? .shared
     presetStore = presets
     imagePlacementStore = imagePlacement
     automationStore = automations
@@ -100,6 +104,7 @@ final class PanelStoreRevisions {
     case .hotKeys: hotKeys &+= 1
     case .playlists: playlists &+= 1
     case .collections: collections &+= 1
+    case .metadata: metadata &+= 1
     case .presets: presets &+= 1
     case .imagePlacement: imagePlacement &+= 1
     case .automationSettings: automationSettings &+= 1
@@ -125,6 +130,7 @@ final class PanelStoreRevisions {
     case .hotKeys: hotKeys
     case .playlists: playlists
     case .collections: collections
+    case .metadata: metadata
     case .presets: presets
     case .imagePlacement: imagePlacement
     case .automationSettings: automationSettings
@@ -152,7 +158,9 @@ final class PanelStoreRevisions {
     observe(PlaylistStore.didChangeNotification, playlistStore, .playlists)
     // A change waiting for a video changes what Next change says, and only the panel follows it.
     observe(PlaylistStore.clipWaitsDidChangeNotification, playlistStore, .playlists)
+    observe(PlaylistStore.sleepTimerDidChangeNotification, playlistStore, .playlists)
     observe(WallpaperCollectionStore.didChangeNotification, collectionStore, .collections)
+    observe(WallpaperMetadataStore.didChangeNotification, metadataStore, .metadata)
     observe(WallpaperPresetStore.didChangeNotification, presetStore, .presets)
     observe(StillImagePlacementStore.didChangeNotification, imagePlacementStore, .imagePlacement)
     observe(WallpaperAutomationStore.didChangeNotification, automationStore, .automationSettings)

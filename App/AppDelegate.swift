@@ -942,7 +942,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return applied
             }, commandRevision: { display in
                 store.commands.revision(for: BridgeStore.activationSlot(displayId: display))
-            })
+            },
+            metadata: .shared,
+            lastUsedDates: { store.history.lastUsedDates() },
+            wallpaperKinds: {
+                Dictionary(
+                    store.librarySnapshot.wallpapers.map { ($0.id, $0.kind) },
+                    uniquingKeysWith: { first, _ in first })
+            },
+            energyLevel: { id, kind in store.wallpaperEnergyRatings?.level(for: id, kind: kind) },
+            isPlaybackPaused: { store.appSnapshot.playbackState == .paused })
         playlistScheduler = scheduler
         store.continuePlaylistAfterDeletion = { [weak store, weak scheduler] display, deleted, before, available in
             guard let store, let scheduler else { return false }

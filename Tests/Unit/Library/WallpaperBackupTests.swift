@@ -838,6 +838,11 @@ final class WallpaperBackupTests: XCTestCase {
         original.set(try JSONEncoder().encode(Archive(items: [preset])), forKey: WallpaperPresetStore.preferenceKey)
         let collections = WallpaperCollectionStore(defaults: original)
         let collection = try collections.create(name: "Night collection", wallpaperIDs: ["101"])
+        let metadata = WallpaperMetadataStore(defaults: original)
+        metadata.setRating(5, for: "101")
+        try metadata.addTag("Cozy", to: "101")
+        try metadata.setNote("Evening favorite", for: "101")
+        metadata.setExcludedFromRotation(true, for: "202")
         let playlists = PlaylistStore(defaults: original)
         playlists.update("display-one") {
             $0.mode = .rotate
@@ -846,6 +851,11 @@ final class WallpaperBackupTests: XCTestCase {
             $0.interval = 45
             $0.trigger = .unlock
             $0.waitsForClipEnd = true
+            $0.skipRecentDays = 7
+            $0.preferHigherRated = true
+            $0.smartQuery = SmartPlaylistQuery(
+                requiredTags: ["Cozy"], excludedTags: ["Loud"], types: [.scene, .still],
+                minimumRating: 4, maximumEnergy: .medium, favoritesOnly: true, excludeMature: true)
         }
         let plan = try playlists.savePlan(from: "display-one", name: "Night plan")
         let placement = try StillImagePlacement(x: 0.2, y: 0.7, zoom: 1.5)
@@ -864,12 +874,18 @@ final class WallpaperBackupTests: XCTestCase {
         XCTAssertEqual(restoredProperty.value, .string(destinationAsset))
         XCTAssertEqual(try String(contentsOf: URL(fileURLWithPath: destinationAsset), encoding: .utf8), "retained by the preset")
         XCTAssertEqual(WallpaperCollectionStore(defaults: targetDefaults).collection(id: collection.id), collection)
+        let restoredMetadata = WallpaperMetadataStore(defaults: targetDefaults)
+        XCTAssertEqual(restoredMetadata.metadata(for: "101"), WallpaperMetadata(customTags: ["Cozy"], rating: 5, note: "Evening favorite"))
+        XCTAssertTrue(restoredMetadata.isExcluded("202"))
         let restoredPlaylists = PlaylistStore(defaults: targetDefaults)
         XCTAssertEqual(restoredPlaylists.plan(id: plan.id), plan)
         XCTAssertEqual(restoredPlaylists.playlist(for: "display-one").collectionID, collection.id)
         XCTAssertEqual(restoredPlaylists.playlist(for: "display-one").trigger, .unlock, "a playlist that changes on unlock restores as one")
         XCTAssertEqual(restoredPlaylists.plan(id: plan.id)?.playlist.trigger, .unlock)
         XCTAssertTrue(restoredPlaylists.playlist(for: "display-one").waitsForClipEnd, "it still waits for videos to finish")
+        XCTAssertEqual(restoredPlaylists.playlist(for: "display-one").skipRecentDays, 7)
+        XCTAssertTrue(restoredPlaylists.playlist(for: "display-one").preferHigherRated)
+        XCTAssertEqual(restoredPlaylists.playlist(for: "display-one").smartQuery, playlists.playlist(for: "display-one").smartQuery)
         XCTAssertEqual(StillImagePlacementStore(defaults: targetDefaults, library: destination.appendingPathComponent("Library"))
             .placement(wallpaperID: "image-test", displayID: "display-one"), placement)
     }
@@ -1211,6 +1227,18 @@ final class WallpaperBackupTests: XCTestCase {
             ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","trigger":"weekly"}}"#.utf8)),
             ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","trigger":5}}"#.utf8)),
             ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","waitsForClipEnd":1}}"#.utf8)),
+            ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","skipRecentDays":-1}}"#.utf8)),
+            ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","skipRecentDays":400}}"#.utf8)),
+            ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","preferHigherRated":1}}"#.utf8)),
+            ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","source":"smart","smartQuery":{"minimumRating":6}}}"#.utf8)),
+            ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","source":"smart","smartQuery":{"maximumEnergy":"extreme"}}}"#.utf8)),
+            ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","source":"smart","smartQuery":{"types":["audio"]}}}"#.utf8)),
+            ("WallpaperMachine.playlists", Data(#"{"screen":{"mode":"rotate","source":"smart","smartQuery":{"favoritesOnly":1}}}"#.utf8)),
+            ("WallpaperMachine.wallpaperMetadata", Data(#"{"w1":{"rating":6}}"#.utf8)),
+            ("WallpaperMachine.wallpaperMetadata", Data(#"{"w1":{"rating":true}}"#.utf8)),
+            ("WallpaperMachine.wallpaperMetadata", Data(#"{"w1":{"customTags":["a","A"]}}"#.utf8)),
+            ("WallpaperMachine.wallpaperMetadata", Data(#"{"w1":{"excludedFromRotation":1}}"#.utf8)),
+            ("WallpaperMachine.wallpaperMetadata", Data(#"{"w1":{"unknownField":true}}"#.utf8)),
             ("WallpaperMachine.playlistPlans", Data(#"[{"id":"p","name":"Bad","playlist":{"mode":"rotate","trigger":"weekly"}}]"#.utf8)),
             ("WallpaperMachine.imagePlacements", Data(#"{"version":1,"placements":{"w":{"screen":{"x":2,"y":0.5,"zoom":1}}}}"#.utf8)),
             ("WallpaperMachine.imagePlacements", Data(#"{"version":2,"placements":{}}"#.utf8)),
@@ -1447,6 +1475,14 @@ final class WallpaperBackupTests: XCTestCase {
         incoming.schedule("new", at: deadline)
         live.set(try JSONEncoder().encode(["300"]), forKey: "WallpaperMachine.favoriteWallpaperIDs")
         original.set(try JSONEncoder().encode(["100"]), forKey: "WallpaperMachine.favoriteWallpaperIDs")
+        let liveMetadata = WallpaperMetadataStore(defaults: live)
+        liveMetadata.setRating(5, for: "shared-wp")
+        try liveMetadata.addTag("Local", to: "shared-wp")
+        let incomingMetadata = WallpaperMetadataStore(defaults: original)
+        incomingMetadata.setRating(2, for: "shared-wp")
+        incomingMetadata.setExcludedFromRotation(true, for: "shared-wp")
+        incomingMetadata.setRating(4, for: "backup-only-wp")
+        try incomingMetadata.addTag("Imported", to: "backup-only-wp")
         // Check the exported records as well as the restored stores so a lost
         // newly added display is traced to its snapshot, archive, or publication.
         let snapshot = try WallpaperBackupPreferences(defaults: original, domainName: domainName(for: original))
@@ -1476,6 +1512,11 @@ final class WallpaperBackupTests: XCTestCase {
         XCTAssertEqual(after.playlist(for: "new").wallpaperIDs, ["z", "x", "y"])
         XCTAssertEqual(after.nextChange["new"], deadline)
         XCTAssertEqual(Set(try JSONDecoder().decode([String].self, from: XCTUnwrap(live.data(forKey: "WallpaperMachine.favoriteWallpaperIDs")))), ["300", "100"])
+        let afterMetadata = WallpaperMetadataStore(defaults: live)
+        XCTAssertEqual(afterMetadata.metadata(for: "shared-wp"), WallpaperMetadata(customTags: ["Local"], rating: 5),
+                       "conflicting local metadata record is preserved whole under keepExisting")
+        XCTAssertEqual(afterMetadata.metadata(for: "backup-only-wp"), WallpaperMetadata(customTags: ["Imported"], rating: 4),
+                       "independent metadata records from backup are imported")
     }
 
     func testPlainTextAndNamesKeepSourceRootWhileOnlyResourcePathsMove() async throws {

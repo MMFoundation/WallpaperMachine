@@ -34,6 +34,7 @@ extension PanelController {
     let listedCount =
       listed.isEmpty
       ? 0 : store.librarySnapshot.wallpapers.reduce(0) { listed.contains($1.id) ? $0 + 1 : $0 }
+    let smartCount = playlist.source == .smart ? smartCandidateCount(for: playlist) : 0
     return PlaylistState(
       display: display, playlist: playlist, nextChange: playlists.nextChange[display],
       clipWaitLimit: playlists.clipWaits[display], isHeld: playlists.holds[display] != nil,
@@ -41,7 +42,48 @@ extension PanelController {
         PlaylistState.SkippedWallpaper(id: $0.key, message: $0.value.message, retryAfter: $0.value.retryAfter)
       },
       listedCount: listedCount,
-      source: .current(for: playlist) { collections.collection(id: $0) != nil })
+      source: .current(for: playlist) { collections.collection(id: $0) != nil },
+      smartCandidateCount: smartCount)
+  }
+
+  /// When the active one-shot sleep timer will pause playback, or nil when off.
+  var sleepTimerEnd: Date? {
+    _ = revisions.playlists
+    return playlists.sleepTimerEnd
+  }
+
+  /// `sleepTimer`: arms a one-shot sleep timer for `minutes` (one of `PlaylistStore.sleepTimerPresets`),
+  /// or cancels it when `minutes` is nil.
+  func setSleepTimer(minutes: Int?) async throws {
+    if let minutes, !PlaylistStore.sleepTimerPresets.contains(minutes) {
+      throw InvalidControlValue()
+    }
+    try await run(.immediate) {
+      playlists.setSleepTimer(minutes: minutes)
+    }
+  }
+
+  /// Evaluates how many installed playable wallpapers currently match `playlist`'s Smart Query,
+  /// strictly in memory (zero synchronous disk scans in views).
+  func smartCandidateCount(for playlist: DisplayPlaylist) -> Int {
+    _ = revisions.metadata
+    _ = energyRatingsRevision
+    let query = playlist.effectiveSmartQuery
+    let playable = store.librarySnapshot.wallpapers.filter(\.supported)
+    let facts = inMemorySmartFacts(for: playable, query: query)
+    var smartOnly = playlist
+    smartOnly.source = .smart
+    // Candidate preview reflects what matches the query (without excluding recently-used items
+    // that fall back anyway).
+    smartOnly.skipRecentDays = 0
+    return PlaylistPlanner.candidates(
+      for: smartOnly,
+      library: playable.map(\.id),
+      favorites: favoriteIDs,
+      collectionIDs: [],
+      metadata: metadata.entries,
+      facts: facts
+    ).count
   }
 
   /// The saved playlists, in the order they were saved.
@@ -149,7 +191,9 @@ extension PanelController {
   /// disabled buttons.
   func canPlay(_ source: PlaylistSourceChoice) -> Bool {
     _ = revisions.collections
-    guard let playlist = try? rotation(through: source, from: DisplayPlaylist()) else { return false }
+    _ = revisions.metadata
+    let base = playlists.playlist(for: targetDisplayID)
+    guard let playlist = try? rotation(through: source, from: base) else { return false }
     return hasPlayableWallpaper(playlist)
   }
 
@@ -218,7 +262,23 @@ extension PanelController {
   /// The refusals that depend on the edit alone: a value no control offers, before it waits for the
   /// queue.
   private func validate(_ edit: PlaylistEdit) throws {
-    if case .interval(let choice) = edit, !choice.isOffered { throw InvalidControlValue() }
+    switch edit {
+    case .interval(let choice) where !choice.isOffered:
+      throw InvalidControlValue()
+    case .skipRecentDays(let days) where !DisplayPlaylist.skipRecentDayChoices.contains(days):
+      throw InvalidControlValue()
+    case .smartQuery(let query):
+      if let min = query.minimumRating, !WallpaperMetadata.ratingRange.contains(min) {
+        throw InvalidControlValue()
+      }
+      if query.requiredTags.count > SmartPlaylistQuery.maximumTags
+        || query.excludedTags.count > SmartPlaylistQuery.maximumTags
+      {
+        throw InvalidControlValue()
+      }
+    default:
+      break
+    }
   }
 
   /// The edit itself, inside the queue turn: the refusals that depend on the library and on the
@@ -240,6 +300,19 @@ extension PanelController {
         $0.collectionID = id
         $0.source = .collection
       }
+    case .smartQuery(let query):
+      let normalized = SmartPlaylistQuery(
+        requiredTags: query.requiredTags,
+        excludedTags: query.excludedTags,
+        types: query.types,
+        minimumRating: query.minimumRating,
+        maximumEnergy: query.maximumEnergy,
+        favoritesOnly: query.favoritesOnly,
+        excludeMature: query.excludeMature)
+      playlists.update(display) {
+        $0.smartQuery = normalized
+        $0.source = .smart
+      }
     case .order(let order):
       playlists.update(display) { $0.order = order }
     case .interval(.unlock):
@@ -252,6 +325,10 @@ extension PanelController {
       }
     case .waitsForClipEnd(let waits):
       playlists.update(display) { $0.waitsForClipEnd = waits }
+    case .skipRecentDays(let days):
+      playlists.update(display) { $0.skipRecentDays = days }
+    case .preferHigherRated(let prefer):
+      playlists.update(display) { $0.preferHigherRated = prefer }
     case .dayWallpaper(let id):
       let id = try playableWallpaperID(id)
       playlists.update(display) { $0.dayWallpaperID = id }
@@ -287,6 +364,7 @@ extension PanelController {
       guard collections.collection(id: id) != nil else { throw LibraryOrganizationError.missingCollection }
       playlist.source = .collection
       playlist.collectionID = id
+    case .smart: playlist.source = .smart
     case .missingCollection: throw LibraryOrganizationError.missingCollection
     }
     return playlist
@@ -295,10 +373,48 @@ extension PanelController {
   /// Whether the rotation has a wallpaper to pick: installed, able to play, and in its source.
   private func hasPlayableWallpaper(_ playlist: DisplayPlaylist) -> Bool {
     let members = playlist.collectionID.flatMap { collections.collection(id: $0)?.wallpaperIDs } ?? []
+    let playable = store.librarySnapshot.wallpapers.filter(\.supported)
+    let facts = playlist.source == .smart
+      ? inMemorySmartFacts(for: playable, query: playlist.effectiveSmartQuery)
+      : [:]
+    var check = playlist
+    check.skipRecentDays = 0
     return !PlaylistPlanner.candidates(
-      for: playlist, library: store.librarySnapshot.wallpapers.filter(\.supported).map(\.id),
-      favorites: favoriteIDs, collectionIDs: members
+      for: check,
+      library: playable.map(\.id),
+      favorites: favoriteIDs,
+      collectionIDs: members,
+      metadata: metadata.entries,
+      facts: facts
     ).isEmpty
+  }
+
+  /// Builds `SmartWallpaperFacts` strictly in memory for UI candidate counts and `canPlay`.
+  /// When `query.needsManifestMetadata`, reads `libraryRows` so `libraryMetrics` measures manifests
+  /// asynchronously off the main thread and updates reactively when ready.
+  private func inMemorySmartFacts(
+    for entries: [BridgeWallpaperEntry], query: SmartPlaylistQuery
+  ) -> [String: SmartWallpaperFacts] {
+    let tagsByID: [String: [String]]
+    if query.needsManifestMetadata {
+      _ = revisions.libraryMetrics
+      let rows = libraryRows
+      tagsByID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.tags) })
+    } else {
+      tagsByID = [:]
+    }
+    let ratings = store.wallpaperEnergyRatings
+    var facts: [String: SmartWallpaperFacts] = [:]
+    facts.reserveCapacity(entries.count)
+    for entry in entries {
+      let type = SmartWallpaperType.of(id: entry.id, kind: entry.kind)
+      let energy = query.maximumEnergy != nil ? ratings?.level(for: entry.id, kind: entry.kind) : nil
+      facts[entry.id] = SmartWallpaperFacts(
+        type: type,
+        manifestTags: tagsByID[entry.id] ?? [],
+        energyLevel: energy)
+    }
+    return facts
   }
 
   /// nil, which clears the choice, or an installed wallpaper that can play.

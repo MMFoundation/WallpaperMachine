@@ -227,6 +227,7 @@ extension PanelController {
   /// The Now Playing card. The bar reads it on every redraw, so what Next and Random could pick is
   /// asked with `contains`, never by listing the candidates.
   var nowPlaying: NowPlayingState {
+    _ = revisions.metadata
     let displays = targetDisplays
     let id = targetDisplayID
     let target = displays.first { $0.id == id }
@@ -237,9 +238,10 @@ extension PanelController {
       hasWallpaper: displays.contains { $0.wallpaperID != nil },
       hasOtherWallpaper: wallpapers.contains { $0.supported && $0.id != target?.wallpaperID },
       // `AutomationCommand.RandomPool.all.candidates` less the one on show: a pick never reopens a
-      // wallpaper held back after a crash.
+      // wallpaper held back after a crash or excluded from rotation.
       hasRandomCandidate: wallpapers.contains {
         $0.supported && $0.id != target?.wallpaperID && !held.contains($0.id)
+          && !metadata.isExcluded($0.id)
       },
       previousID: store.previousWallpaperID(displayId: id), isPaused: isPlaybackPaused,
       isBusy: isStoreBusy)

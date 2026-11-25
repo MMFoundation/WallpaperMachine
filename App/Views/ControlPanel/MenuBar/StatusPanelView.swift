@@ -759,6 +759,7 @@ extension StatusPanelModel.PlaylistBadge {
       case .favorites: L("Favorites")
       case .list(let count): L("This display’s list (\(count))")
       case .collection(let name): name
+      case .smart: L("Smart playlist")
       case .missingCollection: L("A collection that no longer exists")
       }
     }

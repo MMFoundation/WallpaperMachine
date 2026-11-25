@@ -740,13 +740,13 @@ struct WallpaperBackupService: Sendable {
             if policy == .keepExisting, let old = existing[key] {
                 let current = try WallpaperBackupPreferences.decode(old)
                 switch key {
-                case WallpaperCollectionStore.storageKey, PlaylistStore.plansKey, WallpaperDisplayLayoutStore.storageKey, PanelPreferences.favoritesKey,
+                case WallpaperCollectionStore.storageKey, WallpaperMetadataStore.storageKey, PlaylistStore.plansKey, WallpaperDisplayLayoutStore.storageKey, PanelPreferences.favoritesKey,
                      WallpaperPresetStore.preferenceKey, StillImagePlacementStore.storageKey, PlaylistStore.playlistsKey, WallpaperAutomationStore.configurationsKey:
                     guard let oldJSON = current as? Data, let newJSON = remapped as? Data else { throw files.changed() }
                     let oldValue = try JSONSerialization.jsonObject(with: oldJSON)
                     let newValue = try JSONSerialization.jsonObject(with: newJSON)
                     let merged: Any
-                    if key == PlaylistStore.playlistsKey || key == WallpaperAutomationStore.configurationsKey {
+                    if key == PlaylistStore.playlistsKey || key == WallpaperAutomationStore.configurationsKey || key == WallpaperMetadataStore.storageKey {
                         guard let oldMap = oldValue as? [String: Any], let newMap = newValue as? [String: Any] else { throw files.changed() }
                         merged = newMap.merging(oldMap) { _, old in old }
                     } else { merged = mergeJSON(existing: oldValue, incoming: newValue) }

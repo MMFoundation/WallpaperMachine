@@ -14,7 +14,7 @@ the mode:
 | Mode | Rows | What happens |
 | --- | --- | --- |
 | **Off** | — | The wallpaper changes only when the user changes it. |
-| **Rotate wallpapers** | **Wallpapers** (All wallpapers, Favorites, This display's list, or a local collection), **Order** (In order, Shuffle), **How often** (every 5, 10, 15 or 30 minutes, every hour, every 2, 3, 6 or 12 hours, every day, **Each time the Mac is unlocked**, or **Custom**: any whole number of minutes from 1 to 10,080, one week), and for a time, **Wait for the video to finish** | After each interval, or each time the Mac is unlocked, the display moves to the next wallpaper. |
+| **Rotate wallpapers** | **Wallpapers** (All wallpapers, Favorites, This display's list, **Smart playlist**, or a local collection), **Order** (In order, Shuffle, with optional **Prefer higher-rated wallpapers**), **Skip recently used** (Off, 1, 3, 7 or 30 days), **How often** (every 5, 10, 15 or 30 minutes, every hour, every 2, 3, 6 or 12 hours, every day, **Each time the Mac is unlocked**, or **Custom**: any whole number of minutes from 1 to 10,080, one week), and for a time, **Wait for the video to finish** | After each interval, or each time the Mac is unlocked, the display moves to the next wallpaper. |
 | **Day and night** | **Day wallpaper**, **Day starts at**, **Night wallpaper**, **Night starts at** | The day wallpaper takes over at the day time and the night wallpaper at the night time. |
 
 A new rotation defaults to every 30 minutes, in order, and does not wait for videos; day
@@ -88,6 +88,51 @@ Local collections are created and filled from Installed (see
 A collection can feed more than one display, and membership changes are read when the
 next switch is chosen. Removing a wallpaper from the library removes it from
 collections and saved playlists too.
+
+### Smart Dynamic Playlists, ratings, custom tags and exclusions
+
+Choosing **Wallpapers → Smart playlist** turns a display's rotation into a live rule-based
+query (`SmartPlaylistQuery`) evaluated in memory whenever a switch picks the next wallpaper,
+with zero background polling. Rules can filter by:
+
+- **Types**: Scene, Video, Web, or Still image (imported pictures and pixiv works); leaving
+  all unselected allows every playable type.
+- **Must have tags** and **Exclude tags**: matched case-insensitively across both the
+  wallpaper's manifest tags (`project.json`) and your own **Custom tags**.
+- **Minimum rating**: 1–5 stars, assigned in the wallpaper's **Rating & tags** inspector card.
+- **Maximum energy**: Low only or Low & Medium, read from `WallpaperEnergyRatings`. Only
+  wallpapers with a recorded energy rating match an explicit energy limit.
+- **Favorites only** and **Exclude mature** (omitting wallpapers tagged Mature or R-18).
+
+Settings shows a live match count under **Wallpapers**, computed strictly in memory. When the
+app launches at login without opening the Control Panel, `PlaylistScheduler` evaluates rules
+directly from bridge entries, user metadata and `WallpaperEnergyRatings`, reading only
+`project.json` tags off the main actor via `SmartPlaylistManifestCache` if the query requires
+manifest tags or Mature filtering.
+
+Each installed wallpaper's **Rating & tags** inspector card (`MetadataCard`, collapsed by
+default until metadata is set) lets you assign a 1–5 star rating (clicking the active star
+clears it), add or remove custom tags, save an optional short note, and toggle **Exclude from
+playlists & random**. Excluded wallpapers are skipped by **All wallpapers**, **Favorites**,
+**Smart playlist** and **Random Wallpaper**, while explicit display lists and local collections
+still play what you explicitly added to them.
+
+Rotating playlists also support:
+
+- **Prefer higher-rated wallpapers** (when **Order** is **Shuffle**): draws with star-rating
+  weights (4- and 5-star wallpapers weighted higher than unrated or low-rated ones) rather than
+  a uniform full-round cycle, while never repeating the wallpaper currently on screen.
+- **Skip recently used** (Off, 1 day, 3 days, 7 days or 30 days): filters out wallpapers used
+  within that window via `WallpaperHistoryStore.lastUsedDates()`, automatically falling back to
+  the full candidate pool when every alternative candidate was used recently.
+
+### Sleep Timer
+
+The Now Playing **Playlist** popover includes a session-only one-shot **Sleep timer** (15
+minutes, 30 minutes, 1 hour, 2 hours, or Off). `PlaylistScheduler` arms a single one-shot task
+with zero background polling; when it expires, it clears the deadline and pauses wallpaper
+playback. You can cancel it at any time from the popover, and manually pausing playback clears
+it automatically.
 
 Each display's Playlist disclosure has **Saved playlist** and **Save as…**.
 Saving keeps a named copy of the mode, source, order, trigger, interval and day/night
@@ -317,9 +362,14 @@ Now Playing bar's **Random wallpaper** is unavailable.
 `PlaylistStore` keeps every display's playlist in the `WallpaperMachine.playlists`
 default (JSON; missing fields decode with defaults, so a playlist saved before the
 trigger existed rotates on its interval, one saved before **Wait for the video to finish**
-existed does not wait, and an interval outside 1–10,080 minutes falls back to 30) and each display's next change in
+existed does not wait, older playlists decode with `skipRecentDays = 0`,
+`preferHigherRated = false` and no `smartQuery`, and an interval outside 1–10,080 minutes falls back to 30) and each display's next change in
 `WallpaperMachine.playlistNextChange`, so a relaunch neither restarts a long interval
-nor skips a change that fell due while the app was closed. A display whose playlist is
+nor skips a change that fell due while the app was closed. User wallpaper metadata (custom
+tags, 1–5 star ratings, notes and rotation exclusions) lives in
+`WallpaperMachine.wallpaperMetadata` via `PreservedJSON`, pruning entries when every field
+returns to default and included in `.wmbackup` backups. The Sleep Timer deadline is
+session-only run state and is never persisted or backed up. A display whose playlist is
 waiting after the user removed its wallpaper is kept in `WallpaperMachine.playlistHolds`,
 so a relaunch leaves it empty.
 
@@ -357,13 +407,13 @@ left out of a backup too.
 
 | Part | Where |
 | --- | --- |
-| Model | `App/Services/Playlist/WallpaperPlaylist.swift` |
-| Candidates, next pick, day and night | `App/Services/Playlist/PlaylistPlanner.swift` |
+| Model | `App/Services/Playlist/WallpaperPlaylist.swift`, `App/Services/Library/WallpaperMetadataStore.swift` |
+| Candidates, next pick, day and night | `App/Services/Playlist/PlaylistPlanner.swift`, `App/Services/Playlist/SmartPlaylistManifestCache.swift` |
 | Persistence and dates | `App/Services/Playlist/PlaylistStore.swift` |
 | Timer and switching | `App/Services/Playlist/PlaylistScheduler.swift`, wired in `AppDelegate.startPlaylistScheduler` |
 | The end of a video's pass | `NativeVideoWallpaperHost.watchClipEnd`, and `watchNextLoop` in `NativeVideoPlayer.swift` and `Shared/WebMPlayer.swift` |
-| Panel actions | `editPlaylist`, `playPlaylist`, `addToPlaylist`, `removeFromPlaylist`, `reorderPlaylist`, `clearPlaylistFailures`, `skipPlaylist`, `resumePlaylist` in `App/Views/ControlPanel/Model/PanelController+Playlists.swift`; the menus' rules in `Model/PlaylistEdit.swift` |
-| Panel | Settings → Displays in `App/Views/ControlPanel/Settings/Sections/DisplaysPlaylistRows.swift`, with drag and button ordering in `DisplaysOrderEditor.swift` and the page state in `Settings/DisplaysSettingsModel.swift`; the inspector's playlist item and Installed's **Add to playlist** in `Inspector/` and `Library/`; Installed's Play and its order menu in `Library/InstalledScopeBar.swift`, the collection's Play and Shuffle in `Library/CollectionsFilterGroup.swift`; Now Playing's playlist in `Shell/NowPlayingPlaylist.swift` |
+| Panel actions | `editPlaylist`, `playPlaylist`, `addToPlaylist`, `removeFromPlaylist`, `reorderPlaylist`, `clearPlaylistFailures`, `skipPlaylist`, `resumePlaylist`, `setSleepTimer` in `App/Views/ControlPanel/Model/PanelController+Playlists.swift`; metadata actions in `Model/PanelController+Metadata.swift`; the menus' rules in `Model/PlaylistEdit.swift` |
+| Panel | Settings → Displays in `App/Views/ControlPanel/Settings/Sections/DisplaysPlaylistRows.swift` and `DisplaysSmartPlaylistRows.swift`, with drag and button ordering in `DisplaysOrderEditor.swift` and the page state in `Settings/DisplaysSettingsModel.swift`; the inspector's **Rating & tags** card in `Inspector/MetadataCard.swift` and playlist item / Installed's **Add to playlist** in `Inspector/` and `Library/`; Installed's Play and its order menu in `Library/InstalledScopeBar.swift`, the collection's Play and Shuffle in `Library/CollectionsFilterGroup.swift`; Now Playing's playlist and Sleep Timer in `Shell/NowPlayingPlaylist.swift` |
 | Collections and saved-plan actions | `WallpaperCollectionStore.swift`; `createCollection` … `removeFromCollection` in `Model/PanelController+Collections.swift` and `savePlaylistPlan` … `applyPlaylistPlan` in `Model/PanelController+Playlists.swift`; the sidebar's `Library/CollectionsFilterGroup.swift` and the Saved playlists group in `Settings/Sections/DisplaysGroups.swift` |
 
 ## Verification

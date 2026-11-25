@@ -154,4 +154,194 @@ final class PlaylistPlannerTests: XCTestCase {
         playlist.waitsForClipEnd = true
         XCTAssertEqual(try JSONDecoder().decode(DisplayPlaylist.self, from: JSONEncoder().encode(playlist)), playlist)
     }
+
+    func testExcludeFromRotationSkipsAllFavoritesAndSmartButKeepsExplicitListsAndCollections() {
+        let library = ["a", "b", "c"]
+        let metadata: [String: WallpaperMetadata] = [
+            "b": WallpaperMetadata(excludedFromRotation: true),
+        ]
+        XCTAssertEqual(
+            PlaylistPlanner.candidates(for: playlist(.all), library: library, favorites: [], collectionIDs: [], metadata: metadata),
+            ["a", "c"]
+        )
+        XCTAssertEqual(
+            PlaylistPlanner.candidates(for: playlist(.favorites), library: library, favorites: ["a", "b", "c"], collectionIDs: [], metadata: metadata),
+            ["a", "c"]
+        )
+        XCTAssertEqual(
+            PlaylistPlanner.candidates(for: playlist(.smart), library: library, favorites: [], collectionIDs: [], metadata: metadata),
+            ["a", "c"]
+        )
+        XCTAssertEqual(
+            PlaylistPlanner.candidates(for: playlist(.list, list: ["b", "a"]), library: library, favorites: [], collectionIDs: [], metadata: metadata),
+            ["b", "a"],
+            "explicit display list still plays what the user explicitly added"
+        )
+        XCTAssertEqual(
+            PlaylistPlanner.candidates(for: playlist(.collection), library: library, favorites: [], collectionIDs: ["b", "c"], metadata: metadata),
+            ["b", "c"],
+            "explicit local collection still plays its explicit members"
+        )
+    }
+
+    func testSkipRecentlyUsedFiltersRecentWallpapersAndFallsBackWhenAllWereUsedRecently() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var config = playlist(.all)
+        config.skipRecentDays = 7
+        let lastUsed: [String: Date] = [
+            "a": now.addingTimeInterval(-2 * 86_400),
+            "b": now.addingTimeInterval(-10 * 86_400),
+        ]
+        XCTAssertEqual(
+            PlaylistPlanner.candidates(for: config, library: ["a", "b", "c"], favorites: [], collectionIDs: [], lastUsed: lastUsed, now: now),
+            ["b", "c"],
+            "a was used 2 days ago (< 7), b was used 10 days ago, c was never used"
+        )
+
+        let allRecent: [String: Date] = [
+            "a": now.addingTimeInterval(-1 * 86_400),
+            "b": now.addingTimeInterval(-2 * 86_400),
+            "c": now.addingTimeInterval(-3 * 86_400),
+        ]
+        XCTAssertEqual(
+            PlaylistPlanner.candidates(for: config, library: ["a", "b", "c"], favorites: [], collectionIDs: [], lastUsed: allRecent, now: now),
+            ["a", "b", "c"],
+            "falls back to full candidate pool when every candidate was used recently"
+        )
+
+        // Only candidate outside recent window is the wallpaper currently on screen -> falls back.
+        let onlyCurrentFresh: [String: Date] = [
+            "b": now.addingTimeInterval(-1 * 86_400),
+        ]
+        XCTAssertEqual(
+            PlaylistPlanner.candidates(for: config, library: ["a", "b"], favorites: [], collectionIDs: [], lastUsed: onlyCurrentFresh, now: now, current: "a"),
+            ["a", "b"],
+            "falls back when every alternative to current was used recently"
+        )
+    }
+
+    func testWeightedShuffleFavorsHigherRatedWallpapersDeterministically() throws {
+        var random = SplitMix(state: 12345)
+        let candidates = ["five", "four", "unrated", "one"]
+        let ratings = ["five": 5, "four": 4, "one": 1]
+        var counts: [String: Int] = [:]
+        var current: String?
+        for _ in 0..<2_000 {
+            let pick = try XCTUnwrap(PlaylistPlanner.next(
+                after: current, in: candidates, order: .shuffle, recent: [],
+                preferHigherRated: true, ratings: ratings, using: &random
+            ))
+            XCTAssertNotEqual(pick, current, "weighted shuffle never repeats the wallpaper on screen")
+            counts[pick, default: 0] += 1
+            current = pick
+        }
+        XCTAssertGreaterThan(counts["five", default: 0], counts["four", default: 0])
+        XCTAssertGreaterThan(counts["four", default: 0], counts["unrated", default: 0])
+        XCTAssertGreaterThan(counts["unrated", default: 0], counts["one", default: 0])
+
+        // Sequential order ignores preferHigherRated.
+        var seqRandom = SplitMix(state: 1)
+        XCTAssertEqual(
+            PlaylistPlanner.next(
+                after: "five", in: candidates, order: .sequential, recent: [],
+                preferHigherRated: true, ratings: ratings, using: &seqRandom),
+            "four"
+        )
+    }
+
+    func testSmartPlaylistQueryMatchesAcrossTagsCustomTagsTypeRatingEnergyFavoritesAndMature() {
+        let library = ["scene-cozy", "video-heavy", "web-mature", "pixiv-123-p0", "image-calm"]
+        let favorites: Set<String> = ["scene-cozy", "pixiv-123-p0", "video-heavy"]
+        let metadata: [String: WallpaperMetadata] = [
+            "scene-cozy": WallpaperMetadata(customTags: ["Focus", "Lo-Fi"], rating: 5),
+            "video-heavy": WallpaperMetadata(customTags: ["Focus"], rating: 4),
+            "web-mature": WallpaperMetadata(customTags: ["Focus"], rating: 5),
+            "pixiv-123-p0": WallpaperMetadata(customTags: ["Relax"], rating: 4),
+            "image-calm": WallpaperMetadata(customTags: ["Focus"], rating: 2),
+        ]
+        let facts: [String: SmartWallpaperFacts] = [
+            "scene-cozy": SmartWallpaperFacts(type: .scene, manifestTags: ["Anime", "Everyone"], energyLevel: .low),
+            "video-heavy": SmartWallpaperFacts(type: .video, manifestTags: ["Cyberpunk", "Audio responsive"], energyLevel: .high),
+            "web-mature": SmartWallpaperFacts(type: .web, manifestTags: ["Mature", "Anime"], energyLevel: .low),
+            "pixiv-123-p0": SmartWallpaperFacts(type: .still, manifestTags: ["Illustration"], energyLevel: .medium),
+            "image-calm": SmartWallpaperFacts(type: .still, manifestTags: ["Nature"], energyLevel: nil),
+        ]
+
+        func matching(_ query: SmartPlaylistQuery) -> [String] {
+            var config = playlist(.smart)
+            config.smartQuery = query
+            return PlaylistPlanner.candidates(
+                for: config, library: library, favorites: favorites, collectionIDs: [],
+                metadata: metadata, facts: facts
+            )
+        }
+
+        // Combined manifest tag + user custom tag + excludeMature + max energy + min rating + favorites
+        XCTAssertEqual(
+            matching(SmartPlaylistQuery(
+                requiredTags: ["anime", "focus"],
+                minimumRating: 4,
+                maximumEnergy: .medium,
+                favoritesOnly: true,
+                excludeMature: true
+            )),
+            ["scene-cozy"]
+        )
+
+        // Excluded tag removes matching manifest or custom tags
+        XCTAssertEqual(
+            matching(SmartPlaylistQuery(requiredTags: ["focus"], excludedTags: ["cyberpunk", "mature"])),
+            ["scene-cozy", "image-calm"]
+        )
+
+        // Type filter distinguishes still images from web pages
+        XCTAssertEqual(
+            matching(SmartPlaylistQuery(types: [.still])),
+            ["pixiv-123-p0", "image-calm"]
+        )
+        XCTAssertEqual(
+            matching(SmartPlaylistQuery(types: [.still], maximumEnergy: .medium)),
+            ["pixiv-123-p0"],
+            "unrated wallpapers do not match an explicit energy cap"
+        )
+        XCTAssertEqual(
+            matching(SmartPlaylistQuery(excludeMature: true)),
+            ["scene-cozy", "video-heavy", "pixiv-123-p0", "image-calm"]
+        )
+    }
+
+    func testOlderPlaylistsDecodeNewFieldsWithDefaultsAndRoundTripSmartQuery() throws {
+        let old = try JSONDecoder().decode(
+            DisplayPlaylist.self,
+            from: Data(#"{"mode":"rotate","interval":30}"#.utf8)
+        )
+        XCTAssertEqual(old.skipRecentDays, 0)
+        XCTAssertFalse(old.preferHigherRated)
+        XCTAssertNil(old.smartQuery)
+
+        let outOfRange = try JSONDecoder().decode(
+            DisplayPlaylist.self,
+            from: Data(#"{"mode":"rotate","skipRecentDays":-5,"preferHigherRated":"yes"}"#.utf8)
+        )
+        XCTAssertEqual(outOfRange.skipRecentDays, 0)
+        XCTAssertFalse(outOfRange.preferHigherRated)
+
+        var smart = DisplayPlaylist()
+        smart.mode = .rotate
+        smart.source = .smart
+        smart.order = .shuffle
+        smart.skipRecentDays = 7
+        smart.preferHigherRated = true
+        smart.smartQuery = SmartPlaylistQuery(
+            requiredTags: ["Nature", "Cozy"],
+            excludedTags: ["Horror"],
+            types: [.scene, .still],
+            minimumRating: 4,
+            maximumEnergy: .medium,
+            favoritesOnly: true,
+            excludeMature: true
+        )
+        let roundTripped = try JSONDecoder().decode(DisplayPlaylist.self, from: JSONEncoder().encode(smart))
+        XCTAssertEqual(roundTripped, smart)
+    }
 }

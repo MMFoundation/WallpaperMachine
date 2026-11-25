@@ -106,10 +106,12 @@ private struct InspectorContent: View {
           PropertiesCards(options: options)
           DisplaysCard(options: options)
           CollectionsCard(wallpaperID: id)
+          MetadataCard(wallpaperID: id)
           EngineOptionsCard(options: options)
         } else {
           LoadingOptions()
           CollectionsCard(wallpaperID: id)
+          MetadataCard(wallpaperID: id)
         }
       }
       .padding(16)

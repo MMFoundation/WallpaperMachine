@@ -1511,13 +1511,16 @@ final class BridgeStore {
     /// `playlists` remembers the pick only once it has been shown, so a pick that failed to
     /// apply takes nothing out of the round. Throws when the pool holds no other wallpaper.
     func activateRandomWallpaperAsync(
-        displayId: String, pool: AutomationCommand.RandomPool, favorites: Set<String>, playlists: PlaylistStore
+        displayId: String, pool: AutomationCommand.RandomPool, favorites: Set<String>, playlists: PlaylistStore,
+        excluded: Set<String>? = nil
     ) async throws {
         try await commands.run(slot: Self.activationSlot(displayId: displayId)) {
             try validateActivationTarget(displayId)
+            let excludedIDs = excluded ?? WallpaperMetadataStore.shared.excludedIDs
             let candidates = pool.candidates(
                 library: librarySnapshot.wallpapers.filter(\.supported).map(\.id),
-                favorites: favorites, held: Set(heldWallpaperIDs))
+                favorites: favorites, held: Set(heldWallpaperIDs),
+                excluded: excludedIDs)
             guard let id = playlists.randomPick(
                 on: displayId, pool: pool, from: candidates, after: shownWallpaperID(on: displayId))
             else {

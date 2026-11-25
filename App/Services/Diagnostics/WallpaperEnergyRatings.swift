@@ -197,6 +197,15 @@ final class WallpaperEnergyRatings {
     return result
   }
 
+  /// The wallpaper's rated energy level, or nil until measured long enough (and skipping legacy
+  /// version-1 native-video ratings, matching `snapshot(for:kind:)`).
+  func level(for id: String, kind: BridgeWallpaperKind) -> EnergyLevel? {
+    guard let rating = rating(for: id),
+      kind != .video || (rating.version ?? 1) >= WallpaperEnergyRating.nativeVideoExcludedVersion
+    else { return nil }
+    return rating.level
+  }
+
   private func save(now: Date) {
     do {
       try FileManager.default.createDirectory(

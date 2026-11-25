@@ -6,6 +6,7 @@ final class PlaylistSchedulerTests: XCTestCase {
     private var defaults: UserDefaults!
     private var store: PlaylistStore!
     private var collections: WallpaperCollectionStore!
+    private var metadata: WallpaperMetadataStore!
     private var shown: [String: String] = [:]
     private var running = true
     /// Playing, but paused only because nobody can see the display (covered, full screen).
@@ -22,8 +23,9 @@ final class PlaylistSchedulerTests: XCTestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         defaults = try TemporaryDefaults.make(for: self).defaults
-        store = PlaylistStore(defaults: defaults)
+        store = PlaylistStore(defaults: defaults, now: { self.clock })
         collections = WallpaperCollectionStore(defaults: defaults)
+        metadata = WallpaperMetadataStore(defaults: defaults)
         shown = ["primary": "a"]
         running = true
         unseen = false
@@ -37,6 +39,7 @@ final class PlaylistSchedulerTests: XCTestCase {
         defaults = nil
         store = nil
         collections = nil
+        metadata = nil
         super.tearDown()
     }
 
@@ -45,7 +48,15 @@ final class PlaylistSchedulerTests: XCTestCase {
         commandRevision: @escaping @MainActor (String) -> UInt64 = { _ in 0 },
         watchClipEnd: @escaping PlaylistScheduler.WatchClipEnd = { _, _, _ in nil },
         activate: PlaylistScheduler.Activate? = nil,
-        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { _ in try await Task.sleep(for: .seconds(3600)) }
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { _ in try await Task.sleep(for: .seconds(3600)) },
+        lastUsedDates: @escaping @MainActor () -> [String: Date] = { [:] },
+        wallpaperKinds: @escaping @MainActor () -> [String: BridgeWallpaperKind] = { [:] },
+        energyLevel: @escaping @MainActor (String, BridgeWallpaperKind) -> EnergyLevel? = { _, _ in nil },
+        libraryURL: URL = FileManager.default.temporaryDirectory.appendingPathComponent("unused-scheduler-lib"),
+        manifestTagsProvider: (@Sendable ([String]) async -> [String: [String]])? = nil,
+        pausePlayback: @escaping @MainActor () async throws -> Void = {},
+        sleepTimerSleep: (@Sendable (TimeInterval) async throws -> Void)? = nil,
+        isPlaybackPaused: @escaping @MainActor () -> Bool = { false }
     ) -> PlaylistScheduler {
         PlaylistScheduler(
             store: store, collections: collections, displays: { self.displayIDs }, library: { library }, favorites: { favorites },
@@ -58,7 +69,16 @@ final class PlaylistSchedulerTests: XCTestCase {
                 return id
             },
             commandRevision: commandRevision, now: { self.clock }, calendar: calendar, center: .default,
-            sleep: sleep)
+            sleep: sleep,
+            metadata: metadata,
+            lastUsedDates: lastUsedDates,
+            wallpaperKinds: wallpaperKinds,
+            energyLevel: energyLevel,
+            libraryURL: libraryURL,
+            manifestTagsProvider: manifestTagsProvider,
+            pausePlayback: pausePlayback,
+            sleepTimerSleep: sleepTimerSleep,
+            isPlaybackPaused: isPlaybackPaused)
     }
 
     /// Lets the switch a scheduler started on the main actor run to its end.
@@ -1830,5 +1850,183 @@ final class PlaylistSchedulerTests: XCTestCase {
         XCTAssertEqual(applied, ["b"], "one change for one end")
         XCTAssertEqual(shown["second"], "a", "the other display still waits for its clip")
         XCTAssertNotNil(watcher.watches["second"])
+    }
+
+    // MARK: - Smart Dynamic Playlists, Exclusion, Skip Recent, Sleep Timer
+
+    func testSmartPlaylistEvaluatesManifestTagsCustomTagsTypeRatingEnergyAndMatureWithoutControlPanel() async throws {
+        let libraryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("smart-playlist-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: libraryRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: libraryRoot) }
+
+        func writeManifest(id: String, json: String) throws {
+            let folder = libraryRoot.appendingPathComponent(id, isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data(json.utf8).write(to: folder.appendingPathComponent("project.json"))
+        }
+
+        try writeManifest(id: "scene-ok", json: #"{"type":"scene","tags":["Anime"],"contentrating":"Everyone"}"#)
+        try writeManifest(id: "scene-mature", json: #"{"type":"scene","tags":["Anime"],"contentrating":"Mature"}"#)
+        try writeManifest(id: "scene-heavy", json: #"{"type":"scene","tags":["Anime"],"contentrating":"Everyone"}"#)
+        try writeManifest(id: "pixiv-99-p0", json: #"{"type":"web","tags":["Anime"],"contentrating":"Everyone"}"#)
+
+        try metadata.addTag("Cozy", to: "scene-ok")
+        metadata.setRating(5, for: "scene-ok")
+        try metadata.addTag("Cozy", to: "scene-mature")
+        metadata.setRating(5, for: "scene-mature")
+        try metadata.addTag("Cozy", to: "scene-heavy")
+        metadata.setRating(5, for: "scene-heavy")
+        try metadata.addTag("Cozy", to: "pixiv-99-p0")
+        metadata.setRating(4, for: "pixiv-99-p0")
+
+        let kinds: [String: BridgeWallpaperKind] = [
+            "scene-ok": .projectScene,
+            "scene-mature": .projectScene,
+            "scene-heavy": .projectScene,
+            "pixiv-99-p0": .webpage,
+        ]
+        let energies: [String: EnergyLevel] = [
+            "scene-ok": .low,
+            "scene-mature": .low,
+            "scene-heavy": .high,
+            "pixiv-99-p0": .low,
+        ]
+
+        shown["primary"] = "pixiv-99-p0"
+        store.update("primary") {
+            $0.mode = .rotate
+            $0.source = .smart
+            $0.order = .sequential
+            $0.smartQuery = SmartPlaylistQuery(
+                requiredTags: ["Anime", "Cozy"],
+                types: [.scene, .still],
+                minimumRating: 4,
+                maximumEnergy: .medium,
+                excludeMature: true
+            )
+        }
+
+        let scheduler = makeScheduler(
+            library: ["scene-mature", "scene-heavy", "scene-ok", "pixiv-99-p0"],
+            wallpaperKinds: { kinds },
+            energyLevel: { id, _ in energies[id] },
+            libraryURL: libraryRoot
+        )
+        scheduler.start()
+        defer { scheduler.stop() }
+
+        XCTAssertTrue(scheduler.skip("primary"))
+        await settle()
+        XCTAssertEqual(applied, ["scene-ok"],
+                       "evaluates project.json tags + customTags + energy + type + excludeMature without panel open")
+    }
+
+    func testSchedulerSkipsExcludedWallpapersInAllSourceAndRecentlyUsedWithFallback() async {
+        metadata.setExcludedFromRotation(true, for: "b")
+        var lastUsed: [String: Date] = [
+            "c": clock.addingTimeInterval(-1 * 86_400),
+        ]
+        store.update("primary") {
+            $0.mode = .rotate
+            $0.source = .all
+            $0.order = .sequential
+            $0.skipRecentDays = 7
+        }
+        shown["primary"] = "a"
+        let scheduler = makeScheduler(library: ["a", "b", "c", "d"], lastUsedDates: { lastUsed })
+        scheduler.start()
+        defer { scheduler.stop() }
+
+        XCTAssertTrue(scheduler.skip("primary"))
+        await settle()
+        XCTAssertEqual(applied, ["d"], "skips excluded b and recently-used c")
+
+        // When every alternative was used recently, falls back to non-excluded candidates.
+        lastUsed["a"] = clock.addingTimeInterval(-1 * 86_400)
+        lastUsed["d"] = clock.addingTimeInterval(-1 * 86_400)
+        applied.removeAll()
+        XCTAssertTrue(scheduler.skip("primary"))
+        await settle()
+        XCTAssertEqual(applied, ["a"], "falls back to full non-excluded pool when all alternatives are recent")
+    }
+
+    func testSleepTimerFiresOneShotPauseAndClearsDeadline() async throws {
+        var paused = 0
+        let timer = ManualSleeper()
+        let scheduler = makeScheduler(
+            pausePlayback: { paused += 1 },
+            sleepTimerSleep: { try await timer.sleep(.seconds($0)) }
+        )
+        scheduler.start()
+        defer { scheduler.stop() }
+
+        store.setSleepTimer(minutes: 30)
+        try await waitUntil { timer.pendingCount == 1 }
+        XCTAssertEqual(timer.requested, [.seconds(30 * 60)])
+        XCTAssertEqual(paused, 0)
+        XCTAssertNotNil(store.sleepTimerEnd)
+
+        XCTAssertTrue(timer.fireNext())
+        try await waitUntil { paused == 1 }
+        XCTAssertNil(store.sleepTimerEnd, "deadline clears once the timer fires")
+    }
+
+    func testCancellingOrReplacingSleepTimerAbortsOldTaskAndNeverPausesEarly() async throws {
+        var paused = 0
+        let timer = ManualSleeper()
+        let scheduler = makeScheduler(
+            pausePlayback: { paused += 1 },
+            sleepTimerSleep: { try await timer.sleep(.seconds($0)) }
+        )
+        scheduler.start()
+        defer { scheduler.stop() }
+
+        store.setSleepTimer(minutes: 15)
+        try await waitUntil { timer.pendingCount == 1 }
+
+        // Replacing duration cancels the first sleep and arms the second.
+        store.setSleepTimer(minutes: 60)
+        try await waitUntil { timer.cancelledCount == 1 && timer.pendingCount == 1 }
+        XCTAssertEqual(timer.requested, [.seconds(15 * 60), .seconds(60 * 60)])
+        XCTAssertEqual(paused, 0)
+
+        // Cancelling aborts the active sleep without pausing playback.
+        store.setSleepTimer(minutes: nil)
+        try await waitUntil { timer.cancelledCount == 2 && timer.pendingCount == 0 }
+        await settle()
+        XCTAssertEqual(paused, 0)
+        XCTAssertNil(store.sleepTimerEnd)
+    }
+
+    func testManualPauseClearsActiveSleepTimerAndPreventsStalePauseAfterResume() async throws {
+        var playbackPaused = false
+        var sleepTimerPauses = 0
+        let timer = ManualSleeper()
+        let scheduler = makeScheduler(
+            pausePlayback: { sleepTimerPauses += 1 },
+            sleepTimerSleep: { try await timer.sleep(.seconds($0)) },
+            isPlaybackPaused: { playbackPaused }
+        )
+        scheduler.start()
+        defer { scheduler.stop() }
+
+        store.setSleepTimer(minutes: 30)
+        try await waitUntil { timer.pendingCount == 1 }
+        XCTAssertNotNil(store.sleepTimerEnd)
+
+        // Transitioning playback to paused (manual pause, hotkey, Shortcuts or Presentation Mode)
+        // cancels the armed sleep timer immediately.
+        playbackPaused = true
+        scheduler.evaluate()
+        try await waitUntil { timer.cancelledCount == 1 && timer.pendingCount == 0 }
+        XCTAssertNil(store.sleepTimerEnd, "pausing playback clears the sleep timer deadline")
+
+        // Resuming playback later does not re-arm or fire the stale timer.
+        playbackPaused = false
+        scheduler.evaluate()
+        await settle()
+        XCTAssertEqual(timer.pendingCount, 0)
+        XCTAssertEqual(sleepTimerPauses, 0)
     }
 }

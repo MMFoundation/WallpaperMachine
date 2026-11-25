@@ -309,7 +309,8 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
             // The menu's Random Wallpaper draws from every wallpaper that can play and is not held
             // back, so it acts on a display when something other than what it shows is among them.
             let randomPool = AutomationCommand.RandomPool.all.candidates(
-                library: Array(available), favorites: [], held: Set(store.heldWallpaperIDs))
+                library: Array(available), favorites: [], held: Set(store.heldWallpaperIDs),
+                excluded: WallpaperMetadataStore.shared.excludedIDs)
             displays = StatusMenuModel.orderedDisplays(candidates, mainDisplay: screens.first?.id).map { candidate in
                 let shown = store.shownWallpaperID(on: candidate.id)
                 return StatusMenuModel.Display(

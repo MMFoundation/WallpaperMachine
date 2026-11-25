@@ -233,6 +233,11 @@ enum InspectorPolicy {
     collections.contains { $0.wallpaperIDs.contains(wallpaperID) }
   }
 
+  /// Rating & tags stays collapsed by default until the user adds metadata to this wallpaper.
+  static func metadataOpenByDefault(_ metadata: WallpaperMetadata) -> Bool {
+    !metadata.isEmpty
+  }
+
   // MARK: Properties section
 
   /// Long wallpapers gain a search field and Modified filter chip once they carry more than this

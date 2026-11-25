@@ -270,6 +270,14 @@ final class StatusPanelModelTests: XCTestCase {
             Model.playlistBadge(for: byCollection, isHeld: false, collections: [], installedIDs: ["a"]),
             Model.PlaylistBadge(kind: .rotate(source: .missingCollection, order: .sequential)))
 
+        var smart = DisplayPlaylist()
+        smart.mode = .rotate
+        smart.source = .smart
+        smart.order = .shuffle
+        XCTAssertEqual(
+            Model.playlistBadge(for: smart, isHeld: false, collections: [], installedIDs: ["a"]),
+            Model.PlaylistBadge(kind: .rotate(source: .smart, order: .shuffle)))
+
         // `make` exposes only the selected display's badge.
         let panelInput = input(
             displays: [display("primary", shows: "a"), display("2", shows: "b")],

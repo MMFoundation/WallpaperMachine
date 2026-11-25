@@ -174,7 +174,8 @@ final class WallpaperDeletionRecoveryTests: XCTestCase {
                     result = id
                 }
                 return result
-            }, now: { clock }, sleep: { _ in try await Task.sleep(for: .seconds(3600)) })
+            }, now: { clock }, sleep: { _ in try await Task.sleep(for: .seconds(3600)) },
+            metadata: WallpaperMetadataStore(defaults: defaults))
         scheduler.start()
         defer { scheduler.stop() }
         store.continuePlaylistAfterDeletion = { display, deleted, before, available in

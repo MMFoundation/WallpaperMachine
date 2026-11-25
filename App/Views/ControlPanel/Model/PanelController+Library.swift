@@ -106,7 +106,8 @@ extension PanelController {
     let displayID = try standaloneDisplayID(displayID)
     try await run(.direct) {
       try await store.activateRandomWallpaperAsync(
-        displayId: displayID, pool: .all, favorites: favoriteIDs, playlists: playlists)
+        displayId: displayID, pool: .all, favorites: favoriteIDs, playlists: playlists,
+        excluded: metadata.excludedIDs)
     }
   }
 

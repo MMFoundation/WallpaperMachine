@@ -23,6 +23,10 @@ struct DisplaysCardSearch {
     var rotatesOnTimer = false
     /// A rotation draws from the display's own list, so the list shows.
     var listsOwnWallpapers = false
+    /// A rotation draws from a Smart Playlist, so its filter rules show.
+    var isSmart = false
+    /// A rotation runs in Shuffle order, so Prefer higher-rated wallpapers shows.
+    var isShuffle = false
     var hasSkipped = false
     /// The next day-and-night switch is dated.
     var showsNextSwitch = false
@@ -104,7 +108,17 @@ struct DisplaysCardSearch {
       if rows.showsResume { items.append(S.playlistHeld) }
       switch rows.playlistMode {
       case .rotate:
-        items += [S.playlistSource, S.playlistOrder, S.playlistInterval]
+        items.append(S.playlistSource)
+        if rows.isSmart {
+          items += [
+            S.playlistSmartTypes, S.playlistSmartRequiredTags, S.playlistSmartExcludedTags,
+            S.playlistSmartRating, S.playlistSmartEnergy, S.playlistSmartFavorites,
+            S.playlistSmartExcludeMature,
+          ]
+        }
+        items.append(S.playlistOrder)
+        if rows.isShuffle { items.append(S.playlistPreferHigherRated) }
+        items += [S.playlistSkipRecent, S.playlistInterval]
         if rows.showsCustomInterval { items.append(S.playlistCustom) }
         if rows.rotatesOnTimer { items.append(S.playlistClipEnd) }
         if rows.listsOwnWallpapers { items.append(S.playlistList) }
@@ -166,7 +180,10 @@ extension DisplaysCardSearch {
       showsCustomInterval:
         controller.displaysSettings.intervalDraft(of: display.id).selection(for: playlist.playlist) == .custom,
       rotatesOnTimer: playlist.playlist.trigger == .interval,
-      listsOwnWallpapers: playlist.playlist.source == .list, hasSkipped: !playlist.skipped.isEmpty,
+      listsOwnWallpapers: playlist.playlist.source == .list,
+      isSmart: playlist.playlist.source == .smart,
+      isShuffle: playlist.playlist.order == .shuffle,
+      hasSkipped: !playlist.skipped.isEmpty,
       showsNextSwitch: playlist.nextChangeText(locale: PanelLocale.shared.locale) != nil,
       hasPeers: !controller.transferPeers(of: display.id).isEmpty,
       automationMode: controller.automationState(for: display.id).mode)

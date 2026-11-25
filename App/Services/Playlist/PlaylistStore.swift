@@ -9,6 +9,9 @@ final class PlaylistStore {
     static let shared = PlaylistStore()
     static let didChangeNotification = Notification.Name("WallpaperMachine.playlistsDidChange")
     static let clipWaitsDidChangeNotification = Notification.Name("WallpaperMachine.playlistClipWaitsDidChange")
+    static let sleepTimerDidChangeNotification = Notification.Name("WallpaperMachine.sleepTimerDidChange")
+    /// Offered one-shot sleep timer durations, in minutes.
+    nonisolated static let sleepTimerPresets = [15, 30, 60, 120]
     nonisolated static let playlistsKey = "WallpaperMachine.playlists"
     nonisolated static let nextChangeKey = "WallpaperMachine.playlistNextChange"
     nonisolated static let plansKey = "WallpaperMachine.playlistPlans"
@@ -20,6 +23,7 @@ final class PlaylistStore {
     private static let roundLimit = 2048
 
     private let defaults: UserDefaults
+    private let now: @MainActor () -> Date
     private(set) var playlists: [String: DisplayPlaylist]
     private(set) var plans: [PlaylistPlan]
     /// Saved plans this build could not read, as they were saved (`PreservedJSON`).
@@ -67,6 +71,9 @@ final class PlaylistStore {
     /// for the panel, whose Next change would otherwise show a deadline that has passed. Run
     /// state, kept only while the wait lasts and never saved.
     private(set) var clipWaits: [String: Date] = [:]
+    /// When the active one-shot sleep timer expires and pauses playback; nil when off.
+    /// Session-only run state, never persisted or backed up.
+    private(set) var sleepTimerEnd: Date? = nil
     /// Changes a rotating display to its next wallpaper now, answering false when it does not
     /// rotate. The app delegate points it at the scheduler; the panel's Change now calls it.
     var skipHandler: (@MainActor (String) -> Bool)?
@@ -74,8 +81,9 @@ final class PlaylistStore {
     /// the scheduler; the panel's Resume playlist calls it.
     var resumeHandler: (@MainActor (String) -> Void)?
 
-    init(defaults: UserDefaults = ClientPreferences.defaults) {
+    init(defaults: UserDefaults = ClientPreferences.defaults, now: @escaping @MainActor () -> Date = { Date() }) {
         self.defaults = defaults
+        self.now = now
         playlists = (defaults.data(forKey: Self.playlistsKey))
             .flatMap { try? JSONDecoder().decode([String: DisplayPlaylist].self, from: $0) } ?? [:]
         // A plan this build cannot read stays as it was saved and is written back with the others.
@@ -116,6 +124,7 @@ final class PlaylistStore {
         }
         // A round belongs to the wallpapers it was drawn from, and to a rotation that is running.
         if after.source != before.source || after.collectionID != before.collectionID
+            || (after.source == .smart && after.effectiveSmartQuery != before.effectiveSmartQuery)
             || after.order != before.order || after.mode != before.mode
         {
             recent[display] = nil
@@ -227,6 +236,24 @@ final class PlaylistStore {
         guard clipWaits[display] != until else { return }
         clipWaits[display] = until
         NotificationCenter.default.post(name: Self.clipWaitsDidChangeNotification, object: self)
+    }
+
+    /// Sets or clears the session-only one-shot sleep timer deadline. Posts
+    /// `sleepTimerDidChangeNotification` (never `didChangeNotification`), so the scheduler arms or
+    /// cancels its single sleep timer without disturbing playlist rotation evaluation.
+    func setSleepTimer(until date: Date?) {
+        guard sleepTimerEnd != date else { return }
+        sleepTimerEnd = date
+        NotificationCenter.default.post(name: Self.sleepTimerDidChangeNotification, object: self)
+    }
+
+    /// Arms a one-shot sleep timer for `minutes` from now, or cancels it when `minutes` is nil or <= 0.
+    func setSleepTimer(minutes: Int?) {
+        if let minutes, minutes > 0 {
+            setSleepTimer(until: now().addingTimeInterval(TimeInterval(minutes * 60)))
+        } else {
+            setSleepTimer(until: nil)
+        }
     }
 
     /// Makes a display's playlist wait (`hold`) or lets it carry on (nil). Setting what it
@@ -447,7 +474,8 @@ final class PlaylistStore {
     }
 
     private static func signature(of playlist: DisplayPlaylist) -> String {
-        "\(playlist.source.rawValue)|\(playlist.collectionID ?? "")|\(playlist.order.rawValue)"
+        let smart = playlist.source == .smart ? "|\(playlist.effectiveSmartQuery.signature)" : ""
+        return "\(playlist.source.rawValue)|\(playlist.collectionID ?? "")|\(playlist.order.rawValue)\(smart)"
     }
 
     private static func randomKey(_ display: String, _ pool: AutomationCommand.RandomPool) -> String {

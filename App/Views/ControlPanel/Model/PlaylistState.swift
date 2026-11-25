@@ -19,6 +19,8 @@ struct PlaylistState: Equatable, Sendable {
   let listedCount: Int
   /// The Wallpapers menu's selection.
   let source: PlaylistSourceChoice
+  /// How many installed playable wallpapers currently match the Smart Playlist query.
+  var smartCandidateCount: Int = 0
 
   struct SkippedWallpaper: Identifiable, Equatable, Sendable {
     let id: String
@@ -41,6 +43,7 @@ struct PlaylistState: Equatable, Sendable {
     case .favorites: L("Favorites")
     case .list: L("This display’s list (\(listedCount))")
     case .collection(let id): collections.first { $0.id == id }?.name ?? L("A collection that no longer exists")
+    case .smart: L("Smart playlist")
     case .missingCollection: L("A collection that no longer exists")
     }
   }

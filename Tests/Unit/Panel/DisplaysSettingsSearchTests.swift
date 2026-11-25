@@ -94,6 +94,24 @@ final class DisplaysSettingsSearchTests: SettingsBTestCase {
     XCTAssertFalse(card(query, rows: dayNight).showsCard)
   }
 
+  func testSmartPlaylistWeightedShuffleAndSkipRecentRowsMatchOnlyWhereDrawn() {
+    let smart = card("Must have tags", rows: DisplaysCardSearch.Rows(playlistMode: .rotate, isSmart: true))
+    XCTAssertTrue(smart.showsCard)
+    XCTAssertTrue(smart.opens(S.playlist))
+    XCTAssertFalse(card("Must have tags", rows: DisplaysCardSearch.Rows(playlistMode: .rotate)).showsCard)
+
+    let weighted = card("Prefer higher-rated", rows: DisplaysCardSearch.Rows(playlistMode: .rotate, isShuffle: true))
+    XCTAssertTrue(weighted.showsCard)
+    XCTAssertTrue(weighted.opens(S.playlist))
+    XCTAssertFalse(card("Prefer higher-rated", rows: DisplaysCardSearch.Rows(playlistMode: .rotate)).showsCard)
+    XCTAssertFalse(card("Prefer higher-rated", rows: dayNight).showsCard)
+
+    let skipRecent = card("Skip recently used", rows: DisplaysCardSearch.Rows(playlistMode: .rotate))
+    XCTAssertTrue(skipRecent.showsCard)
+    XCTAssertFalse(card("Skip recently used", rows: dayNight).showsCard)
+    XCTAssertFalse(card("Skip recently used", rows: mirror).showsCard)
+  }
+
   /// A disclosure whose own words match stays, folded, on a display where nothing inside matches.
   func testADisclosureFoundByItsOwnWordsStaysFoldedWhereNothingInsideMatches() {
     let paused = card("Playlist paused", rows: dayNight)

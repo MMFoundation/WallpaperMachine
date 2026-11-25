@@ -44,6 +44,7 @@ final class PanelController {
   let systemConditions: SystemConditionState
   let hotKeys: HotKeyPreferences
   let collections: WallpaperCollectionStore
+  let metadata: WallpaperMetadataStore
   let presets: WallpaperPresetStore
   let backup: WallpaperBackupStore
   /// Where the library and the downloads are kept, and a move of them (Settings › Storage).
@@ -273,6 +274,7 @@ final class PanelController {
     playlists: PlaylistStore? = nil,
     hotKeys: HotKeyPreferences? = nil,
     collections: WallpaperCollectionStore? = nil,
+    metadata: WallpaperMetadataStore? = nil,
     presets: WallpaperPresetStore? = nil,
     backup: WallpaperBackupStore? = nil,
     libraryLocation: StorageLocationStore? = nil,
@@ -297,6 +299,7 @@ final class PanelController {
     let playlists = playlists ?? .shared
     let hotKeys = hotKeys ?? .shared
     let collections = collections ?? .shared
+    let metadata = metadata ?? .shared
     let presets = presets ?? .shared
     let imagePlacement = imagePlacement ?? .shared
     let automations = automations ?? WallpaperAutomationStore(defaults: defaults)
@@ -326,6 +329,7 @@ final class PanelController {
     self.systemConditions = systemConditions
     self.hotKeys = hotKeys
     self.collections = collections
+    self.metadata = metadata
     self.presets = presets
     self.backup = backup ?? WallpaperBackupStore(defaults: defaults)
     self.libraryLocation = libraryLocation ?? StorageLocationStore()
@@ -354,9 +358,9 @@ final class PanelController {
       report: { errors.report($0) }, succeeded: { errors.reconcile() })
     self.revisions = PanelStoreRevisions(
       playback: playback, hotKeys: hotKeys, playlists: playlists, collections: collections,
-      presets: presets, imagePlacement: imagePlacement, automations: automations,
-      displayLayouts: displayLayouts, spaces: spaces, conditions: systemConditions, theme: theme,
-      appLanguage: appLanguage, navigation: navigation)
+      metadata: metadata, presets: presets, imagePlacement: imagePlacement,
+      automations: automations, displayLayouts: displayLayouts, spaces: spaces,
+      conditions: systemConditions, theme: theme, appLanguage: appLanguage, navigation: navigation)
     self.chooseApplication = chooseApplication
     welcomeSeen = PanelPreferences.welcomeSeen(in: defaults)
     dragSelectLearned = PanelPreferences.dragSelectLearned(in: defaults)

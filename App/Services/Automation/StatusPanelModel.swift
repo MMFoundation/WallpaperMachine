@@ -59,6 +59,7 @@ enum StatusPanelModel {
             case favorites
             case list(count: Int)
             case collection(name: String)
+            case smart
             case missingCollection
         }
 
@@ -267,6 +268,8 @@ enum StatusPanelModel {
                     } else {
                         .missingCollection
                     }
+                case .smart:
+                    .smart
                 }
             return PlaylistBadge(kind: .rotate(source: source, order: playlist.order), isPaused: isHeld)
         }

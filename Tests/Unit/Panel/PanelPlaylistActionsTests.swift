@@ -573,4 +573,54 @@ final class PanelPlaylistActionsTests: PanelTestCase {
     XCTAssertEqual(asked, 1)
   }
 
+  func testSmartPlaylistSkipRecentWeightedShuffleAndSleepTimerActions() async throws {
+    let panel = try makePanel()
+    defer { Task { await panel.shutdown() } }
+    let controller = panel.controller
+
+    try await controller.editPlaylist(.mode(.rotate), display: "primary")
+    try await controller.editPlaylist(.order(.shuffle), display: "primary")
+    try await controller.editPlaylist(.preferHigherRated(true), display: "primary")
+    try await controller.editPlaylist(.skipRecentDays(7), display: "primary")
+    XCTAssertTrue(panel.playlists.playlist(for: "primary").preferHigherRated)
+    XCTAssertEqual(panel.playlists.playlist(for: "primary").skipRecentDays, 7)
+
+    do {
+      try await controller.editPlaylist(.skipRecentDays(99), display: "primary")
+      XCTFail("unoffered skipRecentDays must be refused")
+    } catch is InvalidControlValue {}
+
+    // Live candidate count reflects user metadata (rating, custom tags, exclusion) in memory.
+    try await controller.setWallpaperRating(5, for: "a")
+    try await controller.addWallpaperTag("Night", to: "a")
+    try await controller.setWallpaperNote("Calm scene", for: "a")
+    XCTAssertEqual(controller.wallpaperMetadata(for: "a"), WallpaperMetadata(customTags: ["Night"], rating: 5, note: "Calm scene"))
+
+    let query = SmartPlaylistQuery(requiredTags: ["Night"], minimumRating: 4)
+    try await controller.editPlaylist(.smartQuery(query), display: "primary")
+    XCTAssertEqual(panel.playlists.playlist(for: "primary").source, .smart)
+    XCTAssertEqual(controller.playlistState(for: "primary").smartCandidateCount, 1)
+    XCTAssertTrue(controller.canPlay(.smart))
+
+    // Excluding "a" drops smart candidate count to 0 and hides it from Random Wallpaper.
+    try await controller.setWallpaperExcludedFromRotation(true, for: "a")
+    XCTAssertEqual(controller.playlistState(for: "primary").smartCandidateCount, 0)
+    XCTAssertFalse(controller.canPlay(.smart))
+
+    // Sleep timer arms and cancels cleanly, refusing unoffered durations.
+    XCTAssertNil(controller.sleepTimerEnd)
+    try await controller.setSleepTimer(minutes: 30)
+    XCTAssertNotNil(controller.sleepTimerEnd)
+    try await controller.setSleepTimer(minutes: nil)
+    XCTAssertNil(controller.sleepTimerEnd)
+    do {
+      try await controller.setSleepTimer(minutes: 45)
+      XCTFail("unoffered sleep timer preset must be refused")
+    } catch is InvalidControlValue {}
+
+    // Deleting a wallpaper forgets its user metadata.
+    try await controller.forgetLibraryMetadata(["a"])
+    XCTAssertTrue(panel.metadata.metadata(for: "a").isEmpty)
+  }
+
 }

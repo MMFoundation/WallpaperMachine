@@ -88,6 +88,7 @@ extension PanelController {
     store.history.forget(Set(ids))
     workshop.updates.forget(ids)
     do { try collections.forget(ids) } catch { firstError = firstError ?? error }
+    metadata.forget(ids)
     do { try await presets.forget(wallpaperIDs: ids) } catch { firstError = firstError ?? error }
     do { try imagePlacement.forget(Set(ids)) } catch { firstError = firstError ?? error }
     if let firstError { throw firstError }

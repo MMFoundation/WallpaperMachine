@@ -108,7 +108,7 @@ struct WallpaperBackupPreferences: Sendable {
     static let localRecoveryKeys: Set<String> = [WallpaperAutomationStore.handledKey, WallpaperAutomationStore.focusRestoreKey, WallpaperSpaceMonitor.visitsKey]
     /// Each key is its owner's constant.
     static let allowedKeys: Set<String> = [
-        WallpaperCollectionStore.storageKey, PlaylistStore.plansKey,
+        WallpaperCollectionStore.storageKey, WallpaperMetadataStore.storageKey, PlaylistStore.plansKey,
         WallpaperPresetStore.preferenceKey, StillImagePlacementStore.storageKey,
         PlaylistStore.playlistsKey, PlaylistStore.nextChangeKey,
         WallpaperAutomationStore.configurationsKey, WallpaperAutomationStore.locationKey,
@@ -180,12 +180,62 @@ struct WallpaperBackupPreferences: Sendable {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 128,
                   !text.contains(where: { $0.isNewline || $0 == "\0" }) else { throw invalid() }
         }
+        func validateTags(_ tags: [String], maximumCount: Int, maximumLength: Int) throws {
+            guard tags.count <= maximumCount else { throw invalid() }
+            var seen = Set<String>()
+            for tag in tags {
+                let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, trimmed.count <= maximumLength,
+                      !trimmed.contains(where: { $0.isNewline || $0 == "\0" }),
+                      seen.insert(trimmed.lowercased()).inserted else { throw invalid() }
+            }
+        }
+        func validateSmartQuery(_ item: Any) throws {
+            if item is NSNull { return }
+            guard let query = item as? [String: Any] else { throw invalid() }
+            let allowed: Set<String> = [
+                "requiredTags", "excludedTags", "types", "minimumRating", "maximumEnergy",
+                "favoritesOnly", "excludeMature",
+            ]
+            guard Set(query.keys).isSubset(of: allowed) else { throw invalid() }
+            for (key, value) in query {
+                switch key {
+                case "requiredTags", "excludedTags":
+                    guard let tags = value as? [String] else { throw invalid() }
+                    try validateTags(tags, maximumCount: SmartPlaylistQuery.maximumTags,
+                                     maximumLength: SmartPlaylistQuery.maximumTagLength)
+                case "types":
+                    guard let types = value as? [String] else { throw invalid() }
+                    var seen = Set<String>()
+                    for raw in types {
+                        guard SmartWallpaperType(rawValue: raw) != nil, seen.insert(raw).inserted else { throw invalid() }
+                    }
+                case "minimumRating":
+                    if value is NSNull { continue }
+                    guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                          number.doubleValue == Double(number.intValue),
+                          WallpaperMetadata.ratingRange.contains(number.intValue) else { throw invalid() }
+                case "maximumEnergy":
+                    if value is NSNull { continue }
+                    guard let raw = value as? String, EnergyLevel(rawValue: raw) != nil else { throw invalid() }
+                case "favoritesOnly", "excludeMature":
+                    guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else { throw invalid() }
+                default:
+                    throw invalid()
+                }
+            }
+        }
         func playlists(_ json: Any) throws {
             guard let records = json as? [String: Any] else { throw invalid() }
             for (display, record) in records {
                 try identities([display])
                 guard let record = record as? [String: Any] else { throw invalid() }
-                let allowed: Set<String> = ["mode", "source", "order", "trigger", "interval", "waitsForClipEnd", "wallpaperIDs", "collectionID", "planID", "dayWallpaperID", "nightWallpaperID", "dayStart", "nightStart"]
+                let allowed: Set<String> = [
+                    "mode", "source", "order", "trigger", "interval", "waitsForClipEnd",
+                    "skipRecentDays", "preferHigherRated", "smartQuery",
+                    "wallpaperIDs", "collectionID", "planID", "dayWallpaperID", "nightWallpaperID",
+                    "dayStart", "nightStart",
+                ]
                 guard Set(record.keys).isSubset(of: allowed) else { throw invalid() }
                 for (key, item) in record {
                     switch key {
@@ -193,8 +243,14 @@ struct WallpaperBackupPreferences: Sendable {
                     case "source": guard let raw = item as? String, PlaylistSource(rawValue: raw) != nil else { throw invalid() }
                     case "order": guard let raw = item as? String, PlaylistOrder(rawValue: raw) != nil else { throw invalid() }
                     case "trigger": guard let raw = item as? String, PlaylistTrigger(rawValue: raw) != nil else { throw invalid() }
-                    case "waitsForClipEnd":
+                    case "waitsForClipEnd", "preferHigherRated":
                         guard let flag = item as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else { throw invalid() }
+                    case "skipRecentDays":
+                        guard let number = item as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                              number.doubleValue == Double(number.intValue),
+                              DisplayPlaylist.skipRecentDayRange.contains(number.intValue) else { throw invalid() }
+                    case "smartQuery":
+                        try validateSmartQuery(item)
                     case "interval", "dayStart", "nightStart":
                         guard let number = item as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
                               number.doubleValue == Double(number.intValue),
@@ -222,6 +278,37 @@ struct WallpaperBackupPreferences: Sendable {
             let records = try JSONDecoder().decode([WallpaperCollection].self, from: data())
             try identities(records.map(\.id))
             for record in records { try name(record.name); try identities(record.wallpaperIDs) }
+        case WallpaperMetadataStore.storageKey:
+            let bytes = try data()
+            _ = try JSONDecoder().decode([String: WallpaperMetadata].self, from: bytes)
+            guard let records = try JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { throw invalid() }
+            for (wallpaperID, raw) in records {
+                try identities([wallpaperID])
+                guard let record = raw as? [String: Any] else { throw invalid() }
+                let allowed: Set<String> = ["customTags", "rating", "note", "excludedFromRotation"]
+                guard Set(record.keys).isSubset(of: allowed) else { throw invalid() }
+                for (field, item) in record {
+                    switch field {
+                    case "customTags":
+                        guard let tags = item as? [String] else { throw invalid() }
+                        try validateTags(tags, maximumCount: WallpaperMetadata.maximumTagsPerWallpaper,
+                                         maximumLength: WallpaperMetadata.maximumTagLength)
+                    case "rating":
+                        if item is NSNull { continue }
+                        guard let number = item as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                              number.doubleValue == Double(number.intValue),
+                              WallpaperMetadata.ratingRange.contains(number.intValue) else { throw invalid() }
+                    case "note":
+                        if item is NSNull { continue }
+                        guard let text = item as? String, !text.contains("\0"),
+                              text.count <= WallpaperMetadata.maximumNoteLength else { throw invalid() }
+                    case "excludedFromRotation":
+                        guard let flag = item as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else { throw invalid() }
+                    default:
+                        throw invalid()
+                    }
+                }
+            }
         case PlaylistStore.plansKey:
             let bytes = try data()
             let records = try JSONDecoder().decode([PlaylistPlan].self, from: bytes)

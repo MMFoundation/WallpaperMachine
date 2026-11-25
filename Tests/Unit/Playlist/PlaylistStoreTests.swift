@@ -626,6 +626,52 @@ final class PlaylistStoreTests: XCTestCase {
         XCTAssertEqual(store.plans, [plan])
         XCTAssertEqual(PlaylistStore(defaults: defaults).plans, [plan])
     }
+
+    func testChangingSmartQueryClearsShuffleRoundAndUpdatesSavedSignature() {
+        let store = PlaylistStore(defaults: defaults)
+        store.update("primary") {
+            $0.mode = .rotate
+            $0.source = .smart
+            $0.order = .shuffle
+            $0.smartQuery = SmartPlaylistQuery(requiredTags: ["Calm"])
+        }
+        store.recordPick("a", on: "primary", candidates: ["a", "b"])
+        XCTAssertEqual(PlaylistStore(defaults: defaults).recent["primary"], ["a"])
+
+        store.update("primary") {
+            $0.smartQuery = SmartPlaylistQuery(requiredTags: ["Energetic"])
+        }
+        XCTAssertNil(store.recent["primary"])
+        XCTAssertNil(PlaylistStore(defaults: defaults).recent["primary"])
+    }
+
+    func testSleepTimerSetsDeadlinePostsDedicatedNotificationAndIsSessionOnly() {
+        var now = Date(timeIntervalSince1970: 1_800_000_000)
+        let store = PlaylistStore(defaults: defaults, now: { now })
+        let playlistPosts = PostCount()
+        let sleepPosts = PostCount()
+        let t1 = NotificationCenter.default.addObserver(forName: PlaylistStore.didChangeNotification, object: store, queue: nil) { _ in
+            playlistPosts.value += 1
+        }
+        let t2 = NotificationCenter.default.addObserver(forName: PlaylistStore.sleepTimerDidChangeNotification, object: store, queue: nil) { _ in
+            sleepPosts.value += 1
+        }
+        defer {
+            NotificationCenter.default.removeObserver(t1)
+            NotificationCenter.default.removeObserver(t2)
+        }
+
+        store.setSleepTimer(minutes: 30)
+        XCTAssertEqual(store.sleepTimerEnd, now.addingTimeInterval(30 * 60))
+        XCTAssertEqual(sleepPosts.value, 1)
+        XCTAssertEqual(playlistPosts.value, 0, "sleep timer never triggers a playlist rotation change")
+        XCTAssertNil(PlaylistStore(defaults: defaults).sleepTimerEnd, "sleep timer is session-only")
+
+        now.addTimeInterval(60)
+        store.setSleepTimer(minutes: nil)
+        XCTAssertNil(store.sleepTimerEnd)
+        XCTAssertEqual(sleepPosts.value, 2)
+    }
 }
 
 private final class PostCount: @unchecked Sendable {

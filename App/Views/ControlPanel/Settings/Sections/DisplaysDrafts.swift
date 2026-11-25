@@ -353,6 +353,8 @@ enum DisplaysPlanSummary {
         } else {
           source = L("A collection that no longer exists")
         }
+      case .smart:
+        source = L("Smart playlist")
       }
       let order = playlist.order == .shuffle ? L("Shuffle") : L("In order")
       let interval = IntervalChoice.current(for: playlist).title.lowercased(

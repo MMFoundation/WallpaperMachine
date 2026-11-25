@@ -59,14 +59,49 @@ struct DisplaysSettingsSection: View {
   static let playlistSource = SettingsItem(
     id: "displays.playlist-source", section: .displays, inside: playlist, title: "Wallpapers",
     keywords: [
-      "All wallpapers", "Favorites", "This display’s list (\(0))", "Collections",
+      "All wallpapers", "Favorites", "This display’s list (\(0))", "Smart playlist", "Collections",
       "A collection that no longer exists",
       "The collection this rotation used was deleted, so it plays nothing until you choose another source.",
       "Collections you make in Installed appear here too.",
     ])
+  static let playlistSmartTypes = SettingsItem(
+    id: "displays.playlist-smart-types", section: .displays, inside: playlist, title: "Types",
+    note: "Leave all unselected to include every wallpaper type.",
+    keywords: ["Scene", "Video", "Web", "Still image"])
+  static let playlistSmartRequiredTags = SettingsItem(
+    id: "displays.playlist-smart-required-tags", section: .displays, inside: playlist,
+    title: "Must have tags",
+    note: "Matches both wallpaper tags and your custom tags.")
+  static let playlistSmartExcludedTags = SettingsItem(
+    id: "displays.playlist-smart-excluded-tags", section: .displays, inside: playlist,
+    title: "Exclude tags")
+  static let playlistSmartRating = SettingsItem(
+    id: "displays.playlist-smart-rating", section: .displays, inside: playlist,
+    title: "Minimum rating",
+    keywords: ["Any", "At least 1 star", "5 stars"])
+  static let playlistSmartEnergy = SettingsItem(
+    id: "displays.playlist-smart-energy", section: .displays, inside: playlist,
+    title: "Maximum energy",
+    note: "Only wallpapers with a recorded energy rating match an energy limit.",
+    keywords: ["Any", "Low only", "Low & Medium"])
+  static let playlistSmartFavorites = SettingsItem(
+    id: "displays.playlist-smart-favorites", section: .displays, inside: playlist,
+    title: "Favorites only")
+  static let playlistSmartExcludeMature = SettingsItem(
+    id: "displays.playlist-smart-exclude-mature", section: .displays, inside: playlist,
+    title: "Exclude mature")
   static let playlistOrder = SettingsItem(
     id: "displays.playlist-order", section: .displays, inside: playlist, title: "Order",
     keywords: ["In order", "Shuffle"])
+  static let playlistPreferHigherRated = SettingsItem(
+    id: "displays.playlist-prefer-higher-rated", section: .displays, inside: playlist,
+    title: "Prefer higher-rated wallpapers",
+    note: "Pick 4- and 5-star wallpapers more often when shuffling.")
+  static let playlistSkipRecent = SettingsItem(
+    id: "displays.playlist-skip-recent", section: .displays, inside: playlist,
+    title: "Skip recently used",
+    note: "Avoid wallpapers shown within this period. If all candidates were used recently, the full pool is used.",
+    keywords: ["Off", "1 day", "\(3) days", "\(7) days", "\(30) days"])
   static let playlistInterval = SettingsItem(
     id: "displays.playlist-interval", section: .displays, inside: playlist, title: "How often",
     keywords: [
@@ -239,7 +274,10 @@ struct DisplaysSettingsSection: View {
   /// The page's order.
   static let items: [SettingsItem] = [
     refresh, enable, mode, mirrorSource, wallpaper, desktops,
-    playlist, playlistMode, playlistHeld, playlistSource, playlistOrder, playlistInterval,
+    playlist, playlistMode, playlistHeld, playlistSource,
+    playlistSmartTypes, playlistSmartRequiredTags, playlistSmartExcludedTags,
+    playlistSmartRating, playlistSmartEnergy, playlistSmartFavorites, playlistSmartExcludeMature,
+    playlistOrder, playlistPreferHigherRated, playlistSkipRecent, playlistInterval,
     playlistCustom, playlistClipEnd, playlistNext, playlistList, playlistSkipped, playlistDay, playlistDayStart,
     playlistNight, playlistNightStart, playlistSwitch, playlistPlan,
     transfer, transferPeer,

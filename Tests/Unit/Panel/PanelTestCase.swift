@@ -367,6 +367,7 @@ final class PanelFixture {
   /// The condition rules engaged, as the app's monitor would publish them; empty until a test sets it.
   let systemConditions = SystemConditionState()
   let collections: WallpaperCollectionStore
+  let metadata: WallpaperMetadataStore
   let presets: WallpaperPresetStore
   let backup: WallpaperBackupStore
   let imagePlacement: StillImagePlacementStore
@@ -456,6 +457,7 @@ final class PanelFixture {
     automations = WallpaperAutomationStore(defaults: defaults)
     self.spaces = spaces ?? WallpaperSpaceMonitor()
     collections = WallpaperCollectionStore(defaults: defaults)
+    metadata = WallpaperMetadataStore(defaults: defaults)
     presets = WallpaperPresetStore(
       defaults: defaults, managed: ManagedUserAssetStore(root: root.appendingPathComponent("UserAssets")))
     let pickers = self.pickers
@@ -489,7 +491,8 @@ final class PanelFixture {
         libraryRoot: { library }),
       dialogs: dialogs,
       appLanguage: language, playback: PlaybackPreferences(defaults: defaults), playlists: playlists,
-      hotKeys: HotKeyPreferences(defaults: defaults), collections: collections, presets: presets,
+      hotKeys: HotKeyPreferences(defaults: defaults), collections: collections, metadata: metadata,
+      presets: presets,
       backup: backup, imagePlacement: imagePlacement, compatibility: compatibility, letterbox: letterbox,
       automations: automations, solarLocationTracker: solarLocationTracker,
       spaces: self.spaces, systemConditions: systemConditions,

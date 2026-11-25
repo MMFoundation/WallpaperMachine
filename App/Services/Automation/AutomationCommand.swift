@@ -45,11 +45,19 @@ enum AutomationCommand: Equatable, Sendable {
         case all, favorites
 
         /// The wallpapers a pick may be, in `library` order: those that can play, narrowed to
-        /// the favorites for `.favorites`, and never one the app is holding back after a crash.
-        /// Picking is the user's own choice, which would release that hold, so a roll of the
+        /// the favorites for `.favorites`, never one the app is holding back after a crash, and
+        /// never one the user excluded from rotation and Random Wallpaper.
+        /// Picking is the user's own choice, which would release a crash hold, so a roll of the
         /// dice must not be able to reopen the wallpaper that killed the app.
-        func candidates(library: [String], favorites: Set<String>, held: Set<String>) -> [String] {
-            library.filter { !held.contains($0) && (self == .all || favorites.contains($0)) }
+        func candidates(
+            library: [String], favorites: Set<String>, held: Set<String>,
+            excluded: Set<String> = []
+        ) -> [String] {
+            library.filter { id in
+                !held.contains(id)
+                    && !excluded.contains(id)
+                    && (self == .all || favorites.contains(id))
+            }
         }
     }
 

@@ -128,6 +128,7 @@ private struct DisplaysRotateRows: View {
         Text("All wallpapers").tag(PlaylistSourceChoice.all)
         Text("Favorites").tag(PlaylistSourceChoice.favorites)
         Text("This display’s list (\(state.listedCount))").tag(PlaylistSourceChoice.list)
+        Text("Smart playlist").tag(PlaylistSourceChoice.smart)
         if !collections.isEmpty {
           Section("Collections") {
             ForEach(collections) {
@@ -140,6 +141,10 @@ private struct DisplaysRotateRows: View {
         }
       }
       .disabled(off)
+    }
+
+    if playlist.source == .smart {
+      DisplaysSmartPlaylistRows(display: display, state: state, off: off, forced: forced)
     }
 
     DisplaysRow(
@@ -155,6 +160,44 @@ private struct DisplaysRotateRows: View {
       ) {
         Text("In order").tag(PlaylistOrder.sequential)
         Text("Shuffle").tag(PlaylistOrder.shuffle)
+      }
+      .disabled(off)
+    }
+
+    if playlist.order == .shuffle {
+      DisplaysRow(
+        item: DisplaysSettingsSection.playlistPreferHigherRated, forced: forced, identity: display.id,
+        controlLabel: name(DisplaysSettingsSection.playlistPreferHigherRated.title)
+      ) {
+        Toggle(
+          noLabel,
+          isOn: model.binding(
+            PanelActionCoordinator.key("playlistSetting", id: display.id, detail: "preferHigherRated"),
+            current: playlist.preferHigherRated
+          ) { prefer in try await controller.editPlaylist(.preferHigherRated(prefer), display: display.id) }
+        )
+        .toggleStyle(.switch)
+        .labelsHidden()
+        .disabled(off)
+      }
+    }
+
+    DisplaysRow(
+      item: DisplaysSettingsSection.playlistSkipRecent, forced: forced, identity: display.id,
+      controlLabel: name(DisplaysSettingsSection.playlistSkipRecent.title)
+    ) {
+      let skipRecent = model.binding(
+        PanelActionCoordinator.key("playlistSetting", id: display.id, detail: "skipRecentDays"),
+        current: playlist.skipRecentDays
+      ) { days in try await controller.editPlaylist(.skipRecentDays(days), display: display.id) }
+      DisplaysTitleMenu(
+        selection: skipRecent,
+        title: SkipRecentChoice.title(days: skipRecent.wrappedValue),
+        width: 140
+      ) {
+        ForEach(SkipRecentChoice.presets, id: \.self) { days in
+          Text(verbatim: SkipRecentChoice.title(days: days)).tag(days)
+        }
       }
       .disabled(off)
     }
@@ -241,8 +284,16 @@ private struct DisplaysRotateRows: View {
     }
   }
 
-  /// Why a source may read as it does: its collection is gone, or there are none to choose from.
+  /// Why a source may read as it does: its collection is gone, its Smart Query match count, or
+  /// there are no collections to choose from.
   private func sourceNote(_ collections: [CollectionRow]) -> String {
+    if state.source == .smart {
+      switch state.smartCandidateCount {
+      case 0: return L("No installed wallpapers match these rules.")
+      case 1: return L("Matches 1 wallpaper.")
+      case let count: return L("Matches \(count) wallpapers.")
+      }
+    }
     if state.source == .missingCollection {
       return L(
         "The collection this rotation used was deleted, so it plays nothing until you choose another source."

@@ -84,7 +84,40 @@ final class PlaylistEditTests: XCTestCase {
     XCTAssertEqual(PlaylistSourceChoice.favorites.edit, .source(.favorites))
     XCTAssertEqual(PlaylistSourceChoice.list.edit, .source(.list))
     XCTAssertEqual(PlaylistSourceChoice.collection(id: "night").edit, .collection(id: "night"))
+    XCTAssertEqual(PlaylistSourceChoice.smart.edit, .source(.smart))
     XCTAssertNil(PlaylistSourceChoice.missingCollection.edit, "choosing the row that stands for a deleted collection changes nothing")
+
+    playlist.source = .smart
+    XCTAssertEqual(PlaylistSourceChoice.current(for: playlist, collectionExists: exists), .smart)
+  }
+
+  func testSkipRecentSleepTimerAndSmartFormattingCoverAllPresets() {
+    XCTAssertEqual(SkipRecentChoice.presets, [0, 1, 3, 7, 30])
+    XCTAssertEqual(SkipRecentChoice.title(days: 0), L("Off"))
+    XCTAssertEqual(SkipRecentChoice.title(days: 1), L("1 day"))
+    XCTAssertEqual(SkipRecentChoice.title(days: 7), L("\(7) days"))
+
+    XCTAssertEqual(SleepTimerChoice.presets, [15, 30, 60, 120])
+    XCTAssertEqual(SleepTimerChoice.title(minutes: 15), L("\(15) minutes"))
+    XCTAssertEqual(SleepTimerChoice.title(minutes: 60), L("1 hour"))
+    XCTAssertEqual(SleepTimerChoice.title(minutes: 120), L("\(2) hours"))
+
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    XCTAssertEqual(SleepTimerChoice.remainingText(until: now.addingTimeInterval(25), now: now), L("Pauses in 1 minute"))
+    XCTAssertEqual(SleepTimerChoice.remainingText(until: now.addingTimeInterval(15 * 60), now: now), L("Pauses in \(15) minutes"))
+    XCTAssertEqual(SleepTimerChoice.remainingText(until: now.addingTimeInterval(60 * 60), now: now), L("Pauses in 1 hour"))
+    XCTAssertEqual(SleepTimerChoice.remainingText(until: now.addingTimeInterval(90 * 60), now: now), L("Pauses in \(1) hr \(30) min"))
+
+    XCTAssertEqual(SmartPlaylistFormatting.typeTitle(.still), L("Still image"))
+    XCTAssertEqual(SmartPlaylistFormatting.minimumRatingTitle(nil), L("Any"))
+    XCTAssertEqual(SmartPlaylistFormatting.minimumRatingTitle(1), L("At least 1 star"))
+    XCTAssertEqual(SmartPlaylistFormatting.minimumRatingTitle(4), L("At least \(4) stars"))
+    XCTAssertEqual(SmartPlaylistFormatting.minimumRatingTitle(5), L("5 stars"))
+    XCTAssertEqual(SmartPlaylistFormatting.maximumEnergyTitle(.low), L("Low only"))
+    XCTAssertEqual(SmartPlaylistFormatting.maximumEnergyTitle(.medium), L("Low & Medium"))
+
+    XCTAssertFalse(InspectorPolicy.metadataOpenByDefault(WallpaperMetadata()))
+    XCTAssertTrue(InspectorPolicy.metadataOpenByDefault(WallpaperMetadata(rating: 5)))
   }
 
   func testAWallpaperIsPutBeforeOrAfterTheOneItLandedOn() {

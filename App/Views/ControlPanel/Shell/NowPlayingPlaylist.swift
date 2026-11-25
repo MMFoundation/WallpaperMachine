@@ -10,11 +10,15 @@ struct NowPlayingPlaylistButton: View {
   var body: some View {
     let shell = controller.shell
     let rotation = NowPlayingRotation(controller: controller)
+    let hasSleepTimer = controller.sleepTimerEnd != nil
+    let isLit = rotation != nil || hasSleepTimer
+    let symbol = rotation?.systemImage ?? (hasSleepTimer ? "moon.zzz" : "repeat")
+    let label = rotation.map { L("Playlist: \($0.title)") } ?? (hasSleepTimer ? L("Sleep timer") : L("Playlist"))
     NowPlayingControl(
-      systemImage: rotation?.systemImage ?? "repeat",
-      label: rotation.map { L("Playlist: \($0.title)") } ?? L("Playlist"),
+      systemImage: symbol,
+      label: label,
       isEnabled: controller.targetDisplay?.isSelectable == true,
-      tint: rotation == nil ? nil : theme.accent.accent.color,
+      tint: isLit ? theme.accent.accent.color : nil,
       identifier: "now-playing-playlist"
     ) {
       let isOpen = shell.activePopover == .playlist
@@ -67,6 +71,9 @@ struct NowPlayingPlaylistDetails: View {
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.panelIsVisible) private var isVisible
+  /// Updated every 30 seconds only while this popover is visible and a sleep timer is running.
+  @State private var sleepTimerNow = Date()
 
   /// The source starting rotation from the popover plays: the display's saved source when it still
   /// has a playable wallpaper, otherwise All wallpapers.
@@ -106,6 +113,8 @@ struct NowPlayingPlaylistDetails: View {
         .font(.system(size: 12))
         .foregroundStyle(theme.surface.muted.color)
         .fixedSize(horizontal: false, vertical: true)
+      Divider()
+      sleepTimerRow(isDisabled: isDisabled)
       HStack(spacing: 8) {
         if state.playlist.mode == .off {
           Button {
@@ -165,6 +174,88 @@ struct NowPlayingPlaylistDetails: View {
     .frame(width: Self.width, alignment: .leading)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("now-playing-playlist-popover")
+    .task(id: sleepTimerTaskKey) {
+      guard isVisible, controller.sleepTimerEnd != nil else { return }
+      sleepTimerNow = Date()
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(30)) } catch { break }
+        guard !Task.isCancelled else { break }
+        sleepTimerNow = Date()
+      }
+    }
+  }
+
+  private struct SleepTimerTaskKey: Equatable {
+    let visible: Bool
+    let end: Date?
+  }
+
+  private var sleepTimerTaskKey: SleepTimerTaskKey {
+    SleepTimerTaskKey(visible: isVisible, end: controller.sleepTimerEnd)
+  }
+
+  private func sleepTimerRow(isDisabled: Bool) -> some View {
+    let sleepKey = PanelActionCoordinator.key("sleepTimer")
+    let end = controller.sleepTimerEnd
+    return VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 8) {
+        Label("Sleep timer", systemImage: "moon.zzz")
+          .font(.panel(.callout))
+          .foregroundStyle(theme.surface.muted.color)
+          .lineLimit(1)
+        Spacer(minLength: 8)
+        if end != nil {
+          Button("Cancel") {
+            controller.launch(sleepKey, policy: .latestWins) { [controller] in
+              try await controller.setSleepTimer(minutes: nil)
+            }
+          }
+          .buttonStyle(.panelSecondary(size: .compact))
+          .disabled(isDisabled || controller.isBusy(sleepKey))
+          .accessibilityIdentifier("now-playing-playlist-sleep-timer-cancel")
+        } else {
+          Menu {
+            Toggle(isOn: .constant(true)) {
+              Text("Off")
+            }
+            .disabled(true)
+            Divider()
+            ForEach(SleepTimerChoice.presets, id: \.self) { minutes in
+              Button {
+                sleepTimerNow = Date()
+                controller.launch(sleepKey, policy: .latestWins) { [controller] in
+                  try await controller.setSleepTimer(minutes: minutes)
+                }
+              } label: {
+                Text(verbatim: SleepTimerChoice.title(minutes: minutes))
+              }
+            }
+          } label: {
+            HStack(spacing: 4) {
+              Text("Off")
+                .lineLimit(1)
+              Image(systemName: "chevron.down")
+                .font(.panel(.mark))
+                .accessibilityHidden(true)
+            }
+          }
+          .menuStyle(.button)
+          .menuIndicator(.hidden)
+          .buttonStyle(.panelCapsule)
+          .disabled(isDisabled || controller.isBusy(sleepKey))
+          .accessibilityLabel(Text("Sleep timer"))
+          .accessibilityValue(Text("Off"))
+          .accessibilityIdentifier("now-playing-playlist-sleep-timer")
+        }
+      }
+      if let end {
+        Text(verbatim: SleepTimerChoice.remainingText(until: end, now: sleepTimerNow))
+          .font(.panel(.caption))
+          .foregroundStyle(theme.surface.text.color)
+          .lineLimit(2)
+          .accessibilityIdentifier("now-playing-playlist-sleep-timer-remaining")
+      }
+    }
   }
 
   /// Inline Order (In order / Shuffle) and How often interval controls for rotation.

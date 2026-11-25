@@ -37,6 +37,7 @@ final class PlaylistScheduler {
 
     private let store: PlaylistStore
     private let collections: WallpaperCollectionStore
+    private let metadata: WallpaperMetadataStore
     private let displays: @MainActor () -> [String]
     private let library: @MainActor () -> [String]
     private let favorites: @MainActor () -> Set<String>
@@ -50,10 +51,26 @@ final class PlaylistScheduler {
     private let calendar: Calendar
     private let center: NotificationCenter
     private let sleep: @Sendable (TimeInterval) async throws -> Void
+    private let sleepTimerSleep: @Sendable (TimeInterval) async throws -> Void
+    private let lastUsedDates: @MainActor () -> [String: Date]
+    private let wallpaperKinds: @MainActor () -> [String: BridgeWallpaperKind]
+    private let energyLevel: @MainActor (String, BridgeWallpaperKind) -> EnergyLevel?
+    private let isPlaybackPaused: @MainActor () -> Bool
+    private let manifestCache: SmartPlaylistManifestCache
+    private let manifestTagsProvider: (@Sendable ([String]) async -> [String: [String]])?
+    private let pausePlayback: @MainActor () async throws -> Void
 
     private var observers: [NSObjectProtocol] = []
     private var timer: Task<Void, Never>?
     private var armedFor: Date?
+    /// Single one-shot sleep timer task; zero background polling.
+    private var sleepTimerTask: Task<Void, Never>?
+    private var armedSleepTimerFor: Date?
+    private var lastPlaybackPaused: Bool?
+    /// On-demand off-main-actor manifest tag read for Smart Playlists when the panel never opened.
+    private var manifestWarmTask: Task<Void, Never>?
+    private var injectedManifestTags: [String: [String]] = [:]
+    private var injectedManifestLoaded = false
     private var inFlight = Set<String>()
     private var recoveringDeletions = Set<String>()
     /// Displays someone asked to move along while the timer's own change was waiting its turn:
@@ -136,10 +153,22 @@ final class PlaylistScheduler {
         // during sleep happens on wake rather than an interval of awake time later.
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { seconds in
             try await Task.sleep(for: .seconds(max(0, seconds)))
-        }
+        },
+        metadata: WallpaperMetadataStore? = nil,
+        lastUsedDates: @escaping @MainActor () -> [String: Date] = { [:] },
+        wallpaperKinds: @escaping @MainActor () -> [String: BridgeWallpaperKind] = { [:] },
+        energyLevel: @escaping @MainActor (String, BridgeWallpaperKind) -> EnergyLevel? = { _, _ in nil },
+        libraryURL: URL = ClientPaths.libraryURL,
+        manifestTagsProvider: (@Sendable ([String]) async -> [String: [String]])? = nil,
+        pausePlayback: @escaping @MainActor () async throws -> Void = {
+            try await AppAutomation.shared.perform(.pause)
+        },
+        sleepTimerSleep: (@Sendable (TimeInterval) async throws -> Void)? = nil,
+        isPlaybackPaused: @escaping @MainActor () -> Bool = { false }
     ) {
         self.store = store
         self.collections = collections
+        self.metadata = metadata ?? .shared
         self.displays = displays
         self.library = library
         self.favorites = favorites
@@ -153,13 +182,23 @@ final class PlaylistScheduler {
         self.calendar = calendar
         self.center = center
         self.sleep = sleep
+        self.sleepTimerSleep = sleepTimerSleep ?? sleep
+        self.lastUsedDates = lastUsedDates
+        self.wallpaperKinds = wallpaperKinds
+        self.energyLevel = energyLevel
+        self.isPlaybackPaused = isPlaybackPaused
+        self.manifestCache = SmartPlaylistManifestCache(libraryURL: libraryURL)
+        self.manifestTagsProvider = manifestTagsProvider
+        self.pausePlayback = pausePlayback
     }
 
     func start() {
         guard observers.isEmpty else {
             evaluate()
+            reconcileSleepTimer()
             return
         }
+        lastPlaybackPaused = isPlaybackPaused()
         // A clock or time-zone change moves every day and night boundary; the store changes when
         // the user edits a playlist or a change is dated.
         let names: [(Notification.Name, AnyObject?)] = [
@@ -173,7 +212,14 @@ final class PlaylistScheduler {
                 MainActor.assumeIsolated { self?.evaluate() }
             })
         }
+        observers.append(
+            center.addObserver(forName: PlaylistStore.sleepTimerDidChangeNotification, object: store, queue: .main) {
+                [weak self] _ in
+                MainActor.assumeIsolated { self?.reconcileSleepTimer() }
+            }
+        )
         evaluate()
+        reconcileSleepTimer()
     }
 
     func stop() {
@@ -182,6 +228,12 @@ final class PlaylistScheduler {
         timer?.cancel()
         timer = nil
         armedFor = nil
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        armedSleepTimerFor = nil
+        lastPlaybackPaused = nil
+        manifestWarmTask?.cancel()
+        manifestWarmTask = nil
         unlock = nil
         handledUnlock.removeAll()
         lastUnlock = nil
@@ -269,6 +321,13 @@ final class PlaylistScheduler {
     /// Makes every change that is due, dates the next ones and arms the timer for the earliest.
     func evaluate() {
         guard !observers.isEmpty else { return }
+        let paused = isPlaybackPaused()
+        let becamePaused = paused && lastPlaybackPaused == false
+        lastPlaybackPaused = paused
+        if becamePaused, store.sleepTimerEnd != nil {
+            store.setSleepTimer(until: nil)
+            AppLog.info("playlist: playback paused, clearing sleep timer")
+        }
         let date = now()
         if let current = unlock, current.expires <= date {
             unlock = nil
@@ -362,6 +421,7 @@ final class PlaylistScheduler {
         // A wait this pass did not keep is over: the display stopped playing, is out of sight,
         // got a new deadline or another playlist, or its change is being made.
         for display in Array(clipWaits.keys) where !waitingForClip.contains(display) { endClipWait(display) }
+        warmManifestTagsIfNeeded()
         arm(earliest)
     }
 
@@ -449,20 +509,28 @@ final class PlaylistScheduler {
             evaluate()
         }
         let playable = Set(available)
+        if playlist.mode == .rotate, playlist.source == .smart, playlist.effectiveSmartQuery.needsManifestMetadata {
+            await refreshManifestTags(for: available)
+        }
         let candidates = availableCandidates(for: playlist, on: display).filter(playable.contains)
         let selected: String?
         switch playlist.mode {
         case .off: return false
         case .rotate:
             let members = playlist.collectionID.flatMap { collections.collection(id: $0)?.wallpaperIDs } ?? []
-            let before = PlaylistPlanner.candidates(for: playlist, library: libraryBefore,
-                favorites: favorites(), collectionIDs: members)
+            let before = PlaylistPlanner.candidates(
+                for: playlist, library: libraryBefore, favorites: favorites(), collectionIDs: members,
+                metadata: metadata.entries, facts: smartFacts(for: libraryBefore, playlist: playlist),
+                lastUsed: lastUsedDates(), now: now(), current: deleted)
             let allowed = Set(candidates)
             var order = before.filter { $0 == deleted || allowed.contains($0) }
             let ordered = Set(order)
             order += candidates.filter { !ordered.contains($0) }
-            selected = PlaylistPlanner.next(after: deleted, in: order, order: playlist.order,
-                recent: store.recent[display] ?? [], using: &random)
+            selected = PlaylistPlanner.next(
+                after: deleted, in: order, order: playlist.order,
+                recent: store.recent[display] ?? [],
+                preferHigherRated: playlist.preferHigherRated, ratings: metadata.ratings,
+                using: &random)
         case .dayNight:
             let phase = PlaylistPlanner.phase(at: now(), dayStart: playlist.dayStart,
                 nightStart: playlist.nightStart, calendar: calendar).phase
@@ -501,7 +569,13 @@ final class PlaylistScheduler {
             requestedWhileInFlight.insert(display)
             return true
         }
-        guard canSkip(display) else { return false }
+        // When a smart playlist needs manifest tags that have not been cached yet (e.g. menu-bar-only
+        // launch before the first pick), let `rotate` load them off-main-actor instead of falsely
+        // reporting no candidates.
+        let needsWarm = playlist.source == .smart
+            && playlist.effectiveSmartQuery.needsManifestMetadata
+            && hasUncachedManifest(for: library())
+        guard needsWarm || canSkip(display) else { return false }
         // Asking for a change is asking a display the user emptied to be filled.
         store.setHold(nil, on: display)
         rotate(display, playlist: playlist, requested: true)
@@ -555,6 +629,11 @@ final class PlaylistScheduler {
                     evaluate()
                 }
             }
+            let latestBeforeActivation = store.playlist(for: display)
+            if latestBeforeActivation.source == .smart,
+               latestBeforeActivation.effectiveSmartQuery.needsManifestMetadata {
+                await refreshManifestTags(for: library())
+            }
             var tried = Set<String>()
             for _ in 0..<Self.maximumAttempts {
                 var selected: String?
@@ -575,7 +654,9 @@ final class PlaylistScheduler {
                         candidates = self.availableCandidates(for: latest, on: display).filter { !tried.contains($0) }
                         selected = PlaylistPlanner.next(
                             after: current(display), in: candidates, order: latest.order,
-                            recent: store.recent[display] ?? [], using: &random)
+                            recent: store.recent[display] ?? [],
+                            preferHigherRated: latest.preferHigherRated, ratings: metadata.ratings,
+                            using: &random)
                         selectedOutOfSight = !isRunning(display) && isUnseen(display)
                         command = commandRevision(display)
                         attempted = attempted || selected != nil
@@ -655,17 +736,117 @@ final class PlaylistScheduler {
         }
     }
 
-    private func candidates(for playlist: DisplayPlaylist) -> [String] {
+    private func candidates(for playlist: DisplayPlaylist, on display: String) -> [String] {
         let ids = playlist.collectionID.flatMap { collections.collection(id: $0)?.wallpaperIDs } ?? []
+        let libraryIDs = library()
+        let facts = playlist.source == .smart ? smartFacts(for: libraryIDs, playlist: playlist) : [:]
         return PlaylistPlanner.candidates(
-            for: playlist, library: library(), favorites: favorites(), collectionIDs: ids)
+            for: playlist,
+            library: libraryIDs,
+            favorites: favorites(),
+            collectionIDs: ids,
+            metadata: metadata.entries,
+            facts: facts,
+            lastUsed: lastUsedDates(),
+            now: now(),
+            current: current(display)
+        )
     }
 
     private func availableCandidates(for playlist: DisplayPlaylist, on display: String) -> [String] {
         let date = now()
-        return candidates(for: playlist).filter {
+        return candidates(for: playlist, on: display).filter {
             guard let failure = store.skipped[display]?[$0] else { return true }
             return failure.retryAfter <= date
+        }
+    }
+
+    /// Builds in-memory `SmartWallpaperFacts` without blocking on disk I/O.
+    private func smartFacts(for ids: [String], playlist: DisplayPlaylist) -> [String: SmartWallpaperFacts] {
+        let query = playlist.effectiveSmartQuery
+        let kinds = wallpaperKinds()
+        var result: [String: SmartWallpaperFacts] = [:]
+        result.reserveCapacity(ids.count)
+        for id in ids {
+            let kind = kinds[id] ?? .unknown
+            let type = SmartWallpaperType.of(id: id, kind: kind)
+            let energy = query.maximumEnergy != nil ? energyLevel(id, kind) : nil
+            let tags: [String]
+            if query.needsManifestMetadata {
+                tags = manifestTagsProvider != nil
+                    ? (injectedManifestTags[id] ?? [])
+                    : (manifestCache.cachedTags(for: id) ?? [])
+            } else {
+                tags = []
+            }
+            result[id] = SmartWallpaperFacts(type: type, manifestTags: tags, energyLevel: energy)
+        }
+        return result
+    }
+
+    private func hasUncachedManifest(for ids: [String]) -> Bool {
+        if manifestTagsProvider != nil {
+            return !injectedManifestLoaded || ids.contains { injectedManifestTags[$0] == nil }
+        }
+        return manifestCache.hasMissing(in: ids)
+    }
+
+    private func refreshManifestTags(for ids: [String]) async {
+        if let provider = manifestTagsProvider {
+            let loaded = await provider(ids)
+            guard !Task.isCancelled else { return }
+            for (id, tags) in loaded { injectedManifestTags[id] = tags }
+            injectedManifestLoaded = true
+        } else {
+            await manifestCache.refresh(ids: ids)
+        }
+    }
+
+    /// Triggers one off-main-actor manifest-tag load only when an active Smart Playlist requires
+    /// manifest tags that are not yet cached. Never polls.
+    private func warmManifestTagsIfNeeded() {
+        guard manifestWarmTask == nil else { return }
+        let needsManifest = displays().contains { display in
+            let playlist = store.playlist(for: display)
+            return playlist.mode == .rotate && playlist.source == .smart
+                && playlist.effectiveSmartQuery.needsManifestMetadata
+        }
+        guard needsManifest else { return }
+        let ids = library()
+        guard hasUncachedManifest(for: ids) else { return }
+        manifestWarmTask = Task { [weak self] in
+            guard let self else { return }
+            await self.refreshManifestTags(for: ids)
+            self.manifestWarmTask = nil
+        }
+    }
+
+    /// Arms or cancels the single one-shot sleep timer task to match `store.sleepTimerEnd`.
+    private func reconcileSleepTimer() {
+        guard !observers.isEmpty else { return }
+        let target = store.sleepTimerEnd
+        guard target != armedSleepTimerFor else { return }
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        armedSleepTimerFor = target
+        guard let target else { return }
+        let delay = target.timeIntervalSince(now())
+        let wait = sleepTimerSleep
+        sleepTimerTask = Task { [weak self] in
+            if delay > 0 {
+                do { try await wait(delay) } catch { return }
+            }
+            guard !Task.isCancelled, let self else { return }
+            guard self.store.sleepTimerEnd == target else { return }
+            self.armedSleepTimerFor = nil
+            self.sleepTimerTask = nil
+            self.store.setSleepTimer(until: nil)
+            AppLog.info("playlist: sleep timer expired, pausing playback")
+            do {
+                try await self.pausePlayback()
+            } catch {
+                AppLog.warn("playlist: sleep timer could not pause playback: \(error.localizedDescription)")
+            }
         }
     }
 
