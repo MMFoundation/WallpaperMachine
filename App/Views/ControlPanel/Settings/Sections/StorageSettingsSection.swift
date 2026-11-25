@@ -97,7 +97,7 @@ struct StorageSettingsSection: View {
     libraryLocation, userFilesFolder, userFilesClear, shaderCache, logs, downloadHistory, context, backupExport,
     backupLibrary, backupRestore, verbose, webInspection, diagnostics, performanceData,
     performanceDataFile,
-  ]
+  ] + SetupPackSection.items
 
   var body: some View {
     SettingsPage(.storage) {
@@ -107,6 +107,7 @@ struct StorageSettingsSection: View {
         StorageCacheRows()
         SettingsDisclosure(Self.context) { StorageContextContent() }
       }
+      SetupPackSection()
       SettingsGroup(Self.backup, in: .storage) { StorageBackupRows() }
       SettingsGroup(Self.troubleshooting, in: .storage) { StorageTroubleshootingRows() }
     }

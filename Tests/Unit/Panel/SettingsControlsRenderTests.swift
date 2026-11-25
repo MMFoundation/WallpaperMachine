@@ -69,7 +69,9 @@ final class SettingsControlsRenderTests: PanelTestCase {
         let controller = panel.controller
         try await withPage(DesktopSettingsSection(), controller) { hosting, tree in
           @MainActor func control(_ item: SettingsItem) throws -> AccessibilityElement {
-            try XCTUnwrap(row(item, in: tree).first(role: "AXButton"))
+            let infoLabel = L("More about \(controller.settings.text(item.title))")
+            return try XCTUnwrap(
+              row(item, in: tree).all().first { $0.role == "AXButton" && $0.label != infoLabel })
           }
           for item in [DesktopSettingsSection.lockScreenSource, DesktopSettingsSection.screenSaverSource] {
             let button = try control(item)

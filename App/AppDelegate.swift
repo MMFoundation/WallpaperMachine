@@ -302,11 +302,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func startLibraryServices() {
         if let store {
             workshopStore.startDownloadLifecycle(bridge: store)
-            let lockScreen = LockScreenConfiguration.isSupportedBySystem
-                ? LockScreenWallpaperService(
+            let lockScreen: LockScreenWallpaperService? = LockScreenConfiguration.isSupportedBySystem ? {
+                let manifestCache = SmartPlaylistManifestCache(libraryURL: ClientPaths.libraryURL)
+                let resolver = LockScreenPlaylistResolver(
+                    libraryProvider: { [weak store] in
+                        guard let store else { return [] }
+                        let cached = store.librarySnapshot.wallpapers
+                        let wallpapers = cached.isEmpty ? (try await store.bridge.librarySnapshot().wallpapers) : cached
+                        return wallpapers.map {
+                            LockScreenLibraryEntry(id: $0.id, kind: $0.kind, supported: $0.supported)
+                        }
+                    },
+                    lastUsedProvider: { [weak store] in store?.history.lastUsedDates() ?? [:] },
+                    manifestTagsProvider: { ids in
+                        await manifestCache.refresh(ids: ids)
+                        var result: [String: [String]] = [:]
+                        for id in ids {
+                            if let tags = manifestCache.cachedTags(for: id) { result[id] = tags }
+                        }
+                        return result
+                    })
+                return LockScreenWallpaperService(
                     bridge: store.bridge,
                     contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 },
-                    renderScale: { [weak store] in Double(store?.settingsSnapshot.renderScale ?? 1) }) : nil
+                    renderScale: { [weak store] in Double(store?.settingsSnapshot.renderScale ?? 1) },
+                    playlistResolver: resolver)
+            }() : nil
             if let lockScreen {
                 store.lockScreenWallpaper = lockScreen
                 lockScreen.beforeActivation = { [weak self] in

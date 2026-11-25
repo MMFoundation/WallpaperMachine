@@ -65,8 +65,12 @@ struct DesktopSettingsSection: View {
   static let lockScreenSource = SettingsItem(
     id: "desktop.lock-screen-source", section: .desktop, group: lockScreen,
     title: "Lock screen wallpaper",
-    note: "Choose a library wallpaper for the lock screen, or follow the desktop; each display needs an applied desktop wallpaper.",
-    keywords: ["Same as desktop"])
+    note: "Choose a library wallpaper or saved playlist for the lock screen, or follow the desktop; each display needs an applied desktop wallpaper. Bound playlists rotate at low priority after unlock.",
+    keywords: ["Same as desktop", "Saved playlists"])
+  static let lockScreenPerDisplay = SettingsItem(
+    id: "desktop.lock-screen-per-display", section: .desktop, group: lockScreen,
+    title: "Different lock screen per display",
+    note: "Pick an independent wallpaper or saved playlist for each connected display instead of sharing one choice across all displays.")
   static let lockScreenStatus = SettingsItem(
     id: "desktop.lock-screen-status", section: .desktop, group: lockScreen,
     title: "Lock screen status", keywords: ["Retry"])
@@ -80,8 +84,12 @@ struct DesktopSettingsSection: View {
   static let screenSaverSource = SettingsItem(
     id: "desktop.screen-saver-source", section: .desktop, group: screenSaver,
     title: "Screen saver wallpaper",
-    note: "Choose a library wallpaper for the screen saver, independently of the lock screen and desktop.",
-    keywords: ["Same as desktop"])
+    note: "Choose a library wallpaper or saved playlist for the screen saver, independently of the lock screen and desktop. Bound playlists rotate at low priority after the screen saver stops.",
+    keywords: ["Same as desktop", "Saved playlists"])
+  static let screenSaverPerDisplay = SettingsItem(
+    id: "desktop.screen-saver-per-display", section: .desktop, group: screenSaver,
+    title: "Different screen saver per display",
+    note: "Pick an independent wallpaper or saved playlist for each connected display instead of sharing one choice across all displays.")
   static let screenSaverStatus = SettingsItem(
     id: "desktop.screen-saver-status", section: .desktop, group: screenSaver,
     title: "Screen saver status", keywords: ["Retry"])
@@ -92,8 +100,8 @@ struct DesktopSettingsSection: View {
   static let items = [
     desktopWallpapers, writeDesktopPicture, refreshMissionControl, keepWindowsOnClick, hideDesktopIcons,
     hideNotch, livePropertyEdits, switchTransitionStyle, switchTransitionDuration,
-    lockScreenSwitch, lockScreenSource, lockScreenStatus, lockScreenContext,
-    screenSaverSwitch, screenSaverSource, screenSaverStatus,
+    lockScreenSwitch, lockScreenSource, lockScreenPerDisplay, lockScreenStatus, lockScreenContext,
+    screenSaverSwitch, screenSaverSource, screenSaverPerDisplay, screenSaverStatus,
     screenSaverContext,
   ]
 
@@ -124,6 +132,7 @@ struct DesktopSettingsSection: View {
   }
 
   @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
 
   var body: some View {
     let desktop = controller.desktopSettings
@@ -163,6 +172,10 @@ struct DesktopSettingsSection: View {
       SettingsGroup(Self.lockScreen, in: .desktop) {
         SettingsRow(Self.lockScreenSwitch) { SettingsSwitchControl(key: .lockScreenEnabled) }
         SettingsRow(Self.lockScreenSource) { NativeWallpaperSourceControl(kind: .lockScreen) }
+        perDisplayToggleRow(Self.lockScreenPerDisplay, kind: .lockScreen, state: controller.lockScreenState)
+        if controller.nativeWallpaperUsesPerDisplay(.lockScreen), search.shows(Self.lockScreenPerDisplay) {
+          perDisplaySourceRows(kind: .lockScreen)
+        }
         statusRow(Self.lockScreenStatus, controller.lockScreenState)
         if search.shows(Self.lockScreenStatus), let error = controller.lockScreenState.error {
           SettingsErrorLine(message: error)
@@ -181,6 +194,10 @@ struct DesktopSettingsSection: View {
       SettingsGroup(Self.screenSaver, in: .desktop) {
         SettingsRow(Self.screenSaverSwitch) { SettingsSwitchControl(key: .screenSaverEnabled) }
         SettingsRow(Self.screenSaverSource) { NativeWallpaperSourceControl(kind: .screenSaver) }
+        perDisplayToggleRow(Self.screenSaverPerDisplay, kind: .screenSaver, state: controller.screenSaverState)
+        if controller.nativeWallpaperUsesPerDisplay(.screenSaver), search.shows(Self.screenSaverPerDisplay) {
+          perDisplaySourceRows(kind: .screenSaver)
+        }
         statusRow(Self.screenSaverStatus, controller.screenSaverState)
         if search.shows(Self.screenSaverStatus), let error = controller.screenSaverState.error {
           SettingsErrorLine(message: error)
@@ -224,6 +241,55 @@ struct DesktopSettingsSection: View {
         }
         .help(L("Open \(settings.text(SettingsSection.displays.title))"))
         SettingsSwitchControl(key: .desktopWallpapers)
+      }
+    }
+  }
+
+  private func perDisplayToggleRow(
+    _ item: SettingsItem, kind: LockScreenState.Kind, state: LockScreenState
+  ) -> some View {
+    let detail = kind == .lockScreen ? "lockScreen" : "screenSaver"
+    return SettingsRow(item) {
+      Toggle(
+        noLabel,
+        isOn: Binding(
+          get: { controller.nativeWallpaperUsesPerDisplay(kind) },
+          set: { enabled in
+            controller.launch(PanelActionCoordinator.key("nativeWallpaperPerDisplay", detail: detail)) {
+              try await controller.setNativeWallpaperUsesPerDisplay(enabled, for: kind)
+            }
+          })
+      )
+      .toggleStyle(.switch)
+      .labelsHidden()
+      .disabled(!state.isSwitchEnabled || controller.settings.isLocked())
+    }
+  }
+
+  @ViewBuilder
+  private func perDisplaySourceRows(kind: LockScreenState.Kind) -> some View {
+    let displays = controller.nativeWallpaperDisplaySources(kind)
+    if displays.isEmpty {
+      Text("Connect a display to assign individual wallpapers.")
+        .font(.panel(.footnote))
+        .foregroundStyle(theme.surface.muted.color)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    } else {
+      ForEach(displays) { display in
+        HStack(spacing: 12) {
+          Text(verbatim: display.title)
+            .font(.panel(.body))
+            .foregroundStyle(theme.surface.text.color)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          NativeWallpaperSourceControl(
+            kind: kind, displayUUID: display.id, displayTitle: display.title)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
       }
     }
   }

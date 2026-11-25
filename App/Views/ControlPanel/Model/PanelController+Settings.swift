@@ -201,16 +201,43 @@ extension PanelController {
   }
 
   func setNativeWallpaperSource(_ id: String?, for kind: LockScreenState.Kind) async throws {
+    try await setNativeWallpaperSource(
+      id.map { .wallpaper($0) } ?? .sameAsDesktop, for: kind, displayUUID: nil)
+  }
+
+  func setNativeWallpaperSource(
+    _ choice: LockScreenSourceChoice, for kind: LockScreenState.Kind, displayUUID: String? = nil
+  ) async throws {
     try await change {
       guard let lock = store.lockScreenWallpaper else {
         throw WallpaperActionError(
           message: kind == .lockScreen
             ? L("Lock Screen integration is unavailable.") : L("Screen saver integration is unavailable."))
       }
-      if let id, !automationTargets.wallpapers.contains(where: { $0.target.id == id }) {
-        throw InvalidControlValue()
+      switch choice {
+      case .sameAsDesktop:
+        break
+      case .wallpaper(let id):
+        if !automationTargets.wallpapers.contains(where: { $0.target.id == id }) {
+          throw InvalidControlValue()
+        }
+      case .playlist(let id):
+        if playlists.plan(id: id) == nil {
+          throw InvalidControlValue()
+        }
       }
-      lock.setWallpaper(id, lockScreen: kind == .lockScreen)
+      lock.setSource(choice, lockScreen: kind == .lockScreen, displayUUID: displayUUID)
+    }
+  }
+
+  func setNativeWallpaperUsesPerDisplay(_ enabled: Bool, for kind: LockScreenState.Kind) async throws {
+    try await change {
+      guard let lock = store.lockScreenWallpaper else {
+        throw WallpaperActionError(
+          message: kind == .lockScreen
+            ? L("Lock Screen integration is unavailable.") : L("Screen saver integration is unavailable."))
+      }
+      lock.setUsesPerDisplay(enabled, lockScreen: kind == .lockScreen)
     }
   }
 

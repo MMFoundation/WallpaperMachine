@@ -7,7 +7,7 @@ struct WallpaperPresetError: LocalizedError, Equatable {
 }
 
 /// Bridge values deliberately use a separate Codable boundary, not generated bridge code.
-enum WallpaperPresetValue: Codable, Equatable {
+enum WallpaperPresetValue: Codable, Equatable, Sendable {
   case bool(Bool), number(Double), string(String), color(red: Double, green: Double, blue: Double), empty
 
   init(_ value: BridgePropertyValue) {
@@ -31,7 +31,7 @@ enum WallpaperPresetValue: Codable, Equatable {
   }
 }
 
-struct WallpaperPresetProperty: Codable, Equatable {
+struct WallpaperPresetProperty: Codable, Equatable, Sendable {
   var id: String
   var kind: String
   var value: WallpaperPresetValue
@@ -41,20 +41,20 @@ struct WallpaperPresetProperty: Codable, Equatable {
   var retainedPath: String?
 }
 
-struct WallpaperPropertyPreset: Codable, Equatable, Identifiable {
+struct WallpaperPropertyPreset: Codable, Equatable, Identifiable, Sendable {
   var id: String
   var wallpaperID: String
   var name: String
   var properties: [WallpaperPresetProperty]
 }
 
-struct WallpaperPresetDocument: Codable {
+struct WallpaperPresetDocument: Codable, Equatable, Sendable {
   static let currentVersion = 1
   var version = currentVersion
   var preset: WallpaperPropertyPreset
   /// Managed bytes are portable; external references are not and cannot grant read access.
   var assets: [String: [Attachment]] = [:]
-  struct Attachment: Codable {
+  struct Attachment: Codable, Equatable, Sendable {
     var name: String
     var bytes: Data
   }
@@ -706,6 +706,68 @@ final class WallpaperPresetStore {
       removeRetained(document.preset.id)
       throw error
     }
+  }
+
+  /// Imports pre-sanitized portable presets (such as from a `.wmpack` setup pack) in place without
+  /// requiring the wallpaper to be installed yet or restarting the app.
+  ///
+  /// Every preset is validated against `validatePortableStructure`, assigned a fresh UUID (unless
+  /// an identical preset for the same wallpaper, name and properties already exists), and published
+  /// atomically without clobbering existing presets.
+  @discardableResult
+  func importPortablePresets(_ incoming: [WallpaperPropertyPreset]) throws -> [WallpaperPropertyPreset] {
+    guard error == nil else { throw WallpaperPresetError(message: error!) }
+    guard !incoming.isEmpty else { return [] }
+    var added: [WallpaperPropertyPreset] = []
+    for raw in incoming {
+      try Self.validatePortableStructure(raw)
+      let duplicate = (items + added).contains { existing in
+        existing.wallpaperID == raw.wallpaperID && existing.name == raw.name
+          && existing.properties == raw.properties
+      }
+      guard !duplicate else { continue }
+      var copy = raw
+      copy.id = UUID().uuidString
+      added.append(copy)
+    }
+    guard !added.isEmpty else { return [] }
+    try publish(items + added)
+    return added
+  }
+
+  /// Validates that `preset` has sound structure and carries no machine-local retained paths or
+  /// external filesystem path references, making it safe to store from a portable setup pack.
+  nonisolated static func validatePortableStructure(_ preset: WallpaperPropertyPreset) throws {
+    try validateStructure(preset)
+    for property in preset.properties {
+      guard property.retainedPath == nil else { throw invalidDocument() }
+      if property.kind == "file" || property.kind == "directory" {
+        if !property.usesDefault, property.value != .empty && property.value != .string("") {
+          throw WallpaperPresetError(
+            message: String(localized: "External file references are not portable. Choose the files in the property editor and save a new preset."))
+        }
+      } else if property.kind == "texture", !property.usesDefault, case .string(let path) = property.value {
+        if Self.looksLikeLocalOrUnsafePath(path) {
+          throw WallpaperPresetError(
+            message: String(localized: "External file references are not portable. Choose the files in the property editor and save a new preset."))
+        }
+      }
+    }
+  }
+
+  nonisolated static func looksLikeLocalOrUnsafePath(_ path: String) -> Bool {
+    guard !path.isEmpty else { return false }
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.hasPrefix("/") || trimmed.hasPrefix("~") || trimmed.hasPrefix("file:")
+      || trimmed.contains("\\") || trimmed.contains("\0")
+    {
+      return true
+    }
+    // Windows drive letters (`C:...`) or URL schemes (`http:`, `file:`) are never portable texture names.
+    if trimmed.contains(":") { return true }
+    let segments = trimmed.split(separator: "/", omittingEmptySubsequences: false)
+    if segments.contains("..") || segments.contains(".") { return true }
+    return false
   }
 
   private func publish(_ updated: [WallpaperPropertyPreset]) throws {

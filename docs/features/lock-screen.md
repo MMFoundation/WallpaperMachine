@@ -16,14 +16,29 @@ when the guide opened, while the guide's **Skip setup** keeps it as set). A stat
 current state, and a **Retry** action appears when activation failed.
 
 The **Lock screen wallpaper** and **Screen saver wallpaper** controls below their
-switches default to **Same as desktop**. Choose an installed wallpaper to use it
-for that mode without applying it to the desktop. Choices survive disabling the
-switch and restarting the app; **Same as desktop** returns to following each
-display's applied wallpaper. An unavailable selection remains visible and reports
-an error rather than silently switching to a different wallpaper.
-If a selected wallpaper cannot be exported, only its native mode is restored to
-the previous system choice. The other mode keeps running and refreshing; Retry
-rechecks the unavailable source without forgetting its saved choice.
+switches default to **Same as desktop**. Choose an installed wallpaper or a
+[saved playlist](playlists.md) to use it for that mode without applying it to the
+desktop, or turn on **Different lock screen per display** / **Different screen saver
+per display** to assign an independent wallpaper, saved playlist or **Same as desktop**
+choice to each connected display (keyed by its stable display UUID, so disconnected
+monitors keep their saved choice without affecting active displays). Choices survive
+disabling the switch, restarting the app, and [local backup and restore](backup-restore.md);
+**Same as desktop** returns to following each display's applied wallpaper. An unavailable
+wallpaper or deleted saved playlist remains visible and reports an error rather than
+silently switching to a different wallpaper. If a selected source cannot be exported,
+only its native mode is restored to the previous system choice. The other mode keeps
+running and refreshing; Retry rechecks the unavailable source without forgetting its
+saved choice.
+
+When a **Saved Playlist** is bound to the lock screen or screen saver (either for all
+displays or for an individual display), routine 2-second monitor checks keep the current
+wallpaper stable. Rotation happens in the main app at low priority (`.utility`) after a
+brief settle debounce following `com.apple.screenIsUnlocked` (for bound lock-screen
+playlists) and `com.apple.screensaver.didstop` (for bound screen-saver playlists),
+coalescing rapid notifications so `LockScreenExchange` publishing never stalls unlock.
+Animated lock screen remains mutually exclusive with Space-based desktop wallpaper
+choices and keeps the macOS 26+ gate and `renderScale`-only pass-through (never passing
+`Display` 2D scene resolution to `Extension/`).
 
 An independent screen saver works on enabled, non-mirrored displays even when no
 WallpaperMachine wallpaper is applied, so macOS can keep a still desktop picture

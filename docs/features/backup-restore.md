@@ -8,7 +8,8 @@ of the Settings → Storage tools; the Settings sections are listed in
 containing renderer/wallpaper settings, allowlisted preferences (collections,
 wallpaper metadata such as ratings, custom tags, notes and rotation exclusions,
 plans, presets, favorites, image placements, display layouts, [desktop
-widgets](desktop-widgets.md), [wallpaper switch transitions](wallpaper-switching.md),
+widgets](desktop-widgets.md), [lock screen and screen saver](lock-screen.md)
+per-display and playlist source selections, [wallpaper switch transitions](wallpaper-switching.md),
 automatic-selection rules and sunrise/sunset settings included), retained
 [user-selected files](user-files.md), and what scene scripts saved with `localStorage`
 (`SceneStorage`, restored per wallpaper under the chosen conflict policy; an older app
@@ -66,3 +67,32 @@ paths directly rather than going through the Web asset host; original paths stay
 provenance only. A retained directory without a directly usable scene resource, or
 a keep-existing asset tree missing the matching bytes, cannot authorize a scene
 reference and is rejected before publication.
+
+## Shareable setup packs (`.wmpack`)
+
+Unlike a full `.wmbackup` local backup, **Settings → Storage → Shareable setup pack** exports
+and imports a lightweight, single-file `.wmpack` JSON document meant for sharing a desktop setup
+with another Mac.
+
+- **What is exported:** strict numeric Steam Workshop wallpaper IDs (with optional display titles
+  for preview), selected sanitized property presets (`WallpaperPresetDocument` entries with all
+  `retainedPath` values, external filesystem paths and binary attachments removed), portable
+  [desktop widgets](desktop-widgets.md) (static image sticker widgets are omitted, and per-Space
+  UUID bindings are downgraded to show on all Spaces with a clear note), and saved display layouts
+  using portable display slot IDs rather than raw hardware UUIDs.
+- **What is never exported:** wallpaper media files, binary preset attachments, Steam sign-in
+  sessions or cookies, passwords, machine-local macOS Space UUIDs, and private filesystem paths.
+- **Strict import hygiene:** opening a `.wmpack` file refuses symbolic links and special files
+  (`O_NOFOLLOW`), enforces a 2 MB file-size limit, validates strict UTF-8 and NUL-free input,
+  checks JSON nesting depth (linearly before parsing) and total node counts, rejects unknown
+  top-level keys, unsupported schema versions, path traversal, non-numeric Workshop IDs and
+  non-portable path references, and downgrades any incoming Space-pinned widget scope to
+  `everywhere`.
+- **Interactive preview and in-place apply:** the import sheet lists which Workshop wallpapers
+  are already installed versus missing, suggests a best-fit mapping from exported displays to
+  currently connected displays (with an interactive picker to remap or skip each display), and
+  lets you choose which presets, display layouts and widgets to import. Chosen components apply
+  immediately without restarting the app and without clobbering unrelated settings. Missing
+  Workshop wallpapers are **never** downloaded silently: queueing downloads is opt-in and requires
+  an explicit confirmation step before anything is added to the Steam download queue.
+

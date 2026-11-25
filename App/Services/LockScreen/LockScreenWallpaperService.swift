@@ -17,6 +17,8 @@ final class LockScreenWallpaperService {
   private(set) var screenSaverError: String?
   private(set) var lockScreenWallpaperID: String?
   private(set) var screenSaverWallpaperID: String?
+  private(set) var lockScreenSources = LockScreenModeSources()
+  private(set) var screenSaverSources = LockScreenModeSources()
   var anyRequested: Bool { isRequested || screenSaverRequested }
   var canRefreshAutomatically: Bool {
     (isRequested && errorMessage == nil) || (screenSaverRequested && screenSaverError == nil)
@@ -38,6 +40,13 @@ final class LockScreenWallpaperService {
   private static let screenSaverPreference = "WallpaperMachineUseWallpaperAsScreenSaver"
   private static let lockScreenWallpaperPreference = "WallpaperMachineLockScreenWallpaperID"
   private static let screenSaverWallpaperPreference = "WallpaperMachineScreenSaverWallpaperID"
+  nonisolated static let lockScreenSourcesPreference = "WallpaperMachine.lockScreenSources"
+  nonisolated static let screenSaverSourcesPreference = "WallpaperMachine.screenSaverSources"
+  nonisolated static let screenUnlockedNotification = Notification.Name("com.apple.screenIsUnlocked")
+  nonisolated static let screenSaverDidStopNotification = Notification.Name("com.apple.screensaver.didstop")
+  /// Settle delay after unlock or screensaver exit before low-priority playlist rotation publishes
+  /// to `LockScreenExchange`, keeping unlock animations completely free of I/O or IPC stutter.
+  static let defaultRotationSettleDelay: Duration = .seconds(3)
   @ObservationIgnored private let scenes: () async throws -> [BridgeLockScreenScene]
   @ObservationIgnored private let wallpaperScenes: (String) async throws -> [BridgeLockScreenScene]
   @ObservationIgnored private let selection: LockScreenWallpaperSelection
@@ -45,6 +54,22 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private let defaults: UserDefaults
   @ObservationIgnored private let scheduleMonitor: (@escaping @MainActor () -> Void) -> Timer
   @ObservationIgnored private let displayUUID: (UInt32) -> String?
+  @ObservationIgnored private let onlineDisplayIDs: (() -> [UInt32])?
+  @ObservationIgnored private let playlistResolver: LockScreenPlaylistResolver?
+  @ObservationIgnored nonisolated(unsafe) private let distributedCenter: NotificationCenter?
+  @ObservationIgnored private let rotationSettleDelay: Duration
+  @ObservationIgnored private let rotationSleep: @Sendable (Duration) async throws -> Void
+  @ObservationIgnored nonisolated(unsafe) private var rotationObservers: [NSObjectProtocol] = []
+  @ObservationIgnored nonisolated(unsafe) private var lockScreenRotationTask: Task<Void, Never>?
+  @ObservationIgnored nonisolated(unsafe) private var screenSaverRotationTask: Task<Void, Never>?
+
+  deinit {
+    if let center = distributedCenter {
+      for token in rotationObservers { center.removeObserver(token) }
+    }
+    lockScreenRotationTask?.cancel()
+    screenSaverRotationTask?.cancel()
+  }
   @ObservationIgnored private let persistConfiguration: (URL, Data) throws -> Void
   @ObservationIgnored private let notifyConfigurationChanged: () -> Void
   @ObservationIgnored private let prepareExtension: () async throws -> Void
@@ -118,9 +143,25 @@ final class LockScreenWallpaperService {
   convenience init(
     bridge: WallpaperBridge, contentRevision: @escaping () -> UInt64 = { 0 },
     renderScale: @escaping @MainActor () -> Double = { 1.0 },
-    language: (@MainActor () -> String)? = nil
+    language: (@MainActor () -> String)? = nil,
+    playlistResolver: LockScreenPlaylistResolver? = nil
   ) {
     let registration = LockScreenExtensionRegistration(processes: .live)
+    let manifestCache = SmartPlaylistManifestCache(libraryURL: ClientPaths.libraryURL)
+    let resolver = playlistResolver ?? LockScreenPlaylistResolver(
+      libraryProvider: {
+        try await bridge.librarySnapshot().wallpapers.map {
+          LockScreenLibraryEntry(id: $0.id, kind: $0.kind, supported: $0.supported)
+        }
+      },
+      manifestTagsProvider: { ids in
+        await manifestCache.refresh(ids: ids)
+        var result: [String: [String]] = [:]
+        for id in ids {
+          if let tags = manifestCache.cachedTags(for: id) { result[id] = tags }
+        }
+        return result
+      })
     self.init(
       prepareExtension: { try await registration.prepare() },
       enableExtension: { try await registration.enableExtension() },
@@ -134,6 +175,9 @@ final class LockScreenWallpaperService {
       selection: LockScreenWallpaperSelection(
         folder: ClientPaths.supportURL.appendingPathComponent("LockScreen")),
       exchange: LockScreenConfiguration.exchangeDirectory,
+      onlineDisplayIDs: LockScreenWallpaperService.onlineDisplays,
+      playlistResolver: resolver,
+      distributedCenter: DistributedNotificationCenter.default(),
       displaysAreAway: LockScreenWallpaperService.displaysAreAway, contentRevision: contentRevision,
       renderScale: renderScale, language: language)
   }
@@ -151,6 +195,13 @@ final class LockScreenWallpaperService {
     scheduleMonitor: @escaping (@escaping @MainActor () -> Void) -> Timer =
       LockScreenWallpaperService.scheduleMonitorTimer,
     displayUUID: @escaping (UInt32) -> String? = LockScreenWallpaperService.onlineDisplayUUID,
+    onlineDisplayIDs: (() -> [UInt32])? = nil,
+    playlistResolver: LockScreenPlaylistResolver? = nil,
+    distributedCenter: NotificationCenter? = nil,
+    rotationSettleDelay: Duration = LockScreenWallpaperService.defaultRotationSettleDelay,
+    rotationSleep: @escaping @Sendable (Duration) async throws -> Void = {
+      try await Task.sleep(for: $0)
+    },
     persistConfiguration: @escaping (URL, Data) throws -> Void = { url, data in
       try data.write(to: url, options: .atomic)
     },
@@ -171,10 +222,25 @@ final class LockScreenWallpaperService {
     self.selection = selection
     self.exchange = exchange
     self.defaults = defaults
-    lockScreenWallpaperID = defaults.string(forKey: Self.lockScreenWallpaperPreference)
-    screenSaverWallpaperID = defaults.string(forKey: Self.screenSaverWallpaperPreference)
+    let loadedLock = Self.loadSources(
+      defaults: defaults,
+      sourcesKey: Self.lockScreenSourcesPreference,
+      legacyKey: Self.lockScreenWallpaperPreference)
+    let loadedSaver = Self.loadSources(
+      defaults: defaults,
+      sourcesKey: Self.screenSaverSourcesPreference,
+      legacyKey: Self.screenSaverWallpaperPreference)
+    lockScreenSources = loadedLock
+    screenSaverSources = loadedSaver
+    lockScreenWallpaperID = loadedLock.allDisplays.wallpaperID
+    screenSaverWallpaperID = loadedSaver.allDisplays.wallpaperID
     self.scheduleMonitor = scheduleMonitor
     self.displayUUID = displayUUID
+    self.onlineDisplayIDs = onlineDisplayIDs
+    self.playlistResolver = playlistResolver
+    self.distributedCenter = distributedCenter
+    self.rotationSettleDelay = rotationSettleDelay
+    self.rotationSleep = rotationSleep
     self.persistConfiguration = persistConfiguration
     self.notifyConfigurationChanged = notifyConfigurationChanged
     self.prepareExtension = prepareExtension
@@ -187,6 +253,28 @@ final class LockScreenWallpaperService {
     self.contentRevision = contentRevision
     self.renderScale = renderScale
     self.language = language ?? { AppLanguageStore.shared.effective.generalPropertyLanguage }
+  }
+
+  nonisolated private static func loadSources(
+    defaults: UserDefaults, sourcesKey: String, legacyKey: String
+  ) -> LockScreenModeSources {
+    if let data = defaults.data(forKey: sourcesKey),
+      let decoded = try? LockScreenModeSources.decode(data)
+    {
+      return decoded
+    }
+    if let legacy = defaults.string(forKey: legacyKey), !legacy.isEmpty {
+      return LockScreenModeSources(allDisplays: .wallpaper(legacy))
+    }
+    return LockScreenModeSources()
+  }
+
+  nonisolated private static func onlineDisplays() -> [UInt32] {
+    var count: UInt32 = 0
+    guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return [] }
+    return Array(ids.prefix(Int(count)))
   }
 
   nonisolated private static func onlineDisplayUUID(_ displayID: UInt32) -> String? {
@@ -219,6 +307,7 @@ final class LockScreenWallpaperService {
     defer { updateMonitor() }
     isRequested = defaults.bool(forKey: Self.preference)
     screenSaverRequested = defaults.bool(forKey: Self.screenSaverPreference)
+    startRotationObservers()
     do {
       try await selection.recover()
       recovered = true
@@ -237,13 +326,129 @@ final class LockScreenWallpaperService {
     }
   }
 
+  /// Subscribes to `com.apple.screenIsUnlocked` (lock screen) and `com.apple.screensaver.didstop`
+  /// (screen saver) so bound Saved Playlists rotate at `.utility` priority after a brief settle
+  /// debounce without blocking unlock.
+  func startRotationObservers() {
+    guard let center = distributedCenter, rotationObservers.isEmpty else { return }
+    rotationObservers.append(
+      center.addObserver(
+        forName: Self.screenUnlockedNotification, object: nil, queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated { self?.schedulePlaylistRotation(lockScreen: true) }
+      })
+    rotationObservers.append(
+      center.addObserver(
+        forName: Self.screenSaverDidStopNotification, object: nil, queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated { self?.schedulePlaylistRotation(lockScreen: false) }
+      })
+  }
+
+  func stopRotationObservers() {
+    if let center = distributedCenter {
+      for token in rotationObservers { center.removeObserver(token) }
+    }
+    rotationObservers.removeAll()
+    lockScreenRotationTask?.cancel()
+    lockScreenRotationTask = nil
+    screenSaverRotationTask?.cancel()
+    screenSaverRotationTask = nil
+  }
+
+  /// Schedules a debounced, low-priority (`.utility`) rotation of any Saved Playlist bound to
+  /// `lockScreen` (or screen saver when `false`). Returns immediately on the calling actor so
+  /// unlock / screensaver-dismissal never stalls on `LockScreenExchange` publishing.
+  func schedulePlaylistRotation(lockScreen: Bool) {
+    guard !stopping else { return }
+    let requested = lockScreen ? isRequested : screenSaverRequested
+    let sources = lockScreen ? lockScreenSources : screenSaverSources
+    guard requested, sources.hasAnyPlaylistChoice else { return }
+    let delay = rotationSettleDelay
+    let sleep = rotationSleep
+    if lockScreen {
+      lockScreenRotationTask?.cancel()
+      lockScreenRotationTask = Task.detached(priority: .utility) { [weak self] in
+        do { try await sleep(delay) } catch { return }
+        guard !Task.isCancelled else { return }
+        await self?.performDeferredPlaylistRotation(lockScreen: true)
+      }
+    } else {
+      screenSaverRotationTask?.cancel()
+      screenSaverRotationTask = Task.detached(priority: .utility) { [weak self] in
+        do { try await sleep(delay) } catch { return }
+        guard !Task.isCancelled else { return }
+        await self?.performDeferredPlaylistRotation(lockScreen: false)
+      }
+    }
+  }
+
+  private func performDeferredPlaylistRotation(lockScreen: Bool) async {
+    guard !stopping, !Task.isCancelled else { return }
+    if lockScreen {
+      guard isRequested, !displaysAreAway() else { return }
+    } else {
+      guard screenSaverRequested else { return }
+    }
+    let sources = lockScreen ? lockScreenSources : screenSaverSources
+    guard sources.hasAnyPlaylistChoice, let resolver = playlistResolver else { return }
+    var advancedAny = false
+    if !sources.usesPerDisplay {
+      if case .playlist(let planID) = sources.allDisplays {
+        guard !Task.isCancelled else { return }
+        do {
+          _ = try await resolver.resolveWallpaperID(
+            planID: planID, lockScreen: lockScreen, scope: "all", advance: true)
+          guard !Task.isCancelled else { return }
+          advancedAny = true
+        } catch {
+          AppLog.warn("Native wallpaper playlist rotation skipped: \(error.localizedDescription)")
+        }
+      }
+    } else {
+      let targetContent: LockScreenContent = lockScreen ? .lockScreen : .screenSaver
+      var activeUUIDs = Set(
+        (publishedInputs ?? []).filter { $0.content == targetContent || $0.content == .desktop }
+          .map(\.displayUUID))
+      if let online = onlineDisplayIDs?() {
+        for id in online {
+          if let uuid = displayUUID(id) { activeUUIDs.insert(uuid) }
+        }
+      }
+      if activeUUIDs.isEmpty {
+        activeUUIDs.formUnion(sources.perDisplay.keys)
+      }
+      var seenScopes = Set<String>()
+      for uuid in activeUUIDs.sorted() where seenScopes.insert(uuid.lowercased()).inserted {
+        guard !Task.isCancelled else { return }
+        if case .playlist(let planID) = sources.effectiveChoice(for: uuid) {
+          do {
+            _ = try await resolver.resolveWallpaperID(
+              planID: planID, lockScreen: lockScreen, scope: uuid, advance: true)
+            guard !Task.isCancelled else { return }
+            advancedAny = true
+          } catch {
+            AppLog.warn("Native wallpaper playlist rotation skipped for display \(uuid): \(error.localizedDescription)")
+          }
+        }
+      }
+    }
+    guard advancedAny, !stopping, !Task.isCancelled else { return }
+    forceRepublish = true
+    refresh()
+  }
+
   func setEnabled(_ enabled: Bool) {
     guard !stopping else { return }
     resetAutomaticRecovery()
     isRequested = enabled
     dropRepairOfferIfNothingIsRequested()
     updateMonitor()
-    if !enabled { defaults.set(false, forKey: Self.preference) }
+    if !enabled {
+      lockScreenRotationTask?.cancel()
+      lockScreenRotationTask = nil
+      defaults.set(false, forKey: Self.preference)
+    }
     onAvailabilityChanged?()
     refresh(retryingLockScreen: true)
   }
@@ -256,21 +461,94 @@ final class LockScreenWallpaperService {
     screenSaverRequested = enabled
     dropRepairOfferIfNothingIsRequested()
     updateMonitor()
-    if !enabled { defaults.set(false, forKey: Self.screenSaverPreference) }
+    if !enabled {
+      screenSaverRotationTask?.cancel()
+      screenSaverRotationTask = nil
+      defaults.set(false, forKey: Self.screenSaverPreference)
+    }
     onAvailabilityChanged?()
     refresh()
   }
 
   func setWallpaper(_ id: String?, lockScreen: Bool) {
-    guard !stopping else { return }
-    if lockScreen {
-      guard lockScreenWallpaperID != id else { return }
-      lockScreenWallpaperID = id
-      defaults.set(id, forKey: Self.lockScreenWallpaperPreference)
+    let choice: LockScreenSourceChoice = id.map { .wallpaper($0) } ?? .sameAsDesktop
+    setSource(choice, lockScreen: lockScreen, displayUUID: nil)
+  }
+
+  func source(lockScreen: Bool, displayUUID: String? = nil) -> LockScreenSourceChoice {
+    let sources = lockScreen ? lockScreenSources : screenSaverSources
+    guard let displayUUID else { return sources.allDisplays }
+    return sources.effectiveChoice(for: displayUUID)
+  }
+
+  func usesPerDisplaySources(lockScreen: Bool) -> Bool {
+    lockScreen ? lockScreenSources.usesPerDisplay : screenSaverSources.usesPerDisplay
+  }
+
+  func setSource(_ choice: LockScreenSourceChoice, lockScreen: Bool, displayUUID: String? = nil) {
+    guard !stopping, choice.isValid else { return }
+    var sources = lockScreen ? lockScreenSources : screenSaverSources
+    if let displayUUID {
+      let existingKey = sources.perDisplay.keys.first {
+        $0.caseInsensitiveCompare(displayUUID) == .orderedSame
+      } ?? displayUUID
+      if sources.perDisplay[existingKey] == choice { return }
+      sources.perDisplay[existingKey] = choice
+      playlistResolver?.clearSlot(lockScreen: lockScreen, scope: displayUUID)
     } else {
-      guard screenSaverWallpaperID != id else { return }
-      screenSaverWallpaperID = id
-      defaults.set(id, forKey: Self.screenSaverWallpaperPreference)
+      if sources.allDisplays == choice { return }
+      sources.allDisplays = choice
+      playlistResolver?.clearSlot(lockScreen: lockScreen, scope: "all")
+    }
+    commitSources(sources, lockScreen: lockScreen)
+  }
+
+  func setUsesPerDisplay(_ enabled: Bool, lockScreen: Bool) {
+    guard !stopping else { return }
+    var sources = lockScreen ? lockScreenSources : screenSaverSources
+    guard sources.usesPerDisplay != enabled else { return }
+    sources.usesPerDisplay = enabled
+    playlistResolver?.clearSlot(lockScreen: lockScreen, scope: nil)
+    commitSources(sources, lockScreen: lockScreen)
+  }
+
+  func resetSources(lockScreen: Bool) {
+    guard !stopping else { return }
+    let empty = LockScreenModeSources()
+    playlistResolver?.clearSlot(lockScreen: lockScreen, scope: nil)
+    let changed = (lockScreen ? lockScreenSources : screenSaverSources) != empty
+    if lockScreen {
+      lockScreenSources = empty
+      lockScreenWallpaperID = nil
+      defaults.removeObject(forKey: Self.lockScreenSourcesPreference)
+      defaults.removeObject(forKey: Self.lockScreenWallpaperPreference)
+    } else {
+      screenSaverSources = empty
+      screenSaverWallpaperID = nil
+      defaults.removeObject(forKey: Self.screenSaverSourcesPreference)
+      defaults.removeObject(forKey: Self.screenSaverWallpaperPreference)
+    }
+    guard changed, lockScreen ? isRequested : screenSaverRequested else { return }
+    resetAutomaticRecovery()
+    forceRepublish = true
+    refresh(retryingLockScreen: lockScreen)
+  }
+
+  private func commitSources(_ sources: LockScreenModeSources, lockScreen: Bool) {
+    if lockScreen {
+      lockScreenSources = sources
+      lockScreenWallpaperID = sources.allDisplays.wallpaperID
+      defaults.set(sources.allDisplays.wallpaperID, forKey: Self.lockScreenWallpaperPreference)
+      if let data = try? JSONEncoder().encode(sources) {
+        defaults.set(data, forKey: Self.lockScreenSourcesPreference)
+      }
+    } else {
+      screenSaverSources = sources
+      screenSaverWallpaperID = sources.allDisplays.wallpaperID
+      defaults.set(sources.allDisplays.wallpaperID, forKey: Self.screenSaverWallpaperPreference)
+      if let data = try? JSONEncoder().encode(sources) {
+        defaults.set(data, forKey: Self.screenSaverSourcesPreference)
+      }
     }
     guard lockScreen ? isRequested : screenSaverRequested else { return }
     resetAutomaticRecovery()
@@ -376,6 +654,7 @@ final class LockScreenWallpaperService {
   func shutdown(restoringDesktop: () async throws -> Void = {}) async throws {
     stopping = true
     updateMonitor()
+    stopRotationObservers()
     cancelRendererWatches()
     generation &+= 1
     cancelExtensionPreparation()
@@ -445,29 +724,164 @@ final class LockScreenWallpaperService {
       var lockSourceError: String?
       var saverSourceError: String?
       var desktopRecords: [BridgeLockScreenScene] = []
-      if isRequested || (screenSaverRequested && screenSaverWallpaperID == nil) {
+      let saverMayFollowDesktop =
+        screenSaverSources.allDisplays == .sameAsDesktop || screenSaverSources.usesPerDisplay
+      if isRequested || (screenSaverRequested && saverMayFollowDesktop) {
         do { desktopRecords = try await scenes() }
         catch is CancellationError { throw CancellationError() }
         catch {
           if isRequested { lockSourceError = error.localizedDescription }
-          if screenSaverRequested, screenSaverWallpaperID == nil { saverSourceError = error.localizedDescription }
+          if screenSaverRequested, screenSaverSources.alwaysFollowsDesktop {
+            saverSourceError = error.localizedDescription
+          }
         }
       }
+      var fetchedWallpaperScenes: [String: [BridgeLockScreenScene]] = [:]
+      func loadScenes(forWallpaperID wallpaperID: String) async throws -> [BridgeLockScreenScene] {
+        if let cached = fetchedWallpaperScenes[wallpaperID] { return cached }
+        let loaded = try await wallpaperScenes(wallpaperID)
+        fetchedWallpaperScenes[wallpaperID] = loaded
+        return loaded
+      }
+      func resolveWallpaperID(
+        for choice: LockScreenSourceChoice, lockScreen: Bool, scope: String
+      ) async throws -> String? {
+        switch choice {
+        case .sameAsDesktop:
+          return nil
+        case .wallpaper(let id):
+          return id
+        case .playlist(let planID):
+          guard let resolver = playlistResolver else {
+            throw LockScreenWallpaperFailure(
+              message: String(localized: "Saved playlist selection is unavailable.")
+            )
+          }
+          return try await resolver.resolveWallpaperID(
+            planID: planID, lockScreen: lockScreen, scope: scope, advance: false)
+        }
+      }
+
       var records = desktopRecords.map { (LockScreenContent.desktop, $0) }
-      if isRequested, lockSourceError == nil, let lockScreenWallpaperID {
+      var lockScreenUsesIndependentScenes = false
+      if isRequested, lockSourceError == nil {
         do {
-          let displays = Set(desktopRecords.map(\.displayId))
-          records += try await wallpaperScenes(lockScreenWallpaperID)
-            .filter { displays.contains($0.displayId) }.map { (.lockScreen, $0) }
+          let desktopByDisplay = desktopRecords.map { record in
+            (record, displayUUID(record.displayId))
+          }
+          let choices = desktopByDisplay.map { (record, uuid) in
+            (record, uuid, lockScreenSources.effectiveChoice(for: uuid))
+          }
+          let needsExplicit = choices.contains { $0.2 != .sameAsDesktop }
+          if needsExplicit {
+            lockScreenUsesIndependentScenes = true
+            let desktopDisplays = Set(desktopRecords.map(\.displayId))
+            if !lockScreenSources.usesPerDisplay {
+              let choice = lockScreenSources.allDisplays
+              if let wallpaperID = try await resolveWallpaperID(
+                for: choice, lockScreen: true, scope: "all")
+              {
+                records += try await loadScenes(forWallpaperID: wallpaperID)
+                  .filter { desktopDisplays.contains($0.displayId) }
+                  .map { (.lockScreen, $0) }
+              }
+            } else {
+              for (desktopRecord, uuid, choice) in choices {
+                switch choice {
+                case .sameAsDesktop:
+                  records.append((.lockScreen, desktopRecord))
+                case .wallpaper, .playlist:
+                  let scope = uuid ?? String(desktopRecord.displayId)
+                  if let wallpaperID = try await resolveWallpaperID(
+                    for: choice, lockScreen: true, scope: scope),
+                    let scene = try await loadScenes(forWallpaperID: wallpaperID)
+                      .first(where: { $0.displayId == desktopRecord.displayId })
+                  {
+                    records.append((.lockScreen, scene))
+                  }
+                }
+              }
+            }
+          }
         } catch is CancellationError { throw CancellationError() }
         catch { lockSourceError = error.localizedDescription }
       }
-      if screenSaverRequested, let screenSaverWallpaperID {
-        do { records += try await wallpaperScenes(screenSaverWallpaperID).map { (.screenSaver, $0) } }
-        catch is CancellationError { throw CancellationError() }
+
+      var screenSaverUsesIndependentScenes = false
+      if screenSaverRequested {
+        do {
+          if !screenSaverSources.usesPerDisplay {
+            let choice = screenSaverSources.allDisplays
+            if choice != .sameAsDesktop {
+              screenSaverUsesIndependentScenes = true
+              if let wallpaperID = try await resolveWallpaperID(
+                for: choice, lockScreen: false, scope: "all")
+              {
+                records += try await loadScenes(forWallpaperID: wallpaperID)
+                  .map { (.screenSaver, $0) }
+              }
+            }
+          } else {
+            var candidateDisplayIDs: [UInt32] = []
+            var seenDisplayIDs = Set<UInt32>()
+            func addDisplayID(_ id: UInt32) {
+              if seenDisplayIDs.insert(id).inserted { candidateDisplayIDs.append(id) }
+            }
+            for record in desktopRecords { addDisplayID(record.displayId) }
+            if let online = onlineDisplayIDs?() {
+              for id in online { addDisplayID(id) }
+            } else if candidateDisplayIDs.isEmpty {
+              // When no explicit online list or desktop scene exists (e.g. independent screensaver
+              // with an empty desktop), discover displays by loading the configured independent choices.
+              var probes: [(scope: String, choice: LockScreenSourceChoice)] = []
+              if screenSaverSources.allDisplays != .sameAsDesktop {
+                probes.append(("all", screenSaverSources.allDisplays))
+              }
+              for (uuid, choice) in screenSaverSources.perDisplay.sorted(by: { $0.key < $1.key })
+              where choice != .sameAsDesktop {
+                probes.append((uuid, choice))
+              }
+              for probe in probes {
+                if let wallpaperID = try await resolveWallpaperID(
+                  for: probe.choice, lockScreen: false, scope: probe.scope)
+                {
+                  for scene in try await loadScenes(forWallpaperID: wallpaperID) {
+                    addDisplayID(scene.displayId)
+                  }
+                }
+              }
+            }
+            let displayChoices = candidateDisplayIDs.map { id -> (UInt32, String?, LockScreenSourceChoice) in
+              let uuid = displayUUID(id)
+              return (id, uuid, screenSaverSources.effectiveChoice(for: uuid))
+            }
+            let needsExplicit = displayChoices.contains { $0.2 != .sameAsDesktop }
+            if needsExplicit {
+              screenSaverUsesIndependentScenes = true
+              for (displayID, uuid, choice) in displayChoices {
+                switch choice {
+                case .sameAsDesktop:
+                  if let desktopRecord = desktopRecords.first(where: { $0.displayId == displayID }) {
+                    records.append((.screenSaver, desktopRecord))
+                  }
+                case .wallpaper, .playlist:
+                  let scope = uuid ?? String(displayID)
+                  if let wallpaperID = try await resolveWallpaperID(
+                    for: choice, lockScreen: false, scope: scope),
+                    let scene = try await loadScenes(forWallpaperID: wallpaperID)
+                      .first(where: { $0.displayId == displayID })
+                  {
+                    records.append((.screenSaver, scene))
+                  }
+                }
+              }
+            }
+          }
+        } catch is CancellationError { throw CancellationError() }
         catch { saverSourceError = error.localizedDescription }
       }
-      if (!isRequested || lockSourceError != nil), screenSaverWallpaperID != nil {
+
+      if (!isRequested || lockSourceError != nil), screenSaverUsesIndependentScenes {
         records.removeAll { $0.0 == .desktop }
       }
       try Task.checkCancellation()
@@ -579,10 +993,10 @@ final class LockScreenWallpaperService {
       try Task.checkCancellation()
       guard generation == revision, anyRequested else { return }
       var configuration = prepared.configuration
-      if isRequested, lockScreenWallpaperID != nil, configuration.lockScreenScenes == nil {
+      if isRequested, lockScreenUsesIndependentScenes, configuration.lockScreenScenes == nil {
         configuration.lockScreenScenes = []
       }
-      if screenSaverRequested, screenSaverWallpaperID != nil, configuration.screenSaverScenes == nil {
+      if screenSaverRequested, screenSaverUsesIndependentScenes, configuration.screenSaverScenes == nil {
         configuration.screenSaverScenes = []
       }
       configuration.lockScreenEnabled = isRequested && lockScreenActivationError == nil && lockSourceError == nil
@@ -834,7 +1248,7 @@ final class LockScreenWallpaperService {
     screenSaverStatus = !screenSaverRequested ? String(localized: "Off") : screenSaverError != nil
       ? String(localized: "Not enabled — action required") : screenSaverEnabled
       ? String(localized: "Selected for \(count) display(s) — starts when macOS is idle")
-      : screenSaverWallpaperID == nil
+      : screenSaverSources.alwaysFollowsDesktop
         ? String(localized: "Waiting for an applied wallpaper on a connected display")
         : String(localized: "No compatible display available.")
   }
