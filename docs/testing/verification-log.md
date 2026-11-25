@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-25 — Wave 3A Parallax power fix, Automation/Intents, Smart Playlists, and Media Widgets (#24, #17a, #20, #19, #18)
+
+- Scope: Parallax static subgraph cache & on-demand easing convergence (#24), display-topology auto-layout (#17a), query/action App Intents + status.json + extended hotkeys + Presentation Mode (#20), wallpaper metadata + Smart Playlists + skip-recent + weighted shuffle + Sleep Timer (#19), Now Playing & Image Sticker widgets + per-wallpaper/Space scope (#18).
+- python3 scripts/build.py --renderer-only -> PASS (0 diff in App/Bridge/Generated/).
+- python3 scripts/check_renderer.py -> PASS (all C++ tests incl. 9 new parallax/on-demand/timer/NodeBinding tests + 12 generated GPU parity checks pixels_equal=True, diagnostics=0, reload cycles 0; 7 opt-in local asset/corpus tests skipped).
+- python3 scripts/check_rust.py -> PASS (core 436, bridge 992, core-integration 20, shader 1094; 0 failed; opt-in desktop/media/network disabled).
+- python3 scripts/test.py -> PASS (36/36 Python suites OK; 5343 passed, 0 failed, 70 skipped of 5413 native tests in 175s).
+- Localization & review: App/Resources/Localizable.xcstrings edited as text (+131 net keys across en/ja/ko/pt-BR/zh-Hans/zh-Hant); verifier-w3a PASS after resolving 3 blockers (sticker test/undo isolation, sleep timer pause cancel, Presentation Mode async re-entrancy).
+- Not run: Release .app build (not requested), desktop UI tests (--ui), live Steam/media opt-ins, and live macOS visual/energy inspection of parallax reuse, Now Playing widget, and display hotplug.
+
 ## 2026-11-25 — Wave 2B Settings, Widgets Undo, and Browse/Downloads upgrades (#12-#15)
 
 - Scope: Settings unified thumbnail chooser, Automation enable/reorder/solar readout, merged Scale (>1.0 preserved), async Storage metrics, Search section titles/live units/scoping (#12); Desktop Widgets scoped Undo/Redo, gesture coalescing, safe canvas Delete, .sun Displays link (#13); Workshop Collection/Favorites Download missing, lazy tile context menus, Pixiv multi-page strip & batch save, Downloads batch controls & Pixiv Download next, async disk space, Steam web persona identity, Workshop update dismiss, LibraryFolderRow Storage jump (#14-#15).
@@ -106,9 +116,3 @@ Settings › About gains More from MMFoundation (OhMyShot's icon, a line about i
 - The agent's shell could not run native tests: `IOPMAssertionCreateWithName` fails there (even `caffeinate`), and `xcodebuild test` needs that assertion; an unsigned `build-for-testing` there succeeded
 - System Python 3.9 fails several script tests (no `hashlib.file_digest`); Homebrew's python3 passes them all
 - Not checked: how the About row looks in light and dark, and the Help menu on macOS 15; no Release build
-
-## 2026-11-18 — Steam Workshop sign-in from Browse and Settings
-
-- Offscreen Workshop regression: the public list offers sign-in when anonymous, hides it after sign-in and offers it again after sign-out.
-- Full gate: python3 scripts/test.py (Homebrew Python 3.15); Python checks passed, native tests: 5,128 passed, 70 skipped, 0 failed.
-- No live Steam login or on-desktop visual check; no Release build.

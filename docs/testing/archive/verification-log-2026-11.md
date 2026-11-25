@@ -9,6 +9,12 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-18 — Steam Workshop sign-in from Browse and Settings
+
+- Offscreen Workshop regression: the public list offers sign-in when anonymous, hides it after sign-in and offers it again after sign-out.
+- Full gate: python3 scripts/test.py (Homebrew Python 3.15); Python checks passed, native tests: 5,128 passed, 70 skipped, 0 failed.
+- No live Steam login or on-desktop visual check; no Release build.
+
 ## 2026-11-17 — Panel close releases Discover and pixiv results
 
 - `python3 scripts/test.py --only WorkshopSourceTests --only PixivStoreTests`: 75 passed, including the two new unload/resume tests.
