@@ -407,6 +407,59 @@ final class PlaybackPreferencesTests: XCTestCase {
         XCTAssertEqual(preferences.switchTransitionStyle, .fade)
         XCTAssertEqual(preferences.switchTransitionDuration, 0.2, accuracy: 1e-9)
     }
+
+    func testSwitchWallpaperAppRulePersistsDecodesLegacyAndRejectsInvalidPayloads() throws {
+        let legacyJSON = Data(#"""
+            [{
+              "id": "11111111-1111-1111-1111-111111111111",
+              "bundleIdentifier": "com.example.Old",
+              "name": "Old",
+              "condition": "running",
+              "action": "pause"
+            }]
+            """#.utf8)
+        let decodedLegacy = try JSONDecoder().decode([AppRule].self, from: legacyJSON)
+        XCTAssertEqual(decodedLegacy.count, 1)
+        XCTAssertNil(decodedLegacy[0].wallpaperTarget)
+        XCTAssertNil(decodedLegacy[0].displayID)
+
+        let preferences = PlaybackPreferences(defaults: defaults)
+        let added = preferences.addRule(bundleIdentifier: "com.apple.dt.Xcode", name: "Xcode")
+        let target = WallpaperAutomationTarget(kind: .wallpaper, id: "coding-dark")
+        try preferences.updateRule(id: added.id, condition: .frontmost)
+        try preferences.updateRule(id: added.id, action: .switchWallpaper)
+        try preferences.updateRule(id: added.id, wallpaperTarget: target)
+        try preferences.updateRule(id: added.id, displayID: "primary")
+
+        let reloaded = PlaybackPreferences(defaults: defaults)
+        XCTAssertEqual(reloaded.appRules.count, 1)
+        XCTAssertEqual(reloaded.appRules[0].action, .switchWallpaper)
+        XCTAssertEqual(reloaded.appRules[0].wallpaperTarget, target)
+        XCTAssertEqual(reloaded.appRules[0].displayID, "primary")
+
+        try reloaded.updateRule(id: added.id, displayID: nil)
+        XCTAssertNil(PlaybackPreferences(defaults: defaults).appRules[0].displayID)
+
+        XCTAssertThrowsError(try reloaded.updateRule(id: UUID(), wallpaperTarget: target)) { error in
+            XCTAssertTrue(error is PlaybackPreferences.UnknownRule)
+        }
+        XCTAssertThrowsError(try reloaded.updateRule(id: UUID(), displayID: "primary")) { error in
+            XCTAssertTrue(error is PlaybackPreferences.UnknownRule)
+        }
+
+        // Invalid wallpaperTarget or displayID fails Codable decoding so backup validation rejects it.
+        let badTarget = Data(#"""
+            {"id":"11111111-1111-1111-1111-111111111111","bundleIdentifier":"com.example.App","name":"App",
+             "condition":"running","action":"switchWallpaper","wallpaperTarget":{"kind":"wallpaper","id":""}}
+            """#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(AppRule.self, from: badTarget))
+
+        let badDisplay = Data(#"""
+            {"id":"11111111-1111-1111-1111-111111111111","bundleIdentifier":"com.example.App","name":"App",
+             "condition":"running","action":"switchWallpaper","displayID":""}
+            """#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(AppRule.self, from: badDisplay))
+    }
 }
 
 private final class ChangeCount: @unchecked Sendable {

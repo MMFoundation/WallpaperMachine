@@ -37,34 +37,42 @@ private struct DisplaysAutomationRows: View {
         item: DisplaysSettingsSection.automationMode, note: modeNote(state), forced: forced,
         identity: display.id, controlLabel: L("Automatic changes for \(display.title)")
       ) {
-        let mode = model.binding(
-          PanelActionCoordinator.key("automationMode", id: display.id), current: state.mode
-        ) { mode in try await controller.setAutomationMode(mode, display: display.id) }
+        let ruleMode = model.binding(
+          PanelActionCoordinator.key("automationMode", id: display.id), current: state.ruleMode
+        ) { mode in try await controller.setAutomationRuleMode(mode, display: display.id) }
         DisplaysTitleMenu(
-          selection: mode,
+          selection: ruleMode,
           title: {
-            switch mode.wrappedValue {
+            switch ruleMode.wrappedValue {
             case .off: L("Off")
             case .schedule: L("Time schedule")
             case .appearance: L("Follow system appearance")
-            case .spaces: L("Different wallpaper for each desktop")
             }
           }(), width: 210
         ) {
-          Text("Off").tag(DisplayWallpaperAutomation.Mode.off)
-          Text("Time schedule").tag(DisplayWallpaperAutomation.Mode.schedule)
-          Text("Follow system appearance").tag(DisplayWallpaperAutomation.Mode.appearance)
-          Text("Different wallpaper for each desktop").tag(DisplayWallpaperAutomation.Mode.spaces)
-            .disabled(!state.spacesAvailable)
+          Text("Off").tag(DisplayWallpaperAutomation.RuleMode.off)
+          Text("Time schedule").tag(DisplayWallpaperAutomation.RuleMode.schedule)
+          Text("Follow system appearance").tag(DisplayWallpaperAutomation.RuleMode.appearance)
         }
         .focused($focus, equals: .modePicker(display: display.id))
         .disabled(locked)
       }
 
-      switch state.mode {
+      switch state.ruleMode {
       case .off:
-        EmptyView()
+        if state.usesSpaces {
+          DisplaysNote(
+            text: L(
+              "Each desktop’s wallpaper is chosen above, under Different wallpaper for each desktop. You can also add a time schedule or system appearance rule for desktops without a choice."
+            ))
+        }
       case .appearance:
+        if state.usesSpaces {
+          DisplaysNote(
+            text: L(
+              "Desktops with a chosen wallpaper keep it; desktops without a choice follow system appearance."
+            ))
+        }
         DisplaysRow(
           item: DisplaysSettingsSection.automationLight, forced: forced, identity: display.id,
           controlLabel: title(DisplaysSettingsSection.automationLight)
@@ -89,13 +97,30 @@ private struct DisplaysAutomationRows: View {
           )
           .disabled(locked)
         }
-      case .spaces:
-        // The desktops are chosen on the card itself, where the switch is.
-        DisplaysNote(text: L("Each desktop’s wallpaper is chosen above, under Different wallpaper for each desktop."))
       case .schedule:
+        if state.usesSpaces {
+          DisplaysNote(
+            text: L(
+              "Desktops with a chosen wallpaper keep it; desktops without a choice follow this time schedule."
+            ))
+        }
         DisplaysScheduleRows(
           display: display, state: state, targets: targets, locked: locked, forced: forced,
           focus: $focus)
+      }
+
+      DisplaysRow(
+        item: DisplaysSettingsSection.automationBattery, note: batteryNote(state), forced: forced,
+        identity: display.id, controlLabel: title(DisplaysSettingsSection.automationBattery)
+      ) {
+        DisplaysTargetPicker(
+          selection: state.batteryTarget, targets: targets, isRequired: false,
+          popoverTitle: L("On battery"),
+          emptyTitle: state.globalBatteryTarget != nil ? L("Follow all-displays setting") : nil,
+          key: PanelActionCoordinator.key("automationBattery", id: display.id),
+          commit: { try await controller.setAutomationBatteryTarget($0, display: display.id) }
+        )
+        .disabled(locked)
       }
 
       DisplaysAutomationFooter(display: display, state: state, locked: locked, forced: forced)
@@ -116,7 +141,7 @@ private struct DisplaysAutomationRows: View {
   /// cannot be chosen, why.
   private func modeNote(_ state: AutomationState) -> String {
     let base = L("Manual choices stay until the next rule changes them.")
-    guard state.mode != .spaces, let reason = state.spacesUnavailableReason else { return base }
+    guard !state.usesSpaces, let reason = state.spacesUnavailableReason else { return base }
     switch reason {
     case .lockScreenOwnsDesktop:
       return "\(base) \(L("Turn off animated lock-screen wallpaper to use desktop Space choices."))"
@@ -124,6 +149,17 @@ private struct DisplaysAutomationRows: View {
       return
         "\(base) \(L("Desktop information is unavailable. Refresh Spaces or choose another automatic mode."))"
     }
+  }
+
+  private func batteryNote(_ state: AutomationState) -> String {
+    if state.batteryTarget == nil, state.globalBatteryTarget != nil {
+      return L(
+        "Temporarily overrides this display’s wallpaper while on battery and restores it on power. Currently follows the all-displays battery wallpaper."
+      )
+    }
+    return L(
+      "Temporarily overrides this display’s wallpaper while on battery and restores it on power. Overrides the all-displays battery wallpaper."
+    )
   }
 }
 
@@ -138,6 +174,8 @@ struct DisplaysTargetPicker: View {
   /// A required choice has no "Leave as it is" entry and asks for a choice instead.
   let isRequired: Bool
   var popoverTitle: String? = nil
+  var emptyTitle: String? = nil
+  var clearTitle: String? = nil
   let key: String
   let commit: @MainActor (WallpaperAutomationTarget?) async throws -> Void
   /// Called with the chosen target instead of acting on it, for the editor's draft.
@@ -154,11 +192,12 @@ struct DisplaysTargetPicker: View {
     let activeID = controller.displaysSettings.drafts[key] as? String ?? Self.identifier(selection)
     let activeTarget = Self.target(activeID, in: targets, keeping: selection)
     let isUnavailable = !activeID.isEmpty && (activeTarget.map { targets.title(of: $0) == nil } ?? true)
+    let clearLabel = clearTitle ?? emptyTitle ?? L("Leave as it is")
     let clearOption: WallpaperThumbnailChooser.ClearOption? =
       isRequired
       ? nil
       : .init(
-        title: L("Leave as it is"), isSelected: activeID.isEmpty, isDisabled: activeID.isEmpty,
+        title: clearLabel, isSelected: activeID.isEmpty, isDisabled: activeID.isEmpty,
         action: { choose(nil) })
     WallpaperChooserTrigger(
       title: title(for: activeID),
@@ -188,7 +227,9 @@ struct DisplaysTargetPicker: View {
   /// The title of the choice shown: what it is, "Unavailable" when it no longer resolves, or what
   /// asks for a choice.
   private func title(for identifier: String) -> String {
-    if identifier.isEmpty { return isRequired ? L("Choose a wallpaper or saved playlist") : L("Leave as it is") }
+    if identifier.isEmpty {
+      return isRequired ? L("Choose a wallpaper or saved playlist") : (emptyTitle ?? L("Leave as it is"))
+    }
     if let found = (targets.wallpapers + targets.playlists).first(where: { $0.id == identifier }) { return found.title }
     return L("Unavailable")
   }
@@ -644,8 +685,8 @@ private struct DisplaysAutomationFooter: View {
   @Environment(PanelController.self) private var controller
 
   var body: some View {
-    if state.isFocused {
-      DisplaysNote(text: L("A Focus filter is active for this display. Manual choices remain available."))
+    if let overrideNote = overrideNotice {
+      DisplaysNote(text: overrideNote)
     }
     if let error = state.error {
       DisplaysMessageRow(text: error, isError: true)
@@ -681,5 +722,20 @@ private struct DisplaysAutomationFooter: View {
     .padding(.horizontal, 12)
     .padding(.vertical, 8)
     .announcesChanges(of: state.error)
+  }
+
+  private var overrideNotice: String? {
+    switch state.activeOverride {
+    case .focus:
+      return L("A Focus filter is active for this display. Manual choices remain available.")
+    case .app:
+      return L("An app rule is temporarily overriding this display’s wallpaper. Manual choices remain available.")
+    case .battery:
+      return L("The battery wallpaper override is active for this display. Manual choices remain available.")
+    case nil:
+      return state.isFocused
+        ? L("A Focus filter is active for this display. Manual choices remain available.")
+        : nil
+    }
   }
 }

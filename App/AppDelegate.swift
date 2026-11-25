@@ -808,6 +808,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             powerSourceResampler?.start()
             let playlists = startPlaylistScheduler(store: store)
+            let presentation = PresentationModeController(
+                isPaused: { [weak store] in store?.appSnapshot.playbackState == .paused },
+                setPaused: { [weak self] paused in
+                    try await self?.performAutomation(paused ? .pause : .play)
+                },
+                isMuted: { PlaybackPreferences.shared.wallpapersMuted },
+                setMuted: { PlaybackPreferences.shared.wallpapersMuted = $0 },
+                areDesktopWidgetsHidden: { [weak self] in self?.desktopWidgetsHidden ?? false },
+                setDesktopWidgetsHidden: { [weak self] hidden in self?.setDesktopWidgetsHidden(hidden) })
+            presentation.onChange = { [weak self] in
+                self?.publishAutomationStatus()
+                self?.rebuildMenu()
+            }
+            presentationMode = presentation
             startAutomaticWallpapers(store: store, playlists: playlists, spaces: spaces, pressure: pressure)
             let statusWriter = AutomationStatusWriter(fileURL: ClientPaths.automationStatusURL)
             automationStatusWriter = statusWriter
@@ -823,20 +837,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     try await store.applyDisplayTransferAsync(.layout(layout.assignments))
                 })
             displayTopologyAutoApplier = topologyAutoApplier
-            let presentation = PresentationModeController(
-                isPaused: { [weak store] in store?.appSnapshot.playbackState == .paused },
-                setPaused: { [weak self] paused in
-                    try await self?.performAutomation(paused ? .pause : .play)
-                },
-                isMuted: { PlaybackPreferences.shared.wallpapersMuted },
-                setMuted: { PlaybackPreferences.shared.wallpapersMuted = $0 },
-                areDesktopWidgetsHidden: { [weak self] in self?.desktopWidgetsHidden ?? false },
-                setDesktopWidgetsHidden: { [weak self] hidden in self?.setDesktopWidgetsHidden(hidden) })
-            presentation.onChange = { [weak self] in
-                self?.publishAutomationStatus()
-                self?.rebuildMenu()
-            }
-            presentationMode = presentation
             favoritesStatusObserver = NotificationCenter.default.addObserver(
                 forName: PanelPreferences.favoritesDidChangeNotification, object: nil, queue: .main
             ) { [weak self] _ in
@@ -1079,6 +1079,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             targetDisplay: { [weak self] in self?.controlPanelNavigation.targetDisplayID ?? "primary" },
             canRun: { [weak self] display in self?.ownSuspension(ofDisplay: display, store: store) == false },
             playlistScheduler: playlistScheduler, spaceMonitor: spaces,
+            onBattery: { [weak self] in
+                (self?.powerSourceMonitor?.source ?? PowerSourceMonitor.systemSource()) == .battery
+            },
+            appWallpaperSwitch: { [weak self] display in
+                self?.appRuleMonitor?.activeWallpaperSwitch(for: display)
+            },
+            isPresentationMode: { [weak self] in
+                self?.presentationMode?.isActive ?? false
+            },
             onInputsChanged: { [weak self] notification in
                 self?.updateAutomaticWallpaperContext()
                 self?.schedulePosterRefresh(after: notification)

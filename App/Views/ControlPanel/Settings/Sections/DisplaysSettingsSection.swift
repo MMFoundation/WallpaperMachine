@@ -39,7 +39,10 @@ struct DisplaysSettingsSection: View {
     keywords: [
       "Desktop \(1)", "Keeps the current wallpaper", "Keep the current wallpaper", "Unavailable desktop",
       "Spaces", "Refresh Spaces",
-      "Turning it on replaces this display’s automatic wallpaper selection.",
+      "Follows time schedule", "Follows system appearance",
+      "Follow time schedule", "Follow system appearance",
+      "Desktops without a chosen wallpaper follow this display’s automatic wallpaper selection.",
+      "Desktops without a chosen wallpaper will keep following your automatic wallpaper selection.",
     ])
 
   // The playlist
@@ -199,14 +202,25 @@ struct DisplaysSettingsSection: View {
       "Sunrise", "Sunset", "Time", "Offset in minutes",
       "Negative offsets run before the sun event; positive offsets run after it. Set your location below.",
     ])
+  static let automationBattery = SettingsItem(
+    id: "displays.automation-battery", section: .displays, inside: automation,
+    title: "On battery",
+    note:
+      "Temporarily overrides this display’s wallpaper while on battery and restores it on power. Overrides the all-displays battery wallpaper.",
+    keywords: [
+      "Leave as it is", "Follow all-displays setting", "Use wallpaper", "Use saved playlist",
+      "Temporarily overrides this display’s wallpaper while on battery and restores it on power. Currently follows the all-displays battery wallpaper.",
+    ])
   static let automationFooter = SettingsItem(
     id: "displays.automation-footer", section: .displays, inside: automation,
     title: "Open Focus Settings…",
     note:
-      "Choosing a wallpaper stops this display’s playlist. Choosing a saved playlist starts that plan. Focus choices temporarily override these rules.",
+      "Choosing a wallpaper stops this display’s playlist. Choosing a saved playlist starts that plan. Focus filters, app rules and battery choices temporarily override these rules and restore them afterwards.",
     keywords: [
       "Refresh Spaces", "Retry automatic change",
       "A Focus filter is active for this display. Manual choices remain available.",
+      "An app rule is temporarily overriding this display’s wallpaper. Manual choices remain available.",
+      "The battery wallpaper override is active for this display. Manual choices remain available.",
     ])
 
   // Playback and scaling
@@ -282,7 +296,7 @@ struct DisplaysSettingsSection: View {
     playlistNight, playlistNightStart, playlistSwitch, playlistPlan,
     transfer, transferPeer,
     automation, automationMode, automationLight, automationDark,
-    automationSchedule, automationFooter,
+    automationSchedule, automationBattery, automationFooter,
     playback, scaling, scale, frameRate, mute, volume,
     layoutsSave, plansList, solarIntro, solarSource, solarSunrise, solarSunset,
     solarLongitude, solarActions,

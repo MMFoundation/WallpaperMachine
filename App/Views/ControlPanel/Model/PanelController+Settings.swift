@@ -178,7 +178,7 @@ extension PanelController {
       if enabled,
         store.settingsSnapshot.displays.contains(where: {
           $0.isIndependent
-            && automations.configuration(for: $0.displayId).mode == .spaces
+            && automations.configuration(for: $0.displayId).usesSpaces
         })
       {
         throw WallpaperActionError(

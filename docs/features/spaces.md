@@ -5,10 +5,7 @@ or saved playlist of its own. It is off by default and is turned on for one disp
 on that display's card in **Settings → Displays**, where it sits under **Wallpaper**; with the
 **Wallpaper per Desktop** tile in **Settings → Quick Settings** or the first row of **Settings →
 Desktop & Lock Screen**, both for the display the Library applies wallpapers to (the row's
-**Choose…** opens that display's card); or in the toolbar's target-display menu in the Library. It is the `spaces` mode of the display's
-[automatic selection](automation.md), so turning it on takes the place of a time schedule or
-an appearance rule on that display, and turning it off leaves the display on the wallpaper it
-shows. Only enabled independent displays offer it.
+**Choose…** opens that display's card); or in the toolbar's target-display menu in the Library. It can run on its own (`mode: "spaces"` / `spacesEnabled: true`) or **stack** with a **Time schedule** or **Follow system appearance** rule on the same display: desktops with an explicit choice keep that wallpaper or saved playlist (including a Day/Night playlist), while desktops without a choice follow the stacked schedule or appearance rule (or Desktop 1's choice when no schedule or appearance rule is active). Turning **Different wallpaper for each desktop** off preserves any stacked schedule or appearance rule, or leaves the display on its current wallpaper when none is set. Only enabled independent displays offer it.
 
 Only the desktop the person is on plays. At launch and when desktop choices change, the app
 prepares each distinct wallpaper in the background, one at a time, without visiting its desktop
@@ -26,24 +23,33 @@ wallpaper the display's desktops show ([below](#keeping-each-desktops-wallpaper)
 
 - **Apply on the desktop.** While the mode is on, a wallpaper applied by hand on a display (the
   Library's Apply, a double-click, Previous, a saved layout, copy or swap) becomes the current
-  desktop's own: it stays when the person leaves and comes back. The panel opens on the desktop
+  desktop's own in standalone Space mode, or updates an already-pinned desktop when stacked with a
+  schedule or appearance rule (on an unpinned stacked desktop, manual choices stay temporary until
+  the next schedule, appearance, or Space event so the desktop does not silently stop following its
+  stacked rule). The panel opens on the desktop
   the person is on, and the toolbar's target-display button names it (`Built-in Retina Display ·
-  Desktop 2`), so going to a desktop and applying is enough. A Focus filter's wallpaper keeps its
-  existing [restoration rules](automation.md#focus-selection-and-restoration) and is not saved
-  for a desktop. A playlist started by hand still lasts only for the visit.
+  Desktop 2`), so going to a desktop and applying is enough. Temporary overrides (Focus filters,
+  app-driven wallpaper switches, and battery wallpaper overrides) keep their
+  [precedence and restoration rules](automation.md#focus-selection-and-restoration)
+  and are never saved for a desktop. A playlist started by hand still lasts only for the visit.
 - **The desktop strip.** Under the switch, the card shows a tile per desktop in their order on
   that display, with the cover of what each shows and the current one outlined. A tile opens a
   chooser with a search field, the installed wallpapers as covers and the saved playlists;
-  **Same as Desktop 1** clears the desktop's choice (on Desktop 1 itself the button is **Keep the
-  current wallpaper**).
-- **A desktop without a choice shows Desktop 1's wallpaper**, including one the person adds. macOS
+  when stacked with a time schedule or system appearance rule, clearing a desktop's choice sets it
+  to **Follow time schedule** or **Follow system appearance**; otherwise **Same as Desktop 1**
+  clears the desktop's choice (on Desktop 1 itself the button is **Keep the current wallpaper**).
+- **A desktop without a choice** follows the display's stacked **Time schedule** or **Follow system
+  appearance** rule when one is set. When no rule is stacked, it shows **Desktop 1's wallpaper**,
+  including one the person adds. macOS
   gives such a desktop Desktop 1's picture (the display's default picture in the wallpaper store is
   Desktop 1's), and Mission Control's **+** preview shows it before the desktop exists, so following
   Desktop 1 is the only rule under which the picture and the wallpaper that plays agree from the
   start. Its tile shows Desktop 1's cover dimmed and **Same as Desktop 1**. If Desktop 1 has no
   choice either, the display keeps what it shows. "Desktop 1" is whichever desktop comes first now.
-- **Turning it on** keeps the wallpaper the display shows as the choice of the current desktop and
-  of Desktop 1, where they have none.
+- **Turning it on** when no schedule or appearance rule is active keeps the wallpaper the display
+  shows as the choice of the current desktop and of Desktop 1, where they have none. Turning it on
+  while a schedule or appearance rule is already active leaves desktops unpinned so they continue
+  following that rule until you explicitly pin a desktop.
 
 Choices are keyed by the Space UUID, not its number: reordering desktops keeps their choices.
 Create, remove and arrange desktops in Mission Control; the app only reads the topology and does
@@ -212,9 +218,12 @@ all the time or polling for Mission Control.
 
 ## Focus, mirroring and native lock-screen ownership
 
-Focus wallpaper/playlist choices keep their existing priority. Leaving Focus uses the rule for the
-currently visible desktop; if that desktop's identity is unknown, restoration waits rather than
-choosing an old Space's wallpaper.
+Focus filters, app-driven wallpaper switches, and battery wallpaper overrides all outrank per-desktop
+Space choices (`Presentation / Manual Pause > Focus Filter > App-driven switch > Battery override >
+Spaces + Appearance / Schedule`). Leaving the last temporary override uses the rule for the
+currently visible desktop (its explicit Space choice, or the stacked Appearance/Schedule rule when
+unpinned); if that desktop's identity is unknown, restoration waits rather than choosing an old
+Space's wallpaper.
 
 Mirrored or disabled displays do not offer the mode. Displays with a shared system Space group can
 still choose different wallpapers, because choices remain per display.
@@ -252,8 +261,9 @@ the poster service is in [desktop picture](desktop-picture.md).
 
 ## Storage and verification
 
-Choices live in the existing `WallpaperMachine.automaticWallpapers` records, under `spaces`; records
-without it decode to an empty map. Local backups include them. UUIDs on another Mac or after system
+Choices live in the existing `WallpaperMachine.automaticWallpapers` records, under `spaces` and
+`spacesEnabled`; legacy records without `spacesEnabled` decode with `spacesEnabled = (mode == .spaces)`
+and records without `spaces` decode to an empty map. Local backups include them. UUIDs on another Mac or after system
 recreation may not match; those choices remain unavailable until explicitly reassigned.
 `WallpaperMachine.spaceVisits` is local runtime state, excluded from backups and cleared with handled
 events and Focus recovery on successful restore; failed restore journals put that local state back.

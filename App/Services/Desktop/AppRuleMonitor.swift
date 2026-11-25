@@ -1,8 +1,25 @@
 import AppKit
 
+/// An active app-driven wallpaper switch resolved from a matching `AppRule` with
+/// `action == .switchWallpaper`.
+struct AppWallpaperSwitch: Equatable, Sendable {
+    let ruleID: UUID
+    let bundleIdentifier: String
+    let condition: AppRuleCondition
+    let target: WallpaperAutomationTarget
+    /// Target display ID, or nil when the rule applies to all enabled independent displays.
+    let displayID: String?
+
+    var key: String {
+        // Length-delimited fields do not alias ids containing punctuation.
+        [ruleID.uuidString, target.kind.rawValue, target.id, displayID ?? ""]
+            .map { "\($0.utf8.count):\($0)" }.joined()
+    }
+}
+
 /// Reports the app-rule actions currently in force: the per-app rules' and that of
-/// "When another app is in front". Workspace notifications are observed only while at least one
-/// of them can do something.
+/// "When another app is in front", plus any matching app-driven wallpaper switches. Workspace
+/// notifications are observed only while at least one of them can do something.
 ///
 /// "Pause on battery" also depends on the power source, which the monitor reads only when that
 /// choice is made and another app is in front. Nothing here observes the power source: the app
@@ -15,6 +32,8 @@ import AppKit
 /// stops counting as another app in front until it is activated again or shows one.
 @MainActor
 final class AppRuleMonitor {
+    static let wallpaperSwitchDidChangeNotification = Notification.Name("WallpaperMachine.appWallpaperSwitchDidChange")
+
     /// The apps that count as the desktop for "When another app is in front": Finder, which
     /// clicking the desktop brings forward, and this app, whose panel and menus are about the
     /// wallpapers themselves.
@@ -28,7 +47,26 @@ final class AppRuleMonitor {
     }
 
     var onChange: (@MainActor () -> Void)?
+    var onWallpaperSwitchChange: (@MainActor () -> Void)?
     private(set) var actions: Set<AppRuleAction> = []
+    private(set) var wallpaperSwitches: [AppWallpaperSwitch] = []
+
+    /// Highest-priority active app-driven wallpaper switch for `display`: frontmost rules beat
+    /// background running rules, display-specific rules beat global rules, and later rules in the
+    /// list break remaining ties.
+    func activeWallpaperSwitch(for display: String) -> AppWallpaperSwitch? {
+        let applicable = wallpaperSwitches.filter { $0.displayID == nil || $0.displayID == display }
+        guard !applicable.isEmpty else { return nil }
+        return applicable.enumerated().max { lhs, rhs in
+            let lFront = lhs.element.condition == .frontmost ? 1 : 0
+            let rFront = rhs.element.condition == .frontmost ? 1 : 0
+            if lFront != rFront { return lFront < rFront }
+            let lSpecific = lhs.element.displayID == display ? 1 : 0
+            let rSpecific = rhs.element.displayID == display ? 1 : 0
+            if lSpecific != rSpecific { return lSpecific < rSpecific }
+            return lhs.offset < rhs.offset
+        }?.element
+    }
 
     private let preferences: PlaybackPreferences
     private let workspaceCenter: NotificationCenter
@@ -111,7 +149,7 @@ final class AppRuleMonitor {
         removeWorkspaceObservers()
         for (center, token) in observers { center.removeObserver(token) }
         observers.removeAll()
-        publish([])
+        publish([], wallpaperSwitches: [])
     }
 
     private func refreshWorkspaceObservation() {
@@ -168,18 +206,31 @@ final class AppRuleMonitor {
 
     private func recompute() {
         guard started, Self.isNeeded(for: preferences) else {
-            publish([])
+            publish([], wallpaperSwitches: [])
             return
         }
         let running = runningBundleIDs()
         let frontmost = frontmostBundleID()
         var next = Set<AppRuleAction>()
+        var nextSwitches: [AppWallpaperSwitch] = []
         for rule in preferences.appRules {
             let matches = switch rule.condition {
             case .running: running.contains(rule.bundleIdentifier)
             case .frontmost: frontmost == rule.bundleIdentifier
             }
-            if matches { next.insert(rule.action) }
+            guard matches else { continue }
+            if rule.action == .switchWallpaper {
+                if let target = rule.wallpaperTarget, target.isValid {
+                    nextSwitches.append(AppWallpaperSwitch(
+                        ruleID: rule.id,
+                        bundleIdentifier: rule.bundleIdentifier,
+                        condition: rule.condition,
+                        target: target,
+                        displayID: rule.displayID))
+                }
+            } else {
+                next.insert(rule.action)
+            }
         }
         // No app in front (a moment between activations) is not another app, nor is one
         // left in front with every window minimized or closed.
@@ -187,7 +238,7 @@ final class AppRuleMonitor {
            let action = preferences.otherAppInFrontAction.ruleAction(onBattery: onBattery()) {
             next.insert(action)
         }
-        publish(next)
+        publish(next, wallpaperSwitches: nextSwitches)
     }
 
     /// Whether the process has a window on screen in the current Space at a level where people
@@ -210,9 +261,17 @@ final class AppRuleMonitor {
         }
     }
 
-    private func publish(_ next: Set<AppRuleAction>) {
-        guard next != actions else { return }
-        actions = next
-        onChange?()
+    private func publish(_ next: Set<AppRuleAction>, wallpaperSwitches nextSwitches: [AppWallpaperSwitch]) {
+        let actionsChanged = next != actions
+        let switchesChanged = nextSwitches != wallpaperSwitches
+        if actionsChanged {
+            actions = next
+            onChange?()
+        }
+        if switchesChanged {
+            wallpaperSwitches = nextSwitches
+            onWallpaperSwitchChange?()
+            preferencesCenter.post(name: Self.wallpaperSwitchDidChangeNotification, object: self)
+        }
     }
 }

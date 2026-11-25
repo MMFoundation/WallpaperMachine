@@ -11,6 +11,9 @@ final class WallpaperAutomationSchedulerTests: XCTestCase {
     private var restores = 0
     private var running = true
     private var dark = false
+    private var presentationPaused = false
+    private var onBattery = false
+    private var appSwitches: [String: AppWallpaperSwitch] = [:]
     private var targetDisplay = "primary"
     private var clock = Date()
     private let queue = UserCommandQueue()
@@ -28,13 +31,15 @@ final class WallpaperAutomationSchedulerTests: XCTestCase {
         var playlist = DisplayPlaylist()
         playlist.mode = .rotate; playlist.source = .list; playlist.wallpaperIDs = ["original", "other"]
         states = ["primary": .init(playlist: playlist, wallpaperID: "original"), "secondary": .init(playlist: .init(), wallpaperID: "second")]
-        changes = []; restores = 0; running = true; dark = false; failures = []; targetDisplay = "primary"
+        changes = []; restores = 0; running = true; dark = false; presentationPaused = false; onBattery = false
+        appSwitches = [:]; failures = []; targetDisplay = "primary"
         spaceVisits = [:]
         clock = calendar.date(from: DateComponents(year: 2026, month: 10, day: 8, hour: 10))!
     }
     private func settle() async { for _ in 0..<70 { await Task.yield() } }
     private func target(_ id: String, _ kind: WallpaperAutomationTarget.Kind = .wallpaper) -> WallpaperAutomationTarget { .init(kind: kind, id: id) }
     private func scheduler(appearanceCenter: NotificationCenter = NotificationCenter(),
+                           center: NotificationCenter = .default,
                            spaceMonitor: WallpaperSpaceMonitor? = nil) -> WallpaperAutomationScheduler {
         WallpaperAutomationScheduler(store: rules, focus: focus, displays: { Array(self.states.keys) }, targetDisplay: { self.targetDisplay },
             canRun: { _ in self.running }, capture: { self.states[$0]! }, queue: { display, action in
@@ -55,8 +60,12 @@ final class WallpaperAutomationSchedulerTests: XCTestCase {
                 self.states[display]?.playlist = original.playlist
                 if !preserve { self.states[display]?.wallpaperID = original.wallpaperID }
             }, dark: { self.dark }, now: { self.clock }, calendar: calendar,
-            appearanceCenter: appearanceCenter, sleep: { _ in try await Task.sleep(for: .seconds(3600)) },
-            spaceMonitor: spaceMonitor, spaceVisit: { self.spaceVisits[$0] })
+            center: center, appearanceCenter: appearanceCenter,
+            sleep: { _ in try await Task.sleep(for: .seconds(3600)) },
+            spaceMonitor: spaceMonitor, spaceVisit: { self.spaceVisits[$0] },
+            isPresentationPaused: { self.presentationPaused },
+            onBattery: { self.onBattery },
+            appWallpaperSwitch: { self.appSwitches[$0] })
     }
 
     func testAppearanceAndSpaceInputsReportDistinctNotificationsWithoutChangingSelection() {
@@ -411,5 +420,280 @@ final class WallpaperAutomationSchedulerTests: XCTestCase {
         spaceVisits["primary"] = .init(spaceID: "c", token: "visit3"); scheduler.evaluate()
         try XCTUnwrap(release).resume(); await blocker.value; await settle()
         XCTAssertEqual(changes.map { $0.1.id }, ["mountain"])
+    }
+
+    // MARK: Precedence & nested transactional restore
+
+    func testBatteryOverrideAppliesPerDisplayOverGlobalAndTransactionallyRestoresOnAC() async throws {
+        let originalPrimary = states["primary"]
+        let originalSecondary = states["secondary"]
+        try rules.setGlobalBatteryTarget(target("global-battery"))
+        try rules.update("primary") { $0.batteryTarget = target("primary-battery") }
+
+        let center = NotificationCenter()
+        let scheduler = scheduler(center: center); scheduler.start(); defer { scheduler.stop() }; await settle()
+        XCTAssertEqual(states["primary"], originalPrimary, "on AC power, battery targets do not apply")
+        XCTAssertEqual(states["secondary"], originalSecondary)
+
+        onBattery = true
+        center.post(name: PowerSourceMonitor.didChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "primary-battery", "per-display battery target wins over global")
+        XCTAssertEqual(states["secondary"]?.wallpaperID, "global-battery", "global battery target covers other displays")
+        XCTAssertEqual(rules.activeOverrides["primary"], .battery)
+        XCTAssertEqual(rules.activeOverrides["secondary"], .battery)
+
+        onBattery = false
+        center.post(name: PowerSourceMonitor.didChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"], originalPrimary, "AC restores original wallpaper and playlist")
+        XCTAssertEqual(states["secondary"], originalSecondary)
+        XCTAssertTrue(rules.focusRestore.isEmpty)
+        XCTAssertNil(rules.activeOverrides["primary"])
+        XCTAssertNil(rules.activeOverrides["secondary"])
+        XCTAssertEqual(restores, 2)
+
+        // Unplugging a second time re-applies cleanly after restore.
+        onBattery = true
+        center.post(name: PowerSourceMonitor.didChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "primary-battery")
+        XCTAssertEqual(states["secondary"]?.wallpaperID, "global-battery")
+    }
+
+    func testFullPrecedenceCascadeAndTransactionalFallThroughAcrossFocusAppBatteryAndBase() async throws {
+        let original = states["primary"]
+        try rules.update("primary") { $0.batteryTarget = target("battery") }
+        let appRule = AppWallpaperSwitch(
+            ruleID: UUID(), bundleIdentifier: "com.apple.dt.Xcode", condition: .frontmost,
+            target: target("xcode"), displayID: "primary")
+
+        let center = NotificationCenter()
+        let scheduler = scheduler(center: center); scheduler.start(); defer { scheduler.stop() }; await settle()
+
+        // 1. Battery turns on.
+        onBattery = true
+        center.post(name: PowerSourceMonitor.didChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "battery")
+        XCTAssertEqual(rules.activeOverrides["primary"], .battery)
+
+        // 2. App-driven switch overrides Battery.
+        appSwitches["primary"] = appRule
+        center.post(name: AppRuleMonitor.wallpaperSwitchDidChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "xcode")
+        XCTAssertEqual(rules.activeOverrides["primary"], .app)
+
+        // 3. Focus overrides App-driven switch.
+        focus.set(nil, selection: .init(target: target("focus"), displayID: "primary"))
+        center.post(name: FocusFilterState.didChangeNotification, object: focus)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "focus")
+        XCTAssertEqual(rules.activeOverrides["primary"], .focus)
+
+        // 4. Focus ends while App and Battery are still active -> falls through to App.
+        focus.set(nil)
+        center.post(name: FocusFilterState.didChangeNotification, object: focus)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "xcode")
+        XCTAssertEqual(rules.activeOverrides["primary"], .app)
+        XCTAssertEqual(restores, 0, "pre-override baseline stays preserved while lower override is active")
+
+        // 5. Returning to AC while App is active keeps the App wallpaper with no reload.
+        let changesBeforeAC = changes.count
+        onBattery = false
+        center.post(name: PowerSourceMonitor.didChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "xcode")
+        XCTAssertEqual(changes.count, changesBeforeAC, "AC transition under higher-priority App switch is a no-op")
+        XCTAssertEqual(rules.activeOverrides["primary"], .app)
+
+        // 6. Unplug again, then App exits -> falls through to Battery wallpaper!
+        onBattery = true
+        center.post(name: PowerSourceMonitor.didChangeNotification, object: nil)
+        await settle()
+        appSwitches["primary"] = nil
+        center.post(name: AppRuleMonitor.wallpaperSwitchDidChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "battery")
+        XCTAssertEqual(rules.activeOverrides["primary"], .battery)
+
+        // 7. Return to AC with no remaining overrides -> transactionally restores original wallpaper + playlist.
+        onBattery = false
+        center.post(name: PowerSourceMonitor.didChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"], original)
+        XCTAssertNil(rules.activeOverrides["primary"])
+        XCTAssertTrue(rules.focusRestore.isEmpty)
+        XCTAssertEqual(restores, 1)
+    }
+
+    func testFocusEndingWhileOnBatteryRestoresBatteryWallpaperThenACRestoresBaseSchedule() async throws {
+        try rules.update("primary") {
+            $0.mode = .schedule
+            $0.rules = [.init(minute: 8 * 60, target: target("morning")), .init(minute: 12 * 60, target: target("noon"))]
+            $0.batteryTarget = target("battery")
+        }
+        let center = NotificationCenter()
+        let scheduler = scheduler(center: center); scheduler.start(); defer { scheduler.stop() }; await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "morning")
+
+        onBattery = true
+        focus.set(nil, selection: .init(target: target("focus"), displayID: "primary"))
+        center.post(name: FocusFilterState.didChangeNotification, object: focus)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "focus")
+
+        // Advance past noon while Focus is active, then end Focus while still on Battery.
+        clock.addTimeInterval(3 * 3600)
+        focus.set(nil)
+        center.post(name: FocusFilterState.didChangeNotification, object: focus)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "battery", "Focus exit on battery falls through to Battery")
+
+        // Plug in AC -> catches up to noon schedule instead of replaying morning.
+        onBattery = false
+        center.post(name: PowerSourceMonitor.didChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "noon")
+        XCTAssertTrue(rules.focusRestore.isEmpty)
+    }
+
+    func testPresentationModeAndManualPauseOutrankFocusAppBatteryAndRestore() async throws {
+        let original = states["primary"]
+        try rules.update("primary") { $0.batteryTarget = target("battery") }
+        let appRule = AppWallpaperSwitch(
+            ruleID: UUID(), bundleIdentifier: "com.example.IDE", condition: .running,
+            target: target("ide"), displayID: "primary")
+
+        let center = NotificationCenter()
+        presentationPaused = true
+        let scheduler = scheduler(center: center); scheduler.start(); defer { scheduler.stop() }
+
+        // While Presentation Mode / Manual Pause is active, Focus, App, and Battery must not mutate wallpapers.
+        onBattery = true
+        appSwitches["primary"] = appRule
+        focus.set(nil, selection: .init(target: target("focus"), displayID: "primary"))
+        scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"], original, "Presentation / Manual Pause outranks Focus, App and Battery")
+        XCTAssertTrue(changes.isEmpty)
+
+        // Exiting Presentation Mode catches up immediately to the highest active tier (Focus).
+        presentationPaused = false
+        center.post(name: PresentationModeController.didChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "focus")
+
+        // Entering Presentation Mode again blocks restoration when Focus/App/Battery clear.
+        presentationPaused = true
+        focus.set(nil); appSwitches["primary"] = nil; onBattery = false
+        scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "focus", "restoration waits while Presentation / Manual Pause is active")
+
+        // Exiting Presentation Mode completes transactional restore.
+        presentationPaused = false
+        center.post(name: PresentationModeController.didChangeNotification, object: nil)
+        await settle()
+        XCTAssertEqual(states["primary"], original)
+        XCTAssertTrue(rules.focusRestore.isEmpty)
+    }
+
+    func testBatteryAndAppOverridesRecoverAfterRelaunchWhenConditionHasEnded() async throws {
+        let original = states["primary"]
+        try rules.update("primary") { $0.batteryTarget = target("battery") }
+        onBattery = true
+        var scheduler = self.scheduler(); scheduler.start(); await settle(); scheduler.stop()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "battery")
+        XCTAssertNotNil(WallpaperAutomationStore(defaults: defaults).focusRestore["primary"])
+
+        // Simulated relaunch after plugging into AC while the app was closed.
+        onBattery = false
+        rules = WallpaperAutomationStore(defaults: defaults)
+        scheduler = self.scheduler(); scheduler.start(); defer { scheduler.stop() }; await settle()
+        XCTAssertEqual(states["primary"], original)
+        XCTAssertTrue(rules.focusRestore.isEmpty)
+    }
+
+    // MARK: Spaces stacking with Appearance and Schedule
+
+    func testSpacesStackedWithAppearanceUsesExplicitSpaceOverridesAndAppearanceFallback() async throws {
+        try rules.update("primary") {
+            $0.mode = .appearance
+            $0.spacesEnabled = true
+            $0.light = target("day-light")
+            $0.dark = target("night-dark")
+            $0.spaces = ["space-code": target("coding")]
+        }
+        spaceVisits["primary"] = .init(spaceID: "space-main", token: "v1", firstSpaceID: "space-main")
+        let scheduler = scheduler(); scheduler.start(); defer { scheduler.stop() }; await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "day-light", "unpinned Space follows light appearance")
+
+        // System appearance switches to dark while staying on the unpinned Space.
+        dark = true; scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "night-dark", "unpinned Space reacts to dark appearance")
+
+        // Swiping to a pinned Space uses its explicit override.
+        spaceVisits["primary"] = .init(spaceID: "space-code", token: "v2", firstSpaceID: "space-main")
+        scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "coding", "explicit Space override wins over appearance")
+
+        // System appearance switches back to light while on the pinned Space -> stays on pinned Space wallpaper.
+        dark = false; scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "coding")
+
+        // Swiping back to the unpinned Space applies light appearance.
+        spaceVisits["primary"] = .init(spaceID: "space-main", token: "v3", firstSpaceID: "space-main")
+        scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "day-light")
+
+        // A manual choice on an unpinned stacked Space is temporary and does not permanently pin that Space.
+        states["primary"]?.wallpaperID = "manual"
+        scheduler.noteManualChoice("primary", wallpaperID: "manual")
+        XCTAssertNil(rules.configuration(for: "primary").spaces["space-main"])
+        dark = true; scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "night-dark", "next appearance event resumes stacked rule")
+
+        // A manual choice on an already-pinned Space updates that Space's override.
+        spaceVisits["primary"] = .init(spaceID: "space-code", token: "v4", firstSpaceID: "space-main")
+        scheduler.evaluate(); await settle()
+        states["primary"]?.wallpaperID = "coding-v2"
+        scheduler.noteManualChoice("primary", wallpaperID: "coding-v2")
+        XCTAssertEqual(rules.configuration(for: "primary").spaces["space-code"], target("coding-v2"))
+    }
+
+    func testSpacesStackedWithScheduleAndOverridesRestoreCorrectTargetPerSpace() async throws {
+        try rules.update("primary") {
+            $0.mode = .schedule
+            $0.spacesEnabled = true
+            $0.rules = [
+                .init(minute: 8 * 60, target: target("morning")),
+                .init(minute: 14 * 60, target: target("afternoon")),
+            ]
+            $0.spaces = ["space-pinned": target("pinned-daynight", .playlist)]
+            $0.batteryTarget = target("battery")
+        }
+        spaceVisits["primary"] = .init(spaceID: "space-1", token: "v1", firstSpaceID: "space-1")
+        let scheduler = scheduler(); scheduler.start(); defer { scheduler.stop() }; await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "morning")
+
+        // Battery override takes over while on unpinned Space; time advances past 14:00.
+        onBattery = true; scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "battery")
+        clock.addTimeInterval(5 * 3600)
+        // Return to AC -> catches up to afternoon schedule on the unpinned Space.
+        onBattery = false; scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"]?.wallpaperID, "afternoon")
+
+        // Enter pinned Space with a saved playlist target (e.g. Day/Night playlist).
+        spaceVisits["primary"] = .init(spaceID: "space-pinned", token: "v2", firstSpaceID: "space-1")
+        scheduler.evaluate(); await settle()
+        XCTAssertEqual(states["primary"]?.playlist.planID, "pinned-daynight")
+
+        // Manual choice during Battery override does NOT overwrite the pinned Space.
+        onBattery = true; scheduler.evaluate(); await settle()
+        states["primary"]?.wallpaperID = "manual-during-battery"
+        scheduler.noteManualChoice("primary", wallpaperID: "manual-during-battery")
+        XCTAssertEqual(rules.configuration(for: "primary").spaces["space-pinned"], target("pinned-daynight", .playlist))
     }
 }

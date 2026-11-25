@@ -1,7 +1,7 @@
 # Automation
 
 WallpaperMachine can choose wallpapers by weekday, time, sunrise/sunset, system
-appearance or Focus. Global keyboard shortcuts, actions in the Shortcuts app
+appearance, desktop Space, power source (battery), running or frontmost app, or Focus. Global keyboard shortcuts, actions in the Shortcuts app
 (and so Siri and Spotlight), and `wallpapermachine://` links run explicit
 commands (`AutomationCommand`)
 through `AppAutomation` into `AppDelegate.performAutomation`, which the menu bar's
@@ -22,10 +22,11 @@ choices across multiple independent displays.
 
 | Mode | Behavior |
 | --- | --- |
-| Off | Leaves the wallpaper and any existing playlist under their usual controls. |
+| Off | Leaves the wallpaper and any existing playlist under their usual controls (while keeping any per-desktop Space choices active if **Different wallpaper for each desktop** is turned on). |
 | Time schedule | Up to 64 rules, each with an enable/disable switch, weekdays, a clock time or sunrise/sunset plus a −180…180 minute offset, and a wallpaper or saved playlist. Rules can be reordered with their move buttons or by drag-and-drop to control tie-breaking order. |
 | Follow system appearance | Separate choices for the system's light and dark appearance; an empty choice leaves the display as it is. The panel's own theme is independent. |
-| Different wallpaper for each desktop | Choices by desktop UUID, made on the display's card or by applying a wallpaper on that desktop, and loaded after entering it, or run on where they paused when the desktop was visited before. A desktop without a choice follows Desktop 1's; only when Desktop 1 has none either does the display keep the current wallpaper. Only the current desktop plays: in Mission Control the others show a still picture. See [a wallpaper for each desktop](spaces.md) for pause/Focus behavior and native lock-screen limits. |
+| Different wallpaper for each desktop | Toggled independently above on the display's card (`spacesEnabled`, plus backward-compatible `mode: "spaces"`). Choices are keyed by desktop UUID and can now **stack** with **Time schedule** or **Follow system appearance**: desktops with an explicit choice keep that wallpaper or saved playlist (including a Day/Night playlist), while desktops without a choice follow the stacked schedule or appearance rule (or Desktop 1's choice when no schedule or appearance rule is set). Only the current desktop plays; in Mission Control the others show a still picture. See [a wallpaper for each desktop](spaces.md) for stacking, pause/Focus behavior and native lock-screen limits. |
+| On battery (per display & global) | Optional wallpaper or saved playlist override while the Mac runs on battery power, configurable globally in **Settings → Playback & Power → Wallpaper on battery** (all displays) and per display in **Settings → Displays → a display → Automatic wallpaper selection → On battery** (overrides the global choice). Driven strictly by IOKit power-source notifications (`PowerSourceMonitor`, zero polling; Wi-Fi SSID triggers are intentionally excluded because macOS 14+ requires Location permission for SSID reads). Works harmoniously alongside **On battery: Reduced quality** so the battery wallpaper also runs under the reduced scale and frame-rate ceiling. |
 
 A wallpaper target turns that display's playlist off after successful activation.
 A saved playlist copies its current settings, then the existing playlist scheduler
@@ -86,25 +87,25 @@ time when editing a sunrise or sunset rule.
 
 ## Focus selection and restoration
 
-In **System Settings → Focus → Focus Filters**, WallpaperMachine also offers
-**Use wallpaper** and **Use saved playlist**, with an optional display. Omitting the
-display pins the panel's current target when that Focus choice takes effect. The
-selection temporarily overrides time and appearance rules; existing pause/mute/stop
-Focus actions are documented under [Performance](performance.md#low-battery-low-power-mode-heat-and-focus).
+Temporary wallpaper overrides — Focus filters, app-driven wallpaper switches, and power-source
+(battery) wallpaper overrides — follow an explicit, deterministic precedence hierarchy from highest to lowest:
 
-When the filter ends, a currently due automatic rule takes over; otherwise the
-previous wallpaper and playlist return. A manual wallpaper chosen during Focus is
-preserved unless a new automatic event became due. Editing or applying a different
-playlist during Focus keeps that new playlist instead of restoring the old one.
-Restored rotations start a fresh interval; restored day/night playlists wait until
-their next boundary. Deleted wallpaper, plan and collection references are checked
-again on restoration. Focus recovery is journaled before applying a choice so an
-interrupted launch can recover it. Actual macOS Focus delivery still requires a
-separate desktop test.
+1. **Presentation mode / Manual pause** — blocks all automatic wallpaper changes and pending restorations until presentation mode ends or playback resumes.
+2. **Focus Filter** — **System Settings → Focus → Focus Filters** offers **Use wallpaper** and **Use saved playlist**, with an optional display (omitting the display pins the panel's current target when that Focus choice takes effect). Existing pause/mute/stop Focus actions are documented under [Performance](performance.md#low-battery-low-power-mode-heat-and-focus).
+3. **App-driven wallpaper switch** — in **Settings → Playback & Power → App rules**, an app rule can choose **Switch wallpaper** alongside existing **Pause**, **Mute**, and **Stop** actions, picking any installed wallpaper or saved playlist and targeting **All displays** or a specific independent display while the app is **Running** or **In front** (`AppRuleMonitor`, driven strictly by `NSWorkspace` launch/terminate/activate notifications with zero polling). When multiple wallpaper-switching app rules match the same display, **In front** beats **Running**, a display-specific rule beats **All displays**, and a later rule in the list breaks remaining ties. Existing pause/mute/stop rules keep their playback behavior untouched.
+4. **Power-source (Battery) wallpaper override** — a per-display **On battery** override beats the global **Wallpaper on battery** choice, applies on battery via `PowerSourceMonitor` notifications, and composes cleanly with battery **Reduced quality**.
+5. **Spaces + Appearance / Time schedule / Day-Night** — per-desktop explicit overrides stacked with Follow system appearance or Time schedule (and any Day/Night saved playlist).
 
-Rules and coordinates are stored in `WallpaperMachine.automaticWallpapers` and
-`WallpaperMachine.solarLocation` and included in local backups. Keep-existing restore
-merges by display. The handled-event and Focus recovery records are local runtime
+All temporary overrides (Focus, app-driven switches, and battery overrides) share the transactional restore journal (`FocusWallpaperRestore`, persisted in `WallpaperMachine.focusWallpaperRestore` before applying so interrupted launches and relaunches after unplug/plug or app quit still recover cleanly):
+
+- **Nested fall-through**: ending a higher-priority override while a lower-priority override is still active falls through directly to the highest remaining active override (for example, ending a Focus Filter while on battery switches to the battery wallpaper; plugging back into AC while an app-driven switch is active keeps the app wallpaper without reloading).
+- **Exiting all overrides**: when the last active temporary override ends, a currently due automatic rule (Space override, stacked Appearance/Schedule rule, or standalone Schedule/Appearance) takes over; otherwise the pre-override wallpaper and playlist return.
+- **Manual choices and playlist edits**: a manual wallpaper chosen during a temporary override is preserved on exit unless a newer automatic event became due (and never overwrites a Space's saved choice). Editing or applying a different playlist during an override keeps that new playlist instead of restoring the old one.
+- **Restored playlists**: restored rotations start a fresh interval; restored day/night playlists wait until their next boundary. Deleted wallpaper, plan and collection references are checked again on restoration. Actual macOS Focus delivery still requires a separate desktop test.
+
+Rules (including `spacesEnabled`, per-display `batteryTarget`, and the global battery override stored under the `"*"` sentinel entry) and coordinates are stored in `WallpaperMachine.automaticWallpapers` and
+`WallpaperMachine.solarLocation` and included in local backups; app-driven wallpaper switch rules live inside `WallpaperMachine.appRules`. Keep-existing restore
+merges by display. Legacy JSON records without `spacesEnabled`, `batteryTarget`, `wallpaperTarget`, or `displayID` decode cleanly with backward-compatible defaults (`mode == "spaces"` decodes with `spacesEnabled = true`). The handled-event and override recovery records are local runtime
 state, excluded from exports, cleared when restored settings replace their baseline,
 and retained if restore rolls back.
 
@@ -296,8 +297,10 @@ scheduler (`WallpaperAutomationPlannerTests`, `WallpaperAutomationStoreTests`,
 and legacy decoding without `isEnabled`, rule reordering with stale-drag validation,
 appearance choices, DST, solar offsets crossing midnight, absent polar events, catch-up
 and retry against a fake clock and the real command queue, manual precedence including
-a rule giving way to a waiting or running manual command, Focus exit and
-interrupted recovery), the panel's validation and queued manual playlist edits
+a rule giving way to a waiting or running manual command, the full precedence hierarchy
+(`Presentation / Manual Pause > Focus Filter > App-driven switch > Battery override > Spaces + Appearance / Schedule`),
+nested transactional restore fall-through, Spaces stacking with Appearance and Schedule,
+and interrupted/relaunch recovery), app-rule switch matching and priority (`AppRuleMonitorTests`, `PlaybackPreferencesTests`), the panel's validation and queued manual playlist edits
 (`PanelPlaylistActionsTests`), the rule actions, reordering, today's solar readout and
 editor (`PanelAutomationActionsTests`, `DisplaysSettingsModelTests`,
 `DisplaysSettingsDraftsTests`), the shortcut recorder

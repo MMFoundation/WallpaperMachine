@@ -17,14 +17,21 @@ final class PowerSourceMonitor {
         case mains, battery, unknown
     }
 
+    static let didChangeNotification = Notification.Name("WallpaperMachine.powerSourceDidChange")
+
     var onChange: (@MainActor (Source) -> Void)?
     private(set) var source: Source
 
     private let read: @MainActor () -> Source
+    private let center: NotificationCenter
     private var runLoopSource: CFRunLoopSource?
 
-    init(read: @escaping @MainActor () -> Source = PowerSourceMonitor.systemSource) {
+    init(
+        read: @escaping @MainActor () -> Source = PowerSourceMonitor.systemSource,
+        center: NotificationCenter = .default
+    ) {
         self.read = read
+        self.center = center
         source = read()
     }
 
@@ -79,6 +86,7 @@ final class PowerSourceMonitor {
         AppLog.info("power source changed to \(next)")
         source = next
         onChange?(next)
+        center.post(name: Self.didChangeNotification, object: self)
     }
 }
 

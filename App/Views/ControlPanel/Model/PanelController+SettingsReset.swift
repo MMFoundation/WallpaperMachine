@@ -93,6 +93,9 @@ extension PanelController {
 
     // Playback, power and app rules.
     playback.resetToDefaults()
+    if automations.globalBatteryTarget != nil {
+      await attempt { try automations.setGlobalBatteryTarget(nil) }
+    }
 
     // What the engine keeps. Only a value that differs is sent, so a reset of settings already
     // at their defaults restarts nothing.

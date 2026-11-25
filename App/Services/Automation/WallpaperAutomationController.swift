@@ -9,6 +9,9 @@ final class WallpaperAutomationController {
          focus: FocusFilterState, displays: @escaping @MainActor () -> [String],
          targetDisplay: @escaping @MainActor () -> String, canRun: @escaping @MainActor (String) -> Bool,
          playlistScheduler: PlaylistScheduler, spaceMonitor: WallpaperSpaceMonitor? = nil,
+         onBattery: (@MainActor () -> Bool)? = nil,
+         appWallpaperSwitch: (@MainActor (String) -> AppWallpaperSwitch?)? = nil,
+         isPresentationMode: @escaping @MainActor () -> Bool = { false },
          onInputsChanged: @escaping @MainActor (Notification.Name) -> Void,
          onSettled: @escaping @MainActor () -> Void) {
         scheduler = WallpaperAutomationScheduler(store: rules, focus: focus,
@@ -48,7 +51,11 @@ final class WallpaperAutomationController {
                       let row = bridge.settingsSnapshot.displays.first(where: { $0.displayId == display }),
                       let physical = spaceMonitor?.physicalDisplay(display, title: row.title) else { return nil }
                 return spaceMonitor?.visit(for: physical)
-            })
+            }, isPresentationPaused: {
+                bridge.appSnapshot.playbackState == .paused || isPresentationMode()
+            }, onBattery: onBattery ?? {
+                bridge.settingsSnapshot.onBatteryPower
+            }, appWallpaperSwitch: appWallpaperSwitch ?? { _ in nil })
         scheduler.onSettled = { [weak playlistScheduler] in playlistScheduler?.evaluate(); onSettled() }
         scheduler.onInputsChanged = onInputsChanged
         rules.manualChoice = { [weak scheduler = self.scheduler] display in scheduler?.noteManualChoice(display) }

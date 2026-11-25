@@ -64,6 +64,11 @@ struct PlaybackSettingsSection: View {
     note:
       "Reduced quality uses the scale and frame rate below instead of your usual quality settings. Pause stops wallpapers until you plug in."
   )
+  static let batteryWallpaper = SettingsItem(
+    id: "playback.battery-wallpaper", section: .playback, group: playback, title: "Wallpaper on battery",
+    note:
+      "Temporarily switches every display to this wallpaper or saved playlist while on battery and restores it when you plug in. A display’s own battery choice overrides this. Works alongside Reduced quality.",
+    keywords: ["Leave as it is", "Use wallpaper", "Use saved playlist"])
   static let batteryScale = SettingsItem(
     id: "playback.battery-scale", section: .playback, group: playback,
     title: "Render scale when reduced",
@@ -107,11 +112,12 @@ struct PlaybackSettingsSection: View {
     keywords: ["Open Focus Settings…"])
   static let appRules = SettingsItem(
     id: "playback.app-rules", section: .playback, group: playback, title: "App rules",
-    note: "Pause, mute or stop wallpapers while a chosen app is running or in front.")
+    note: "Pause, mute, stop or temporarily switch wallpapers while a chosen app is running or in front.")
   static let addAppRule = SettingsItem(
     id: "playback.app-rules-add", section: .playback, inside: appRules, title: "Add app…",
     keywords: [
-      "No app rules yet. Add an app to pause, mute or stop wallpapers while it is running or in front."
+      "No app rules yet. Add an app to pause, mute, stop or switch wallpapers while it is running or in front.",
+      "Switch wallpaper", "All displays",
     ])
   static let whatChanges = SettingsItem(
     id: "playback.context", section: .playback, group: context,
@@ -120,7 +126,7 @@ struct PlaybackSettingsSection: View {
   static let items = [
     muteAll, desktopCovered, activeDisplayOnly, otherAudio, otherAudioVolume, otherAppInFront, displaySleep,
     inactivity,
-    inactivityTime, batteryMode, batteryScale,
+    inactivityTime, batteryMode, batteryWallpaper, batteryScale,
     batteryFps, reducedQuality, lowBattery, lowBatteryLevel, lowPowerMode, thermal, focus, appRules,
     addAppRule, whatChanges,
   ]
@@ -216,6 +222,15 @@ struct PlaybackSettingsSection: View {
             "batteryMode", saved: playback.batteryMode,
             options: [BridgeBatteryMode.keepRunning, .reducedQuality, .pause].map { ($0, $0.title) }
           ) { try await controller.setBatteryMode($0) }
+        }
+        SettingsRow(Self.batteryWallpaper) {
+          DisplaysTargetPicker(
+            selection: controller.globalBatteryTarget, targets: controller.automationTargets,
+            isRequired: false, popoverTitle: L("Wallpaper on battery"),
+            key: PanelActionCoordinator.key("automationBatteryGlobal"),
+            commit: { try await controller.setGlobalBatteryTarget($0) }
+          )
+          .disabled(controller.isStoreBusy)
         }
         if quality.reducedQualityChosen {
           reducedProfileRows(playback, quality)
@@ -358,7 +373,10 @@ struct PlaybackSettingsSection: View {
         "When the battery is low, wallpapers pause or stop once the charge falls to the level you chose, and resume when you plug in or the charge recovers."
       )
       Text(
-        "App rules pause, mute or stop wallpapers while a chosen app is running or in front. Your own Play and Pause are not changed."
+        "App rules pause, mute, stop or temporarily switch wallpapers while a chosen app is running or in front, restoring your previous wallpaper and playlist when the app no longer matches. Your own Play and Pause are not changed."
+      )
+      Text(
+        "When multiple automatic rules apply at once, Presentation mode and manual Pause come first, followed by Focus filters, app-driven wallpaper switches, battery wallpaper overrides, and then per-desktop Spaces stacked with system appearance or time schedules."
       )
       Text(
         "Low Power Mode, a hot Mac and a Focus filter work the same way: while they hold, wallpapers pause, mute or stop as you chose, and resume when they end. Stop frees renderer memory and reloads wallpapers afterwards."

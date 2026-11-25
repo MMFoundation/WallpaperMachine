@@ -112,6 +112,21 @@ final class DisplaysSettingsSearchTests: SettingsBTestCase {
     XCTAssertFalse(card("Skip recently used", rows: mirror).showsCard)
   }
 
+  func testBatteryOverrideAndAppSwitchSettingsAreDiscoverableBySearch() {
+    let batteryCard = card("On battery", rows: DisplaysCardSearch.Rows(automationMode: .off))
+    XCTAssertTrue(batteryCard.showsCard)
+    XCTAssertTrue(batteryCard.showsDisclosure(S.automation))
+    XCTAssertTrue(batteryCard.opens(S.automation))
+
+    let globalBattery = search("Wallpaper on battery")
+    XCTAssertTrue(globalBattery.shows(.playback))
+    XCTAssertTrue(globalBattery.shows(PlaybackSettingsSection.batteryWallpaper))
+
+    let appSwitch = search("Switch wallpaper")
+    XCTAssertTrue(appSwitch.shows(.playback))
+    XCTAssertTrue(appSwitch.opens(PlaybackSettingsSection.appRules))
+  }
+
   /// A disclosure whose own words match stays, folded, on a display where nothing inside matches.
   func testADisclosureFoundByItsOwnWordsStaysFoldedWhereNothingInsideMatches() {
     let paused = card("Playlist paused", rows: dayNight)

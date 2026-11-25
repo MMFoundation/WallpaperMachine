@@ -1,6 +1,13 @@
 import AppKit
 
 /// Resolves one automatic choice per display; all mutations share the user's command queue.
+///
+/// Precedence (highest to lowest):
+/// 1. Presentation Mode / Manual Pause (`isPresentationPaused`) — holds all automatic changes.
+/// 2. Focus Filter wallpaper / playlist override (`focus.selection`).
+/// 3. App-driven wallpaper switch (`appWallpaperSwitch`).
+/// 4. Power-source (Battery) wallpaper override (`onBattery` + `store.effectiveBatteryTarget`).
+/// 5. Spaces (per-desktop override) stacked with Appearance / Time Schedule / Day-Night rules.
 @MainActor
 final class WallpaperAutomationScheduler {
     /// Runs the change in the display's command slot and says how that ended: whether it ran, and
@@ -27,6 +34,9 @@ final class WallpaperAutomationScheduler {
     private let sleep: @Sendable (Duration) async throws -> Void
     private let spaceVisit: @MainActor (String) -> WallpaperSpaceVisit?
     private let spaceMonitor: WallpaperSpaceMonitor?
+    private let isPresentationPaused: @MainActor () -> Bool
+    private let onBattery: @MainActor () -> Bool
+    private let appWallpaperSwitch: @MainActor (String) -> AppWallpaperSwitch?
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var timer: Task<Void, Never>?
     private var armedFor: Date?
@@ -57,12 +67,18 @@ final class WallpaperAutomationScheduler {
          appearanceCenter: NotificationCenter = DistributedNotificationCenter.default(),
          sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
          spaceMonitor: WallpaperSpaceMonitor? = nil,
-         spaceVisit: @escaping @MainActor (String) -> WallpaperSpaceVisit? = { _ in nil }) {
+         spaceVisit: @escaping @MainActor (String) -> WallpaperSpaceVisit? = { _ in nil },
+         isPresentationPaused: @escaping @MainActor () -> Bool = { false },
+         onBattery: @escaping @MainActor () -> Bool = { false },
+         appWallpaperSwitch: @escaping @MainActor (String) -> AppWallpaperSwitch? = { _ in nil }) {
         self.store = store; self.focus = focus; self.displays = displays; self.targetDisplay = targetDisplay
         self.canRun = canRun; self.capture = capture; self.queue = queue; self.apply = apply; self.restore = restore
         self.dark = dark; self.now = now; self.calendar = calendar; self.center = center
         self.appearanceCenter = appearanceCenter; self.sleep = sleep
         self.spaceMonitor = spaceMonitor; self.spaceVisit = spaceVisit
+        self.isPresentationPaused = isPresentationPaused
+        self.onBattery = onBattery
+        self.appWallpaperSwitch = appWallpaperSwitch
     }
 
     static var systemIsDark: Bool {
@@ -76,6 +92,9 @@ final class WallpaperAutomationScheduler {
         for (name, object): (Notification.Name, AnyObject?) in [
             (WallpaperAutomationStore.didChangeNotification, store),
             (FocusFilterState.didChangeNotification, focus),
+            (PowerSourceMonitor.didChangeNotification, nil),
+            (AppRuleMonitor.wallpaperSwitchDidChangeNotification, nil),
+            (PresentationModeController.didChangeNotification, nil),
             (.NSSystemClockDidChange, nil), (.NSSystemTimeZoneDidChange, nil),
         ] { observe(center, name: name, object: object) }
         observe(appearanceCenter, name: .init("AppleInterfaceThemeChangedNotification"), object: nil)
@@ -102,26 +121,32 @@ final class WallpaperAutomationScheduler {
         observers.append((center, token))
     }
 
-    /// An explicit selection lasts until the next event. During Focus, preserve it on exit too.
-    /// On a display that has a wallpaper for each desktop, a wallpaper chosen by hand becomes the
-    /// current desktop's own: it stays when the person leaves and comes back.
+    /// An explicit selection lasts until the next event. During an active temporary override
+    /// (Focus, app switch, or battery), preserve it on exit too. On a display that has a wallpaper
+    /// for each desktop, a wallpaper chosen by hand becomes the current desktop's own unless the
+    /// desktop is unpinned and following a stacked schedule or appearance rule.
     func noteManualChoice(_ display: String, wallpaperID: String? = nil) {
         if let wallpaperID, assignCurrentDesktop(display, to: wallpaperID) { return }
         let resolution = desired(on: display)
-        if store.focusRestore[display] != nil, !resolution.focused {
+        if store.focusRestore[display] != nil, resolution.activeOverride == nil {
             do { try store.forgetFocus(on: display) }
-            catch { AppLog.error("could not release Focus restoration after a manual choice: \(error.localizedDescription)") }
+            catch { AppLog.error("could not release override restoration after a manual choice: \(error.localizedDescription)") }
         } else { store.preserveManualWallpaper(on: display) }
         if let event = resolution.event { store.markHandled(event.key, on: display) }
         else if store.errors[display] != nil { store.markHandled("manual", on: display) }
     }
 
     /// Saves `wallpaperID` as the current desktop's choice. False when the display does not follow
-    /// desktops, the desktop is unknown, or a Focus filter decides its wallpaper now.
+    /// desktops, the desktop is unknown, a temporary override decides its wallpaper now, or the
+    /// desktop is unpinned and following a stacked schedule/appearance rule.
     private func assignCurrentDesktop(_ display: String, to wallpaperID: String) -> Bool {
         let configuration = store.configuration(for: display)
-        guard configuration.mode == .spaces, store.focusRestore[display] == nil,
-              !desired(on: display).focused, let visit = spaceVisit(display) else { return false }
+        let resolution = desired(on: display)
+        guard configuration.usesSpaces, store.focusRestore[display] == nil,
+              resolution.activeOverride == nil, let visit = spaceVisit(display) else { return false }
+        if configuration.ruleMode != .off, configuration.spaces[visit.spaceID] == nil {
+            return false
+        }
         let target = WallpaperAutomationTarget(kind: .wallpaper, id: wallpaperID)
         guard target.isValid else { return false }
         if configuration.spaces[visit.spaceID] != target {
@@ -144,17 +169,21 @@ final class WallpaperAutomationScheduler {
                 value.displayID ?? store.focusRestore.first { $0.value.key == "focus:" + value.key }?.key ?? targetDisplay()
             }
         }
+        let pausedForPresentation = isPresentationPaused()
         let connected = Set(displays())
         let ids = connected.union(store.configurations.keys).union(store.focusRestore.keys)
+            .subtracting([WallpaperAutomationStore.globalDisplayID])
         var nextDate: Date?
         for display in ids {
             let resolution = desired(on: display)
-            store.setStatus(on: display, next: resolution.next, focused: resolution.focused)
-            if store.configuration(for: display).mode != .off {
+            store.setStatus(
+                on: display, next: resolution.next, focused: resolution.focused,
+                activeOverride: resolution.activeOverride)
+            if store.configuration(for: display).ruleMode == .schedule {
                 nextDate = min(nextDate ?? resolution.reevaluateAt, resolution.reevaluateAt)
             }
-            guard connected.contains(display), !inFlight.contains(display) else { continue }
-            if let record = store.focusRestore[display], !resolution.focused {
+            guard connected.contains(display), !inFlight.contains(display), !pausedForPresentation else { continue }
+            if let record = store.focusRestore[display], resolution.activeOverride == nil {
                 let key = restorationKey(record, base: resolution.event)
                 guard resolution.baseAvailable, store.handled[display] != key, canRun(display) else { continue }
                 begin(display, key: key, restoring: true)
@@ -171,27 +200,36 @@ final class WallpaperAutomationScheduler {
         var event: WallpaperAutomationOccurrence?
         var next: WallpaperAutomationOccurrence?
         var reevaluateAt: Date
-        var focused = false
+        var activeOverride: WallpaperAutomationOverrideKind?
         var baseAvailable = true
+        var ruleTarget: WallpaperAutomationTarget?
+
+        var focused: Bool { activeOverride == .focus }
     }
 
     /// A Space's old pixels must not be published while its replacement is still waiting.
     func selectionIsSettled(on display: String) -> Bool {
         guard !inFlight.contains(display) else { return false }
         let resolution = desired(on: display)
-        if let record = store.focusRestore[display], !resolution.focused {
+        if let record = store.focusRestore[display], resolution.activeOverride == nil {
             return store.handled[display] == restorationKey(record, base: resolution.event)
         }
         return resolution.event.map { store.handled[display] == $0.key } ?? true
     }
 
     /// The choice this display is about to change to, while that change waits or runs; nil once
-    /// it is handled or while a Focus restoration decides instead.
+    /// it is handled or while an override restoration decides instead.
     func pendingTarget(on display: String) -> WallpaperAutomationTarget? {
         let resolution = desired(on: display)
-        guard store.focusRestore[display] == nil || resolution.focused,
+        guard store.focusRestore[display] == nil || resolution.activeOverride != nil,
               let event = resolution.event, store.handled[display] != event.key else { return nil }
         return event.target
+    }
+
+    /// The currently due schedule or appearance target on `display` (before per-Space or temporary
+    /// overrides), used for Space pinning and poster caching when Spaces stacks with a rule mode.
+    func stackedRuleTarget(on display: String) -> WallpaperAutomationTarget? {
+        desired(on: display).ruleTarget
     }
 
     /// Whether this display's change has been admitted and is running now, rather than waiting
@@ -213,23 +251,54 @@ final class WallpaperAutomationScheduler {
             resolutions[display] = .init(revision: configuration.revision, solar: store.solar,
                 dark: appearance, computedAt: time, result: result)
         }
-        var resolved = Resolution(event: result.current, next: result.next, reevaluateAt: result.reevaluateAt)
-        if configuration.mode == .spaces {
+        var resolved = Resolution(
+            event: result.current, next: result.next, reevaluateAt: result.reevaluateAt,
+            ruleTarget: result.current?.target)
+        if configuration.usesSpaces {
             let visit = spaceVisit(display)
             resolved.baseAvailable = visit != nil
-            if let visit, let target = configuration.desktopTarget(visit.spaceID, firstDesktop: visit.firstSpaceID) {
-                // The target is part of the event: a desktop that follows Desktop 1 changes target
-                // within one visit when the desktops are reordered and another one becomes first.
-                let key = "space:\(configuration.revision):\(visit.spaceID):\(visit.token):\(target.kind.rawValue):\(target.id)"
-                resolved.event = .init(key: key, date: time, target: target)
+            if let visit {
+                if let explicit = configuration.spaces[visit.spaceID] {
+                    let key = "space:\(configuration.revision):\(visit.spaceID):\(visit.token):\(explicit.kind.rawValue):\(explicit.id)"
+                    resolved.event = .init(key: key, date: time, target: explicit)
+                } else if configuration.ruleMode != .off {
+                    if let ruleEvent = result.current {
+                        let key = "space:\(configuration.revision):\(visit.spaceID):\(visit.token):\(ruleEvent.key)"
+                        resolved.event = .init(key: key, date: ruleEvent.date, target: ruleEvent.target)
+                    } else {
+                        resolved.event = nil
+                    }
+                } else if let inherited = visit.firstSpaceID.flatMap({ configuration.spaces[$0] }) {
+                    // The target is part of the event: a desktop that follows Desktop 1 changes target
+                    // within one visit when the desktops are reordered and another one becomes first.
+                    let key = "space:\(configuration.revision):\(visit.spaceID):\(visit.token):\(inherited.kind.rawValue):\(inherited.id)"
+                    resolved.event = .init(key: key, date: time, target: inherited)
+                } else {
+                    resolved.event = nil
+                }
+            } else {
+                resolved.event = nil
             }
         }
+        // Temporary override precedence: Focus Filter > App-driven switch > Power-source (Battery).
         if let selection = focus.selection {
             let target = selection.displayID ?? focusDisplay ?? targetDisplay()
             if display == target {
                 resolved.event = .init(key: "focus:" + selection.key, date: time, target: selection.target)
-                resolved.focused = true
+                resolved.activeOverride = .focus
+                return resolved
             }
+        }
+        if let appSwitch = appWallpaperSwitch(display) {
+            resolved.event = .init(key: "app:" + appSwitch.key, date: time, target: appSwitch.target)
+            resolved.activeOverride = .app
+            return resolved
+        }
+        if onBattery(), let batteryTarget = store.effectiveBatteryTarget(for: display) {
+            let key = "battery:\(batteryTarget.kind.rawValue.utf8.count):\(batteryTarget.kind.rawValue):\(batteryTarget.id.utf8.count):\(batteryTarget.id)"
+            resolved.event = .init(key: key, date: time, target: batteryTarget)
+            resolved.activeOverride = .battery
+            return resolved
         }
         return resolved
     }
@@ -247,17 +316,18 @@ final class WallpaperAutomationScheduler {
             do {
                 let outcome = try await queue(display) { [self] in
                     try Task.checkCancellation()
-                    guard self.started, self.displays().contains(display) else { return }
+                    guard self.started, !self.isPresentationPaused(), self.displays().contains(display) else { return }
                     let resolution = self.desired(on: display)
                     if restoring {
-                        guard !resolution.focused, resolution.baseAvailable, self.canRun(display), let record = self.store.focusRestore[display],
+                        guard resolution.activeOverride == nil, resolution.baseAvailable, self.canRun(display),
+                              let record = self.store.focusRestore[display],
                               self.restorationKey(record, base: resolution.event) == key else { return }
-                        try await self.finishFocus(display, record: record, base: resolution.event)
+                        try await self.finishOverride(display, record: record, base: resolution.event)
                         performed = true
                     } else {
                         guard let event = resolution.event, event.key == key,
                               self.store.handled[display] != key, resolution.focused || self.canRun(display) else { return }
-                        if resolution.focused { try await self.applyFocus(event, on: display) }
+                        if resolution.activeOverride != nil { try await self.applyOverride(event, on: display) }
                         else { try await self.apply(event.target, display) }
                         performed = true
                         self.store.markHandled(event.key, on: display)
@@ -271,7 +341,7 @@ final class WallpaperAutomationScheduler {
                 // Replaced by another automatic command (an update reloading the files, a playlist
                 // change): nothing the user chose stands in this change's place, so it is left
                 // unhandled and the evaluation that follows asks for it again. Marking it handled
-                // would drop a Focus wallpaper, or the restoration after one, for good.
+                // would drop a temporary override, or the restoration after one, for good.
             } catch is CancellationError {
                 return
             } catch {
@@ -281,7 +351,7 @@ final class WallpaperAutomationScheduler {
         }
     }
 
-    private func applyFocus(_ event: WallpaperAutomationOccurrence, on display: String) async throws {
+    private func applyOverride(_ event: WallpaperAutomationOccurrence, on display: String) async throws {
         let current = capture(display)
         let previous = store.focusRestore[display]
         var record: FocusWallpaperRestore
@@ -310,8 +380,8 @@ final class WallpaperAutomationScheduler {
         }
     }
 
-    private func finishFocus(_ display: String, record: FocusWallpaperRestore,
-                             base: WallpaperAutomationOccurrence?) async throws {
+    private func finishOverride(_ display: String, record: FocusWallpaperRestore,
+                                base: WallpaperAutomationOccurrence?) async throws {
         let current = capture(display)
         if !record.pending, current.playlist != record.expectedPlaylist {
             // Editing/applying another playlist is a new user decision, not a temporary override.

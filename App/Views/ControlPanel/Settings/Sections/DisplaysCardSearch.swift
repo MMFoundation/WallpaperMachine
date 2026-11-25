@@ -136,12 +136,11 @@ struct DisplaysCardSearch {
     case S.automation.id:
       let body: [SettingsItem]
       switch rows.automationMode {
-      case .off: body = []
+      case .off, .spaces: body = []
       case .appearance: body = [S.automationLight, S.automationDark]
-      case .spaces: body = []
       case .schedule: body = [S.automationSchedule]
       }
-      return [S.automationMode] + body + [S.automationFooter]
+      return [S.automationMode] + body + [S.automationBattery, S.automationFooter]
     case S.playback.id:
       return [S.scaling, S.scale, S.frameRate, S.mute, S.volume]
     default:

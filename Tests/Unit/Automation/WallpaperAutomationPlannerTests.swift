@@ -187,4 +187,34 @@ final class WallpaperAutomationPlannerTests: XCTestCase {
         XCTAssertNil(allDisabled.current)
         XCTAssertNil(allDisabled.next)
     }
+
+    func testStackedSpacesEnabledPlansScheduleAndAppearanceRules() {
+        let calendar = calendar()
+        let now = date(2026, 10, 8, 9, in: calendar)
+
+        var scheduleStacked = DisplayWallpaperAutomation()
+        scheduleStacked.mode = .schedule
+        scheduleStacked.spacesEnabled = true
+        scheduleStacked.spaces = ["space-2": target("pinned")]
+        scheduleStacked.rules = [
+            .init(minute: 8 * 60, target: target("morning")),
+            .init(minute: 18 * 60, target: target("evening")),
+        ]
+        let scheduleResult = WallpaperAutomationPlanner.resolve(
+            scheduleStacked, now: now, dark: false, solar: nil, calendar: calendar)
+        XCTAssertEqual(scheduleResult.current?.target.id, "morning")
+        XCTAssertEqual(scheduleResult.next?.target.id, "evening")
+
+        var appearanceStacked = DisplayWallpaperAutomation()
+        appearanceStacked.mode = .appearance
+        appearanceStacked.spacesEnabled = true
+        appearanceStacked.light = target("day")
+        appearanceStacked.dark = target("night")
+        XCTAssertEqual(
+            WallpaperAutomationPlanner.resolve(appearanceStacked, now: now, dark: false, solar: nil, calendar: calendar).current?.target.id,
+            "day")
+        XCTAssertEqual(
+            WallpaperAutomationPlanner.resolve(appearanceStacked, now: now, dark: true, solar: nil, calendar: calendar).current?.target.id,
+            "night")
+    }
 }

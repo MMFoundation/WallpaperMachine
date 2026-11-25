@@ -61,39 +61,71 @@ struct WallpaperAutomationRule: Codable, Equatable, Identifiable, Sendable {
 
 struct DisplayWallpaperAutomation: Codable, Equatable, Sendable {
     enum Mode: String, Codable, CaseIterable, Sendable { case off, schedule, appearance, spaces }
+
+    /// The automatic rule active on this display, independent of whether per-desktop (Space)
+    /// overrides are enabled.
+    enum RuleMode: String, Codable, CaseIterable, Sendable { case off, schedule, appearance }
+
     var mode: Mode = .off
+    /// Whether per-desktop (Space) overrides are enabled on this display. May be combined with
+    /// `.schedule` or `.appearance` so desktops without a chosen wallpaper follow those rules.
+    var spacesEnabled: Bool = false
     var rules: [WallpaperAutomationRule] = []
     var light: WallpaperAutomationTarget?
     var dark: WallpaperAutomationTarget?
     var revision: UInt64 = 0
     var spaces: [String: WallpaperAutomationTarget] = [:]
+    /// Optional wallpaper or saved playlist override while running on battery power.
+    var batteryTarget: WallpaperAutomationTarget?
 
-    /// What a desktop shows in the Space mode: its own choice, or else the first desktop's. macOS
-    /// gives a desktop with no picture of its own, a new one too, the first desktop's picture, so
-    /// following it keeps Mission Control and the wallpaper that plays in agreement. Nil when
-    /// neither has a choice: the display keeps what it shows.
-    func desktopTarget(_ space: String, firstDesktop: String?) -> WallpaperAutomationTarget? {
-        spaces[space] ?? firstDesktop.flatMap { spaces[$0] }
+    /// True when per-desktop (Space) choices are active, either standalone (`.spaces` / legacy
+    /// records) or stacked alongside a schedule or appearance rule (`spacesEnabled`).
+    var usesSpaces: Bool { mode == .spaces || spacesEnabled }
+
+    /// The active schedule or appearance rule, if any.
+    var ruleMode: RuleMode {
+        switch mode {
+        case .schedule: .schedule
+        case .appearance: .appearance
+        case .off, .spaces: .off
+        }
+    }
+
+    /// What a desktop shows when per-desktop choices are active: its own explicit choice first;
+    /// otherwise the stacked schedule/appearance target when a rule mode is active, or Desktop 1's
+    /// choice in standalone Space mode so Mission Control and the live wallpaper agree. Nil when
+    /// nothing applies: the display keeps what it shows.
+    func desktopTarget(
+        _ space: String, firstDesktop: String?, ruleFallback: WallpaperAutomationTarget? = nil
+    ) -> WallpaperAutomationTarget? {
+        if let explicit = spaces[space] { return explicit }
+        if ruleMode != .off { return ruleFallback }
+        return firstDesktop.flatMap { spaces[$0] }
     }
 
     var isValid: Bool {
         rules.count <= 64 && Set(rules.map(\.id)).count == rules.count
             && rules.allSatisfy(\.isValid) && light?.isValid != false && dark?.isValid != false
+            && batteryTarget?.isValid != false
             && spaces.count <= 128 && spaces.allSatisfy { !$0.key.isEmpty && $0.key.count <= 128
                 && !$0.key.contains(where: { $0.isNewline || $0 == "\0" }) && $0.value.isValid }
     }
 }
 
 extension DisplayWallpaperAutomation {
-    private enum CodingKeys: String, CodingKey { case mode, rules, light, dark, revision, spaces }
+    private enum CodingKeys: String, CodingKey {
+        case mode, spacesEnabled, rules, light, dark, revision, spaces, batteryTarget
+    }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         mode = try values.decode(Mode.self, forKey: .mode)
+        spacesEnabled = try values.decodeIfPresent(Bool.self, forKey: .spacesEnabled) ?? (mode == .spaces)
         rules = try values.decode([WallpaperAutomationRule].self, forKey: .rules)
         light = try values.decodeIfPresent(WallpaperAutomationTarget.self, forKey: .light)
         dark = try values.decodeIfPresent(WallpaperAutomationTarget.self, forKey: .dark)
         revision = try values.decode(UInt64.self, forKey: .revision)
         spaces = try values.decodeIfPresent([String: WallpaperAutomationTarget].self, forKey: .spaces) ?? [:]
+        batteryTarget = try values.decodeIfPresent(WallpaperAutomationTarget.self, forKey: .batteryTarget)
     }
 }
 
@@ -149,13 +181,13 @@ enum WallpaperAutomationPlanner {
         let today = calendar.startOfDay(for: now)
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? now.addingTimeInterval(24 * 3600)
         var result = Result(reevaluateAt: tomorrow)
-        if configuration.mode == .appearance {
+        if configuration.ruleMode == .appearance {
             if let target = dark ? configuration.dark : configuration.light {
                 result.current = .init(key: "appearance:\(configuration.revision):\(dark)", date: today, target: target)
             }
             return result
         }
-        guard configuration.mode == .schedule else { return result }
+        guard configuration.ruleMode == .schedule else { return result }
         var occurrences: [(Int, WallpaperAutomationOccurrence)] = []
         // One full week either side, plus a day for offsets crossing midnight.
         for dayOffset in -8...8 {

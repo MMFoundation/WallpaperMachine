@@ -4,9 +4,17 @@ import Foundation
 /// and the state the scheduler and the Space monitor keep beside them.
 struct AutomationState: Equatable, Sendable {
   let mode: DisplayWallpaperAutomation.Mode
+  /// Whether per-desktop (Space) overrides are active on this display (standalone or stacked).
+  var usesSpaces: Bool = false
+  /// The active schedule or appearance rule mode, independent of `usesSpaces`.
+  var ruleMode: DisplayWallpaperAutomation.RuleMode = .off
   /// The choices of Follow system appearance; nil leaves the wallpaper as it is.
   let light: WallpaperAutomationTarget?
   let dark: WallpaperAutomationTarget?
+  /// Optional per-display battery power wallpaper/playlist override.
+  var batteryTarget: WallpaperAutomationTarget? = nil
+  /// Optional global ("All displays") battery power wallpaper/playlist override.
+  var globalBatteryTarget: WallpaperAutomationTarget? = nil
   /// The time schedule, in the order the list shows. When two rules fall due together, the later one
   /// wins.
   let rules: [WallpaperAutomationRule]
@@ -15,6 +23,8 @@ struct AutomationState: Equatable, Sendable {
   let nextTarget: WallpaperAutomationTarget?
   /// A Focus filter holds this display's wallpaper; manual choices stay possible.
   let isFocused: Bool
+  /// The highest-priority temporary override currently active on this display, if any.
+  var activeOverride: WallpaperAutomationOverrideKind? = nil
   /// Why the last automatic change failed; Retry clears it.
   let error: String?
   /// Whether Different wallpaper for each desktop can be chosen: Space information is read for

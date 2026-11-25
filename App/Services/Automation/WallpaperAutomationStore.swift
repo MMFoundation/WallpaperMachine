@@ -24,10 +24,21 @@ struct FocusWallpaperRestore: Codable, Equatable, Sendable {
     var pending = false
 }
 
-/// Persistent rules and local Focus recovery; runtime status is separate from settings.
+/// Temporary wallpaper override tiers above base automatic selection, in descending priority.
+enum WallpaperAutomationOverrideKind: String, Codable, Equatable, Sendable {
+    case focus
+    case app
+    case battery
+}
+
+/// Persistent rules and local override recovery; runtime status is separate from settings.
 @MainActor
 final class WallpaperAutomationStore {
     static let shared = WallpaperAutomationStore()
+    /// Reserved display key for settings that apply across all enabled independent displays (such
+    /// as the global battery wallpaper override), stored inside `configurationsKey` so existing
+    /// backup/restore validation covers it without extra UserDefaults keys.
+    nonisolated static let globalDisplayID = "*"
     nonisolated static let configurationsKey = "WallpaperMachine.automaticWallpapers"
     nonisolated static let locationKey = "WallpaperMachine.solarLocation"
     nonisolated static let solarKey = "WallpaperMachine.solarSettings"
@@ -51,6 +62,7 @@ final class WallpaperAutomationStore {
     private(set) var errors: [String: String] = [:]
     private(set) var next: [String: WallpaperAutomationOccurrence] = [:]
     private(set) var focusedDisplays: Set<String> = []
+    private(set) var activeOverrides: [String: WallpaperAutomationOverrideKind] = [:]
     var manualChoice: (@MainActor (String) -> Void)?
 
     init(defaults: UserDefaults = ClientPreferences.defaults) {
@@ -112,6 +124,46 @@ final class WallpaperAutomationStore {
     }
 
     func configuration(for display: String) -> DisplayWallpaperAutomation { configurations[display] ?? .init() }
+
+    /// Optional battery wallpaper override shared across all enabled independent displays unless a
+    /// display defines its own `batteryTarget`.
+    var globalBatteryTarget: WallpaperAutomationTarget? {
+        configurations[Self.globalDisplayID]?.batteryTarget
+    }
+
+    /// The battery wallpaper override that applies to `display`: its per-display choice if set,
+    /// otherwise the global battery choice.
+    func effectiveBatteryTarget(for display: String) -> WallpaperAutomationTarget? {
+        guard display != Self.globalDisplayID else { return globalBatteryTarget }
+        return configurations[display]?.batteryTarget ?? globalBatteryTarget
+    }
+
+    /// Sets or clears the global battery wallpaper override shared by all displays without their
+    /// own per-display battery override.
+    func setGlobalBatteryTarget(_ target: WallpaperAutomationTarget?) throws {
+        guard target?.isValid != false else { throw Self.invalid() }
+        guard globalBatteryTarget != target else { return }
+        let held = configurations.count + unreadConfigurations.count
+        guard configurations[Self.globalDisplayID] != nil || unreadConfigurations[Self.globalDisplayID] != nil
+            || held < Self.displayLimit else { throw Self.invalid() }
+        var updated = configurations
+        if let target {
+            var value = configurations[Self.globalDisplayID] ?? .init()
+            value.mode = .off
+            value.spacesEnabled = false
+            value.batteryTarget = target
+            value.revision = value.revision &+ 1
+            updated[Self.globalDisplayID] = value
+        } else {
+            updated[Self.globalDisplayID] = nil
+        }
+        let data = try PreservedJSON.writeObject(updated, keeping: unreadConfigurations)
+        configurations = updated
+        unreadConfigurations[Self.globalDisplayID] = nil
+        defaults.set(data, forKey: Self.configurationsKey)
+        if unreadConfigurations.isEmpty && unreadFocusRestore.isEmpty { loadError = nil }
+        changed()
+    }
 
     func update(_ display: String, _ change: (inout DisplayWallpaperAutomation) throws -> Void) throws {
         // A display whose record could not be read still holds one of the places.
@@ -215,10 +267,17 @@ final class WallpaperAutomationStore {
         statusChanged()
     }
 
-    func setStatus(on display: String, next: WallpaperAutomationOccurrence?, focused: Bool) {
-        let changed = self.next[display] != next || focusedDisplays.contains(display) != focused
+    func setStatus(
+        on display: String, next: WallpaperAutomationOccurrence?, focused: Bool,
+        activeOverride: WallpaperAutomationOverrideKind? = nil
+    ) {
+        let effectiveOverride = activeOverride ?? (focused ? .focus : nil)
+        let changed = self.next[display] != next
+            || focusedDisplays.contains(display) != focused
+            || activeOverrides[display] != effectiveOverride
         self.next[display] = next
         if focused { focusedDisplays.insert(display) } else { focusedDisplays.remove(display) }
+        activeOverrides[display] = effectiveOverride
         if changed { statusChanged() }
     }
 
@@ -250,11 +309,20 @@ final class WallpaperAutomationStore {
     }
 
     func forgetWallpapers(_ ids: Set<String>) throws {
-        for display in configurations.keys {
+        for display in Array(configurations.keys) {
+            if display == Self.globalDisplayID {
+                if let target = globalBatteryTarget, target.kind == .wallpaper, ids.contains(target.id) {
+                    try setGlobalBatteryTarget(nil)
+                }
+                continue
+            }
             try update(display) { value in
                 value.rules.removeAll { $0.target.kind == .wallpaper && ids.contains($0.target.id) }
                 if let target = value.light, target.kind == .wallpaper, ids.contains(target.id) { value.light = nil }
                 if let target = value.dark, target.kind == .wallpaper, ids.contains(target.id) { value.dark = nil }
+                if let target = value.batteryTarget, target.kind == .wallpaper, ids.contains(target.id) {
+                    value.batteryTarget = nil
+                }
                 value.spaces = value.spaces.filter { $0.value.kind != .wallpaper || !ids.contains($0.value.id) }
             }
         }

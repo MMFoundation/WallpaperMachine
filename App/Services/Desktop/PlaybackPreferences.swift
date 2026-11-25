@@ -153,6 +153,7 @@ enum AppRuleAction: String, Codable, CaseIterable, Sendable {
     case pause
     case mute
     case stop
+    case switchWallpaper
 }
 
 struct AppRule: Codable, Equatable, Identifiable, Sendable {
@@ -161,6 +162,55 @@ struct AppRule: Codable, Equatable, Identifiable, Sendable {
     var name: String
     var condition: AppRuleCondition
     var action: AppRuleAction
+    /// Chosen wallpaper or saved playlist when `action == .switchWallpaper`.
+    var wallpaperTarget: WallpaperAutomationTarget?
+    /// Display ID to target when `action == .switchWallpaper`; nil applies to all displays.
+    var displayID: String?
+
+    init(
+        id: UUID,
+        bundleIdentifier: String,
+        name: String,
+        condition: AppRuleCondition,
+        action: AppRuleAction,
+        wallpaperTarget: WallpaperAutomationTarget? = nil,
+        displayID: String? = nil
+    ) {
+        self.id = id
+        self.bundleIdentifier = bundleIdentifier
+        self.name = name
+        self.condition = condition
+        self.action = action
+        self.wallpaperTarget = wallpaperTarget
+        self.displayID = displayID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, bundleIdentifier, name, condition, action, wallpaperTarget, displayID
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        bundleIdentifier = try values.decode(String.self, forKey: .bundleIdentifier)
+        name = try values.decode(String.self, forKey: .name)
+        condition = try values.decode(AppRuleCondition.self, forKey: .condition)
+        action = try values.decode(AppRuleAction.self, forKey: .action)
+        wallpaperTarget = try values.decodeIfPresent(WallpaperAutomationTarget.self, forKey: .wallpaperTarget)
+        displayID = try values.decodeIfPresent(String.self, forKey: .displayID)
+        if let wallpaperTarget, !wallpaperTarget.isValid {
+            throw DecodingError.dataCorruptedError(
+                forKey: .wallpaperTarget, in: values, debugDescription: "Invalid app-rule wallpaper target")
+        }
+        if let displayID, !Self.validDisplayID(displayID) {
+            throw DecodingError.dataCorruptedError(
+                forKey: .displayID, in: values, debugDescription: "Invalid app-rule display identifier")
+        }
+    }
+
+    nonisolated static func validDisplayID(_ id: String) -> Bool {
+        !id.isEmpty && id.count <= 2048 && !id.contains("\0")
+    }
 }
 
 /// UserDefaults-backed playback rules for display sleep, other-app audio (and the volume wallpapers
@@ -433,6 +483,22 @@ final class PlaybackPreferences {
     func updateRule(id: UUID, action: AppRuleAction) throws {
         guard let index = appRules.firstIndex(where: { $0.id == id }) else { throw UnknownRule() }
         appRules[index].action = action
+        persistRules()
+    }
+
+    func updateRule(id: UUID, wallpaperTarget: WallpaperAutomationTarget?) throws {
+        guard let index = appRules.firstIndex(where: { $0.id == id }) else { throw UnknownRule() }
+        if let wallpaperTarget, !wallpaperTarget.isValid { return }
+        guard appRules[index].wallpaperTarget != wallpaperTarget else { return }
+        appRules[index].wallpaperTarget = wallpaperTarget
+        persistRules()
+    }
+
+    func updateRule(id: UUID, displayID: String?) throws {
+        guard let index = appRules.firstIndex(where: { $0.id == id }) else { throw UnknownRule() }
+        if let displayID, !AppRule.validDisplayID(displayID) { return }
+        guard appRules[index].displayID != displayID else { return }
+        appRules[index].displayID = displayID
         persistRules()
     }
 

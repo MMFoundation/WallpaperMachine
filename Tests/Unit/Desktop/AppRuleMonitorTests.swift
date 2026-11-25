@@ -299,6 +299,71 @@ final class AppRuleMonitorTests: XCTestCase {
         workspaceCenter.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         XCTAssertTrue(monitor.actions.isEmpty, "With no rules left, launches do not revive an action")
     }
+
+    func testSwitchWallpaperRulesEmitSwitchesWithoutPlaybackActionsAndResolvePriority() throws {
+        let runningGlobal = preferences.addRule(bundleIdentifier: "com.example.Music", name: "Music")
+        try preferences.updateRule(id: runningGlobal.id, condition: .running)
+        try preferences.updateRule(id: runningGlobal.id, action: .switchWallpaper)
+        try preferences.updateRule(id: runningGlobal.id, wallpaperTarget: .init(kind: .wallpaper, id: "music-wall"))
+
+        let runningSpecific = preferences.addRule(bundleIdentifier: "com.example.Terminal", name: "Terminal")
+        try preferences.updateRule(id: runningSpecific.id, condition: .running)
+        try preferences.updateRule(id: runningSpecific.id, action: .switchWallpaper)
+        try preferences.updateRule(id: runningSpecific.id, wallpaperTarget: .init(kind: .wallpaper, id: "term-wall"))
+        try preferences.updateRule(id: runningSpecific.id, displayID: "primary")
+
+        let frontmostGlobal = preferences.addRule(bundleIdentifier: "com.example.IDE", name: "IDE")
+        try preferences.updateRule(id: frontmostGlobal.id, condition: .frontmost)
+        try preferences.updateRule(id: frontmostGlobal.id, action: .switchWallpaper)
+        try preferences.updateRule(id: frontmostGlobal.id, wallpaperTarget: .init(kind: .wallpaper, id: "ide-wall"))
+
+        let emptySwitch = preferences.addRule(bundleIdentifier: "com.example.Empty", name: "Empty")
+        try preferences.updateRule(id: emptySwitch.id, condition: .running)
+        try preferences.updateRule(id: emptySwitch.id, action: .switchWallpaper)
+
+        let playbackRule = preferences.addRule(bundleIdentifier: "com.example.Game", name: "Game")
+        try preferences.updateRule(id: playbackRule.id, condition: .frontmost)
+        try preferences.updateRule(id: playbackRule.id, action: .mute)
+
+        let playbackChanges = ChangeCount()
+        let switchChanges = ChangeCount()
+        let monitor = makeMonitor()
+        monitor.onChange = { playbackChanges.value += 1 }
+        monitor.onWallpaperSwitchChange = { switchChanges.value += 1 }
+        monitor.start()
+        defer { monitor.stop() }
+
+        running = ["com.example.Empty"]
+        workspaceCenter.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        XCTAssertTrue(monitor.wallpaperSwitches.isEmpty, "a switchWallpaper rule with no target does nothing")
+        XCTAssertTrue(monitor.actions.isEmpty)
+
+        // Running global + running display-specific: display-specific wins on primary, global applies on secondary.
+        running = ["com.example.Music", "com.example.Terminal"]
+        workspaceCenter.post(name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        XCTAssertTrue(monitor.actions.isEmpty, "switchWallpaper never injects a pause/mute/stop playback action")
+        XCTAssertEqual(playbackChanges.value, 0)
+        XCTAssertEqual(switchChanges.value, 1)
+        XCTAssertEqual(monitor.activeWallpaperSwitch(for: "primary")?.target.id, "term-wall")
+        XCTAssertEqual(monitor.activeWallpaperSwitch(for: "secondary")?.target.id, "music-wall")
+
+        // Frontmost match outranks background running match on every display it applies to.
+        activate("com.example.IDE")
+        XCTAssertEqual(monitor.activeWallpaperSwitch(for: "primary")?.target.id, "ide-wall")
+        XCTAssertEqual(monitor.activeWallpaperSwitch(for: "secondary")?.target.id, "ide-wall")
+        XCTAssertEqual(switchChanges.value, 2)
+
+        // Existing pause/mute/stop playback rules keep working alongside switchWallpaper rules.
+        activate("com.example.Game")
+        XCTAssertEqual(monitor.actions, [.mute])
+        XCTAssertEqual(monitor.activeWallpaperSwitch(for: "primary")?.target.id, "term-wall")
+        XCTAssertEqual(playbackChanges.value, 1)
+
+        // Stopping clears both actions and wallpaperSwitches.
+        monitor.stop()
+        XCTAssertTrue(monitor.actions.isEmpty)
+        XCTAssertTrue(monitor.wallpaperSwitches.isEmpty)
+    }
 }
 
 private final class ChangeCount: @unchecked Sendable {

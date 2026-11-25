@@ -290,7 +290,7 @@ final class PanelAutomationActionsTests: PanelTestCase {
     } catch { XCTAssertTrue(error is InvalidControlValue) }
   }
 
-  func testTurningOnAWallpaperForEachDesktopKeepsTheCurrentOneAndDesktop1sAndReplacesASchedule() async throws {
+  func testTurningOnAWallpaperForEachDesktopKeepsCurrentAndDesktop1AndStacksWithScheduleOrAppearance() async throws {
     let topology: [String: WallpaperDisplaySpaces]? = [
       "1": .init(
         displayUUID: "screen", spaces: [.init(id: "space-a", number: 1), .init(id: "space-b", number: 2)],
@@ -303,12 +303,13 @@ final class PanelAutomationActionsTests: PanelTestCase {
     defer { Task { await panel.shutdown() } }
     panel.store.monitorInformationSnapshot.rows = [OrganizationFixtures.monitor("primary", wallpaper: "a")]
     let controller = panel.controller
-    try await controller.setAutomationMode(.schedule)
 
+    // Standalone Spaces (from .off): seeds current desktop and Desktop 1.
     try await controller.setDesktopWallpapers(true)
-
     var configuration = panel.automations.configuration(for: "primary")
-    XCTAssertEqual(configuration.mode, .spaces, "it takes the place of the schedule")
+    XCTAssertEqual(configuration.mode, .spaces)
+    XCTAssertTrue(configuration.usesSpaces)
+    XCTAssertEqual(configuration.ruleMode, .off)
     XCTAssertEqual(
       configuration.spaces, ["space-a": wallpaper("a"), "space-b": wallpaper("a")],
       "the desktop the person is on keeps its wallpaper, and so does Desktop 1, which new desktops follow")
@@ -322,16 +323,90 @@ final class PanelAutomationActionsTests: PanelTestCase {
 
     try await controller.setAutomationDesktop("space-b", to: wallpaper("b"))
     try await controller.setDesktopWallpapers(false)
+    XCTAssertEqual(panel.automations.configuration(for: "primary").mode, .off)
+    XCTAssertFalse(panel.automations.configuration(for: "primary").usesSpaces)
     try await controller.setDesktopWallpapers(true)
     configuration = panel.automations.configuration(for: "primary")
     XCTAssertEqual(configuration.spaces["space-b"], wallpaper("b"), "a choice already made is kept")
 
+    // Stacking: switching rule mode to .schedule or .appearance keeps Spaces enabled.
+    try await controller.setAutomationRuleMode(.schedule)
+    configuration = panel.automations.configuration(for: "primary")
+    XCTAssertEqual(configuration.mode, .schedule)
+    XCTAssertEqual(configuration.ruleMode, .schedule)
+    XCTAssertTrue(configuration.usesSpaces, "rule mode stacks alongside Spaces instead of replacing it")
+
+    // Turning Spaces off preserves the stacked schedule/appearance rule.
     try await controller.setDesktopWallpapers(false)
-    XCTAssertEqual(panel.automations.configuration(for: "primary").mode, .off)
+    configuration = panel.automations.configuration(for: "primary")
+    XCTAssertEqual(configuration.mode, .schedule)
+    XCTAssertFalse(configuration.usesSpaces)
+
+    // Turning Spaces on while .appearance is active stacks without overwriting unpinned desktops.
     try await controller.setAutomationMode(.appearance)
-    try await controller.setDesktopWallpapers(false)
-    XCTAssertEqual(panel.automations.configuration(for: "primary").mode, .appearance,
-                   "turning it off leaves another automatic selection alone")
+    try await controller.setDesktopWallpapers(true)
+    configuration = panel.automations.configuration(for: "primary")
+    XCTAssertEqual(configuration.mode, .appearance)
+    XCTAssertEqual(configuration.ruleMode, .appearance)
+    XCTAssertTrue(configuration.usesSpaces)
+    XCTAssertTrue(controller.automationState(for: "primary").usesSpaces)
+
+    // Turning rule mode off while Spaces is on keeps Spaces active.
+    try await controller.setAutomationRuleMode(.off)
+    configuration = panel.automations.configuration(for: "primary")
+    XCTAssertEqual(configuration.ruleMode, .off)
+    XCTAssertTrue(configuration.usesSpaces)
+  }
+
+  // MARK: Battery & App-driven wallpaper switching actions
+
+  func testBatteryAndAppWallpaperActionsValidateTargetsAndDisplays() async throws {
+    let panel = try makePanel()
+    defer { Task { await panel.shutdown() } }
+    let controller = panel.controller
+
+    try await controller.setGlobalBatteryTarget(wallpaper("a"))
+    XCTAssertEqual(controller.globalBatteryTarget, wallpaper("a"))
+    XCTAssertEqual(controller.automationState(for: "primary").globalBatteryTarget, wallpaper("a"))
+
+    try await controller.setAutomationBatteryTarget(wallpaper("b"), display: "primary")
+    XCTAssertEqual(controller.automationState(for: "primary").batteryTarget, wallpaper("b"))
+
+    do {
+      try await controller.setGlobalBatteryTarget(wallpaper("app"))
+      XCTFail("unsupported wallpaper must be refused")
+    } catch { XCTAssertTrue(error is InvalidControlValue) }
+    do {
+      try await controller.setAutomationBatteryTarget(wallpaper("a"), display: "mirrored")
+      XCTFail("mirrored display must be refused")
+    } catch { XCTAssertTrue(error is InvalidControlValue) }
+
+    try await controller.setAutomationBatteryTarget(nil, display: "primary")
+    XCTAssertNil(controller.automationState(for: "primary").batteryTarget)
+    try await controller.setGlobalBatteryTarget(nil)
+    XCTAssertNil(controller.globalBatteryTarget)
+
+    let rule = controller.playback.addRule(bundleIdentifier: "com.example.Editor", name: "Editor")
+    try await controller.updateAppRule(rule.id, action: .switchWallpaper)
+    try await controller.updateAppRule(rule.id, wallpaperTarget: wallpaper("a"))
+    try await controller.updateAppRule(rule.id, displayID: "primary")
+    XCTAssertEqual(controller.playbackSettings.appRules.first?.action, .switchWallpaper)
+    XCTAssertEqual(controller.playbackSettings.appRules.first?.wallpaperTarget, wallpaper("a"))
+    XCTAssertEqual(controller.playbackSettings.appRules.first?.displayID, "primary")
+
+    do {
+      try await controller.updateAppRule(rule.id, wallpaperTarget: wallpaper("missing"))
+      XCTFail("missing wallpaper must be refused")
+    } catch { XCTAssertTrue(error is InvalidControlValue) }
+    do {
+      try await controller.updateAppRule(rule.id, displayID: "mirrored")
+      XCTFail("mirrored display must be refused")
+    } catch { XCTAssertTrue(error is InvalidControlValue) }
+
+    try await controller.updateAppRule(rule.id, displayID: nil)
+    try await controller.updateAppRule(rule.id, wallpaperTarget: nil)
+    XCTAssertNil(controller.playbackSettings.appRules.first?.displayID)
+    XCTAssertNil(controller.playbackSettings.appRules.first?.wallpaperTarget)
   }
 
   func testChoosingAWallpaperForEachDesktopFromTheModeMenuStartsLikeTheSwitch() async throws {

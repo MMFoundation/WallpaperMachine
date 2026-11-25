@@ -19,10 +19,14 @@ extension PanelController {
     let desktops = row.flatMap { spaces.physicalDisplay(display, title: $0.title) }.flatMap { spaces.displays[$0] }
     let blocked = isSpaceSelectionBlocked
     return AutomationState(
-      mode: configuration.mode, light: configuration.light, dark: configuration.dark,
+      mode: configuration.mode, usesSpaces: configuration.usesSpaces, ruleMode: configuration.ruleMode,
+      light: configuration.light, dark: configuration.dark,
+      batteryTarget: configuration.batteryTarget, globalBatteryTarget: automations.globalBatteryTarget,
       rules: configuration.rules, next: automations.next[display]?.date,
       nextTarget: automations.next[display]?.target,
-      isFocused: automations.focusedDisplays.contains(display), error: automations.errors[display],
+      isFocused: automations.focusedDisplays.contains(display),
+      activeOverride: automations.activeOverrides[display],
+      error: automations.errors[display],
       spacesAvailable: spaces.available && desktops != nil && !blocked, spacesBlocked: blocked,
       desktops: (desktops?.spaces ?? []).enumerated().map { index, desktop in
         AutomationState.Desktop(
@@ -35,6 +39,12 @@ extension PanelController {
           configuration.spaces[id].map { AutomationState.MissingDesktop(id: id, target: $0) }
         }
       } ?? [])
+  }
+
+  /// Optional wallpaper or saved playlist applied across all displays while on battery power.
+  var globalBatteryTarget: WallpaperAutomationTarget? {
+    _ = revisions.automationSettings
+    return automations.globalBatteryTarget
   }
 
   /// The coordinates the sunrise and sunset rules use; nil until the user saves them.
@@ -71,26 +81,73 @@ extension PanelController {
   // MARK: Actions
 
   /// `automationMode`. Different wallpaper for each desktop needs Space information for the display
-  /// and no animated lock screen.
+  /// and no animated lock screen. Choosing schedule or appearance preserves `spacesEnabled` so
+  /// Spaces can stack with time schedules and appearance rules.
   func setAutomationMode(_ mode: DisplayWallpaperAutomation.Mode, display: String? = nil) async throws {
-    // Chosen from the mode menu, a wallpaper for each desktop starts as the switch starts it.
-    if mode == .spaces { return try await setDesktopWallpapers(true, display: display) }
+    if mode == .spaces {
+      try await run(.immediate) {
+        let display = try standaloneDisplayID(display)
+        let info = try requireSpaceInformation(display)
+        let shown = store.shownWallpaperID(on: display).flatMap { id in
+          store.librarySnapshot.wallpapers.contains { $0.id == id && $0.supported } ? id : nil
+        }
+        try automations.update(display) { configuration in
+          let wasSpaces = configuration.usesSpaces
+          configuration.mode = .spaces
+          configuration.spacesEnabled = true
+          guard !wasSpaces, let shown else { return }
+          for desktop in [info.current, info.spaces.first?.id].compactMap({ $0 })
+          where configuration.spaces[desktop] == nil {
+            configuration.spaces[desktop] = WallpaperAutomationTarget(kind: .wallpaper, id: shown)
+          }
+        }
+      }
+      return
+    }
     try await run(.immediate) {
       let display = try standaloneDisplayID(display)
-      try automations.update(display) { $0.mode = mode }
+      try automations.update(display) { configuration in
+        if mode == .off {
+          configuration.mode = .off
+          configuration.spacesEnabled = false
+        } else {
+          if configuration.mode == .spaces { configuration.spacesEnabled = true }
+          configuration.mode = mode
+        }
+      }
     }
   }
 
-  /// `desktopWallpapers`: whether the display keeps a wallpaper of its own for each desktop. On, it
-  /// takes the place of the display's other automatic selection, and the desktop the person is on
-  /// and Desktop 1, which every desktop without a choice follows, keep the wallpaper it shows;
-  /// off, the display keeps what it shows now, on every desktop.
+  /// `automationRuleMode`: changes the schedule or appearance rule without toggling per-desktop
+  /// Space choices, allowing Spaces to stack with Time schedule or Follow system appearance.
+  func setAutomationRuleMode(
+    _ ruleMode: DisplayWallpaperAutomation.RuleMode, display: String? = nil
+  ) async throws {
+    try await run(.immediate) {
+      let display = try standaloneDisplayID(display)
+      try automations.update(display) { configuration in
+        let keepSpaces = configuration.usesSpaces
+        configuration.spacesEnabled = keepSpaces
+        switch ruleMode {
+        case .off: configuration.mode = keepSpaces ? .spaces : .off
+        case .schedule: configuration.mode = .schedule
+        case .appearance: configuration.mode = .appearance
+        }
+      }
+    }
+  }
+
+  /// `desktopWallpapers`: whether the display keeps a wallpaper of its own for each desktop.
+  /// Stacks cleanly with an active time schedule or appearance rule (unpinned desktops continue
+  /// following the rule); when no rule is active, turning it on keeps the current wallpaper for
+  /// the current desktop and Desktop 1. Turning it off preserves any stacked schedule/appearance.
   func setDesktopWallpapers(_ on: Bool, display: String? = nil) async throws {
     try await run(.immediate) {
       let display = try standaloneDisplayID(display)
       guard on else {
-        if automations.configuration(for: display).mode == .spaces {
-          try automations.update(display) { $0.mode = .off }
+        try automations.update(display) { configuration in
+          configuration.spacesEnabled = false
+          if configuration.mode == .spaces { configuration.mode = .off }
         }
         return
       }
@@ -99,6 +156,8 @@ extension PanelController {
         store.librarySnapshot.wallpapers.contains { $0.id == id && $0.supported } ? id : nil
       }
       try automations.update(display) { configuration in
+        configuration.spacesEnabled = true
+        guard configuration.mode == .off else { return }
         configuration.mode = .spaces
         guard let shown else { return }
         for desktop in [info.current, info.spaces.first?.id].compactMap({ $0 })
@@ -106,6 +165,49 @@ extension PanelController {
           configuration.spaces[desktop] = WallpaperAutomationTarget(kind: .wallpaper, id: shown)
         }
       }
+    }
+  }
+
+  /// `automationBattery`: optional per-display wallpaper or saved playlist override while running
+  /// on battery power; nil falls back to the all-displays battery override (if any).
+  func setAutomationBatteryTarget(
+    _ target: WallpaperAutomationTarget?, display: String? = nil
+  ) async throws {
+    try await run(.immediate) {
+      let display = try standaloneDisplayID(display)
+      let target = try target.map(validated)
+      try automations.update(display) { $0.batteryTarget = target }
+    }
+  }
+
+  /// `automationBatteryGlobal`: optional wallpaper or saved playlist override applied across all
+  /// enabled independent displays while running on battery power (unless a display overrides it).
+  func setGlobalBatteryTarget(_ target: WallpaperAutomationTarget?) async throws {
+    try await run(.immediate) {
+      let target = try target.map(validated)
+      try automations.setGlobalBatteryTarget(target)
+    }
+  }
+
+  /// `appRuleWallpaperTarget`: sets or clears the wallpaper/playlist target of an app rule.
+  func updateAppRule(_ id: UUID, wallpaperTarget: WallpaperAutomationTarget?) async throws {
+    try await run(.queued) {
+      let target = try wallpaperTarget.map(validated)
+      try playback.updateRule(id: id, wallpaperTarget: target)
+    }
+  }
+
+  /// `appRuleDisplay`: sets the target display of a wallpaper-switching app rule; nil means all
+  /// enabled independent displays.
+  func updateAppRule(_ id: UUID, displayID: String?) async throws {
+    try await run(.queued) {
+      let validatedDisplay: String?
+      if let displayID {
+        validatedDisplay = try standaloneDisplayID(displayID)
+      } else {
+        validatedDisplay = nil
+      }
+      try playback.updateRule(id: id, displayID: validatedDisplay)
     }
   }
 

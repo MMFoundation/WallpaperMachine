@@ -224,4 +224,61 @@ final class WallpaperAutomationStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.reorderRules(["r3", "r2"], on: "screen"))
         XCTAssertThrowsError(try store.reorderRules(["r3", "r2", "unknown"], on: "screen"))
     }
+
+    func testLegacySpacesAndNonSpacesJSONDecodeBackwardCompatiblyAndStackedConfigRoundTrips() throws {
+        let legacySpaces = Data(#"{"mode":"spaces","rules":[],"revision":4,"spaces":{"s1":{"kind":"wallpaper","id":"w1"}}}"#.utf8)
+        let decodedSpaces = try JSONDecoder().decode(DisplayWallpaperAutomation.self, from: legacySpaces)
+        XCTAssertEqual(decodedSpaces.mode, .spaces)
+        XCTAssertTrue(decodedSpaces.spacesEnabled, "legacy mode=spaces decodes with spacesEnabled=true")
+        XCTAssertTrue(decodedSpaces.usesSpaces)
+        XCTAssertEqual(decodedSpaces.ruleMode, .off)
+        XCTAssertNil(decodedSpaces.batteryTarget)
+
+        let legacySchedule = Data(#"{"mode":"schedule","rules":[],"revision":2}"#.utf8)
+        let decodedSchedule = try JSONDecoder().decode(DisplayWallpaperAutomation.self, from: legacySchedule)
+        XCTAssertFalse(decodedSchedule.spacesEnabled)
+        XCTAssertFalse(decodedSchedule.usesSpaces)
+        XCTAssertEqual(decodedSchedule.ruleMode, .schedule)
+
+        var stacked = DisplayWallpaperAutomation()
+        stacked.mode = .appearance
+        stacked.spacesEnabled = true
+        stacked.light = .init(kind: .wallpaper, id: "day")
+        stacked.dark = .init(kind: .wallpaper, id: "night")
+        stacked.spaces["s2"] = .init(kind: .wallpaper, id: "pinned")
+        stacked.batteryTarget = .init(kind: .wallpaper, id: "eco")
+        let roundTripped = try JSONDecoder().decode(DisplayWallpaperAutomation.self, from: JSONEncoder().encode(stacked))
+        XCTAssertEqual(roundTripped, stacked)
+        XCTAssertTrue(roundTripped.usesSpaces)
+        XCTAssertEqual(roundTripped.ruleMode, .appearance)
+        XCTAssertEqual(roundTripped.batteryTarget, .init(kind: .wallpaper, id: "eco"))
+        XCTAssertEqual(
+            roundTripped.desktopTarget("s2", firstDesktop: "s1", ruleFallback: .init(kind: .wallpaper, id: "day")),
+            .init(kind: .wallpaper, id: "pinned"))
+        XCTAssertEqual(
+            roundTripped.desktopTarget("s1", firstDesktop: "s1", ruleFallback: .init(kind: .wallpaper, id: "day")),
+            .init(kind: .wallpaper, id: "day"))
+    }
+
+    func testGlobalAndPerDisplayBatteryTargetsPersistValidateAndPruneDeletedWallpapers() throws {
+        let store = WallpaperAutomationStore(defaults: defaults)
+        try store.setGlobalBatteryTarget(.init(kind: .wallpaper, id: "global-eco"))
+        try store.update("primary") { $0.batteryTarget = .init(kind: .wallpaper, id: "primary-eco") }
+
+        let reloaded = WallpaperAutomationStore(defaults: defaults)
+        XCTAssertEqual(reloaded.globalBatteryTarget, .init(kind: .wallpaper, id: "global-eco"))
+        XCTAssertEqual(reloaded.effectiveBatteryTarget(for: "primary"), .init(kind: .wallpaper, id: "primary-eco"))
+        XCTAssertEqual(reloaded.effectiveBatteryTarget(for: "secondary"), .init(kind: .wallpaper, id: "global-eco"))
+
+        let data = try XCTUnwrap(defaults.data(forKey: WallpaperAutomationStore.configurationsKey))
+        XCTAssertNoThrow(try WallpaperAutomationStore.validateConfigurations(data))
+
+        XCTAssertThrowsError(try reloaded.setGlobalBatteryTarget(.init(kind: .wallpaper, id: "")))
+        XCTAssertThrowsError(try reloaded.update("primary") { $0.batteryTarget = .init(kind: .wallpaper, id: "bad\0id") })
+
+        try reloaded.forgetWallpapers(["global-eco", "primary-eco"])
+        XCTAssertNil(reloaded.globalBatteryTarget)
+        XCTAssertNil(reloaded.configurations[WallpaperAutomationStore.globalDisplayID], "clearing global target removes sentinel entry")
+        XCTAssertNil(reloaded.configuration(for: "primary").batteryTarget)
+    }
 }

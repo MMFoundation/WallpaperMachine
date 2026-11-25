@@ -50,7 +50,7 @@ extension PanelController {
     case .sceneVideoPlaneSampling: store.settingsSnapshot.sceneVideoPlaneSamplingEnabled
     case .sceneDisplayFraming: store.settingsSnapshot.sceneDisplayFramingEnabled
     case .sceneReflections: store.settingsSnapshot.sceneQuality.reflections
-    case .desktopWallpapers: automationState(for: targetDisplayID).mode == .spaces
+    case .desktopWallpapers: automationState(for: targetDisplayID).usesSpaces
     case .translateWorkshopSearches: searchTranslation.isEnabled
     }
   }
@@ -76,7 +76,7 @@ extension PanelController {
   var canSwitchDesktopWallpapers: Bool {
     guard let target = targetDisplay, target.isEnabled, !target.isMirror else { return false }
     let state = automationState(for: target.id)
-    return state.mode == .spaces || state.spacesAvailable
+    return state.usesSpaces || state.spacesAvailable
   }
 
   /// Sends the value to the typed setter of `key`. Queued like every setting.
@@ -234,6 +234,7 @@ extension AppRuleAction {
     case .pause: L("Pause")
     case .mute: L("Mute")
     case .stop: L("Stop")
+    case .switchWallpaper: L("Switch wallpaper")
     }
   }
 }

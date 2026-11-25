@@ -17,7 +17,7 @@ struct DisplaysDesktopRows: View {
     let state = controller.automationState(for: display.id)
     let item = DisplaysSettingsSection.desktops
     let locked = controller.isStoreBusy || !display.enabled || display.isMirror
-    let isOn = state.mode == .spaces
+    let isOn = state.usesSpaces
     Group {
       DisplaysRow(
         item: item, note: note(state, isOn: isOn), forced: forced, identity: display.id,
@@ -66,15 +66,19 @@ struct DisplaysDesktopRows: View {
     }
   }
 
-  /// What the switch does, and while it is off, why it cannot be turned on or what it replaces.
+  /// What the switch does, and while it is off, why it cannot be turned on or how it stacks with
+  /// an existing schedule or appearance rule.
   private func note(_ state: AutomationState, isOn: Bool) -> String {
     let base = controller.settings.text(DisplaysSettingsSection.desktops.note ?? "")
-    if isOn { return base }
+    if isOn {
+      guard state.ruleMode != .off else { return base }
+      return "\(base) \(L("Desktops without a chosen wallpaper follow this display’s automatic wallpaper selection."))"
+    }
     if let reason = state.spacesUnavailableReason { return "\(base) \(Self.unavailableText(reason))" }
-    switch state.mode {
+    switch state.ruleMode {
     case .schedule, .appearance:
-      return "\(base) \(L("Turning it on replaces this display’s automatic wallpaper selection."))"
-    case .off, .spaces:
+      return "\(base) \(L("Desktops without a chosen wallpaper will keep following your automatic wallpaper selection."))"
+    case .off:
       return base
     }
   }
@@ -114,7 +118,8 @@ private struct DisplaysDesktopStrip: View {
       HStack(alignment: .top, spacing: 10) {
         ForEach(state.desktops) { desktop in
           DisplaysDesktopTile(
-            display: display, desktop: desktop, isCurrent: desktop.id == state.currentDesktop, locked: locked)
+            display: display, desktop: desktop, ruleMode: state.ruleMode,
+            isCurrent: desktop.id == state.currentDesktop, locked: locked)
         }
       }
       .padding(.horizontal, 12)
@@ -130,6 +135,7 @@ private struct DisplaysDesktopStrip: View {
 private struct DisplaysDesktopTile: View {
   let display: DisplayRow
   let desktop: AutomationState.Desktop
+  let ruleMode: DisplayWallpaperAutomation.RuleMode
   let isCurrent: Bool
   let locked: Bool
 
@@ -175,7 +181,9 @@ private struct DisplaysDesktopTile: View {
     .accessibilityHint(Text(verbatim: L("Choose the wallpaper for \(name)")))
     .accessibilityIdentifier("displays.desktop.\(display.id).\(desktop.number)")
     .popover(isPresented: $choosing, arrowEdge: .bottom) {
-      DesktopWallpaperChooser(display: display, desktop: desktop, desktopName: name) { choosing = false }
+      DesktopWallpaperChooser(
+        display: display, desktop: desktop, desktopName: name, ruleMode: ruleMode
+      ) { choosing = false }
         .panelPresentationLocale()
     }
   }
@@ -184,32 +192,43 @@ private struct DisplaysDesktopTile: View {
     isCurrent ? L("Desktop \(desktop.number) (current)") : L("Desktop \(desktop.number)")
   }
 
-  /// What the desktop shows: its wallpaper or playlist, Desktop 1's, or whatever plays.
+  /// What the desktop shows: its wallpaper or playlist, the stacked schedule/appearance rule,
+  /// Desktop 1's choice, or whatever plays.
   private var showsText: String {
     guard let target = desktop.target else {
-      return desktop.firstDesktopTarget == nil ? L("Keeps the current wallpaper") : L("Same as Desktop 1")
+      switch ruleMode {
+      case .schedule: return L("Follows time schedule")
+      case .appearance: return L("Follows system appearance")
+      case .off:
+        return desktop.firstDesktopTarget == nil ? L("Keeps the current wallpaper") : L("Same as Desktop 1")
+      }
     }
     return controller.automationTargets.title(of: target) ?? L("Unavailable")
   }
 
-  /// A desktop that follows Desktop 1 shows its cover, dimmed.
+  /// A desktop that follows Desktop 1 shows its cover, dimmed; one following a stacked schedule or
+  /// appearance rule shows that rule's symbol.
   @ViewBuilder
   private var artwork: some View {
-    let shown = desktop.target ?? desktop.firstDesktopTarget
+    let shown = desktop.target ?? (ruleMode == .off ? desktop.firstDesktopTarget : nil)
     ZStack {
       theme.surface.well.color
-      switch shown?.kind {
-      case .wallpaper:
-        if let row = shown.flatMap({ controller.libraryRow(id: $0.id) }) {
-          PanelImage(source: row.coverSource, pointSize: Self.size.width)
-            .opacity(desktop.target == nil ? 0.55 : 1)
-        } else {
-          symbol("questionmark.square.dashed")
+      if desktop.target == nil, ruleMode != .off {
+        symbol(ruleMode == .schedule ? "clock" : "circle.lefthalf.filled")
+      } else {
+        switch shown?.kind {
+        case .wallpaper:
+          if let row = shown.flatMap({ controller.libraryRow(id: $0.id) }) {
+            PanelImage(source: row.coverSource, pointSize: Self.size.width)
+              .opacity(desktop.target == nil ? 0.55 : 1)
+          } else {
+            symbol("questionmark.square.dashed")
+          }
+        case .playlist:
+          symbol("rectangle.stack")
+        case nil:
+          symbol("plus")
         }
-      case .playlist:
-        symbol("rectangle.stack")
-      case nil:
-        symbol("plus")
       }
     }
   }
@@ -228,24 +247,41 @@ struct DesktopWallpaperChooser: View {
   let display: DisplayRow
   let desktop: AutomationState.Desktop
   let desktopName: String
+  var ruleMode: DisplayWallpaperAutomation.RuleMode = .off
   let dismiss: () -> Void
 
   @Environment(PanelController.self) private var controller
 
   var body: some View {
     let targets = controller.automationTargets
-    let clearOption: WallpaperThumbnailChooser.ClearOption =
-      desktop.number == 1
-      ? .init(
-        title: L("Keep the current wallpaper"),
-        help: L("This desktop shows whatever the display plays when you switch to it."),
-        isSelected: desktop.target == nil, isDisabled: desktop.target == nil,
-        action: { choose(nil) })
-      : .init(
-        title: L("Same as Desktop 1"),
-        help: L("This desktop shows Desktop 1’s wallpaper, like every desktop you add."),
-        isSelected: desktop.target == nil, isDisabled: desktop.target == nil,
-        action: { choose(nil) })
+    let clearOption: WallpaperThumbnailChooser.ClearOption = {
+      switch ruleMode {
+      case .schedule:
+        return .init(
+          title: L("Follow time schedule"),
+          help: L("This desktop follows this display’s time schedule."),
+          isSelected: desktop.target == nil, isDisabled: desktop.target == nil,
+          action: { choose(nil) })
+      case .appearance:
+        return .init(
+          title: L("Follow system appearance"),
+          help: L("This desktop follows the system light or dark appearance."),
+          isSelected: desktop.target == nil, isDisabled: desktop.target == nil,
+          action: { choose(nil) })
+      case .off:
+        return desktop.number == 1
+          ? .init(
+            title: L("Keep the current wallpaper"),
+            help: L("This desktop shows whatever the display plays when you switch to it."),
+            isSelected: desktop.target == nil, isDisabled: desktop.target == nil,
+            action: { choose(nil) })
+          : .init(
+            title: L("Same as Desktop 1"),
+            help: L("This desktop shows Desktop 1’s wallpaper, like every desktop you add."),
+            isSelected: desktop.target == nil, isDisabled: desktop.target == nil,
+            action: { choose(nil) })
+      }
+    }()
     let unavailable =
       desktop.target.flatMap { target in
         targets.title(of: target) == nil ? L("The saved choice is no longer available.") : nil

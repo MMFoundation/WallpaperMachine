@@ -124,7 +124,7 @@ struct TargetDisplayPicker: View {
   /// The desktop the person is on, while the display keeps a wallpaper for each desktop.
   private func desktopName(of display: TargetDisplayOption) -> String? {
     let state = controller.automationState(for: display.id)
-    guard state.mode == .spaces, let current = state.currentDesktop,
+    guard state.usesSpaces, let current = state.currentDesktop,
       let desktop = state.desktops.first(where: { $0.id == current })
     else { return nil }
     return L("Desktop \(desktop.number)")
@@ -134,7 +134,7 @@ struct TargetDisplayPicker: View {
   /// Settings › Displays.
   private func desktopsToggle(_ display: TargetDisplayOption) -> some View {
     let state = controller.automationState(for: display.id)
-    let isOn = state.mode == .spaces
+    let isOn = state.usesSpaces
     return Toggle(
       isOn: Binding(
         get: { isOn },

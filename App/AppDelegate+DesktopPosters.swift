@@ -125,10 +125,10 @@ extension AppDelegate {
     private func desktopPosterScope(_ physicalDisplay: String) -> DesktopPosterScope {
         guard let store else { return .hold }
         guard let row = Self.settingsRow(onPhysicalDisplay: physicalDisplay, in: store) else {
-            return WallpaperAutomationStore.shared.configurations.values.contains { $0.mode == .spaces } ? .hold : .all
+            return WallpaperAutomationStore.shared.configurations.values.contains { $0.usesSpaces } ? .hold : .all
         }
         guard row.isIndependent,
-              WallpaperAutomationStore.shared.configuration(for: row.displayId).mode == .spaces else { return .all }
+              WallpaperAutomationStore.shared.configuration(for: row.displayId).usesSpaces else { return .all }
         guard store.lockScreenWallpaper?.isRequested != true, store.lockScreenWallpaper?.ownsDesktopProvider != true,
               store.activatingWallpaperID == nil, store.applyingWallpaperID == nil,
               automaticWallpapers?.scheduler.selectionIsSettled(on: row.displayId) == true,
@@ -157,7 +157,7 @@ extension AppDelegate {
         var pins: [UInt32: WallpaperSpacePin] = [:]
         for row in store.settingsSnapshot.displays where row.isIndependent {
             let configuration = WallpaperAutomationStore.shared.configuration(for: row.displayId)
-            guard configuration.mode == .spaces,
+            guard configuration.usesSpaces,
                   let physical = ResolvedDisplayTitles.liveDisplayID(row.displayId, title: row.title),
                   let topology = spaces.displays[String(physical)] else { continue }
             var content = WallpaperSpacePin.Content.ready
@@ -170,21 +170,25 @@ extension AppDelegate {
                     content = scheduler.isApplying(on: row.displayId) ? .loading : .waiting
                 }
             }
+            let ruleFallback = scheduler.stackedRuleTarget(on: row.displayId)
             pins[physical] = .init(space: topology.currentManagedID, content: content,
-                                   desktops: Self.spaceDesktops(configuration, topology: topology), incoming: incoming)
+                                   desktops: Self.spaceDesktops(configuration, topology: topology, ruleFallback: ruleFallback),
+                                   incoming: incoming)
         }
         return pins
     }
 
     /// The desktops (the window server's numbers) each wallpaper of a display is chosen for; a
-    /// desktop without a choice takes Desktop 1's, as it plays it. Playlists are left out.
+    /// desktop without a choice takes the stacked rule target (when active) or Desktop 1's, as it
+    /// plays it. Playlists are left out.
     private static func spaceDesktops(_ configuration: DisplayWallpaperAutomation,
-                                      topology: WallpaperDisplaySpaces) -> [String: Set<UInt64>] {
+                                      topology: WallpaperDisplaySpaces,
+                                      ruleFallback: WallpaperAutomationTarget? = nil) -> [String: Set<UInt64>] {
         let first = topology.spaces.first?.id
         var desktops: [String: Set<UInt64>] = [:]
         for desktop in topology.spaces {
             guard let space = desktop.managedID,
-                  let target = configuration.desktopTarget(desktop.id, firstDesktop: first),
+                  let target = configuration.desktopTarget(desktop.id, firstDesktop: first, ruleFallback: ruleFallback),
                   target.kind == .wallpaper else { continue }
             desktops[target.id, default: []].insert(space)
         }
@@ -328,20 +332,21 @@ extension AppDelegate {
               store.lockScreenWallpaper?.ownsDesktopProvider != true,
               let row = Self.settingsRow(onPhysicalDisplay: physicalDisplay, in: store), row.isIndependent else { return nil }
         let configuration = WallpaperAutomationStore.shared.configuration(for: row.displayId)
-        return configuration.mode == .spaces ? (row.displayId, configuration) : nil
+        return configuration.usesSpaces ? (row.displayId, configuration) : nil
     }
 
     /// The last poster of each desktop's wallpaper, by Space id; a desktop without a choice takes
-    /// Desktop 1's, as it plays it. The current desktop's own poster comes from the wallpaper
-    /// playing there once one is taken.
+    /// the stacked rule target (when active) or Desktop 1's, as it plays it. The current desktop's
+    /// own poster comes from the wallpaper playing there once one is taken.
     private func savedDesktopPosters(_ physicalDisplay: String) -> [String: Data] {
         guard let (row, configuration) = spaceModeDisplay(physicalDisplay),
               let spaces = desktopSpaces, spaces.available,
               let topology = spaces.displays[physicalDisplay] else { return [:] }
         let first = topology.spaces.first?.id
+        let ruleFallback = automaticWallpapers?.scheduler.stackedRuleTarget(on: row)
         var posters: [String: Data] = [:]
         for desktop in topology.spaces {
-            guard let target = configuration.desktopTarget(desktop.id, firstDesktop: first),
+            guard let target = configuration.desktopTarget(desktop.id, firstDesktop: first, ruleFallback: ruleFallback),
                   target.kind == .wallpaper else { continue }
             posters[desktop.id] = spacePosters.poster(display: row, wallpaperID: target.id)
         }
@@ -349,12 +354,15 @@ extension AppDelegate {
     }
 
     /// Keeps a poster taken on a desktop when another desktop of the display is set to the same
-    /// wallpaper, or that desktop is.
+    /// wallpaper, that desktop is, or the stacked rule target resolves to it.
     private func keepSpacePoster(_ poster: Data, display physicalDisplay: String) {
         guard let store, let (row, configuration) = spaceModeDisplay(physicalDisplay),
               let wallpaper = store.monitorInformationSnapshot.rows.first(where: { $0.displayId == row })?.wallpaperId,
-              !wallpaper.isEmpty,
-              configuration.spaces.values.contains(where: { $0.kind == .wallpaper && $0.id == wallpaper }) else { return }
+              !wallpaper.isEmpty else { return }
+        let ruleFallback = automaticWallpapers?.scheduler.stackedRuleTarget(on: row)
+        let matchesSpace = configuration.spaces.values.contains { $0.kind == .wallpaper && $0.id == wallpaper }
+        let matchesStacked = configuration.ruleMode != .off && ruleFallback?.kind == .wallpaper && ruleFallback?.id == wallpaper
+        guard matchesSpace || matchesStacked else { return }
         spacePosters.store(poster, display: row, wallpaperID: wallpaper)
     }
 
@@ -362,9 +370,21 @@ extension AppDelegate {
     /// display's settings id, so a display that is unplugged keeps its own.
     func retainSpacePosters() {
         var keys = Set<DesktopSpacePosterCache.Key>()
-        for (display, configuration) in WallpaperAutomationStore.shared.configurations where configuration.mode == .spaces {
+        for (display, configuration) in WallpaperAutomationStore.shared.configurations where configuration.usesSpaces {
             for target in configuration.spaces.values where target.kind == .wallpaper {
                 keys.insert(.init(display: display, wallpaperID: target.id))
+            }
+            switch configuration.ruleMode {
+            case .appearance:
+                for target in [configuration.light, configuration.dark].compactMap({ $0 }) where target.kind == .wallpaper {
+                    keys.insert(.init(display: display, wallpaperID: target.id))
+                }
+            case .schedule:
+                for rule in configuration.rules where rule.isEnabled && rule.target.kind == .wallpaper {
+                    keys.insert(.init(display: display, wallpaperID: rule.target.id))
+                }
+            case .off:
+                break
             }
         }
         guard keys != retainedSpacePosters else { return }
@@ -472,7 +492,7 @@ extension AppDelegate {
         guard let store else { return [] }
         return Set(store.settingsSnapshot.displays.compactMap { row in
             guard row.isIndependent,
-                  WallpaperAutomationStore.shared.configuration(for: row.displayId).mode == .spaces,
+                  WallpaperAutomationStore.shared.configuration(for: row.displayId).usesSpaces,
                   let physical = ResolvedDisplayTitles.liveDisplayID(row.displayId, title: row.title),
                   automaticWallpapers?.scheduler.inFlight.contains(row.displayId) == true
                     || store.monitorInformationSnapshot.rows.contains(where: { $0.displayId == row.displayId && !$0.wallpaperId.isEmpty }) else { return nil }
