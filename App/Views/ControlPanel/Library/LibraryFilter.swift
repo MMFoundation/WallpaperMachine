@@ -17,9 +17,20 @@ struct LibraryFilter: Equatable, Sendable {
   var collectionID: String?
 
   /// How many filters are in effect: every required tag, every box unticked, and the collection.
-  /// It reads zero right after Clear, and the Filter button's badge shows it.
+  /// It reads zero right after Clear, and the Filters sidebar's header shows it.
   var activeCount: Int {
     requiredTags.count + excludedTags.count + (collectionID == nil ? 0 : 1)
+  }
+
+  /// How many filters narrow the view on show, leaving out the view's own scope: the collection
+  /// when one is shown, or `Favorite` when Favorites is the view. Used for the Filter button's
+  /// badge and matches `InstalledBrowserModel.narrowsView`.
+  var narrowingFilterCount: Int {
+    let narrowingRequired =
+      collectionID == nil
+      ? requiredTags.filter { $0 != LibraryFilterCatalog.favoriteTag }.count
+      : requiredTags.count
+    return narrowingRequired + excludedTags.count
   }
 
   /// Tags and collection only; the search text is the search field's.

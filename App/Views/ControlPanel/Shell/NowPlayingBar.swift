@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The bar along the bottom of the window: what the target display is showing, and the previous,
-/// play or pause, next, random, playlist and Recently used buttons. While the target display
-/// rotates, the line under the title names what it rotates through and the playlist button is lit.
+/// play or pause, next, random, playlist and Recently used buttons. While the target display has
+/// an active playlist (rotating or Day and night), the line under the title names it and the
+/// playlist button is lit.
 ///
 /// The wallpaper's part of the bar is a button: it lights on hover and opens the details, a wider
 /// still with the title, its kind, the display and the playback state, and Show in library.
@@ -147,8 +148,17 @@ private struct NowPlayingSummary: View {
   }
 
   /// The target display as the toolbar's menu button names it, which is what the line has room
-  /// for, and what it rotates through; the details and VoiceOver keep the full title.
+  /// for, and what it rotates through (or Day and night); the details and VoiceOver keep the full
+  /// title.
   private func displayName(_ state: NowPlayingState) -> String {
+    NowPlayingBar.displayName(state, controller: controller)
+  }
+}
+
+extension NowPlayingBar {
+  /// The short subtitle under the Now Playing title: the target display's short name, followed by
+  /// the active playlist's title when one is running.
+  @MainActor static func displayName(_ state: NowPlayingState, controller: PanelController) -> String {
     let displays = controller.targetDisplays
     let target = displays.first { $0.id == controller.targetDisplayID }
     let name = target?.shortLabel(among: displays) ?? state.displayTitle
@@ -165,7 +175,7 @@ extension EnvironmentValues {
 
 extension View {
   /// Gives a popover opened from a part with palettes of its own the window's palettes back.
-  fileprivate func panelWindowLook() -> some View {
+  func panelWindowLook() -> some View {
     modifier(PanelWindowLook())
   }
 }

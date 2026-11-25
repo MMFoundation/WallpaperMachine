@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// The inspector column along the page's trailing edge: the selected wallpaper's details, 300
@@ -48,9 +47,7 @@ private struct ResizeHandle: View {
     Color.clear
       .frame(width: 8)
       .contentShape(Rectangle())
-      .onHover { inside in
-        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-      }
+      .pointerStyle(.columnResize)
       .gesture(
         DragGesture(minimumDistance: 1, coordinateSpace: .global)
           .onChanged { drag in

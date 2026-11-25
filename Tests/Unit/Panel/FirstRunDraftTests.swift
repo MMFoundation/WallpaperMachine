@@ -120,6 +120,17 @@ final class FirstRunDraftTests: XCTestCase {
     XCTAssertNil(go(0, .rightArrow, count: 0))
   }
 
+  func testChoiceGroupDrawsGroupFocusRingOnlyWhenFocusedWithNoSelection() {
+    XCTAssertFalse(WelcomeChoiceGroup<EmptyView>.showsGroupFocusRing(hasFocus: false, selectedIndex: nil))
+    XCTAssertFalse(WelcomeChoiceGroup<EmptyView>.showsGroupFocusRing(hasFocus: false, selectedIndex: 0))
+    XCTAssertFalse(
+      WelcomeChoiceGroup<EmptyView>.showsGroupFocusRing(hasFocus: true, selectedIndex: 1),
+      "a selected tile draws its own focus ring")
+    XCTAssertTrue(
+      WelcomeChoiceGroup<EmptyView>.showsGroupFocusRing(hasFocus: true, selectedIndex: nil),
+      "Custom framerate has no chosen preset tile, so the group frames itself when focused")
+  }
+
   // MARK: Steps
 
   /// Five pages: the guide asks for no Steam account, so Steam is not one of them.

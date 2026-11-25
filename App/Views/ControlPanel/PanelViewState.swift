@@ -1,7 +1,7 @@
 import Foundation
 
-/// What the panel would otherwise lose when its window closes: Installed's search, sort and tag
-/// filters, and how far each library page was scrolled.
+/// What the panel would otherwise lose when its window closes: Installed's search, sort, tag
+/// filters and collection, and how far each library page was scrolled.
 ///
 /// The open window keeps it current, `ControlPanelNavigation` holds the last copy that
 /// `normalized()` accepted (memory only, so a fresh launch starts clean), and the next window
@@ -15,6 +15,7 @@ struct PanelViewState: Codable, Equatable {
     var descending = false
     var tags: [String] = []
     var excludedTags: [String] = []
+    var collectionID: String?
   }
 
   var installed = Installed()
@@ -28,6 +29,7 @@ struct PanelViewState: Codable, Equatable {
   static let maxTextLength = 200
   static let maxTags = 32
   static let maxTagLength = 128
+  static let maxCollectionIDLength = 128
   static let maxScroll = 1_000_000.0
   /// Upper bound for the encoded form, so a runaway filter cannot grow the stored copy.
   static let maxEncodedBytes = 8 * 1024
@@ -38,13 +40,14 @@ struct PanelViewState: Codable, Equatable {
   }
 
   /// The state in the form the panel may keep, or nil when any part is outside its limit: an
-  /// unknown sort, text or tag lists beyond their limits, a scroll offset that is negative or not
-  /// a number, or an encoded form above 8 KB. Offsets above `maxScroll` are clamped, and pages
-  /// that do not draw into the library grid are dropped, so a newer page never invalidates the
-  /// rest.
+  /// unknown sort, text, tag lists or a collection id beyond their limits, a scroll offset that is
+  /// negative or not a number, or an encoded form above 8 KB. Offsets above `maxScroll` are
+  /// clamped, and pages that do not draw into the library grid are dropped, so a newer page never
+  /// invalidates the rest.
   func normalized() -> PanelViewState? {
     guard installed.text.count <= Self.maxTextLength, Self.sorts.contains(installed.sort),
-      Self.isTagList(installed.tags), Self.isTagList(installed.excludedTags)
+      Self.isTagList(installed.tags), Self.isTagList(installed.excludedTags),
+      Self.isCollectionID(installed.collectionID)
     else { return nil }
     var kept: [String: Double] = [:]
     for (page, offset) in scroll where Self.pages.contains(page) {
@@ -59,5 +62,10 @@ struct PanelViewState: Codable, Equatable {
 
   private static func isTagList(_ tags: [String]) -> Bool {
     tags.count <= maxTags && tags.allSatisfy { $0.count <= maxTagLength }
+  }
+
+  private static func isCollectionID(_ id: String?) -> Bool {
+    guard let id else { return true }
+    return !id.isEmpty && id.count <= maxCollectionIDLength
   }
 }

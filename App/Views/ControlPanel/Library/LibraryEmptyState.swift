@@ -10,6 +10,8 @@ enum LibraryEmptyState: Equatable {
   case failed(message: String)
   /// Nothing is installed: import something or find it on the Workshop.
   case emptyLibrary
+  /// Favorites is on show and no installed wallpaper is a favorite.
+  case emptyFavorites
   /// A collection that holds nothing. It is empty, not filtered away.
   case emptyCollection(name: String)
   /// The search is a Workshop link or id, and no installed wallpaper is that item: Discover can
@@ -37,13 +39,15 @@ enum LibraryEmptyState: Equatable {
   ///   - loadFailure: Why the last read of the library failed, when it did.
   ///   - libraryIsEmpty: Nothing is installed at all.
   ///   - collection: The collection on show and how many ids it holds, stale ones included.
+  ///   - installedFavoriteCount: How many installed wallpapers are favorites, so an empty Favorites
+  ///     view says so instead of blaming filters.
   ///   - isInstalled: Whether the library holds the wallpaper of this id.
   ///   - textIsWhole: The search text was pasted, dropped, confirmed with Return or restored,
   ///     rather than being typed (`InstalledBrowserModel.isTextWhole`).
   static func make(
     rowCount: Int, isLoading: Bool, loadFailure: String? = nil, libraryIsEmpty: Bool,
-    collection: (name: String, memberCount: Int)?, filter: LibraryFilter,
-    isInstalled: (String) -> Bool, textIsWhole: Bool
+    collection: (name: String, memberCount: Int)?, installedFavoriteCount: Int = 0,
+    filter: LibraryFilter, isInstalled: (String) -> Bool, textIsWhole: Bool
   ) -> LibraryEmptyState? {
     guard rowCount == 0 else { return nil }
     if isLoading { return .loading }
@@ -53,6 +57,11 @@ enum LibraryEmptyState: Equatable {
     if libraryIsEmpty { return .emptyLibrary }
     if let collection, collection.memberCount == 0 {
       return .emptyCollection(name: collection.name)
+    }
+    if collection == nil, filter.requiredTags.contains(LibraryFilterCatalog.favoriteTag),
+      installedFavoriteCount == 0
+    {
+      return .emptyFavorites
     }
     if let id = WorkshopLink.itemID(in: filter.text), WorkshopLink.isBareItemID(id),
       !isInstalled(id),

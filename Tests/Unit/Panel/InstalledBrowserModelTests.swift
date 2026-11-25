@@ -268,6 +268,69 @@ final class InstalledBrowserModelTests: PanelTestCase {
     XCTAssertEqual(titles(model).count, 3)
   }
 
+  func testEmptyFavoritesShowsItsOwnStateIgnoresStaleFavoriteIDsAndReturnsToAll() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    let model = panel.controller.library
+    try await installNames(panel, count: 3)
+    // A stale favorite id whose wallpaper is no longer installed does not count.
+    panel.controller.favoriteIDs = ["ghost"]
+
+    model.show(.favorites)
+    XCTAssertEqual(model.scope, .favorites)
+    XCTAssertEqual(model.emptyState, .emptyFavorites)
+    XCTAssertEqual(model.filterCount, 1, "sidebar Clear still sees Favorites")
+    XCTAssertEqual(model.narrowingFilterCount, 0, "Filter button badge excludes the Favorites view scope")
+    XCTAssertEqual(model.filterButtonValue, L("Collapsed"))
+
+    model.setRequired("Customizable", true)
+    XCTAssertEqual(model.emptyState, .emptyFavorites, "extra filters still report empty Favorites while none exist")
+    XCTAssertEqual(model.narrowingFilterCount, 1)
+    XCTAssertEqual(model.filterButtonValue, "\(L("1 active")), \(L("Collapsed"))")
+
+    model.setRequired("Customizable", false)
+    model.showAllWallpapers()
+    XCTAssertEqual(model.scope, .all)
+    XCTAssertNil(model.emptyState)
+    XCTAssertEqual(titles(model).count, 3)
+
+    // With an installed favorite, an extra filter that hides it reports filters instead of emptyFavorites.
+    panel.controller.favoriteIDs = ["w00"]
+    model.show(.favorites)
+    XCTAssertNil(model.emptyState)
+    model.setRequired("Customizable", true)
+    XCTAssertEqual(model.emptyState, .filters(count: 2))
+  }
+
+  func testACollectionScopePersistsAcrossReopenAndFallsBackWhenDeleted() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    let model = panel.controller.library
+    try await installNames(panel, count: 4)
+    let night = try panel.collections.create(name: "Night", wallpaperIDs: ["w01", "w03"])
+
+    model.show(.collection(night.id))
+    XCTAssertEqual(panel.navigation.viewState?.installed.collectionID, night.id)
+    XCTAssertEqual(model.narrowingFilterCount, 0, "Filter button badge excludes the collection view scope")
+    XCTAssertEqual(model.filterButtonValue, L("Collapsed"))
+
+    // The model holds its controller unowned, so each reopened controller is kept alive while asked.
+    let reopenedController = panel.buildController()
+    let reopened = reopenedController.library
+    XCTAssertEqual(reopened.scope, .collection(night.id))
+    XCTAssertEqual(reopened.shownCollection?.id, night.id)
+    XCTAssertEqual(titles(reopened), ["w01", "w03"])
+
+    // If the collection is deleted before the next window opens, fall back gracefully to All wallpapers.
+    try panel.collections.delete(night.id)
+    let afterDeleteController = panel.buildController()
+    let afterDelete = afterDeleteController.library
+    XCTAssertEqual(afterDelete.scope, .all)
+    XCTAssertNil(afterDelete.filter.collectionID)
+    XCTAssertEqual(titles(afterDelete).count, 4)
+    withExtendedLifetime((reopenedController, afterDeleteController)) {}
+  }
+
   // MARK: Header and summary
 
   func testOnlyASearchOrAFilterNarrowsTheViewTheSidebarLights() async throws {
@@ -717,6 +780,36 @@ final class InstalledBrowserModelTests: PanelTestCase {
     XCTAssertFalse(model.isSelecting, "Escape leaves selection mode too")
     model.beginNewCollection()
     XCTAssertNil(model.newCollectionName, "there is no selection to make a collection of")
+  }
+
+  func testToggleSelectingLeavesAndClearsMultiSelectStartedBySelectAllOrCommandClickInOneClick() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    let model = panel.controller.library
+    try await installNames(panel, count: 4)
+
+    XCTAssertFalse(model.hasActiveSelectionMode)
+    model.selectAllVisible()
+    XCTAssertFalse(model.isSelecting)
+    XCTAssertEqual(model.selectedIDs.count, 4)
+    XCTAssertTrue(model.hasActiveSelectionMode, "Select button shows Done after ⌘A")
+
+    model.toggleSelecting()
+    XCTAssertFalse(model.isSelecting)
+    XCTAssertTrue(model.selection.isEmpty, "one click on Done clears the ⌘A selection")
+    XCTAssertFalse(model.hasActiveSelectionMode)
+
+    model.tileClicked("w02", clickCount: 1, modifiers: .command)
+    XCTAssertEqual(model.selectedIDs, ["w02"])
+    XCTAssertTrue(model.hasActiveSelectionMode, "Select button shows Done after ⌘-click")
+    model.beginNewCollection()
+    XCTAssertNotNil(model.newCollectionName)
+
+    model.toggleSelecting()
+    XCTAssertFalse(model.isSelecting)
+    XCTAssertTrue(model.selection.isEmpty)
+    XCTAssertNil(model.newCollectionName)
+    XCTAssertFalse(model.hasActiveSelectionMode)
   }
 
   func testWallpapersThatLeaveTheLibraryLeaveTheSelection() async throws {

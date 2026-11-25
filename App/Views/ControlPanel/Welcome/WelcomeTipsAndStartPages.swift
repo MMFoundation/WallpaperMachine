@@ -179,6 +179,6 @@ struct WelcomeStartPage: View {
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 10)
-    .accessibilityElement(children: .combine)
+    .accessibilityElement(children: action == nil ? .combine : .contain)
   }
 }

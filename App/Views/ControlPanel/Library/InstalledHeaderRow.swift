@@ -42,8 +42,8 @@ struct InstalledHeaderRow: View {
 
 // MARK: - Filter
 
-/// The Filter capsule: tinted while any filter applies or the Filters sidebar is open, with the
-/// number of filters in effect beside it. It opens and closes the sidebar.
+/// The Filter capsule: tinted while any narrowing filter applies or the Filters sidebar is open,
+/// with the number of narrowing filters in effect beside it. It opens and closes the sidebar.
 private struct FilterButton: View {
   let tier: HeaderTier
 
@@ -52,7 +52,7 @@ private struct FilterButton: View {
   var body: some View {
     let model = controller.library
     let shell = controller.shell
-    let count = model.filterCount
+    let count = model.narrowingFilterCount
     Button {
       shell.toggleFilters()
     } label: {
@@ -173,28 +173,29 @@ private struct SelectButton: View {
 
   var body: some View {
     let model = controller.library
+    let showsDone = model.hasActiveSelectionMode
     Button {
       model.toggleSelecting()
     } label: {
       HStack(spacing: 5) {
-        Image(systemName: model.isSelecting ? "xmark" : "checkmark.circle")
+        Image(systemName: showsDone ? "xmark" : "checkmark.circle")
           .font(.system(size: 11.5, weight: .semibold))
         if tier.showsLabels {
-          if model.isSelecting { Text("Done") } else { Text("Select") }
+          if showsDone { Text("Done") } else { Text("Select") }
         }
       }
     }
     .buttonStyle(.panelCapsule(
-        isActive: model.isSelecting, horizontalPadding: tier.capsulePadding))
+        isActive: showsDone, horizontalPadding: tier.capsulePadding))
     .help(
-      model.isSelecting
+      showsDone
         ? L("Leave selection mode")
         : L(
           "Select wallpapers to add to a playlist or a collection, or to move to Trash. Holding a tile and dragging across others selects them too."
         )
     )
-    .accessibilityLabel(model.isSelecting ? Text("Done") : Text("Select"))
-    .accessibilityAddTraits(model.isSelecting ? .isSelected : [])
+    .accessibilityLabel(showsDone ? Text("Done") : Text("Select"))
+    .accessibilityAddTraits(showsDone ? .isSelected : [])
     .accessibilityIdentifier("installed-select")
   }
 }

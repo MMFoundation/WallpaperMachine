@@ -98,12 +98,19 @@ extension InstalledBrowserModel {
 
   // MARK: Selection mode
 
-  /// The Select button. Leaving selection mode puts the selection away.
+  /// Whether selection controls show Done and leave selection in one click: either selection mode
+  /// is on, or tiles are ticked (for example via ⌘A or ⌘-click).
+  var hasActiveSelectionMode: Bool { isSelecting || !selection.isEmpty }
+
+  /// The Select button. Leaves selection mode and clears any ticked wallpapers in one click while
+  /// either is active; otherwise enters selection mode.
   func toggleSelecting() {
-    isSelecting.toggle()
-    if !isSelecting {
+    if hasActiveSelectionMode {
+      isSelecting = false
       selection.clear()
       newCollectionName = nil
+    } else {
+      isSelecting = true
     }
   }
 

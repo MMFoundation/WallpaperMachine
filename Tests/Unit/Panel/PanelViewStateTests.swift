@@ -7,22 +7,32 @@ import XCTest
 final class PanelViewStateTests: XCTestCase {
   private func state(
     text: String = "", sort: String = "title", descending: Bool = false, tags: [String] = [],
-    excludedTags: [String] = [], scroll: [String: Double] = [:]
+    excludedTags: [String] = [], collectionID: String? = nil, scroll: [String: Double] = [:]
   ) -> PanelViewState {
     PanelViewState(
       installed: .init(
-        text: text, sort: sort, descending: descending, tags: tags, excludedTags: excludedTags),
+        text: text, sort: sort, descending: descending, tags: tags, excludedTags: excludedTags,
+        collectionID: collectionID),
       scroll: scroll)
   }
 
   func testAFullStateSurvivesNormalizingAndEncoding() throws {
     let full = state(
       text: "夜景 night", sort: "added", descending: true, tags: ["Favorite", "Approved"],
-      excludedTags: ["Mature", "Web"], scroll: ["installed": 1_240.5, "discover": 0])
+      excludedTags: ["Mature", "Web"], collectionID: "collection-1",
+      scroll: ["installed": 1_240.5, "discover": 0])
     let kept = try XCTUnwrap(full.normalized())
-    XCTAssertEqual(kept, full, "non-ASCII text, a fractional offset and a zero offset stay as they were")
+    XCTAssertEqual(kept, full, "non-ASCII text, collection id, a fractional offset and a zero offset stay as they were")
     let decoded = try JSONDecoder().decode(PanelViewState.self, from: JSONEncoder().encode(kept))
     XCTAssertEqual(decoded, kept)
+  }
+
+  func testEmptyOrOverlongCollectionIDIsRefused() {
+    XCTAssertNil(state(collectionID: "").normalized())
+    XCTAssertNotNil(
+      state(collectionID: String(repeating: "c", count: PanelViewState.maxCollectionIDLength)).normalized())
+    XCTAssertNil(
+      state(collectionID: String(repeating: "c", count: PanelViewState.maxCollectionIDLength + 1)).normalized())
   }
 
   func testAnEmptyStateIsTheDefaultAndIsAccepted() {

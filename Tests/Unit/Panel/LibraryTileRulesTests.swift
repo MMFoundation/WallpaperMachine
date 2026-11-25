@@ -270,4 +270,34 @@ final class LibraryTileRulesTests: PanelTestCase {
         rowCount: 3, isLoading: false, libraryIsEmpty: false, collection: nil,
         filter: LibraryFilter(), isInstalled: { _ in false }, textIsWhole: true))
   }
+
+  func testEmptyFavoritesSaysSoInsteadOfBlamingFilters() {
+    func state(
+      empty: Bool = false, collection: (String, Int)? = nil, favorites: Int = 0,
+      text: String = "", tags: [String] = ["Favorite"], collectionID: String? = nil
+    ) -> LibraryEmptyState? {
+      var filter = LibraryFilter(text: text, requiredTags: tags)
+      filter.collectionID = collectionID
+      return LibraryEmptyState.make(
+        rowCount: 0, isLoading: false, libraryIsEmpty: empty,
+        collection: collection.map { (name: $0.0, memberCount: $0.1) },
+        installedFavoriteCount: favorites, filter: filter,
+        isInstalled: { _ in false }, textIsWhole: true)
+    }
+
+    XCTAssertEqual(state(), .emptyFavorites, "no installed favorites is an empty Favorites view, not a filter hiding everything")
+    XCTAssertEqual(
+      state(text: "zzz", tags: ["Favorite", "Approved"]), .emptyFavorites,
+      "search and extra filters do not explain an empty Favorites view")
+    XCTAssertEqual(state(empty: true), .emptyLibrary, "an empty library takes precedence")
+    XCTAssertEqual(
+      state(collection: ("Quiet", 0), collectionID: "q"), .emptyCollection(name: "Quiet"),
+      "an empty collection takes precedence over Favorites")
+    XCTAssertEqual(
+      state(favorites: 2, tags: ["Favorite", "Approved"]), .filters(count: 2),
+      "with installed favorites, an extra filter hiding them reports filters")
+    XCTAssertEqual(
+      state(favorites: 2, text: "zzz"), .searchAndFilters,
+      "with installed favorites, a search that misses them is not an empty Favorites view")
+  }
 }

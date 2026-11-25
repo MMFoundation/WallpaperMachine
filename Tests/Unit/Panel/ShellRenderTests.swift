@@ -474,4 +474,70 @@ final class ShellRenderTests: PanelTestCase {
     let long = height("Deleted “A very long collection name that does not fit one line”.")
     XCTAssertGreaterThan(long, line * 1.8, "the whole sentence is shown")
   }
+
+  func testNowPlayingPlaylistButtonShowsDayAndNightAndPopoverRestoresWindowTheme() async throws {
+    try await withPanel { panel in
+      try await ShellFixtures.seed(panel.store, bridge: panel.bridge)
+      panel.playlists.update("primary") { $0.mode = .dayNight }
+      let controller = panel.controller
+
+      let hosting = NSHostingView(
+        rootView: NowPlayingBar()
+          .environment(controller)
+          .environment(\.panelImages, controller.images)
+          .panelTheme(theme: controller.theme, locale: PanelLocale.shared)
+          .frame(width: 760))
+      let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 760, height: 80), styleMask: [.borderless],
+        backing: .buffered, defer: true)
+      window.isReleasedWhenClosed = false
+      window.contentView = hosting
+      defer {
+        window.contentView = nil
+        window.close()
+      }
+      hosting.layoutSubtreeIfNeeded()
+      try await Task.sleep(for: .milliseconds(250))
+      hosting.layoutSubtreeIfNeeded()
+
+      let playlistButton = try XCTUnwrap(
+        AccessibilityElement.everything(in: hosting).first { $0.identifier == "now-playing-playlist" })
+      XCTAssertEqual(playlistButton.label, L("Playlist: \(L("Day and night"))"))
+
+      // Light + Halloween: the seasonal bar uses dark palettes, while its popovers must restore
+      // the window's light palettes via panelWindowLook().
+      let light = PanelTheme(season: .halloween, appearance: .light)
+      let dark = PanelTheme(season: .halloween, appearance: .dark)
+      var seenTheme: PanelTheme?
+      let probe = NSHostingView(
+        rootView: NowPlayingWindowLookProbe { seenTheme = $0 }
+          .panelWindowLook()
+          .environment(\.panelTheme, dark)
+          .environment(\.panelWindowTheme, light))
+      probe.frame = NSRect(x: 0, y: 0, width: 10, height: 10)
+      probe.layoutSubtreeIfNeeded()
+      _ = probe.fittingSize
+      XCTAssertEqual(seenTheme, light, "panelWindowLook restores the window's light palette over the dark seasonal bar")
+
+      let details = NSHostingView(
+        rootView: NowPlayingPlaylistDetails()
+          .panelPresentationLocale()
+          .panelWindowLook()
+          .environment(controller)
+          .environment(\.panelTheme, dark)
+          .environment(\.panelWindowTheme, light))
+      details.layoutSubtreeIfNeeded()
+      XCTAssertEqual(details.fittingSize.width, NowPlayingPlaylistDetails.width, accuracy: 1)
+    }
+  }
+}
+
+private struct NowPlayingWindowLookProbe: View {
+  let onTheme: @MainActor (PanelTheme) -> Void
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    let _ = onTheme(theme)
+    Color.clear.frame(width: 1, height: 1)
+  }
 }

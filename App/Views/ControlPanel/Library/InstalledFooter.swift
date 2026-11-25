@@ -317,11 +317,13 @@ private struct SweepTip: View {
         gotIt.padding(.leading, 19)
       }
     }
-    .accessibilityElement(children: .combine)
+    .accessibilityElement(children: .contain)
   }
 
   private var icon: some View {
-    Image(systemName: "hand.point.up.left").font(.system(size: 11))
+    Image(systemName: "hand.point.up.left")
+      .font(.system(size: 11))
+      .accessibilityHidden(true)
   }
 
   private var text: some View {

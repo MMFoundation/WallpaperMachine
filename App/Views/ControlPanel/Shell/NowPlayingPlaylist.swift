@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Now Playing's playlist button: lit while the target display rotates, with the order's symbol,
-/// and named after what it rotates through. It opens the playlist's state above the bar.
+/// Now Playing's playlist button: lit while the target display has an active playlist (with the
+/// order's symbol for rotation, or a sunrise for Day and night), and named after what it plays. It
+/// opens the playlist's state above the bar.
 struct NowPlayingPlaylistButton: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
@@ -10,7 +11,7 @@ struct NowPlayingPlaylistButton: View {
     let shell = controller.shell
     let rotation = NowPlayingRotation(controller: controller)
     NowPlayingControl(
-      systemImage: rotation?.state.playlist.order == .shuffle ? "shuffle" : "repeat",
+      systemImage: rotation?.systemImage ?? "repeat",
       label: rotation.map { L("Playlist: \($0.title)") } ?? L("Playlist"),
       isEnabled: controller.targetDisplay?.isSelectable == true,
       tint: rotation == nil ? nil : theme.accent.accent.color,
@@ -20,30 +21,48 @@ struct NowPlayingPlaylistButton: View {
       shell.popover(.playlist).wrappedValue = !isOpen
     }
     .popover(isPresented: shell.popover(.playlist), arrowEdge: .top) {
-      NowPlayingPlaylistDetails().panelPresentationLocale()
+      NowPlayingPlaylistDetails().panelPresentationLocale().panelWindowLook()
     }
   }
 }
 
-/// The target display's rotation as Now Playing names it; nil while that display does not rotate.
+/// The target display's active playlist as Now Playing names it; nil while that display's playlist
+/// is off or the display cannot have one.
 struct NowPlayingRotation {
   let state: PlaylistState
-  /// What it rotates through: All wallpapers, Favorites, the display's list or a collection's name.
+  /// What it plays: All wallpapers, Favorites, the display's list, a collection's name, or
+  /// Day and night.
   let title: String
+
+  /// The symbol the playlist button shows while this playlist is active.
+  var systemImage: String {
+    switch state.playlist.mode {
+    case .dayNight: "sunrise"
+    case .rotate: state.playlist.order == .shuffle ? "shuffle" : "repeat"
+    case .off: "repeat"
+    }
+  }
 
   @MainActor init?(controller: PanelController) {
     guard controller.targetDisplay?.isSelectable == true else { return nil }
     let state = controller.playlistState(for: controller.targetDisplayID)
-    guard state.playlist.mode == .rotate else { return nil }
-    self.state = state
-    title = state.sourceTitle(collections: controller.collectionRows)
+    switch state.playlist.mode {
+    case .rotate:
+      self.state = state
+      title = state.sourceTitle(collections: controller.collectionRows)
+    case .dayNight:
+      self.state = state
+      title = L("Day and night")
+    case .off:
+      return nil
+    }
   }
 }
 
-/// The playlist above the bar: what the target display rotates through, its order and interval,
-/// when it changes next, and Change now, Stop and Settings…. A display that does not rotate says how
-/// to start one.
-private struct NowPlayingPlaylistDetails: View {
+/// The playlist above the bar: what the target display rotates through (or Day and night), its
+/// order and interval, when it changes next, and Change now, Stop and Settings…. A display whose
+/// playlist is off says how to start one.
+struct NowPlayingPlaylistDetails: View {
   static let width: CGFloat = 300
 
   @Environment(PanelController.self) private var controller

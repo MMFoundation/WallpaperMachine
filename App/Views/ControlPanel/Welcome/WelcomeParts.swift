@@ -369,7 +369,8 @@ extension ButtonStyle where Self == WelcomeCapsuleButtonStyle {
 
 /// A set of tiles of which one is chosen, as the native radio group behaves: one tab stop for the
 /// whole group, the arrow keys, Home and End move the choice (and wrap), and VoiceOver reads the
-/// group by its name with the chosen tile marked.
+/// group by its name with the chosen tile marked. When no tile is chosen (for example Custom
+/// framerate), the focus ring frames the whole group so keyboard focus stays visible.
 struct WelcomeChoiceGroup<Content: View>: View {
   /// The group's name, for VoiceOver.
   let label: String
@@ -381,11 +382,24 @@ struct WelcomeChoiceGroup<Content: View>: View {
   let select: (Int) -> Void
   @ViewBuilder var content: Content
 
+  @Environment(\.panelTheme) private var theme
   @FocusState private var hasFocus: Bool
+
+  /// Whether the group itself draws the focus ring instead of a selected tile.
+  static func showsGroupFocusRing(hasFocus: Bool, selectedIndex: Int?) -> Bool {
+    hasFocus && selectedIndex == nil
+  }
 
   var body: some View {
     content
       .environment(\.welcomeGroupHasFocus, hasFocus)
+      .background {
+        if Self.showsGroupFocusRing(hasFocus: hasFocus, selectedIndex: selectedIndex) {
+          RoundedRectangle(cornerRadius: 15, style: .continuous)
+            .stroke(theme.accent.focus.color.opacity(0.55), lineWidth: 3)
+            .padding(-3)
+        }
+      }
       .focusable()
       .focused($hasFocus)
       .focusEffectDisabled()

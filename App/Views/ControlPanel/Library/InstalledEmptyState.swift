@@ -53,6 +53,15 @@ struct InstalledEmptyState: View {
         }
         .textSelectable()
         .seasonalArt(.emptyLibrary)
+      case .emptyFavorites:
+        PanelEmptyState(
+          "No favorite wallpapers yet", systemImage: "heart",
+          description: "Click the heart on a wallpaper to add it to your favorites."
+        ) {
+          Button("Show all wallpapers") { model.showAllWallpapers() }
+            .buttonStyle(.panelCapsule)
+        }
+        .textSelectable()
       case .emptyCollection(let name):
         PanelEmptyState(
           "This collection is empty", systemImage: "folder",

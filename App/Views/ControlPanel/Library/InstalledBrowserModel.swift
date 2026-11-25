@@ -225,26 +225,26 @@ final class InstalledBrowserModel {
     return effective
   }
 
-  /// How many filters are in effect, for the Filter button's badge.
+  /// How many filters are in effect, including the view's own Favorites or collection scope, for
+  /// the Filters sidebar header and its Clear button.
   var filterCount: Int { effectiveFilter.activeCount }
+
+  /// How many filters narrow the view on show (excluding Favorites and the shown collection), for
+  /// the Filter button's badge.
+  var narrowingFilterCount: Int { effectiveFilter.narrowingFilterCount }
 
   /// Whether a search or a filter narrows the view the chips light, so the grid can show fewer
   /// wallpapers than the window's subtitle counts. Favorites and a collection are that view, not a
   /// narrowing of it.
   var narrowsView: Bool {
-    var narrowing = effectiveFilter
-    narrowing.collectionID = nil
-    if scope == .favorites {
-      narrowing.requiredTags.removeAll { $0 == LibraryFilterCatalog.favoriteTag }
-    }
-    return !narrowing.text.isEmpty || narrowing.hasFilters
+    !effectiveFilter.text.isEmpty || narrowingFilterCount > 0
   }
 
-  /// What VoiceOver reads after the Filter button's name: how many filters apply, and whether the
-  /// Filters sidebar is open, which the web panel's button said with `aria-expanded`. Two separate
-  /// facts, so a list of them.
+  /// What VoiceOver reads after the Filter button's name: how many narrowing filters apply, and
+  /// whether the Filters sidebar is open, which the web panel's button said with `aria-expanded`.
+  /// Two separate facts, so a list of them.
   var filterButtonValue: String {
-    let count = filterCount
+    let count = narrowingFilterCount
     var parts: [String] = []
     if count > 0 { parts.append(L("\(count) active")) }
     parts.append(controller.shell.areFiltersShown ? L("Expanded") : L("Collapsed"))
@@ -371,10 +371,13 @@ final class InstalledBrowserModel {
     filtersChanged(immediately: true)
   }
 
-  /// Shows every wallpaper again, as an empty collection's Show all wallpapers does.
+  /// Shows every wallpaper again, as an empty collection's or empty Favorites' Show all wallpapers
+  /// does.
   func showAllWallpapers() {
-    guard filter.collectionID != nil else { return }
+    guard filter.collectionID != nil || filter.requiredTags.contains(LibraryFilterCatalog.favoriteTag)
+    else { return }
     filter.collectionID = nil
+    filter.requiredTags.removeAll { $0 == LibraryFilterCatalog.favoriteTag }
     filtersChanged(immediately: true)
   }
 
@@ -463,10 +466,15 @@ final class InstalledBrowserModel {
     let rowCount = visibleRows.count
     guard rowCount == 0 else { return nil }
     let collection = shownCollection
+    let favorites = controller.favoriteIDs
+    let installedFavoriteCount =
+      favorites.isEmpty
+      ? 0 : controller.libraryRows.reduce(0) { $0 + (favorites.contains($1.id) ? 1 : 0) }
     return LibraryEmptyState.make(
       rowCount: rowCount, isLoading: controller.isLibraryLoading,
       loadFailure: controller.libraryLoadFailure, libraryIsEmpty: controller.libraryRows.isEmpty,
-      collection: collection.map { ($0.name, $0.count) }, filter: effectiveFilter,
+      collection: collection.map { ($0.name, $0.count) },
+      installedFavoriteCount: installedFavoriteCount, filter: effectiveFilter,
       isInstalled: { controller.libraryRow(id: $0) != nil }, textIsWhole: isTextWhole)
   }
 
@@ -529,8 +537,8 @@ final class InstalledBrowserModel {
 
   // MARK: Restoring and reporting the view
 
-  /// Comes back to what the last window left, once: the text, sort, direction and tags, and the
-  /// scroll offset the grid restores itself to.
+  /// Comes back to what the last window left, once: the text, sort, direction, tags and
+  /// collection (if it still exists), and the scroll offset the grid restores itself to.
   private func restore(_ saved: PanelViewState?) {
     guard let saved else { return }
     filter.text = saved.installed.text
@@ -539,6 +547,11 @@ final class InstalledBrowserModel {
     descending = saved.installed.descending
     filter.requiredTags = Self.unique(saved.installed.tags)
     filter.excludedTags = Self.unique(saved.installed.excludedTags)
+    if let collectionID = saved.installed.collectionID,
+      controller.collectionRows.contains(where: { $0.id == collectionID })
+    {
+      filter.collectionID = collectionID
+    }
     restoredTags = Set(filter.requiredTags)
     scrollOffset = CGFloat(saved.scroll["installed"] ?? 0)
   }
@@ -581,10 +594,13 @@ final class InstalledBrowserModel {
     reportTask = nil
     hasUnreportedChange = false
     var state = controller.navigation.viewState ?? PanelViewState()
+    let collectionID = effectiveFilter.collectionID.flatMap {
+      !$0.isEmpty && $0.count <= PanelViewState.maxCollectionIDLength ? $0 : nil
+    }
     state.installed = PanelViewState.Installed(
       text: filter.text.count <= PanelViewState.maxTextLength ? filter.text : "",
       sort: sort.rawValue, descending: descending, tags: filter.requiredTags,
-      excludedTags: filter.excludedTags)
+      excludedTags: filter.excludedTags, collectionID: collectionID)
     state.scroll["installed"] = Double(max(0, scrollOffset.rounded()))
     controller.storeViewState(state)
   }

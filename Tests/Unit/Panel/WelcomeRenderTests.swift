@@ -352,6 +352,25 @@ final class WelcomeRenderTests: PanelTestCase {
     }
   }
 
+  func testStartPageRecapRowExposesReviewButtonToVoiceOver() async throws {
+    try await withPanel(welcomeSeen: false) { panel in
+      let model = panel.controller.welcome
+      model.choosePreset(.low)
+      XCTAssertFalse(model.recap.unsaved.isEmpty)
+      let harness = try WelcomeRenderHarness(panel: panel) { controller in
+        AnyView(WelcomeStartPage().environment(controller.welcome))
+      }
+      defer { harness.close() }
+      try await harness.layout(at: sizes[1])
+      let buttons = AccessibilityElement.everything(in: harness.hosting.view).filter {
+        $0.role == NSAccessibility.Role.button.rawValue
+      }
+      XCTAssertTrue(
+        buttons.contains { $0.text == L("Review") },
+        "A recap row with Review must contain its children so VoiceOver can activate the button")
+    }
+  }
+
   // MARK: The support prompt
 
   /// The sheet keeps to its width and a sensible height in every language, with and without the

@@ -387,18 +387,20 @@ on every Space as before, unless the display has a
 ### Reopening the panel
 
 Installed's model reports its filters and the grid's scroll offset to
-`ControlPanelNavigation.viewState` as they change: a click on a box or the sort menu at
+`ControlPanelNavigation.viewState` as they change: a click on a box, view or the sort menu at
 once, typing and scrolling at most every 400 ms, and when the page goes away; the
 Discover page merges its own scroll offset into the same value. `PanelViewState.normalized()`
 checks each report (a known sort key, search text up to 200 characters, at most 32 tags of
-128 characters each for the required and the excluded list, scroll offsets of 0 to
+128 characters each for the required and the excluded list, an optional non-empty collection id
+up to 128 characters, scroll offsets of 0 to
 1,000,000 for the Installed, Discover and pixiv grids, 8 KB encoded) and the navigation
 keeps the last valid one in memory, where it outlives the window. An invalid report is
 dropped and the previous one stays. Reporting builds nothing and reaches no store.
 
 A new window restores the stored state once. Installed:
 
-- puts back the search text, sort key, direction and both tag lists;
+- puts back the search text, sort key, direction, both tag lists and the shown collection
+  (falling back to **All wallpapers** if that collection no longer exists);
 - drops a required tag that no wallpaper in the library carries any more, once the
   library has loaded, so a library that changed in between shows its wallpapers
   instead of an empty grid. It keeps excluded tags, which only hide, and a tag the
@@ -407,8 +409,8 @@ A new window restores the stored state once. Installed:
   holds.
 
 Discover restores its own offset the same way; pixiv starts at the top. Nothing is
-written to disk, so a fresh launch starts clean. Property drafts, the selection,
-disclosures and the library view (Favorites or a collection) are not restored.
+written to disk, so a fresh launch starts clean. Property drafts, the selection and
+disclosures are not restored.
 
 Closing the window lets go of what Discover and pixiv read for it
 (`WorkshopStore.unload()`, `PixivStore.unload()`) and of the decoded thumbnails
@@ -654,8 +656,9 @@ no Share: they have no page to share.
 
 The bar along the bottom of the window shows the target display's wallpaper: its
 still, its title, and the display's name beside a small equalizer that moves only
-while playback runs and the window is on screen; while the display rotates, the name is
-followed by what it rotates through (All wallpapers, Favorites, its list or a collection). When the target display is empty it
+while playback runs and the window is on screen; while the display has an active
+playlist, the name is followed by what it plays (All wallpapers, Favorites, its list,
+a collection or **Day and night**). When the target display is empty it
 says **Nothing on this display** and the playback state; while no display shows a wallpaper,
 the line under it says how to apply one instead (double-click a wallpaper or choose **Apply
 wallpaper**); VoiceOver reads the
@@ -689,13 +692,14 @@ shows the wallpaper selected on Installed. Its controls:
   other than the one on show and never one held back after a crash, each coming round before one
   repeats; a rotating playlist gives way to it. It is unavailable for a mirror or a disabled
   display and when nothing else could be picked.
-- **Playlist** is lit, with the order's symbol (repeat or shuffle), while the target
-  display rotates, and is unavailable for a mirror or a disabled display. It opens the
-  target display's playlist above the bar: what it rotates through, the order and how
-  often, when it changes next (or **Playlist paused**), **Change now** (or **Resume
-  playlist**), **Stop**, which turns the playlist off and leaves the wallpaper on screen,
-  and **Settings…**, which opens Settings → Displays. A display that does not rotate
-  says to press Play on Installed.
+- **Playlist** is lit while the target display has an active playlist — with the order's
+  symbol (repeat or shuffle) when rotating, or a sunrise for **Day and night** — and is
+  unavailable for a mirror or a disabled display. It opens the target display's playlist
+  above the bar (restoring the window's light or dark appearance over a dark seasonal
+  bar): what it plays, the order and how often when rotating, when it changes next (or
+  **Playlist paused**), **Change now** (or **Resume playlist**), **Stop**, which turns
+  the playlist off and leaves the wallpaper on screen, and **Settings…**, which opens
+  Settings → Displays. A display whose playlist is off says to press Play on Installed.
 
 ## Previous, next and recently used
 
@@ -912,7 +916,9 @@ and reinstalling the wallpaper brings the assignment back.
   favorites** and makes every ticked wallpaper a favorite, or **Remove from favorites**
   when they all are. A batch takes at most 4,096 wallpapers and says so when more are
   ticked. `Delete` acts on the selection from
-  the grid, and `Escape` or **Done** leaves selection mode and clears the selection.
+  the grid, **Select** switches to **Done** whenever selection mode is on or any tile is
+  ticked (including via `Command`-`A` or `Command`-click), and `Escape` or a single click
+  on **Done** leaves selection mode and clears the selection.
   The selection survives a change of view, search or filter. One confirmation sheet
   covers the whole batch, every wallpaper is trashed independently, the library
   refreshes once, and any wallpaper that could not be removed is reported in the
@@ -1025,7 +1031,10 @@ ids are unchanged, so nothing persisted or sent over the bridge moves.
 
 Installed, Discover and pixiv share one **Filters sidebar**. The page's **Filter**
 button opens and closes it: a funnel symbol, the label "Filter" and, when filters are
-active, their count in a badge; the button is tinted with the accent while any filter
+active, their count in a badge; on Installed the button's badge and tint count only
+narrowing filters beyond the active view scope (excluding the Favorites and collection
+view scopes themselves), while the sidebar header's count and **Clear** button still
+include them. The button is tinted with the accent while any such filter
 applies or the sidebar is open, and VoiceOver reads the count and whether it is open.
 The sidebar is a 260-point column at the page's leading edge, a floating panel (glass
 from macOS 26), with the search bar and grid narrowing beside it. It slides out from
@@ -1105,7 +1114,10 @@ tags are not claimed to be represented by the sum of visible group counts.
 
 An empty result offers recovery for the actual restriction: **Clear search**,
 **Clear filters** (plus **Show filters** while the sidebar is closed), or **Clear search and
-filters**; on Installed a search alone says no wallpaper matches it. An empty local
+filters**; on Installed a search alone says no wallpaper matches it. An empty **Favorites**
+view (when no installed wallpaper is a favorite) says **No favorite wallpapers yet**,
+explains how to favorite one, and offers **Show all wallpapers**, whatever the search and
+filters. An empty local
 collection says **This collection is empty**, names it and how to add wallpapers, and
 offers **Show all wallpapers**, whatever the search and filters; a collection whose
 wallpapers are all gone counts as the filter that hides them. On Steam Workshop a search
@@ -1130,8 +1142,9 @@ stops while the window is hidden and with Reduce Motion.
 
 The **Collections** group at the top of Installed's Filters sidebar lists named local
 collections with their sizes, separate from Steam's Workshop collections and the
-author's tags; choosing one shows it on Installed (its chip joins the view chips and
-the Filter count includes it), choosing it again or pressing its chip shows every
+author's tags; choosing one shows it on Installed (its chip joins the view chips; the
+Filters sidebar count includes it, while the header's Filter badge counts only narrowing
+filters beyond the view scope), choosing it again or pressing its chip shows every
 wallpaper again, and a collection deleted while it is shown returns the page to All
 wallpapers. **New collection…** under the list creates one with an inline name field
 (a refused name says why under the field), and a collection's context menu

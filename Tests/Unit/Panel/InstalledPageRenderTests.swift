@@ -236,6 +236,11 @@ final class InstalledPageRenderTests: PanelTestCase {
         model.show(.collection(quiet.id))
         XCTAssertEqual(model.emptyState, .emptyCollection(name: "Quiet"))
       },
+      {
+        panel.controller.favoriteIDs = []
+        model.show(.favorites)
+        XCTAssertEqual(model.emptyState, .emptyFavorites)
+      },
     ]
     for language in AppLanguage.supported.map(\.tag) {
       try panel.controller.appLanguage.set(language)
@@ -502,5 +507,80 @@ final class InstalledPageRenderTests: PanelTestCase {
         XCTAssertLessThanOrEqual(importing.height, 520)
       }
     }
+  }
+
+  func testSweepTipExposesGotItButtonAndHeaderReflectsScopeAndMultiSelect() async throws {
+    let panel = try makeController()
+    defer { Task { await panel.shutdown() } }
+    try await prepare(panel)
+    let controller = panel.controller
+    let model = controller.library
+    XCTAssertFalse(controller.dragSelectLearned)
+    model.toggleSelecting()
+    XCTAssertTrue(model.showsSweepTip)
+
+    let footerHosting = NSHostingView(
+      rootView: InstalledFooter()
+        .environment(controller)
+        .panelTheme(theme: controller.theme, locale: PanelLocale.shared)
+        .frame(width: 760))
+    let footerWindow = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 760, height: 120), styleMask: [.borderless],
+      backing: .buffered, defer: true)
+    footerWindow.isReleasedWhenClosed = false
+    footerWindow.contentView = footerHosting
+    defer {
+      footerWindow.contentView = nil
+      footerWindow.close()
+    }
+    footerHosting.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(250))
+    footerHosting.layoutSubtreeIfNeeded()
+
+    let interactiveRoles: Set<String> = [
+      NSAccessibility.Role.button.rawValue, NSAccessibility.Role.link.rawValue,
+    ]
+    let footerElements = AccessibilityElement.everything(in: footerHosting)
+    XCTAssertTrue(
+      footerElements.contains { interactiveRoles.contains($0.role) && $0.text == L("Got it") },
+      "SweepTip must keep Got it reachable as an interactive element for VoiceOver")
+
+    // Leave selection mode, then select via selectAllVisible (⌘A): header must show Done and
+    // leave in one click, and Favorites scope must not light up the Filter badge.
+    model.toggleSelecting()
+    model.show(.favorites)
+    model.selectAllVisible()
+
+    let headerHosting = NSHostingView(
+      rootView: InstalledHeaderRow()
+        .environment(controller)
+        .panelTheme(theme: controller.theme, locale: PanelLocale.shared)
+        .frame(width: 760))
+    let headerWindow = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 760, height: 60), styleMask: [.borderless],
+      backing: .buffered, defer: true)
+    headerWindow.isReleasedWhenClosed = false
+    headerWindow.contentView = headerHosting
+    defer {
+      headerWindow.contentView = nil
+      headerWindow.close()
+    }
+    headerHosting.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(250))
+    headerHosting.layoutSubtreeIfNeeded()
+
+    let headerElements = AccessibilityElement.everything(in: headerHosting)
+    let selectButton = try XCTUnwrap(headerElements.first { $0.identifier == "installed-select" })
+    XCTAssertEqual(selectButton.label, L("Done"), "Select button switches to Done when tiles are ticked via ⌘A")
+    let filterButton = try XCTUnwrap(headerElements.first { $0.identifier == "installed-filter" })
+    XCTAssertEqual(filterButton.value, L("Collapsed"), "Favorites view scope alone does not show a Filter badge")
+
+    model.toggleSelecting()
+    headerHosting.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(200))
+    headerHosting.layoutSubtreeIfNeeded()
+    let resetSelect = try XCTUnwrap(
+      AccessibilityElement.everything(in: headerHosting).first { $0.identifier == "installed-select" })
+    XCTAssertEqual(resetSelect.label, L("Select"), "one click on Done clears selection and returns to Select")
   }
 }

@@ -195,6 +195,35 @@ final class LibraryFilterTests: XCTestCase {
     XCTAssertEqual(filter.clearingFilters().activeCount, 0)
   }
 
+  func testNarrowingFilterCountExcludesFavoritesAndCollectionViewScopes() {
+    XCTAssertEqual(LibraryFilter().narrowingFilterCount, 0)
+
+    let favoritesOnly = LibraryFilter(requiredTags: ["Favorite"])
+    XCTAssertEqual(favoritesOnly.activeCount, 1)
+    XCTAssertEqual(favoritesOnly.narrowingFilterCount, 0, "Favorites is a view scope, not a narrowing filter")
+
+    let favoritesWithFilters = LibraryFilter(requiredTags: ["Favorite", "Approved"], excludedTags: ["Web"])
+    XCTAssertEqual(favoritesWithFilters.activeCount, 3)
+    XCTAssertEqual(favoritesWithFilters.narrowingFilterCount, 2)
+
+    var collectionOnly = LibraryFilter()
+    collectionOnly.collectionID = "night"
+    XCTAssertEqual(collectionOnly.activeCount, 1)
+    XCTAssertEqual(collectionOnly.narrowingFilterCount, 0, "a collection is a view scope too")
+
+    var collectionWithFavorite = LibraryFilter(requiredTags: ["Favorite"])
+    collectionWithFavorite.collectionID = "night"
+    XCTAssertEqual(collectionWithFavorite.activeCount, 2)
+    XCTAssertEqual(
+      collectionWithFavorite.narrowingFilterCount, 1,
+      "inside a collection view, the Favorite tag narrows the collection")
+
+    var collectionWithFilters = LibraryFilter(requiredTags: ["Approved"], excludedTags: ["Anime"])
+    collectionWithFilters.collectionID = "night"
+    XCTAssertEqual(collectionWithFilters.activeCount, 3)
+    XCTAssertEqual(collectionWithFilters.narrowingFilterCount, 2)
+  }
+
   func testClearKeepsTheSearchText() {
     var filter = LibraryFilter(text: "nat", requiredTags: ["Favorite"], excludedTags: ["Web"])
     filter.collectionID = "night"

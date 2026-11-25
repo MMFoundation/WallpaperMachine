@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 import XCTest
 
@@ -191,6 +192,49 @@ final class PanelLibraryStateTests: PanelTestCase {
       XCTAssertNil(card.item, "the display's wallpaper is not installed")
       XCTAssertTrue(card.hasWallpaper)
       XCTAssertEqual(card.title, L("Nothing on this display"))
+    }
+  }
+
+  func testNowPlayingRotationRecognizesRotateAndDayNightAndIgnoresOffOrUnusableDisplays() async throws {
+    try await withPanel { panel in
+      panel.configureDisplays()
+      panel.store.librarySnapshot.wallpapers = [entry("first"), entry("second")]
+      let controller = panel.controller
+      XCTAssertNil(NowPlayingRotation(controller: controller), "off playlist shows no rotation")
+
+      panel.playlists.update("primary") {
+        $0.mode = .rotate
+        $0.order = .sequential
+        $0.source = .all
+      }
+      let sequential = try XCTUnwrap(NowPlayingRotation(controller: controller))
+      XCTAssertEqual(sequential.title, L("All wallpapers"))
+      XCTAssertEqual(sequential.systemImage, "repeat")
+
+      panel.playlists.update("primary") {
+        $0.order = .shuffle
+        $0.source = .favorites
+      }
+      let shuffled = try XCTUnwrap(NowPlayingRotation(controller: controller))
+      XCTAssertEqual(shuffled.title, L("Favorites"))
+      XCTAssertEqual(shuffled.systemImage, "shuffle")
+
+      panel.playlists.update("primary") { $0.mode = .dayNight }
+      let dayNight = try XCTUnwrap(NowPlayingRotation(controller: controller))
+      XCTAssertEqual(dayNight.title, L("Day and night"))
+      XCTAssertEqual(dayNight.systemImage, "sunrise")
+      XCTAssertNotNil(
+        NSImage(systemSymbolName: dayNight.systemImage, accessibilityDescription: nil),
+        "Day and night uses a valid SF Symbol")
+      XCTAssertTrue(
+        NowPlayingBar.displayName(controller.nowPlaying, controller: controller)
+          .hasSuffix("· \(L("Day and night"))"))
+
+      panel.store.settingsSnapshot.displays[0].mode = .mirror
+      XCTAssertNil(NowPlayingRotation(controller: controller), "a mirror display has no playlist of its own")
+      panel.store.settingsSnapshot.displays[0].mode = .standalone
+      panel.store.settingsSnapshot.displays[0].enabled = false
+      XCTAssertNil(NowPlayingRotation(controller: controller), "a disabled display has no playlist")
     }
   }
 
