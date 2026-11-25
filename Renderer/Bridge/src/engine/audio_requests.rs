@@ -55,12 +55,28 @@ pub(super) trait CaptureAssembly: Send + 'static {
     );
     fn sync_watch(&mut self, wanted: bool, events: &CaptureEvents);
     fn stop_watch(&mut self);
+    fn set_target_app(
+        &mut self,
+        controller: &mut AudioCaptureController<Self::Backend>,
+        bundle_id: Option<String>,
+    ) -> Result<(), String> {
+        controller
+            .set_target_app_bundle_id(bundle_id)
+            .map_err(|error| audio_capture_error("update", &error))
+    }
+    fn process_list_changed(&mut self, controller: &mut AudioCaptureController<Self::Backend>) {
+        let _ = controller;
+    }
+    fn sync_process_watch(&mut self, wanted: bool, events: &CaptureEvents) {
+        let _ = (wanted, events);
+    }
 }
 
 enum Operation {
     Scene { handle: SceneHandle, enabled: bool },
     Demand(AudioCaptureDemand),
     Prune,
+    TargetApp(Option<String>),
 }
 
 enum Envelope {
@@ -73,6 +89,7 @@ enum Envelope {
         reply: oneshot::Sender<Result<bool, String>>,
     },
     OutputChanged,
+    ProcessListChanged,
     Retry {
         generation: u64,
         attempt: usize,
@@ -119,6 +136,10 @@ impl CaptureMailbox {
         self.request(Operation::Prune).await
     }
 
+    pub(super) async fn set_target_app(&self, bundle_id: Option<String>) -> Result<(), String> {
+        self.request(Operation::TargetApp(bundle_id)).await
+    }
+
     pub(super) async fn scene_registered(&self, handle: SceneHandle) -> Result<bool, String> {
         let (reply, response) = oneshot::channel();
         self.sender
@@ -141,6 +162,10 @@ impl CaptureMailbox {
 impl CaptureEvents {
     pub(super) fn output_changed(&self) {
         let _ = self.sender.send(Envelope::OutputChanged);
+    }
+
+    pub(super) fn process_list_changed(&self) {
+        let _ = self.sender.send(Envelope::ProcessListChanged);
     }
 
     pub(super) fn retry_restart(&self, generation: u64, attempt: usize) {
@@ -195,6 +220,11 @@ fn run_lane<A: CaptureAssembly>(
                     assembly.output_changed(controller, &events);
                 }
             }
+            Envelope::ProcessListChanged => {
+                if let Ok(controller) = initialized.as_mut() {
+                    assembly.process_list_changed(controller);
+                }
+            }
             Envelope::Retry {
                 generation,
                 attempt,
@@ -217,9 +247,13 @@ fn run_lane<A: CaptureAssembly>(
                                     assembly.apply_demand(controller, demand)
                                 }
                                 Operation::Prune => Ok(()),
+                                Operation::TargetApp(bundle_id) => {
+                                    assembly.set_target_app(controller, bundle_id)
+                                }
                             },
                         };
                         assembly.sync_watch(controller.wants_capture(), &events);
+                        assembly.sync_process_watch(controller.wants_process_list_watch(), &events);
                         result
                     }
                 };

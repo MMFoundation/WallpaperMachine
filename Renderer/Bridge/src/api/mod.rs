@@ -91,7 +91,8 @@ use crate::{
             RefreshDisplays, RefreshLibrary, ReleaseHeldWallpaper, RestoreAllEngineOptionDefaults,
             RestoreAllPropertyDefaults, RestoreEngineOptionDefault, RestorePropertyDefault,
             SelectWallpaper,
-            SetAudioResponseEnabled, SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
+            SetAudioResponseEnabled, SetAudioResponseTargetApp, SetAudioResponseTuning,
+            SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode,
             SetDisplayVolume, SetDisplayMuted,
             PreviewDisplayPosition, PreviewWallpaperProperties, SetDisplayPosition,
             SetDisplayParkedWallpapers, SetDisplayPresentationSuspended,
@@ -322,6 +323,14 @@ impl<E: crate::engine::EngineFacade> BridgeBuilder<E> {
         log::info!(
             "Requested MetalFX upscaling: {}",
             config.quality.metalfx_upscaling_enabled,
+        );
+        let audio_tuning = config.effective_audio_response_tuning();
+        log::info!(
+            "Requested audio response tuning: sensitivity={:.2}, noise_floor_db={:.1}, smoothing={:.2}, target_app={:?}",
+            audio_tuning.sensitivity,
+            audio_tuning.noise_floor_db,
+            audio_tuning.smoothing,
+            config.effective_audio_response_target_app(),
         );
 
         let engine = ArcEngineFacade::new(engine);
@@ -886,6 +895,20 @@ impl EngineFacade for ArcEngineFacade {
         enabled: bool,
     ) -> Result<(), wallpaper_core::EngineError> {
         self.0.set_metalfx_upscaling_enabled(enabled)
+    }
+
+    fn set_audio_response_tuning(
+        &self,
+        tuning: wallpaper_core::AudioResponseTuning,
+    ) -> Result<(), wallpaper_core::EngineError> {
+        self.0.set_audio_response_tuning(tuning)
+    }
+
+    fn set_audio_response_target_app(
+        &self,
+        bundle_id: Option<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), wallpaper_core::EngineError>> + Send>> {
+        self.0.set_audio_response_target_app(bundle_id)
     }
 
     fn set_scene_resolution(
@@ -2345,6 +2368,48 @@ impl WallpaperBridge {
         enabled: bool,
     ) -> Result<BridgeSnapshotBundle, BridgeError> {
         self.actor.ask(SetMetalFxUpscalingEnabled { enabled }).await
+    }
+
+    /// Tunes the process-wide 30 Hz audio-response spectrum analyser.
+    ///
+    /// Values are clamped to their supported ranges (`sensitivity` `0.25..=4.0`,
+    /// `noise_floor_db` `-72.0..=-24.0`, `smoothing` `0.0..=0.90`) and applied
+    /// through relaxed atomics without restarting capture or any wallpaper.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any value is non-finite, when the setting cannot be
+    /// saved, or when the renderer rejects the call.
+    pub async fn set_audio_response_tuning(
+        &self,
+        sensitivity: f32,
+        noise_floor_db: f32,
+        smoothing: f32,
+    ) -> Result<BridgeSnapshotBundle, BridgeError> {
+        self.actor
+            .ask(SetAudioResponseTuning {
+                sensitivity,
+                noise_floor_db,
+                smoothing,
+            })
+            .await
+    }
+
+    /// Selects an optional target application bundle identifier for per-app
+    /// system audio capture (`None` or empty captures all system audio excluding
+    /// this app).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the setting cannot be saved or when updating the
+    /// capture backend fails.
+    pub async fn set_audio_response_target_app(
+        &self,
+        bundle_id: Option<String>,
+    ) -> Result<BridgeSnapshotBundle, BridgeError> {
+        self.actor
+            .ask(SetAudioResponseTargetApp { bundle_id })
+            .await
     }
 
     /// Chooses how many pixels a 2D scene wallpaper is rasterized with.

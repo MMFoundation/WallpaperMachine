@@ -70,12 +70,53 @@ The input is sound playing in other apps. It is not the microphone, and it is
 not the wallpaper's own playback. The wallpaper mute and volume controls stay
 independent of audio response.
 
-Capture is a CoreAudio process tap created with
-`initStereoGlobalTapButExcludeProcesses:`, so the left and right channels are analysed by
-separate FFTs. If that initialiser is absent or the created tap reports fewer than two
-channels, capture falls back to a mono tap: left and right are then equal, and nothing
-reports that as stereo. The spectrum's `stereo` flag describes how the PCM was submitted,
-not whether the content happens to differ.
+By default (**Settings → Playback & Power → Audio response → Audio capture source**
+set to **All apps**), capture is a CoreAudio process tap created with
+`initStereoGlobalTapButExcludeProcesses:`, excluding this app's own process so the
+left and right channels of all other system audio are analysed by separate FFTs.
+If that initialiser is absent or the created tap reports fewer than two channels,
+capture falls back to a mono tap: left and right are then equal, and nothing
+reports that as stereo. The spectrum's `stereo` flag describes how the PCM was
+submitted, not whether the content happens to differ.
+
+### Per-app capture target
+
+**Audio capture source** can also be pinned to a single application by bundle
+identifier (`audio_response_target_app` in `AppConfig`). When a target app is
+selected:
+
+- CoreAudio process objects are enumerated via `kAudioHardwarePropertyProcessObjectList`
+  and matched case-insensitively by `kAudioProcessPropertyBundleID` for both the
+  exact bundle identifier and standard macOS helper bundle suffixes
+  (`<target>.helper` and `<target>.helper.*`, covering Chromium browsers such as
+  `com.google.Chrome.helper` / `com.google.Chrome.helper.renderer` and Electron
+  helper processes), always excluding this app's own PID and CoreAudio process
+  object ID. Shared system XPC services such as Safari's `com.apple.WebKit.GPU`
+  and `com.apple.WebKit.WebContent` carry a shared WebKit bundle identifier rather
+  than the host app's bundle identifier (and are also used by WallpaperMachine's
+  own web wallpapers), so they are intentionally not matched by bundle ID; use
+  **All apps** when capturing audio from Safari.
+- When one or more matching audio processes exist, capture creates a targeted tap
+  with `initStereoMixdownOfProcesses:` (falling back to `initMonoMixdownOfProcesses:`
+  if stereo is unavailable).
+- A CoreAudio HAL property listener on `kAudioHardwarePropertyProcessObjectList`
+  (debounced after 200 ms, registered only while capture is wanted and a target app
+  is configured, with zero polling) watches for the target app launching, spawning
+  matched helper audio processes, or quitting. Unrelated apps starting or quitting
+  leave an unchanged target set untouched.
+- While the target app is not running or has no audio process yet, capture stays
+  cleanly idle (flushing two full 48 kHz analysis windows — 3200 mono zeros — so
+  both stereo and mono-fallback taps clear downstream FIFOs and smoothing state
+  immediately, with no busy loop and no error banner) and attaches automatically
+  as soon as `kAudioHardwarePropertyProcessObjectList` reports a matching process.
+- If switching the target app fails while stopping or restarting capture, the
+  capture controller rolls the backend's target bundle ID back to the previous
+  setting and attempts to restore capture state so the backend and process-list
+  watcher stay aligned with configuration.
+- Stall monitoring checks `kAudioProcessPropertyIsRunningOutput` on the tapped
+  processes instead of the global output device (treating empty or exited target
+  process sets as idle), so an idle or just-closed target app does not trigger
+  unnecessary tap rebuilds while other apps are playing audio.
 
 ## Output device changes
 
@@ -138,12 +179,24 @@ Its exact formula is not published; where this differs, it is an estimate.
   760 Hz, 1.5 kHz, 3 kHz, 6 kHz and 12 kHz peaks in the band Wallpaper Engine
   shows it in. The 32- and 16-band resolutions cover the same frequencies with
   the energy of the bands they merge.
-- A band's value is its level on a 48 dB scale: 0 at -48 dB or below, about 1
-  for a full-scale tone, and occasionally a little above 1, as Wallpaper Engine
-  documents. Normal music sits mostly between 0.1 and 0.3 with peaks towards 1.
-- Every spectrum stands alone. Wallpaper Engine leaves smoothing to the
-  wallpaper, so a visualizer that smooths in its script looks as intended and
-  one that does not jumps from frame to frame, as it does there.
+- A band's value is its level on a dB scale anchored at the configured noise floor
+  (default `-48 dB`, configurable from `-72 dB` to `-24 dB`): `0` at or below the
+  noise floor, about `1` for a full-scale tone at default `1.00×` sensitivity, and
+  occasionally a little above `1`, as Wallpaper Engine documents. Normal music sits
+  mostly between `0.1` and `0.3` with peaks towards `1`.
+- Optional 30 Hz output tuning (**Settings → Playback & Power → Audio response**)
+  adjusts the analyzed spectrum without touching audio hardware or taking locks on
+  the audio thread (parameters are stored in relaxed `std::atomic<float>` values
+  read once per 30 Hz block):
+  - **Sensitivity** (`0.25×`–`4.00×`, default `1.00×`): scales analyzed band levels
+    before clamping (at `1.00×` the output is bit-identical to legacy behavior).
+  - **Noise floor** (`-72 dB` to `-24 dB`, default `-48 dB`): sets the quiet-signal
+    cutoff; lowering it reveals subtler music and raising it gates background hiss.
+  - **Smoothing** (`0%`–`90%`, default `0%`): applies exponential temporal smoothing
+    (`out = smoothing * prev + (1 - smoothing) * raw`) across the 64-, 32- and
+    16-band outputs, resetting cleanly on silent blocks, 250 ms staleness, or stop.
+    At `0%` every spectrum stands alone and smoothing stays with the wallpaper,
+    matching Wallpaper Engine's default.
 - A scene frame reads one spectrum, as Wallpaper Engine's do: the first read of a
   frame takes the newest analysis, and every shader pass, particle emitter or
   operator and script of that frame gets that same one, even when the analysis
@@ -183,11 +236,26 @@ shared file immediately.
 ## Verification
 
 Synthetic offscreen checks cover the analysis against tone measurements
-(`AudioResponseMonoTest`, `SpectrumExport128Test` including full 224-band export/inject
-round-trips and staleness clearing, see [renderer testing](../testing/renderer.md)),
-audio-driven shader color and SceneScript scale. Device-free controller and bridge tests
-cover web-only capture startup, lock-screen audio demand during desktop presentation
-suspension (`web_audio_media`), permission, shared ownership, suspension and shutdown.
+(`AudioResponseMonoTest` including tuning defaults parity, sensitivity scaling,
+noise-floor gating and exponential smoothing reset on silence; `SpectrumExport128Test`
+including full 224-band export/inject round-trips, sub-`1e-4` smoothed tail and
+coarse-resolution staleness clearing across 250 ms expiry and resume, and
+`owe_audio_set_response_tuning` C ABI clamping/propagation, see
+[renderer testing](../testing/renderer.md)),
+audio-driven shader color and SceneScript scale. Device-free controller, watcher
+and bridge tests cover per-app bundle ID and `<target>.helper*` filtering, prefix
+collision and shared WebKit exclusion, self-exclusion, 3200-frame mono silence
+flushes, clean idle and re-attach on `kAudioHardwarePropertyProcessObjectList`
+transitions, failed target-app switch rollback (`capture`, `capture_controller_tests`,
+and `capture_lifecycle_tests`), debounced process-list watcher registration
+(`device_watch`), config defaults/clamping/round-trip and live tuning/target
+propagation (`config`, `web_audio_media`), web-only capture startup, lock-screen
+audio demand during desktop presentation suspension, permission, shared ownership,
+suspension and shutdown. `AudioResponseSettingsTests` covers the Swift Settings
+model, clamping, non-finite rejection, app chooser validation (including rejecting
+this app's own bundle ID), candidate deduplication, zero-I/O cached display-name
+lookup (`AudioResponseSourceModel`), case-insensitive picker canonicalization,
+narrow-column layout and reset.
 `LockScreenLiveFeedTests` and `ScreenSaverWebSurfaceTests` cover the `mmap` seqlock
 channel, staleness expiry, inode replacement, sleep/exit teardown and web listener
 delivery.

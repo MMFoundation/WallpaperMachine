@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -414,6 +415,186 @@ TEST(AudioResponseMonoTest, StereoCompatibilityWrapperRejectsNonAnalysisSampleRa
     EXPECT_FALSE(SubmitAudioFrames(12'000u, kChunkFrameCount, stereo.data(), &error));
     EXPECT_NE(error.find("sample_rate"), std::string::npos);
     EXPECT_NE(error.find(std::to_string(kAudioResponseSampleRate)), std::string::npos);
+}
+
+TEST(AudioResponseMonoTest, TuningDefaultsPreserveLegacyParityAndClampOutOfRangeValues) {
+    ResetAudioResponseServiceForTesting();
+
+    const auto defaults = CurrentAudioResponseTuning();
+    EXPECT_FLOAT_EQ(defaults.sensitivity, kAudioResponseDefaultSensitivity);
+    EXPECT_FLOAT_EQ(defaults.noise_floor_db, kAudioResponseDefaultNoiseFloorDb);
+    EXPECT_FLOAT_EQ(defaults.smoothing, kAudioResponseDefaultSmoothing);
+
+    const auto baseline = AnalyzeTone(1500.0, 0.5f);
+    SetAudioResponseTuning(AudioResponseTuning {
+        .sensitivity = 1.0f,
+        .noise_floor_db = -48.0f,
+        .smoothing = 0.0f,
+    });
+    const auto explicit_default = AnalyzeTone(1500.0, 0.5f);
+    EXPECT_EQ(baseline.average64, explicit_default.average64);
+    EXPECT_EQ(baseline.average32, explicit_default.average32);
+    EXPECT_EQ(baseline.average16, explicit_default.average16);
+
+    // Extreme and non-finite inputs clamp cleanly to documented bounds / defaults.
+    SetAudioResponseTuning(AudioResponseTuning {
+        .sensitivity = 99.0f,
+        .noise_floor_db = -5.0f,
+        .smoothing = 1.5f,
+    });
+    auto clamped = CurrentAudioResponseTuning();
+    EXPECT_FLOAT_EQ(clamped.sensitivity, kAudioResponseMaxSensitivity);
+    EXPECT_FLOAT_EQ(clamped.noise_floor_db, kAudioResponseMaxNoiseFloorDb);
+    EXPECT_FLOAT_EQ(clamped.smoothing, kAudioResponseMaxSmoothing);
+
+    SetAudioResponseTuning(AudioResponseTuning {
+        .sensitivity = 0.01f,
+        .noise_floor_db = -120.0f,
+        .smoothing = -0.5f,
+    });
+    clamped = CurrentAudioResponseTuning();
+    EXPECT_FLOAT_EQ(clamped.sensitivity, kAudioResponseMinSensitivity);
+    EXPECT_FLOAT_EQ(clamped.noise_floor_db, kAudioResponseMinNoiseFloorDb);
+    EXPECT_FLOAT_EQ(clamped.smoothing, kAudioResponseMinSmoothing);
+
+    SetAudioResponseTuning(AudioResponseTuning {
+        .sensitivity = std::numeric_limits<float>::quiet_NaN(),
+        .noise_floor_db = std::numeric_limits<float>::infinity(),
+        .smoothing = -std::numeric_limits<float>::infinity(),
+    });
+    clamped = CurrentAudioResponseTuning();
+    EXPECT_FLOAT_EQ(clamped.sensitivity, kAudioResponseDefaultSensitivity);
+    EXPECT_FLOAT_EQ(clamped.noise_floor_db, kAudioResponseDefaultNoiseFloorDb);
+    EXPECT_FLOAT_EQ(clamped.smoothing, kAudioResponseDefaultSmoothing);
+}
+
+TEST(AudioResponseMonoTest, SensitivityScalesAnalyzedBandMagnitudesProportionally) {
+    ResetAudioResponseServiceForTesting();
+
+    const float amplitude = std::pow(10.0f, -24.0f / 20.0f);
+    const auto baseline = AnalyzeTone(1500.0, amplitude);
+    const size_t peak64 = PeakBand(baseline.average64);
+    const size_t peak16 = PeakBand(baseline.average16);
+    ASSERT_GT(baseline.average64[peak64], 0.3f);
+
+    SetAudioResponseTuning(AudioResponseTuning {
+        .sensitivity = 2.0f,
+        .noise_floor_db = -48.0f,
+        .smoothing = 0.0f,
+    });
+    const auto boosted = AnalyzeTone(1500.0, amplitude);
+    EXPECT_NEAR(boosted.average64[peak64], baseline.average64[peak64] * 2.0f, 1e-5f);
+    EXPECT_NEAR(boosted.average16[peak16], baseline.average16[peak16] * 2.0f, 1e-5f);
+
+    SetAudioResponseTuning(AudioResponseTuning {
+        .sensitivity = 0.5f,
+        .noise_floor_db = -48.0f,
+        .smoothing = 0.0f,
+    });
+    const auto attenuated = AnalyzeTone(1500.0, amplitude);
+    EXPECT_NEAR(attenuated.average64[peak64], baseline.average64[peak64] * 0.5f, 1e-5f);
+    EXPECT_NEAR(attenuated.average16[peak16], baseline.average16[peak16] * 0.5f, 1e-5f);
+
+    ResetAudioResponseServiceForTesting();
+}
+
+TEST(AudioResponseMonoTest, NoiseFloorGatesQuietSignalsAndRevealsSubtleOnes) {
+    ResetAudioResponseServiceForTesting();
+
+    // A -30 dB tone sits above the default -48 dB floor, but below a strict -24 dB floor.
+    const float minus30db = std::pow(10.0f, -30.0f / 20.0f);
+    const auto at_default = AnalyzeTone(1500.0, minus30db);
+    EXPECT_GT(at_default.average64[PeakBand(at_default.average64)], 0.3f);
+
+    SetAudioResponseTuning(AudioResponseTuning {
+        .sensitivity = 1.0f,
+        .noise_floor_db = -24.0f,
+        .smoothing = 0.0f,
+    });
+    const auto gated = AnalyzeTone(1500.0, minus30db);
+    for (float value : gated.average64) {
+        EXPECT_FLOAT_EQ(value, 0.0f);
+    }
+
+    // A -54 dB tone is silent at -48 dB, and becomes measurable at -72 dB.
+    const float minus54db = std::pow(10.0f, -54.0f / 20.0f);
+    SetAudioResponseTuning(AudioResponseTuning {
+        .sensitivity = 1.0f,
+        .noise_floor_db = -48.0f,
+        .smoothing = 0.0f,
+    });
+    const auto silent_at_default = AnalyzeTone(1500.0, minus54db);
+    for (float value : silent_at_default.average64) {
+        EXPECT_FLOAT_EQ(value, 0.0f);
+    }
+
+    SetAudioResponseTuning(AudioResponseTuning {
+        .sensitivity = 1.0f,
+        .noise_floor_db = -72.0f,
+        .smoothing = 0.0f,
+    });
+    const auto revealed = AnalyzeTone(1500.0, minus54db);
+    EXPECT_NEAR(revealed.average64[PeakBand(revealed.average64)], 0.25f, 0.05f);
+
+    ResetAudioResponseServiceForTesting();
+}
+
+TEST(AudioResponseMonoTest, ExponentialSmoothingBlendsAcrossBlocksAndResetsOnSilence) {
+    ResetAudioResponseServiceForTesting();
+
+    const auto loud = Tone(1500.0, 0.5f);
+    const auto raw = AnalyzeTone(1500.0, 0.5f);
+    const size_t peak64 = PeakBand(raw.average64);
+    const size_t peak16 = PeakBand(raw.average16);
+    const float raw64 = raw.average64[peak64];
+    const float raw16 = raw.average16[peak16];
+    ASSERT_GT(raw64, 0.5f);
+
+    constexpr float kSmooth = 0.5f;
+    SetAudioResponseTuning(AudioResponseTuning {
+        .sensitivity = 1.0f,
+        .noise_floor_db = -48.0f,
+        .smoothing = kSmooth,
+    });
+
+    // Direct analyzer smoothing across successive blocks.
+    AudioSpectrumSnapshot smoothed {};
+    AnalyzeAudioResponseMonoBlock(loud.data(), kWindowFrames, &smoothed);
+    EXPECT_NEAR(smoothed.average64[peak64], (1.0f - kSmooth) * raw64, 1e-5f);
+    EXPECT_NEAR(smoothed.average16[peak16], (1.0f - kSmooth) * raw16, 1e-5f);
+
+    AnalyzeAudioResponseMonoBlock(loud.data(), kWindowFrames, &smoothed);
+    const float expected_second64 = kSmooth * ((1.0f - kSmooth) * raw64) + (1.0f - kSmooth) * raw64;
+    const float expected_second16 = kSmooth * ((1.0f - kSmooth) * raw16) + (1.0f - kSmooth) * raw16;
+    EXPECT_NEAR(smoothed.average64[peak64], expected_second64, 1e-5f);
+    EXPECT_NEAR(smoothed.average16[peak16], expected_second16, 1e-5f);
+
+    ClearAudioResponseSnapshot(&smoothed);
+    EXPECT_FLOAT_EQ(smoothed.average64[peak64], 0.0f);
+    AnalyzeAudioResponseMonoBlock(loud.data(), kWindowFrames, &smoothed);
+    EXPECT_NEAR(smoothed.average64[peak64], (1.0f - kSmooth) * raw64, 1e-5f);
+
+    // Through AudioResponseService: digital silence resets smoother cleanly.
+    std::string error;
+    ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, kWindowFrames, loud.data(), &error)) << error;
+    const auto first = WaitForGeneration();
+    ASSERT_GT(first.generation, 0u);
+    EXPECT_NEAR(first.average64[peak64], (1.0f - kSmooth) * raw64, 1e-5f);
+
+    ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, kWindowFrames, loud.data(), &error)) << error;
+    const auto second = WaitForGenerationAfter(first.generation, std::chrono::milliseconds(500));
+    EXPECT_NEAR(second.average64[peak64], expected_second64, 1e-5f);
+
+    const std::vector<float> zeros(kWindowFrames, 0.0f);
+    ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, kWindowFrames, zeros.data(), &error)) << error;
+    const auto cleared = WaitForSilentGeneration(second.generation);
+    EXPECT_FLOAT_EQ(cleared.average64[peak64], 0.0f);
+
+    ASSERT_TRUE(SubmitMonoAudioFrames(kSubmitSampleRate, kWindowFrames, loud.data(), &error)) << error;
+    const auto after_silence = WaitForGenerationAfter(cleared.generation, std::chrono::milliseconds(500));
+    EXPECT_NEAR(after_silence.average64[peak64], (1.0f - kSmooth) * raw64, 1e-5f);
+
+    ResetAudioResponseServiceForTesting();
 }
 
 } // namespace

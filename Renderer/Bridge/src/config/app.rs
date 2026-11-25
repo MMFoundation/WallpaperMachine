@@ -7,11 +7,45 @@ use super::{Presence, read_frame_rate, resolve_frame_rate};
 pub const SCHEMA_VERSION: u32 = 1;
 pub const MIN_RENDER_SCALE: f32 = 0.25;
 pub const MAX_RENDER_SCALE: f32 = 1.0;
+pub const DEFAULT_AUDIO_RESPONSE_SENSITIVITY: f32 =
+    wallpaper_core::AudioResponseTuning::DEFAULT_SENSITIVITY;
+pub const MIN_AUDIO_RESPONSE_SENSITIVITY: f32 =
+    wallpaper_core::AudioResponseTuning::MIN_SENSITIVITY;
+pub const MAX_AUDIO_RESPONSE_SENSITIVITY: f32 =
+    wallpaper_core::AudioResponseTuning::MAX_SENSITIVITY;
+pub const DEFAULT_AUDIO_RESPONSE_NOISE_FLOOR_DB: f32 =
+    wallpaper_core::AudioResponseTuning::DEFAULT_NOISE_FLOOR_DB;
+pub const MIN_AUDIO_RESPONSE_NOISE_FLOOR_DB: f32 =
+    wallpaper_core::AudioResponseTuning::MIN_NOISE_FLOOR_DB;
+pub const MAX_AUDIO_RESPONSE_NOISE_FLOOR_DB: f32 =
+    wallpaper_core::AudioResponseTuning::MAX_NOISE_FLOOR_DB;
+pub const DEFAULT_AUDIO_RESPONSE_SMOOTHING: f32 =
+    wallpaper_core::AudioResponseTuning::DEFAULT_SMOOTHING;
+pub const MIN_AUDIO_RESPONSE_SMOOTHING: f32 = wallpaper_core::AudioResponseTuning::MIN_SMOOTHING;
+pub const MAX_AUDIO_RESPONSE_SMOOTHING: f32 = wallpaper_core::AudioResponseTuning::MAX_SMOOTHING;
+
+fn audio_response_sensitivity_default() -> f32 {
+    DEFAULT_AUDIO_RESPONSE_SENSITIVITY
+}
+fn audio_response_noise_floor_db_default() -> f32 {
+    DEFAULT_AUDIO_RESPONSE_NOISE_FLOOR_DB
+}
+fn audio_response_smoothing_default() -> f32 {
+    DEFAULT_AUDIO_RESPONSE_SMOOTHING
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     pub schema_version: u32,
+    #[serde(default = "audio_response_sensitivity_default")]
+    pub audio_response_sensitivity: f32,
+    #[serde(default = "audio_response_noise_floor_db_default")]
+    pub audio_response_noise_floor_db: f32,
+    #[serde(default = "audio_response_smoothing_default")]
+    pub audio_response_smoothing: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_response_target_app: Option<String>,
     pub general: GeneralCfg,
     pub power: PowerCfg,
     pub ui: UiCfg,
@@ -32,6 +66,10 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
+            audio_response_sensitivity: audio_response_sensitivity_default(),
+            audio_response_noise_floor_db: audio_response_noise_floor_db_default(),
+            audio_response_smoothing: audio_response_smoothing_default(),
+            audio_response_target_app: None,
             general: GeneralCfg::default(),
             power: PowerCfg::default(),
             ui: UiCfg::default(),
@@ -606,7 +644,60 @@ pub fn clamp_render_scale(scale: f32) -> f32 {
     }
 }
 
+#[must_use]
+pub fn clamp_audio_response_sensitivity(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(
+            MIN_AUDIO_RESPONSE_SENSITIVITY,
+            MAX_AUDIO_RESPONSE_SENSITIVITY,
+        )
+    } else {
+        DEFAULT_AUDIO_RESPONSE_SENSITIVITY
+    }
+}
+
+#[must_use]
+pub fn clamp_audio_response_noise_floor_db(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(
+            MIN_AUDIO_RESPONSE_NOISE_FLOOR_DB,
+            MAX_AUDIO_RESPONSE_NOISE_FLOOR_DB,
+        )
+    } else {
+        DEFAULT_AUDIO_RESPONSE_NOISE_FLOOR_DB
+    }
+}
+
+#[must_use]
+pub fn clamp_audio_response_smoothing(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(MIN_AUDIO_RESPONSE_SMOOTHING, MAX_AUDIO_RESPONSE_SMOOTHING)
+    } else {
+        DEFAULT_AUDIO_RESPONSE_SMOOTHING
+    }
+}
+
+#[must_use]
+pub fn normalize_audio_response_target_app(bundle_id: Option<&str>) -> Option<String> {
+    wallpaper_core::media::audio::normalize_target_app_bundle_id(bundle_id)
+}
+
 impl AppConfig {
+    #[must_use]
+    pub fn effective_audio_response_tuning(&self) -> wallpaper_core::AudioResponseTuning {
+        wallpaper_core::AudioResponseTuning {
+            sensitivity: clamp_audio_response_sensitivity(self.audio_response_sensitivity),
+            noise_floor_db: clamp_audio_response_noise_floor_db(
+                self.audio_response_noise_floor_db,
+            ),
+            smoothing: clamp_audio_response_smoothing(self.audio_response_smoothing),
+        }
+    }
+
+    #[must_use]
+    pub fn effective_audio_response_target_app(&self) -> Option<String> {
+        normalize_audio_response_target_app(self.audio_response_target_app.as_deref())
+    }
     pub fn migrate_legacy_keys(&mut self) {
         let pause = self.power.legacy_pause_on_battery_power.take();
         let profile = self.quality.legacy_battery_profile_enabled.take();

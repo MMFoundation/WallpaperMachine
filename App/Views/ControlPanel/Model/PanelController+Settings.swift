@@ -543,9 +543,9 @@ extension PanelController {
     try await change { playback.removeRule(id: id) }
   }
 
-  /// The application to add a rule for: what the `chooseApplication` seam answers, else the panel's sheet
-  /// (applications only, starting in /Applications, packages not opened).
-  private func chooseApplicationURL() async -> URL? {
+  /// The application to add a rule or shortcut for: what the `chooseApplication` seam answers,
+  /// else the panel's sheet (applications only, starting in /Applications, packages not opened).
+  func chooseApplicationURL() async -> URL? {
     if let chooseApplication { return await chooseApplication() }
     let panel = NSOpenPanel()
     panel.title = L("Choose App")

@@ -1565,6 +1565,29 @@ extern "C" int owe_audio_submit_spectrum_full(
     });
 }
 
+extern "C" void owe_audio_set_response_tuning(
+    float sensitivity,
+    float noise_floor_db,
+    float smoothing)
+{
+    wallpaper::audio::SetAudioResponseTuning(wallpaper::audio::AudioResponseTuning {
+        .sensitivity = sensitivity,
+        .noise_floor_db = noise_floor_db,
+        .smoothing = smoothing,
+    });
+}
+
+extern "C" void owe_audio_get_response_tuning(
+    float* out_sensitivity,
+    float* out_noise_floor_db,
+    float* out_smoothing)
+{
+    const auto tuning = wallpaper::audio::CurrentAudioResponseTuning();
+    if (out_sensitivity != nullptr) *out_sensitivity = tuning.sensitivity;
+    if (out_noise_floor_db != nullptr) *out_noise_floor_db = tuning.noise_floor_db;
+    if (out_smoothing != nullptr) *out_smoothing = tuning.smoothing;
+}
+
 extern "C" int owe_renderer_counters_set_enabled(bool enabled)
 {
     clear_last_error();

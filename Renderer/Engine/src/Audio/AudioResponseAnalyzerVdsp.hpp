@@ -7,8 +7,10 @@
 namespace wallpaper::audio
 {
 
-// Each analyses the first kAudioResponseWindowFrames of the block and replaces
-// every band of the snapshot; nothing carries over from the previous block.
+// Each analyses the first kAudioResponseWindowFrames of the block using the
+// current atomic AudioResponseTuning. At default smoothing (0.0f) every band of
+// the snapshot is replaced with nothing carried over; when smoothing > 0.0f,
+// each band is exponentially blended against the previous snapshot values.
 void AnalyzeAudioResponseMonoBlock(
     const float* mono_pcm,
     uint32_t frame_count,

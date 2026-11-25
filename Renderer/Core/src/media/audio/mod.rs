@@ -11,7 +11,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub use capture::{DefaultAudioResponseController, PlatformAudioCaptureBackend};
+pub use capture::{
+    AudioProcessEntry, CaptureTargetPlan, DefaultAudioResponseController,
+    PlatformAudioCaptureBackend, bundle_id_matches_target, matching_process_objects,
+    normalize_target_app_bundle_id, plan_capture_target,
+};
 
 use crate::project::SceneHandle;
 
@@ -461,6 +465,36 @@ pub trait AudioCaptureBackend {
     fn output_device_is_running(&self) -> bool {
         false
     }
+    /// Configures an optional target application bundle ID for per-app audio
+    /// capture. `None` captures all system audio excluding this process.
+    fn set_target_app_bundle_id(&mut self, bundle_id: Option<String>) {
+        let _ = bundle_id;
+    }
+    /// Returns the currently configured target application bundle ID, if any.
+    #[must_use]
+    fn target_app_bundle_id(&self) -> Option<&str> {
+        None
+    }
+    /// Whether capture is intentionally idling because a target app is
+    /// configured and currently has no active audio processes.
+    #[must_use]
+    fn is_idle_for_target(&self) -> bool {
+        false
+    }
+    /// Re-evaluates the CoreAudio process list for a configured target app.
+    /// Returns `Ok(true)` when capture attached, switched process IDs, or
+    /// transitioned to clean idle; `Ok(false)` when no change was needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AudioCaptureError`] when teardown or tap startup fails.
+    fn sync_target_processes(
+        &mut self,
+        consumer: Arc<dyn AudioFrameConsumer>,
+    ) -> Result<bool, AudioCaptureError> {
+        let _ = consumer;
+        Ok(false)
+    }
 }
 
 /// How long to wait before each further attempt to bring the tap back after a
@@ -773,7 +807,10 @@ impl<B: AudioCaptureBackend> AudioCaptureController<B> {
     pub fn restart_capture(&mut self) -> Result<RestartOutcome, AudioCaptureError> {
         if !self.wants_capture() {
             self.restart_pending = false;
-            if self.backend.is_running() || self.backend.has_pending_cleanup() {
+            if self.backend.is_running()
+                || self.backend.has_pending_cleanup()
+                || self.backend.is_idle_for_target()
+            {
                 self.backend.stop()?;
             }
             return Ok(RestartOutcome::NotRunning);
@@ -790,10 +827,129 @@ impl<B: AudioCaptureBackend> AudioCaptureController<B> {
             return Ok(RestartOutcome::NotRunning);
         }
         self.start_backend()?;
-        if self.is_capturing() {
+        if self.is_capturing() || self.backend.is_idle_for_target() {
             self.restart_pending = false;
         }
-        Ok(RestartOutcome::Restarted)
+        Ok(if self.backend.is_idle_for_target() {
+            RestartOutcome::NotRunning
+        } else {
+            RestartOutcome::Restarted
+        })
+    }
+
+    /// Configures an optional target application bundle ID for per-app audio
+    /// capture (`None` captures all system audio excluding this process).
+    ///
+    /// A failed transition rolls the backend's target bundle ID back to the
+    /// previous setting and attempts to restore capture state so the backend
+    /// and process-list watcher stay consistent with persisted configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AudioCaptureError`] when permission checking, stopping the
+    /// previous tap, or starting the replacement tap fails.
+    pub fn set_target_app_bundle_id(
+        &mut self,
+        bundle_id: Option<String>,
+    ) -> Result<(), AudioCaptureError> {
+        let normalized = normalize_target_app_bundle_id(bundle_id.as_deref());
+        if self.backend.target_app_bundle_id() == normalized.as_deref() {
+            return Ok(());
+        }
+        let permitted = if self.wants_capture() {
+            self.backend.has_permission()?
+        } else {
+            false
+        };
+        let previous = self.backend.target_app_bundle_id().map(ToOwned::to_owned);
+        let was_active_or_idle = self.backend.is_running()
+            || self.backend.has_pending_cleanup()
+            || self.backend.is_idle_for_target();
+        if was_active_or_idle
+            && let Err(error) = self.backend.stop()
+        {
+            if self.backend.has_pending_cleanup() && self.wants_capture() {
+                self.restart_pending = true;
+            }
+            return Err(error);
+        }
+        self.backend.set_target_app_bundle_id(normalized);
+        self.stall.rearm();
+        if permitted {
+            if let Err(error) = self.start_backend() {
+                self.backend.set_target_app_bundle_id(previous);
+                if was_active_or_idle
+                    && let Err(rollback) = self.sync_capture_state()
+                {
+                    self.restart_pending = true;
+                    return Err(AudioCaptureError::Platform(format!(
+                        "{error}; audio capture rollback failed: {rollback}"
+                    )));
+                }
+                return Err(error);
+            }
+            if self.is_capturing() || self.backend.is_idle_for_target() {
+                self.restart_pending = false;
+            }
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn target_app_bundle_id(&self) -> Option<&str> {
+        self.backend.target_app_bundle_id()
+    }
+
+    #[must_use]
+    pub fn is_idle_for_target(&self) -> bool {
+        self.backend.is_idle_for_target()
+    }
+
+    /// Whether a `ProcessListWatcher` should be running: capture is wanted and
+    /// a per-app target bundle ID is configured.
+    #[must_use]
+    pub fn wants_process_list_watch(&self) -> bool {
+        self.wants_capture() && self.backend.target_app_bundle_id().is_some()
+    }
+
+    /// Re-evaluates the CoreAudio process list after a
+    /// `kAudioHardwarePropertyProcessObjectList` notification.
+    ///
+    /// Returns `Ok(true)` when capture attached, rebuilt for updated process
+    /// objects, or transitioned to idle; `Ok(false)` when no change was needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AudioCaptureError`] when tearing down or starting a tap fails.
+    pub fn handle_process_list_change(&mut self) -> Result<bool, AudioCaptureError> {
+        if !self.wants_capture() || self.backend.target_app_bundle_id().is_none() {
+            return Ok(false);
+        }
+        if !self.backend.has_permission()? {
+            return Ok(false);
+        }
+        match self
+            .backend
+            .sync_target_processes(Arc::clone(&self.consumer))
+        {
+            Ok(changed) => {
+                if changed {
+                    if self.is_capturing() {
+                        self.stall.tap_started();
+                        self.restart_pending = false;
+                    } else if self.backend.is_idle_for_target() {
+                        self.restart_pending = false;
+                    }
+                }
+                Ok(changed)
+            }
+            Err(error) => {
+                if !self.is_capturing() {
+                    self.restart_pending = true;
+                }
+                Err(error)
+            }
+        }
     }
 
     /// Whether a tap should be running right now: capture is not suspended
@@ -844,19 +1000,22 @@ impl<B: AudioCaptureBackend> AudioCaptureController<B> {
     fn sync_capture_state(&mut self) -> Result<(), AudioCaptureError> {
         let wanted = self.wants_capture();
         let running = self.backend.is_running();
+        let idle_for_target = self.backend.is_idle_for_target();
         let cleanup = self.backend.has_pending_cleanup();
-        let outcome = if wanted && (!running || cleanup) {
+        let outcome = if wanted && ((!running && !idle_for_target) || cleanup || self.restart_pending)
+        {
             match self.backend.has_permission() {
                 Ok(true) => self.start_backend(),
                 Ok(false) => Ok(()),
                 Err(error) => Err(error),
             }
-        } else if !wanted && (running || cleanup) {
+        } else if !wanted && (running || idle_for_target || cleanup) {
             self.backend.stop()
         } else {
             Ok(())
         };
-        if !wanted || self.is_capturing() {
+        if !wanted || (outcome.is_ok() && (self.is_capturing() || self.backend.is_idle_for_target()))
+        {
             self.restart_pending = false;
         }
         outcome
@@ -865,7 +1024,10 @@ impl<B: AudioCaptureBackend> AudioCaptureController<B> {
 
 impl<B: AudioCaptureBackend> Drop for AudioCaptureController<B> {
     fn drop(&mut self) {
-        if self.backend.is_running() || self.backend.has_pending_cleanup() {
+        if self.backend.is_running()
+            || self.backend.has_pending_cleanup()
+            || self.backend.is_idle_for_target()
+        {
             let _ = self.backend.stop();
         }
     }
@@ -1367,5 +1529,330 @@ mod capture_controller_tests {
         assert!(!controller.is_capturing());
         controller.set_demand(false, false).unwrap();
         assert!(controller.is_capturing());
+    }
+
+    #[derive(Default)]
+    struct TargetAppBackend {
+        running: bool,
+        idle_for_target: bool,
+        permission_pending: bool,
+        fail_start_count: usize,
+        fail_stop: bool,
+        target_app: Option<String>,
+        available_processes: Vec<AudioProcessEntry>,
+        tapped_processes: Vec<u32>,
+        starts: usize,
+        stops: usize,
+    }
+
+    impl AudioCaptureBackend for TargetAppBackend {
+        fn has_permission(&self) -> Result<bool, AudioCaptureError> {
+            Ok(!self.permission_pending)
+        }
+        fn request_permission(&mut self) -> Result<bool, AudioCaptureError> {
+            self.permission_pending = false;
+            Ok(true)
+        }
+        fn start(&mut self, _: Arc<dyn AudioFrameConsumer>) -> Result<(), AudioCaptureError> {
+            match plan_capture_target(
+                self.target_app.as_deref(),
+                &self.available_processes,
+                9999,
+                None,
+            ) {
+                CaptureTargetPlan::GlobalExcludingSelf => {
+                    if self.fail_start_count > 0 {
+                        self.fail_start_count -= 1;
+                        return Err(AudioCaptureError::Platform("target start failed".into()));
+                    }
+                    self.running = true;
+                    self.idle_for_target = false;
+                    self.tapped_processes.clear();
+                    self.starts += 1;
+                }
+                CaptureTargetPlan::Processes(ids) => {
+                    if self.fail_start_count > 0 {
+                        self.fail_start_count -= 1;
+                        return Err(AudioCaptureError::Platform("target start failed".into()));
+                    }
+                    self.running = true;
+                    self.idle_for_target = false;
+                    self.tapped_processes = ids;
+                    self.starts += 1;
+                }
+                CaptureTargetPlan::IdleWaitingForTarget => {
+                    self.running = false;
+                    self.idle_for_target = true;
+                    self.tapped_processes.clear();
+                }
+            }
+            Ok(())
+        }
+        fn stop(&mut self) -> Result<(), AudioCaptureError> {
+            if std::mem::take(&mut self.fail_stop) {
+                return Err(AudioCaptureError::Platform("target stop failed".into()));
+            }
+            if self.running {
+                self.stops += 1;
+            }
+            self.running = false;
+            self.idle_for_target = false;
+            self.tapped_processes.clear();
+            Ok(())
+        }
+        fn is_running(&self) -> bool {
+            self.running
+        }
+        fn io_callback_count(&self) -> Option<u64> {
+            self.running.then_some(0)
+        }
+        fn set_target_app_bundle_id(&mut self, bundle_id: Option<String>) {
+            self.target_app = normalize_target_app_bundle_id(bundle_id.as_deref());
+        }
+        fn target_app_bundle_id(&self) -> Option<&str> {
+            self.target_app.as_deref()
+        }
+        fn is_idle_for_target(&self) -> bool {
+            self.idle_for_target
+        }
+        fn sync_target_processes(
+            &mut self,
+            consumer: Arc<dyn AudioFrameConsumer>,
+        ) -> Result<bool, AudioCaptureError> {
+            if self.target_app.is_none() {
+                return Ok(false);
+            }
+            match plan_capture_target(
+                self.target_app.as_deref(),
+                &self.available_processes,
+                9999,
+                None,
+            ) {
+                CaptureTargetPlan::Processes(ids) => {
+                    if self.running && !self.idle_for_target && self.tapped_processes == ids {
+                        return Ok(false);
+                    }
+                    let was_idle = self.idle_for_target;
+                    self.stop()?;
+                    if let Err(error) = self.start(consumer) {
+                        self.idle_for_target = was_idle;
+                        return Err(error);
+                    }
+                    Ok(true)
+                }
+                CaptureTargetPlan::IdleWaitingForTarget => {
+                    if self.idle_for_target && !self.running {
+                        return Ok(false);
+                    }
+                    self.stop()?;
+                    self.idle_for_target = true;
+                    Ok(true)
+                }
+                CaptureTargetPlan::GlobalExcludingSelf => Ok(false),
+            }
+        }
+    }
+
+    #[test]
+    fn per_app_target_idles_cleanly_attaches_on_process_change_and_falls_back_to_global() {
+        let mut controller =
+            AudioCaptureController::new(Arc::new(TestConsumer), TargetAppBackend::default());
+        controller
+            .set_target_app_bundle_id(Some("  com.spotify.client  ".to_owned()))
+            .unwrap();
+        assert_eq!(controller.target_app_bundle_id(), Some("com.spotify.client"));
+        assert!(!controller.wants_process_list_watch(), "no watch while nothing wants capture");
+
+        // Demand arrives while Spotify is not running: idle cleanly with zero tap errors.
+        controller
+            .set_scene_capturing(SceneHandle::new(41), true)
+            .unwrap();
+        assert!(controller.wants_process_list_watch());
+        assert!(controller.is_idle_for_target());
+        assert!(!controller.is_capturing());
+        assert!(!controller.watches_tap_stall(), "idle waiting must schedule zero timers");
+        assert_eq!(controller.backend().starts, 0);
+
+        // An unrelated app launches: process-list notification is a no-op.
+        controller.backend.available_processes.push(AudioProcessEntry {
+            object_id: 101,
+            pid: Some(11),
+            bundle_id: Some("com.apple.Safari".to_owned()),
+        });
+        assert!(!controller.handle_process_list_change().unwrap());
+        assert!(controller.is_idle_for_target());
+        assert_eq!(controller.backend().starts, 0);
+
+        // Target app launches: attaches automatically with case-insensitive bundle match.
+        controller.backend.available_processes.push(AudioProcessEntry {
+            object_id: 202,
+            pid: Some(22),
+            bundle_id: Some("com.Spotify.Client".to_owned()),
+        });
+        assert!(controller.handle_process_list_change().unwrap());
+        assert!(controller.is_capturing());
+        assert!(!controller.is_idle_for_target());
+        assert_eq!(controller.backend().tapped_processes, vec![202]);
+        assert_eq!(controller.backend().starts, 1);
+
+        // Another unrelated app changes: running tap is left untouched.
+        controller.backend.available_processes.push(AudioProcessEntry {
+            object_id: 303,
+            pid: Some(33),
+            bundle_id: Some("com.apple.Music".to_owned()),
+        });
+        assert!(!controller.handle_process_list_change().unwrap());
+        assert_eq!(controller.backend().starts, 1);
+        assert_eq!(controller.backend().stops, 0);
+
+        // Target app quits: stops tap cleanly and idles without errors.
+        controller
+            .backend
+            .available_processes
+            .retain(|entry| entry.object_id != 202);
+        assert!(controller.handle_process_list_change().unwrap());
+        assert!(!controller.is_capturing());
+        assert!(controller.is_idle_for_target());
+        assert_eq!(controller.backend().stops, 1);
+
+        // Switching back to None ("All apps") falls back immediately to global tap.
+        controller.set_target_app_bundle_id(None).unwrap();
+        assert_eq!(controller.target_app_bundle_id(), None);
+        assert!(!controller.wants_process_list_watch());
+        assert!(controller.is_capturing());
+        assert!(!controller.is_idle_for_target());
+        assert!(controller.backend().tapped_processes.is_empty());
+        assert_eq!(controller.backend().starts, 2);
+    }
+
+    #[test]
+    fn process_list_change_respects_suspension_and_permission() {
+        let backend = TargetAppBackend {
+            permission_pending: true,
+            ..TargetAppBackend::default()
+        };
+        let mut controller = AudioCaptureController::new(Arc::new(TestConsumer), backend);
+        controller
+            .set_target_app_bundle_id(Some("com.apple.Music".to_owned()))
+            .unwrap();
+        controller
+            .set_scene_capturing(SceneHandle::new(55), true)
+            .unwrap();
+        controller.backend.available_processes.push(AudioProcessEntry {
+            object_id: 88,
+            pid: Some(880),
+            bundle_id: Some("com.apple.Music".to_owned()),
+        });
+        assert!(
+            !controller.handle_process_list_change().unwrap(),
+            "background process events must never bypass permission"
+        );
+        assert!(!controller.is_capturing());
+
+        controller.request_permission().unwrap();
+        assert!(controller.is_capturing());
+        controller.set_demand(true, false).unwrap();
+        assert!(!controller.is_capturing());
+        assert!(!controller.wants_process_list_watch());
+        assert!(!controller.handle_process_list_change().unwrap());
+    }
+
+    #[test]
+    fn failed_target_app_switch_rolls_back_backend_target_and_capture_state() {
+        let mut backend = TargetAppBackend::default();
+        backend.available_processes.push(AudioProcessEntry {
+            object_id: 301,
+            pid: Some(3010),
+            bundle_id: Some("com.apple.Music".to_owned()),
+        });
+        let mut controller = AudioCaptureController::new(Arc::new(TestConsumer), backend);
+        controller
+            .set_scene_capturing(SceneHandle::new(71), true)
+            .unwrap();
+        assert!(controller.is_capturing());
+        assert_eq!(controller.target_app_bundle_id(), None);
+        assert!(!controller.wants_process_list_watch());
+
+        // 1. Stop failure leaves previous target and running capture completely untouched.
+        controller.backend.fail_stop = true;
+        let stop_err = controller
+            .set_target_app_bundle_id(Some("com.apple.Music".to_owned()))
+            .unwrap_err();
+        assert_eq!(stop_err, AudioCaptureError::Platform("target stop failed".into()));
+        assert_eq!(controller.target_app_bundle_id(), None);
+        assert!(controller.is_capturing());
+        assert!(!controller.wants_process_list_watch());
+
+        // 2. Start failure switching global -> per-app restores target=None and restarts global tap.
+        controller.backend.fail_start_count = 1;
+        let start_err = controller
+            .set_target_app_bundle_id(Some("com.apple.Music".to_owned()))
+            .unwrap_err();
+        assert_eq!(start_err, AudioCaptureError::Platform("target start failed".into()));
+        assert_eq!(controller.target_app_bundle_id(), None);
+        assert!(controller.is_capturing());
+        assert!(controller.backend().tapped_processes.is_empty());
+        assert!(!controller.wants_process_list_watch());
+
+        // 3. Start failure switching idle per-app -> global restores previous target and idle state.
+        controller
+            .set_target_app_bundle_id(Some("com.spotify.client".to_owned()))
+            .unwrap();
+        assert!(controller.is_idle_for_target());
+        assert!(controller.wants_process_list_watch());
+        controller.backend.fail_start_count = 1;
+        let to_global_err = controller.set_target_app_bundle_id(None).unwrap_err();
+        assert_eq!(to_global_err, AudioCaptureError::Platform("target start failed".into()));
+        assert_eq!(controller.target_app_bundle_id(), Some("com.spotify.client"));
+        assert!(controller.is_idle_for_target());
+        assert!(!controller.is_capturing());
+        assert!(controller.wants_process_list_watch());
+
+        // 4. Double failure (new target start + rollback start both fail) still rolls back target
+        //    and leaves restart_pending armed so a later restart_capture() heals capture.
+        controller.set_target_app_bundle_id(None).unwrap();
+        assert!(controller.is_capturing());
+        controller.backend.fail_start_count = 2;
+        let double_err = controller
+            .set_target_app_bundle_id(Some("com.apple.Music".to_owned()))
+            .unwrap_err();
+        assert!(
+            double_err.to_string().contains("rollback failed"),
+            "double failure should surface both transition and rollback errors: {double_err}"
+        );
+        assert_eq!(controller.target_app_bundle_id(), None);
+        assert!(!controller.wants_process_list_watch());
+        assert!(!controller.is_capturing());
+        assert_eq!(controller.restart_capture().unwrap(), RestartOutcome::Restarted);
+        assert!(controller.is_capturing());
+    }
+
+    #[test]
+    fn failed_process_list_change_arms_restart_pending_for_recovery() {
+        let mut controller =
+            AudioCaptureController::new(Arc::new(TestConsumer), TargetAppBackend::default());
+        controller
+            .set_target_app_bundle_id(Some("com.spotify.client".to_owned()))
+            .unwrap();
+        controller
+            .set_scene_capturing(SceneHandle::new(72), true)
+            .unwrap();
+        assert!(controller.is_idle_for_target());
+
+        controller.backend.available_processes.push(AudioProcessEntry {
+            object_id: 404,
+            pid: Some(4040),
+            bundle_id: Some("com.spotify.client".to_owned()),
+        });
+        controller.backend.fail_start_count = 1;
+        assert!(controller.handle_process_list_change().is_err());
+        assert!(!controller.is_capturing());
+        assert!(controller.is_idle_for_target());
+
+        // Recovery via restart_capture heals even without a second process-list notification.
+        assert_eq!(controller.restart_capture().unwrap(), RestartOutcome::Restarted);
+        assert!(controller.is_capturing());
+        assert!(!controller.is_idle_for_target());
+        assert_eq!(controller.backend().tapped_processes, vec![404]);
     }
 }

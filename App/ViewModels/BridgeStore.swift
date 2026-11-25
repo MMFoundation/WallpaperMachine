@@ -1330,6 +1330,27 @@ final class BridgeStore {
         apply(bundle)
     }
 
+    /// Tunes the 30 Hz audio-response spectrum analyser (sensitivity, noise floor dB, smoothing).
+    /// Stored in lock-free atomics; applies immediately without restarting audio capture or scenes.
+    func setAudioResponseTuningAsync(
+        sensitivity: Float,
+        noiseFloorDb: Float,
+        smoothing: Float
+    ) async throws {
+        let bundle = try await bridge.setAudioResponseTuning(
+            sensitivity: sensitivity,
+            noiseFloorDb: noiseFloorDb,
+            smoothing: smoothing)
+        apply(bundle)
+    }
+
+    /// Selects an optional target application bundle identifier for per-app audio capture
+    /// (`nil` captures all system audio excluding this app).
+    func setAudioResponseTargetAppAsync(_ bundleID: String?) async throws {
+        let bundle = try await bridge.setAudioResponseTargetApp(bundleId: bundleID)
+        apply(bundle)
+    }
+
     func applyWallpaperOptionsAsync(wallpaperId: String, userInitiated: Bool = false) async throws {
         await waitForIdleActivation()
         try requireIdleWallpaperEdits(id: wallpaperId)
@@ -1644,7 +1665,8 @@ final class BridgeStore {
             sceneRenderers: [], userAssetsPath: "", renderScale: 1, preferredRenderScale: 1,
             frameRateCap: nil, batteryRenderScale: 0.75, batteryTargetFps: 30, onBatteryPower: false,
             qualityThrottle: [], effectiveFrameRateCap: nil, renderScaleSupported: false,
-            mutedWallpaperCount: 0)
+            mutedWallpaperCount: 0, audioResponseSensitivity: 1, audioResponseNoiseFloorDb: -48,
+            audioResponseSmoothing: 0, audioResponseTargetApp: nil)
         return Snapshots(app: app, library: library, wallpaperOptions: nil, monitorInformation: monitor, settings: settings)
     }
 

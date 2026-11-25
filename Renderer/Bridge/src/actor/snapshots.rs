@@ -498,6 +498,8 @@ impl BridgeActorState {
                 }
             })
             .collect();
+        let audio_tuning = candidate.effective_audio_response_tuning();
+        let audio_target_app = candidate.effective_audio_response_target_app();
         BridgeSettingsSnapshot {
             displays: rows,
             launch_at_login_available: !matches!(launch_at_login, LaunchAtLoginStatus::Unavailable),
@@ -568,6 +570,10 @@ impl BridgeActorState {
                     .count(),
             )
             .unwrap_or(u32::MAX),
+            audio_response_sensitivity: audio_tuning.sensitivity,
+            audio_response_noise_floor_db: audio_tuning.noise_floor_db,
+            audio_response_smoothing: audio_tuning.smoothing,
+            audio_response_target_app: audio_target_app,
         }
     }
 }

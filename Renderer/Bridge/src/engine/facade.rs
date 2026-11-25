@@ -17,13 +17,15 @@ use futures_util::future::{BoxFuture, FutureExt};
 #[cfg(test)]
 use wallpaper_core::project::SceneTemplate;
 use wallpaper_core::{
-    AudioSpectrum128, AudioSpectrumFull, DisplaySelector, SceneCapabilityProbe, DisplaySnapshotEntry, EngineError, FirstFrameCallback,
-    PropertyPreview, RecoveryOutcome, RecoveryReason, SceneBackend, SceneDemandReasons, SceneWindowEntry,
-    SceneResolution, SceneUpdateMode, WallpaperAssignment, WallpaperEngine,
+    AudioResponseTuning, AudioSpectrum128, AudioSpectrumFull, DisplaySelector,
+    DisplaySnapshotEntry, EngineError, FirstFrameCallback, PropertyPreview, RecoveryOutcome,
+    RecoveryReason, SceneBackend, SceneCapabilityProbe, SceneDemandReasons, SceneResolution,
+    SceneUpdateMode, SceneWindowEntry, WallpaperAssignment, WallpaperEngine,
     media::audio::{
         AudioCaptureBackend, AudioCaptureController, AudioVolume, PlatformAudioCaptureBackend,
         RESTART_RETRY_DELAYS, RestartOutcome, TAP_STALL_REBUILD_LIMIT, TAP_STALL_TIMEOUT,
-        TapStallCheck, device_watch::OutputDeviceWatcher,
+        TapStallCheck,
+        device_watch::{OutputDeviceWatcher, ProcessListWatcher},
     },
     project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SceneResult},
     render::RendererSurfaceCounters,
@@ -322,6 +324,21 @@ pub trait EngineFacade: Send + Sync + 'static {
     fn set_metalfx_upscaling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
         let _ = enabled;
         Ok(())
+    }
+    /// Updates the process-wide 30 Hz audio-response FFT tuning atomics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the renderer rejects the call.
+    fn set_audio_response_tuning(&self, tuning: AudioResponseTuning) -> Result<(), EngineError> {
+        let _ = tuning;
+        Ok(())
+    }
+    /// Sets the optional target application bundle ID for per-app CoreAudio
+    /// capture (`None` captures all system audio excluding this app).
+    fn set_audio_response_target_app(&self, bundle_id: Option<String>) -> EngineFuture<()> {
+        let _ = bundle_id;
+        async move { Ok(()) }.boxed()
     }
     /// Chooses how many pixels a 2D scene is rasterized with, process-wide.
     /// `Canvas` by default.
@@ -679,6 +696,22 @@ impl EngineFacade for RealEngineFacade {
 
     fn set_metalfx_upscaling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
         self.engine.set_metalfx_upscaling_enabled(enabled)
+    }
+
+    fn set_audio_response_tuning(&self, tuning: AudioResponseTuning) -> Result<(), EngineError> {
+        self.engine.set_audio_response_tuning(tuning)
+    }
+
+    fn set_audio_response_target_app(&self, bundle_id: Option<String>) -> EngineFuture<()> {
+        let audio_capture = self.audio_capture.clone();
+        let audio_mutation = self.audio_mutation.clone();
+        async move {
+            mutate_audio(&audio_mutation, || {
+                audio_capture.mailbox().set_target_app(bundle_id)
+            })
+            .await
+        }
+        .boxed()
     }
 
     fn set_scene_resolution(&self, resolution: SceneResolution) -> Result<(), EngineError> {
@@ -1219,6 +1252,7 @@ impl OwnedCaptureLane {
         Self::from_mailbox(start_capture_lane(PlatformCaptureAssembly {
             engine,
             output_watch: OutputWatchGate::default(),
+            process_watch: OutputWatchGate::default(),
             restart: AudioRestartState::default(),
         }))
     }
@@ -1247,6 +1281,7 @@ pub(super) fn retain_capture_live<B: AudioCaptureBackend>(
 struct PlatformCaptureAssembly {
     engine: WallpaperEngine,
     output_watch: OutputWatchGate<OutputDeviceWatcher>,
+    process_watch: OutputWatchGate<ProcessListWatcher>,
     restart: AudioRestartState,
 }
 
@@ -1307,8 +1342,35 @@ impl CaptureAssembly for PlatformCaptureAssembly {
         self.output_watch.sync(wanted, || watch_output_device(events.clone()));
     }
 
+    fn process_list_changed(&mut self, controller: &mut AudioCaptureController<Self::Backend>) {
+        if let Err(error) = controller.handle_process_list_change() {
+            log::warn!(
+                "[wallpaper-core audio] failed to reconcile per-app audio capture after process list change: {error}"
+            );
+        }
+    }
+
+    fn sync_process_watch(&mut self, wanted: bool, events: &CaptureEvents) {
+        let events = events.clone();
+        self.process_watch.sync(wanted, move || {
+            let on_change = Arc::new(move || {
+                events.process_list_changed();
+            });
+            match ProcessListWatcher::start(on_change) {
+                Ok(watcher) => Some(watcher),
+                Err(error) => {
+                    log::warn!(
+                        "[wallpaper-core audio] could not watch CoreAudio process list: {error}; per-app capture will not auto-attach when apps launch"
+                    );
+                    None
+                }
+            }
+        });
+    }
+
     fn stop_watch(&mut self) {
         self.output_watch.sync(false, || None);
+        self.process_watch.sync(false, || None);
     }
 }
 
@@ -1378,6 +1440,8 @@ pub struct FakeEngineFacade {
     scene_video_plane_sampling_calls: Observation<bool>,
     scene_display_framing_calls: Observation<bool>,
     metalfx_upscaling_calls: Observation<bool>,
+    audio_response_tuning_calls: Observation<AudioResponseTuning>,
+    audio_response_target_app_calls: Observation<Option<String>>,
     scene_resolution_calls: Observation<SceneResolution>,
     scene_runtime_reports: Reading<Vec<SceneRuntimeReport>>,
     /// Scripted snapshots retain the final sample; `None` reads the live state.
@@ -1587,6 +1651,8 @@ impl Default for FakeEngineFacade {
             scene_video_plane_sampling_calls: Observation::new(),
             scene_display_framing_calls: Observation::new(),
             metalfx_upscaling_calls: Observation::new(),
+            audio_response_tuning_calls: Observation::new(),
+            audio_response_target_app_calls: Observation::new(),
             scene_resolution_calls: Observation::new(),
             scene_runtime_reports: Reading::new(Default::default()),
             display_snapshot_script: Reading::new(Default::default()),
@@ -2007,6 +2073,18 @@ impl FakeEngineFacade {
     #[must_use]
     pub fn metalfx_upscaling_calls(&self) -> Vec<bool> {
         self.metalfx_upscaling_calls.snapshot()
+    }
+
+    /// Every audio-response FFT tuning change the bridge pushed, in order.
+    #[must_use]
+    pub fn audio_response_tuning_calls(&self) -> Vec<AudioResponseTuning> {
+        self.audio_response_tuning_calls.snapshot()
+    }
+
+    /// Every audio-response target app bundle ID the bridge pushed, in order.
+    #[must_use]
+    pub fn audio_response_target_app_calls(&self) -> Vec<Option<String>> {
+        self.audio_response_target_app_calls.snapshot()
     }
 
     /// Every 2D scene resolution the bridge pushed, in order.
@@ -2745,6 +2823,16 @@ impl EngineFacade for FakeEngineFacade {
     fn set_metalfx_upscaling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
         self.metalfx_upscaling_calls.record(enabled);
         Ok(())
+    }
+
+    fn set_audio_response_tuning(&self, tuning: AudioResponseTuning) -> Result<(), EngineError> {
+        self.audio_response_tuning_calls.record(tuning);
+        Ok(())
+    }
+
+    fn set_audio_response_target_app(&self, bundle_id: Option<String>) -> EngineFuture<()> {
+        self.audio_response_target_app_calls.record(bundle_id);
+        async move { Ok(()) }.boxed()
     }
 
     fn set_scene_resolution(&self, resolution: SceneResolution) -> Result<(), EngineError> {

@@ -286,6 +286,14 @@ int owe_audio_submit_spectrum_full(const float* bands, uintptr_t len, bool stere
  * A mono source is never reported as stereo.
  */
 int owe_audio_spectrum_is_stereo(void);
+/*
+ * Process-wide 30 Hz FFT output tuning. Values are clamped to their valid
+ * ranges (sensitivity 0.25..4.0, noise_floor_db -72.0..-24.0, smoothing
+ * 0.0..0.90) and stored in relaxed atomics with zero audio-thread overhead.
+ */
+void owe_audio_set_response_tuning(float sensitivity, float noise_floor_db, float smoothing);
+void owe_audio_get_response_tuning(float* out_sensitivity, float* out_noise_floor_db,
+                                   float* out_smoothing);
 
 /*
  * Scene render optimisation, process-wide.

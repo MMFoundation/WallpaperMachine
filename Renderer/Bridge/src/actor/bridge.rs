@@ -46,7 +46,8 @@ use crate::{
             ReplaceWallpaperConfigForTest, RestoreAllEngineOptionDefaults, RestoreAllPropertyDefaults,
             RestoreEngineOptionDefault, RestorePropertyDefault,
             SelectWallpaper,
-            SetAudioResponseEnabled, SetBatteryQualityProfile,
+            SetAudioResponseEnabled, SetAudioResponseTargetApp, SetAudioResponseTuning,
+            SetBatteryQualityProfile,
             SetDisplayConfigEnabled, SetDisplayPosition, SetDisplayVolume, SetDisplayMuted,
             SetDisplayParkedWallpapers, SetDisplayPresentationSuspended,
             FanOutSystemMediaArtwork, FanOutSystemMediaEvent, GetSystemMediaConsentHandles,
@@ -77,8 +78,9 @@ use crate::{
         BridgeWallpaperMutationBundle, BridgeWallpaperPreview, BridgeWebWallpaper, MousePollingControl,
     },
     config::{
-        ConfigStore, FramingCfg, SceneResolutionCfg,
-        SerializedSelector, WallpaperConfig,
+        ConfigStore, FramingCfg, SceneResolutionCfg, SerializedSelector, WallpaperConfig,
+        clamp_audio_response_noise_floor_db, clamp_audio_response_sensitivity,
+        clamp_audio_response_smoothing, normalize_audio_response_target_app,
     },
     display::{DisplaySelectorExt, DisplaySnapshotExt},
     engine::{
@@ -1930,6 +1932,21 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
         ) {
             self.state.errors.push(error.to_string());
         }
+        if let Err(error) = self
+            .engine
+            .set_audio_response_tuning(self.state.app_config.effective_audio_response_tuning())
+        {
+            self.state.errors.push(error.to_string());
+        }
+        if let Err(error) = self
+            .engine
+            .set_audio_response_target_app(
+                self.state.app_config.effective_audio_response_target_app(),
+            )
+            .await
+        {
+            self.state.errors.push(error.to_string());
+        }
 
         if let Err(error) = self.refresh_displays().await {
             self.state.errors.push(error.message().to_string());
@@ -2994,6 +3011,69 @@ impl<E: EngineFacade + Clone> Message<SetMetalFxUpscalingEnabled> for BridgeActo
         self.engine
             .set_metalfx_upscaling_enabled(msg.enabled)
             .map_err(|error| BridgeError::engine(error.to_string()))?;
+        self.invalidate_operations();
+        Ok(self.all_snapshots())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetAudioResponseTuning> for BridgeActor<E> {
+    type Reply = messages::SetAudioResponseTuningReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetAudioResponseTuning,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if !msg.sensitivity.is_finite()
+            || !msg.noise_floor_db.is_finite()
+            || !msg.smoothing.is_finite()
+        {
+            return Err(BridgeError::invalid_input(
+                "audio response tuning values must be finite",
+            ));
+        }
+        let sensitivity = clamp_audio_response_sensitivity(msg.sensitivity);
+        let noise_floor_db = clamp_audio_response_noise_floor_db(msg.noise_floor_db);
+        let smoothing = clamp_audio_response_smoothing(msg.smoothing);
+        self.state.app_config.audio_response_sensitivity = sensitivity;
+        self.state.app_config.audio_response_noise_floor_db = noise_floor_db;
+        self.state.app_config.audio_response_smoothing = smoothing;
+        if let Some(store) = &self.config_store {
+            store.save_app_config(&self.state.app_config)?;
+        }
+        self.engine
+            .set_audio_response_tuning(wallpaper_core::AudioResponseTuning {
+                sensitivity,
+                noise_floor_db,
+                smoothing,
+            })
+            .map_err(|error| BridgeError::engine(error.to_string()))?;
+        self.invalidate_operations();
+        Ok(self.all_snapshots())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetAudioResponseTargetApp> for BridgeActor<E> {
+    type Reply = messages::SetAudioResponseTargetAppReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetAudioResponseTargetApp,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let normalized = normalize_audio_response_target_app(msg.bundle_id.as_deref());
+        let previous = self.state.app_config.audio_response_target_app.clone();
+        self.state.app_config.audio_response_target_app = normalized.clone();
+        if let Some(store) = &self.config_store {
+            store.save_app_config(&self.state.app_config)?;
+        }
+        if let Err(error) = self.engine.set_audio_response_target_app(normalized).await {
+            self.state.app_config.audio_response_target_app = previous;
+            if let Some(store) = &self.config_store {
+                let _ = store.save_app_config(&self.state.app_config);
+            }
+            return Err(BridgeError::engine(error.to_string()));
+        }
         self.invalidate_operations();
         Ok(self.all_snapshots())
     }

@@ -1345,6 +1345,119 @@ async fn metalfx_upscaling_defaults_off_and_survives_a_restart() {
     );
 }
 
+#[tokio::test]
+async fn audio_response_tuning_and_target_app_clamp_propagate_live_and_survive_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = crate::config::ConfigStore::open(temp.path().to_path_buf());
+    let engine = FakeEngineFacade::default();
+    let bridge = BridgeBuilder::new(engine.clone())
+        .with_config_store(store.clone())
+        .build()
+        .unwrap();
+
+    let initial = bridge.settings_snapshot().await.unwrap();
+    assert_eq!(initial.audio_response_sensitivity, 1.0);
+    assert_eq!(initial.audio_response_noise_floor_db, -48.0);
+    assert_eq!(initial.audio_response_smoothing, 0.0);
+    assert_eq!(initial.audio_response_target_app, None);
+
+    // Non-finite inputs are rejected cleanly without mutating state.
+    assert!(
+        bridge
+            .set_audio_response_tuning(f32::NAN, -48.0, 0.0)
+            .await
+            .is_err()
+    );
+    assert!(engine.audio_response_tuning_calls().is_empty());
+
+    // Out-of-range finite values clamp and propagate immediately without reopening scenes.
+    let clamped = bridge
+        .set_audio_response_tuning(9.5, -100.0, 1.5)
+        .await
+        .unwrap()
+        .settings;
+    assert_eq!(clamped.audio_response_sensitivity, 4.0);
+    assert_eq!(clamped.audio_response_noise_floor_db, -72.0);
+    assert_eq!(clamped.audio_response_smoothing, 0.90);
+    assert_eq!(
+        engine.audio_response_tuning_calls().last().copied(),
+        Some(wallpaper_core::AudioResponseTuning {
+            sensitivity: 4.0,
+            noise_floor_db: -72.0,
+            smoothing: 0.90,
+        })
+    );
+
+    let tuned = bridge
+        .set_audio_response_tuning(1.5, -54.0, 0.4)
+        .await
+        .unwrap()
+        .settings;
+    assert_eq!(tuned.audio_response_sensitivity, 1.5);
+    assert_eq!(tuned.audio_response_noise_floor_db, -54.0);
+    assert_eq!(tuned.audio_response_smoothing, 0.4);
+
+    // Target app trims whitespace and collapses blank strings to None.
+    let targeted = bridge
+        .set_audio_response_target_app(Some("  com.spotify.client  ".to_owned()))
+        .await
+        .unwrap()
+        .settings;
+    assert_eq!(
+        targeted.audio_response_target_app.as_deref(),
+        Some("com.spotify.client")
+    );
+    assert_eq!(
+        engine.audio_response_target_app_calls().last(),
+        Some(&Some("com.spotify.client".to_owned()))
+    );
+    assert!(
+        engine.rendered_scenes().is_empty(),
+        "audio response tuning and target app must never reopen scenes"
+    );
+
+    drop(bridge);
+    let restarted_engine = FakeEngineFacade::default();
+    let restarted = BridgeBuilder::new(restarted_engine.clone())
+        .with_config_store(store)
+        .build()
+        .unwrap();
+    let loaded = restarted.settings_snapshot().await.unwrap();
+    assert_eq!(loaded.audio_response_sensitivity, 1.5);
+    assert_eq!(loaded.audio_response_noise_floor_db, -54.0);
+    assert_eq!(loaded.audio_response_smoothing, 0.4);
+    assert_eq!(
+        loaded.audio_response_target_app.as_deref(),
+        Some("com.spotify.client")
+    );
+    restarted.bootstrap().await.unwrap();
+    assert_eq!(
+        restarted_engine.audio_response_tuning_calls().last().copied(),
+        Some(wallpaper_core::AudioResponseTuning {
+            sensitivity: 1.5,
+            noise_floor_db: -54.0,
+            smoothing: 0.4,
+        }),
+        "saved tuning must be pushed back into the C++ atomics on launch"
+    );
+    assert_eq!(
+        restarted_engine.audio_response_target_app_calls().last(),
+        Some(&Some("com.spotify.client".to_owned())),
+        "saved target app must be pushed to the capture lane on launch"
+    );
+
+    let cleared = restarted
+        .set_audio_response_target_app(Some("   ".to_owned()))
+        .await
+        .unwrap()
+        .settings;
+    assert_eq!(cleared.audio_response_target_app, None);
+    assert_eq!(
+        restarted_engine.audio_response_target_app_calls().last(),
+        Some(&None)
+    );
+}
+
 /// The tap is rebuilt when the default output device changes. The listener that
 /// reports the change is `CoreAudio` glue and needs a device, so these replay
 /// the worker's decisions through the production handlers and the real

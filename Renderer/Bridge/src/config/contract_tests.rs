@@ -46,6 +46,10 @@ fn assert_kind<T: std::fmt::Debug>(result: Result<T, BridgeError>, kind: BridgeE
 
 fn assert_default_app(config: &AppConfig) {
     assert_eq!(config.schema_version, 1);
+    assert_eq!(config.audio_response_sensitivity, 1.0);
+    assert_eq!(config.audio_response_noise_floor_db, -48.0);
+    assert_eq!(config.audio_response_smoothing, 0.0);
+    assert_eq!(config.audio_response_target_app, None);
     assert_eq!(config.general.last_selected_wallpaper, None);
     assert_eq!(config.power.on_battery, BatteryModeCfg::KeepRunning);
     assert_eq!(config.power.legacy_pause_on_battery_power, None);
@@ -229,6 +233,10 @@ fn all_app_fields_and_selector_variants_round_trip_without_normalizing_preferenc
             for optional in [false, true] {
                 let mut expected = AppConfig {
                     schema_version: 0,
+                    audio_response_sensitivity: if optional { 2.25 } else { 0.5 },
+                    audio_response_noise_floor_db: if optional { -60.0 } else { -36.0 },
+                    audio_response_smoothing: if optional { 0.45 } else { 0.0 },
+                    audio_response_target_app: optional.then(|| "com.spotify.client".to_owned()),
                     primary_display: None,
                     general: GeneralCfg {
                         last_selected_wallpaper: optional.then(|| "item-52".to_owned()),
@@ -502,6 +510,50 @@ fn an_experimental_section_saved_before_display_framing_existed_loads_it_off() {
     let output = app_output(&store);
     assert_eq!(output["experimental"]["scene_video_plane_sampling"].as_bool(), Some(true));
     assert_eq!(output["experimental"]["scene_display_framing"].as_bool(), Some(false));
+}
+
+#[test]
+fn audio_response_tuning_fields_default_on_legacy_configs_clamp_and_round_trip() {
+    let (_temporary, store) = isolated_store();
+    put(&app_path(&store), "schema_version = 1\n[general]\npaused = false\n");
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.config.audio_response_sensitivity, 1.0);
+    assert_eq!(loaded.config.audio_response_noise_floor_db, -48.0);
+    assert_eq!(loaded.config.audio_response_smoothing, 0.0);
+    assert_eq!(loaded.config.audio_response_target_app, None);
+
+    let mut cfg = loaded.config;
+    cfg.audio_response_sensitivity = 12.0;
+    cfg.audio_response_noise_floor_db = -10.0;
+    cfg.audio_response_smoothing = 0.99;
+    cfg.audio_response_target_app = Some("  com.apple.Music  ".to_owned());
+    let effective = cfg.effective_audio_response_tuning();
+    assert_eq!(effective.sensitivity, 4.0);
+    assert_eq!(effective.noise_floor_db, -24.0);
+    assert_eq!(effective.smoothing, 0.90);
+    assert_eq!(
+        cfg.effective_audio_response_target_app().as_deref(),
+        Some("com.apple.Music")
+    );
+
+    cfg.audio_response_sensitivity = 1.75;
+    cfg.audio_response_noise_floor_db = -60.0;
+    cfg.audio_response_smoothing = 0.35;
+    cfg.audio_response_target_app = Some("com.apple.Music".to_owned());
+    store.save_app_config(&cfg).unwrap();
+    let reloaded = store.load().unwrap().config;
+    assert_eq!(reloaded.audio_response_sensitivity, 1.75);
+    assert_eq!(reloaded.audio_response_noise_floor_db, -60.0);
+    assert_eq!(reloaded.audio_response_smoothing, 0.35);
+    assert_eq!(
+        reloaded.audio_response_target_app.as_deref(),
+        Some("com.apple.Music")
+    );
+
+    assert_eq!(clamp_audio_response_sensitivity(f32::NAN), 1.0);
+    assert_eq!(clamp_audio_response_noise_floor_db(f32::INFINITY), -48.0);
+    assert_eq!(clamp_audio_response_smoothing(f32::NEG_INFINITY), 0.0);
+    assert_eq!(normalize_audio_response_target_app(Some("   ")), None);
 }
 
 // C04: every legacy presence/value pair crossed with absent and every explicit mode.

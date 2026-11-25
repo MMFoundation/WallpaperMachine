@@ -353,6 +353,16 @@ pub struct SetSceneDisplayFramingEnabled {
     pub enabled: bool,
 }
 
+pub struct SetAudioResponseTuning {
+    pub sensitivity: f32,
+    pub noise_floor_db: f32,
+    pub smoothing: f32,
+}
+
+pub struct SetAudioResponseTargetApp {
+    pub bundle_id: Option<String>,
+}
+
 /// A web page registered or dropped its audio listener.
 pub struct SetWebAudioSubscribed {
     pub wallpaper_id: String,
@@ -554,6 +564,8 @@ pub type SetSceneOnDemandEnabledReply = AllSnapshotsReply;
 pub type SetMetalFxUpscalingEnabledReply = AllSnapshotsReply;
 pub type SetSceneVideoPlaneSamplingEnabledReply = AllSnapshotsReply;
 pub type SetSceneDisplayFramingEnabledReply = AllSnapshotsReply;
+pub type SetAudioResponseTuningReply = AllSnapshotsReply;
+pub type SetAudioResponseTargetAppReply = AllSnapshotsReply;
 pub type SetWebAudioSubscribedReply = Result<(), BridgeError>;
 pub type SetLockScreenAudioDemandReply = Result<(), BridgeError>;
 pub type AudioRequirementChangedReply = Result<(), BridgeError>;

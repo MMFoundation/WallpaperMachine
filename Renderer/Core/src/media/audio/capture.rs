@@ -15,17 +15,19 @@ use objc2_core_audio::{
     AudioDeviceCreateIOProcID, AudioDeviceDestroyIOProcID, AudioDeviceIOProcID, AudioDeviceStart,
     AudioDeviceStop, AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap,
     AudioHardwareDestroyAggregateDevice, AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData,
-    AudioObjectID, AudioObjectPropertyAddress, CATapDescription, CATapMuteBehavior,
-    kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceNameKey,
+    AudioObjectGetPropertyDataSize, AudioObjectID, AudioObjectPropertyAddress, CATapDescription,
+    CATapMuteBehavior, kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceNameKey,
     kAudioAggregateDeviceTapAutoStartKey, kAudioAggregateDeviceTapListKey,
     kAudioAggregateDeviceUIDKey, kAudioAggregateDriftCompensationMediumQuality,
     kAudioDevicePropertyDeviceIsRunningSomewhere, kAudioHardwarePropertyDefaultOutputDevice,
-    kAudioHardwarePropertyTranslatePIDToProcessObject, kAudioObjectPropertyElementMain,
-    kAudioObjectPropertyScopeGlobal, kAudioObjectUnknown, kAudioSubTapDriftCompensationKey,
-    kAudioSubTapDriftCompensationQualityKey, kAudioSubTapUIDKey, kAudioTapPropertyFormat,
+    kAudioHardwarePropertyProcessObjectList, kAudioHardwarePropertyTranslatePIDToProcessObject,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectUnknown,
+    kAudioProcessPropertyBundleID, kAudioProcessPropertyIsRunningOutput, kAudioProcessPropertyPID,
+    kAudioSubTapDriftCompensationKey, kAudioSubTapDriftCompensationQualityKey, kAudioSubTapUIDKey,
+    kAudioTapPropertyFormat,
 };
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp};
-use objc2_core_foundation::CFDictionary;
+use objc2_core_foundation::{CFDictionary, CFRetained, CFString};
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
 
 use super::{
@@ -252,9 +254,137 @@ impl<O: TeardownOperations> CaptureOwner<O> {
     }
 }
 
+/// One CoreAudio process object discovered through
+/// `kAudioHardwarePropertyProcessObjectList`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AudioProcessEntry {
+    pub object_id: AudioObjectID,
+    pub pid: Option<i32>,
+    pub bundle_id: Option<String>,
+}
+
+/// Which CoreAudio tap layout should be active for the current target setting
+/// and running audio processes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CaptureTargetPlan {
+    /// No target app configured: capture all system audio excluding self.
+    GlobalExcludingSelf,
+    /// Target app configured and one or more matching process objects exist.
+    Processes(Vec<AudioObjectID>),
+    /// Target app configured, but no matching audio process currently exists:
+    /// idle cleanly without creating an empty tap or reporting an error.
+    IdleWaitingForTarget,
+}
+
+/// Normalizes an optional bundle identifier by trimming whitespace and
+/// collapsing empty strings to `None` ("All system audio").
+#[must_use]
+pub fn normalize_target_app_bundle_id(bundle_id: Option<&str>) -> Option<String> {
+    bundle_id
+        .map(str::trim)
+        .filter(|trimmed| !trimmed.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+/// Returns whether a CoreAudio process bundle identifier belongs to
+/// `target_bundle_id`: either an exact case-insensitive match or a standard
+/// macOS multi-process helper (`<target>.helper` or `<target>.helper.<role>`,
+/// used by Chromium browsers and Electron applications).
+///
+/// Requires a dot boundary or end-of-string after `.helper` so unrelated apps
+/// sharing a bundle prefix never match, and intentionally does not match shared
+/// system XPC services such as `com.apple.WebKit.GPU` (which also host this
+/// app's own web wallpapers).
+#[must_use]
+pub fn bundle_id_matches_target(bundle_id: &str, target_bundle_id: &str) -> bool {
+    const HELPER_SUFFIX: &str = ".helper";
+    let bundle = bundle_id.trim();
+    let target = target_bundle_id.trim();
+    if bundle.is_empty() || target.is_empty() {
+        return false;
+    }
+    if bundle.eq_ignore_ascii_case(target) {
+        return true;
+    }
+    let Some(rest) = bundle
+        .get(..target.len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case(target))
+        .and_then(|_| bundle.get(target.len()..))
+    else {
+        return false;
+    };
+    let Some(tail) = rest
+        .get(..HELPER_SUFFIX.len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case(HELPER_SUFFIX))
+        .and_then(|_| rest.get(HELPER_SUFFIX.len()..))
+    else {
+        return false;
+    };
+    tail.is_empty() || tail.starts_with('.')
+}
+
+/// Returns the sorted, deduplicated CoreAudio process object IDs whose bundle
+/// identifier matches `target_bundle_id` (case-insensitively, including
+/// `<target>.helper` and `<target>.helper.*` helper processes), always
+/// excluding this process by both PID and `AudioObjectID`.
+#[must_use]
+pub fn matching_process_objects(
+    processes: &[AudioProcessEntry],
+    target_bundle_id: &str,
+    own_pid: i32,
+    own_object_id: Option<AudioObjectID>,
+) -> Vec<AudioObjectID> {
+    let target = target_bundle_id.trim();
+    if target.is_empty() {
+        return Vec::new();
+    }
+    let mut matched: Vec<AudioObjectID> = processes
+        .iter()
+        .filter(|entry| {
+            entry.object_id != kAudioObjectUnknown
+                && Some(entry.object_id) != own_object_id
+                && entry.pid != Some(own_pid)
+                && entry
+                    .bundle_id
+                    .as_deref()
+                    .is_some_and(|bundle| bundle_id_matches_target(bundle, target))
+        })
+        .map(|entry| entry.object_id)
+        .collect();
+    matched.sort_unstable();
+    matched.dedup();
+    matched
+}
+
+/// Resolves the desired CoreAudio tap plan from the configured target bundle ID
+/// and the current snapshot of CoreAudio process objects.
+#[must_use]
+pub fn plan_capture_target(
+    target_bundle_id: Option<&str>,
+    processes: &[AudioProcessEntry],
+    own_pid: i32,
+    own_object_id: Option<AudioObjectID>,
+) -> CaptureTargetPlan {
+    let Some(target) = normalize_target_app_bundle_id(target_bundle_id) else {
+        return CaptureTargetPlan::GlobalExcludingSelf;
+    };
+    let matched = matching_process_objects(processes, &target, own_pid, own_object_id);
+    if matched.is_empty() {
+        CaptureTargetPlan::IdleWaitingForTarget
+    } else {
+        CaptureTargetPlan::Processes(matched)
+    }
+}
+
 pub struct PlatformAudioCaptureBackend {
     capture: CaptureOwner<NativeTeardown>,
     permission_hint: bool,
+    target_app_bundle_id: Option<String>,
+    /// Sorted CoreAudio process object IDs currently tapped in per-app mode.
+    active_target_processes: Vec<AudioObjectID>,
+    /// True when capture is wanted for a specific app that currently has no
+    /// active CoreAudio process objects.
+    idle_for_target: bool,
 }
 
 impl PlatformAudioCaptureBackend {
@@ -265,6 +395,9 @@ impl PlatformAudioCaptureBackend {
         Ok(Self {
             capture: CaptureOwner { state: None },
             permission_hint: false,
+            target_app_bundle_id: None,
+            active_target_processes: Vec::new(),
+            idle_for_target: false,
         })
     }
 
@@ -280,6 +413,107 @@ impl PlatformAudioCaptureBackend {
             .as_ref()
             .filter(|state| state.running && !state.releasing)
             .map(|state| state.channel_mode)
+    }
+
+    fn current_target_plan(&self) -> CaptureTargetPlan {
+        let Some(target) = self.target_app_bundle_id.as_deref() else {
+            return CaptureTargetPlan::GlobalExcludingSelf;
+        };
+        let address = property_address(kAudioHardwarePropertyProcessObjectList);
+        let mut size: u32 = 0;
+        let size_status = unsafe {
+            AudioObjectGetPropertyDataSize(
+                SYSTEM_OBJECT,
+                NonNull::from(&address),
+                0,
+                ptr::null(),
+                NonNull::from(&mut size),
+            )
+        };
+        let entry_size = mem::size_of::<AudioObjectID>();
+        let count = if size_status == 0 {
+            size as usize / entry_size
+        } else {
+            0
+        };
+        let mut entries = Vec::with_capacity(count);
+        if count > 0
+            && let Ok(mut byte_size) = u32::try_from(count * entry_size)
+        {
+            let mut objects = vec![kAudioObjectUnknown; count];
+            let data_status = unsafe {
+                AudioObjectGetPropertyData(
+                    SYSTEM_OBJECT,
+                    NonNull::from(&address),
+                    0,
+                    ptr::null(),
+                    NonNull::from(&mut byte_size),
+                    NonNull::new(objects.as_mut_ptr())
+                        .expect("non-empty process list")
+                        .cast(),
+                )
+            };
+            if data_status == 0 {
+                objects.truncate(byte_size as usize / entry_size);
+                for object_id in objects {
+                    if object_id == kAudioObjectUnknown {
+                        continue;
+                    }
+                    let mut raw_pid = 0u32;
+                    let pid = read_u32_property(object_id, kAudioProcessPropertyPID, &mut raw_pid)
+                        .then(|| i32::from_ne_bytes(raw_pid.to_ne_bytes()));
+                    let bundle_address = property_address(kAudioProcessPropertyBundleID);
+                    let mut raw_bundle: *mut CFString = ptr::null_mut();
+                    let mut bundle_size =
+                        u32::try_from(mem::size_of::<*mut CFString>()).unwrap_or(8);
+                    let bundle_status = unsafe {
+                        AudioObjectGetPropertyData(
+                            object_id,
+                            NonNull::from(&bundle_address),
+                            0,
+                            ptr::null(),
+                            NonNull::from(&mut bundle_size),
+                            NonNull::from(&mut raw_bundle).cast(),
+                        )
+                    };
+                    let bundle_id = if bundle_status == 0
+                        && bundle_size as usize == mem::size_of::<*mut CFString>()
+                    {
+                        NonNull::new(raw_bundle).and_then(|ptr| {
+                            // SAFETY: CoreAudio's kAudioProcessPropertyBundleID returns a +1
+                            // retained CFStringRef; CFRetained releases it on drop.
+                            let cf_string = unsafe { CFRetained::from_raw(ptr) };
+                            let text = cf_string.to_string();
+                            (!text.is_empty()).then_some(text)
+                        })
+                    } else {
+                        None
+                    };
+                    entries.push(AudioProcessEntry {
+                        object_id,
+                        pid,
+                        bundle_id,
+                    });
+                }
+            }
+        }
+        let own_pid = i32::try_from(std::process::id()).unwrap_or(0);
+        let own_object = own_process_object();
+        plan_capture_target(Some(target), &entries, own_pid, own_object)
+    }
+}
+
+/// Feeds two full silent 48 kHz analysis windows (3200 frames) so both stereo
+/// and mono-fallback taps flush any buffered samples in `AudioResponseResampler`
+/// and the engine FIFO and clear the spectrum and exponential smoother to zero
+/// immediately when a per-app tap transitions to idle.
+fn emit_silence(consumer: &Arc<dyn AudioFrameConsumer>) {
+    const SILENT_FLUSH: [f32; 3200] = [0.0; 3200];
+    if let Ok(frames) = MonoPcmF32::borrowed(
+        super::AudioResponseResampler::TARGET_SAMPLE_RATE,
+        &SILENT_FLUSH,
+    ) {
+        let _ = consumer.submit_mono_audio_frames(frames);
     }
 }
 
@@ -297,13 +531,44 @@ impl AudioCaptureBackend for PlatformAudioCaptureBackend {
     }
 
     fn start(&mut self, consumer: Arc<dyn AudioFrameConsumer>) -> Result<(), AudioCaptureError> {
-        self.capture
-            .start_with(CaptureState::empty, |state| open_capture(state, Arc::clone(&consumer)))?;
-        self.permission_hint = true;
-        Ok(())
+        match self.current_target_plan() {
+            CaptureTargetPlan::GlobalExcludingSelf => {
+                self.capture.start_with(CaptureState::empty, |state| {
+                    open_capture(state, Arc::clone(&consumer), None)
+                })?;
+                self.idle_for_target = false;
+                self.active_target_processes.clear();
+                self.permission_hint = true;
+                Ok(())
+            }
+            CaptureTargetPlan::Processes(ids) => {
+                self.capture.start_with(CaptureState::empty, |state| {
+                    open_capture(state, Arc::clone(&consumer), Some(&ids))
+                })?;
+                self.idle_for_target = false;
+                self.active_target_processes = ids;
+                self.permission_hint = true;
+                Ok(())
+            }
+            CaptureTargetPlan::IdleWaitingForTarget => {
+                self.capture.stop()?;
+                self.active_target_processes.clear();
+                self.idle_for_target = true;
+                self.permission_hint = true;
+                emit_silence(&consumer);
+                if let Some(target) = self.target_app_bundle_id.as_deref() {
+                    log::info!(
+                        "[wallpaper-core audio] target app {target:?} has no active audio process; idling until it launches"
+                    );
+                }
+                Ok(())
+            }
+        }
     }
 
     fn stop(&mut self) -> Result<(), AudioCaptureError> {
+        self.idle_for_target = false;
+        self.active_target_processes.clear();
         self.capture.stop()
     }
 
@@ -321,7 +586,75 @@ impl AudioCaptureBackend for PlatformAudioCaptureBackend {
     }
 
     fn output_device_is_running(&self) -> bool {
-        default_output_is_running()
+        if !default_output_is_running() {
+            return false;
+        }
+        if self.target_app_bundle_id.is_some() {
+            return self.active_target_processes.iter().any(|&process_id| {
+                let mut running = 0u32;
+                read_u32_property(process_id, kAudioProcessPropertyIsRunningOutput, &mut running)
+                    && running != 0
+            });
+        }
+        true
+    }
+
+    fn set_target_app_bundle_id(&mut self, bundle_id: Option<String>) {
+        self.target_app_bundle_id = normalize_target_app_bundle_id(bundle_id.as_deref());
+    }
+
+    fn target_app_bundle_id(&self) -> Option<&str> {
+        self.target_app_bundle_id.as_deref()
+    }
+
+    fn is_idle_for_target(&self) -> bool {
+        self.idle_for_target
+    }
+
+    fn sync_target_processes(
+        &mut self,
+        consumer: Arc<dyn AudioFrameConsumer>,
+    ) -> Result<bool, AudioCaptureError> {
+        if self.target_app_bundle_id.is_none() {
+            return Ok(false);
+        }
+        match self.current_target_plan() {
+            CaptureTargetPlan::Processes(ids) => {
+                if self.capture.is_running()
+                    && !self.idle_for_target
+                    && self.active_target_processes == ids
+                {
+                    return Ok(false);
+                }
+                self.capture.stop()?;
+                self.active_target_processes.clear();
+                self.capture.start_with(CaptureState::empty, |state| {
+                    open_capture(state, Arc::clone(&consumer), Some(&ids))
+                })?;
+                self.idle_for_target = false;
+                self.active_target_processes = ids;
+                Ok(true)
+            }
+            CaptureTargetPlan::IdleWaitingForTarget => {
+                if self.idle_for_target
+                    && !self.capture.is_running()
+                    && !self.capture.has_pending_cleanup()
+                {
+                    return Ok(false);
+                }
+                self.capture.stop()?;
+                self.active_target_processes.clear();
+                self.idle_for_target = true;
+                emit_silence(&consumer);
+                if let Some(target) = self.target_app_bundle_id.as_deref() {
+                    log::info!(
+                        "[wallpaper-core audio] target app {target:?} stopped producing audio; idling cleanly"
+                    );
+                }
+                Ok(true)
+            }
+            CaptureTargetPlan::GlobalExcludingSelf => Ok(false),
+        }
     }
 }
 
@@ -361,8 +694,9 @@ fn read_u32_property(object: AudioObjectID, selector: u32, value: &mut u32) -> b
 fn open_capture(
     state: &mut CaptureState,
     consumer: Arc<dyn AudioFrameConsumer>,
+    target_processes: Option<&[AudioObjectID]>,
 ) -> Result<(), AudioCaptureError> {
-    let (tap, tap_uid, stereo_requested) = create_tap()?;
+    let (tap, tap_uid, stereo_requested) = create_tap(target_processes)?;
     state.tap = Some(tap);
 
     let format = tap_format(tap)?;
@@ -450,24 +784,51 @@ fn property_address(selector: u32) -> AudioObjectPropertyAddress {
     }
 }
 
-/// Creates the private, unmuted global tap that leaves out this process. Returns the
-/// tap, its uid and whether the stereo variant was the one created.
-fn create_tap() -> Result<(AudioObjectID, String, bool), AudioCaptureError> {
-    let excluded: Vec<_> = own_process_object().map(NSNumber::new_u32).into_iter().collect();
-    let excluded = NSArray::from_retained_slice(&excluded);
-
+/// Creates a private, unmuted tap: either a targeted mixdown of
+/// `target_processes` (`initStereoMixdownOfProcesses:` /
+/// `initMonoMixdownOfProcesses:`) or a global tap excluding this process
+/// (`initStereoGlobalTapButExcludeProcesses:` /
+/// `initMonoGlobalTapButExcludeProcesses:`). Returns the tap, its uid and
+/// whether the stereo variant was created.
+fn create_tap(
+    target_processes: Option<&[AudioObjectID]>,
+) -> Result<(AudioObjectID, String, bool), AudioCaptureError> {
     let class = CATapDescription::class();
-    let stereo_available = class
-        .instance_method(sel!(initStereoGlobalTapButExcludeProcesses:))
-        .is_some();
+    let (process_numbers, stereo_available, targeted) = if let Some(ids) = target_processes {
+        let included: Vec<_> = ids.iter().copied().map(NSNumber::new_u32).collect();
+        let stereo_available = class
+            .instance_method(sel!(initStereoMixdownOfProcesses:))
+            .is_some();
+        (NSArray::from_retained_slice(&included), stereo_available, true)
+    } else {
+        let excluded: Vec<_> = own_process_object()
+            .map(NSNumber::new_u32)
+            .into_iter()
+            .collect();
+        let stereo_available = class
+            .instance_method(sel!(initStereoGlobalTapButExcludeProcesses:))
+            .is_some();
+        (NSArray::from_retained_slice(&excluded), stereo_available, false)
+    };
 
     let describe = |stereo: bool| {
         let description = CATapDescription::alloc();
         let description = unsafe {
-            if stereo {
-                CATapDescription::initStereoGlobalTapButExcludeProcesses(description, &excluded)
-            } else {
-                CATapDescription::initMonoGlobalTapButExcludeProcesses(description, &excluded)
+            match (targeted, stereo) {
+                (true, true) => {
+                    CATapDescription::initStereoMixdownOfProcesses(description, &process_numbers)
+                }
+                (true, false) => {
+                    CATapDescription::initMonoMixdownOfProcesses(description, &process_numbers)
+                }
+                (false, true) => CATapDescription::initStereoGlobalTapButExcludeProcesses(
+                    description,
+                    &process_numbers,
+                ),
+                (false, false) => CATapDescription::initMonoGlobalTapButExcludeProcesses(
+                    description,
+                    &process_numbers,
+                ),
             }
         };
         unsafe {
@@ -936,5 +1297,221 @@ mod tests {
         let mut odd = [-2.0; 3];
         assert!(buffers.as_list().copy_to_stereo_f32(0, &mut odd).is_err());
         assert_eq!(odd, [-2.0; 3]);
+    }
+
+    #[test]
+    fn normalize_target_app_bundle_id_trims_and_collapses_empty() {
+        assert_eq!(normalize_target_app_bundle_id(None), None);
+        assert_eq!(normalize_target_app_bundle_id(Some("")), None);
+        assert_eq!(normalize_target_app_bundle_id(Some("   \t\n ")), None);
+        assert_eq!(
+            normalize_target_app_bundle_id(Some("  com.spotify.client  ")),
+            Some("com.spotify.client".to_owned())
+        );
+    }
+
+    #[test]
+    fn matching_process_objects_matches_case_insensitively_and_excludes_self() {
+        let processes = vec![
+            AudioProcessEntry {
+                object_id: 40,
+                pid: Some(1001),
+                bundle_id: Some("com.Spotify.Client".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 25,
+                pid: Some(1002),
+                bundle_id: Some("com.spotify.client".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 99,
+                pid: Some(4242), // own PID must always be excluded
+                bundle_id: Some("com.spotify.client".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 77,
+                pid: Some(2000),
+                bundle_id: Some("com.spotify.client".to_owned()), // own object_id excluded
+            },
+            AudioProcessEntry {
+                object_id: 50,
+                pid: Some(3000),
+                bundle_id: Some("com.apple.Music".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: kAudioObjectUnknown,
+                pid: Some(3001),
+                bundle_id: Some("com.spotify.client".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 25, // duplicate object_id deduplicated
+                pid: Some(1002),
+                bundle_id: Some("com.spotify.client".to_owned()),
+            },
+        ];
+
+        assert_eq!(
+            matching_process_objects(&processes, "COM.SPOTIFY.CLIENT", 4242, Some(77)),
+            vec![25, 40]
+        );
+        assert_eq!(
+            matching_process_objects(&processes, "com.apple.music", 4242, Some(77)),
+            vec![50]
+        );
+        assert!(matching_process_objects(&processes, "com.example.absent", 4242, Some(77)).is_empty());
+        assert!(matching_process_objects(&processes, "   ", 4242, Some(77)).is_empty());
+    }
+
+    #[test]
+    fn plan_capture_target_selects_global_processes_or_idle() {
+        let processes = vec![AudioProcessEntry {
+            object_id: 12,
+            pid: Some(500),
+            bundle_id: Some("com.apple.Music".to_owned()),
+        }];
+
+        assert_eq!(
+            plan_capture_target(None, &processes, 99, None),
+            CaptureTargetPlan::GlobalExcludingSelf
+        );
+        assert_eq!(
+            plan_capture_target(Some("  "), &processes, 99, None),
+            CaptureTargetPlan::GlobalExcludingSelf
+        );
+        assert_eq!(
+            plan_capture_target(Some("com.apple.music"), &processes, 99, None),
+            CaptureTargetPlan::Processes(vec![12])
+        );
+        assert_eq!(
+            plan_capture_target(Some("com.spotify.client"), &processes, 99, None),
+            CaptureTargetPlan::IdleWaitingForTarget
+        );
+    }
+
+    #[test]
+    fn matching_process_objects_matches_chromium_and_electron_helpers_without_prefix_collisions() {
+        let processes = vec![
+            AudioProcessEntry {
+                object_id: 10,
+                pid: Some(100),
+                bundle_id: Some("com.google.Chrome".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 11,
+                pid: Some(101),
+                bundle_id: Some("com.google.Chrome.helper".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 12,
+                pid: Some(102),
+                bundle_id: Some("com.google.Chrome.helper.renderer".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 13,
+                pid: Some(103),
+                bundle_id: Some("COM.GOOGLE.CHROME.HELPER.GPU".to_owned()),
+            },
+            // Own PID and own object ID must stay excluded even if matching `.helper`.
+            AudioProcessEntry {
+                object_id: 14,
+                pid: Some(4242),
+                bundle_id: Some("com.google.Chrome.helper".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 77,
+                pid: Some(105),
+                bundle_id: Some("com.google.Chrome.helper.renderer".to_owned()),
+            },
+            // Non-matching sibling / prefix-collision / shared WebKit processes.
+            AudioProcessEntry {
+                object_id: 20,
+                pid: Some(200),
+                bundle_id: Some("com.google.Chrome.helperapp".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 21,
+                pid: Some(201),
+                bundle_id: Some("com.google.ChromeBeta".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 22,
+                pid: Some(202),
+                bundle_id: Some("com.google.Chrome.canary".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 30,
+                pid: Some(300),
+                bundle_id: Some("com.hnc.Discord.Helper".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 31,
+                pid: Some(301),
+                bundle_id: Some("com.hnc.Discord.helper.Renderer".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 40,
+                pid: Some(400),
+                bundle_id: Some("com.apple.WebKit.GPU".to_owned()),
+            },
+            AudioProcessEntry {
+                object_id: 41,
+                pid: Some(401),
+                bundle_id: Some("com.apple.WebKit.WebContent".to_owned()),
+            },
+            // Non-ASCII bundle ID must never panic on UTF-8 boundary checks.
+            AudioProcessEntry {
+                object_id: 50,
+                pid: Some(500),
+                bundle_id: Some("com.example.音乐".to_owned()),
+            },
+        ];
+
+        assert_eq!(
+            matching_process_objects(&processes, "com.google.Chrome", 4242, Some(77)),
+            vec![10, 11, 12, 13]
+        );
+        assert_eq!(
+            matching_process_objects(&processes, "com.hnc.Discord", 4242, Some(77)),
+            vec![30, 31]
+        );
+        // Safari does not match shared WebKit XPC processes (which also host our own WKWebView).
+        assert!(
+            matching_process_objects(&processes, "com.apple.Safari", 4242, Some(77)).is_empty()
+        );
+        // Multibyte boundary safety.
+        assert!(!bundle_id_matches_target("com.example.音乐", "com.example.x"));
+        assert!(bundle_id_matches_target("com.example.音乐.helper", "com.example.音乐"));
+    }
+
+    #[test]
+    fn emit_silence_submits_two_full_analysis_windows_to_flush_mono_fifo() {
+        struct RecordingConsumer(Mutex<Vec<(u32, usize, bool)>>);
+        impl AudioFrameConsumer for RecordingConsumer {
+            fn submit_audio_frames(
+                &self,
+                _frames: InterleavedStereoF32<'_>,
+            ) -> Result<(), AudioCaptureError> {
+                panic!("emit_silence should submit mono zeros")
+            }
+            fn submit_mono_audio_frames(
+                &self,
+                frames: MonoPcmF32<'_>,
+            ) -> Result<(), AudioCaptureError> {
+                let all_zero = frames.samples().iter().all(|&sample| sample == 0.0);
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((frames.sample_rate(), frames.samples().len(), all_zero));
+                Ok(())
+            }
+        }
+
+        let recording = Arc::new(RecordingConsumer(Mutex::new(Vec::new())));
+        let consumer: Arc<dyn AudioFrameConsumer> = recording.clone();
+        emit_silence(&consumer);
+        assert_eq!(
+            *recording.0.lock().unwrap(),
+            vec![(super::super::AudioResponseResampler::TARGET_SAMPLE_RATE, 3200, true)]
+        );
     }
 }

@@ -6,8 +6,9 @@ pub mod writer;
 pub use app::{
     AppConfig, BatteryModeCfg, FilterCfg, GeneralCfg, MonitorCfg, MonitorSettingsCfg, PowerCfg,
     MsaaCfg, PostProcessingCfg, QualityCfg, QualityInForce, QualityLevelCfg, QualityProfileCfg,
-    SceneQualityCfg, SceneResolutionCfg, SerializedSelector, UiCfg,
-    WindowGeom, clamp_render_scale,
+    SceneQualityCfg, SceneResolutionCfg, SerializedSelector, UiCfg, WindowGeom,
+    clamp_audio_response_noise_floor_db, clamp_audio_response_sensitivity,
+    clamp_audio_response_smoothing, clamp_render_scale, normalize_audio_response_target_app,
 };
 pub use store::{ConfigLoad, ConfigStore};
 pub use wallpaper::{

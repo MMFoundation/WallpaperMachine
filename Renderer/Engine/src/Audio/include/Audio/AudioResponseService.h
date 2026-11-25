@@ -18,6 +18,30 @@ inline constexpr uint32_t kAudioResponseWindowFrames = 1600;
 // left32, right32, left16, right16.
 inline constexpr size_t kAudioSpectrumFullBandCount = 64u + 64u + 32u + 32u + 16u + 16u;
 
+inline constexpr float kAudioResponseDefaultSensitivity = 1.0f;
+inline constexpr float kAudioResponseMinSensitivity = 0.25f;
+inline constexpr float kAudioResponseMaxSensitivity = 4.0f;
+inline constexpr float kAudioResponseDefaultNoiseFloorDb = -48.0f;
+inline constexpr float kAudioResponseMinNoiseFloorDb = -72.0f;
+inline constexpr float kAudioResponseMaxNoiseFloorDb = -24.0f;
+inline constexpr float kAudioResponseDefaultSmoothing = 0.0f;
+inline constexpr float kAudioResponseMinSmoothing = 0.0f;
+inline constexpr float kAudioResponseMaxSmoothing = 0.90f;
+
+// Process-wide 30 Hz FFT output tuning. Stored in relaxed atomics so the
+// analysis worker reads them with zero mutexes and zero audio-thread overhead.
+// Defaults (1.0, -48.0 dB, 0.0) preserve bit-exact legacy behaviour.
+struct AudioResponseTuning
+{
+    float sensitivity { kAudioResponseDefaultSensitivity };
+    float noise_floor_db { kAudioResponseDefaultNoiseFloorDb };
+    float smoothing { kAudioResponseDefaultSmoothing };
+};
+
+AudioResponseTuning ClampAudioResponseTuning(AudioResponseTuning tuning);
+void SetAudioResponseTuning(AudioResponseTuning tuning);
+AudioResponseTuning CurrentAudioResponseTuning();
+
 struct AudioSpectrumSnapshot
 {
     uint64_t generation { 0 };

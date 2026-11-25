@@ -129,7 +129,7 @@ struct PlaybackSettingsSection: View {
     inactivityTime, batteryMode, batteryWallpaper, batteryScale,
     batteryFps, reducedQuality, lowBattery, lowBatteryLevel, lowPowerMode, thermal, focus, appRules,
     addAppRule, whatChanges,
-  ]
+  ] + AudioResponseSettingsSection.items
 
   /// The rows this page leaves out now, by the rules its body draws them with: "Only play on the
   /// display I'm using" needs two displays (or is on), the reduced volume needs Reduce volume to
@@ -282,6 +282,7 @@ struct PlaybackSettingsSection: View {
           PlaybackAddAppRuleRow()
         }
       }
+      AudioResponseSettingsGroup()
       SettingsGroup(Self.context, in: .playback) {
         SettingsDisclosure(Self.whatChanges) { context }
       }

@@ -147,7 +147,11 @@ enum BridgeSnapshotFixtures {
     qualityThrottle: [BridgeQualityThrottleCause] = [],
     effectiveFrameRateCap: UInt32? = nil,
     renderScaleSupported: Bool = true,
-    mutedWallpaperCount: UInt32 = 0
+    mutedWallpaperCount: UInt32 = 0,
+    audioResponseSensitivity: Float = 1,
+    audioResponseNoiseFloorDb: Float = -48,
+    audioResponseSmoothing: Float = 0,
+    audioResponseTargetApp: String? = nil
   ) -> BridgeSettingsSnapshot {
     BridgeSettingsSnapshot(
       displays: displays,
@@ -181,6 +185,10 @@ enum BridgeSnapshotFixtures {
       qualityThrottle: qualityThrottle,
       effectiveFrameRateCap: effectiveFrameRateCap,
       renderScaleSupported: renderScaleSupported,
-      mutedWallpaperCount: mutedWallpaperCount)
+      mutedWallpaperCount: mutedWallpaperCount,
+      audioResponseSensitivity: audioResponseSensitivity,
+      audioResponseNoiseFloorDb: audioResponseNoiseFloorDb,
+      audioResponseSmoothing: audioResponseSmoothing,
+      audioResponseTargetApp: audioResponseTargetApp)
   }
 }

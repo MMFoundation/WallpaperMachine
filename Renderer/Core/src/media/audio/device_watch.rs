@@ -31,8 +31,8 @@ use std::{
 
 use objc2_core_audio::{
     AudioObjectAddPropertyListener, AudioObjectID, AudioObjectPropertyAddress,
-    kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
-    kAudioObjectPropertyScopeGlobal,
+    kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyProcessObjectList,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
 };
 
 use super::AudioCaptureError;
@@ -41,6 +41,11 @@ use super::AudioCaptureError;
 /// reported. Bluetooth devices announce a switch as several property changes in
 /// quick succession; one rebuild covers all of them.
 pub const OUTPUT_CHANGE_QUIET: Duration = Duration::from_millis(300);
+
+/// How long the audio process list must stay unchanged before a per-app tap
+/// re-evaluates matching processes. Launching an app often creates helper audio
+/// clients in quick succession; one evaluation covers the burst.
+pub const PROCESS_LIST_CHANGE_QUIET: Duration = Duration::from_millis(200);
 
 const NO_ERR: i32 = 0;
 const AUDIO_OBJECT_SYSTEM_OBJECT: AudioObjectID = 1;
@@ -173,10 +178,19 @@ impl SubscriberTable {
 }
 
 static OUTPUT_SUBSCRIBERS: SubscriberTable = SubscriberTable::new();
+static PROCESS_SUBSCRIBERS: SubscriberTable = SubscriberTable::new();
 
-/// Held while the listener is registered, and not while it runs, so that a
+/// Held while each listener is registered, and not while it runs, so that a
 /// registration waiting on the HAL can never block a notification.
 static LISTENER_REGISTERED: Mutex<bool> = Mutex::new(false);
+static PROCESS_LISTENER_REGISTERED: Mutex<bool> = Mutex::new(false);
+
+type HalListenerProc = unsafe extern "C-unwind" fn(
+    AudioObjectID,
+    u32,
+    NonNull<AudioObjectPropertyAddress>,
+    *mut c_void,
+) -> i32;
 
 unsafe extern "C-unwind" fn default_output_device_changed(
     _object: AudioObjectID,
@@ -188,24 +202,39 @@ unsafe extern "C-unwind" fn default_output_device_changed(
     NO_ERR
 }
 
-/// Registers the process-wide HAL listener the first time it is called.
-fn ensure_listener_registered() -> Result<(), AudioCaptureError> {
-    let mut registered = locked(&LISTENER_REGISTERED);
+unsafe extern "C-unwind" fn process_list_changed(
+    _object: AudioObjectID,
+    _address_count: u32,
+    _addresses: NonNull<AudioObjectPropertyAddress>,
+    _client_data: *mut c_void,
+) -> i32 {
+    PROCESS_SUBSCRIBERS.notify_all();
+    NO_ERR
+}
+
+/// Registers a process-wide HAL listener on the system object the first time it
+/// is requested.
+fn ensure_hal_listener_registered(
+    selector: u32,
+    listener: HalListenerProc,
+    registered_flag: &Mutex<bool>,
+) -> Result<(), AudioCaptureError> {
+    let mut registered = locked(registered_flag);
     if *registered {
         return Ok(());
     }
     let address = AudioObjectPropertyAddress {
-        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mSelector: selector,
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain,
     };
-    // SAFETY: `address` outlives the call, the callback is a plain function
+    // SAFETY: `address` outlives the call, `listener` is a plain function
     // that touches only statics, and the client data is unused (null).
     let status = unsafe {
         AudioObjectAddPropertyListener(
             AUDIO_OBJECT_SYSTEM_OBJECT,
             NonNull::from_ref(&address),
-            Some(default_output_device_changed),
+            Some(listener),
             ptr::null_mut(),
         )
     };
@@ -218,18 +247,57 @@ fn ensure_listener_registered() -> Result<(), AudioCaptureError> {
     Ok(())
 }
 
-/// Reports changes of the default output device, debounced, until dropped.
-pub struct OutputDeviceWatcher {
+struct WatcherRegistration {
     table: &'static SubscriberTable,
     id: u64,
     debouncer: Arc<Debouncer>,
     worker: Option<JoinHandle<()>>,
 }
 
+impl WatcherRegistration {
+    fn subscribe(
+        table: &'static SubscriberTable,
+        quiet: Duration,
+        thread_name: &str,
+        on_change: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<Self, AudioCaptureError> {
+        let debouncer = Arc::new(Debouncer::default());
+        let runner = Arc::clone(&debouncer);
+        let worker = thread::Builder::new()
+            .name(thread_name.to_string())
+            .spawn(move || runner.run(quiet, || on_change()))
+            .map_err(|error| {
+                AudioCaptureError::Platform(format!(
+                    "could not start audio watcher {thread_name}: {error}"
+                ))
+            })?;
+        let id = table.add(Arc::clone(&debouncer));
+        Ok(Self {
+            table,
+            id,
+            debouncer,
+            worker: Some(worker),
+        })
+    }
+}
+
+impl Drop for WatcherRegistration {
+    fn drop(&mut self) {
+        self.table.remove(self.id);
+        self.debouncer.cancel();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+/// Reports changes of the default output device, debounced, until dropped.
+pub struct OutputDeviceWatcher(WatcherRegistration);
+
 impl fmt::Debug for OutputDeviceWatcher {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OutputDeviceWatcher")
-            .field("id", &self.id)
+            .field("id", &self.0.id)
             .finish_non_exhaustive()
     }
 }
@@ -245,7 +313,11 @@ impl OutputDeviceWatcher {
     /// Returns [`AudioCaptureError::Platform`] when the `CoreAudio` listener or
     /// the watcher thread cannot be started.
     pub fn start(on_change: Arc<dyn Fn() + Send + Sync>) -> Result<Self, AudioCaptureError> {
-        ensure_listener_registered()?;
+        ensure_hal_listener_registered(
+            kAudioHardwarePropertyDefaultOutputDevice,
+            default_output_device_changed,
+            &LISTENER_REGISTERED,
+        )?;
         Self::subscribe(&OUTPUT_SUBSCRIBERS, OUTPUT_CHANGE_QUIET, on_change)
     }
 
@@ -254,33 +326,58 @@ impl OutputDeviceWatcher {
         quiet: Duration,
         on_change: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Self, AudioCaptureError> {
-        let debouncer = Arc::new(Debouncer::default());
-        let runner = Arc::clone(&debouncer);
-        let worker = thread::Builder::new()
-            .name("wallpaper-core-audio-output-watch".to_string())
-            .spawn(move || runner.run(quiet, || on_change()))
-            .map_err(|error| {
-                AudioCaptureError::Platform(format!(
-                    "could not start the output device watcher: {error}"
-                ))
-            })?;
-        let id = table.add(Arc::clone(&debouncer));
-        Ok(Self {
+        WatcherRegistration::subscribe(
             table,
-            id,
-            debouncer,
-            worker: Some(worker),
-        })
+            quiet,
+            "wallpaper-core-audio-output-watch",
+            on_change,
+        )
+        .map(Self)
     }
 }
 
-impl Drop for OutputDeviceWatcher {
-    fn drop(&mut self) {
-        self.table.remove(self.id);
-        self.debouncer.cancel();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+/// Reports changes to `kAudioHardwarePropertyProcessObjectList`, debounced,
+/// until dropped. Used only when per-app audio capture is configured so zero
+/// polling runs while waiting for a target app to launch or exit.
+pub struct ProcessListWatcher(WatcherRegistration);
+
+impl fmt::Debug for ProcessListWatcher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProcessListWatcher")
+            .field("id", &self.0.id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ProcessListWatcher {
+    /// Starts reporting CoreAudio process-object-list changes to `on_change`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AudioCaptureError::Platform`] when the `CoreAudio` listener or
+    /// the watcher thread cannot be started.
+    pub fn start(on_change: Arc<dyn Fn() + Send + Sync>) -> Result<Self, AudioCaptureError> {
+        ensure_hal_listener_registered(
+            kAudioHardwarePropertyProcessObjectList,
+            process_list_changed,
+            &PROCESS_LISTENER_REGISTERED,
+        )?;
+        Self::subscribe(&PROCESS_SUBSCRIBERS, PROCESS_LIST_CHANGE_QUIET, on_change)
+    }
+
+    #[allow(clippy::single_call_fn)]
+    fn subscribe(
+        table: &'static SubscriberTable,
+        quiet: Duration,
+        on_change: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<Self, AudioCaptureError> {
+        WatcherRegistration::subscribe(
+            table,
+            quiet,
+            "wallpaper-core-audio-process-watch",
+            on_change,
+        )
+        .map(Self)
     }
 }
 
@@ -443,6 +540,27 @@ mod tests {
         assert!(
             locked(&table.entries).is_empty(),
             "dropping removes the subscription"
+        );
+    }
+
+    #[test]
+    fn process_list_watcher_debounces_bursts_and_unsubscribes_on_drop() {
+        let table: &'static SubscriberTable = Box::leak(Box::new(SubscriberTable::new()));
+        let (count, fired, fire) = counting_fire();
+        let watcher = ProcessListWatcher::subscribe(table, QUIET, Arc::new(fire)).unwrap();
+
+        for _ in 0..4 {
+            table.notify_all();
+        }
+        fired
+            .recv_timeout(PATIENCE)
+            .expect("the process-list burst is reported once");
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        drop(watcher);
+        assert!(
+            locked(&table.entries).is_empty(),
+            "dropping removes the process-list subscription"
         );
     }
 }

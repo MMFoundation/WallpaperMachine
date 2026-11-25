@@ -289,5 +289,111 @@ TEST_F(SpectrumExport128Test, SubmittedFullSpectrumSanitizesMonoAndClearsWhenSta
     EXPECT_FLOAT_EQ(cleared.average64[0], 0.0f);
 }
 
+TEST_F(SpectrumExport128Test, ResponseTuningCAbiRoundTripsClampsAndAffectsWebExport)
+{
+    float sensitivity = 0.0f;
+    float noise_floor_db = 0.0f;
+    float smoothing = 0.0f;
+    owe_audio_get_response_tuning(&sensitivity, &noise_floor_db, &smoothing);
+    EXPECT_FLOAT_EQ(sensitivity, kAudioResponseDefaultSensitivity);
+    EXPECT_FLOAT_EQ(noise_floor_db, kAudioResponseDefaultNoiseFloorDb);
+    EXPECT_FLOAT_EQ(smoothing, kAudioResponseDefaultSmoothing);
+
+    // Out-of-range values clamp on store and null getters are tolerated.
+    owe_audio_set_response_tuning(10.0f, -99.0f, 0.99f);
+    owe_audio_get_response_tuning(&sensitivity, nullptr, &smoothing);
+    owe_audio_get_response_tuning(nullptr, &noise_floor_db, nullptr);
+    EXPECT_FLOAT_EQ(sensitivity, kAudioResponseMaxSensitivity);
+    EXPECT_FLOAT_EQ(noise_floor_db, kAudioResponseMinNoiseFloorDb);
+    EXPECT_FLOAT_EQ(smoothing, kAudioResponseMaxSmoothing);
+
+    // Web export clamps sensitivity-boosted bands cleanly to [0.0, 1.0].
+    owe_audio_set_response_tuning(4.0f, -48.0f, 0.0f);
+    SubmitStereo(0.5f, 0.5f);
+    const AudioSpectrumSnapshot raw = testing::WaitForGeneration();
+    ASSERT_GT(raw.generation, 0u);
+    const float raw_peak = *std::max_element(raw.left64.begin(), raw.left64.end());
+    EXPECT_GT(raw_peak, 1.0f);
+
+    std::array<float, 128> bins {};
+    uint64_t generation = 0;
+    ASSERT_EQ(owe_audio_current_spectrum_128(bins.data(), bins.size(), &generation), 0);
+    EXPECT_EQ(generation, raw.generation);
+    const float web_peak = *std::max_element(bins.begin(), bins.begin() + 64);
+    EXPECT_FLOAT_EQ(web_peak, 1.0f);
+}
+
+TEST_F(SpectrumExport128Test, StaleExpiryClearsSubThresholdSmoothedTailsAndCoarseBandsBeforeResume)
+{
+    const auto expect_all_zero = [](const AudioSpectrumSnapshot& s) {
+        for (float v : s.left64) EXPECT_FLOAT_EQ(v, 0.0f);
+        for (float v : s.right64) EXPECT_FLOAT_EQ(v, 0.0f);
+        for (float v : s.average64) EXPECT_FLOAT_EQ(v, 0.0f);
+        for (float v : s.left32) EXPECT_FLOAT_EQ(v, 0.0f);
+        for (float v : s.right32) EXPECT_FLOAT_EQ(v, 0.0f);
+        for (float v : s.average32) EXPECT_FLOAT_EQ(v, 0.0f);
+        for (float v : s.left16) EXPECT_FLOAT_EQ(v, 0.0f);
+        for (float v : s.right16) EXPECT_FLOAT_EQ(v, 0.0f);
+        for (float v : s.average16) EXPECT_FLOAT_EQ(v, 0.0f);
+    };
+
+    // Case 1: Only coarse bands (32/16) hold energy while 64-band averages are all zero.
+    {
+        std::array<float, kAudioSpectrumFullBandCount> bands {};
+        bands[128 + 3] = 0.04f; // left32[3]
+        bands[192 + 2] = 0.08f; // left16[2]
+        ASSERT_EQ(owe_audio_submit_spectrum_full(bands.data(), bands.size(), false), 0);
+        const AudioSpectrumSnapshot first = CurrentAudioSpectrumSnapshot();
+        ASSERT_FLOAT_EQ(first.average64[0], 0.0f);
+        ASSERT_GT(first.average16[2], 0.0f);
+
+        const AudioSpectrumSnapshot cleared = testing::PollSnapshot(
+            std::chrono::milliseconds(1000),
+            [gen = first.generation](const AudioSpectrumSnapshot& s) {
+                return s.generation > gen && s.average16[2] == 0.0f && s.average32[3] == 0.0f;
+            });
+        EXPECT_GT(cleared.generation, first.generation);
+        expect_all_zero(cleared);
+    }
+
+    // Case 2: Decayed smoothed tail in (0, 1e-4] must clear to exact 0.0f on 250 ms staleness
+    // and must never leak into a resumed smoothed block after an idle gap.
+    ResetAudioResponseServiceForTesting();
+    owe_audio_set_response_tuning(1.0f, -48.0f, 0.85f);
+    {
+        std::array<float, kAudioSpectrumFullBandCount> tail {};
+        tail[10]      = 5e-5f; // left64[10], below 1e-4f yet above smoothing zero flush
+        tail[64 + 10] = 5e-5f; // right64[10]
+        tail[128 + 5] = 4e-5f; // left32[5]
+        tail[160 + 5] = 4e-5f; // right32[5]
+        tail[192 + 2] = 6e-5f; // left16[2]
+        tail[208 + 2] = 6e-5f; // right16[2]
+        ASSERT_EQ(owe_audio_submit_spectrum_full(tail.data(), tail.size(), true), 0);
+        const AudioSpectrumSnapshot before_expiry = CurrentAudioSpectrumSnapshot();
+        ASSERT_GT(before_expiry.average64[10], 0.0f);
+        ASSERT_LT(before_expiry.average64[10], 0.0001f);
+
+        const AudioSpectrumSnapshot cleared = testing::PollSnapshot(
+            std::chrono::milliseconds(1000),
+            [gen = before_expiry.generation](const AudioSpectrumSnapshot& s) {
+                return s.generation > gen && s.average64[10] == 0.0f && s.average16[2] == 0.0f;
+            });
+        EXPECT_GT(cleared.generation, before_expiry.generation);
+        expect_all_zero(cleared);
+
+        // Resume with PCM above the silence gate (0.0002 > 0.00005) but below the -48 dB
+        // noise floor (~-74 dB), so raw FFT bins are 0.0f while SmoothInto runs. Any surviving
+        // smoothing state would produce 0.85 * 5e-5 = 4.25e-5 instead of exact 0.0f.
+        const std::vector<float> quiet_pcm = Tone(kAudioResponseWindowFrames, 0.0002f, 0.0002f);
+        std::string error;
+        ASSERT_TRUE(SubmitAudioFrames(kRate, kAudioResponseWindowFrames, quiet_pcm.data(), &error))
+            << error;
+        const AudioSpectrumSnapshot resumed =
+            testing::WaitForGenerationAfter(cleared.generation, std::chrono::milliseconds(1000));
+        EXPECT_GT(resumed.generation, cleared.generation);
+        expect_all_zero(resumed);
+    }
+}
+
 } // namespace
 } // namespace wallpaper::audio

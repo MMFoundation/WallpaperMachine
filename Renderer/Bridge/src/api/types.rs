@@ -1022,6 +1022,18 @@ pub struct BridgeSettingsSnapshot {
     /// settings. The host's mute of every wallpaper is layered on top and
     /// never written into them, so the panel names these beside it.
     pub muted_wallpaper_count: u32,
+    /// Sensitivity multiplier applied to 30 Hz audio-response spectrum bands
+    /// before web clamping (`0.25..=4.0`, default `1.0`).
+    pub audio_response_sensitivity: f32,
+    /// Noise floor in decibels for 30 Hz audio-response spectrum analysis
+    /// (`-72.0..=-24.0`, default `-48.0`).
+    pub audio_response_noise_floor_db: f32,
+    /// Exponential temporal smoothing factor for 30 Hz audio-response spectrum
+    /// bands (`0.0..=0.90`, default `0.0`).
+    pub audio_response_smoothing: f32,
+    /// Optional target application bundle identifier for per-app system audio
+    /// capture (`None` = all system audio excluding this app).
+    pub audio_response_target_app: Option<String>,
 }
 
 /// Everything the panel shows, in one answer.

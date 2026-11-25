@@ -153,6 +153,20 @@ extension PanelController {
     if current().sceneDisplayFramingEnabled != D.sceneDisplayFraming {
       await attempt { try await store.setSceneDisplayFramingEnabledAsync(D.sceneDisplayFraming) }
     }
+    if current().audioResponseSensitivity != AudioResponseSettings.defaultSensitivity
+      || current().audioResponseNoiseFloorDb != AudioResponseSettings.defaultNoiseFloorDb
+      || current().audioResponseSmoothing != AudioResponseSettings.defaultSmoothing
+    {
+      await attempt {
+        try await store.setAudioResponseTuningAsync(
+          sensitivity: AudioResponseSettings.defaultSensitivity,
+          noiseFloorDb: AudioResponseSettings.defaultNoiseFloorDb,
+          smoothing: AudioResponseSettings.defaultSmoothing)
+      }
+    }
+    if current().audioResponseTargetApp != nil {
+      await attempt { try await store.setAudioResponseTargetAppAsync(nil) }
+    }
     if current().verboseLogging != D.verboseLogging {
       await attempt { try await store.setVerboseLoggingAsync(enabled: D.verboseLogging) }
     }

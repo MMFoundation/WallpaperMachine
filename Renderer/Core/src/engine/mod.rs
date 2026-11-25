@@ -818,6 +818,20 @@ impl WallpaperEngine {
         self.backend.current_audio_spectrum()
     }
 
+    /// Updates the process-wide 30 Hz audio-response FFT tuning atomics
+    /// (sensitivity, noise floor dB, and exponential smoothing) without
+    /// restarting audio capture or any scene.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the renderer rejects the call.
+    pub fn set_audio_response_tuning(
+        &self,
+        tuning: crate::AudioResponseTuning,
+    ) -> Result<(), EngineError> {
+        self.backend.set_audio_response_tuning(tuning)
+    }
+
     /// Latest full-resolution (224-band, unclamped) system-audio spectrum, or
     /// `None` when no analysis has run.
     ///

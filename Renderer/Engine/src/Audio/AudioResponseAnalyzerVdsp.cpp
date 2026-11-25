@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 
 namespace wallpaper::audio
@@ -22,8 +23,18 @@ constexpr uint32_t kWindowSize = kAudioResponseWindowFrames;
 constexpr uint32_t kBandCount64 = 64;
 constexpr uint32_t kLinearBands = 16;
 constexpr uint32_t kTopBin = 640;
-// Levels span 48 dB below a full-scale tone.
-constexpr float kFloorDecibels = 48.0f;
+// Residual smoothed values below this threshold flush to zero when raw input
+// is silent so exponential decay never lingers as subnormal floats.
+constexpr float kSmoothingZeroFlush = 1e-7f;
+
+struct AtomicAudioResponseTuning
+{
+    std::atomic<float> sensitivity { kAudioResponseDefaultSensitivity };
+    std::atomic<float> noise_floor_db { kAudioResponseDefaultNoiseFloorDb };
+    std::atomic<float> smoothing { kAudioResponseDefaultSmoothing };
+};
+
+AtomicAudioResponseTuning g_tuning {};
 
 static_assert(kWindowSize <= kFftSize);
 static_assert(kTopBin < kFftSize / 2u);
@@ -70,12 +81,17 @@ AnalyzerResources& Resources()
     return resources;
 }
 
-float Level(float energy)
+float Level(float energy, float floor_db, float sensitivity)
 {
     if (! (energy > 0.0f) || ! std::isfinite(energy)) {
         return 0.0f;
     }
-    return std::max(0.0f, 1.0f + (20.0f * std::log10(energy)) / kFloorDecibels);
+    const float base = std::max(0.0f, 1.0f + (20.0f * std::log10(energy)) / floor_db);
+    if (sensitivity == kAudioResponseDefaultSensitivity) {
+        return base;
+    }
+    const float scaled = base * sensitivity;
+    return std::isfinite(scaled) ? std::max(0.0f, scaled) : 0.0f;
 }
 
 struct ChannelLevels
@@ -87,14 +103,17 @@ struct ChannelLevels
 
 // Energy is summed over each bucket's bins, so a coarser resolution covers the
 // same frequencies with the energy of the buckets it merges.
-ChannelLevels AnalyzeChannel(const float* pcm)
+// Keep one out-of-line copy with 64-byte aligned FFT scratch buffers so mono
+// and stereo paths dispatch the exact same vDSP kernel and codegen regardless
+// of caller stack-frame alignment.
+[[gnu::noinline]] ChannelLevels AnalyzeChannel(const float* pcm, float floor_db, float sensitivity)
 {
     const auto& resources = Resources();
 
-    std::array<float, kFftSize>      windowed {};
-    std::array<float, kFftSize / 2u> realp {};
-    std::array<float, kFftSize / 2u> imagp {};
-    std::array<float, kFftSize / 2u> power {};
+    alignas(64) std::array<float, kFftSize>      windowed {};
+    alignas(64) std::array<float, kFftSize / 2u> realp {};
+    alignas(64) std::array<float, kFftSize / 2u> imagp {};
+    alignas(64) std::array<float, kFftSize / 2u> power {};
 
     vDSP_vmul(pcm, 1, resources.window.data(), 1, windowed.data(), 1,
               static_cast<vDSP_Length>(kWindowSize));
@@ -127,18 +146,33 @@ ChannelLevels AnalyzeChannel(const float* pcm)
 
     ChannelLevels levels;
     for (uint32_t band = 0; band < kBandCount64; ++band) {
-        levels.bands64[band] = Level(std::sqrt(energy_squared[band]));
+        levels.bands64[band] = Level(std::sqrt(energy_squared[band]), floor_db, sensitivity);
     }
     for (uint32_t band = 0; band < 32u; ++band) {
         levels.bands32[band] =
-            Level(std::sqrt(energy_squared[band * 2u] + energy_squared[band * 2u + 1u]));
+            Level(std::sqrt(energy_squared[band * 2u] + energy_squared[band * 2u + 1u]), floor_db, sensitivity);
     }
     for (uint32_t band = 0; band < 16u; ++band) {
         float sum = 0.0f;
         for (uint32_t part = 0; part < 4u; ++part) sum += energy_squared[band * 4u + part];
-        levels.bands16[band] = Level(std::sqrt(sum));
+        levels.bands16[band] = Level(std::sqrt(sum), floor_db, sensitivity);
     }
     return levels;
+}
+
+template<typename Array>
+void SmoothInto(const Array& raw, Array& target, float smoothing)
+{
+    if (! (smoothing > 0.0f)) {
+        target = raw;
+        return;
+    }
+    const float raw_weight = 1.0f - smoothing;
+    for (size_t band = 0; band < target.size(); ++band) {
+        const float prev = (std::isfinite(target[band]) && target[band] > 0.0f) ? target[band] : 0.0f;
+        const float blended = smoothing * prev + raw_weight * raw[band];
+        target[band] = (raw[band] == 0.0f && blended < kSmoothingZeroFlush) ? 0.0f : blended;
+    }
 }
 
 template<typename Array>
@@ -151,6 +185,37 @@ void Average(const Array& left, const Array& right, Array& average)
 
 } // namespace
 
+AudioResponseTuning ClampAudioResponseTuning(AudioResponseTuning tuning)
+{
+    tuning.sensitivity = std::isfinite(tuning.sensitivity)
+        ? std::clamp(tuning.sensitivity, kAudioResponseMinSensitivity, kAudioResponseMaxSensitivity)
+        : kAudioResponseDefaultSensitivity;
+    tuning.noise_floor_db = std::isfinite(tuning.noise_floor_db)
+        ? std::clamp(tuning.noise_floor_db, kAudioResponseMinNoiseFloorDb, kAudioResponseMaxNoiseFloorDb)
+        : kAudioResponseDefaultNoiseFloorDb;
+    tuning.smoothing = std::isfinite(tuning.smoothing)
+        ? std::clamp(tuning.smoothing, kAudioResponseMinSmoothing, kAudioResponseMaxSmoothing)
+        : kAudioResponseDefaultSmoothing;
+    return tuning;
+}
+
+void SetAudioResponseTuning(AudioResponseTuning tuning)
+{
+    const auto clamped = ClampAudioResponseTuning(tuning);
+    g_tuning.sensitivity.store(clamped.sensitivity, std::memory_order_relaxed);
+    g_tuning.noise_floor_db.store(clamped.noise_floor_db, std::memory_order_relaxed);
+    g_tuning.smoothing.store(clamped.smoothing, std::memory_order_relaxed);
+}
+
+AudioResponseTuning CurrentAudioResponseTuning()
+{
+    return AudioResponseTuning {
+        .sensitivity = g_tuning.sensitivity.load(std::memory_order_relaxed),
+        .noise_floor_db = g_tuning.noise_floor_db.load(std::memory_order_relaxed),
+        .smoothing = g_tuning.smoothing.load(std::memory_order_relaxed),
+    };
+}
+
 void AnalyzeAudioResponseMonoBlock(
     const float* mono_pcm,
     uint32_t frame_count,
@@ -160,10 +225,15 @@ void AnalyzeAudioResponseMonoBlock(
         return;
     }
 
-    const auto levels = AnalyzeChannel(mono_pcm);
-    snapshot->average64 = snapshot->left64 = snapshot->right64 = levels.bands64;
-    snapshot->average32 = snapshot->left32 = snapshot->right32 = levels.bands32;
-    snapshot->average16 = snapshot->left16 = snapshot->right16 = levels.bands16;
+    const auto tuning = CurrentAudioResponseTuning();
+    const float floor_db = -tuning.noise_floor_db;
+    const auto levels = AnalyzeChannel(mono_pcm, floor_db, tuning.sensitivity);
+    SmoothInto(levels.bands64, snapshot->average64, tuning.smoothing);
+    SmoothInto(levels.bands32, snapshot->average32, tuning.smoothing);
+    SmoothInto(levels.bands16, snapshot->average16, tuning.smoothing);
+    snapshot->left64 = snapshot->right64 = snapshot->average64;
+    snapshot->left32 = snapshot->right32 = snapshot->average32;
+    snapshot->left16 = snapshot->right16 = snapshot->average16;
     snapshot->stereo = false;
 }
 
@@ -178,14 +248,16 @@ void AnalyzeAudioResponseStereoBlock(
         return;
     }
 
-    const auto left = AnalyzeChannel(left_pcm);
-    const auto right = AnalyzeChannel(right_pcm);
-    snapshot->left64 = left.bands64;
-    snapshot->right64 = right.bands64;
-    snapshot->left32 = left.bands32;
-    snapshot->right32 = right.bands32;
-    snapshot->left16 = left.bands16;
-    snapshot->right16 = right.bands16;
+    const auto tuning = CurrentAudioResponseTuning();
+    const float floor_db = -tuning.noise_floor_db;
+    const auto left = AnalyzeChannel(left_pcm, floor_db, tuning.sensitivity);
+    const auto right = AnalyzeChannel(right_pcm, floor_db, tuning.sensitivity);
+    SmoothInto(left.bands64, snapshot->left64, tuning.smoothing);
+    SmoothInto(right.bands64, snapshot->right64, tuning.smoothing);
+    SmoothInto(left.bands32, snapshot->left32, tuning.smoothing);
+    SmoothInto(right.bands32, snapshot->right32, tuning.smoothing);
+    SmoothInto(left.bands16, snapshot->left16, tuning.smoothing);
+    SmoothInto(right.bands16, snapshot->right16, tuning.smoothing);
     Average(snapshot->left64, snapshot->right64, snapshot->average64);
     Average(snapshot->left32, snapshot->right32, snapshot->average32);
     Average(snapshot->left16, snapshot->right16, snapshot->average16);

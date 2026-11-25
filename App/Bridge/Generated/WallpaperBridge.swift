@@ -1099,6 +1099,32 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func setAudioResponseEnabled(wallpaperId: String, enabled: Bool) async throws  -> BridgeWallpaperMutationBundle
 
     /**
+     * Selects an optional target application bundle identifier for per-app
+     * system audio capture (`None` or empty captures all system audio excluding
+     * this app).
+     *
+     * # Errors
+     *
+     * Returns an error when the setting cannot be saved or when updating the
+     * capture backend fails.
+     */
+    func setAudioResponseTargetApp(bundleId: String?) async throws  -> BridgeSnapshotBundle
+
+    /**
+     * Tunes the process-wide 30 Hz audio-response spectrum analyser.
+     *
+     * Values are clamped to their supported ranges (`sensitivity` `0.25..=4.0`,
+     * `noise_floor_db` `-72.0..=-24.0`, `smoothing` `0.0..=0.90`) and applied
+     * through relaxed atomics without restarting capture or any wallpaper.
+     *
+     * # Errors
+     *
+     * Returns an error when any value is non-finite, when the setting cannot be
+     * saved, or when the renderer rejects the call.
+     */
+    func setAudioResponseTuning(sensitivity: Float, noiseFloorDb: Float, smoothing: Float) async throws  -> BridgeSnapshotBundle
+
+    /**
      * Mutes or restores every open scene on top of its saved mute. Not
      * persisted. A user unmute while this is set stays muted until it clears.
      *
@@ -2951,6 +2977,62 @@ open func setAudioResponseEnabled(wallpaperId: String, enabled: Bool)async throw
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+
+    /**
+     * Selects an optional target application bundle identifier for per-app
+     * system audio capture (`None` or empty captures all system audio excluding
+     * this app).
+     *
+     * # Errors
+     *
+     * Returns an error when the setting cannot be saved or when updating the
+     * capture backend fails.
+     */
+open func setAudioResponseTargetApp(bundleId: String?)async throws  -> BridgeSnapshotBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_audio_response_target_app(
+                    self.uniffiClonePointer(),
+                    FfiConverterOptionString.lower(bundleId)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+
+    /**
+     * Tunes the process-wide 30 Hz audio-response spectrum analyser.
+     *
+     * Values are clamped to their supported ranges (`sensitivity` `0.25..=4.0`,
+     * `noise_floor_db` `-72.0..=-24.0`, `smoothing` `0.0..=0.90`) and applied
+     * through relaxed atomics without restarting capture or any wallpaper.
+     *
+     * # Errors
+     *
+     * Returns an error when any value is non-finite, when the setting cannot be
+     * saved, or when the renderer rejects the call.
+     */
+open func setAudioResponseTuning(sensitivity: Float, noiseFloorDb: Float, smoothing: Float)async throws  -> BridgeSnapshotBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_audio_response_tuning(
+                    self.uniffiClonePointer(),
+                    FfiConverterFloat.lower(sensitivity),FfiConverterFloat.lower(noiseFloorDb),FfiConverterFloat.lower(smoothing)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -8964,6 +9046,26 @@ public struct BridgeSettingsSnapshot {
      * never written into them, so the panel names these beside it.
      */
     public var mutedWallpaperCount: UInt32
+    /**
+     * Sensitivity multiplier applied to 30 Hz audio-response spectrum bands
+     * before web clamping (`0.25..=4.0`, default `1.0`).
+     */
+    public var audioResponseSensitivity: Float
+    /**
+     * Noise floor in decibels for 30 Hz audio-response spectrum analysis
+     * (`-72.0..=-24.0`, default `-48.0`).
+     */
+    public var audioResponseNoiseFloorDb: Float
+    /**
+     * Exponential temporal smoothing factor for 30 Hz audio-response spectrum
+     * bands (`0.0..=0.90`, default `0.0`).
+     */
+    public var audioResponseSmoothing: Float
+    /**
+     * Optional target application bundle identifier for per-app system audio
+     * capture (`None` = all system audio excluding this app).
+     */
+    public var audioResponseTargetApp: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -9056,7 +9158,23 @@ public struct BridgeSettingsSnapshot {
          * How many installed wallpapers are muted in their own saved sound
          * settings. The host's mute of every wallpaper is layered on top and
          * never written into them, so the panel names these beside it.
-         */mutedWallpaperCount: UInt32) {
+         */mutedWallpaperCount: UInt32,
+        /**
+         * Sensitivity multiplier applied to 30 Hz audio-response spectrum bands
+         * before web clamping (`0.25..=4.0`, default `1.0`).
+         */audioResponseSensitivity: Float,
+        /**
+         * Noise floor in decibels for 30 Hz audio-response spectrum analysis
+         * (`-72.0..=-24.0`, default `-48.0`).
+         */audioResponseNoiseFloorDb: Float,
+        /**
+         * Exponential temporal smoothing factor for 30 Hz audio-response spectrum
+         * bands (`0.0..=0.90`, default `0.0`).
+         */audioResponseSmoothing: Float,
+        /**
+         * Optional target application bundle identifier for per-app system audio
+         * capture (`None` = all system audio excluding this app).
+         */audioResponseTargetApp: String?) {
         self.displays = displays
         self.launchAtLoginAvailable = launchAtLoginAvailable
         self.launchAtLoginEnabled = launchAtLoginEnabled
@@ -9089,6 +9207,10 @@ public struct BridgeSettingsSnapshot {
         self.effectiveFrameRateCap = effectiveFrameRateCap
         self.renderScaleSupported = renderScaleSupported
         self.mutedWallpaperCount = mutedWallpaperCount
+        self.audioResponseSensitivity = audioResponseSensitivity
+        self.audioResponseNoiseFloorDb = audioResponseNoiseFloorDb
+        self.audioResponseSmoothing = audioResponseSmoothing
+        self.audioResponseTargetApp = audioResponseTargetApp
     }
 }
 
@@ -9192,6 +9314,18 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         if lhs.mutedWallpaperCount != rhs.mutedWallpaperCount {
             return false
         }
+        if lhs.audioResponseSensitivity != rhs.audioResponseSensitivity {
+            return false
+        }
+        if lhs.audioResponseNoiseFloorDb != rhs.audioResponseNoiseFloorDb {
+            return false
+        }
+        if lhs.audioResponseSmoothing != rhs.audioResponseSmoothing {
+            return false
+        }
+        if lhs.audioResponseTargetApp != rhs.audioResponseTargetApp {
+            return false
+        }
         return true
     }
 
@@ -9228,6 +9362,10 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         hasher.combine(effectiveFrameRateCap)
         hasher.combine(renderScaleSupported)
         hasher.combine(mutedWallpaperCount)
+        hasher.combine(audioResponseSensitivity)
+        hasher.combine(audioResponseNoiseFloorDb)
+        hasher.combine(audioResponseSmoothing)
+        hasher.combine(audioResponseTargetApp)
     }
 }
 
@@ -9270,7 +9408,11 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
                 qualityThrottle: FfiConverterSequenceTypeBridgeQualityThrottleCause.read(from: &buf),
                 effectiveFrameRateCap: FfiConverterOptionUInt32.read(from: &buf),
                 renderScaleSupported: FfiConverterBool.read(from: &buf),
-                mutedWallpaperCount: FfiConverterUInt32.read(from: &buf)
+                mutedWallpaperCount: FfiConverterUInt32.read(from: &buf),
+                audioResponseSensitivity: FfiConverterFloat.read(from: &buf),
+                audioResponseNoiseFloorDb: FfiConverterFloat.read(from: &buf),
+                audioResponseSmoothing: FfiConverterFloat.read(from: &buf),
+                audioResponseTargetApp: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -9307,6 +9449,10 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
         FfiConverterOptionUInt32.write(value.effectiveFrameRateCap, into: &buf)
         FfiConverterBool.write(value.renderScaleSupported, into: &buf)
         FfiConverterUInt32.write(value.mutedWallpaperCount, into: &buf)
+        FfiConverterFloat.write(value.audioResponseSensitivity, into: &buf)
+        FfiConverterFloat.write(value.audioResponseNoiseFloorDb, into: &buf)
+        FfiConverterFloat.write(value.audioResponseSmoothing, into: &buf)
+        FfiConverterOptionString.write(value.audioResponseTargetApp, into: &buf)
     }
 }
 
@@ -13555,6 +13701,12 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_audio_response_enabled() != 32236) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_audio_response_target_app() != 51182) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_audio_response_tuning() != 11610) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_audio_suppressed() != 35975) {

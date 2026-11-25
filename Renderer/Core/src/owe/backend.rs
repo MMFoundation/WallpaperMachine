@@ -51,6 +51,59 @@ use crate::{
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OweBackend;
 
+/// Process-wide 30 Hz FFT output tuning applied by the C++ audio-response
+/// analyser (`sensitivity`, `noise_floor_db`, `smoothing`).
+/// Defaults `(1.0, -48.0, 0.0)` preserve bit-exact legacy behaviour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AudioResponseTuning {
+    pub sensitivity: f32,
+    pub noise_floor_db: f32,
+    pub smoothing: f32,
+}
+
+impl AudioResponseTuning {
+    pub const DEFAULT_SENSITIVITY: f32 = 1.0;
+    pub const MIN_SENSITIVITY: f32 = 0.25;
+    pub const MAX_SENSITIVITY: f32 = 4.0;
+    pub const DEFAULT_NOISE_FLOOR_DB: f32 = -48.0;
+    pub const MIN_NOISE_FLOOR_DB: f32 = -72.0;
+    pub const MAX_NOISE_FLOOR_DB: f32 = -24.0;
+    pub const DEFAULT_SMOOTHING: f32 = 0.0;
+    pub const MIN_SMOOTHING: f32 = 0.0;
+    pub const MAX_SMOOTHING: f32 = 0.90;
+
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            sensitivity: if self.sensitivity.is_finite() {
+                self.sensitivity.clamp(Self::MIN_SENSITIVITY, Self::MAX_SENSITIVITY)
+            } else {
+                Self::DEFAULT_SENSITIVITY
+            },
+            noise_floor_db: if self.noise_floor_db.is_finite() {
+                self.noise_floor_db.clamp(Self::MIN_NOISE_FLOOR_DB, Self::MAX_NOISE_FLOOR_DB)
+            } else {
+                Self::DEFAULT_NOISE_FLOOR_DB
+            },
+            smoothing: if self.smoothing.is_finite() {
+                self.smoothing.clamp(Self::MIN_SMOOTHING, Self::MAX_SMOOTHING)
+            } else {
+                Self::DEFAULT_SMOOTHING
+            },
+        }
+    }
+}
+
+impl Default for AudioResponseTuning {
+    fn default() -> Self {
+        Self {
+            sensitivity: Self::DEFAULT_SENSITIVITY,
+            noise_floor_db: Self::DEFAULT_NOISE_FLOOR_DB,
+            smoothing: Self::DEFAULT_SMOOTHING,
+        }
+    }
+}
+
 pub type FirstFrameCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 
 pub type PointerInputCallback = Arc<dyn Fn(bool) + Send + Sync + 'static>;
@@ -220,6 +273,27 @@ impl OweBackend {
                 frames.samples().as_ptr(),
             )
         })
+    }
+
+    /// Updates the process-wide 30 Hz audio-response FFT tuning atomics.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] if the call unwinds.
+    pub fn set_audio_response_tuning(
+        &self,
+        tuning: AudioResponseTuning,
+    ) -> Result<(), EngineError> {
+        let clamped = tuning.clamped();
+        unsafe {
+            UnwindSafeFFI::new("owe_audio_set_response_tuning").call(|| {
+                sys::owe_audio_set_response_tuning(
+                    clamped.sensitivity,
+                    clamped.noise_floor_db,
+                    clamped.smoothing,
+                );
+            })
+        }
     }
 
 

@@ -27,7 +27,6 @@ constexpr uint32_t kHopSize = kWindowSize;
 constexpr size_t kInterleavedChannels = 2u;
 constexpr size_t kMaxRetainedMonoFrames = static_cast<size_t>(kAnalysisSampleRate) * 2u;
 constexpr auto kSnapshotStaleAfter = std::chrono::milliseconds(250);
-constexpr float kSnapshotSignalFloor = 0.0001f;
 constexpr float kPcmSignalFloor = 0.00005f;
 
 struct AudioResponseState
@@ -131,10 +130,18 @@ float Sanitize(float sample)
     return std::isfinite(sample) ? std::clamp(sample, -1.0f, 1.0f) : 0.0f;
 }
 
+template<size_t N>
+bool AnyNonZero(const std::array<float, N>& bands)
+{
+    return std::any_of(bands.begin(), bands.end(), [](float v) { return v != 0.0f; });
+}
+
 bool HasSnapshotSignalLocked()
 {
-    const auto& bands = g_state.snapshot.average64;
-    return std::any_of(bands.begin(), bands.end(), [](float v) { return v > kSnapshotSignalFloor; });
+    const auto& s = g_state.snapshot;
+    return AnyNonZero(s.left64) || AnyNonZero(s.right64) || AnyNonZero(s.average64) ||
+           AnyNonZero(s.left32) || AnyNonZero(s.right32) || AnyNonZero(s.average32) ||
+           AnyNonZero(s.left16) || AnyNonZero(s.right16) || AnyNonZero(s.average16);
 }
 
 bool NeverSubmittedLocked()
@@ -160,9 +167,12 @@ bool AnalyzeNextBlock(std::unique_lock<std::mutex>& lock, const std::stop_token&
         std::copy_n(g_state.fifo_right.begin() + begin, kWindowSize, right.begin());
     }
     DropOldestFramesLocked(kHopSize);
+    // Preserve previous spectrum bands so exponential smoothing (when enabled)
+    // blends continuously across 30 Hz blocks; silent blocks and staleness
+    // clear this snapshot to zero.
+    AudioSpectrumSnapshot analysed = g_state.snapshot;
 
     lock.unlock();
-    AudioSpectrumSnapshot analysed {};
     const bool silent = BlockIsSilent(left.data()) && (!stereo || BlockIsSilent(right.data()));
     if (silent) {
         ClearAudioResponseSnapshot(&analysed);
@@ -208,6 +218,8 @@ void WorkerMain(std::stop_token stop_token)
             ClearFifosLocked();
             if (g_state.snapshot.generation > 0u && HasSnapshotSignalLocked()) {
                 PublishSilenceLocked();
+            } else {
+                ClearAudioResponseSnapshot(&g_state.snapshot);
             }
             g_state.last_submit_time = Clock::time_point {};
             continue;
@@ -297,6 +309,7 @@ bool SubmitValidatedFrames(
     const auto now = std::chrono::steady_clock::now();
     if (!NeverSubmittedLocked() && now - g_state.last_submit_time >= kSnapshotStaleAfter) {
         ClearFifosLocked();
+        ClearAudioResponseSnapshot(&g_state.snapshot);
     }
     AppendFramesLocked(pcm_frames, frame_count, stereo);
     g_state.last_submit_time = now;
@@ -402,6 +415,7 @@ bool CurrentAudioSpectrumIsStereo()
 void ResetAudioResponseServiceForTesting()
 {
     StopWorker();
+    SetAudioResponseTuning(AudioResponseTuning {});
     std::lock_guard<std::mutex> lock(g_state.mutex);
     ClearFifosLocked();
     g_state.fifo_stereo = false;

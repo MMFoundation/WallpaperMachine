@@ -12,6 +12,12 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
     var targetFps: UInt32
   }
 
+  struct AudioResponseTuningCall: Equatable {
+    var sensitivity: Float
+    var noiseFloorDb: Float
+    var smoothing: Float
+  }
+
   var batteryProfileCalls: [Profile] = []
   var sceneOptimizationCalls: [Bool] = []
   var sceneOnDemandCalls: [Bool] = []
@@ -21,6 +27,8 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
   var sceneResolutionCalls: [String] = []
   var sceneQualityCalls: [BridgeSceneQuality] = []
   var verboseLoggingCalls: [Bool] = []
+  var audioResponseTuningCalls: [AudioResponseTuningCall] = []
+  var audioResponseTargetAppCalls: [String?] = []
   /// Counted off the main actor: the store reads these synchronously.
   let clearShaderCacheCalls = SettingsCallCounter()
   let clearLogsCalls = SettingsCallCounter()
@@ -84,6 +92,26 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
 
   override func setVerboseLogging(enabled: Bool) async throws -> BridgeSnapshotBundle {
     try await record({ $0.verboseLoggingCalls.append(enabled) }) { $0.verboseLogging = enabled }
+  }
+
+  override func setAudioResponseTuning(
+    sensitivity: Float, noiseFloorDb: Float, smoothing: Float
+  ) async throws -> BridgeSnapshotBundle {
+    try await record({
+      $0.audioResponseTuningCalls.append(
+        AudioResponseTuningCall(
+          sensitivity: sensitivity, noiseFloorDb: noiseFloorDb, smoothing: smoothing))
+    }) {
+      $0.audioResponseSensitivity = sensitivity
+      $0.audioResponseNoiseFloorDb = noiseFloorDb
+      $0.audioResponseSmoothing = smoothing
+    }
+  }
+
+  override func setAudioResponseTargetApp(bundleId: String?) async throws -> BridgeSnapshotBundle {
+    try await record({ $0.audioResponseTargetAppCalls.append(bundleId) }) {
+      $0.audioResponseTargetApp = bundleId
+    }
   }
 
   override func clearShaderCache() async throws -> BridgeSettingsSnapshot {
