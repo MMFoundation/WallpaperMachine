@@ -129,10 +129,16 @@ extension PanelController {
       }
       return value
     case (.combo, _):
-      guard let option = descriptor.comboOptions.first(where: { $0.value == value }) else {
-        throw InvalidControlValue()
+      if let option = descriptor.comboOptions.first(where: { $0.value == value }) {
+        return option.value
       }
-      return option.value
+      if UserShortcutDescriptor.isUserShortcut(descriptor),
+         case .string(let raw) = value,
+         UserShortcutTarget(rawValue: raw) != nil
+      {
+        return value
+      }
+      throw InvalidControlValue()
     default:
       throw InvalidControlValue()
     }
@@ -153,6 +159,8 @@ extension PanelController {
       }
       try await store.applyWallpaperOptionsAsync(wallpaperId: id, userInitiated: true)
     }
+    commitPendingUserShortcutEdits(for: wallpaperID)
+    await pruneUnmatchedUserShortcuts(for: wallpaperID)
     reconcileInspectorContext()
   }
 
@@ -164,6 +172,8 @@ extension PanelController {
     try await run(.queued) {
       try await store.cancelWallpaperOptionsAsync(wallpaperId: installedWallpaperID(wallpaperID))
     }
+    pendingUserShortcutEdits.removeValue(forKey: wallpaperID)
+    await pruneUnmatchedUserShortcuts(for: wallpaperID)
     reconcileInspectorContext()
   }
 
@@ -172,8 +182,13 @@ extension PanelController {
   func restoreProperty(_ wallpaperID: String, property propertyID: String) async throws {
     store.editorState.clearPropertyText(.init(wallpaperID: wallpaperID, fieldID: propertyID))
     try await run(.queued) {
-      try await store.restorePropertyDefaultAsync(
-        wallpaperId: installedWallpaperID(wallpaperID), propertyId: propertyID)
+      let id = try installedWallpaperID(wallpaperID)
+      try await store.restorePropertyDefaultAsync(wallpaperId: id, propertyId: propertyID)
+      if userShortcuts.binding(wallpaperID: id, propertyID: propertyID) != nil
+          || pendingUserShortcutEdits[id]?[propertyID] != nil
+      {
+        pendingUserShortcutEdits[id, default: [:]][propertyID] = .remove
+      }
     }
   }
 
@@ -183,9 +198,204 @@ extension PanelController {
   func restoreAllProperties(_ wallpaperID: String) async throws {
     discardPropertyTextDrafts(of: wallpaperID)
     try await run(.queued) {
-      try await store.restoreAllPropertyDefaultsAsync(
-        wallpaperId: installedWallpaperID(wallpaperID))
+      let id = try installedWallpaperID(wallpaperID)
+      try await store.restoreAllPropertyDefaultsAsync(wallpaperId: id)
+      let propertyIDs = Set(userShortcuts.bindings(for: id).keys)
+        .union((pendingUserShortcutEdits[id] ?? [:]).keys)
+      for propertyID in propertyIDs {
+        pendingUserShortcutEdits[id, default: [:]][propertyID] = .remove
+      }
     }
+  }
+
+  // MARK: User shortcuts (macOS Apps & Apple Shortcuts)
+
+  /// Merged view of persisted `UserShortcutStore` approvals plus staged (unapplied) inspector edits
+  /// for `wallpaperID`. Never arms unapplied edits in `UserShortcutExecutor`.
+  func effectiveApprovedUserShortcuts(for wallpaperID: String) -> [String: ApprovedUserShortcutBinding] {
+    var result = userShortcuts.bindings(for: wallpaperID)
+    if let pending = pendingUserShortcutEdits[wallpaperID] {
+      for (propertyID, edit) in pending {
+        switch edit {
+        case .approve(let binding):
+          result[propertyID] = binding
+        case .remove:
+          result.removeValue(forKey: propertyID)
+        }
+      }
+    }
+    return result
+  }
+
+  /// Picks a `.app` bundle via sheet (`chooseApplicationURL`), extracts its `CFBundleIdentifier`
+  /// and display name, and stages `app:<bundleID>` on the wallpaper property. Approval is persisted
+  /// to `UserShortcutStore` only when the user clicks "Apply changes".
+  func chooseShortcutApplication(_ wallpaperID: String, property propertyID: String) async throws {
+    errors.clearAction()
+    guard let url = await chooseApplicationURL() else { return }
+    guard let bundleID = Bundle(url: url)?.bundleIdentifier,
+          UserShortcutTarget.isValidBundleIdentifier(bundleID)
+    else {
+      throw WallpaperActionError(
+        message: L("This app has no bundle identifier, so it can’t be bound to a shortcut."))
+    }
+    var displayName = FileManager.default.displayName(atPath: url.path)
+    if displayName.lowercased().hasSuffix(".app") {
+      displayName = String(displayName.dropLast(4))
+    }
+    try await stageUserShortcutBinding(
+      wallpaperID, property: propertyID,
+      target: .application(bundleID: bundleID),
+      displayName: displayName)
+  }
+
+  /// Validates an Apple Shortcut name and stages `shortcut:<name>` on the wallpaper property.
+  /// Approval is persisted to `UserShortcutStore` only when the user clicks "Apply changes".
+  func bindUserShortcut(
+    _ wallpaperID: String, property propertyID: String, shortcutName: String
+  ) async throws {
+    let trimmed = shortcutName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard UserShortcutTarget.isValidShortcutName(trimmed) else {
+      throw WallpaperActionError(
+        message: L("Enter a valid Shortcut name. Names cannot be empty or start with a hyphen."))
+    }
+    try await stageUserShortcutBinding(
+      wallpaperID, property: propertyID,
+      target: .shortcut(name: trimmed),
+      displayName: nil)
+  }
+
+  /// Selects a built-in media action (`""`, `"media:playpause"`, `"media:next"`, `"media:previous"`)
+  /// and stages removal of any custom app/shortcut binding until "Apply changes" commits it
+  /// (so clicking Revert restores both the property and its existing approval cleanly).
+  func setUserShortcutAction(
+    _ wallpaperID: String, property propertyID: String, builtInValue: String
+  ) async throws {
+    let bridgeValue = BridgePropertyValue.string(value: builtInValue)
+    guard UserShortcutDescriptor.isBuiltInValue(bridgeValue) else { throw InvalidControlValue() }
+    try await commitProperty(wallpaperID, property: propertyID, value: bridgeValue)
+    if userShortcuts.binding(wallpaperID: wallpaperID, propertyID: propertyID) != nil
+        || pendingUserShortcutEdits[wallpaperID]?[propertyID] != nil
+    {
+      pendingUserShortcutEdits[wallpaperID, default: [:]][propertyID] = .remove
+    }
+  }
+
+  private func stageUserShortcutBinding(
+    _ wallpaperID: String,
+    property propertyID: String,
+    target: UserShortcutTarget,
+    displayName: String?
+  ) async throws {
+    let value = BridgePropertyValue.string(value: target.rawValue)
+    pendingPropertyValues[wallpaperID, default: [:]][propertyID] = value
+    defer {
+      if pendingPropertyValues[wallpaperID]?[propertyID] == value {
+        pendingPropertyValues[wallpaperID]?[propertyID] = nil
+        if pendingPropertyValues[wallpaperID]?.isEmpty == true {
+          pendingPropertyValues[wallpaperID] = nil
+        }
+      }
+    }
+    try await run(.queued) {
+      let id = try installedWallpaperID(wallpaperID)
+      let options = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
+      guard let descriptor = options.properties.first(where: { $0.id == propertyID && $0.enabled }),
+            UserShortcutDescriptor.isUserShortcut(descriptor)
+      else { throw InvalidControlValue() }
+      let trimmedName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+      let normalizedName = (trimmedName?.isEmpty == false) ? trimmedName : nil
+      let binding = ApprovedUserShortcutBinding(
+        wallpaperID: id,
+        propertyID: propertyID,
+        target: target,
+        displayName: normalizedName,
+        approvedAt: Date())
+      guard binding.isValid else {
+        throw UserShortcutStoreError(
+          message: String(localized: "Choose a valid application or Shortcut name."))
+      }
+      let stagedNewCount = pendingUserShortcutEdits.values.reduce(0) { count, map in
+        count + map.values.reduce(0) { inner, edit in
+          if case .approve(let pending) = edit,
+             !(pending.wallpaperID == id && pending.propertyID == propertyID),
+             userShortcuts.binding(wallpaperID: pending.wallpaperID, propertyID: pending.propertyID) == nil
+          {
+            return inner + 1
+          }
+          return inner
+        }
+      }
+      guard userShortcuts.canApprove(
+        wallpaperID: id, propertyID: propertyID, additionalStagedCount: stagedNewCount)
+      else {
+        throw UserShortcutStoreError(
+          message: String(localized: "Too many shortcut bindings are saved."))
+      }
+      try await store.editPropertyAsync(wallpaperId: id, propertyId: propertyID, value: value)
+      pendingUserShortcutEdits[id, default: [:]][propertyID] = .approve(binding)
+    }
+    reconcileInspectorContext()
+  }
+
+  /// Commits staged `usershortcut` approval additions/removals into `UserShortcutStore` once the
+  /// bridge has applied `wallpaperID`'s edits.
+  func commitPendingUserShortcutEdits(for wallpaperID: String) {
+    guard let pending = pendingUserShortcutEdits.removeValue(forKey: wallpaperID), !pending.isEmpty else {
+      return
+    }
+    let snapshot = store.wallpaperOptionsSnapshot.flatMap { $0.wallpaperId == wallpaperID ? $0 : nil }
+    let valuesByID: [String: String]? = snapshot.map { snap in
+      Dictionary(
+        uniqueKeysWithValues: snap.properties.compactMap { descriptor in
+          guard case .string(let text) = descriptor.value else { return nil }
+          return (descriptor.id, text)
+        })
+    }
+    for (propertyID, edit) in pending {
+      switch edit {
+      case .approve(let binding):
+        if let valuesByID, valuesByID[propertyID] != binding.rawValue {
+          continue
+        }
+        _ = try? userShortcuts.approve(
+          wallpaperID: binding.wallpaperID,
+          propertyID: binding.propertyID,
+          target: binding.target,
+          displayName: binding.displayName,
+          now: binding.approvedAt)
+      case .remove:
+        userShortcuts.remove(wallpaperID: wallpaperID, propertyID: propertyID)
+      }
+    }
+    userShortcutsRevision &+= 1
+  }
+
+  /// Drops any saved custom shortcut approvals whose wallpaper property no longer carries that
+  /// target after Apply changes, Revert, or applying a property preset.
+  func pruneUnmatchedUserShortcuts(for wallpaperID: String) async {
+    let existing = userShortcuts.bindings(for: wallpaperID)
+    guard !existing.isEmpty else { return }
+    let snapshot: BridgeWallpaperOptionsSnapshot?
+    if let cached = store.wallpaperOptionsSnapshot, cached.wallpaperId == wallpaperID {
+      snapshot = cached
+    } else {
+      snapshot = try? await store.wallpaperOptionsSnapshotAsync(wallpaperId: wallpaperID)
+    }
+    guard let snapshot else { return }
+    let valuesByID: [String: String] = Dictionary(
+      uniqueKeysWithValues: snapshot.properties.compactMap { descriptor in
+        guard case .string(let text) = descriptor.value else { return nil }
+        return (descriptor.id, text)
+      })
+    var removed = false
+    for (propertyID, binding) in existing {
+      if valuesByID[propertyID] != binding.rawValue {
+        userShortcuts.remove(wallpaperID: wallpaperID, propertyID: propertyID)
+        removed = true
+      }
+    }
+    if removed { userShortcutsRevision &+= 1 }
   }
 
   // MARK: Files, folders and images

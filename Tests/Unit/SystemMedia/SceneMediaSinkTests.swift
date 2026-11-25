@@ -283,10 +283,10 @@ final class SceneMediaSinkTests: XCTestCase {
         let provider = ScriptedSystemMediaProvider()
         let session = DesktopMediaSession(provider: provider)
         let presses = AsyncPresses([
-            BridgeUserShortcut(sceneHandle: 11, property: "nextsongbutton", value: "media:next"),
-            BridgeUserShortcut(sceneHandle: 11, property: "mystery", value: ""),
+            BridgeUserShortcut(sceneHandle: 11, wallpaperId: "scene-11", property: "nextsongbutton", value: "media:next"),
+            BridgeUserShortcut(sceneHandle: 11, wallpaperId: "scene-11", property: "mystery", value: ""),
             BridgeUserShortcut(
-                sceneHandle: 11, property: "playpausebutton", value: "media:playpause"),
+                sceneHandle: 11, wallpaperId: "scene-11", property: "playpausebutton", value: "media:playpause"),
         ])
         let sink = SceneMediaSink(
             session: session, submit: { _ in }, applyArtwork: { _, _, _ in },

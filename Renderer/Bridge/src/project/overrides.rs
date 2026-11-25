@@ -1,3 +1,4 @@
+use super::manifest::is_valid_custom_user_shortcut_value;
 use super::{ProjectModel, PropertyKind, PropertyMetadata, PropertyValue};
 use crate::{BridgeError, BridgePropertyEdit, BridgePropertyValue};
 use serde_json::{Map, Value};
@@ -100,7 +101,10 @@ impl ProjectModel {
                 PropertyKind::Combo,
                 PropertyMetadata::Combo { options },
                 BridgePropertyValue::String { value },
-            ) => options.iter().any(|option| option.value == *value),
+            ) => {
+                options.iter().any(|option| option.value == *value)
+                    || (property.is_user_shortcut && is_valid_custom_user_shortcut_value(value))
+            }
             (PropertyKind::Color, _, BridgePropertyValue::ColorRgb { red, green, blue }) => {
                 [red, green, blue]
                     .into_iter()

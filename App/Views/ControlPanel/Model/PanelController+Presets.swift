@@ -103,6 +103,8 @@ extension PanelController {
       let current = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
       if current.dirty || store.editorState.hasPendingEdits(wallpaperID: id) {
         try await store.applyWallpaperOptionsAsync(wallpaperId: id, userInitiated: true)
+        commitPendingUserShortcutEdits(for: id)
+        await pruneUnmatchedUserShortcuts(for: id)
       }
       let applied = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
       let pending =
@@ -161,6 +163,8 @@ extension PanelController {
       let preset = try presets.preset(id: presetID)
       let options = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
       try await presets.apply(preset, options: options, bridge: store, userInitiated: true)
+      pendingUserShortcutEdits.removeValue(forKey: id)
+      await pruneUnmatchedUserShortcuts(for: id)
       presets.status = L("Property preset applied.")
     }
     reconcileInspectorContext()

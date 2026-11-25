@@ -12,6 +12,9 @@ extension InspectorOptions {
       /// A pop-up of the author's choices. `selection` is the choice the current value matches, and
       /// nil when it matches none: show no selection, and never change the value on its own.
       case choice(selection: BridgePropertyValue?, choices: [Choice])
+      /// A `usershortcut` property: built-in media transport commands plus user-approved macOS
+      /// applications (`app:<bundleID>`) and Apple Shortcuts (`shortcut:<name>`).
+      case userShortcut(UserShortcutState)
       case color(red: Double, green: Double, blue: Double)
       case text(String)
       /// A scene's image picker: the path of the picked image, empty for none. The picker stores
@@ -54,6 +57,30 @@ extension InspectorOptions {
       let id: Int
       let label: String
       let value: BridgePropertyValue
+    }
+
+    struct UserShortcutState: Equatable {
+      enum Selection: Equatable {
+        case none
+        case mediaPlayPause
+        case mediaNext
+        case mediaPrevious
+        /// Explicitly user-approved macOS app (`app:<bundleID>`). Display name shown via `Text(verbatim:)`.
+        case application(bundleID: String, displayName: String)
+        /// Explicitly user-approved Apple Shortcut (`shortcut:<name>`). Name shown via `Text(verbatim:)`.
+        case shortcut(name: String)
+      }
+
+      let selection: Selection
+
+      var isCustomBinding: Bool {
+        switch selection {
+        case .application, .shortcut: true
+        default: false
+        }
+      }
+
+      var isBound: Bool { selection != .none }
     }
 
     /// A chosen file or folder, reduced to what the row shows. Names and paths are

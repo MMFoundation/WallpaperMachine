@@ -41,6 +41,7 @@ fn record(
         metadata,
         default_value,
         default_is_host_supplied: false,
+        is_user_shortcut: false,
         label_html: String::new(),
         order: 0.0,
         index: 0,
@@ -420,6 +421,90 @@ fn shortcut_suggestion_priority_and_explicit_empty() {
             .properties
             .iter()
             .all(|p| !p.default_is_host_supplied)
+    );
+}
+
+#[test]
+fn authored_app_and_shortcut_defaults_are_stripped_and_custom_edits_validated() {
+    let malicious = parse_properties(
+        r#"{
+            "launch":{"type":"usershortcut","value":"app:com.apple.Terminal"},
+            "play_hijack":{"type":"usershortcut","value":" APP:com.evil.Tool"},
+            "run_script":{"type":"usershortcut","value":"shortcut:Erase Disk"},
+            "mixed_case":{"type":"usershortcut","value":"\tShortcut:Danger"},
+            "regular_combo":{"type":"combo","options":[{"label":"A","value":"a"}],"value":"a"}
+        }"#,
+    );
+    for id in ["launch", "play_hijack", "run_script", "mixed_case"] {
+        let p = property(&malicious, id);
+        assert!(p.is_user_shortcut, "{id}");
+        assert_eq!(p.default_value, PropertyValue::String(String::new()), "{id}");
+        assert!(
+            p.default_is_host_supplied,
+            "{id} must actively override project.json default with empty string"
+        );
+    }
+    let scene_json = scene_property_override_json(Some(&malicious), &BTreeMap::new()).unwrap();
+    assert_eq!(
+        scene_json,
+        r#"{"launch":"","mixed_case":"","play_hijack":"","run_script":""}"#
+    );
+
+    // Valid user-chosen app: and shortcut: targets are accepted for usershortcut properties only.
+    for valid in [
+        "app:com.apple.Safari",
+        "app:org.example.My_App-2",
+        "shortcut:Morning Routine",
+        "media:playpause",
+        "",
+    ] {
+        assert!(
+            malicious
+                .check_edit("launch", &BridgePropertyValue::String { value: valid.to_owned() })
+                .is_ok(),
+            "expected valid shortcut edit: {valid}"
+        );
+    }
+
+    // Invalid or unsafe custom targets are rejected.
+    for invalid in [
+        "app:",
+        "app:com.apple.Safari;rm -rf /",
+        "app:../etc/passwd",
+        "app:-leading",
+        "app:com..double",
+        "shortcut:",
+        "shortcut:   ",
+        "shortcut: leading",
+        "shortcut:--input-path",
+        "shortcut:bad\nname",
+        "shortcut:bad\0name",
+        "shell:whoami",
+    ] {
+        assert!(
+            malicious
+                .check_edit("launch", &BridgePropertyValue::String { value: invalid.to_owned() })
+                .is_err(),
+            "expected invalid shortcut edit to be rejected: {invalid:?}"
+        );
+    }
+
+    // Regular combos never accept app: or shortcut: values.
+    assert!(
+        malicious
+            .check_edit(
+                "regular_combo",
+                &BridgePropertyValue::String { value: "app:com.apple.Safari".to_owned() }
+            )
+            .is_err()
+    );
+    assert!(
+        malicious
+            .check_edit(
+                "regular_combo",
+                &BridgePropertyValue::String { value: "shortcut:Morning Routine".to_owned() }
+            )
+            .is_err()
     );
 }
 

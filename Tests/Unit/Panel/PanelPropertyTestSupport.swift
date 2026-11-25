@@ -190,6 +190,10 @@ final class InspectorPreviewBridge: LayoutSnapshotBridge {
   @MainActor var editAnswer: (@MainActor (BridgeWallpaperOptionsSnapshot) -> BridgeWallpaperOptionsSnapshot)?
   /// What the engine reports once every default is staged.
   @MainActor var restoreAllAnswer: BridgeWallpaperOptionsSnapshot?
+  /// What the engine reports after a revert, when a test needs it to restore committed values.
+  @MainActor var cancelAnswer: (@MainActor (BridgeWallpaperOptionsSnapshot) -> BridgeWallpaperOptionsSnapshot)?
+  /// What the engine reports after restoring one property's default, when a test needs the value reset.
+  @MainActor var restoreAnswer: (@MainActor (String, BridgeWallpaperOptionsSnapshot) -> BridgeWallpaperOptionsSnapshot)?
 
   @MainActor func releaseApply() {
     holdApply = false
@@ -248,7 +252,9 @@ final class InspectorPreviewBridge: LayoutSnapshotBridge {
     -> BridgeWallpaperMutationBundle
   {
     restored.append(property)
-    return try reply("restore", id, dirty: true)
+    var changed = try current(id)
+    if let restoreAnswer { changed = restoreAnswer(property, changed) }
+    return try reply("restore", id, changed: changed, dirty: true)
   }
 
   override func restoreAllPropertyDefaults(wallpaperId: String) async throws
@@ -265,7 +271,13 @@ final class InspectorPreviewBridge: LayoutSnapshotBridge {
   override func cancelWallpaperOptions(wallpaperId: String) async throws
     -> BridgeWallpaperMutationBundle
   {
-    try await reply("cancel", wallpaperId, dirty: false)
+    try await cancel(wallpaperId)
+  }
+
+  @MainActor private func cancel(_ id: String) throws -> BridgeWallpaperMutationBundle {
+    var changed = try current(id)
+    if let cancelAnswer { changed = cancelAnswer(changed) }
+    return try reply("cancel", id, changed: changed, dirty: false)
   }
 
   override func applyWallpaperOptions(wallpaperId: String, userInitiated: Bool) async throws

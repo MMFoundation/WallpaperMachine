@@ -6,6 +6,8 @@ extension InspectorOptions {
     var titles = ResolvedDisplayTitles(names: [:])
     /// Measured files and folders, by property id.
     var assets: [String: PanelPropertyAsset] = [:]
+    /// Explicitly user-approved custom `usershortcut` bindings for this wallpaper, by property id.
+    var approvedShortcuts: [String: ApprovedUserShortcutBinding] = [:]
     /// Why choosing a path failed, by property id.
     var pathErrors: [String: String] = [:]
     /// Text typed into a property and not committed, by property id.
@@ -100,13 +102,17 @@ extension InspectorOptions {
           step: metadata.flatMap { $0.step > 0 ? $0.step : nil } ?? (metadata == nil ? 0.01 : nil),
           precision: Int(metadata?.precision ?? 0)))
     case .combo:
-      let choices = property.comboOptions.enumerated().map { index, option in
-        PropertyRow.Choice(
-          id: index, label: PropertyLabels.choiceLabel(option.label, locale: locale),
-          value: option.value)
+      if UserShortcutDescriptor.isUserShortcut(property) {
+        control = .userShortcut(userShortcutState(property: property, shown: shown, inputs: inputs))
+      } else {
+        let choices = property.comboOptions.enumerated().map { index, option in
+          PropertyRow.Choice(
+            id: index, label: PropertyLabels.choiceLabel(option.label, locale: locale),
+            value: option.value)
+        }
+        control = .choice(
+          selection: choices.first { $0.value == shown }?.value, choices: choices)
       }
-      control = .choice(
-        selection: choices.first { $0.value == shown }?.value, choices: choices)
     case .color:
       if case .colorRgb(let red, let green, let blue) = shown {
         control = .color(red: red, green: green, blue: blue)
@@ -152,6 +158,36 @@ extension InspectorOptions {
       acceptedTypes: PanelPropertyAsset.filter(for: property.fileFilter).allowedExtensions.sorted(),
       error: inputs.pathErrors[property.id], isManaged: property.assetManaged,
       isMissing: property.assetMissing, sourcePath: property.assetSourcePath)
+  }
+
+  private static func userShortcutState(
+    property: BridgePropertyDescriptor, shown: BridgePropertyValue, inputs: Inputs
+  ) -> PropertyRow.UserShortcutState {
+    let raw = Self.string(shown)
+    switch raw {
+    case "":
+      return .init(selection: .none)
+    case SystemMediaCommand.togglePlayPause.rawValue:
+      return .init(selection: .mediaPlayPause)
+    case SystemMediaCommand.nextTrack.rawValue:
+      return .init(selection: .mediaNext)
+    case SystemMediaCommand.previousTrack.rawValue:
+      return .init(selection: .mediaPrevious)
+    default:
+      // Never display an unapproved author-supplied `app:` or `shortcut:` value as bound.
+      if let target = UserShortcutTarget(rawValue: raw),
+         let approved = inputs.approvedShortcuts[property.id],
+         approved.target == target
+      {
+        switch target {
+        case .application(let bundleID):
+          return .init(selection: .application(bundleID: bundleID, displayName: approved.displayName ?? bundleID))
+        case .shortcut(let name):
+          return .init(selection: .shortcut(name: name))
+        }
+      }
+      return .init(selection: .none)
+    }
   }
 
   private static func string(_ value: BridgePropertyValue) -> String {

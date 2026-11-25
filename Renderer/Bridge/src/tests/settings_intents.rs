@@ -295,8 +295,85 @@ async fn a_reported_press_comes_back_out_of_the_bridge() {
     .await
     .expect("a reported press has to come back out rather than hang")
     .expect("the channel closed instead of delivering the press");
+    assert_eq!(event.wallpaper_id, "100");
     assert_eq!(event.property, "nextsongbutton");
     assert_eq!(event.value, "media:next");
+}
+
+#[tokio::test]
+async fn custom_app_and_shortcut_triggers_deliver_without_media_consent_while_media_commands_stay_gated() {
+    let engine = FakeEngineFacade::default();
+    engine.set_snapshot(vec![DisplaySnapshotEntry {
+        handle: Some(SceneHandle::new(21)),
+        accepts_pointer_input: true,
+        paused: false,
+        window_active: true,
+        assignment: Some(WallpaperAssignment::Direct(
+            SceneTemplate::builder("/workshop/content/431960/200/project.json")
+                .build()
+                .unwrap(),
+        )),
+        ..anonymous(8, 1.0, 60, true)
+    }]);
+    let bridge = BridgeBuilder::new(engine.clone())
+        .with_state(crate::actor::state::BridgeActorState::default())
+        .build()
+        .unwrap();
+    bridge
+        .inject_scene_wallpaper_config_for_test("200", "SceneWithoutMediaConsent")
+        .await;
+    bridge
+        .set_display_config_enabled("200".into(), "8".into(), true)
+        .await
+        .unwrap();
+    bridge.apply_wallpaper_options("200".into(), true).await.unwrap();
+    // Media integration explicitly disabled.
+    bridge
+        .set_media_integration_enabled("200".into(), false)
+        .await
+        .unwrap();
+    assert!(bridge.system_media_consent_handles().await.unwrap().is_empty());
+
+    // Unknown scene handle is dropped (fail closed), media:* is dropped without consent,
+    // while custom `app:` and `shortcut:` actions still reach the host with exact wallpaper_id.
+    assert!(engine.report_user_shortcut(SceneHandle::new(999), "spoof", "app:com.apple.Safari"));
+    assert!(engine.report_user_shortcut(SceneHandle::new(21), "nextsong", "media:next"));
+    assert!(engine.report_user_shortcut(SceneHandle::new(21), "launch_app", "app:com.apple.Safari"));
+    assert!(engine.report_user_shortcut(SceneHandle::new(21), "morning", "shortcut:Morning Routine"));
+
+    let first = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        bridge.next_user_shortcut(),
+    )
+    .await
+    .expect("app: shortcut must not be blocked by media_integration_enabled == false")
+    .unwrap();
+    assert_eq!(
+        first,
+        crate::api::BridgeUserShortcut {
+            scene_handle: 21,
+            wallpaper_id: "200".to_owned(),
+            property: "launch_app".to_owned(),
+            value: "app:com.apple.Safari".to_owned(),
+        }
+    );
+
+    let second = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        bridge.next_user_shortcut(),
+    )
+    .await
+    .expect("shortcut: action must not be blocked by media_integration_enabled == false")
+    .unwrap();
+    assert_eq!(
+        second,
+        crate::api::BridgeUserShortcut {
+            scene_handle: 21,
+            wallpaper_id: "200".to_owned(),
+            property: "morning".to_owned(),
+            value: "shortcut:Morning Routine".to_owned(),
+        }
+    );
 }
 
 #[tokio::test]

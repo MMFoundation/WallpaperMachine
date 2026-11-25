@@ -31,8 +31,12 @@ extension InspectorOptions {
     /// How far the Volume control reaches into a web page, and whether Mute silences all of it.
     struct WebOutput: Equatable {
       enum Volume: Equatable {
+        /// Volume sets the level of both HTML media elements and Web Audio.
+        case mediaAndWebAudio
         /// Volume sets the audio and video the page plays through media elements.
         case mediaElements
+        /// Volume sets Web Audio output only (native media volume is unavailable).
+        case webAudioOnly
         case unavailable
         case unknown
       }
@@ -85,8 +89,16 @@ extension InspectorOptions {
       var webOutput: WebOutput?
       if kind == .webpage {
         let controls = host?.audioOutputControls[wallpaperID]
+        let volume: WebOutput.Volume = controls.map {
+          switch ($0.mediaVolume, $0.webAudioGain) {
+          case (true, true): .mediaAndWebAudio
+          case (true, false): .mediaElements
+          case (false, true): .webAudioOnly
+          case (false, false): .unavailable
+          }
+        } ?? .unknown
         webOutput = WebOutput(
-          volume: controls.map { $0.mediaVolume ? .mediaElements : .unavailable } ?? .unknown,
+          volume: volume,
           mute: controls.map { $0.pageMute ? .available : .unavailable } ?? .unknown)
       }
       return DeliveryReport(audio: audio, media: media, webOutput: webOutput)

@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <cstdio>
+#include <cstring>
 #include <memory>
 
 namespace wallpaper
@@ -339,8 +341,8 @@ TEST(SceneScriptMediaEventSmoke, OpenUserShortcutCarriesTheValueTheUserChose) {
     // the name instead would be deciding for them.
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
         .project_properties = {
-            { "playpausebutton", RuntimeScalarValue::String("toggle_play_pause") },
-            { "nextsongbutton", RuntimeScalarValue::String("") },
+            { "playpausebutton", RuntimeScalarValue::UserShortcut("toggle_play_pause") },
+            { "nextsongbutton", RuntimeScalarValue::UserShortcut("") },
         },
     });
     ASSERT_NE(runtime, nullptr);
@@ -384,6 +386,70 @@ scene.on('mediaPlaybackChanged', function() {
     EXPECT_TRUE(runtime->TakeUserShortcutRequests().empty());
     EXPECT_GT(runtime->scriptErrorCount(), 0u)
         << "reaching past this wallpaper's own properties passed silently";
+}
+
+TEST(SceneScriptMediaEventSmoke, OpenUserShortcutRefusesNonShortcutTextProperties) {
+    // A wallpaper must never be able to trigger `engine.openUserShortcut` via a
+    // plain `text` (or other non-`usershortcut`) property, whose authored value
+    // is not stripped by the shortcut sanitizer.
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
+        .project_properties = {
+            { "launch_text", RuntimeScalarValue::String("app:com.apple.Terminal") },
+            { "real_shortcut", RuntimeScalarValue::UserShortcut("media:next") },
+        },
+    });
+    ASSERT_NE(runtime, nullptr);
+
+    runtime->RegisterSceneScript(
+        R"JS(
+scene.on('mediaPlaybackChanged', function() {
+  engine.openUserShortcut('real_shortcut');
+  engine.openUserShortcut('launch_text');
+});
+)JS",
+        "");
+    runtime->SetMediaIntegrationEnabled(true);
+    runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":1})");
+
+    const auto requests = runtime->TakeUserShortcutRequests();
+    ASSERT_EQ(requests.size(), 1u);
+    EXPECT_EQ(requests[0].first, "real_shortcut");
+    EXPECT_EQ(requests[0].second, "media:next");
+    EXPECT_GT(runtime->scriptErrorCount(), 0u)
+        << "non-usershortcut text property must be refused by engine.openUserShortcut";
+
+    // Also verify ParseProjectProperties + MergeProjectProperties preserve
+    // `is_user_shortcut` exclusively on `type: "usershortcut"` entries.
+    const std::string temp_path = "/tmp/wm_usershortcut_type_check_project.json";
+    {
+        FILE* f = std::fopen(temp_path.c_str(), "wb");
+        ASSERT_NE(f, nullptr);
+        const char* doc = R"({
+            "general": {
+                "properties": {
+                    "evil_text": { "type": "text", "value": "app:com.apple.Terminal" },
+                    "good_sc": { "type": "usershortcut", "value": "" }
+                }
+            }
+        })";
+        std::fwrite(doc, 1, std::strlen(doc), f);
+        std::fclose(f);
+    }
+    ProjectProperties authored;
+    std::string       error;
+    ASSERT_TRUE(ParseProjectProperties(temp_path, &authored, &error)) << error;
+    std::remove(temp_path.c_str());
+    ASSERT_TRUE(authored.contains("evil_text"));
+    ASSERT_TRUE(authored.contains("good_sc"));
+    EXPECT_FALSE(authored.at("evil_text").is_user_shortcut);
+    EXPECT_TRUE(authored.at("good_sc").is_user_shortcut);
+
+    ProjectProperties overrides;
+    overrides.emplace("evil_text", RuntimeScalarValue::String("app:com.apple.Safari"));
+    overrides.emplace("good_sc", RuntimeScalarValue::String("app:com.apple.Safari"));
+    const ProjectProperties merged = MergeProjectProperties(authored, overrides);
+    EXPECT_FALSE(merged.at("evil_text").is_user_shortcut);
+    EXPECT_TRUE(merged.at("good_sc").is_user_shortcut);
 }
 
 TEST(SceneScriptMediaEventSmoke, UndrainedShortcutRequestsKeepTheNewestPresses) {

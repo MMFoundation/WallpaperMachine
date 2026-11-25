@@ -91,6 +91,7 @@ extension PanelController {
     metadata.forget(ids)
     do { try await presets.forget(wallpaperIDs: ids) } catch { firstError = firstError ?? error }
     do { try imagePlacement.forget(Set(ids)) } catch { firstError = firstError ?? error }
+    userShortcuts.removeAll(for: Set(ids))
     if let firstError { throw firstError }
   }
 }

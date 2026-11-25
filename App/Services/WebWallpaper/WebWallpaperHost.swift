@@ -303,7 +303,8 @@ final class WebWallpaperHost {
             if let previous = controls[wallpaper.wallpaperId] {
                 controls[wallpaper.wallpaperId] = .init(
                     mediaVolume: previous.mediaVolume && value.mediaVolume,
-                    pageMute: previous.pageMute && value.pageMute)
+                    pageMute: previous.pageMute && value.pageMute,
+                    webAudioGain: previous.webAudioGain && value.webAudioGain)
             } else {
                 controls[wallpaper.wallpaperId] = value
             }

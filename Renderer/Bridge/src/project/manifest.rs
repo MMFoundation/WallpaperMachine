@@ -29,11 +29,49 @@ pub struct ProjectProperty {
     pub kind: PropertyKind,
     pub default_value: PropertyValue,
     pub default_is_host_supplied: bool,
+    pub is_user_shortcut: bool,
     pub label_html: String,
     pub order: f64,
     pub index: i64,
     pub condition: Option<String>,
     pub metadata: PropertyMetadata,
+}
+
+/// Whether `value` is an author-authored executable shortcut target (`app:` or `shortcut:`)
+/// that must never be accepted as a project default.
+fn is_executable_shortcut_scheme(value: &str) -> bool {
+    let trimmed = value.trim_start();
+    trimmed
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("app:"))
+        || trimmed
+            .get(..9)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("shortcut:"))
+}
+
+/// Validates a custom user-saved `usershortcut` action target (`app:<bundleID>` or
+/// `shortcut:<name>`) submitted through the explicit property editor.
+pub(crate) fn is_valid_custom_user_shortcut_value(value: &str) -> bool {
+    if let Some(bundle_id) = value.strip_prefix("app:") {
+        return !bundle_id.is_empty()
+            && bundle_id.len() <= 256
+            && !bundle_id.starts_with('.')
+            && !bundle_id.ends_with('.')
+            && !bundle_id.starts_with('-')
+            && !bundle_id.ends_with('-')
+            && !bundle_id.contains("..")
+            && bundle_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
+    }
+    if let Some(name) = value.strip_prefix("shortcut:") {
+        return !name.is_empty()
+            && name.chars().count() <= 256
+            && name.trim() == name
+            && !name.starts_with('-')
+            && name.chars().all(|c| !c.is_control());
+    }
+    false
 }
 
 fn project_error(message: String) -> BridgeError {
@@ -334,8 +372,9 @@ fn parse_property(id: &str, entry: &Map<String, Value>) -> ProjectProperty {
             PropertyMetadata::Unknown,
         ),
     };
+    let is_user_shortcut = raw_type.eq_ignore_ascii_case("usershortcut");
     let mut host_supplied = false;
-    let default = if raw_type.eq_ignore_ascii_case("usershortcut") {
+    let default = if is_user_shortcut {
         let authored = entry
             .get("value")
             .map(PropertyValue::json_scalar_to_string)
@@ -355,6 +394,12 @@ fn parse_property(id: &str, entry: &Map<String, Value>) -> ProjectProperty {
             .unwrap_or_default();
             host_supplied = !suggestion.is_empty();
             PropertyValue::String(suggestion.to_owned())
+        } else if is_executable_shortcut_scheme(&authored) {
+            // Hard security redline: an author-supplied `app:` or `shortcut:` default in
+            // `project.json` must never execute. Strip it to empty and mark it host-supplied so
+            // `scene_property_override_json` actively overwrites the authored value in the engine.
+            host_supplied = true;
+            PropertyValue::String(String::new())
         } else {
             PropertyValue::String(authored)
         }
@@ -384,6 +429,7 @@ fn parse_property(id: &str, entry: &Map<String, Value>) -> ProjectProperty {
         metadata,
         default_value: default,
         default_is_host_supplied: host_supplied,
+        is_user_shortcut,
         label_html: entry
             .get("text")
             .and_then(Value::as_str)

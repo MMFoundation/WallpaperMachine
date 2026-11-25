@@ -119,6 +119,12 @@ enum WebWallpaperProtocol {
         /// `screen` size is reported; see `pageZoom(forBackingScale:)`. At 1 the page
         /// keeps WebKit's own properties.
         var screenScale = 1.0
+        /// Initial effective WebAudio master gain (`0...1`), baked into the document-start
+        /// audio script so audio created before `didFinish` starts at the committed level.
+        var audioGain = 1.0
+        /// Whether `WKPageSetMediaVolume` scales HTML media elements for this view, so
+        /// `createMediaElementSource()` bypasses the master gain and avoids `v^2` scaling.
+        var mediaVolumeScaledByHost = true
     }
 
     /// Wallpaper Engine starts its Chromium with `force-device-scale-factor=1`, so a web

@@ -126,7 +126,13 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         /// is zoomed out by (`WebWallpaperProtocol.pageZoom(forBackingScale:)`).
         var backingScale: Double = 1
         var volume: Float = 1
+        var duckingGain: Float = 1
         var muted = false
+
+        var effectiveAudioVolume: Float {
+            WebWallpaperAudioOutput.effectiveVolume(
+                volume: volume, muted: muted, duckingGain: duckingGain)
+        }
         /// The bridge's composed pause, not only the Play/Pause button: user
         /// pause, battery Pause, and the renderer's own presentation and
         /// per-display suspension all arrive through `BridgeWebWallpaper.paused`.
@@ -159,6 +165,10 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     private(set) var documentGeneration: UInt64 = 0
     private var committed = CommittedState()
     private(set) var audioOutputCapabilities: WebWallpaperAudioOutput.Capabilities?
+    /// The effective WebAudio gain and host media-volume scaling mode baked into the current
+    /// document's document-start user script.
+    private var seededAudioGain: Float = 1
+    private var seededMediaScaledByHost = true
     private let surface: RuntimeSurfaceKey
     private let counters: RuntimeCounters
     private let recovery: RecoveryPolicy
@@ -440,6 +450,12 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         onLoading?()
         deliverAudioOutput()
         webView.loadFileURL(entryURL, allowingReadAccessTo: projectURL)
+        // The incoming document starts from the document-start user script's baked seed rather
+        // than whatever was evaluated into the outgoing document before navigation.
+        WebWallpaperAudioOutput.seedWebAudioGainCache(
+            volume: seededAudioGain,
+            mediaScaledByHost: seededMediaScaledByHost,
+            for: webView)
     }
 
     func stop() {
@@ -452,7 +468,9 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         documentGeneration += 1
         isLoaded = false
         forgetDocumentState()
-        _ = WebWallpaperAudioOutput.apply(volume: committed.volume, muted: true, to: webView)
+        _ = WebWallpaperAudioOutput.apply(
+            volume: committed.volume, muted: true, duckingGain: committed.duckingGain, to: webView)
+        WebWallpaperAudioOutput.resetWebAudioGainCache(for: webView)
         messageProxy.page = nil
         webView.configuration.userContentController.removeScriptMessageHandler(forName: WebWallpaperProtocol.messageHandlerName)
         webView.stopLoading()
@@ -472,9 +490,14 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     /// paths in `deliverGeneralProperties` and `deliverRenderScale` keep a
     /// running document in step afterwards.
     private func installUserScripts() {
+        let initialAudioGain = committed.effectiveAudioVolume
+        let initialMediaScaledByHost = WebWallpaperAudioOutput.supportsMediaVolume(for: webView)
+        seededAudioGain = initialAudioGain
+        seededMediaScaledByHost = initialMediaScaledByHost
         let seed = WebWallpaperProtocol.Seed(
             framePacing: true, frameLimit: frameLimit, renderScale: Double(committed.renderScale),
-            screenScale: committed.backingScale)
+            screenScale: committed.backingScale, audioGain: Double(initialAudioGain),
+            mediaVolumeScaledByHost: initialMediaScaledByHost)
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         for script in WebWallpaperProtocol.userScripts(seed: seed) { controller.addUserScript(script) }
@@ -615,12 +638,14 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
             """, load: logLoad)
     }
 
-    func applyAudioOutput(volume: Float, muted: Bool) {
-        guard committed.volume != volume || committed.muted != muted || audioOutputCapabilities == nil else {
+    func applyAudioOutput(volume: Float, muted: Bool, duckingGain: Float = 1) {
+        guard committed.volume != volume || committed.muted != muted
+                || committed.duckingGain != duckingGain || audioOutputCapabilities == nil else {
             return
         }
         committed.volume = volume
         committed.muted = muted
+        committed.duckingGain = duckingGain
         deliverAudioOutput()
     }
 
@@ -897,9 +922,13 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         run(WebWallpaperProtocol.hostCall(.setScreenScale, "scale"), arguments: ["scale": committed.backingScale])
     }
 
-    private func deliverAudioOutput() {
+    private func deliverAudioOutput(forceWebAudioSync: Bool = false) {
         audioOutputCapabilities = WebWallpaperAudioOutput.apply(
-            volume: committed.volume, muted: committed.muted || committed.volume == 0, to: webView)
+            volume: committed.volume,
+            muted: committed.muted || committed.effectiveAudioVolume == 0,
+            duckingGain: committed.duckingGain,
+            to: webView,
+            forceWebAudioSync: forceWebAudioSync)
     }
 
     private func deliverPaused() {
@@ -912,7 +941,10 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     /// changed, so nothing would be sent and the page would start blank.
     private func replayCommittedState() {
         counters.record(.webStateReplayed, for: surface)
-        deliverAudioOutput()
+        let currentMediaScaled = WebWallpaperAudioOutput.supportsMediaVolume(for: webView)
+        deliverAudioOutput(
+            forceWebAudioSync: committed.effectiveAudioVolume != seededAudioGain
+                || currentMediaScaled != seededMediaScaledByHost)
         deliverUserProperties()
         deliverGeneralProperties()
         deliverRenderScale()

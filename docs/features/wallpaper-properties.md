@@ -328,6 +328,53 @@ picture chosen for a solid placeholder layer, the user's own or one a preset shi
 is shown as it is: the layer's colour, often the scheme colour, only paints the
 placeholder while no picture fills it.
 
+### User shortcuts
+
+Scene wallpapers can declare `usershortcut` properties and invoke them from SceneScript
+with `engine.openUserShortcut("<property>")`. In the inspector (`UserShortcutRowView`),
+each `usershortcut` row lets the user pick:
+
+- **No action** (`""`)
+- **Play / Pause** (`media:playpause`), **Next Track** (`media:next`), or **Previous Track**
+  (`media:previous`) — dispatched to the active system media player through
+  `DesktopMediaSession`.
+- **Open Application…** (`app:<bundleID>`) — opens an application picker for `.app`
+  bundles, reads its `CFBundleIdentifier` and display name (rendered via `Text(verbatim:)`),
+  and activates or launches that app when triggered.
+- **Run Shortcut…** (`shortcut:<name>`) — prompts inline for an Apple Shortcut name with
+  an explicit **Save** confirmation, and runs it directly via `/usr/bin/shortcuts run <name>`
+  using a non-blocking `Process` with a direct `arguments` array (never shell interpolation)
+  and a 15-second timeout so a slow Shortcut never blocks media controls or other displays.
+  User-approved `app:` and `shortcut:` actions do not require Media Integration to be on;
+  only `media:*` transport commands stay gated on Media Integration consent.
+
+Custom `app:` and `shortcut:` targets enforce strict security boundaries
+(`App/Services/Automation/UserShortcutStore.swift`, `UserShortcutExecutor.swift`,
+`Renderer/Bridge/src/project/manifest.rs`, `Renderer/Engine/src/Scripting/ScriptEngine.cpp`):
+
+- **Never execute author defaults or cross-wallpaper/non-shortcut triggers:** any `app:` or
+  `shortcut:` value authored in `project.json` is stripped to empty at manifest parse time
+  (and overwritten in the scene engine), SceneScript only allows `engine.openUserShortcut`
+  to read properties declared with `type: "usershortcut"`, the bridge resolves the exact
+  owning `wallpaper_id` for each `scene_handle` atomically, and `UserShortcutExecutor` fails
+  closed unless `UserShortcutStore` holds an explicit applied approval for that exact
+  `(wallpaperID, propertyID, target)` tuple. Staged inspector edits commit to
+  `UserShortcutStore` only on **Apply changes** (never on close or **Revert**),
+  `UserShortcutStore` stays local-only (excluded from backups), and exported/imported
+  property presets strip custom `app:` and `shortcut:` bindings.
+- **Argument-safe dispatch:** bundle identifiers accept only bounded ASCII identifier
+  characters (`[A-Za-z0-9._-]`, no path traversal); Shortcut names reject Unicode control
+  characters, line/paragraph separators, and leading hyphens (`-`) so
+  `/usr/bin/shortcuts run <name>` cannot treat a name as an option flag.
+- **Anti-spam rate limiting:** `UserShortcutExecutor` enforces a 1.5-second minimum
+  cooldown per `(wallpaperID, propertyID)` plus a global burst cap of 3 app/Shortcut
+  launches per 10-second sliding window (recorded synchronously before launching) so a
+  script calling `engine.openUserShortcut` every frame cannot spam-launch apps or Shortcuts.
+  Verified in `Tests/Unit/Automation/UserShortcutExecutorTests.swift`,
+  `Renderer/Engine/tests/scenescript_media_event_smoke.cpp`,
+  `Renderer/Bridge/src/tests/settings_intents.rs`, and
+  `Renderer/Bridge/src/project/contract_tests.rs`.
+
 ### Wallpaper Engine options
 
 **Wallpaper Engine options**, the inspector's last card, holds the

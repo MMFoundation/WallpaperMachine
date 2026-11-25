@@ -9897,13 +9897,21 @@ public func FfiConverterTypeBridgeSystemMediaScene_lower(_ value: BridgeSystemMe
  */
 public struct BridgeUserShortcut {
     public var sceneHandle: UInt64
+    /**
+     * Exact wallpaper ID that owns `scene_handle`, resolved atomically by the bridge.
+     */
+    public var wallpaperId: String
     public var property: String
     public var value: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(sceneHandle: UInt64, property: String, value: String) {
+    public init(sceneHandle: UInt64,
+        /**
+         * Exact wallpaper ID that owns `scene_handle`, resolved atomically by the bridge.
+         */wallpaperId: String, property: String, value: String) {
         self.sceneHandle = sceneHandle
+        self.wallpaperId = wallpaperId
         self.property = property
         self.value = value
     }
@@ -9914,6 +9922,9 @@ public struct BridgeUserShortcut {
 extension BridgeUserShortcut: Equatable, Hashable {
     public static func ==(lhs: BridgeUserShortcut, rhs: BridgeUserShortcut) -> Bool {
         if lhs.sceneHandle != rhs.sceneHandle {
+            return false
+        }
+        if lhs.wallpaperId != rhs.wallpaperId {
             return false
         }
         if lhs.property != rhs.property {
@@ -9927,6 +9938,7 @@ extension BridgeUserShortcut: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(sceneHandle)
+        hasher.combine(wallpaperId)
         hasher.combine(property)
         hasher.combine(value)
     }
@@ -9941,6 +9953,7 @@ public struct FfiConverterTypeBridgeUserShortcut: FfiConverterRustBuffer {
         return
             try BridgeUserShortcut(
                 sceneHandle: FfiConverterUInt64.read(from: &buf),
+                wallpaperId: FfiConverterString.read(from: &buf),
                 property: FfiConverterString.read(from: &buf),
                 value: FfiConverterString.read(from: &buf)
         )
@@ -9948,6 +9961,7 @@ public struct FfiConverterTypeBridgeUserShortcut: FfiConverterRustBuffer {
 
     public static func write(_ value: BridgeUserShortcut, into buf: inout [UInt8]) {
         FfiConverterUInt64.write(value.sceneHandle, into: &buf)
+        FfiConverterString.write(value.wallpaperId, into: &buf)
         FfiConverterString.write(value.property, into: &buf)
         FfiConverterString.write(value.value, into: &buf)
     }

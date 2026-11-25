@@ -136,7 +136,7 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     // laid out in the display's device pixels like the desktop page; see `pageZoom` below.
     let seed = WebWallpaperProtocol.Seed(
       framePacing: true, frameLimit: WebWallpaperProtocol.frameLimit(forFPS: fps),
-      renderScale: self.renderScale, screenScale: Double(scale))
+      renderScale: self.renderScale, screenScale: Double(scale), audioGain: 0)
     for script in WebWallpaperProtocol.userScripts(seed: seed) { configuration.userContentController.addUserScript(script) }
     configuration.userContentController.addUserScript(WKUserScript(
       source: Self.denyCaptureScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))

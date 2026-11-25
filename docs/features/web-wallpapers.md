@@ -63,14 +63,15 @@ Security for web content only (`NSAllowsArbitraryLoadsInWebContent` in their
 WebKit still blocks an `http://` subresource of an `https://` page as mixed content.
 The sign-in windows are web content too, and load only Steam's and pixiv's HTTPS pages.
 
-Five scripts are installed at document start, built in one place
+Seven scripts are installed at document start, built in one place
 (`Shared/WebWallpaperUserScripts.swift`) for the desktop page, the preview and the
 screen-saver web surface alike; desktop and preview pages get a copy built for each
 document. The host script (`Shared/WebWallpaperProtocol.swift`) is the author API and
-everything in the table below, and runs in the main frame only. The other four close
-gaps between WebKit and Chromium: one in file requests, one in error stacks
-([below](#error-stacks)), one in idle callbacks ([below](#idle-callbacks)) and one in
-fonts ([below](#windows-fonts)). The first one is described here. WebKit
+everything in the table below, and runs in the main frame only. The other six close
+gaps between WebKit and Chromium and enforce host rules: file requests, error stacks
+([below](#error-stacks)), idle callbacks ([below](#idle-callbacks)), fonts
+([below](#windows-fonts)), WebAudio master gain ([below](#page-sound)) and native drag
+suppression. The first one is described here. WebKit
 answers a `fetch()` or `XMLHttpRequest` of a project file with status 0 and no
 headers, where Chromium answers 200 with a `Content-Type` taken from the extension. The script gives a found `file://` GET/HEAD response that status and
 type, so loaders that check `ok`, and WebGL exports (Unity, Emscripten) that call
@@ -83,7 +84,8 @@ That file-request script runs in every frame, so a page that hosts its player in
 iframe of a project file, or in a `srcdoc` or script-created frame, gets the same
 answers as the page itself; it installs once per document and marks it with a
 non-enumerable `window.__mweFileCompat`. A subframe gets nothing else but
-[idle callbacks](#idle-callbacks) and the [font aliases](#windows-fonts): no
+[idle callbacks](#idle-callbacks), the [font aliases](#windows-fonts) and (for
+same-origin / `srcdoc` subframes) the [WebAudio master gain](#page-sound): no
 `wallpaperPropertyListener` delivery, no audio, media or random-file registration,
 and the host drops any message on the host channel that does not come from the main
 frame, so a frame (a remote embed included) cannot subscribe to audio or ask for
@@ -602,24 +604,47 @@ control are in [user-files.md](user-files.md).
 
 ## Page sound
 
-Mute and Volume reach the page's output, independently of Audio response.
-`WebWallpaperAudioOutput` resolves WebKit's native interfaces at runtime:
-`WKPageSetMediaVolume` controls HTML audio/video media elements, while
-`_setPageMuted:` with only the audio bit controls whole-page output, including
-WebAudio. Nonzero Volume is **not** a WebAudio gain control. Zero volume also mutes
-the page; neither control pauses media timelines or disables system-audio analysis.
-The official general-property payload remains `fps`, not an invented `volume`
-protocol.
+Mute, Volume and ducking reach both HTML media elements and realtime Web Audio,
+independently of Audio response. `WebWallpaperAudioOutput` resolves WebKit's native
+interfaces at runtime and coordinates them with an injected WebAudio master gain stage
+(`Shared/WebWallpaperAudioGain.swift`):
+
+- `WKPageSetMediaVolume` scales HTML `<audio>` / `<video>` elements by the effective
+  volume (`muted ? 0 : volume * duckingGain`).
+- `_setPageMuted:` with only the audio bit controls whole-page mute. Zero effective volume
+  also mutes the page; neither control pauses media timelines or disables system-audio
+  analysis.
+- A document-start `WKUserScript` (`WebWallpaperAudioGain`) wraps `window.AudioContext`
+  and `window.webkitAudioContext` in every frame so nodes connecting to `ctx.destination`
+  route transparently through an internal master `GainNode` controlled by
+  `window.__mweAudioGain`. Initial gain is seeded at document start so audio created before
+  `didFinish` starts at the committed level, and `WebWallpaperAudioOutput` evaluates a live
+  update only when the effective volume (or host media-volume availability) actually
+  changes — zero polling and zero timers.
+- **`OfflineAudioContext` exclusion:** `window.OfflineAudioContext` and
+  `window.webkitOfflineAudioContext` are never wrapped, tracked or attenuated, so offline
+  waveform synthesis and audio decoding remain unmodified.
+- **Preventing $v^2$ double-attenuation on `createMediaElementSource()`:** because
+  `WKPageSetMediaVolume` already scales HTML media elements by $v$, routing a
+  `MediaElementAudioSourceNode` (or a chain fed purely by one, regardless of connection
+  order) through a master `GainNode` at gain $v$ would attenuate it to $v \times v = v^2$.
+  `WebWallpaperAudioGain` intercepts `createMediaElementSource()` (and recognizes
+  `MediaElementAudioSourceNode` instances) and routes pure media-element chains through an
+  internal `mediaBypassGain` set to `1` whenever $v > 0$ ($v \times 1 = v$, so $v = 0.5$
+  yields $0.5$, not $0.25$) and `0` when $v = 0$ (hard silence on mute or zero volume). If
+  `WKPageSetMediaVolume` is unavailable, `mediaBypassGain` falls back to $v$ directly.
+- The official general-property payload remains `fps`, not an invented `volume` protocol,
+  and pages continue loading from `file://` without `WKURLSchemeHandler`.
 
 User mute and temporary app/Focus/other-audio mute compose in the existing bridge
-configuration; ending a rule does not clear user mute. The gain other-app audio
-applies under **Reduce volume** ([Playback](performance.md#playback)) arrives as a
-lower Volume in the same descriptor, so it reaches media elements only: Web Audio
-keeps its level, and a level of 0% mutes the page as zero Volume does. Mirrored pages elect one
-presenting audible owner per actual source assignment (`MirrorAudioOwnership`, which native video
-follows too);
-independent assignments of the same project stay independent, and a hidden owner
-hands off to a visible mirror without duplicate sound.
+configuration; ending a rule does not clear user mute. The gain other-app audio or a
+covered desktop applies under **Reduce volume** ([Playback](performance.md#playback))
+arrives as a lower Volume in the same descriptor (and may also be supplied directly via
+`duckingGain`), so it reaches both media elements and realtime Web Audio; a level of 0%
+mutes the page as zero Volume does. Mirrored pages elect one presenting audible owner per
+actual source assignment (`MirrorAudioOwnership`, which native video follows too);
+independent assignments of the same project stay independent, and a hidden owner hands
+off to a visible mirror without duplicate sound.
 
 Whenever the host suspends a page (a pause, or a display no pixel can reach), its
 WebAudio stops rendering as well as going quiet: suspending media playback moves every
@@ -702,8 +727,11 @@ never substitutes Pause for an unavailable mute.
   full-resolution software pass for every frame (about 160 ms more per 3456 x 1944
   snapshot, 60 ms at 1920 x 1080) and would have to know each stream's tags to undo
   them. Measured on offscreen snapshots; see [Verification](#verification) for what was not.
-- Nonzero WebAudio gain is not controlled by the native media-volume interface;
-  whole-page Mute still applies where WebKit exposes it.
+- When a single intermediate Web Audio bus mixes both a `MediaElementAudioSourceNode` and a
+  pure Web Audio generator (`OscillatorNode`, `AudioBufferSourceNode`) before connecting to
+  `ctx.destination`, the shared bus routes through `masterGain` so pure Web Audio never
+  leaks unattenuated (pure media-element chains route through `mediaBypassGain` with exact
+  linear gain $v$). Whole-page Mute still applies where WebKit exposes it.
 
 ## Verification
 
@@ -721,7 +749,10 @@ rebuilt when a frame rate crosses a fast display's refresh with its render scale
 limit and pointer rate carried over, render scale on `devicePixelRatio` including the
 resize rebuild of a canvas page, the audio pump with its silence cadence on a
 hand-moved clock, the inspection switch on running, new and preview pages,
-`WebWallpaperDeviceLayoutTests` (a page in a window is laid out in its display's device pixels
+`WebWallpaperAudioGainTests` (realtime `AudioContext` master `GainNode` routing,
+`OfflineAudioContext` exclusion and unmodified rendering, `createMediaElementSource()`
+anti-$v^2$ bypass across direct, chained and reverse-wired graphs, and zero-polling live
+volume/mute/ducking push on change only), `WebWallpaperDeviceLayoutTests` (a page in a window is laid out in its display's device pixels
 from its first line with `screen` in device pixels, a scale change relays out the running
 document without a reload and 1 restores WebKit's own `screen`, a reload starts at the
 committed scale), the silence a listener with Audio response off hears

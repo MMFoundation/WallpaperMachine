@@ -178,6 +178,9 @@ public:
     void          SetCursorButtons(uint32_t down, uint32_t pressed, uint32_t released);
     void          BeginFrame();
     DynamicValue* FindPropertyValue(std::string_view name) const;
+    /// True only for properties declared with `type: "usershortcut"` in `project.json`.
+    /// Prevents non-shortcut properties (such as `text`) from triggering `engine.openUserShortcut`.
+    bool          IsUserShortcutProperty(std::string_view name) const;
     /// The live value a setting bound to property `name` follows. A name the table does not
     /// declare gets a value that holds `authored` until a property document supplies the
     /// name, so a binding made before the name appeared follows it once it does (a name

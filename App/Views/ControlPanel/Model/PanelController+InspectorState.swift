@@ -25,9 +25,11 @@ extension PanelController {
     }
     let settings = store.settingsSnapshot
     _ = store.webWallpaperDeliveryRevision
+    _ = userShortcutsRevision
     var inputs = InspectorOptions.Inputs()
     inputs.titles = displayTitles.resolved()
     inputs.assets = assets(of: value)
+    inputs.approvedShortcuts = effectiveApprovedUserShortcuts(for: wallpaperID)
     inputs.pathErrors = propertyPathErrors[wallpaperID] ?? [:]
     inputs.textDrafts = Dictionary(
       uniqueKeysWithValues: store.editorState.propertyTextDrafts

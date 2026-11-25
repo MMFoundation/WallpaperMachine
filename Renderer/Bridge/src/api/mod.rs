@@ -409,15 +409,24 @@ impl<E: crate::engine::EngineFacade> BridgeBuilder<E> {
     }
 }
 
+/// Raw `engine.openUserShortcut` event before `BridgeActor` resolves its owning
+/// wallpaper ID and media consent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RawUserShortcut {
+    scene_handle: u64,
+    property: String,
+    value: String,
+}
+
 // Keep the actual admission callback independently exercisable without creating an actor.
 fn builder_shortcut_channel() -> (
     wallpaper_core::UserShortcutObserverCallback,
-    tokio::sync::mpsc::Receiver<BridgeUserShortcut>,
+    tokio::sync::mpsc::Receiver<RawUserShortcut>,
 ) {
     let (sender, receiver) = tokio::sync::mpsc::channel(8);
     let callback: wallpaper_core::UserShortcutObserverCallback =
         std::sync::Arc::new(move |scene, property, value| {
-            let event = BridgeUserShortcut {
+            let event = RawUserShortcut {
                 scene_handle: scene.raw(),
                 property,
                 value,
@@ -452,7 +461,7 @@ mod api_assembly_tests {
             (0, String::new(), "\0\n\t".to_owned()),
             (u64::MAX, "任意.property\0".to_owned(), " {\"raw\": true} ".to_owned()),
         ] {
-            let expected = BridgeUserShortcut {
+            let expected = RawUserShortcut {
                 scene_handle: handle,
                 property: property.clone(),
                 value: value.clone(),
@@ -481,7 +490,7 @@ mod api_assembly_tests {
         for handle in 0..8 {
             assert_eq!(
                 receiver.try_recv().unwrap(),
-                BridgeUserShortcut {
+                RawUserShortcut {
                     scene_handle: handle,
                     property: format!("property-{handle}"),
                     value: format!("value-{handle}"),
@@ -762,7 +771,7 @@ pub struct WallpaperBridge {
     /// Requests waiting for `next_user_shortcut`. Bounded, and outside the
     /// actor: awaiting one inside a message handler would stall the mailbox for
     /// every other request while nobody is pressing anything.
-    user_shortcuts: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<BridgeUserShortcut>>,
+    user_shortcuts: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<RawUserShortcut>>,
     /// One check after a wake at a time. Two overlapping checks would each find
     /// the same stalled scene and spend two rungs of its recovery ladder on one
     /// fault.
@@ -2682,30 +2691,48 @@ impl WallpaperBridge {
                 log::warn!("the user shortcut channel closed: every sender was dropped");
                 return Err(BridgeError::engine("the engine stopped reporting user shortcuts"));
             };
-            // Consent, not liveness: this asks whether the user allowed this
-            // wallpaper near their media, which does not stop being true
-            // because playback is paused or a display went dark.
-            // A momentary failure to read consent is not a reason to stop
-            // taking presses; the caller would have to treat it as the channel
-            // having closed, which is permanent.
-            let consented = match self.system_media_consent_handles().await {
-                Ok(handles) => handles,
+            let context = match self
+                .actor
+                .ask(crate::actor::messages::ResolveUserShortcutContext {
+                    scene_handle: event.scene_handle,
+                })
+                .await
+            {
+                Ok(context) => context,
                 Err(error) => {
-                    log::warn!("could not read media consent for a user shortcut: {error}");
+                    log::warn!("could not resolve context for a user shortcut: {error}");
                     continue;
                 }
             };
-            if consented.contains(&event.scene_handle) {
-                return Ok(event);
+            let Some(context) = context else {
+                log::info!(
+                    "ignored user shortcut {} from unknown scene handle {}",
+                    event.property,
+                    event.scene_handle
+                );
+                continue;
+            };
+            // Only media transport commands require Media Integration consent;
+            // user-approved `app:` and `shortcut:` actions remain authorized
+            // strictly by exact `(wallpaper_id, property, target)` approval on
+            // the host even when Media Integration is off.
+            let is_custom_user_action =
+                event.value.starts_with("app:") || event.value.starts_with("shortcut:");
+            if !is_custom_user_action && !context.media_integration_enabled {
+                log::info!(
+                    "ignored media user shortcut {} from wallpaper {} (handle {}), which has no media consent",
+                    event.property,
+                    context.wallpaper_id,
+                    event.scene_handle
+                );
+                continue;
             }
-            // A press is rare and deliberate, and being dropped here is
-            // indistinguishable from never having been reported at all.
-            log::info!(
-                "ignored user shortcut {} from scene handle {}, which has no media consent; consented: {:?}",
-                event.property,
-                event.scene_handle,
-                consented
-            );
+            return Ok(BridgeUserShortcut {
+                scene_handle: event.scene_handle,
+                wallpaper_id: context.wallpaper_id,
+                property: event.property,
+                value: event.value,
+            });
         }
     }
 

@@ -51,7 +51,7 @@ use crate::{
             SetDisplayConfigEnabled, SetDisplayPosition, SetDisplayVolume, SetDisplayMuted,
             SetDisplayParkedWallpapers, SetDisplayPresentationSuspended,
             FanOutSystemMediaArtwork, FanOutSystemMediaEvent, GetSystemMediaConsentHandles,
-            GetSystemMediaSceneHandles, SetFilter,
+            GetSystemMediaSceneHandles, ResolveUserShortcutContext, SetFilter,
             SetFrameRateCap, SetGlobalPlayback, SetQualityThrottle,
             SetLaunchAtLogin, SetMediaIntegrationEnabled,
             SetMuted, SetAudioGain, SetAudioSuppressed, SetBatteryMode, SetLabelLanguages, SetPowerSource,
@@ -3510,6 +3510,58 @@ impl<E: EngineFacade + Clone> Message<GetSystemMediaConsentHandles> for BridgeAc
             .into_iter()
             .map(SceneHandle::raw)
             .collect())
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<ResolveUserShortcutContext> for BridgeActor<E> {
+    type Reply = messages::ResolveUserShortcutContextReply;
+
+    async fn handle(
+        &mut self,
+        msg: ResolveUserShortcutContext,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let target = SceneHandle::new(msg.scene_handle);
+        let wallpaper_id = self
+            .engine
+            .scene_windows()
+            .into_iter()
+            .find(|scene| scene.handle == target)
+            .and_then(|scene| {
+                std::path::Path::new(&scene.desc.scene_path)
+                    .parent()?
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .filter(|id| !id.is_empty())
+            .or_else(|| {
+                let mut ids: Vec<&String> = self.state.wallpaper_configs.keys().collect();
+                ids.sort();
+                ids.into_iter().find_map(|id| {
+                    self.wallpaper_handles(id, true)
+                        .contains(&target)
+                        .then(|| id.clone())
+                })
+            });
+        let Some(wallpaper_id) = wallpaper_id else {
+            return Ok(None);
+        };
+        let media_integration_enabled = self
+            .state
+            .wallpaper_drafts
+            .get(&wallpaper_id)
+            .map(|draft| draft.current().media_integration_enabled)
+            .or_else(|| {
+                self.state
+                    .wallpaper_configs
+                    .get(&wallpaper_id)
+                    .map(|config| config.media_integration_enabled)
+            })
+            .unwrap_or(false);
+        Ok(Some(messages::UserShortcutContext {
+            wallpaper_id,
+            media_integration_enabled,
+        }))
     }
 }
 

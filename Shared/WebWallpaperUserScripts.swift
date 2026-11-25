@@ -35,6 +35,12 @@ extension WebWallpaperProtocol {
             WKUserScript(
                 source: WebWallpaperFontAliases.script, injectionTime: .atDocumentStart,
                 forMainFrameOnly: false),
+            WKUserScript(
+                source: WebWallpaperAudioGain.script(
+                    initialGain: seed.audioGain,
+                    mediaScaledByHost: seed.mediaVolumeScaledByHost),
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false),
             WKUserScript(source: noDragScript, injectionTime: .atDocumentStart, forMainFrameOnly: false),
             WKUserScript(
                 source: makeHostScript(seed: seed), injectionTime: .atDocumentStart, forMainFrameOnly: true),

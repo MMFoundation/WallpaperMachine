@@ -430,6 +430,18 @@ pub struct GetSystemMediaScenes;
 /// what its user permitted, not on whether it happens to be presenting.
 pub struct GetSystemMediaConsentHandles;
 
+/// Resolves the owning wallpaper ID and media-integration consent for a scene
+/// handle that emitted `engine.openUserShortcut`.
+pub struct ResolveUserShortcutContext {
+    pub scene_handle: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserShortcutContext {
+    pub wallpaper_id: String,
+    pub media_integration_enabled: bool,
+}
+
 /// Stores the absolute path the host staged for a file or directory property,
 /// or clears it. The path is persisted exactly as given.
 pub struct SetPropertyPath {
@@ -577,5 +589,6 @@ pub type FanOutSystemMediaArtworkReply = Result<(), BridgeError>;
 pub type GetSystemMediaSceneHandlesReply = Result<Vec<u64>, BridgeError>;
 pub type GetSystemMediaScenesReply = Result<Vec<crate::api::BridgeSystemMediaScene>, BridgeError>;
 pub type GetSystemMediaConsentHandlesReply = Result<Vec<u64>, BridgeError>;
+pub type ResolveUserShortcutContextReply = Result<Option<UserShortcutContext>, BridgeError>;
 pub type SetPropertyPathReply = WallpaperMutationReply;
 pub type GetNativeVideoWallpapersReply = Result<Vec<BridgeNativeVideoWallpaper>, BridgeError>;

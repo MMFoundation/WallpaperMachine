@@ -392,6 +392,10 @@ struct PropertyRowView: View {
         .accessibilityLabel(Text(verbatim: row.name))
         .disabled(isDisabled)
       }
+    case .userShortcut(let shortcut):
+      UserShortcutRowView(
+        options: options, row: row, state: shortcut, isDisabled: isDisabled,
+        header: { menu in topLine(control: true) { menu } })
     case .color(let red, let green, let blue):
       topLine(control: true) {
         ColorPicker(

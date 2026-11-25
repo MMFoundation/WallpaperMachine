@@ -35,6 +35,7 @@ final class PanelController {
   let playback: PlaybackPreferences
   let playlists: PlaylistStore
   let automations: WallpaperAutomationStore
+  let userShortcuts: UserShortcutStore
   let solarLocationTracker: SolarLocationTracker
   let displayLayouts: WallpaperDisplayLayoutStore
   /// The clocks and dates on the desktop (Settings › Desktop Widgets).
@@ -126,6 +127,17 @@ final class PanelController {
   @ObservationIgnored var loginItemRefresh: Task<Void, Never>?
   /// Reads the favorites again when the menu bar panel saved them, while the panel is started.
   @ObservationIgnored private var favoritesObserver: NSObjectProtocol?
+  /// Observes explicit user-approved shortcut bindings so Inspector rows stay current.
+  @ObservationIgnored private var userShortcutsObserver: NSObjectProtocol?
+  var userShortcutsRevision: UInt64 = 0
+  /// Pending `usershortcut` approval changes staged in the inspector but not yet committed by
+  /// "Apply changes". Never persisted to `UserShortcutStore` until Apply succeeds; cleared on
+  /// Revert, preset apply, or panel close (`stop()`).
+  enum PendingUserShortcutEdit: Equatable {
+    case approve(ApprovedUserShortcutBinding)
+    case remove
+  }
+  var pendingUserShortcutEdits: [String: [String: PendingUserShortcutEdit]] = [:]
   /// `start()` has run and `stop()` has not.
   private(set) var isStarted = false
   /// `stop()` has run: the panel is closing or closed, so an action that needs a window it no
@@ -287,6 +299,7 @@ final class PanelController {
     letterbox: VideoLetterboxStore? = nil,
     chooseApplication: (@MainActor () async -> URL?)? = nil,
     automations: WallpaperAutomationStore? = nil,
+    userShortcuts: UserShortcutStore? = nil,
     solarLocationTracker: SolarLocationTracker? = nil,
     displayLayouts: WallpaperDisplayLayoutStore? = nil,
     desktopWidgets: DesktopWidgetStore? = nil,
@@ -308,6 +321,7 @@ final class PanelController {
     let presets = presets ?? .shared
     let imagePlacement = imagePlacement ?? .shared
     let automations = automations ?? WallpaperAutomationStore(defaults: defaults)
+    let userShortcuts = userShortcuts ?? (defaults === ClientPreferences.defaults ? .shared : UserShortcutStore(defaults: defaults))
     let displayLayouts = displayLayouts ?? WallpaperDisplayLayoutStore(defaults: defaults)
     let spaces = spaces ?? WallpaperSpaceMonitor()
     let systemConditions = systemConditions ?? .shared
@@ -327,6 +341,7 @@ final class PanelController {
     self.playback = playback
     self.playlists = playlists
     self.automations = automations
+    self.userShortcuts = userShortcuts
     self.solarLocationTracker = solarLocationTracker ?? SolarLocationTracker(store: automations)
     self.displayLayouts = displayLayouts
     self.desktopWidgets = desktopWidgets ?? DesktopWidgetStore(defaults: defaults)
@@ -438,6 +453,11 @@ final class PanelController {
         if saved != self.favoriteIDs { self.favoriteIDs = saved }
       }
     }
+    userShortcutsObserver = NotificationCenter.default.addObserver(
+      forName: UserShortcutStore.didChangeNotification, object: userShortcuts, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.userShortcutsRevision &+= 1 }
+    }
     refreshVisibilityGatedWork()
   }
 
@@ -458,6 +478,9 @@ final class PanelController {
     storageHealthModel?.cancelScan()
     if let favoritesObserver { NotificationCenter.default.removeObserver(favoritesObserver) }
     favoritesObserver = nil
+    if let userShortcutsObserver { NotificationCenter.default.removeObserver(userShortcutsObserver) }
+    userShortcutsObserver = nil
+    pendingUserShortcutEdits.removeAll()
     displayOptions.cancel()
     letterbox.cancelAll()
     revisions.stop()

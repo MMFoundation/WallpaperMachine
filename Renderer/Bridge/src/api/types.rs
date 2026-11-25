@@ -1316,6 +1316,8 @@ impl From<wallpaper_core::SceneCapabilityProbe> for BridgeSceneCapability {
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BridgeUserShortcut {
     pub scene_handle: u64,
+    /// Exact wallpaper ID that owns `scene_handle`, resolved atomically by the bridge.
+    pub wallpaper_id: String,
     pub property: String,
     pub value: String,
 }

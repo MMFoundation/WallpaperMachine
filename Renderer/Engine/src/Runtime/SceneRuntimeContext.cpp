@@ -1075,6 +1075,17 @@ DynamicValue* SceneRuntimeContext::FindPropertyValue(std::string_view name) cons
     return found == m_property_values.end() ? nullptr : found->second;
 }
 
+bool SceneRuntimeContext::IsUserShortcutProperty(std::string_view name) const {
+    const std::string key(name);
+    if (const auto authored = m_default_properties.find(key); authored != m_default_properties.end()) {
+        return authored->second.is_user_shortcut;
+    }
+    if (const auto live = m_project_properties.find(key); live != m_project_properties.end()) {
+        return live->second.is_user_shortcut;
+    }
+    return false;
+}
+
 DynamicValue* SceneRuntimeContext::FollowProperty(std::string_view name, const DynamicValue& authored) {
     if (name.empty()) return nullptr;
     if (auto* declared = FindPropertyValue(name); declared != nullptr) return declared;

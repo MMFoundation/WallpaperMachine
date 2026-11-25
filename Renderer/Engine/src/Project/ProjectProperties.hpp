@@ -19,6 +19,7 @@ struct RuntimeScalarValue
     static RuntimeScalarValue Bool(bool value);
     static RuntimeScalarValue Float(float value);
     static RuntimeScalarValue String(std::string value);
+    static RuntimeScalarValue UserShortcut(std::string value);
 
     bool               asBool() const;
     float              asFloat() const;
@@ -28,6 +29,7 @@ struct RuntimeScalarValue
     bool        bool_value { false };
     float       float_value { 0.0f };
     std::string string_value {};
+    bool        is_user_shortcut { false };
 };
 
 using ProjectProperties = std::unordered_map<std::string, RuntimeScalarValue>;

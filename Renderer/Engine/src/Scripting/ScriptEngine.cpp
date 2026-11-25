@@ -2360,7 +2360,9 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
     }
     case kNative_shortcutValue: {
         if (rt_ == nullptr) return JS_UNDEFINED;
-        const DynamicValue* property = rt_->FindPropertyValue(str(0));
+        const auto name = str(0);
+        if (! rt_->IsUserShortcutProperty(name)) return JS_UNDEFINED;
+        const DynamicValue* property = rt_->FindPropertyValue(name);
         if (property == nullptr) return JS_UNDEFINED;
         return text(property->getType() == DynamicValue::String ? property->getString() : property->toString());
     }

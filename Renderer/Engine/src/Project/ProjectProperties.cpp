@@ -107,7 +107,13 @@ RuntimeScalarValue RuntimeScalarValue::Float(float value)
 RuntimeScalarValue RuntimeScalarValue::String(std::string value)
 {
     const bool flag = StringIsTrue(value);
-    return RuntimeScalarValue { Kind::String, flag, 0.0f, std::move(value) };
+    return RuntimeScalarValue { Kind::String, flag, 0.0f, std::move(value), false };
+}
+
+RuntimeScalarValue RuntimeScalarValue::UserShortcut(std::string value)
+{
+    const bool flag = StringIsTrue(value);
+    return RuntimeScalarValue { Kind::String, flag, 0.0f, std::move(value), true };
 }
 
 bool RuntimeScalarValue::asBool() const
@@ -161,7 +167,20 @@ bool ParseProjectProperties(
                 if (! member.is_object()) continue;
                 const auto value = member.find("value");
                 if (value == member.end()) continue;
-                table.insert_or_assign(name, ValueFromJson(*value));
+                RuntimeScalarValue parsed = ValueFromJson(*value);
+                const auto         type   = member.find("type");
+                if (type != member.end() && type->is_string()) {
+                    const std::string& kind = type->get_ref<const std::string&>();
+                    constexpr std::string_view kUserShortcut = "usershortcut";
+                    if (kind.size() == kUserShortcut.size() &&
+                        std::equal(kind.begin(), kind.end(), kUserShortcut.begin(),
+                                   [](unsigned char ch, char expected) {
+                                       return static_cast<char>(std::tolower(ch)) == expected;
+                                   })) {
+                        parsed.is_user_shortcut = true;
+                    }
+                }
+                table.insert_or_assign(name, std::move(parsed));
             }
             *properties = std::move(table);
             return true;
@@ -194,7 +213,13 @@ ProjectProperties MergeProjectProperties(
     const ProjectProperties& overrides)
 {
     ProjectProperties merged = defaults;
-    for (const auto& [name, value] : overrides) merged.insert_or_assign(name, value);
+    for (const auto& [name, value] : overrides) {
+        RuntimeScalarValue next = value;
+        if (const auto authored = defaults.find(name); authored != defaults.end()) {
+            next.is_user_shortcut = authored->second.is_user_shortcut;
+        }
+        merged.insert_or_assign(name, std::move(next));
+    }
     return merged;
 }
 

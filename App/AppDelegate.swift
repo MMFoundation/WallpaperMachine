@@ -433,7 +433,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 },
                 nextShortcut: {
                     try await store.bridge.nextUserShortcut()
-                })
+                },
+                shortcutExecutor: UserShortcutExecutor(store: .shared))
             if let lockScreen {
                 let liveFeed = LockScreenLiveFeedCoordinator(
                     bridge: store.bridge,

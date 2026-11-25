@@ -356,6 +356,16 @@ enum InspectorPolicy {
     switch row.control {
     case .choice(_, let choices):
       return choices.contains { $0.label.localizedCaseInsensitiveContains(query) }
+    case .userShortcut(let state):
+      switch state.selection {
+      case .application(let bundleID, let displayName):
+        return displayName.localizedCaseInsensitiveContains(query)
+          || bundleID.localizedCaseInsensitiveContains(query)
+      case .shortcut(let name):
+        return name.localizedCaseInsensitiveContains(query)
+      default:
+        return false
+      }
     case .description(let detail):
       return detail?.localizedCaseInsensitiveContains(query) == true
     default:

@@ -13,9 +13,16 @@ final class SceneMediaSink {
     private let applyArtwork: (UInt32, UInt32, Data) async throws -> Void
     private let fetchScenes: () async -> [UInt64: UInt64]
     private let nextShortcut: (() async throws -> BridgeUserShortcut)?
+    private let shortcutExecutor: UserShortcutExecutor?
     /// Waits for wallpaper button presses. A long wait, not a poll: it returns
     /// only when a press arrives, so an untouched wallpaper costs nothing.
     private var shortcuts: Task<Void, Never>?
+    /// In-flight app/Shortcut launches dispatched off the receive loop so a slow
+    /// Apple Shortcut never blocks media controls or other displays, cancelled
+    /// cleanly on `shutdown()`.
+    private var inFlightShortcuts: [UUID: Task<Void, Never>] = [:]
+    /// Throttles per-frame rate-limit warning logs by `(wallpaperId, property)`.
+    private var lastRateLimitWarning: [String: TimeInterval] = [:]
     /// Held, not derived from a temporary. `ObjectIdentifier` is an address,
     /// and an address freed the moment it was taken can be handed to the next
     /// allocation — which would let two listeners share one key in the shared
@@ -57,13 +64,15 @@ final class SceneMediaSink {
         submit: @escaping (String) async throws -> Void,
         applyArtwork: @escaping (UInt32, UInt32, Data) async throws -> Void,
         fetchScenes: @escaping () async -> [UInt64: UInt64],
-        nextShortcut: (() async throws -> BridgeUserShortcut)? = nil
+        nextShortcut: (() async throws -> BridgeUserShortcut)? = nil,
+        shortcutExecutor: UserShortcutExecutor? = nil
     ) {
         self.session = session
         self.submit = submit
         self.applyArtwork = applyArtwork
         self.fetchScenes = fetchScenes
         self.nextShortcut = nextShortcut
+        self.shortcutExecutor = shortcutExecutor
         session.relay.addListener(listenerKey) { [weak self] event in
             self?.deliver(event)
         }
@@ -110,15 +119,57 @@ final class SceneMediaSink {
     /// user left a button unbound gets silence, which is what an unbound
     /// button already did.
     private func perform(_ event: BridgeUserShortcut) async {
-        guard let command = SystemMediaCommand(rawValue: event.value) else {
-            AppLog.info("Wallpaper shortcut \(event.property) is bound to nothing this host can do: \"\(event.value)\".")
+        if let command = SystemMediaCommand(rawValue: event.value) {
+            if await session.send(command) {
+                AppLog.info("Carried out \(command.rawValue) for wallpaper shortcut \(event.property).")
+                return
+            }
+            AppLog.warn("No media player took a wallpaper's transport command.")
             return
         }
-        if await session.send(command) {
-            AppLog.info("Carried out \(command.rawValue) for wallpaper shortcut \(event.property).")
+        if let shortcutExecutor, UserShortcutTarget(rawValue: event.value) != nil {
+            // Synchronously verify exact `(wallpaperId, property, target)` approval and record
+            // rate-limit timestamps before dispatching off the receive loop so a slow Shortcut
+            // never stalls `media:*` transport commands or other displays.
+            switch shortcutExecutor.admit(
+                wallpaperID: event.wallpaperId,
+                propertyID: event.property,
+                value: event.value)
+            {
+            case .admitted(let target):
+                let taskID = UUID()
+                let property = event.property
+                let task = Task { @MainActor [weak self, shortcutExecutor] in
+                    defer { self?.inFlightShortcuts.removeValue(forKey: taskID) }
+                    let outcome = await shortcutExecutor.runAdmitted(target)
+                    guard !Task.isCancelled else { return }
+                    switch outcome {
+                    case .executed(let ran):
+                        AppLog.info("Carried out \(ran.rawValue) for wallpaper shortcut \(property).")
+                    case .failed(let reason):
+                        AppLog.warn("Wallpaper shortcut \(property) failed: \(reason).")
+                    default:
+                        break
+                    }
+                }
+                inFlightShortcuts[taskID] = task
+            case .rejected(.rejectedUnapproved):
+                AppLog.warn(
+                    "Rejected unapproved wallpaper shortcut \(event.property) for wallpaper \(event.wallpaperId).")
+            case .rejected(.rateLimitedPerShortcut), .rejected(.rateLimitedGlobalBurst):
+                let now = ProcessInfo.processInfo.systemUptime
+                let warnKey = "\(event.wallpaperId)|\(event.property)"
+                lastRateLimitWarning = lastRateLimitWarning.filter { now - $0.value < 5.0 }
+                if lastRateLimitWarning[warnKey] == nil {
+                    lastRateLimitWarning[warnKey] = now
+                    AppLog.warn("Rate-limited wallpaper shortcut \(event.property) for wallpaper \(event.wallpaperId).")
+                }
+            case .rejected(.rejectedEmptyOrUnsupported), .rejected(.executed), .rejected(.failed):
+                break
+            }
             return
         }
-        AppLog.warn("No media player took a wallpaper's transport command.")
+        AppLog.info("Wallpaper shortcut \(event.property) is bound to nothing this host can do: \"\(event.value)\".")
     }
 
     func reconcile() {
@@ -147,6 +198,9 @@ final class SceneMediaSink {
     func shutdown() {
         shortcuts?.cancel()
         shortcuts = nil
+        for task in inFlightShortcuts.values { task.cancel() }
+        inFlightShortcuts.removeAll()
+        lastRateLimitWarning.removeAll()
         // Retires any reconcile still in flight, and any delivery already past
         // its first await, along with the listener. `setConsuming` tells the
         // relay; saying it twice would only rely on its remove-guard.

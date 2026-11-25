@@ -606,6 +606,14 @@ final class WallpaperPresetStore {
     var total = 0
     for index in document.preset.properties.indices {
       let property = document.preset.properties[index]
+      // A portable export never carries machine-local `app:` or `shortcut:` bindings.
+      if property.kind == "combo", !property.usesDefault,
+         case .string(let raw) = property.value,
+         UserShortcutTarget(rawValue: raw) != nil
+      {
+        document.preset.properties[index].value = .string("")
+        document.preset.properties[index].usesDefault = true
+      }
       guard let path = property.retainedPath else { continue }
       try requireRetainedPath(path, presetID: document.preset.id, propertyID: property.id)
       let url = URL(fileURLWithPath: path)
@@ -689,6 +697,16 @@ final class WallpaperPresetStore {
     do {
       for index in document.preset.properties.indices {
         let property = document.preset.properties[index]
+        // Imported presets can never smuggle custom `app:` or `shortcut:` bindings.
+        if property.kind == "combo", !property.usesDefault,
+           case .string(let raw) = property.value,
+           UserShortcutTarget(rawValue: raw) != nil,
+           let descriptor = options.properties.first(where: { $0.id == property.id }),
+           UserShortcutDescriptor.isUserShortcut(descriptor)
+        {
+          document.preset.properties[index].value = .string("")
+          document.preset.properties[index].usesDefault = true
+        }
         guard let files = document.assets[property.id] else { continue }
         let directory = try prepareRetainedDirectory(presetID: document.preset.id, propertyID: property.id)
         // The UUID root is unpublished staging. Exclusive creation also fails
@@ -803,7 +821,17 @@ final class WallpaperPresetStore {
     case (.slider, .number(let number)):
       let min = descriptor.slider?.min ?? 0, max = descriptor.slider?.max ?? 1
       valid = number.isFinite && min.isFinite && max.isFinite && min <= max && number >= min && number <= max
-    case (.combo, _): valid = descriptor.comboOptions.contains { WallpaperPresetValue($0.value) == value }
+    case (.combo, _):
+      if descriptor.comboOptions.contains(where: { WallpaperPresetValue($0.value) == value }) {
+        valid = true
+      } else if UserShortcutDescriptor.isUserShortcut(descriptor),
+                case .string(let raw) = value,
+                UserShortcutTarget(rawValue: raw) != nil
+      {
+        valid = true
+      } else {
+        valid = false
+      }
     case (.color, .color(let red, let green, let blue)):
       valid = [red, green, blue].allSatisfy { $0.isFinite && (0...1).contains($0) }
     case (.textInput, .string(let string)), (.texture, .string(let string)),

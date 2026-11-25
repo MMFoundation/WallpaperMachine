@@ -87,9 +87,15 @@ enum InspectorWording {
 
   static func webVolumeStatus(_ volume: InspectorOptions.DeliveryReport.WebOutput.Volume) -> String {
     switch volume {
+    case .mediaAndWebAudio:
+      return L("Volume sets the level of both HTML media elements and Web Audio.")
     case .mediaElements:
       return L(
         "Volume sets the level of the audio and video the page plays through media elements. Sound the page makes with Web Audio does not follow it; only Mute does."
+      )
+    case .webAudioOnly:
+      return L(
+        "Volume sets the level of Web Audio. HTML media volume cannot be changed on this version of macOS."
       )
     case .unavailable: return L("Media volume cannot be changed for this page on this version of macOS.")
     case .unknown: return L("How far Volume reaches is confirmed once the wallpaper is running.")
