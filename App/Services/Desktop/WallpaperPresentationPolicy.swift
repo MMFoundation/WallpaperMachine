@@ -377,7 +377,9 @@ final class WallpaperPresentationPolicy {
         "MWEWallpaperDesktopWindow",
         "MWEWebWallpaperDesktopWindow",
         "MWENativeVideoDesktopWindow",
+        "MWENativeVideoSpanDesktopWindow",
         "MWEWebMVideoDesktopWindow",
+        "MWEStillImageSpanDesktopWindow",
     ]
 
     static func isWallpaperWindow(_ window: NSWindow) -> Bool {
@@ -835,9 +837,10 @@ final class WallpaperPresentationPolicy {
 struct WallpaperHosts {
     var web: WebWallpaperHost?
     var native: NativeVideoWallpaperHost?
+    var stillImageSpan: DisplaySpanStillImageHost? = nil
 
     func reconcile() {
-        web?.reconcile()
+        if let stillImageSpan { stillImageSpan.reconcile() } else { web?.reconcile() }
         native?.reconcile()
     }
 }

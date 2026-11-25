@@ -26,6 +26,9 @@ final class WebMVideoWallpaperWindow: NSWindow {
         var options = WallpaperEngineOptions.identity
         var lut: VideoLut?
         var borderColor: CGColor?
+        var trimRange: VideoTrimRange?
+        var spanDisplays: [DisplayConfiguration.Display] = []
+        var spanDisplayID: UInt32?
     }
 
     private let surface: RuntimeSurfaceKey
@@ -86,7 +89,9 @@ final class WebMVideoWallpaperWindow: NSWindow {
     var playerForTest: WebMPlayer? { player }
 
     private func makePlayer(_ file: WebMFile) {
-        let player = WebMPlayer(file: file, withAudio: true, paused: desired.userPaused || desired.suspended)
+        let player = WebMPlayer(
+            file: file, withAudio: true, paused: desired.userPaused || desired.suspended,
+            loopRange: desired.trimRange?.closedRange)
         self.player = player
         counters.record(.nativeVideoItemCreated, for: surface)
         player.onFailure = { [weak self] detail, settled in self?.report(failure: detail, settled: settled) }
@@ -105,6 +110,23 @@ final class WebMVideoWallpaperWindow: NSWindow {
         player.setScaling(desired.mode.layoutMode, factor: desired.factor, pan: desired.pan)
         player.setPaused(desired.userPaused || desired.suspended)
         player.setEngineOptions(desired.options, lut: desired.lut, borderColor: desired.borderColor)
+        player.setLoopRange(desired.trimRange?.closedRange)
+        applySpan(to: player)
+    }
+
+    private func applySpan(to player: WebMPlayer) {
+        if let slice = activeSpanSlice(for: player.file) {
+            player.setSpanMediaFrame(slice.mediaFrameInDisplay)
+        } else {
+            player.setSpanMediaFrame(nil)
+        }
+    }
+
+    private func activeSpanSlice(for file: WebMFile) -> DisplaySpanGeometry.DisplaySlice? {
+        guard let displayID = desired.spanDisplayID, desired.spanDisplays.count >= 2 else { return nil }
+        return DisplaySpanGeometry.compute(
+            displays: desired.spanDisplays, mediaSize: file.presentationSize
+        )?.slice(for: displayID)
     }
 
     private func report(failure detail: String, settled: Bool) {
@@ -170,6 +192,23 @@ extension WebMVideoWallpaperWindow: NativeVideoSurface {
         player?.setEngineOptions(options, lut: lut, borderColor: borderColor)
     }
 
+    func setTrimRange(_ range: VideoTrimRange?) {
+        desired.trimRange = range
+        player?.setLoopRange(range?.closedRange)
+    }
+
+    func setSpanDisplays(_ displays: [DisplayConfiguration.Display], displayID: UInt32) {
+        desired.spanDisplays = displays
+        desired.spanDisplayID = displayID
+        if let player { applySpan(to: player) }
+    }
+
+    func clearSpanLayout() {
+        desired.spanDisplays = []
+        desired.spanDisplayID = nil
+        player?.setSpanMediaFrame(nil)
+    }
+
     func setUserPaused(_ paused: Bool) {
         desired.userPaused = paused
         player?.setPaused(desired.userPaused || desired.suspended)
@@ -193,7 +232,13 @@ extension WebMVideoWallpaperWindow: NativeVideoSurface {
     }
 
     func posterImage() async -> CGImage? {
-        guard let player, let image = await player.posterImage() else { return nil }
+        guard let player else { return nil }
+        if let slice = activeSpanSlice(for: player.file) {
+            guard let image = await player.unflippedPosterImage() else { return nil }
+            return DisplaySpanGeometry.composePoster(
+                from: image, slice: slice, flipHorizontal: player.isFlippedHorizontally)
+        }
+        guard let image = await player.posterImage() else { return nil }
         return NativeVideoWallpaperWindow.fittedPoster(
             image,
             pixelSize: CGSize(width: frame.width * backingScaleFactor, height: frame.height * backingScaleFactor),

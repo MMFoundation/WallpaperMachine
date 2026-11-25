@@ -53,7 +53,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // snapshot applied meanwhile can have closed its window on the screens AppKit listed
         // then. The refresh that used to follow the return is what opened it again, so the
         // hosts that draw per display look again themselves.
-        self.webWallpaperHost?.reconcile()
+        if let stillImageSpanHost = self.stillImageSpanHost {
+            stillImageSpanHost.reconcile()
+        } else {
+            self.webWallpaperHost?.reconcile()
+        }
         self.nativeVideoHost?.reconcile()
     }) { [weak self] in
         guard let self else { return false }
@@ -64,9 +68,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var sceneMediaSink: SceneMediaSink?
     private var lockScreenLiveFeed: LockScreenLiveFeedCoordinator?
     private(set) var webWallpaperHost: WebWallpaperHost?
+    private(set) var stillImageSpanHost: DisplaySpanStillImageHost?
     private(set) var nativeVideoHost: NativeVideoWallpaperHost?
     private var wallpaperHosts: WallpaperHosts {
-        WallpaperHosts(web: webWallpaperHost, native: nativeVideoHost)
+        WallpaperHosts(web: webWallpaperHost, native: nativeVideoHost, stillImageSpan: stillImageSpanHost)
     }
     private(set) var presentationPolicy: WallpaperPresentationPolicy?
     /// Keeps the previous picture on screen while a switched wallpaper loads.
@@ -397,11 +402,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     scheduler: mediaScheduler))
             desktopMediaSession = mediaSession
             desktopWidgets?.attachMediaSession(mediaSession)
+            let stillSpan = DisplaySpanStillImageHost(bridge: store.bridge, switchHold: hold)
+            stillImageSpanHost = stillSpan
             let webHost = WebWallpaperHost(bridge: store.bridge, mediaRelay: mediaSession.relay,
                 contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 },
-                switchHold: hold)
+                switchHold: hold,
+                fetch: { [weak stillSpan] in
+                    let all = try await store.bridge.webWallpapers()
+                    return stillSpan?.filterForWebHost(all) ?? all
+                })
             webWallpaperHost = webHost
-            webHost.onStateChanged = { [weak store] state in store?.receiveHostState(state) }
+            stillSpan.applyWebHost = { [weak webHost] filtered in
+                await webHost?.applyFetched(filtered)
+            }
+            stillSpan.onStateChanged = { [weak store, weak webHost] state in
+                if state.phase == .closed, webHost?.activeDisplayIDs.contains(state.displayID) == true { return }
+                store?.receiveHostState(state)
+            }
+            stillSpan.onError = { [weak self] message in
+                self?.lastError = WallpaperActionError(message: message)
+                self?.rebuildMenu()
+            }
+            stillSpan.onSpanPreferenceChanged = { [weak self] in
+                self?.schedulePosterRefresh()
+            }
+            stillSpan.onSurfacesChanged = { [weak self, weak lockScreen] in
+                guard let self, !self.shutdownInProgress else { return }
+                self.presentationPolicy?.evaluate()
+                self.observeWallpaperSettling()
+                self.windowAuditor?.windowsMayHaveChanged()
+                self.spacePinning?.update()
+                guard lockScreen?.claimsDesktopPicture != true else { return }
+                do { try self.startDesktopWallpaperSync(.surfacesChanged) } catch {
+                    AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
+                }
+            }
+            stillSpan.start()
+            webHost.onStateChanged = { [weak store, weak stillSpan] state in
+                if state.phase == .closed, stillSpan?.hasActiveClaim(on: state.displayID) == true { return }
+                store?.receiveHostState(state)
+            }
             webHost.onDeliveryStateChanged = { [weak store] in store?.webWallpaperDeliveryRevision &+= 1 }
             webHost.onAssetsChanged = { [weak store] in
                 store?.wallpaperContentRevision &+= 1
@@ -508,7 +548,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.telemetry?.invalidateFrames()
                 // Web wallpapers live in host windows; open or close them before
                 // the poster sync and the presentation policy look at the desktop.
-                self.webWallpaperHost?.reconcile()
+                if let stillImageSpanHost = self.stillImageSpanHost {
+                    stillImageSpanHost.reconcile()
+                } else {
+                    self.webWallpaperHost?.reconcile()
+                }
                 self.sceneMediaSink?.reconcile()
                 self.lockScreenLiveFeed?.reconcile()
                 self.nativeVideoHost?.reconcile()
@@ -1604,6 +1648,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         lockScreenLiveFeed = nil
         webWallpaperHost?.shutdown()
         webWallpaperHost = nil
+        stillImageSpanHost?.shutdown()
+        stillImageSpanHost = nil
         nativeVideoHost?.shutdown()
         nativeVideoHost = nil
         updates.cancel()

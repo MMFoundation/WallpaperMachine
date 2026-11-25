@@ -93,6 +93,7 @@ extension PanelController {
 
     // Playback, power and app rules.
     playback.resetToDefaults()
+    displaySpan.resetToDefaults()
     if automations.globalBatteryTarget != nil {
       await attempt { try automations.setGlobalBatteryTarget(nil) }
     }

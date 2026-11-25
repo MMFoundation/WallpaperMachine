@@ -53,6 +53,8 @@ final class PanelController {
   let imagePlacement: StillImagePlacementStore
   let compatibility: WallpaperCompatibilityStore
   let letterbox: VideoLetterboxStore
+  let videoTrim: VideoTrimStore
+  let displaySpan: DisplaySpanStore
   let displayTitles: DisplayTitleResolver
   /// Folder sizes and dates for Installed's sort, measured off the main thread.
   let libraryMetrics: LibraryMetricsService
@@ -112,6 +114,11 @@ final class PanelController {
   var remembersSession = true
   /// The scale factor the Black bars card last set, while it can still be waiting in the draft.
   var letterboxStaged: LetterboxStagedFactor?
+  /// Cached video clip durations (seconds) keyed by wallpaper ID and library refresh revision,
+  /// populated asynchronously off the main thread for `VideoTrimCard`.
+  var videoTrimDurations: [String: VideoTrimDurationEntry] = [:]
+  @ObservationIgnored var videoTrimDurationTasks: [String: Task<Void, Never>] = [:]
+  @ObservationIgnored var videoTrimDurationReader: (@MainActor (_ wallpaperID: String, _ displayID: String) async throws -> Double)?
   /// Measured `file` / `directory` property paths, by wallpaper then property id.
   var propertyAssets: [String: [String: PanelPropertyAsset]] = [:]
   /// Why choosing or clearing a path failed, by wallpaper then property id. It belongs beside the
@@ -306,7 +313,9 @@ final class PanelController {
     spaces: WallpaperSpaceMonitor? = nil,
     systemConditions: SystemConditionState? = nil,
     searchTranslation: WorkshopSearchTranslator? = nil,
-    surfaceDiagnostics: LiveSurfaceDiagnosticsMonitor? = nil
+    surfaceDiagnostics: LiveSurfaceDiagnosticsMonitor? = nil,
+    videoTrim: VideoTrimStore? = nil,
+    displaySpan: DisplaySpanStore? = nil
   ) {
     let pixiv = pixiv ?? PixivStore()
     let imports = imports ?? LibraryImportStore()
@@ -364,6 +373,8 @@ final class PanelController {
             return try await store.bridge.sceneCapability(wallpaperId: id)
           }))
     self.letterbox = letterbox ?? Self.letterboxStore(for: store)
+    self.videoTrim = videoTrim ?? (defaults === ClientPreferences.defaults ? .shared : VideoTrimStore(defaults: defaults))
+    self.displaySpan = displaySpan ?? (defaults === ClientPreferences.defaults ? .shared : DisplaySpanStore(defaults: defaults))
     self.displayTitles = displayTitles
     self.libraryMetrics = libraryMetrics ?? LibraryMetricsService()
     self.libraryCovers = libraryCovers ?? LibraryCoverStamps()
@@ -483,6 +494,8 @@ final class PanelController {
     pendingUserShortcutEdits.removeAll()
     displayOptions.cancel()
     letterbox.cancelAll()
+    for task in videoTrimDurationTasks.values { task.cancel() }
+    videoTrimDurationTasks.removeAll()
     revisions.stop()
     lifecycleLoop?.stop()
     errorLoop?.stop()

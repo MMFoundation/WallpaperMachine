@@ -1,5 +1,61 @@
 import SwiftUI
 
+// MARK: - Multi-display span
+
+/// Phase 1 multi-display span toggle (Native Video and packaged Still Image wallpapers only),
+/// shown in Settings › Displays whenever 2 or more displays are connected.
+struct DisplaysSpanGroup: View {
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    let state = controller.displaySpanState
+    let settings = controller.settings
+    let groupMatches =
+      settings.search.matches(settings.text(DisplaysSettingsSection.span.title ?? ""))
+      || settings.search.matches(settings.text(SettingsSection.displays.title))
+    SettingsGroup(DisplaysSettingsSection.span, in: .displays) {
+      DisplaysRow(item: DisplaysSettingsSection.spanEnabled, forced: groupMatches) {
+        Toggle(
+          noLabel,
+          isOn: Binding(
+            get: { state.isEnabled },
+            set: { enabled in
+              controller.launch(PanelActionCoordinator.key("displaySpan"), policy: .latestWins) {
+                try await controller.setDisplaySpanEnabled(enabled)
+              }
+            })
+        )
+        .labelsHidden()
+        .toggleStyle(.switch)
+        .disabled(controller.isStoreBusy)
+      }
+      if state.isEnabled {
+        switch state.unsupportedActiveKind {
+        case .scene:
+          DisplaysNote(
+            text: L(
+              "Multi-display span applies to video and still-image wallpapers only. Active scene wallpapers stay in their per-display mode."
+            ),
+            tone: .warning)
+        case .web:
+          DisplaysNote(
+            text: L(
+              "Multi-display span applies to video and still-image wallpapers only. Active web wallpapers stay in their per-display mode."
+            ),
+            tone: .warning)
+        case nil:
+          if state.needsSharedWallpaper {
+            DisplaysNote(
+              text: L(
+                "Apply the same video or still-image wallpaper to multiple displays, or mirror a display, to span it across screens."
+              ))
+          }
+        }
+      }
+    }
+  }
+}
+
 // MARK: - Display layouts
 
 /// Display layouts: the arrangements of wallpapers saved for the enabled independent displays, each

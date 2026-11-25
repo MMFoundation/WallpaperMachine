@@ -22,6 +22,12 @@ protocol NativeVideoSurface: AnyObject {
     /// Wallpaper Engine's per-wallpaper options (rate, flip, colour, image filter) and the
     /// Fit-style border colour, applied to the running surface.
     func setEngineOptions(_ options: WallpaperEngineOptions, lut: VideoLut?, borderColor: CGColor?)
+    /// Sets or clears the active A–B loop trim range on the running surface.
+    func setTrimRange(_ range: VideoTrimRange?)
+    /// Positions this surface as part of a multi-display span across `displays`.
+    func setSpanDisplays(_ displays: [DisplayConfiguration.Display], displayID: UInt32)
+    /// Leaves multi-display span mode and restores standard per-display scaling.
+    func clearSpanLayout()
     func setUserPaused(_ paused: Bool)
     func setPresentationSuspended(_ suspended: Bool)
     var isPlaying: Bool { get }
@@ -87,6 +93,12 @@ protocol NativeVideoSurface: AnyObject {
     /// caller decides when a surface becomes visible.
     func present()
     func stop()
+}
+
+extension NativeVideoSurface {
+    func setTrimRange(_ range: VideoTrimRange?) {}
+    func setSpanDisplays(_ displays: [DisplayConfiguration.Display], displayID: UInt32) {}
+    func clearSpanLayout() {}
 }
 
 /// One desktop window playing a plain local video with the platform player.
@@ -164,6 +176,15 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         self.borderColor = borderColor
         player.setEngineOptions(options, lut: lut, borderColor: borderColor)
     }
+    func setTrimRange(_ range: VideoTrimRange?) {
+        player.setTrimRange(range)
+    }
+    func setSpanDisplays(_ displays: [DisplayConfiguration.Display], displayID: UInt32) {
+        player.setSpanLayout(primaryDisplayID: displayID, displays: displays)
+    }
+    func clearSpanLayout() {
+        player.clearSpanLayout()
+    }
     func setUserPaused(_ paused: Bool) { player.setUserPaused(paused) }
     func setPresentationSuspended(_ suspended: Bool) {
         player.setPresentationSuspended(suspended)
@@ -175,6 +196,11 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         set { player.onReadyForDisplay = newValue }
     }
     func posterImage() async -> CGImage? {
+        if let slice = player.primarySpanSlice {
+            guard let image = await player.unflippedPosterImage() else { return nil }
+            return DisplaySpanGeometry.composePoster(
+                from: image, slice: slice, flipHorizontal: player.isFlippedHorizontally)
+        }
         guard let image = await player.posterImage() else { return nil }
         return Self.fittedPoster(image, pixelSize: CGSize(
             width: frame.width * backingScaleFactor, height: frame.height * backingScaleFactor),

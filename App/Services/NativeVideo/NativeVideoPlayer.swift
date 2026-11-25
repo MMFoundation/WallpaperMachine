@@ -98,6 +98,34 @@ final class NativeVideoPlayer {
     /// The project's `schemecolor`, shown around the picture in Fit-style modes (I2).
     private var borderColor: CGColor?
     private weak var container: NSView?
+    /// Active A–B loop trim interval (`nil` plays the full video track).
+    private var trimRange: VideoTrimRange?
+    /// Set when `setTrimRange` arrives while a load or reload task is already in flight so the
+    /// newest range is applied immediately once that task finishes.
+    private var pendingTrimReload = false
+    /// The `CMTimeRange` currently installed on `looper`, or `.invalid` while idle.
+    private var activeLoopRange: CMTimeRange = .invalid
+
+    /// Secondary per-display `AVPlayerLayer`s bound to this player's single `AVQueuePlayer` while
+    /// multi-display span is active (zero extra video decoder).
+    private final class SpanLayerBinding {
+        let displayID: UInt32
+        let layer: AVPlayerLayer
+        weak var container: NSView?
+        var backingScale: CGFloat
+        var readyObservation: NSKeyValueObservation?
+        var onReadyForDisplay: (@MainActor () -> Void)?
+
+        init(displayID: UInt32, layer: AVPlayerLayer, container: NSView, backingScale: CGFloat) {
+            self.displayID = displayID
+            self.layer = layer
+            self.container = container
+            self.backingScale = backingScale
+        }
+    }
+    private var primarySpanDisplayID: UInt32?
+    private var spanDisplays: [DisplayConfiguration.Display] = []
+    private var spanLayers: [UInt32: SpanLayerBinding] = [:]
     /// Whether the clip can be heard: not muted and above zero volume. A clip
     /// that cannot be heard has its audio track switched off, so its sound is
     /// neither decoded nor sent to an output (`SilentVideoAudio`).
@@ -117,10 +145,15 @@ final class NativeVideoPlayer {
     /// that is always heard plays exactly as it did; becoming audible switches
     /// back on only these.
     private var silencedCopies: Set<ObjectIdentifier> = []
-    /// Who waits for the clip to start over (`watchNextLoop`), and the observation of the
-    /// looper's count that tells it. Both exist only while someone waits; the observation is
-    /// made again on the looper of a rebuilt item, whose count starts from zero.
-    private var loopWatch: (@MainActor () -> Void)?
+    /// Who waits for the clip to start over (`watchNextLoop`), keyed so the primary display and
+    /// any multi-display span followers sharing this `AVQueuePlayer` wait independently without
+    /// clobbering one another. Both the map and the looper count observation exist only while
+    /// someone waits; the observation is made again on the looper of a rebuilt item.
+    private enum LoopWatchKey: Hashable {
+        case primary
+        case follower(UInt32)
+    }
+    private var loopWatches: [LoopWatchKey: (serial: UInt64, handler: @MainActor () -> Void)] = [:]
     private var loopCountObservation: NSKeyValueObservation?
     /// Tells a report on its way to the main actor for a watch that was replaced meanwhile.
     private var loopWatchSerial: UInt64 = 0
@@ -204,10 +237,25 @@ final class NativeVideoPlayer {
         applyPlacement()
     }
 
-    /// Positions the layer for the current scaling choice, picture size and
-    /// display geometry.
+    /// Positions the layer (and any secondary span layers sharing this `AVPlayer`) for the current
+    /// scaling or multi-display span layout, picture size and display geometry.
     private func applyPlacement() {
         guard !stopped else { return }
+        if let primaryID = primarySpanDisplayID,
+           spanDisplays.count >= 2,
+           let geometry = DisplaySpanGeometry.compute(displays: spanDisplays, mediaSize: presentationSize),
+           let primarySlice = geometry.slice(for: primaryID)
+        {
+            applySpanSlice(primarySlice, to: layer, container: container, backingScale: backingScale)
+            for (displayID, binding) in spanLayers {
+                if let slice = geometry.slice(for: displayID) {
+                    applySpanSlice(
+                        slice, to: binding.layer, container: binding.container,
+                        backingScale: binding.backingScale)
+                }
+            }
+            return
+        }
         let placement = NativeVideoLayout.placement(
             mode: scalingMode.layoutMode, factor: scalingFactor, videoSize: presentationSize,
             viewport: viewportBounds.size, backingScale: backingScale, pan: scalingPan)
@@ -239,6 +287,132 @@ final class NativeVideoPlayer {
         layer.backgroundColor = background
         container?.layer?.backgroundColor = background
     }
+
+    private func applySpanSlice(
+        _ slice: DisplaySpanGeometry.DisplaySlice, to targetLayer: AVPlayerLayer,
+        container: NSView?, backingScale: CGFloat
+    ) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        targetLayer.setAffineTransform(.identity)
+        targetLayer.contentsScale = backingScale > 0 ? backingScale : slice.backingScale
+        if presentationSize != nil {
+            // `mediaFrameInDisplay` already carries the video's exact aspect ratio filled over the
+            // virtual union canvas; plain `.resize` maps it 1:1 without re-applying aspect rules.
+            let rect = slice.mediaFrameInDisplay
+            targetLayer.videoGravity = .resize
+            targetLayer.bounds = CGRect(origin: .zero, size: rect.size)
+            targetLayer.position = CGPoint(x: rect.midX, y: rect.midY)
+        } else {
+            let rect = slice.unionFrameInDisplay
+            targetLayer.videoGravity = .resizeAspectFill
+            targetLayer.bounds = CGRect(origin: .zero, size: rect.size)
+            targetLayer.position = CGPoint(x: rect.midX, y: rect.midY)
+        }
+        targetLayer.setAffineTransform(flipHorizontal ? CGAffineTransform(scaleX: -1, y: 1) : .identity)
+        let background = CGColor(gray: 0, alpha: 1)
+        targetLayer.backgroundColor = background
+        container?.layer?.backgroundColor = background
+    }
+
+    // MARK: Multi-display span
+
+    /// Configures multi-display span geometry for this player and all secondary span layers bound
+    /// to its shared `AVQueuePlayer`.
+    func setSpanLayout(primaryDisplayID: UInt32, displays: [DisplayConfiguration.Display]) {
+        guard !stopped else { return }
+        guard primarySpanDisplayID != primaryDisplayID || spanDisplays != displays else { return }
+        primarySpanDisplayID = primaryDisplayID
+        spanDisplays = displays
+        applyPlacement()
+    }
+
+    /// Leaves multi-display span mode and restores standard per-display scaling on the primary layer.
+    func clearSpanLayout() {
+        guard primarySpanDisplayID != nil || !spanDisplays.isEmpty else { return }
+        primarySpanDisplayID = nil
+        spanDisplays = []
+        applyPlacement()
+    }
+
+    /// Attaches a secondary per-display `AVPlayerLayer` backed by this player's single
+    /// `AVQueuePlayer` (zero extra video decoder), masked to `view`'s display bounds.
+    @discardableResult
+    func attachSpanLayer(
+        displayID: UInt32, to view: NSView, onReadyForDisplay: (@MainActor () -> Void)? = nil
+    ) -> AVPlayerLayer {
+        detachSpanLayer(displayID: displayID)
+        let spanLayer = AVPlayerLayer()
+        spanLayer.player = player
+        spanLayer.videoGravity = .resizeAspectFill
+        let scale = view.window?.backingScaleFactor ?? 1
+        spanLayer.contentsScale = scale
+        view.layer?.masksToBounds = true
+        view.layer?.addSublayer(spanLayer)
+        let binding = SpanLayerBinding(
+            displayID: displayID, layer: spanLayer, container: view, backingScale: scale)
+        binding.onReadyForDisplay = onReadyForDisplay
+        binding.readyObservation = spanLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) {
+            [weak self, weak binding] layer, _ in
+            guard layer.isReadyForDisplay else { return }
+            Task { @MainActor [weak self, weak binding] in
+                guard let self, !self.stopped, let binding,
+                      self.spanLayers[displayID] === binding
+                else { return }
+                binding.onReadyForDisplay?()
+            }
+        }
+        spanLayers[displayID] = binding
+        if let slice = spanSlice(for: displayID) {
+            applySpanSlice(slice, to: spanLayer, container: view, backingScale: scale)
+        }
+        return spanLayer
+    }
+
+    func setSpanLayerReadyHandler(displayID: UInt32, _ handler: (@MainActor () -> Void)?) {
+        guard let binding = spanLayers[displayID] else { return }
+        binding.onReadyForDisplay = handler
+        if !stopped, binding.layer.isReadyForDisplay { handler?() }
+    }
+
+    func relayoutSpanLayer(displayID: UInt32, backingScale: CGFloat) {
+        guard !stopped, let binding = spanLayers[displayID] else { return }
+        binding.backingScale = backingScale > 0 ? backingScale : 1
+        if let slice = spanSlice(for: displayID) {
+            applySpanSlice(
+                slice, to: binding.layer, container: binding.container,
+                backingScale: binding.backingScale)
+        }
+    }
+
+    func detachSpanLayer(displayID: UInt32) {
+        cancelLoopWatch(forFollower: displayID)
+        guard let binding = spanLayers.removeValue(forKey: displayID) else { return }
+        binding.readyObservation?.invalidate()
+        binding.readyObservation = nil
+        binding.onReadyForDisplay = nil
+        binding.layer.player = nil
+        binding.layer.removeFromSuperlayer()
+    }
+
+    /// The active span slice for `displayID`, recomputed with the loaded `presentationSize`.
+    func spanSlice(for displayID: UInt32) -> DisplaySpanGeometry.DisplaySlice? {
+        guard spanDisplays.count >= 2 else { return nil }
+        return DisplaySpanGeometry.compute(displays: spanDisplays, mediaSize: presentationSize)?
+            .slice(for: displayID)
+    }
+
+    /// The primary display's active span slice, or `nil` when not spanning.
+    var primarySpanSlice: DisplaySpanGeometry.DisplaySlice? {
+        primarySpanDisplayID.flatMap { spanSlice(for: $0) }
+    }
+
+    var isFlippedHorizontally: Bool { flipHorizontal }
+    var avPlayerForTest: AVQueuePlayer { player }
+    var isSpanningForTest: Bool { primarySpanDisplayID != nil && spanDisplays.count >= 2 }
+    var spanLayerCountForTest: Int { spanLayers.count }
+    func spanLayerForTest(displayID: UInt32) -> AVPlayerLayer? { spanLayers[displayID]?.layer }
 
     /// Whether `mode` leaves room around the picture that the border colour fills.
     nonisolated static func borderShows(for mode: BridgeScalingMode) -> Bool {
@@ -277,19 +451,60 @@ final class NativeVideoPlayer {
         }
     }
 
+    /// Updates or clears the A–B loop trim range. Live changes rebuild the `AVPlayerLooper` cleanly
+    /// with the new `CMTimeRange` (zero extra decoder or memory overhead) without spending the
+    /// recovery budget.
+    func setTrimRange(_ range: VideoTrimRange?) {
+        guard !stopped, range != trimRange else { return }
+        trimRange = range
+        guard mediaURL != nil, !failureReported else { return }
+        if rebuild != nil {
+            pendingTrimReload = true
+            return
+        }
+        if looper != nil {
+            reloadItem(reason: "the loop trim range changed")
+        }
+    }
+
+    /// Keeps `time` when it lies inside `range`; returns `.invalid` when outside so a freshly
+    /// created `AVPlayerLooper` begins naturally at `range.start`.
+    nonisolated static func clampedSeekTime(_ time: CMTime, within range: CMTimeRange) -> CMTime {
+        guard time.isNumeric else { return .invalid }
+        guard range.isValid, range.start.isNumeric, range.duration.isNumeric, range.duration > .zero
+        else { return time }
+        let end = CMTimeRangeGetEnd(range)
+        guard CMTimeCompare(time, range.start) >= 0, CMTimeCompare(time, end) < 0 else {
+            return .invalid
+        }
+        return time
+    }
+
     /// The item rebuilt from the file at the time it was playing, with or without the colour
-    /// composition. Not a repair, so the recovery allowance is not spent.
+    /// composition or an updated A–B loop trim range. Not a repair, so the recovery allowance is
+    /// not spent.
     private func reloadItem(reason: String) {
         guard !stopped, !failureReported, let mediaURL, rebuild == nil else { return }
         let silent = audioDropped
+        let requestedTrim = trimRange
+        pendingTrimReload = false
         AppLog.debug("native video: reloading the item (\(reason))")
         rebuild = Task { @MainActor [weak self] in
+            var appliedTrim = requestedTrim
             let item = silent ? await Self.videoOnlyItem(url: mediaURL) : AVPlayerItem(url: mediaURL)
             var range = CMTimeRange.invalid
-            if let item { range = await Self.loopRange(of: item.asset) }
+            if let item { range = await Self.loopRange(of: item.asset, trim: appliedTrim) }
             guard let self, !self.stopped, !Task.isCancelled else { return }
             if let item, !(await self.attachComposition(to: item)) { self.rebuild = nil; return }
             guard !self.stopped, !Task.isCancelled else { return }
+            if let item {
+                while self.pendingTrimReload || self.trimRange != appliedTrim {
+                    self.pendingTrimReload = false
+                    appliedTrim = self.trimRange
+                    range = await Self.loopRange(of: item.asset, trim: appliedTrim)
+                    guard !self.stopped, !Task.isCancelled else { return }
+                }
+            }
             self.rebuild = nil
             guard let item else { return }
             // Preparation leaves the old item usable: playback and seeks during its awaits
@@ -297,7 +512,10 @@ final class NativeVideoPlayer {
             let time = self.player.currentItem?.currentTime() ?? .zero
             self.releaseItem()
             self.start(item, looping: range)
-            if time.isNumeric { self.player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: { _ in }) }
+            let seekTarget = Self.clampedSeekTime(time, within: range)
+            if seekTarget.isNumeric {
+                self.player.seek(to: seekTarget, toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: { _ in })
+            }
         }
     }
 
@@ -320,6 +538,8 @@ final class NativeVideoPlayer {
     var layerPositionForTest: CGPoint { layer.position }
     var layerBackgroundForTest: CGColor? { layer.backgroundColor }
     var hasColorCompositionForTest: Bool { player.currentItem?.videoComposition != nil }
+    var activeLoopRangeForTest: CMTimeRange { activeLoopRange }
+    var trimRangeForTest: VideoTrimRange? { trimRange }
 
     /// Fails without loading anything, unsettled: for a file the player must not be given (an
     /// `hev1` clip whose corrected copy has gone). Delivered like any preparation failure.
@@ -333,14 +553,26 @@ final class NativeVideoPlayer {
         // Held as the pending rebuild so a repair cannot start an item of its
         // own before this one is playing, and `stop()` cancels it.
         let releasesSilentAudio = self.releasesSilentAudio
+        let initialTrim = trimRange
+        pendingTrimReload = false
         rebuild = Task { @MainActor [weak self] in
-            let range = await Self.loopRange(of: item.asset)
+            var appliedTrim = initialTrim
+            var range = await Self.loopRange(of: item.asset, trim: appliedTrim)
             // Every rebuild reopens this same file, so its tracks are read once.
             let audioTrack = releasesSilentAudio ? await Self.silenceableAudioTrack(of: item.asset) : nil
             guard let self, !self.stopped, !Task.isCancelled else { return }
             self.silenceableAudioTrack = audioTrack
             guard await self.attachComposition(to: item) else { self.rebuild = nil; return }
             guard !self.stopped, !Task.isCancelled else { return }
+            // Recompute `loopRange` before first `start` when `setTrimRange` arrived during load
+            // (e.g. `NativeVideoWallpaperHost.update` applying a saved trim), avoiding a frame-0
+            // flash and an extra `AVPlayerLooper` creation.
+            while self.pendingTrimReload || self.trimRange != appliedTrim {
+                self.pendingTrimReload = false
+                appliedTrim = self.trimRange
+                range = await Self.loopRange(of: item.asset, trim: appliedTrim)
+                guard !self.stopped, !Task.isCancelled else { return }
+            }
             self.rebuild = nil
             self.start(item, looping: range)
         }
@@ -358,20 +590,21 @@ final class NativeVideoPlayer {
     }
 
     /// The stretch of the file one pass of the loop plays: the video track's
-    /// own time range, or `.invalid` (the whole item) when it cannot be read.
+    /// own time range (further clamped to `trim` when active), or `.invalid` (the whole item)
+    /// when it cannot be read.
     ///
     /// An unbounded looper ends each pass at the end of the item, which a clip
     /// with sound reaches only once its audio has drained. Even muted, and
     /// even when both tracks report the same duration, that held a 4K clip's
     /// last frame for about a quarter of a second at every seam (issue 76);
     /// bounded by the picture, the seam is as smooth as any other frame.
-    nonisolated static func loopRange(of asset: AVAsset) async -> CMTimeRange {
+    nonisolated static func loopRange(of asset: AVAsset, trim: VideoTrimRange? = nil) async -> CMTimeRange {
         guard let video = try? await asset.loadTracks(withMediaType: .video).first,
             let range = try? await video.load(.timeRange),
             range.isValid, range.start.isNumeric, range.duration.isNumeric,
             range.duration > .zero
         else { return .invalid }
-        return range
+        return VideoTrimRange.effectiveLoopRange(trackRange: range, trim: trim)
     }
 
     private func start(_ item: AVPlayerItem, looping range: CMTimeRange) {
@@ -379,6 +612,7 @@ final class NativeVideoPlayer {
         // per item and replaced wholesale rather than mutated.
         let looper = AVPlayerLooper(player: player, templateItem: item, timeRange: range)
         self.looper = looper
+        self.activeLoopRange = range
         counters.record(.nativeVideoItemCreated, for: surface)
         observeFailures(looper: looper)
         followLoopCopies()
@@ -390,39 +624,60 @@ final class NativeVideoPlayer {
     /// playing now, or, for a clip still loading or being rebuilt, the end of its first pass.
     /// False for a player that is stopped, has failed or was never loaded.
     func watchNextLoop(_ handler: @escaping @MainActor () -> Void) -> Bool {
+        watchNextLoop(for: .primary, handler)
+    }
+
+    func cancelLoopWatch() {
+        cancelLoopWatch(for: .primary)
+    }
+
+    /// Per-follower loop watch so playlists waiting for clip end on multi-display span followers
+    /// observe this shared leader's `AVPlayerLooper` independently of the leader's own watch.
+    func watchNextLoop(forFollower displayID: UInt32, _ handler: @escaping @MainActor () -> Void) -> Bool {
+        watchNextLoop(for: .follower(displayID), handler)
+    }
+
+    func cancelLoopWatch(forFollower displayID: UInt32) {
+        cancelLoopWatch(for: .follower(displayID))
+    }
+
+    private func watchNextLoop(for key: LoopWatchKey, _ handler: @escaping @MainActor () -> Void) -> Bool {
         guard !stopped, !failureReported, mediaURL != nil else { return false }
         loopWatchSerial &+= 1
-        loopWatch = handler
+        loopWatches[key] = (loopWatchSerial, handler)
         observeLoopCount()
         return true
     }
 
-    func cancelLoopWatch() {
-        loopWatch = nil
-        loopCountObservation = nil
+    private func cancelLoopWatch(for key: LoopWatchKey) {
+        loopWatches.removeValue(forKey: key)
+        if loopWatches.isEmpty { loopCountObservation = nil }
     }
 
-    /// Follows the count of the looper playing now, for the watch. `AVPlayerLooper` raises it
-    /// each time it starts the item again, and says so through key-value observing, so nothing
+    /// Follows the count of the looper playing now, for any active watches. `AVPlayerLooper` raises
+    /// it each time it starts the item again, and says so through key-value observing, so nothing
     /// is sampled.
     private func observeLoopCount() {
         loopCountObservation = nil
-        guard loopWatch != nil, let looper else { return }
+        guard !loopWatches.isEmpty, let looper else { return }
         let start = looper.loopCount
         let identity = ObjectIdentifier(looper)
-        let serial = loopWatchSerial
         loopCountObservation = looper.observe(\.loopCount, options: [.new]) { [weak self] looper, _ in
             guard looper.loopCount > start else { return }
-            Task { @MainActor [weak self] in self?.loopStartedOver(identity, serial: serial) }
+            Task { @MainActor [weak self] in self?.loopStartedOver(identity) }
         }
     }
 
-    private func loopStartedOver(_ identity: ObjectIdentifier, serial: UInt64) {
-        guard !stopped, serial == loopWatchSerial, let looper, ObjectIdentifier(looper) == identity,
-            let handler = loopWatch
-        else { return }
-        cancelLoopWatch()
-        handler()
+    private func loopStartedOver(_ identity: ObjectIdentifier) {
+        guard !stopped, let looper, ObjectIdentifier(looper) == identity, !loopWatches.isEmpty else { return }
+        let snapshot = loopWatches
+        loopCountObservation = nil
+        for (key, entry) in snapshot {
+            guard loopWatches[key]?.serial == entry.serial else { continue }
+            loopWatches.removeValue(forKey: key)
+            entry.handler()
+        }
+        if !loopWatches.isEmpty { observeLoopCount() }
     }
 
     /// Takes the looper and its queued copies down, leaving the player and
@@ -447,6 +702,7 @@ final class NativeVideoPlayer {
         // the queue while the items are being removed.
         looper.disableLooping()
         self.looper = nil
+        self.activeLoopRange = .invalid
         player.removeAllItems()
         counters.record(.nativeVideoItemReleased, for: surface)
     }
@@ -550,10 +806,12 @@ final class NativeVideoPlayer {
             return
         }
         audioDropped = true
+        let requestedTrim = trimRange
+        pendingTrimReload = false
         rebuild = Task { @MainActor [weak self] in
             let silent = await Self.videoOnlyItem(url: mediaURL)
             var range = CMTimeRange.invalid
-            if let silent { range = await Self.loopRange(of: silent.asset) }
+            if let silent { range = await Self.loopRange(of: silent.asset, trim: requestedTrim) }
             guard let self, !self.stopped else { return }
             if let silent, !(await self.attachComposition(to: silent)) { self.rebuild = nil; return }
             guard !self.stopped, !Task.isCancelled else { return }
@@ -565,6 +823,9 @@ final class NativeVideoPlayer {
             self.releaseItem()
             self.onAudioDropped?(detail)
             self.start(silent, looping: range)
+            if self.pendingTrimReload || self.trimRange != requestedTrim {
+                self.reloadItem(reason: "the loop trim range changed during audio-drop rebuild")
+            }
         }
     }
 
@@ -622,6 +883,8 @@ final class NativeVideoPlayer {
             "native video: restarting playback (\(reason)); rebuild \(recovery.spent) of "
                 + "\(recovery.policy.maximum); \(stateSummary)")
         let silent = audioDropped
+        let requestedTrim = trimRange
+        pendingTrimReload = false
         rebuild = Task { @MainActor [weak self] in
             let item: AVPlayerItem?
             if silent {
@@ -630,7 +893,7 @@ final class NativeVideoPlayer {
                 item = AVPlayerItem(url: mediaURL)
             }
             var range = CMTimeRange.invalid
-            if let item { range = await Self.loopRange(of: item.asset) }
+            if let item { range = await Self.loopRange(of: item.asset, trim: requestedTrim) }
             guard let self, !self.stopped, !Task.isCancelled else { return }
             if let item, !(await self.attachComposition(to: item)) { self.rebuild = nil; return }
             guard !self.stopped, !Task.isCancelled else { return }
@@ -641,6 +904,9 @@ final class NativeVideoPlayer {
             }
             self.releaseItem(cancellingCheck: !keepingCheck)
             self.start(item, looping: range)
+            if self.pendingTrimReload || self.trimRange != requestedTrim {
+                self.reloadItem(reason: "the loop trim range changed during restart")
+            }
         }
         return true
     }
@@ -860,7 +1126,9 @@ final class NativeVideoPlayer {
     /// coalesce into one. Nothing here resumes playback: a paused player is
     /// read where it stands, and answers from the last frame it produced when
     /// the read fails.
-    func posterImage() async -> CGImage? {
+    /// The unflipped source frame at the playing position, shared by concurrent callers and by
+    /// spanned multi-display poster slicing so horizontal flip mirrors the whole union canvas.
+    func unflippedPosterImage() async -> CGImage? {
         guard !stopped else { return nil }
         let request: Task<CGImage?, Never>
         if let posterRequest {
@@ -873,6 +1141,11 @@ final class NativeVideoPlayer {
         }
         let image = await request.value
         if posterRequest == request { posterRequest = nil }
+        return image
+    }
+
+    func posterImage() async -> CGImage? {
+        let image = await unflippedPosterImage()
         // Every caller applies the layer's flip to the shared, unflipped source frame.
         // Keeping it out of the cached image lets later requests change the option.
         return flipHorizontal ? image.flatMap(Self.mirrored) : image
@@ -950,7 +1223,12 @@ final class NativeVideoPlayer {
         onReadyForDisplay = nil
         onAudioDropped = nil
         onHealthEvent = nil
-        cancelLoopWatch()
+        loopWatches.removeAll()
+        loopCountObservation = nil
+        for displayID in Array(spanLayers.keys) { detachSpanLayer(displayID: displayID) }
+        primarySpanDisplayID = nil
+        spanDisplays = []
+        pendingTrimReload = false
         player.pause()
         releaseItem()
         layer.player = nil

@@ -110,6 +110,9 @@ struct WallpaperBackupPreferences: Sendable {
     static let allowedKeys: Set<String> = [
         WallpaperCollectionStore.storageKey, WallpaperMetadataStore.storageKey, PlaylistStore.plansKey,
         WallpaperPresetStore.preferenceKey, StillImagePlacementStore.storageKey,
+        VideoTrimStore.storageKey, DisplaySpanStore.enabledKey,
+        // `UserShortcutStore.storageKey` is intentionally kept local-only so untrusted
+        // backup imports can never auto-arm `app:` or `shortcut:` execution.
         PlaylistStore.playlistsKey, PlaylistStore.nextChangeKey,
         WallpaperAutomationStore.configurationsKey, WallpaperAutomationStore.locationKey,
         WallpaperAutomationStore.solarKey,
@@ -332,6 +335,7 @@ struct WallpaperBackupPreferences: Sendable {
             guard record.version == 1 else { throw invalid() }
             try identities(Array(record.placements.keys))
             for displays in record.placements.values { try identities(Array(displays.keys)) }
+        case VideoTrimStore.storageKey: try VideoTrimStore.validateArchiveData(data())
         case PanelPreferences.favoritesKey: try identities(JSONDecoder().decode([String].self, from: data()))
         case HotKeyPreferences.bindingsKey:
             let bindings = try JSONDecoder().decode([String: HotKey].self, from: data())

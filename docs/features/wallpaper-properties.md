@@ -766,3 +766,22 @@ them, and the thresholds are this app's own, exercised on generated H.264 clips
 and not on a corpus of real wallpapers. Anamorphic (non-square pixel) clips can be
 a percent or two off, which the overscan covers. Mirror displays hold their own
 scale factor and are not covered.
+
+### Video loop trim
+
+An installed video wallpaper's **Loop trim** card (`VideoTrimCard`) lets you loop a
+selected sub-range of the clip without re-encoding or using extra GPU memory:
+
+- **Start** and **End** sliders with `MM:SS.t` readouts enforce a minimum loop duration
+  of `0.5` seconds; **Reset to full clip** removes the saved trim and loops the whole
+  video again.
+- **AVFoundation playback (`NativeVideoPlayer`)** applies the clamped `CMTimeRange`
+  directly to `AVPlayerLooper(player:templateItem:timeRange:)`, rebuilding the looper
+  live when adjusted without spending the pipeline recovery budget.
+- **WebM / Matroska playback (`WebMPlayer` / `WebMFeeder`)** seeks to the nearest
+  keyframe at or before the trim start, marks preroll frames before `start` with
+  `DoNotDisplay`, drops frames beyond `end`, and wraps seamlessly back to `start` on
+  each pass.
+- Ranges are persisted per wallpaper under the allowlisted `WallpaperMachine.videoTrimRanges`
+  preference (`VideoTrimStore`), clamped cleanly against the actual asset duration at
+  playback time, included in backups, and removed when the wallpaper is moved to Trash.

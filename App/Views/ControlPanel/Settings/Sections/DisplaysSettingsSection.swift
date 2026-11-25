@@ -11,6 +11,7 @@ struct DisplaysSettingsSection: View {
   // MARK: Groups
 
   static let card = SettingsItem.Group("display-card")
+  static let span = SettingsItem.Group("span", title: "Multi-display span")
   static let layouts = SettingsItem.Group("layouts", title: "Display layouts")
   static let plans = SettingsItem.Group("plans", title: "Saved playlists")
   static let solar = SettingsItem.Group("solar", title: "Sunrise and sunset")
@@ -249,6 +250,16 @@ struct DisplaysSettingsSection: View {
 
   // MARK: Page-level groups
 
+  static let spanEnabled = SettingsItem(
+    id: "displays.span-enabled", section: .displays, group: span, title: "Span across displays",
+    note: "Stretch a single video or still-image wallpaper seamlessly across connected displays.",
+    keywords: [
+      "Multi-display span",
+      "Multi-display span applies to video and still-image wallpapers only. Active scene wallpapers stay in their per-display mode.",
+      "Multi-display span applies to video and still-image wallpapers only. Active web wallpapers stay in their per-display mode.",
+      "Apply the same video or still-image wallpaper to multiple displays, or mirror a display, to span it across screens.",
+    ])
+
   static let layoutsSave = SettingsItem(
     id: "displays.layouts-save", section: .displays, group: layouts, title: "Save current layout…",
     note:
@@ -298,7 +309,7 @@ struct DisplaysSettingsSection: View {
     automation, automationMode, automationLight, automationDark,
     automationSchedule, automationBattery, automationFooter,
     playback, scaling, scale, frameRate, mute, volume,
-    layoutsSave, plansList, solarIntro, solarSource, solarSunrise, solarSunset,
+    spanEnabled, layoutsSave, plansList, solarIntro, solarSource, solarSunrise, solarSunset,
     solarLongitude, solarActions,
   ]
 
@@ -312,6 +323,9 @@ struct DisplaysSettingsSection: View {
           DisplaysNoDisplays()
         } else {
           ForEach(rows) { DisplaysSettingsCard(display: $0) }
+        }
+        if rows.count >= 2 {
+          DisplaysSpanGroup()
         }
         DisplaysLayoutsGroup()
         DisplaysPlansGroup()

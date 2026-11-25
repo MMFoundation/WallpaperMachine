@@ -91,6 +91,9 @@ private struct InspectorContent: View {
         if let letterbox = controller.letterboxState, letterbox.wallpaperID == id {
           LetterboxCard(state: letterbox)
         }
+        if let videoTrim = controller.videoTrimState, videoTrim.wallpaperID == id {
+          VideoTrimCard(state: videoTrim)
+        }
         if InspectorPolicy.isPackagedStill(id), let placement = controller.imagePlacementState,
           placement.wallpaperID == id
         {

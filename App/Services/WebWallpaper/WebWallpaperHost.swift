@@ -206,9 +206,10 @@ final class WebWallpaperHost {
 
     convenience init(bridge: WallpaperBridge, mediaRelay: WebWallpaperMediaRelay? = nil,
                      contentRevision: @escaping @MainActor () -> UInt64 = { 0 },
-                     switchHold: WallpaperSwitchHold? = nil) {
+                     switchHold: WallpaperSwitchHold? = nil,
+                     fetch: (@MainActor () async throws -> [BridgeWebWallpaper])? = nil) {
         self.init(
-            fetch: { try await bridge.webWallpapers() },
+            fetch: fetch ?? { try await bridge.webWallpapers() },
             audioPump: WebWallpaperAudioPump(read: { try bridge.webAudioSpectrum() }),
             setAudioSubscribed: { wallpaperId, displayId, subscribed in
                 try await bridge.setWebAudioSubscribed(
@@ -501,6 +502,21 @@ final class WebWallpaperHost {
     func setKeptWallpapers(_ plan: [UInt32: Set<String>]) {
         keepPlan = plan
         releaseKeptPages()
+    }
+
+    func applyFetched(_ wallpapers: [BridgeWebWallpaper]) async {
+        guard !stopped else { return }
+        for wallpaper in wallpapers
+        where windows[wallpaper.displayId] == nil
+            || descriptors[wallpaper.displayId]?.wallpaperId != wallpaper.wallpaperId {
+            do { _ = try await imagePlacement.prepare(wallpaperID: wallpaper.wallpaperId) }
+            catch {
+                AppLog.error("image wallpaper preparation failed: \(error.localizedDescription)")
+                onError?(error.localizedDescription)
+            }
+        }
+        guard !stopped else { return }
+        await apply(wallpapers)
     }
 
     func apply(_ wallpapers: [BridgeWebWallpaper]) async {

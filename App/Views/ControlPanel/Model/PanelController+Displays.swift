@@ -28,6 +28,19 @@ enum DisplaySetting: Equatable {
   case muted(Bool)
 }
 
+/// What Settings › Displays shows for the Phase 1 Multi-display span group (Native Video and
+/// packaged Still Image wallpapers only).
+struct DisplaySpanStatus: Equatable {
+  enum UnsupportedKind: Equatable { case scene, web }
+
+  let isEnabled: Bool
+  let displayCount: Int
+  let unsupportedActiveKind: UnsupportedKind?
+  let needsSharedWallpaper: Bool
+
+  var canSpan: Bool { displayCount >= 2 }
+}
+
 extension PanelController {
   // MARK: Derived state
 
@@ -78,6 +91,51 @@ extension PanelController {
       source.mode == .standalone
     else { return [] }
     return rows.filter { $0.isStandalone && $0.id != display }
+  }
+
+  /// Phase 1 multi-display span status derived from connected displays and their active wallpapers.
+  var displaySpanState: DisplaySpanStatus {
+    let enabled = displaySpan.isEnabled
+    let rows = displayRows
+    let enabledRows = rows.filter(\.enabled)
+    let kindsByID = Dictionary(
+      store.librarySnapshot.wallpapers.map { ($0.id, $0.kind) },
+      uniquingKeysWith: { first, _ in first })
+    var supportedCounts: [String: Int] = [:]
+    var hasScene = false
+    var hasInteractiveWeb = false
+    for row in enabledRows {
+      guard let id = row.wallpaperID, let kind = kindsByID[id] else { continue }
+      switch kind {
+      case .video:
+        supportedCounts[id, default: 0] += 1
+      case .webpage:
+        if InspectorPolicy.isPackagedStill(id) {
+          supportedCounts[id, default: 0] += 1
+        } else {
+          hasInteractiveWeb = true
+        }
+      case .projectScene:
+        hasScene = true
+      case .unknown:
+        break
+      }
+    }
+    let unsupported: DisplaySpanStatus.UnsupportedKind? =
+      enabled ? (hasScene ? .scene : (hasInteractiveWeb ? .web : nil)) : nil
+    let hasSharedSupported = supportedCounts.values.contains { $0 >= 2 }
+    return DisplaySpanStatus(
+      isEnabled: enabled,
+      displayCount: rows.count,
+      unsupportedActiveKind: unsupported,
+      needsSharedWallpaper: enabled && unsupported == nil && !hasSharedSupported)
+  }
+
+  /// Toggles multi-display span for Native Video and Still Image wallpapers.
+  func setDisplaySpanEnabled(_ enabled: Bool) async throws {
+    try await run(.immediate) {
+      displaySpan.setEnabled(enabled)
+    }
   }
 
   // MARK: Actions

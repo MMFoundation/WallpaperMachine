@@ -1,5 +1,12 @@
 import AppKit
 
+/// Tracks the last multi-display span and screen-origin topology observed by each `AppDelegate`
+/// during desktop poster sync so `.surfacesChanged` / `.snapshot` upgrade to a full `.refresh`
+/// whenever span state, group membership, or screen origins change — including for leader layers
+/// whose `CALayer` instance is reused across Span toggles.
+@MainActor
+private var lastPosterSpanTopologyByDelegate: [ObjectIdentifier: String] = [:]
+
 /// The macOS desktop picture: the poster sync and its one gate, the Settings switch that puts the
 /// user's own picture back, and the posters, pins and kept wallpapers of displays that follow
 /// desktop Spaces.
@@ -23,7 +30,15 @@ extension AppDelegate {
         // sync is suspended: a second sync would write posters the restore then overwrites.
         // The restore re-runs this through `applyDesktopPicturePreference` when it ends.
         guard restoringDesktopPicture == nil else { return }
+        let spanTopology = desktopPosterSpanTopologySignature()
+        let delegateKey = ObjectIdentifier(self)
+        let spanTopologyChanged = lastPosterSpanTopologyByDelegate[delegateKey].map { $0 != spanTopology } ?? false
+        lastPosterSpanTopologyByDelegate[delegateKey] = spanTopology
         if let sync = desktopWallpaperSync, !sync.isSuspended {
+            if spanTopologyChanged {
+                sync.refresh()
+                return
+            }
             switch trigger {
             case .refresh: sync.refresh()
             case .snapshot: sync.snapshotApplied(desktopPosterLayout())
@@ -206,6 +221,7 @@ extension AppDelegate {
     func desktopWallpaperIsLoaded(display: UInt32, wallpaper: String) -> Bool {
         (store?.sceneWindows().contains { $0.displayId == display && $0.wallpaperId == wallpaper } ?? false)
             || (webWallpaperHost?.containsWallpaper(wallpaper, on: display) ?? false)
+            || (stillImageSpanHost?.containsWallpaper(wallpaper, on: display) ?? false)
             || (nativeVideoHost?.containsWallpaper(wallpaper, on: display) ?? false)
     }
 
@@ -234,7 +250,9 @@ extension AppDelegate {
             try Task.checkCancellation()
             let scene = store.sceneWindows().first { $0.displayId == display && $0.wallpaperId == wallpaper }
             // A concurrent switch owns its own first-frame wait once it promotes this instance.
-            if scene?.parked == false || scene?.ready == true || webWallpaperHost?.wallpaperIsReady(wallpaper, on: display) == true
+            if scene?.parked == false || scene?.ready == true
+                || webWallpaperHost?.wallpaperIsReady(wallpaper, on: display) == true
+                || stillImageSpanHost?.wallpaperIsReady(wallpaper, on: display) == true
                 || nativeVideoHost?.wallpaperIsReady(wallpaper, on: display) == true {
                 spacePinning?.update()
                 return
@@ -271,6 +289,7 @@ extension AppDelegate {
         if store?.sceneWindows().contains(where: { Int($0.windowNumber) == number && $0.ready }) == true { return true }
         guard let display, let wallpaper else { return false }
         return webWallpaperHost?.wallpaperIsReady(wallpaper, on: display) == true
+            || stillImageSpanHost?.wallpaperIsReady(wallpaper, on: display) == true
             || nativeVideoHost?.wallpaperIsReady(wallpaper, on: display) == true
     }
 
@@ -279,6 +298,7 @@ extension AppDelegate {
         var ids: [Int: String] = [:]
         for window in store?.sceneWindows() ?? [] { ids[Int(window.windowNumber)] = window.wallpaperId }
         ids.merge(webWallpaperHost?.windowWallpapers ?? [:]) { $1 }
+        ids.merge(stillImageSpanHost?.windowWallpapers ?? [:]) { $1 }
         ids.merge(nativeVideoHost?.windowWallpapers ?? [:]) { $1 }
         return ids
     }
@@ -308,6 +328,7 @@ extension AppDelegate {
                   window.isVisible, let layer = window.contentView?.layer,
                   scenes.contains(where: { Int($0.windowNumber) == number && $0.ready })
                     || webWallpaperHost?.wallpaperIsReady(wallpaper, on: display) == true
+                    || stillImageSpanHost?.wallpaperIsReady(wallpaper, on: display) == true
                     || nativeVideoHost?.wallpaperIsReady(wallpaper, on: display) == true else { return nil }
             return .init(key: .init(display: display, wallpaper: wallpaper), window: number, layer: layer,
                          frame: window.frame, revision: store?.wallpaperContentRevision ?? 0,
@@ -449,6 +470,26 @@ extension AppDelegate {
                 + " " + (placement.generatedImage(wallpaperID: wallpaper)?.imageFile ?? "")
         }
         let screen = NSScreen.screens.first { SystemDesktopPictureWorkspace.id($0) == surface.display }
+        if let screen {
+            extras["screenOrigin"] = "\(screen.frame.origin.x),\(screen.frame.origin.y)"
+        }
+        let stillSpanActive = UInt32(surface.display).map {
+            stillImageSpanHost?.containsWallpaper(wallpaper, on: $0) == true
+        } ?? false
+        let liveScreens: [(id: String, frame: CGRect, scale: CGFloat)] = NSScreen.screens.compactMap { screen in
+            guard let id = SystemDesktopPictureWorkspace.id(screen) else { return nil }
+            return (id: id, frame: screen.frame, scale: screen.backingScaleFactor)
+        }
+        extras["displaySpan"] = Self.desktopPosterSpanLookSignature(
+            display: surface.display,
+            wallpaperID: wallpaper,
+            kind: kind,
+            spanEnabled: DisplaySpanStore.shared.isEnabled,
+            stillImageSpanActive: stillSpanActive,
+            settings: store.settingsSnapshot,
+            monitors: store.monitorInformationSnapshot.rows,
+            screens: liveScreens,
+            physicalDisplay: { Self.physicalDisplayID(of: $0) })
         let settingsFile = ClientPaths.wallpaperSettingsURL(wallpaperID: wallpaper)
         return DesktopPosterLook.resolve(
             display: surface.display, wallpaperID: wallpaper, kind: kind, settings: store.settingsSnapshot,
@@ -457,6 +498,78 @@ extension AppDelegate {
             contentRevision: store.wallpaperContentRevision,
             wallpaperSettings: try? Data(contentsOf: settingsFile), extras: extras,
             physicalDisplay: { Self.physicalDisplayID(of: $0) })
+    }
+
+    /// Stable digest input capturing whether multi-display span affects `display` together with
+    /// the full span group membership and every member's global frame origin, size, and scale.
+    nonisolated static func desktopPosterSpanLookSignature(
+        display: String,
+        wallpaperID: String,
+        kind: BridgeWallpaperKind?,
+        spanEnabled: Bool,
+        stillImageSpanActive: Bool,
+        settings: BridgeSettingsSnapshot,
+        monitors: [BridgeMonitorInfoRow],
+        screens: [(id: String, frame: CGRect, scale: CGFloat)],
+        physicalDisplay: (BridgeDisplaySettingsRow) -> String?
+    ) -> String {
+        let appliesToSurface: Bool
+        switch kind {
+        case .video: appliesToSurface = spanEnabled
+        case .webpage: appliesToSurface = spanEnabled && stillImageSpanActive
+        case .projectScene, .unknown, nil: appliesToSurface = false
+        }
+        guard appliesToSurface else { return "off" }
+        let screenByID = Dictionary(screens.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var members: [(id: String, frame: CGRect, scale: CGFloat)] = []
+        for row in settings.displays {
+            guard let physical = physicalDisplay(row),
+                  let screen = screenByID[physical],
+                  let monitor = monitors.first(where: { $0.displayId == row.displayId }),
+                  monitor.wallpaperId == wallpaperID
+            else { continue }
+            members.append((physical, screen.frame, screen.scale))
+        }
+        members.sort { $0.id < $1.id }
+        guard members.count >= 2, members.contains(where: { $0.id == display }) else {
+            return "single"
+        }
+        return "on:" + members.map {
+            "\($0.id)=\($0.frame.origin.x),\($0.frame.origin.y),\($0.frame.width)x\($0.frame.height)@\($0.scale)"
+        }.joined(separator: ";")
+    }
+
+    /// Captures the current span preference, screen origins/sizes/scales, and display assignments
+    /// so `startDesktopWallpaperSync` retakes posters across Span toggles and monitor moves even
+    /// when a leader keeps its existing `CALayer`.
+    func desktopPosterSpanTopologySignature() -> String {
+        let screens: [(id: String, frame: CGRect, scale: CGFloat)] = NSScreen.screens.compactMap { screen in
+            guard let id = SystemDesktopPictureWorkspace.id(screen) else { return nil }
+            return (id: id, frame: screen.frame, scale: screen.backingScaleFactor)
+        }
+        return Self.desktopPosterSpanTopologySignature(
+            spanEnabled: DisplaySpanStore.shared.isEnabled,
+            monitors: store?.monitorInformationSnapshot.rows ?? [],
+            screens: screens)
+    }
+
+    nonisolated static func desktopPosterSpanTopologySignature(
+        spanEnabled: Bool,
+        monitors: [BridgeMonitorInfoRow],
+        screens: [(id: String, frame: CGRect, scale: CGFloat)]
+    ) -> String {
+        let screenPart = screens
+            .sorted { $0.id < $1.id }
+            .map {
+                "\($0.id)=\($0.frame.origin.x),\($0.frame.origin.y),\($0.frame.width)x\($0.frame.height)@\($0.scale)"
+            }
+            .joined(separator: ";")
+        guard spanEnabled else { return "off|\(screenPart)" }
+        let assignments = monitors
+            .map { "\($0.displayId)=\($0.wallpaperId)" }
+            .sorted()
+            .joined(separator: ";")
+        return "on|\(screenPart)|\(assignments)"
     }
 
     /// Nil with `WALLPAPER_MACHINE_DESKTOP_POSTER_REUSE=0`, which takes every return again as

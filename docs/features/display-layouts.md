@@ -175,11 +175,39 @@ display is on, as any manual choice does in that mode. A layout does not save th
 Space map or switch Spaces, and inactive desktops do not retain separate live
 renderer instances.
 
+## Multi-display span
+
+**Settings → Displays → Multi-display span → Span across displays** (shown when two
+or more displays are connected, off by default, persisted in `WallpaperMachine.displaySpanEnabled`
+via `DisplaySpanStore`) stretches one wallpaper seamlessly across connected screens
+that share the same wallpaper (via **Mirror another display** or **Apply to all displays**).
+
+- **Separate Spaces preserved**: span always keeps one desktop `NSWindow` per display
+  rather than creating a single giant window across screens, so macOS "Displays have
+  separate Spaces" continues working normally. `DisplaySpanGeometry` computes the
+  aspect-filled virtual union canvas and each display's sliced coordinates across
+  mixed-DPI Retina, negative-origin, vertical, and L-shaped arrangements.
+- **Native Video span (AVFoundation)**: one leader display owns the single `AVQueuePlayer`
+  and each follower display renders its clipped viewport through a secondary
+  `AVPlayerLayer` (`NativeVideoSpanFollowerWindow`, `masksToBounds = true`), adding
+  zero extra video decoders. The shared player stays active while at least one spanned
+  display is visible and unpaused.
+- **WebM / Matroska video span**: each spanned display keeps its `WebMVideoWallpaperWindow`
+  and applies its exact sliced viewport frame from `DisplaySpanGeometry`.
+- **Still image span**: `DisplaySpanStillImageHost` decodes a packaged still image once
+  into a single shared `CGImage` and presents per-display `StillImageSpanWindow`s slicing
+  that image via `CALayer.contentsRect`.
+- **Phase 1 scope**: Multi-display span applies to Native Video and packaged Still Image
+  wallpapers only. Metal Scene and interactive Web wallpapers stay in their normal
+  per-display / mirror mode without crashing or regressing, and Settings shows an
+  explanatory note when an active display is showing one.
+
 ## Code and verification
 
 | Responsibility | Source |
 | --- | --- |
 | Records, bounded persistence and backup validation | `App/Services/Library/WallpaperDisplayLayoutStore.swift` |
+| Multi-display span geometry, preference store and still-image span host | `App/Services/Desktop/DisplaySpanGeometry.swift`, `DisplaySpanStore.swift`, `DisplaySpanStillImageHost.swift`, `App/Services/NativeVideo/NativeVideoSpanWindow.swift` |
 | Capture, planning, preflight and verified recovery | `App/Services/Desktop/WallpaperDisplayTransfer.swift` |
 | Bridge queue, clean-option checks, topology auto-apply and final history | `App/ViewModels/BridgeStoreDisplayLayouts.swift` |
 | Panel actions and state | `saveDisplayLayout`, `renameDisplayLayout`, `deleteDisplayLayout`, `setDisplayLayoutAutoApply`, `applyDisplayLayout`, `copyWallpaper`, `swapWallpapers` in `App/Views/ControlPanel/Model/PanelController+DisplayLayouts.swift` |

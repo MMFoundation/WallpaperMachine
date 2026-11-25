@@ -115,6 +115,11 @@ final class WebMPlayer {
   private var feedEpoch = 0
   private var repositioning = 0
   private var restartAfterReposition = false
+  /// Target clock time held paused during an async live `setLoopRange` reposition so the clock
+  /// cannot advance or play stale buffers before the readers finish seeking.
+  private var pendingClockResetTime: CMTime?
+  /// True when a pre-start `setLoopRange` skipped audio repositioning because audio was silent.
+  private var audioNeedsRepositionOnStart = false
   /// Who waits for the clip to start over (`watchNextLoop`), and the synchronizer's boundary
   /// observer at the end of the pass the clock is in. Both exist only while someone waits.
   private var loopWatch: (@MainActor () -> Void)?
@@ -128,6 +133,11 @@ final class WebMPlayer {
   private var pan = NativeVideoLayout.Pan.centered
   private var viewport = CGRect.zero
   private var backingScale: CGFloat = 1
+  /// Optional multi-display span viewport frames (`media` = aspect-filled virtual canvas in this
+  /// display's local y-up coordinates). `nil` uses standard `NativeVideoLayout`.
+  private var spanMediaFrame: CGRect?
+  /// Optional A–B loop trim interval in seconds relative to `file.firstPresentationTime`.
+  private var loopRange: ClosedRange<Double>?
   /// Wallpaper Engine's per-wallpaper options: the clock's rate (`rate` / 100, WE
   /// `sub_1400FFCB0`), the horizontal flip, the Fit-style border colour and the colour pipeline,
   /// whose filtered feed runs only while it changes the picture.
@@ -168,6 +178,7 @@ final class WebMPlayer {
 
   init(
     file: WebMFile, withAudio: Bool, paused: Bool,
+    loopRange: ClosedRange<Double>? = nil,
     recovery: NativeVideoRecoveryBudget.Policy = .init(),
     feedQueue: DispatchQueue = DispatchQueue(label: "app.wallpapermachine.webm-feed", qos: .userInitiated),
     now: @escaping @MainActor () -> ContinuousClock.Instant = { .now },
@@ -176,6 +187,7 @@ final class WebMPlayer {
   ) {
     self.file = file
     self.paused = paused
+    self.loopRange = loopRange
     self.releasesSilentAudio = releasesSilentAudio
     self.recovery = NativeVideoRecoveryBudget(policy: recovery)
     self.queue = feedQueue
@@ -194,7 +206,7 @@ final class WebMPlayer {
     }
     audioRenderer = audioReader == nil ? nil : AVSampleBufferAudioRenderer()
     audioActive = audioReader != nil
-    feeder = WebMFeeder(file: file, audio: audioReader)
+    feeder = WebMFeeder(file: file, audio: audioReader, loopRange: loopRange)
 
     layer.videoGravity = .resizeAspectFill
     layer.sampleBufferRenderer.flush(removingDisplayedImage: true, completionHandler: nil)
@@ -203,7 +215,8 @@ final class WebMPlayer {
       synchronizer.addRenderer(audioRenderer)
       audioOnClock = true
     }
-    synchronizer.setRate(0, time: file.firstPresentationTime)
+    let window = WebMFeeder.effectiveWindow(in: file, loopRange: loopRange)
+    synchronizer.setRate(0, time: window.start)
     feeder.onFailure = { [weak self] detail in
       DispatchQueue.main.async { MainActor.assumeIsolated { self?.fail(detail, settled: false) } }
     }
@@ -237,10 +250,66 @@ final class WebMPlayer {
     applyPlacement()
   }
 
+  /// Positions the layer to slice a multi-display spanned virtual canvas (`mediaFrameInDisplay` in
+  /// this display's local y-up layer coordinates).
+  func setSpanMediaFrame(_ mediaFrameInDisplay: CGRect?) {
+    guard spanMediaFrame != mediaFrameInDisplay else { return }
+    spanMediaFrame = mediaFrameInDisplay
+    applyPlacement()
+  }
+
+  /// Updates or clears the A–B loop trim interval (`start...end`, seconds from clip start) live
+  /// without tearing down the player or blocking the main actor.
+  func setLoopRange(_ range: ClosedRange<Double>?) {
+    guard !stopped, range != loopRange else { return }
+    loopRange = range
+    let window = WebMFeeder.effectiveWindow(in: file, loopRange: range)
+    guard started else {
+      synchronizer.setRate(0, time: window.start)
+      let feeder = self.feeder
+      let moveAudio = feedsAudio
+      audioNeedsRepositionOnStart = audioActive && !moveAudio
+      queue.async {
+        feeder.setLoopRange(range)
+        feeder.reposition(at: window.start, audio: moveAudio)
+      }
+      return
+    }
+    guard !failureLatched else { return }
+    stopFeeding()
+    // Pause the clock at the new window start and flush stale buffers immediately so old audio
+    // and video cannot play and the clock cannot advance while the feed queue repositions. The
+    // running rate is restored inside `repositioned(_:)` once repositioning completes.
+    synchronizer.setRate(0, time: window.start)
+    layer.sampleBufferRenderer.flush(removingDisplayedImage: false, completionHandler: nil)
+    audioRenderer?.flush()
+    pendingClockResetTime = window.start
+    if let watch = loopWatch { _ = watchNextLoop(watch) }
+    restartAfterReposition = true
+    reposition(video: true, at: window.start, updatingLoopRange: range)
+  }
+
+  var loopRangeForTest: ClosedRange<Double>? { loopRange }
+  var synchronizerRateForTest: Float { synchronizer.rate }
+  var isFlippedHorizontally: Bool { flipHorizontal }
+
   private func applyPlacement() {
     guard !stopped else { return }
     let size = file.presentationSize
     let upright = file.preferredTransform.isIdentity
+    if let target = spanMediaFrame {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      defer { CATransaction.commit() }
+      let stored = !upright && file.transformSwapsAxes ? CGSize(width: target.height, height: target.width) : target.size
+      layer.videoGravity = .resize
+      layer.setAffineTransform(.identity)
+      layer.bounds = CGRect(origin: .zero, size: stored)
+      layer.position = CGPoint(x: target.midX, y: target.midY)
+      layer.setAffineTransform((upright ? .identity : file.layerTransform).concatenating(mirror))
+      root?.backgroundColor = CGColor(gray: 0, alpha: 1)
+      return
+    }
     var placement = NativeVideoLayout.placement(
       mode: mode, factor: factor, videoSize: size, viewport: viewport.size,
       backingScale: backingScale, pan: pan)
@@ -295,7 +364,7 @@ final class WebMPlayer {
     let rate = Float(max(10, min(options.playbackRate, 200)) / 100)
     if rate != playRate {
       playRate = rate
-      if started, !paused, !stopped { synchronizer.rate = rate }
+      if started, !paused, !stopped, pendingClockResetTime == nil { synchronizer.rate = rate }
     }
     let parameters = VideoColorPipeline.Parameters(options: options, lut: lut)
     let wasFiltered = filteredSink != nil
@@ -342,8 +411,17 @@ final class WebMPlayer {
     self.audible = audible
     guard releasesSilentAudio, !stopped else { return }
     if audible {
-      // Before `start` there is nothing to catch up with: starting feeds the sound from the beginning.
-      guard started, !failureLatched else { return }
+      // Before `start`, reposition audio only if a pre-start `setLoopRange` skipped it while muted.
+      if !started {
+        if audioNeedsRepositionOnStart {
+          audioNeedsRepositionOnStart = false
+          let window = WebMFeeder.effectiveWindow(in: file, loopRange: loopRange)
+          let feeder = self.feeder
+          queue.async { feeder.repositionAudio(at: window.start) }
+        }
+        return
+      }
+      guard !failureLatched else { return }
       let time = synchronizer.currentTime()
       reposition(video: false, at: time.isNumeric ? time : file.firstPresentationTime)
     } else {
@@ -410,7 +488,8 @@ final class WebMPlayer {
     guard !started, !stopped else { return }
     started = true
     startFeeding()
-    synchronizer.setRate(paused ? 0 : playRate, time: file.firstPresentationTime)
+    let window = WebMFeeder.effectiveWindow(in: file, loopRange: loopRange)
+    synchronizer.setRate(paused ? 0 : playRate, time: window.start)
     if paused { pausedSince = now() }
   }
 
@@ -426,7 +505,7 @@ final class WebMPlayer {
       healthTask?.cancel()
       healthTask = nil
     } else {
-      synchronizer.rate = playRate
+      if pendingClockResetTime == nil { synchronizer.rate = playRate }
       if let since = pausedSince, now() - since >= Self.minimumPauseForCheck {
         verifyPlayback(reason: "resumed after \(Int((now() - since) / .seconds(1))) s")
       }
@@ -440,7 +519,7 @@ final class WebMPlayer {
   /// started, has stopped or has failed. A later call replaces the earlier watch.
   func watchNextLoop(_ handler: @escaping @MainActor () -> Void) -> Bool {
     guard started, !stopped, !failureLatched,
-      let end = WebMFeeder.endOfPass(containing: synchronizer.currentTime(), in: file)
+      let end = WebMFeeder.endOfPass(containing: synchronizer.currentTime(), in: file, loopRange: loopRange)
     else { return false }
     cancelLoopWatch()
     loopWatchSerial &+= 1
@@ -522,11 +601,12 @@ final class WebMPlayer {
     feedEpoch += 1
     repositioning = 0
     restartAfterReposition = false
+    pendingClockResetTime = nil
   }
 
   /// Moves the readers on the feed queue, behind any feed callback already running there, and
   /// resumes feeding on the main actor once the last repositioning in flight is done.
-  private func reposition(video: Bool, at time: CMTime) {
+  private func reposition(video: Bool, at time: CMTime, updatingLoopRange newRange: ClosedRange<Double>?? = nil) {
     repositioning += 1
     let feeder = self.feeder
     let filtered = filteredSink
@@ -534,6 +614,7 @@ final class WebMPlayer {
     // A sound nobody hears is not decoded up to the clock; it is moved there when it is heard again.
     let audio = feedsAudio
     queue.async { [weak self] in
+      if let newRange { feeder.setLoopRange(newRange) }
       if video {
         filtered?.reset()
         feeder.reposition(at: time, audio: audio)
@@ -554,6 +635,11 @@ final class WebMPlayer {
       audioRenderer?.flush()
       decodeFailures = 0
       startFeeding()
+      if let resetTime = pendingClockResetTime {
+        pendingClockResetTime = nil
+        synchronizer.setRate(paused ? 0 : playRate, time: resetTime)
+        if let watch = loopWatch { _ = watchNextLoop(watch) }
+      }
     } else if let audioRenderer, feedsAudio {
       putAudioOnClock(audioRenderer)
       startFeedingAudio(into: audioRenderer)
@@ -757,11 +843,22 @@ final class WebMPlayer {
   /// The picture on the display now, upright at the clip's shown size, decoded from the key frame at
   /// or before the clock. Decoded once for this request; nothing runs between requests.
   func posterImage() async -> CGImage? {
+    await decodePoster(applyFlip: true)
+  }
+
+  /// Same as `posterImage()`, without horizontal mirroring so a multi-display span can mirror
+  /// across the full virtual union canvas instead of each display separately.
+  func unflippedPosterImage() async -> CGImage? {
+    await decodePoster(applyFlip: false)
+  }
+
+  private func decodePoster(applyFlip: Bool) async -> CGImage? {
     guard !stopped else { return nil }
-    let time = started ? synchronizer.currentTime() : file.firstPresentationTime
-    let first = file.firstPresentationTime
-    let length = file.duration
-    // The clock runs on past the file's end at every loop; the picture is the one at the same point
+    let window = WebMFeeder.effectiveWindow(in: file, loopRange: loopRange)
+    let time = started ? synchronizer.currentTime() : window.start
+    let first = window.start
+    let length = window.length
+    // The clock runs on past the pass's end at every loop; the picture is the one at the same point
     // of the pass.
     var inPass = time
     if time.isNumeric, length.isNumeric, length.seconds > 0, time >= first {
@@ -770,7 +867,7 @@ final class WebMPlayer {
     }
     let file = self.file
     let pipeline = colorPipeline
-    let flip = flipHorizontal
+    let flip = applyFlip && flipHorizontal
     return await Task.detached(priority: .utility) { () -> CGImage? in
       guard var image = file.copyPosterImage(at: inPass) else { return nil }
       // The poster shows what the layer shows: the colour options, then the flip.
@@ -807,19 +904,47 @@ extension AVSampleBufferAudioRenderer: WebMSampleSink {
   func accept(_ buffer: CMSampleBuffer) { enqueue(buffer) }
 }
 
-/// Hands the readers' samples to the renderers, and wraps them at the end of the file. Every method
-/// runs on the player's feed queue, never two at once; the main actor never waits for it.
+/// Hands the readers' samples to the renderers, and wraps them at the end of the file (or at the
+/// end of an optional A–B `loopRange`). Every method runs on the player's feed queue, never two at
+/// once; the main actor never waits for it.
 final class WebMFeeder: @unchecked Sendable {
+  /// Minimum A–B loop duration, in seconds, matching `VideoTrimRange.minimumDuration`.
+  static let minimumLoopDuration: Double = 0.5
+  private static let durationTolerance: Double = 1e-9
+
+  /// The effective loop pass boundaries on the file's own timeline (`[start, end)`).
+  struct EffectiveLoopWindow: Equatable {
+    var start: CMTime
+    var end: CMTime
+    var length: CMTime
+    var isTrimmed: Bool
+  }
+
   private let file: WebMFile
   private var video: WebMVideoReader?
   private var audio: WebMAudioReader?
   private let first: CMTime
   private let length: CMTime
   private let loops: Bool
+  private var window: EffectiveLoopWindow
   private var videoPass = 0
   private var audioPass = 0
   private var videoDone = false
   private var audioDone = false
+  /// Base timestamp offset applied across passes after an empty-window fallback so timestamps
+  /// keep advancing monotonically from where preroll left off.
+  private var baseTimeOffset: CMTime = .zero
+  /// Highest DTS emitted in trimmed mode so reordered B-frame clips never emit a backward DTS.
+  private var lastTrimmedVideoDTS: CMTime = .invalid
+  /// True when the current trimmed pass started from `window.start` (not a mid-pass reposition),
+  /// so finishing it with zero visible frames proves the window itself contains no visible frames.
+  private var startedPassAtWindowStart = true
+  /// Set when a trimmed pass wraps so the first sample of the new pass signals the decoder to
+  /// reset its reference chain cleanly before decoding from the rewound keyframe.
+  private var needsResetDecoder = false
+  /// Tracks whether the current trimmed pass emitted at least one visible frame, preventing an
+  /// infinite wrap loop on degenerate files whose timestamps never fall inside the requested window.
+  private var emittedVisibleInPass = false
   /// Audio buffers decoded to reach a time after a reposition, ahead of the reader's next.
   private var heldAudio: CMSampleBuffer?
   private let counters = OSAllocatedUnfairLock(initialState: UInt64(0))
@@ -833,14 +958,59 @@ final class WebMFeeder: @unchecked Sendable {
   var onFailure: (@Sendable (String) -> Void)?
   var onAudioFailure: (@Sendable (String) -> Void)?
 
-  init(file: WebMFile, audio: WebMAudioReader?) {
+  init(file: WebMFile, audio: WebMAudioReader?, loopRange: ClosedRange<Double>? = nil) {
     self.file = file
     self.video = file.makeVideoReader()
     self.audio = audio
     first = file.firstPresentationTime
     length = file.duration
     loops = Self.loops(file)
-    audio?.rewind(withTimeOffset: .zero, limit: loops ? length : .invalid)
+    window = Self.effectiveWindow(in: file, loopRange: loopRange)
+    if window.isTrimmed {
+      needsResetDecoder = true
+      _ = video?.seek(to: window.start)
+      rewindAudioForPass(0, advanceTo: window.start)
+    } else {
+      audio?.rewind(withTimeOffset: .zero, limit: loops ? length : .invalid)
+    }
+  }
+
+  /// Computes the clamped loop window for `file` and optional `loopRange` (`start...end`, seconds
+  /// relative to `file.firstPresentationTime`). Falls back to the full clip whenever the range is
+  /// nil, malformed, out of bounds, or leaves less than `minimumLoopDuration` inside the file.
+  static func effectiveWindow(in file: WebMFile, loopRange: ClosedRange<Double>?) -> EffectiveLoopWindow {
+    let full = EffectiveLoopWindow(
+      start: file.firstPresentationTime,
+      end: CMTimeAdd(file.firstPresentationTime, file.duration),
+      length: file.duration,
+      isTrimmed: false)
+    guard loops(file), let range = loopRange else { return full }
+    let startSeconds = range.lowerBound
+    let endSeconds = range.upperBound
+    let totalSeconds = file.duration.seconds
+    guard startSeconds.isFinite, endSeconds.isFinite, totalSeconds.isFinite,
+          startSeconds >= 0, endSeconds > startSeconds,
+          startSeconds < totalSeconds, endSeconds > 0
+    else { return full }
+    let clampedStart = max(0, startSeconds)
+    let clampedEnd = min(totalSeconds, endSeconds)
+    guard (clampedEnd - clampedStart) + durationTolerance >= minimumLoopDuration else { return full }
+    let start = CMTimeAdd(file.firstPresentationTime, CMTime(seconds: clampedStart, preferredTimescale: 1_000_000_000))
+    let end = CMTimeAdd(file.firstPresentationTime, CMTime(seconds: clampedEnd, preferredTimescale: 1_000_000_000))
+    let span = CMTimeSubtract(end, start)
+    guard span.isNumeric, span.seconds + durationTolerance >= minimumLoopDuration else { return full }
+    let isTrimmed = clampedStart > 1e-6 || clampedEnd < totalSeconds - 1e-6
+    return EffectiveLoopWindow(start: start, end: end, length: span, isTrimmed: isTrimmed)
+  }
+
+  /// Updates the active loop window. Must be called on the feed queue (followed by `reposition`).
+  func setLoopRange(_ loopRange: ClosedRange<Double>?) {
+    window = Self.effectiveWindow(in: file, loopRange: loopRange)
+    baseTimeOffset = .zero
+    lastTrimmedVideoDTS = .invalid
+    startedPassAtWindowStart = true
+    emittedVisibleInPass = false
+    needsResetDecoder = window.isTrimmed
   }
 
   /// Whether `file` is played round and round. One frame is a still picture: it is shown and
@@ -852,10 +1022,13 @@ final class WebMFeeder: @unchecked Sendable {
   /// Where the pass of `file` that the clock time `time` falls in ends, which is where the clip
   /// starts over; nil for a file that does not loop. Reads only the file's fixed facts, so any
   /// thread may ask.
-  static func endOfPass(containing time: CMTime, in file: WebMFile) -> CMTime? {
+  static func endOfPass(
+    containing time: CMTime, in file: WebMFile, loopRange: ClosedRange<Double>? = nil
+  ) -> CMTime? {
     guard loops(file) else { return nil }
-    let pass = passIndex(of: time, first: file.firstPresentationTime, length: file.duration)
-    return CMTimeAdd(file.firstPresentationTime, CMTimeMultiplyByFloat64(file.duration, multiplier: Double(pass + 1)))
+    let window = effectiveWindow(in: file, loopRange: loopRange)
+    let pass = passIndex(of: time, first: window.start, length: window.length)
+    return CMTimeAdd(window.start, CMTimeMultiplyByFloat64(window.length, multiplier: Double(pass + 1)))
   }
 
   var videoSamplesEnqueued: UInt64 { counters.withLock { $0 } }
@@ -870,7 +1043,7 @@ final class WebMFeeder: @unchecked Sendable {
   }
 
   private func passOffset(_ pass: Int) -> CMTime {
-    CMTimeMultiplyByFloat64(length, multiplier: Double(pass))
+    CMTimeAdd(baseTimeOffset, CMTimeMultiplyByFloat64(window.length, multiplier: Double(pass)))
   }
 
   /// Feeds while the renderer has room. False once the video has ended for good.
@@ -885,23 +1058,221 @@ final class WebMFeeder: @unchecked Sendable {
 
   private func nextVideo() -> CMSampleBuffer? {
     guard let video, !videoDone else { return nil }
-    if let sample = video.copyNextSampleBuffer() { return sample }
-    if let error = video.error {
+    if !window.isTrimmed {
+      if let sample = video.copyNextSampleBuffer() {
+        return applyPendingResetIfNeeded(sample)
+      }
+      if let error = video.error {
+        videoDone = true
+        onFailure?("the video could not be read: \(error.localizedDescription)")
+        return nil
+      }
+      guard loops else {
+        videoDone = true
+        return nil
+      }
+      videoPass += 1
+      video.timeOffset = passOffset(videoPass)
+      _ = video.seek(to: .negativeInfinity)
+      if let sample = video.copyNextSampleBuffer() {
+        return applyPendingResetIfNeeded(sample)
+      }
       videoDone = true
-      onFailure?("the video could not be read: \(error.localizedDescription)")
+      onFailure?("the video could not be read again from its start")
       return nil
     }
-    guard loops else {
-      videoDone = true
-      return nil
-    }
-    videoPass += 1
-    video.timeOffset = passOffset(videoPass)
+    return nextTrimmedVideo(video)
+  }
+
+  private func applyPendingResetIfNeeded(_ sample: CMSampleBuffer) -> CMSampleBuffer {
+    guard needsResetDecoder else { return sample }
+    needsResetDecoder = false
+    return Self.retimeSample(
+      sample,
+      pts: CMSampleBufferGetPresentationTimeStamp(sample),
+      dts: CMSampleBufferGetDecodeTimeStamp(sample),
+      duration: CMSampleBufferGetDuration(sample),
+      markDoNotDisplay: Self.isDoNotDisplay(sample),
+      markResetDecoder: true)
+  }
+
+  /// Falls back cleanly to playing the full clip starting monotonically at `passClockStart` when
+  /// a full pass over a trimmed `[window.start, window.end)` contains zero visible frames (for
+  /// example a very low-fps clip whose frames straddle the window), avoiding a permanent black screen.
+  private func fallbackToFullClip(from passClockStart: CMTime, video: WebMVideoReader) -> CMSampleBuffer? {
+    window = EffectiveLoopWindow(
+      start: first,
+      end: CMTimeAdd(first, length),
+      length: length,
+      isTrimmed: false)
+    let floor = lastTrimmedVideoDTS.isNumeric
+      ? CMTimeMaximum(passClockStart, lastTrimmedVideoDTS)
+      : passClockStart
+    baseTimeOffset = first.isNumeric && floor.isNumeric
+      ? CMTimeMaximum(.zero, CMTimeSubtract(floor, first))
+      : .zero
+    videoPass = 0
+    emittedVisibleInPass = false
+    startedPassAtWindowStart = true
+    needsResetDecoder = true
+    video.timeOffset = passOffset(0)
     _ = video.seek(to: .negativeInfinity)
-    if let sample = video.copyNextSampleBuffer() { return sample }
+    if let sample = video.copyNextSampleBuffer() {
+      needsResetDecoder = false
+      let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+      let dts = CMSampleBufferGetDecodeTimeStamp(sample)
+      let duration = CMSampleBufferGetDuration(sample)
+      let clampedDTS = dts.isNumeric && lastTrimmedVideoDTS.isNumeric
+        && CMTimeCompare(dts, lastTrimmedVideoDTS) < 0
+        ? lastTrimmedVideoDTS : dts
+      return Self.retimeSample(
+        sample, pts: pts, dts: clampedDTS, duration: duration,
+        markDoNotDisplay: Self.isDoNotDisplay(sample), markResetDecoder: true)
+    }
     videoDone = true
-    onFailure?("the video could not be read again from its start")
+    onFailure?("the video could not be read from its start")
     return nil
+  }
+
+  /// Reads the next video sample inside `[window.start, window.end)`:
+  /// - Preroll frames between the rewound keyframe and `window.start` are marked `DoNotDisplay`
+  ///   and clamped to the pass's start timestamp so the decoder builds valid reference frames
+  ///   without displaying frames before `start`.
+  /// - Hidden reference frames (such as VP9 alt-ref frames) with `pts >= window.end` keep
+  ///   `DoNotDisplay` and stay clamped to the pass's end so trailing visible frames decode cleanly.
+  /// - The first visible frame at or past `window.end` (or EOF) ends the pass and seamlessly
+  ///   rewinds to the keyframe at or before `window.start` for the next pass.
+  /// - Every sample's DTS is clamped monotonically against `passClockStart` and the prior DTS so
+  ///   B-frame Matroska clips never emit non-monotonic decode timestamps.
+  private func nextTrimmedVideo(_ video: WebMVideoReader) -> CMSampleBuffer? {
+    var wrapsInCall = 0
+    while true {
+      let offset = passOffset(videoPass)
+      let passClockStart = CMTimeAdd(window.start, offset)
+      let passClockEnd = CMTimeAdd(window.end, offset)
+      if let sample = video.copyNextSampleBuffer() {
+        let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+        let filePTS = CMTimeSubtract(pts, offset)
+        let hidden = Self.isDoNotDisplay(sample)
+
+        if CMTimeCompare(filePTS, window.start) < 0 {
+          let clampedDTS = lastTrimmedVideoDTS.isNumeric
+            ? CMTimeMaximum(passClockStart, lastTrimmedVideoDTS) : passClockStart
+          lastTrimmedVideoDTS = clampedDTS
+          let reset = needsResetDecoder
+          needsResetDecoder = false
+          return Self.retimeSample(
+            sample, pts: passClockStart, dts: clampedDTS, duration: .zero,
+            markDoNotDisplay: true, markResetDecoder: reset)
+        }
+
+        if CMTimeCompare(filePTS, window.end) >= 0 {
+          if hidden {
+            let clampedDTS = lastTrimmedVideoDTS.isNumeric
+              ? CMTimeMaximum(passClockEnd, lastTrimmedVideoDTS) : passClockEnd
+            lastTrimmedVideoDTS = clampedDTS
+            let reset = needsResetDecoder
+            needsResetDecoder = false
+            return Self.retimeSample(
+              sample, pts: passClockEnd, dts: clampedDTS, duration: .zero,
+              markDoNotDisplay: true, markResetDecoder: reset)
+          }
+          if !emittedVisibleInPass && startedPassAtWindowStart {
+            return fallbackToFullClip(from: passClockStart, video: video)
+          }
+          guard loops, wrapsInCall == 0 else {
+            videoDone = true
+            return nil
+          }
+          wrapsInCall += 1
+          videoPass += 1
+          emittedVisibleInPass = false
+          startedPassAtWindowStart = true
+          needsResetDecoder = true
+          video.timeOffset = passOffset(videoPass)
+          _ = video.seek(to: window.start)
+          continue
+        }
+
+        // Visible (or hidden) sample strictly within [window.start, window.end).
+        if !hidden { emittedVisibleInPass = true }
+        let reset = needsResetDecoder
+        needsResetDecoder = false
+        let sampleDuration = CMSampleBufferGetDuration(sample)
+        let remaining = CMTimeSubtract(passClockEnd, pts)
+        let needsDurationClamp = sampleDuration.isNumeric && remaining.isNumeric
+          && CMTimeCompare(CMTimeAdd(pts, sampleDuration), passClockEnd) > 0
+        let dts = CMSampleBufferGetDecodeTimeStamp(sample)
+        let dtsFloor = lastTrimmedVideoDTS.isNumeric
+          ? CMTimeMaximum(passClockStart, lastTrimmedVideoDTS) : passClockStart
+        let needsDTSClamp = dts.isNumeric && CMTimeCompare(dts, dtsFloor) < 0
+        let clampedDTS = needsDTSClamp ? dtsFloor : dts
+        if clampedDTS.isNumeric {
+          lastTrimmedVideoDTS = lastTrimmedVideoDTS.isNumeric
+            ? CMTimeMaximum(lastTrimmedVideoDTS, clampedDTS) : clampedDTS
+        }
+        if needsDurationClamp || needsDTSClamp || reset {
+          let clampedDuration = needsDurationClamp ? CMTimeMaximum(.zero, remaining) : sampleDuration
+          return Self.retimeSample(
+            sample, pts: pts, dts: clampedDTS, duration: clampedDuration,
+            markDoNotDisplay: hidden, markResetDecoder: reset)
+        }
+        return sample
+      }
+
+      if let error = video.error {
+        videoDone = true
+        onFailure?("the video could not be read: \(error.localizedDescription)")
+        return nil
+      }
+      if !emittedVisibleInPass && startedPassAtWindowStart {
+        return fallbackToFullClip(from: passClockStart, video: video)
+      }
+      guard loops, wrapsInCall == 0 else {
+        videoDone = true
+        return nil
+      }
+      wrapsInCall += 1
+      videoPass += 1
+      emittedVisibleInPass = false
+      startedPassAtWindowStart = true
+      needsResetDecoder = true
+      video.timeOffset = passOffset(videoPass)
+      _ = video.seek(to: window.start)
+    }
+  }
+
+  private static func isDoNotDisplay(_ sample: CMSampleBuffer) -> Bool {
+    let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]]
+    return attachments?.first?[kCMSampleAttachmentKey_DoNotDisplay] as? Bool == true
+  }
+
+  private static func retimeSample(
+    _ sample: CMSampleBuffer, pts: CMTime, dts: CMTime, duration: CMTime,
+    markDoNotDisplay: Bool, markResetDecoder: Bool
+  ) -> CMSampleBuffer {
+    var timing = CMSampleTimingInfo(duration: duration, presentationTimeStamp: pts, decodeTimeStamp: dts)
+    var copy: CMSampleBuffer?
+    let status = CMSampleBufferCreateCopyWithNewTiming(
+      allocator: kCFAllocatorDefault, sampleBuffer: sample,
+      sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleBufferOut: &copy)
+    let result = (status == noErr ? copy : nil) ?? sample
+    if markDoNotDisplay,
+       let attachments = CMSampleBufferGetSampleAttachmentsArray(result, createIfNecessary: true),
+       CFArrayGetCount(attachments) > 0
+    {
+      let raw = CFArrayGetValueAtIndex(attachments, 0)
+      let dict = unsafeBitCast(raw, to: CFMutableDictionary.self)
+      CFDictionarySetValue(
+        dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DoNotDisplay).toOpaque(),
+        Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+    }
+    if markResetDecoder {
+      CMSetAttachment(
+        result, key: kCMSampleBufferAttachmentKey_ResetDecoderBeforeDecoding,
+        value: kCFBooleanTrue, attachmentMode: kCMAttachmentMode_ShouldPropagate)
+    }
+    return result
   }
 
   func feedAudio(into sink: WebMSampleSink) -> Bool {
@@ -923,33 +1294,198 @@ final class WebMFeeder: @unchecked Sendable {
       heldAudio = nil
       return held
     }
-    if let buffer = audio.copyNextSampleBuffer() { return buffer }
-    if let error = audio.error {
+    if !window.isTrimmed {
+      if let buffer = audio.copyNextSampleBuffer() { return buffer }
+      if let error = audio.error {
+        audioDone = true
+        onAudioFailure?(error.localizedDescription)
+        return nil
+      }
+      guard loops else {
+        audioDone = true
+        return nil
+      }
+      audioPass += 1
+      audio.rewind(withTimeOffset: passOffset(audioPass), limit: length)
+      if let buffer = audio.copyNextSampleBuffer() { return buffer }
+      if let error = audio.error { onAudioFailure?(error.localizedDescription) }
       audioDone = true
-      onAudioFailure?(error.localizedDescription)
       return nil
     }
-    guard loops else {
+    return nextTrimmedAudio(audio)
+  }
+
+  private func nextTrimmedAudio(_ audio: WebMAudioReader) -> CMSampleBuffer? {
+    var wrapsInCall = 0
+    while true {
+      let offset = passOffset(audioPass)
+      let passClockStart = CMTimeAdd(window.start, offset)
+      let passClockEnd = CMTimeAdd(window.end, offset)
+      if let buffer = audio.copyNextSampleBuffer() {
+        let start = CMSampleBufferGetPresentationTimeStamp(buffer)
+        if CMTimeCompare(start, passClockEnd) < 0 {
+          if let sliced = Self.sliceAudioBuffer(buffer, from: passClockStart, to: passClockEnd) {
+            return sliced
+          }
+          continue
+        }
+      } else if let error = audio.error {
+        audioDone = true
+        onAudioFailure?(error.localizedDescription)
+        return nil
+      }
+      guard loops, wrapsInCall == 0 else {
+        audioDone = true
+        return nil
+      }
+      wrapsInCall += 1
+      audioPass += 1
+      let nextClockStart = CMTimeAdd(window.start, passOffset(audioPass))
+      rewindAudioForPass(audioPass, advanceTo: nextClockStart)
+      if let held = heldAudio {
+        heldAudio = nil
+        return held
+      }
+      if let error = audio.error { onAudioFailure?(error.localizedDescription) }
       audioDone = true
       return nil
     }
-    audioPass += 1
-    audio.rewind(withTimeOffset: passOffset(audioPass), limit: length)
-    if let buffer = audio.copyNextSampleBuffer() { return buffer }
-    if let error = audio.error { onAudioFailure?(error.localizedDescription) }
-    audioDone = true
-    return nil
+  }
+
+  private func rewindAudioForPass(_ pass: Int, advanceTo targetClockTime: CMTime) {
+    guard let audio else { return }
+    let offset = passOffset(pass)
+    heldAudio = nil
+    if window.isTrimmed {
+      let spanFromAudioStart = CMTimeSubtract(window.end, audio.startTime)
+      guard spanFromAudioStart.isNumeric, spanFromAudioStart > .zero else { return }
+      audio.rewind(withTimeOffset: offset, limit: spanFromAudioStart)
+      let passClockStart = CMTimeAdd(window.start, offset)
+      let passClockEnd = CMTimeAdd(window.end, offset)
+      let effectiveTarget = CMTimeMaximum(passClockStart, targetClockTime)
+      while let buffer = audio.copyNextSampleBuffer() {
+        let start = CMSampleBufferGetPresentationTimeStamp(buffer)
+        if CMTimeCompare(start, passClockEnd) >= 0 { break }
+        if let sliced = Self.sliceAudioBuffer(buffer, from: effectiveTarget, to: passClockEnd) {
+          heldAudio = sliced
+          break
+        }
+      }
+      return
+    }
+    audio.rewind(withTimeOffset: offset, limit: loops ? length : .invalid)
+  }
+
+  /// Trims leading linear-PCM frames before `startTime` (and trailing frames past `endTime`, if
+  /// specified) using a zero-copy `CMBlockBuffer` reference so audio PTS never jumps backwards or
+  /// overlaps the previous pass at loop seams.
+  static func sliceAudioBuffer(
+    _ buffer: CMSampleBuffer, from startTime: CMTime, to endTime: CMTime? = nil
+  ) -> CMSampleBuffer? {
+    let totalFrames = CMSampleBufferGetNumSamples(buffer)
+    guard totalFrames > 0 else { return nil }
+    let bufStart = CMSampleBufferGetPresentationTimeStamp(buffer)
+    let bufDuration = CMSampleBufferGetDuration(buffer)
+    guard bufStart.isNumeric else { return buffer }
+    let bufEnd = bufDuration.isNumeric ? CMTimeAdd(bufStart, bufDuration) : bufStart
+    if startTime.isNumeric, CMTimeCompare(bufEnd, startTime) <= 0 { return nil }
+    if let endTime, endTime.isNumeric, CMTimeCompare(bufStart, endTime) >= 0 { return nil }
+
+    guard let format = CMSampleBufferGetFormatDescription(buffer),
+          let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(format)
+    else { return buffer }
+    let asbd = asbdPtr.pointee
+    guard asbd.mFormatID == kAudioFormatLinearPCM,
+          asbd.mFramesPerPacket == 1,
+          asbd.mBytesPerFrame > 0,
+          asbd.mSampleRate.isFinite, asbd.mSampleRate > 0
+    else { return buffer }
+    let rateScale = CMTimeScale(asbd.mSampleRate.rounded())
+    guard rateScale > 0 else { return buffer }
+
+    func framePTS(_ frameOffset: Int) -> CMTime {
+      CMTimeAdd(bufStart, CMTime(value: Int64(frameOffset), timescale: rateScale))
+    }
+
+    var dropLeading = 0
+    if startTime.isNumeric, CMTimeCompare(bufStart, startTime) < 0 {
+      let delta = CMTimeSubtract(startTime, bufStart).seconds
+      if delta.isFinite, delta > 0 {
+        dropLeading = max(0, min(totalFrames, Int(floor(delta * asbd.mSampleRate))))
+        while dropLeading < totalFrames && CMTimeCompare(framePTS(dropLeading), startTime) < 0 {
+          dropLeading += 1
+        }
+      }
+    }
+    guard dropLeading < totalFrames else { return nil }
+
+    var keepFrames = totalFrames - dropLeading
+    if let endTime, endTime.isNumeric {
+      let keptStart = framePTS(dropLeading)
+      if CMTimeCompare(keptStart, endTime) >= 0 { return nil }
+      if CMTimeCompare(framePTS(dropLeading + keepFrames), endTime) > 0 {
+        let allowed = CMTimeSubtract(endTime, keptStart).seconds
+        if allowed.isFinite, allowed > 0 {
+          keepFrames = max(0, min(keepFrames, Int(floor(allowed * asbd.mSampleRate)) + 1))
+          while keepFrames > 0 && CMTimeCompare(framePTS(dropLeading + keepFrames), endTime) > 0 {
+            keepFrames -= 1
+          }
+        } else {
+          return nil
+        }
+      }
+    }
+    guard keepFrames > 0 else { return nil }
+    if dropLeading == 0 && keepFrames == totalFrames { return buffer }
+
+    guard let dataBuffer = CMSampleBufferGetDataBuffer(buffer) else { return nil }
+    let bytesPerFrame = Int(asbd.mBytesPerFrame)
+    let byteOffset = dropLeading * bytesPerFrame
+    let byteLength = keepFrames * bytesPerFrame
+    guard byteOffset >= 0, byteLength > 0,
+          byteOffset + byteLength <= CMBlockBufferGetDataLength(dataBuffer)
+    else { return nil }
+
+    var slicedBlock: CMBlockBuffer?
+    let blockStatus = CMBlockBufferCreateWithBufferReference(
+      allocator: kCFAllocatorDefault,
+      referenceBuffer: dataBuffer,
+      offsetToData: byteOffset,
+      dataLength: byteLength,
+      flags: 0,
+      blockBufferOut: &slicedBlock)
+    guard blockStatus == noErr, let slicedBlock else { return nil }
+
+    var slicedSample: CMSampleBuffer?
+    let sampleStatus = CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+      allocator: kCFAllocatorDefault,
+      dataBuffer: slicedBlock,
+      formatDescription: format,
+      sampleCount: keepFrames,
+      presentationTimeStamp: framePTS(dropLeading),
+      packetDescriptions: nil,
+      sampleBufferOut: &slicedSample)
+    guard sampleStatus == noErr, let slicedSample else { return nil }
+    return slicedSample
   }
 
   /// Moves both readers to `time`: the video to the key frame at or before it within its pass, the
   /// sound to the buffer that covers it. Without `audio` the sound is left where it is.
   func reposition(at time: CMTime, audio moveAudio: Bool = true) {
+    baseTimeOffset = .zero
+    lastTrimmedVideoDTS = .invalid
     let pass = passIndex(of: time)
     if let video {
       videoPass = pass
       video.timeOffset = passOffset(pass)
-      _ = video.seek(to: CMTimeSubtract(time, passOffset(pass)))
+      let targetInFile = CMTimeSubtract(time, passOffset(pass))
+      let clampedTarget = window.isTrimmed && CMTimeCompare(targetInFile, window.start) < 0
+        ? window.start : targetInFile
+      _ = video.seek(to: clampedTarget)
       videoDone = false
+      emittedVisibleInPass = false
+      startedPassAtWindowStart = !window.isTrimmed || CMTimeCompare(clampedTarget, window.start) <= 0
+      needsResetDecoder = window.isTrimmed
     }
     if moveAudio { repositionAudio(at: time) }
   }
@@ -961,7 +1497,14 @@ final class WebMFeeder: @unchecked Sendable {
     audioDone = false
     heldAudio = nil
     audioFed.withLock { $0.firstSinceMove = .invalid }
+    if window.isTrimmed {
+      let passClockStart = CMTimeAdd(window.start, passOffset(pass))
+      let clamped = CMTimeCompare(time, passClockStart) < 0 ? passClockStart : time
+      rewindAudioForPass(pass, advanceTo: clamped)
+      return
+    }
     audio.rewind(withTimeOffset: passOffset(pass), limit: loops ? length : .invalid)
+    if pass == 0, CMTimeCompare(time, first) <= 0 { return }
     // Decode and drop what the clock has passed: the sound is rewound to its start and read forward.
     while let buffer = audio.copyNextSampleBuffer() {
       let end = CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(buffer), CMSampleBufferGetDuration(buffer))
@@ -974,11 +1517,11 @@ final class WebMFeeder: @unchecked Sendable {
 
   private func passIndex(of time: CMTime) -> Int {
     guard loops else { return 0 }
-    return Self.passIndex(of: time, first: first, length: length)
+    return Self.passIndex(of: time, first: window.start, length: window.length)
   }
 
   private static func passIndex(of time: CMTime, first: CMTime, length: CMTime) -> Int {
-    guard time.isNumeric, time >= first else { return 0 }
+    guard time.isNumeric, length.isNumeric, length.seconds > 0, time >= first else { return 0 }
     return max(0, Int(floor((time - first).seconds / length.seconds)))
   }
 }

@@ -36,7 +36,20 @@ final class NativeVideoWallpaperHost {
     /// The corrected copies some clips play from (an HEVC clip tagged `hev1`). Asked which file a
     /// surface plays, and heard when copies change, so a clip waiting for its copy opens.
     private let derivedVideos: DerivedVideoCache
+    private let trimStore: VideoTrimStore
+    private let spanStore: DisplaySpanStore
+    private let displayConfiguration: (@MainActor () -> DisplayConfiguration)?
+    private let makeSpanFollower: @MainActor (UInt32, NSRect, NativeVideoSurface) -> NativeVideoSurface?
     private var copiesObserver: NSObjectProtocol?
+    private var trimObserver: NSObjectProtocol?
+    private var spanObserver: NSObjectProtocol?
+
+    private struct SpanGroupKey: Hashable {
+        let wallpaperID: String
+        let admissionKey: UInt64
+    }
+    /// Follower display ID -> leader display ID for displays sharing the leader's single `AVPlayer`.
+    private var spanFollowerLeaders: [UInt32: UInt32] = [:]
 
     private var surfaces: [UInt32: NativeVideoSurface] = [:]
     private var descriptors: [UInt32: BridgeNativeVideoWallpaper] = [:]
@@ -166,7 +179,11 @@ final class NativeVideoWallpaperHost {
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         storage: (@MainActor (URL) async -> NativeVideoStoragePolicy.Location)? = nil,
         switchHold: WallpaperSwitchHold? = nil,
-        derivedVideos: DerivedVideoCache = .shared
+        derivedVideos: DerivedVideoCache = .shared,
+        trimStore: VideoTrimStore = .shared,
+        spanStore: DisplaySpanStore = .shared,
+        displayConfiguration: (@MainActor () -> DisplayConfiguration)? = nil,
+        makeSpanFollower: (@MainActor (UInt32, NSRect, NativeVideoSurface) -> NativeVideoSurface?)? = nil
     ) {
         self.fetch = fetch
         self.screens = screens ?? { SystemDisplays.screens() }
@@ -211,6 +228,13 @@ final class NativeVideoWallpaperHost {
         self.storage = storage ?? { url in await NativeVideoStoragePolicy.location(of: url) }
         self.switchHold = switchHold
         self.derivedVideos = derivedVideos
+        self.trimStore = trimStore
+        self.spanStore = spanStore
+        self.displayConfiguration = displayConfiguration
+        self.makeSpanFollower = makeSpanFollower ?? { displayID, frame, leaderSurface in
+            guard let leaderWindow = leaderSurface as? NativeVideoWallpaperWindow else { return nil }
+            return NativeVideoSpanFollowerWindow(frame: frame, displayID: displayID, leader: leaderWindow.player)
+        }
     }
 
     convenience init(bridge: WallpaperBridge, switchHold: WallpaperSwitchHold? = nil) {
@@ -414,7 +438,37 @@ final class NativeVideoWallpaperHost {
             // On a later turn: a copy is let go from inside the pass that closes its window.
             Task { @MainActor in self?.copiesChanged() }
         }
+        trimObserver = NotificationCenter.default.addObserver(
+            forName: VideoTrimStore.didChangeNotification, object: trimStore, queue: .main
+        ) { [weak self] notification in
+            let wallpaperID = notification.userInfo?[VideoTrimStore.wallpaperIDUserInfoKey] as? String
+            MainActor.assumeIsolated { self?.refreshTrimRange(wallpaperID: wallpaperID) }
+        }
+        spanObserver = NotificationCenter.default.addObserver(
+            forName: DisplaySpanStore.didChangeNotification, object: spanStore, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reconcile() }
+        }
         stopped = false
+    }
+
+    var spanFollowerLeadersForTest: [UInt32: UInt32] { spanFollowerLeaders }
+    var hostStatesForTest: [UInt32: HostWallpaperState] { states }
+
+    private func refreshTrimRange(wallpaperID: String?) {
+        guard !stopped else { return }
+        for (displayID, surface) in surfaces {
+            guard spanFollowerLeaders[displayID] == nil,
+                  let descriptor = descriptors[displayID],
+                  wallpaperID == nil || descriptor.wallpaperId == wallpaperID
+            else { continue }
+            surface.setTrimRange(trimStore.trimRange(for: descriptor.wallpaperId))
+        }
+        for clips in kept.values {
+            for (keptID, clip) in clips where wallpaperID == nil || keptID == wallpaperID {
+                clip.surface.setTrimRange(trimStore.trimRange(for: keptID))
+            }
+        }
     }
 
     /// A corrected copy was finished or failed, or copies were let go: the offers that wait for one
@@ -592,13 +646,88 @@ final class NativeVideoWallpaperHost {
             if !keep(displayID: displayID, surface: surface) { close(displayID: displayID, surface: surface) }
         }
 
-        for (displayID, wallpaper) in wanted.sorted(by: { $0.key < $1.key }) {
+        let plannedSpan = computePlannedSpan(for: wanted)
+        // Close followers whose span group ended, switched leader, or promoted them to leader
+        // before opening or updating displays below.
+        for (followerID, currentLeaderID) in spanFollowerLeaders {
+            let expectedLeader = plannedSpan.leaderByDisplay[followerID]
+            let remainsFollowerOfSameLeader = expectedLeader == currentLeaderID && expectedLeader != followerID
+            if !remainsFollowerOfSameLeader, let surface = surfaces[followerID] {
+                close(displayID: followerID, surface: surface)
+            }
+        }
+
+        // Open/update non-followers (standalone displays and span leaders) before span followers
+        // so each follower can attach its `AVPlayerLayer` directly to the leader's single player.
+        let orderedWanted = wanted.sorted { lhs, rhs in
+            let lhsFollower = plannedSpan.isFollower(lhs.key) ? 1 : 0
+            let rhsFollower = plannedSpan.isFollower(rhs.key) ? 1 : 0
+            return lhsFollower != rhsFollower ? lhsFollower < rhsFollower : lhs.key < rhs.key
+        }
+
+        for (displayID, wallpaper) in orderedWanted {
             // Every open before this one may have waited on a metadata read, and
             // a newer pass can have taken over meanwhile. What is left of this
             // list is then out of date: opening from it would read files
             // nobody wants any more, and updating from it would put an older
             // volume or scaling over what the newer pass already applied.
             guard !stopped, generation == applyGeneration else { break }
+
+            if plannedSpan.isFollower(displayID),
+               let leaderID = plannedSpan.leaderByDisplay[displayID],
+               let leaderSurface = surfaces[leaderID],
+               descriptors[leaderID]?.wallpaperId == wallpaper.wallpaperId,
+               descriptors[leaderID]?.admissionKey == wallpaper.admissionKey
+            {
+                if spanFollowerLeaders[displayID] == leaderID, let existing = surfaces[displayID] {
+                    if let frame = currentFrame(of: displayID) { existing.setScreenFrame(frame) }
+                    update(surface: existing, with: wallpaper, displayID: displayID)
+                    continue
+                }
+                if let frame = currentFrame(of: displayID) {
+                    // Populate the leader's span layout BEFORE creating/attaching the follower so
+                    // `attachSpanLayer` computes the exact display slice instead of presenting a
+                    // `0x0` `AVPlayerLayer` until `syncSpanLayouts()` runs at the end of `apply`.
+                    let memberSet = Set(plannedSpan.members(ofLeader: leaderID))
+                    let groupDisplays = currentDisplayConfiguration().displays.filter { memberSet.contains($0.id) }
+                    if groupDisplays.count >= 2 {
+                        leaderSurface.setSpanDisplays(groupDisplays, displayID: leaderID)
+                    }
+                    if let follower = makeSpanFollower(displayID, frame, leaderSurface) {
+                        if let prior = surfaces[displayID] {
+                            close(displayID: displayID, surface: prior)
+                        }
+                        surfaces[displayID] = follower
+                        descriptors[displayID] = wallpaper
+                        spanFollowerLeaders[displayID] = leaderID
+                        recordState(wallpaper, phase: .loading)
+                        installCallbacks(on: follower, wallpaper: wallpaper, displayID: displayID)
+                        guard surfaces[displayID] === follower else { continue }
+                        update(surface: follower, with: wallpaper, displayID: displayID)
+                        let holding = adoptHeldPicture(into: follower, displayID: displayID)
+                        follower.present()
+                        if follower.isReadyForDisplay {
+                            if holding { switchHold?.contentReady(displayID: displayID) }
+                        } else if leaderSurface.isReadyForDisplay,
+                                  effectiveUserPaused(for: leaderID)
+                                    || suspended || suspendedDisplays.contains(displayID)
+                        {
+                            // The shared leader player is already ready; when paused or occluded
+                            // the follower layer may not composite immediately, so transition
+                            // startup state cleanly to `.ready` instead of dropping it.
+                            cancelFirstFrameWatch(displayID)
+                            recordState(wallpaper, phase: .ready)
+                            if holding { switchHold?.contentReady(displayID: displayID) }
+                        } else {
+                            armFirstFrameWatch(
+                                displayID: displayID, surface: follower,
+                                url: URL(fileURLWithPath: wallpaper.mediaPath), restarted: false)
+                        }
+                        continue
+                    }
+                }
+            }
+
             // No local skip list. If the bridge is still offering this key,
             // this host must either play it or say again that it cannot —
             // silently ignoring an offer is how a display ends up with no
@@ -633,6 +762,7 @@ final class NativeVideoWallpaperHost {
         // A newer pass reports its own result, and reporting this one's would
         // describe a list that has been replaced.
         guard generation == applyGeneration else { return }
+        syncSpanLayouts()
         notifySurfacesChanged()
     }
 
@@ -664,6 +794,18 @@ final class NativeVideoWallpaperHost {
             if let request = self.posterRequests[displayID] {
                 if request.reading { request.readyDuringRead = true }
                 else { self.readPoster(displayID: displayID, surface: surface, request: request) }
+            }
+            if self.spanFollowerLeaders[displayID] == nil {
+                for followerID in self.followers(of: displayID) {
+                    guard self.states[followerID]?.phase == .loading,
+                          let followerDescriptor = self.descriptors[followerID],
+                          self.effectiveUserPaused(for: displayID)
+                            || self.suspended || self.suspendedDisplays.contains(followerID)
+                    else { continue }
+                    self.cancelFirstFrameWatch(followerID)
+                    self.recordState(followerDescriptor, phase: .ready)
+                    self.switchHold?.contentReady(displayID: followerID)
+                }
             }
         }
         surface.onHealthEvent = { [weak self, weak surface] event in
@@ -1048,11 +1190,18 @@ final class NativeVideoWallpaperHost {
         guard surfaces[displayID] === surface else { return }
         let refusal = NativeVideoRefusal.playbackFailed(detail)
         let load = logLoads[displayID]
+        let dependentFollowers: [BridgeNativeVideoWallpaper] = spanFollowerLeaders.compactMap { followerID, leaderID in
+            guard leaderID == displayID else { return nil }
+            return descriptors[followerID]
+        }
         close(displayID: displayID, surface: surface)
         // The window the held picture sat on is closed, and nothing takes its place.
-        switchHold?.cancel(displays: [displayID])
+        switchHold?.cancel(displays: [displayID] + dependentFollowers.map(\.displayId))
         if settled { admissionCache[wallpaper.admissionKey] = refusal }
         fail(wallpaper: wallpaper, refusal: refusal, load: load)
+        for followerWallpaper in dependentFollowers {
+            fail(wallpaper: followerWallpaper, refusal: refusal, load: nil)
+        }
         notifySurfacesChanged()
     }
 
@@ -1251,8 +1400,12 @@ final class NativeVideoWallpaperHost {
         }
         applyAppearance(to: surface, wallpaper: wallpaper)
         // The descriptor carries the user's pause and this display's suspension.
-        surface.setUserPaused(wallpaper.paused)
-        surface.setPresentationSuspended(suspended || suspendedDisplays.contains(displayID))
+        if let leaderID = spanFollowerLeaders[displayID] {
+            syncGroupPlaybackState(leaderID: leaderID)
+        } else {
+            surface.setUserPaused(effectiveUserPaused(for: displayID))
+            surface.setPresentationSuspended(effectivePresentationSuspended(for: displayID))
+        }
         if surface.isReadyForDisplay { recordState(wallpaper, phase: .ready) }
         else if let prior = states[displayID], prior.startupRevision != wallpaper.startupRevision {
             recordState(wallpaper, phase: prior.phase, message: prior.message)
@@ -1269,6 +1422,7 @@ final class NativeVideoWallpaperHost {
             WallpaperEngineOptions(wallpaper.engineOptions),
             lut: wallpaper.lutPath.flatMap { VideoLutLoader.load(URL(fileURLWithPath: $0)) },
             borderColor: wallpaper.borderColor.map(\.cgColor))
+        surface.setTrimRange(trimStore.trimRange(for: wallpaper.wallpaperId))
     }
 
     private func recordState(
@@ -1300,8 +1454,11 @@ final class NativeVideoWallpaperHost {
     /// display may keep that wallpaper for the desktop the person left and the clip has a picture
     /// to show there. False when it is to be closed instead.
     private func keep(displayID: UInt32, surface: NativeVideoSurface) -> Bool {
-        guard let descriptor = descriptors[displayID], surface.isReadyForDisplay,
+        guard spanFollowerLeaders[displayID] == nil,
+              let descriptor = descriptors[displayID], surface.isReadyForDisplay,
               keepPlan[displayID]?.contains(descriptor.wallpaperId) == true else { return false }
+        closeFollowers(of: displayID)
+        surface.clearSpanLayout()
         let load = logLoads[displayID]
         posterRequests.removeValue(forKey: displayID)
         cancelFirstFrameWatch(displayID)
@@ -1366,6 +1523,9 @@ final class NativeVideoWallpaperHost {
     }
 
     private func close(displayID: UInt32, surface: NativeVideoSurface) {
+        // Detach any followers bound to this display's shared `AVQueuePlayer` before stopping it.
+        closeFollowers(of: displayID)
+        spanFollowerLeaders.removeValue(forKey: displayID)
         posterRequests.removeValue(forKey: displayID)
         cancelFirstFrameWatch(displayID)
         clipLeft(displayID, surface: surface)
@@ -1375,6 +1535,129 @@ final class NativeVideoWallpaperHost {
         surfaces.removeValue(forKey: displayID)
         descriptors.removeValue(forKey: displayID)
         refreshAudioOutputs()
+    }
+
+    private func closeFollowers(of leaderID: UInt32) {
+        let followerIDs = spanFollowerLeaders.compactMap { $0.value == leaderID ? $0.key : nil }
+        for followerID in followerIDs {
+            spanFollowerLeaders.removeValue(forKey: followerID)
+            if let followerSurface = surfaces[followerID] {
+                close(displayID: followerID, surface: followerSurface)
+            }
+        }
+    }
+
+    // MARK: Multi-display span coordination
+
+    private struct PlannedSpan {
+        let leaderByDisplay: [UInt32: UInt32]
+
+        func isFollower(_ displayID: UInt32) -> Bool {
+            guard let leader = leaderByDisplay[displayID] else { return false }
+            return leader != displayID
+        }
+
+        func members(ofLeader leaderID: UInt32) -> [UInt32] {
+            leaderByDisplay.compactMap { $0.value == leaderID ? $0.key : nil }.sorted()
+        }
+    }
+
+    private func computePlannedSpan(for wanted: [UInt32: BridgeNativeVideoWallpaper]) -> PlannedSpan {
+        guard spanStore.isEnabled else { return PlannedSpan(leaderByDisplay: [:]) }
+        var groups: [SpanGroupKey: [UInt32]] = [:]
+        for (displayID, wallpaper) in wanted {
+            let key = SpanGroupKey(wallpaperID: wallpaper.wallpaperId, admissionKey: wallpaper.admissionKey)
+            groups[key, default: []].append(displayID)
+        }
+        var leaderByDisplay: [UInt32: UInt32] = [:]
+        for (key, members) in groups where members.count >= 2 {
+            let sorted = members.sorted()
+            let memberSet = Set(sorted)
+            let audioSources = Set(sorted.compactMap { wanted[$0]?.audioSourceDisplayId }.filter { memberSet.contains($0) })
+            let leader: UInt32
+            if audioSources.count == 1, let source = audioSources.first {
+                leader = source
+            } else if let liveNonFollower = sorted.first(where: { id in
+                surfaces[id] != nil
+                    && spanFollowerLeaders[id] == nil
+                    && descriptors[id]?.wallpaperId == key.wallpaperID
+                    && descriptors[id]?.admissionKey == key.admissionKey
+            }) {
+                leader = liveNonFollower
+            } else {
+                leader = sorted[0]
+            }
+            for id in sorted { leaderByDisplay[id] = leader }
+        }
+        return PlannedSpan(leaderByDisplay: leaderByDisplay)
+    }
+
+    private func currentDisplayConfiguration() -> DisplayConfiguration {
+        if let displayConfiguration { return displayConfiguration() }
+        let currentScreens = screens()
+        let systemByID = Dictionary(
+            uniqueKeysWithValues: DisplayConfiguration.current().displays.map { ($0.id, $0) })
+        return DisplayConfiguration(displays: currentScreens.map { screen in
+            let system = systemByID[screen.id]
+            return DisplayConfiguration.Display(
+                id: screen.id,
+                frame: screen.frame,
+                scale: system?.scale ?? 1,
+                refreshRate: system?.refreshRate ?? 60)
+        })
+    }
+
+    private func syncSpanLayouts() {
+        guard spanStore.isEnabled else {
+            for surface in surfaces.values { surface.clearSpanLayout() }
+            refreshAudioOutputs()
+            return
+        }
+        var groups: [SpanGroupKey: [UInt32]] = [:]
+        for (displayID, descriptor) in descriptors where surfaces[displayID] != nil {
+            let key = SpanGroupKey(wallpaperID: descriptor.wallpaperId, admissionKey: descriptor.admissionKey)
+            groups[key, default: []].append(displayID)
+        }
+        let config = currentDisplayConfiguration()
+        var spannedDisplays: Set<UInt32> = []
+        for members in groups.values where members.count >= 2 {
+            let memberSet = Set(members)
+            let groupDisplays = config.displays.filter { memberSet.contains($0.id) }
+            guard groupDisplays.count >= 2 else { continue }
+            for memberID in members {
+                spannedDisplays.insert(memberID)
+                guard spanFollowerLeaders[memberID] == nil else { continue }
+                surfaces[memberID]?.setSpanDisplays(groupDisplays, displayID: memberID)
+                syncGroupPlaybackState(leaderID: memberID)
+            }
+        }
+        for (displayID, surface) in surfaces where !spannedDisplays.contains(displayID) {
+            surface.clearSpanLayout()
+        }
+        refreshAudioOutputs()
+    }
+
+    private func followers(of leaderID: UInt32) -> [UInt32] {
+        spanFollowerLeaders.compactMap { $0.value == leaderID ? $0.key : nil }
+    }
+
+    private func effectivePresentationSuspended(for displayID: UInt32) -> Bool {
+        if suspended { return true }
+        let groupFollowers = followers(of: displayID)
+        guard !groupFollowers.isEmpty else { return suspendedDisplays.contains(displayID) }
+        return ([displayID] + groupFollowers).allSatisfy { suspendedDisplays.contains($0) }
+    }
+
+    private func effectiveUserPaused(for displayID: UInt32) -> Bool {
+        let groupFollowers = followers(of: displayID)
+        guard !groupFollowers.isEmpty else { return descriptors[displayID]?.paused ?? false }
+        return ([displayID] + groupFollowers).allSatisfy { descriptors[$0]?.paused ?? true }
+    }
+
+    private func syncGroupPlaybackState(leaderID: UInt32) {
+        guard let leaderSurface = surfaces[leaderID] else { return }
+        leaderSurface.setUserPaused(effectiveUserPaused(for: leaderID))
+        leaderSurface.setPresentationSuspended(effectivePresentationSuspended(for: leaderID))
     }
 
     /// Gives every surface its volume, with each mirror group heard from one member
@@ -1388,21 +1671,34 @@ final class NativeVideoWallpaperHost {
         // A member that is not its group's owner is silent, whether another member is heard or
         // none can be. Those that lose the sound go first, so it never plays twice for a moment.
         for (displayID, surface) in surfaces {
-            guard let wallpaper = descriptors[displayID],
-                  owners[wallpaper.audioSourceDisplayId] != displayID else { continue }
-            surface.setVolume(wallpaper.volume, muted: true)
+            guard spanFollowerLeaders[displayID] == nil,
+                  let wallpaper = descriptors[displayID] else { continue }
+            let groupMembers = [displayID] + followers(of: displayID)
+            let groupHasOwner = groupMembers.contains { memberID in
+                guard let memberWallpaper = descriptors[memberID] else { return false }
+                return owners[memberWallpaper.audioSourceDisplayId] == memberID
+            }
+            if !groupHasOwner {
+                surface.setVolume(wallpaper.volume, muted: true)
+            }
         }
-        for displayID in owners.values {
-            guard let wallpaper = descriptors[displayID], let surface = surfaces[displayID] else { continue }
-            surface.setVolume(wallpaper.volume, muted: wallpaper.muted)
+        for (displayID, surface) in surfaces {
+            guard spanFollowerLeaders[displayID] == nil else { continue }
+            let groupMembers = [displayID] + followers(of: displayID)
+            if let owningMember = groupMembers.first(where: { memberID in
+                guard let memberWallpaper = descriptors[memberID] else { return false }
+                return owners[memberWallpaper.audioSourceDisplayId] == memberID
+            }), let ownerWallpaper = descriptors[owningMember] {
+                surface.setVolume(ownerWallpaper.volume, muted: ownerWallpaper.muted)
+            }
         }
     }
 
     /// Global suspension: no display can show a wallpaper pixel at all.
     func setPresentationSuspended(_ value: Bool) {
         suspended = value
-        for (displayID, surface) in surfaces {
-            surface.setPresentationSuspended(value || suspendedDisplays.contains(displayID))
+        for (displayID, surface) in surfaces where spanFollowerLeaders[displayID] == nil {
+            surface.setPresentationSuspended(effectivePresentationSuspended(for: displayID))
         }
         refreshAudioOutputs()
         if !value {
@@ -1418,8 +1714,11 @@ final class NativeVideoWallpaperHost {
         } else {
             suspendedDisplays.remove(displayID)
         }
-        guard let surface = surfaces[displayID] else { return }
-        surface.setPresentationSuspended(suspended || value)
+        if let leaderID = spanFollowerLeaders[displayID] {
+            syncGroupPlaybackState(leaderID: leaderID)
+        } else if let surface = surfaces[displayID] {
+            surface.setPresentationSuspended(effectivePresentationSuspended(for: displayID))
+        }
         refreshAudioOutputs()
         if !value { resumeParkedFirstFrameWatch(displayID) }
     }
@@ -1436,11 +1735,26 @@ final class NativeVideoWallpaperHost {
             NotificationCenter.default.removeObserver(copiesObserver)
             self.copiesObserver = nil
         }
+        if let trimObserver {
+            NotificationCenter.default.removeObserver(trimObserver)
+            self.trimObserver = nil
+        }
+        if let spanObserver {
+            NotificationCenter.default.removeObserver(spanObserver)
+            self.spanObserver = nil
+        }
         wakeTask?.cancel()
         wakeTask = nil
-        for (displayID, surface) in surfaces {
+        // Close followers before leaders so every follower detaches cleanly while its leader exists.
+        let orderedForShutdown = surfaces.sorted { lhs, rhs in
+            let lhsFollower = spanFollowerLeaders[lhs.key] != nil ? 0 : 1
+            let rhsFollower = spanFollowerLeaders[rhs.key] != nil ? 0 : 1
+            return lhsFollower != rhsFollower ? lhsFollower < rhsFollower : lhs.key < rhs.key
+        }
+        for (displayID, surface) in orderedForShutdown where surfaces[displayID] === surface {
             close(displayID: displayID, surface: surface)
         }
+        spanFollowerLeaders.removeAll()
         surfaces.removeAll()
         descriptors.removeAll()
         clipEndWatches.removeAll()
