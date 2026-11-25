@@ -25,6 +25,14 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-25 — Wave 2B Settings, Widgets Undo, and Browse/Downloads upgrades (#12-#15)
+
+- Scope: Settings unified thumbnail chooser, Automation enable/reorder/solar readout, merged Scale (>1.0 preserved), async Storage metrics, Search section titles/live units/scoping (#12); Desktop Widgets scoped Undo/Redo, gesture coalescing, safe canvas Delete, .sun Displays link (#13); Workshop Collection/Favorites Download missing, lazy tile context menus, Pixiv multi-page strip & batch save, Downloads batch controls & Pixiv Download next, async disk space, Steam web persona identity, Workshop update dismiss, LibraryFolderRow Storage jump (#14-#15).
+- python3 scripts/test.py: PASS (36/36 Python suites OK; 5296 passed, 0 failed, 70 skipped of 5366 native tests in 137s).
+- Localization: App/Resources/Localizable.xcstrings edited as text (+38 new keys across en, ja, ko, pt-BR, zh-Hans, zh-Hant; -1 superseded unreferenced key); catalog and panel localization suites passed.
+- Code review: verifier-w2b re-verified all fixes and signed off PASS (no blockers).
+- Not run: Release build (not requested), opt-in --ui desktop tests, and live visual inspection.
+
 ## 2026-11-25 — Wave 2A UI/UX workflow upgrades (#8, #9, #10, #11, #16)
 
 - Scope: three-page clickable tags, ActiveFilterChipsBar, Workshop Hide installed (#8); Collections scope menu, quick actions, target display wallpaper titles, inline playlist controls (#9); Inspector search/modified/collapsible headings, artwork Preview, Preview shortcuts/Apply (#10); Menu Bar dynamic scroll/compact picker/Mute All/playlist badge/reveal (#11); Shift+Arrow, Cmd+S, Placement pinch/Option+scroll/double-click/center guides, Preset Update & Apply & Save (#16).
@@ -104,12 +112,3 @@ Settings › About gains More from MMFoundation (OhMyShot's icon, a line about i
 - Offscreen Workshop regression: the public list offers sign-in when anonymous, hides it after sign-in and offers it again after sign-out.
 - Full gate: python3 scripts/test.py (Homebrew Python 3.15); Python checks passed, native tests: 5,128 passed, 70 skipped, 0 failed.
 - No live Steam login or on-desktop visual check; no Release build.
-
-## 2026-11-17 — Panel close releases Discover and pixiv results
-
-- `python3 scripts/test.py --only WorkshopSourceTests --only PixivStoreTests`: 75 passed, including the two new unload/resume tests.
-- `python3 scripts/test.py` (Xcode 26.6, macOS 26.6.2): 5113 passed, 2 failed, 72 skipped. The two failures, `DesktopWidgetTests/testADateCanBeWrittenInAnotherCalendarInThatCalendarsOwnWords` ("九月30" for "九月三十") and `WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem`, fail the same way on `main` without this change.
-- Debug build by hand: Discover searched and paged a few pages, then the window closed. Footprint 213 MB open, 108 MB closed; `heap` showed 111 `DecodedPanelImage` open and none closed, no `WorkshopItem` arrays or `WorkshopPage` caches closed.
-- Before the change, the release app after several close/reopen cycles kept 502 `DecodedPanelImage` (187 MB of CG raster data) and six `PanelController`s after the window closed.
-- Each closed window left its `PanelController` behind: `leaks --traceTree` rooted it in the toolbar `Menu` (`AppKitPopUpAdaptor`) host, held by an `NSView` notification block. `ControlPanelWindow.tearDown` now takes the toolbar off before the content; a scripted run of ten identical open, page and close cycles went from one more controller and about 1 MB of live heap per close to none left after any close.
-- Not checked: reopening on pixiv and Back after reopening by hand (covered by the unit tests); `check_renderer.py` (no renderer change).
