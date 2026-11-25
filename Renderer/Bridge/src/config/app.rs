@@ -620,7 +620,25 @@ impl AppConfig {
     }
 
     pub fn effective_render_scale(&self, in_force: QualityInForce) -> f32 {
-        let preferred = clamp_render_scale(self.quality.render_scale);
+        self.effective_render_scale_for_wallpaper(None, in_force)
+    }
+
+    /// Effective internal render scale for one wallpaper.
+    ///
+    /// Combines an optional per-wallpaper override with the global default and
+    /// clamps against the battery/thermal profile via `.min(...)` whenever
+    /// battery reduced-quality or thermal throttling is in force, so a
+    /// per-wallpaper override can never bypass battery or thermal throttling.
+    #[must_use]
+    pub fn effective_render_scale_for_wallpaper(
+        &self,
+        wallpaper_override: Option<f32>,
+        in_force: QualityInForce,
+    ) -> f32 {
+        let preferred = wallpaper_override.map_or_else(
+            || clamp_render_scale(self.quality.render_scale),
+            clamp_render_scale,
+        );
         let profile = clamp_render_scale(self.quality.battery.render_scale);
         if in_force.throttled || in_force.battery_profile {
             preferred.min(profile)

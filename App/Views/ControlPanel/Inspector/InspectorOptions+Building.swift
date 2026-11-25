@@ -20,6 +20,9 @@ extension InspectorOptions {
     var nativePlayerDisplays: Set<UInt32> = []
     /// The frame-rate ceiling in force and the setting that sets it.
     var frameRateCeiling: FrameRateCeiling?
+    /// Global preferred render scale and scene quality from Performance settings.
+    var globalRenderScale: Float = 1.0
+    var globalSceneQuality: BridgeSceneQuality = .wallpaperEngineDefault
     var isLocked = false
     /// The language the rows are worded in; the panel's own when nil.
     var locale: PanelLocale?
@@ -49,7 +52,11 @@ extension InspectorOptions {
       engineOptions: value.engineOptions.map { options in
         options.rows.filter(\.enabled).map { engineRow($0, filters: options.imageFilters, inputs: inputs) }
       },
-      engineHiddenModified: value.engineOptions?.rows.contains { !$0.enabled && $0.modified } ?? false)
+      engineHiddenModified: value.engineOptions?.rows.contains { !$0.enabled && $0.modified } ?? false,
+      renderScaleOverride: value.renderScaleOverride,
+      sceneQualityOverride: value.sceneQualityOverride,
+      globalRenderScale: inputs.globalRenderScale,
+      globalSceneQuality: inputs.globalSceneQuality)
   }
 
   private static func displayRow(_ row: BridgeDisplayConfigRow, inputs: Inputs) -> DisplayRow {

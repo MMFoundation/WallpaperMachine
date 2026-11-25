@@ -38,7 +38,9 @@ enum BridgeSnapshotFixtures {
     mediaIntegrationEnabled: Bool = true,
     muted: Bool = false,
     volume: Float = 1,
-    engineOptions: BridgeEngineOptions? = nil
+    engineOptions: BridgeEngineOptions? = nil,
+    renderScaleOverride: Float? = nil,
+    sceneQualityOverride: BridgeSceneQuality? = nil
   ) -> BridgeWallpaperOptionsSnapshot {
     BridgeWallpaperOptionsSnapshot(
       wallpaperId: wallpaperId,
@@ -52,7 +54,9 @@ enum BridgeSnapshotFixtures {
       mediaIntegrationEnabled: mediaIntegrationEnabled,
       muted: muted,
       volume: volume,
-      engineOptions: engineOptions)
+      engineOptions: engineOptions,
+      renderScaleOverride: renderScaleOverride,
+      sceneQualityOverride: sceneQualityOverride)
   }
 
   /// Wallpaper Engine's per-wallpaper option values, at their defaults unless named.

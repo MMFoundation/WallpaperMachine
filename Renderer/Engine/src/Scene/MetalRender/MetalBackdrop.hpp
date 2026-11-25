@@ -75,6 +75,7 @@ private:
     std::vector<wallpaper::BackdropReductionStep> plan_;
     uint32_t                                     source_width_ { 0 };
     uint32_t                                     source_height_ { 0 };
+    uint64_t                                     allocated_bytes_ { 0 };
     std::string                                  error_;
 };
 

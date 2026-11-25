@@ -1589,6 +1589,36 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func setVolume(wallpaperId: String, volume: Float) async throws  -> BridgeWallpaperMutationBundle
 
     /**
+     * Sets or clears a per-wallpaper internal render scale override (`0.25..=1.0`).
+     *
+     * Passing `None` returns this wallpaper to the global render scale setting.
+     * Battery and thermal throttling still clamp the effective scale via
+     * `.min(...)`. Applied live to running scenes showing this wallpaper
+     * without reparsing the project.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper id is unknown, the setting cannot be
+     * saved, or a running scene rejects the new scale.
+     */
+    func setWallpaperRenderScale(wallpaperId: String, scale: Float?) async throws  -> BridgeWallpaperMutationBundle
+
+    /**
+     * Sets or clears a per-wallpaper scene quality override (MSAA, shadows,
+     * volumetrics, reflections, post-processing).
+     *
+     * Passing `None` returns this wallpaper to the global scene quality
+     * setting. When this wallpaper is currently assigned to a display, running
+     * scenes are reconciled with the updated quality.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper id is unknown, the setting cannot be
+     * saved, or reconciling scenes fails.
+     */
+    func setWallpaperSceneQuality(wallpaperId: String, quality: BridgeSceneQuality?) async throws  -> BridgeWallpaperMutationBundle
+
+    /**
      * Records or withdraws one web page as a live consumer of the system
      * audio capture.
      *
@@ -4020,6 +4050,66 @@ open func setVolume(wallpaperId: String, volume: Float)async throws  -> BridgeWa
                 uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_volume(
                     self.uniffiClonePointer(),
                     FfiConverterString.lower(wallpaperId),FfiConverterFloat.lower(volume)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+
+    /**
+     * Sets or clears a per-wallpaper internal render scale override (`0.25..=1.0`).
+     *
+     * Passing `None` returns this wallpaper to the global render scale setting.
+     * Battery and thermal throttling still clamp the effective scale via
+     * `.min(...)`. Applied live to running scenes showing this wallpaper
+     * without reparsing the project.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper id is unknown, the setting cannot be
+     * saved, or a running scene rejects the new scale.
+     */
+open func setWallpaperRenderScale(wallpaperId: String, scale: Float?)async throws  -> BridgeWallpaperMutationBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_wallpaper_render_scale(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId),FfiConverterOptionFloat.lower(scale)
+                )
+            },
+            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
+            errorHandler: FfiConverterTypeBridgeError.lift
+        )
+}
+
+    /**
+     * Sets or clears a per-wallpaper scene quality override (MSAA, shadows,
+     * volumetrics, reflections, post-processing).
+     *
+     * Passing `None` returns this wallpaper to the global scene quality
+     * setting. When this wallpaper is currently assigned to a display, running
+     * scenes are reconciled with the updated quality.
+     *
+     * # Errors
+     *
+     * Returns an error when the wallpaper id is unknown, the setting cannot be
+     * saved, or reconciling scenes fails.
+     */
+open func setWallpaperSceneQuality(wallpaperId: String, quality: BridgeSceneQuality?)async throws  -> BridgeWallpaperMutationBundle {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_wallpaper_scene_quality(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(wallpaperId),FfiConverterOptionTypeBridgeSceneQuality.lower(quality)
                 )
             },
             pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
@@ -7529,6 +7619,22 @@ public struct BridgeRendererSurfaceCounters {
      */
     public var videoConversionLiveBytes: UInt64
     public var videoConversionPeakLiveBytes: UInt64
+    /**
+     * Bytes allocated for this surface's Metal render targets (colour, depth,
+     * multisample, blurred backdrop and MetalFX targets, deduplicated).
+     * Always-live atomic gauge updated on compile/resize/release, never per frame.
+     */
+    public var renderTargetBytes: UInt64
+    /**
+     * Bytes allocated for this surface's static and dynamic scene geometry
+     * buffers (deduplicated). Always-live atomic gauge, never per frame.
+     */
+    public var geometryBufferBytes: UInt64
+    /**
+     * Whether Extended Dynamic Range (EDR) output is currently active on this
+     * surface.
+     */
+    public var edrActive: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -7595,7 +7701,20 @@ public struct BridgeRendererSurfaceCounters {
          * textures alone: decode pixel buffers, Core Video plane wrappers, the
          * the drawables the layer hands out are all outside it, so
          * neither figure is a residency or process-footprint measurement.
-         */videoConversionLiveBytes: UInt64, videoConversionPeakLiveBytes: UInt64) {
+         */videoConversionLiveBytes: UInt64, videoConversionPeakLiveBytes: UInt64,
+        /**
+         * Bytes allocated for this surface's Metal render targets (colour, depth,
+         * multisample, blurred backdrop and MetalFX targets, deduplicated).
+         * Always-live atomic gauge updated on compile/resize/release, never per frame.
+         */renderTargetBytes: UInt64,
+        /**
+         * Bytes allocated for this surface's static and dynamic scene geometry
+         * buffers (deduplicated). Always-live atomic gauge, never per frame.
+         */geometryBufferBytes: UInt64,
+        /**
+         * Whether Extended Dynamic Range (EDR) output is currently active on this
+         * surface.
+         */edrActive: Bool) {
         self.displayId = displayId
         self.surfaceId = surfaceId
         self.generation = generation
@@ -7634,6 +7753,9 @@ public struct BridgeRendererSurfaceCounters {
         self.videoImports = videoImports
         self.videoConversionLiveBytes = videoConversionLiveBytes
         self.videoConversionPeakLiveBytes = videoConversionPeakLiveBytes
+        self.renderTargetBytes = renderTargetBytes
+        self.geometryBufferBytes = geometryBufferBytes
+        self.edrActive = edrActive
     }
 }
 
@@ -7755,6 +7877,15 @@ extension BridgeRendererSurfaceCounters: Equatable, Hashable {
         if lhs.videoConversionPeakLiveBytes != rhs.videoConversionPeakLiveBytes {
             return false
         }
+        if lhs.renderTargetBytes != rhs.renderTargetBytes {
+            return false
+        }
+        if lhs.geometryBufferBytes != rhs.geometryBufferBytes {
+            return false
+        }
+        if lhs.edrActive != rhs.edrActive {
+            return false
+        }
         return true
     }
 
@@ -7797,6 +7928,9 @@ extension BridgeRendererSurfaceCounters: Equatable, Hashable {
         hasher.combine(videoImports)
         hasher.combine(videoConversionLiveBytes)
         hasher.combine(videoConversionPeakLiveBytes)
+        hasher.combine(renderTargetBytes)
+        hasher.combine(geometryBufferBytes)
+        hasher.combine(edrActive)
     }
 }
 
@@ -7845,7 +7979,10 @@ public struct FfiConverterTypeBridgeRendererSurfaceCounters: FfiConverterRustBuf
                 videoConversions: FfiConverterUInt64.read(from: &buf),
                 videoImports: FfiConverterUInt64.read(from: &buf),
                 videoConversionLiveBytes: FfiConverterUInt64.read(from: &buf),
-                videoConversionPeakLiveBytes: FfiConverterUInt64.read(from: &buf)
+                videoConversionPeakLiveBytes: FfiConverterUInt64.read(from: &buf),
+                renderTargetBytes: FfiConverterUInt64.read(from: &buf),
+                geometryBufferBytes: FfiConverterUInt64.read(from: &buf),
+                edrActive: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -7888,6 +8025,9 @@ public struct FfiConverterTypeBridgeRendererSurfaceCounters: FfiConverterRustBuf
         FfiConverterUInt64.write(value.videoImports, into: &buf)
         FfiConverterUInt64.write(value.videoConversionLiveBytes, into: &buf)
         FfiConverterUInt64.write(value.videoConversionPeakLiveBytes, into: &buf)
+        FfiConverterUInt64.write(value.renderTargetBytes, into: &buf)
+        FfiConverterUInt64.write(value.geometryBufferBytes, into: &buf)
+        FfiConverterBool.write(value.edrActive, into: &buf)
     }
 }
 
@@ -10030,6 +10170,16 @@ public struct BridgeWallpaperOptionsSnapshot {
      * for a web page and a wallpaper of unknown kind, which have none.
      */
     public var engineOptions: BridgeEngineOptions?
+    /**
+     * Optional per-wallpaper internal render scale override (`0.25..=1.0`),
+     * or `None` when using the global setting.
+     */
+    public var renderScaleOverride: Float?
+    /**
+     * Optional per-wallpaper scene quality override, or `None` when using the
+     * global `[quality.scene]` setting.
+     */
+    public var sceneQualityOverride: BridgeSceneQuality?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -10057,7 +10207,15 @@ public struct BridgeWallpaperOptionsSnapshot {
         /**
          * Wallpaper Engine's per-wallpaper options for a scene or a video; `None`
          * for a web page and a wallpaper of unknown kind, which have none.
-         */engineOptions: BridgeEngineOptions?) {
+         */engineOptions: BridgeEngineOptions?,
+        /**
+         * Optional per-wallpaper internal render scale override (`0.25..=1.0`),
+         * or `None` when using the global setting.
+         */renderScaleOverride: Float?,
+        /**
+         * Optional per-wallpaper scene quality override, or `None` when using the
+         * global `[quality.scene]` setting.
+         */sceneQualityOverride: BridgeSceneQuality?) {
         self.wallpaperId = wallpaperId
         self.title = title
         self.kind = kind
@@ -10070,6 +10228,8 @@ public struct BridgeWallpaperOptionsSnapshot {
         self.muted = muted
         self.volume = volume
         self.engineOptions = engineOptions
+        self.renderScaleOverride = renderScaleOverride
+        self.sceneQualityOverride = sceneQualityOverride
     }
 }
 
@@ -10113,6 +10273,12 @@ extension BridgeWallpaperOptionsSnapshot: Equatable, Hashable {
         if lhs.engineOptions != rhs.engineOptions {
             return false
         }
+        if lhs.renderScaleOverride != rhs.renderScaleOverride {
+            return false
+        }
+        if lhs.sceneQualityOverride != rhs.sceneQualityOverride {
+            return false
+        }
         return true
     }
 
@@ -10129,6 +10295,8 @@ extension BridgeWallpaperOptionsSnapshot: Equatable, Hashable {
         hasher.combine(muted)
         hasher.combine(volume)
         hasher.combine(engineOptions)
+        hasher.combine(renderScaleOverride)
+        hasher.combine(sceneQualityOverride)
     }
 }
 
@@ -10151,7 +10319,9 @@ public struct FfiConverterTypeBridgeWallpaperOptionsSnapshot: FfiConverterRustBu
                 mediaIntegrationEnabled: FfiConverterBool.read(from: &buf),
                 muted: FfiConverterBool.read(from: &buf),
                 volume: FfiConverterFloat.read(from: &buf),
-                engineOptions: FfiConverterOptionTypeBridgeEngineOptions.read(from: &buf)
+                engineOptions: FfiConverterOptionTypeBridgeEngineOptions.read(from: &buf),
+                renderScaleOverride: FfiConverterOptionFloat.read(from: &buf),
+                sceneQualityOverride: FfiConverterOptionTypeBridgeSceneQuality.read(from: &buf)
         )
     }
 
@@ -10168,6 +10338,8 @@ public struct FfiConverterTypeBridgeWallpaperOptionsSnapshot: FfiConverterRustBu
         FfiConverterBool.write(value.muted, into: &buf)
         FfiConverterFloat.write(value.volume, into: &buf)
         FfiConverterOptionTypeBridgeEngineOptions.write(value.engineOptions, into: &buf)
+        FfiConverterOptionFloat.write(value.renderScaleOverride, into: &buf)
+        FfiConverterOptionTypeBridgeSceneQuality.write(value.sceneQualityOverride, into: &buf)
     }
 }
 
@@ -12141,6 +12313,30 @@ fileprivate struct FfiConverterOptionInt64: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionFloat: FfiConverterRustBuffer {
+    typealias SwiftType = Float?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterFloat.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterFloat.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
     typealias SwiftType = Double?
 
@@ -13482,6 +13678,12 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_volume() != 1489) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_wallpaper_render_scale() != 39286) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_wallpaper_scene_quality() != 21824) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_web_audio_subscribed() != 60797) {

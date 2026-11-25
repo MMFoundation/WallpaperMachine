@@ -142,6 +142,10 @@ pub(super) fn project_options(
         // Filled by the caller, which holds the scene traits and the image
         // filters this projection does not read.
         engine_options: None,
+        render_scale_override: current.render_scale,
+        scene_quality_override: current
+            .scene_quality
+            .map(|quality| quality.to_scene().into()),
     }
 }
 

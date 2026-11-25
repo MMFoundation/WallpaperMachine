@@ -107,7 +107,8 @@ use crate::{
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneQuality,
             SetSceneDisplayFramingEnabled, SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
             SetTargetFps, SetVolume,
-            SetLockScreenAudioDemand, SetWebAudioSubscribed, Shutdown,
+            SetLockScreenAudioDemand, SetWallpaperRenderScale, SetWallpaperSceneQuality,
+            SetWebAudioSubscribed, Shutdown,
         },
         state::BridgeActorState,
     },
@@ -2484,6 +2485,55 @@ impl WallpaperBridge {
             .ask(SetMediaIntegrationEnabled {
                 wallpaper_id,
                 enabled,
+            })
+            .await
+    }
+
+    /// Sets or clears a per-wallpaper internal render scale override (`0.25..=1.0`).
+    ///
+    /// Passing `None` returns this wallpaper to the global render scale setting.
+    /// Battery and thermal throttling still clamp the effective scale via
+    /// `.min(...)`. Applied live to running scenes showing this wallpaper
+    /// without reparsing the project.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper id is unknown, the setting cannot be
+    /// saved, or a running scene rejects the new scale.
+    pub async fn set_wallpaper_render_scale(
+        &self,
+        wallpaper_id: String,
+        scale: Option<f32>,
+    ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
+        self.actor
+            .ask(SetWallpaperRenderScale {
+                wallpaper_id,
+                scale,
+            })
+            .await
+    }
+
+    /// Sets or clears a per-wallpaper scene quality override (MSAA, shadows,
+    /// volumetrics, reflections, post-processing).
+    ///
+    /// Passing `None` returns this wallpaper to the global scene quality
+    /// setting. When this wallpaper is currently assigned to a display, running
+    /// scenes are reconciled with the updated quality.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the wallpaper id is unknown, the setting cannot be
+    /// saved, or reconciling scenes fails.
+    pub async fn set_wallpaper_scene_quality(
+        &self,
+        wallpaper_id: String,
+        quality: Option<BridgeSceneQuality>,
+    ) -> Result<BridgeWallpaperMutationBundle, BridgeError> {
+        let quality = quality.map(|value| crate::config::SceneQualityCfg::from_scene(value.into()));
+        self.actor
+            .ask(SetWallpaperSceneQuality {
+                wallpaper_id,
+                quality,
             })
             .await
     }

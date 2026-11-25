@@ -232,6 +232,18 @@ public:
         return false;
     }
     void SetCounters(RendererCounters* counters) { OWE_FORWARD_VOID(SetCounters(counters)); }
+    [[nodiscard]] uint64_t RenderTargetBytes() const noexcept {
+        if (m_metal != nullptr) return m_metal->RenderTargetBytes();
+        return 0;
+    }
+    [[nodiscard]] uint64_t GeometryBufferBytes() const noexcept {
+        if (m_metal != nullptr) return m_metal->GeometryBufferBytes();
+        return 0;
+    }
+    [[nodiscard]] bool SurfaceEDRActive() const noexcept {
+        if (m_metal != nullptr) return m_metal->SurfaceEDRActive();
+        return false;
+    }
     WallpaperCursorMapping CursorMapping(const Scene& scene) const {
         OWE_FORWARD(CursorMapping(scene));
         return WallpaperCursorMapping {};

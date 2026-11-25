@@ -246,6 +246,20 @@ public:
 
     void SetCounters(RendererCounters* counters);
 
+    /// Bytes Metal allocated for this surface's colour, depth, multisample,
+    /// blurred-backdrop and MetalFX upscale render targets, each texture
+    /// counted once. Backed by an atomic gauge updated only when targets are
+    /// compiled, resized, allocated or released — zero per-frame work and
+    /// lock-free to read.
+    [[nodiscard]] uint64_t RenderTargetBytes() const noexcept;
+    /// Bytes Metal allocated for this surface's static and dynamic scene
+    /// geometry buffers, each buffer counted once. Backed by an atomic gauge
+    /// updated only on graph compile, release or dynamic buffer growth.
+    [[nodiscard]] uint64_t GeometryBufferBytes() const noexcept;
+    /// Whether Extended Dynamic Range (EDR) output is currently active on this
+    /// surface. Lock-free atomic read.
+    [[nodiscard]] bool SurfaceEDRActive() const noexcept;
+
     [[nodiscard]] WallpaperCursorMapping CursorMapping(const Scene& scene) const;
 
     /// Why the last failed call failed, for the fallback reason the settings

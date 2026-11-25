@@ -29,6 +29,15 @@ pub struct WallpaperConfig {
     /// while every option is at its default.
     #[serde(skip_serializing_if = "EngineOptionsCfg::is_default")]
     pub engine_options: EngineOptionsCfg,
+    /// Optional per-wallpaper internal render scale override (`0.25..=1.0`).
+    /// `None` uses the global preference; battery and thermal throttling still
+    /// apply via `.min(...)` on top of any override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_scale: Option<f32>,
+    /// Optional per-wallpaper scene quality override. `None` uses the global
+    /// `[quality.scene]` setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_quality: Option<super::SceneQualityCfg>,
 }
 
 impl Default for WallpaperConfig {
@@ -42,6 +51,8 @@ impl Default for WallpaperConfig {
             monitors: Vec::new(),
             property_overrides: BTreeMap::new(),
             engine_options: EngineOptionsCfg::default(),
+            render_scale: None,
+            scene_quality: None,
         }
     }
 }

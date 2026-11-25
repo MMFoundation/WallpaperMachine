@@ -432,3 +432,35 @@ fn the_report_says_feedback_is_off_when_presents_ask_for_none() {
     assert!(present_feedback_requested(Some("1")));
     assert!(!present_feedback_requested(Some("0")), "zero shown frames must not read as measured");
 }
+
+#[tokio::test]
+async fn surface_vram_gauges_and_edr_state_are_carried_per_surface() {
+    use RendererCounterKind as K;
+    let engine = FakeEngineFacade::default();
+    let bridge = two_display_bridge(&engine).await;
+
+    engine.set_renderer_counters(
+        vec![
+            surface(7, 1, 1, "/library/hdr/project.json", false, &[
+                (K::RenderTargetBytes, 67_108_864),
+                (K::GeometryBufferBytes, 2_097_152),
+                (K::EdrActive, 1),
+            ]),
+            surface(9, 2, 1, "/library/sdr/project.json", false, &[
+                (K::RenderTargetBytes, 16_777_216),
+                (K::GeometryBufferBytes, 524_288),
+                (K::EdrActive, 0),
+            ]),
+        ],
+        vec![],
+    );
+
+    let report = bridge.renderer_counters().await.unwrap();
+    assert_eq!(report.surfaces.len(), 2);
+    assert_eq!(report.surfaces[0].render_target_bytes, 67_108_864);
+    assert_eq!(report.surfaces[0].geometry_buffer_bytes, 2_097_152);
+    assert!(report.surfaces[0].edr_active);
+    assert_eq!(report.surfaces[1].render_target_bytes, 16_777_216);
+    assert_eq!(report.surfaces[1].geometry_buffer_bytes, 524_288);
+    assert!(!report.surfaces[1].edr_active);
+}

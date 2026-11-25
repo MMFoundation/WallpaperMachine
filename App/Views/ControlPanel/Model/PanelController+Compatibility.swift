@@ -21,6 +21,9 @@ struct CompatibilityState: Equatable {
   /// Checking is possible: the target is an enabled independent display with the wallpaper's
   /// options loaded and a frame rate to certify.
   let canCheck: Bool
+  /// Cached post-download / post-import background compatibility pre-check verdict, if available.
+  /// Read purely from memory; nil until pre-checked or after invalidation.
+  var cachedSummary: WallpaperCompatibilitySummary? = nil
 
   /// The runtime says what draws this kind of wallpaper once it plays: a scene's renderer or a
   /// video's player. A web page runs in the app's own web view, which reports nothing, and a
@@ -74,11 +77,12 @@ extension PanelController {
         SceneFailureReport(stage: SceneFailureStage(name: $0), reason: scene.failureReason)
       }
     }
+    let cachedSummary = store.compatibilityCache?.summaries[context.wallpaperID]
     return CompatibilityState(
       wallpaperID: context.wallpaperID, displayID: context.displayID, kind: context.kind,
       isChecking: current && compatibility.checking, checks: current ? compatibility.checks : [],
       backend: report?.backend, fallbackReason: report?.reason, failure: failure,
-      canCheck: context.targetAvailable)
+      canCheck: context.targetAvailable, cachedSummary: cachedSummary)
   }
 
   /// `compatibilityCheck`: reads the wallpaper's files again and re-runs the checks. Leaves the banner
@@ -99,6 +103,9 @@ extension PanelController {
         context.targetAvailable
       else { throw InvalidControlValue() }
       await compatibility.check(context, retry: true)
+      store.compatibilityCache?.recordManualCheck(
+        wallpaperID: id, kind: context.kind, checks: compatibility.checks,
+        libraryRevision: context.libraryRevision)
     }
   }
 

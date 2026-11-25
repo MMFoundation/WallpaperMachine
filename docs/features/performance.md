@@ -436,6 +436,50 @@ running scene, what the renderer actually applies, and exported diagnostics appe
 `quality msaa=… shadows=… volumetrics=… reflection=… post=…` to each running scene line.
 The lock screen and screen saver use the saved quality.
 
+### Per-wallpaper quality overrides
+
+Each scene or web wallpaper can override the global **Internal render scale** (and a scene
+wallpaper can also override **Antialiasing (MSAA)**, **Shadows**, **Volumetrics**,
+**Reflections** and **Post-processing**) from the **Quality** card in its Inspector
+([per-wallpaper quality](wallpaper-properties.md#per-wallpaper-quality)).
+
+- Overrides are saved in `wallpapers/<id>.json` (`render_scale` and `scene_quality`,
+  omitted when using global defaults) and take effect immediately without changing other
+  wallpapers or global preferences.
+- A per-wallpaper render scale applies live to the displays showing that wallpaper without
+  reparsing the project. Whenever battery reduced quality, Low Power Mode, low battery or
+  thermal throttling is active, the effective scale is combined with the reduced-quality
+  profile via `.min(...)` so per-wallpaper overrides never bypass battery or thermal
+  throttling.
+- Next to a **High** [per-wallpaper energy rating](#per-wallpaper-energy-rating) in the
+  Inspector, a one-click **Lower quality** button steps that wallpaper's render scale down
+  (100% → 75% → 50%) and eases heavy scene quality settings without changing global
+  settings.
+- Process-level `scene_resolution` and `metalfx_upscaling_enabled` remain global settings.
+
+### Live surface memory and counters
+
+Under **Advanced › Scene wallpapers › Live diagnostics**, **Memory and surface counters**
+reports live per-display allocation gauges and presentation counters while the disclosure is
+expanded:
+
+- **GPU memory**: deduplicated bytes allocated for the surface's Metal render targets
+  (colour, depth, multisample, blurred backdrop and MetalFX targets) plus static and
+  dynamic scene geometry buffers. Backed by lock-free `std::atomic<uint64_t>` gauges updated
+  only when the render graph compiles, targets resize, dynamic geometry grows or resources
+  are released — zero per-frame overhead and zero locks on the draw path.
+- **Video conversion textures**: current live bytes held by the surface's video conversion
+  destination texture cache (`video_conversion_live_bytes`).
+- **Presents skipped (unchanged)** and **Dropped presents**: presentation counts from the
+  surface's unchanged-present gate and display feedback (`presents_skipped_unchanged`,
+  `presents_dropped`).
+- **Extended Dynamic Range (EDR)**: whether EDR output is currently active on the surface.
+
+The panel polls these counters only while **Live diagnostics** is expanded and the panel
+window is visible, stopping immediately with zero idle polling when closed. Exported
+runtime diagnostics lines also include `render_target_bytes=…`, `geometry_buffer_bytes=…`
+and `edr_active=…`.
+
 ### Default per-display frame rate
 
 A display with no saved rate runs at its refresh rate up to 60 fps

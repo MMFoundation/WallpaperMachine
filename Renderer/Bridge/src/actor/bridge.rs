@@ -60,6 +60,7 @@ use crate::{
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneQuality,
             SetSceneDisplayFramingEnabled, SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
             SetTargetFps, SetVerboseLogging, SetVolume, SetLockScreenAudioDemand,
+            SetWallpaperRenderScale, SetWallpaperSceneQuality,
             SetWebAudioSubscribed,
             Shutdown,
         },
@@ -127,6 +128,10 @@ pub struct BridgeActor<E: EngineFacade> {
     /// is the one the scene shows. A wallpaper without a mark shows its saved
     /// look.
     previewed_properties: HashSet<String>,
+    /// Displays that most recently received a sub-native render scale (`< 1.0`),
+    /// so switching from a scaled wallpaper back to a native-scale wallpaper
+    /// resets the display's runtime render scale back to `1.0`.
+    reduced_scale_displays: Arc<std::sync::Mutex<BTreeSet<u32>>>,
 }
 
 enum PlaybackChangeOrigin {
@@ -176,6 +181,7 @@ pub(super) fn assemble_actor<E: EngineFacade>(
         desktop_preloads: BTreeMap::new(),
         previewed_framing: HashSet::new(),
         previewed_properties: HashSet::new(),
+        reduced_scale_displays: Arc::default(),
     };
     actor.refresh_mouse_polling_policy();
     actor
@@ -797,33 +803,63 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     }
 
 
-    /// Every open scene handle, once each.
-    #[allow(clippy::single_call_fn)]
-    fn open_scene_handles(&self) -> Vec<SceneHandle> {
-        let mut handles = Vec::new();
-        for entry in self.engine.display_snapshot() {
-            let Some(handle) = entry.handle else {
-                continue;
-            };
-            if !handles.contains(&handle) {
-                handles.push(handle);
-            }
-        }
-        handles
-    }
-
-    /// Pushes the render scale that is in force to every open scene.
+    /// Pushes the effective render scale in force to every open scene,
+    /// combining each display's wallpaper override with the global default and
+    /// active battery/thermal throttling via `.min(...)`.
     ///
     /// Set as a live renderer property, one open scene at a time. Going
     /// through a reconcile instead would reparse every project and reopen
     /// every video for what is a quality control the user drags.
     async fn apply_effective_render_scale(&self) -> Result<(), BridgeError> {
-        let scale = self.effective_render_scale();
-        for handle in self.open_scene_handles() {
+        let displays = self.engine.display_snapshot();
+        let normalized = self.state.app_config.normalized(&displays);
+        let rows = normalized.monitor_rows(&displays);
+        let mut seen = Vec::new();
+        for entry in &displays {
+            let Some(handle) = entry.handle else {
+                continue;
+            };
+            if seen.contains(&handle) {
+                continue;
+            }
+            seen.push(handle);
+            let wallpaper_id = rows
+                .iter()
+                .find(|row| {
+                    row.connected
+                        && row.config.enabled
+                        && row
+                            .display_index
+                            .and_then(|index| displays.get(index))
+                            .is_some_and(|display| display.desc.display_id == entry.desc.display_id)
+                })
+                .and_then(|row| {
+                    if row.config.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE) {
+                        let target = row.config.mirror_target.as_ref()?;
+                        let source_display = target.to_selector().resolve_display(&displays)?;
+                        let source_selector = source_display.config_selector(&displays);
+                        rows.iter()
+                            .find(|candidate| candidate.selector == source_selector)
+                            .and_then(|source_row| source_row.config.wallpaper.as_deref())
+                    } else {
+                        row.config.wallpaper.as_deref()
+                    }
+                });
+            let scale = wallpaper_id.map_or_else(
+                || self.effective_render_scale(),
+                |id| self.effective_render_scale_for_wallpaper(id),
+            );
             self.engine
                 .set_render_scale(handle, scale)
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
+            if let Ok(mut reduced) = self.reduced_scale_displays.lock() {
+                if scale < 1.0 {
+                    reduced.insert(entry.desc.display_id);
+                } else {
+                    reduced.remove(&entry.desc.display_id);
+                }
+            }
         }
         Ok(())
     }
@@ -832,6 +868,17 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         self.state
             .app_config
             .effective_render_scale(self.state.quality_in_force())
+    }
+
+    fn effective_render_scale_for_wallpaper(&self, wallpaper_id: &str) -> f32 {
+        let override_scale = self
+            .state
+            .wallpaper_configs
+            .get(wallpaper_id)
+            .and_then(|config| config.render_scale);
+        self.state
+            .app_config
+            .effective_render_scale_for_wallpaper(override_scale, self.state.quality_in_force())
     }
 
     /// The frame-rate ceiling in force: the global cap, the reduced-quality
@@ -1056,6 +1103,22 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         Ok(())
     }
 
+    fn ensure_wallpaper_config_loaded(&mut self, wallpaper_id: &str) -> Result<(), BridgeError> {
+        if self.state.wallpaper_configs.contains_key(wallpaper_id)
+            || self.state.wallpaper_drafts.contains_key(wallpaper_id)
+        {
+            return Ok(());
+        }
+        if let Some(store) = &self.config_store {
+            let config = store.load_wallpaper(wallpaper_id)?;
+            self.state
+                .wallpaper_configs
+                .entry(wallpaper_id.to_owned())
+                .or_insert(config);
+        }
+        Ok(())
+    }
+
     async fn refresh_displays(&mut self) -> Result<(), BridgeError> {
         self.engine
             .refresh_displays()
@@ -1250,6 +1313,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     .map_err(|_| BridgeError::invalid_input("web wallpaper path is not UTF-8"))?;
                 let properties_json =
                     self.web_properties_json(&desc.wallpaper_id, &desc.properties);
+                let render_scale = self.effective_render_scale_for_wallpaper(&desc.wallpaper_id);
                 let media_integration_enabled = self
                     .state
                     .wallpaper_configs
@@ -1267,7 +1331,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     project_path,
                     entry_file: desc.entry_file,
                     fps: desc.fps,
-                    render_scale: self.effective_render_scale(),
+                    render_scale,
                     paused: desc.paused,
                     volume: desc.volume,
                     muted: desc.muted,
@@ -1337,7 +1401,11 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 .filter(|file| file.is_file())
                 .map(path)
                 .transpose()?,
-            scene_quality: self.state.app_config.quality.scene.to_scene().into(),
+            scene_quality: config
+                .scene_quality
+                .unwrap_or(self.state.app_config.quality.scene)
+                .to_scene()
+                .into(),
         })
     }
 
@@ -2068,6 +2136,8 @@ impl<E: EngineFacade + Clone> Message<GetWallpaperOptionsSnapshot> for BridgeAct
         msg: GetWallpaperOptionsSnapshot,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        self.state.ensure_wallpaper_exists(&msg.wallpaper_id)?;
+        self.ensure_wallpaper_config_loaded(&msg.wallpaper_id)?;
         self.refresh_engine_option_inputs(&msg.wallpaper_id);
         let displays = self.engine.display_snapshot();
         self.state.options(&displays, msg.wallpaper_id, &self.paths)
@@ -2661,6 +2731,7 @@ impl<E: EngineFacade + Clone> Message<messages::PreloadDesktopWallpaper> for Bri
                     .is_some_and(|display| display.desc.display_id == msg.display_id)
         }).map(|monitor| monitor.selector.clone()).map_or_else(
             || self.resolve_operation_selector(&msg.display_id.to_string(), &displays), Ok)?;
+        let preload_render_scale = self.effective_render_scale_for_wallpaper(&msg.wallpaper_id);
         config.monitors = vec![crate::config::MonitorCfg {
             selector,
             wallpaper: Some(msg.wallpaper_id), ..Default::default()
@@ -2669,8 +2740,13 @@ impl<E: EngineFacade + Clone> Message<messages::PreloadDesktopWallpaper> for Bri
             ..self.activation_inputs(&displays, true) };
         if let Some(scene) = inputs().build()?.into_iter().next() {
             let scene = live_scene(scene, self.active_target_fps_cap(), true, self.state.audio_gain);
-            self.engine.preload_scene(scene, f64::from(self.effective_render_scale())).await
+            self.engine.preload_scene(scene, f64::from(preload_render_scale)).await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
+            if preload_render_scale < 1.0 {
+                if let Ok(mut reduced) = self.reduced_scale_displays.lock() {
+                    reduced.insert(msg.display_id);
+                }
+            }
         }
         let result = crate::api::BridgeDesktopPreload {
             web: self.web_wallpapers_from(inputs())?.into_iter().next(),
@@ -3046,6 +3122,122 @@ impl<E: EngineFacade + Clone> Message<SetMediaIntegrationEnabled> for BridgeActo
     }
 }
 
+impl<E: EngineFacade + Clone> Message<SetWallpaperRenderScale> for BridgeActor<E> {
+    type Reply = messages::SetWallpaperRenderScaleReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetWallpaperRenderScale,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.ensure_wallpaper_exists(&msg.wallpaper_id)?;
+        self.ensure_wallpaper_config_loaded(&msg.wallpaper_id)?;
+        let clamped = msg.scale.map(crate::config::clamp_render_scale);
+        let previous = self
+            .state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .current()
+            .render_scale;
+        if previous.map(f32::to_bits) == clamped.map(f32::to_bits) {
+            return self.wallpaper_bundle(msg.wallpaper_id);
+        }
+        let wallpaper_config = self
+            .state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .set_render_scale_immediate(clamped);
+        if let Err(error) = self.save_wallpaper(msg.wallpaper_id.clone(), wallpaper_config) {
+            let _ = self
+                .state
+                .wallpaper_draft_mut(&msg.wallpaper_id)?
+                .set_render_scale_immediate(previous);
+            return Err(error);
+        }
+        self.invalidate_operations();
+        let effective = self.effective_render_scale_for_wallpaper(&msg.wallpaper_id);
+        let handles = self.wallpaper_handles(&msg.wallpaper_id, true);
+        let displays = self.engine.display_snapshot();
+        for handle in handles {
+            if let Err(error) = self.engine.set_render_scale(handle, effective).await {
+                let reverted = self
+                    .state
+                    .wallpaper_draft_mut(&msg.wallpaper_id)?
+                    .set_render_scale_immediate(previous);
+                let _ = self.save_wallpaper(msg.wallpaper_id.clone(), reverted);
+                return Err(BridgeError::engine(error.to_string()));
+            }
+            if let (Some(display), Ok(mut reduced)) = (
+                displays.iter().find(|entry| entry.handle == Some(handle)),
+                self.reduced_scale_displays.lock(),
+            ) {
+                if effective < 1.0 {
+                    reduced.insert(display.desc.display_id);
+                } else {
+                    reduced.remove(&display.desc.display_id);
+                }
+            }
+        }
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetWallpaperSceneQuality> for BridgeActor<E> {
+    type Reply = messages::SetWallpaperSceneQualityReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetWallpaperSceneQuality,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.ensure_wallpaper_exists(&msg.wallpaper_id)?;
+        self.ensure_wallpaper_config_loaded(&msg.wallpaper_id)?;
+        let previous = self
+            .state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .current()
+            .scene_quality;
+        if previous == msg.quality {
+            return self.wallpaper_bundle(msg.wallpaper_id);
+        }
+        let wallpaper_config = self
+            .state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .set_scene_quality_immediate(msg.quality);
+        if let Err(error) = self.save_wallpaper(msg.wallpaper_id.clone(), wallpaper_config) {
+            let _ = self
+                .state
+                .wallpaper_draft_mut(&msg.wallpaper_id)?
+                .set_scene_quality_immediate(previous);
+            return Err(error);
+        }
+        let assigned = self.state.app_config.monitors.iter().any(|monitor| {
+            monitor.enabled
+                && !monitor.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE)
+                && monitor.wallpaper.as_deref() == Some(msg.wallpaper_id.as_str())
+        });
+        if assigned {
+            let app_config = self.state.app_config.clone();
+            let wallpaper_configs = self.state.wallpaper_configs.clone();
+            let result = self
+                .reconcile_snapshot_operation(app_config, wallpaper_configs, false)
+                .await;
+            self.refresh_mouse_polling_policy();
+            match result {
+                Ok(scenes) => self.state.set_active_ids_from_scenes(&scenes),
+                Err(error) => {
+                    let reverted = self
+                        .state
+                        .wallpaper_draft_mut(&msg.wallpaper_id)?
+                        .set_scene_quality_immediate(previous);
+                    let _ = self.save_wallpaper(msg.wallpaper_id.clone(), reverted);
+                    return Err(error);
+                }
+            }
+        }
+        self.invalidate_operations();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
+
 impl<E: EngineFacade + Clone> BridgeActor<E> {
     /// Displays that cannot present right now, as scene handles.
     ///
@@ -3399,6 +3591,9 @@ fn renderer_surface_row(counters: &RendererSurfaceCounters) -> BridgeRendererSur
         video_imports: counters.value(K::VideoImports),
         video_conversion_live_bytes: counters.value(K::VideoConversionLiveBytes),
         video_conversion_peak_live_bytes: counters.value(K::VideoConversionPeakLiveBytes),
+        render_target_bytes: counters.value(K::RenderTargetBytes),
+        geometry_buffer_bytes: counters.value(K::GeometryBufferBytes),
+        edr_active: counters.value(K::EdrActive) != 0,
     }
 }
 

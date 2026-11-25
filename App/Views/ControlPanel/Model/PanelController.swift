@@ -60,6 +60,8 @@ final class PanelController {
   let libraryCovers: LibraryCoverStamps
   /// Energy readout on Settings › Performance; samples only while Settings is on screen.
   let energyUsage: EnergyUsageMonitor
+  /// Live per-surface VRAM gauges & counters; polls only while Live Diagnostics is expanded and visible.
+  let surfaceDiagnostics: LiveSurfaceDiagnosticsMonitor
   let defaults: UserDefaults
 
   // MARK: Core services
@@ -288,7 +290,8 @@ final class PanelController {
     desktopWidgets: DesktopWidgetStore? = nil,
     spaces: WallpaperSpaceMonitor? = nil,
     systemConditions: SystemConditionState? = nil,
-    searchTranslation: WorkshopSearchTranslator? = nil
+    searchTranslation: WorkshopSearchTranslator? = nil,
+    surfaceDiagnostics: LiveSurfaceDiagnosticsMonitor? = nil
   ) {
     let pixiv = pixiv ?? PixivStore()
     let imports = imports ?? LibraryImportStore()
@@ -348,6 +351,7 @@ final class PanelController {
     self.libraryMetrics = libraryMetrics ?? LibraryMetricsService()
     self.libraryCovers = libraryCovers ?? LibraryCoverStamps()
     self.energyUsage = energyUsage ?? EnergyUsageMonitor()
+    self.surfaceDiagnostics = surfaceDiagnostics ?? LiveSurfaceDiagnosticsMonitor(store: store)
     self.defaults = defaults
     self.images = images ?? PanelImagePipeline()
     self.dialogs =
@@ -444,6 +448,7 @@ final class PanelController {
     if navigation.tileZoomTarget === self { navigation.tileZoomTarget = nil }
     importPicker.cancel()
     energyUsage.setActive(false)
+    surfaceDiagnostics.setActive(false)
     loginItemRefresh?.cancel()
     loginItemRefresh = nil
     storageMetricsTask?.cancel()

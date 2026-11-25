@@ -43,26 +43,28 @@ MetalUpscaler::~MetalUpscaler() = default;
 
 void MetalUpscaler::release()
 {
-    scaler_        = nil;
-    output_        = nil;
-    format_        = MTLPixelFormatInvalid;
-    input_width_   = 0;
-    input_height_  = 0;
-    output_width_  = 0;
-    output_height_ = 0;
-    refused_       = false;
+    scaler_          = nil;
+    output_          = nil;
+    format_          = MTLPixelFormatInvalid;
+    input_width_     = 0;
+    input_height_    = 0;
+    output_width_    = 0;
+    output_height_   = 0;
+    allocated_bytes_ = 0;
+    refused_         = false;
 }
 
 uint64_t MetalUpscaler::allocatedBytes() const
 {
-    return output_ != nil ? static_cast<uint64_t>(output_.allocatedSize) : 0;
+    return allocated_bytes_;
 }
 
 bool MetalUpscaler::make(id<MTLDevice> device, id<MTLTexture> source, uint32_t width,
                          uint32_t height)
 {
-    scaler_ = nil;
-    output_ = nil;
+    scaler_          = nil;
+    output_          = nil;
+    allocated_bytes_ = 0;
     if (g_unsupported_for_tests.load(std::memory_order_relaxed) ||
         ! [MTLFXSpatialScalerDescriptor supportsDevice:device]) {
         error_ = "MetalFX spatial scaling is not supported on this GPU";
@@ -103,6 +105,7 @@ bool MetalUpscaler::make(id<MTLDevice> device, id<MTLTexture> source, uint32_t w
     scaler.outputTexture = output;
     scaler_              = scaler;
     output_              = output;
+    allocated_bytes_     = static_cast<uint64_t>(output.allocatedSize);
     error_.clear();
     return true;
 }

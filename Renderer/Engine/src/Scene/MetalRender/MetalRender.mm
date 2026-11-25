@@ -1917,6 +1917,16 @@ struct MetalRender::Impl
     bool                 video_paused { false };
     float                video_rate { 1.0f };
     RendererCounters*    counters { nullptr };
+    /// Lock-free allocation and output gauges updated only on structural
+    /// transitions (graph compile, target resize, dynamic buffer growth,
+    /// backdrop/upscaler allocation change, display output change).
+    std::atomic<uint64_t>              render_target_bytes_gauge { 0 };
+    std::atomic<uint64_t>              geometry_buffer_bytes_gauge { 0 };
+    std::shared_ptr<std::atomic<bool>> edr_active_gauge {
+        std::make_shared<std::atomic<bool>>(false)
+    };
+    uint64_t core_target_bytes { 0 };
+    uint64_t aux_target_bytes { 0 };
     /// Counts what the display did with the frames presented while counting is
     /// on. Shared with every drawable's report, which can arrive after this
     /// renderer is gone; `armed` and `feedback_display` belong to the render thread.
@@ -2588,6 +2598,11 @@ struct MetalRender::Impl
     void releaseGraph();
     void drainQueue();
     void releasePresentation();
+    void publishRenderTargetBytesGauge() noexcept;
+    void refreshRenderTargetBytesGauge();
+    void syncAuxRenderTargetBytes() noexcept;
+    void refreshGeometryBufferBytesGauge();
+    void publishEdrActiveGauge(bool active) noexcept;
 
     bool buildPresentation();
     id<MTLRenderPipelineState> presentPipelineFor(MTLPixelFormat format, PresentTransfer transfer = PresentTransfer::Identity);
@@ -2946,6 +2961,70 @@ void MetalRender::Impl::releaseGraph()
     graph_ready       = false;
     demand_reasons    = static_cast<uint32_t>(render::DynamicReason::UnknownInput);
     has_parallax_pass = false;
+    core_target_bytes = 0;
+    aux_target_bytes  = backdrop.allocatedBytes() + upscaler.allocatedBytes();
+    publishRenderTargetBytesGauge();
+    geometry_buffer_bytes_gauge.store(0, std::memory_order_relaxed);
+    if (counters != nullptr) counters->SetGauge(OWE_RC_GEOMETRY_BUFFER_BYTES, 0);
+}
+
+void MetalRender::Impl::publishRenderTargetBytesGauge() noexcept
+{
+    const uint64_t total = core_target_bytes + aux_target_bytes;
+    render_target_bytes_gauge.store(total, std::memory_order_relaxed);
+    if (counters != nullptr) counters->SetGauge(OWE_RC_RENDER_TARGET_BYTES, total);
+}
+
+void MetalRender::Impl::refreshRenderTargetBytesGauge()
+{
+    std::unordered_set<const void*> counted;
+    uint64_t                        bytes = 0;
+    for (const auto* table : { &targets, &depth_targets, &ms_targets, &ms_depth_targets }) {
+        for (const auto& [key, texture] : *table) {
+            (void)key;
+            if (texture == nil || ! counted.insert((__bridge const void*)texture).second) continue;
+            bytes += texture.allocatedSize;
+        }
+    }
+    core_target_bytes = bytes;
+    aux_target_bytes  = backdrop.allocatedBytes() + upscaler.allocatedBytes();
+    publishRenderTargetBytesGauge();
+}
+
+void MetalRender::Impl::syncAuxRenderTargetBytes() noexcept
+{
+    const uint64_t aux = backdrop.allocatedBytes() + upscaler.allocatedBytes();
+    if (aux != aux_target_bytes) {
+        aux_target_bytes = aux;
+        publishRenderTargetBytesGauge();
+    }
+}
+
+void MetalRender::Impl::refreshGeometryBufferBytesGauge()
+{
+    std::unordered_set<const void*> seen;
+    uint64_t                        bytes = 0;
+    const auto add = [&](id<MTLBuffer> buffer) {
+        if (buffer != nil && seen.insert((__bridge const void*)buffer).second) {
+            bytes += buffer.length;
+        }
+    };
+    for (const auto& pass : prepared) {
+        for (const auto buffer : pass.vertex_buffers) add(buffer);
+        add(pass.index_buffer);
+        for (const auto& ring : pass.dynamic_vertex_rings) {
+            for (const auto buffer : ring) add(buffer);
+        }
+        for (const auto buffer : pass.dynamic_index_ring) add(buffer);
+    }
+    geometry_buffer_bytes_gauge.store(bytes, std::memory_order_relaxed);
+    if (counters != nullptr) counters->SetGauge(OWE_RC_GEOMETRY_BUFFER_BYTES, bytes);
+}
+
+void MetalRender::Impl::publishEdrActiveGauge(bool active) noexcept
+{
+    if (edr_active_gauge) edr_active_gauge->store(active, std::memory_order_relaxed);
+    if (counters != nullptr) counters->SetGauge(OWE_RC_EDR_ACTIVE, active ? 1u : 0u);
 }
 
 void MetalRender::Impl::drainQueue()
@@ -2972,12 +3051,14 @@ void MetalRender::Impl::releasePresentation()
     present_vertices_flipped = nil;
     present_sampler          = nil;
     layer                    = nil;
+    publishEdrActiveGauge(false);
 }
 
 void MetalRender::Impl::prepareBackdrop()
 {
     if (scaling_mode != WallpaperScalingMode::FIT_BLURRED) {
         backdrop.release();
+        syncAuxRenderTargetBytes();
         return;
     }
     // Before the renderer has a device the pipelines wait for `buildPresentation`.
@@ -2985,6 +3066,7 @@ void MetalRender::Impl::prepareBackdrop()
     if (! backdrop.buildPipelines(device, drawable_format, composition_linear)) {
         LOG_ERROR("metal render: the blurred backdrop is off: %s", backdrop.error().c_str());
     }
+    syncAuxRenderTargetBytes();
 }
 
 std::array<float,3> MetalRender::Impl::linearBorder(const std::array<float,3>& encoded) {
@@ -3004,7 +3086,8 @@ void MetalRender::Impl::refreshDisplayOutput(Scene& scene) {
     composition_linear = scene.output_linear;
     if (scene.output_linear) {
         if (!display_output && layer != nil)
-            display_output = std::make_unique<MetalDisplayOutput>(layer, display_characteristics, display_changed,display_id);
+            display_output = std::make_unique<MetalDisplayOutput>(
+                layer, display_characteristics, display_changed, display_id, edr_active_gauge);
         if (display_output) {
             display_output->Request(scene.display_hdr && display_hdr_output_allowed);
             const float headroom = display_output->Headroom();
@@ -3021,6 +3104,7 @@ void MetalRender::Impl::refreshDisplayOutput(Scene& scene) {
     } else {
         display_output.reset();
     }
+    publishEdrActiveGauge(display_output && display_output->Extended());
     if (layer != nil && layer.pixelFormat != MTLPixelFormatInvalid) drawable_format = layer.pixelFormat;
     if (present_library != nil)
         (void)ensurePresentPipeline(drawable_format, TransferFor(drawable_format, scene.output_linear));
@@ -3202,6 +3286,7 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
             backdrop.releaseImages();
         }
     }
+    syncAuxRenderTargetBytes();
 
     MTLRenderPassDescriptor* present = [MTLRenderPassDescriptor renderPassDescriptor];
     present.colorAttachments[0].texture     = destination;
@@ -6025,6 +6110,7 @@ bool MetalRender::Impl::uploadDynamicMesh(PreparedPass& pass, const ScenePassDes
             }
             pass.dynamic_vertex_capacities[i] = capacity;
             std::fill(uploaded_generation.begin(), uploaded_generation.end(), 0);
+            refreshGeometryBufferBytesGauge();
         }
         const auto& attributes = vertex.Attributes();
         if (! std::equal(attributes.begin(), attributes.end(),
@@ -6060,6 +6146,7 @@ bool MetalRender::Impl::uploadDynamicMesh(PreparedPass& pass, const ScenePassDes
             }
             pass.dynamic_index_capacity = capacity;
             std::fill(index_content.begin(), index_content.end(), IndexSlotContent {});
+            refreshGeometryBufferBytesGauge();
         }
         if (pass.index_count > 0 && index_bytes == 0) {
             return set_error("a dynamic mesh's index byte capacity overflowed");
@@ -6476,6 +6563,7 @@ bool MetalRender::Impl::applySceneOptimizationSetting(Scene& scene, id<MTLComman
         optimization_applied = enabled;
         return true;
     }
+    AUTO_DELETER(vram_gauge, [this]() { refreshRenderTargetBytesGauge(); });
 
     // The whole plan, not just the flag: the copy plan decides which targets
     // exist at all, so turning the setting back on with only `enabled = true`
@@ -6982,6 +7070,10 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
 bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
 {
     releaseGraph();
+    AUTO_DELETER(vram_gauges, [this]() {
+        refreshRenderTargetBytesGauge();
+        refreshGeometryBufferBytesGauge();
+    });
     // The videos and carried targets a rebuild set aside and this graph does not
     // take back are the ones it no longer uses: closed with the compile, however it ends.
     AUTO_DELETER(held_videos, [this]() {
@@ -7382,6 +7474,7 @@ void MetalRender::Impl::refreshDrawOrder(Scene& scene)
 bool MetalRender::Impl::resizeTargets(Scene& scene)
 {
     if (! inited || ! graph_ready) return fail("there is no compiled graph to resize");
+    AUTO_DELETER(vram_gauge, [this]() { refreshRenderTargetBytesGauge(); });
 
     // What belongs to the targets, as `releaseGraph` drops it. Nothing that the passes own
     // goes: those are the cost a rebuild repeats.
@@ -7671,6 +7764,7 @@ bool MetalRender::init(const MetalRenderInitInfo& info)
         }
         if (! pImpl->buildPresentation()) return false;
         pImpl->poster.configure(device, info.wants_poster, info.poster_ready);
+        pImpl->publishEdrActiveGauge(layer.wantsExtendedDynamicRangeContent ? true : false);
         pImpl->inited = true;
         pImpl->last_error.clear();
         return true;
@@ -7688,6 +7782,7 @@ void MetalRender::destroy()
         pImpl->releasePresentation();
         pImpl->backdrop.release();
         pImpl->upscaler.release();
+        pImpl->syncAuxRenderTargetBytes();
         pImpl->present_pipelines.clear();
         pImpl->queue  = nil;
         pImpl->device = nil;
@@ -7741,6 +7836,7 @@ bool MetalRender::resetSurface(const MetalRenderInitInfo& info)
         pImpl->display_scale_factor = NormalizeScaleFactor(info.display_scale_factor);
         if (! pImpl->buildPresentation()) return false;
         pImpl->poster.configure(pImpl->device, info.wants_poster, info.poster_ready);
+        pImpl->publishEdrActiveGauge(layer.wantsExtendedDynamicRangeContent ? true : false);
         pImpl->static_cache.InvalidateAll();
         pImpl->inited     = true;
         pImpl->graph_ready = had_graph;
@@ -7915,6 +8011,31 @@ void MetalRender::SetCounters(RendererCounters* counters)
     pImpl->present_feedback_armed = false;
     pImpl->counters = counters;
     pImpl->video.setCounters(counters);
+    if (counters != nullptr) {
+        counters->SetGauge(OWE_RC_RENDER_TARGET_BYTES,
+                           pImpl->render_target_bytes_gauge.load(std::memory_order_relaxed));
+        counters->SetGauge(OWE_RC_GEOMETRY_BUFFER_BYTES,
+                           pImpl->geometry_buffer_bytes_gauge.load(std::memory_order_relaxed));
+        const bool edr = pImpl->edr_active_gauge &&
+                         pImpl->edr_active_gauge->load(std::memory_order_relaxed);
+        counters->SetGauge(OWE_RC_EDR_ACTIVE, edr ? 1u : 0u);
+    }
+}
+
+uint64_t MetalRender::RenderTargetBytes() const noexcept
+{
+    return pImpl != nullptr ? pImpl->render_target_bytes_gauge.load(std::memory_order_relaxed) : 0;
+}
+
+uint64_t MetalRender::GeometryBufferBytes() const noexcept
+{
+    return pImpl != nullptr ? pImpl->geometry_buffer_bytes_gauge.load(std::memory_order_relaxed) : 0;
+}
+
+bool MetalRender::SurfaceEDRActive() const noexcept
+{
+    return pImpl != nullptr && pImpl->edr_active_gauge &&
+           pImpl->edr_active_gauge->load(std::memory_order_relaxed);
 }
 
 WallpaperCursorMapping MetalRender::CursorMapping(const Scene& scene) const
@@ -9267,18 +9388,7 @@ MetalRender::RasterWindowForTests MetalRender::RasterWindowStateForTests() const
 
 uint64_t MetalRender::RenderTargetBytesForTests() const
 {
-    if (pImpl == nullptr) return 0;
-    std::unordered_set<const void*> counted;
-    uint64_t                        bytes = 0;
-    for (const auto* table : { &pImpl->targets, &pImpl->depth_targets,
-                              &pImpl->ms_targets, &pImpl->ms_depth_targets }) {
-        for (const auto& [key, texture] : *table) {
-            (void)key;
-            if (texture == nil || ! counted.insert((__bridge const void*)texture).second) continue;
-            bytes += texture.allocatedSize;
-        }
-    }
-    return bytes + pImpl->backdrop.allocatedBytes() + pImpl->upscaler.allocatedBytes();
+    return RenderTargetBytes();
 }
 
 MetalLoadAction MetalRender::FirstSceneOutputLoadForTests() const {
@@ -9291,19 +9401,7 @@ MetalLoadAction MetalRender::FirstSceneOutputLoadForTests() const {
 }
 
 uint64_t MetalRender::GeometryBufferBytesForTests() const {
-    if (pImpl == nullptr) return 0;
-    std::unordered_set<const void*> seen;
-    uint64_t bytes = 0;
-    const auto add = [&](id<MTLBuffer> buffer) {
-        if (buffer != nil && seen.insert((__bridge const void*)buffer).second) bytes += buffer.length;
-    };
-    for (const auto& pass : pImpl->prepared) {
-        for (const auto buffer : pass.vertex_buffers) add(buffer);
-        add(pass.index_buffer);
-        for (const auto& ring : pass.dynamic_vertex_rings) for (const auto buffer : ring) add(buffer);
-        for (const auto buffer : pass.dynamic_index_ring) add(buffer);
-    }
-    return bytes;
+    return GeometryBufferBytes();
 }
 
 uint64_t MetalRender::ModelDataUploadBytesForTests() const {

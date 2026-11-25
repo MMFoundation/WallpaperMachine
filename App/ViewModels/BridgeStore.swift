@@ -96,6 +96,18 @@ final class BridgeStore {
     /// What Native Metal last concluded about each scene. The app delegate records the running
     /// scenes' reports into it; the panel's Compatibility check reads and adds to it.
     @ObservationIgnored var sceneDrawVerdicts: SceneDrawVerdicts?
+    /// Persisted post-download / post-import compatibility pre-check cache and low-priority
+    /// background scheduler. Read purely from memory in SwiftUI views (zero disk I/O in `body`).
+    var compatibilityCache: WallpaperCompatibilityCacheStore?
+
+    func scheduleCompatibilityPrecheck(wallpaperIDs: [String]) {
+        guard !wallpaperIDs.isEmpty else { return }
+        compatibilityCache?.schedulePrecheck(
+            wallpaperIDs: wallpaperIDs,
+            entries: librarySnapshot.wallpapers,
+            libraryRevision: libraryRefreshRevision
+        )
+    }
     let editorState = WallpaperEditorState()
     /// The user's commands, from the control panel and the menu bar, run through here.
     let commands = UserCommandQueue()
@@ -821,6 +833,22 @@ final class BridgeStore {
         defer { endWallpaperEdit(wallpaperId) }
         let bundle = try await bridge.setMediaIntegrationEnabled(wallpaperId: wallpaperId, enabled: enabled)
         apply(bundle)
+    }
+
+    func setWallpaperRenderScaleAsync(wallpaperId: String, scale: Float?) async throws {
+        beginWallpaperEdit(wallpaperId)
+        defer { endWallpaperEdit(wallpaperId) }
+        let bundle = try await bridge.setWallpaperRenderScale(wallpaperId: wallpaperId, scale: scale)
+        apply(bundle)
+        onRenderingSettingAppliedElsewhere?()
+    }
+
+    func setWallpaperSceneQualityAsync(wallpaperId: String, quality: BridgeSceneQuality?) async throws {
+        beginWallpaperEdit(wallpaperId)
+        defer { endWallpaperEdit(wallpaperId) }
+        let bundle = try await bridge.setWallpaperSceneQuality(wallpaperId: wallpaperId, quality: quality)
+        apply(bundle)
+        onRenderingSettingAppliedElsewhere?()
     }
 
     func setDisplayConfigEnabledAsync(

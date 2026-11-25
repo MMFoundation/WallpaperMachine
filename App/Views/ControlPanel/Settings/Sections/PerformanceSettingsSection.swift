@@ -127,6 +127,10 @@ struct PerformanceSettingsSection: View {
   static let sceneUpdating = SettingsItem(
     id: "performance.scene-updating", section: .performance, group: scene,
     inside: sceneDiagnostics, title: "Updating now", keywords: ["Retry"])
+  static let sceneSurfaceCounters = SettingsItem(
+    id: "performance.scene-surface-counters", section: .performance, group: scene,
+    inside: sceneDiagnostics, title: "Memory and surface counters",
+    keywords: ["No scene wallpaper is running."])
   static let sceneCompatibility = SettingsItem(
     id: "performance.scene-compatibility", section: .performance, group: scene, inside: advanced,
     title: "Renderer compatibility")
@@ -148,7 +152,8 @@ struct PerformanceSettingsSection: View {
     energyUse, energyMethod, preset, frameRateLimit, renderScale, metalFXUpscaling, renderScaleEffective,
     sceneResolution, msaa, shadows, volumetrics, reflections, postProcessing, advanced,
     videoDiagnostics, videoInUse, sceneOptimization, sceneOnDemand,
-    sceneDiagnostics, sceneDrawnBy, sceneInForce, sceneQualityInForce, sceneUpdating, sceneCompatibility,
+    sceneDiagnostics, sceneDrawnBy, sceneInForce, sceneQualityInForce, sceneUpdating,
+    sceneSurfaceCounters, sceneCompatibility,
     videoPlaneSampling, displayFraming,
   ]
 
@@ -293,6 +298,7 @@ struct PerformanceSettingsSection: View {
             empty: "No scene wallpaper is running.")
         }
         SettingsRow(Self.sceneUpdating, stacked: true) { updating(performance.sceneUpdates) }
+        SettingsRow(Self.sceneSurfaceCounters, stacked: true) { LiveSurfaceCountersView() }
       }
       SettingsDisclosure(Self.sceneCompatibility) {
         SettingsProse {
@@ -375,6 +381,68 @@ struct PerformanceSettingsSection: View {
         }
       }
       .accessibilityElement(children: .contain)
+    }
+  }
+}
+
+/// Live per-display VRAM gauges and surface counters. Only mounted while
+/// `PerformanceSettingsSection.sceneDiagnostics` is open, and pauses whenever the panel window is
+/// hidden, so closing Live Diagnostics stops polling immediately with zero idle cost.
+private struct LiveSurfaceCountersView: View {
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+  @Environment(\.panelIsVisible) private var isVisible
+
+  var body: some View {
+    let monitor = controller.surfaceDiagnostics
+    let reports = monitor.latestReport.map {
+      SurfaceDiagnosticsReport.make(from: $0, settings: controller.store.settingsSnapshot)
+    } ?? []
+    Group {
+      if monitor.isLoading && reports.isEmpty {
+        HStack(spacing: 6) {
+          ProgressRing(value: nil, lineWidth: 1.5).frame(width: 12, height: 12)
+          Text("Reading surface counters…")
+            .font(.panel(.callout))
+            .foregroundStyle(theme.surface.muted.color)
+        }
+      } else if reports.isEmpty {
+        Text("No scene wallpaper is running.")
+          .font(.panel(.callout))
+          .foregroundStyle(theme.surface.muted.color)
+      } else {
+        VStack(alignment: .leading, spacing: 8) {
+          ForEach(reports) { surface in
+            VStack(alignment: .leading, spacing: 2) {
+              Text(verbatim: surface.subject)
+                .font(.panel(.label))
+                .foregroundStyle(theme.surface.text.color)
+              Text(verbatim: surface.vramLine)
+                .font(.panel(.footnote))
+                .foregroundStyle(theme.surface.muted.color)
+              Text(verbatim: surface.videoConversionLine)
+                .font(.panel(.footnote))
+                .foregroundStyle(theme.surface.muted.color)
+              Text(verbatim: surface.presentsLine)
+                .font(.panel(.footnote))
+                .foregroundStyle(theme.surface.muted.color)
+              Text(verbatim: surface.edrLine)
+                .font(.panel(.footnote))
+                .foregroundStyle(theme.surface.muted.color)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+            .accessibilityElement(children: .combine)
+          }
+        }
+        .accessibilityElement(children: .contain)
+      }
+    }
+    .onChange(of: isVisible, initial: true) { _, visible in
+      controller.surfaceDiagnostics.setActive(visible)
+    }
+    .onDisappear {
+      controller.surfaceDiagnostics.setActive(false)
     }
   }
 }

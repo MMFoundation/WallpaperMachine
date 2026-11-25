@@ -19,7 +19,14 @@ extension PanelController {
   ///   a later unrelated edit must not bring the claim back.
   /// - The folders the open wallpaper's properties point at are measured once per path.
   func reconcileInspectorContext() {
-    compatibility.select(compatibilityContext())
+    let compatContext = compatibilityContext()
+    compatibility.select(compatContext)
+    if let compatContext {
+      store.compatibilityCache?.validateInBackground(
+        wallpaperID: compatContext.wallpaperID,
+        kind: compatContext.kind,
+        libraryRevision: compatContext.libraryRevision)
+    }
     letterbox.select(store.appSnapshot.selectedWallpaperId)
     let selected = isStarted && navigation.selection == .wallpaper ? selectedInstalledWallpaperID : nil
     workshop.updates.selectDetails(

@@ -1701,3 +1701,81 @@ fn engine_options_reach_the_scene_renderer_under_its_own_names() {
     edited.restore(EngineOptionId::PlaybackRate);
     assert!(edited.is_default());
 }
+
+#[test]
+fn per_wallpaper_quality_overrides_round_trip_and_stay_backward_compatible() {
+    let legacy: WallpaperConfig = serde_json::from_value(json!({
+        "schema_version": 1,
+        "workshop_id": "legacy-wp",
+        "type": "scene",
+        "audio": { "volume": 1.0, "response_enabled": true, "muted": false },
+        "monitors": [],
+        "property_overrides": {}
+    }))
+    .unwrap();
+    assert_eq!(legacy.render_scale, None);
+    assert_eq!(legacy.scene_quality, None);
+
+    let default_json = serde_json::to_value(WallpaperConfig::new_for("clean", "scene")).unwrap();
+    assert!(
+        default_json.get("render_scale").is_none(),
+        "default render_scale override must be omitted from JSON"
+    );
+    assert!(
+        default_json.get("scene_quality").is_none(),
+        "default scene_quality override must be omitted from JSON"
+    );
+
+    let mut overridden = WallpaperConfig::new_for("custom", "scene");
+    overridden.render_scale = Some(0.5);
+    overridden.scene_quality = Some(SceneQualityCfg {
+        msaa: MsaaCfg::X2,
+        shadows: QualityLevelCfg::Low,
+        volumetrics: QualityLevelCfg::Off,
+        reflection: false,
+        post_processing: PostProcessingCfg::Disabled,
+    });
+    let encoded = serde_json::to_string(&overridden).unwrap();
+    let decoded: WallpaperConfig = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, overridden);
+}
+
+#[test]
+fn per_wallpaper_render_scale_combines_with_global_and_throttling_via_min() {
+    let mut config = AppConfig::default();
+    config.quality.render_scale = 0.75;
+    config.quality.battery.render_scale = 0.6;
+
+    let ac = QualityInForce {
+        battery_profile: false,
+        throttled: false,
+    };
+    let battery = QualityInForce {
+        battery_profile: true,
+        throttled: false,
+    };
+    let thermal = QualityInForce {
+        battery_profile: false,
+        throttled: true,
+    };
+
+    // No override falls back to global default and clamps under throttling.
+    assert_eq!(config.effective_render_scale_for_wallpaper(None, ac), 0.75);
+    assert_eq!(config.effective_render_scale_for_wallpaper(None, battery), 0.6);
+    assert_eq!(config.effective_render_scale_for_wallpaper(None, thermal), 0.6);
+
+    // Override below throttling profile stays at the lower override.
+    assert_eq!(config.effective_render_scale_for_wallpaper(Some(0.5), ac), 0.5);
+    assert_eq!(config.effective_render_scale_for_wallpaper(Some(0.5), battery), 0.5);
+    assert_eq!(config.effective_render_scale_for_wallpaper(Some(0.5), thermal), 0.5);
+
+    // Override above global applies on AC, but NEVER bypasses battery or thermal throttling.
+    assert_eq!(config.effective_render_scale_for_wallpaper(Some(1.0), ac), 1.0);
+    assert_eq!(config.effective_render_scale_for_wallpaper(Some(1.0), battery), 0.6);
+    assert_eq!(config.effective_render_scale_for_wallpaper(Some(1.0), thermal), 0.6);
+
+    // Out-of-range and non-finite overrides clamp safely before throttling.
+    assert_eq!(config.effective_render_scale_for_wallpaper(Some(0.05), ac), 0.25);
+    assert_eq!(config.effective_render_scale_for_wallpaper(Some(f32::NAN), ac), 1.0);
+    assert_eq!(config.effective_render_scale_for_wallpaper(Some(f32::NAN), thermal), 0.6);
+}

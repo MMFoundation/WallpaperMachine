@@ -735,6 +735,7 @@ final class WorkshopStore {
         AppLog.warn("Workshop item \(item.id) was updated but could not be reloaded: \(error.localizedDescription)")
       }
     }
+    bridge.scheduleCompatibilityPrecheck(wallpaperIDs: [item.id])
     scheduleApplyOnArrival(item, bridge: bridge)
   }
 

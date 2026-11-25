@@ -168,4 +168,12 @@ private struct KeyLoopHost: NSViewRepresentable {
 }
 
 private final class SizingDelegate: NSObject, NSWindowDelegate {}
-private final class SizingBridge: WallpaperBridge {}
+private final class SizingBridge: WallpaperBridge {
+  override func rendererCounters() async throws -> BridgeRendererCountersReport {
+    BridgeRendererCountersReport(
+      recording: false, surfaces: [], audioAnalysisDeliveries: 0, audioAcceptedFrames: 0,
+      audioActiveConsumers: 0, presentationFeedbackAvailable: false)
+  }
+
+  override func setRendererCountersEnabled(enabled: Bool) async throws {}
+}

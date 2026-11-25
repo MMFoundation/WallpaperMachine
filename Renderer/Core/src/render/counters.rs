@@ -68,6 +68,12 @@ pub enum RendererCounterKind {
     VideoSourceInstance,
     VideoDecodeOutputs,
     VideoSeeks,
+    // Surface allocation and output state gauges. Updated only on structural
+    // changes (graph compile, target resize, geometry allocation, output
+    // change) — always live and lock-free.
+    RenderTargetBytes,
+    GeometryBufferBytes,
+    EdrActive,
 }
 
 impl RendererCounterKind {
@@ -116,6 +122,9 @@ impl RendererCounterKind {
             Self::VideoConversionPeakLiveBytes => {
                 sys::owe_renderer_counter_OWE_RC_VIDEO_CONVERSION_PEAK_LIVE_BYTES
             }
+            Self::RenderTargetBytes => sys::owe_renderer_counter_OWE_RC_RENDER_TARGET_BYTES,
+            Self::GeometryBufferBytes => sys::owe_renderer_counter_OWE_RC_GEOMETRY_BUFFER_BYTES,
+            Self::EdrActive => sys::owe_renderer_counter_OWE_RC_EDR_ACTIVE,
         };
         raw as usize
     }

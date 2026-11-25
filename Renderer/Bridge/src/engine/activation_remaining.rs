@@ -167,7 +167,12 @@ pub(super) fn build_configured_scene(
     .audio_volume(f32::from(volume))
     .audio_muted(audio.muted)
     .force_shader_refresh(inputs.force_shader_refresh)
-    .quality(inputs.app_config.quality.scene.to_scene())
+    .quality(
+        wallpaper
+            .scene_quality
+            .unwrap_or(inputs.app_config.quality.scene)
+            .to_scene(),
+    )
     .scene_storage_dir(
         inputs
             .paths

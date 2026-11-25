@@ -35,6 +35,7 @@ mod scaling_fit_blurred;
 mod scene_settings;
 mod scene_storage;
 mod scene_quality;
+mod per_wallpaper_quality;
 mod property_preview;
 mod property_snapshot;
 mod settings_intents;

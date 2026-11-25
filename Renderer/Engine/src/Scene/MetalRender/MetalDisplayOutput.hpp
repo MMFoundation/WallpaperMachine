@@ -1,6 +1,7 @@
 #pragma once
 #include "MetalRender/MetalRender.hpp"
 #import <QuartzCore/CAMetalLayer.h>
+#include <atomic>
 #include <functional>
 #include <memory>
 
@@ -11,7 +12,8 @@ class MetalDisplayOutput {
 public:
     MetalDisplayOutput(CAMetalLayer* layer,
                        std::function<MetalDisplayCharacteristics(uint32_t)> provider,
-                       std::function<void()> changed, uint32_t display_id = 0);
+                       std::function<void()> changed, uint32_t display_id = 0,
+                       std::shared_ptr<std::atomic<bool>> extended_sink = nullptr);
     ~MetalDisplayOutput();
     void Request(bool display_hdr);
     void SetDisplayId(uint32_t identity);

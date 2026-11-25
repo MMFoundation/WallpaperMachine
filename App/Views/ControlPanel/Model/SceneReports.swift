@@ -384,3 +384,86 @@ struct SceneOptimizationStatus: Equatable, Sendable {
       : L("\(savedState) and in force on all \(applied) running scenes.")
   }
 }
+
+/// Live per-surface VRAM gauges and surface counters shown inside Settings › Performance ›
+/// Advanced › Scene wallpapers › Live diagnostics while expanded.
+struct SurfaceDiagnosticsReport: Equatable, Identifiable, Sendable {
+  var id: String
+  var displayID: String
+  var subject: String
+  var renderTargetBytes: UInt64
+  var geometryBufferBytes: UInt64
+  var videoConversionLiveBytes: UInt64
+  var presentsSkippedUnchanged: UInt64
+  var presentsDropped: UInt64
+  var edrActive: Bool
+  var recording: Bool
+
+  var totalVramBytes: UInt64 { renderTargetBytes &+ geometryBufferBytes }
+
+  @MainActor
+  static func make(
+    from report: BridgeRendererCountersReport,
+    settings: BridgeSettingsSnapshot
+  ) -> [SurfaceDiagnosticsReport] {
+    report.surfaces.map { surface in
+      let numericID = UInt32(surface.displayId)
+      let sceneReport = numericID.flatMap { id in
+        settings.sceneRenderers.first { $0.displayId == id }
+      }
+      let subject: String
+      if let sceneReport {
+        subject = ReportSubject.line(
+          display: sceneReport.displayName, id: sceneReport.displayId,
+          wallpaper: sceneReport.wallpaperTitle.isEmpty
+            ? (sceneReport.wallpaperId.isEmpty ? L("wallpaper") : sceneReport.wallpaperId)
+            : sceneReport.wallpaperTitle)
+      } else if let numericID {
+        subject = ReportSubject.display(name: "", id: numericID)
+      } else {
+        subject = L("Display \(surface.displayId)")
+      }
+      return SurfaceDiagnosticsReport(
+        id: "\(surface.displayId)#\(surface.surfaceId)#\(surface.generation)",
+        displayID: surface.displayId,
+        subject: subject,
+        renderTargetBytes: surface.renderTargetBytes,
+        geometryBufferBytes: surface.geometryBufferBytes,
+        videoConversionLiveBytes: surface.videoConversionLiveBytes,
+        presentsSkippedUnchanged: surface.presentsSkippedUnchanged,
+        presentsDropped: surface.presentsDropped,
+        edrActive: surface.edrActive,
+        recording: report.recording
+      )
+    }
+  }
+
+  /// "GPU memory: 48 MB (render targets 44 MB, geometry 4 MB)"
+  @MainActor var vramLine: String {
+    let locale = PanelLocale.shared.locale
+    let total = ByteSize.format(Double(totalVramBytes), locale: locale)
+    let targets = ByteSize.format(Double(renderTargetBytes), locale: locale)
+    let geometry = ByteSize.format(Double(geometryBufferBytes), locale: locale)
+    return L("GPU memory: \(total) (render targets \(targets), geometry \(geometry))")
+  }
+
+  /// "Video conversion textures: 0 B"
+  @MainActor var videoConversionLine: String {
+    let bytes = ByteSize.format(Double(videoConversionLiveBytes), locale: PanelLocale.shared.locale)
+    return L("Video conversion textures: \(bytes)")
+  }
+
+  /// "Presents skipped (unchanged): 12 · Dropped presents: 0"
+  @MainActor var presentsLine: String {
+    let skipped = String(presentsSkippedUnchanged)
+    let dropped = String(presentsDropped)
+    return L("Presents skipped (unchanged): \(skipped) · Dropped presents: \(dropped)")
+  }
+
+  /// "Extended Dynamic Range (EDR): Active" / "Extended Dynamic Range (EDR): Off"
+  @MainActor var edrLine: String {
+    edrActive
+      ? L("Extended Dynamic Range (EDR): Active")
+      : L("Extended Dynamic Range (EDR): Off")
+  }
+}

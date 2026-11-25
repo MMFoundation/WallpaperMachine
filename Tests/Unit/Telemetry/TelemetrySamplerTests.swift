@@ -37,7 +37,8 @@ final class TelemetrySamplerTests: XCTestCase {
             vsyncPeriodMicros: 0, videoDecodeOutputs: 0, videoSeeks: 0,
             videoFramesSelected: 0, videoFramesReused: 0, videoFramesSkipped: 0,
             videoSelectedGeneration: 0, videoConversions: 0, videoImports: 0,
-            videoConversionLiveBytes: 0, videoConversionPeakLiveBytes: 0)
+            videoConversionLiveBytes: 0, videoConversionPeakLiveBytes: 0,
+            renderTargetBytes: 0, geometryBufferBytes: 0, edrActive: false)
     }
 
     private static func reading(_ surfaces: BridgeRendererSurfaceCounters...) -> BridgeRendererCountersReport {

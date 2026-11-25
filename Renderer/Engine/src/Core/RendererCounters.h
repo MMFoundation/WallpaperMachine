@@ -135,6 +135,22 @@ typedef enum owe_renderer_counter {
     /* Seeks or resyncs the decoder was asked to perform. */
     OWE_RC_VIDEO_SEEKS,
 
+    /* --- surface allocation and output state gauges --- */
+    /*
+     * Bytes allocated for this surface's Metal render targets (colour, depth,
+     * multisample, blurred backdrop and MetalFX upscale targets, each texture
+     * counted once) and scene geometry buffers (static and dynamic vertex and
+     * index rings, each buffer counted once), plus whether Extended Dynamic
+     * Range (EDR) output is currently active on this surface (1 or 0).
+     *
+     * Updated only on structural changes (render graph compile, target resize,
+     * dynamic geometry growth, graph release, display output change) — zero
+     * per-frame work and lock-free to read.
+     */
+    OWE_RC_RENDER_TARGET_BYTES,
+    OWE_RC_GEOMETRY_BUFFER_BYTES,
+    OWE_RC_EDR_ACTIVE,
+
     OWE_RC_COUNT
 } owe_renderer_counter;
 

@@ -520,6 +520,12 @@ pub struct BridgeWallpaperOptionsSnapshot {
     /// Wallpaper Engine's per-wallpaper options for a scene or a video; `None`
     /// for a web page and a wallpaper of unknown kind, which have none.
     pub engine_options: Option<BridgeEngineOptions>,
+    /// Optional per-wallpaper internal render scale override (`0.25..=1.0`),
+    /// or `None` when using the global setting.
+    pub render_scale_override: Option<f32>,
+    /// Optional per-wallpaper scene quality override, or `None` when using the
+    /// global `[quality.scene]` setting.
+    pub scene_quality_override: Option<BridgeSceneQuality>,
 }
 
 /// One of Wallpaper Engine's per-wallpaper options (the properties
@@ -1133,6 +1139,16 @@ pub struct BridgeRendererSurfaceCounters {
     /// neither figure is a residency or process-footprint measurement.
     pub video_conversion_live_bytes: u64,
     pub video_conversion_peak_live_bytes: u64,
+    /// Bytes allocated for this surface's Metal render targets (colour, depth,
+    /// multisample, blurred backdrop and MetalFX targets, deduplicated).
+    /// Always-live atomic gauge updated on compile/resize/release, never per frame.
+    pub render_target_bytes: u64,
+    /// Bytes allocated for this surface's static and dynamic scene geometry
+    /// buffers (deduplicated). Always-live atomic gauge, never per frame.
+    pub geometry_buffer_bytes: u64,
+    /// Whether Extended Dynamic Range (EDR) output is currently active on this
+    /// surface.
+    pub edr_active: bool,
 }
 
 /// One pull of the renderer counters, plus the process-wide values that belong

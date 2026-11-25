@@ -44,6 +44,14 @@ public:
         Slot(counter).store(value, std::memory_order_relaxed);
     }
 
+    /// Stores an always-live gauge (surface allocation totals, EDR state) even
+    /// while per-frame event counting is disabled. Callers update these only on
+    /// rare structural changes (graph compile, resize, release, output change),
+    /// never per frame.
+    void SetGauge(owe_renderer_counter counter, std::uint64_t value) noexcept {
+        Slot(counter).store(value, std::memory_order_relaxed);
+    }
+
     [[nodiscard]] std::uint64_t Get(owe_renderer_counter counter) const noexcept {
         return Slot(counter).load(std::memory_order_relaxed);
     }
@@ -59,8 +67,17 @@ public:
         return written;
     }
 
+    static constexpr bool IsGauge(owe_renderer_counter counter) noexcept {
+        return counter == OWE_RC_RENDER_TARGET_BYTES
+            || counter == OWE_RC_GEOMETRY_BUFFER_BYTES
+            || counter == OWE_RC_EDR_ACTIVE;
+    }
+
     void Reset() noexcept {
-        for (auto& value : m_values) value.store(0, std::memory_order_relaxed);
+        for (std::size_t i = 0; i < kCount; ++i) {
+            if (IsGauge(static_cast<owe_renderer_counter>(i))) continue;
+            m_values[i].store(0, std::memory_order_relaxed);
+        }
     }
 
     static constexpr std::size_t kCount = static_cast<std::size_t>(OWE_RC_COUNT);

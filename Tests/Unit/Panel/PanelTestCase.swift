@@ -141,6 +141,23 @@ class LayoutSnapshotBridge: WallpaperBridge {
   /// Stands in for the engine's reply to a scale-factor edit. Without one the usual bundle is
   /// returned, which needs the wallpaper's options in the snapshot.
   @MainActor var scalingFactorReply: (@MainActor (_ wallpaperId: String, _ displayId: String, _ factor: Double) throws -> BridgeWallpaperMutationBundle)?
+  @MainActor var wallpaperRenderScaleCalls: [(wallpaperId: String, scale: Float?)] = []
+  @MainActor var wallpaperSceneQualityCalls: [(wallpaperId: String, quality: BridgeSceneQuality?)] = []
+  @MainActor var rendererCountersEnabledCalls: [Bool] = []
+  @MainActor var rendererCountersReport = BridgeRendererCountersReport(
+    recording: false, surfaces: [], audioAnalysisDeliveries: 0, audioAcceptedFrames: 0,
+    audioActiveConsumers: 0, presentationFeedbackAvailable: false)
+
+  override func rendererCounters() async throws -> BridgeRendererCountersReport {
+    await MainActor.run { rendererCountersReport }
+  }
+
+  override func setRendererCountersEnabled(enabled: Bool) async throws {
+    await MainActor.run {
+      rendererCountersEnabledCalls.append(enabled)
+      rendererCountersReport.recording = enabled
+    }
+  }
 
   override func setBatteryMode(mode: BridgeBatteryMode) async throws -> BridgeSnapshotBundle {
     try await reply { $0.batteryModeCalls.append(mode) }
@@ -173,6 +190,36 @@ class LayoutSnapshotBridge: WallpaperBridge {
 
   override func editScalingFactor(wallpaperId: String, displayId: String, factor: Double) async throws -> BridgeWallpaperMutationBundle {
     try await recordScalingFactor(wallpaperId: wallpaperId, displayId: displayId, factor: factor)
+  }
+
+  override func setWallpaperRenderScale(wallpaperId: String, scale: Float?) async throws -> BridgeWallpaperMutationBundle {
+    try await recordWallpaperRenderScale(wallpaperId: wallpaperId, scale: scale)
+  }
+
+  override func setWallpaperSceneQuality(wallpaperId: String, quality: BridgeSceneQuality?) async throws -> BridgeWallpaperMutationBundle {
+    try await recordWallpaperSceneQuality(wallpaperId: wallpaperId, quality: quality)
+  }
+
+  @MainActor private func recordWallpaperRenderScale(wallpaperId: String, scale: Float?) throws -> BridgeWallpaperMutationBundle {
+    wallpaperRenderScaleCalls.append((wallpaperId, scale))
+    guard let bundle = bundleProvider?() ?? snapshot else { throw CancellationError() }
+    var current = options[wallpaperId] ?? bundle.wallpaperOptions ?? BridgeSnapshotFixtures.options(wallpaperId: wallpaperId)
+    current.renderScaleOverride = scale
+    options[wallpaperId] = current
+    return BridgeWallpaperMutationBundle(
+      app: bundle.app, library: bundle.library, wallpaperOptions: current,
+      monitorInformation: bundle.monitorInformation, settings: bundle.settings)
+  }
+
+  @MainActor private func recordWallpaperSceneQuality(wallpaperId: String, quality: BridgeSceneQuality?) throws -> BridgeWallpaperMutationBundle {
+    wallpaperSceneQualityCalls.append((wallpaperId, quality))
+    guard let bundle = bundleProvider?() ?? snapshot else { throw CancellationError() }
+    var current = options[wallpaperId] ?? bundle.wallpaperOptions ?? BridgeSnapshotFixtures.options(wallpaperId: wallpaperId)
+    current.sceneQualityOverride = quality
+    options[wallpaperId] = current
+    return BridgeWallpaperMutationBundle(
+      app: bundle.app, library: bundle.library, wallpaperOptions: current,
+      monitorInformation: bundle.monitorInformation, settings: bundle.settings)
   }
 
   @MainActor private func recordScalingFactor(wallpaperId: String, displayId: String, factor: Double) throws -> BridgeWallpaperMutationBundle {

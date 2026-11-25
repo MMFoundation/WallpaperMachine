@@ -62,7 +62,8 @@ struct ReconcileWork<E> {
     audio_suppressed: bool,
     audio_gain: crate::engine::AudioGain,
     frame_rate_cap: Option<u32>,
-    render_scale: f32,
+    quality_in_force: crate::config::QualityInForce,
+    reduced_scale_displays: std::sync::Arc<std::sync::Mutex<BTreeSet<u32>>>,
     force_shader_refresh: bool,
 }
 
@@ -117,10 +118,10 @@ impl<E: EngineFacade> ReconcileWork<E> {
             .unzip();
         let awaiting = displays_awaiting_first_frame(&displays, &self.engine.scene_windows(), &scenes);
         let openings = owners
-            .into_iter()
+            .iter()
             .zip(&scenes)
             .filter(|(_, scene)| awaiting.contains(&scene.display.display_id))
-            .map(|(owner, scene)| (owner, scene.display.display_id))
+            .map(|(owner, scene)| (owner.clone(), scene.display.display_id))
             .collect();
         let ticket = self.journal.begin(openings);
         // An empty scene list also means a video/web desktop now owns the display.
@@ -128,6 +129,9 @@ impl<E: EngineFacade> ReconcileWork<E> {
         // host's asynchronous parking-plan update, then reconcile the empty slots.
         if self.unloaded {
             self.engine.close_all_scenes().await.map_err(engine_error)?;
+            if let Ok(mut reduced) = self.reduced_scale_displays.lock() {
+                reduced.clear();
+            }
         }
         // The facade owns core/prune/readiness ordering. Keep the journal ticket
         // alive until every subsequent operation-layer poststep has succeeded.
@@ -136,7 +140,7 @@ impl<E: EngineFacade> ReconcileWork<E> {
             .reconcile_scenes(scenes.clone())
             .await
             .map_err(engine_error)?;
-        for scene in &scenes {
+        for (scene, owner) in scenes.iter().zip(&owners) {
             let Some(result) = results
                 .iter()
                 .find(|result| result.display_id == scene.display.display_id)
@@ -158,11 +162,29 @@ impl<E: EngineFacade> ReconcileWork<E> {
             )
             .await
             .map_err(engine_error)?;
-            if self.render_scale < 1.0 {
+            let override_scale = self
+                .wallpapers
+                .get(owner)
+                .and_then(|config| config.render_scale);
+            let scale = self
+                .app
+                .effective_render_scale_for_wallpaper(override_scale, self.quality_in_force);
+            let was_reduced = self
+                .reduced_scale_displays
+                .lock()
+                .is_ok_and(|reduced| reduced.contains(&scene.display.display_id));
+            if scale < 1.0 || was_reduced {
                 self.engine
-                    .set_render_scale(result.handle, self.render_scale)
+                    .set_render_scale(result.handle, scale)
                     .await
                     .map_err(engine_error)?;
+                if let Ok(mut reduced) = self.reduced_scale_displays.lock() {
+                    if scale < 1.0 {
+                        reduced.insert(scene.display.display_id);
+                    } else {
+                        reduced.remove(&scene.display.display_id);
+                    }
+                }
             }
         }
         ticket.succeed();
@@ -392,7 +414,8 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             audio_suppressed: self.operation_audio_suppressed(),
             audio_gain: self.operation_audio_gain(),
             frame_rate_cap: self.active_target_fps_cap(),
-            render_scale: self.effective_render_scale(),
+            quality_in_force: self.state.quality_in_force(),
+            reduced_scale_displays: self.reduced_scale_displays.clone(),
             force_shader_refresh,
         }
     }

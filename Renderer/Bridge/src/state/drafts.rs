@@ -168,6 +168,8 @@ impl WallpaperOptionsDraft {
             || pending.media_integration_enabled != saved.media_integration_enabled
             || pending.property_overrides != saved.property_overrides
             || pending.engine_options != saved.engine_options
+            || pending.render_scale.map(f32::to_bits) != saved.render_scale.map(f32::to_bits)
+            || pending.scene_quality != saved.scene_quality
             || !PartialEq::eq(&saved.audio, &saved.audio)
             || pending.monitors.len() < saved.monitors.len()
         {
@@ -277,6 +279,29 @@ impl WallpaperOptionsDraft {
     pub fn set_media_integration_enabled_immediate(&mut self, enabled: bool) -> WallpaperConfig {
         self.pending_config.media_integration_enabled = enabled;
         self.saved_config.media_integration_enabled = enabled;
+        self.saved_config.clone()
+    }
+
+    /// Sets or clears this wallpaper's render scale override immediately.
+    ///
+    /// Like audio and media switches, per-wallpaper quality overrides commit
+    /// at once rather than waiting behind Apply.
+    #[must_use]
+    pub fn set_render_scale_immediate(&mut self, scale: Option<f32>) -> WallpaperConfig {
+        let clamped = scale.map(crate::config::clamp_render_scale);
+        self.pending_config.render_scale = clamped;
+        self.saved_config.render_scale = clamped;
+        self.saved_config.clone()
+    }
+
+    /// Sets or clears this wallpaper's scene quality override immediately.
+    #[must_use]
+    pub fn set_scene_quality_immediate(
+        &mut self,
+        quality: Option<crate::config::SceneQualityCfg>,
+    ) -> WallpaperConfig {
+        self.pending_config.scene_quality = quality;
+        self.saved_config.scene_quality = quality;
         self.saved_config.clone()
     }
 

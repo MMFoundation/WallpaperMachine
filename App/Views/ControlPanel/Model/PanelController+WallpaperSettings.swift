@@ -43,6 +43,89 @@ extension PanelController {
     }
   }
 
+  /// `wallpaperSetting` `renderScale`: sets or clears a per-wallpaper render scale override.
+  func setWallpaperRenderScale(_ scale: Float?, for wallpaperID: String) async throws {
+    try await run(.queued) {
+      let id = try installedWallpaperID(wallpaperID)
+      let validated: Float?
+      if let scale {
+        guard scale.isFinite else { throw InvalidControlValue() }
+        validated = min(1.0, max(0.25, scale))
+      } else {
+        validated = nil
+      }
+      try await store.setWallpaperRenderScaleAsync(wallpaperId: id, scale: validated)
+    }
+  }
+
+  /// `wallpaperSetting` `sceneQuality`: sets or clears a per-wallpaper scene quality override.
+  func setWallpaperSceneQuality(_ quality: BridgeSceneQuality?, for wallpaperID: String)
+    async throws
+  {
+    try await run(.queued) {
+      try await store.setWallpaperSceneQualityAsync(
+        wallpaperId: installedWallpaperID(wallpaperID), quality: quality)
+    }
+  }
+
+  /// Clears both per-wallpaper quality overrides back to the global settings.
+  func resetWallpaperQuality(for wallpaperID: String) async throws {
+    try await run(.queued) {
+      let id = try installedWallpaperID(wallpaperID)
+      let options = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
+      if options.renderScaleOverride != nil {
+        try await store.setWallpaperRenderScaleAsync(wallpaperId: id, scale: nil)
+      }
+      if options.sceneQualityOverride != nil {
+        try await store.setWallpaperSceneQualityAsync(wallpaperId: id, quality: nil)
+      }
+    }
+  }
+
+  /// One-click action beside a High energy rating: steps down this wallpaper's render scale
+  /// (100% → 75%, 75% → 50%) and, for scenes with heavier effects, eases MSAA, shadows,
+  /// volumetrics, reflections and post-processing without changing global settings.
+  func lowerWallpaperQuality(for wallpaperID: String) async throws {
+    try await run(.queued) {
+      let id = try installedWallpaperID(wallpaperID)
+      let options = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
+      let settings = store.settingsSnapshot
+      if options.kind == .projectScene || options.kind == .webpage {
+        let currentScale = options.renderScaleOverride ?? settings.preferredRenderScale
+        let nextScale = Self.loweredRenderScale(from: currentScale)
+        if options.renderScaleOverride != nextScale {
+          try await store.setWallpaperRenderScaleAsync(wallpaperId: id, scale: nextScale)
+        }
+      }
+      if options.kind == .projectScene {
+        let currentQuality = options.sceneQualityOverride ?? settings.sceneQuality
+        let nextQuality = Self.loweredSceneQuality(from: currentQuality)
+        if nextQuality != currentQuality {
+          try await store.setWallpaperSceneQualityAsync(wallpaperId: id, quality: nextQuality)
+        }
+      }
+    }
+  }
+
+  /// Next lower standard render scale step: above 75% → 75%, above 50% → 50%, otherwise keeps
+  /// `current` so "Lower quality" never raises an already-lower render scale.
+  static func loweredRenderScale(from current: Float) -> Float {
+    guard current.isFinite else { return 0.75 }
+    if current > 0.75 { return 0.75 }
+    if current > 0.5 { return 0.5 }
+    return current
+  }
+
+  /// Eases heavy per-scene quality features without changing global settings.
+  static func loweredSceneQuality(from current: BridgeSceneQuality) -> BridgeSceneQuality {
+    BridgeSceneQuality(
+      msaa: .off,
+      shadows: current.shadows == .off ? .off : .low,
+      volumetrics: current.volumetrics == .off ? .off : .low,
+      reflections: false,
+      postProcessing: current.postProcessing == .disabled ? .disabled : .enabled)
+  }
+
   // MARK: One display's setting
 
   /// `displayConfig` `enabled`: whether the display plays this wallpaper.

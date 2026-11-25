@@ -103,6 +103,7 @@ private struct InspectorContent: View {
             }
           }
           GeneralConfigurationCard(options: options)
+          WallpaperQualityCard(options: options)
           PropertiesCards(options: options)
           DisplaysCard(options: options)
           CollectionsCard(wallpaperID: id)

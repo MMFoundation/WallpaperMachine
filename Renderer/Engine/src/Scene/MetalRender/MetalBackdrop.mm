@@ -287,10 +287,11 @@ void MetalBackdrop::release()
 void MetalBackdrop::releaseImages()
 {
     chain_.clear();
-    scratch_       = nil;
+    scratch_         = nil;
     plan_.clear();
-    source_width_  = 0;
-    source_height_ = 0;
+    source_width_    = 0;
+    source_height_   = 0;
+    allocated_bytes_ = 0;
 }
 
 bool MetalBackdrop::makeImages(uint32_t source_width, uint32_t source_height)
@@ -317,11 +318,14 @@ bool MetalBackdrop::makeImages(uint32_t source_width, uint32_t source_height)
         error_ = "the backdrop images could not be allocated";
         return false;
     }
-    chain_         = std::move(chain);
-    scratch_       = scratch;
-    plan_          = std::move(plan);
-    source_width_  = source_width;
-    source_height_ = source_height;
+    uint64_t bytes = scratch.allocatedSize;
+    for (id<MTLTexture> image : chain) bytes += image.allocatedSize;
+    chain_           = std::move(chain);
+    scratch_         = scratch;
+    plan_            = std::move(plan);
+    source_width_    = source_width;
+    source_height_   = source_height;
+    allocated_bytes_ = bytes;
     return true;
 }
 
@@ -406,10 +410,7 @@ void MetalBackdrop::encodeBands(id<MTLRenderCommandEncoder> encoder, const Surro
 
 uint64_t MetalBackdrop::allocatedBytes() const
 {
-    uint64_t bytes = 0;
-    for (id<MTLTexture> image : chain_) bytes += image.allocatedSize;
-    if (scratch_ != nil) bytes += scratch_.allocatedSize;
-    return bytes;
+    return allocated_bytes_;
 }
 
 } // namespace wallpaper::metal

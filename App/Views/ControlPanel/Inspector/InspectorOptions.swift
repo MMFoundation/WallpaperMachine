@@ -44,11 +44,46 @@ struct InspectorOptions: Equatable {
   /// the colour adjustments off, the filter strength with no filter): its value is saved, so
   /// Restore all defaults has to know of it.
   var engineHiddenModified = false
+  /// Optional per-wallpaper internal render scale override (`0.25...1.0`), nil when using the
+  /// global setting.
+  var renderScaleOverride: Float? = nil
+  /// Optional per-wallpaper scene quality override, nil when using the global setting.
+  var sceneQualityOverride: BridgeSceneQuality? = nil
+  /// Global preferred render scale from Performance settings.
+  var globalRenderScale: Float = 1.0
+  /// Global scene quality from Performance settings.
+  var globalSceneQuality: BridgeSceneQuality = .wallpaperEngineDefault
 
   /// Whether Apply changes and Revert have anything to act on.
   var hasChanges: Bool { isDirty || hasUnsentChanges }
   var canRevert: Bool { !isLocked && hasChanges }
   var canApply: Bool { !isLocked && hasChanges && isSupported }
+
+  /// Scenes and web pages honour internal render scale; videos do not.
+  var offersRenderScaleOverride: Bool {
+    isSupported && (kind == .projectScene || kind == .webpage)
+  }
+
+  /// Only scene wallpapers carry MSAA, shadows, volumetrics, reflections and post-processing.
+  var offersSceneQualityOverride: Bool {
+    isSupported && kind == .projectScene
+  }
+
+  /// Whether this wallpaper offers per-wallpaper quality overrides.
+  var offersQualityOverrides: Bool {
+    offersRenderScaleOverride || offersSceneQualityOverride
+  }
+
+  /// Whether at least one per-wallpaper quality override is active.
+  var hasQualityOverride: Bool {
+    renderScaleOverride != nil || sceneQualityOverride != nil
+  }
+
+  /// Effective render scale chosen for this wallpaper before battery/thermal clamping.
+  var chosenRenderScale: Float { renderScaleOverride ?? globalRenderScale }
+
+  /// Effective scene quality chosen for this wallpaper.
+  var chosenSceneQuality: BridgeSceneQuality { sceneQualityOverride ?? globalSceneQuality }
 
   /// Restore all defaults stages every default except chosen files and folders, which keep their
   /// own Clear. A modified value behind a hiding rule counts, though its row is not listed.

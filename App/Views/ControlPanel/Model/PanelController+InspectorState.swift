@@ -41,6 +41,8 @@ extension PanelController {
       settings.videoBackends.filter { $0.wallpaperId == wallpaperID && $0.backend == "native" }
         .map(\.displayId))
     inputs.frameRateCeiling = FrameRateCeiling(settings)
+    inputs.globalRenderScale = settings.preferredRenderScale
+    inputs.globalSceneQuality = settings.sceneQuality
     inputs.isLocked = isInspectorLocked(for: wallpaperID)
     return InspectorOptions.make(value, inputs: inputs)
   }

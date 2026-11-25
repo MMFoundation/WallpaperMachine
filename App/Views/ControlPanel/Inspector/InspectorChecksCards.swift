@@ -22,8 +22,7 @@ struct CompatibilityCard: View {
             if state.isChecking { ProgressRing(value: nil, lineWidth: 1.5).frame(width: 11, height: 11) }
             Text(verbatim: summary)
               .font(.system(size: 11, weight: .medium))
-              .foregroundStyle(
-                state.unavailableCount > 0 ? theme.surface.danger.color : theme.surface.muted.color)
+              .foregroundStyle(summaryColor)
           }
           .accessibilityElement(children: .combine)
           .announcing(summary)
@@ -34,10 +33,14 @@ struct CompatibilityCard: View {
         CheckRow(check: check)
       }
       if state.checks.isEmpty {
-        InspectorCardRow {
-          if state.isChecking {
+        if state.isChecking {
+          InspectorCardRow {
             InspectorNote("Reading the wallpaper’s files…")
-          } else {
+          }
+        } else if let cached = state.cachedSummary {
+          CachedSummaryRow(summary: cached)
+        } else {
+          InspectorCardRow {
             InspectorNote("Not checked yet on this display.")
           }
         }
@@ -133,6 +136,63 @@ struct CompatibilityCard: View {
 
     private var color: Color {
       switch check.status {
+      case .ok: theme.surface.approved.color
+      case .warning: theme.surface.warning.color
+      case .unavailable: theme.surface.danger.color
+      case .unknown: theme.surface.muted.color
+      }
+    }
+  }
+
+  private var summaryColor: Color {
+    if state.unavailableCount > 0 { return theme.surface.danger.color }
+    if state.checks.isEmpty, let cached = state.cachedSummary {
+      switch cached.status {
+      case .ok: return theme.surface.approved.color
+      case .warning: return theme.surface.warning.color
+      case .unavailable: return theme.surface.danger.color
+      case .unknown: return theme.surface.muted.color
+      }
+    }
+    return theme.surface.muted.color
+  }
+
+  private struct CachedSummaryRow: View {
+    let summary: WallpaperCompatibilitySummary
+    @Environment(\.panelTheme) private var theme
+
+    var body: some View {
+      HStack(alignment: .top, spacing: 8) {
+        Image(systemName: InspectorGlyphs.compatibility(summary.status.checkStatus))
+          .font(.panel(.label))
+          .foregroundStyle(color)
+          .frame(width: 16)
+          .padding(.top, 1)
+          .accessibilityLabel(InspectorWording.statusWord(summary.status.checkStatus))
+        VStack(alignment: .leading, spacing: 2) {
+          Text(verbatim: InspectorWording.cachedCompatibilityTitle(summary.status))
+            .font(.panel(.label))
+            .foregroundStyle(theme.surface.text.color)
+          if !summary.detail.isEmpty {
+            Text(verbatim: summary.detail)
+              .font(.panel(.footnote))
+              .foregroundStyle(theme.surface.muted.color)
+          }
+          Text("Cached from background check after download or import.")
+            .font(.panel(.caption))
+            .foregroundStyle(theme.surface.muted.color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .accessibilityElement(children: .combine)
+      .accessibilityIdentifier("inspector.compatibility.cachedBadge")
+    }
+
+    private var color: Color {
+      switch summary.status {
       case .ok: theme.surface.approved.color
       case .warning: theme.surface.warning.color
       case .unavailable: theme.surface.danger.color

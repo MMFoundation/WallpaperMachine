@@ -20,6 +20,9 @@ final class LibraryImportStore {
     /// would otherwise keep what it had loaded. Called once for each replaced id, in turn, once
     /// the library has been rescanned; a failure is the caller's to log.
     @ObservationIgnored var reloadReplaced: (@MainActor (String) async -> Void)?
+    /// Runs after an import finishes rescanning the library, receiving the newly imported and
+    /// replaced wallpaper IDs (e.g. to schedule low-priority background compatibility pre-checks).
+    @ObservationIgnored var onImported: (@MainActor ([String]) -> Void)?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// The files are in and the import is only rescanning and reloading, on the bridge.
     @ObservationIgnored private var isSettling = false
@@ -96,11 +99,15 @@ final class LibraryImportStore {
             // makes what did arrive appear.
             try await Task { @MainActor in try await refreshLibrary() }.value
         }
-        guard let reloadReplaced else { return }
-        for id in report.replacedIDs {
-            guard !isShuttingDown else { break }
-            // The files are already replaced, so a cancel must not leave a display on the old ones.
-            await Task { @MainActor in await reloadReplaced(id) }.value
+        if let reloadReplaced {
+            for id in report.replacedIDs {
+                guard !isShuttingDown else { break }
+                // The files are already replaced, so a cancel must not leave a display on the old ones.
+                await Task { @MainActor in await reloadReplaced(id) }.value
+            }
+        }
+        if !isShuttingDown, !report.importedIDs.isEmpty {
+            onImported?(report.importedIDs)
         }
     }
 }

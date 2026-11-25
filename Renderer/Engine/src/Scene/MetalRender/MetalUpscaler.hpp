@@ -48,6 +48,7 @@ private:
     uint32_t               input_height_ { 0 };
     uint32_t               output_width_ { 0 };
     uint32_t               output_height_ { 0 };
+    uint64_t               allocated_bytes_ { 0 };
     /// The combination `make` last failed for, so it is not tried every frame.
     bool                   refused_ { false };
     std::string            error_;

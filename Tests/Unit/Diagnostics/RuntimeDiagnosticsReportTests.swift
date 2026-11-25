@@ -28,7 +28,10 @@ final class RuntimeDiagnosticsReportTests: XCTestCase {
         presentedFrames: UInt64 = 0,
         presentsDropped: UInt64 = 0,
         gaps: (UInt64, UInt64, UInt64) = (0, 0, 0),
-        vsyncPeriodMicros: UInt64 = 0
+        vsyncPeriodMicros: UInt64 = 0,
+        renderTargetBytes: UInt64 = 0,
+        geometryBufferBytes: UInt64 = 0,
+        edrActive: Bool = false
     ) -> BridgeRendererSurfaceCounters {
         BridgeRendererSurfaceCounters(
             displayId: displayID,
@@ -68,7 +71,10 @@ final class RuntimeDiagnosticsReportTests: XCTestCase {
             videoConversions: 0,
             videoImports: 0,
             videoConversionLiveBytes: conversionLiveBytes,
-            videoConversionPeakLiveBytes: conversionPeakLiveBytes)
+            videoConversionPeakLiveBytes: conversionPeakLiveBytes,
+            renderTargetBytes: renderTargetBytes,
+            geometryBufferBytes: geometryBufferBytes,
+            edrActive: edrActive)
     }
 
     private func report(

@@ -1077,6 +1077,7 @@ if(APPLE)
   add_executable(metal_memory_test
       metal_archive_store_test.mm
       metal_image_levels_test.mm
+      metal_vram_gauges_test.mm
       scene_shared_pictures_test.mm)
   target_link_libraries(metal_memory_test PRIVATE scene_test_support GTest::gtest_main)
   set_target_properties(metal_memory_test PROPERTIES

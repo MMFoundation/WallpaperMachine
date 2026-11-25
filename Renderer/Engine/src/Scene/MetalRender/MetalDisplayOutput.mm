@@ -70,10 +70,13 @@ struct MetalDisplayOutput::State : std::enable_shared_from_this<State> {
     std::atomic<int> requested {-1}; // 0: linear SDR, 1: display HDR
     std::atomic<bool> active {true};
     std::atomic<uint64_t> snapshot {Pack(1.0f, false)};
+    std::shared_ptr<std::atomic<bool>> extended_sink;
 
     State(CAMetalLayer* target, std::function<MetalDisplayCharacteristics(uint32_t)> read,
-          std::function<void()> wake, uint32_t identity)
-        : layer(target), provider(std::move(read)), display_id(identity), changed(std::move(wake)) {}
+          std::function<void()> wake, uint32_t identity,
+          std::shared_ptr<std::atomic<bool>> sink)
+        : layer(target), provider(std::move(read)), display_id(identity), changed(std::move(wake)),
+          extended_sink(std::move(sink)) {}
 
     void RemoveObservers() {
         auto* center = [NSNotificationCenter defaultCenter];
@@ -134,10 +137,12 @@ struct MetalDisplayOutput::State : std::enable_shared_from_this<State> {
         CGColorSpaceRelease(space);
         const uint64_t now = Pack(headroom, extended);
         const bool headroom_changed = snapshot.exchange(now, std::memory_order_acq_rel) != now;
+        if (extended_sink) extended_sink->store(extended, std::memory_order_relaxed);
         if ((surface_changed || headroom_changed) && changed) changed();
     }
     void Stop() {
         active.store(false, std::memory_order_release);
+        if (extended_sink) extended_sink->store(false, std::memory_order_relaxed);
         auto self = shared_from_this();
         OnMain([self] {
             self->RemoveObservers();
@@ -160,8 +165,9 @@ struct MetalDisplayOutput::State : std::enable_shared_from_this<State> {
 };
 
 MetalDisplayOutput::MetalDisplayOutput(CAMetalLayer* layer,
-    std::function<MetalDisplayCharacteristics(uint32_t)> provider, std::function<void()> changed, uint32_t display_id)
-    : state_(std::make_shared<State>(layer, std::move(provider), std::move(changed),display_id)) {}
+    std::function<MetalDisplayCharacteristics(uint32_t)> provider, std::function<void()> changed, uint32_t display_id,
+    std::shared_ptr<std::atomic<bool>> extended_sink)
+    : state_(std::make_shared<State>(layer, std::move(provider), std::move(changed), display_id, std::move(extended_sink))) {}
 MetalDisplayOutput::~MetalDisplayOutput() { state_->Stop(); }
 void MetalDisplayOutput::Request(bool hdr) {
     const int mode = hdr ? 1 : 0;

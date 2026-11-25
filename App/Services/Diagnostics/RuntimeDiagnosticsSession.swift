@@ -176,7 +176,10 @@ final class RuntimeDiagnosticsSession {
                     // against, because the current value alone hides the
                     // destinations that were in flight a moment ago.
                     + "conversion_live_bytes=\(surface.videoConversionLiveBytes) "
-                    + "conversion_peak_live_bytes=\(surface.videoConversionPeakLiveBytes)")
+                    + "conversion_peak_live_bytes=\(surface.videoConversionPeakLiveBytes) "
+                    + "render_target_bytes=\(surface.renderTargetBytes) "
+                    + "geometry_buffer_bytes=\(surface.geometryBufferBytes) "
+                    + "edr_active=\(surface.edrActive)")
             // Work the decoder instance performs, which one hidden consumer
             // does not necessarily stop.
             lines.append(

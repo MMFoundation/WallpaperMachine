@@ -620,6 +620,37 @@ a web page is drawn. For a scene Native Metal cannot draw, it says why it is hel
 When the installed project or its entry file is unavailable and the wallpaper is
 a Workshop item, the card also offers [Reinstall from Workshop…](workshop-downloads.md#reinstall-from-workshop).
 
+#### Post-download and post-import compatibility cache
+
+Because Steam Workshop public metadata does not declare video codecs or internal scene
+dependencies, the app never guesses compatibility before downloading. Once a Workshop
+download or local import lands in the library, a low-priority background check runs
+asynchronously and caches the summarized verdict in `Cache/CompatibilityCache.json`
+(excluded from backups).
+
+- Each cached entry is keyed by wallpaper ID and automatically invalidated whenever the app
+  version/build, shared scene assets folder/markers, project directory fingerprint, or
+  video entry file stamp changes.
+- Before you run a display-specific **Check compatibility**, the **Compatibility check**
+  card displays the cached pre-check badge purely from in-memory state (never reading disk
+  from SwiftUI view bodies).
+
+### Per-wallpaper quality
+
+For supported scene and web wallpapers, the **Quality** card in the Inspector lets you
+override global [Performance](performance.md#per-wallpaper-quality-overrides) settings for
+just that wallpaper:
+
+- **Internal render scale** (scenes and web wallpapers): defaults to **Use global setting**
+  and takes effect live without reparsing the project.
+- **Override scene quality** (scenes only): enables per-wallpaper **Antialiasing (MSAA)**,
+  **Shadows**, **Volumetrics**, **Reflections** and **Post-processing**, reloading only the
+  displays showing that wallpaper when changed.
+- **Reset to global settings** clears both overrides back to the global defaults.
+- When a wallpaper has a **High** energy rating, the Inspector header also surfaces a
+  one-click **Lower quality** action. Battery and thermal throttling always apply via
+  `.min(...)` on top of any per-wallpaper override.
+
 ### Black bars
 
 An installed video's **Black bars** card looks for bars baked into the picture

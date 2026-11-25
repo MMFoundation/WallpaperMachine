@@ -206,6 +206,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let created = try BridgeStore()
             store = created
             created.sceneDrawVerdicts = SceneDrawVerdicts(file: ClientPaths.sceneDrawVerdictsURL)
+            let compatibilityCache = WallpaperCompatibilityCacheStore(
+                cache: WallpaperCompatibilityCache(
+                    file: ClientPaths.compatibilityCacheURL,
+                    service: WallpaperCompatibilityService(verdicts: created.sceneDrawVerdicts)))
+            created.compatibilityCache = compatibilityCache
+            compatibilityCache.loadCachedSummaries()
             created.openPreview = { [weak self] selection in self?.showWallpaperPreview(selection) }
             created.onPropertyDraftChanged = { [weak self] id in self?.previewWindow?.session.propertiesDidChange(wallpaperID: id) }
             created.onPropertyDragged = { [weak self] id in
@@ -221,6 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             pixivStore.downloads.onInstalled = { [weak created] id in
                 created?.supportPrompt?.recordDownload(wallpaperID: id)
                 try await created?.refreshLibraryAsync()
+                created?.scheduleCompatibilityPrecheck(wallpaperIDs: [id])
             }
             libraryImports.refreshLibrary = { [weak created] in try await created?.refreshLibraryAsync() }
             libraryImports.reloadReplaced = { [weak created] id in
@@ -229,6 +236,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 } catch {
                     AppLog.warn("import: \(id) was replaced but could not be reloaded: \(error.localizedDescription)")
                 }
+            }
+            libraryImports.onImported = { [weak created] ids in
+                created?.scheduleCompatibilityPrecheck(wallpaperIDs: ids)
             }
             // Videos imported before imports made a preview show an empty tile until they have one.
             let library = ClientPaths.libraryURL

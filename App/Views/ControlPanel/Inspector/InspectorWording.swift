@@ -163,7 +163,20 @@ enum InspectorWording {
     if warnings > 0 { parts.append(warnings == 1 ? L("1 warning") : L("\(warnings) warnings")) }
     if unknown > 0 { parts.append(unknown == 1 ? L("1 unknown") : L("\(unknown) unknown")) }
     if !parts.isEmpty { return parts.joined(separator: " · ") }
-    return state.checks.isEmpty ? nil : L("No problems found")
+    if state.checks.isEmpty {
+      return state.cachedSummary.map { cachedCompatibilityTitle($0.status) }
+    }
+    return L("No problems found")
+  }
+
+  /// Short status title for a cached post-download / post-import compatibility pre-check badge.
+  static func cachedCompatibilityTitle(_ status: WallpaperCompatibilitySummary.Status) -> String {
+    switch status {
+    case .ok: L("Pre-checked: OK")
+    case .warning: L("Pre-checked: Warning")
+    case .unavailable: L("Pre-checked: Unavailable")
+    case .unknown: L("Pre-checked: Needs runtime check")
+    }
   }
 
   /// The word a screen reader reads for a check's glyph.

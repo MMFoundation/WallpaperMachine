@@ -38,12 +38,28 @@ struct InspectorHeader: View {
           .foregroundStyle(theme.surface.muted.color)
         }
         if let rating = row.energy {
-          Text(verbatim: InspectorWording.energyLine(rating))
-            .font(.panel(.caption))
-            .foregroundStyle(theme.surface.muted.color)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
-            .padding(.top, 2)
+          VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: InspectorWording.energyLine(rating))
+              .font(.panel(.caption))
+              .foregroundStyle(theme.surface.muted.color)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .textSelection(.enabled)
+            if rating.level == .high, row.isSupported, row.kind == .scene || row.kind == .web {
+              let lowerKey = InspectorAction.wallpaperSetting(row.id, "lowerQuality")
+              Button {
+                controller.launch(lowerKey) {
+                  try await controller.lowerWallpaperQuality(for: row.id)
+                }
+              } label: {
+                Label("Lower quality", systemImage: "arrow.down.circle")
+              }
+              .buttonStyle(.panelCardLink)
+              .disabled(controller.isBusy(lowerKey))
+              .help(L("Lower this wallpaper’s render scale and scene quality without changing global settings"))
+              .accessibilityIdentifier("inspector.lowerQuality")
+            }
+          }
+          .padding(.top, 2)
         }
       }
       InspectorActionRow(row: row, applyIsPrimary: applyIsPrimary, applyFocusRequests: applyFocusRequests)

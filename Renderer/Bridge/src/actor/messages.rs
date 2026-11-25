@@ -378,6 +378,16 @@ pub struct SetMediaIntegrationEnabled {
     pub enabled: bool,
 }
 
+pub struct SetWallpaperRenderScale {
+    pub wallpaper_id: String,
+    pub scale: Option<f32>,
+}
+
+pub struct SetWallpaperSceneQuality {
+    pub wallpaper_id: String,
+    pub quality: Option<crate::config::SceneQualityCfg>,
+}
+
 /// Delivers one already-serialized SceneScript media event to every desktop
 /// scene that opted in.
 pub struct FanOutSystemMediaEvent {
@@ -548,6 +558,8 @@ pub type SetWebAudioSubscribedReply = Result<(), BridgeError>;
 pub type SetLockScreenAudioDemandReply = Result<(), BridgeError>;
 pub type AudioRequirementChangedReply = Result<(), BridgeError>;
 pub type SetMediaIntegrationEnabledReply = WallpaperMutationReply;
+pub type SetWallpaperRenderScaleReply = WallpaperMutationReply;
+pub type SetWallpaperSceneQualityReply = WallpaperMutationReply;
 pub type FanOutSystemMediaEventReply = Result<(), BridgeError>;
 pub type FanOutSystemMediaArtworkReply = Result<(), BridgeError>;
 pub type GetSystemMediaSceneHandlesReply = Result<Vec<u64>, BridgeError>;
