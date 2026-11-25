@@ -21,6 +21,7 @@ enum SettingsRegistry {
   @MainActor
   static func unofferedItems(_ controller: PanelController) -> Set<String> {
     QuickSettingsSection.unofferedItems(controller)
+      .union(DesktopSettingsSection.unofferedItems(controller))
       .union(PlaybackSettingsSection.unofferedItems(controller))
       .union(PerformanceSettingsSection.unofferedItems(controller))
       .union(AboutSettingsSection.unofferedItems(controller))

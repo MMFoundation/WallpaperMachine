@@ -153,6 +153,21 @@ extension PanelController {
     }
   }
 
+  /// `switchTransitionStyle`: how the previous wallpaper's held picture leaves once the new one
+  /// has drawn.
+  func setSwitchTransitionStyle(_ style: SwitchTransitionStyle) async throws {
+    try await change { playback.switchTransitionStyle = style }
+  }
+
+  /// `switchTransitionDuration`: how long the switch transition lasts, in seconds, inside
+  /// `PlaybackPreferences.switchTransitionDurationRange` (`0.15`–`2.0` s).
+  func setSwitchTransitionDuration(_ duration: TimeInterval) async throws {
+    guard duration.isFinite, PlaybackPreferences.switchTransitionDurationRange.contains(duration) else {
+      throw InvalidControlValue()
+    }
+    try await change { playback.switchTransitionDuration = duration }
+  }
+
   /// `lockScreenEnabled` (experimental). Enabling it is refused while a display follows desktop Spaces,
   /// because the lock screen cannot show a different wallpaper per Space.
   func setLockScreenEnabled(_ enabled: Bool) async throws {

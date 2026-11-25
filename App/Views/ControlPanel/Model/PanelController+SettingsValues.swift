@@ -27,7 +27,9 @@ extension PanelController {
       keepsWindowsOnWallpaperClick: !DesktopClickRevealPreference.isEnabled,
       hidesDesktopIcons: !FinderDesktopIcons().areShown,
       hidesNotch: NotchMaskController.isEnabled(defaults: defaults),
-      livePropertyEdits: LivePropertyEditing.isEnabled(defaults: defaults))
+      livePropertyEdits: LivePropertyEditing.isEnabled(defaults: defaults),
+      switchTransitionStyle: playback.switchTransitionStyle,
+      switchTransitionDuration: playback.switchTransitionDuration)
   }
 
   /// The Animate lock screen row and its quick tile.

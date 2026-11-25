@@ -28,6 +28,8 @@ final class PlaybackPreferencesTests: XCTestCase {
         XCTAssertFalse(preferences.refreshesDesktopPicturePeriodically, "The Mission Control picture refreshes on a timer only when chosen")
         XCTAssertFalse(preferences.playsOnlyOnActiveDisplay, "Every display plays unless the user asks otherwise")
         XCTAssertFalse(preferences.wallpapersMuted, "Wallpapers keep their own sound until the user mutes them all")
+        XCTAssertEqual(preferences.switchTransitionStyle, .fade)
+        XCTAssertEqual(preferences.switchTransitionDuration, 0.2, accuracy: 1e-9)
         XCTAssertTrue(preferences.appRules.isEmpty)
     }
 
@@ -367,6 +369,43 @@ final class PlaybackPreferencesTests: XCTestCase {
         XCTAssertEqual(posts.value, 5, "Removing an unknown rule changes nothing")
         preferences.playsOnlyOnActiveDisplay = true
         XCTAssertEqual(posts.value, 6, "The policy re-evaluates from this notification")
+    }
+
+    func testSwitchTransitionStyleAndDurationPersistValidateDecodeForwardCompatAndReset() throws {
+        let preferences = PlaybackPreferences(defaults: defaults)
+        for style in SwitchTransitionStyle.allCases {
+            preferences.switchTransitionStyle = style
+            XCTAssertEqual(PlaybackPreferences(defaults: defaults).switchTransitionStyle, style)
+        }
+        for duration in [0.15, 0.2, 0.75, 2.0] {
+            preferences.switchTransitionDuration = duration
+            XCTAssertEqual(PlaybackPreferences(defaults: defaults).switchTransitionDuration, duration, accuracy: 1e-9)
+        }
+
+        // Out-of-range and non-finite writes are ignored.
+        preferences.switchTransitionDuration = 0.5
+        for bad in [0.0, 0.14, 2.01, -0.5, Double.nan, Double.infinity] {
+            preferences.switchTransitionDuration = bad
+        }
+        XCTAssertEqual(PlaybackPreferences(defaults: defaults).switchTransitionDuration, 0.5, accuracy: 1e-9)
+
+        // Corrupt or unknown stored values fall back to defaults.
+        defaults.set("futureRipple", forKey: PlaybackPreferences.switchTransitionStyleKey)
+        XCTAssertEqual(PlaybackPreferences(defaults: defaults).switchTransitionStyle, .fade)
+        for stored: Any in [0.0, 0.14, 2.5, -1, "0.5", true, false] {
+            defaults.set(stored, forKey: PlaybackPreferences.switchTransitionDurationKey)
+            XCTAssertEqual(PlaybackPreferences(defaults: defaults).switchTransitionDuration, 0.2, accuracy: 1e-9, "\(stored)")
+        }
+
+        // Forward-compatible Codable decoding of unknown style falls back to `.fade`.
+        let decoded = try JSONDecoder().decode(SwitchTransitionStyle.self, from: Data(#""futureRipple""#.utf8))
+        XCTAssertEqual(decoded, .fade)
+
+        preferences.switchTransitionStyle = .wipe
+        preferences.switchTransitionDuration = 1.25
+        preferences.resetToDefaults()
+        XCTAssertEqual(preferences.switchTransitionStyle, .fade)
+        XCTAssertEqual(preferences.switchTransitionDuration, 0.2, accuracy: 1e-9)
     }
 }
 

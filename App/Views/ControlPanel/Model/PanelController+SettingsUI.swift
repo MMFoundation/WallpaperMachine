@@ -171,6 +171,18 @@ extension DisplaySleepAction {
   }
 }
 
+extension SwitchTransitionStyle {
+  @MainActor var title: String {
+    switch self {
+    case .none: L("None")
+    case .fade: L("Fade")
+    case .slide: L("Slide")
+    case .zoomFade: L("Zoom fade")
+    case .wipe: L("Wipe")
+    }
+  }
+}
+
 extension SystemConditionAction {
   @MainActor var title: String {
     switch self {

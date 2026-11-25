@@ -65,6 +65,13 @@ struct DesktopSettings: Equatable, Sendable {
   var hidesNotch: Bool
   /// The displays follow property edits before Apply.
   var livePropertyEdits: Bool
+  /// How the previous wallpaper's held picture leaves once the new one has drawn.
+  var switchTransitionStyle: SwitchTransitionStyle = PlaybackPreferences.defaultSwitchTransitionStyle
+  /// How long the switch transition animation lasts, in seconds.
+  var switchTransitionDuration: TimeInterval = PlaybackPreferences.defaultSwitchTransitionDuration
+
+  /// The duration control only applies when an animated transition is chosen.
+  var showsSwitchTransitionDuration: Bool { switchTransitionStyle != .none }
 
   /// A timed retake of a picture that is not written does nothing, so the switch waits for the one it depends on.
   var canChangeRefresh: Bool { writesDesktopPicture }

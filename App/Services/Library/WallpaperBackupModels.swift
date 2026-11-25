@@ -123,6 +123,7 @@ struct WallpaperBackupPreferences: Sendable {
         PlaybackPreferences.lowBatteryActionKey, PlaybackPreferences.lowBatteryThresholdKey,
         PlaybackPreferences.inactivityActionKey, PlaybackPreferences.inactivityMinutesKey,
         PlaybackPreferences.playOnlyOnActiveDisplayKey,
+        PlaybackPreferences.switchTransitionStyleKey, PlaybackPreferences.switchTransitionDurationKey,
         PanelPreferences.hideAfterActivatingKey, PanelPreferences.tileZoomKey,
         PanelPreferences.libraryPreviewsOnHoverKey, StatusItemClick.defaultsKey,
         MenuBarEnergyPreference.defaultsKey,
@@ -285,6 +286,11 @@ struct WallpaperBackupPreferences: Sendable {
         case PlaybackPreferences.inactivityMinutesKey:
             guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue == Double(number.intValue),
                   PlaybackPreferences.inactivityMinuteChoices.contains(number.intValue) else { throw invalid() }
+        case PlaybackPreferences.switchTransitionStyleKey:
+            guard let raw = value as? String, SwitchTransitionStyle(rawValue: raw) != nil else { throw invalid() }
+        case PlaybackPreferences.switchTransitionDurationKey:
+            guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite,
+                  PlaybackPreferences.switchTransitionDurationRange.contains(number.doubleValue) else { throw invalid() }
         case WorkshopStore.concurrentDownloadsKey:
             guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue == Double(number.intValue),
                   WorkshopDownloadManager.concurrentDownloadRange.contains(number.intValue) else { throw invalid() }

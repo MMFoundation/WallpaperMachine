@@ -322,8 +322,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                         && !self.switchResumesKeptWallpaper(on: display)
                 },
                 reduceMotion: { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion },
-                // A display hidden while its desktop's wallpaper loads shows no veil to fade.
-                concealed: { [weak self] display in self?.spacePinning?.isConcealed(display) ?? false })
+                // A display hidden while its desktop's wallpaper loads shows no veil to transition.
+                concealed: { [weak self] display in self?.spacePinning?.isConcealed(display) ?? false },
+                transition: {
+                    WallpaperSwitchHold.Transition(
+                        style: PlaybackPreferences.shared.switchTransitionStyle,
+                        duration: PlaybackPreferences.shared.switchTransitionDuration)
+                })
             switchHold = hold
             // A hidden display is shown again once its successor no longer needs the veil.
             hold.onReleased = { [weak self] _ in self?.spacePinning?.update() }

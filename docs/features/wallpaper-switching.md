@@ -3,21 +3,29 @@
 Choosing another wallpaper tears the old renderer down before the new one has drawn a
 frame, and the window between the two is black. The **switch hold** covers that gap: it
 takes a still of what the display shows just before the switch, carries it over the window
-that shows the new wallpaper, and fades it out once the new wallpaper has drawn. There is no
-setting; it applies whenever the conditions below hold and costs one picture in memory per
-display while a switch loads.
+that shows the new wallpaper, and animates it away once the new wallpaper has drawn. The
+transition style (**None**, **Fade** [default], **Slide**, **Zoom fade**, or **Wipe**) and
+duration (`0.15`–`2.0` seconds, default `0.2` s) are configured in **Settings › Desktop & Lock
+Screen** (`PlaybackPreferences`, included in local backups). Every transition runs purely as
+Core Animation on the single captured `CGImage` veil layer with zero extra image memory and zero
+per-frame CPU work, clipped to the display's parent layer (`masksToBounds = true`) so slide and
+zoom animations never bleed onto adjacent displays.
 
-The pieces are `WallpaperSwitchHold` (the per-display state and its timers) and
-`SwitchHoldVeil` (the layer that carries the still), both in `App/Services/Desktop/`, and
+The pieces are `WallpaperSwitchHold` (the per-display state and its timers),
+`SwitchHoldVeil` (the layer that carries the still and runs the Core Animation dismissal),
+`SwitchTransitionStyle` in `PlaybackPreferences` (all in `App/Services/Desktop/`), and
 three hooks on `BridgeStore` that tell the hold when a switch starts, settles or fails.
 
 ## What the user sees
 
-- The previous wallpaper stays on screen while the new one loads, then fades out over 0.2
-  seconds. A scene that takes seconds to load, or a cold shader compile, no longer shows a
-  black screen first.
-- **Reduce Motion** (System Settings › Accessibility › Display) removes the fade: the
-  previous picture is replaced at once when the new wallpaper has drawn.
+- The previous wallpaper stays on screen while the new one loads, then leaves with the chosen
+  transition (**Fade** over `0.2` s by default; **None** cuts immediately once ready; **Slide**,
+  **Zoom fade**, and **Wipe** run over the chosen duration, `0.15`–`2.0` s). A scene that takes
+  seconds to load, or a cold shader compile, no longer shows a black screen first.
+- **Reduce Motion** (System Settings › Accessibility › Display) overrides every transition style
+  and cuts immediately: the previous picture is replaced at once when the new wallpaper has drawn.
+- Choosing **None** hides **Transition duration** in Settings; **Reset all settings** restores
+  **Fade** and `0.2` s.
 - The held picture is a still taken up to a quarter of a second before the switch. An
   animated wallpaper may therefore jump a little at the moment the new one appears.
 - With the native video player (the default for videos) the same picture covers the new clip's window
@@ -78,7 +86,7 @@ nothing for a page without any.
 | Waiting for the still | 250 ms | Every switch waits this long at most before it applies |
 | Holding a display | 30 s | A cold compile can outlast it, which only restores the black gap |
 | Waiting for a host window | 8 s | After the engine finished with no scene to carry the still |
-| Fade | 0.2 s | None under Reduce Motion |
+| Transition duration | 0.15–2.0 s (default 0.2 s) | Configurable in Settings › Desktop; instant cut for **None** or under Reduce Motion |
 
 The still is the renderer's final pixels at the display's pixel size, four bytes per
 pixel: about 60 MB on a 5K display, held for at most the ceiling. A second switch while a
@@ -103,7 +111,10 @@ scene.
    desktop poster. Several displays are asked at once.
 3. **The veil.** The still becomes `SwitchHoldVeil`, a plain sublayer named `MWEHandoffVeil`
    with a high `zPosition`, never a window: occlusion tracking, hit testing, the poster sync
-   and web snapshots see the window as before.
+   and web snapshots see the window as before. Attaching sets `masksToBounds = true` on the
+   parent layer so **Slide** and **Zoom fade** never bleed onto an adjacent display. **Wipe**
+   animates `bounds` and `contentsRect` together from the trailing edge so pixels stay stationary
+   without allocating a mask render pass.
 4. **A scene successor.** The Rust window code posts `WallpaperMachine.wallpaperLayerInstalled`
    for every content layer it gives a window, synchronously on the main thread before the
    layer is first composited (see [architecture](../architecture.md#desktop-wallpaper-windows-and-private-api-handling)).
@@ -216,10 +227,15 @@ A switch with no `frame captured` line was not held. The activation line
 `WallpaperSwitchHoldTests` drive the hold with an injected notification center, plain
 `CALayer`s, a manual clock and timers: the request goes to the frontmost layer, an unanswered
 or unusable request leaves no ticket, announcements move the veil, `reconfigure` moves it only
-off a scene that has not presented yet and does not restart the ceiling, the veil fades and is
-removed by the timer, Reduce Motion skips the fade, the ceiling and the
+off a scene that has not presented yet and does not restart the ceiling, attaching clips the
+parent layer to bounds, each configured transition style (`fade`, `slide`, `zoomFade`, `wipe`)
+installs its Core Animation over the configured duration and is removed by the timer, `none` and
+Reduce Motion force an instant cut for every style, the ceiling and the
 host grace release a veil nothing ends, `cancel` and `stop` remove everything including a
-still still on its way, and displays are held independently.
+still still on its way, and displays are held independently. `PlaybackPreferencesTests` and
+`WallpaperBackupTests` cover transition style/duration defaults, validation, forward-compatible
+decoding and backup allowlisting; `PanelSettingsValuesTests`, `PanelSettingsResetTests` and
+`SettingsSearchOfferTests` cover Settings wiring, reset and conditional duration search hiding.
 `NativeVideoWallpaperHostTests` drive the native host with a fake surface that logs what is
 done to it: the replacement window carries the veil when it is presented and keeps it through
 a repeated offer or a setting change, the first frame releases it (with the fade, and at once

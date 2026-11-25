@@ -1139,6 +1139,38 @@ final class WallpaperBackupTests: XCTestCase {
         }
     }
 
+    func testSwitchTransitionPreferencesAreBackedUpAndValidated() throws {
+        let preferences = try defaults()
+        let playback = PlaybackPreferences(defaults: preferences)
+        playback.switchTransitionStyle = .zoomFade
+        playback.switchTransitionDuration = 0.85
+        let export = try WallpaperBackupPreferences(defaults: preferences, domainName: domainName(for: preferences))
+
+        let styleKey = PlaybackPreferences.switchTransitionStyleKey
+        let durationKey = PlaybackPreferences.switchTransitionDurationKey
+        let storedStyle = try WallpaperBackupPreferences.decode(XCTUnwrap(export.values[styleKey], styleKey))
+        try WallpaperBackupPreferences.validate(storedStyle, forKey: styleKey)
+        XCTAssertEqual(storedStyle as? String, "zoomFade")
+
+        let storedDuration = try WallpaperBackupPreferences.decode(XCTUnwrap(export.values[durationKey], durationKey))
+        try WallpaperBackupPreferences.validate(storedDuration, forKey: durationKey)
+        XCTAssertEqual((storedDuration as? NSNumber)?.doubleValue ?? 0, 0.85, accuracy: 1e-9)
+
+        for style in SwitchTransitionStyle.allCases {
+            XCTAssertNoThrow(try WallpaperBackupPreferences.validate(style.rawValue, forKey: styleKey), style.rawValue)
+        }
+        for bad: Any in ["ripple", "", "Fade", 1, true, NSNull()] {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(bad, forKey: styleKey), "\(bad)")
+        }
+        for duration in [0.15, 0.2, 1.0, 2.0] {
+            XCTAssertNoThrow(
+                try WallpaperBackupPreferences.validate(NSNumber(value: duration), forKey: durationKey), "\(duration)")
+        }
+        for bad: Any in [0.0, 0.14, 2.01, -0.5, "0.5", true, false, Double.nan, Double.infinity] {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(bad, forKey: durationKey), "\(bad)")
+        }
+    }
+
     /// Muting every wallpaper is local to this Mac: a backup never carries it, and a package that
     /// claims to cannot silence a Mac whose owner did not ask.
     func testMutingEveryWallpaperIsNeitherBackedUpNorRestored() async throws {

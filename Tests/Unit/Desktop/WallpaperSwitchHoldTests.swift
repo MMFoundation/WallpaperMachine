@@ -82,6 +82,7 @@ private final class HoldRig {
     var holdable = Set<UInt32>()
     var reduceMotion = false
     var concealed = Set<UInt32>()
+    var transition = WallpaperSwitchHold.Transition.default
     private(set) var released: [UInt32] = []
     /// What the visible wallpaper answers with; nil leaves the request unanswered.
     var answer: (CALayer) -> DesktopPosterFrame? = { _ in HoldRig.frame() }
@@ -100,6 +101,7 @@ private final class HoldRig {
             shouldHold: { [unowned self] in self.holdable.contains($0) },
             reduceMotion: { [unowned self] in self.reduceMotion },
             concealed: { [unowned self] in self.concealed.contains($0) },
+            transition: { [unowned self] in self.transition },
             sleep: timers.closure,
             now: { [unowned self] in self.clock })
         responder = center.addObserver(forName: DesktopPosterNotification.request, object: nil, queue: nil) {
@@ -711,5 +713,109 @@ final class WallpaperSwitchHoldTests: XCTestCase {
         XCTAssertEqual(rig.state(7), .dismissing)
         XCTAssertEqual(rig.state(8), .onScene, "the other display's switch is still loading")
         XCTAssertNotNil(rig.veil(on: second))
+    }
+
+    func testAttachClipsParentLayerToBoundsSoSlideAndZoomNeverBleed() async throws {
+        let rig = HoldRig()
+        defer { rig.finish() }
+        await rig.hold.begin(displays: [7])
+        let scene = HoldRig.screenLayer()
+        XCTAssertFalse(scene.masksToBounds)
+
+        rig.announce(scene, display: 7, reason: "replace")
+
+        XCTAssertTrue(scene.masksToBounds, "parent container clips slide and zoom transitions to this display")
+
+        let host = HoldRig.screenLayer()
+        XCTAssertFalse(host.masksToBounds)
+        rig.live[7] = []
+        XCTAssertTrue(rig.hold.adopt(into: host, displayID: 7))
+        XCTAssertTrue(host.masksToBounds)
+    }
+
+    func testConfiguredTransitionStylesAnimateAndRespectDuration() async throws {
+        for style in [SwitchTransitionStyle.fade, .slide, .zoomFade, .wipe] {
+            let rig = HoldRig()
+            defer { rig.finish() }
+            rig.transition = .init(style: style, duration: 0.75)
+            await rig.hold.begin(displays: [7])
+            let scene = HoldRig.screenLayer()
+            rig.announce(scene, display: 7, reason: "replace")
+            let veil = try XCTUnwrap(rig.veil(on: scene))
+
+            rig.hold.engineSettled(displays: [7])
+
+            XCTAssertEqual(rig.state(), .dismissing, "\(style)")
+            let animation = try XCTUnwrap(veil.animation(forKey: SwitchHoldVeil.transitionAnimationKey), "\(style)")
+            XCTAssertEqual(animation.duration, 0.75, accuracy: 1e-6, "\(style)")
+            switch style {
+            case .fade:
+                XCTAssertEqual(veil.opacity, 0)
+                XCTAssertEqual((animation as? CABasicAnimation)?.keyPath, "opacity")
+            case .slide:
+                XCTAssertEqual(veil.transform.m41, -scene.bounds.width, accuracy: 1e-4)
+                XCTAssertEqual((animation as? CABasicAnimation)?.keyPath, "transform.translation.x")
+            case .zoomFade:
+                XCTAssertEqual(veil.opacity, 0)
+                XCTAssertEqual(veil.transform.m11, 1.08, accuracy: 1e-4)
+                let group = try XCTUnwrap(animation as? CAAnimationGroup)
+                let keyPaths = Set((group.animations ?? []).compactMap { ($0 as? CABasicAnimation)?.keyPath })
+                XCTAssertEqual(keyPaths, ["opacity", "transform.scale"])
+            case .wipe:
+                XCTAssertEqual(veil.bounds.width, 0, accuracy: 1e-4)
+                XCTAssertEqual(veil.contentsRect, CGRect(x: 1, y: 0, width: 0, height: 1))
+                let group = try XCTUnwrap(animation as? CAAnimationGroup)
+                let keyPaths = Set((group.animations ?? []).compactMap { ($0 as? CABasicAnimation)?.keyPath })
+                XCTAssertEqual(keyPaths, ["bounds", "contentsRect"])
+            case .none:
+                break
+            }
+            let expectedWait = Duration.seconds(0.75) + .milliseconds(50)
+            await rig.timers.waitFor(expectedWait)
+            rig.timers.fire(expectedWait)
+            await rig.settle()
+            XCTAssertNil(rig.veil(on: scene), "\(style)")
+            XCTAssertNil(rig.state(), "\(style)")
+        }
+    }
+
+    func testNoneTransitionStyleRemovesTheVeilImmediatelyWithoutAnimation() async throws {
+        let rig = HoldRig()
+        defer { rig.finish() }
+        rig.transition = .init(style: .none, duration: 1.0)
+        await rig.hold.begin(displays: [7])
+        let scene = HoldRig.screenLayer()
+        rig.announce(scene, display: 7, reason: "replace")
+
+        rig.hold.engineSettled(displays: [7])
+        await rig.settle()
+
+        XCTAssertNil(rig.veil(on: scene))
+        XCTAssertNil(rig.state())
+        XCTAssertTrue(rig.timers.pending.isEmpty)
+        XCTAssertFalse(rig.timers.requested.contains(Duration.seconds(1.0) + .milliseconds(50)))
+        XCTAssertEqual(rig.released, [7])
+    }
+
+    func testReduceMotionForcesInstantCutForEveryTransitionStyle() async throws {
+        for style in SwitchTransitionStyle.allCases {
+            let rig = HoldRig()
+            defer { rig.finish() }
+            rig.reduceMotion = true
+            rig.transition = .init(style: style, duration: 1.5)
+            await rig.hold.begin(displays: [7])
+            let scene = HoldRig.screenLayer()
+            rig.announce(scene, display: 7, reason: "replace")
+
+            rig.hold.engineSettled(displays: [7])
+            await rig.settle()
+
+            XCTAssertNil(rig.veil(on: scene), "Reduce Motion skips \(style) animation")
+            XCTAssertNil(rig.state(), "\(style)")
+            XCTAssertTrue(rig.timers.pending.isEmpty, "no transition timer runs under Reduce Motion for \(style)")
+            XCTAssertFalse(
+                rig.timers.requested.contains(Duration.seconds(1.5) + .milliseconds(50)),
+                "no removal wait requested under Reduce Motion for \(style)")
+        }
     }
 }

@@ -55,8 +55,18 @@ final class WallpaperSwitchHold {
         var holdCeiling: Duration = .seconds(30)
         /// How long an armed veil waits for a host window once the engine has finished.
         var hostGrace: Duration = .seconds(8)
-        /// The fade-out, in seconds; none under Reduce Motion.
-        var fade: TimeInterval = 0.2
+        /// The default transition duration, in seconds; none under Reduce Motion.
+        var fade: TimeInterval = PlaybackPreferences.defaultSwitchTransitionDuration
+    }
+
+    /// The dismissal transition read when a veil is released.
+    struct Transition: Equatable, Sendable {
+        var style: SwitchTransitionStyle
+        var duration: TimeInterval
+
+        static let `default` = Transition(
+            style: PlaybackPreferences.defaultSwitchTransitionStyle,
+            duration: PlaybackPreferences.defaultSwitchTransitionDuration)
     }
 
     enum Phase: Equatable {
@@ -104,6 +114,7 @@ final class WallpaperSwitchHold {
     private let shouldHold: @MainActor (UInt32) -> Bool
     private let reduceMotion: @MainActor () -> Bool
     private let concealed: @MainActor (UInt32) -> Bool
+    private let transition: @MainActor () -> Transition
     private let sleep: @Sendable (Duration) async throws -> Void
     private let now: @MainActor () -> ContinuousClock.Instant
     private let configuration: Configuration
@@ -117,12 +128,14 @@ final class WallpaperSwitchHold {
     /// `layers` lists a display's live wallpaper content layers, the front one first;
     /// `shouldHold` says whether anyone can see the display (a suspended one is not held, and a
     /// suspended surface may not answer the request); `reduceMotion` is the person's setting;
-    /// `concealed` says a display's windows are hidden, so its veil goes without a fade.
+    /// `concealed` says a display's windows are hidden, so its veil goes without a transition;
+    /// `transition` supplies the current dismissal style and duration.
     init(center: NotificationCenter = .default,
          layers: @escaping @MainActor (UInt32) -> [CALayer],
          shouldHold: @escaping @MainActor (UInt32) -> Bool,
          reduceMotion: @escaping @MainActor () -> Bool,
          concealed: @escaping @MainActor (UInt32) -> Bool = { _ in false },
+         transition: (@MainActor () -> Transition)? = nil,
          sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
          now: @escaping @MainActor () -> ContinuousClock.Instant = { ContinuousClock.now },
          configuration: Configuration = Configuration()) {
@@ -131,6 +144,7 @@ final class WallpaperSwitchHold {
         self.shouldHold = shouldHold
         self.reduceMotion = reduceMotion
         self.concealed = concealed
+        self.transition = transition ?? { Transition(style: .fade, duration: configuration.fade) }
         self.sleep = sleep
         self.now = now
         self.configuration = configuration
@@ -384,8 +398,8 @@ final class WallpaperSwitchHold {
         }
     }
 
-    /// Fades the veil out and forgets the display; at once when it is not on a window, nobody
-    /// sees the window or the person asked for less motion.
+    /// Animates the veil away and forgets the display; at once when it is not on a window, nobody
+    /// sees the window, the style is `.none`, or the person asked for Reduce Motion.
     private func dismiss(_ display: UInt32, because reason: String) {
         guard let ticket = tickets[display], ticket.phase != .dismissing else { return }
         ticket.phase = .dismissing
@@ -394,16 +408,18 @@ final class WallpaperSwitchHold {
         let seconds = Double(ticket.heldAt.duration(to: now()).wholeMilliseconds) / 1_000
         AppLog.info("switch hold: display \(display) released after "
             + "\(String(format: "%.1f", seconds)) s (\(reason))")
-        guard ticket.veil.isAttached, configuration.fade > 0, !reduceMotion(), !concealed(display) else {
+        let transition = self.transition()
+        guard ticket.veil.isAttached, transition.style != .none, transition.duration > 0,
+              !reduceMotion(), !concealed(display) else {
             remove(display)
             return
         }
-        ticket.veil.beginFade(duration: configuration.fade)
+        ticket.veil.beginTransition(transition.style, duration: transition.duration)
         let id = ticket.generation
         let sleep = self.sleep
         // From a timer and not the animation's completion, which does not run for a layer
         // that is off screen and would leave the veil on it.
-        let wait = Duration.seconds(configuration.fade) + .milliseconds(50)
+        let wait = Duration.seconds(transition.duration) + .milliseconds(50)
         ticket.removal = Task { [weak self] in
             do { try await sleep(wait) } catch { return }
             guard let self, self.tickets[display]?.generation == id else { return }

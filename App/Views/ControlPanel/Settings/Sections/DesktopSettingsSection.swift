@@ -50,6 +50,14 @@ struct DesktopSettingsSection: View {
     note:
       "While you edit a wallpaper’s properties, your displays follow each change before you press Apply changes, and Revert puts the saved look back. Pictures, options that switch an effect on or off, and a video’s Wallpaper Engine options still wait for Apply changes. The lock screen and the Mission Control picture keep the saved look until you apply."
   )
+  static let switchTransitionStyle = SettingsItem(
+    id: "desktop.switch-transition-style", section: .desktop, group: desktop,
+    title: "Wallpaper transition",
+    note: "How the previous wallpaper leaves once the next one is ready. Reduce Motion always switches immediately.",
+    keywords: ["Fade", "Slide", "Zoom fade", "Wipe"])
+  static let switchTransitionDuration = SettingsItem(
+    id: "desktop.switch-transition-duration", section: .desktop, group: desktop,
+    title: "Transition duration")
 
   static let lockScreenSwitch = SettingsItem(
     id: "desktop.lock-screen", section: .desktop, group: lockScreen, title: "Animate lock screen",
@@ -83,11 +91,37 @@ struct DesktopSettingsSection: View {
 
   static let items = [
     desktopWallpapers, writeDesktopPicture, refreshMissionControl, keepWindowsOnClick, hideDesktopIcons,
-    hideNotch, livePropertyEdits,
+    hideNotch, livePropertyEdits, switchTransitionStyle, switchTransitionDuration,
     lockScreenSwitch, lockScreenSource, lockScreenStatus, lockScreenContext,
     screenSaverSwitch, screenSaverSource, screenSaverStatus,
     screenSaverContext,
   ]
+
+  /// Transition duration is offered only when an animated transition style is selected.
+  @MainActor
+  static func unofferedItems(_ controller: PanelController) -> Set<String> {
+    controller.desktopSettings.showsSwitchTransitionDuration ? [] : [switchTransitionDuration.id]
+  }
+
+  /// 0.15 s to 2.00 s in 0.05 s steps (3…40).
+  static let transitionDurationSteps = 3...40
+
+  static func transitionDurationStep(for seconds: TimeInterval) -> Int {
+    let raw = Int((seconds * 20).rounded())
+    return min(max(raw, transitionDurationSteps.lowerBound), transitionDurationSteps.upperBound)
+  }
+
+  static func transitionDurationSeconds(for step: Int) -> TimeInterval {
+    Double(step) / 20
+  }
+
+  @MainActor
+  static func transitionDurationReadout(_ seconds: TimeInterval, locale: Locale? = nil) -> String {
+    let locale = locale ?? PanelLocale.shared.locale
+    let number = seconds.formatted(
+      .number.rounded(rule: .toNearestOrAwayFromZero).precision(.fractionLength(2)).grouping(.never).locale(locale))
+    return L("\(number) s")
+  }
 
   @Environment(PanelController.self) private var controller
 
@@ -109,6 +143,22 @@ struct DesktopSettingsSection: View {
         SettingsRow(Self.hideDesktopIcons) { SettingsSwitchControl(key: .hideDesktopIcons) }
         SettingsRow(Self.hideNotch) { SettingsSwitchControl(key: .hideNotch) }
         SettingsRow(Self.livePropertyEdits) { SettingsSwitchControl(key: .livePropertyEdits) }
+        SettingsRow(Self.switchTransitionStyle) {
+          SettingsMenuControl(
+            key: "switchTransitionStyle", saved: desktop.switchTransitionStyle,
+            options: SwitchTransitionStyle.allCases.map { SettingsMenuOption(value: $0, title: $0.title) }
+          ) { try await controller.setSwitchTransitionStyle($0) }
+        }
+        if desktop.showsSwitchTransitionDuration {
+          SettingsRow(Self.switchTransitionDuration) {
+            SettingsSliderControl(
+              key: "switchTransitionDuration",
+              saved: Self.transitionDurationStep(for: desktop.switchTransitionDuration),
+              range: Self.transitionDurationSteps,
+              readout: { Self.transitionDurationReadout(Self.transitionDurationSeconds(for: $0)) }
+            ) { try await controller.setSwitchTransitionDuration(Self.transitionDurationSeconds(for: $0)) }
+          }
+        }
       }
       SettingsGroup(Self.lockScreen, in: .desktop) {
         SettingsRow(Self.lockScreenSwitch) { SettingsSwitchControl(key: .lockScreenEnabled) }

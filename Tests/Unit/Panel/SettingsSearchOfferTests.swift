@@ -112,6 +112,11 @@ final class SettingsSearchOfferTests: PanelTestCase {
       settings.query = "Direct video plane sampling"
       XCTAssertEqual(settings.search.count(in: .performance), 1)
       XCTAssertTrue(settings.search.opens(PerformanceSettingsSection.advanced))
+
+      settings.query = "Transition duration"
+      XCTAssertTrue(settings.search.shows(DesktopSettingsSection.switchTransitionDuration))
+      controller.playback.switchTransitionStyle = .none
+      XCTAssertTrue(settings.search.hasNoResults, "Transition duration hides when transition style is None")
     }
   }
 }

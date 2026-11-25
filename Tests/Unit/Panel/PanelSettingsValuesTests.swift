@@ -216,6 +216,35 @@ final class PanelSettingsValuesTests: PanelTestCase {
     }
   }
 
+  func testSwitchTransitionSettingsCarryValuesValidateRangeAndHideDurationWhenNone() async throws {
+    try await withRecordingPanel { panel, _ in
+      let controller = panel.controller
+      XCTAssertEqual(controller.desktopSettings.switchTransitionStyle, .fade)
+      XCTAssertEqual(controller.desktopSettings.switchTransitionDuration, 0.2, accuracy: 1e-9)
+      XCTAssertTrue(controller.desktopSettings.showsSwitchTransitionDuration)
+
+      try await controller.setSwitchTransitionStyle(.slide)
+      try await controller.setSwitchTransitionDuration(0.85)
+      XCTAssertEqual(controller.desktopSettings.switchTransitionStyle, .slide)
+      XCTAssertEqual(controller.desktopSettings.switchTransitionDuration, 0.85, accuracy: 1e-9)
+      XCTAssertTrue(controller.desktopSettings.showsSwitchTransitionDuration)
+
+      for bad in [0.1, 2.5, -1.0, Double.nan, Double.infinity] {
+        do {
+          try await controller.setSwitchTransitionDuration(bad)
+          XCTFail("\(bad) is outside the valid duration range")
+        } catch is InvalidControlValue {}
+      }
+      XCTAssertEqual(controller.desktopSettings.switchTransitionDuration, 0.85, accuracy: 1e-9)
+
+      try await controller.setSwitchTransitionStyle(.none)
+      XCTAssertFalse(controller.desktopSettings.showsSwitchTransitionDuration)
+      XCTAssertEqual(
+        DesktopSettingsSection.unofferedItems(controller),
+        [DesktopSettingsSection.switchTransitionDuration.id])
+    }
+  }
+
   // MARK: Library and Steam
 
   /// The Downloads-at-once menu changes how many Steam downloads run at once, and the choice is read

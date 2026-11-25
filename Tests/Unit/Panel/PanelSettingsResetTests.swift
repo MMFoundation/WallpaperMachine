@@ -32,6 +32,8 @@ final class PanelSettingsResetTests: PanelTestCase {
       try await controller.setOtherAppInFrontAction(.pauseOnBattery)
       controller.playback.addRule(bundleIdentifier: "com.example.game", name: "Game")
       try await controller.setLivePropertyEdits(true)
+      try await controller.setSwitchTransitionStyle(.wipe)
+      try await controller.setSwitchTransitionDuration(1.4)
       try await controller.setConcurrentDownloads(6)
       try await controller.setWorkshopUpdateChecks(false)
       try await controller.setSceneOptimization(false)
@@ -59,6 +61,8 @@ final class PanelSettingsResetTests: PanelTestCase {
       XCTAssertEqual(controller.playback.otherAppInFrontAction, .keepRunning)
       XCTAssertTrue(controller.playback.appRules.isEmpty)
       XCTAssertFalse(controller.desktopSettings.livePropertyEdits)
+      XCTAssertEqual(controller.desktopSettings.switchTransitionStyle, .fade)
+      XCTAssertEqual(controller.desktopSettings.switchTransitionDuration, 0.2, accuracy: 1e-9)
       XCTAssertEqual(
         controller.workshop.downloader.maximumConcurrentDownloads,
         WorkshopDownloadManager.defaultConcurrentDownloads)

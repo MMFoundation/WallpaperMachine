@@ -5,6 +5,27 @@ enum DisplaySleepAction: String, Codable, CaseIterable, Sendable {
     case stop
 }
 
+/// How the previous wallpaper's held picture leaves once the new wallpaper has drawn.
+enum SwitchTransitionStyle: String, Codable, CaseIterable, Sendable {
+    /// Replaces the held picture immediately with no animation.
+    case none
+    /// Cross-fades the held picture out (the default).
+    case fade
+    /// Slides the held picture off the display.
+    case slide
+    /// Zooms the held picture gently while fading it out.
+    case zoomFade
+    /// Wipes the held picture away across the display.
+    case wipe
+
+    /// Forward-compatible decoding: an unrecognized style from a newer build falls back to `.fade`.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        self = Self(rawValue: raw) ?? .fade
+    }
+}
+
 enum OtherAudioAction: String, Codable, CaseIterable, Sendable {
     case keepRunning
     /// Keep playing, each wallpaper at a share of its own volume
@@ -174,6 +195,8 @@ final class PlaybackPreferences {
     private static let writeDesktopPictureKey = "WallpaperMachine.writeDesktopPicture"
     nonisolated static let playOnlyOnActiveDisplayKey = "WallpaperMachine.playOnlyOnActiveDisplay"
     private static let wallpapersMutedKey = "WallpaperMachine.wallpapersMuted"
+    nonisolated static let switchTransitionStyleKey = "WallpaperMachine.switchTransitionStyle"
+    nonisolated static let switchTransitionDurationKey = "WallpaperMachine.switchTransitionDuration"
 
     /// The charge levels the user can pick for the low-battery rule, in percent.
     nonisolated static let lowBatteryThresholds = [10, 20, 30]
@@ -184,6 +207,10 @@ final class PlaybackPreferences {
     /// The times without input the user can pick for the inactivity rule, in minutes.
     nonisolated static let inactivityMinuteChoices = [5, 10, 15, 30, 60]
     nonisolated static let defaultInactivityMinutes = 10
+    /// The wallpaper switch transition animation style and duration range (in seconds).
+    nonisolated static let defaultSwitchTransitionStyle = SwitchTransitionStyle.fade
+    nonisolated static let switchTransitionDurationRange: ClosedRange<TimeInterval> = 0.15...2.0
+    nonisolated static let defaultSwitchTransitionDuration: TimeInterval = 0.2
 
     private let defaults: UserDefaults
 
@@ -348,6 +375,34 @@ final class PlaybackPreferences {
         }
     }
 
+    /// How the held picture leaves when switching wallpapers (`.fade` by default). An unknown
+    /// stored value falls back to `.fade`. Reduce Motion always cuts immediately regardless.
+    var switchTransitionStyle: SwitchTransitionStyle {
+        get { storedEnum(Self.switchTransitionStyleKey, default: Self.defaultSwitchTransitionStyle) }
+        set { store(newValue.rawValue, forKey: Self.switchTransitionStyleKey) }
+    }
+
+    /// How long the switch transition animation lasts, in seconds (`0.15`–`2.0`, default `0.2`).
+    /// A stored value outside the range, non-finite, or not a number (including a Boolean) reads
+    /// as the default; setting one is ignored.
+    var switchTransitionDuration: TimeInterval {
+        get {
+            guard let number = defaults.object(forKey: Self.switchTransitionDurationKey) as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID()
+            else { return Self.defaultSwitchTransitionDuration }
+            let value = number.doubleValue
+            guard value.isFinite, Self.switchTransitionDurationRange.contains(value) else {
+                return Self.defaultSwitchTransitionDuration
+            }
+            return value
+        }
+        set {
+            guard newValue.isFinite, Self.switchTransitionDurationRange.contains(newValue) else { return }
+            defaults.set(newValue, forKey: Self.switchTransitionDurationKey)
+            postChange()
+        }
+    }
+
     private(set) var appRules: [AppRule]
     /// Saved rules this build could not read (a newer build's action, say), as they were saved.
     /// They are written back with the others, so editing one rule never erases them.
@@ -395,7 +450,7 @@ final class PlaybackPreferences {
             Self.displaySleepKey, Self.otherAudioKey, Self.otherAudioVolumeKey, Self.otherAppInFrontKey, Self.desktopCoveredKey, Self.appRulesKey,
             Self.lowPowerModeKey, Self.thermalKey, Self.lowBatteryActionKey, Self.lowBatteryThresholdKey,
             Self.inactivityActionKey, Self.inactivityMinutesKey, Self.periodicDesktopPictureKey, Self.writeDesktopPictureKey, Self.playOnlyOnActiveDisplayKey,
-            Self.wallpapersMutedKey,
+            Self.wallpapersMutedKey, Self.switchTransitionStyleKey, Self.switchTransitionDurationKey,
         ] {
             defaults.removeObject(forKey: key)
         }
