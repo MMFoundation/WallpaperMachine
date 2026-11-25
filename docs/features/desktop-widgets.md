@@ -14,7 +14,7 @@ is arranged and styled by looking at it, and its forty-odd rows down one page ke
 long scroll from the picture it changed. Without a search the page is a **workspace**
 (`WidgetsWorkspace`):
 
-- a header with the section's name, **Ready-made** and **Add Widget**;
+- a header with the section's name, **Undo** and **Redo** buttons, **Ready-made** and **Add Widget**;
 - a large **canvas** of the previewed display (with a **Preview display** switcher above it
   whenever two or more displays are connected, so `.all`, `.main`, and per-display widgets can
   be inspected on any display, including secondary or portrait displays), as wide as the page
@@ -58,7 +58,8 @@ desktop, the one higher in the list covers the other (with two or more widgets, 
 so). Each row shows a drag handle, the widget's words now (the first line of a text, the
 month of a calendar), its kind and its display (and **Hidden** for one switched off), and two
 buttons: the eye shows or hides it on the desktop, and the trash removes it after asking once more
-in place (**Cancel** or **Remove**), since a removal cannot be undone; the editor then moves to
+in place (**Cancel** or **Remove**) to guard against misclicks (removal can also be undone); the
+editor then moves to
 the next widget. A click picks the widget the inspector edits, and the selected row is
 highlighted. Dragging a row's handle onto another row puts it in that row's place; a drop made
 from an order that has changed since is refused. The row's context menu has **Show on the
@@ -89,9 +90,21 @@ The selected widget is outlined above every layer, so it can be found under anot
 
 While a handle moves, its size ("128 pt") or turn ("15°") shows under the widget; the change is
 saved when it is let go, as a move is. Once the canvas has been clicked, the arrow keys move the
-selected widget one point of the display, ten with Shift, and **⌘D** duplicates the selected widget
-on the canvas. `Tab` remains reserved for macOS focus navigation, and bare Delete/Backspace is not
-bound to unconfirmed deletion.
+selected widget one point of the display, ten with Shift, **Delete** or **Forward Delete** removes
+the selected widget immediately (reversible with Undo), and in the workspace **⌘D** duplicates the
+selected widget while **⌘Z** / **⇧⌘Z** undo and redo Desktop Widgets edits. All workspace shortcuts
+and canvas **Delete** are strictly scoped to the full workspace (never active in Library, Settings
+search snippets, or while a text field has focus), and `Tab` remains reserved for macOS focus
+navigation.
+
+Undo and Redo keep up to 40 lightweight snapshots of the widgets and selection on the workspace's
+own stack (never in the window-wide `UndoManager`). Continuous interactions — dragging, resizing or
+rotating on the canvas, dragging an inspector slider (which previews live on the canvas before
+committing on release), picking colors in the color panel, typing in a widget text field, or
+repeating arrow-key nudges and slider steps — coalesce into one undo step; every discrete edit
+(adding a widget or preset, applying a style swatch, resetting effects, pasting a style,
+duplicating, reordering, toggling switches, picking menu values, or removing) records one undo step
+and clears the redo stack.
 
 A click on the wallpaper around the widgets, or Escape on the canvas, **selects nothing**, to see
 the widgets as the desktop will show them: no outline or handles, no highlighted layer, and no
@@ -101,8 +114,9 @@ ready-made widgets. Clicking a widget on the canvas or in the layers, or adding 
 again. The search results keep editing the widget chosen last. A widget's context menu on the canvas
 matches the layer row's menu: **Hide on the desktop** or **Show on the desktop**, **Duplicate**,
 **Copy Style**, **Paste Style**, **Bring to Front**, **Bring Forward**, **Send Backward**,
-**Send to Back** and **Remove** (which asks for confirmation before deleting). The canvas is hidden
-from VoiceOver: the rows of the Position and Text tabs do the same from the keyboard.
+**Send to Back** and **Remove** (which asks for confirmation before deleting, and can be undone).
+The canvas is hidden from VoiceOver: the rows of the Position and Text tabs do the same from the
+keyboard.
 
 | Kind | Shows | Changes |
 | --- | --- | --- |
@@ -180,7 +194,8 @@ The tabs of the inspector, and the groups they hold:
   - a text: **Text** (Option-Return starts a new line); a countdown: **Event** and **Count down
     to**, a date picker; a greeting: **Your name**;
   - sunrise and sunset: **Sun times** (**Next sunrise or sunset**, **Today’s sunrise and
-    sunset**) and **Time format**. The times are those the automatic wallpapers plan with
+    sunset**), a direct **Open Displays** link to `Settings › Displays › Sunrise and sunset`, and
+    **Time format**. The times are those the automatic wallpapers plan with
     (Settings › Displays › Sunrise and sunset): worked out from the coordinates typed or found
     there, or the two clock times fixed there. Without a place it says so; on a polar day or
     night it says there is none today.
@@ -368,10 +383,12 @@ and replaced by a **settled** one once the wallpaper has played a moment:
   and turning by the handles and nudging, the ready-made widgets' layout and limit, the
   inspector's tabs, the
   Display, Date format, Time zone and Calendar menus, multi-display preview switching, precedence
-  and default placement for new widgets, Copy/Paste Style and canvas removal confirmation, the
-  rows each kind offers and those waiting
-  on another choice, the preview's wallpaper frame, search and layout of the workspace in a
-  narrow, a middle and a wide column in every tab); `testSnapshotsOnRequest` writes offscreen
+  and default placement for new widgets, Copy/Paste Style and canvas removal confirmation, snapshot
+  restore validation, scoped Undo/Redo across discrete edits and coalesced continuous gestures,
+  scoped workspace shortcuts (`⌘Z`, `⇧⌘Z`, `⌘D`, and safe canvas `Delete` with text-field and
+  search-snippet guards), the Sunrise and sunset Displays shortcut, the rows each kind offers and
+  those waiting on another choice, the preview's wallpaper frame, search and layout of the
+  workspace in a narrow, a middle and a wide column in every tab); `testSnapshotsOnRequest` writes offscreen
   renders of the workspace to the folder in `WALLPAPER_MACHINE_WIDGET_SNAPSHOTS` (pass it as
   `TEST_RUNNER_WALLPAPER_MACHINE_WIDGET_SNAPSHOTS`) for a person to look at; `Tests/Unit/Panel/DesktopWidgetSnappingTests.swift` the snap lines, the pull and the
   guides.

@@ -498,27 +498,25 @@ struct WidgetEditor: View {
 
   private var sliderWidth: CGFloat { compact ? 196 : 160 }
 
-  /// A slider for one of a widget's numbers.
+  /// A slider for one of a widget's numbers: previews live on the canvas during a drag and commits
+  /// one undoable change on release.
   private func slider(
     _ control: String, saved: Int, range: ClosedRange<Int>, readout: @escaping (Int) -> String,
     change: @escaping (Int) -> DesktopWidgetChange
   ) -> some View {
-    let id = widget.id
-    return SettingsSliderControl(
-      key: DesktopWidgetsSettingsModel.key(id, control), saved: saved, range: range, width: sliderWidth,
-      waitsForMac: false, readout: readout
-    ) { try await controller.changeDesktopWidget(id, change($0)) }
+    WidgetSliderControl(
+      id: widget.id, control: control, saved: saved, range: range, width: sliderWidth,
+      readout: readout, change: change)
   }
 
   /// A position slider in whole percent of the display, 0 at the left or top edge.
   private func percentSlider(
     _ control: String, saved: Double, change: @escaping (Double) -> DesktopWidgetChange
   ) -> some View {
-    let id = widget.id
-    return SettingsSliderControl(
-      key: DesktopWidgetsSettingsModel.key(id, control), saved: Int((saved * 100).rounded()), range: 0...100,
-      width: sliderWidth, waitsForMac: false, readout: { L("\($0)%") }
-    ) { try await controller.changeDesktopWidget(id, change(Double($0) / 100)) }
+    WidgetSliderControl(
+      id: widget.id, control: control, saved: Int((saved * 100).rounded()), range: 0...100,
+      width: sliderWidth, readout: { L("\($0)%") }
+    ) { change(Double($0) / 100) }
   }
 
   private func menu<Value: Hashable>(
@@ -615,11 +613,11 @@ struct WidgetEditor: View {
         WidgetFontMenu(widget: widget)
       }
       row(Section.weight) {
-        SettingsSliderControl(
-          key: DesktopWidgetsSettingsModel.key(id, "weight"), saved: widget.weight / 100,
+        WidgetSliderControl(
+          id: id, control: "weight", saved: widget.weight / 100,
           range: (DesktopWidget.weightRange.lowerBound / 100)...(DesktopWidget.weightRange.upperBound / 100),
-          width: sliderWidth, waitsForMac: false, readout: { String($0 * 100) }
-        ) { try await controller.changeDesktopWidget(id, .weight($0 * 100)) }
+          width: sliderWidth, readout: { String($0 * 100) }
+        ) { .weight($0 * 100) }
       }
       row(Section.italic, inline: true) {
         WidgetSwitch(id: id, control: "italic", saved: widget.isItalic) { .italic($0) }
@@ -881,11 +879,33 @@ struct WidgetEditor: View {
             options: DesktopWidget.SunStyle.allCases.map { .init(value: $0, title: Section.title(of: $0)) }
           ) { .sunStyle($0) }
         }
+        if controller.settings.search.shows(Section.sunStyle) {
+          sunLocationRow
+        }
         row(Section.timeFormat, inline: true) { timeFormatMenu }
       case .battery, .calendar:
         EmptyView()
       }
     }
+  }
+
+  /// Direct jump to Settings › Displays where the Sunrise and sunset location is configured.
+  private var sunLocationRow: some View {
+    HStack(spacing: 8) {
+      Text("Sunrise and sunset location")
+        .font(.panel(.footnote))
+        .foregroundStyle(theme.surface.muted.color)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+      Button(SettingsSection.displays.openTitle) {
+        controller.widgetsSettings.openSunLocationSettings()
+      }
+      .buttonStyle(.panelSecondary(size: .small))
+      .fixedSize()
+      .accessibilityIdentifier("widgets.sun.open-displays")
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .accessibilityElement(children: .contain)
   }
 
   private var timeFormatMenu: some View {
@@ -929,7 +949,8 @@ struct WidgetLayerDrag: Codable, Transferable {
 
 /// One layer of the list: a handle to drag it to another place, what it says now, its kind and
 /// display, and buttons that show or hide it and remove it. A click picks it for the editor below;
-/// the selected layer is highlighted. Removing asks once more in place, since it cannot be undone.
+/// the selected layer is highlighted. Removing asks once more in place to guard against misclicks,
+/// and removal can be undone.
 struct WidgetLayerRow: View {
   let widget: DesktopWidget
   let screens: [DesktopWidgetController.Screen]
@@ -1136,8 +1157,91 @@ struct WidgetLayerRow: View {
   }
 }
 
+/// A widget slider that previews smoothly on the canvas while dragged and commits a single
+/// undoable change when released; keyboard and VoiceOver steps coalesce briefly on the same
+/// control.
+private struct WidgetSliderControl: View {
+  let id: String
+  let control: String
+  let saved: Int
+  let range: ClosedRange<Int>
+  let width: CGFloat
+  let readout: (Int) -> String
+  let change: (Int) -> DesktopWidgetChange
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+  @Environment(\.settingsRow) private var row
+  @State private var session = SettingsSliderSession(value: 0)
+
+  var body: some View {
+    let model = controller.widgetsSettings
+    let current = model.value(id, control, saved: saved)
+    let shown = session.isDragging ? session.value : current
+    HStack(spacing: 10) {
+      PanelSlider(
+        value: Double(shown), range: Double(range.lowerBound)...Double(range.upperBound), step: 1,
+        accessibilityLabel: row?.title ?? "", accessibilityValue: readout(shown),
+        events: PanelSliderEvents(
+          onDrag: { raw in
+            drag(to: raw, from: current, model: model)
+          },
+          onRelease: { raw in
+            drag(to: raw, from: current, model: model)
+            model.clearSliderPreview()
+            if let finalValue = session.end() {
+              let preSnapshot = model.takeActiveTransaction()
+              model.commit(
+                id, control, to: finalValue, policy: .latestWins, preSnapshot: preSnapshot, change)
+            } else {
+              model.cancelTransaction()
+            }
+          },
+          onStep: { raw in
+            let next = Int(raw.rounded())
+            if session.update(next, from: shown) {
+              model.commit(
+                id, control, to: next, policy: .latestWins,
+                coalesceKey: "slider.\(id).\(control)", change)
+            }
+          })
+      )
+      .frame(width: width)
+      .settingsAccessibilityHint(row?.hint)
+      Text(verbatim: readout(shown))
+        .font(.panel(.callout).monospacedDigit())
+        .foregroundStyle(theme.surface.muted.color)
+        .frame(minWidth: 62, alignment: .trailing)
+        .accessibilityHidden(true)
+    }
+    .onChange(of: id) {
+      if session.isDragging {
+        _ = session.end()
+        model.clearSliderPreview()
+        model.cancelTransaction()
+      }
+    }
+    .onDisappear {
+      if session.isDragging {
+        _ = session.end()
+        model.clearSliderPreview()
+        model.cancelTransaction()
+      }
+    }
+  }
+
+  private func drag(to value: Double, from current: Int, model: DesktopWidgetsSettingsModel) {
+    if !session.isDragging {
+      session.begin(at: current)
+      model.beginTransaction()
+    }
+    _ = session.update(Int(value.rounded()), from: session.value)
+    model.setSliderPreview(id: id, change: change(session.value))
+  }
+}
+
 /// The field for a widget's words: a text widget's text, a label, a countdown's event or a name.
-/// The desktop follows each keystroke; the field shows what was typed until it is saved.
+/// The desktop follows each keystroke; consecutive keystrokes coalesce into one undo step.
 private struct WidgetTextField: View {
   let id: String
   let saved: String
@@ -1150,7 +1254,11 @@ private struct WidgetTextField: View {
     let model = controller.widgetsSettings
     let text = Binding(
       get: { model.value(id, "text", saved: saved) },
-      set: { model.commit(id, "text", to: String($0.prefix(DesktopWidget.textLimit))) { .text($0) } })
+      set: {
+        model.commit(
+          id, "text", to: String($0.prefix(DesktopWidget.textLimit)), coalesceKey: "text.\(id)"
+        ) { .text($0) }
+      })
     Group {
       if multiline {
         TextField(noLabel, text: text, axis: .vertical).lineLimit(1...6)
@@ -1193,7 +1301,7 @@ private struct WidgetSwitch: View {
 }
 
 /// A colour well of a widget. The colour panel sends every colour the person passes over, and the
-/// desktop follows each one.
+/// desktop follows each one; continuous dragging in the panel coalesces into one undo step.
 private struct WidgetColorControl: View {
   let id: String
   let control: String
@@ -1209,7 +1317,7 @@ private struct WidgetColorControl: View {
         get: { Self.color(model.value(id, control, saved: saved)) },
         set: { color in
           guard let hex = DesktopWidget.hex(NSColor(color)) else { return }
-          model.commit(id, control, to: hex, change)
+          model.commit(id, control, to: hex, coalesceKey: "color.\(id).\(control)", change)
         }),
       supportsOpacity: false
     ) {

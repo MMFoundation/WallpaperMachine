@@ -15,7 +15,9 @@ import SwiftUI
 /// corner that resizes it about its middle and a knob that turns it (snapping to every 15°, again
 /// unless Command is held; a double click on the knob turns it back upright); its size or turn
 /// shows under it meanwhile. The arrow keys move the selected widget a point of the display, ten
-/// with Shift. A click on the wallpaper around the widgets, or Escape, selects nothing, so the
+/// with Shift; in the full workspace (`limit == nil`), Delete or Forward Delete removes the
+/// selected widget (reversible with Undo). A click on the wallpaper around the widgets, or Escape,
+/// selects nothing, so the
 /// picture shows the widgets as the desktop will, without the outline and handles. A hidden widget
 /// is drawn, faded, only while it is selected. The words are those of when the page was drawn: the
 /// preview runs no clock of its own and the frame does not move. The rows of the editor are the
@@ -88,19 +90,8 @@ struct DesktopWidgetPreview: View {
       controller.widgetsSettings.clearSelection()
       return .handled
     }
-    .background {
-      if let selected = model.widgets(on: screen).first(where: { $0.id == model.selectedID }) {
-        Button {
-          duplicate(selected.id)
-        } label: {
-          EmptyView()
-        }
-        .keyboardShortcut("d", modifiers: .command)
-        .disabled(model.widgets.count >= DesktopWidgetStore.limit)
-        .frame(width: 0, height: 0)
-        .opacity(0)
-        .accessibilityHidden(true)
-      }
+    .onKeyPress(keys: [.delete, .deleteForward]) { press in
+      deleteSelected(press)
     }
     .accessibilityHidden(true)
   }
@@ -356,6 +347,45 @@ struct DesktopWidgetPreview: View {
     guard offset != .zero else { return .ignored }
     model.nudge(widget, by: offset, on: screen)
     return .handled
+  }
+
+  /// Delete or Forward Delete on the focused workspace canvas (`limit == nil`) removes the
+  /// selected widget immediately; Undo (`⌘Z`) restores it. Never intercepts `Tab` or text editors.
+  private func deleteSelected(_ press: KeyPress) -> KeyPress.Result {
+    let model = controller.widgetsSettings
+    let selected = model.widgets(on: screen).first { $0.id == model.selectedID }
+    let isWorkspaceActive =
+      model.isWorkspaceActiveForShortcuts && NSApp.keyWindow?.attachedSheet == nil
+    guard
+      let id = Self.deletableWidgetID(
+        for: press.key, modifiers: press.modifiers, limit: limit,
+        firstResponder: NSApp.keyWindow?.firstResponder, selectedOnScreen: selected,
+        isWorkspaceActive: isWorkspaceActive)
+    else { return .ignored }
+    controller.launch(PanelActionCoordinator.key("removeDesktopWidget", id: id)) {
+      try await controller.removeDesktopWidget(id)
+    }
+    return .handled
+  }
+
+  /// Pure guard deciding whether a canvas Delete / Forward Delete press should remove the selected
+  /// widget: strictly in the active workspace (`limit == nil`, no popover/sheet/search/welcome),
+  /// without command/option/control modifiers, never while a text field has first responder, and
+  /// never for `Tab`.
+  @MainActor
+  static func deletableWidgetID(
+    for key: KeyEquivalent,
+    modifiers: EventModifiers,
+    limit: CGSize?,
+    firstResponder: NSResponder?,
+    selectedOnScreen: DesktopWidget?,
+    isWorkspaceActive: Bool = true
+  ) -> String? {
+    guard isWorkspaceActive, limit == nil else { return nil }
+    guard key == .delete || key == .deleteForward else { return nil }
+    guard modifiers.intersection([.command, .option, .control]).isEmpty else { return nil }
+    guard !WidgetsWorkspaceShortcuts.isTextResponder(firstResponder) else { return nil }
+    return selectedOnScreen?.id
   }
 
   // MARK: Guides

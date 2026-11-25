@@ -154,8 +154,11 @@ final class ShellModel {
     set { isReportedPopoverOpen = newValue }
   }
 
-  /// The popover an area presents from its own state: the library's Import.
-  private var isAreaPopoverOpen: Bool { controller.library.importAnchor != nil }
+  /// The popovers areas present from their own state: the library's Import and Desktop Widgets'
+  /// Ready-made picker.
+  private var isAreaPopoverOpen: Bool {
+    controller.library.importAnchor != nil || controller.widgetsSettings.isReadyMadePopoverOpen
+  }
 
   /// What the shell contributes to the support prompt's conditions: the offer waits while the guide
   /// or a popover is up and while a wallpaper is being switched or waiting to be. The presenter adds

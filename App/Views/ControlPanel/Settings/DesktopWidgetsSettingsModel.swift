@@ -34,6 +34,31 @@ enum DesktopWidgetPane: String, CaseIterable, Identifiable, Sendable {
 final class DesktopWidgetsSettingsModel {
   typealias Screen = DesktopWidgetController.Screen
 
+  /// A snapshot of the Desktop Widgets list and selection, stored by the workspace's scoped
+  /// Undo/Redo stack (`DesktopWidgetStore.limit` caps each snapshot at 24 lightweight structs).
+  struct HistorySnapshot: Equatable, Sendable {
+    var widgets: [DesktopWidget]
+    var selectedID: String?
+  }
+
+  /// An in-flight inspector slider drag preview applied to `shown(_:)` on the canvas without
+  /// writing to preferences on every tick.
+  struct SliderPreview: Equatable, Sendable {
+    var id: String
+    var change: DesktopWidgetChange
+  }
+
+  /// Maximum number of undo steps kept in memory for the Desktop Widgets workspace.
+  static let historyLimit = 40
+  /// Consecutive updates on the same continuous control within this interval coalesce into one
+  /// undo step (color wheel dragging, text typing, arrow-key nudges, and slider key stepping).
+  static let coalesceWindow: TimeInterval = 0.8
+
+  private struct CoalesceState {
+    var key: String
+    var lastEdit: Date
+  }
+
   /// A widget being dragged on the preview, where the pointer has taken it so far, and the guides
   /// it snapped to there; or one being resized or turned by its handles, with its size or turn so
   /// far.
@@ -73,16 +98,214 @@ final class DesktopWidgetsSettingsModel {
   private(set) var previewDisplayID: UInt32?
   /// Visual styling copied with Copy Style, ready to paste onto another widget.
   private(set) var copiedStyle: DesktopWidget.Style?
+  /// Scoped Undo/Redo snapshots; never registered in the window-wide `UndoManager`.
+  private(set) var undoStack: [HistorySnapshot] = []
+  private(set) var redoStack: [HistorySnapshot] = []
+  /// Live preview of a slider being dragged in the inspector; nil when none is dragging.
+  private(set) var sliderPreview: SliderPreview?
+  /// True while the Ready-made widgets popover is presented; included in `ShellModel.isPopoverOpen`
+  /// so workspace shortcuts and canvas Delete do not fire behind it.
+  var isReadyMadePopoverOpen = false
   /// The drag in progress on the preview; nil when none is.
   var drag: Drag?
   @ObservationIgnored private var dragStart: DragStart?
+  @ObservationIgnored private var activeTransaction: HistorySnapshot?
+  @ObservationIgnored private var lastCoalesce: CoalesceState?
+  @ObservationIgnored private var isRestoringHistory = false
+  /// Clock seam so unit tests verify coalescing windows deterministically.
+  @ObservationIgnored var now: () -> Date = Date.init
   @ObservationIgnored private let formatters = DesktopWidgetRendering.Formatters()
 
   init(controller: PanelController) { self.controller = controller }
 
   var widgets: [DesktopWidget] { controller.desktopWidgets.widgets }
 
+  var canUndo: Bool { !undoStack.isEmpty }
+  var canRedo: Bool { !redoStack.isEmpty }
   var canPasteStyle: Bool { copiedStyle != nil }
+
+  /// True while Settings › Desktop Widgets is the active foreground workspace, with no Settings
+  /// search, welcome guide, or popover covering it.
+  var isWorkspaceActiveForShortcuts: Bool {
+    controller.navigation.selection == .settings
+      && controller.settings.selectedSection == .widgets
+      && !controller.settings.search.isActive
+      && !controller.shell.isWelcomeOpen
+      && !controller.shell.isPopoverOpen
+  }
+
+  /// Opens Settings › Displays where the Sunrise and sunset location is configured.
+  @discardableResult
+  func openSunLocationSettings() -> Task<Void, Never> {
+    controller.launch(PanelActionCoordinator.key("openSettings")) { [controller] in
+      try await controller.openSettings(.displays)
+    }
+  }
+
+  /// The selected widget's id when `⌘D` in the workspace should duplicate it: under the store
+  /// limit and visible on the currently previewed display.
+  func duplicableSelectedID() -> String? {
+    guard widgets.count < DesktopWidgetStore.limit,
+      let selectedID,
+      let screen = previewScreen(among: screens()),
+      widgets(on: screen).contains(where: { $0.id == selectedID })
+    else { return nil }
+    return selectedID
+  }
+
+  // MARK: Scoped Undo / Redo
+
+  /// Captures the current widgets and selection for Undo/Redo.
+  func currentSnapshot() -> HistorySnapshot {
+    HistorySnapshot(widgets: widgets, selectedID: selectedID)
+  }
+
+  /// Begins a coalesced gesture transaction (canvas drag, handle resize/rotate, or slider drag),
+  /// capturing one pre-gesture snapshot if none is open yet.
+  func beginTransaction() {
+    guard activeTransaction == nil else { return }
+    activeTransaction = currentSnapshot()
+  }
+
+  /// Finishes an open gesture transaction, pushing one undo step (and clearing redo) only if the
+  /// stored widgets actually changed from the pre-gesture snapshot.
+  func endTransaction() {
+    guard let before = activeTransaction else { return }
+    activeTransaction = nil
+    guard widgets != before.widgets else { return }
+    pushUndo(before)
+    redoStack.removeAll()
+    lastCoalesce = nil
+  }
+
+  /// Discards an open gesture transaction without recording an undo step.
+  func cancelTransaction() {
+    activeTransaction = nil
+  }
+
+  /// Pops and returns any open gesture transaction's pre-gesture snapshot so an async commit can
+  /// record it atomically without leaving `activeTransaction` open across suspension points.
+  func takeActiveTransaction() -> HistorySnapshot? {
+    defer { activeTransaction = nil }
+    return activeTransaction
+  }
+
+  /// Runs a Desktop Widgets store mutation and records it in the scoped Undo stack.
+  ///
+  /// - When a gesture transaction is open (`activeTransaction != nil`), intermediate writes are
+  ///   suppressed until `endTransaction()` commits the single pre-gesture snapshot.
+  /// - When `coalesceKey` matches the previous edit within `coalesceWindow`, the top undo entry is
+  ///   kept instead of pushing another snapshot (or popped if the edit returned to that snapshot).
+  /// - A mutation that throws or leaves `widgets` unchanged records nothing and leaves `redoStack`
+  ///   intact.
+  func recordMutation(
+    coalesceKey: String? = nil,
+    preSnapshot: HistorySnapshot? = nil,
+    _ mutate: () throws -> Void
+  ) throws {
+    if isRestoringHistory || activeTransaction != nil {
+      try mutate()
+      return
+    }
+    let before = preSnapshot ?? currentSnapshot()
+    try mutate()
+    guard widgets != before.widgets else { return }
+    let timestamp = now()
+    if let coalesceKey, let previous = lastCoalesce, previous.key == coalesceKey,
+      timestamp.timeIntervalSince(previous.lastEdit) <= Self.coalesceWindow,
+      let top = undoStack.last
+    {
+      redoStack.removeAll()
+      if top.widgets == widgets {
+        undoStack.removeLast()
+        lastCoalesce = nil
+      } else {
+        lastCoalesce = CoalesceState(key: coalesceKey, lastEdit: timestamp)
+      }
+      return
+    }
+    pushUndo(before)
+    redoStack.removeAll()
+    lastCoalesce = coalesceKey.map { CoalesceState(key: $0, lastEdit: timestamp) }
+  }
+
+  /// Restores the most recent undo snapshot and pushes the current state onto the redo stack.
+  func undo() throws {
+    cancelPendingInteraction()
+    guard let target = undoStack.popLast() else { return }
+    let current = currentSnapshot()
+    isRestoringHistory = true
+    defer { isRestoringHistory = false }
+    do {
+      try controller.desktopWidgets.restore(target.widgets)
+    } catch {
+      undoStack.append(target)
+      throw error
+    }
+    pushRedo(current)
+    lastCoalesce = nil
+    restoreSelection(target.selectedID)
+  }
+
+  /// Reapplies the most recently undone snapshot and pushes the current state onto the undo stack.
+  func redo() throws {
+    cancelPendingInteraction()
+    guard let target = redoStack.popLast() else { return }
+    let current = currentSnapshot()
+    isRestoringHistory = true
+    defer { isRestoringHistory = false }
+    do {
+      try controller.desktopWidgets.restore(target.widgets)
+    } catch {
+      redoStack.append(target)
+      throw error
+    }
+    pushUndo(current)
+    lastCoalesce = nil
+    restoreSelection(target.selectedID)
+  }
+
+  /// Updates the live in-memory canvas preview for a slider being dragged in the inspector.
+  func setSliderPreview(id: String, change: DesktopWidgetChange) {
+    sliderPreview = SliderPreview(id: id, change: change)
+  }
+
+  /// Clears any active inspector slider preview.
+  func clearSliderPreview() {
+    sliderPreview = nil
+  }
+
+  private func cancelPendingInteraction() {
+    drag = nil
+    dragStart = nil
+    sliderPreview = nil
+    activeTransaction = nil
+  }
+
+  private func pushUndo(_ snapshot: HistorySnapshot) {
+    undoStack.append(snapshot)
+    if undoStack.count > Self.historyLimit {
+      undoStack.removeFirst(undoStack.count - Self.historyLimit)
+    }
+  }
+
+  private func pushRedo(_ snapshot: HistorySnapshot) {
+    redoStack.append(snapshot)
+    if redoStack.count > Self.historyLimit {
+      redoStack.removeFirst(redoStack.count - Self.historyLimit)
+    }
+  }
+
+  private func restoreSelection(_ id: String?) {
+    if let id, widgets.contains(where: { $0.id == id }) {
+      select(id)
+    } else if widgets.isEmpty {
+      chosenID = nil
+      isSelectionCleared = false
+    } else {
+      isSelectionCleared = true
+    }
+  }
 
   /// Copies the visual styling of `widget` without its kind, content, geometry or display placement.
   func copyStyle(of widget: DesktopWidget) {
@@ -144,7 +367,8 @@ final class DesktopWidgetsSettingsModel {
   }
 
   /// `widget` where the preview draws it: where a drag has it, at the size and turn its handles
-  /// have it, or as it was let go while that is being saved.
+  /// have it, with any in-flight inspector slider preview, or as it was let go while that is being
+  /// saved.
   func shown(_ widget: DesktopWidget) -> DesktopWidget {
     var moved = widget
     moved.size = value(widget.id, "size", saved: widget.size)
@@ -158,6 +382,10 @@ final class DesktopWidgetsSettingsModel {
       let position = value(widget.id, "position", saved: [widget.x, widget.y])
       moved.x = position[0]
       moved.y = position[1]
+    }
+    if let sliderPreview, sliderPreview.id == widget.id {
+      sliderPreview.change.apply(to: &moved)
+      moved = moved.clamped()
     }
     return moved
   }
@@ -488,10 +716,13 @@ final class DesktopWidgetsSettingsModel {
   @discardableResult
   func commit<Value: Hashable>(
     _ id: String, _ control: String, to value: Value, policy: PanelActionCoordinator.Policy = .latestWins,
+    coalesceKey: String? = nil,
+    preSnapshot: HistorySnapshot? = nil,
     _ change: @escaping (Value) -> DesktopWidgetChange
   ) -> Task<Void, Never>? {
     controller.settings.commit(Self.key(id, control), to: value, policy: policy) { [controller] value in
-      try await controller.changeDesktopWidget(id, change(value))
+      try await controller.changeDesktopWidget(
+        id, change(value), coalesceKey: coalesceKey, preSnapshot: preSnapshot)
     }
   }
 
@@ -501,21 +732,31 @@ final class DesktopWidgetsSettingsModel {
   }
 
   /// Ends a drag on the preview where it was let go, and saves that position, or the size or turn
-  /// a handle gave it. The draft shows it until it is saved, so the widget does not jump back
-  /// meanwhile.
+  /// a handle gave it, as a single undoable step. The draft shows it until it is saved, so the
+  /// widget does not jump back meanwhile.
   @discardableResult
   func endDrag() -> Task<Void, Never>? {
     dragStart = nil
-    guard let drag else { return nil }
+    guard let drag else {
+      cancelTransaction()
+      return nil
+    }
     self.drag = nil
-    if let size = drag.size { return commit(drag.id, "size", to: size) { .size($0) } }
-    if let rotation = drag.rotation { return commit(drag.id, "rotation", to: rotation) { .rotation($0) } }
-    return commit(drag.id, "position", to: [drag.x, drag.y]) { .position(x: $0[0], y: $0[1]) }
+    let preSnapshot = takeActiveTransaction()
+    if let size = drag.size {
+      return commit(drag.id, "size", to: size, preSnapshot: preSnapshot) { .size($0) }
+    }
+    if let rotation = drag.rotation {
+      return commit(drag.id, "rotation", to: rotation, preSnapshot: preSnapshot) { .rotation($0) }
+    }
+    return commit(drag.id, "position", to: [drag.x, drag.y], preSnapshot: preSnapshot) {
+      .position(x: $0[0], y: $0[1])
+    }
   }
 
   // MARK: Resizing and turning
 
-  /// Keeps what a handle's drag starts from, and selects the widget.
+  /// Keeps what a handle's drag starts from, selects the widget, and opens one undo transaction.
   private func beginTransform(_ widget: DesktopWidget) -> DragStart {
     if let start = dragStart, start.id == widget.id, drag?.id == widget.id { return start }
     let shown = shown(widget)
@@ -523,6 +764,7 @@ final class DesktopWidgetsSettingsModel {
       id: widget.id, x: shown.x, y: shown.y, size: shown.size, rotation: shown.rotation, others: [])
     dragStart = start
     if selectedID != widget.id { select(widget.id) }
+    beginTransaction()
     return start
   }
 
@@ -543,6 +785,7 @@ final class DesktopWidgetsSettingsModel {
   }
 
   /// Moves a widget by `points` of its display, as an arrow key on the canvas does, and saves it.
+  /// Consecutive arrow nudges on the same widget coalesce into one undo step.
   @discardableResult
   func nudge(_ widget: DesktopWidget, by points: CGSize, on screen: Screen) -> Task<Void, Never>? {
     let display = screen.frame.size
@@ -551,7 +794,9 @@ final class DesktopWidgetsSettingsModel {
     let x = min(max(shown.x + points.width / display.width, 0), 1)
     let y = min(max(shown.y + points.height / display.height, 0), 1)
     if selectedID != widget.id { select(widget.id) }
-    return commit(widget.id, "position", to: [x, y]) { .position(x: $0[0], y: $0[1]) }
+    return commit(widget.id, "position", to: [x, y], coalesceKey: "nudge.\(widget.id)") {
+      .position(x: $0[0], y: $0[1])
+    }
   }
 
   /// A size `factor` times `start`, in whole points inside the size's range.
@@ -634,6 +879,7 @@ final class DesktopWidgetsSettingsModel {
       dragStart = DragStart(
         id: widget.id, x: start.x, y: start.y, size: start.size, rotation: start.rotation, others: others)
       if selectedID != widget.id { select(widget.id) }
+      beginTransaction()
     }
     guard let start = dragStart else { return }
     var moved = widget
@@ -685,5 +931,50 @@ final class DesktopWidgetsSettingsModel {
     let extent = horizontally ? screen.frame.width : screen.frame.height
     let position = horizontally ? widget.x : widget.y
     return abs(position - centered(widget, on: screen, horizontally: horizontally)) * extent < 1
+  }
+}
+
+/// Pure keyboard-scope rules for the Desktop Widgets workspace (`⌘Z`, `⇧⌘Z`, `⌘D`) so shortcuts
+/// stay strictly inside the workspace (never in Library, Settings search, or text editors).
+enum WidgetsWorkspaceShortcuts {
+  enum Action: Equatable, Sendable {
+    case undo
+    case redo
+    case duplicate
+  }
+
+  /// True while `responder` is a text editor or sits inside one, so typing shortcuts (`⌘Z`,
+  /// `⇧⌘Z`, `Delete`, `Backspace`) stay with the field editor.
+  @MainActor
+  static func isTextResponder(_ responder: NSResponder?) -> Bool {
+    if responder is NSText || responder is NSTextField || responder is NSSearchField {
+      return true
+    }
+    var current = responder as? NSView
+    while let view = current {
+      if view is NSText || view is NSTextField || view is NSSearchField {
+        return true
+      }
+      current = view.superview
+    }
+    return false
+  }
+
+  /// Resolves workspace-scoped command shortcuts (`⌘Z`, `⇧⌘Z`, `⌘D`). Never matches `Tab` or
+  /// events while a text field has first responder or the workspace is inactive.
+  @MainActor
+  static func commandAction(
+    charactersIgnoringModifiers: String?,
+    modifiers: NSEvent.ModifierFlags,
+    firstResponder: NSResponder?,
+    isWorkspaceActive: Bool
+  ) -> Action? {
+    guard isWorkspaceActive, !isTextResponder(firstResponder) else { return nil }
+    let flags = modifiers.intersection([.command, .shift, .option, .control])
+    let key = charactersIgnoringModifiers?.lowercased() ?? ""
+    if flags == .command, key == "z" { return .undo }
+    if flags == [.command, .shift], key == "z" { return .redo }
+    if flags == .command, key == "d" { return .duplicate }
+    return nil
   }
 }

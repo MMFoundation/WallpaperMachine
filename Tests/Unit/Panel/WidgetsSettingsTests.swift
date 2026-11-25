@@ -683,6 +683,472 @@ final class WidgetsSettingsTests: PanelTestCase {
       panel.dialogs.confirmAnswer = true
       try await controller.confirmAndRemoveDesktopWidget(targetID)
       XCTAssertFalse(model.widgets.contains { $0.id == targetID }, "Confirm removes the widget")
+      try await controller.undoDesktopWidgets()
+      XCTAssertTrue(model.widgets.contains { $0.id == targetID }, "Confirmed removal can still be undone")
+    }
+  }
+
+  /// `DesktopWidgetStore.restore(_:)` validates limit, uniqueness and field ranges, persists, and
+  /// publishes `didChangeNotification` only when the list actually changes.
+  func testDesktopWidgetStoreRestorePersistsValidatesAndPostsOnce() throws {
+    let defaults = try TemporaryDefaults.make(for: self).defaults
+    let center = NotificationCenter()
+    var notifications = 0
+    let token = center.addObserver(
+      forName: DesktopWidgetStore.didChangeNotification, object: nil, queue: nil
+    ) { _ in notifications += 1 }
+    defer { center.removeObserver(token) }
+
+    let store = DesktopWidgetStore(defaults: defaults, center: center)
+    let first = try store.add(.time)
+    let second = try store.add(.date)
+    let snapshot = store.widgets
+    XCTAssertEqual(notifications, 2)
+
+    try store.remove(first.id)
+    XCTAssertEqual(store.widgets.map(\.id), [second.id])
+    XCTAssertEqual(notifications, 3)
+
+    try store.restore(snapshot)
+    XCTAssertEqual(store.widgets, snapshot)
+    XCTAssertEqual(notifications, 4)
+    XCTAssertEqual(DesktopWidgetStore(defaults: defaults, center: center).widgets, snapshot, "persisted")
+
+    try store.restore(snapshot)
+    XCTAssertEqual(notifications, 4, "restoring an identical snapshot is a no-op")
+
+    let tooMany = (0...DesktopWidgetStore.limit).map { _ in DesktopWidget(kind: .time) }
+    XCTAssertThrowsError(try store.restore(tooMany)) { error in
+      XCTAssertEqual(error as? DesktopWidgetError, .tooMany)
+    }
+    var duplicate = first
+    duplicate.id = second.id
+    XCTAssertThrowsError(try store.restore([second, duplicate])) { error in
+      XCTAssertEqual(error as? DesktopWidgetError, .invalid)
+    }
+    var invalid = first
+    invalid.opacity = 0
+    XCTAssertThrowsError(try store.restore([invalid])) { error in
+      XCTAssertEqual(error as? DesktopWidgetError, .invalid)
+    }
+    XCTAssertEqual(store.widgets, snapshot, "rejected restores leave saved widgets untouched")
+  }
+
+  /// Scoped Undo/Redo covers discrete edits (add, preset, style swatch, reset effects, paste
+  /// style, duplicate, reorder, toggle, picker, time zone, remove), clears redo on any new edit,
+  /// ignores no-ops and failures, and stays bounded at `historyLimit`.
+  func testScopedUndoAndRedoCoverDiscreteEditsClearRedoAndRespectHistoryLimit() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop] in [laptop] }
+      let model = controller.widgetsSettings
+      XCTAssertFalse(model.canUndo)
+      XCTAssertFalse(model.canRedo)
+
+      // Add + Undo + Redo.
+      try await controller.addDesktopWidget(.time)
+      let clockID = try XCTUnwrap(model.selectedID)
+      XCTAssertTrue(model.canUndo)
+      XCTAssertFalse(model.canRedo)
+
+      try await controller.undoDesktopWidgets()
+      XCTAssertTrue(model.widgets.isEmpty)
+      XCTAssertNil(model.selectedID)
+      XCTAssertFalse(model.canUndo)
+      XCTAssertTrue(model.canRedo)
+
+      try await controller.redoDesktopWidgets()
+      XCTAssertEqual(model.widgets.map(\.id), [clockID])
+      XCTAssertEqual(model.selectedID, clockID)
+      XCTAssertTrue(model.canUndo)
+      XCTAssertFalse(model.canRedo)
+
+      // Multi-widget preset adds atomically in one undo step.
+      try await controller.addDesktopWidgetPreset(.clockAndDate)
+      XCTAssertEqual(model.widgets.count, 3)
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.widgets.map(\.id), [clockID], "preset undo removes every widget of the preset")
+      XCTAssertEqual(model.selectedID, clockID)
+
+      // Style swatch -> Reset effects -> Undo/Redo.
+      let beforeStyle = try XCTUnwrap(model.selected)
+      try await controller.changeDesktopWidget(clockID, .style(.neon))
+      let neon = try XCTUnwrap(model.selected)
+      XCTAssertEqual(neon.glowSize, 18)
+      XCTAssertFalse(neon.hasShadow)
+
+      try await controller.changeDesktopWidget(clockID, .resetEffects)
+      XCTAssertEqual(model.selected?.glowSize, 0)
+      XCTAssertTrue(model.selected?.hasShadow ?? false)
+
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected, neon, "undo reset effects restores neon")
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected, beforeStyle, "undo style swatch restores original look")
+      try await controller.redoDesktopWidgets()
+      XCTAssertEqual(model.selected, neon, "redo reapplies style swatch")
+
+      // Paste Style onto a second widget, reorder, toggle switch, picker, and time zone.
+      try await controller.addDesktopWidget(.date)
+      let dateID = try XCTUnwrap(model.selectedID)
+      model.copyStyle(of: neon)
+      await model.pasteStyle(to: dateID)?.value
+      XCTAssertEqual(model.widgets.first { $0.id == dateID }?.glowSize, 18)
+
+      let orderBeforeMove = model.widgets.map(\.id)
+      try await controller.moveDesktopWidget(dateID, to: 1, expected: orderBeforeMove)
+      XCTAssertEqual(model.widgets.map(\.id), [clockID, dateID])
+
+      try await controller.changeDesktopWidget(dateID, .shown(false))
+      try await controller.changeDesktopWidget(dateID, .background(.capsule))
+      try await controller.setDesktopWidgetTimeZone(dateID, "Asia/Tokyo", label: "Tokyo")
+      XCTAssertEqual(model.widgets.first { $0.id == dateID }?.timeZone, "Asia/Tokyo")
+      XCTAssertEqual(model.widgets.first { $0.id == dateID }?.text, "Tokyo")
+
+      // Undo back through time zone -> background picker -> visibility switch -> reorder -> paste style.
+      try await controller.undoDesktopWidgets()
+      XCTAssertNil(model.widgets.first { $0.id == dateID }?.timeZone)
+      XCTAssertEqual(model.widgets.first { $0.id == dateID }?.text, "")
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.widgets.first { $0.id == dateID }?.background, .off)
+      try await controller.undoDesktopWidgets()
+      XCTAssertTrue(model.widgets.first { $0.id == dateID }?.isShown ?? false)
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.widgets.map(\.id), orderBeforeMove, "undo restores previous layer order")
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.widgets.first { $0.id == dateID }?.glowSize, 0, "undo reverses Paste Style")
+
+      // A stale-order move is a no-op and must not push onto undo or clear redo.
+      let undoCountBeforeNoOp = model.undoStack.count
+      let redoCountBeforeNoOp = model.redoStack.count
+      XCTAssertGreaterThan(redoCountBeforeNoOp, 0)
+      try await controller.moveDesktopWidget(dateID, to: 1, expected: ["stale"])
+      XCTAssertEqual(model.undoStack.count, undoCountBeforeNoOp)
+      XCTAssertEqual(model.redoStack.count, redoCountBeforeNoOp)
+
+      // A new discrete mutation clears the redo stack.
+      try await controller.duplicateDesktopWidget(dateID)
+      let dupID = try XCTUnwrap(model.selectedID)
+      XCTAssertFalse(model.canRedo, "any new mutation clears the redo stack")
+      try await controller.undoDesktopWidgets()
+      XCTAssertFalse(model.widgets.contains { $0.id == dupID })
+      XCTAssertEqual(model.selectedID, dateID)
+
+      // History stays bounded at `historyLimit`.
+      for step in 1...(DesktopWidgetsSettingsModel.historyLimit + 6) {
+        try await controller.changeDesktopWidget(clockID, .size(40 + step))
+      }
+      XCTAssertEqual(model.undoStack.count, DesktopWidgetsSettingsModel.historyLimit)
+    }
+  }
+
+  /// Continuous gestures (canvas drag, handle resize, handle rotate, slider drag with preview) and
+  /// rapid continuous controls (color wheel, text typing, arrow nudge, slider key steps) each
+  /// coalesce into one undoable step.
+  func testContinuousGesturesAndControlsCoalesceIntoOneUndoStep() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop] in [laptop] }
+      let model = controller.widgetsSettings
+      var clock = Date(timeIntervalSince1970: 1_000)
+      model.now = { clock }
+
+      try await controller.addDesktopWidget(.text)
+      let id = try XCTUnwrap(model.selectedID)
+      let startWidget = try XCTUnwrap(model.selected)
+      let canvas = CGSize(width: 480, height: 480 * laptop.frame.height / laptop.frame.width)
+      let scale = canvas.width / laptop.frame.width
+
+      // 1. Canvas drag across many pointer ticks -> 1 undo step.
+      let beforeDragCount = model.undoStack.count
+      for step in 1...10 {
+        model.drag(
+          startWidget, by: CGSize(width: CGFloat(step * 4), height: CGFloat(step * 2)),
+          in: canvas, scale: scale, on: laptop, snaps: false)
+      }
+      XCTAssertEqual(model.undoStack.count, beforeDragCount, "nothing pushed mid-drag")
+      await model.endDrag()?.value
+      XCTAssertEqual(model.undoStack.count, beforeDragCount + 1, "entire drag coalesces into 1 undo step")
+      let afterDrag = try XCTUnwrap(model.selected)
+      XCTAssertNotEqual(afterDrag.x, startWidget.x)
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected?.x ?? -1, startWidget.x, accuracy: 1e-9)
+      XCTAssertEqual(model.selected?.y ?? -1, startWidget.y, accuracy: 1e-9)
+
+      // Dragging back to the exact start pushes nothing and keeps redo intact.
+      let redoBeforeNoOpDrag = model.redoStack.count
+      XCTAssertEqual(redoBeforeNoOpDrag, 1)
+      model.drag(startWidget, by: CGSize(width: 40, height: 0), in: canvas, scale: scale, on: laptop, snaps: false)
+      model.drag(startWidget, by: .zero, in: canvas, scale: scale, on: laptop, snaps: false)
+      await model.endDrag()?.value
+      XCTAssertEqual(model.undoStack.count, beforeDragCount, "zero-delta drag pushes nothing")
+      XCTAssertEqual(model.redoStack.count, redoBeforeNoOpDrag)
+
+      // 2. Corner handle resize -> 1 undo step.
+      let beforeResize = try XCTUnwrap(model.selected)
+      let beforeResizeCount = model.undoStack.count
+      model.resize(beforeResize, by: 1.1)
+      model.resize(beforeResize, by: 1.3)
+      model.resize(beforeResize, by: 1.5)
+      await model.endDrag()?.value
+      XCTAssertEqual(model.undoStack.count, beforeResizeCount + 1)
+      XCTAssertEqual(model.selected?.size, DesktopWidgetsSettingsModel.size(beforeResize.size, scaledBy: 1.5))
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected?.size, beforeResize.size)
+
+      // 3. Rotation handle -> 1 undo step.
+      let beforeRotate = try XCTUnwrap(model.selected)
+      let beforeRotateCount = model.undoStack.count
+      model.rotate(beforeRotate, by: 15, snaps: false)
+      model.rotate(beforeRotate, by: 30, snaps: false)
+      model.rotate(beforeRotate, by: 45, snaps: false)
+      await model.endDrag()?.value
+      XCTAssertEqual(model.undoStack.count, beforeRotateCount + 1)
+      XCTAssertEqual(model.selected?.rotation, 45)
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected?.rotation, beforeRotate.rotation)
+
+      // 4. Continuous slider drag transaction + live preview -> 1 undo step.
+      let beforeSliderCount = model.undoStack.count
+      model.beginTransaction()
+      model.setSliderPreview(id: id, change: .opacity(55))
+      XCTAssertEqual(model.shown(try XCTUnwrap(model.selected)).opacity, 55, "live preview updates shown widget")
+      XCTAssertEqual(model.selected?.opacity, 100, "preview does not mutate store")
+      try await controller.changeDesktopWidget(id, .opacity(80))
+      try await controller.changeDesktopWidget(id, .opacity(60))
+      try await controller.changeDesktopWidget(id, .opacity(40))
+      XCTAssertEqual(model.undoStack.count, beforeSliderCount, "transaction suppresses intermediate snapshots")
+      model.clearSliderPreview()
+      model.endTransaction()
+      XCTAssertEqual(model.undoStack.count, beforeSliderCount + 1)
+      XCTAssertEqual(model.selected?.opacity, 40)
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.selected?.opacity, 100)
+      try await controller.redoDesktopWidgets()
+      XCTAssertEqual(model.selected?.opacity, 40)
+
+      // 5. Continuous color wheel, text typing, arrow nudges, and slider key stepping coalesce
+      // within the coalesce window and start a new step once the window elapses.
+      let beforeColorCount = model.undoStack.count
+      await model.commit(id, "color", to: "#FF1100", coalesceKey: "color.\(id).color") { .color($0) }?.value
+      clock = clock.addingTimeInterval(0.15)
+      await model.commit(id, "color", to: "#FF4400", coalesceKey: "color.\(id).color") { .color($0) }?.value
+      clock = clock.addingTimeInterval(0.15)
+      await model.commit(id, "color", to: "#FF8800", coalesceKey: "color.\(id).color") { .color($0) }?.value
+      XCTAssertEqual(model.undoStack.count, beforeColorCount + 1, "continuous color picking is 1 undo step")
+      clock = clock.addingTimeInterval(DesktopWidgetsSettingsModel.coalesceWindow + 0.5)
+      await model.commit(id, "color", to: "#00AAFF", coalesceKey: "color.\(id).color") { .color($0) }?.value
+      XCTAssertEqual(model.undoStack.count, beforeColorCount + 2, "edit after pause starts a new undo step")
+
+      let beforeTextCount = model.undoStack.count
+      for partial in ["H", "He", "Hel", "Hello"] {
+        await model.commit(id, "text", to: partial, coalesceKey: "text.\(id)") { .text($0) }?.value
+        clock = clock.addingTimeInterval(0.1)
+      }
+      XCTAssertEqual(model.undoStack.count, beforeTextCount + 1, "typing coalesces into 1 undo step")
+
+      let beforeNudgeCount = model.undoStack.count
+      for _ in 0..<4 {
+        let current = try XCTUnwrap(model.selected)
+        await model.nudge(current, by: CGSize(width: 1, height: 0), on: laptop)?.value
+        clock = clock.addingTimeInterval(0.1)
+      }
+      XCTAssertEqual(model.undoStack.count, beforeNudgeCount + 1, "rapid arrow nudges coalesce into 1 undo step")
+
+      let beforeStepCount = model.undoStack.count
+      for blur in [8, 10, 12, 14] {
+        await model.commit(id, "shadowBlur", to: blur, coalesceKey: "slider.\(id).shadowBlur") { .shadowBlur($0) }?.value
+        clock = clock.addingTimeInterval(0.1)
+      }
+      XCTAssertEqual(model.undoStack.count, beforeStepCount + 1, "rapid slider steps coalesce into 1 undo step")
+    }
+  }
+
+  /// Workspace shortcuts (`⌘Z`, `⇧⌘Z`, `⌘D`) and canvas `Delete` stay strictly scoped to the
+  /// active Desktop Widgets workspace (`limit == nil`), never leak to Library/search, never hijack
+  /// text editors or `Tab`, and canvas `Delete` is immediately reversible with Undo.
+  func testScopedShortcutsAndSafeCanvasDeleteRespectWorkspaceAndTextFocus() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      controller.desktopWidgetScreens = { [laptop, external] in [laptop, external] }
+      let model = controller.widgetsSettings
+
+      // Scoped command shortcuts.
+      let plainView = NSView()
+      XCTAssertEqual(
+        WidgetsWorkspaceShortcuts.commandAction(
+          charactersIgnoringModifiers: "z", modifiers: .command, firstResponder: plainView, isWorkspaceActive: true),
+        .undo)
+      XCTAssertEqual(
+        WidgetsWorkspaceShortcuts.commandAction(
+          charactersIgnoringModifiers: "Z", modifiers: [.command, .shift], firstResponder: plainView,
+          isWorkspaceActive: true),
+        .redo)
+      XCTAssertEqual(
+        WidgetsWorkspaceShortcuts.commandAction(
+          charactersIgnoringModifiers: "d", modifiers: .command, firstResponder: plainView, isWorkspaceActive: true),
+        .duplicate)
+      XCTAssertNil(
+        WidgetsWorkspaceShortcuts.commandAction(
+          charactersIgnoringModifiers: "\t", modifiers: [], firstResponder: plainView, isWorkspaceActive: true),
+        "Tab is never intercepted")
+      XCTAssertNil(
+        WidgetsWorkspaceShortcuts.commandAction(
+          charactersIgnoringModifiers: "z", modifiers: [.command, .option], firstResponder: plainView,
+          isWorkspaceActive: true))
+
+      // Inactive workspace (e.g. Library or Settings search) never handles widget shortcuts.
+      XCTAssertNil(
+        WidgetsWorkspaceShortcuts.commandAction(
+          charactersIgnoringModifiers: "z", modifiers: .command, firstResponder: plainView, isWorkspaceActive: false))
+      XCTAssertNil(
+        WidgetsWorkspaceShortcuts.commandAction(
+          charactersIgnoringModifiers: "Z", modifiers: [.command, .shift], firstResponder: plainView,
+          isWorkspaceActive: false))
+      XCTAssertNil(
+        WidgetsWorkspaceShortcuts.commandAction(
+          charactersIgnoringModifiers: "d", modifiers: .command, firstResponder: plainView, isWorkspaceActive: false))
+
+      // Text responders keep their own ⌘Z / ⇧⌘Z / ⌘D / Delete handling.
+      let textView = NSTextView()
+      let textField = NSTextField()
+      let searchField = NSSearchField()
+      let nestedChild = NSView()
+      textField.addSubview(nestedChild)
+      for responder: NSResponder in [textView, textField, searchField, nestedChild] {
+        XCTAssertTrue(WidgetsWorkspaceShortcuts.isTextResponder(responder))
+        XCTAssertNil(
+          WidgetsWorkspaceShortcuts.commandAction(
+            charactersIgnoringModifiers: "z", modifiers: .command, firstResponder: responder, isWorkspaceActive: true))
+        XCTAssertNil(
+          WidgetsWorkspaceShortcuts.commandAction(
+            charactersIgnoringModifiers: "Z", modifiers: [.command, .shift], firstResponder: responder,
+            isWorkspaceActive: true))
+        XCTAssertNil(
+          WidgetsWorkspaceShortcuts.commandAction(
+            charactersIgnoringModifiers: "d", modifiers: .command, firstResponder: responder, isWorkspaceActive: true))
+      }
+
+      // Safe canvas Delete / Forward Delete guard + Undo restoration.
+      try await controller.addDesktopWidget(.time)
+      let widget = try XCTUnwrap(model.selected)
+      XCTAssertEqual(model.duplicableSelectedID(), widget.id)
+
+      XCTAssertEqual(
+        DesktopWidgetPreview.deletableWidgetID(
+          for: .delete, modifiers: [], limit: nil, firstResponder: plainView, selectedOnScreen: widget),
+        widget.id)
+      XCTAssertEqual(
+        DesktopWidgetPreview.deletableWidgetID(
+          for: .deleteForward, modifiers: [], limit: nil, firstResponder: plainView, selectedOnScreen: widget),
+        widget.id)
+      XCTAssertNil(
+        DesktopWidgetPreview.deletableWidgetID(
+          for: .delete, modifiers: [], limit: DesktopWidgetPreview.rowLimit, firstResponder: plainView,
+          selectedOnScreen: widget),
+        "search-result preview snippets never accept canvas Delete")
+      XCTAssertNil(
+        DesktopWidgetPreview.deletableWidgetID(
+          for: .delete, modifiers: [], limit: nil, firstResponder: textView, selectedOnScreen: widget),
+        "focused text editors never trigger widget deletion")
+      XCTAssertNil(
+        DesktopWidgetPreview.deletableWidgetID(
+          for: .tab, modifiers: [], limit: nil, firstResponder: plainView, selectedOnScreen: widget),
+        "Tab is never hijacked")
+      XCTAssertNil(
+        DesktopWidgetPreview.deletableWidgetID(
+          for: .delete, modifiers: .command, limit: nil, firstResponder: plainView, selectedOnScreen: widget))
+      XCTAssertNil(
+        DesktopWidgetPreview.deletableWidgetID(
+          for: .delete, modifiers: [], limit: nil, firstResponder: plainView, selectedOnScreen: nil))
+
+      let deleteID = try XCTUnwrap(
+        DesktopWidgetPreview.deletableWidgetID(
+          for: .delete, modifiers: [], limit: nil, firstResponder: plainView, selectedOnScreen: widget))
+      try await controller.removeDesktopWidget(deleteID)
+      XCTAssertTrue(model.widgets.isEmpty)
+      XCTAssertNil(model.selectedID)
+
+      try await controller.undoDesktopWidgets()
+      XCTAssertEqual(model.widgets, [widget], "Undo restores the deleted widget")
+      XCTAssertEqual(model.selectedID, widget.id, "Undo restores selection to the restored widget")
+
+      // `duplicableSelectedID()` checks display visibility and cleared selection.
+      model.selectPreviewScreen(external.displayID)
+      XCTAssertNil(model.duplicableSelectedID(), "widget pinned to main is not on external canvas")
+      model.selectPreviewScreen(laptop.displayID)
+      model.clearSelection()
+      XCTAssertNil(model.duplicableSelectedID(), "no selection means nothing to duplicate")
+
+      // Workspace-active guards block both command shortcuts and canvas Delete behind popovers,
+      // the welcome guide, Settings search, and other sections/pages.
+      panel.navigation.selection = .settings
+      controller.settings.select(.widgets)
+      XCTAssertTrue(model.isWorkspaceActiveForShortcuts)
+
+      controller.shell.popover(.downloads).wrappedValue = true
+      XCTAssertFalse(model.isWorkspaceActiveForShortcuts, "shell popovers suppress workspace shortcuts")
+      XCTAssertNil(
+        WidgetsWorkspaceShortcuts.commandAction(
+          charactersIgnoringModifiers: "z", modifiers: .command, firstResponder: plainView,
+          isWorkspaceActive: model.isWorkspaceActiveForShortcuts))
+      XCTAssertNil(
+        DesktopWidgetPreview.deletableWidgetID(
+          for: .delete, modifiers: [], limit: nil, firstResponder: plainView,
+          selectedOnScreen: widget, isWorkspaceActive: model.isWorkspaceActiveForShortcuts),
+        "canvas Delete never fires behind an open shell popover")
+      controller.shell.popover(.downloads).wrappedValue = false
+      XCTAssertTrue(model.isWorkspaceActiveForShortcuts)
+
+      model.isReadyMadePopoverOpen = true
+      XCTAssertTrue(controller.shell.isPopoverOpen, "Ready-made popover reports to ShellModel")
+      XCTAssertFalse(model.isWorkspaceActiveForShortcuts, "Ready-made popover suppresses shortcuts")
+      XCTAssertNil(
+        DesktopWidgetPreview.deletableWidgetID(
+          for: .delete, modifiers: [], limit: nil, firstResponder: plainView,
+          selectedOnScreen: widget, isWorkspaceActive: model.isWorkspaceActiveForShortcuts))
+      model.isReadyMadePopoverOpen = false
+      XCTAssertTrue(model.isWorkspaceActiveForShortcuts)
+
+      controller.shell.isWelcomeRequested = true
+      XCTAssertFalse(model.isWorkspaceActiveForShortcuts, "welcome guide suppresses shortcuts")
+      controller.shell.isWelcomeRequested = false
+      XCTAssertTrue(model.isWorkspaceActiveForShortcuts)
+
+      controller.settings.query = "clock"
+      XCTAssertFalse(model.isWorkspaceActiveForShortcuts, "Settings search suppresses shortcuts")
+      controller.settings.query = ""
+      XCTAssertTrue(model.isWorkspaceActiveForShortcuts)
+
+      controller.settings.select(.displays)
+      XCTAssertFalse(model.isWorkspaceActiveForShortcuts, "other Settings sections suppress shortcuts")
+      controller.settings.select(.widgets)
+      panel.navigation.selection = .wallpaper
+      XCTAssertFalse(model.isWorkspaceActiveForShortcuts, "Library page suppresses shortcuts")
+    }
+  }
+
+  /// Editing a `.sun` widget offers a direct shortcut to Settings › Displays where the Sunrise and
+  /// sunset location is configured.
+  func testSunWidgetDisplaysShortcutNavigatesToDisplaysSettings() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      let model = controller.widgetsSettings
+      controller.settings.select(.widgets)
+      try await controller.addDesktopWidget(.sun)
+      let sun = try XCTUnwrap(model.selected)
+      XCTAssertTrue(WidgetsSettingsSection.offers(WidgetsSettingsSection.sunStyle, for: sun))
+
+      try await controller.addDesktopWidget(.time)
+      let clock = try XCTUnwrap(model.selected)
+      XCTAssertFalse(WidgetsSettingsSection.offers(WidgetsSettingsSection.sunStyle, for: clock))
+
+      model.select(sun.id)
+      await model.openSunLocationSettings().value
+      XCTAssertEqual(panel.navigation.selection, .settings)
+      XCTAssertEqual(panel.navigation.settingsSection, .displays)
+      controller.settings.adoptReveal()
+      XCTAssertEqual(controller.settings.selectedSection, .displays)
     }
   }
 
@@ -820,6 +1286,7 @@ final class WidgetsSettingsTests: PanelTestCase {
           try await controller.addDesktopWidget(.calendar)
           try await controller.addDesktopWidget(.analog)
           try await controller.addDesktopWidget(.countdown)
+          try await controller.addDesktopWidget(.sun)
         }
         for language in ["en", "ja"] {
           PanelLocale.shared.bind(

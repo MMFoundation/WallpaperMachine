@@ -75,6 +75,7 @@ struct WidgetsWorkspace: View {
       .padding(Self.margin)
       .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
     }
+    .background { WidgetsWorkspaceShortcutMonitor(controller: controller) }
   }
 
   // MARK: Header
@@ -87,6 +88,7 @@ struct WidgetsWorkspace: View {
       VStack(alignment: .leading, spacing: 1) {
         Text(verbatim: settings.text(section.title))
           .font(.panel(.headline))
+          .lineLimit(1)
           .accessibilityAddTraits(.isHeader)
         Text(verbatim: settings.text(section.summary))
           .font(.panel(.callout))
@@ -94,8 +96,12 @@ struct WidgetsWorkspace: View {
           .lineLimit(1)
       }
       .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-      ReadyMadeWidgetsButton()
-      WidgetAddMenu()
+      HStack(spacing: 8) {
+        WidgetHistoryButtons()
+        ReadyMadeWidgetsButton()
+        WidgetAddMenu()
+      }
+      .fixedSize()
     }
   }
 
@@ -309,10 +315,125 @@ struct WidgetsWorkspace: View {
   }
 }
 
+// MARK: - History & scoped shortcuts
+
+/// Scoped Undo and Redo controls in the Desktop Widgets workspace header. Shortcuts (`⌘Z`,
+/// `⇧⌘Z`) are handled by `WidgetsWorkspaceShortcutMonitor` rather than `.keyboardShortcut` so
+/// typing undo in text fields is never hijacked.
+struct WidgetHistoryButtons: View {
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    let model = controller.widgetsSettings
+    let undoKey = PanelActionCoordinator.key("undoDesktopWidgets")
+    let redoKey = PanelActionCoordinator.key("redoDesktopWidgets")
+    HStack(spacing: 4) {
+      Button {
+        controller.launch(undoKey) { try await controller.undoDesktopWidgets() }
+      } label: {
+        Image(systemName: "arrow.uturn.backward")
+      }
+      .buttonStyle(.panelSecondary(size: .small))
+      .disabled(!model.canUndo || controller.isBusy(undoKey))
+      .help(L("Undo (⌘Z)"))
+      .accessibilityLabel(Text("Undo"))
+      .accessibilityIdentifier("widgets.undo")
+      Button {
+        controller.launch(redoKey) { try await controller.redoDesktopWidgets() }
+      } label: {
+        Image(systemName: "arrow.uturn.forward")
+      }
+      .buttonStyle(.panelSecondary(size: .small))
+      .disabled(!model.canRedo || controller.isBusy(redoKey))
+      .help(L("Redo (⇧⌘Z)"))
+      .accessibilityLabel(Text("Redo"))
+      .accessibilityIdentifier("widgets.redo")
+    }
+    .fixedSize()
+    .accessibilityElement(children: .contain)
+  }
+}
+
+/// Captures workspace-scoped `⌘Z`, `⇧⌘Z`, and `⌘D` strictly while Settings › Desktop Widgets is
+/// active (never in Library, Settings search, sheets, popovers, or while editing text).
+private struct WidgetsWorkspaceShortcutMonitor: NSViewRepresentable {
+  let controller: PanelController
+
+  func makeNSView(context: Context) -> MonitorView { MonitorView() }
+
+  func updateNSView(_ view: MonitorView, context: Context) {
+    view.controller = controller
+  }
+
+  static func dismantleNSView(_ view: MonitorView, coordinator: ()) {
+    view.removeMonitor()
+  }
+
+  final class MonitorView: NSView {
+    weak var controller: PanelController?
+    private var monitor: Any?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      removeMonitor()
+      guard window != nil else { return }
+      monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        let handled = MainActor.assumeIsolated { () -> Bool in
+          guard let self, let controller = self.controller else { return false }
+          let isWorkspaceActive =
+            event.window === self.window
+            && !self.isHiddenOrHasHiddenAncestor
+            && self.window?.attachedSheet == nil
+            && controller.widgetsSettings.isWorkspaceActiveForShortcuts
+          guard
+            let action = WidgetsWorkspaceShortcuts.commandAction(
+              charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+              modifiers: event.modifierFlags,
+              firstResponder: self.window?.firstResponder,
+              isWorkspaceActive: isWorkspaceActive)
+          else { return false }
+          let model = controller.widgetsSettings
+          switch action {
+          case .undo:
+            guard model.canUndo else { return false }
+            controller.launch(PanelActionCoordinator.key("undoDesktopWidgets")) {
+              try await controller.undoDesktopWidgets()
+            }
+            return true
+          case .redo:
+            guard model.canRedo else { return false }
+            controller.launch(PanelActionCoordinator.key("redoDesktopWidgets")) {
+              try await controller.redoDesktopWidgets()
+            }
+            return true
+          case .duplicate:
+            guard !event.isARepeat, let id = model.duplicableSelectedID() else { return false }
+            controller.launch(PanelActionCoordinator.key("duplicateDesktopWidget", id: id)) {
+              try await controller.duplicateDesktopWidget(id)
+            }
+            return true
+          }
+        }
+        return handled ? nil : event
+      }
+    }
+
+    func removeMonitor() {
+      if let monitor {
+        NSEvent.removeMonitor(monitor)
+        self.monitor = nil
+      }
+    }
+  }
+}
+
 // MARK: - Ready-made widgets
 
 /// The Ready-made button: a popover of every ready-made widget.
 struct ReadyMadeWidgetsButton: View {
+  @Environment(PanelController.self) private var controller
   @State private var isPresented = false
 
   var body: some View {
@@ -328,6 +449,12 @@ struct ReadyMadeWidgetsButton: View {
     .popover(isPresented: $isPresented, arrowEdge: .bottom) {
       ReadyMadeWidgetsPopover { isPresented = false }
         .panelPresentationLocale()
+    }
+    .onChange(of: isPresented) { _, open in
+      controller.widgetsSettings.isReadyMadePopoverOpen = open
+    }
+    .onDisappear {
+      controller.widgetsSettings.isReadyMadePopoverOpen = false
     }
   }
 }

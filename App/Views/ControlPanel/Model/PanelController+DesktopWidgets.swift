@@ -121,9 +121,11 @@ extension PanelController {
   /// display), in front of the others, and opens it in the editor.
   func addDesktopWidget(_ kind: DesktopWidget.Kind) async throws {
     _ = try await run(.immediate) {
-      let placement = widgetsSettings.defaultPlacement()
-      let widget = try desktopWidgets.add(kind, placement: placement)
-      widgetsSettings.select(widget.id)
+      try widgetsSettings.recordMutation {
+        let placement = widgetsSettings.defaultPlacement()
+        let widget = try desktopWidgets.add(kind, placement: placement)
+        widgetsSettings.select(widget.id)
+      }
     }
   }
 
@@ -132,23 +134,31 @@ extension PanelController {
   /// editor.
   func addDesktopWidgetPreset(_ preset: DesktopWidgetPreset) async throws {
     _ = try await run(.immediate) {
-      let screens = widgetsSettings.screens()
-      let placement = widgetsSettings.defaultPlacement(among: screens)
-      let widgets = widgetsSettings.widgets(of: preset).map { widget in
-        var placed = widget
-        placed.placement = placement
-        return placed
+      try widgetsSettings.recordMutation {
+        let screens = widgetsSettings.screens()
+        let placement = widgetsSettings.defaultPlacement(among: screens)
+        let widgets = widgetsSettings.widgets(of: preset).map { widget in
+          var placed = widget
+          placed.placement = placement
+          return placed
+        }
+        let added = try desktopWidgets.add(widgets)
+        if let first = added.first { widgetsSettings.select(first.id) }
       }
-      let added = try desktopWidgets.add(widgets)
-      if let first = added.first { widgetsSettings.select(first.id) }
     }
   }
 
-  func changeDesktopWidget(_ id: String, _ change: DesktopWidgetChange) async throws {
+  func changeDesktopWidget(
+    _ id: String, _ change: DesktopWidgetChange,
+    coalesceKey: String? = nil,
+    preSnapshot: DesktopWidgetsSettingsModel.HistorySnapshot? = nil
+  ) async throws {
     _ = try await run(.immediate) {
-      try desktopWidgets.update(id) { change.apply(to: &$0) }
-      if id == widgetsSettings.selectedID, case .placement(let placement) = change {
-        widgetsSettings.didChangeSelectedPlacement(placement)
+      try widgetsSettings.recordMutation(coalesceKey: coalesceKey, preSnapshot: preSnapshot) {
+        try desktopWidgets.update(id) { change.apply(to: &$0) }
+        if id == widgetsSettings.selectedID, case .placement(let placement) = change {
+          widgetsSettings.didChangeSelectedPlacement(placement)
+        }
       }
     }
   }
@@ -157,10 +167,12 @@ extension PanelController {
   /// without a label takes `label`, the city's name, so a world clock says whose time it tells.
   func setDesktopWidgetTimeZone(_ id: String, _ zone: String?, label: String?) async throws {
     _ = try await run(.immediate) {
-      try desktopWidgets.update(id) { widget in
-        widget.timeZone = zone
-        if zone != nil, let label, widget.text.isEmpty, [.time, .date].contains(widget.kind) {
-          widget.text = label
+      try widgetsSettings.recordMutation {
+        try desktopWidgets.update(id) { widget in
+          widget.timeZone = zone
+          if zone != nil, let label, widget.text.isEmpty, [.time, .date].contains(widget.kind) {
+            widget.text = label
+          }
         }
       }
     }
@@ -169,8 +181,10 @@ extension PanelController {
   /// Adds a copy of a widget in front of it and opens the copy in the editor.
   func duplicateDesktopWidget(_ id: String) async throws {
     _ = try await run(.immediate) {
-      let copy = try desktopWidgets.duplicate(id)
-      widgetsSettings.select(copy.id)
+      try widgetsSettings.recordMutation {
+        let copy = try desktopWidgets.duplicate(id)
+        widgetsSettings.select(copy.id)
+      }
     }
   }
 
@@ -178,32 +192,50 @@ extension PanelController {
   /// showed, so a drop on a list that changed since changes nothing.
   func moveDesktopWidget(_ id: String, to index: Int, expected: [String]? = nil) async throws {
     _ = try await run(.immediate) {
-      try desktopWidgets.move(id, to: index, expected: expected)
+      try widgetsSettings.recordMutation {
+        try desktopWidgets.move(id, to: index, expected: expected)
+      }
     }
   }
 
   /// Removes a widget; the editor moves to the one listed after it, or before it when it was last.
   func removeDesktopWidget(_ id: String) async throws {
     _ = try await run(.immediate) {
-      let ids = desktopWidgets.widgets.map(\.id)
-      let wasSelected = widgetsSettings.selectedID == id
-      try desktopWidgets.remove(id)
-      if wasSelected, let index = ids.firstIndex(of: id) {
-        let remaining = ids.filter { $0 != id }
-        widgetsSettings.select(remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)])
+      try widgetsSettings.recordMutation {
+        let ids = desktopWidgets.widgets.map(\.id)
+        let wasSelected = widgetsSettings.selectedID == id
+        try desktopWidgets.remove(id)
+        if wasSelected, let index = ids.firstIndex(of: id) {
+          let remaining = ids.filter { $0 != id }
+          widgetsSettings.select(remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)])
+        }
       }
     }
   }
 
-  /// Asks before removing a widget from the canvas context menu, since removal cannot be undone.
+  /// Asks before removing a widget from the canvas context menu; removal can still be undone.
   func confirmAndRemoveDesktopWidget(_ id: String) async throws {
     guard desktopWidgets.widgets.contains(where: { $0.id == id }) else { return }
     guard
       await dialogs.confirm(
         L("Remove widget?"),
-        detail: L("This widget will be removed from the desktop. This can’t be undone."),
+        detail: L("This widget will be removed from the desktop. You can undo this change."),
         button: L("Remove"))
     else { return }
     try await removeDesktopWidget(id)
+  }
+
+  /// Undoes the last Desktop Widgets edit, restoring the previous widgets and selection.
+  func undoDesktopWidgets() async throws {
+    _ = try await run(.immediate) {
+      try widgetsSettings.undo()
+    }
+  }
+
+  /// Redoes the last undone Desktop Widgets edit.
+  func redoDesktopWidgets() async throws {
+    _ = try await run(.immediate) {
+      try widgetsSettings.redo()
+    }
   }
 }

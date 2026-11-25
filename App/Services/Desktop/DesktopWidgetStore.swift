@@ -100,6 +100,13 @@ final class DesktopWidgetStore {
         try commit(widgets.filter { $0.id != id })
     }
 
+    /// Replaces the stored widgets with a validated snapshot (used by Undo and Redo), preserving
+    /// the limit check, persistence, and change notification without duplicating storage logic.
+    func restore(_ values: [DesktopWidget]) throws {
+        guard values.count <= Self.limit else { throw DesktopWidgetError.tooMany }
+        try commit(values)
+    }
+
     // MARK: Storage
 
     /// The saved widgets; none when nothing is saved or what is saved cannot be read, which the log
