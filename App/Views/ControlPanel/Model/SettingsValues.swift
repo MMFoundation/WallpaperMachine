@@ -344,6 +344,29 @@ struct LibrarySteamSettings: Equatable, Sendable {
 
 // MARK: - Storage and About
 
+/// Asynchronously measured disk usage shown on Settings › Storage. Every figure is nil until its
+/// background scan finishes (or when volume free space cannot be read).
+struct StorageMetrics: Equatable, Sendable {
+  /// Total size of installed wallpaper folders from `LibraryMetricsService`.
+  var libraryBytes: UInt64?
+  /// Total size of managed files copied for wallpaper properties (`UserAssets/`).
+  var userAssetsBytes: UInt64?
+  /// Available free space on the volume holding the wallpaper library.
+  var volumeFreeBytes: UInt64?
+  /// Whether a background disk or library scan is currently running.
+  var isMeasuring = false
+  /// True once the background scan for user assets and volume free space has completed.
+  var hasMeasuredDisk = false
+}
+
+/// Raw background disk reading cached on `PanelController` for Settings › Storage.
+struct StorageDiskReading: Equatable, Sendable {
+  var userAssetsBytes: UInt64?
+  var volumeFreeBytes: UInt64?
+  var isMeasuring = false
+  var hasMeasured = false
+}
+
 /// Settings › Storage: sizes, the managed-files folder and the troubleshooting switches.
 struct StorageState: Equatable, Sendable {
   var shaderCacheBytes: UInt64
@@ -355,6 +378,8 @@ struct StorageState: Equatable, Sendable {
   var userAssetsReleasedBytes: UInt64?
   var verboseLogging: Bool
   var inspectsWebWallpapers: Bool
+  /// Asynchronously measured library total size, managed user-asset size and volume free space.
+  var metrics = StorageMetrics()
 
   /// A zero or missing size has nothing to clear.
   var canClearShaderCache: Bool { shaderCacheBytes > 0 }
@@ -364,6 +389,39 @@ struct StorageState: Equatable, Sendable {
   @MainActor func lastClearNote(locale: Locale = .current) -> String? {
     guard let released = userAssetsReleasedBytes else { return nil }
     return L("Last clear released \(ByteSize.format(Double(released), locale: locale)).")
+  }
+
+  /// "Library size: 1.2 GB · 48.5 GB available", "Library size: 1.2 GB", or "Measuring…" while
+  /// scanning; nil before Storage has requested a measurement.
+  @MainActor func librarySpaceLine(locale: Locale = .current) -> String? {
+    let libraryPart: String?
+    if let bytes = metrics.libraryBytes {
+      let formatted = ByteSize.format(Double(bytes), locale: locale)
+      libraryPart = L("Library size: \(formatted)")
+    } else if metrics.isMeasuring {
+      let measuring = L("Measuring…")
+      libraryPart = L("Library size: \(measuring)")
+    } else {
+      libraryPart = nil
+    }
+    let freePart = metrics.volumeFreeBytes.map { free in
+      let formatted = ByteSize.format(Double(free), locale: locale)
+      return L("\(formatted) available")
+    }
+    let parts = [libraryPart, freePart].compactMap { $0 }
+    if parts.isEmpty {
+      return metrics.isMeasuring ? L("Measuring…") : nil
+    }
+    return parts.joined(separator: " · ")
+  }
+
+  /// Formatted managed user-assets folder size ("4.2 MB"), "Measuring…" while scanning, or nil
+  /// before a scan has been started.
+  @MainActor func userAssetsSizeText(locale: Locale = .current) -> String? {
+    if let bytes = metrics.userAssetsBytes {
+      return ByteSize.format(Double(bytes), locale: locale)
+    }
+    return metrics.isMeasuring ? L("Measuring…") : nil
   }
 }
 

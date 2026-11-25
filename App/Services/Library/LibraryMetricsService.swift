@@ -44,6 +44,9 @@ final class LibraryMetricsService {
   let libraryURL: URL
   /// Called on the main actor after a background walk stored new values.
   var onChange: (@MainActor () -> Void)?
+  /// Called on the main actor when a background walk finishes (even if all folders were
+  /// unmeasurable), so Storage metrics can leave their measuring state.
+  var onSettled: (@MainActor () -> Void)?
   private(set) var measured: [String: Metrics] = [:]
   private(set) var contentRevision: UInt64 = 0
   /// Ids the renderer lists but the library folder cannot show; left alone until a reload.
@@ -79,6 +82,19 @@ final class LibraryMetricsService {
     pending.formUnion(queue)
     schedule()
     return measured
+  }
+
+  /// Total bytes of the measured folders among `ids`, or nil while any of them is still waiting to
+  /// be measured (or has not yet been queued for `revision`). Performs no disk I/O.
+  func totalBytes(for ids: [String], revision: UInt64) -> UInt64? {
+    guard !ids.isEmpty else { return 0 }
+    guard self.revision == revision, pending.isEmpty else { return nil }
+    let wanted = Set(ids)
+    guard wanted.allSatisfy({ measured[$0] != nil || unmeasurable.contains($0) }) else {
+      return nil
+    }
+    let sum = ids.reduce(Int64(0)) { $0 + max(0, measured[$1]?.size ?? 0) }
+    return UInt64(max(0, sum))
   }
 
   /// Drops everything measured so far; the next snapshot measures again.
@@ -129,7 +145,11 @@ final class LibraryMetricsService {
         }
       }
       self.task = nil
-      if !self.pending.isEmpty { self.schedule() }
+      if !self.pending.isEmpty {
+        self.schedule()
+      } else if !changed {
+        self.onSettled?()
+      }
       if changed { self.contentRevision &+= 1; self.onChange?() }
     }
   }

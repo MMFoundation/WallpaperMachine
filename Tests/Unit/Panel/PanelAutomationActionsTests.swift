@@ -124,6 +124,9 @@ final class PanelAutomationActionsTests: PanelTestCase {
         { try await controller.setAutomationMode(.schedule, display: display) },
         { try await controller.setAutomationAppearance(.dark, to: self.wallpaper("a"), display: display) },
         { try await controller.removeAutomationRule("x", display: display) },
+        { try await controller.setAutomationRuleEnabled("x", isEnabled: false, display: display) },
+        { try await controller.moveAutomationRule("x", by: 1, display: display) },
+        { try await controller.reorderAutomationRules([], expected: [], display: display) },
         { try await controller.retryAutomation(display: display) },
         { try await controller.setAutomationDesktop("space", to: nil, display: display) },
       ]
@@ -144,6 +147,47 @@ final class PanelAutomationActionsTests: PanelTestCase {
     try await controller.saveAutomationRule(AutomationRuleEdit(target: wallpaper("a")))
     try await controller.removeAutomationRule("never-there")
     XCTAssertEqual(controller.automationState(for: "primary").rules.count, 1)
+  }
+
+  func testTimeRulesCanBeToggledReorderedAndEditedWhileDisabled() async throws {
+    let panel = try makePanel()
+    defer { Task { await panel.shutdown() } }
+    let controller = panel.controller
+    try await controller.setAutomationMode(.schedule, display: "primary")
+    try await controller.saveAutomationRule(
+      AutomationRuleEdit(time: try time(480), target: wallpaper("a")), display: "primary")
+    try await controller.saveAutomationRule(
+      AutomationRuleEdit(time: try time(480), target: wallpaper("b")), display: "primary")
+    try await controller.saveAutomationRule(
+      AutomationRuleEdit(time: try time(600), target: wallpaper("a")), display: "primary")
+    let ids = controller.automationState(for: "primary").rules.map(\.id)
+    XCTAssertEqual(ids.count, 3)
+
+    try await controller.setAutomationRuleEnabled(ids[1], isEnabled: false, display: "primary")
+    XCTAssertEqual(controller.automationState(for: "primary").rules.map(\.isEnabled), [true, false, true])
+
+    let disabledRule = try XCTUnwrap(controller.automationState(for: "primary").rules.first { $0.id == ids[1] })
+    try await controller.saveAutomationRule(
+      AutomationRuleEdit(
+        id: disabledRule.id, weekdays: [2, 4], event: .time, time: try time(510),
+        target: wallpaper("b"), isEnabled: disabledRule.isEnabled),
+      display: "primary")
+    let edited = try XCTUnwrap(controller.automationState(for: "primary").rules.first { $0.id == ids[1] })
+    XCTAssertFalse(edited.isEnabled, "editing a disabled rule preserves its disabled state")
+    XCTAssertEqual(edited.minute, 510)
+
+    try await controller.moveAutomationRule(ids[0], by: 1, display: "primary")
+    XCTAssertEqual(controller.automationState(for: "primary").rules.map(\.id), [ids[1], ids[0], ids[2]])
+
+    try await controller.reorderAutomationRules(
+      [ids[2], ids[1], ids[0]], expected: [ids[1], ids[0], ids[2]], display: "primary")
+    XCTAssertEqual(controller.automationState(for: "primary").rules.map(\.id), [ids[2], ids[1], ids[0]])
+    do {
+      try await controller.reorderAutomationRules(
+        [ids[0], ids[1], ids[2]], expected: [ids[1], ids[0], ids[2]], display: "primary")
+      XCTFail("stale expected order must be rejected")
+    } catch {}
+    XCTAssertEqual(controller.automationState(for: "primary").rules.map(\.id), [ids[2], ids[1], ids[0]])
   }
 
   // MARK: Appearance

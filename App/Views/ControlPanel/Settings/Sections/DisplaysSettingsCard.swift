@@ -208,27 +208,15 @@ struct DisplaysPlaybackDisclosure: View {
       }
 
       DisplaysRow(
-        item: DisplaysSettingsSection.scaleFactor, forced: forced, identity: display.id,
-        controlLabel: label(DisplaysSettingsSection.scaleFactor.title)
-      ) {
-        DisplaysNumberField(
-          value: display.scalingFactor, digits: 4, unit: "×",
-          accepts: { $0 > 0 }, invalidMessage: L("Enter a number greater than 0."),
-          commit: { factor in
-            await controller.launch(
-              PanelActionCoordinator.key("displaySetting", id: display.id, detail: "scalingFactor")
-            ) { try await controller.setDisplay(display.id, .scalingFactor(factor)) }.value
-          }
-        )
-        .disabled(playbackOff)
-      }
-
-      DisplaysRow(
         item: DisplaysSettingsSection.scale, forced: forced, identity: display.id,
-        controlLabel: label(DisplaysSettingsSection.scale.title)
+        labelsControl: false
       ) {
-        DisplaysScaleSlider(
-          factor: display.scalingFactor, label: label(DisplaysSettingsSection.scale.title)
+        let scalePercentageTitle = L("Scale percentage")
+        let scaleFactorTitle = L("Scale factor")
+        DisplaysScaleControl(
+          factor: display.scalingFactor,
+          sliderLabel: L("\(scalePercentageTitle) for \(display.title)"),
+          fieldLabel: L("\(scaleFactorTitle) for \(display.title)")
         ) { factor in
           // A later choice waits for the save before it instead of being dropped as a duplicate.
           controller.launch(

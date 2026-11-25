@@ -1,8 +1,8 @@
 import Foundation
 
-/// What Settings can be searched by, in one language: each item's phrases joined, and each group's
-/// title. Built once per language, because resolving every phrase of every row is the costly part
-/// of a search and typing should not repeat it.
+/// What Settings can be searched by, in one language: each item's phrases joined, each group's
+/// title, and each section's title. Built once per language, because resolving every phrase of
+/// every row is the costly part of a search and typing should not repeat it.
 struct SettingsIndex {
   fileprivate struct Entry {
     let item: SettingsItem
@@ -11,6 +11,7 @@ struct SettingsIndex {
 
   fileprivate let entries: [Entry]
   fileprivate let groupTitles: [String: String]
+  fileprivate let sectionTitles: [SettingsSection: String]
 
   /// - Parameter resolve: Turns a phrase into the panel's language.
   init(items: [SettingsItem] = SettingsRegistry.items, resolve: (LocalizedStringResource) -> String)
@@ -23,11 +24,16 @@ struct SettingsIndex {
       return Entry(item: item, text: item.phrases(resolve).joined(separator: "\n"))
     }
     groupTitles = titles
+    sectionTitles = Dictionary(
+      uniqueKeysWithValues: SettingsSection.allCases.map { ($0, resolve($0.title)) })
   }
 
-  private init(entries: [Entry], groupTitles: [String: String]) {
+  private init(
+    entries: [Entry], groupTitles: [String: String], sectionTitles: [SettingsSection: String]
+  ) {
     self.entries = entries
     self.groupTitles = groupTitles
+    self.sectionTitles = sectionTitles
   }
 
   /// The index of what the pages draw now: without the items `isOffered` turns down, nor anything
@@ -49,7 +55,9 @@ struct SettingsIndex {
       }
       return true
     }
-    return SettingsIndex(entries: entries.filter { offered($0.item) }, groupTitles: groupTitles)
+    return SettingsIndex(
+      entries: entries.filter { offered($0.item) }, groupTitles: groupTitles,
+      sectionTitles: sectionTitles)
   }
 
   @MainActor
@@ -59,21 +67,26 @@ struct SettingsIndex {
 }
 
 /// A row a section builds from live data instead of declaring it as an item: a display's card, a
-/// saved display layout, a wallpaper in a display's own list. The web page searched whatever a row
-/// said, so a display's name, a layout's name or a listed wallpaper's title found it; a search counts
-/// each live row that matches toward its section, so the section keeps its page and its list
-/// count for it. The section's view decides which of its live rows to draw with `matches(_:)`.
+/// saved display layout, a saved playlist, a wallpaper in a display's own list, an app rule, or a
+/// desktop widget. A search counts each live row that matches toward its section, keeps its group
+/// on show, and opens any enclosing disclosure so the row is immediately reachable.
 struct SettingsLiveUnit: Equatable, Sendable {
   let section: SettingsSection
   /// The group the row is drawn in, which a match keeps on show; nil for a row that is not inside a
   /// registered group's card, or whose view decides on its own whether its card shows.
   let groupID: String?
+  /// The disclosure holding the row, which a match shows and opens (for example, App rules).
+  let disclosureID: String?
   /// Everything the row says, one phrase per line.
   let text: String
 
-  init(section: SettingsSection, group: SettingsItem.Group? = nil, text: String) {
+  init(
+    section: SettingsSection, group: SettingsItem.Group? = nil, disclosure: SettingsItem? = nil,
+    text: String
+  ) {
     self.section = section
     groupID = group?.id
+    disclosureID = disclosure?.id
     self.text = text
   }
 }
@@ -81,11 +94,11 @@ struct SettingsLiveUnit: Equatable, Sendable {
 /// The result of typing in the Settings search field: which rows stay, how many each section
 /// keeps, and which disclosures open.
 ///
-/// The rules are the web panel's, including the fix of `50129725`:
+/// The rules are the web panel's, including the fix of `50129725`, extended with section titles:
 /// - A query is one contiguous piece of text, matched ignoring case, accents and character width
-///   against everything a row says: its title, note, details and keywords. Section names are not
-///   searched; group titles are.
-/// - A group whose title matches keeps all of its items.
+///   against everything a row says: its title, note, details and keywords, as well as its group
+///   title and section title.
+/// - A section or group whose title matches keeps all of its offered items.
 /// - A disclosure shows when its own words match or something inside it does, and opens when
 ///   something inside it does. Without a match in or on it, an open one folds away with its title
 ///   instead of leaving its contents on show without it; it comes back, still open, when the
@@ -132,10 +145,14 @@ struct SettingsSearch {
 
     let textMatches = Set(entries.filter { contains($0.text) }.map(\.item.id))
     let matchingGroups = Set(index.groupTitles.filter { contains($0.value) }.keys)
+    let matchingSections = Set(index.sectionTitles.filter { contains($0.value) }.keys)
     var matched = Set<String>()
     for entry in entries {
       let item = entry.item
-      if textMatches.contains(item.id) || group(of: item).map(matchingGroups.contains) == true {
+      if textMatches.contains(item.id)
+        || group(of: item).map(matchingGroups.contains) == true
+        || matchingSections.contains(item.section)
+      {
         matched.insert(item.id)
       }
     }
@@ -163,6 +180,15 @@ struct SettingsSearch {
     for unit in live where contains(unit.text) {
       counts[unit.section, default: 0] += 1
       if let group = unit.groupID { visibleGroups.insert(Self.groupKey(unit.section, id: group)) }
+      var parent = unit.disclosureID
+      var hops = 0
+      while let id = parent, hops < 8 {
+        visible.insert(id)
+        opening.insert(id)
+        if let item = byID[id], let groupKey = group(of: item) { visibleGroups.insert(groupKey) }
+        parent = byID[id]?.disclosure
+        hops += 1
+      }
     }
     self.matched = matched
     self.visible = visible

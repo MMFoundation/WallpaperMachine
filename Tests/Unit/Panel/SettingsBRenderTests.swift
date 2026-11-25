@@ -189,6 +189,46 @@ final class SettingsBRenderTests: SettingsBTestCase {
     }
   }
 
+  /// The merged Scale row shows the 10–100% slider beside the numeric scale factor field and
+  /// preserves `> 1.0` zoom-in cropping values (Display 2 has `scalingFactor: 1.25`).
+  func testDisplaysScaleRowPreservesZoomAboveOneWhileSliderStaysAtOneHundredPercent() async throws {
+    try await withPanel { panel in
+      try SettingsBFixtures.populate(panel)
+      panel.show()
+      panel.controller.displaysSettings.setOpen(true, DisplaysSettingsSection.playback, display: "2")
+      let host = SettingsBHost(panel: panel)
+      try await host.show(.displays, size: NSSize(width: 760, height: 1_600))
+      let slider = try XCTUnwrap(
+        PanelNSSlider.all(in: host.hosting.view).first {
+          $0.accessibilityLabel() == "Scale percentage for LG UltraFine 5K (2)"
+        }, "the second display's Scale slider is drawn")
+      XCTAssertEqual(slider.doubleValue, 100, "a >1.0 zoom factor parks the slider at 100%")
+      let field = try XCTUnwrap(
+        AccessibilityElement.everything(in: host.hosting.view).first {
+          $0.role == "AXTextField" && $0.label == "Scale factor for LG UltraFine 5K (2)"
+        }, "the numeric scale factor field is drawn beside the slider")
+      XCTAssertEqual(field.value, "1.25", "the >1.0 zoom-in factor is preserved without clamping")
+      try await assertFits(host, at: NSSize(width: 760, height: 560), "displays scale >1.0 narrow")
+      host.close()
+    }
+  }
+
+  func testScopedSettingsSearchBarFitsNarrowWindow() async throws {
+    try await withPanel { panel in
+      try SettingsBFixtures.populate(panel)
+      panel.show()
+      let host = SettingsBHost(panel: panel)
+      try await host.show(.displays, size: NSSize(width: 760, height: 560))
+      panel.controller.settings.query = "wallpaper"
+      panel.controller.settings.chooseFromList(.displays)
+      try await host.layout(at: NSSize(width: 760, height: 560))
+      try await assertFits(host, at: NSSize(width: 760, height: 560), "scoped search bar narrow")
+      panel.controller.settings.clearSearchScope()
+      panel.controller.settings.query = ""
+      host.close()
+    }
+  }
+
   func testTheDisplaysPageWithNoDisplayStillSaysSoAndFits() async throws {
     try await withPanel { panel in
       try SettingsBFixtures.populate(panel)

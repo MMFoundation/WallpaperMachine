@@ -41,10 +41,14 @@ struct DisplaysCardSearch {
   /// - Parameters:
   ///   - title: What the card's heading says (`titleText(of:)`).
   ///   - listTitles: The display's own list as it is drawn: the wallpapers the library holds.
-  init(search: SettingsSearch, title: String, rows: Rows, listTitles: [(id: String, title: String)] = []) {
+  ///   - sectionMatched: True when the Displays section title itself matched the query.
+  init(
+    search: SettingsSearch, title: String, rows: Rows,
+    listTitles: [(id: String, title: String)] = [], sectionMatched: Bool = false
+  ) {
     self.search = search
     self.rows = rows
-    forced = search.isActive && search.matches(title)
+    forced = search.isActive && (sectionMatched || search.matches(title))
     listMatches =
       search.isActive && rows.listsOwnWallpapers && rows.playlistMode == .rotate && !rows.isMirror
       ? Set(listTitles.filter { search.matches($0.title) }.map(\.id)) : []
@@ -125,7 +129,7 @@ struct DisplaysCardSearch {
       }
       return [S.automationMode] + body + [S.automationFooter]
     case S.playback.id:
-      return [S.scaling, S.scaleFactor, S.scale, S.frameRate, S.mute, S.volume]
+      return [S.scaling, S.scale, S.frameRate, S.mute, S.volume]
     default:
       return []
     }
@@ -168,13 +172,15 @@ extension DisplaysCardSearch {
       automationMode: controller.automationState(for: display.id).mode)
     return DisplaysCardSearch(
       search: search, title: titleText(of: display), rows: rows,
-      listTitles: rows.listsOwnWallpapers ? DisplaysSearchUnits.listTitles(playlist.playlist, controller: controller) : [])
+      listTitles: rows.listsOwnWallpapers ? DisplaysSearchUnits.listTitles(playlist.playlist, controller: controller) : [],
+      sectionMatched: search.matches(controller.settings.text(SettingsSection.displays.title)))
   }
 }
 
 /// The rows of Settings › Displays built from live data, as the Settings search counts them: each
 /// display's card (by its heading), each saved layout (its name, what goes where, why it cannot be
-/// applied), and each wallpaper of a display's own list while the list is drawn.
+/// applied), each saved playlist (by its name), and each wallpaper of a display's own list while
+/// the list is drawn.
 enum DisplaysSearchUnits {
   @MainActor
   static func make(_ controller: PanelController) -> [SettingsLiveUnit] {
@@ -191,6 +197,10 @@ enum DisplaysSearchUnits {
     for layout in controller.displayLayoutsState.layouts {
       units.append(
         SettingsLiveUnit(section: .displays, group: DisplaysSettingsSection.layouts, text: text(of: layout)))
+    }
+    for plan in controller.playlistPlanRows {
+      units.append(
+        SettingsLiveUnit(section: .displays, group: DisplaysSettingsSection.plans, text: plan.name))
     }
     return units
   }

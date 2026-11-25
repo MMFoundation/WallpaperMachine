@@ -4,7 +4,7 @@ import SwiftUI
 /// behave on battery, in Low Power Mode, when the Mac is hot or inactive, under a Focus and beside
 /// other apps.
 struct PlaybackSettingsSection: View {
-  private static let playback = SettingsItem.Group("playback", title: "Playback")
+  static let playback = SettingsItem.Group("playback", title: "Playback")
   private static let context = SettingsItem.Group("context")
   /// The state a search reads in the notes that name how hot the Mac is; the page shows the real one.
   private static let sampleState = "normal"
@@ -145,6 +145,11 @@ struct PlaybackSettingsSection: View {
     return Set(hidden.map(\.id))
   }
 
+  /// Searchable text for an app rule: its display name and bundle identifier.
+  static func appRuleSearchText(_ rule: AppRule) -> String {
+    [rule.name, rule.bundleIdentifier].filter { !$0.isEmpty }.joined(separator: "\n")
+  }
+
   @Environment(PanelController.self) private var controller
 
   var body: some View {
@@ -250,8 +255,15 @@ struct PlaybackSettingsSection: View {
           }
         }
         SettingsDisclosure(Self.appRules) {
-          if playback.appRules.isEmpty { PlaybackAppRulesEmptyRow() }
-          ForEach(playback.appRules) { PlaybackAppRuleRow(rule: $0) }
+          let search = controller.settings.search
+          let showsAllRules =
+            !search.isActive || search.matchesItself(Self.appRules) || search.shows(Self.addAppRule)
+          if playback.appRules.isEmpty && showsAllRules { PlaybackAppRulesEmptyRow() }
+          ForEach(playback.appRules) { rule in
+            if showsAllRules || search.matches(Self.appRuleSearchText(rule)) {
+              PlaybackAppRuleRow(rule: rule)
+            }
+          }
           PlaybackAddAppRuleRow()
         }
       }

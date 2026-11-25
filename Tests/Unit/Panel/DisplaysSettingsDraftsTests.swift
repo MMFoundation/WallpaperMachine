@@ -282,4 +282,104 @@ final class DisplaysSettingsDraftsTests: SettingsBTestCase {
       "choosing the Unavailable row changes nothing")
     XCTAssertNil(DisplaysTargetPicker.target("wallpaper:gone", in: targets, keeping: nil))
   }
+
+  func testEditingADisabledRulePreservesIsEnabledAndSummaryMarksItDisabled() throws {
+    let rule = WallpaperAutomationRule(
+      weekdays: [2, 4], event: .time, minute: 9 * 60, target: wallpaper, isEnabled: false)
+    let draft = DisplaysRuleDraft(editing: rule)
+    XCTAssertFalse(draft.isEnabled)
+    let edit = try draft.edit(locale: english).get()
+    XCTAssertFalse(edit.isEnabled)
+    XCTAssertEqual(DisplaysRuleSummary.text(of: rule), "Mon, Wed · 09:00 · Disabled")
+    var enabled = rule
+    enabled.isEnabled = true
+    XCTAssertEqual(DisplaysRuleSummary.text(of: enabled), "Mon, Wed · 09:00")
+  }
+
+  func testWallpaperThumbnailChooserFilterMatchesMultipleWordsCaseAndAccentInsensitively() {
+    let choices: [AutomationTargets.Choice] = [
+      .init(target: .init(kind: .wallpaper, id: "a"), title: "Aurora Bay"),
+      .init(target: .init(kind: .wallpaper, id: "b"), title: "Café Rain Loop"),
+      .init(target: .init(kind: .wallpaper, id: "c"), title: "Night Market"),
+    ]
+    XCTAssertEqual(WallpaperThumbnailChooser.filter(choices, query: "   ").map(\.target.id), ["a", "b", "c"])
+    XCTAssertEqual(WallpaperThumbnailChooser.filter(choices, query: "bay AURORA").map(\.target.id), ["a"])
+    XCTAssertEqual(WallpaperThumbnailChooser.filter(choices, query: "cafe loop").map(\.target.id), ["b"])
+    XCTAssertTrue(WallpaperThumbnailChooser.filter(choices, query: "aurora night").isEmpty)
+  }
+
+  func testSolarReadoutFormatsTodayAndRuleTimesAndHandlesPolarNil() throws {
+    var utc = Calendar(identifier: .gregorian)
+    utc.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+    let equinox = try XCTUnwrap(utc.date(from: DateComponents(year: 2026, month: 3, day: 20, hour: 12)))
+    let equator = WallpaperSolarSettings(
+      source: .coordinates, location: WallpaperSolarLocation(latitude: 0, longitude: 0))
+
+    let today = try XCTUnwrap(
+      DisplaysSolarReadout.todaySummary(solar: equator, on: equinox, calendar: utc, locale: english))
+    XCTAssertTrue(today.hasPrefix("Today: "), today)
+    XCTAssertTrue(today.contains("Sunrise "), today)
+    XCTAssertTrue(today.contains("Sunset "), today)
+
+    let ruleZero = try XCTUnwrap(
+      DisplaysSolarReadout.ruleEventSummary(
+        event: .sunrise, offset: 0, solar: equator, on: equinox, calendar: utc, locale: english))
+    XCTAssertTrue(ruleZero.hasPrefix("Today: Sunrise "), ruleZero)
+    XCTAssertFalse(ruleZero.contains("Runs at "), ruleZero)
+
+    let ruleShifted = try XCTUnwrap(
+      DisplaysSolarReadout.ruleEventSummary(
+        event: .sunset, offset: -25, solar: equator, on: equinox, calendar: utc, locale: english))
+    XCTAssertTrue(ruleShifted.contains("Today: Sunset "), ruleShifted)
+    XCTAssertTrue(ruleShifted.contains("Runs at "), ruleShifted)
+    XCTAssertNil(
+      DisplaysSolarReadout.ruleEventSummary(
+        event: .time, offset: 0, solar: equator, on: equinox, calendar: utc, locale: english))
+
+    // Polar summer: neither sunrise nor sunset occurs.
+    let solstice = try XCTUnwrap(utc.date(from: DateComponents(year: 2026, month: 6, day: 21, hour: 12)))
+    let polar = WallpaperSolarSettings(
+      source: .coordinates, location: WallpaperSolarLocation(latitude: 80, longitude: 0))
+    XCTAssertEqual(
+      DisplaysSolarReadout.todaySummary(solar: polar, on: solstice, calendar: utc, locale: english),
+      "No sunrise or sunset today")
+    XCTAssertEqual(
+      DisplaysSolarReadout.ruleEventSummary(
+        event: .sunrise, offset: 0, solar: polar, on: solstice, calendar: utc, locale: english),
+      "No sunrise today")
+    XCTAssertEqual(
+      DisplaysSolarReadout.ruleEventSummary(
+        event: .sunset, offset: -15, solar: polar, on: solstice, calendar: utc, locale: english),
+      "No sunset today")
+
+    // Missing coordinates show no readout.
+    let noLocation = WallpaperSolarSettings(source: .coordinates, location: nil)
+    XCTAssertNil(DisplaysSolarReadout.todaySummary(solar: noLocation, on: equinox, calendar: utc, locale: english))
+    XCTAssertNil(
+      DisplaysSolarReadout.ruleEventSummary(
+        event: .sunrise, offset: 0, solar: noLocation, on: equinox, calendar: utc, locale: english))
+
+    // Fixed times omit today's calculated coordinate summary, while the rule editor shows the fixed time and offset.
+    let fixed = WallpaperSolarSettings(
+      source: .fixed, location: nil, fixedSunriseMinute: 6 * 60 + 30, fixedSunsetMinute: 18 * 60 + 20)
+    XCTAssertNil(DisplaysSolarReadout.todaySummary(solar: fixed, on: equinox, calendar: utc, locale: english))
+    let fixedRule = try XCTUnwrap(
+      DisplaysSolarReadout.ruleEventSummary(
+        event: .sunset, offset: -15, solar: fixed, on: equinox, calendar: utc, locale: english))
+    XCTAssertTrue(fixedRule.contains("6:20"), fixedRule)
+    XCTAssertTrue(fixedRule.contains("6:05"), fixedRule)
+  }
+
+  func testScaleFactorAcceptsZoomAboveOneWhileSliderParksAtOneHundredPercent() {
+    let outcome = { (typed: String, stored: Double) in
+      DisplaysNumberCommit.outcome(typed: typed, stored: stored, locale: self.english, accepts: { $0 > 0 })
+    }
+    XCTAssertEqual(outcome("1.5", 1.0), .send(1.5))
+    XCTAssertEqual(outcome("2.25", 1.25), .send(2.25))
+    XCTAssertEqual(outcome("0", 1.25), .refuse)
+    XCTAssertEqual(ScaleSlider.percent(for: 1.5), 100)
+    XCTAssertNil(
+      ScaleSlider.factor(for: 100, current: 1.5),
+      "leaving the slider at 100% does not overwrite a >1.0 zoom factor")
+  }
 }

@@ -17,6 +17,40 @@ struct WallpaperAutomationRule: Codable, Equatable, Identifiable, Sendable {
     var minute = 8 * 60
     var offset = 0
     var target: WallpaperAutomationTarget
+    var isEnabled = true
+
+    init(
+        id: String = UUID().uuidString,
+        weekdays: Set<Int> = Set(1...7),
+        event: Event = .time,
+        minute: Int = 8 * 60,
+        offset: Int = 0,
+        target: WallpaperAutomationTarget,
+        isEnabled: Bool = true
+    ) {
+        self.id = id
+        self.weekdays = weekdays
+        self.event = event
+        self.minute = minute
+        self.offset = offset
+        self.target = target
+        self.isEnabled = isEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, weekdays, event, minute, offset, target, isEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        weekdays = try values.decode(Set<Int>.self, forKey: .weekdays)
+        event = try values.decode(Event.self, forKey: .event)
+        minute = try values.decode(Int.self, forKey: .minute)
+        offset = try values.decode(Int.self, forKey: .offset)
+        target = try values.decode(WallpaperAutomationTarget.self, forKey: .target)
+        isEnabled = try values.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+    }
 
     var isValid: Bool {
         !id.isEmpty && id.count <= 128 && !id.contains("\0") && !weekdays.isEmpty
@@ -127,7 +161,7 @@ enum WallpaperAutomationPlanner {
         for dayOffset in -8...8 {
             guard let day = calendar.date(byAdding: .day, value: dayOffset, to: today) else { continue }
             let weekday = calendar.component(.weekday, from: day)
-            for (index, rule) in configuration.rules.enumerated() where rule.weekdays.contains(weekday) {
+            for (index, rule) in configuration.rules.enumerated() where rule.isEnabled && rule.weekdays.contains(weekday) {
                 let date: Date?
                 switch rule.event {
                 case .time:

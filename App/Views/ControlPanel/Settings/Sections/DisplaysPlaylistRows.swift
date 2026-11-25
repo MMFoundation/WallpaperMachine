@@ -371,7 +371,8 @@ private struct DisplaysDayNightRows: View {
       controlLabel: name(DisplaysSettingsSection.playlistDay.title)
     ) {
       wallpaperPicker(
-        key: "dayWallpaper", current: playlist.dayWallpaperID ?? "", choices: choices
+        key: "dayWallpaper", popoverTitle: L("Day wallpaper"), current: playlist.dayWallpaperID ?? "",
+        choices: choices
       ) { try await controller.editPlaylist(.dayWallpaper($0), display: display.id) }
     }
     DisplaysRow(
@@ -394,7 +395,8 @@ private struct DisplaysDayNightRows: View {
       controlLabel: name(DisplaysSettingsSection.playlistNight.title)
     ) {
       wallpaperPicker(
-        key: "nightWallpaper", current: playlist.nightWallpaperID ?? "", choices: choices
+        key: "nightWallpaper", popoverTitle: L("Night wallpaper"), current: playlist.nightWallpaperID ?? "",
+        choices: choices
       ) { try await controller.editPlaylist(.nightWallpaper($0), display: display.id) }
     }
     DisplaysRow(
@@ -424,21 +426,38 @@ private struct DisplaysDayNightRows: View {
     }
   }
 
-  /// A menu of the wallpapers that can play, with "Leave as it is" first.
+  /// A searchable thumbnail chooser of the wallpapers that can play, with "Leave as it is" in the
+  /// footer. A saved wallpaper ID that no longer resolves displays as "Unavailable" without being
+  /// overwritten until another choice is made.
   private func wallpaperPicker(
-    key: String, current: String, choices: [AutomationTargets.Choice],
+    key: String, popoverTitle: String, current: String, choices: [AutomationTargets.Choice],
     commit: @escaping @MainActor (String?) async throws -> Void
   ) -> some View {
-    DisplaysTitleMenu(
-      selection: controller.displaysSettings.binding(
-        PanelActionCoordinator.key("playlistSetting", id: display.id, detail: key), current: current
-      ) { id in try await commit(id.isEmpty ? nil : id) },
-      title: choices.first { $0.target.id == current }?.title ?? L("Leave as it is")
-    ) {
-      Text("Leave as it is").tag("")
-      ForEach(choices) { Text(verbatim: $0.title).tag($0.target.id) }
-    }
+    let actionKey = PanelActionCoordinator.key("playlistSetting", id: display.id, detail: key)
+    let activeID = controller.displaysSettings.drafts[actionKey] as? String ?? current
+    let matched = activeID.isEmpty ? nil : choices.first { $0.target.id == activeID }
+    let isUnavailable = !activeID.isEmpty && matched == nil
+    let title = activeID.isEmpty ? L("Leave as it is") : (matched?.title ?? L("Unavailable"))
+    let selected = activeID.isEmpty ? nil : WallpaperAutomationTarget(kind: .wallpaper, id: activeID)
+    return WallpaperChooserTrigger(
+      title: title, popoverTitle: popoverTitle, wallpapers: choices, selected: selected,
+      unavailableNote: isUnavailable ? L("The saved choice is no longer available.") : nil,
+      clearOption: .init(
+        title: L("Leave as it is"), isSelected: activeID.isEmpty, isDisabled: activeID.isEmpty,
+        action: { sendWallpaper(nil, key: actionKey, commit: commit) }),
+      onSelect: { target in sendWallpaper(target.id, key: actionKey, commit: commit) }
+    )
     .disabled(off)
+  }
+
+  private func sendWallpaper(
+    _ id: String?, key: String, commit: @escaping @MainActor (String?) async throws -> Void
+  ) {
+    controller.displaysSettings.setDraft(key, to: id ?? "")
+    controller.launch(key) {
+      defer { controller.displaysSettings.setDraft(key, to: nil) }
+      try await commit(id)
+    }
   }
 }
 

@@ -155,4 +155,73 @@ final class WallpaperAutomationStoreTests: XCTestCase {
             source: .fixed, location: nil,
             fixedSunriseMinute: 24 * 60, fixedSunsetMinute: 18 * 60)))
     }
+
+    func testLegacyRuleWithoutIsEnabledDecodesAsEnabledAndDisabledRuleRoundTrips() throws {
+        let legacyJSON = Data(#"""
+            {
+              "screen": {
+                "mode": "schedule",
+                "rules": [
+                  {
+                    "id": "r1",
+                    "weekdays": [2, 3, 4, 5, 6],
+                    "event": "time",
+                    "minute": 480,
+                    "offset": 0,
+                    "target": { "kind": "wallpaper", "id": "work" }
+                  }
+                ],
+                "revision": 1
+              }
+            }
+            """#.utf8)
+        XCTAssertNoThrow(try WallpaperAutomationStore.validateConfigurations(legacyJSON))
+        let decoded = try JSONDecoder().decode([String: DisplayWallpaperAutomation].self, from: legacyJSON)
+        let legacyRule = try XCTUnwrap(decoded["screen"]?.rules.first)
+        XCTAssertTrue(legacyRule.isEnabled, "rules saved before isEnabled existed decode as enabled")
+
+        let disabled = WallpaperAutomationRule(
+            id: "r2", weekdays: [1, 7], event: .sunset, offset: -15,
+            target: .init(kind: .wallpaper, id: "night"), isEnabled: false)
+        let roundTripped = try JSONDecoder().decode(
+            WallpaperAutomationRule.self, from: JSONEncoder().encode(disabled))
+        XCTAssertEqual(roundTripped, disabled)
+        XCTAssertFalse(roundTripped.isEnabled)
+    }
+
+    func testRulesCanBeDisabledEnabledAndReorderedWithExpectedOrderValidation() throws {
+        let store = WallpaperAutomationStore(defaults: defaults)
+        let r1 = WallpaperAutomationRule(id: "r1", minute: 480, target: .init(kind: .wallpaper, id: "a"))
+        let r2 = WallpaperAutomationRule(id: "r2", minute: 480, target: .init(kind: .wallpaper, id: "b"))
+        let r3 = WallpaperAutomationRule(id: "r3", minute: 600, target: .init(kind: .wallpaper, id: "c"))
+        try store.update("screen") {
+            $0.mode = .schedule
+            $0.rules = [r1, r2, r3]
+        }
+
+        try store.setRuleEnabled("r2", isEnabled: false, on: "screen")
+        XCTAssertEqual(store.configuration(for: "screen").rules.map(\.isEnabled), [true, false, true])
+        XCTAssertFalse(WallpaperAutomationStore(defaults: defaults).configuration(for: "screen").rules[1].isEnabled)
+        try store.setRuleEnabled("r2", isEnabled: true, on: "screen")
+        XCTAssertEqual(store.configuration(for: "screen").rules.map(\.isEnabled), [true, true, true])
+        XCTAssertThrowsError(try store.setRuleEnabled("missing", isEnabled: false, on: "screen"))
+
+        let revisionBeforeBoundary = store.configuration(for: "screen").revision
+        try store.moveRule("r1", by: -1, on: "screen")
+        XCTAssertEqual(store.configuration(for: "screen").rules.map(\.id), ["r1", "r2", "r3"])
+        XCTAssertEqual(store.configuration(for: "screen").revision, revisionBeforeBoundary, "boundary move is a no-op")
+        try store.moveRule("r1", by: 1, on: "screen")
+        XCTAssertEqual(store.configuration(for: "screen").rules.map(\.id), ["r2", "r1", "r3"])
+        XCTAssertThrowsError(try store.moveRule("r1", by: 2, on: "screen"))
+        XCTAssertThrowsError(try store.moveRule("missing", by: 1, on: "screen"))
+
+        try store.reorderRules(["r3", "r2", "r1"], expected: ["r2", "r1", "r3"], on: "screen")
+        XCTAssertEqual(store.configuration(for: "screen").rules.map(\.id), ["r3", "r2", "r1"])
+        XCTAssertEqual(
+            WallpaperAutomationStore(defaults: defaults).configuration(for: "screen").rules.map(\.id),
+            ["r3", "r2", "r1"])
+        XCTAssertThrowsError(try store.reorderRules(["r1", "r2", "r3"], expected: ["r2", "r1", "r3"], on: "screen"))
+        XCTAssertThrowsError(try store.reorderRules(["r3", "r2"], on: "screen"))
+        XCTAssertThrowsError(try store.reorderRules(["r3", "r2", "unknown"], on: "screen"))
+    }
 }

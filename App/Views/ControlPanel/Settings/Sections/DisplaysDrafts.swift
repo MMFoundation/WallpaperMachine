@@ -114,6 +114,8 @@ struct DisplaysRuleDraft: Equatable {
   var offsetText = "0"
   /// What the rule switches to; a rule needs one.
   var target: WallpaperAutomationTarget?
+  /// Preserved while editing a disabled rule so editing its fields does not re-enable it.
+  var isEnabled = true
   /// "Choose at least one weekday." is showing: set by a save without a day, cleared by the next
   /// choice of days.
   var showsDaysError = false
@@ -131,6 +133,7 @@ struct DisplaysRuleDraft: Equatable {
     time = ClockMinute(minutes: rule.minute) ?? .eightAM
     offsetText = String(rule.offset)
     target = rule.target
+    isEnabled = rule.isEnabled
   }
 
   enum Failure: Error, Equatable {
@@ -165,7 +168,8 @@ struct DisplaysRuleDraft: Equatable {
     guard !weekdays.isEmpty else { return .failure(.noWeekday) }
     return .success(
       AutomationRuleEdit(
-        id: id, weekdays: weekdays, event: event, time: time, offset: offset, target: target))
+        id: id, weekdays: weekdays, event: event, time: time, offset: offset, target: target,
+        isEnabled: isEnabled))
   }
 
   /// Chooses one of the quick sets, which also ends the weekday alert.
@@ -256,6 +260,68 @@ enum DisplaysPlaylistList {
     guard moving != target, let from = ids.firstIndex(of: moving), let to = ids.firstIndex(of: target)
     else { return ids }
     return PlaylistOrdering.reordered(ids, moving: moving, relativeTo: target, after: from < to)
+  }
+}
+
+// MARK: - Today's sunrise and sunset
+
+/// Pure, timer-free formatting for today's computed sunrise and sunset times using local
+/// `WallpaperSolarTimes`. Handles polar day/night `nil` results cleanly.
+enum DisplaysSolarReadout {
+  /// Summary shown inline under Sunrise and sunset when coordinates are set (coordinates or
+  /// automatic source). Nil when no planning coordinates are set (or fixed times are selected).
+  @MainActor
+  static func todaySummary(
+    solar: WallpaperSolarSettings, on date: Date = Date(),
+    calendar: Calendar = .autoupdatingCurrent, locale: Locale? = nil
+  ) -> String? {
+    let locale = locale ?? PanelLocale.shared.locale
+    guard let location = solar.planningLocation else { return nil }
+    let sunrise = WallpaperSolarTimes.event(.sunrise, on: date, location: location, calendar: calendar)
+    let sunset = WallpaperSolarTimes.event(.sunset, on: date, location: location, calendar: calendar)
+    if sunrise == nil && sunset == nil { return L("No sunrise or sunset today") }
+    let rise = sunrise.map { L("Sunrise \(format($0, calendar: calendar, locale: locale))") } ?? L("No sunrise today")
+    let set = sunset.map { L("Sunset \(format($0, calendar: calendar, locale: locale))") } ?? L("No sunset today")
+    let combined = "\(rise) · \(set)"
+    return L("Today: \(combined)")
+  }
+
+  /// Inline readout for `DisplaysRuleEditor` when a solar trigger (sunrise or sunset) is selected.
+  /// Nil for clock-time rules or when coordinates are required and not yet set.
+  @MainActor
+  static func ruleEventSummary(
+    event: WallpaperAutomationRule.Event, offset: Int?, solar: WallpaperSolarSettings,
+    on date: Date = Date(), calendar: Calendar = .autoupdatingCurrent,
+    locale: Locale? = nil
+  ) -> String? {
+    let locale = locale ?? PanelLocale.shared.locale
+    guard event != .time else { return nil }
+    let base: Date?
+    if solar.source == .fixed {
+      let minute = event == .sunrise ? solar.fixedSunriseMinute : solar.fixedSunsetMinute
+      base = calendar.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: date)
+    } else if let location = solar.planningLocation {
+      base = WallpaperSolarTimes.event(event, on: date, location: location, calendar: calendar)
+    } else {
+      return nil
+    }
+    guard let base else {
+      return event == .sunrise ? L("No sunrise today") : L("No sunset today")
+    }
+    let baseText = format(base, calendar: calendar, locale: locale)
+    let eventLabel = event == .sunrise ? L("Sunrise \(baseText)") : L("Sunset \(baseText)")
+    let todayLine = L("Today: \(eventLabel)")
+    if let offset, offset != 0, DisplaysRuleDraft.offsetRange.contains(offset) {
+      let shifted = base.addingTimeInterval(TimeInterval(offset * 60))
+      let runsText = L("Runs at \(format(shifted, calendar: calendar, locale: locale))")
+      return "\(todayLine) · \(runsText)"
+    }
+    return todayLine
+  }
+
+  private static func format(_ date: Date, calendar: Calendar, locale: Locale) -> String {
+    date.formatted(
+      Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone))
   }
 }
 

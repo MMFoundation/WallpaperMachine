@@ -17,7 +17,9 @@ struct DisplaysLayoutsGroup: View {
     let state = controller.displayLayoutsState
     let settings = controller.settings
     let locked = controller.isStoreBusy
-    let groupMatches = settings.search.matches(settings.text(DisplaysSettingsSection.layouts.title ?? ""))
+    let groupMatches =
+      settings.search.matches(settings.text(DisplaysSettingsSection.layouts.title ?? ""))
+      || settings.search.matches(settings.text(SettingsSection.displays.title))
     let showsSave = groupMatches || settings.search.shows(DisplaysSettingsSection.layoutsSave)
     let error = model.layoutOutcome?.failure ?? state.loadError
     SettingsGroup(DisplaysSettingsSection.layouts, in: .displays) {
@@ -189,15 +191,22 @@ struct DisplaysPlansGroup: View {
 
   var body: some View {
     let model = controller.displaysSettings
+    let settings = controller.settings
     let plans = controller.playlistPlanRows
+    let groupMatches =
+      settings.search.matches(settings.text(DisplaysSettingsSection.plans.title ?? ""))
+      || settings.search.matches(settings.text(SettingsSection.displays.title))
+      || settings.search.shows(DisplaysSettingsSection.plansList)
     SettingsGroup(DisplaysSettingsSection.plans, in: .displays) {
-      if plans.isEmpty {
+      if plans.isEmpty && groupMatches {
         DisplaysNote(
           text: L("No saved playlists yet. Set up a display’s playlist above, then choose Save as…."))
       }
-      // The rows are not units of the search: the group is found by its title or by the Saved
-      // playlist rows on the displays.
-      ForEach(plans) { plan in DisplaysPlanRowView(plan: plan, focus: $focus) }
+      ForEach(plans) { plan in
+        if groupMatches || settings.search.matches(plan.name) {
+          DisplaysPlanRowView(plan: plan, focus: $focus)
+        }
+      }
     }
     .onChange(of: model.planFocus, initial: true) { _, target in
       guard let target else { return }
@@ -410,6 +419,10 @@ struct DisplaysSolarGroup: View {
             .disabled(busy)
           }
         }
+      }
+      if let today = DisplaysSolarReadout.todaySummary(solar: controller.solarSettings, locale: locale) {
+        DisplaysNote(text: today)
+          .accessibilityIdentifier("displays.solar-today")
       }
       DisplaysNote(text: L("Solar times are approximate. Near the poles, a day may have no sunrise or sunset."))
     }

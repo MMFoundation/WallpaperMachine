@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 
 @testable import WallpaperMachine
@@ -241,6 +242,139 @@ final class PanelStorageActionsTests: PanelTestCase {
     XCTAssertEqual(ByteSize.text(.nan, locale: en), "")
   }
 
+  func testStorageSpaceFormattingCoversMeasuringMeasuredAndMissingVolumeSpace() throws {
+    try pinPanelLanguageToEnglish()
+    let en = Locale(identifier: "en_US")
+    var state = StorageState(
+      shaderCacheBytes: 0, logBytes: 0, userAssetsPath: "", userAssetsReleasedBytes: nil,
+      verboseLogging: false, inspectsWebWallpapers: false)
+    XCTAssertNil(state.librarySpaceLine(locale: en))
+    XCTAssertNil(state.userAssetsSizeText(locale: en))
+
+    state.metrics = StorageMetrics(isMeasuring: true)
+    XCTAssertEqual(state.librarySpaceLine(locale: en), "Library size: Measuring…")
+    XCTAssertEqual(state.userAssetsSizeText(locale: en), "Measuring…")
+
+    state.metrics = StorageMetrics(
+      libraryBytes: 2 * 1024 * 1024, userAssetsBytes: 8 * 1024,
+      volumeFreeBytes: 10 * 1024 * 1024 * 1024, isMeasuring: false, hasMeasuredDisk: true)
+    XCTAssertEqual(state.librarySpaceLine(locale: en), "Library size: 2 MB · 10 GB available")
+    XCTAssertEqual(state.userAssetsSizeText(locale: en), "8 KB")
+
+    state.metrics = StorageMetrics(
+      libraryBytes: 0, userAssetsBytes: 0, volumeFreeBytes: nil, isMeasuring: false, hasMeasuredDisk: true)
+    XCTAssertEqual(state.librarySpaceLine(locale: en), "Library size: 0 B")
+    XCTAssertEqual(state.userAssetsSizeText(locale: en), "0 B")
+  }
+
+  func testRefreshingStorageMetricsMeasuresLibraryUserAssetsAndFreeSpaceAsynchronously() async throws {
+    try await withRecordingPanel { panel, _ in
+      let controller = panel.controller
+      controller.storageVolumeInspector = FakeStorageVolumeInspector(availableBytes: 50 * 1024 * 1024 * 1024)
+
+      let wallpaperFolder = ClientPaths.libraryURL.appendingPathComponent("w1", isDirectory: true)
+      try FileManager.default.createDirectory(at: wallpaperFolder, withIntermediateDirectories: true)
+      try Data(count: 4096).write(to: wallpaperFolder.appendingPathComponent("scene.pkg"))
+      panel.store.librarySnapshot.wallpapers = [OrganizationFixtures.wallpaper("w1", title: "Aurora")]
+
+      let userAssetFolder = ClientPaths.userAssetsURL.appendingPathComponent("orphan", isDirectory: true)
+      try FileManager.default.createDirectory(at: userAssetFolder, withIntermediateDirectories: true)
+      try Data(count: 8192).write(to: userAssetFolder.appendingPathComponent("leftover.bin"))
+
+      controller.refreshStorageMetrics()
+      try await panel.waitUntil(timeout: 5) {
+        let metrics = controller.storageState.metrics
+        return metrics.libraryBytes != nil && metrics.hasMeasuredDisk && !metrics.isMeasuring
+      }
+      let measured = controller.storageState.metrics
+      XCTAssertEqual(measured.libraryBytes, 4096)
+      XCTAssertEqual(measured.userAssetsBytes, 8192)
+      XCTAssertEqual(measured.volumeFreeBytes, 50 * 1024 * 1024 * 1024)
+
+      panel.dialogs.confirmAnswer = true
+      try await controller.purgeUnreferencedUserAssets()
+      try await panel.waitUntil(timeout: 5) {
+        !controller.storageState.metrics.isMeasuring && controller.storageState.metrics.userAssetsBytes == 0
+      }
+      XCTAssertEqual(controller.storageState.metrics.userAssetsBytes, 0)
+    }
+  }
+
+  /// When the library reloads while Settings › Storage is open, `.onChange(of: libraryRefreshRevision)`
+  /// re-queues `LibraryMetricsService` so the size never sticks on "Library size: Measuring…", and
+  /// revisiting Storage refreshes disk figures silently in the background without flashing measuring.
+  func testStorageMetricsReMeasuresOnLibraryRefreshAndSilentlyRefreshesOnRevisit() async throws {
+    try await withRecordingPanel { panel, bridge in
+      let controller = panel.controller
+      controller.storageVolumeInspector = FakeStorageVolumeInspector(availableBytes: 50 * 1024 * 1024 * 1024)
+
+      let w1 = ClientPaths.libraryURL.appendingPathComponent("w1", isDirectory: true)
+      try FileManager.default.createDirectory(at: w1, withIntermediateDirectories: true)
+      try Data(count: 4096).write(to: w1.appendingPathComponent("scene.pkg"))
+      panel.store.librarySnapshot.wallpapers = [OrganizationFixtures.wallpaper("w1", title: "Aurora")]
+
+      let userAssetFolder = ClientPaths.userAssetsURL.appendingPathComponent("orphan", isDirectory: true)
+      try FileManager.default.createDirectory(at: userAssetFolder, withIntermediateDirectories: true)
+      try Data(count: 8192).write(to: userAssetFolder.appendingPathComponent("leftover.bin"))
+
+      let hosting = NSHostingController(
+        rootView: StorageSettingsSection()
+          .environment(controller)
+          .panelTheme(theme: controller.theme, locale: PanelLocale.shared))
+      hosting.sizingOptions = []
+      let window = ControlPanelWindow.make(contentViewController: hosting, delegate: nil)
+      defer {
+        window.contentViewController = nil
+        window.close()
+      }
+      window.setContentSize(NSSize(width: 760, height: 600))
+      window.layoutIfNeeded()
+      hosting.view.layoutSubtreeIfNeeded()
+
+      try await panel.waitUntil(timeout: 5) {
+        let metrics = controller.storageState.metrics
+        return metrics.libraryBytes == 4096 && metrics.userAssetsBytes == 8192
+          && metrics.hasMeasuredDisk && !metrics.isMeasuring
+      }
+
+      // Reload the library with an additional wallpaper while Storage stays open.
+      let w2 = ClientPaths.libraryURL.appendingPathComponent("w2", isDirectory: true)
+      try FileManager.default.createDirectory(at: w2, withIntermediateDirectories: true)
+      try Data(count: 2048).write(to: w2.appendingPathComponent("scene.pkg"))
+      var refreshedLibrary = panel.store.librarySnapshot
+      refreshedLibrary.wallpapers = [
+        OrganizationFixtures.wallpaper("w1", title: "Aurora"),
+        OrganizationFixtures.wallpaper("w2", title: "Glacier"),
+      ]
+      bridge.bundleProvider = { [store = panel.store, refreshedLibrary] in
+        BridgeSnapshotBundle(
+          app: store.appSnapshot, library: refreshedLibrary, wallpaperOptions: nil,
+          monitorInformation: store.monitorInformationSnapshot, settings: store.settingsSnapshot)
+      }
+      bridge.snapshot = bridge.bundleProvider?()
+
+      try await controller.refresh()
+      hosting.view.layoutSubtreeIfNeeded()
+      try await panel.waitUntil(timeout: 5) {
+        let metrics = controller.storageState.metrics
+        return metrics.libraryBytes == 6144 && !metrics.isMeasuring
+      }
+      XCTAssertEqual(controller.storageState.metrics.libraryBytes, 6144)
+
+      // Revisiting Storage refreshes disk sizes silently without clearing cached values or showing Measuring…
+      try Data(count: 1024).write(to: userAssetFolder.appendingPathComponent("extra.bin"))
+      controller.storageVolumeInspector = FakeStorageVolumeInspector(availableBytes: 40 * 1024 * 1024 * 1024)
+      controller.refreshStorageMetrics()
+      XCTAssertFalse(
+        controller.storageState.metrics.isMeasuring,
+        "revisit refresh keeps cached values visible instead of flashing Measuring…")
+      try await panel.waitUntil(timeout: 5) {
+        let metrics = controller.storageState.metrics
+        return metrics.userAssetsBytes == 9216 && metrics.volumeFreeBytes == 40 * 1024 * 1024 * 1024
+      }
+    }
+  }
+
   // MARK: Backup
 
   /// The controller's side of a restore: idle, then the previewed package, then a restore waiting
@@ -328,5 +462,14 @@ final class PanelStorageActionsTests: PanelTestCase {
     XCTAssertEqual(
       BackupPresentation(isBusy: true, hasPendingRestore: false, preview: nil, status: "Copying the local backup…", error: nil).workingText,
       "Copying the local backup…")
+  }
+}
+
+private struct FakeStorageVolumeInspector: StorageVolumeInspecting {
+  let availableBytes: Int64?
+  func volume(of url: URL) throws -> StorageVolume {
+    StorageVolume(
+      identifier: 1, isLocal: true, isReadOnly: false,
+      supportsExclusiveRenaming: true, supportsHardLinks: true, availableBytes: availableBytes)
   }
 }

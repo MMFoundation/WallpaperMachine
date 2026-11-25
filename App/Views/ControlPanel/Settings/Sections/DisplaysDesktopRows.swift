@@ -231,96 +231,29 @@ struct DesktopWallpaperChooser: View {
   let dismiss: () -> Void
 
   @Environment(PanelController.self) private var controller
-  @Environment(\.panelTheme) private var theme
-  @State private var query = ""
-  @FocusState private var searchFocused: Bool
-
-  private static let columns = [GridItem(.adaptive(minimum: 124, maximum: 160), spacing: 10)]
 
   var body: some View {
     let targets = controller.automationTargets
-    let wallpapers = filtered(targets.wallpapers)
-    let playlists = filtered(targets.playlists)
-    VStack(alignment: .leading, spacing: 10) {
-      Text(verbatim: L("Wallpaper for \(desktopName)"))
-        .font(.system(size: 13, weight: .semibold))
-      TextField(L("Search wallpapers"), text: $query)
-        .textFieldStyle(.roundedBorder)
-        .focused($searchFocused)
-      ScrollView {
-        VStack(alignment: .leading, spacing: 12) {
-          if wallpapers.isEmpty && playlists.isEmpty {
-            Text("No wallpapers match.")
-              .font(.system(size: 12))
-              .foregroundStyle(theme.surface.muted.color)
-              .frame(maxWidth: .infinity, minHeight: 80)
-          }
-          if !wallpapers.isEmpty {
-            LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 10) {
-              ForEach(wallpapers) { choice in
-                wallpaperButton(choice)
-              }
-            }
-          }
-          if !playlists.isEmpty {
-            Text("Saved playlists")
-              .font(.system(size: 12, weight: .semibold))
-              .foregroundStyle(theme.surface.muted.color)
-            ForEach(playlists) { choice in
-              Button {
-                choose(choice.target)
-              } label: {
-                Label {
-                  Text(verbatim: choice.title)
-                } icon: {
-                  Image(systemName: desktop.target == choice.target ? "checkmark" : "rectangle.stack")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-              }
-              .buttonStyle(.plain)
-            }
-          }
-        }
-        .padding(.vertical, 2)
+    let clearOption: WallpaperThumbnailChooser.ClearOption =
+      desktop.number == 1
+      ? .init(
+        title: L("Keep the current wallpaper"),
+        help: L("This desktop shows whatever the display plays when you switch to it."),
+        isSelected: desktop.target == nil, isDisabled: desktop.target == nil,
+        action: { choose(nil) })
+      : .init(
+        title: L("Same as Desktop 1"),
+        help: L("This desktop shows Desktop 1’s wallpaper, like every desktop you add."),
+        isSelected: desktop.target == nil, isDisabled: desktop.target == nil,
+        action: { choose(nil) })
+    let unavailable =
+      desktop.target.flatMap { target in
+        targets.title(of: target) == nil ? L("The saved choice is no longer available.") : nil
       }
-      HStack {
-        if desktop.number == 1 {
-          Button("Keep the current wallpaper") { choose(nil) }
-            .disabled(desktop.target == nil)
-            .help(L("This desktop shows whatever the display plays when you switch to it."))
-        } else {
-          Button("Same as Desktop 1") { choose(nil) }
-            .disabled(desktop.target == nil)
-            .help(L("This desktop shows Desktop 1’s wallpaper, like every desktop you add."))
-        }
-        Spacer()
-        Button("Cancel", role: .cancel, action: dismiss)
-          .keyboardShortcut(.cancelAction)
-      }
-    }
-    .padding(14)
-    .frame(width: 560, height: 460)
-    .onAppear { searchFocused = true }
-  }
-
-  private func wallpaperButton(_ choice: AutomationTargets.Choice) -> some View {
-    let row = controller.libraryRow(id: choice.target.id)
-    let isChosen = desktop.target == choice.target
-    return Button {
-      choose(choice.target)
-    } label: {
-      WallpaperTile(title: choice.title, subtitle: row?.kind.label, kind: row?.kind.label ?? "", isSelected: isChosen) {
-        PanelImage(source: row?.coverSource, pointSize: 160)
-      }
-    }
-    .buttonStyle(.plain)
-    .accessibilityAddTraits(isChosen ? .isSelected : [])
-  }
-
-  private func filtered(_ choices: [AutomationTargets.Choice]) -> [AutomationTargets.Choice] {
-    let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
-    guard !words.isEmpty else { return choices }
-    return choices.filter { choice in words.allSatisfy { choice.title.localizedStandardContains($0) } }
+    WallpaperThumbnailChooser(
+      title: L("Wallpaper for \(desktopName)"), wallpapers: targets.wallpapers,
+      playlists: targets.playlists, selected: desktop.target, unavailableNote: unavailable,
+      clearOption: clearOption, onSelect: { choose($0) }, onDismiss: dismiss)
   }
 
   private func choose(_ target: WallpaperAutomationTarget?) {
@@ -328,6 +261,5 @@ struct DesktopWallpaperChooser: View {
     controller.launch(key) {
       try await controller.setAutomationDesktop(desktop.id, to: target, display: display.id)
     }
-    dismiss()
   }
 }

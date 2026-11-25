@@ -67,7 +67,40 @@ final class SettingsSearchTests: XCTestCase {
     XCTAssertTrue(search("on bat").shows(Self.battery))
     XCTAssertFalse(
       search("battery frame").shows(Self.battery), "The query is one piece of text, not words")
-    XCTAssertFalse(search("Quick Settings").shows(Self.mute), "Section names are not searched")
+    XCTAssertFalse(
+      search("Quick Settings").shows(Self.mute), "A different section's title does not match items outside it")
+  }
+
+  func testAMatchingSectionTitleKeepsAllOfferedItemsInThatSectionAcrossLanguages() {
+    let general = search("General")
+    XCTAssertTrue(general.shows(.general))
+    XCTAssertTrue(general.shows(Self.screenSaver))
+    XCTAssertFalse(general.shows(Self.mute))
+    XCTAssertEqual(general.count(in: .general), 1)
+
+    let playback = search("Playback & Power")
+    for item in [Self.battery, Self.mute, Self.help, Self.guide] {
+      XCTAssertTrue(playback.shows(item), "\(item.id) stays when its section title matches")
+    }
+    XCTAssertFalse(playback.opens(Self.help), "Matching a section title does not force disclosures open")
+    XCTAssertEqual(playback.count(in: .playback), 4)
+
+    XCTAssertTrue(search("一般", language: "ja").shows(Self.screenSaver))
+    XCTAssertTrue(search("재생", language: "ko").shows(Self.mute))
+  }
+
+  func testALiveUnitInsideADisclosureShowsAndOpensItsDisclosureAndGroup() {
+    let live = [
+      SettingsLiveUnit(
+        section: .playback, group: Self.playback, disclosure: Self.help,
+        text: "Safari\ncom.apple.Safari"),
+    ]
+    let found = SettingsSearch(query: "Safari", index: index("en"), live: live)
+    XCTAssertTrue(found.shows(.playback))
+    XCTAssertTrue(found.shows(Self.playback, in: .playback))
+    XCTAssertTrue(found.shows(Self.help))
+    XCTAssertTrue(found.opens(Self.help))
+    XCTAssertEqual(found.count(in: .playback), 1)
   }
 
   func testAMatchingGroupTitleKeepsEveryItemInTheGroup() {

@@ -126,12 +126,23 @@ extension PanelController {
 
   var storageState: StorageState {
     _ = systemReadingsRevision
+    _ = revisions.libraryMetrics
     let settings = store.settingsSnapshot
+    let libraryIDs = store.librarySnapshot.wallpapers.map(\.id)
+    let libraryBytes = libraryMetrics.totalBytes(for: libraryIDs, revision: store.libraryRefreshRevision)
+    let disk = storageDiskMetrics
+    let metrics = StorageMetrics(
+      libraryBytes: libraryBytes,
+      userAssetsBytes: disk.userAssetsBytes,
+      volumeFreeBytes: disk.volumeFreeBytes,
+      isMeasuring: disk.isMeasuring || (libraryBytes == nil && disk.hasMeasured),
+      hasMeasuredDisk: disk.hasMeasured)
     return StorageState(
       shaderCacheBytes: settings.storage.shaderCacheSizeBytes,
       logBytes: settings.storage.logs.activeFileSizeBytes, userAssetsPath: settings.userAssetsPath,
       userAssetsReleasedBytes: userAssetsReleasedBytes, verboseLogging: settings.verboseLogging,
-      inspectsWebWallpapers: WebWallpaperInspection.isEnabled(defaults: defaults))
+      inspectsWebWallpapers: WebWallpaperInspection.isEnabled(defaults: defaults),
+      metrics: metrics)
   }
 
   var aboutInfo: AboutInfo {

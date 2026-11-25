@@ -22,11 +22,23 @@ final class SettingsModel {
 
   /// The section on show. A window starts on Quick Settings.
   private(set) var selectedSection = SettingsSection.quick
+  /// When non-nil during an active search, scopes the search results to this matching section
+  /// without discarding `query`.
+  private(set) var searchSection: SettingsSection?
   /// Counts the times a section was chosen or revealed, so the page scrolls back to its top even
   /// when the choice is the section already on show.
   private(set) var scrollEpoch = 0
   /// What the search field says, as typed.
-  var query = ""
+  var query = "" {
+    didSet {
+      let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed.isEmpty {
+        searchSection = nil
+      } else if let scoped = searchSection, !search.shows(scoped) {
+        searchSection = nil
+      }
+    }
+  }
   /// The disclosures the person opened. A search opens more for as long as it lasts.
   private(set) var openDisclosures = Set<String>()
   @ObservationIgnored private var cachedSearch:
@@ -69,9 +81,9 @@ final class SettingsModel {
     let tag = locale.tag
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
     let unoffered = trimmed.isEmpty ? [] : SettingsRegistry.unofferedItems(controller)
-    // The rows built from live data (display names, saved layouts, listed wallpapers) are read only
-    // while a query is typed; the Displays model keeps them cached.
-    let live = trimmed.isEmpty ? [] : controller.displaysSettings.searchUnits
+    // The rows built from live data (displays, layouts, saved playlists, app rules, desktop
+    // widgets) are read only while a query is typed.
+    let live = trimmed.isEmpty ? [] : liveSearchUnits
     if let cachedSearch, cachedSearch.query == trimmed, cachedSearch.tag == tag,
       cachedSearch.unoffered == unoffered, cachedSearch.live == live
     {
@@ -86,15 +98,95 @@ final class SettingsModel {
     return search
   }
 
+  /// Live-data rows across Settings sections: Displays (cards, listed wallpapers, saved layouts,
+  /// saved playlists), Playback & Power (App rules), and Desktop Widgets.
+  var liveSearchUnits: [SettingsLiveUnit] {
+    _ = controller.revisions.playback
+    var units = controller.displaysSettings.searchUnits
+    for rule in controller.playback.appRules {
+      let text = PlaybackSettingsSection.appRuleSearchText(rule)
+      if !text.isEmpty {
+        units.append(
+          SettingsLiveUnit(
+            section: .playback, group: PlaybackSettingsSection.playback,
+            disclosure: PlaybackSettingsSection.appRules, text: text))
+      }
+    }
+    for widget in controller.desktopWidgets.widgets {
+      let text = Self.widgetSearchText(widget, controller: controller)
+      if !text.isEmpty {
+        units.append(SettingsLiveUnit(section: .widgets, text: text))
+      }
+    }
+    return units
+  }
+
+  /// Display title of a desktop widget for Settings search results.
+  static func widgetDisplayName(_ widget: DesktopWidget, controller: PanelController) -> String {
+    let custom = widget.text
+      .split(whereSeparator: \.isNewline)
+      .joined(separator: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    if !custom.isEmpty { return custom }
+    return WidgetsSettingsSection.title(of: widget.kind)
+  }
+
+  /// Searchable phrases for a live desktop widget: its custom label/text, kind name, city/time
+  /// zone when set, and pinned display name when placed on a specific display.
+  static func widgetSearchText(_ widget: DesktopWidget, controller: PanelController) -> String {
+    var parts = [WidgetsSettingsSection.title(of: widget.kind)]
+    let custom = widget.text
+      .split(whereSeparator: \.isNewline)
+      .joined(separator: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    if !custom.isEmpty { parts.append(custom) }
+    if let zone = widget.timeZone, !zone.isEmpty {
+      parts.append(controller.widgetsSettings.city(zone))
+      parts.append(zone)
+    }
+    if case .display(_, let name) = widget.placement, !name.isEmpty {
+      parts.append(name)
+    }
+    return parts.joined(separator: "\n")
+  }
+
   /// A phrase of a row or section in the panel's language.
   func text(_ resource: LocalizedStringResource) -> String { locale.string(resolving: resource) }
 
-  /// Shows a section, as a click on its row in the section list does: the search ends and the page starts at
-  /// its top.
+  /// Shows a section in full: clears any search and starts the page at its top.
   func select(_ section: SettingsSection) {
     query = ""
+    searchSection = nil
     selectedSection = section
     scrollEpoch += 1
+  }
+
+  /// Handles clicking a section in `SettingsSectionList`: while searching, scopes results to a
+  /// matching section without discarding the query; clicking a section with no matches clears
+  /// search and opens that section directly.
+  func chooseFromList(_ section: SettingsSection) {
+    guard search.isActive else {
+      select(section)
+      return
+    }
+    if search.shows(section) {
+      searchSection = section
+      scrollEpoch += 1
+    } else {
+      select(section)
+    }
+  }
+
+  /// Returns from a single-section search scope to all matching sections, keeping `query`.
+  func clearSearchScope() {
+    guard searchSection != nil else { return }
+    searchSection = nil
+    scrollEpoch += 1
+  }
+
+  /// Clears the search query and shows `section` (or the currently scoped/selected section).
+  func exitSearch(to section: SettingsSection? = nil) {
+    select(section ?? searchSection ?? selectedSection)
   }
 
   /// Shows the section the app asked to reveal, once. A reveal made before the window existed is

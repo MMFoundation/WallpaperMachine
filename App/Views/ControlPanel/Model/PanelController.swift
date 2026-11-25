@@ -245,6 +245,11 @@ final class PanelController {
   @ObservationIgnored var revealPerformanceData: @MainActor (URL) -> Void = {
     DesktopActions.current.reveal([$0])
   }
+  /// Asynchronously measured user-assets size and library volume free space for Settings › Storage.
+  var storageDiskMetrics = StorageDiskReading()
+  @ObservationIgnored var storageMetricsTask: Task<Void, Never>?
+  /// Test seam for reading volume free space without touching a real external drive.
+  @ObservationIgnored var storageVolumeInspector: any StorageVolumeInspecting = FileSystemVolumes()
   // MARK: end M-settings state
 
   // MARK: Initialization
@@ -360,6 +365,7 @@ final class PanelController {
     PanelPreferences.removeLegacyKeys(from: defaults)
 
     self.libraryMetrics.onChange = { [weak self] in self?.revisions.bump(.libraryMetrics) }
+    self.libraryMetrics.onSettled = { [weak self] in self?.revisions.bump(.libraryMetrics) }
     self.libraryCovers.onChange = { [weak self] in self?.revisions.bump(.libraryCovers) }
     self.energyUsage.onChange = { [weak self] in self?.revisions.bump(.energy) }
     self.store.onRenderingSettingAppliedElsewhere = { [weak self] in self?.energyUsage.settingChanged() }
@@ -436,6 +442,8 @@ final class PanelController {
     energyUsage.setActive(false)
     loginItemRefresh?.cancel()
     loginItemRefresh = nil
+    storageMetricsTask?.cancel()
+    storageMetricsTask = nil
     if let favoritesObserver { NotificationCenter.default.removeObserver(favoritesObserver) }
     favoritesObserver = nil
     displayOptions.cancel()

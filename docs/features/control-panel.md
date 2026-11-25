@@ -223,10 +223,17 @@ canvas, the widgets' layers and an inspector with tabs, which do not scroll as o
 ([desktop widgets](desktop-widgets.md#what-the-user-sees)).
 
 - **Search** filters rows across every section by their own words in the language
-  on show (titles, explanations, keywords, choices and button labels). The page then
+  on show (section titles, group titles, row titles, explanations, keywords, choices
+  and button labels) as well as live entries: display names, saved layouts, saved
+  playlists, listed display wallpapers, app rules (name and bundle ID) and desktop
+  widgets (label, type, city/time zone and pinned display). The page then
   lists every section with a match, one under another, with only the matching rows;
   the section list counts the matches per section and dims the rest; disclosures holding a
-  match open for the search and fold again when it clears. `Escape` clears the field,
+  match (including **App rules** when an app rule matches) open for the search and fold
+  again when it clears. Clicking a matching section in the section list scopes results to
+  that section without discarding the search query, showing a bar with **All results**
+  and **Clear search**; clicking a dimmed section with no matches clears search and opens
+  it directly. `Escape` clears the field,
   and **No settings match “…”.** shows when nothing matches. Results load near the visible
   part of the list as it scrolls. Editing the query returns to the top without rebuilding
   every matching section or repeating its system-state reads; clearing it returns to the
@@ -339,9 +346,12 @@ canvas, the widgets' layers and an inspector with tabs, which do not scroll as o
   (https://mmfoundation.dev/discord, also in the Help menu;
   [Discord invitation](first-run.md#discord-invitation)).
 - **Storage** opens with **Wallpaper library location**: where the installed
-  wallpapers and downloads are kept, **Show in Finder**, **Move…** to another folder
-  or an external drive and **Move to This Mac…** ([library location](library-location.md)).
-  It holds the wallpaper files chosen for properties, **Clear unused
+  wallpapers and downloads are kept, along with the asynchronously measured wallpaper
+  library total size and available space on its volume, **Show in Finder**, **Move…**
+  to another folder or an external drive and **Move to This Mac…**
+  ([library location](library-location.md)).
+  It holds the wallpaper files chosen for properties (with their asynchronously
+  measured folder size), **Clear unused
   caches…** with the shader cache, logs and completed downloads,
   [Backup](backup-restore.md), and ends with **Troubleshooting**: Detailed logging, *Allow inspecting web wallpapers*
   (Safari's Web Inspector on the running pages), the diagnostics report
@@ -967,11 +977,16 @@ wallpaper** help names it too. Disabled and mirrored displays are listed but not
 can no longer be chosen stays stored (the menu bar and automation read it) and the menu reads
 **Target display** until another is picked.
 Per-display enablement, independent/mirror mode, mirror source, scaling (No scaling,
-Stretch, Match, Match with blurred backdrop, Fill), scale factor, scale percentage (a slider
-from 10% to 100% that sets the scale factor, see
+Stretch, Match, Match with blurred backdrop, Fill), **Scale** (combining the 10%–100%
+percentage slider with the numeric scale-factor field, preserving `> 1.0` zoom-in
+cropping values, see
 [wallpaper properties](wallpaper-properties.md)), frame rate, mute and
 volume live in **Settings → Displays**, beside each
-independent display's **Playlist** (see [playlists](playlists.md)). When the frame-rate
+independent display's **Playlist** (see [playlists](playlists.md)). Day/night
+playlist pickers, automatic selection pickers, desktop Space tiles and native
+lock-screen / screen-saver source pickers share one searchable cover-thumbnail
+chooser (`WallpaperThumbnailChooser`) that keeps unavailable saved choices visible
+without overwriting them. When the frame-rate
 ceiling in force is below the saved frame rate, the field notes it and names what set
 it: `Limited to N fps by Performance settings` with a button to Settings → Performance
 while the Performance cap holds it, or `Limited to N fps while the battery is low` (on

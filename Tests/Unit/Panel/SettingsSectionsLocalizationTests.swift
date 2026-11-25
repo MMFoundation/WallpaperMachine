@@ -20,6 +20,7 @@ final class SettingsSectionsLocalizationTests: XCTestCase {
     "pt-BR": [
       "App", "Backup", "CPU", "Downloads", "Experimental", "GPU", "Interface", "Latitude",
       "Longitude", "min", "Neon", "normal", "Playlist", "Spaces", "SteamCMD", "Volume", "Web",
+      "Zoom",
     ]
   ]
 

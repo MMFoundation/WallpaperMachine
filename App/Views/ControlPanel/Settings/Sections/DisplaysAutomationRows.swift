@@ -71,6 +71,7 @@ private struct DisplaysAutomationRows: View {
         ) {
           DisplaysTargetPicker(
             selection: state.light, targets: targets, isRequired: false,
+            popoverTitle: L("In light appearance"),
             key: PanelActionCoordinator.key("automationAppearance", id: display.id, detail: "light"),
             commit: { try await controller.setAutomationAppearance(.light, to: $0, display: display.id) }
           )
@@ -82,6 +83,7 @@ private struct DisplaysAutomationRows: View {
         ) {
           DisplaysTargetPicker(
             selection: state.dark, targets: targets, isRequired: false,
+            popoverTitle: L("In dark appearance"),
             key: PanelActionCoordinator.key("automationAppearance", id: display.id, detail: "dark"),
             commit: { try await controller.setAutomationAppearance(.dark, to: $0, display: display.id) }
           )
@@ -127,71 +129,65 @@ private struct DisplaysAutomationRows: View {
 
 // MARK: - Choosing a wallpaper or a saved playlist
 
-/// A menu of what an automatic choice can switch to: the wallpapers that can play, then the saved
-/// playlists. A saved choice that no longer resolves stays in the menu as "Unavailable", so the menu
-/// shows it and does not change it.
+/// A searchable thumbnail chooser of what an automatic choice can switch to: the wallpapers that
+/// can play, then the saved playlists. A saved choice that no longer resolves stays displayed as
+/// "Unavailable" without being overwritten until the user explicitly chooses another target.
 struct DisplaysTargetPicker: View {
   let selection: WallpaperAutomationTarget?
   let targets: AutomationTargets
   /// A required choice has no "Leave as it is" entry and asks for a choice instead.
   let isRequired: Bool
+  var popoverTitle: String? = nil
   let key: String
   let commit: @MainActor (WallpaperAutomationTarget?) async throws -> Void
   /// Called with the chosen target instead of acting on it, for the editor's draft.
   var onSelect: ((WallpaperAutomationTarget?) -> Void)?
-  /// How wide the menu is: its entries are the user's own titles and may be long.
+  /// How wide the trigger button is: its entries are the user's own titles and may be long.
   var width: CGFloat = 200
-  /// Where the menu sits in its width: at the trailing edge of a row, the leading edge of a form's
-  /// column.
+  /// Where the button sits in its width: at the trailing edge of a row, the leading edge of a
+  /// form's column.
   var alignment = Alignment.trailing
 
   @Environment(PanelController.self) private var controller
 
   var body: some View {
-    let current = Self.identifier(selection)
-    let resolves = selection.map { targets.title(of: $0) != nil } ?? true
-    DisplaysTitleMenu(
-      selection: Binding(
-        get: { controller.displaysSettings.drafts[key] as? String ?? current },
-        set: { chosen in
-          let target = Self.target(chosen, in: targets, keeping: selection)
-          if let onSelect {
-            onSelect(target)
-          } else {
-            controller.displaysSettings.setDraft(key, to: chosen)
-            controller.launch(key) {
-              defer { controller.displaysSettings.setDraft(key, to: nil) }
-              try await commit(target)
-            }
-          }
-        }),
-      title: title(for: controller.displaysSettings.drafts[key] as? String ?? current, resolves: resolves),
-      width: width, alignment: alignment
-    ) {
-      if isRequired {
-        Text("Choose a wallpaper or saved playlist").tag("")
-      } else {
-        Text("Leave as it is").tag("")
-      }
-      if !resolves, let selection {
-        Text("Unavailable").tag(Self.identifier(selection))
-      }
-      if !targets.wallpapers.isEmpty {
-        Section("Wallpapers") {
-          ForEach(targets.wallpapers) { Text(verbatim: $0.title).tag($0.id) }
-        }
-      }
-      if !targets.playlists.isEmpty {
-        Section("Saved playlists") {
-          ForEach(targets.playlists) { Text(verbatim: $0.title).tag($0.id) }
-        }
+    let activeID = controller.displaysSettings.drafts[key] as? String ?? Self.identifier(selection)
+    let activeTarget = Self.target(activeID, in: targets, keeping: selection)
+    let isUnavailable = !activeID.isEmpty && (activeTarget.map { targets.title(of: $0) == nil } ?? true)
+    let clearOption: WallpaperThumbnailChooser.ClearOption? =
+      isRequired
+      ? nil
+      : .init(
+        title: L("Leave as it is"), isSelected: activeID.isEmpty, isDisabled: activeID.isEmpty,
+        action: { choose(nil) })
+    WallpaperChooserTrigger(
+      title: title(for: activeID),
+      popoverTitle: popoverTitle ?? L("Choose a wallpaper or saved playlist"),
+      wallpapers: targets.wallpapers,
+      playlists: targets.playlists,
+      selected: activeTarget,
+      unavailableNote: isUnavailable ? L("The saved choice is no longer available.") : nil,
+      clearOption: clearOption,
+      width: width,
+      alignment: alignment,
+      onSelect: { choose($0) })
+  }
+
+  private func choose(_ target: WallpaperAutomationTarget?) {
+    if let onSelect {
+      onSelect(target)
+    } else {
+      controller.displaysSettings.setDraft(key, to: Self.identifier(target))
+      controller.launch(key) {
+        defer { controller.displaysSettings.setDraft(key, to: nil) }
+        try await commit(target)
       }
     }
   }
 
   /// The title of the choice shown: what it is, "Unavailable" when it no longer resolves, or what
   /// asks for a choice.
-  private func title(for identifier: String, resolves: Bool) -> String {
+  private func title(for identifier: String) -> String {
     if identifier.isEmpty { return isRequired ? L("Choose a wallpaper or saved playlist") : L("Leave as it is") }
     if let found = (targets.wallpapers + targets.playlists).first(where: { $0.id == identifier }) { return found.title }
     return L("Unavailable")
@@ -214,6 +210,17 @@ struct DisplaysTargetPicker: View {
 
 // MARK: - Time schedule
 
+/// Private drag payload for reordering a display's time rules.
+struct AutomationRuleDrag: Codable, Transferable {
+  let display: String
+  let id: String
+  let expected: [String]
+
+  static var transferRepresentation: some TransferRepresentation {
+    CodableRepresentation(contentType: .data, encoder: JSONEncoder(), decoder: JSONDecoder())
+  }
+}
+
 private struct DisplaysScheduleRows: View {
   let display: DisplayRow
   let state: AutomationState
@@ -233,77 +240,42 @@ private struct DisplaysScheduleRows: View {
   var body: some View {
     let model = controller.displaysSettings
     let editing = model.ruleEditing.flatMap { $0.display == display.id ? $0.draft : nil }
-    if state.rules.isEmpty && editing == nil {
-      DisplaysNote(text: L("No time rules yet. Add one to choose when this display changes."))
-    }
-    ForEach(state.rules) { rule in
-      if let editing, editing.id == rule.id {
+    let order = state.rules.map(\.id)
+    Group {
+      if state.rules.isEmpty && editing == nil {
+        DisplaysNote(text: L("No time rules yet. Add one to choose when this display changes."))
+      }
+      ForEach(Array(state.rules.enumerated()), id: \.element.id) { index, rule in
+        if let editing, editing.id == rule.id {
+          DisplaysRuleEditor(display: display, targets: targets, focus: focus)
+        } else {
+          DisplaysScheduleRuleRow(
+            display: display, rule: rule, index: index, count: state.rules.count, order: order,
+            targets: targets, locked: locked, removalArmed: $removalArmed, focus: focus)
+        }
+      }
+      if let editing, editing.id == nil {
         DisplaysRuleEditor(display: display, targets: targets, focus: focus)
-      } else {
-        ruleRow(rule)
       }
-    }
-    if let editing, editing.id == nil {
-      DisplaysRuleEditor(display: display, targets: targets, focus: focus)
-    }
-    VStack(alignment: .leading, spacing: 8) {
-      HStack(spacing: 8) {
-        Button("Add time rule") { model.beginRule(display: display.id) }
-          .focused(focus, equals: .addRule(display: display.id))
-          .disabled(locked || state.rules.count >= Self.ruleLimit || editing != nil)
-        Spacer(minLength: 0)
-        if let next = state.next {
-          Text(verbatim: nextLine(next))
-            .font(.system(size: 11.5))
-            .foregroundStyle(theme.surface.muted.color)
-            .lineLimit(1)
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
+          Button("Add time rule") { model.beginRule(display: display.id) }
+            .focused(focus, equals: .addRule(display: display.id))
+            .disabled(locked || state.rules.count >= Self.ruleLimit || editing != nil)
+          Spacer(minLength: 0)
+          if let next = state.next {
+            Text(verbatim: nextLine(next))
+              .font(.system(size: 11.5))
+              .foregroundStyle(theme.surface.muted.color)
+              .lineLimit(1)
+          }
         }
+        DisplaysCaption(item: DisplaysSettingsSection.automationSchedule, forced: forced)
       }
-      DisplaysCaption(item: DisplaysSettingsSection.automationSchedule, forced: forced)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 8)
-  }
-
-  private func ruleRow(_ rule: WallpaperAutomationRule) -> some View {
-    let model = controller.displaysSettings
-    return HStack(spacing: 8) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(verbatim: targets.title(of: rule.target) ?? L("Unavailable"))
-          .font(.system(size: 13, weight: .semibold))
-          .lineLimit(1)
-        Text(verbatim: DisplaysRuleSummary.text(of: rule))
-          .font(.system(size: 11.5))
-          .foregroundStyle(theme.surface.muted.color)
-          .lineLimit(2)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      if removalArmed == rule.id {
-        // A rule is removed for good, so it asks first, in the row, as deleting a layout or a
-        // saved playlist does.
-        Text("Remove this rule?")
-          .font(.system(size: 12))
-        Button("Cancel") { removalArmed = nil }
-        Button("Remove") {
-          removalArmed = nil
-          controller.launch(
-            PanelActionCoordinator.key("automationRuleRemove", id: display.id, detail: rule.id)
-          ) { try await model.removeRule(rule.id, display: display.id) }
-        }
-        .foregroundStyle(theme.surface.danger.color)
-        .disabled(locked)
-      } else {
-        Button("Edit…") { model.beginRule(display: display.id, editing: rule) }
-          .focused(focus, equals: .editRule(display: display.id, id: rule.id))
-          .disabled(locked)
-        Button("Remove") { removalArmed = rule.id }
-          .disabled(locked)
-      }
-    }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 8)
-    .accessibilityElement(children: .contain)
-    .accessibilityIdentifier("displays.automation-rule.\(display.id).\(rule.id)")
+    .announcesChanges(of: model.ruleAnnouncement)
   }
 
   /// "Next: Evening at Fri 18:30".
@@ -314,6 +286,146 @@ private struct DisplaysScheduleRows: View {
         .minute(.twoDigits))
     let name = state.nextTarget.flatMap { targets.title(of: $0) } ?? L("Unavailable")
     return L("Next: \(name) at \(time)")
+  }
+}
+
+/// One scheduled time rule: its enable switch, target title, schedule summary, and controls to
+/// reorder, edit or remove it. Dragging a row onto another reorders rules in place.
+private struct DisplaysScheduleRuleRow: View {
+  let display: DisplayRow
+  let rule: WallpaperAutomationRule
+  let index: Int
+  let count: Int
+  let order: [String]
+  let targets: AutomationTargets
+  let locked: Bool
+  @Binding var removalArmed: String?
+  var focus: FocusState<DisplaysSettingsModel.AutomationFocus?>.Binding
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+  @State private var isTargeted = false
+
+  var body: some View {
+    let model = controller.displaysSettings
+    let targetTitle = targets.title(of: rule.target) ?? L("Unavailable")
+    let canDrag = !locked && count > 1 && removalArmed != rule.id
+    DisplaysRowLayout {
+      HStack(spacing: 8) {
+        Toggle(
+          noLabel,
+          isOn: model.binding(
+            PanelActionCoordinator.key("automationRuleEnabled", id: display.id, detail: rule.id),
+            current: rule.isEnabled
+          ) { enabled in
+            try await controller.setAutomationRuleEnabled(rule.id, isEnabled: enabled, display: display.id)
+          }
+        )
+        .toggleStyle(.switch)
+        .labelsHidden()
+        .disabled(locked)
+        .accessibilityLabel(Text(verbatim: L("Enable rule for \(targetTitle)")))
+        VStack(alignment: .leading, spacing: 2) {
+          Text(verbatim: targetTitle)
+            .font(.system(size: 13, weight: .semibold))
+            .lineLimit(1)
+          Text(verbatim: DisplaysRuleSummary.text(of: rule))
+            .font(.system(size: 11.5))
+            .foregroundStyle(theme.surface.muted.color)
+            .lineLimit(2)
+        }
+        .panelDisabledOpacity(rule.isEnabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      HStack(spacing: 6) {
+        if removalArmed == rule.id {
+          // A rule is removed for good, so it asks first, in the row, as deleting a layout or a
+          // saved playlist does.
+          Text("Remove this rule?")
+            .font(.system(size: 12))
+          Button("Cancel") { removalArmed = nil }
+          Button("Remove") {
+            removalArmed = nil
+            controller.launch(
+              PanelActionCoordinator.key("automationRuleRemove", id: display.id, detail: rule.id)
+            ) { try await model.removeRule(rule.id, display: display.id) }
+          }
+          .foregroundStyle(theme.surface.danger.color)
+          .disabled(locked)
+        } else {
+          if count > 1 {
+            moveButton(
+              "chevron.up", help: L("Move up"), label: L("Move \(targetTitle) up"),
+              targetFocus: .moveRuleUp(display: display.id, id: rule.id), disabled: locked || index == 0
+            ) { move(-1) }
+            moveButton(
+              "chevron.down", help: L("Move down"), label: L("Move \(targetTitle) down"),
+              targetFocus: .moveRuleDown(display: display.id, id: rule.id), disabled: locked || index == count - 1
+            ) { move(1) }
+          }
+          Button("Edit…") { model.beginRule(display: display.id, editing: rule) }
+            .focused(focus, equals: .editRule(display: display.id, id: rule.id))
+            .disabled(locked)
+          Button("Remove") { removalArmed = rule.id }
+            .disabled(locked)
+        }
+      }
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .background(isTargeted ? theme.accent.accent.color.opacity(0.14) : Color.clear)
+    .contentShape(Rectangle())
+    .modifier(
+      DisplaysRuleDragging(
+        isEnabled: canDrag, drag: AutomationRuleDrag(display: display.id, id: rule.id, expected: order))
+    )
+    .dropDestination(for: AutomationRuleDrag.self) { drops, _ in
+      guard canDrag, let drop = drops.first, drop.display == display.id, drop.id != rule.id else {
+        return false
+      }
+      controller.launch(PanelActionCoordinator.key("automationRuleReorder", id: display.id)) {
+        try await model.dropRule(drop.id, onto: rule.id, expected: drop.expected, display: display.id)
+      }
+      return true
+    } isTargeted: { isTargeted = $0 }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("displays.automation-rule.\(display.id).\(rule.id)")
+  }
+
+  private func move(_ direction: Int) {
+    controller.launch(PanelActionCoordinator.key("automationRuleReorder", id: display.id)) {
+      try await controller.displaysSettings.moveRule(rule.id, by: direction, display: display.id)
+    }
+  }
+
+  private func moveButton(
+    _ symbol: String, help: String, label: String,
+    targetFocus: DisplaysSettingsModel.AutomationFocus, disabled: Bool, action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: symbol)
+        .font(.system(size: 11, weight: .semibold))
+        .frame(width: 22, height: 22)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(DisplaysIconButtonStyle())
+    .focused(focus, equals: targetFocus)
+    .disabled(disabled)
+    .help(help)
+    .accessibilityLabel(Text(verbatim: label))
+  }
+}
+
+private struct DisplaysRuleDragging: ViewModifier {
+  let isEnabled: Bool
+  let drag: AutomationRuleDrag
+
+  func body(content: Content) -> some View {
+    if isEnabled {
+      content.draggable(drag)
+    } else {
+      content
+    }
   }
 }
 
@@ -360,6 +472,9 @@ enum DisplaysRuleSummary {
     if rule.event != .time, rule.offset != 0 {
       parts.append(
         rule.offset < 0 ? L("\(abs(rule.offset)) min before") : L("\(rule.offset) min after"))
+    }
+    if !rule.isEnabled {
+      parts.append(L("Disabled"))
     }
     return parts.joined(separator: " · ")
   }
@@ -419,6 +534,15 @@ private struct DisplaysRuleEditor: View {
             .frame(width: 64)
             .accessibilityLabel(Text(verbatim: L("Offset in minutes")))
         }
+        if let solarLine = DisplaysSolarReadout.ruleEventSummary(
+          event: value.event, offset: value.offset(locale: locale),
+          solar: controller.solarSettings, locale: locale)
+        {
+          Text(verbatim: solarLine)
+            .font(.system(size: 11.5))
+            .foregroundStyle(theme.surface.muted.color)
+            .accessibilityIdentifier("displays.rule-solar-today.\(display.id)")
+        }
         Text("Negative offsets run before the sun event; positive offsets run after it. Set your location below.")
           .font(.system(size: 11.5))
           .foregroundStyle(theme.surface.muted.color)
@@ -450,7 +574,7 @@ private struct DisplaysRuleEditor: View {
       }
       formRow(L("Switch to")) {
         DisplaysTargetPicker(
-          selection: value.target, targets: targets, isRequired: true,
+          selection: value.target, targets: targets, isRequired: true, popoverTitle: L("Switch to"),
           key: PanelActionCoordinator.key("automationRuleDraft", id: display.id),
           commit: { _ in }, onSelect: { draft.wrappedValue.target = $0 }, width: 300,
           alignment: .leading)

@@ -1,7 +1,9 @@
 # Library location
 
 Settings → **Storage** → **Wallpaper library location** shows where the installed
-wallpapers and the downloads are kept, and moves them to another folder, such as
+wallpapers and the downloads are kept, asynchronously reports the wallpaper library's
+total size and available space on its volume alongside managed user-asset size under
+**Wallpaper files you chose**, and moves the library to another folder, such as
 one on an external drive, or back to this Mac.
 
 ## What moves and what stays

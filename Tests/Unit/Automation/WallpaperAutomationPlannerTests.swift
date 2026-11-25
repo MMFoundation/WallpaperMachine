@@ -159,4 +159,32 @@ final class WallpaperAutomationPlannerTests: XCTestCase {
             calendar: calendar)
         XCTAssertNil(missing.current)
     }
+
+    func testDisabledRulesAreSkippedForCurrentAndNextAndLoseTies() {
+        let calendar = calendar()
+        var value = DisplayWallpaperAutomation()
+        value.mode = .schedule
+        value.rules = [
+            .init(id: "first", minute: 8 * 60, target: target("first"), isEnabled: true),
+            .init(id: "later-disabled", minute: 8 * 60, target: target("later"), isEnabled: false),
+            .init(id: "midday-disabled", minute: 12 * 60, target: target("midday"), isEnabled: false),
+            .init(id: "evening", minute: 18 * 60, target: target("evening"), isEnabled: true),
+        ]
+
+        let morning = WallpaperAutomationPlanner.resolve(
+            value, now: date(2026, 10, 8, 9, in: calendar), dark: false, solar: nil, calendar: calendar)
+        XCTAssertEqual(morning.current?.target.id, "first", "a disabled later rule does not win a tie")
+        XCTAssertEqual(morning.next?.target.id, "evening", "a disabled intermediate rule is skipped for next")
+        XCTAssertEqual(morning.next?.date, date(2026, 10, 8, 18, in: calendar))
+
+        let beforeFirst = WallpaperAutomationPlanner.resolve(
+            value, now: date(2026, 10, 8, 7, in: calendar), dark: false, solar: nil, calendar: calendar)
+        XCTAssertEqual(beforeFirst.next?.target.id, "first")
+
+        for index in value.rules.indices { value.rules[index].isEnabled = false }
+        let allDisabled = WallpaperAutomationPlanner.resolve(
+            value, now: date(2026, 10, 8, 9, in: calendar), dark: false, solar: nil, calendar: calendar)
+        XCTAssertNil(allDisabled.current)
+        XCTAssertNil(allDisabled.next)
+    }
 }

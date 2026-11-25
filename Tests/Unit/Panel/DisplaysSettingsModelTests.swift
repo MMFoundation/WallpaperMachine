@@ -562,6 +562,43 @@ final class DisplaysSettingsModelTests: SettingsBTestCase {
     XCTAssertTrue(panel.automations.configuration(for: "primary").rules.isEmpty, "an offset outside three hours")
   }
 
+  func testMovingAndDroppingTimeRulesReordersAnnouncesAndUpdatesFocus() async throws {
+    let panel = try makeRulePanel()
+    defer { Task { await panel.shutdown() } }
+    let controller = panel.controller
+    let model = controller.displaysSettings
+    try await controller.setAutomationMode(.schedule)
+    try await controller.saveAutomationRule(AutomationRuleEdit(time: try XCTUnwrap(ClockMinute(minutes: 480)), target: wallpaper("a")))
+    try await controller.saveAutomationRule(AutomationRuleEdit(time: try XCTUnwrap(ClockMinute(minutes: 600)), target: wallpaper("b")))
+    try await controller.saveAutomationRule(AutomationRuleEdit(time: try XCTUnwrap(ClockMinute(minutes: 720)), target: wallpaper("a")))
+    let initial = panel.automations.configuration(for: "primary").rules.map(\.id)
+    XCTAssertEqual(initial.count, 3)
+
+    try await model.moveRule(initial[0], by: 1, display: "primary")
+    XCTAssertEqual(panel.automations.configuration(for: "primary").rules.map(\.id), [initial[1], initial[0], initial[2]])
+    XCTAssertEqual(model.ruleAnnouncement, "Ocean <img src=x> moved to position 2 of 3.")
+    XCTAssertEqual(model.automationFocus, .moveRuleDown(display: "primary", id: initial[0]))
+
+    try await model.moveRule(initial[0], by: 1, display: "primary")
+    XCTAssertEqual(panel.automations.configuration(for: "primary").rules.map(\.id), [initial[1], initial[2], initial[0]])
+    XCTAssertEqual(model.ruleAnnouncement, "Ocean <img src=x> moved to position 3 of 3.")
+    XCTAssertEqual(
+      model.automationFocus, .moveRuleUp(display: "primary", id: initial[0]),
+      "Move down is disabled on the last rule, so focus moves to Move up")
+
+    let beforeDrop = panel.automations.configuration(for: "primary").rules.map(\.id)
+    try await model.dropRule(initial[0], onto: initial[1], expected: beforeDrop, display: "primary")
+    XCTAssertEqual(panel.automations.configuration(for: "primary").rules.map(\.id), [initial[0], initial[1], initial[2]])
+    XCTAssertEqual(model.ruleAnnouncement, "Ocean <img src=x> moved to position 1 of 3.")
+
+    // A stale drag expected order is rejected without overwriting the current order.
+    do {
+      try await model.dropRule(initial[2], onto: initial[1], expected: beforeDrop, display: "primary")
+      XCTFail("stale drag order must be rejected")
+    } catch {}
+    XCTAssertEqual(panel.automations.configuration(for: "primary").rules.map(\.id), [initial[0], initial[1], initial[2]])
+  }
+
   // MARK: Spaces
 
   func testForgettingAMissingDesktopMovesFocusToTheNextForgetButtonElseTheModeMenu() async throws {

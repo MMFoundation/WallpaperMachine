@@ -138,7 +138,58 @@ extension PanelController {
       // A negative figure would be a bug in the accounting, not a real amount, so it is reported as
       // nothing released rather than wrapped.
       userAssetsReleasedBytes = UInt64(max(0, released))
+      refreshStorageMetrics(force: true)
     }
+  }
+
+  // MARK: Async storage metrics
+
+  /// Triggers background measurement of the wallpaper library total size (reusing
+  /// `LibraryMetricsService`), managed user-assets folder size, and library volume free space.
+  /// Performs zero synchronous disk I/O on the main actor.
+  func refreshStorageMetrics(force: Bool = false) {
+    guard !isStopped else { return }
+    let ids = store.librarySnapshot.wallpapers.map(\.id)
+    _ = libraryMetrics.metrics(for: ids, revision: store.libraryRefreshRevision)
+    guard force || storageMetricsTask == nil else { return }
+    storageMetricsTask?.cancel()
+    if !storageDiskMetrics.hasMeasured {
+      storageDiskMetrics.isMeasuring = true
+    }
+    let libraryRoot = libraryLocation.current
+    let userAssetsURL = UserAssetStorage.managedRootURL
+    let volumes = storageVolumeInspector
+    storageMetricsTask = Task { @MainActor [weak self] in
+      let result = await Task.detached(priority: .utility) { () -> (UInt64, UInt64?) in
+        let assetsBytes = Self.measureUserAssetsBytes(at: userAssetsURL)
+        let freeBytes = Self.measureVolumeFreeBytes(for: libraryRoot, volumes: volumes)
+        return (assetsBytes, freeBytes)
+      }.value
+      guard let self, !Task.isCancelled, !self.isStopped else { return }
+      self.storageDiskMetrics = StorageDiskReading(
+        userAssetsBytes: result.0, volumeFreeBytes: result.1, isMeasuring: false, hasMeasured: true)
+      self.storageMetricsTask = nil
+    }
+  }
+
+  nonisolated static func measureUserAssetsBytes(at url: URL) -> UInt64 {
+    UInt64(max(0, StorageCopier.bytes(in: [url])))
+  }
+
+  nonisolated static func measureVolumeFreeBytes(
+    for url: URL, volumes: any StorageVolumeInspecting
+  ) -> UInt64? {
+    var candidate = url
+    let manager = FileManager.default
+    while !manager.fileExists(atPath: candidate.path) {
+      let parent = candidate.deletingLastPathComponent()
+      if parent.path == candidate.path { break }
+      candidate = parent
+    }
+    guard let available = try? volumes.volume(of: candidate).availableBytes, available >= 0 else {
+      return nil
+    }
+    return UInt64(available)
   }
 
   // MARK: Diagnostics

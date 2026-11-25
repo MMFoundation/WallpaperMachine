@@ -112,7 +112,13 @@ struct StorageSettingsSection: View {
     }
     // Row buttons and switches share one size across Settings.
     .controlSize(.small)
+    .onAppear { controller.refreshStorageMetrics() }
+    .onChange(of: controller.store.libraryRefreshRevision) { _, _ in
+      controller.refreshStorageMetrics()
+    }
   }
+
+  @Environment(PanelController.self) private var controller
 }
 
 // MARK: - Library location
@@ -131,8 +137,11 @@ private struct StorageLocationRows: View {
       !location.isCopying && location.pending == nil
       && !controller.isBusy(PanelActionCoordinator.key("moveLibrary"))
       && !controller.isBusy(PanelActionCoordinator.key("moveLibraryToThisMac"))
+    let storage = controller.storageState
     DisplaysRow(
-      item: StorageSettingsSection.libraryLocation, details: [location.current.path], labelsControl: false
+      item: StorageSettingsSection.libraryLocation,
+      details: [location.current.path] + [storage.librarySpaceLine(locale: locale)].compactMap { $0 },
+      labelsControl: false
     ) {
       HStack(spacing: 8) {
         Button("Show in Finder") {
@@ -214,6 +223,7 @@ private struct StorageUserFilesRows: View {
     let path = state.userAssetsPath
     DisplaysRow(
       item: StorageSettingsSection.userFilesFolder, title: path.isEmpty ? L("Unavailable") : path, note: "",
+      details: [state.userAssetsSizeText(locale: locale)].compactMap { $0 },
       isPath: !path.isEmpty, isPlaceholder: path.isEmpty, labelsControl: false
     ) {
       Button("Show in Finder") {

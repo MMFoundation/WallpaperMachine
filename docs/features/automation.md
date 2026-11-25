@@ -23,20 +23,26 @@ choices across multiple independent displays.
 | Mode | Behavior |
 | --- | --- |
 | Off | Leaves the wallpaper and any existing playlist under their usual controls. |
-| Time schedule | Up to 64 rules, each with weekdays, a clock time or sunrise/sunset plus a −180…180 minute offset, and a wallpaper or saved playlist. |
+| Time schedule | Up to 64 rules, each with an enable/disable switch, weekdays, a clock time or sunrise/sunset plus a −180…180 minute offset, and a wallpaper or saved playlist. Rules can be reordered with their move buttons or by drag-and-drop to control tie-breaking order. |
 | Follow system appearance | Separate choices for the system's light and dark appearance; an empty choice leaves the display as it is. The panel's own theme is independent. |
 | Different wallpaper for each desktop | Choices by desktop UUID, made on the display's card or by applying a wallpaper on that desktop, and loaded after entering it, or run on where they paused when the desktop was visited before. A desktop without a choice follows Desktop 1's; only when Desktop 1 has none either does the display keep the current wallpaper. Only the current desktop plays: in Mission Control the others show a still picture. See [a wallpaper for each desktop](spaces.md) for pause/Focus behavior and native lock-screen limits. |
 
 A wallpaper target turns that display's playlist off after successful activation.
 A saved playlist copies its current settings, then the existing playlist scheduler
-takes over. Editing a saved plan does not update an already applied copy. Mirrored
+takes over. Editing a saved plan does not update an already applied copy. Appearance
+and time-rule targets use a searchable cover-thumbnail chooser (`WallpaperThumbnailChooser`);
+a saved target that no longer exists stays displayed as **Unavailable** without being
+overwritten until another choice is picked. Mirrored
 and disabled displays do not accept rules. Disconnected displays keep their settings
-and catch up when eligible again. **Remove** on a time rule asks in the row (**Remove this
+and catch up when eligible again. Each time rule has a switch to turn it off without
+deleting it (`isEnabled`, defaulting to enabled when loading older saved rules and
+backups); disabled rules are skipped by the planner and stay dimmed in the list.
+**Remove** on a time rule asks in the row (**Remove this
 rule?**, **Cancel** or **Remove**) before the rule is gone, as deleting a display layout or
 a saved playlist does.
 
-Time rules use the Mac's time zone. The latest due rule wins; equal timestamps
-choose the later rule in the list. A daylight-saving gap moves a nonexistent time
+Time rules use the Mac's time zone. The latest due enabled rule wins; equal timestamps
+choose the later rule in the list, which can be adjusted directly by reordering rules. A daylight-saving gap moves a nonexistent time
 to the next valid clock time; a repeated time fires at its first occurrence only.
 After sleep, lock, pause, a covered display or a display that is not in use, only the latest due choice is applied
 when playback can run again. Manual wallpaper and playlist choices mark the current
@@ -73,7 +79,10 @@ so and links to System Settings; allowing access there resumes updates while
 Weekdays refer to the solar event's civil day before applying the offset; offsets
 may cross midnight. Days without a sunrise/sunset near the poles are skipped. A
 coordinate-based or automatic solar rule without a location has no event until one
-is supplied.
+is supplied. When coordinates are set, **Sunrise and sunset** displays today's
+locally calculated sunrise and sunset times inline (or notes when neither occurs
+near the poles), and the rule editor shows today's event and offset-adjusted run
+time when editing a sunrise or sunset rule.
 
 ## Focus selection and restoration
 
@@ -250,13 +259,15 @@ modifier mapping (`HotKeyPreferencesTests`, `GlobalHotKeysTests`), the mute pref
 joins the audio suppression the bridge receives (`PlaybackPreferencesTests`,
 `PlaybackPolicyCompositionTests`; the Settings switch is in `PanelPerformanceSettingsTests`), the planner, store and
 scheduler (`WallpaperAutomationPlannerTests`, `WallpaperAutomationStoreTests`,
-`WallpaperAutomationSchedulerTests`: weekday rules, simultaneous events, appearance
-choices, DST, solar offsets crossing midnight, absent polar events, catch-up and retry
-against a fake clock and the real command queue, manual precedence including a rule
-giving way to a waiting or running manual command, Focus exit and
+`WallpaperAutomationSchedulerTests`: weekday rules, simultaneous events, disabled rules
+and legacy decoding without `isEnabled`, rule reordering with stale-drag validation,
+appearance choices, DST, solar offsets crossing midnight, absent polar events, catch-up
+and retry against a fake clock and the real command queue, manual precedence including
+a rule giving way to a waiting or running manual command, Focus exit and
 interrupted recovery), the panel's validation and queued manual playlist edits
-(`PanelPlaylistActionsTests`), the rule actions and editor (`PanelAutomationActionsTests`,
-`DisplaysSettingsModelTests`, `DisplaysSettingsDraftsTests`), the shortcut recorder
+(`PanelPlaylistActionsTests`), the rule actions, reordering, today's solar readout and
+editor (`PanelAutomationActionsTests`, `DisplaysSettingsModelTests`,
+`DisplaysSettingsDraftsTests`), the shortcut recorder
 (`PanelHotKeyActionsTests`, `ShortcutsRecorderModelTests`) and
 rule merging and rollback in backups (`WallpaperBackupTests`) each have their own suite;
 the Space tests are listed in [Spaces verification](spaces.md#storage-and-verification).

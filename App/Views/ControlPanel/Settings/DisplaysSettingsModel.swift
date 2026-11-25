@@ -497,6 +497,8 @@ final class DisplaysSettingsModel {
   enum AutomationFocus: Hashable {
     case addRule(display: String)
     case editRule(display: String, id: String)
+    case moveRuleUp(display: String, id: String)
+    case moveRuleDown(display: String, id: String)
     case firstDay
     case modePicker(display: String)
     /// The Different wallpaper for each desktop switch.
@@ -506,6 +508,8 @@ final class DisplaysSettingsModel {
     case ruleEvent(display: String)
   }
 
+  /// What a screen reader is told after a time rule moves: "Evening moved to position 1 of 2."
+  private(set) var ruleAnnouncement: String?
   private(set) var automationFocus: AutomationFocus?
 
   func consumeAutomationFocus() { automationFocus = nil }
@@ -549,6 +553,36 @@ final class DisplaysSettingsModel {
     try await controller.removeAutomationRule(id, display: display)
     if ruleEditing?.draft.id == id { ruleEditing = nil }
     automationFocus = .addRule(display: display)
+  }
+
+  /// Moves a saved time rule up (-1) or down (+1), announcing its new position and keeping keyboard
+  /// focus on a move button that remains enabled.
+  func moveRule(_ id: String, by direction: Int, display: String) async throws {
+    let before = controller.automationState(for: display).rules.map(\.id)
+    try await controller.moveAutomationRule(id, by: direction, display: display)
+    let after = controller.automationState(for: display).rules
+    let ids = after.map(\.id)
+    guard ids != before else { return }
+    announceRuleMove(of: id, in: after)
+    switch DisplaysPlaylistList.focusAfterMove(of: id, pressed: direction < 0 ? .up : .down, in: ids) {
+    case .up: automationFocus = .moveRuleUp(display: display, id: id)
+    case .down: automationFocus = .moveRuleDown(display: display, id: id)
+    case .remove: automationFocus = .editRule(display: display, id: id)
+    }
+  }
+
+  /// Moves a dragged time rule onto `target`, checking `expected` so concurrent edits are not lost.
+  func dropRule(_ id: String, onto target: String, expected: [String], display: String) async throws {
+    let order = DisplaysPlaylistList.dropped(expected, moving: id, onto: target)
+    guard order != expected else { return }
+    try await controller.reorderAutomationRules(order, expected: expected, display: display)
+    announceRuleMove(of: id, in: controller.automationState(for: display).rules)
+  }
+
+  private func announceRuleMove(of id: String, in rules: [WallpaperAutomationRule]) {
+    guard let index = rules.firstIndex(where: { $0.id == id }) else { return }
+    let title = controller.automationTargets.title(of: rules[index].target) ?? L("Unavailable")
+    ruleAnnouncement = L("\(title) moved to position \(index + 1) of \(rules.count).")
   }
 
   private static func restoreFocus(_ display: String, _ id: String?) -> AutomationFocus {

@@ -79,7 +79,7 @@ struct SettingsSectionList: View {
     -> Binding<SettingsSection?>
   {
     Binding(
-      get: { search.isActive ? nil : settings.selectedSection },
-      set: { if let section = $0 { settings.select(section) } })
+      get: { search.isActive ? settings.searchSection : settings.selectedSection },
+      set: { if let section = $0 { settings.chooseFromList(section) } })
   }
 }

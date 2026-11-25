@@ -149,6 +149,36 @@ final class WallpaperAutomationStore {
         try update(display) { $0.rules.removeAll { $0.id == id } }
     }
 
+    func setRuleEnabled(_ id: String, isEnabled: Bool, on display: String) throws {
+        try update(display) { value in
+            guard let index = value.rules.firstIndex(where: { $0.id == id }) else { throw Self.invalid() }
+            value.rules[index].isEnabled = isEnabled
+        }
+    }
+
+    /// Moves a saved rule one position up (-1) or down (+1). Moving past either end is a no-op.
+    func moveRule(_ id: String, by direction: Int, on display: String) throws {
+        guard direction == -1 || direction == 1 else { throw Self.invalid() }
+        try update(display) { value in
+            guard let index = value.rules.firstIndex(where: { $0.id == id }) else { throw Self.invalid() }
+            let destination = index + direction
+            guard value.rules.indices.contains(destination) else { return }
+            value.rules.swapAt(index, destination)
+        }
+    }
+
+    /// Reorders a display's saved rules to match `ids`. If `expected` is provided and does not match
+    /// the current order, the reorder is rejected so a stale drag never overwrites a newer edit.
+    func reorderRules(_ ids: [String], expected: [String]? = nil, on display: String) throws {
+        try update(display) { value in
+            let current = value.rules.map(\.id)
+            if let expected, expected != current { throw Self.invalid() }
+            guard ids.count == current.count, Set(ids) == Set(current) else { throw Self.invalid() }
+            let byID = Dictionary(uniqueKeysWithValues: value.rules.map { ($0.id, $0) })
+            value.rules = ids.compactMap { byID[$0] }
+        }
+    }
+
     func setLocation(_ value: WallpaperSolarLocation?) throws {
         guard value?.isValid != false else { throw Self.invalid() }
         guard solar.location != value else { return }

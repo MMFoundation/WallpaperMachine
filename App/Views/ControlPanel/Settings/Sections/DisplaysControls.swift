@@ -14,6 +14,10 @@ struct DisplaysNumberField: View {
   var digits = 2
   var width: CGFloat = 64
   var unit: String?
+  /// Changing this counter discards any uncommitted draft text (used when a paired slider commits).
+  var resetToken: UInt64 = 0
+  /// Accessibility label applied directly to the text field when shared inside a composite row.
+  var fieldAccessibilityLabel: String? = nil
   let accepts: (Double) -> Bool
   /// What the field accepts, said under it after a text it refused: "Enter a whole number from 1
   /// to 60."
@@ -52,8 +56,13 @@ struct DisplaysNumberField: View {
         .multilineTextAlignment(.trailing)
         .frame(width: width)
         .focused($isFocused)
+        .modifier(OptionalAccessibilityLabel(label: fieldAccessibilityLabel))
         .onSubmit { if !finish() { isFocused = true } }
         .onChange(of: isFocused) { _, focused in if !focused { finish() } }
+        .onChange(of: resetToken) { _, _ in
+          text = nil
+          isInvalid = false
+        }
         .onExitCommand {
           text = nil
           isInvalid = false
@@ -153,60 +162,79 @@ struct DisplaysVolumeSlider: View {
   }
 }
 
-/// The Scale percentage slider: the display's scale factor as a whole percentage (`ScaleSlider`).
+/// Unified Scale control: combines the 10–100% percentage slider (`ScaleSlider`) with the
+/// numeric scale factor field (`> 0`), strictly preserving `> 1.0` zoom-in cropping input.
 ///
-/// It is the panel's AppKit slider (`PanelSlider`), not SwiftUI's as Volume is: without a step an
-/// arrow key moves a SwiftUI slider a twentieth of its range, four and a half percent here, so the
-/// keyboard could not reach the percentage next to the one shown. An arrow key or a VoiceOver
-/// adjustment moves one percent and is sent at once; a drag moves the readout and is sent where it
-/// is let go.
-///
-/// Until a factor it sent has been saved, the slider shows that factor and compares the next
-/// choice with it (`RequestedValue`), so a step taken back before the first is saved is sent too.
-struct DisplaysScaleSlider: View {
+/// Both controls share one `RequestedValue` draft so an arrow key or drag on the slider updates the
+/// numeric field immediately, while typing a factor above 1.0 (such as `1.5`) commits directly and
+/// keeps the slider parked at 100% without clamping it back to 1.0.
+struct DisplaysScaleControl: View {
   let factor: Double
   /// What VoiceOver calls the slider: "Scale percentage for Studio Display".
-  let label: String
+  let sliderLabel: String
+  /// What VoiceOver calls the numeric field: "Scale factor for Studio Display".
+  let fieldLabel: String
   /// Starts the save of a factor and returns its task.
   let commit: @MainActor (Double) -> Task<Void, Never>
 
-  @Environment(\.panelTheme) private var theme
   @State private var dragged: Double?
   @State private var draft = RequestedValue<Double>()
+  @State private var sliderEditToken: UInt64 = 0
 
   var body: some View {
-    let percent = dragged ?? ScaleSlider.percent(for: draft.shown(saved: factor))
+    let effective = draft.shown(saved: factor)
+    let percent = dragged ?? ScaleSlider.percent(for: effective)
     let readout = "\(Int(percent.rounded()))%"
+    let fieldValue = dragged.map { $0 / 100 } ?? effective
     HStack(spacing: 8) {
       PanelSlider(
         value: percent, range: ScaleSlider.range, step: 1,
-        // The slider says its value itself, so the readout beside it is not read twice.
-        accessibilityLabel: label, accessibilityValue: readout,
+        accessibilityLabel: sliderLabel, accessibilityValue: readout,
         events: PanelSliderEvents(
           onDrag: { dragged = $0 },
           onRelease: { percent in
             dragged = nil
-            send(percent)
+            sendFromSlider(percent)
           },
-          onStep: send)
+          onStep: sendFromSlider)
       )
-      .frame(width: 130)
-      Text(verbatim: readout)
-        .font(.panel(.callout).monospacedDigit())
-        .foregroundStyle(theme.surface.muted.color)
-        .frame(width: 38, alignment: .trailing)
-        .accessibilityHidden(true)
+      .frame(width: 112)
+      DisplaysNumberField(
+        value: fieldValue, digits: 4, unit: "×",
+        resetToken: sliderEditToken,
+        fieldAccessibilityLabel: fieldLabel,
+        accepts: { $0 > 0 }, invalidMessage: L("Enter a number greater than 0."),
+        commit: { typed in
+          draft.ask(typed)
+          let task = commit(typed)
+          await task.value
+          draft.answered(typed)
+        })
     }
+    .accessibilityElement(children: .contain)
   }
 
-  private func send(_ percent: Double) {
+  private func sendFromSlider(_ percent: Double) {
     guard let chosen = ScaleSlider.factor(for: percent, current: draft.shown(saved: factor))
     else { return }
+    sliderEditToken &+= 1
     draft.ask(chosen)
     let task = commit(chosen)
     Task { @MainActor in
       await task.value
       draft.answered(chosen)
+    }
+  }
+}
+
+private struct OptionalAccessibilityLabel: ViewModifier {
+  let label: String?
+
+  func body(content: Content) -> some View {
+    if let label {
+      content.accessibilityLabel(Text(verbatim: label))
+    } else {
+      content
     }
   }
 }

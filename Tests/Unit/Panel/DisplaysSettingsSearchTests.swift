@@ -171,4 +171,76 @@ final class DisplaysSettingsSearchTests: SettingsBTestCase {
       settings.query = ""
     }
   }
+
+  func testLiveSearchIndexesSavedPlaylistsAppRulesAndDesktopWidgetsAndSectionScopeControls() async throws {
+    try await withPanel { panel in
+      try SettingsBFixtures.populate(panel)
+      let controller = panel.controller
+      let settings = controller.settings
+
+      // Saved playlist name from SettingsBFixtures ("Weekday rotation").
+      settings.query = "Weekday rotation"
+      XCTAssertTrue(settings.search.shows(.displays))
+      XCTAssertTrue(settings.search.shows(S.plans, in: .displays))
+
+      // Live App rule indexed under Playback & Power and opens the App rules disclosure.
+      _ = controller.playback.addRule(bundleIdentifier: "com.example.Xcode", name: "Xcode")
+      settings.query = "Xcode"
+      XCTAssertTrue(settings.search.shows(.playback))
+      XCTAssertTrue(settings.search.opens(PlaybackSettingsSection.appRules))
+      XCTAssertEqual(settings.search.count(in: .playback), 1)
+      settings.query = "com.example.Xcode"
+      XCTAssertTrue(settings.search.shows(.playback))
+      XCTAssertTrue(settings.search.opens(PlaybackSettingsSection.appRules))
+
+      // Live Desktop Widget indexed by custom text, time zone city, and pinned display name.
+      let widget = try controller.desktopWidgets.add(
+        .time, placement: .display(uuid: "disp-1", name: "Reference Monitor"))
+      try controller.desktopWidgets.update(widget.id) {
+        $0.text = "Focus timer"
+        $0.timeZone = "Asia/Tokyo"
+      }
+      settings.query = "Focus timer"
+      XCTAssertTrue(settings.search.shows(.widgets))
+      XCTAssertGreaterThan(settings.search.count(in: .widgets), 0)
+      settings.query = "Tokyo"
+      XCTAssertTrue(settings.search.shows(.widgets))
+      settings.query = "Reference Monitor"
+      XCTAssertTrue(settings.search.shows(.widgets))
+
+      // Clicking a matching section scopes results without discarding the query.
+      settings.query = "wallpaper"
+      XCTAssertTrue(settings.search.shows(.displays))
+      XCTAssertTrue(settings.search.shows(.playback))
+      settings.chooseFromList(.displays)
+      XCTAssertEqual(settings.query, "wallpaper")
+      XCTAssertEqual(settings.searchSection, .displays)
+
+      settings.clearSearchScope()
+      XCTAssertEqual(settings.query, "wallpaper")
+      XCTAssertNil(settings.searchSection)
+
+      // Refining the query so the scoped section no longer matches automatically clears the scope.
+      settings.chooseFromList(.displays)
+      XCTAssertEqual(settings.searchSection, .displays)
+      settings.query = "Xcode"
+      XCTAssertNil(settings.searchSection)
+      XCTAssertTrue(settings.search.shows(.playback))
+
+      // Clicking a non-matching section clears search and opens that section directly.
+      XCTAssertFalse(settings.search.shows(.about))
+      settings.chooseFromList(.about)
+      XCTAssertEqual(settings.query, "")
+      XCTAssertNil(settings.searchSection)
+      XCTAssertEqual(settings.selectedSection, .about)
+
+      // Exit search returns to the scoped section and clears the query.
+      settings.query = "Scale"
+      settings.chooseFromList(.displays)
+      settings.exitSearch()
+      XCTAssertEqual(settings.query, "")
+      XCTAssertNil(settings.searchSection)
+      XCTAssertEqual(settings.selectedSection, .displays)
+    }
+  }
 }

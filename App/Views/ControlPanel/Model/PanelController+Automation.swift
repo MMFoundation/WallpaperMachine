@@ -162,7 +162,7 @@ extension PanelController {
       let display = try standaloneDisplayID(display)
       var rule = WallpaperAutomationRule(
         weekdays: edit.weekdays, event: edit.event, minute: edit.minute, offset: edit.offset,
-        target: try validated(edit.target))
+        target: try validated(edit.target), isEnabled: edit.isEnabled)
       if let id = edit.id, !id.isEmpty {
         guard automations.configuration(for: display).rules.contains(where: { $0.id == id }) else {
           throw InvalidControlValue()
@@ -177,6 +177,29 @@ extension PanelController {
   func removeAutomationRule(_ id: String, display: String? = nil) async throws {
     try await run(.immediate) {
       try automations.removeRule(id, from: try standaloneDisplayID(display))
+    }
+  }
+
+  /// `automationRuleEnabled`: turns a saved time rule on or off without removing it.
+  func setAutomationRuleEnabled(_ id: String, isEnabled: Bool, display: String? = nil) async throws {
+    try await run(.immediate) {
+      try automations.setRuleEnabled(id, isEnabled: isEnabled, on: try standaloneDisplayID(display))
+    }
+  }
+
+  /// `automationRuleMove`: moves a saved time rule up (-1) or down (+1) to control precedence.
+  func moveAutomationRule(_ id: String, by direction: Int, display: String? = nil) async throws {
+    try await run(.immediate) {
+      try automations.moveRule(id, by: direction, on: try standaloneDisplayID(display))
+    }
+  }
+
+  /// `automationRuleReorder`: applies a full rule order after drag-and-drop.
+  func reorderAutomationRules(
+    _ ids: [String], expected: [String]? = nil, display: String? = nil
+  ) async throws {
+    try await run(.immediate) {
+      try automations.reorderRules(ids, expected: expected, on: try standaloneDisplayID(display))
     }
   }
 

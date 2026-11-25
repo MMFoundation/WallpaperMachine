@@ -16,6 +16,7 @@ struct AutomationRuleEdit: Equatable, Sendable {
   /// Minutes after the sun event, from -180 (before) to 180; 0 for a time rule.
   let offset: Int
   let target: WallpaperAutomationTarget
+  let isEnabled: Bool
 
   static let weekdaysOnly: Set<Int> = Set(2...6)
   static let weekends: Set<Int> = [1, 7]
@@ -24,7 +25,7 @@ struct AutomationRuleEdit: Equatable, Sendable {
   /// refused on saving when it is outside the range the editor offers.
   init(
     id: String? = nil, weekdays: Set<Int> = Self.everyDay, event: WallpaperAutomationRule.Event = .time,
-    time: ClockMinute = .eightAM, offset: Int = 0, target: WallpaperAutomationTarget
+    time: ClockMinute = .eightAM, offset: Int = 0, target: WallpaperAutomationTarget, isEnabled: Bool = true
   ) {
     self.id = id
     self.weekdays = weekdays
@@ -32,6 +33,7 @@ struct AutomationRuleEdit: Equatable, Sendable {
     minute = event == .time ? time.minutes : ClockMinute.eightAM.minutes
     self.offset = event == .time ? 0 : offset
     self.target = target
+    self.isEnabled = isEnabled
   }
 
   /// The edit that changes the saved `rule` as it stands.
@@ -42,6 +44,7 @@ struct AutomationRuleEdit: Equatable, Sendable {
     minute = rule.minute
     offset = rule.offset
     target = rule.target
+    isEnabled = rule.isEnabled
   }
 
   /// The time of a time rule, for the editor's time field.
