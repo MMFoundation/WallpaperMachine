@@ -153,6 +153,76 @@ enum WebWallpaperProtocol {
         return min(max(scale, renderScaleRange.lowerBound), renderScaleRange.upperBound)
     }
 
+    /// Wallpaper Engine's standard lowercase BCP-47 `language` tag for
+    /// `applyGeneralProperties({ language })` and SceneScript `applyGeneralSettings`,
+    /// e.g. `"en-us"`, `"zh-cn"`, `"zh-tw"`, `"ja-jp"`, `"ko-kr"`, `"pt-br"`.
+    ///
+    /// Normalizes shipped app tags (`en`, `zh-Hans`, `zh-Hant`, `ja`, `ko`, `pt-BR`),
+    /// Wallpaper Engine label-table codes (`zh-chs`, `zh-cht`) and OS locale tags
+    /// (`zh_Hans_CN`, `zh-Hans-US`, `de_DE`, `en_US@calendar=gregorian`). Empty or
+    /// malformed inputs fall back to `"en-us"`.
+    static func generalLanguage(forTag raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).first
+            .map(String.init) ?? ""
+        let normalized = base.replacingOccurrences(of: "_", with: "-").lowercased()
+        let parts = normalized.split(separator: "-").map(String.init)
+        guard let language = parts.first, !language.isEmpty,
+              language.allSatisfy({ $0.isASCII && $0.isLetter })
+        else { return "en-us" }
+
+        var script: String?
+        var region: String?
+        var index = 1
+        if index < parts.count, parts[index].count == 4,
+           parts[index].allSatisfy({ $0.isASCII && $0.isLetter })
+        {
+            script = parts[index]
+            index += 1
+        }
+        if index < parts.count {
+            let candidate = parts[index]
+            let isAlphaRegion = candidate.count == 2 && candidate.allSatisfy({ $0.isASCII && $0.isLetter })
+            let isNumericRegion = candidate.count == 3 && candidate.allSatisfy({ $0.isASCII && $0.isNumber })
+            let isChineseAlias = language == "zh" && (candidate == "chs" || candidate == "cht")
+            if isAlphaRegion || isNumericRegion || isChineseAlias {
+                region = candidate
+            }
+        }
+
+        switch language {
+        case "zh":
+            if script == "hant" || region == "cht" || region == "tw" { return "zh-tw" }
+            if script != "hans", let region, region == "hk" || region == "mo" { return "zh-\(region)" }
+            return "zh-cn"
+        case "ja":
+            return "ja-jp"
+        case "ko":
+            return "ko-kr"
+        case "en":
+            if let region, region.count == 2 { return "en-\(region)" }
+            return "en-us"
+        case "pt":
+            if let region, region.count == 2 { return "pt-\(region)" }
+            return "pt-br"
+        default:
+            if let region { return "\(language)-\(region)" }
+            return defaultRegionByLanguage[language].map { "\(language)-\($0)" } ?? language
+        }
+    }
+
+    private static let defaultRegionByLanguage: [String: String] = [
+        "de": "de", "es": "es", "fr": "fr", "it": "it",
+        "nl": "nl", "pl": "pl", "ru": "ru", "tr": "tr",
+    ]
+
+    /// Fallback BCP-47 `language` from the current process's preferred languages, used
+    /// when no explicit app language tag is supplied (for example, inside the sandboxed
+    /// extension when reading a manifest written by an older app).
+    static var systemGeneralLanguage: String {
+        generalLanguage(forTag: Locale.preferredLanguages.first ?? Locale.current.identifier)
+    }
+
     /// The file-request fixes, and nothing else. They are the one part of the page
     /// host that every frame of a page gets, the main frame and the subframes it
     /// embeds, so this source reaches for no seed, no author API and no message

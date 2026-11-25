@@ -140,8 +140,31 @@ struct LockScreenScene: Codable, Equatable {
   /// Whether this wallpaper allows system audio response on the lock screen or
   /// screen saver. Absent from older apps and always false for plain videos.
   var audioResponseEnabled: Bool? = nil
+  /// Effective internal render scale (0.25...1.0), carrying the user's setting as reduced by
+  /// battery, Low Power Mode, low battery or heat. Absent from older apps and for plain videos,
+  /// which read as 1.0. Never carries 2D scene resolution (`Display` mode): the extension keeps
+  /// `Canvas size` to stay within ExtensionKit memory limits.
+  var renderScale: Double? = nil
+  /// Lowercase BCP-47 interface language tag for web wallpapers (`applyGeneralProperties`),
+  /// e.g. `"en-us"`, `"zh-cn"`, `"ja-jp"`. Absent from older apps and for scenes/videos.
+  var language: String? = nil
+
+  /// Matches `MIN_RENDER_SCALE...MAX_RENDER_SCALE` in `Renderer/Bridge/src/config/app.rs`.
+  static let renderScaleRange: ClosedRange<Double> = 0.25...1.0
+
+  static func clampedRenderScale(_ scale: Double) -> Double {
+    guard scale.isFinite else { return renderScaleRange.upperBound }
+    return min(max(scale, renderScaleRange.lowerBound), renderScaleRange.upperBound)
+  }
 
   var effectiveFraming: LockScreenFraming { framing ?? .centered }
+  var effectiveRenderScale: Double {
+    Self.clampedRenderScale(renderScale ?? Self.renderScaleRange.upperBound)
+  }
+  var effectiveLanguage: String {
+    language.map(WebWallpaperProtocol.generalLanguage(forTag:))
+      ?? WebWallpaperProtocol.systemGeneralLanguage
+  }
   var effectiveMediaIntegrationEnabled: Bool {
     plainVideo != true && (mediaIntegrationEnabled ?? false)
   }
@@ -156,9 +179,9 @@ struct LockScreenScene: Codable, Equatable {
   }
 
   /// Whether a surface already showing `other` can take this scene without a new
-  /// renderer. Frame rate, title, pause, media integration and audio response apply
-  /// to the running renderer, and the preview path is not read by it. The scaling
-  /// and the position are, like the project, only read when the renderer is built,
+  /// renderer. Frame rate, render scale, language, title, pause, media integration and
+  /// audio response apply to the running renderer, and the preview path is not read by it.
+  /// The scaling and the position are, like the project, only read when the renderer is built,
   /// so a change of either replaces it. So are the kind of wallpaper and the file
   /// a video plays.
   func sharesRenderer(with other: LockScreenScene) -> Bool {

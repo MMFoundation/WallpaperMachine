@@ -46,6 +46,10 @@ final class WebWallpaperHost {
     /// Whether pages may be attached to Safari's Web Inspector, read when a page
     /// is made and again whenever the preference changes.
     private let inspectionEnabled: @MainActor () -> Bool
+    private var languageObserver: NSObjectProtocol?
+    private let languageStore: AppLanguageStore
+    /// Resolved lowercase BCP-47 `language` tag delivered via `applyGeneralProperties`.
+    private let language: @MainActor () -> String
     private var imagePlacementObserver: NSObjectProtocol?
     private var placementDirtyDisplays = Set<UInt32>()
     private var reconcileInFlight = false
@@ -163,6 +167,8 @@ final class WebWallpaperHost {
         pointerMonitor: (any WebWallpaperPointerMonitoring)? = nil,
         pageTiming: WebWallpaperPage.Timing = .init(),
         inspectionEnabled: @escaping @MainActor () -> Bool = { WebWallpaperInspection.isEnabled() },
+        languageStore: AppLanguageStore? = nil,
+        language: (@MainActor () -> String)? = nil,
         audioClock: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         contentRevision: @escaping @MainActor () -> UInt64 = { 0 },
         switchHold: WallpaperSwitchHold? = nil,
@@ -176,6 +182,9 @@ final class WebWallpaperHost {
         self.pointerMonitorOverride = pointerMonitor
         self.pageTiming = pageTiming
         self.inspectionEnabled = inspectionEnabled
+        let resolvedLanguageStore = languageStore ?? .shared
+        self.languageStore = resolvedLanguageStore
+        self.language = language ?? { resolvedLanguageStore.effective.generalPropertyLanguage }
         self.audioClock = audioClock
         self.contentRevision = contentRevision
         self.screens = screens ?? { SystemDisplays.screens() }
@@ -317,6 +326,11 @@ final class WebWallpaperHost {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.applyInspection() }
         }
+        languageObserver = NotificationCenter.default.addObserver(
+            forName: AppLanguageStore.didChangeNotification, object: languageStore, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyLanguage() }
+        }
         imagePlacementObserver = NotificationCenter.default.addObserver(
             forName: StillImagePlacementStore.didChangeNotification, object: imagePlacement, queue: .main
         ) { [weak self] note in
@@ -429,7 +443,7 @@ final class WebWallpaperHost {
             window: window, descriptor: preparing, projectRevision: revision, ready: false)
         counters.record(.webPageCreated, for: surface)
         page.applyDisplayRefreshRate(refreshRate(display))
-        page.applyGeneralProperties(fps: wallpaper.fps)
+        page.applyGeneralProperties(fps: wallpaper.fps, language: language())
         page.applyRenderScale(wallpaper.renderScale)
         page.setAudioResponseEnabled(false)
         page.setMediaIntegrationEnabled(false)
@@ -782,8 +796,11 @@ final class WebWallpaperHost {
                 onError?(error.localizedDescription)
             }
         }
+        let currentLanguage = language()
         if previous?.fps != wallpaper.fps {
-            page.applyGeneralProperties(fps: wallpaper.fps)
+            page.applyGeneralProperties(fps: wallpaper.fps, language: currentLanguage)
+        } else {
+            page.applyLanguage(currentLanguage)
         }
         if previous?.renderScale != wallpaper.renderScale {
             page.applyRenderScale(wallpaper.renderScale)
@@ -906,6 +923,12 @@ final class WebWallpaperHost {
         for window in windows.values { window.page.setInspectable(enabled) }
     }
 
+    private func applyLanguage() {
+        let current = language()
+        for window in windows.values { window.page.applyLanguage(current) }
+        for page in kept.values.flatMap(\.values) { page.window.page.applyLanguage(current) }
+    }
+
     func shutdown() {
         stopped = true
         applyGeneration &+= 1
@@ -917,6 +940,10 @@ final class WebWallpaperHost {
         if let inspectionObserver {
             frameCenter.removeObserver(inspectionObserver)
             self.inspectionObserver = nil
+        }
+        if let languageObserver {
+            NotificationCenter.default.removeObserver(languageObserver)
+            self.languageObserver = nil
         }
         if let imagePlacementObserver {
             NotificationCenter.default.removeObserver(imagePlacementObserver)

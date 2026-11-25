@@ -201,12 +201,18 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       let storage = try WallpaperRuntime.asset(path)
       try check(owe_scene_wallpaper_set_storage(renderer, storage.path, key, true))
     }
-    // The saved scene quality and Wallpaper Engine options, in force for the first frame.
+    // The saved scene quality, Wallpaper Engine options and effective render scale, in force for
+    // the first frame. 2D scene resolution is intentionally never set here so the extension keeps
+    // `Canvas size` within ExtensionKit memory limits.
     if let quality = scene.sceneQuality, let renderer {
       try check(SceneEngineOptionsBinding.apply(quality, to: renderer))
     }
     if let options = scene.engineOptions, let renderer {
       try check(SceneEngineOptionsBinding.apply(options, to: renderer))
+    }
+    let renderScale = scene.effectiveRenderScale
+    if renderScale < 1.0 {
+      try check(owe_scene_wallpaper_set_render_scale(renderer, renderScale))
     }
     try check(
       owe_scene_wallpaper_apply_config(
@@ -224,7 +230,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     let framing = scene.effectiveFraming
     try check(owe_scene_wallpaper_set_framing(renderer, framing.panX, framing.panY))
     WallpaperRuntime.log(
-      "Framing display=\(scene.displayID) panX=\(framing.panX) panY=\(framing.panY)")
+      "Framing display=\(scene.displayID) panX=\(framing.panX) panY=\(framing.panY) renderScale=\(renderScale)")
     try installEngineSignals(renderer)
     firstFrameReply = completion
     requestFrame()
@@ -571,6 +577,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       // surface counted it as playing, and the settling desktop and a lock in its first
       // seconds would never resume it.
       paused: rendererPaused,
+      renderScale: scene.effectiveRenderScale,
+      language: scene.effectiveLanguage,
       mediaIntegrationEnabled: desiredWebMediaEnabled,
       audioResponseEnabled: !preview && isLivePresentationContent && scene.effectiveAudioResponseEnabled)
     web = page
@@ -666,17 +674,24 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   }
 
   func update(scene: LockScreenScene) {
+    let previousRenderScale = self.scene.effectiveRenderScale
     self.scene = scene
     if let renderer {
       do { try check(owe_scene_wallpaper_set_target_fps(renderer, scene.fps)) } catch {
         WallpaperRuntime.log(error.localizedDescription)
+      }
+      if scene.effectiveRenderScale != previousRenderScale {
+        do { try check(owe_scene_wallpaper_set_render_scale(renderer, scene.effectiveRenderScale)) } catch {
+          WallpaperRuntime.log(error.localizedDescription)
+        }
       }
     }
     if let web {
       do {
         // The page keeps the state this surface tracks; `applyPolicy` below changes both together.
         try web.update(propertiesJSON: scene.propertiesJSON ?? "{}", fps: scene.fps,
-          paused: rendererPaused)
+          paused: rendererPaused, renderScale: scene.effectiveRenderScale,
+          language: scene.effectiveLanguage)
       } catch {
         contentError = error
         web.stop()

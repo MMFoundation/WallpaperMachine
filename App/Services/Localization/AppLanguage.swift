@@ -31,6 +31,13 @@ struct AppLanguage: Equatable, Sendable {
     return wallpaperEngineLocale == english ? [english] : [wallpaperEngineLocale, english]
   }
 
+  /// Lowercase BCP-47 tag sent to web wallpapers (`applyGeneralProperties({ language })`),
+  /// matching SceneScript's `applyGeneralSettings({ language })` convention (e.g. `"en-us"`,
+  /// `"zh-cn"`, `"zh-tw"`, `"ja-jp"`, `"ko-kr"`, `"pt-br"`).
+  var generalPropertyLanguage: String {
+    WebWallpaperProtocol.generalLanguage(forTag: tag)
+  }
+
   static func named(_ tag: String) -> AppLanguage? {
     supported.first { $0.tag == tag }
   }
@@ -53,6 +60,7 @@ struct AppLanguage: Equatable, Sendable {
 @MainActor
 final class AppLanguageStore: ObservableObject {
   static let shared = AppLanguageStore()
+  nonisolated static let didChangeNotification = Notification.Name("WallpaperMachine.appLanguageDidChange")
   nonisolated static let defaultsKey = "WallpaperMachine.appLanguage"
   nonisolated static let appleLanguagesKey = "AppleLanguages"
   static let systemChoice = "system"
@@ -108,6 +116,7 @@ final class AppLanguageStore: ObservableObject {
       defaults.set(languages, forKey: Self.appleLanguagesKey)
     }
     preference = next
+    NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
   }
 
   /// The user's macOS language list, read from the global domain so the app-domain

@@ -14,9 +14,11 @@ final class WebWallpaperPreviewSurfaceTests: XCTestCase {
         try """
         <!doctype html><html><head><script>
         window.received = null;
+        window.general = null;
         window.paused = false;
         window.wallpaperPropertyListener = {
           applyUserProperties(properties) { window.received = properties; },
+          applyGeneralProperties(properties) { window.general = properties; },
           setPaused(value) { window.paused = value; }
         };
         </script></head><body>Original preview fixture</body></html>
@@ -28,7 +30,8 @@ final class WebWallpaperPreviewSurfaceTests: XCTestCase {
     private nonisolated static let defaultProperties = #"{"message":{"type":"textinput","value":"Unapplied text"},"choice":{"type":"combo","value":2}}"#
 
     private func makeSurface(generation: UInt64, inspectable: Bool = false,
-                             properties: String = WebWallpaperPreviewSurfaceTests.defaultProperties) throws -> WebWallpaperPreviewSurface {
+                             properties: String = WebWallpaperPreviewSurfaceTests.defaultProperties,
+                             language: String? = nil) throws -> WebWallpaperPreviewSurface {
         let request = try WallpaperPreviewRequest(.init(wallpaperId: "preview", title: "Preview", kind: .webpage,
             projectPath: project.path, entryFile: "index.html", assetsPath: project.path,
             propertiesJson: properties,
@@ -36,7 +39,9 @@ final class WebWallpaperPreviewSurfaceTests: XCTestCase {
             sceneQuality: .wallpaperEngineDefault))
         let assets = UserAssetStore(projectURL: project, wallpaperId: "preview",
             managed: ManagedUserAssetStore(root: root.appendingPathComponent("UserAssets")))
-        return WebWallpaperPreviewSurface(request: request, generation: generation, assets: assets, inspectable: inspectable)
+        return WebWallpaperPreviewSurface(
+            request: request, generation: generation, assets: assets, inspectable: inspectable,
+            language: language)
     }
 
     private func waitForProperties(_ surface: WebWallpaperPreviewSurface) async throws {
@@ -142,5 +147,17 @@ final class WebWallpaperPreviewSurfaceTests: XCTestCase {
         first.stop()
         XCTAssertNil(web.superview)
         XCTAssertFalse(first.page.isLoaded)
+    }
+
+    func testWebPreviewDeliversGeneralPropertiesWithNormalizedLanguage() async throws {
+        let surface = try makeSurface(generation: 1, language: "ja")
+        defer { surface.stop() }
+        try surface.setMuted(true)
+        try await surface.start()
+        try await waitForPage(surface, "window.general && window.general.language")
+        let general = try await surface.page.webView.callAsyncJavaScript(
+            "return window.general", arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
+        XCTAssertEqual(general?["fps"] as? Int, 30)
+        XCTAssertEqual(general?["language"] as? String, "ja-jp")
     }
 }

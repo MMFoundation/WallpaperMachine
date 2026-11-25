@@ -318,20 +318,34 @@ final class WebWallpaperMouseForwarder: WebWallpaperPointerMonitoring {
     }
 
     /// Rebuilds the observed event as if the wallpaper window had received it.
-    /// Scroll events cannot be created through `NSEvent`, so their `CGEvent`
-    /// is copied with a location chosen so AppKit's window-less conversion
-    /// (`x`, primary display height − `y`) lands on the wallpaper-local point.
+    /// Scroll events cannot be created through `NSEvent`, and `NSEvent.mouseEvent`
+    /// has no `buttonNumber` parameter for middle or extra buttons (`.otherMouse*`),
+    /// so both copy their `CGEvent` with a location chosen so AppKit's window-less
+    /// conversion (`x`, primary display height − `y`) lands on the wallpaper-local point.
     static func rebase(_ event: NSEvent, to window: NSWindow, at local: NSPoint) -> NSEvent? {
-        if event.type == .scrollWheel {
-            guard let copy = event.cgEvent?.copy() else { return nil }
-            let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
-            copy.location = CGPoint(x: local.x, y: primaryHeight - local.y)
-            return NSEvent(cgEvent: copy)
+        rebase(event, windowNumber: window.windowNumber, at: local)
+    }
+
+    static func rebase(_ event: NSEvent, windowNumber: Int, at local: NSPoint) -> NSEvent? {
+        switch event.type {
+        case .scrollWheel:
+            return rebaseCGEvent(event, at: local)
+        case .otherMouseDown, .otherMouseDragged, .otherMouseUp:
+            if let rebased = rebaseCGEvent(event, at: local) { return rebased }
+        default:
+            break
         }
         return NSEvent.mouseEvent(
             with: event.type, location: local, modifierFlags: event.modifierFlags, timestamp: event.timestamp,
-            windowNumber: window.windowNumber, context: nil, eventNumber: event.eventNumber,
+            windowNumber: windowNumber, context: nil, eventNumber: event.eventNumber,
             clickCount: event.type == .mouseMoved ? 0 : event.clickCount, pressure: event.pressure)
+    }
+
+    private static func rebaseCGEvent(_ event: NSEvent, at local: NSPoint) -> NSEvent? {
+        guard let copy = event.cgEvent?.copy() else { return nil }
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        copy.location = CGPoint(x: local.x, y: primaryHeight - local.y)
+        return NSEvent(cgEvent: copy)
     }
 
     /// The window a pointer event hits, as the window server recorded it when

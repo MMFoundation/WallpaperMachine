@@ -117,4 +117,37 @@ final class WebWallpaperMouseRoutingTests: XCTestCase {
       WebWallpaperMouseForwarder.frontWindow(of: try event(.scrollWheel, under: nil), kind: .scroll, hitTest: hitTest), 7)
     XCTAssertEqual(asked, 2)
   }
+
+  // MARK: - event rebasing
+
+  @MainActor
+  func testRebasePreservesMiddleAndExtraMouseButtonNumbers() throws {
+    let local = NSPoint(x: 120, y: 80)
+    for (type, button) in [
+      (CGEventType.otherMouseDown, 2),
+      (.otherMouseDragged, 2),
+      (.otherMouseUp, 2),
+      (.otherMouseDown, 3),
+      (.otherMouseUp, 4),
+    ] {
+      let cgEvent = try XCTUnwrap(
+        CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: .zero, mouseButton: .center))
+      cgEvent.setIntegerValueField(.mouseEventButtonNumber, value: Int64(button))
+      let source = try XCTUnwrap(NSEvent(cgEvent: cgEvent))
+      let rebased = try XCTUnwrap(WebWallpaperMouseForwarder.rebase(source, windowNumber: 42, at: local))
+      XCTAssertEqual(rebased.type, source.type)
+      XCTAssertEqual(rebased.buttonNumber, button, "buttonNumber must survive rebase for \(type)")
+      XCTAssertEqual(rebased.locationInWindow.x, local.x, accuracy: 1e-3)
+      XCTAssertEqual(rebased.locationInWindow.y, local.y, accuracy: 1e-3)
+    }
+
+    let leftCG = try XCTUnwrap(
+      CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: .zero, mouseButton: .left))
+    let left = try XCTUnwrap(NSEvent(cgEvent: leftCG))
+    let rebasedLeft = try XCTUnwrap(WebWallpaperMouseForwarder.rebase(left, windowNumber: 42, at: local))
+    XCTAssertEqual(rebasedLeft.type, .leftMouseDown)
+    XCTAssertEqual(rebasedLeft.windowNumber, 42)
+    XCTAssertEqual(rebasedLeft.locationInWindow.x, local.x, accuracy: 1e-3)
+    XCTAssertEqual(rebasedLeft.locationInWindow.y, local.y, accuracy: 1e-3)
+  }
 }

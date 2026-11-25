@@ -2511,4 +2511,33 @@ final class LockScreenWallpaperTests: XCTestCase {
     paused.title = "renamed"
     XCTAssertTrue(native.sharesRenderer(with: paused))
   }
+
+  func testRenderScaleAndLanguageDecodeBackwardCompatiblyClampAndUpdateInPlace() throws {
+    let legacyJSON = Data(#"{"displayID":1,"title":"t","projectPath":"p","assetsPath":"a","fps":30,"scalingMode":3,"scalingFactor":1,"paused":false}"#.utf8)
+    let legacy = try JSONDecoder().decode(LockScreenScene.self, from: legacyJSON)
+    XCTAssertNil(legacy.renderScale)
+    XCTAssertNil(legacy.language)
+    XCTAssertEqual(legacy.effectiveRenderScale, 1.0)
+
+    for (raw, expected) in [
+      (0.0, 0.25), (-1.0, 0.25), (0.25, 0.25), (0.5, 0.5), (0.75, 0.75), (1.0, 1.0),
+      (2.5, 1.0), (.nan, 1.0), (.infinity, 1.0), (-.infinity, 1.0),
+    ] {
+      var scene = legacy
+      scene.renderScale = raw
+      XCTAssertEqual(scene.effectiveRenderScale, expected, "raw=\(raw)")
+    }
+
+    var scaled = legacy
+    scaled.renderScale = 0.75
+    scaled.language = "zh-Hans"
+    let roundTripped = try JSONDecoder().decode(LockScreenScene.self, from: JSONEncoder().encode(scaled))
+    XCTAssertEqual(roundTripped.renderScale, 0.75)
+    XCTAssertEqual(roundTripped.effectiveRenderScale, 0.75)
+    XCTAssertEqual(roundTripped.language, "zh-Hans")
+    XCTAssertEqual(roundTripped.effectiveLanguage, "zh-cn")
+    XCTAssertTrue(
+      legacy.sharesRenderer(with: scaled),
+      "renderScale and language update live on the running surface without replacing the renderer")
+  }
 }

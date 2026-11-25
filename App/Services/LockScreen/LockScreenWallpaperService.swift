@@ -74,6 +74,8 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private var publishedInputs: [LockScreenPublishInput]?
   @ObservationIgnored private var lastContentRevision: UInt64?
   @ObservationIgnored private let contentRevision: () -> UInt64
+  @ObservationIgnored private let renderScale: @MainActor () -> Double
+  @ObservationIgnored private let language: @MainActor () -> String
   @ObservationIgnored private var lastLockScreenRequested: Bool?
   @ObservationIgnored private var lastScreenSaverRequested = false
   @ObservationIgnored private var published: LockScreenConfiguration?
@@ -114,7 +116,9 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private let displaysAreAway: () -> Bool
 
   convenience init(
-    bridge: WallpaperBridge, contentRevision: @escaping () -> UInt64 = { 0 }
+    bridge: WallpaperBridge, contentRevision: @escaping () -> UInt64 = { 0 },
+    renderScale: @escaping @MainActor () -> Double = { 1.0 },
+    language: (@MainActor () -> String)? = nil
   ) {
     let registration = LockScreenExtensionRegistration(processes: .live)
     self.init(
@@ -130,7 +134,8 @@ final class LockScreenWallpaperService {
       selection: LockScreenWallpaperSelection(
         folder: ClientPaths.supportURL.appendingPathComponent("LockScreen")),
       exchange: LockScreenConfiguration.exchangeDirectory,
-      displaysAreAway: LockScreenWallpaperService.displaysAreAway, contentRevision: contentRevision)
+      displaysAreAway: LockScreenWallpaperService.displaysAreAway, contentRevision: contentRevision,
+      renderScale: renderScale, language: language)
   }
 
   init(
@@ -157,7 +162,9 @@ final class LockScreenWallpaperService {
       LockScreenWallpaperService.watchProcessExit,
     // The app passes `displaysAreAway`; a test's displays are never away unless it says so.
     displaysAreAway: @escaping () -> Bool = { false },
-    contentRevision: @escaping () -> UInt64 = { 0 }
+    contentRevision: @escaping () -> UInt64 = { 0 },
+    renderScale: @escaping @MainActor () -> Double = { 1.0 },
+    language: (@MainActor () -> String)? = nil
   ) {
     self.scenes = scenes
     self.wallpaperScenes = wallpaperScenes
@@ -178,6 +185,8 @@ final class LockScreenWallpaperService {
     self.watchProcessExit = watchProcessExit
     self.displaysAreAway = displaysAreAway
     self.contentRevision = contentRevision
+    self.renderScale = renderScale
+    self.language = language ?? { AppLanguageStore.shared.effective.generalPropertyLanguage }
   }
 
   nonisolated private static func onlineDisplayUUID(_ displayID: UInt32) -> String? {
@@ -484,6 +493,8 @@ final class LockScreenWallpaperService {
           return
         }
       }
+      let currentRenderScale = LockScreenScene.clampedRenderScale(renderScale())
+      let currentLanguage = WebWallpaperProtocol.generalLanguage(forTag: language())
       var inputs: [LockScreenPublishInput] = []
       for (content, record) in records {
         guard let uuid = displayUUID(record.displayId) else {
@@ -510,7 +521,9 @@ final class LockScreenWallpaperService {
           sceneQuality: record.sceneQuality.map(SceneQualitySettings.init),
           borderColor: record.borderColor.map { [Double($0.red), Double($0.green), Double($0.blue)] },
           mediaIntegrationEnabled: record.mediaIntegrationEnabled,
-          audioResponseEnabled: record.audioResponseEnabled))
+          audioResponseEnabled: record.audioResponseEnabled,
+          renderScale: currentRenderScale,
+          language: currentLanguage))
       }
       inputs.sort { ($0.content.rawValue, $0.displayID) < ($1.content.rawValue, $1.displayID) }
       let currentContentRevision = contentRevision()
@@ -1161,6 +1174,8 @@ private struct LockScreenPublishInput: Equatable, Sendable {
   var borderColor: [Double]? = nil
   var mediaIntegrationEnabled: Bool = false
   var audioResponseEnabled: Bool = false
+  var renderScale: Double = 1.0
+  var language: String = "en-us"
 }
 
 /// A source-tree metadata fingerprint reuses immutable snapshots without reading
@@ -1283,7 +1298,9 @@ private enum LockScreenAssetPublisher {
           lutFile: lutFile,
           borderColor: isVideo ? input.borderColor : nil,
           mediaIntegrationEnabled: isVideo ? false : input.mediaIntegrationEnabled,
-          audioResponseEnabled: isVideo ? false : input.audioResponseEnabled)
+          audioResponseEnabled: isVideo ? false : input.audioResponseEnabled,
+          renderScale: isVideo ? nil : LockScreenScene.clampedRenderScale(input.renderScale),
+          language: isWeb ? input.language : nil)
       switch input.content {
       case .desktop: configuration.scenes.append(scene)
       case .lockScreen: configuration.lockScreenScenes = (configuration.lockScreenScenes ?? []) + [scene]

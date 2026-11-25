@@ -57,6 +57,8 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
   }
   private var pendingRandomReplies = 0
   private var fps: UInt32
+  private var renderScale: Double
+  private var language: String
   private var desiredPaused: Bool
   private(set) var isPaused = false
   private(set) var isReady = false
@@ -102,6 +104,8 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
 
   init(projectURL: URL, entryFile: String, readAccessURL: URL, size: CGSize,
        scale: CGFloat, propertiesJSON: String, fps: UInt32, paused: Bool,
+       renderScale: Double = 1.0,
+       language: String = WebWallpaperProtocol.systemGeneralLanguage,
        mediaIntegrationEnabled: Bool = false, audioResponseEnabled: Bool = false) throws {
     guard fps > 0 else { throw Failure.invalidProperties }
     guard let entry = WebWallpaperProtocol.canonicalEntryURL(projectURL: projectURL, entryFile: entryFile),
@@ -112,6 +116,8 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     self.projectURL = projectURL.standardizedFileURL.resolvingSymlinksInPath()
     self.readAccessURL = readAccessURL.standardizedFileURL.resolvingSymlinksInPath()
     self.fps = fps
+    self.renderScale = WebWallpaperProtocol.clampedRenderScale(renderScale)
+    self.language = WebWallpaperProtocol.generalLanguage(forTag: language)
     desiredPaused = paused
     self.mediaIntegrationEnabled = mediaIntegrationEnabled
     self.audioResponseEnabled = audioResponseEnabled
@@ -130,7 +136,7 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     // laid out in the display's device pixels like the desktop page; see `pageZoom` below.
     let seed = WebWallpaperProtocol.Seed(
       framePacing: true, frameLimit: WebWallpaperProtocol.frameLimit(forFPS: fps),
-      screenScale: Double(scale))
+      renderScale: self.renderScale, screenScale: Double(scale))
     for script in WebWallpaperProtocol.userScripts(seed: seed) { configuration.userContentController.addUserScript(script) }
     configuration.userContentController.addUserScript(WKUserScript(
       source: Self.denyCaptureScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
@@ -209,16 +215,25 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     webView.loadFileURL(entryURL, allowingReadAccessTo: readAccessURL)
   }
 
-  func update(propertiesJSON: String, fps: UInt32, paused: Bool) throws {
+  func update(
+    propertiesJSON: String, fps: UInt32, paused: Bool,
+    renderScale: Double? = nil, language: String? = nil
+  ) throws {
     guard !isStopped else { throw CancellationError() }
     guard fps > 0 else { throw Failure.invalidProperties }
-    guard self.propertiesJSON != propertiesJSON || self.fps != fps else {
+    let nextScale = renderScale.map(WebWallpaperProtocol.clampedRenderScale) ?? self.renderScale
+    let nextLanguage = language.map(WebWallpaperProtocol.generalLanguage(forTag:)) ?? self.language
+    guard self.propertiesJSON != propertiesJSON || self.fps != fps
+      || self.renderScale != nextScale || self.language != nextLanguage
+    else {
       setPaused(paused)
       return
     }
     properties = try Self.validatedProperties(propertiesJSON, root: readAccessURL, project: projectURL)
     self.propertiesJSON = propertiesJSON
     self.fps = fps
+    self.renderScale = nextScale
+    self.language = nextLanguage
     desiredPaused = paused
     commitRevision &+= 1
     rebuildDirectories()
@@ -389,6 +404,7 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     _ = try await webView.callAsyncJavaScript("""
       \(WebWallpaperProtocol.hostCall(.applyGeneralProperties, "general"));
       \(WebWallpaperProtocol.hostCall(.setFrameLimit, "limit"));
+      \(WebWallpaperProtocol.hostCall(.setRenderScale, "renderScale"));
       \(WebWallpaperProtocol.hostCall(.applyUserProperties, "properties"));
       \(WebWallpaperProtocol.hostCall(.setPaused, "paused"));
       \(WebWallpaperProtocol.hostCall(.deliverMedia, "'status'", "mediaStatus"));
@@ -396,7 +412,9 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
         \(WebWallpaperProtocol.hostCall(.userDirectoryFilesRemoved, "property", "files"));
       for (const [property, files] of Object.entries(directories))
         \(WebWallpaperProtocol.hostCall(.userDirectoryFilesAddedOrChanged, "property", "files"));
-      """, arguments: ["general": ["fps": Int(fps)], "limit": WebWallpaperProtocol.frameLimit(forFPS: fps),
+      """, arguments: ["general": ["fps": Int(fps), "language": language],
+                         "limit": WebWallpaperProtocol.frameLimit(forFPS: fps),
+                         "renderScale": renderScale,
                          "properties": properties,
                          "paused": paused, "mediaStatus": ["enabled": mediaIntegrationEnabled],
                          "directories": currentDirectories, "removed": removed], in: nil, contentWorld: .page)

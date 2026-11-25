@@ -354,6 +354,9 @@ through silence, and a visualiser that starts its idle animation only after the 
 otherwise never moves. Its `requestAnimationFrame` is held to the published frame rate,
 as on the desktop ([frame-rate limit](web-wallpapers.md#frame-rate-limit)), so a 30 fps
 cap or the reduced rate on battery applies here too instead of WebKit's cadence near 60.
+The published effective render scale (held to 50–100% for web pages) and the app's
+resolved lowercase BCP-47 `language` (`applyGeneralProperties({ fps, language })`) reach
+the page as well, updating live without restarting the surface.
 The page's scheduling window is never ordered on screen: the native host displays its
 exported layer tree. Where WebKit exposes window-occlusion control, the page ignores
 that hidden window and follows the host's explicit pause and resume instead, as a
@@ -383,13 +386,15 @@ resuming the page within 15 seconds is, and it is reported like any other surfac
 - Lock-screen animation replaces Desktop; screen-saver playback replaces Idle.
   Selection changes reload the wallpaper service, and unsupported per-display
   configurations are rejected rather than converted destructively.
-- Playback respects the pause and battery settings, and the reduced-quality frame
-  rate that Low Power Mode, heat or a low battery can ask for. Only the frame rate
-  reaches the lock screen and the screen saver: the lock-screen export carries no
-  render scale, so they draw at the surface's own resolution whatever the render
-  scale is. The [2D scene resolution](performance.md#2d-scene-resolution) is not
-  carried either: the extension never sets it, so a 2D scene there is rasterized at
-  its canvas size, the engine's own default. The lock screen covering the desktop does not pause it. A change made
+- Playback respects the pause and battery settings, the reduced-quality frame
+  rate, and the effective internal render scale that Performance settings, battery
+  power, Low Power Mode, heat or a low battery put in force (`LockScreenScene.renderScale`,
+  clamped to `0.25...1.0` for scenes via `owe_scene_wallpaper_set_render_scale` and
+  `0.5...1.0` for web pages, defaulting to `1.0` for manifests written by older apps;
+  plain videos omit it). The [2D scene resolution](performance.md#2d-scene-resolution) is
+  intentionally not carried: the extension never sets `Display` resolution so a 2D scene
+  there stays rasterized at its canvas size (the engine's default) within ExtensionKit
+  memory limits. The lock screen covering the desktop does not pause it. A change made
   while the Mac is locked has not been exercised.
 - The extension answers the whole private wallpaper-service protocol, 21 requests on
   macOS 27.0. macOS drops the connection of an extension that cannot answer a request,

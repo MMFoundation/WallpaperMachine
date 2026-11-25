@@ -115,6 +115,9 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
     private struct CommittedState {
         var propertiesJSON: String?
         var fps: UInt32?
+        /// Lowercase BCP-47 `language` tag delivered via `applyGeneralProperties`, or nil to
+        /// follow `AppLanguageStore.shared.effective` at delivery time.
+        var language: String?
         /// The refresh rate of the display the page is on, 0 while unknown.
         var displayRefreshRate = 0
         /// Multiplies the page's `devicePixelRatio`; 1 is the display's own.
@@ -562,10 +565,20 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
         deliverScreenScale()
     }
 
-    func applyGeneralProperties(fps: UInt32) {
+    func applyGeneralProperties(fps: UInt32, language: String? = nil) {
         let before = frameLimit
         committed.fps = fps
+        if let language {
+            committed.language = WebWallpaperProtocol.generalLanguage(forTag: language)
+        }
         logFrameLimit(changedFrom: before)
+        deliverGeneralProperties()
+    }
+
+    func applyLanguage(_ language: String) {
+        let normalized = WebWallpaperProtocol.generalLanguage(forTag: language)
+        guard normalized != committed.language else { return }
+        committed.language = normalized
         deliverGeneralProperties()
     }
 
@@ -866,11 +879,12 @@ final class WebWallpaperPage: NSObject, WKNavigationDelegate {
 
     private func deliverGeneralProperties() {
         guard isLoaded, let fps = committed.fps else { return }
+        let language = committed.language ?? AppLanguageStore.shared.effective.generalPropertyLanguage
         // One call, so the page's listener and its frame pacing change together.
         run("""
             \(WebWallpaperProtocol.hostCall(.applyGeneralProperties, "general"));
             \(WebWallpaperProtocol.hostCall(.setFrameLimit, "limit"));
-            """, arguments: ["general": ["fps": Int(fps)], "limit": frameLimit])
+            """, arguments: ["general": ["fps": Int(fps), "language": language], "limit": frameLimit])
     }
 
     private func deliverRenderScale() {

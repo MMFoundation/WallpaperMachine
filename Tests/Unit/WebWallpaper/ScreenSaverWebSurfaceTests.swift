@@ -64,11 +64,12 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
 
   private func make(
     entry: String = "index.html", properties: String = "{}", fps: UInt32 = 30, paused: Bool = false,
-    scale: CGFloat = 1
+    scale: CGFloat = 1, renderScale: Double = 1.0,
+    language: String = WebWallpaperProtocol.systemGeneralLanguage
   ) throws -> ScreenSaverWebSurface {
     let surface = try ScreenSaverWebSurface(projectURL: project, entryFile: entry,
       readAccessURL: rootURL, size: CGSize(width: 128, height: 96), scale: scale,
-      propertiesJSON: properties, fps: fps, paused: paused)
+      propertiesJSON: properties, fps: fps, paused: paused, renderScale: renderScale, language: language)
     surfaces.append(surface)
     let layer = CALayer()
     layer.frame = CGRect(x: 0, y: 0, width: 128, height: 96)
@@ -524,5 +525,25 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
       let current = try await self.state(surface)
       return (current["media"] as? [String: Any])?["enabled"] as? Bool == false
     }
+  }
+
+  func testGeneralPropertiesDeliverLanguageAndRenderScaleUpdatesLive() async throws {
+    let surface = try make(fps: 30, scale: 1, renderScale: 0.5, language: "zh-Hans")
+    try await start(surface)
+    let initial = try await state(surface)
+    let initialGeneral = try XCTUnwrap(initial["general"] as? [String: Any])
+    XCTAssertEqual(initialGeneral["fps"] as? Int, 30)
+    XCTAssertEqual(initialGeneral["language"] as? String, "zh-cn")
+    let initialDPR = try await surface.webView.callAsyncJavaScript(
+      "return window.devicePixelRatio", arguments: [:], in: nil, contentWorld: .page) as? Double
+    XCTAssertEqual(try XCTUnwrap(initialDPR), 0.5, accuracy: 1e-6)
+
+    try surface.update(propertiesJSON: "{}", fps: 30, paused: false, renderScale: 0.75, language: "ja")
+    try await poll {
+      (try await self.state(surface)["general"] as? [String: Any])?["language"] as? String == "ja-jp"
+    }
+    let updatedDPR = try await surface.webView.callAsyncJavaScript(
+      "return window.devicePixelRatio", arguments: [:], in: nil, contentWorld: .page) as? Double
+    XCTAssertEqual(try XCTUnwrap(updatedDPR), 0.75, accuracy: 1e-6)
   }
 }

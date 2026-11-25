@@ -117,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var desktopPictureRestoreSettled = false
     private var globalHotKeys: GlobalHotKeys?
     private var playbackPreferencesObserver: NSObjectProtocol?
+    private var appLanguageObserver: NSObjectProtocol?
     private var wallpaperEnergy: WallpaperEnergyRecorder?
     /// The scene reports last handed to `BridgeStore.sceneDrawVerdicts`.
     private var recordedSceneReports: [BridgeSceneBackendReport] = []
@@ -282,7 +283,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             workshopStore.startDownloadLifecycle(bridge: store)
             let lockScreen = LockScreenConfiguration.isSupportedBySystem
                 ? LockScreenWallpaperService(
-                    bridge: store.bridge, contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 }) : nil
+                    bridge: store.bridge,
+                    contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 },
+                    renderScale: { [weak store] in Double(store?.settingsSnapshot.renderScale ?? 1) }) : nil
             if let lockScreen {
                 store.lockScreenWallpaper = lockScreen
                 lockScreen.beforeActivation = { [weak self] in
@@ -513,6 +516,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self?.presentationPolicy?.evaluate()
                     self?.desktopWallpaperSync?.refreshesPeriodically = preferences.refreshesDesktopPicturePeriodically
                     self?.applyDesktopPicturePreference()
+                }
+            }
+            appLanguageObserver = NotificationCenter.default.addObserver(
+                forName: AppLanguageStore.didChangeNotification, object: AppLanguageStore.shared, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    if self?.store?.lockScreenWallpaper?.canRefreshAutomatically == true {
+                        self?.store?.lockScreenWallpaper?.refresh()
+                    }
                 }
             }
             // Seed the Space snapshot before presentation first evaluates, including a launch
@@ -1593,6 +1605,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let playbackPreferencesObserver {
             NotificationCenter.default.removeObserver(playbackPreferencesObserver)
             self.playbackPreferencesObserver = nil
+        }
+        if let appLanguageObserver {
+            NotificationCenter.default.removeObserver(appLanguageObserver)
+            self.appLanguageObserver = nil
         }
         appRuleMonitor?.stop()
         otherAudioMonitor?.stop()

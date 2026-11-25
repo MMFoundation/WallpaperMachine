@@ -639,11 +639,61 @@ final class WebWallpaperAuthorAPITests: XCTestCase {
 
   func testGeneralPropertiesAreDeduplicatedToo() async throws {
     let page = try await listenerPage()
-    page.applyGeneralProperties(fps: 30)
-    page.applyGeneralProperties(fps: 30)
+    page.applyGeneralProperties(fps: 30, language: "en")
+    page.applyGeneralProperties(fps: 30, language: "en")
     page.applyGeneralProperties(fps: 24)
-    let received = try await pollState(page) { ($0["general"] as? [[String: Any]])?.count == 2 }
-    XCTAssertEqual((received["general"] as? [[String: Int]]), [["fps": 30], ["fps": 24]])
+    page.applyLanguage("zh-Hans")
+    page.applyLanguage("zh-Hans")
+    let received = try await pollState(page) { ($0["general"] as? [[String: Any]])?.count == 3 }
+    let calls = try XCTUnwrap(received["general"] as? [[String: Any]])
+    XCTAssertEqual(calls.count, 3)
+    XCTAssertEqual(calls[0]["fps"] as? Int, 30)
+    XCTAssertEqual(calls[0]["language"] as? String, "en-us")
+    XCTAssertEqual(calls[1].keys.sorted(), ["fps"])
+    XCTAssertEqual(calls[1]["fps"] as? Int, 24)
+    XCTAssertEqual(calls[2].keys.sorted(), ["language"])
+    XCTAssertEqual(calls[2]["language"] as? String, "zh-cn")
+  }
+
+  func testGeneralLanguageFormattingMatchesWallpaperEngineBCP47Convention() {
+    let cases: [(String, String)] = [
+      ("en", "en-us"),
+      ("en-US", "en-us"),
+      ("en_GB", "en-gb"),
+      ("zh-Hans", "zh-cn"),
+      ("zh-Hans-CN", "zh-cn"),
+      ("zh-Hans-US", "zh-cn"),
+      ("ZH_cn", "zh-cn"),
+      ("zh-chs", "zh-cn"),
+      ("zh-Hant", "zh-tw"),
+      ("zh-Hant-TW", "zh-tw"),
+      ("zh-Hant-US", "zh-tw"),
+      ("zh-cht", "zh-tw"),
+      ("ja", "ja-jp"),
+      ("ja-JP", "ja-jp"),
+      ("ja-US", "ja-jp"),
+      ("ko", "ko-kr"),
+      ("ko-KR", "ko-kr"),
+      ("ko-US", "ko-kr"),
+      ("pt-BR", "pt-br"),
+      ("pt_BR", "pt-br"),
+      ("pt-PT", "pt-pt"),
+      ("de_DE", "de-de"),
+      ("en_US@calendar=gregorian", "en-us"),
+      ("", "en-us"),
+      ("   ", "en-us"),
+      ("123", "en-us"),
+    ]
+    for (input, expected) in cases {
+      XCTAssertEqual(WebWallpaperProtocol.generalLanguage(forTag: input), expected, input)
+    }
+    let expectedShipped = [
+      "en": "en-us", "zh-Hans": "zh-cn", "zh-Hant": "zh-tw", "ja": "ja-jp", "ko": "ko-kr",
+      "pt-BR": "pt-br",
+    ]
+    XCTAssertEqual(
+      Dictionary(uniqueKeysWithValues: AppLanguage.supported.map { ($0.tag, $0.generalPropertyLanguage) }),
+      expectedShipped)
   }
 
   // MARK: - helpers

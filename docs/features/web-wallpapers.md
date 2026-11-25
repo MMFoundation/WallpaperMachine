@@ -157,7 +157,7 @@ installs once per document and marks it with a non-enumerable `window.__mweFontA
 | Call into the page | When |
 |---|---|
 | `wallpaperPropertyListener.applyUserProperties({ id: { value } })` | Once after load with every property, then after an Apply with only the properties whose values changed; colors are `"r g b"` floats in 0–1 as in `project.json` |
-| `wallpaperPropertyListener.applyGeneralProperties({ fps })` | Once after load, then when the display's target FPS changes; below the rate the page draws at (60 by default) the host also [enforces the limit](#frame-rate-limit) |
+| `wallpaperPropertyListener.applyGeneralProperties({ fps, language })` | Once after load, then when the display's target FPS or the app's resolved lowercase BCP-47 `language` (e.g. `en-us`, `zh-cn`, `ja-jp`) changes; below the rate the page draws at (60 by default) the host also [enforces the limit](#frame-rate-limit) |
 | `wallpaperPropertyListener.setPaused(bool)` | Play/Pause, battery Pause, presentation suspension; the page's cooperative half, the host suspends it as well ([Suspension](#runtime-shape)) |
 | `wallpaperPropertyListener.userDirectoryFilesAddedOrChanged(property, files)` / `userDirectoryFilesRemoved(property, files)` | A watched `fetchall` folder gained or lost files |
 
@@ -282,10 +282,10 @@ setting ([performance](performance.md#quality)) reaches a page as a multiplier o
 (`Shared/WebWallpaperProtocol.swift`) installs an accessor for the property only
 while the scale is below 1 and puts WebKit's own descriptor back when it returns to
 1, so a full-scale page runs on the native property. The scale is
-`BridgeWebWallpaper.renderScale`: the saved scale; the battery profile's while
-Reduced quality is selected and the Mac is on battery; or the lower of the saved scale
-and the profile's while a reduced-quality request from Low Power Mode, heat or a low
-battery holds (and the stricter of the two when both do). It is held to 50-100% for a page.
+`BridgeWebWallpaper.renderScale`: the saved scale, or the lower of the saved scale and the
+reduced-quality profile's while Reduced quality is selected on battery or a reduced-quality
+request from Low Power Mode, heat or a low battery holds (it never raises a lower saved
+scale). It is held to 50-100% for a page.
 Like the frame-rate limit it is part of each document's script, so the very first
 read of a page, a reload and a content-process restart already see it. A change on
 a running page (a Performance or power-source change) is delivered without a reload
@@ -293,7 +293,8 @@ and raises one `resize` event on the window, however many changes share a turn, 
 pages that rebuild their canvas or WebGL buffers on `resize` pick it up; the
 value a document starts with raises none. Changes are logged at debug level
 (`render scale <n>`). A page that assigns `devicePixelRatio` itself keeps its own
-value. The preview and the native screen-saver surface are never scaled.
+value. The native lock-screen and screen-saver web surface receives the same published
+render scale (held to 50-100%); the live preview is never scaled.
 
 The page may call `wallpaperRegisterAudioListener`, the five
 `wallpaperRegisterMedia*Listener` functions (status, properties, thumbnail,
@@ -424,8 +425,9 @@ property name of 1 to 256.
   selector is unavailable, the page keeps WebKit's default scheduling and the
   limitation is logged. This does not change the native screen-saver web
   surface.
-- **Frame rate.** The page is told the display's effective frame rate through
-  `applyGeneralProperties({ fps })`, and many pages pace their own loop by it.
+- **Frame rate.** The page is told the display's effective frame rate and the app's
+  resolved lowercase BCP-47 interface language through
+  `applyGeneralProperties({ fps, language })`, and many pages pace their own loop by `fps`.
   WebKit draws a page near 60 fps even on a faster display, and it hands the page
   one pointer move per drawn frame, so hover is held to that rate too. When the
   effective rate reaches the refresh of a display above 60 Hz (the user chose, for
@@ -438,9 +440,9 @@ property name of 1 to 256.
   a change that stays on one side keeps the document. Those three conditions come
   and go on their own. A page drawing at the full refresh of a fast display reloads,
   and loses whatever it kept in memory, each time one of them lowers its rate below
-  that refresh and again when it ends, and a Mac that hovers at the serious thermal
-  boundary does so at every crossing. Nothing holds the page at the cadence it was
-  created with or delays the rebuild, and the cost has not been measured. At the
+  that refresh and again when it ends; for heat, `SystemConditionMonitor`'s 45-second
+  asymmetric recovery hold window prevents repeated reloads when a Mac hovers at the
+  serious thermal boundary. At the
   default rate nothing changes. If the running WebKit no longer offers the feature,
   the page keeps the default cadence and the limitation is logged once. The rebuilt
   page is a new page like any other: it takes in the render scale, the pause, the
@@ -471,8 +473,9 @@ property name of 1 to 256.
   (`mouseEventWindowUnderMousePointer`), so routing makes no window-server call per
   move: a synchronous per-move query stalled the main thread during Show Desktop
   and froze the page. Only a press or scroll without the field still asks; a move
-  without it is dropped. Events are rebuilt in wallpaper-window coordinates and
-  replayed through the responder methods. Hover has no public entry point on
+  without it is dropped. Events are rebuilt in wallpaper-window coordinates (copying
+  `CGEvent` for scroll wheel and middle/extra mouse buttons so `buttonNumber` is
+  preserved) and replayed through the responder methods. Hover has no public entry point on
   `WKWebView`, so it uses `_simulateMouseMove:`/`_simulateMouseExit:` when the
   running WebKit responds to them, and `WebWallpaperWindow` reports `isKeyWindow` as
   true because WebKit hit-tests hover only for active windows (it still cannot
@@ -632,8 +635,7 @@ never substitutes Pause for an unavailable mute.
 
 - Keyboard input is not forwarded; the wallpaper window never becomes key.
 - Pointer events are mirrored, not captured: Finder still selects icons and
-  rubber-bands, and a click on an icon reaches the page too. The middle button
-  arrives without its button number.
+  rubber-bands, and a click on an icon reaches the page too.
 - The native drag guard is not a security boundary. Existing text selections,
   shadow-tree content and inline `-webkit-user-drag: element !important` declarations
   can still begin a drag and empty Finder's drag pasteboard before `dragstart` is

@@ -3790,4 +3790,82 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     XCTAssertEqual(outside.plainVideo, true)
     XCTAssertNil(outside.nativeVideoFile)
   }
+
+  /// Scenes and web pages publish the current effective render scale (carrying battery/Low Power/heat
+  /// reductions) and web pages publish the resolved lowercase BCP-47 language; plain videos omit both.
+  /// Changing effective render scale or language republishes a new configuration revision.
+  @MainActor
+  func testPublishedScenesCarryEffectiveRenderScaleAndWebLanguageAndRepublishOnChange() async throws {
+    try Data(#"{"type":"scene","title":"t","file":"scene.pkg"}"#.utf8).write(
+      to: project.appendingPathComponent("project.json"))
+    var record = scene()
+    record.displayId = 1
+    var currentScale = 0.75
+    var currentLanguage = "zh-Hans"
+    var contentRev: UInt64 = 0
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" },
+      contentRevision: { contentRev },
+      renderScale: { currentScale },
+      language: { currentLanguage })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try await service.start()
+    service.setEnabled(true)
+    await waitFor("scene with render scale published") { service.isEnabled && !service.isBusy }
+    let firstConfig = try publishedConfiguration()
+    let firstScene = try XCTUnwrap(firstConfig.scenes.first)
+    XCTAssertEqual(firstScene.renderScale, 0.75)
+    XCTAssertEqual(firstScene.effectiveRenderScale, 0.75)
+    XCTAssertNil(firstScene.language, "scenes carry no web language key")
+
+    // Effective render scale drops under thermal/battery reduction (clamped to 0.25...1.0).
+    currentScale = 0.1
+    service.refresh()
+    await waitFor("updated render scale published") {
+      !service.isBusy && (try? self.publishedConfiguration().revision) != firstConfig.revision
+    }
+    let loweredScene = try XCTUnwrap(try publishedConfiguration().scenes.first)
+    XCTAssertEqual(loweredScene.renderScale, 0.25)
+    XCTAssertEqual(loweredScene.effectiveRenderScale, 0.25)
+
+    // Web wallpaper carries both effective render scale and normalized app language.
+    try Data(#"{"type":"web","title":"t","file":"index.html"}"#.utf8).write(
+      to: project.appendingPathComponent("project.json"))
+    try Data("<html></html>".utf8).write(to: project.appendingPathComponent("index.html"))
+    contentRev += 1
+    currentScale = 0.5
+    service.refresh()
+    await waitFor("web scene published") {
+      !service.isBusy && (try? self.publishedConfiguration().scenes.first?.webEntryFile) == "index.html"
+    }
+    let webConfig = try publishedConfiguration()
+    let webScene = try XCTUnwrap(webConfig.scenes.first)
+    XCTAssertEqual(webScene.renderScale, 0.5)
+    XCTAssertEqual(webScene.language, "zh-cn")
+
+    // Changing app language republishes web configuration with the new normalized tag.
+    currentLanguage = "ja"
+    service.refresh()
+    await waitFor("updated web language published") {
+      !service.isBusy && (try? self.publishedConfiguration().revision) != webConfig.revision
+    }
+    XCTAssertEqual(try publishedConfiguration().scenes.first?.language, "ja-jp")
+
+    // Plain video omits renderScale and language.
+    try Data(#"{"type":"video","title":"t","file":"a.mp4"}"#.utf8).write(
+      to: project.appendingPathComponent("project.json"))
+    contentRev += 1
+    service.refresh()
+    await waitFor("video scene published") {
+      !service.isBusy && (try? self.publishedConfiguration().scenes.first?.plainVideo) == true
+    }
+    let videoScene = try XCTUnwrap(try publishedConfiguration().scenes.first)
+    XCTAssertNil(videoScene.renderScale)
+    XCTAssertNil(videoScene.language)
+    try await service.shutdown()
+  }
 }

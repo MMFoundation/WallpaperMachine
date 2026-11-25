@@ -10,6 +10,7 @@ final class WebWallpaperPreviewSurface: NSObject, WallpaperPreviewSurface, WKUID
     var onFailure: ((String) -> Void)?
     private let request: WallpaperPreviewRequest
     private let assets: UserAssetStore
+    private let language: String
     private var fetchAll = Set<String>()
     /// The staged copies of the files the page was handed, by property id. A later delivery
     /// names the user's own path again, so these are put back to keep the page's value.
@@ -20,9 +21,12 @@ final class WebWallpaperPreviewSurface: NSObject, WallpaperPreviewSurface, WKUID
     /// the next one opened honors whatever the preference is by then.
     init(request: WallpaperPreviewRequest, generation: UInt64,
          counters: RuntimeCounters? = nil, assets: UserAssetStore? = nil,
-         inspectable: Bool = WebWallpaperInspection.isEnabled()) {
+         inspectable: Bool = WebWallpaperInspection.isEnabled(),
+         language: String? = nil) {
         self.request = request
         self.assets = assets ?? UserAssetStore(projectURL: request.projectURL, wallpaperId: request.wallpaperID)
+        self.language = WebWallpaperProtocol.generalLanguage(
+            forTag: language ?? AppLanguageStore.shared.effective.tag)
         page = WebWallpaperPage(projectURL: request.projectURL, entryFile: request.entryFile,
             surface: RuntimeSurfaceKey(kind: .preview, displayID: 0, generation: generation),
             counters: counters, persistentData: false, inspectable: inspectable)
@@ -78,7 +82,7 @@ final class WebWallpaperPreviewSurface: NSObject, WallpaperPreviewSurface, WKUID
         try Task.checkCancellation()
         guard !stopped else { throw CancellationError() }
         page.applyUserProperties(json: WebWallpaperHost.substituting(replacements, in: request.propertiesJSON) ?? request.propertiesJSON)
-        page.applyGeneralProperties(fps: request.fps)
+        page.applyGeneralProperties(fps: request.fps, language: language)
         page.setAudioResponseEnabled(false)
         page.setMediaIntegrationEnabled(false)
         page.load()
