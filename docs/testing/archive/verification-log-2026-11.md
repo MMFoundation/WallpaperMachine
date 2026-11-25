@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-17 — Resume SteamCMD Workshop downloads after native timeouts
+
+- Replayed issue #228 output with a scripted SteamCMD on a real PTY; the new regression failed before the fix with the misleading ownership/Steam Guard error.
+- Added four regressions covering split and unterminated native timeout output, automatic retry, checkpoint recovery, bounded retries and no inferred sign-in.
+- python3 scripts/test.py --only DownloaderRetryTests --only DownloaderStorageTests — exit 0; 31 passed before isolating the change from PR #229.
+- On main, the first full run timed out in the existing retry-sign-in stall test; its isolated rerun passed (1 passed), with no assertion or timeout changes.
+- Final python3 scripts/test.py on main — exit 0; all 36 Python modules passed; 5119 native tests passed, 0 failed, 70 skipped; 3 runtime warnings.
+- Real Steam large-file transfer, desktop behavior and Release delivery were not exercised; no renderer or bridge changes.
+
 ## 2026-11-16 — Nix release pin and login-path integration
 
 - Nix regression against the original Home Manager module: expected failure; the corrected module passes.

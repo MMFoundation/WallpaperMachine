@@ -25,6 +25,14 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-25 — Wave 2A UI/UX workflow upgrades (#8, #9, #10, #11, #16)
+
+- Scope: three-page clickable tags, ActiveFilterChipsBar, Workshop Hide installed (#8); Collections scope menu, quick actions, target display wallpaper titles, inline playlist controls (#9); Inspector search/modified/collapsible headings, artwork Preview, Preview shortcuts/Apply (#10); Menu Bar dynamic scroll/compact picker/Mute All/playlist badge/reveal (#11); Shift+Arrow, Cmd+S, Placement pinch/Option+scroll/double-click/center guides, Preset Update & Apply & Save (#16).
+- Routine gate: python3 scripts/test.py — PASS (36/36 Python suites OK; 5251 passed, 0 failed, 70 skipped of 5321 native tests in 161s).
+- Localization: App/Resources/Localizable.xcstrings +37/-1 keys across all 6 shipped languages (en, ja, ko, pt-BR, zh-Hans, zh-Hant), verified by test_localization_catalogs.py and test_panel_localization.py.
+- Review: verifier-w2a read-only review PASS (0 blockers after fixing 3 must-fix and 3 nit findings with added unit tests).
+- Not run: Release build (not requested), --ui desktop tests, and live visual inspection.
+
 ## 2026-11-25 — Wave 1 P0 fixes and quick wins (#1-#7)
 
 - Scope: NowPlaying theme/day-night, empty Favorites/narrowingFilterCount/collectionID, a11y/focus/cursor/SelectButton, thermal hysteresis/battery renderScale/Web middle-click+language, Workshop updates/comments/UpdateWindow, Widgets multi-display preview+Copy Style+Cmd-D, Switch Transitions, Lock Screen renderScale.
@@ -105,12 +113,3 @@ Settings › About gains More from MMFoundation (OhMyShot's icon, a line about i
 - Before the change, the release app after several close/reopen cycles kept 502 `DecodedPanelImage` (187 MB of CG raster data) and six `PanelController`s after the window closed.
 - Each closed window left its `PanelController` behind: `leaks --traceTree` rooted it in the toolbar `Menu` (`AppKitPopUpAdaptor`) host, held by an `NSView` notification block. `ControlPanelWindow.tearDown` now takes the toolbar off before the content; a scripted run of ten identical open, page and close cycles went from one more controller and about 1 MB of live heap per close to none left after any close.
 - Not checked: reopening on pixiv and Back after reopening by hand (covered by the unit tests); `check_renderer.py` (no renderer change).
-
-## 2026-11-17 — Resume SteamCMD Workshop downloads after native timeouts
-
-- Replayed issue #228 output with a scripted SteamCMD on a real PTY; the new regression failed before the fix with the misleading ownership/Steam Guard error.
-- Added four regressions covering split and unterminated native timeout output, automatic retry, checkpoint recovery, bounded retries and no inferred sign-in.
-- python3 scripts/test.py --only DownloaderRetryTests --only DownloaderStorageTests — exit 0; 31 passed before isolating the change from PR #229.
-- On main, the first full run timed out in the existing retry-sign-in stall test; its isolated rerun passed (1 passed), with no assertion or timeout changes.
-- Final python3 scripts/test.py on main — exit 0; all 36 Python modules passed; 5119 native tests passed, 0 failed, 70 skipped; 3 runtime warnings.
-- Real Steam large-file transfer, desktop behavior and Release delivery were not exercised; no renderer or bridge changes.
