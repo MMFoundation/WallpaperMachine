@@ -618,6 +618,96 @@ final class WallpaperPresetStoreTests: XCTestCase {
     }
   }
 
+  func testUpdatingPresetWithNewManagedAssetPreservesReferencedRetainedAssetOfDisabledProperty() async throws {
+    let context = try Context()
+    defer { context.close() }
+    let fileA = context.root.appendingPathComponent("a.png")
+    let fileB = context.root.appendingPathComponent("b.png")
+    try Data("old-a".utf8).write(to: fileA)
+    try Data("new-b".utf8).write(to: fileB)
+
+    let storedA = try context.managed.adopt(
+      readingFrom: fileA, fileName: "a.png", sourcePath: fileA.path,
+      wallpaperId: "wallpaper", propertyId: "propA", known: nil)
+    try context.managed.write(
+      UserAssetManifest(
+        wallpaperId: "wallpaper",
+        properties: ["propA": ManagedUserAssetProperty(kind: .file, sourcePath: fileA.path, assets: [storedA])]))
+    var descA = property("propA", .file, .string(value: fileA.path))
+    descA.assetManaged = true
+    descA.fileFilter = .image
+    let saved = try await context.store.save(name: "Look", options: options(properties: [descA]), hasPendingEdits: false)
+    let retainedA = try XCTUnwrap(saved.properties.first { $0.id == "propA" }?.retainedPath)
+    XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: retainedA)), Data("old-a".utf8))
+
+    // Now propA is conditionally disabled while still referencing its retained path, and an enabled
+    // propB carries a new managed asset (hasNewRetained == true).
+    let storedB = try context.managed.adopt(
+      readingFrom: fileB, fileName: "b.png", sourcePath: fileB.path,
+      wallpaperId: "wallpaper", propertyId: "propB", known: nil)
+    try context.managed.write(
+      UserAssetManifest(
+        wallpaperId: "wallpaper",
+        properties: [
+          "propA": ManagedUserAssetProperty(kind: .file, sourcePath: retainedA, assets: [storedA]),
+          "propB": ManagedUserAssetProperty(kind: .file, sourcePath: fileB.path, assets: [storedB]),
+        ]))
+    var disabledA = property("propA", .file, .string(value: retainedA))
+    disabledA.enabled = false
+    disabledA.assetManaged = true
+    disabledA.fileFilter = .image
+    var descB = property("propB", .file, .string(value: fileB.path))
+    descB.assetManaged = true
+    descB.fileFilter = .image
+
+    let updated = try await context.store.update(
+      id: saved.id, options: options(properties: [disabledA, descB]), hasPendingEdits: false)
+    let retainedB = try XCTUnwrap(updated.properties.first { $0.id == "propB" }?.retainedPath)
+    XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: retainedB)), Data("new-b".utf8))
+    XCTAssertEqual(
+      try Data(contentsOf: URL(fileURLWithPath: retainedA)), Data("old-a".utf8),
+      "replacing PresetAssets/<id> must preserve live referenced assets of disabled properties")
+  }
+
+  func testUpdatingPresetReResolvesIndexAcrossAwaitsWhenItemsShiftOrPresetIsDeleted() async throws {
+    let context = try Context()
+    defer { context.close() }
+    func speed(_ value: Double) -> BridgePropertyDescriptor {
+      var descriptor = property("speed", .slider, .number(value: value))
+      descriptor.slider = BridgeSliderMetadata(min: 0, max: 10, step: 1, precision: 0)
+      return descriptor
+    }
+    let first = try await context.store.save(
+      name: "First", options: options(properties: [speed(1)]),
+      hasPendingEdits: false)
+    let second = try await context.store.save(
+      name: "Second", options: options(properties: [speed(2)]),
+      hasPendingEdits: false)
+
+    // Deleting `first` while `second`'s update is suspended shifts `second` from index 1 to 0.
+    context.store.beforeUpdatePublish = { [store = context.store] in
+      store.beforeUpdatePublish = nil
+      try await store.delete(id: first.id)
+    }
+    let shifted = try await context.store.update(
+      id: second.id, options: options(properties: [speed(9)]),
+      hasPendingEdits: false)
+    XCTAssertEqual(context.store.items.map(\.id), [second.id])
+    XCTAssertEqual(shifted.properties.first?.value, .number(9))
+
+    // Deleting the target preset itself while its update is suspended throws and leaves items clean.
+    context.store.beforeUpdatePublish = { [store = context.store] in
+      store.beforeUpdatePublish = nil
+      try await store.delete(id: second.id)
+    }
+    await assertFailure {
+      _ = try await context.store.update(
+        id: second.id, options: options(properties: [speed(3)]),
+        hasPendingEdits: false)
+    }
+    XCTAssertTrue(context.store.items.isEmpty)
+  }
+
   private func assertFailure(_ operation: () async throws -> Void, file: StaticString = #filePath, line: UInt = #line) async {
     do { try await operation(); XCTFail("Expected the operation to fail", file: file, line: line) }
     catch {}

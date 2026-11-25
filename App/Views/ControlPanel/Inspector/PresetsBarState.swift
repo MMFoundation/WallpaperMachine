@@ -19,6 +19,7 @@ struct PresetsBarState: Equatable {
   struct Editor: Equatable {
     enum Mode: Equatable {
       case save
+      case applyAndSave
       case rename(presetID: String)
     }
     var mode: Mode
@@ -57,6 +58,11 @@ struct PresetsBarState: Equatable {
 
   mutating func beginSave() {
     editor = Editor(mode: .save, name: "")
+    disarm()
+  }
+
+  mutating func beginApplyAndSave() {
+    editor = Editor(mode: .applyAndSave, name: "")
     disarm()
   }
 
@@ -128,6 +134,16 @@ struct PresetsBarState: Equatable {
 
   func canSave(_ state: PresetsState, isPending: Bool) -> Bool {
     !isPending && state.canSave && !state.isDirty
+  }
+
+  /// Overwriting the chosen preset requires a clean applied state and a chosen preset.
+  func canUpdate(_ state: PresetsState, isPending: Bool) -> Bool {
+    !isPending && chosen(in: state.items) != nil && state.canSave && !state.isDirty
+  }
+
+  /// Applying pending edits and saving them as a new preset is offered only while edits are dirty.
+  func canApplyAndSave(_ state: PresetsState, isPending: Bool) -> Bool {
+    !isPending && state.canApplyAndSave && state.isDirty
   }
 
   func canPick(_ state: PresetsState, isPending: Bool) -> Bool {

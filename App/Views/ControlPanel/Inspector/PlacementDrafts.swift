@@ -134,6 +134,32 @@ final class PlacementDrafts {
     let values = values(for: state)
     let moved = PlacementGeometry.nudged(x: values.x, y: values.y, dx: dx, dy: dy, large: large)
     update(x: moved.x, y: moved.y)
+    scheduleDebouncedCommit()
+  }
+
+  /// Recenters both axes to (50%, 50%) and commits at once; leaves everything untouched when
+  /// already centered.
+  @discardableResult
+  func recenter(state: ImagePlacementState) -> Task<Void, Never>? {
+    let values = values(for: state)
+    guard values.x != 0.5 || values.y != 0.5 else { return nil }
+    keyTask?.cancel()
+    keyTask = nil
+    update(x: 0.5, y: 0.5)
+    return commit(from: state)
+  }
+
+  /// Zooms in response to an Option-scroll event and saves once scrolling pauses.
+  func scrollZoom(deltaY: Double, hasPreciseDeltas: Bool, state: ImagePlacementState) {
+    let values = values(for: state)
+    let next = PlacementGeometry.scrollZoomed(
+      from: values.zoom, deltaY: deltaY, hasPreciseDeltas: hasPreciseDeltas)
+    guard next != values.zoom else { return }
+    update(zoom: next)
+    scheduleDebouncedCommit()
+  }
+
+  private func scheduleDebouncedCommit() {
     keyTask?.cancel()
     let sleep = sleep
     keyTask = Task { @MainActor [weak self] in

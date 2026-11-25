@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import XCTest
 
@@ -121,5 +122,80 @@ final class PlacementGeometryTests: XCTestCase {
     XCTAssertEqual(PlacementGeometry.rounded(0.123456), 0.123)
     XCTAssertEqual(PlacementGeometry.rounded(0.9996), 1)
     XCTAssertEqual(PlacementGeometry.keyDebounce, .milliseconds(400))
+  }
+
+  func testDraggingSnapsGentlyToCenterOnPannableAxesOnly() {
+    // 200pt horizontal overflow -> threshold is 5 / 200 = 0.025 (5pt on screen).
+    let overflow = CGSize(width: 200, height: 0)
+    // Start at 0.45, drag left by 8pt -> raw x = 0.45 + 8/200 = 0.49 (within 0.025 of 0.5).
+    let snapped = PlacementGeometry.draggedWithCenterSnap(
+      from: (0.45, 0.5), overflow: overflow, translation: CGSize(width: -8, height: 20))
+    XCTAssertEqual(snapped.x, 0.5)
+    XCTAssertTrue(snapped.snappedX)
+    XCTAssertEqual(snapped.y, 0.5)
+    XCTAssertFalse(snapped.snappedY, "an axis with no overflow never snaps or shows a guide")
+
+    // Drag further past the snap zone -> raw x = 0.45 + 30/200 = 0.60 (unsnapped).
+    let unsnapped = PlacementGeometry.draggedWithCenterSnap(
+      from: (0.45, 0.5), overflow: overflow, translation: CGSize(width: -30, height: 0))
+    XCTAssertEqual(unsnapped.x, 0.60, accuracy: 1e-9)
+    XCTAssertFalse(unsnapped.snappedX)
+
+    // Both axes overflowing can snap together when dragged near (0.5, 0.5).
+    let both = PlacementGeometry.draggedWithCenterSnap(
+      from: (0.52, 0.48), overflow: CGSize(width: 200, height: 200),
+      translation: CGSize(width: 2, height: -2))
+    XCTAssertEqual(both.x, 0.5)
+    XCTAssertEqual(both.y, 0.5)
+    XCTAssertTrue(both.snappedX)
+    XCTAssertTrue(both.snappedY)
+  }
+
+  func testPinchAndOptionScrollZoomClampWithinZoomRange() {
+    XCTAssertEqual(PlacementGeometry.magnified(from: 1.5, scale: 1.2), 1.8, accuracy: 1e-9)
+    XCTAssertEqual(PlacementGeometry.magnified(from: 2.0, scale: 2.5), 3.0)
+    XCTAssertEqual(PlacementGeometry.magnified(from: 1.2, scale: 0.5), 1.0)
+    XCTAssertEqual(PlacementGeometry.magnified(from: 1.5, scale: .nan), 1.5)
+    XCTAssertEqual(PlacementGeometry.magnified(from: 1.5, scale: -1), 1.5)
+
+    // Precise trackpad delta and discrete mouse wheel delta.
+    XCTAssertEqual(
+      PlacementGeometry.scrollZoomed(from: 1.5, deltaY: 50, hasPreciseDeltas: true),
+      1.5 + 50 * PlacementGeometry.preciseScrollZoomStep, accuracy: 1e-9)
+    XCTAssertEqual(
+      PlacementGeometry.scrollZoomed(from: 1.5, deltaY: -2, hasPreciseDeltas: false),
+      1.5 - 2 * PlacementGeometry.wheelScrollZoomStep, accuracy: 1e-9)
+    XCTAssertEqual(PlacementGeometry.scrollZoomed(from: 2.9, deltaY: 10, hasPreciseDeltas: false), 3.0)
+    XCTAssertEqual(PlacementGeometry.scrollZoomed(from: 1.05, deltaY: -10, hasPreciseDeltas: false), 1.0)
+    XCTAssertEqual(PlacementGeometry.scrollZoomed(from: 1.5, deltaY: 0, hasPreciseDeltas: true), 1.5)
+    XCTAssertEqual(PlacementGeometry.scrollZoomed(from: 1.5, deltaY: .nan, hasPreciseDeltas: true), 1.5)
+  }
+
+  func testOptionScrollMonitorNeverCapturesBareScrollWheel() {
+    XCTAssertFalse(
+      OptionScrollZoomMonitor.shouldHandleScrollEvent(
+        modifiers: [], windowMatches: true, isHidden: false, pointInVisibleBounds: true, isEnabled: true),
+      "bare scroll wheel must always scroll the outer inspector")
+    XCTAssertFalse(
+      OptionScrollZoomMonitor.shouldHandleScrollEvent(
+        modifiers: [.command], windowMatches: true, isHidden: false, pointInVisibleBounds: true, isEnabled: true))
+    XCTAssertFalse(
+      OptionScrollZoomMonitor.shouldHandleScrollEvent(
+        modifiers: [.option, .command], windowMatches: true, isHidden: false, pointInVisibleBounds: true, isEnabled: true))
+    XCTAssertTrue(
+      OptionScrollZoomMonitor.shouldHandleScrollEvent(
+        modifiers: [.option], windowMatches: true, isHidden: false, pointInVisibleBounds: true, isEnabled: true))
+    XCTAssertFalse(
+      OptionScrollZoomMonitor.shouldHandleScrollEvent(
+        modifiers: [.option], windowMatches: true, isHidden: false, pointInVisibleBounds: false, isEnabled: true))
+    XCTAssertFalse(
+      OptionScrollZoomMonitor.shouldHandleScrollEvent(
+        modifiers: [.option], windowMatches: false, isHidden: false, pointInVisibleBounds: true, isEnabled: true))
+    XCTAssertFalse(
+      OptionScrollZoomMonitor.shouldHandleScrollEvent(
+        modifiers: [.option], windowMatches: true, isHidden: true, pointInVisibleBounds: true, isEnabled: true))
+    XCTAssertFalse(
+      OptionScrollZoomMonitor.shouldHandleScrollEvent(
+        modifiers: [.option], windowMatches: true, isHidden: false, pointInVisibleBounds: true, isEnabled: false))
   }
 }

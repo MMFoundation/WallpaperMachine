@@ -22,13 +22,14 @@ struct PresetsCard: View {
   private var id: String { state.wallpaperID }
 
   /// Any preset action is on its way: the whole bar waits. Saving, applying, exporting and
-  /// importing are keyed by the wallpaper, renaming and deleting by the preset.
+  /// importing are keyed by the wallpaper, updating, renaming and deleting by the preset.
   private var isPending: Bool {
-    ["Save", "Apply", "Export", "Import"].contains {
+    ["Save", "ApplyAndSave", "Apply", "Export", "Import"].contains {
       controller.isBusy(InspectorAction.preset($0, id: id))
     }
       || state.items.contains {
-        controller.isBusy(InspectorAction.preset("Rename", id: $0.id))
+        controller.isBusy(InspectorAction.preset("Update", id: $0.id))
+          || controller.isBusy(InspectorAction.preset("Rename", id: $0.id))
           || controller.isBusy(InspectorAction.preset("Delete", id: $0.id))
       }
   }
@@ -65,21 +66,33 @@ struct PresetsCard: View {
       if bar.showsTools(in: state.items) {
         InspectorCardRow {
           TagFlow(spacing: 14) {
-            Button("Save current…") {
-              bar.beginSave()
-              nameFocused = true
+            if state.isDirty {
+              Button("Apply & Save…") {
+                bar.beginApplyAndSave()
+                nameFocused = true
+              }
+              .disabled(!bar.canApplyAndSave(state, isPending: pending))
+              .help(L("Applies your pending changes and saves them as a new preset"))
+            } else {
+              Button("Save current…") {
+                bar.beginSave()
+                nameFocused = true
+              }
+              .disabled(!bar.canSave(state, isPending: pending))
+              .help(L("Saves the values the wallpaper is using now as a new preset"))
             }
-            .disabled(!bar.canSave(state, isPending: pending))
-            .help(
-              state.isDirty
-                ? L("Apply or revert your changes first")
-                : L("Saves the values the wallpaper is using now as a new preset"))
             Button("Import…") {
               run("Import", id: id) { try await controller.importPreset(into: id) }
             }
             .disabled(pending)
             .help(L("Adds a preset from a file exported by WallpaperMachine"))
             if let chosen {
+              Button("Update preset") { update(chosen) }
+                .disabled(!bar.canUpdate(state, isPending: pending))
+                .help(
+                  state.isDirty
+                    ? L("Apply or revert your changes first")
+                    : L("Overwrites “\(chosen.name)” with the values the wallpaper is using now"))
               Button("Rename…") {
                 bar.beginRename(of: chosen)
                 nameFocused = true
@@ -121,7 +134,9 @@ struct PresetsCard: View {
       }
       if bar.showsDirtyNote(state) {
         InspectorCardRow {
-          InspectorNote("Apply or revert your changes before saving or applying a preset.")
+          InspectorNote(
+            "Apply or revert your changes before applying or updating a preset, or use Apply & Save… to save them as a new preset."
+          )
         }
       }
       if let status = state.status {
@@ -177,9 +192,12 @@ struct PresetsCard: View {
     Button {
       submit(editor)
     } label: {
-      if case .save = editor.mode {
+      switch editor.mode {
+      case .save:
         Text("Save preset")
-      } else {
+      case .applyAndSave:
+        Text("Apply & Save")
+      case .rename:
         Text("Save")
       }
     }
@@ -216,6 +234,11 @@ struct PresetsCard: View {
     run("Apply", id: id) { try await controller.applyPreset(id, preset: chosen.id) }
   }
 
+  private func update(_ chosen: PresetsState.Item) {
+    bar.disarm()
+    run("Update", id: chosen.id) { try await controller.updatePreset(id, preset: chosen.id) }
+  }
+
   /// The name form's Return or Save: the preset is created (and then picked) or renamed, and the
   /// form closes once that went through; a refusal leaves it open for another try.
   private func submit(_ editor: PresetsBarState.Editor) {
@@ -226,6 +249,18 @@ struct PresetsCard: View {
       let task = controller.launch(InspectorAction.preset("Save", id: id)) {
         outcome.ran = true
         do { outcome.value = try await controller.savePreset(id, name: name) } catch {
+          outcome.failed = true
+          throw error
+        }
+      }
+      Task { @MainActor in
+        await task.value
+        if outcome.ran, !outcome.failed { bar.didSave(created: outcome.value ?? nil) }
+      }
+    case .applyAndSave:
+      let task = controller.launch(InspectorAction.preset("ApplyAndSave", id: id)) {
+        outcome.ran = true
+        do { outcome.value = try await controller.applyAndSavePreset(id, name: name) } catch {
           outcome.failed = true
           throw error
         }

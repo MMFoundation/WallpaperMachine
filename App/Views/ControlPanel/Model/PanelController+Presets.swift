@@ -18,35 +18,55 @@ struct PresetsState: Equatable {
   /// Saving is possible: the options are supported and clean, nothing is being edited, applied or
   /// run, the preset store itself is healthy, and nothing is unsent.
   let canSave: Bool
+  /// Applying pending edits and saving them as a new preset is possible: the options are supported
+  /// and dirty, nothing is being edited, applied or run, and the preset store itself is healthy.
+  let canApplyAndSave: Bool
   /// What the last preset action did, in a sentence. The store clears it whenever the list changes.
   let status: String?
   /// Why the stored presets could not be read; the only error the card shows beside its controls.
   let error: String?
+
+  init(
+    wallpaperID: String, items: [Item], isDirty: Bool, canSave: Bool,
+    canApplyAndSave: Bool = false, status: String?, error: String?
+  ) {
+    self.wallpaperID = wallpaperID
+    self.items = items
+    self.isDirty = isDirty
+    self.canSave = canSave
+    self.canApplyAndSave = canApplyAndSave
+    self.status = status
+    self.error = error
+  }
 }
 
-/// Property presets: save the values a wallpaper is using now, apply one, rename, delete, export and
-/// import. Every action is queued, and its whole validated edit-and-apply sequence runs inside one
-/// turn of the command queue, so nothing can come between the checks and the work. A failure
-/// reaches the banner; a result is the store's `status`.
+/// Property presets: save the values a wallpaper is using now, apply one, update one, rename,
+/// delete, export and import. Every action is queued, and its whole validated edit-and-apply
+/// sequence runs inside one turn of the command queue, so nothing can come between the checks and
+/// the work. A failure reaches the banner; a result is the store's `status`.
 extension PanelController {
   /// The presets bar for the selected installed wallpaper, or nil with none.
   var presetsState: PresetsState? {
     _ = revisions.presets
     guard let id = selectedInstalledWallpaperID else { return nil }
     let options = store.wallpaperOptionsSnapshot.flatMap { $0.wallpaperId == id ? $0 : nil }
-    let pending =
-      store.editorState.hasPendingEdits(wallpaperID: id)
-      || !(pendingPropertyValues[id] ?? [:]).isEmpty
+    let inFlight =
+      !(pendingPropertyValues[id] ?? [:]).isEmpty
       || !(pendingEngineOptionValues[id] ?? [:]).isEmpty
+    let pending = store.editorState.hasPendingEdits(wallpaperID: id) || inFlight
     let isDirty = options?.dirty == true || pending
-    let clean =
-      options?.supported == true && options?.dirty == false && !pending
+    let ready =
+      options?.supported == true
       && !store.isWallpaperEditInProgress(id: id) && !store.commands.isBusy
       && store.activatingWallpaperID == nil && store.applyingWallpaperID == nil
+      && presets.error == nil
     return PresetsState(
       wallpaperID: id,
       items: presets.presets(wallpaperID: id).map { PresetsState.Item(id: $0.id, name: $0.name) },
-      isDirty: isDirty, canSave: clean && presets.error == nil, status: presets.status,
+      isDirty: isDirty,
+      canSave: ready && options?.dirty == false && !pending,
+      canApplyAndSave: ready && isDirty && !inFlight,
+      status: presets.status,
       error: presets.error)
   }
 
@@ -61,12 +81,54 @@ extension PanelController {
       let options = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
       let pending =
         store.editorState.hasPendingEdits(wallpaperID: id) || store.isWallpaperEditInProgress(id: id)
-      let before = Set(presets.presets(wallpaperID: id).map(\.id))
-      _ = try await presets.save(name: name, options: options, hasPendingEdits: pending)
+      let saved = try await presets.save(name: name, options: options, hasPendingEdits: pending)
       presets.status = L("Saved the applied wallpaper properties.")
-      created = presets.presets(wallpaperID: id).map(\.id).first { !before.contains($0) }
+      created = saved.id
     }
     return created
+  }
+
+  /// Applies pending wallpaper edits first and then saves the newly applied values as a new preset,
+  /// preserving `WallpaperPresetStore.save`'s clean-state and managed-asset invariants.
+  @discardableResult
+  func applyAndSavePreset(_ wallpaperID: String, name: String) async throws -> String? {
+    var created: String?
+    try await run(.queued) {
+      let id = try installedWallpaperID(wallpaperID)
+      _ = try WallpaperPresetStore.validateName(name)
+      let drafts = store.editorState.propertyTextDrafts.filter { $0.key.wallpaperID == id }
+      guard drafts.values.allSatisfy({ $0.count <= PanelValueRules.maximumTextLength }) else {
+        throw InvalidControlValue()
+      }
+      let current = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
+      if current.dirty || store.editorState.hasPendingEdits(wallpaperID: id) {
+        try await store.applyWallpaperOptionsAsync(wallpaperId: id, userInitiated: true)
+      }
+      let applied = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
+      let pending =
+        store.editorState.hasPendingEdits(wallpaperID: id) || store.isWallpaperEditInProgress(id: id)
+      let saved = try await presets.save(name: name, options: applied, hasPendingEdits: pending)
+      presets.status = L("Applied changes and saved preset “\(saved.name)”.")
+      created = saved.id
+    }
+    reconcileInspectorContext()
+    return created
+  }
+
+  /// Overwrites an existing preset with the values the wallpaper is using now. Needs a clean,
+  /// supported, applied state and a preset belonging to the wallpaper.
+  func updatePreset(_ wallpaperID: String, preset presetID: String) async throws {
+    try await run(.queued) {
+      let id = try installedWallpaperID(wallpaperID)
+      let existing = try presets.preset(id: presetID)
+      guard existing.wallpaperID == id else { throw InvalidControlValue() }
+      let options = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
+      let pending =
+        store.editorState.hasPendingEdits(wallpaperID: id) || store.isWallpaperEditInProgress(id: id)
+      let updated = try await presets.update(
+        id: existing.id, options: options, hasPendingEdits: pending)
+      presets.status = L("Updated preset “\(updated.name)”.")
+    }
   }
 
   /// `wallpaperPresetRename`.

@@ -10,6 +10,9 @@ struct PropertyLabelView: View {
   /// and `<big>` scale from its size.
   var role: PanelFont = .body
   var color: Color?
+  /// Static labels stay selectable so people can copy from them; a heading drawn as a disclosure
+  /// button turns selection off so it never swallows clicks.
+  var isSelectable = true
 
   @Environment(\.panelTheme) private var theme
 
@@ -20,7 +23,7 @@ struct PropertyLabelView: View {
         case .paragraph(let paragraph):
           ParagraphView(
             paragraph: paragraph, role: role, color: color ?? theme.surface.text.color,
-            accent: theme.accent.accent.color)
+            accent: theme.accent.accent.color, isSelectable: isSelectable)
         case .image(let image):
           PropertyLabelImageView(image: image)
         case .rule:
@@ -36,20 +39,30 @@ struct PropertyLabelView: View {
     let role: PanelFont
     let color: Color
     let accent: Color
+    let isSelectable: Bool
 
     var body: some View {
       HStack(alignment: .firstTextBaseline, spacing: 4) {
         if let marker = paragraph.marker {
           Text(verbatim: marker).font(.panel(role)).foregroundStyle(color)
         }
-        Text(PropertyLabelView.attributed(paragraph, role: role, accent: accent))
-        .foregroundStyle(color)
-        .multilineTextAlignment(paragraph.isCentered ? .center : .leading)
-        .frame(maxWidth: .infinity, alignment: paragraph.isCentered ? .center : .leading)
-        .textSelection(.enabled)
+        paragraphText
       }
       .accessibilityElement(children: .combine)
       .accessibilityAddTraits(paragraph.heading == nil ? [] : .isHeader)
+    }
+
+    @ViewBuilder
+    private var paragraphText: some View {
+      let base = Text(PropertyLabelView.attributed(paragraph, role: role, accent: accent))
+        .foregroundStyle(color)
+        .multilineTextAlignment(paragraph.isCentered ? .center : .leading)
+        .frame(maxWidth: .infinity, alignment: paragraph.isCentered ? .center : .leading)
+      if isSelectable {
+        base.textSelection(.enabled)
+      } else {
+        base
+      }
     }
   }
 

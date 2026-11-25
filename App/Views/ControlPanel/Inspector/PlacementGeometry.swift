@@ -16,6 +16,14 @@ enum PlacementGeometry {
   static let largeKeyStep = 0.05
   /// A key press waits this long for the next before it is saved.
   static let keyDebounce: Duration = .milliseconds(400)
+  /// Distance in frame points within which dragging snaps a pannable axis to center (50%).
+  static let centerSnapPoints = 5.0
+  /// Upper bound on the center snap window as a fraction of overflow so small overflows never feel sticky.
+  static let maxCenterSnapFraction = 0.05
+  /// Zoom change per point of a precise (trackpad) Option-scroll event.
+  static let preciseScrollZoomStep = 0.004
+  /// Zoom change per notch of a discrete (mouse wheel) Option-scroll event.
+  static let wheelScrollZoomStep = 0.08
 
   /// A fraction held to 0...1; a value that is not a number is `fallback`.
   static func fraction(_ value: Double?, fallback: Double) -> Double {
@@ -110,6 +118,49 @@ enum PlacementGeometry {
     return (
       min(1, max(0, x + Double(dx) * step)), min(1, max(0, y + Double(dy) * step))
     )
+  }
+
+  /// The result of dragging with gentle 50% center snapping on pannable axes.
+  struct DragResult: Equatable {
+    let x: Double
+    let y: Double
+    let snappedX: Bool
+    let snappedY: Bool
+  }
+
+  /// Fraction window around 0.5 within which dragging snaps an overflowing axis to center.
+  static func centerSnapThreshold(for overflow: Double) -> Double {
+    guard overflow > overflowThreshold else { return 0 }
+    return min(maxCenterSnapFraction, centerSnapPoints / overflow)
+  }
+
+  /// Dragging with gentle snapping to 50% on each overflowing axis, reporting which axes snapped
+  /// so the frame can highlight its center guides.
+  static func draggedWithCenterSnap(
+    from start: (x: Double, y: Double), overflow: CGSize, translation: CGSize
+  ) -> DragResult {
+    let raw = dragged(from: start, overflow: overflow, translation: translation)
+    let thresholdX = centerSnapThreshold(for: Double(overflow.width))
+    let thresholdY = centerSnapThreshold(for: Double(overflow.height))
+    let snappedX = thresholdX > 0 && abs(raw.x - 0.5) <= thresholdX
+    let snappedY = thresholdY > 0 && abs(raw.y - 0.5) <= thresholdY
+    return DragResult(
+      x: snappedX ? 0.5 : raw.x, y: snappedY ? 0.5 : raw.y, snappedX: snappedX, snappedY: snappedY)
+  }
+
+  /// Multiplies the starting zoom by a pinch gesture's magnification factor, clamped to `zoomRange`.
+  static func magnified(from startZoom: Double, scale: Double) -> Double {
+    guard scale.isFinite, scale > 0 else { return zoom(startZoom) }
+    return zoom(zoom(startZoom) * scale)
+  }
+
+  /// Adjusts zoom by an Option-scroll delta, clamped to `zoomRange`.
+  static func scrollZoomed(from currentZoom: Double, deltaY: Double, hasPreciseDeltas: Bool)
+    -> Double
+  {
+    guard deltaY.isFinite, deltaY != 0 else { return zoom(currentZoom) }
+    let step = hasPreciseDeltas ? preciseScrollZoomStep : wheelScrollZoomStep
+    return zoom(zoom(currentZoom) + deltaY * step)
   }
 
   /// A drag that moved by no more than two points in total is a click, which restores the values

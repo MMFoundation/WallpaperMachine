@@ -63,8 +63,10 @@ private struct InspectorContent: View {
         // has taken its room. A footer that comes in with a wallpaper scrolls nothing.
         .onChange(of: showsFooter) { _, shows in
           guard shows, let edited = editedRow.take() else { return }
+          let expanded = editedRow.prepareToReveal(edited)
           Task { @MainActor in
             await Task.yield()
+            if expanded { await Task.yield() }
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { proxy.scrollTo(edited) }
           }
         }
@@ -131,6 +133,9 @@ private struct InspectorContent: View {
 @MainActor
 final class InspectorEditedRow {
   private var noted: (id: String, at: ContinuousClock.Instant)?
+  /// Called before scrolling to `id`, so a collapsed property subgroup holding that row can expand
+  /// first. Returns true when a subgroup expanded.
+  var onReveal: ((String) -> Bool)?
 
   func note(_ id: String) { noted = (id, .now) }
 
@@ -139,6 +144,12 @@ final class InspectorEditedRow {
     defer { noted = nil }
     guard let noted, ContinuousClock.now - noted.at < .seconds(2) else { return nil }
     return noted.id
+  }
+
+  /// Expands any collapsed subgroup containing `id` before `ScrollViewReader` scrolls to it.
+  @discardableResult
+  func prepareToReveal(_ id: String) -> Bool {
+    onReveal?(id) ?? false
   }
 }
 
@@ -213,7 +224,9 @@ struct InspectorFooter: View {
           run(.apply, key: applyKey, saying: L("Changes applied.")) { try await controller.apply(id) }
         }
         .buttonStyle(.panelPrimary(size: .regular, expands: true))
+        .keyboardShortcut("s", modifiers: .command)
         .disabled(!options.canApply || controller.isBusy(applyKey))
+        .help(L("Apply pending changes (⌘S)"))
         .focused($focused, equals: .apply)
         .accessibilityFocused($voiceOverFocused, equals: .apply)
         .accessibilityIdentifier("inspector.applyChanges")

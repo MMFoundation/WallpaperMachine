@@ -230,6 +230,67 @@ final class PanelPresetsTests: XCTestCase {
     }
   }
 
+  func testUpdatingAPresetOverwritesItsValuesWhileKeepingItsIDAndOrder() async throws {
+    try await PanelPropertyContext.with { context in
+      let controller = context.controller
+      show(context, options(mode: false))
+      let first = try await save(controller, "First")
+      let second = try await save(controller, "Second")
+
+      // Dirty edits block updating.
+      show(context, options(mode: true, dirty: true))
+      await assertThrows("updating while dirty") {
+        try await controller.updatePreset("wp", preset: first)
+      }
+
+      // Clean applied change overwrites the chosen preset while keeping id and order.
+      show(context, options(mode: true))
+      try await controller.updatePreset("wp", preset: first)
+      let state = try XCTUnwrap(controller.presetsState)
+      XCTAssertEqual(state.items.map(\.id), [first, second])
+      XCTAssertEqual(state.items.map(\.name), ["First", "Second"])
+      let expectedStatus = "First"
+      XCTAssertEqual(state.status, L("Updated preset “\(expectedStatus)”."))
+
+      // Applying the updated preset now restores `mode: true`.
+      show(context, options(mode: false))
+      try await controller.applyPreset("wp", preset: first)
+      XCTAssertEqual(context.bridge.edits, [.init(propertyId: "mode", value: .bool(value: true))])
+
+      await assertInspectorInvalidValue("a preset of another wallpaper") {
+        try await controller.updatePreset("wp2", preset: first)
+      }
+    }
+  }
+
+  func testApplyAndSaveAppliesPendingEditsFirstThenSavesCleanPreset() async throws {
+    try await PanelPropertyContext.with { context in
+      let controller = context.controller
+      show(context, options(mode: true, dirty: true))
+      let dirtyState = try XCTUnwrap(controller.presetsState)
+      XCTAssertTrue(dirtyState.isDirty)
+      XCTAssertFalse(dirtyState.canSave)
+      XCTAssertTrue(dirtyState.canApplyAndSave)
+
+      // An invalid name fails before applying pending edits.
+      await assertThrows("a blank preset name") {
+        try await controller.applyAndSavePreset("wp", name: "   ")
+      }
+      XCTAssertTrue(context.bridge.events.isEmpty, "invalid name must not apply edits")
+
+      let created = try await controller.applyAndSavePreset("wp", name: "Evening")
+      XCTAssertEqual(context.bridge.events, ["apply wp"])
+      let state = try XCTUnwrap(controller.presetsState)
+      XCTAssertEqual(state.items.map(\.name), ["Evening"])
+      XCTAssertEqual(created, state.items.first?.id)
+      let savedName = "Evening"
+      XCTAssertEqual(state.status, L("Applied changes and saved preset “\(savedName)”."))
+      XCTAssertFalse(state.isDirty)
+      XCTAssertTrue(state.canSave)
+      XCTAssertFalse(state.canApplyAndSave)
+    }
+  }
+
   private func save(_ controller: PanelController, _ name: String) async throws -> String {
     let id = try await controller.savePreset("wp", name: name)
     return try XCTUnwrap(id)

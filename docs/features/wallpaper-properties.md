@@ -7,14 +7,23 @@ layout, are in [control panel](control-panel.md#selection-versus-apply).
 
 ## Live preview
 
-An installed scene, video or Web wallpaper has **Preview wallpaper** in its
-details. It opens one ordinary, resizable **Wallpaper Preview** window; choosing
-another preview replaces that window's content. A preview never applies to a
-display, changes the panel's selection, consumes a playback-history entry or saves
-options. It reads the current property draft, including text still being edited,
-and the target display's scaling options when it opens, and then follows the
-draft ([the preview follows your edits](#the-preview-follows-your-edits));
-**Reload preview** reads everything again.
+An installed scene, video or Web wallpaper has a **Preview** button overlaid on
+its artwork in the inspector header (as well as **Preview wallpaper** in the
+more menu and tile context menu). It opens one ordinary, resizable **Wallpaper
+Preview** window; choosing another preview replaces that window's content. A
+preview never applies to a display on its own, changes the panel's selection,
+consumes a playback-history entry or saves options. It reads the current
+property draft, including text still being edited, and the target display's
+scaling options when it opens, and then follows the draft ([the preview follows
+your edits](#the-preview-follows-your-edits)); **Reload** reads everything
+again.
+
+The window also offers an **Apply** button to commit any pending property edits
+and apply the previewed wallpaper to its target display without leaving the
+preview window. Keyboard shortcuts in the preview window cover `⌘R` to reload,
+`Esc` to close, `Space` to play/pause and `M` to toggle mute; `Space` and `M`
+are ignored while focus is inside a `WKWebView` or text field, and `Space` is
+ignored while an AppKit button has keyboard focus.
 
 The wallpaper is shown on a stage with the proportions of the target display, so a
 portrait, ultrawide or 4:3 display previews with the layout and crop it will get
@@ -113,12 +122,13 @@ each step of a drag.
 What a preview reads only while it loads does not follow. A picture or file a
 property picks (a texture, a file, a folder) keeps the value the preview started with,
 and while the draft picks another the window's status line says **Reload preview to
-show the picture or files you chose.**; picking the original again clears it.
-**Reload preview** starts over from the draft, which is also how the scale factor,
+show the picture or files you chose.** and highlights the **Reload** button in the
+accent colour; picking the original again clears both.
+**Reload** starts over from the draft, which is also how the scale factor,
 which the preview reads once, is shown. Two scene readers decide while the scene
 loads as well, an effect that a switch or choice builds or leaves out and a texture
 a property picks for a material: they stay as the scene loaded them and the window
-gives no note for them (the renderer logs the held names once), so **Reload preview**
+gives no note for them (the renderer logs the held names once), so **Reload**
 shows those. Apply changes is unchanged: it reloads the wallpaper from the saved options.
 
 ## Properties
@@ -211,9 +221,17 @@ readable name uses **Unnamed option**, never the editor's markup-derived id.
 A `group` record is a section heading for the controls after it, so it is shown
 as a heading with a rule above it (marked as a heading for VoiceOver) rather
 than as muted description text, at the size of the inspector's card titles and a Settings
-group's title. It takes the same sanitised label as any
-other, is omitted when it has no words, and is not collapsible: Wallpaper Engine
-groups only label what follows and own no rows of their own.
+group's title. It takes the same sanitised label as any other and is omitted when
+it has no words. A textual heading with rows beneath it folds its subgroup away
+on click; rows before the first heading remain always visible, decorative
+headings (rules or image-only dividers) and empty headings stay static, and
+scrolling to a newly edited row automatically expands a collapsed subgroup.
+
+When a wallpaper defines more than 10 editable author properties, the top of
+**Wallpaper properties** also shows a search field (**Filter properties**) and a
+**Modified (N)** filter chip (matching properties changed from their default or
+holding pending unapplied edits); matching subgroups expand while a filter is
+active.
 
 Author artwork is loaded only for the image addresses the label registered, as a
 `PanelImageSource.propertyImage` the panel's image pipeline checks again before it
@@ -257,7 +275,7 @@ without a `condition`, until a property document supplies that name.
 Audio, scaling mode, position and frame rate take effect immediately. Everything
 else is pending until committed:
 
-- **Apply changes** saves pending properties, Wallpaper Engine options, and a
+- **Apply changes** (`⌘S`) saves pending properties, Wallpaper Engine options, and a
   display's scaling factor and **Enabled** switch.
 - **Revert** discards pending changes.
 
@@ -362,7 +380,10 @@ authored properties.
 ### Showing edits on the desktop
 
 **Settings → Desktop & Lock Screen → Desktop → Show property edits on the desktop as I
-make them** lets the displays that draw a scene wallpaper follow its pending
+make them** (also available as a quick **Show edits on desktop** toggle in the
+inspector's **Wallpaper properties** card for supported scenes, which notes that
+it is a global desktop setting applying to the active scene wallpaper on screen)
+lets the displays that draw a scene wallpaper follow its pending
 properties before **Apply changes**. It is off until the user turns it on, a choice
 kept on this Mac only (`WallpaperMachine.livePropertyEdits`, `LivePropertyEditing`)
 and left out of backups: the update runs inside the scene that is already playing
@@ -434,9 +455,12 @@ the saved value.
 ### Property presets
 
 **Wallpaper properties → Save current…** stores a named preset of the currently
-applied authored properties; pending edits must first be applied or reverted.
-Choose a preset and **Apply**, rename or delete it, or export/import its versioned
-JSON document. Import saves a new preset and never applies it automatically; a pick that
+applied authored properties; when pending edits exist, **Apply & Save…** applies
+those edits first and then saves the clean applied state as a new preset.
+Choose a preset in the picker (picking alone does not apply it) and **Apply**,
+**Update preset** (overwrites the selected preset when edits are clean while
+keeping its name, id and order), rename or delete it, or export/import its
+versioned JSON document. Import saves a new preset and never applies it automatically; a pick that
 is not a regular file (an alias, a folder) or is larger than 48 MB is refused with a
 message saying what a preset file has to be. These
 are wallpaper-specific property presets, not the Performance quality tiers.
@@ -473,7 +497,10 @@ presets.
 ### Image placement
 
 App-generated imported pictures and saved pixiv pages show **Position on screen**.
-Drag the preview or use its keyboard/position controls and 100–300% zoom; each
+Drag the preview (with subtle 50% horizontal and vertical center snap guides
+while dragging), double-click to recenter to `(50%, 50%)`, pinch with two fingers
+or hold `⌥` while scrolling to zoom (bare scroll wheel always scrolls the
+inspector), or use its keyboard/position controls and 100–300% zoom; each
 target display keeps its own placement. **Reset to Image fit** restores the
 Fit/Fill/top-aligned behavior. Original image bytes are unchanged, and changes
 reach the running page through properties without resetting its document. An

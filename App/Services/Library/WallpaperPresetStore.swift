@@ -92,6 +92,8 @@ final class WallpaperPresetStore {
   var status: String?
   @ObservationIgnored var chooseImportFile: (@MainActor () async -> URL?)?
   @ObservationIgnored var chooseExportFile: (@MainActor (String) async -> URL?)?
+  /// Test hook invoked on the main actor after staging/swapping assets and before publishing an update.
+  @ObservationIgnored var beforeUpdatePublish: (@MainActor () async throws -> Void)?
   @ObservationIgnored private let defaults: UserDefaults
   // Stateless IO dependencies are used only by utility jobs; published state stays MainActor-owned.
   @ObservationIgnored nonisolated(unsafe) private let managed: ManagedUserAssetStore
@@ -163,6 +165,196 @@ final class WallpaperPresetStore {
       await Task.detached(priority: .utility) { self.removeRetained(preset.id) }.value
       throw error
     }
+  }
+
+  /// Overwrites an existing preset's saved properties with the currently applied state while
+  /// preserving its id, name, list order and `ManagedUserAssetStore` retention invariants.
+  @discardableResult
+  func update(id: String, options: BridgeWallpaperOptionsSnapshot, hasPendingEdits: Bool) async throws -> WallpaperPropertyPreset {
+    try requireClean(options, hasPendingEdits: hasPendingEdits)
+    guard let index = items.firstIndex(where: { $0.id == id }) else {
+      _ = try preset(id: id)
+      throw Self.invalidDocument()
+    }
+    let existing = items[index]
+    guard existing.wallpaperID == options.wallpaperId else {
+      throw WallpaperPresetError(message: String(localized: "This property preset belongs to a different wallpaper."))
+    }
+    let listed = options.properties.filter(\.enabled)
+    if let unknown = listed.first(where: { $0.kind == .unknown }) {
+      throw Self.invalidProperty(unknown.id)
+    }
+    let stagingID = UUID().uuidString
+    let stagedDraft = WallpaperPropertyPreset(
+      id: stagingID, wallpaperID: existing.wallpaperID, name: existing.name,
+      properties: listed.compactMap { descriptor in
+        guard let kind = Self.kind(descriptor.kind) else { return nil }
+        return WallpaperPresetProperty(
+          id: descriptor.id, kind: kind, value: WallpaperPresetValue(descriptor.value),
+          usesDefault: !descriptor.canRestoreDefaults, retainedPath: nil)
+      })
+    try Self.validateStructure(stagedDraft)
+    let staged = try await Task.detached(priority: .utility) {
+      try self.retainAssets(stagedDraft, options: options)
+    }.value
+    let hasNewRetained = staged.properties.contains { $0.retainedPath != nil }
+    var finalPreset = staged
+    finalPreset.id = existing.id
+    if hasNewRetained {
+      let rootPath = retentionRoot.standardizedFileURL.path
+      let stagingPrefix = rootPath + "/" + stagingID + "/"
+      let targetPrefix = rootPath + "/" + existing.id + "/"
+      for propIndex in finalPreset.properties.indices {
+        if let path = finalPreset.properties[propIndex].retainedPath, path.hasPrefix(stagingPrefix) {
+          let remapped = targetPrefix + path.dropFirst(stagingPrefix.count)
+          finalPreset.properties[propIndex].retainedPath = remapped
+          if case .string(let value) = finalPreset.properties[propIndex].value, value == path {
+            finalPreset.properties[propIndex].value = .string(remapped)
+          }
+        }
+      }
+    }
+    do {
+      try Self.validateStructure(finalPreset)
+    } catch {
+      await Task.detached(priority: .utility) { self.removeRetained(stagingID) }.value
+      throw error
+    }
+    guard items.contains(where: { $0.id == existing.id }) else {
+      await Task.detached(priority: .utility) { self.removeRetained(stagingID) }.value
+      _ = try preset(id: existing.id)
+      throw Self.invalidDocument()
+    }
+
+    let backupID = try await Task.detached(priority: .utility) {
+      try self.swapRetainedDirectory(
+        stagingID: stagingID, targetID: existing.id, hasNewRetained: hasNewRetained,
+        wallpaperID: existing.wallpaperID, options: options)
+    }.value
+
+    do {
+      if let beforeUpdatePublish { try await beforeUpdatePublish() }
+      guard let currentIndex = items.firstIndex(where: { $0.id == existing.id }) else {
+        _ = try preset(id: existing.id)
+        throw Self.invalidDocument()
+      }
+      var updatedItems = items
+      updatedItems[currentIndex] = finalPreset
+      try publish(updatedItems)
+      if let backupID {
+        await Task.detached(priority: .utility) { self.removeRetained(backupID) }.value
+      }
+      return finalPreset
+    } catch {
+      await Task.detached(priority: .utility) {
+        self.rollbackRetainedDirectory(targetID: existing.id, hasNewRetained: hasNewRetained, backupID: backupID)
+      }.value
+      throw error
+    }
+  }
+
+  /// Atomically replaces `PresetAssets/<targetID>` with `PresetAssets/<stagingID>`, keeping a
+  /// backup UUID directory until `publish` succeeds. Returns the backup UUID to clean up, if any.
+  nonisolated private func swapRetainedDirectory(
+    stagingID: String, targetID: String, hasNewRetained: Bool,
+    wallpaperID: String, options: BridgeWallpaperOptionsSnapshot
+  ) throws -> String? {
+    guard UUID(uuidString: stagingID) != nil, UUID(uuidString: targetID) != nil else {
+      throw Self.invalidDocument()
+    }
+    let root = retentionRoot
+    let stagingDir = root.appendingPathComponent(stagingID, isDirectory: true)
+    let targetDir = root.appendingPathComponent(targetID, isDirectory: true)
+    let targetExists = fileManager.fileExists(atPath: targetDir.path)
+
+    if !hasNewRetained {
+      guard targetExists else { return nil }
+      // Keep an existing retained directory if the applied wallpaper or managed manifest still
+      // references it; otherwise move it aside so a publish failure can roll back cleanly.
+      var referenced = Self.resourcePaths(options)
+      referenced.formUnion(try managed.manifest(wallpaperId: wallpaperID).properties.values.map(\.sourcePath))
+      let targetComponents = targetDir.resolvingSymlinksInPath().pathComponents
+      let stillReferenced = referenced.contains { path in
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().pathComponents.starts(with: targetComponents)
+      }
+      guard !stillReferenced else { return nil }
+      let backupID = UUID().uuidString
+      let backupDir = root.appendingPathComponent(backupID, isDirectory: true)
+      try fileManager.moveItem(at: targetDir, to: backupDir)
+      return backupID
+    }
+
+    var backupID: String?
+    if targetExists {
+      do {
+        try preserveReferencedRetainedAssets(
+          from: targetDir, into: stagingDir, wallpaperID: wallpaperID, options: options)
+      } catch {
+        removeRetained(stagingID)
+        throw error
+      }
+      let id = UUID().uuidString
+      let backupDir = root.appendingPathComponent(id, isDirectory: true)
+      do {
+        try fileManager.moveItem(at: targetDir, to: backupDir)
+        backupID = id
+      } catch {
+        removeRetained(stagingID)
+        throw error
+      }
+    }
+    do {
+      try fileManager.moveItem(at: stagingDir, to: targetDir)
+      return backupID
+    } catch {
+      removeRetained(stagingID)
+      if let backupID {
+        let backupDir = root.appendingPathComponent(backupID, isDirectory: true)
+        try? fileManager.moveItem(at: backupDir, to: targetDir)
+      }
+      throw error
+    }
+  }
+
+  /// Copies any retained asset under `targetDir` that is still referenced by `options` or the
+  /// managed manifest (for example, a conditionally disabled property) into `stagingDir` when
+  /// absent there so replacing `targetDir` never deletes a live referenced source.
+  nonisolated private func preserveReferencedRetainedAssets(
+    from targetDir: URL, into stagingDir: URL, wallpaperID: String, options: BridgeWallpaperOptionsSnapshot
+  ) throws {
+    var referenced = Self.resourcePaths(options)
+    referenced.formUnion(try managed.manifest(wallpaperId: wallpaperID).properties.values.map(\.sourcePath))
+    let targetComponents = targetDir.resolvingSymlinksInPath().pathComponents
+    let entries: [(relative: [String], source: URL, destination: URL)] = referenced.compactMap { path in
+      let components = URL(fileURLWithPath: path).resolvingSymlinksInPath().pathComponents
+      guard components.starts(with: targetComponents), components.count > targetComponents.count else { return nil }
+      let relative = Array(components.dropFirst(targetComponents.count))
+      guard relative.first != ".wallpaper-id", relative.allSatisfy(Self.safeComponent) else { return nil }
+      let source = relative.reduce(targetDir) { $0.appendingPathComponent($1) }
+      let destination = relative.reduce(stagingDir) { $0.appendingPathComponent($1) }
+      return (relative, source, destination)
+    }.sorted { $0.relative.count < $1.relative.count }
+    for entry in entries {
+      guard fileManager.fileExists(atPath: entry.source.path),
+            !fileManager.fileExists(atPath: entry.destination.path) else { continue }
+      let values = try entry.source.resourceValues(forKeys: [.isSymbolicLinkKey])
+      guard values.isSymbolicLink != true,
+            entry.source.resolvingSymlinksInPath().pathComponents.starts(with: targetComponents) else {
+        throw Self.invalidDocument()
+      }
+      try fileManager.createDirectory(at: entry.destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try fileManager.copyItem(at: entry.source, to: entry.destination)
+    }
+  }
+
+  nonisolated private func rollbackRetainedDirectory(targetID: String, hasNewRetained: Bool, backupID: String?) {
+    if hasNewRetained { removeRetained(targetID) }
+    guard let backupID, UUID(uuidString: backupID) != nil, UUID(uuidString: targetID) != nil else { return }
+    let root = retentionRoot
+    let backupDir = root.appendingPathComponent(backupID, isDirectory: true)
+    let targetDir = root.appendingPathComponent(targetID, isDirectory: true)
+    guard fileManager.fileExists(atPath: backupDir.path) else { return }
+    try? fileManager.moveItem(at: backupDir, to: targetDir)
   }
 
   nonisolated private func retainAssets(_ original: WallpaperPropertyPreset, options: BridgeWallpaperOptionsSnapshot) throws -> WallpaperPropertyPreset {
@@ -698,6 +890,10 @@ final class WallpaperPresetStore {
 
   nonisolated private static func safeComponent(_ string: String) -> Bool {
     !string.isEmpty && !string.hasPrefix(".") && !string.contains("/") && !string.contains("\\") && !string.contains(":") && !string.contains("\0") && string.utf8.count <= 255
+  }
+
+  nonisolated static func validateName(_ name: String) throws -> String {
+    try validName(name)
   }
 
   nonisolated private static func validName(_ name: String) throws -> String {

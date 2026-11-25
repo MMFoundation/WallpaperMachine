@@ -31,6 +31,14 @@ extension InspectorOptions {
         default: false
         }
       }
+
+      /// Whether this row edits a property value (as opposed to a heading or description note).
+      var isControl: Bool {
+        switch self {
+        case .heading, .description: false
+        default: true
+        }
+      }
     }
 
     struct Slider: Equatable {
@@ -111,5 +119,8 @@ extension InspectorOptions {
 
     /// Not applied wins over Modified: a value that waits says so first, even back at its default.
     var mark: Mark? { isStaged ? .notApplied : isModified ? .modified : nil }
+
+    /// Whether the property differs from its default or holds a pending unapplied edit.
+    var isModifiedOrStaged: Bool { isModified || isStaged }
   }
 }

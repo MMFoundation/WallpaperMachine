@@ -10,10 +10,12 @@ final class PresetsBarStateTests: XCTestCase {
   private let day = PresetsState.Item(id: "p2", name: "Day")
 
   private func state(
-    items: [PresetsState.Item], dirty: Bool = false, canSave: Bool = true, status: String? = nil
+    items: [PresetsState.Item], dirty: Bool = false, canSave: Bool = true,
+    canApplyAndSave: Bool = false, status: String? = nil
   ) -> PresetsState {
     PresetsState(
-      wallpaperID: "a", items: items, isDirty: dirty, canSave: canSave, status: status, error: nil)
+      wallpaperID: "a", items: items, isDirty: dirty, canSave: canSave,
+      canApplyAndSave: canApplyAndSave, status: status, error: nil)
   }
 
   func testAPickedPresetIsDroppedWhenItLeavesTheListAndDeleteDisarms() {
@@ -151,5 +153,37 @@ final class PresetsBarStateTests: XCTestCase {
     XCTAssertFalse(none.canApply(clean, isPending: false), "nothing chosen")
     none.pick("gone")
     XCTAssertFalse(none.canApply(clean, isPending: false), "a pick that is not in the list")
+  }
+
+  func testUpdateRequiresCleanChosenPresetAndApplyAndSaveRequiresDirtyState() {
+    var bar = PresetsBarState()
+    let clean = state(items: [night, day], dirty: false, canSave: true, canApplyAndSave: false)
+    let dirty = state(items: [night, day], dirty: true, canSave: false, canApplyAndSave: true)
+
+    // Without a chosen preset, Update is unavailable; choosing stays decoupled from applying.
+    XCTAssertFalse(bar.canUpdate(clean, isPending: false))
+    bar.pick("p1")
+    XCTAssertTrue(bar.canUpdate(clean, isPending: false))
+    XCTAssertFalse(bar.canApplyAndSave(clean, isPending: false))
+    XCTAssertFalse(bar.canUpdate(clean, isPending: true))
+
+    // Dirty edits disable Update and plain Save/Apply, while enabling Apply & Save….
+    XCTAssertFalse(bar.canUpdate(dirty, isPending: false))
+    XCTAssertTrue(bar.canApplyAndSave(dirty, isPending: false))
+    XCTAssertFalse(bar.canApplyAndSave(dirty, isPending: true))
+    XCTAssertFalse(
+      bar.canApplyAndSave(state(items: [night], dirty: true, canSave: false, canApplyAndSave: false), isPending: false))
+
+    bar.beginDelete(of: night)
+    bar.beginApplyAndSave()
+    XCTAssertEqual(bar.editor?.mode, .applyAndSave)
+    XCTAssertEqual(bar.armed, "", "opening Apply & Save disarms Delete")
+    XCTAssertFalse(bar.showsTools(in: [night, day]))
+    XCTAssertFalse(bar.showsDirtyNote(dirty))
+    bar.setName("  Tuned night  ")
+    XCTAssertEqual(bar.editor?.trimmedName, "Tuned night")
+    bar.didSave(created: "p3")
+    XCTAssertNil(bar.editor)
+    XCTAssertEqual(bar.picked, "p3")
   }
 }

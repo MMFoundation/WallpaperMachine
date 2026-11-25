@@ -1,10 +1,22 @@
 import AppKit
+import WebKit
 
 /// A regular, non-restored utility window; all playback belongs to its private session.
 @MainActor
 final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelegate {
+    enum KeyboardAction: Equatable {
+        case togglePause
+        case toggleMute
+        case reload
+        case close
+    }
+
     let session: WallpaperPreviewSession
     var onClosed: (() -> Void)?
+    /// Applies the previewed wallpaper (and any pending edits) to the desktop.
+    var onApply: (@MainActor (WallpaperPreviewSession.Selection) async throws -> Void)? {
+        didSet { render() }
+    }
     /// The black backdrop; the stage sits inside it, so a window of any shape shows the display's
     /// proportions with bars instead of stretching the wallpaper.
     private let container = NSView()
@@ -12,12 +24,17 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
     private let playButton = NSButton()
     private let muteButton = NSButton()
     private let reloadButton = NSButton()
+    private let applyButton = NSButton()
     private let status = NSTextField(wrappingLabelWithString: "")
     private let progress = NSProgressIndicator()
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var screensAwake = true
     private var unlocked = true
     private var sessionActive = true
+    private var isApplying = false
+    private var applyNotice: String?
+    private var lastSelection: WallpaperPreviewSession.Selection?
+    private var lastPhase: WallpaperPreviewSession.Phase = .closed
     private let displayAspect: @MainActor (String) -> CGFloat?
     private var stageAspect = WallpaperPreviewWindowController.defaultAspect
     private var stageAspectConstraint: NSLayoutConstraint?
@@ -39,6 +56,7 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
         // A window that is already open keeps the size the user gave it; only the stage changes.
         setStageAspect(displayAspect(selection.displayID))
         if window == nil { makeWindow() }
+        applyNotice = nil
         session.open(selection)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
@@ -56,6 +74,69 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
     /// bars beside it rather than a window too narrow for its buttons.
     static let minimumContentWidth: CGFloat = 480
     static let defaultAspect: CGFloat = 16.0 / 9.0
+
+    /// Whether `responder` lives inside a `WKWebView` or text input/editor, where bare letter and
+    /// Space shortcuts must never steal keystrokes.
+    static func isTextOrWebResponder(_ responder: NSResponder?) -> Bool {
+        if responder is NSText || responder is NSTextField { return true }
+        var current = responder as? NSView
+        while let view = current {
+            if view is WKWebView || view is NSText || view is NSTextField { return true }
+            current = view.superview
+        }
+        return false
+    }
+
+    /// Resolves preview window shortcuts (`⌘R` reload, `Esc` close, guarded `Space` play/pause and
+    /// `M` mute). Pure so tests verify responder guards without opening a window.
+    static func keyboardAction(for event: NSEvent, firstResponder: NSResponder?) -> KeyboardAction? {
+        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        if flags == .command, key == "r" { return .reload }
+        if flags.isEmpty, event.keyCode == 53 || key == "\u{1B}" { return .close }
+        if flags.isEmpty, event.keyCode == 49 || key == " " {
+            guard !isTextOrWebResponder(firstResponder), !(firstResponder is NSControl) else { return nil }
+            return .togglePause
+        }
+        if flags.isEmpty || flags == .shift, key == "m" {
+            guard !isTextOrWebResponder(firstResponder) else { return nil }
+            return .toggleMute
+        }
+        return nil
+    }
+
+    /// Executes a keyboard shortcut when its control is available. Returns whether the event was
+    /// handled.
+    @discardableResult
+    func handleKeyEvent(_ event: NSEvent, firstResponder: NSResponder?) -> Bool {
+        guard let action = Self.keyboardAction(for: event, firstResponder: firstResponder) else { return false }
+        return performKeyboardAction(action)
+    }
+
+    private func performKeyboardAction(_ action: KeyboardAction) -> Bool {
+        switch action {
+        case .reload:
+            guard reloadButton.isEnabled else { return false }
+            reload()
+            return true
+        case .close:
+            if let window {
+                window.performClose(nil)
+            } else {
+                session.close()
+                onClosed?()
+            }
+            return true
+        case .togglePause:
+            guard playButton.isEnabled else { return false }
+            togglePause()
+            return true
+        case .toggleMute:
+            guard muteButton.isEnabled else { return false }
+            toggleMute()
+            return true
+        }
+    }
 
     /// The stage proportions for a display: its own width over height, within the range a
     /// window can reasonably show, or 16:9 when the display is unknown.
@@ -84,8 +165,18 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
     private func makeWindow() {
         let visible = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1280, height: 800)
         let size = Self.contentSize(visibleSize: visible, aspect: stageAspect)
-        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
+        let window = PreviewWindow(contentRect: CGRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: true)
+        window.onKeyEquivalent = { [weak self] event, responder in
+            guard let self, let action = Self.keyboardAction(for: event, firstResponder: responder),
+                  action == .reload || action == .close
+            else { return false }
+            return self.performKeyboardAction(action)
+        }
+        window.onKeyDown = { [weak self] event, responder in
+            guard let self else { return false }
+            return self.handleKeyEvent(event, firstResponder: responder)
+        }
         self.window = window
         window.delegate = self
         window.isReleasedWhenClosed = false
@@ -132,14 +223,29 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
         ])
         setStageAspect(stageAspect)
 
-        for (button, action) in [(playButton, #selector(togglePause)), (muteButton, #selector(toggleMute)), (reloadButton, #selector(reload))] {
+        for (button, action) in [
+            (playButton, #selector(togglePause)),
+            (muteButton, #selector(toggleMute)),
+            (reloadButton, #selector(reload)),
+            (applyButton, #selector(applyPreview)),
+        ] {
             button.target = self
             button.action = action
             button.bezelStyle = .rounded
             button.setContentHuggingPriority(.required, for: .horizontal)
         }
-        reloadButton.title = String(localized: "Reload preview")
+        playButton.identifier = NSUserInterfaceItemIdentifier("preview-play")
+        muteButton.identifier = NSUserInterfaceItemIdentifier("preview-mute")
+        reloadButton.identifier = NSUserInterfaceItemIdentifier("preview-reload")
+        reloadButton.title = String(localized: "Reload")
+        reloadButton.setAccessibilityLabel(String(localized: "Reload preview"))
         reloadButton.toolTip = String(localized: "Reload with the current wallpaper options.")
+        reloadButton.keyEquivalent = "r"
+        reloadButton.keyEquivalentModifierMask = .command
+        applyButton.identifier = NSUserInterfaceItemIdentifier("preview-apply")
+        applyButton.title = String(localized: "Apply")
+        applyButton.setAccessibilityLabel(String(localized: "Apply wallpaper"))
+        applyButton.toolTip = String(localized: "Apply this wallpaper and any pending changes to your desktop.")
         progress.style = .spinning
         progress.controlSize = .small
         progress.isDisplayedWhenStopped = false
@@ -152,7 +258,7 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
         status.translatesAutoresizingMaskIntoConstraints = false
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         status.setAccessibilityElement(true)
-        let controls = NSStackView(views: [playButton, muteButton, reloadButton, NSView(), progress])
+        let controls = NSStackView(views: [playButton, muteButton, reloadButton, NSView(), progress, applyButton])
         controls.orientation = .horizontal
         controls.spacing = 8
         controls.distribution = .fill
@@ -216,6 +322,11 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
     }
 
     private func render() {
+        if session.selection != lastSelection || session.phase != lastPhase {
+            applyNotice = nil
+            lastSelection = session.selection
+            lastPhase = session.phase
+        }
         window?.title = session.title.isEmpty ? String(localized: "Wallpaper Preview")
             : String(localized: "Preview — \(session.title)")
         playButton.title = session.userPaused ? String(localized: "Play") : String(localized: "Pause")
@@ -227,20 +338,67 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
         muteButton.setAccessibilityLabel(muteButton.toolTip)
         muteButton.isEnabled = session.surface != nil
         reloadButton.isEnabled = session.selection != nil
-        switch session.phase {
-        case .closed: status.stringValue = ""
-        case .loading: status.stringValue = String(localized: "Loading preview…")
-        case .playing: status.stringValue = session.needsReload ? Self.reloadNote : String(localized: "Playing preview")
-        case .paused: status.stringValue = session.needsReload ? Self.reloadNote : String(localized: "Preview paused")
-        case .failed(let message): status.stringValue = message
+        reloadButton.bezelColor = session.needsReload ? .controlAccentColor : nil
+        reloadButton.toolTip = session.needsReload
+            ? Self.reloadNote
+            : String(localized: "Reload with the current wallpaper options.")
+        let isFailed: Bool
+        if case .failed = session.phase { isFailed = true } else { isFailed = false }
+        applyButton.isHidden = onApply == nil
+        applyButton.isEnabled = onApply != nil && session.selection != nil && !isApplying && !isFailed
+        if isApplying {
+            status.stringValue = String(localized: "Applying wallpaper…")
+        } else if session.needsReload, session.phase == .playing || session.phase == .paused {
+            status.stringValue = Self.reloadNote
+        } else if let applyNotice {
+            status.stringValue = applyNotice
+        } else {
+            switch session.phase {
+            case .closed: status.stringValue = ""
+            case .loading: status.stringValue = String(localized: "Loading preview…")
+            case .playing: status.stringValue = String(localized: "Playing preview")
+            case .paused: status.stringValue = String(localized: "Preview paused")
+            case .failed(let message): status.stringValue = message
+            }
         }
         status.toolTip = status.stringValue
-        if session.phase == .loading { progress.startAnimation(nil) } else { progress.stopAnimation(nil) }
+        let spinning = session.phase == .loading || isApplying
+        progress.isHidden = !spinning
+        if spinning { progress.startAnimation(nil) } else { progress.stopAnimation(nil) }
     }
 
     @objc private func togglePause() { session.togglePause() }
     @objc private func toggleMute() { session.toggleMute() }
     @objc private func reload() { session.reload() }
+    @objc private func applyPreview() {
+        guard !isApplying, let onApply, let selection = session.selection else { return }
+        isApplying = true
+        applyNotice = nil
+        render()
+        Task { @MainActor [weak self] in
+            do {
+                try await onApply(selection)
+                guard let self else { return }
+                self.isApplying = false
+                if self.session.selection == selection {
+                    self.applyNotice = String(localized: "Applied to desktop.")
+                }
+                self.render()
+            } catch is CancellationError {
+                guard let self else { return }
+                self.isApplying = false
+                self.render()
+            } catch {
+                AppLog.warn("wallpaper preview: apply failed: \(error.localizedDescription)")
+                guard let self else { return }
+                self.isApplying = false
+                if self.session.selection == selection {
+                    self.applyNotice = error.localizedDescription
+                }
+                self.render()
+            }
+        }
+    }
 
     private func updateVisibility() {
         guard let window else { session.setVisible(false); return }
@@ -256,5 +414,22 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
         for (center, observer) in observers { center.removeObserver(observer) }
         observers.removeAll()
         onClosed?()
+    }
+}
+
+/// Hosts preview window keyboard shortcuts without stealing typing from WebKit pages or text
+/// editors, and without breaking Space activation on focused AppKit controls.
+private final class PreviewWindow: NSWindow {
+    var onKeyEquivalent: ((NSEvent, NSResponder?) -> Bool)?
+    var onKeyDown: ((NSEvent, NSResponder?) -> Bool)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if onKeyEquivalent?(event, firstResponder) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if onKeyDown?(event, firstResponder) == true { return }
+        super.keyDown(with: event)
     }
 }

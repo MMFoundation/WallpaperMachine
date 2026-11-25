@@ -356,16 +356,21 @@ final class WallpaperPreviewLivePropertiesTests: XCTestCase {
         let controller = WallpaperPreviewWindowController(session: h.session)
         let root = controller.makeContentView(size: CGSize(width: 480, height: 320))
         let status = try XCTUnwrap(root.subviews.compactMap { $0 as? NSTextField }.first { $0.identifier?.rawValue == "preview-status" })
+        let controls = try XCTUnwrap(root.subviews.compactMap { $0 as? NSStackView }.first)
+        let reloadButton = try XCTUnwrap(controls.arrangedSubviews.compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "preview-reload" })
         await h.show()
         XCTAssertEqual(status.stringValue, String(localized: "Playing preview"))
+        XCTAssertNil(reloadButton.bezelColor)
         h.draft = Harness.scene(size: 10, picture: "b.png")
         h.session.propertiesDidChange(wallpaperID: "a")
         await elapse(h)
         XCTAssertEqual(status.stringValue, String(localized: "Reload preview to show the picture or files you chose."))
+        XCTAssertEqual(reloadButton.bezelColor, .controlAccentColor, "reload button highlights when a pending picture or file needs reload")
         h.draft = Harness.scene(size: 10)
         h.session.propertiesDidChange(wallpaperID: "a")
         await elapse(h)
         XCTAssertEqual(status.stringValue, String(localized: "Playing preview"))
+        XCTAssertNil(reloadButton.bezelColor)
     }
 }
 

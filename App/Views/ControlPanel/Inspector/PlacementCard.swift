@@ -97,9 +97,10 @@ struct PlacementCard: View {
 }
 
 /// The frame itself: the picture at its box inside a frame of the display's shape. Dragging moves
-/// the picture the other way (right shows more of its left side), an arrow key moves it a
-/// hundredth and Shift five hundredths, and a click that does not move it changes nothing. The
-/// pointer is a hand while there is something to drag.
+/// the picture the other way (right shows more of its left side) with gentle 50% center guides,
+/// double-clicking recenters it to (50%, 50%), pinching or Option-scrolling zooms it, an arrow key
+/// moves it a hundredth and Shift five hundredths, and a click that does not move it changes
+/// nothing. The pointer is a hand while there is something to drag.
 private struct PlacementFrame: View {
   let state: ImagePlacementState
   let source: PanelImageSource?
@@ -109,13 +110,15 @@ private struct PlacementFrame: View {
   @Environment(\.panelImages) private var images
   @State private var loaded: DecodedPanelImage?
   @State private var drag: DragSession?
+  @State private var pinchStartZoom: Double?
 
   private struct DragSession {
     var x: Double
     var y: Double
     var overflow: CGSize
-    var before: PlacementDrafts.Draft?
     var moved = false
+    var snappedX = false
+    var snappedY = false
   }
 
   var body: some View {
@@ -133,6 +136,9 @@ private struct PlacementFrame: View {
             .frame(width: box.size.width, height: box.size.height)
             .offset(x: box.origin.x, y: box.origin.y)
         }
+        if let session = drag, session.moved, let box {
+          centerGuides(size: proxy.size, overflow: box.overflow, session: session)
+        }
       }
       .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
       .clipped()
@@ -144,14 +150,18 @@ private struct PlacementFrame: View {
           .onChanged { value in
             guard !drafts.isResetting, let box else { return }
             if drag == nil {
-              drag = DragSession(
-                x: box.x, y: box.y, overflow: box.overflow, before: drafts.draft)
+              drag = DragSession(x: box.x, y: box.y, overflow: box.overflow)
             }
             guard var session = drag else { return }
-            let moved = PlacementGeometry.dragged(
+            if !session.moved {
+              guard PlacementGeometry.isDrag(value.translation) else { return }
+              session.moved = true
+            }
+            let moved = PlacementGeometry.draggedWithCenterSnap(
               from: (session.x, session.y), overflow: session.overflow,
               translation: value.translation)
-            if PlacementGeometry.isDrag(value.translation) { session.moved = true }
+            session.snappedX = moved.snappedX
+            session.snappedY = moved.snappedY
             drag = session
             drafts.update(x: moved.x, y: moved.y)
           }
@@ -160,10 +170,32 @@ private struct PlacementFrame: View {
             drag = nil
             if session.moved {
               drafts.commit(from: state)
-            } else {
-              drafts.restore(session.before)
             }
           })
+      .simultaneousGesture(
+        TapGesture(count: 2).onEnded {
+          guard !drafts.isResetting else { return }
+          drafts.recenter(state: state)
+        })
+      .simultaneousGesture(
+        MagnifyGesture()
+          .onChanged { value in
+            guard !drafts.isResetting else { return }
+            let start = pinchStartZoom ?? drafts.values(for: state).zoom
+            if pinchStartZoom == nil { pinchStartZoom = start }
+            drafts.update(
+              zoom: PlacementGeometry.magnified(from: start, scale: Double(value.magnification)))
+          }
+          .onEnded { _ in
+            guard pinchStartZoom != nil else { return }
+            pinchStartZoom = nil
+            drafts.commit(from: state)
+          })
+      .overlay {
+        OptionScrollZoomMonitor(isEnabled: !drafts.isResetting) { deltaY, precise in
+          drafts.scrollZoom(deltaY: deltaY, hasPreciseDeltas: precise, state: state)
+        }
+      }
     }
     .aspectRatio(aspect, contentMode: .fit)
     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -198,6 +230,35 @@ private struct PlacementFrame: View {
     .task(id: source) { await load() }
   }
 
+  /// Subtle 50% center guides shown while dragging pannable axes; brighten in the accent colour
+  /// while snapped to center.
+  @ViewBuilder
+  private func centerGuides(size: CGSize, overflow: CGSize, session: DragSession) -> some View {
+    ZStack {
+      if overflow.width > PlacementGeometry.overflowThreshold {
+        Rectangle()
+          .fill(
+            session.snappedX
+              ? theme.accent.accent.color.opacity(0.85) : theme.surface.markGlyph.color.opacity(0.28)
+          )
+          .frame(width: session.snappedX ? 1 : 0.5, height: size.height)
+          .position(x: size.width / 2, y: size.height / 2)
+      }
+      if overflow.height > PlacementGeometry.overflowThreshold {
+        Rectangle()
+          .fill(
+            session.snappedY
+              ? theme.accent.accent.color.opacity(0.85) : theme.surface.markGlyph.color.opacity(0.28)
+          )
+          .frame(width: size.width, height: session.snappedY ? 1 : 0.5)
+          .position(x: size.width / 2, y: size.height / 2)
+      }
+    }
+    .frame(width: size.width, height: size.height)
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
+  }
+
   private func geometry(stage: CGSize, values: PlacementDrafts.Values) -> PlacementGeometry.Box? {
     var aspect = state.imageAspectRatio
     if aspect == nil || aspect! <= 0, let loaded, loaded.pixelSize.height > 0 {
@@ -215,6 +276,71 @@ private struct PlacementFrame: View {
       return
     }
     loaded = try? await images.image(for: source, maxPixelSize: 1200)
+  }
+}
+
+/// Captures Option-scroll wheel events over the placement frame for zooming while leaving bare
+/// scroll wheel events completely untouched so the enclosing inspector `ScrollView` still scrolls.
+struct OptionScrollZoomMonitor: NSViewRepresentable {
+  let isEnabled: Bool
+  let onOptionScroll: @MainActor (Double, Bool) -> Void
+
+  /// Pure guardrail: only Option-modified scroll events inside the visible frame bounds are
+  /// captured; bare scroll wheel and other modifier combinations always pass through.
+  nonisolated static func shouldHandleScrollEvent(
+    modifiers: NSEvent.ModifierFlags, windowMatches: Bool, isHidden: Bool,
+    pointInVisibleBounds: Bool, isEnabled: Bool
+  ) -> Bool {
+    guard modifiers.intersection([.option, .command, .control]) == .option else { return false }
+    return isEnabled && windowMatches && !isHidden && pointInVisibleBounds
+  }
+
+  func makeNSView(context: Context) -> MonitorView { MonitorView() }
+
+  func updateNSView(_ view: MonitorView, context: Context) {
+    view.isEnabled = isEnabled
+    view.onOptionScroll = onOptionScroll
+  }
+
+  static func dismantleNSView(_ view: MonitorView, coordinator: ()) {
+    view.removeMonitor()
+  }
+
+  final class MonitorView: NSView {
+    var isEnabled = true
+    var onOptionScroll: (@MainActor (Double, Bool) -> Void)?
+    private var monitor: Any?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      removeMonitor()
+      guard window != nil else { return }
+      monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+        MainActor.assumeIsolated {
+          guard let self else { return event }
+          let point = self.convert(event.locationInWindow, from: nil)
+          guard
+            OptionScrollZoomMonitor.shouldHandleScrollEvent(
+              modifiers: event.modifierFlags,
+              windowMatches: event.window === self.window,
+              isHidden: self.isHiddenOrHasHiddenAncestor,
+              pointInVisibleBounds: self.visibleRect.contains(point),
+              isEnabled: self.isEnabled)
+          else { return event }
+          self.onOptionScroll?(Double(event.scrollingDeltaY), event.hasPreciseScrollingDeltas)
+          return nil
+        }
+      }
+    }
+
+    func removeMonitor() {
+      if let monitor {
+        NSEvent.removeMonitor(monitor)
+        self.monitor = nil
+      }
+    }
   }
 }
 

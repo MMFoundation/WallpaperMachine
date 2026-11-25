@@ -290,18 +290,24 @@ final class InspectorRenderTests: InspectorTestCase {
     let preset = PresetsState.Item(id: "evening", name: "Evening glow over the harbour")
     let presets = PresetsState(
       wallpaperID: id, items: [preset], isDirty: false, canSave: true, status: nil, error: nil)
+    let dirtyPresets = PresetsState(
+      wallpaperID: id, items: [preset], isDirty: true, canSave: false, canApplyAndSave: true,
+      status: nil, error: nil)
     var chosen = PresetsBarState()
     chosen.pick(preset.id)
     var deleting = chosen
     deleting.beginDelete(of: preset)
     var saving = chosen
     saving.beginSave()
+    var applySaving = chosen
+    applySaving.beginApplyAndSave()
     var renaming = chosen
     renaming.beginRename(of: preset)
     let cards: [(name: String, buttons: [String], card: AnyView)] = [
       ("a chosen preset", ["Apply"], AnyView(PresetsCard(state: presets, bar: chosen))),
       ("Delete…", ["Delete", "Cancel"], AnyView(PresetsCard(state: presets, bar: deleting))),
       ("Save current…", ["Save preset", "Cancel"], AnyView(PresetsCard(state: presets, bar: saving))),
+      ("Apply & Save…", ["Apply & Save", "Cancel"], AnyView(PresetsCard(state: dirtyPresets, bar: applySaving))),
       ("Rename…", ["Save", "Cancel"], AnyView(PresetsCard(state: presets, bar: renaming))),
       ("New collection…", ["Create", "Cancel"], AnyView(CollectionsCard(wallpaperID: id, isNaming: true))),
     ]

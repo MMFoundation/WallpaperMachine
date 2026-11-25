@@ -1874,6 +1874,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let title = store.settingsSnapshot.displays.first { $0.displayId == displayID }?.title ?? ""
                 return DisplayGeometry.aspectRatio(displayID: displayID, title: title)
             })
+            controller.onApply = { [weak self] selection in
+                try await self?.applyPreviewSelection(selection)
+            }
             controller.onClosed = { [weak self, weak controller] in
                 guard let self, self.previewWindow === controller else { return }
                 self.previewWindow = nil
@@ -1885,6 +1888,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         NSApp.setActivationPolicy(.regular)
         previewWindow?.present(selection)
+    }
+
+    /// Applies pending edits (if any) and activates the previewed wallpaper on its target display.
+    private func applyPreviewSelection(_ selection: WallpaperPreviewSession.Selection) async throws {
+        guard let store, !shutdownInProgress, !shutdownComplete else { throw AutomationError.notReady }
+        let id = selection.wallpaperID
+        let displayID = selection.displayID
+        try await store.commands.run {
+            let options = try await store.wallpaperOptionsSnapshotAsync(wallpaperId: id)
+            let drafts = store.editorState.propertyTextDrafts.filter { $0.key.wallpaperID == id }
+            guard drafts.values.allSatisfy({ $0.count <= PanelValueRules.maximumTextLength }) else {
+                throw InvalidControlValue()
+            }
+            if options.dirty || store.editorState.hasPendingEdits(wallpaperID: id) {
+                try await store.applyWallpaperOptionsAsync(wallpaperId: id, userInitiated: true)
+            }
+            if !store.isWallpaperActive(id: id, displayId: displayID) {
+                try await store.activateWallpaperAsync(id: id, displayId: displayID, origin: .user)
+            }
+        }
     }
 
     func canActivateNextWallpaper(store: BridgeStore, displayId: String) -> Bool {

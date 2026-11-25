@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import XCTest
 @testable import WallpaperMachine
 
@@ -10,6 +11,7 @@ final class WallpaperPreviewLayoutTests: XCTestCase {
             throw WallpaperPreviewFailure(message: "A failed load must not create a surface")
         })
         let controller = WallpaperPreviewWindowController(session: session)
+        controller.onApply = { _ in }
         let root = controller.makeContentView(size: CGSize(width: 480, height: 320))
         XCTAssertNil(root.window)
         session.open(.init(wallpaperID: "fixture", displayID: "primary"))
@@ -17,9 +19,17 @@ final class WallpaperPreviewLayoutTests: XCTestCase {
         XCTAssertEqual(session.phase, .failed(reason))
         let controls = try XCTUnwrap(root.subviews.compactMap { $0 as? NSStackView }.first)
         let buttons = controls.arrangedSubviews.compactMap { $0 as? NSButton }
-        XCTAssertEqual(buttons.count, 3)
+        XCTAssertEqual(buttons.count, 4)
         let status = try XCTUnwrap(root.subviews.compactMap { $0 as? NSTextField }.first { $0.identifier?.rawValue == "preview-status" })
-        for titles in [["Pause", "Unmute", "Reload preview"], ["暂停", "取消静音", "重新载入预览"], ["一時停止", "消音を解除", "プレビューを再読み込み"]] {
+        let localizedTitles = [
+            ["Pause", "Unmute", "Reload", "Apply"],
+            ["暂停", "取消静音", "重新载入", "应用"],
+            ["暫停", "取消靜音", "重新載入", "套用"],
+            ["一時停止", "消音を解除", "再読み込み", "適用"],
+            ["일시 정지", "소리 켜기", "다시 불러오기", "적용"],
+            ["Reproduzir", "Ativar som", "Recarregar", "Aplicar"],
+        ]
+        for titles in localizedTitles {
             for (button, title) in zip(buttons, titles) { button.title = title }
             root.layoutSubtreeIfNeeded()
             for button in buttons {
@@ -188,4 +198,123 @@ final class WallpaperPreviewLayoutTests: XCTestCase {
         session.onSurface?(nil)
         XCTAssertTrue(stage.subviews.isEmpty)
     }
+
+    // MARK: Shortcuts and Apply
+
+    private func keyEvent(
+        _ characters: String, keyCode: UInt16 = 0, modifiers: NSEvent.ModifierFlags = []
+    ) throws -> NSEvent {
+        try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                windowNumber: 0, context: nil, characters: characters,
+                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode))
+    }
+
+    func testKeyboardShortcutsGuardWebViewTextFieldsAndButtons() throws {
+        let reload = try keyEvent("r", keyCode: 15, modifiers: .command)
+        let escape = try keyEvent("\u{1B}", keyCode: 53)
+        let space = try keyEvent(" ", keyCode: 49)
+        let mute = try keyEvent("m", keyCode: 46)
+        let commandMute = try keyEvent("m", keyCode: 46, modifiers: .command)
+
+        let plain = NSView()
+        let webView = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let webChild = NSView()
+        webView.addSubview(webChild)
+        let textView = NSTextView()
+        let textField = NSTextField()
+        let button = NSButton()
+
+        // Normal view or nil responder allows all four shortcuts.
+        for responder: NSResponder? in [nil, plain] {
+            XCTAssertEqual(WallpaperPreviewWindowController.keyboardAction(for: reload, firstResponder: responder), .reload)
+            XCTAssertEqual(WallpaperPreviewWindowController.keyboardAction(for: escape, firstResponder: responder), .close)
+            XCTAssertEqual(WallpaperPreviewWindowController.keyboardAction(for: space, firstResponder: responder), .togglePause)
+            XCTAssertEqual(WallpaperPreviewWindowController.keyboardAction(for: mute, firstResponder: responder), .toggleMute)
+            XCTAssertNil(WallpaperPreviewWindowController.keyboardAction(for: commandMute, firstResponder: responder))
+        }
+
+        // WKWebView, descendants of WKWebView, and text inputs never lose Space or M.
+        for responder: NSResponder in [webView, webChild, textView, textField] {
+            XCTAssertNil(WallpaperPreviewWindowController.keyboardAction(for: space, firstResponder: responder))
+            XCTAssertNil(WallpaperPreviewWindowController.keyboardAction(for: mute, firstResponder: responder))
+            XCTAssertEqual(WallpaperPreviewWindowController.keyboardAction(for: reload, firstResponder: responder), .reload)
+            XCTAssertEqual(WallpaperPreviewWindowController.keyboardAction(for: escape, firstResponder: responder), .close)
+        }
+
+        // Focused AppKit buttons keep Space activation while still allowing M, Cmd+R and Esc.
+        XCTAssertNil(WallpaperPreviewWindowController.keyboardAction(for: space, firstResponder: button))
+        XCTAssertEqual(WallpaperPreviewWindowController.keyboardAction(for: mute, firstResponder: button), .toggleMute)
+        XCTAssertEqual(WallpaperPreviewWindowController.keyboardAction(for: reload, firstResponder: button), .reload)
+    }
+
+    func testApplyButtonInvokesCallbackAndReportsSuccessOrFailure() async throws {
+        let selection = WallpaperPreviewSession.Selection(wallpaperID: "wp-1", displayID: "primary")
+        let request = try WallpaperPreviewRequest(.init(
+            wallpaperId: "wp-1", title: "Aurora", kind: .projectScene,
+            projectPath: "/fixture/a", entryFile: "scene.json", assetsPath: "/fixture/assets",
+            propertiesJson: "{}", fps: 30, scalingMode: .fill, scalingFactor: 1, volume: 0.5,
+            engineOptions: nil, lutPath: nil, sceneQuality: .wallpaperEngineDefault))
+        let surface = StubPreviewSurface()
+        let session = WallpaperPreviewSession(load: { _ in request }, makeSurface: { _, _ in surface })
+        let controller = WallpaperPreviewWindowController(session: session)
+        let root = controller.makeContentView(size: CGSize(width: 480, height: 320))
+        let controls = try XCTUnwrap(root.subviews.compactMap { $0 as? NSStackView }.first)
+        let applyButton = try XCTUnwrap(
+            controls.arrangedSubviews.compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "preview-apply" })
+        let status = try XCTUnwrap(
+            root.subviews.compactMap { $0 as? NSTextField }.first { $0.identifier?.rawValue == "preview-status" })
+
+        XCTAssertTrue(applyButton.isHidden, "hidden when no onApply callback is wired")
+
+        var applied: [WallpaperPreviewSession.Selection] = []
+        var failure: Error?
+        controller.onApply = { sel in
+            applied.append(sel)
+            if let failure { throw failure }
+        }
+        session.open(selection)
+        session.setVisible(true)
+        for _ in 0..<20 where session.phase != .playing { await Task.yield() }
+        XCTAssertFalse(applyButton.isHidden)
+        XCTAssertTrue(applyButton.isEnabled)
+
+        applyButton.performClick(nil)
+        for _ in 0..<30 where applied.isEmpty || status.stringValue != String(localized: "Applied to desktop.") {
+            await Task.yield()
+        }
+        XCTAssertEqual(applied, [selection])
+        XCTAssertEqual(status.stringValue, String(localized: "Applied to desktop."))
+
+        // Keyboard Space and M control the running session, and Esc closes it.
+        XCTAssertTrue(controller.handleKeyEvent(try keyEvent(" ", keyCode: 49), firstResponder: nil))
+        XCTAssertTrue(session.userPaused)
+        XCTAssertTrue(controller.handleKeyEvent(try keyEvent("m", keyCode: 46), firstResponder: nil))
+        XCTAssertFalse(session.muted)
+
+        failure = WallpaperPreviewFailure(message: "Display unavailable.")
+        applyButton.performClick(nil)
+        for _ in 0..<30 where status.stringValue != "Display unavailable." { await Task.yield() }
+        XCTAssertEqual(status.stringValue, "Display unavailable.")
+
+        var closed = false
+        controller.onClosed = { closed = true }
+        XCTAssertTrue(controller.handleKeyEvent(try keyEvent("\u{1B}", keyCode: 53), firstResponder: nil))
+        XCTAssertEqual(session.phase, .closed)
+        XCTAssertTrue(closed)
+    }
+}
+
+@MainActor
+private final class StubPreviewSurface: WallpaperPreviewSurface {
+    let view = NSView()
+    var onReady: (() -> Void)?
+    var onFailure: ((String) -> Void)?
+    func start() async throws { onReady?() }
+    func setPaused(_ paused: Bool) throws {}
+    func setMuted(_ muted: Bool) throws {}
+    func applyProperties(_ json: String) throws {}
+    func applyEngineOptions(_ options: WallpaperEngineOptions) throws {}
+    func stop() {}
 }

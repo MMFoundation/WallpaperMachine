@@ -76,6 +76,17 @@ struct PropertyLabelDocument: Equatable {
   /// label is empty leaves its row out.
   var isEmpty: Bool { blocks.isEmpty }
 
+  /// Whether any run or image carries an allowlisted link that opens on click.
+  var hasLinks: Bool {
+    blocks.contains { block in
+      switch block {
+      case .paragraph(let paragraph): paragraph.runs.contains { $0.link != nil }
+      case .image(let image): image.link != nil
+      case .rule: false
+      }
+    }
+  }
+
   /// The words of every text block, one line each.
   var plainText: String {
     blocks.compactMap { block in

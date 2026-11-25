@@ -1,5 +1,56 @@
 import AppKit
+import Observation
 import SwiftUI
+
+/// The Wallpaper properties card's local filter and subgroup disclosure state, keyed per wallpaper
+/// inside `PropertiesCards`.
+@MainActor
+@Observable
+final class PropertySectionState {
+  var query = ""
+  var modifiedOnly = false
+  private(set) var collapsedGroupIDs: Set<String> = []
+
+  /// The latest unfiltered subgroups for the current wallpaper, used to auto-expand a collapsed
+  /// subgroup when `ScrollViewReader` scrolls to an edited row without forcing a redraw on update.
+  @ObservationIgnored var unfilteredGroups: [InspectorPolicy.PropertyGroup] = []
+
+  var isFiltering: Bool {
+    !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || modifiedOnly
+  }
+
+  func isExpanded(_ group: InspectorPolicy.PropertyGroup, filtering: Bool) -> Bool {
+    !group.isCollapsible || filtering || !collapsedGroupIDs.contains(group.id)
+  }
+
+  func toggle(_ group: InspectorPolicy.PropertyGroup) {
+    guard group.isCollapsible else { return }
+    if !collapsedGroupIDs.insert(group.id).inserted {
+      collapsedGroupIDs.remove(group.id)
+    }
+  }
+
+  func clearFilters() {
+    query = ""
+    modifiedOnly = false
+  }
+
+  /// Expands whichever collapsed subgroup contains `propertyKey`. Returns true when a subgroup
+  /// actually expanded so the scroll view can wait one layout pass before scrolling.
+  @discardableResult
+  func expandGroup(
+    containingPropertyKey propertyKey: String, wallpaperID: String,
+    in groups: [InspectorPolicy.PropertyGroup]? = nil
+  ) -> Bool {
+    let targetGroups = groups ?? unfilteredGroups
+    guard
+      let groupID = InspectorPolicy.collapsibleGroupID(
+        containingPropertyKey: propertyKey, wallpaperID: wallpaperID, in: targetGroups),
+      collapsedGroupIDs.remove(groupID) != nil
+    else { return false }
+    return true
+  }
+}
 
 /// The presets and the authored properties of the wallpaper, in the author's order. Both are left
 /// out when no row has anything to draw (a wallpaper whose rows are all empty groups and decoration).
@@ -7,37 +58,224 @@ struct PropertiesCards: View {
   let options: InspectorOptions
 
   @Environment(PanelController.self) private var controller
+  @Environment(\.inspectorEditedRow) private var editedRow
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var sectionState = PropertySectionState()
 
   var body: some View {
     let rows = InspectorPolicy.visibleProperties(options)
     if !rows.isEmpty {
+      let showsFilter = InspectorPolicy.showsPropertyFilter(for: rows)
+      let activeQuery = showsFilter ? sectionState.query : ""
+      let activeModifiedOnly = showsFilter ? sectionState.modifiedOnly : false
+      let filtering = !activeQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || activeModifiedOnly
+      let modifiedCount = InspectorPolicy.modifiedPropertyCount(in: rows)
+      let allGroups = InspectorPolicy.propertyGroups(in: rows)
+      let groups = filtering
+        ? InspectorPolicy.propertyGroups(in: rows, query: activeQuery, modifiedOnly: activeModifiedOnly)
+        : allGroups
       if let presets = controller.presetsState, presets.wallpaperID == options.wallpaperID {
         PresetsCard(state: presets)
       }
       InspectorSection("Wallpaper properties") {
-        InspectorCardRow {
-          HStack {
-            Spacer(minLength: 0)
-            Button {
-              controller.launch(InspectorAction.restoreAll(options.wallpaperID)) {
-                try await controller.restoreAllProperties(options.wallpaperID)
+        if InspectorPolicy.offersLiveDesktopEdits(options) {
+          LiveDesktopEditsToggleRow()
+        }
+        if showsFilter {
+          InspectorCardRow {
+            VStack(alignment: .leading, spacing: 8) {
+              PropertySearchField(text: $sectionState.query)
+              TagFlow(spacing: 8, centersRows: true) {
+                PropertyModifiedChip(count: modifiedCount, isOn: $sectionState.modifiedOnly)
+                restoreAllButton
               }
-            } label: {
-              Label("Restore all defaults", systemImage: "arrow.counterclockwise")
             }
-            .buttonStyle(.panelCardLink)
-            .disabled(!options.canRestoreAll)
-            .help(
-              L(
-                "Stages the default for every property except chosen files and folders. Revert undoes it."
-              ))
+          }
+        } else {
+          InspectorCardRow {
+            HStack {
+              Spacer(minLength: 0)
+              restoreAllButton
+            }
           }
         }
-        ForEach(rows) { row in
-          PropertyRowView(options: options, row: row)
+        if groups.isEmpty {
+          InspectorCardRow {
+            VStack(alignment: .leading, spacing: 6) {
+              if activeModifiedOnly && activeQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                InspectorNote("No modified properties.")
+              } else {
+                InspectorNote("No matching properties.")
+              }
+              Button("Clear filters") {
+                sectionState.clearFilters()
+              }
+              .buttonStyle(.panelCardLink)
+            }
+          }
+        } else {
+          ForEach(groups) { group in
+            if let heading = group.heading {
+              if group.isCollapsible && !filtering {
+                CollapsiblePropertyHeadingView(
+                  row: heading,
+                  isExpanded: sectionState.isExpanded(group, filtering: false)
+                ) {
+                  withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+                    sectionState.toggle(group)
+                  }
+                }
+              } else {
+                PropertyHeadingView(row: heading)
+              }
+            }
+            if sectionState.isExpanded(group, filtering: filtering) {
+              ForEach(group.rows) { row in
+                PropertyRowView(options: options, row: row)
+              }
+            }
+          }
         }
       }
+      .onChange(of: allGroups, initial: true) { _, latest in
+        sectionState.unfilteredGroups = latest
+      }
+      .onAppear {
+        sectionState.unfilteredGroups = allGroups
+        let wallpaperID = options.wallpaperID
+        let state = sectionState
+        editedRow?.onReveal = { propertyKey in
+          state.expandGroup(containingPropertyKey: propertyKey, wallpaperID: wallpaperID)
+        }
+      }
+      .onDisappear {
+        editedRow?.onReveal = nil
+      }
     }
+  }
+
+  private var restoreAllButton: some View {
+    Button {
+      controller.launch(InspectorAction.restoreAll(options.wallpaperID)) {
+        try await controller.restoreAllProperties(options.wallpaperID)
+      }
+    } label: {
+      Label("Restore all defaults", systemImage: "arrow.counterclockwise")
+    }
+    .buttonStyle(.panelCardLink)
+    .disabled(!options.canRestoreAll)
+    .help(
+      L(
+        "Stages the default for every property except chosen files and folders. Revert undoes it."
+      ))
+  }
+}
+
+/// Quick toggle for the global live desktop edits setting, placed in the property editing area so
+/// people editing a scene can switch live feedback on or off without leaving the inspector.
+private struct LiveDesktopEditsToggleRow: View {
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      InspectorToggleRow(
+        title: "Show edits on desktop",
+        isOn: controller.settings.isOn(.livePropertyEdits),
+        isDisabled: controller.settings.isDisabled(.livePropertyEdits)
+      ) { enabled in
+        controller.settings.set(.livePropertyEdits, to: enabled)
+      }
+      .accessibilityIdentifier("inspector.livePropertyEdits")
+      InspectorNote(
+        "Global desktop setting. Shows pending edits live on the active scene wallpaper on screen."
+      )
+      .padding(.horizontal, 12)
+      .padding(.bottom, 8)
+    }
+  }
+}
+
+/// A compact, zero-minimum-width search field for long property lists.
+private struct PropertySearchField: View {
+  @Binding var text: String
+
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Image(systemName: "magnifyingglass")
+        .font(.panel(.caption))
+        .foregroundStyle(theme.surface.muted.color)
+        .accessibilityHidden(true)
+      TextField(
+        "Filter properties",
+        text: $text,
+        prompt: Text("Filter properties")
+      )
+      .textFieldStyle(.plain)
+      .font(.panel(.callout))
+      .frame(minWidth: 0, maxWidth: .infinity)
+      .onExitCommand { if !text.isEmpty { text = "" } }
+      .accessibilityLabel(L("Filter properties"))
+      .accessibilityIdentifier("inspector.propertySearch")
+      if !text.isEmpty {
+        Button {
+          text = ""
+        } label: {
+          Image(systemName: "xmark.circle.fill")
+            .font(.panel(.caption))
+            .foregroundStyle(theme.surface.muted.color)
+        }
+        .buttonStyle(.plain)
+        .help(L("Clear filter"))
+        .accessibilityLabel(L("Clear filter"))
+      }
+    }
+    .padding(.horizontal, 8)
+    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 24)
+    .background(theme.surface.sunken.color, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 6, style: .continuous)
+        .strokeBorder(theme.surface.line.color, lineWidth: 0.5)
+    }
+  }
+}
+
+/// Toggle chip that narrows a long property list to properties modified from default or holding
+/// pending unapplied edits.
+private struct PropertyModifiedChip: View {
+  let count: Int
+  @Binding var isOn: Bool
+
+  @Environment(\.panelTheme) private var theme
+  @State private var isHovering = false
+
+  var body: some View {
+    let isDisabled = count == 0 && !isOn
+    Button {
+      isOn.toggle()
+    } label: {
+      Text("Modified (\(count))")
+        .font(.panel(.controlSmall))
+        .foregroundStyle(isOn ? theme.accent.onPrimary.color : theme.surface.tagInk.color)
+        .lineLimit(1)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(background, in: Capsule())
+        .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .disabled(isDisabled)
+    .panelDisabledOpacity(!isDisabled)
+    .onHover { isHovering = $0 }
+    .accessibilityAddTraits(isOn ? .isSelected : [])
+    .accessibilityIdentifier("inspector.propertyModifiedFilter")
+    .help(L("Show only properties changed from their defaults or waiting to be applied"))
+  }
+
+  private var background: Color {
+    if isOn { return theme.accent.primary.color.opacity(isHovering ? 0.85 : 1) }
+    return isHovering ? theme.surface.selected.color : theme.surface.badge.color
   }
 }
 
@@ -410,6 +648,60 @@ private struct PropertyHeadingView: View {
     .padding(.top, 12)
     .padding(.bottom, 6)
     .accessibilityAddTraits(.isHeader)
+  }
+}
+
+/// A textual group heading with rows under it that folds its subgroup away on click. Headings with
+/// author links keep their label clickable beside a dedicated chevron button so links still open.
+private struct CollapsiblePropertyHeadingView: View {
+  let row: InspectorOptions.PropertyRow
+  let isExpanded: Bool
+  let toggle: () -> Void
+
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    let document = InspectorPolicy.labelDocument(for: row)
+    if document.hasLinks {
+      HStack(alignment: .center, spacing: 6) {
+        PropertyLabelView(document: document, role: .sectionHeader)
+        Button(action: toggle) {
+          chevron
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(verbatim: row.name))
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(isExpanded ? Text("Expanded") : Text("Collapsed"))
+      }
+      .padding(.horizontal, 12)
+      .padding(.top, 10)
+      .padding(.bottom, 6)
+    } else {
+      Button(action: toggle) {
+        HStack(alignment: .center, spacing: 6) {
+          PropertyLabelView(document: document, role: .sectionHeader, isSelectable: false)
+          chevron
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityAddTraits(.isHeader)
+      .accessibilityValue(isExpanded ? Text("Expanded") : Text("Collapsed"))
+    }
+  }
+
+  private var chevron: some View {
+    Image(systemName: "chevron.right")
+      .font(.panel(.mark))
+      .foregroundStyle(theme.surface.muted.color)
+      .rotationEffect(.degrees(isExpanded ? 90 : 0))
+      .accessibilityHidden(true)
   }
 }
 

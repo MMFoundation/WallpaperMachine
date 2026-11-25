@@ -226,4 +226,39 @@ final class PlacementDraftsTests: XCTestCase {
     harness.drafts.restore(nil)
     XCTAssertNil(harness.drafts.draft)
   }
+
+  func testRecenterCommitsCenterImmediatelyAndSkipsWhenAlreadyCentered() async throws {
+    let centered = state(x: 0.5, y: 0.5)
+    let centeredHarness = Harness(centered)
+    XCTAssertNil(centeredHarness.drafts.recenter(state: centered))
+    XCTAssertTrue(centeredHarness.sent.isEmpty)
+
+    let shifted = state(x: 0.2, y: 0.8, zoom: 1.5)
+    let harness = Harness(shifted)
+    await harness.drafts.recenter(state: shifted)?.value
+    XCTAssertEqual(harness.sent.count, 1)
+    let request = try XCTUnwrap(harness.sent.first)
+    XCTAssertEqual(request.x, 0.5, accuracy: 1e-9)
+    XCTAssertEqual(request.y, 0.5, accuracy: 1e-9)
+    XCTAssertEqual(request.zoom, 1.5, accuracy: 1e-9, "recenter preserves the current zoom")
+  }
+
+  func testOptionScrollZoomUpdatesDraftImmediatelyAndDebouncesCommit() async throws {
+    let initial = state(zoom: 1.2)
+    let harness = Harness(initial)
+    harness.drafts.scrollZoom(deltaY: 2, hasPreciseDeltas: false, state: initial)
+    harness.drafts.scrollZoom(deltaY: 1, hasPreciseDeltas: false, state: initial)
+    XCTAssertEqual(
+      harness.drafts.values(for: initial).zoom,
+      1.2 + 3 * PlacementGeometry.wheelScrollZoomStep, accuracy: 1e-9)
+    XCTAssertTrue(harness.sent.isEmpty, "debounced while scrolling continues")
+    for _ in 0..<20 { await Task.yield() }
+    await harness.sleeper.waitUntilPending()
+    harness.sleeper.fireNext()
+    for _ in 0..<60 where harness.sent.isEmpty { await Task.yield() }
+    XCTAssertEqual(harness.sent.count, 1)
+    XCTAssertEqual(
+      try XCTUnwrap(harness.sent.first).zoom,
+      PlacementGeometry.rounded(1.2 + 3 * PlacementGeometry.wheelScrollZoomStep), accuracy: 1e-9)
+  }
 }

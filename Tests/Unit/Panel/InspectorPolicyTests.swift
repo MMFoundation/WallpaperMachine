@@ -468,4 +468,150 @@ final class InspectorPolicyTests: InspectorTestCase {
       ]))
     XCTAssertEqual(rows.map(\.id), ["a", "b", "c"])
   }
+
+  func testPropertyFilterThresholdCountsOnlyEditablePropertiesAndModifiedIncludesStagedRows() {
+    var tenControls = (1...10).map { property("p\($0)", .bool, label: "Option \($0)") }
+    tenControls.insert(property("g1", .group, label: "Section"), at: 0)
+    tenControls.append(property("note", .text, label: "Some author note"))
+    let tenRows = InspectorPolicy.visibleProperties(options(tenControls))
+    XCTAssertFalse(
+      InspectorPolicy.showsPropertyFilter(for: tenRows),
+      "headings and descriptions do not count toward the 10-property threshold")
+
+    var elevenControls = tenControls
+    elevenControls.append(property("p11", .bool, label: "Option 11"))
+    elevenControls[1].dirty = true
+    elevenControls[2].staged = true  // staged back to default: isModified is false, isStaged is true
+    let elevenRows = InspectorPolicy.visibleProperties(options(elevenControls))
+    XCTAssertTrue(InspectorPolicy.showsPropertyFilter(for: elevenRows))
+    XCTAssertEqual(InspectorPolicy.modifiedPropertyCount(in: elevenRows), 2)
+
+    XCTAssertTrue(
+      InspectorPolicy.offersLiveDesktopEdits(
+        InspectorOptions.make(BridgeSnapshotFixtures.options(wallpaperId: "s", kind: .projectScene))))
+    XCTAssertFalse(
+      InspectorPolicy.offersLiveDesktopEdits(
+        InspectorOptions.make(
+          BridgeSnapshotFixtures.options(wallpaperId: "s", kind: .projectScene, supported: false))))
+    XCTAssertFalse(
+      InspectorPolicy.offersLiveDesktopEdits(
+        InspectorOptions.make(BridgeSnapshotFixtures.options(wallpaperId: "v", kind: .video))))
+    XCTAssertFalse(
+      InspectorPolicy.offersLiveDesktopEdits(
+        InspectorOptions.make(BridgeSnapshotFixtures.options(wallpaperId: "w", kind: .webpage))))
+  }
+
+  func testPropertyGroupsPreserveLeadingRowsAndHandleDecorativeAndEmptyHeadings() {
+    let rows = InspectorPolicy.visibleProperties(
+      options([
+        property("intro", .bool, label: "Master switch"),
+        property("hr1", .group, label: "<hr>"),
+        property("lighting", .group, label: "<b>Lighting</b>"),
+        property("glow", .slider, label: "Glow"),
+        property("hr2", .group, label: "<hr>"),
+        property("bloom", .bool, label: "Bloom"),
+        property("emptyHeading", .group, label: "Audio"),
+        property("trailing", .group, label: "Extras"),
+        property("clock", .bool, label: "Clock"),
+      ]))
+
+    let groups = InspectorPolicy.propertyGroups(in: rows)
+    XCTAssertEqual(groups.map(\.id), [InspectorPolicy.PropertyGroup.leadingID, "lighting", "emptyHeading", "trailing"])
+    XCTAssertNil(groups[0].heading)
+    XCTAssertEqual(groups[0].rows.map(\.id), ["intro", "hr1"])
+    XCTAssertFalse(groups[0].isCollapsible, "rows before the first heading stay always visible")
+
+    XCTAssertEqual(groups[1].heading?.id, "lighting")
+    XCTAssertEqual(groups[1].rows.map(\.id), ["glow", "hr2", "bloom"], "decorative headings stay inside their subgroup")
+    XCTAssertTrue(groups[1].isCollapsible)
+
+    XCTAssertEqual(groups[2].heading?.id, "emptyHeading")
+    XCTAssertTrue(groups[2].rows.isEmpty)
+    XCTAssertFalse(groups[2].isCollapsible, "a heading with no rows under it does not fold")
+
+    XCTAssertEqual(groups[3].heading?.id, "trailing")
+    XCTAssertEqual(groups[3].rows.map(\.id), ["clock"])
+    XCTAssertTrue(groups[3].isCollapsible)
+  }
+
+  func testPropertyGroupsFilterByQueryHeadingNameAndModifiedState() {
+    var mode = property("mode", .combo, label: "Weather")
+    mode.comboOptions = [
+      BridgeComboOption(label: "Rainy", value: .string(value: "rain")),
+      BridgeComboOption(label: "Sunny", value: .string(value: "sun")),
+    ]
+    var glow = property("glow", .bool, label: "Glow")
+    glow.dirty = true
+    var speed = property("speed", .slider, label: "Speed")
+    speed.staged = true
+    let rows = InspectorPolicy.visibleProperties(
+      options([
+        property("top", .bool, label: "Top switch"),
+        property("gLight", .group, label: "Lighting"),
+        glow,
+        property("dim", .bool, label: "Dimmer"),
+        property("gMotion", .group, label: "Motion"),
+        speed,
+        mode,
+      ]))
+
+    // Query by row label.
+    let byLabel = InspectorPolicy.propertyGroups(in: rows, query: "dim")
+    XCTAssertEqual(byLabel.map(\.id), ["gLight"])
+    XCTAssertEqual(byLabel[0].rows.map(\.id), ["dim"])
+
+    // Query by combo choice label.
+    let byChoice = InspectorPolicy.propertyGroups(in: rows, query: "rainy")
+    XCTAssertEqual(byChoice.map(\.id), ["gMotion"])
+    XCTAssertEqual(byChoice[0].rows.map(\.id), ["mode"])
+
+    // Query by heading name reveals its whole subgroup.
+    let byHeading = InspectorPolicy.propertyGroups(in: rows, query: "lighting")
+    XCTAssertEqual(byHeading.map(\.id), ["gLight"])
+    XCTAssertEqual(byHeading[0].rows.map(\.id), ["glow", "dim"])
+
+    // Modified filter includes both saved-dirty and staged rows, dropping untouched groups.
+    let modified = InspectorPolicy.propertyGroups(in: rows, modifiedOnly: true)
+    XCTAssertEqual(modified.map(\.id), ["gLight", "gMotion"])
+    XCTAssertEqual(modified[0].rows.map(\.id), ["glow"])
+    XCTAssertEqual(modified[1].rows.map(\.id), ["speed"])
+
+    // Heading query combined with modifiedOnly keeps only modified rows in that subgroup.
+    let headingAndModified = InspectorPolicy.propertyGroups(in: rows, query: "lighting", modifiedOnly: true)
+    XCTAssertEqual(headingAndModified.map(\.id), ["gLight"])
+    XCTAssertEqual(headingAndModified[0].rows.map(\.id), ["glow"])
+  }
+
+  func testPropertySectionStateAutoExpandsCollapsedSubgroupWhenScrollingToEditedRow() {
+    let rows = InspectorPolicy.visibleProperties(
+      options([
+        property("lead", .bool, label: "Lead"),
+        property("g1", .group, label: "Lighting"),
+        property("glow", .bool, label: "Glow"),
+        property("g2", .group, label: "Motion"),
+        property("speed", .slider, label: "Speed"),
+      ]))
+    let groups = InspectorPolicy.propertyGroups(in: rows)
+    let state = PropertySectionState()
+    state.unfilteredGroups = groups
+
+    state.toggle(groups[1])  // collapse Lighting
+    XCTAssertFalse(state.isExpanded(groups[1], filtering: false))
+    XCTAssertTrue(state.isExpanded(groups[1], filtering: true), "filtering auto-expands matching subgroups")
+
+    let editedRow = InspectorEditedRow()
+    editedRow.onReveal = { key in
+      state.expandGroup(containingPropertyKey: key, wallpaperID: "wp")
+    }
+    XCTAssertFalse(
+      editedRow.prepareToReveal(InspectorAction.property("wp", "lead")),
+      "the leading group is never collapsed")
+    XCTAssertFalse(
+      editedRow.prepareToReveal(InspectorAction.property("wp", "speed")),
+      "an already expanded subgroup reports no expansion")
+    XCTAssertTrue(
+      editedRow.prepareToReveal(InspectorAction.property("wp", "glow")),
+      "scrolling to an edited row inside a collapsed subgroup expands it")
+    XCTAssertTrue(state.isExpanded(groups[1], filtering: false))
+  }
 }

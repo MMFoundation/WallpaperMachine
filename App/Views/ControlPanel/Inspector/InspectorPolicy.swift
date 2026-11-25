@@ -235,6 +235,23 @@ enum InspectorPolicy {
 
   // MARK: Properties section
 
+  /// Long wallpapers gain a search field and Modified filter chip once they carry more than this
+  /// many editable author properties.
+  static let propertyFilterThreshold = 10
+
+  /// One group inside the Wallpaper properties card: either the leading rows that precede the
+  /// first textual heading (`heading == nil`, always visible) or a heading followed by its rows.
+  struct PropertyGroup: Equatable, Identifiable {
+    static let leadingID = "__leading__"
+
+    let id: String
+    let heading: InspectorOptions.PropertyRow?
+    let rows: [InspectorOptions.PropertyRow]
+
+    /// A textual heading with rows under it folds away; leading rows and empty headings stay open.
+    var isCollapsible: Bool { heading != nil && !rows.isEmpty }
+  }
+
   /// Whether a property row has anything to draw: a control row always does (its name stands in for
   /// an empty label), a group or description only when its label has words, artwork or a rule.
   static func drawsRow(_ row: InspectorOptions.PropertyRow) -> Bool {
@@ -251,6 +268,94 @@ enum InspectorPolicy {
   /// The rows the properties section shows, in the author's order.
   static func visibleProperties(_ options: InspectorOptions) -> [InspectorOptions.PropertyRow] {
     options.properties.filter(drawsRow)
+  }
+
+  /// Whether the properties section offers the search field and Modified filter chip.
+  static func showsPropertyFilter(for rows: [InspectorOptions.PropertyRow]) -> Bool {
+    rows.filter { $0.control.isControl }.count > propertyFilterThreshold
+  }
+
+  /// How many editable author properties differ from their default or hold a pending edit.
+  static func modifiedPropertyCount(in rows: [InspectorOptions.PropertyRow]) -> Int {
+    rows.filter { $0.control.isControl && $0.isModifiedOrStaged }.count
+  }
+
+  /// Whether the quick "Show edits on desktop" toggle applies to this wallpaper. Only supported
+  /// scenes follow live property edits on the desktop; videos and web pages wait for Apply changes.
+  static func offersLiveDesktopEdits(_ options: InspectorOptions) -> Bool {
+    options.isSupported && options.kind == .projectScene
+  }
+
+  /// Whether a heading carries readable text and starts a collapsible subgroup. Decorative
+  /// headings (rules or image-only banners with no words) stay inline with surrounding rows.
+  static func isCollapsibleHeading(_ row: InspectorOptions.PropertyRow) -> Bool {
+    row.control == .heading && !labelDocument(for: row).plainText.isEmpty
+  }
+
+  /// Partitions visible property rows into leading rows and heading subgroups, applying an
+  /// optional case-insensitive search query and Modified-only filter.
+  static func propertyGroups(
+    in rows: [InspectorOptions.PropertyRow], query: String = "", modifiedOnly: Bool = false
+  ) -> [PropertyGroup] {
+    var raw: [(id: String, heading: InspectorOptions.PropertyRow?, rows: [InspectorOptions.PropertyRow])] = []
+    for row in rows {
+      if isCollapsibleHeading(row) {
+        raw.append((id: row.id, heading: row, rows: []))
+      } else if raw.isEmpty {
+        raw.append((id: PropertyGroup.leadingID, heading: nil, rows: [row]))
+      } else {
+        raw[raw.count - 1].rows.append(row)
+      }
+    }
+
+    let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !needle.isEmpty || modifiedOnly else {
+      return raw.map { PropertyGroup(id: $0.id, heading: $0.heading, rows: $0.rows) }
+    }
+
+    var filtered: [PropertyGroup] = []
+    for group in raw {
+      let headingMatches =
+        !needle.isEmpty && group.heading.map { propertyRowMatches($0, query: needle) } == true
+      let kept = group.rows.filter { row in
+        if row.control == .heading { return false }
+        if modifiedOnly {
+          guard row.control.isControl, row.isModifiedOrStaged else { return false }
+        }
+        if needle.isEmpty { return true }
+        return headingMatches || propertyRowMatches(row, query: needle)
+      }
+      if !kept.isEmpty {
+        filtered.append(PropertyGroup(id: group.id, heading: group.heading, rows: kept))
+      }
+    }
+    return filtered
+  }
+
+  /// The subgroup id that holds the authored property identified by `propertyKey`, or nil when the
+  /// key belongs to another section or the always-visible leading group.
+  static func collapsibleGroupID(
+    containingPropertyKey propertyKey: String, wallpaperID: String, in groups: [PropertyGroup]
+  ) -> String? {
+    for group in groups where group.isCollapsible {
+      if group.rows.contains(where: { InspectorAction.property(wallpaperID, $0.id) == propertyKey }) {
+        return group.id
+      }
+    }
+    return nil
+  }
+
+  private static func propertyRowMatches(_ row: InspectorOptions.PropertyRow, query: String) -> Bool {
+    if row.name.localizedCaseInsensitiveContains(query) { return true }
+    if labelDocument(for: row).plainText.localizedCaseInsensitiveContains(query) { return true }
+    switch row.control {
+    case .choice(_, let choices):
+      return choices.contains { $0.label.localizedCaseInsensitiveContains(query) }
+    case .description(let detail):
+      return detail?.localizedCaseInsensitiveContains(query) == true
+    default:
+      return false
+    }
   }
 
   /// The parsed label of a row: the author's markup, or the app's words as one plain paragraph.

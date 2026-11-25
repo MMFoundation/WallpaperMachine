@@ -9,6 +9,7 @@ struct InspectorHeader: View {
   /// Apply wallpaper takes the keyboard and VoiceOver focus each time this grows.
   var applyFocusRequests = 0
 
+  @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
 
   var body: some View {
@@ -48,7 +49,11 @@ struct InspectorHeader: View {
       InspectorActionRow(row: row, applyIsPrimary: applyIsPrimary, applyFocusRequests: applyFocusRequests)
       if !row.tags.isEmpty {
         TagFlow(spacing: 6) {
-          ForEach(Array(row.tags.enumerated()), id: \.offset) { _, tag in TagChip(text: tag) }
+          ForEach(Array(row.tags.enumerated()), id: \.offset) { _, tag in
+            TagChip(
+              text: tag, selection: controller.library.chipSelection(tag),
+              onSelect: { controller.library.toggleTagFromInspector(tag, exclude: $0) })
+          }
         }
       }
     }
@@ -64,32 +69,82 @@ struct InspectorArtwork: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
   @Environment(\.panelIsVisible) private var isVisible
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var animation: Data?
+  @State private var isHoveringArtwork = false
+  @State private var isHoveringPreview = false
 
   var body: some View {
+    let offersPreview = InspectorPolicy.offersPreview(
+      kind: row.kind, previewAvailable: controller.previewAvailable)
     ZStack {
-      theme.surface.mediaWell.color
-      if row.previewFile == nil {
-        Image(systemName: "photo")
-          .font(.system(size: 30, weight: .light))
-          .foregroundStyle(theme.surface.faint.color)
-      } else {
-        PanelImage(source: row.previewSource, pointSize: 420, contentMode: .fill)
-        if animation != nil {
-          AnimatedPreview(data: animation, isPlaying: isVisible, contentMode: .fill)
+      ZStack {
+        theme.surface.mediaWell.color
+        if row.previewFile == nil {
+          Image(systemName: "photo")
+            .font(.system(size: 30, weight: .light))
+            .foregroundStyle(theme.surface.faint.color)
+        } else {
+          PanelImage(source: row.previewSource, pointSize: 420, contentMode: .fill)
+          if animation != nil {
+            AnimatedPreview(data: animation, isPlaying: isVisible, contentMode: .fill)
+          }
         }
       }
+      .accessibilityHidden(true)
     }
     .aspectRatio(16.0 / 10.0, contentMode: .fit)
+    .overlay(alignment: .bottomTrailing) {
+      if offersPreview {
+        previewButton
+          .padding(8)
+      }
+    }
     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .strokeBorder(theme.surface.divider.color, lineWidth: 0.5)
     }
     .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
-    .accessibilityHidden(true)
+    .onHover { hovering in
+      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
+        isHoveringArtwork = hovering
+      }
+    }
     // Hidden, the request becomes nil and the animation's bytes go; the still stays under it.
     .task(id: isVisible ? row.animationSource : nil) { await loadAnimation() }
+  }
+
+  private var previewButton: some View {
+    let previewKey = PanelActionCoordinator.key("previewWallpaper", id: row.id)
+    let isBusy = controller.isBusy(previewKey)
+    let emphasized = isHoveringPreview || isHoveringArtwork
+    return Button {
+      controller.launch(previewKey) {
+        try await controller.previewWithTypedText(row.id)
+      }
+    } label: {
+      Label("Preview", systemImage: "eye")
+        .font(.panel(.controlSmall))
+        .foregroundStyle(theme.surface.markGlyph.color)
+        .lineLimit(1)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+          emphasized ? theme.surface.markFillHover.color : theme.surface.markFill.color,
+          in: Capsule())
+        .overlay {
+          Capsule().strokeBorder(theme.surface.controlRim.color, lineWidth: 0.75)
+        }
+        .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .disabled(isBusy)
+    .panelDisabledOpacity(!isBusy)
+    .onHover { isHoveringPreview = $0 }
+    .help(L("Open a live preview without changing your desktop"))
+    .accessibilityLabel(L("Preview wallpaper"))
+    .accessibilityIdentifier("inspector.preview")
   }
 
   private func loadAnimation() async {
