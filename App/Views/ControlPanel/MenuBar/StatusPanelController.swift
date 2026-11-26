@@ -237,11 +237,15 @@ final class StatusPanelController {
     volumeRead = (key, task)
   }
 
+  /// Completes after this read has applied or discarded its result, even if a save replaces it.
+  var volumeReadTask: Task<Void, Never>? { volumeRead?.task }
+
   /// Resolves once the cover stamps and the volume asked for so far have been read, so a test
   /// never sleeps for them.
   func settled() async {
+    let read = volumeReadTask
     await covers.settled()
-    await volumeRead?.task.value
+    await read?.value
   }
 
   // MARK: Starting actions
