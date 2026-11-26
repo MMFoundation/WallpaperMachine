@@ -117,31 +117,83 @@ enum PixivSearchMode: String, Sendable {
     case safe, r18, all
 }
 
-/// What pixiv itself is asked: a ranking, or a tag search with the filters its search can
-/// apply on the server. Pages fetched for one listing are shared by every query with it.
+/// Whether pixiv's bookmarks endpoint returns public (`show`) or private (`hide`) bookmarks.
+enum PixivBookmarkVisibility: String, CaseIterable, Hashable, Sendable {
+    case `public` = "show"
+    case `private` = "hide"
+}
+
+/// Which feed or page the pixiv browser is viewing.
+enum PixivBrowseScope: Hashable, Sendable {
+    /// Rankings (when search text is empty), tag search, or direct URL/id jump.
+    case explore
+    /// An artist's own illustration page.
+    case author(id: String, name: String)
+    /// The signed-in user's bookmarked illustrations.
+    case bookmarks(PixivBookmarkVisibility)
+    /// New illustrations from artists the signed-in user follows.
+    case following
+
+    var requiresSignIn: Bool {
+        switch self {
+        case .bookmarks, .following: true
+        case .explore, .author: false
+        }
+    }
+}
+
+/// What pixiv itself is asked: a ranking, a tag search, a direct illustration lookup, an artist's
+/// works, or a signed-in bookmarks/following feed. Pages fetched for one listing are shared by
+/// every query with it.
 enum PixivListing: Hashable, Sendable {
     case ranking(PixivRanking)
     case search(
         text: String, order: PixivSearchOrder, orientation: PixivOrientation,
         minimumSize: PixivMinimumSize, hidesAIGenerated: Bool, mode: PixivSearchMode)
+    case illust(id: String)
+    case author(id: String)
+    case bookmarks(visibility: PixivBookmarkVisibility)
+    case following
 
     var isSearch: Bool {
         if case .search = self { return true }
         return false
     }
 
+    var isDirectLookup: Bool {
+        if case .illust = self { return true }
+        return false
+    }
+
+    var requiresSignIn: Bool {
+        switch self {
+        case .bookmarks, .following: true
+        case .ranking, .search, .illust, .author: false
+        }
+    }
+
+    /// Listings that can span many pages and are therefore scanned on demand rather than eagerly
+    /// fetched to completion up front (rankings are capped at 10 pages and scanned whole).
+    var isOnDemandPaginated: Bool {
+        switch self {
+        case .search, .author, .bookmarks, .following: true
+        case .ranking, .illust: false
+        }
+    }
+
     var isR18: Bool {
         switch self {
         case .ranking(let ranking): ranking.isR18
         case .search(_, _, _, _, _, let mode): mode != .safe
+        case .illust, .author, .bookmarks, .following: false
         }
     }
 }
 
 /// Everything the pixiv page asks for. `listing` goes to pixiv; `admits(_:)` is applied in the
-/// app, because rankings accept no filters and search results still need the age rating check.
+/// app, because rankings and feeds accept no filters and search results still need the age check.
 struct PixivQuery: Equatable, Sendable {
-    /// Tags to search for; empty browses `ranking` instead.
+    /// Tags (or a pixiv URL / illustration id) to search for; empty browses `ranking` instead.
     var text = ""
     var ranking = PixivRanking.daily
     var order = PixivSearchOrder.newest
@@ -150,19 +202,36 @@ struct PixivQuery: Equatable, Sendable {
     var hidesAIGenerated = false
     /// Ages to show. Mature (R-18) needs a signed-in pixiv session; see `sanitized(signedIn:)`.
     var ratings: Set<PixivRating> = [.everyone]
+    /// Which section of pixiv is shown: Explore (rankings/search/jump), an Author page, Bookmarks, or Following.
+    var scope: PixivBrowseScope = .explore
+    /// The Japanese translation sent to pixiv instead of `text`, when `PixivSearchTranslator` translated a search.
+    var translation: PixivSearchTranslation? = nil
 
     /// The ratings the page offers as boxes; R-18G is never among them.
     static let offeredRatings: [PixivRating] = [.everyone, .questionable, .mature]
 
     var listing: PixivListing {
-        let words = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        guard !words.isEmpty else { return .ranking(ranking) }
-        let mature = ratings.contains(.mature)
-        let mode: PixivSearchMode =
-            !mature ? .safe : ratings.contains(.everyone) || ratings.contains(.questionable) ? .all : .r18
-        return .search(
-            text: words, order: order, orientation: orientation, minimumSize: minimumSize,
-            hidesAIGenerated: hidesAIGenerated, mode: mode)
+        switch scope {
+        case .author(let id, _):
+            return .author(id: id)
+        case .bookmarks(let visibility):
+            return .bookmarks(visibility: visibility)
+        case .following:
+            return .following
+        case .explore:
+            if let illustID = PixivLink.illustID(in: text) {
+                return .illust(id: illustID)
+            }
+            let effectiveText = translation?.japanese ?? text
+            let words = effectiveText.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            guard !words.isEmpty else { return .ranking(ranking) }
+            let mature = ratings.contains(.mature)
+            let mode: PixivSearchMode =
+                !mature ? .safe : ratings.contains(.everyone) || ratings.contains(.questionable) ? .all : .r18
+            return .search(
+                text: words, order: order, orientation: orientation, minimumSize: minimumSize,
+                hidesAIGenerated: hidesAIGenerated, mode: mode)
+        }
     }
 
     /// The query as it may be asked: without a pixiv session, or without the Mature box, it
@@ -188,6 +257,17 @@ struct PixivQuery: Equatable, Sendable {
             else { return false }
         }
         return true
+    }
+
+    /// Direct URL/id lookups bypass orientation, size, AI and Questionable filters so jumping to a
+    /// specific artwork lands on it immediately, while still strictly blocking R-18G everywhere and
+    /// requiring a signed-in Mature opt-in for R-18 works.
+    func admitsDirectLookup(_ work: PixivWork, signedIn: Bool) -> Bool {
+        switch work.rating {
+        case .grotesque: false
+        case .mature: signedIn && ratings.contains(.mature)
+        case .everyone, .questionable: true
+        }
     }
 }
 

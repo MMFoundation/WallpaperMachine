@@ -13,16 +13,59 @@ and each saved wallpaper links back to the work on pixiv.
 
 ## Browsing
 
-With the page's search bar empty the page shows a ranking; typing tags searches
-pixiv instead, and the menu in the page's header follows: rankings while the field is
-empty, search orders once it is not. Typing searches after a short pause, and Return
-or **Refresh** asks again at once from the first page.
+The pixiv page offers three top-level feeds in its header (**Explore**, **Bookmarks**, and
+**Following**), plus an in-app **Author** view with a bounded **Back** navigation stack (`⌘[`).
+
+In **Explore**, an empty search bar browses a ranking; typing tags searches pixiv instead, and
+pasting a pixiv artwork URL (`https://www.pixiv.net/artworks/<id>`, `/en/artworks/<id>`,
+`member_illust.php?...&illust_id=<id>`, `pixiv.net/i/<id>`) or entering a bare numeric
+illustration ID (6 or more digits) jumps directly to that illustration via `/ajax/illust/<id>` and
+selects it immediately in the inspector (`PixivLink`). The header menu follows the current feed:
+rankings when Explore's search bar is empty, search orders while searching tags, and **Public
+bookmarks** / **Private bookmarks** while browsing Bookmarks. Typing searches after a short pause,
+pasting a pixiv URL jumps at once, and Return or **Refresh** asks again afresh from the first page.
 
 | Listing | What pixiv is asked | Page |
 | --- | --- | --- |
 | Daily, Weekly, Monthly, Rookie ranking | `ranking.php?mode=<ranking>&content=illust&format=json` | 50 works |
 | Daily R-18, Weekly R-18 ranking | the same with `mode=daily_r18` / `weekly_r18`, only while signed in with Mature ticked | 50 works |
 | Tag search, Newest first / Oldest first | `/ajax/search/illustrations/<tags>` with `s_mode=s_tag`, `type=illust` and `order=date_d` / `date` | 60 works |
+| Direct URL / illustration ID jump | `/ajax/illust/<id>` | 1 work |
+| Artist works (in-app author page) | `/ajax/user/<authorID>/profile/all` + `/ajax/user/<authorID>/profile/illusts` | 48 works |
+| Bookmarks (signed in) | `/ajax/user/<userID>/illusts/bookmarks?tag=&offset=<offset>&limit=48&rest=<show\|hide>` | 48 works |
+| Following (signed in) | `/ajax/follow_latest/illust?p=<page>&mode=all` | 60 works |
+
+### In-app author browsing & Back stack
+
+Clicking the artist's name in the inspector or choosing **More by this author** in a tile's context
+menu pushes the current browse snapshot (scope, query, filters, page, selection, scroll offset, and
+cached source pages) onto a bounded `Back` navigation stack (up to 16 entries) and opens the
+artist's illustrations in-app, showing their name, works count, and an external **View on pixiv**
+link. Clicking **Back** in the header (or pressing `⌘[`) pops and restores the previous view without
+re-fetching when the session and cached pages are still current. Switching to a top-level feed
+(**Explore**, **Bookmarks**, or **Following**) clears the Back stack.
+
+### Signed-in Bookmarks & Following feeds
+
+**Bookmarks** (defaulting to public bookmarks, with a Public/Private switcher) and **Following**
+reuse the existing pixiv sign-in session (`PixivStore.signedInUserID`, resolved from the confirmed
+account ID or the held session cookie). While signed out, switching to Bookmarks or Following sends
+no unauthenticated requests and shows an empty state with a direct **Sign in to Pixiv** button.
+Signing in loads the feed automatically; logging out clears signed-in results at once.
+
+### Japanese-tag search translation
+
+Because pixiv tags are predominantly Japanese, `PixivSearchTranslator` (dedicated to pixiv and
+separate from Steam Workshop's English-target `WorkshopSearchTranslator`) translates non-Japanese
+tag searches into Japanese (`ja`) on this Mac using macOS's on-device `Translation` framework
+whenever the required language pack is already installed. Queries that are empty, already contain
+Japanese Kana (Hiragana/Katakana) or read as Japanese, or parse as a pixiv URL / bare illustration
+ID are sent as typed without invoking translation.
+
+When a search is translated, a banner under the header displays **Searching Pixiv in Japanese for
+“…”** alongside a **Search as typed** override (remembered until the search text changes) and a
+persisted toggle (`WallpaperMachine.translatesPixivSearches`, enabled by default when the app
+language is not Japanese, and also available in the Filters sidebar).
 
 Only the rankings that accept `content=illust` are offered, so every entry is a
 single still illustration. pixiv answers a popularity order with the newest works
@@ -104,7 +147,8 @@ R-18 ranking denials have the account-specific handling described below.
 ## Saving a page
 
 Selecting a tile fetches the work's page list; the inspector shows the page
-whole, the artist's name (a link to their pixiv page), a page stepper and horizontal
+whole, the artist's name (opening their illustrations in-app, alongside a **View
+artist on pixiv** external link), a page stepper and horizontal
 page thumbnail strip for works with several pages (clickable to jump directly to any
 page, marking pages already in the library with the Library tab's grid symbol, the
 mark its tile wears too), **Download** (or **Download page N**), **Download all
@@ -228,18 +272,22 @@ and password always works.
 | Part | Where |
 | --- | --- |
 | Models, ratings, queries, failures | `App/Services/Pixiv/PixivModels.swift` |
+| Artwork URL / ID parser | `App/Services/Pixiv/PixivLink.swift` |
+| Japanese-tag search translator | `App/Services/Pixiv/PixivSearchTranslator.swift` |
 | Requests and decoding | `App/Services/Pixiv/PixivService.swift`, `PixivTransport.swift` |
-| Browse state, account | `App/Services/Pixiv/PixivStore.swift`, `PixivSessionStore.swift` |
+| Browse state, Back stack, account | `App/Services/Pixiv/PixivStore.swift`, `PixivSessionStore.swift` |
 | Downloads and packaging | `App/Services/Pixiv/PixivDownloadQueue.swift`, `PixivWallpaperPackager.swift` |
 | Panel actions and state | `App/Views/ControlPanel/Model/PanelController+Pixiv.swift`; `App/Views/ControlPanel/Pixiv/PixivBrowseState.swift`, `PixivTile.swift`, `PixivQuery+Panel.swift` |
 | Sign-in window | `App/Views/ControlPanel/WebSignInWindow.swift` |
-| Page, inspector and toolbar pill | `App/Views/ControlPanel/Pixiv/` |
+| Page, translation bar, inspector and toolbar pill | `App/Views/ControlPanel/Pixiv/` |
 
 ## Verification
 
-`Tests/Unit/Pixiv/` covers decoding against pixiv's answer shapes, addresses, ratings and
+`Tests/Unit/Pixiv/` covers `PixivLink` URL/ID parsing, decoding against pixiv's answer shapes
+(rankings, search, detail, author profiles/works, bookmarks, following), addresses, ratings and
 query sanitising, request pacing, the session reaching only `www.pixiv.net`, sign-in, log
-out and expiry against an in-memory keychain, the download queue and packaging.
+out and expiry against an in-memory keychain, Back navigation stack preservation, Japanese-tag
+search translation (`PixivSearchTranslator`), the download queue and packaging.
 `PanelPixivActionsTests`, `PixivPanelStateTests`, `PixivBrowserModelTests`,
 `PixivListSummaryTests` and `PixivBrowserRenderTests` (Panel) drive the page's actions,
 model and views with a fixture pixiv and a closure in place of the sign-in window. Nothing in

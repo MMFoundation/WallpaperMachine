@@ -65,6 +65,7 @@ extension PanelController {
     MenuBarEnergyPreference.save(false, in: defaults)
     library.previewModeChanged()
     searchTranslation.resetPreference()
+    pixivBrowser.searchTranslator.resetPreference()
     setTileZoom(0)
     if appLanguage.preference != AppLanguageStore.systemChoice {
       await attempt { try await setLanguage(nil) }

@@ -1,7 +1,7 @@
 import Foundation
 
-/// The pixiv page's list-level state: the query, the works that pass it, how far paging has gone
-/// and what the last load said.
+/// The pixiv page's list-level state: the query, scope, translation, works that pass it, how far
+/// paging has gone and what the last load said.
 ///
 /// Per-tile state (the saved pages, the download ring) and the selected work's state are asked for
 /// separately, so a progress tick re-renders its own tile and not the grid.
@@ -9,9 +9,21 @@ struct PixivBrowseState: Equatable {
   /// What the page edits and last committed: sanitized for the account, so a signed-out query never
   /// asks for R-18 works.
   let query: PixivQuery
+  /// Which pixiv section is on show (Explore, Author, Bookmarks, Following).
+  let scope: PixivBrowseScope
   /// The results on show answer a tag search, so the toolbar offers search orders and the summary
   /// counts results instead of naming a ranking.
   let isSearching: Bool
+  /// The results on show answer a direct illustration URL or bare id jump.
+  let isDirectLookup: Bool
+  /// Whether the active scope requires a signed-in pixiv session (Bookmarks or Following).
+  let requiresSignIn: Bool
+  /// Whether a pixiv session is currently held.
+  let isSignedIn: Bool
+  /// Whether the Back navigation stack holds a previous browse snapshot.
+  let canGoBack: Bool
+  /// The Japanese translation applied to the current tag search, if any.
+  let translation: PixivSearchTranslation?
   /// The works on the page that the committed query's filters admit, in pixiv's order.
   let works: [PixivWork]
   /// Unique works hidden across the source pages scanned for this query.
@@ -27,29 +39,41 @@ struct PixivBrowseState: Equatable {
   let selectedID: String?
 
   @MainActor
-  init(_ pixiv: PixivStore) {
-    query = pixiv.query
-    if case .search = (pixiv.committedQuery ?? pixiv.query).listing {
+  init(_ pixiv: PixivStore, isTranslatingSearch: Bool = false) {
+    // Derive scope, sign-in requirement and listing mode from `pixiv.query` rather than
+    // `committedQuery`, so switching Explore <-> Author <-> Bookmarks <-> Following updates the
+    // header/empty-state chrome immediately instead of flashing stale scope state while loading.
+    let activeQuery = pixiv.query
+    let activeListing = activeQuery.listing
+    query = activeQuery
+    scope = activeQuery.scope
+    if case .search = activeListing {
       isSearching = true
     } else {
       isSearching = false
     }
+    isDirectLookup = activeListing.isDirectLookup
+    requiresSignIn = activeListing.requiresSignIn
+    isSignedIn = pixiv.isSignedIn
+    canGoBack = pixiv.canGoBack
+    translation = activeQuery.translation
     works = pixiv.works
     hiddenCount = pixiv.hiddenCount
     totalCount = pixiv.totalCount
     hasExactTotal = pixiv.hasExactTotal
     pager = ResultPager(
-      page: pixiv.page, totalPages: pixiv.totalPages, isLoading: pixiv.isLoading,
+      page: pixiv.page, totalPages: pixiv.totalPages,
+      isLoading: pixiv.isLoading || isTranslatingSearch,
       maxPages: PixivService.maxPages)
-    isLoading = pixiv.isLoading
+    isLoading = pixiv.isLoading || isTranslatingSearch
     hasLoaded = pixiv.hasLoaded
     errorMessage = pixiv.errorMessage
     selectedID = pixiv.selectedWork?.id
   }
 }
 
-/// Who is signed in to pixiv, and what that unlocks: members-only works and, if the account allows
-/// them, R-18 works. The session itself is never part of it.
+/// Who is signed in to pixiv, and what that unlocks: members-only works, Bookmarks, Following, and
+/// (if the account allows them) R-18 works. The session itself is never part of it.
 struct PixivAccountState: Equatable {
   /// A session is held, even before pixiv confirmed it.
   let isSignedIn: Bool
@@ -97,6 +121,6 @@ struct PixivAccountState: Equatable {
   init(_ pixiv: PixivStore) {
     self.init(
       isSignedIn: pixiv.isSignedIn, isSigningIn: pixiv.isSigningIn, name: pixiv.account?.name,
-      id: pixiv.account?.id, showsR18: pixiv.account?.showsR18, message: pixiv.accountMessage)
+      id: pixiv.signedInUserID, showsR18: pixiv.account?.showsR18, message: pixiv.accountMessage)
   }
 }

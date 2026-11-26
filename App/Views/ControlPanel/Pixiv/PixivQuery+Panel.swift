@@ -8,8 +8,16 @@ extension PixivQuery {
   static let defaultRatings: Set<PixivRating> = [.everyone]
 
   /// The tag search or the ranking: the draft counts as a search as soon as its text has a
-  /// non-blank character, which is when the toolbar swaps its ranking menu for search orders.
-  var isSearchDraft: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+  /// non-blank character in Explore scope, which is when the toolbar swaps its ranking menu for
+  /// search orders.
+  var isSearchDraft: Bool {
+    scope == .explore && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  /// Whether the draft's search text names a direct pixiv artwork URL or bare illustration id.
+  var isDirectLookupDraft: Bool {
+    scope == .explore && PixivLink.illustID(in: text) != nil
+  }
 
   // How many of the page's filters differ from their defaults, as the Filter button's badge and
   // each group's pill count them. The account has no count of its own.
@@ -101,6 +109,63 @@ extension PixivRating {
     case .questionable: L("Questionable (PG-13)")
     case .mature: L("Mature (R-18)")
     case .grotesque: "R-18G"
+    }
+  }
+}
+
+/// Top-level pixiv browsing scopes offered in the header and Filters sidebar.
+enum PixivScopeTab: String, CaseIterable, Hashable, Sendable {
+  case explore, bookmarks, following
+
+  @MainActor
+  var title: String {
+    switch self {
+    case .explore: L("Explore")
+    case .bookmarks: L("Bookmarks")
+    case .following: L("Following")
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .explore: "safari"
+    case .bookmarks: "bookmark"
+    case .following: "person.2"
+    }
+  }
+
+  func scope(bookmarkVisibility: PixivBookmarkVisibility = .public) -> PixivBrowseScope {
+    switch self {
+    case .explore: .explore
+    case .bookmarks: .bookmarks(bookmarkVisibility)
+    case .following: .following
+    }
+  }
+}
+
+extension PixivBrowseScope {
+  /// The top-level tab this scope belongs to, or nil while viewing an author page.
+  var tab: PixivScopeTab? {
+    switch self {
+    case .explore: .explore
+    case .bookmarks: .bookmarks
+    case .following: .following
+    case .author: nil
+    }
+  }
+
+  var bookmarkVisibility: PixivBookmarkVisibility {
+    if case .bookmarks(let visibility) = self { return visibility }
+    return .public
+  }
+}
+
+extension PixivBookmarkVisibility {
+  @MainActor
+  var title: String {
+    switch self {
+    case .public: L("Public bookmarks")
+    case .private: L("Private bookmarks")
     }
   }
 }

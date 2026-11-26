@@ -141,12 +141,41 @@ private struct PixivAccountGroup: View {
         Text(
           account.isSigningIn
             ? "Finish signing in in the pixiv window."
-            : "Signing in shows works pixiv keeps for members, and R-18 works if your account allows them. You sign in on pixiv’s own page; WallpaperMachine keeps only the session, in your keychain."
+            : "Signing in shows works pixiv keeps for members, your bookmarks and following feed, and R-18 works if your account allows them. You sign in on pixiv’s own page; WallpaperMachine keeps only the session, in your keychain."
         )
         .font(.caption)
         .foregroundStyle(theme.surface.muted.color)
         PixivSignInButton(isSigningIn: account.isSigningIn)
           .controlSize(.small)
+      }
+      let model = controller.pixivBrowser
+      Toggle(
+        "Translate searches to Japanese",
+        isOn: Binding(
+          get: { model.translatesSearches },
+          set: { model.setTranslatesSearches($0) }
+        )
+      )
+      .toggleStyle(.checkbox)
+      .font(.panel(.callout))
+      .accessibilityIdentifier("pixiv-filters-translate")
+      if case .bookmarks(let visibility) = model.query.scope, account.isSignedIn {
+        Picker(
+          "Bookmarks visibility",
+          selection: Binding(
+            get: { visibility },
+            set: { model.choose(bookmarkVisibility: $0) }
+          )
+        ) {
+          ForEach(PixivBookmarkVisibility.allCases, id: \.self) {
+            Text(verbatim: $0.title).tag($0)
+          }
+        }
+        .pickerStyle(.radioGroup)
+        .labelsHidden()
+        .fixedSize()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("pixiv-filters-bookmarks-visibility")
       }
       if let message = account.message, !message.isEmpty {
         Text(verbatim: message)

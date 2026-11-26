@@ -40,7 +40,7 @@ struct PixivPagerBar: View {
   static func isShown(for browse: PixivBrowseState) -> Bool {
     switch PixivEmptyState.make(browse) {
     case nil: true
-    case .filtersHideAll, .loading, .error, .nothing: false
+    case .filtersHideAll, .loading, .signInRequired, .error, .nothing, .emptyFeed: false
     }
   }
 

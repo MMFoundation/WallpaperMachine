@@ -262,6 +262,82 @@ enum PixivFixtures {
         json(["error": false, "message": "", "body": ["userId": id, "name": name, "image": "", "isFollowed": false]])
     }
 
+    static func detail(_ work: Work, authorID: String? = nil, authorName: String? = nil) -> Data {
+        let stamp = "img/2026/09/26/19/04/18/\(work.id)_p0"
+        return json([
+            "error": false,
+            "message": "",
+            "body": [
+                "illustId": String(work.id),
+                "illustTitle": work.title ?? "Work \(work.id)",
+                "illustType": work.type,
+                "xRestrict": work.xRestrict,
+                "sl": work.sanity,
+                "userId": authorID ?? String(2000 + work.id),
+                "userName": authorName ?? "Artist \(work.id)",
+                "width": work.width,
+                "height": work.height,
+                "pageCount": work.pages,
+                "isMasked": false,
+                "aiType": work.aiType,
+                "urls": [
+                    "mini": "https://i.pximg.net/c/48x48/img-master/\(stamp)_square1200.jpg",
+                    "thumb": "https://i.pximg.net/c/250x250_80_a2/img-master/\(stamp)_square1200.jpg",
+                    "small": "https://i.pximg.net/c/540x540_70/img-master/\(stamp)_master1200.jpg",
+                    "regular": "https://i.pximg.net/img-master/\(stamp)_master1200.jpg",
+                    "original": "https://i.pximg.net/img-original/\(stamp).png",
+                ],
+                "tags": [
+                    "authorId": authorID ?? String(2000 + work.id),
+                    "tags": work.tags.map { ["tag": $0, "locked": false] },
+                ],
+            ],
+        ])
+    }
+
+    static func authorProfileAll(illustIDs: [Int]) -> Data {
+        if illustIDs.isEmpty {
+            return json(["error": false, "message": "", "body": ["illusts": [Any](), "manga": [Any]()]])
+        }
+        var map: [String: Any] = [:]
+        for id in illustIDs { map[String(id)] = NSNull() }
+        return json(["error": false, "message": "", "body": ["illusts": map, "manga": [Any]()]])
+    }
+
+    static func authorIllusts(_ works: [Work], authorID: String, authorName: String) -> Data {
+        if works.isEmpty {
+            return json(["error": false, "message": "", "body": ["works": [Any]()]])
+        }
+        var map: [String: Any] = [:]
+        for work in works {
+            var entry = searchEntry(work)
+            entry["userId"] = authorID
+            entry["userName"] = authorName
+            map[String(work.id)] = entry
+        }
+        return json(["error": false, "message": "", "body": ["works": map]])
+    }
+
+    static func bookmarks(_ entries: [[String: Any]], total: Int) -> Data {
+        json([
+            "error": false,
+            "message": "",
+            "body": ["works": entries, "total": total],
+        ])
+    }
+
+    static func following(_ entries: [[String: Any]], ids: [Int]? = nil, isLastPage: Bool = true) -> Data {
+        let orderedIDs = ids ?? entries.compactMap { ($0["id"] as? String).flatMap(Int.init) }
+        return json([
+            "error": false,
+            "message": "",
+            "body": [
+                "page": ["ids": orderedIDs, "isLastPage": isLastPage],
+                "thumbnails": ["illust": entries],
+            ],
+        ])
+    }
+
     /// pixiv's own answer to an R-18 ranking asked for by someone it does not know is an adult.
     static let forbidden = PixivFailure(code: .status(403))
 

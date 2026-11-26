@@ -10,7 +10,9 @@ extension PanelController {
   // MARK: State
 
   /// The page's list-level state: query, works, paging and the last load's outcome.
-  var pixivBrowse: PixivBrowseState { PixivBrowseState(pixiv) }
+  var pixivBrowse: PixivBrowseState {
+    PixivBrowseState(pixiv, isTranslatingSearch: pixivBrowser.searchTranslator.isTranslating)
+  }
 
   /// Who is signed in, and what that unlocks.
   var pixivAccount: PixivAccountState { PixivAccountState(pixiv) }
@@ -95,12 +97,128 @@ extension PanelController {
   /// Refused: a text of more than 256 characters, and a rating no box offers (R-18G). A search
   /// whose typing pause ends after the window closed is dropped, so nothing reads a listing again
   /// for a closed panel.
-  func pixivSearch(_ query: PixivQuery, refresh: Bool = false) async throws {
+  func pixivSearch(_ query: PixivQuery, refresh: Bool = false, generation: UInt64? = nil) async throws {
     guard query.text.count <= 256, query.ratings.isSubset(of: PixivQuery.offeredRatings) else {
       throw InvalidControlValue()
     }
-    guard !isStopped else { return }
-    try await run(.immediate) { pixiv.apply(query, refresh: refresh) }
+    if case .author(let id, let name) = query.scope {
+      guard PixivWork.isValidID(id), name.count <= 256 else { throw InvalidControlValue() }
+    }
+    let actionGeneration = generation ?? pixivBrowser.beginBrowseAction()
+    guard !isStopped, !Task.isCancelled, actionGeneration == pixivBrowser.browseGeneration else { return }
+    var effectiveQuery = query
+    let trimmed = query.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if query.scope == .explore, !trimmed.isEmpty, PixivLink.illustID(in: trimmed) == nil {
+      if trimmed == pixiv.declinedTranslationText {
+        effectiveQuery.translation = nil
+      } else if effectiveQuery.translation == nil {
+        effectiveQuery.translation = await pixivBrowser.translateSearch(
+          query.text, generation: actionGeneration)
+      }
+    } else {
+      effectiveQuery.translation = nil
+    }
+    guard !isStopped, !Task.isCancelled, actionGeneration == pixivBrowser.browseGeneration else { return }
+    try await run(.immediate) {
+      guard actionGeneration == pixivBrowser.browseGeneration else { return }
+      if pixiv.declinedTranslationText != trimmed { pixiv.declinedTranslationText = nil }
+      pixiv.apply(effectiveQuery, refresh: refresh)
+    }
+  }
+
+  /// **Search as typed**: searches `original` without Japanese translation and remembers the
+  /// choice while the search text stays unchanged.
+  func pixivSearchAsTyped(_ original: String, generation: UInt64? = nil) async throws {
+    let actionGeneration = generation ?? pixivBrowser.beginBrowseAction()
+    guard !isStopped, !Task.isCancelled, actionGeneration == pixivBrowser.browseGeneration else { return }
+    let trimmed = original.trimmingCharacters(in: .whitespacesAndNewlines)
+    let activeTranslations = [pixiv.committedQuery?.translation, pixiv.query.translation]
+    guard pixiv.query.text.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed,
+      activeTranslations.contains(where: { $0?.original == trimmed })
+    else { return }
+    try await run(.immediate) {
+      guard actionGeneration == pixivBrowser.browseGeneration else { return }
+      pixiv.declinedTranslationText = trimmed
+      var next = pixiv.query
+      next.translation = nil
+      pixiv.apply(next, refresh: true)
+    }
+  }
+
+  /// Persists whether non-Japanese pixiv tag searches are translated into Japanese, and refreshes
+  /// the current tag search immediately when applicable.
+  func pixivSetTranslatesSearches(_ on: Bool, generation: UInt64? = nil) async throws {
+    let actionGeneration = generation ?? pixivBrowser.beginBrowseAction()
+    guard !isStopped, !Task.isCancelled, actionGeneration == pixivBrowser.browseGeneration else { return }
+    try await run(.immediate) {
+      guard actionGeneration == pixivBrowser.browseGeneration else { return }
+      pixivBrowser.searchTranslator.setEnabled(on)
+    }
+    guard !isStopped, !Task.isCancelled, actionGeneration == pixivBrowser.browseGeneration else { return }
+    let current = pixiv.query
+    let trimmed = current.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard current.scope == .explore, !trimmed.isEmpty, PixivLink.illustID(in: trimmed) == nil else {
+      return
+    }
+    if on {
+      try await run(.immediate) {
+        guard actionGeneration == pixivBrowser.browseGeneration else { return }
+        pixiv.declinedTranslationText = nil
+      }
+      guard !isStopped, !Task.isCancelled, actionGeneration == pixivBrowser.browseGeneration else { return }
+      var next = current
+      next.translation = nil
+      try await pixivSearch(next, refresh: true, generation: actionGeneration)
+    } else if current.translation != nil {
+      try await run(.immediate) {
+        guard actionGeneration == pixivBrowser.browseGeneration else { return }
+        var next = current
+        next.translation = nil
+        pixiv.apply(next, refresh: true)
+      }
+    }
+  }
+
+  /// Opens an artist's works page in-app, pushing the current browse snapshot onto the Back stack.
+  func pixivOpenAuthor(
+    id: String, name: String, leavingAt scrollOffset: Double = 0, generation: UInt64? = nil
+  ) async throws {
+    guard PixivWork.isValidID(id), name.count <= 256, scrollOffset.isFinite, scrollOffset >= 0 else {
+      throw InvalidControlValue()
+    }
+    let actionGeneration = generation ?? pixivBrowser.beginBrowseAction()
+    guard !isStopped, !Task.isCancelled, actionGeneration == pixivBrowser.browseGeneration else { return }
+    try await run(.immediate) {
+      guard actionGeneration == pixivBrowser.browseGeneration else { return }
+      pixiv.openAuthor(id: id, name: name, leavingAt: scrollOffset)
+    }
+  }
+
+  /// Pops the previous browse snapshot from the Back navigation stack and returns the scroll offset
+  /// captured when leaving (or nil if the previous listing had to be re-fetched).
+  @discardableResult
+  func pixivGoBack(generation: UInt64? = nil) async throws -> Double? {
+    let actionGeneration = generation ?? pixivBrowser.beginBrowseAction()
+    guard !isStopped, !Task.isCancelled, actionGeneration == pixivBrowser.browseGeneration else { return nil }
+    var offset: Double?
+    try await run(.immediate) {
+      guard actionGeneration == pixivBrowser.browseGeneration else { return }
+      offset = pixiv.goBack()
+    }
+    return offset
+  }
+
+  /// Switches to a top-level pixiv scope (Explore, Bookmarks, Following), clearing the Back stack.
+  func pixivOpenScope(_ scope: PixivBrowseScope, generation: UInt64? = nil) async throws {
+    if case .author(let id, let name) = scope {
+      guard PixivWork.isValidID(id), name.count <= 256 else { throw InvalidControlValue() }
+    }
+    let actionGeneration = generation ?? pixivBrowser.beginBrowseAction()
+    guard !isStopped, !Task.isCancelled, actionGeneration == pixivBrowser.browseGeneration else { return }
+    try await run(.immediate) {
+      guard actionGeneration == pixivBrowser.browseGeneration else { return }
+      pixiv.openScope(scope)
+    }
   }
 
   /// Loads a page of the listing on show. pixiv serves at most 1,000; a number outside them is

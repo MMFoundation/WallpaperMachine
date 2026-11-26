@@ -40,7 +40,7 @@ struct PageSearchBar: View {
       let model = controller.pixivBrowser
       return .init(
         text: Binding(get: { model.draft.text }, set: { model.setText($0) }),
-        prompt: L("Search pixiv tags"), name: L("Search pixiv by tag"),
+        prompt: L("Search pixiv tags, URL, or ID"), name: L("Search pixiv by tag"),
         submit: { model.submit() })
     case .workshop:
       // Every edit goes through the model, which tells a pasted link (searched at once) from typing

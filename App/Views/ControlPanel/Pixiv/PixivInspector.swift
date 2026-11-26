@@ -77,15 +77,16 @@ private struct PixivInspectorDetail: View {
         .textSelection(.enabled)
         .accessibilityAddTraits(.isHeader)
       if !work.authorName.isEmpty {
-        if let profile = work.authorProfileURL {
+        if PixivWork.isValidID(work.authorID) {
           Button {
-            ExternalLink.open(profile)
+            controller.pixivBrowser.openAuthor(of: work)
           } label: {
             Text(verbatim: work.authorName)
           }
           .buttonStyle(.panelLink)
           .font(.panel(.body))
-          .help(L("View on pixiv"))
+          .help(L("More by this author"))
+          .accessibilityIdentifier("pixiv-inspector-author")
         } else {
           Text(verbatim: work.authorName)
             .font(.panel(.body))
@@ -303,6 +304,16 @@ private struct PixivInspectorDetail: View {
         .buttonStyle(.panelLink)
         .labelStyle(.panelLinkRow)
         .accessibilityIdentifier("pixiv-view-on-pixiv")
+      }
+      if let profile = work.authorProfileURL {
+        Button {
+          ExternalLink.open(profile)
+        } label: {
+          Label("View artist on pixiv", systemImage: "person.crop.circle")
+        }
+        .buttonStyle(.panelLink)
+        .labelStyle(.panelLinkRow)
+        .accessibilityIdentifier("pixiv-view-artist-on-pixiv")
       }
     }
     // The Steam Workshop inspector's links set the same type.

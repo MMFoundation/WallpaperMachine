@@ -269,15 +269,19 @@ struct PixivTileContextMenu: View {
       }
     }
 
+    if PixivWork.isValidID(work.authorID) {
+      Button {
+        model.openAuthor(of: work)
+      } label: {
+        Label("More by this author", systemImage: "person.crop.circle")
+      }
+    }
+
     if !work.authorName.isEmpty, let profile = work.authorProfileURL, ExternalLink.isAllowed(profile) {
       Button {
         ExternalLink.open(profile, using: model.openURL)
       } label: {
-        Label {
-          Text(verbatim: work.authorName)
-        } icon: {
-          Image(systemName: "person.crop.circle")
-        }
+        Label("View artist on pixiv", systemImage: "arrow.up.right.square")
       }
     }
   }

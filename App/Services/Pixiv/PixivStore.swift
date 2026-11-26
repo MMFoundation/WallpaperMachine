@@ -43,6 +43,10 @@ final class PixivStore {
     private(set) var accountMessage: String?
     /// The signed-in `PHPSESSID`. Never logged, and sent to `www.pixiv.net` only.
     private var session: String?
+    /// Depth of the navigation stack for `Back` when viewing author pages.
+    private(set) var backStackCount = 0
+    /// Search text the user explicitly asked to search as typed (skipping Japanese translation).
+    @ObservationIgnored var declinedTranslationText: String?
     /// Prefetches the next unscanned source page; off unless the owner opts in.
     @ObservationIgnored var prefetchesNextPage = false
     /// Announces displayed thumbnails and selected-page previews for image caching.
@@ -67,7 +71,21 @@ final class PixivStore {
     @ObservationIgnored private var pageLists: [String: [PixivPage]] = [:]
     @ObservationIgnored private var pageListOrder: [String] = []
     @ObservationIgnored private(set) var pagesTask: Task<Void, Never>?
+    @ObservationIgnored private var history: [HistoryEntry] = []
     private static let pageListLimit = 64
+    /// Maximum number of snapshots retained on the `Back` navigation stack.
+    static let maxHistory = 16
+
+    private struct HistoryEntry {
+        let query: PixivQuery
+        let page: Int
+        let selectedWork: PixivWork?
+        let selectedPage: Int
+        let scrollOffset: Double
+        var cacheListing: PixivListing?
+        var cachedPages: [Int: PixivResultPage]
+        let session: String?
+    }
 
     /// `sessions` is read only by `restoreSession()`, and written only when signing in or out
     /// or when pixiv has ended the session.
@@ -82,27 +100,154 @@ final class PixivStore {
 
     var isSignedIn: Bool { session != nil }
 
+    /// Whether the `Back` navigation stack has a snapshot to return to.
+    var canGoBack: Bool { backStackCount > 0 }
+
+    /// The signed-in user's validated pixiv user id: confirmed account id once known, else parsed
+    /// from the held session cookie. Nil while signed out.
+    var signedInUserID: String? {
+        if let id = account?.id, PixivWork.isValidID(id) { return id }
+        return session.flatMap(PixivService.userID(fromSession:))
+    }
+
     /// Commits `query`, as far as the account allows (see `PixivQuery.sanitized(signedIn:)`).
     /// Filter changes restart at the first matching page and reuse cached source pages.
     func apply(_ query: PixivQuery, refresh: Bool = false) {
         let query = query.sanitized(signedIn: isSignedIn)
+        // Leaving an author page via search bar, tag click or Clear search returns to a top-level
+        // scope, so drop any Back stack instead of leaving an orphaned Back button on Explore.
+        if case .author = query.scope {} else if !history.isEmpty {
+            clearHistory()
+        }
         let unchanged = self.query == query
         self.query = query
+        if query.listing.requiresSignIn, !isSignedIn {
+            showSignInRequired(for: query)
+            return
+        }
         if !refresh, unchanged, cacheListing == query.listing,
             isLoading || (hasLoaded && committedQuery == query && errorMessage == nil) {
             return
         }
-        if refresh || cacheListing != query.listing { resetCache(for: query.listing) }
-        load(page: 1, of: query)
+        if refresh || cacheListing != query.listing {
+            resetCache(for: query.listing)
+        }
+        load(page: 1, of: query, refresh: refresh)
+    }
+
+    /// Switches to a top-level scope (`explore`, `bookmarks`, `following`), clearing the Back stack
+    /// and preserving active filters.
+    func openScope(_ scope: PixivBrowseScope) {
+        clearHistory()
+        var next = query
+        next.scope = scope
+        if scope != .explore {
+            next.text = ""
+            next.translation = nil
+        }
+        apply(next)
+    }
+
+    /// Pushes the current browse snapshot onto the bounded Back stack and opens an artist's works.
+    func openAuthor(id: String, name: String, leavingAt scrollOffset: Double = 0) {
+        guard PixivWork.isValidID(id) else { return }
+        if case .author(let currentID, _) = query.scope, currentID == id { return }
+        let currentQuery = committedQuery ?? query
+        let entry = HistoryEntry(
+            query: currentQuery,
+            page: page,
+            selectedWork: selectedWork,
+            selectedPage: selectedPage,
+            scrollOffset: scrollOffset.isFinite && scrollOffset >= 0 ? scrollOffset : 0,
+            cacheListing: cacheListing,
+            cachedPages: cachedPages,
+            session: session
+        )
+        history.append(entry)
+        if history.count > Self.maxHistory { history.removeFirst() }
+        backStackCount = history.count
+
+        pagesTask?.cancel()
+        selectedWork = nil
+        selectedPages = nil
+        selectedPage = 0
+
+        var next = query
+        next.scope = .author(id: id, name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+        next.text = ""
+        next.translation = nil
+        apply(next)
+    }
+
+    /// Pops the latest browse snapshot from the Back stack, restoring its mode, query, filters,
+    /// page, and selection. Returns the scroll offset captured when leaving, if cached pages were
+    /// still valid under the current session.
+    @discardableResult
+    func goBack() -> Double? {
+        guard let previous = history.popLast() else { return nil }
+        backStackCount = history.count
+        let restored = previous.query.sanitized(signedIn: isSignedIn)
+        self.query = restored
+
+        if let priorWork = previous.selectedWork, isSignedIn || priorWork.rating != .mature {
+            selectedWork = priorWork
+            selectedPage = max(0, min(previous.selectedPage, max(0, pageCount(of: priorWork) - 1)))
+            loadPages(of: priorWork)
+        } else {
+            pagesTask?.cancel()
+            selectedWork = nil
+            selectedPages = nil
+            selectedPage = 0
+        }
+
+        if restored.listing.requiresSignIn, !isSignedIn {
+            showSignInRequired(for: restored)
+            return nil
+        }
+
+        if previous.session == session, previous.cacheListing == restored.listing, !previous.cachedPages.isEmpty {
+            resetCache(for: restored.listing)
+            cachedPages = previous.cachedPages
+            load(page: previous.page, of: restored)
+            return previous.scrollOffset
+        }
+
+        resetCache(for: restored.listing)
+        load(page: previous.page, of: restored)
+        return nil
+    }
+
+    private func clearHistory() {
+        history.removeAll()
+        backStackCount = 0
+    }
+
+    private func showSignInRequired(for query: PixivQuery) {
+        loadTask?.cancel()
+        generation = UUID()
+        isLoading = false
+        resetCache(for: query.listing)
+        clearResults()
+        committedQuery = query
+        errorMessage = nil
+        failedPage = nil
+        lastLoad = (page: 1, query: query)
+        resumeLoad = nil
     }
 
     func loadPage(_ number: Int) {
         guard let committedQuery, number >= 1, number <= totalPages else { return }
+        if committedQuery.listing.requiresSignIn, !isSignedIn { return }
         load(page: number, of: committedQuery)
     }
 
     func retry() {
-        load(page: failedPage ?? page, of: committedQuery ?? query)
+        let target = committedQuery ?? query
+        if target.listing.requiresSignIn, !isSignedIn {
+            showSignInRequired(for: target)
+            return
+        }
+        load(page: failedPage ?? page, of: target)
     }
 
     /// Whether `loadIfNeeded()` would show a listing `unload()` left rather than start afresh.
@@ -123,6 +268,10 @@ final class PixivStore {
         generation = UUID()
         isLoading = false
         resetCache(for: query.listing)
+        for index in history.indices {
+            history[index].cachedPages = [:]
+            history[index].cacheListing = nil
+        }
         pageLists = [:]
         pageListOrder = []
         selectedPages = nil
@@ -140,7 +289,12 @@ final class PixivStore {
         guard !hasLoaded, !isLoading else { return }
         if let selectedWork, selectedPages == nil { loadPages(of: selectedWork) }
         if let resumeLoad {
-            load(page: resumeLoad.page, of: resumeLoad.query.sanitized(signedIn: isSignedIn))
+            let resumed = resumeLoad.query.sanitized(signedIn: isSignedIn)
+            if resumed.listing.requiresSignIn, !isSignedIn {
+                showSignInRequired(for: resumed)
+            } else {
+                load(page: resumeLoad.page, of: resumed)
+            }
         } else {
             apply(query)
         }
@@ -296,12 +450,16 @@ final class PixivStore {
             loadPages(of: selectedWork)
         }
         if session == nil {
-            let kept = works.filter { $0.rating != .mature }
-            hiddenCount += works.count - kept.count
-            works = kept
+            if query.listing.requiresSignIn {
+                clearResults()
+            } else {
+                let kept = works.filter { $0.rating != .mature }
+                hiddenCount += works.count - kept.count
+                works = kept
+            }
         }
         let query = query.sanitized(signedIn: session != nil)
-        if hasLoaded || isLoading || committedQuery != nil {
+        if !isUnloaded && (hasLoaded || isLoading || committedQuery != nil || query.listing.requiresSignIn) {
             apply(query, refresh: true)
         } else {
             self.query = query
@@ -363,14 +521,18 @@ final class PixivStore {
     }
 
     /// Starts, or joins, the fetch of one page for the current cache.
-    private func fetch(_ number: Int, of listing: PixivListing) -> Task<PixivResultPage, Error> {
-        if let task = fetches[number] { return task }
+    private func fetch(
+        _ number: Int, of listing: PixivListing, bypassCache: Bool = false
+    ) -> Task<PixivResultPage, Error> {
+        if !bypassCache, let task = fetches[number] { return task }
         let cacheID = cacheID
         let service = service
         let session = session
+        let userID = signedInUserID
         let task = Task { [weak self] in
             defer { if let self, self.cacheID == cacheID { self.fetches[number] = nil } }
-            let result = try await service.page(number, of: listing, session: session)
+            let result = try await service.page(
+                number, of: listing, session: session, userID: userID, bypassCache: bypassCache)
             try Task.checkCancellation()
             if let self, self.cacheID == cacheID {
                 self.cachedPages[number] = result
@@ -381,7 +543,11 @@ final class PixivStore {
         return task
     }
 
-    private func load(page number: Int, of query: PixivQuery) {
+    private func load(page number: Int, of query: PixivQuery, refresh: Bool = false) {
+        if query.listing.requiresSignIn, !isSignedIn {
+            showSignInRequired(for: query)
+            return
+        }
         isUnloaded = false
         lastLoad = (page: number, query: query)
         resumeLoad = nil
@@ -391,7 +557,7 @@ final class PixivStore {
         generation = UUID()
         errorMessage = nil
         let cached = filteredResults(for: query)
-        if cached.complete || (query.listing.isSearch && cached.works.count > number * cached.pageSize) {
+        if cached.complete || (query.listing.isOnDemandPaginated && cached.works.count > number * cached.pageSize) {
             isLoading = false
             publish(cached, page: number, for: query)
             return
@@ -403,8 +569,12 @@ final class PixivStore {
             guard let self, self.generation == requestID, !Task.isCancelled else { return }
             do {
                 var result = cached
-                while !result.complete && (!listing.isSearch || result.works.count <= number * result.pageSize) {
-                    _ = try await self.fetch(result.nextPage, of: listing).value
+                var shouldBypassCache = refresh
+                while !result.complete && (!listing.isOnDemandPaginated || result.works.count <= number * result.pageSize) {
+                    _ = try await self.fetch(
+                        result.nextPage, of: listing, bypassCache: shouldBypassCache
+                    ).value
+                    shouldBypassCache = false
                     guard self.generation == requestID, !Task.isCancelled else { return }
                     result = self.filteredResults(for: query, continuing: result)
                 }
@@ -417,8 +587,12 @@ final class PixivStore {
                 self.errorMessage = error.localizedDescription
                 self.failedPage = number
                 self.committedQuery = query
-                // pixiv refusing an R-18 ranking may mean it ended the session.
-                if let failure = error as? PixivFailure, failure.code == .r18Hidden { self.checkAccount() }
+                // pixiv refusing an R-18 ranking or signed-in feed may mean it ended the session.
+                if let failure = error as? PixivFailure,
+                    failure.code == .r18Hidden || failure.code == .signedOut
+                {
+                    self.checkAccount()
+                }
             }
             if self.generation == requestID { self.isLoading = false }
         }
@@ -443,12 +617,27 @@ final class PixivStore {
         let pageSize: Int
     }
 
+    private static func pageSize(for listing: PixivListing) -> Int {
+        switch listing {
+        case .ranking: PixivService.rankingPageSize
+        case .search: PixivService.searchPageSize
+        case .author: PixivService.authorPageSize
+        case .bookmarks: PixivService.bookmarksPageSize
+        case .following: PixivService.followingPageSize
+        case .illust: 1
+        }
+    }
+
     private func filteredResults(for query: PixivQuery, continuing previous: FilteredResults? = nil) -> FilteredResults {
-        var result = previous ?? FilteredResults(
-            pageSize: query.listing.isSearch ? PixivService.searchPageSize : PixivService.rankingPageSize)
+        let listing = query.listing
+        var result = previous ?? FilteredResults(pageSize: Self.pageSize(for: listing))
         while let source = cachedPages[result.nextPage] {
             for work in source.works where result.seen.insert(work.id).inserted {
-                if query.admits(work) { result.works.append(work) } else { result.hidden += 1 }
+                let admitted =
+                    listing.isDirectLookup
+                    ? query.admitsDirectLookup(work, signedIn: isSignedIn)
+                    : query.admits(work)
+                if admitted { result.works.append(work) } else { result.hidden += 1 }
             }
             result.nextPage += 1
             if result.nextPage > min(PixivService.maxPages, max(1, source.totalPages)) {
@@ -456,7 +645,7 @@ final class PixivStore {
                 break
             }
         }
-        if query.ratings.isEmpty { result.complete = true }
+        if !listing.isDirectLookup, query.ratings.isEmpty { result.complete = true }
         return result
     }
 
@@ -472,6 +661,9 @@ final class PixivStore {
         errorMessage = nil
         failedPage = nil
         onThumbnailsAvailable?(works.compactMap(\.thumbnailURL))
+        if query.listing.isDirectLookup, let work = works.first {
+            select(work)
+        }
         if prefetchesNextPage, !result.complete, cachedPages[result.nextPage] == nil {
             _ = fetch(result.nextPage, of: query.listing)
         }

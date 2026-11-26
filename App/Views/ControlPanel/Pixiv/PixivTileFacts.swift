@@ -90,8 +90,14 @@ enum PixivMeta {
 extension PixivWork {
   /// The artist's page on pixiv, when the id is one the allowlist opens.
   var authorProfileURL: URL? {
-    guard !authorID.isEmpty, authorID.allSatisfy(\.isASCII), authorID.allSatisfy(\.isNumber)
-    else { return nil }
-    return ExternalLink.allowed("https://www.pixiv.net/users/\(authorID)")
+    ExternalLink.pixivAuthor(id: authorID)
+  }
+}
+
+extension ExternalLink {
+  /// An artist's profile page on pixiv, validated against the allowlist.
+  static func pixivAuthor(id: String) -> URL? {
+    guard PixivWork.isValidID(id) else { return nil }
+    return allowed("https://www.pixiv.net/users/\(id)")
   }
 }

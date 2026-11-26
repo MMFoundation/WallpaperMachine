@@ -11,16 +11,27 @@ import Foundation
 actor PixivService {
     static let rankingPageSize = 50
     static let searchPageSize = 60
+    static let authorPageSize = 48
+    static let bookmarksPageSize = 48
+    static let followingPageSize = 60
     /// Signed-in members can page deeper; anonymous search stops at page 10 and rankings at 10.
     static let maxPages = 1000
     /// The largest original accepted; pixiv caps uploads well below this.
     static let originalByteLimit = 64 * 1024 * 1024
     private static let host = "www.pixiv.net"
+    private static let authorIDCacheLimit = 16
+
+    private struct AuthorCacheKey: Hashable {
+        let authorID: String
+        let isSignedIn: Bool
+    }
 
     private let transport: any PixivTransport
     private let minimumInterval: Duration
     private let clock = ContinuousClock()
     private var nextRequest: ContinuousClock.Instant?
+    private var authorIDCache: [AuthorCacheKey: [String]] = [:]
+    private var authorIDCacheOrder: [AuthorCacheKey] = []
 
     /// `minimumInterval` spaces out the JSON requests this app sends, so paging quickly through
     /// a ranking never looks like a scraper to pixiv. Images are not paced.
@@ -42,7 +53,28 @@ actor PixivService {
         return PixivAccount(id: id, name: name ?? id, showsR18: status.viewingRestriction.map { $0 >= 1 })
     }
 
-    func page(_ number: Int, of listing: PixivListing, session: String? = nil) async throws -> PixivResultPage {
+    /// Fetches a single illustration's metadata by id (`/ajax/illust/<id>`).
+    func detail(id: String, session: String? = nil) async throws -> PixivWork {
+        guard let url = Self.detailURL(workID: id) else { throw PixivFailure(code: .unreadable) }
+        return try Self.decodeDetail(try await json(url, session: session))
+    }
+
+    /// Drops cached illustration id lists for `authorID` (or all authors when nil), so Refresh
+    /// re-reads `/ajax/user/<id>/profile/all`.
+    func clearAuthorCache(id authorID: String? = nil) {
+        if let authorID {
+            authorIDCache = authorIDCache.filter { $0.key.authorID != authorID }
+            authorIDCacheOrder.removeAll { $0.authorID == authorID }
+        } else {
+            authorIDCache = [:]
+            authorIDCacheOrder = []
+        }
+    }
+
+    func page(
+        _ number: Int, of listing: PixivListing, session: String? = nil, userID: String? = nil,
+        bypassCache: Bool = false
+    ) async throws -> PixivResultPage {
         let page = max(1, number)
         switch listing {
         case .ranking(let ranking):
@@ -57,6 +89,88 @@ actor PixivService {
         case .search:
             guard let url = Self.searchURL(listing, page: page) else { throw PixivFailure(code: .unreadable) }
             return try Self.decodeSearch(try await json(url, session: session), requestedPage: page)
+        case .illust(let id):
+            let work = try await detail(id: id, session: session)
+            return PixivResultPage(works: [work], page: 1, totalPages: 1, totalCount: 1)
+        case .author(let authorID):
+            return try await authorPage(
+                authorID: authorID, page: page, session: session, bypassCache: bypassCache)
+        case .bookmarks(let visibility):
+            return try await bookmarksPage(
+                userID: userID, page: page, visibility: visibility, session: session)
+        case .following:
+            return try await followingPage(page: page, session: session)
+        }
+    }
+
+    private func authorPage(
+        authorID: String, page: Int, session: String?, bypassCache: Bool
+    ) async throws -> PixivResultPage {
+        guard PixivWork.isValidID(authorID) else { throw PixivFailure(code: .unreadable) }
+        let cacheKey = AuthorCacheKey(authorID: authorID, isSignedIn: session != nil)
+        if bypassCache {
+            clearAuthorCache(id: authorID)
+        }
+        let ids: [String]
+        if let cached = authorIDCache[cacheKey] {
+            ids = cached
+        } else {
+            guard let allURL = Self.authorProfileAllURL(authorID: authorID) else {
+                throw PixivFailure(code: .unreadable)
+            }
+            let fetched = try Self.decodeAuthorIllustIDs(try await json(allURL, session: session))
+            rememberAuthorIDs(fetched, for: cacheKey)
+            ids = fetched
+        }
+        let total = ids.count
+        let totalPages = min(Self.maxPages, max(1, (total + Self.authorPageSize - 1) / Self.authorPageSize))
+        let start = (page - 1) * Self.authorPageSize
+        guard start < ids.count else {
+            return PixivResultPage(works: [], page: page, totalPages: totalPages, totalCount: total)
+        }
+        let slice = Array(ids[start..<min(ids.count, start + Self.authorPageSize)])
+        guard let sliceURL = Self.authorIllustsURL(authorID: authorID, ids: slice, isFirstPage: page == 1) else {
+            throw PixivFailure(code: .unreadable)
+        }
+        let works = try Self.decodeAuthorIllusts(try await json(sliceURL, session: session), orderedIDs: slice)
+        return PixivResultPage(works: works, page: page, totalPages: totalPages, totalCount: total)
+    }
+
+    private func bookmarksPage(
+        userID: String?, page: Int, visibility: PixivBookmarkVisibility, session: String?
+    ) async throws -> PixivResultPage {
+        guard let session, Self.isSessionValue(session) else {
+            throw PixivFailure(code: .signedOut)
+        }
+        let resolvedID = userID.flatMap { PixivWork.isValidID($0) ? $0 : nil } ?? Self.userID(fromSession: session)
+        guard let resolvedID,
+            let url = Self.bookmarksURL(userID: resolvedID, page: page, visibility: visibility)
+        else { throw PixivFailure(code: .signedOut) }
+        do {
+            return try Self.decodeBookmarks(try await json(url, session: session), requestedPage: page)
+        } catch let failure as PixivFailure where failure.code == .status(401) || failure.code == .status(403) {
+            throw PixivFailure(code: .signedOut)
+        }
+    }
+
+    private func followingPage(page: Int, session: String?) async throws -> PixivResultPage {
+        guard let session, Self.isSessionValue(session) else {
+            throw PixivFailure(code: .signedOut)
+        }
+        let url = Self.followingURL(page: page)
+        do {
+            return try Self.decodeFollowing(try await json(url, session: session), requestedPage: page)
+        } catch let failure as PixivFailure where failure.code == .status(401) || failure.code == .status(403) {
+            throw PixivFailure(code: .signedOut)
+        }
+    }
+
+    private func rememberAuthorIDs(_ ids: [String], for key: AuthorCacheKey) {
+        authorIDCache[key] = ids
+        authorIDCacheOrder.removeAll { $0 == key }
+        authorIDCacheOrder.append(key)
+        while authorIDCacheOrder.count > Self.authorIDCacheLimit {
+            authorIDCache[authorIDCacheOrder.removeFirst()] = nil
         }
     }
 
@@ -151,6 +265,61 @@ actor PixivService {
 
     static func pagesURL(workID: String) -> URL {
         URL(string: "https://\(host)/ajax/illust/\(workID)/pages")!
+    }
+
+    static func detailURL(workID: String) -> URL? {
+        guard PixivWork.isValidID(workID) else { return nil }
+        return URL(string: "https://\(host)/ajax/illust/\(workID)")
+    }
+
+    static func authorProfileAllURL(authorID: String) -> URL? {
+        guard PixivWork.isValidID(authorID) else { return nil }
+        return URL(string: "https://\(host)/ajax/user/\(authorID)/profile/all")
+    }
+
+    static func authorIllustsURL(authorID: String, ids: [String], isFirstPage: Bool = false) -> URL? {
+        guard PixivWork.isValidID(authorID), !ids.isEmpty, ids.count <= authorPageSize,
+            ids.allSatisfy(PixivWork.isValidID)
+        else { return nil }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.path = "/ajax/user/\(authorID)/profile/illusts"
+        var items = ids.map { URLQueryItem(name: "ids[]", value: $0) }
+        items.append(URLQueryItem(name: "work_category", value: "illust"))
+        items.append(URLQueryItem(name: "is_first_page", value: isFirstPage ? "1" : "0"))
+        components.queryItems = items
+        return components.url
+    }
+
+    static func bookmarksURL(
+        userID: String, page: Int, visibility: PixivBookmarkVisibility, limit: Int = bookmarksPageSize
+    ) -> URL? {
+        guard PixivWork.isValidID(userID), limit > 0 else { return nil }
+        let offset = max(0, (max(1, page) - 1) * limit)
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.path = "/ajax/user/\(userID)/illusts/bookmarks"
+        components.queryItems = [
+            URLQueryItem(name: "tag", value: ""),
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "rest", value: visibility.rawValue),
+        ]
+        return components.url
+    }
+
+    static func followingURL(page: Int) -> URL {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.path = "/ajax/follow_latest/illust"
+        components.queryItems = [
+            URLQueryItem(name: "p", value: String(max(1, page))),
+            URLQueryItem(name: "mode", value: "all"),
+        ]
+        return components.url!
     }
 
     /// Whether anyone is signed in, and who: the status pixiv's mobile site reads.
@@ -252,6 +421,142 @@ actor PixivService {
             throw PixivFailure(code: rows.isEmpty ? .unreadable : .membersOnly)
         }
         return pages
+    }
+
+    /// Decodes `/ajax/illust/<id>` into a `PixivWork`. Only still illustrations (`illustType == 0`)
+    /// are accepted as wallpapers; ugoira/manga throw `.notAnImage`.
+    static func decodeDetail(_ data: Data) throws -> PixivWork {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            root["error"] as? Bool != true, let body = root["body"] as? [String: Any]
+        else { throw PixivFailure(code: .unreadable) }
+        let illustType = integer(body["illustType"]) ?? 0
+        guard illustType == 0 else { throw PixivFailure(code: .notAnImage) }
+        guard
+            let id = (body["illustId"] as? String) ?? integer(body["illustId"]).map(String.init)
+                ?? (body["id"] as? String) ?? integer(body["id"]).map(String.init),
+            PixivWork.isValidID(id),
+            let width = integer(body["width"]), let height = integer(body["height"]),
+            width > 0, height > 0
+        else { throw PixivFailure(code: .unreadable) }
+
+        let urls = body["urls"] as? [String: Any]
+        let thumbnail =
+            imageURL(urls?["small"]) ?? imageURL(urls?["thumb"]) ?? imageURL(urls?["regular"])
+            ?? imageURL(urls?["mini"]) ?? imageURL(body["url"])
+        if thumbnail == nil, let urls, !urls.isEmpty,
+            urls.values.allSatisfy({ $0 is NSNull })
+        {
+            throw PixivFailure(code: .membersOnly)
+        }
+
+        let rawAuthorID = (body["userId"] as? String) ?? integer(body["userId"]).map(String.init) ?? ""
+        let authorID = PixivWork.isValidID(rawAuthorID) ? rawAuthorID : ""
+        let title = (body["illustTitle"] as? String) ?? (body["title"] as? String) ?? ""
+        let tags: [String]
+        if let tagsObject = body["tags"] as? [String: Any],
+            let entries = tagsObject["tags"] as? [[String: Any]]
+        {
+            tags = entries.compactMap { $0["tag"] as? String }.filter { !$0.isEmpty }
+        } else {
+            tags = strings(body["tags"])
+        }
+
+        return PixivWork(
+            id: id, title: title, authorID: authorID, authorName: body["userName"] as? String ?? "",
+            thumbnailURL: thumbnail, width: width, height: height,
+            pageCount: max(1, integer(body["pageCount"]) ?? 1),
+            rating: PixivRating(
+                xRestrict: integer(body["xRestrict"]) ?? 0, sanityLevel: integer(body["sl"]), sexual: nil,
+                sensitive: body["isMasked"] as? Bool == true),
+            aiGenerated: integer(body["aiType"]).map { $0 == 2 }, tags: tags, rank: nil)
+    }
+
+    /// Decodes `/ajax/user/<id>/profile/all`: returns valid illustration ids sorted newest-first
+    /// (descending numeric id). Pixiv sends an empty array `[]` when the user has no illustrations.
+    static func decodeAuthorIllustIDs(_ data: Data) throws -> [String] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            root["error"] as? Bool != true, let body = root["body"] as? [String: Any]
+        else { throw PixivFailure(code: .unreadable) }
+        if let empty = body["illusts"] as? [Any], empty.isEmpty { return [] }
+        guard let map = body["illusts"] as? [String: Any] else { throw PixivFailure(code: .unreadable) }
+        return map.keys
+            .filter(PixivWork.isValidID)
+            .sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
+    }
+
+    /// Decodes `/ajax/user/<id>/profile/illusts`, preserving `orderedIDs` when supplied.
+    static func decodeAuthorIllusts(_ data: Data, orderedIDs: [String] = []) throws -> [PixivWork] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            root["error"] as? Bool != true, let body = root["body"] as? [String: Any]
+        else { throw PixivFailure(code: .unreadable) }
+        if let empty = body["works"] as? [Any], empty.isEmpty { return [] }
+        guard let map = body["works"] as? [String: Any] else { throw PixivFailure(code: .unreadable) }
+        if !orderedIDs.isEmpty {
+            let rows = orderedIDs.compactMap { map[$0] as? [String: Any] }
+            return unique(rows.compactMap(searchWork))
+        }
+        let sortedKeys = map.keys.sorted { (UInt64($0) ?? 0) > (UInt64($1) ?? 0) }
+        return unique(sortedKeys.compactMap { (map[$0] as? [String: Any]).flatMap(searchWork) })
+    }
+
+    /// Decodes `/ajax/user/<id>/illusts/bookmarks`.
+    static func decodeBookmarks(
+        _ data: Data, requestedPage: Int, pageSize: Int = bookmarksPageSize
+    ) throws -> PixivResultPage {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            root["error"] as? Bool != true, let body = root["body"] as? [String: Any],
+            let rows = body["works"] as? [[String: Any]]
+        else { throw PixivFailure(code: .unreadable) }
+        let total = max(0, integer(body["total"]) ?? rows.count)
+        let totalPages = max(1, (total + max(1, pageSize) - 1) / max(1, pageSize))
+        return PixivResultPage(
+            works: unique(rows.compactMap(searchWork)), page: requestedPage,
+            totalPages: min(maxPages, totalPages), totalCount: total)
+    }
+
+    /// Decodes `/ajax/follow_latest/illust?p=<page>&mode=all`.
+    static func decodeFollowing(_ data: Data, requestedPage: Int) throws -> PixivResultPage {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            root["error"] as? Bool != true, let body = root["body"] as? [String: Any],
+            let pageInfo = body["page"] as? [String: Any],
+            let thumbnails = body["thumbnails"] as? [String: Any],
+            let rows = thumbnails["illust"] as? [[String: Any]]
+        else { throw PixivFailure(code: .unreadable) }
+
+        let decoded = unique(rows.compactMap(searchWork))
+        let ordered: [PixivWork]
+        if let rawIDs = pageInfo["ids"] as? [Any], !rawIDs.isEmpty {
+            let byID = Dictionary(uniqueKeysWithValues: decoded.map { ($0.id, $0) })
+            var seen = Set<String>()
+            var result: [PixivWork] = []
+            for raw in rawIDs {
+                if let id = (raw as? String) ?? integer(raw).map(String.init),
+                    seen.insert(id).inserted, let work = byID[id]
+                {
+                    result.append(work)
+                }
+            }
+            for work in decoded where seen.insert(work.id).inserted {
+                result.append(work)
+            }
+            ordered = result
+        } else {
+            ordered = decoded
+        }
+
+        let isLastPage = (pageInfo["isLastPage"] as? Bool) ?? (integer(pageInfo["isLastPage"]) == 1)
+        let lastPage: Int
+        if isLastPage || rows.isEmpty {
+            lastPage = requestedPage
+        } else if let explicitLast = integer(pageInfo["lastPage"]) {
+            lastPage = max(requestedPage, explicitLast)
+        } else {
+            lastPage = min(maxPages, requestedPage + 1)
+        }
+        let totalCount = integer(pageInfo["total"]) ?? max(ordered.count, requestedPage * followingPageSize)
+        return PixivResultPage(
+            works: ordered, page: requestedPage,
+            totalPages: min(maxPages, max(1, lastPage)), totalCount: totalCount)
     }
 
     /// A ranking entry. A slot pixiv withholds from anonymous visitors (`mask_reason`) carries

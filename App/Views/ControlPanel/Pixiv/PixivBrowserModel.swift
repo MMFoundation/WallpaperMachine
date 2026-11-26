@@ -32,10 +32,14 @@ final class PixivBrowserModel {
 
   /// What the page edits. Read `query` for what is shown and sent.
   private(set) var draft: PixivQuery
+  /// Dedicated Japanese-tag search translator for pixiv (independent of Workshop's English translator).
+  var searchTranslator: PixivSearchTranslator
   /// The folded groups of the Filters sidebar: kept while the page lives, all open at first.
   var collapsedGroups: Set<PixivFilterGroup> = []
   /// What the page field holds: the page on show until the person types another.
   var pageText = "1"
+  /// Remembers the bookmark visibility choice when switching away from Bookmarks and back.
+  private(set) var preferredBookmarkVisibility: PixivBookmarkVisibility = .public
 
   /// Opens an address outside the app instead of `DesktopActions.current`, which `ExternalLink`
   /// uses while this is nil; a test that checks the address sets it.
@@ -50,8 +54,15 @@ final class PixivBrowserModel {
     try await Task.sleep(for: $0)
   }
   @ObservationIgnored private var debounce: Task<Void, Never>?
+  /// Monotonic token incremented on every search/navigation mutation so superseded translations
+  /// never commit or clobber a newer page or draft.
+  @ObservationIgnored private(set) var browseGeneration: UInt64 = 0
+  /// Active search-translation task, cancelled immediately when superseded by another action.
+  @ObservationIgnored private var activeTranslationTask: Task<PixivSearchTranslation?, Never>?
   /// Where the grid was last seen, in points from its top.
   @ObservationIgnored private(set) var scrollOffset: Double = 0
+  /// Scroll offset to restore once after popping the Back stack.
+  @ObservationIgnored private var pendingBackScrollOffset: Double?
   @ObservationIgnored private var scrollReport: Task<Void, Never>?
   @ObservationIgnored private var hasUnreportedScroll = false
   /// The grid's offset was handed back from the last window, once.
@@ -64,22 +75,37 @@ final class PixivBrowserModel {
   /// Two presses of one ring closer than this are a double-click: the system's interval.
   @ObservationIgnored var doubleClickInterval: Duration = .seconds(NSEvent.doubleClickInterval)
 
-  init(controller: PanelController) {
+  init(controller: PanelController, searchTranslator: PixivSearchTranslator? = nil) {
     self.controller = controller
     draft = controller.pixiv.query
+    self.searchTranslator =
+      searchTranslator
+      ?? PixivSearchTranslator(
+        defaults: controller.defaults,
+        backend: controller.searchTranslation.backend,
+        appLanguage: { [weak controller] in controller?.appLanguage.effective ?? .english })
   }
 
   // MARK: Reading
 
-  /// Whether a pixiv session is held, which unlocks the Mature box and the R-18 rankings.
+  /// Whether a pixiv session is held, which unlocks Bookmarks, Following, Mature and R-18 rankings.
   var isSignedIn: Bool { controller.pixiv.isSignedIn }
+
+  /// Whether automatic Japanese-tag search translation is enabled.
+  var translatesSearches: Bool { searchTranslator.isEnabled }
 
   /// The draft as the account allows it: what the controls show and what is sent.
   var query: PixivQuery { draft.sanitized(signedIn: isSignedIn) }
 
-  /// The draft counts as a search once its text has a visible character, which is when the menu
-  /// swaps rankings for search orders.
+  /// The draft counts as a search once its text has a visible character in Explore scope, which is
+  /// when the menu swaps rankings for search orders.
   var isSearching: Bool { query.isSearchDraft }
+
+  /// Whether the draft holds a direct pixiv artwork URL or bare illustration id.
+  var isDirectLookup: Bool { query.isDirectLookupDraft }
+
+  /// The active top-level tab, or nil when viewing an author page.
+  var activeTab: PixivScopeTab? { query.scope.tab }
 
   /// The rankings the menu offers while the box is empty.
   var rankingChoices: [PixivRanking] {
@@ -152,10 +178,61 @@ final class PixivBrowserModel {
 
   // MARK: Editing
 
-  /// The search field's text, cut to the length pixiv takes. The search follows after a pause.
-  func setText(_ text: String) {
-    draft.text = String(text.prefix(Self.textLimit))
+  /// Cancels any pending debounce timer and in-flight search translation, advancing the monotonic
+  /// generation token so stale completions are dropped cleanly.
+  @discardableResult
+  func beginBrowseAction() -> UInt64 {
     debounce?.cancel()
+    debounce = nil
+    activeTranslationTask?.cancel()
+    activeTranslationTask = nil
+    browseGeneration &+= 1
+    return browseGeneration
+  }
+
+  /// Runs on-device Japanese tag translation in a tracked, cancellable task bound to `generation`.
+  /// Returns `nil` immediately when cancelled or superseded by a newer browse action.
+  func translateSearch(_ text: String, generation: UInt64) async -> PixivSearchTranslation? {
+    guard generation == browseGeneration else { return nil }
+    activeTranslationTask?.cancel()
+    let translator = searchTranslator
+    let task = Task { @MainActor in
+      await translator.translation(for: text)
+    }
+    activeTranslationTask = task
+    let result = await withTaskCancellationHandler {
+      await task.value
+    } onCancel: {
+      task.cancel()
+    }
+    if activeTranslationTask == task {
+      activeTranslationTask = nil
+    }
+    guard !Task.isCancelled, generation == browseGeneration else { return nil }
+    return result
+  }
+
+  /// The search field's text, cut to the length pixiv takes. Pasting a pixiv artwork link jumps
+  /// immediately; typing tags or a bare id follows after a pause (or immediately on Return).
+  func setText(_ text: String) {
+    let previous = draft.text
+    let normalized: String
+    if text.count > Self.textLimit, let linkedID = PixivLink.illustID(inLink: text) {
+      normalized = "https://www.pixiv.net/artworks/\(linkedID)"
+    } else {
+      normalized = String(text.prefix(Self.textLimit))
+    }
+    let isPaste = WorkshopSearchTrigger.isPasteOrDrop(from: previous, to: normalized)
+    draft.text = normalized
+    draft.translation = nil
+    if !normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, draft.scope != .explore {
+      draft.scope = .explore
+    }
+    beginBrowseAction()
+    if isPaste, PixivLink.illustID(inLink: normalized) != nil {
+      commit()
+      return
+    }
     let sleep = self.sleep
     debounce = Task { [weak self] in
       do { try await sleep(Self.searchDelay) } catch { return }
@@ -167,11 +244,110 @@ final class PixivBrowserModel {
 
   /// Return or the Search button: the first page of the listing, asked for afresh.
   @discardableResult
-  func submit() -> Task<Void, Never> { commit(refresh: true) }
+  func submit() -> Task<Void, Never> {
+    if !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, draft.scope != .explore {
+      draft.scope = .explore
+    }
+    return commit(refresh: true)
+  }
 
   /// The Refresh button.
   @discardableResult
   func refresh() -> Task<Void, Never> { commit(refresh: true) }
+
+  /// Switches to one of the top-level pixiv scopes (Explore, Bookmarks, Following).
+  @discardableResult
+  func open(tab: PixivScopeTab) -> Task<Void, Never> {
+    choose(scope: tab.scope(bookmarkVisibility: preferredBookmarkVisibility))
+  }
+
+  /// Switches to a top-level scope, clearing the Back stack and syncing the draft.
+  @discardableResult
+  func choose(scope: PixivBrowseScope) -> Task<Void, Never> {
+    let generation = beginBrowseAction()
+    if case .bookmarks(let visibility) = scope {
+      preferredBookmarkVisibility = visibility
+    }
+    draft.scope = scope
+    if scope != .explore {
+      draft.text = ""
+      draft.translation = nil
+    }
+    let controller = controller
+    return controller.launch("pixivScope", policy: .latestWins) { [weak self] in
+      try await controller.pixivOpenScope(scope, generation: generation)
+      guard let self, generation == self.browseGeneration else { return }
+      self.draft = controller.pixiv.query
+    }
+  }
+
+  /// Switches between Public and Private bookmarks while in Bookmarks scope.
+  @discardableResult
+  func choose(bookmarkVisibility: PixivBookmarkVisibility) -> Task<Void, Never> {
+    preferredBookmarkVisibility = bookmarkVisibility
+    draft.scope = .bookmarks(bookmarkVisibility)
+    return commit()
+  }
+
+  /// Opens an artist's works page in-app, pushing the current view onto the Back stack.
+  @discardableResult
+  func openAuthor(of work: PixivWork) -> Task<Void, Never>? {
+    guard PixivWork.isValidID(work.authorID) else { return nil }
+    return openAuthor(id: work.authorID, name: work.authorName)
+  }
+
+  /// Opens an artist's works page by validated author id and display name.
+  @discardableResult
+  func openAuthor(id: String, name: String) -> Task<Void, Never>? {
+    guard PixivWork.isValidID(id) else { return nil }
+    let generation = beginBrowseAction()
+    let offset = scrollOffset
+    let controller = controller
+    return controller.launch("pixivOpenAuthor", policy: .latestWins) { [weak self] in
+      try await controller.pixivOpenAuthor(id: id, name: name, leavingAt: offset, generation: generation)
+      guard let self, generation == self.browseGeneration else { return }
+      self.draft = controller.pixiv.query
+    }
+  }
+
+  /// Pops the previous browse snapshot from the Back stack, restoring its mode, query, filters,
+  /// page, selection, and scroll offset.
+  @discardableResult
+  func goBack() -> Task<Void, Never> {
+    let generation = beginBrowseAction()
+    let controller = controller
+    return controller.launch("pixivBack", policy: .latestWins) { [weak self] in
+      let offset = try await controller.pixivGoBack(generation: generation)
+      guard let self, generation == self.browseGeneration else { return }
+      self.draft = controller.pixiv.query
+      self.pendingBackScrollOffset = offset
+    }
+  }
+
+  /// **Search as typed**: runs the current tag search without Japanese translation.
+  @discardableResult
+  func searchAsTyped(_ translation: PixivSearchTranslation) -> Task<Void, Never> {
+    let generation = beginBrowseAction()
+    let original = translation.original
+    let controller = controller
+    return controller.launch("pixivSearch", policy: .latestWins) { [weak self] in
+      try await controller.pixivSearchAsTyped(original, generation: generation)
+      guard let self, generation == self.browseGeneration else { return }
+      self.draft.translation = nil
+    }
+  }
+
+  /// Enables or disables automatic Japanese-tag search translation.
+  @discardableResult
+  func setTranslatesSearches(_ on: Bool) -> Task<Void, Never> {
+    let generation = beginBrowseAction()
+    let controller = controller
+    return controller.launch("pixivTranslateToggle", policy: .latestWins) { [weak self] in
+      try await controller.pixivSetTranslatesSearches(on, generation: generation)
+      guard let self, generation == self.browseGeneration else { return }
+      self.draft = controller.pixiv.query
+    }
+  }
 
   /// The menu's choice while the box is empty.
   @discardableResult
@@ -225,7 +401,9 @@ final class PixivBrowserModel {
   /// Clear search: back to the ranking.
   @discardableResult
   func clearSearch() -> Task<Void, Never> {
+    draft.scope = .explore
     draft.text = ""
+    draft.translation = nil
     return commit()
   }
 
@@ -234,7 +412,9 @@ final class PixivBrowserModel {
   func searchTag(_ tag: String) -> Task<Void, Never> {
     let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return Task {} }
+    draft.scope = .explore
     draft.text = String(trimmed.prefix(Self.textLimit))
+    draft.translation = nil
     return commit()
   }
 
@@ -248,13 +428,12 @@ final class PixivBrowserModel {
   /// Commits the draft, whole, and drops a pause that was waiting to. The newest query lands last.
   @discardableResult
   func commit(refresh: Bool = false) -> Task<Void, Never> {
-    debounce?.cancel()
-    debounce = nil
+    let generation = beginBrowseAction()
     draft = query
     let query = draft
     let controller = controller
     return controller.launch("pixivSearch", policy: .latestWins) {
-      try await controller.pixivSearch(query, refresh: refresh)
+      try await controller.pixivSearch(query, refresh: refresh, generation: generation)
     }
   }
 
@@ -318,6 +497,12 @@ final class PixivBrowserModel {
   }
 
   // MARK: Remembering where the grid was
+
+  /// The offset captured before opening an author page, handed back once when Back restores the grid.
+  func takePendingBackScrollOffset() -> Double? {
+    defer { pendingBackScrollOffset = nil }
+    return pendingBackScrollOffset
+  }
 
   /// The offset the last window left, taken once by the first grid this window shows.
   func takeRestoredScroll() -> Double? {

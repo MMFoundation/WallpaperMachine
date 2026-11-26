@@ -14,8 +14,22 @@ struct PixivBrowserPage: View {
     let model = controller.pixivBrowser
     let browse = controller.pixivBrowse
     let activeChips = controller.shell.areFiltersShown ? [] : model.activeFilterChips
+    let showsTranslationBar = Self.showsTranslationBar(
+      browse: browse, translatesSearches: model.translatesSearches,
+      appLanguage: controller.appLanguage.effective)
     VStack(spacing: 0) {
       PixivBar(height: 48) { PixivHeaderRow(browse: browse) }
+      if case .author(let authorID, let authorName) = browse.scope {
+        PixivBar(height: 36) {
+          PixivAuthorBar(
+            authorID: authorID, authorName: authorName,
+            totalCount: browse.totalCount, hasExactTotal: browse.hasExactTotal,
+            hasLoaded: browse.hasLoaded)
+        }
+      }
+      if showsTranslationBar {
+        PixivBar(height: 32) { PixivTranslationBar(translation: browse.translation) }
+      }
       if !activeChips.isEmpty {
         // ActiveFilterChipsBar lays its content over a zero-min-width Color.clear filler,
         // matching PixivBar so narrow columns beside an open inspector never loop constraints.
@@ -37,6 +51,17 @@ struct PixivBrowserPage: View {
     }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("pixiv-page")
+  }
+
+  /// Shows the translation bar whenever a search was translated into Japanese, or while searching
+  /// a translatable non-Japanese query with translation switched off so the user can turn it back on.
+  static func showsTranslationBar(
+    browse: PixivBrowseState, translatesSearches: Bool, appLanguage: AppLanguage
+  ) -> Bool {
+    guard browse.scope == .explore, !browse.isDirectLookup else { return false }
+    if browse.translation != nil { return true }
+    return browse.isSearching && !translatesSearches
+      && PixivSearchTranslator.isTranslatable(browse.query.text, app: appLanguage)
   }
 
   @ViewBuilder
@@ -117,7 +142,9 @@ private struct PixivGrid: View {
       scrolled(metrics, model: model)
     }
     .onAppear {
-      guard let stored = model.takeRestoredScroll(), stored > 0 else {
+      let backTarget = model.takePendingBackScrollOffset()
+      let stored = backTarget ?? model.takeRestoredScroll()
+      guard let stored, stored > 0 else {
         // A grid that starts at its top says so: the scroll view reports only changes, so
         // without this a new listing or page would keep the place the grid before it had.
         model.scrolled(to: 0)
@@ -197,8 +224,25 @@ struct PixivHeaderRow: View {
   var body: some View {
     let model = controller.pixivBrowser
     HStack(spacing: 8) {
+      if browse.canGoBack {
+        Button {
+          model.goBack()
+        } label: {
+          HStack(spacing: 4) {
+            Image(systemName: "chevron.left")
+              .font(.panel(.controlSmall))
+            if width >= 460 { Text("Back") }
+          }
+        }
+        .buttonStyle(.panelCapsule)
+        .keyboardShortcut("[", modifiers: .command)
+        .help(L("Go back"))
+        .accessibilityLabel(L("Go back"))
+        .accessibilityIdentifier("pixiv-back")
+      }
+      PixivScopeSwitcher(current: browse.scope.tab) { model.open(tab: $0) }
       PixivFilterButton()
-      PixivListingMenu()
+      PixivListingMenu(browse: browse)
       Spacer(minLength: 0)
       if !model.isSignedIn {
         signIn(Self.signInStyle(forWidth: width))
@@ -216,7 +260,7 @@ struct PixivHeaderRow: View {
         .frame(width: 14, height: 14)
       }
       .buttonStyle(.panelCapsule)
-      .disabled(browse.isLoading)
+      .disabled(browse.isLoading || (browse.requiresSignIn && !browse.isSignedIn))
       .help(L("Refresh pixiv"))
       .accessibilityLabel(L("Refresh pixiv"))
       .accessibilityIdentifier("pixiv-refresh")
@@ -271,57 +315,237 @@ private struct PixivFilterButton: View {
   }
 }
 
-/// The menu beside Filter: the rankings while the search box is empty, the search orders once it
-/// has text. The R-18 rankings appear only for a signed-in account with Mature ticked.
+/// Top-level pixiv scopes (Explore, Bookmarks, Following): segmented control when wide, collapsing
+/// into a compact menu when narrow so the split view never asks for more width than it has.
+private struct PixivScopeSwitcher: View {
+  let current: PixivScopeTab?
+  let onSelect: (PixivScopeTab) -> Void
+
+  @Environment(\.panelTheme) private var theme
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    ViewThatFits(in: .horizontal) {
+      segments
+      menu(showsTitle: true)
+      menu(showsTitle: false)
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel(Text("pixiv feeds"))
+    .accessibilityIdentifier("pixiv-scopes")
+  }
+
+  private var segments: some View {
+    HStack(spacing: 0) {
+      ForEach(PixivScopeTab.allCases, id: \.self) { tab in
+        let isCurrent = tab == current
+        Button {
+          onSelect(tab)
+        } label: {
+          Text(verbatim: tab.title)
+            .font(.panel(isCurrent ? .calloutStrong : .callout))
+            .foregroundStyle(isCurrent ? theme.surface.text.color : theme.surface.muted.color)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background {
+              if isCurrent {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                  .fill(theme.surface.segmentSelected.color)
+                  .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.12), radius: 1, y: 0.5)
+              }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
+        .accessibilityIdentifier("pixiv-scope-\(tab.rawValue)")
+      }
+    }
+    .padding(2)
+    .background(theme.surface.hover.color, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+  }
+
+  private func menu(showsTitle: Bool) -> some View {
+    Menu {
+      ForEach(PixivScopeTab.allCases, id: \.self) { tab in
+        Button {
+          onSelect(tab)
+        } label: {
+          if tab == current {
+            Label {
+              Text(verbatim: tab.title)
+            } icon: {
+              Image(systemName: "checkmark")
+            }
+          } else {
+            Text(verbatim: tab.title)
+          }
+        }
+      }
+    } label: {
+      let symbol = Image(systemName: current?.systemImage ?? "person.crop.circle")
+      if showsTitle {
+        HStack(spacing: 5) {
+          symbol.font(.panel(.controlSmall))
+          Text(verbatim: current?.title ?? L("Author"))
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+      } else {
+        symbol.font(.panel(.controlSmall))
+      }
+    }
+    .menuStyle(.button)
+    .buttonStyle(.panelCapsule)
+    .menuIndicator(showsTitle ? .visible : .hidden)
+    .help(current?.title ?? L("pixiv feeds"))
+    .accessibilityLabel(Text("pixiv feeds"))
+    .accessibilityValue(current.map { Text(verbatim: $0.title) } ?? Text(verbatim: ""))
+  }
+}
+
+/// Banner shown while browsing a specific artist's works: artist name via `Text(verbatim:)`,
+/// works count, and an external link to their pixiv profile.
+private struct PixivAuthorBar: View {
+  let authorID: String
+  let authorName: String
+  let totalCount: Int
+  let hasExactTotal: Bool
+  let hasLoaded: Bool
+
+  @Environment(PanelController.self) private var controller
+  @Environment(\.panelTheme) private var theme
+
+  var body: some View {
+    let displayName = authorName.isEmpty ? authorID : authorName
+    HStack(spacing: 8) {
+      Image(systemName: "person.crop.circle")
+        .font(.panel(.sectionHeader))
+        .foregroundStyle(theme.surface.muted.color)
+        .accessibilityHidden(true)
+      Text(verbatim: displayName)
+        .font(.panel(.sectionHeader))
+        .foregroundStyle(theme.surface.text.color)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .help(displayName)
+        .accessibilityAddTraits(.isHeader)
+      if hasLoaded {
+        let countText = hasExactTotal
+          ? L("\(totalCount) works")
+          : L("At least \(totalCount) works")
+        Text(verbatim: countText)
+          .font(.panel(.callout))
+          .foregroundStyle(theme.surface.muted.color)
+          .lineLimit(1)
+      }
+      Spacer(minLength: 4)
+      if let profileURL = ExternalLink.pixivAuthor(id: authorID) {
+        Button {
+          ExternalLink.open(profileURL, using: controller.pixivBrowser.openURL)
+        } label: {
+          Label("View on pixiv", systemImage: "arrow.up.right.square")
+            .font(.panel(.callout))
+        }
+        .buttonStyle(.panelLink)
+        .fixedSize()
+        .accessibilityIdentifier("pixiv-author-external")
+      }
+    }
+    .padding(.horizontal, 20)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("pixiv-author-bar")
+  }
+}
+
+/// The menu beside Filter: rankings while browsing Explore with an empty search box, search orders
+/// while searching tags, or Public/Private bookmarks while viewing Bookmarks.
 private struct PixivListingMenu: View {
+  let browse: PixivBrowseState
+
   @Environment(PanelController.self) private var controller
 
   var body: some View {
     let model = controller.pixivBrowser
     let query = model.query
-    let isSearching = model.isSearching
-    let current = isSearching ? query.order.title : query.ranking.title
-    let label = isSearching ? L("Search order") : L("Ranking")
-    Menu {
-      if isSearching {
+    switch browse.scope {
+    case .explore where !model.isDirectLookup:
+      let isSearching = model.isSearching
+      let current = isSearching ? query.order.title : query.ranking.title
+      let label = isSearching ? L("Search order") : L("Ranking")
+      Menu {
+        if isSearching {
+          Picker(
+            label,
+            selection: Binding(get: { query.order }, set: { model.choose(order: $0) })
+          ) {
+            ForEach(PixivSearchOrder.allCases, id: \.self) { Text(verbatim: $0.title).tag($0) }
+          }
+          .pickerStyle(.inline)
+          .labelsHidden()
+        } else {
+          Picker(
+            label,
+            selection: Binding(get: { query.ranking }, set: { model.choose(ranking: $0) })
+          ) {
+            ForEach(model.rankingChoices, id: \.self) { Text(verbatim: $0.title).tag($0) }
+          }
+          .pickerStyle(.inline)
+          .labelsHidden()
+        }
+      } label: {
+        HStack(spacing: 5) {
+          Text(verbatim: current).lineLimit(1).truncationMode(.tail)
+          Image(systemName: "chevron.up.chevron.down")
+            .font(.system(size: 8.5, weight: .bold))
+            .foregroundStyle(.secondary)
+        }
+      }
+      .menuStyle(.button)
+      .menuIndicator(.hidden)
+      .buttonStyle(.panelCapsule)
+      .layoutPriority(-1)
+      .accessibilityLabel(label)
+      .accessibilityValue(current)
+      .accessibilityIdentifier("pixiv-listing-menu")
+    case .bookmarks(let visibility) where model.isSignedIn:
+      let label = L("Bookmarks visibility")
+      Menu {
         Picker(
           label,
-          selection: Binding(get: { query.order }, set: { model.choose(order: $0) })
+          selection: Binding(
+            get: { visibility }, set: { model.choose(bookmarkVisibility: $0) })
         ) {
-          ForEach(PixivSearchOrder.allCases, id: \.self) { Text(verbatim: $0.title).tag($0) }
+          ForEach(PixivBookmarkVisibility.allCases, id: \.self) {
+            Text(verbatim: $0.title).tag($0)
+          }
         }
         .pickerStyle(.inline)
         .labelsHidden()
-      } else {
-        Picker(
-          label,
-          selection: Binding(get: { query.ranking }, set: { model.choose(ranking: $0) })
-        ) {
-          ForEach(model.rankingChoices, id: \.self) { Text(verbatim: $0.title).tag($0) }
+      } label: {
+        HStack(spacing: 5) {
+          Text(verbatim: visibility.title).lineLimit(1).truncationMode(.tail)
+          Image(systemName: "chevron.up.chevron.down")
+            .font(.panel(.mark))
+            .foregroundStyle(.secondary)
         }
-        .pickerStyle(.inline)
-        .labelsHidden()
       }
-    } label: {
-      HStack(spacing: 5) {
-        Text(verbatim: current).lineLimit(1).truncationMode(.tail)
-        Image(systemName: "chevron.up.chevron.down")
-          .font(.system(size: 8.5, weight: .bold))
-          .foregroundStyle(.secondary)
-      }
+      .menuStyle(.button)
+      .menuIndicator(.hidden)
+      .buttonStyle(.panelCapsule)
+      .layoutPriority(-1)
+      .accessibilityLabel(label)
+      .accessibilityValue(visibility.title)
+      .accessibilityIdentifier("pixiv-bookmarks-visibility")
+    default:
+      EmptyView()
     }
-    .menuStyle(.button)
-    .menuIndicator(.hidden)
-    .buttonStyle(.panelCapsule)
-    .layoutPriority(-1)
-    .accessibilityLabel(label)
-    .accessibilityValue(current)
-    .accessibilityIdentifier("pixiv-listing-menu")
   }
 }
 
-/// What the page shows in place of the grid: loading, an error, filters that hide the whole page,
-/// or nothing found.
+/// What the page shows in place of the grid: sign-in required, loading, an error, filters that hide
+/// the whole page, or nothing found.
 private struct PixivEmptyView: View {
   let state: PixivEmptyState
 
@@ -329,6 +553,7 @@ private struct PixivEmptyView: View {
 
   var body: some View {
     let model = controller.pixivBrowser
+    let account = controller.pixivAccount
     switch state {
     case .loading:
       PanelEmptyState(
@@ -336,6 +561,29 @@ private struct PixivEmptyView: View {
         description: "Fetching illustrations from pixiv."
       ) {
         LoadingRing()
+      }
+    case .signInRequired(let feed):
+      let title =
+        feed == .bookmarks
+        ? L("Sign in to see your bookmarks")
+        : L("Sign in to see following works")
+      let description =
+        feed == .bookmarks
+        ? L("Sign in to pixiv to browse your bookmarked illustrations.")
+        : L("Sign in to pixiv to browse new illustrations from artists you follow.")
+      let symbol = feed == .bookmarks ? "bookmark" : "person.2"
+      PanelEmptyState(verbatim: title, systemImage: symbol, description: description) {
+        Button {
+          controller.launch("pixivSignIn") { try await controller.pixivSignIn() }
+        } label: {
+          if account.isSigningIn {
+            Label("Show sign-in window", systemImage: "macwindow")
+          } else {
+            Label("Sign in to Pixiv", systemImage: "person.crop.circle")
+          }
+        }
+        .buttonStyle(.panelPrimary)
+        .accessibilityIdentifier("pixiv-empty-sign-in")
       }
     case .error(let message):
       PanelEmptyState(
@@ -363,6 +611,36 @@ private struct PixivEmptyView: View {
           : L("pixiv returned an empty ranking.")
       ) {
         if searching { Button("Clear search") { model.clearSearch() } }
+      }
+    case .emptyFeed(let feed):
+      switch feed {
+      case .author:
+        PanelEmptyState(
+          verbatim: L("No illustrations found"), systemImage: "person.crop.circle",
+          description: L("This artist has no illustrations to show.")
+        ) {
+          if controller.pixivBrowse.canGoBack {
+            Button("Go back") { model.goBack() }
+          }
+        }
+      case .bookmarks(let visibility):
+        PanelEmptyState(
+          verbatim: L("No bookmarks yet"), systemImage: "bookmark",
+          description: visibility == .private
+            ? L("Illustrations you bookmark privately on pixiv appear here.")
+            : L("Illustrations you bookmark on pixiv appear here.")
+        ) {
+          Button("Explore pixiv") { model.open(tab: .explore) }
+            .buttonStyle(.panelPrimary)
+        }
+      case .following:
+        PanelEmptyState(
+          verbatim: L("No illustrations from followed artists"), systemImage: "person.2",
+          description: L("New illustrations from artists you follow on pixiv appear here.")
+        ) {
+          Button("Explore pixiv") { model.open(tab: .explore) }
+            .buttonStyle(.panelPrimary)
+        }
       }
     }
   }
