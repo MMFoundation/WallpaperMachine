@@ -96,3 +96,42 @@ with another Mac.
   Workshop wallpapers are **never** downloaded silently: queueing downloads is opt-in and requires
   an explicit confirmation step before anything is added to the Steam download queue.
 
+## Cross-Mac sync folder (`WallpaperMachineSync.json`)
+
+**Settings → Storage → Cross-Mac sync folder** provides manual Push / Pull syncing across Macs
+using any user-chosen folder (iCloud Drive, Syncthing, Dropbox, OneDrive, SMB/NAS or an external
+drive), without background directory watchers, real-time merge races or CloudKit entitlements.
+
+- **Local-only folder binding:** the chosen sync folder path and bookmark stay strictly local in
+  `UserDefaults` on each Mac and are never included in `.wmbackup` packages or synced snapshots.
+- **Atomic manual push:** **Push now** writes a versioned `WallpaperMachineSync.json` snapshot
+  (`schemaVersion: 1`, `exportedAt`, `deviceName`, `appVersion`) via a same-directory temporary
+  file (`O_EXCL | O_NOFOLLOW` + `fsync`) and atomic replacement so cloud sync daemons never upload
+  a half-written file.
+- **What is synced:** the Steam Workshop wallpaper index (numeric IDs and optional titles, no media
+  binaries), favorites, collections, per-wallpaper metadata (1–5 star ratings, custom tags, notes
+  and rotation exclusions), saved playlists (including Smart Playlists), sanitized portable property
+  presets (local paths and `app:`/`shortcut:` values stripped), portable [desktop
+  widgets](desktop-widgets.md) (static image stickers omitted; Space UUID scopes downgraded to
+  `everywhere` with a note), display layouts using canonicalized display slots (`display-1`,
+  `display-2`, …), and video A–B loop trim ranges.
+- **Hard security exclusions:** Steam/Pixiv sessions, cookies and credentials,
+  `UserShortcutStore` (`app:`/`shortcut:` bindings), media binaries, caches, logs, local folder
+  bookmarks, CoreGraphics hardware UUIDs and macOS Space UUIDs are never exported or accepted.
+- **iCloud placeholder detection & strict pull hygiene:** before opening
+  `WallpaperMachineSync.json`, WallpaperMachine checks both `.WallpaperMachineSync.json.icloud`
+  stubs and `URLResourceValues.ubiquitousItemDownloadingStatus` so un-downloaded iCloud Drive files
+  surface a clear message instead of hanging. Reading enforces `O_NOFOLLOW | S_IFREG` (rejecting
+  symlinks and special files), an 8 MB size cap, linear pre-parse JSON depth and node count limits,
+  a top-level key allowlist, schema version checks, strict numeric Workshop ID validation, and
+  per-field bounds validation across every category.
+- **Diff & conflict preview:** **Pull & Review…** displays source Mac metadata, per-category diff
+  counts (added, updated, conflicting), selectable categories, and an explicit conflict strategy:
+  **Merge** (default: union sets, keep this Mac’s value on same-item conflicts, append non-duplicate
+  items) or **Replace** (replace only the checked categories, leaving unchecked categories untouched).
+  Display layouts and display-pinned widgets offer interactive display remapping with an explicit
+  **Skip** option, imported layouts always save with `autoApplyOnConnect` turned off so local
+  auto-apply layouts are never clobbered, missing Workshop downloads require explicit user opt-in
+  confirmation, and changes apply immediately in place with no restart.
+
+

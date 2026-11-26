@@ -346,7 +346,14 @@ final class PlaylistStore {
     func savePlan(from display: String, name: String) throws -> PlaylistPlan {
         var playlist = playlist(for: display)
         playlist.planID = nil
-        let plan = PlaylistPlan(id: UUID().uuidString, name: try WallpaperCollectionStore.validatedName(name), playlist: playlist)
+        return try savePlan(name: name, playlist: playlist)
+    }
+
+    @discardableResult
+    func savePlan(name: String, playlist: DisplayPlaylist) throws -> PlaylistPlan {
+        var cleaned = playlist
+        cleaned.planID = nil
+        let plan = PlaylistPlan(id: UUID().uuidString, name: try WallpaperCollectionStore.validatedName(name), playlist: cleaned)
         let updated = plans + [plan]
         let data = try PreservedJSON.writeArray(updated, keeping: unreadPlans)
         plans = updated
