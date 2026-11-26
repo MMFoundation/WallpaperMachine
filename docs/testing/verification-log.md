@@ -25,6 +25,13 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-26 — Wave 4B: Pixiv deep browsing phase B (#28a) and cross-Mac manual sync folder (#28b)
+
+- test.py: PASS (36/36 Python suites / 731 tests; 5477 passed, 0 failed, 70 skipped of 5547 native tests in 210s)
+- verifier-w4b: PASS after fixing Pixiv translation cancellation/generation guards, Author Refresh actor cache ordering, PixivBrowseState mid-load scope/sign-in state, pre-parse JSON node cap, off-main-actor bookmark resolution, and multi-display widget merge
+- Localization: 110 new keys inserted surgically as text into App/Resources/Localizable.xcstrings across all 6 shipped languages; Extension/Localizable.xcstrings untouched
+- Scope: pure Swift/UI/tests/docs (no Rust/C++ renderer changes); Release .app not rebuilt (unrequested); opt-in --ui/desktop/live-Pixiv/iCloud-Drive checks not run
+
 ## 2026-11-26 — Wave 4A: MP4 HDR mdcv/clli & >2ch AAC/Vorbis downmix (#25a/#25c), video A-B trim (#25b), multi-display span phase 1 (#27), WebAudio GainNode & safe usershortcut (#26a/#26c), audio-response FFT tuning & per-app capture (#26b)
 
 - build.py --renderer-only: OK (C++ Media/Sound/Engine + Rust Core/Bridge rebuilt, App/Bridge/Generated regenerated)
@@ -108,12 +115,3 @@ Fix for #256: a rate-limited sign-in (SteamCMD .rateLimited, QR logOnRefused(84)
 - Test workflow rust job — passed; renderer job — blocked: check_renderer.py's cmake build of the test targets timed out after 600 s on the fork's cold cache (no renderer or bridge change here)
 - `python3 scripts/test.py --python-only` (Python 3.13, local) — exit 0, 36 script test files OK
 - Not verified: a real Steam rate limit (scripted SteamCMD and fake Steam only), no desktop/UI run, nothing checked visually
-
-## 2026-11-23 — Scale percentage slider for a display (#248)
-
-A slider from 10% to 100% that sets a display's scale factor, in the inspector's display card and in Settings › Displays.
-
-- `python3 scripts/test.py` (Python 3.15) — exit 0; 36 Python modules passed; native 5223 tests: 5153 passed, 70 skipped, 0 failed. Run with the energy-ratings refresh fix applied, which ships as its own change.
-- The same gate without that fix — 5152 passed, 1 failed: `PanelLibraryRowsTests/testRefreshEnergyRatingsRebuildsAndNotifiesOnlyWhenRatingsMoved`, which fails the same way on `main` at `2f7cd127` without this change.
-- `python3 scripts/test.py --only InspectorInputTests --only InspectorRenderTests/testADisplayCardsScaleSliderSendsTheScaleFactorOfThePercentageItSettlesOn` — 7 passed.
-- Not checked: the slider on a real display (no desktop run was requested), the row's layout by eye in the five languages, and the Settings › Displays slider, which no automated test drives. No Release build.

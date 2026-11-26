@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-23 — Scale percentage slider for a display (#248)
+
+A slider from 10% to 100% that sets a display's scale factor, in the inspector's display card and in Settings › Displays.
+
+- `python3 scripts/test.py` (Python 3.15) — exit 0; 36 Python modules passed; native 5223 tests: 5153 passed, 70 skipped, 0 failed. Run with the energy-ratings refresh fix applied, which ships as its own change.
+- The same gate without that fix — 5152 passed, 1 failed: `PanelLibraryRowsTests/testRefreshEnergyRatingsRebuildsAndNotifiesOnlyWhenRatingsMoved`, which fails the same way on `main` at `2f7cd127` without this change.
+- `python3 scripts/test.py --only InspectorInputTests --only InspectorRenderTests/testADisplayCardsScaleSliderSendsTheScaleFactorOfThePercentageItSettlesOn` — 7 passed.
+- Not checked: the slider on a real display (no desktop run was requested), the row's layout by eye in the five languages, and the Settings › Displays slider, which no automated test drives. No Release build.
+
 ## 2026-11-21 — Installed library sort by Energy use (#251)
 
 - `python3 scripts/test.py --python-only` — exit 0; all 36 Python modules passed (including `test_panel_localization.py`, `test_localization_catalogs.py`, `test_doc_links.py`).
