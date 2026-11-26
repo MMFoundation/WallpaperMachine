@@ -400,22 +400,20 @@ final class StatusPanelControllerTests: PanelTestCase {
     await controller.settled()
 
     let staleRead = AsyncGate()
+    defer { staleRead.open() }
     source.nextVolumeReadGate = staleRead
     source.input = input(revision: 2)
-    await staleRead.waitUntilWaiting()
+    try await waitUntil("the revision 2 volume read is waiting") { staleRead.waitingCount == 1 }
+    let staleTask = try XCTUnwrap(controller.volumeReadTask)
 
-    let save = Task { @MainActor in
-      defer { staleRead.open() }
-      // The new mute flag distinguishes the post-save read from the immediate slider update.
-      source.volumes["w1"]?.muted = true
-      try await controller.setVolume(0.25, for: "w1")
-      XCTAssertEqual(controller.volume?.volume, 0.25)
-      try await self.waitUntil("the post-save volume read has landed") { controller.volume?.muted == true }
-    }
+    // The new mute flag distinguishes the post-save read from the immediate slider update.
+    source.volumes["w1"]?.muted = true
+    try await controller.setVolume(0.25, for: "w1")
+    XCTAssertEqual(controller.volume?.volume, 0.25)
+    try await waitUntil("the post-save volume read has landed") { controller.volume?.muted == true }
 
-    // Join the outstanding read that sampled 80% before the save. It returns last.
-    await controller.settled()
-    try await save.value
+    staleRead.open()
+    await staleTask.value
     XCTAssertEqual(controller.volume, source.volumes["w1"])
   }
 
