@@ -12,6 +12,179 @@ update offer shows the new version's localized notes. Settings → About shows i
 release history offline; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.16.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.15.0...v1.16.0) (2026-11-26)
+
+### English
+
+WallpaperMachine 1.16.0 gives you more say over when and how wallpapers change, with smarter playlists, automatic switching and in-app updates, and lets you carry your setup between Macs
+
+#### Highlights
+
+- Update WallpaperMachine from inside the app, read release notes in your language and skip a version or be reminded later ([b141142](https://github.com/MMFoundation/WallpaperMachine/commit/b141142fd319a9bb86d4d579a8c5af635c0b732d))
+- Stretch one video or still image across several displays, and trim a video wallpaper to loop only the part you want ([f0b8ccd](https://github.com/MMFoundation/WallpaperMachine/commit/f0b8ccd094e7f80ea38efa9b6d39b402e2fd162a))
+- Wallpapers can switch on their own when you unplug, open an app or connect displays, and Presentation Mode quiets everything in one click ([a808bc8](https://github.com/MMFoundation/WallpaperMachine/commit/a808bc89d77851927f68b4fdf883b3b297aca83d), [3ddd8b8](https://github.com/MMFoundation/WallpaperMachine/commit/3ddd8b8722251b37a89548354913f997eac5c395))
+- Rate and tag your wallpapers, then let Smart Playlists choose what plays by type, tags, rating or favorites ([45b161c](https://github.com/MMFoundation/WallpaperMachine/commit/45b161c71dc7feb1c2b47e1bc94f53e3a25366cb))
+- Carry your wallpaper list, favorites, collections and layouts to another Mac through any synced folder, or share your setup as a Setup Pack ([d971384](https://github.com/MMFoundation/WallpaperMachine/commit/d971384ba094de2a0a9b607b63b426f16f854d0e), [2aa8f61](https://github.com/MMFoundation/WallpaperMachine/commit/2aa8f61affebc525f2f4a355e30e4f526a5c10ec))
+
+#### Features
+
+- WallpaperMachine now checks for signed updates in the app and installs them only when you choose, and About keeps past release notes readable offline ([b141142](https://github.com/MMFoundation/WallpaperMachine/commit/b141142fd319a9bb86d4d579a8c5af635c0b732d))
+- Stretch one video or still-image wallpaper seamlessly across two or more displays, and trim a video wallpaper to loop only the part you like ([f0b8ccd](https://github.com/MMFoundation/WallpaperMachine/commit/f0b8ccd094e7f80ea38efa9b6d39b402e2fd162a))
+- Switch to a chosen wallpaper or playlist while on battery or while a specific app runs, and keep per-Space wallpapers alongside schedules ([a808bc8](https://github.com/MMFoundation/WallpaperMachine/commit/a808bc89d77851927f68b4fdf883b3b297aca83d))
+- Rate and tag wallpapers, build Smart Playlists from type, tags, rating or favorites, and let rotation skip recent picks or pause with a Sleep Timer ([45b161c](https://github.com/MMFoundation/WallpaperMachine/commit/45b161c71dc7feb1c2b47e1bc94f53e3a25366cb))
+- Push and pull your favorites, collections, ratings, playlists and layouts between Macs through iCloud Drive, Dropbox or any synced folder, previewing changes before merging ([d971384](https://github.com/MMFoundation/WallpaperMachine/commit/d971384ba094de2a0a9b607b63b426f16f854d0e))
+- Presentation Mode pauses, mutes and hides widgets in one click, saved display layouts can apply when displays connect, and new Shortcuts actions control wallpapers ([3ddd8b8](https://github.com/MMFoundation/WallpaperMachine/commit/3ddd8b8722251b37a89548354913f997eac5c395))
+- Choose how one wallpaper gives way to the next, with Fade, Slide, Zoom fade, Wipe or no transition, and set how long it lasts ([7385939](https://github.com/MMFoundation/WallpaperMachine/commit/7385939263928bbb3b40ee857e6dfafdccc16dd8))
+- Each display can show its own wallpaper or playlist on the experimental Lock screen and screen saver, separate from the desktop ([2aa8f61](https://github.com/MMFoundation/WallpaperMachine/commit/2aa8f61affebc525f2f4a355e30e4f526a5c10ec))
+- Export your wallpaper picks, presets, widgets and layouts as a Setup Pack to share, and import one with a preview that downloads missing wallpapers ([2aa8f61](https://github.com/MMFoundation/WallpaperMachine/commit/2aa8f61affebc525f2f4a355e30e4f526a5c10ec))
+- Find duplicate and long-unused wallpapers on demand, repair broken references and clear leftover files, with removed copies moved to the Trash ([147bde9](https://github.com/MMFoundation/WallpaperMachine/commit/147bde9972ccbcc0559d04987fa8bf8b9817995b))
+- New desktop widgets show the song that is playing or a sticker image of your own, and any widget can appear only on chosen wallpapers or Spaces ([6680b05](https://github.com/MMFoundation/WallpaperMachine/commit/6680b05a29b5cbafe0961e25884780235b992684))
+- Open pixiv artworks by URL or ID, browse an artist's work in the app, switch to your Bookmarks or Following feeds, and search in Japanese automatically ([146f990](https://github.com/MMFoundation/WallpaperMachine/commit/146f990a9bbf6df1d50b600e57e28ea1b3c20099))
+- Download every missing wallpaper of a Workshop collection or your favorites at once, and pause, resume or cancel the whole queue in Downloads ([5b04411](https://github.com/MMFoundation/WallpaperMachine/commit/5b04411da0e28a7d85dd41181be2dd9450bba949))
+- Set render scale and scene quality for each wallpaper, and watch live graphics memory use in Performance settings ([605044e](https://github.com/MMFoundation/WallpaperMachine/commit/605044e6ead15e3b447b864128350eb9713ea705))
+- Tune how audio-reactive wallpapers respond with sensitivity, noise floor and smoothing, and have them listen to a single app instead of all sound ([ec36637](https://github.com/MMFoundation/WallpaperMachine/commit/ec36637da8933cc5b05a34013ac97361b2a7c99b))
+- Wallpapers with a custom shortcut setting can open an app or run a Shortcut that you pick and approve ([8864261](https://github.com/MMFoundation/WallpaperMachine/commit/88642617020f4a73fc24b0b8141231408c7e72c4))
+
+#### Improvements
+
+- The wallpaper inspector can now search properties, show only edited ones, preview changes live and update saved presets in place ([abaec35](https://github.com/MMFoundation/WallpaperMachine/commit/abaec358ea919b8420ea6c7c310868e38a09a60a))
+- Clicking a tag filters Library, Steam Workshop or pixiv results, and active filters appear as removable chips right above the grid ([b9b3c76](https://github.com/MMFoundation/WallpaperMachine/commit/b9b3c76afbb667df9bdf24d07ef6f1d8782d33ca))
+- Wallpaper pickers across Settings share one searchable chooser with thumbnails, and automatic rules can be turned off or reordered ([44e0cb1](https://github.com/MMFoundation/WallpaperMachine/commit/44e0cb1976c0902f49d5ec70819c3103d278b3d5))
+- Editing desktop widgets is easier with undo and redo, style copy and paste, and a preview of each connected display ([cff4b97](https://github.com/MMFoundation/WallpaperMachine/commit/cff4b970d5ca37b6a41ad0c9df457066a63f6466), [43b57e2](https://github.com/MMFoundation/WallpaperMachine/commit/43b57e20a158dd89018fc3313fc1c9d74dc002ac))
+- The menu bar panel scrolls on smaller screens, offers Mute All and opens the current wallpaper in the control panel with one click ([fb95c57](https://github.com/MMFoundation/WallpaperMachine/commit/fb95c5791725f8e2dc7c70d8dba95e98286a40bc))
+- Workshop wallpaper updates can be installed all at once from Settings, with links to each item's change notes and more comments to load ([067bc22](https://github.com/MMFoundation/WallpaperMachine/commit/067bc22bc3230bb03303c355797a8dd96bbddf4a))
+- Parallax scene wallpapers redraw only when the pointer moves and settle smoothly instead of drawing continuously ([3adbc3c](https://github.com/MMFoundation/WallpaperMachine/commit/3adbc3ce42355b2061a502e3fa2a947f427e9f9e))
+- Sound from web wallpapers now follows each display's volume and mute settings ([8864261](https://github.com/MMFoundation/WallpaperMachine/commit/88642617020f4a73fc24b0b8141231408c7e72c4))
+- Web wallpapers now use the app's language and receive middle and extra mouse buttons, and the experimental Lock screen follows your Performance render scale ([02f2f00](https://github.com/MMFoundation/WallpaperMachine/commit/02f2f00168356f73fc9f7419d75d84a789045bfb))
+- HDR MP4 videos keep their brightness information for tone mapping even when the video stream itself leaves it out ([25ec1ef](https://github.com/MMFoundation/WallpaperMachine/commit/25ec1ef32874b311448eec3f4b8e4c92cda5d7f0))
+- The inspector shows a wallpaper's compatibility check right away after download or import instead of scanning it each time ([605044e](https://github.com/MMFoundation/WallpaperMachine/commit/605044e6ead15e3b447b864128350eb9713ea705))
+
+#### Bug Fixes
+
+- Animated details on scene characters, such as eyebrows, no longer disappear when the artwork fills only part of its image (closes [#261](https://github.com/MMFoundation/WallpaperMachine/issues/261)) ([b6e540b](https://github.com/MMFoundation/WallpaperMachine/commit/b6e540b310aed17b55ddb30ff58ab9ff0f976887))
+- When the experimental Lock screen follows the desktop, characters or layers you picked with a wallpaper's buttons now stay as you chose them (closes [#262](https://github.com/MMFoundation/WallpaperMachine/issues/262)) ([4a1a3eb](https://github.com/MMFoundation/WallpaperMachine/commit/4a1a3eb802a11479622435a31348bcfee439b72f))
+- WebM videos with surround AAC or Vorbis sound now play their audio in stereo instead of staying silent ([25ec1ef](https://github.com/MMFoundation/WallpaperMachine/commit/25ec1ef32874b311448eec3f4b8e4c92cda5d7f0))
+- A warm Mac near the heat limit no longer keeps reloading scene and web wallpapers as heat reductions switch on and off ([411fc4a](https://github.com/MMFoundation/WallpaperMachine/commit/411fc4ad44f41cde30776b70c9b762ec6ec9b62e))
+- Unplugging your Mac no longer raises a lower render scale you set in Performance settings ([411fc4a](https://github.com/MMFoundation/WallpaperMachine/commit/411fc4ad44f41cde30776b70c9b762ec6ec9b62e))
+- The Now Playing bar and playlist popover stay readable in light themes, even with seasonal themes that use a dark bar ([33ebf7f](https://github.com/MMFoundation/WallpaperMachine/commit/33ebf7f16fbe239be4b7b6cc0d5e3ec351c1c20c))
+- Reopening the control panel brings back the collection you were viewing, and the Filter badge no longer counts the Favorites or collection view ([33ebf7f](https://github.com/MMFoundation/WallpaperMachine/commit/33ebf7f16fbe239be4b7b6cc0d5e3ec351c1c20c))
+- VoiceOver can reach the buttons on the Welcome screen, and Select turns into Done and clears the selection in one click ([33ebf7f](https://github.com/MMFoundation/WallpaperMachine/commit/33ebf7f16fbe239be4b7b6cc0d5e3ec351c1c20c))
+- The update window no longer shows an empty notes box when a release comes without release notes ([067bc22](https://github.com/MMFoundation/WallpaperMachine/commit/067bc22bc3230bb03303c355797a8dd96bbddf4a))
+
+### 简体中文
+
+WallpaperMachine 1.16.0 让你更好地决定壁纸何时以及如何切换，带来更智能的播放列表、自动切换和应用内更新，还能把整套配置带到其他 Mac
+
+#### 亮点
+
+- 现在可以直接在应用内更新 WallpaperMachine，查看本地化的更新说明，并可跳过某个版本或稍后提醒 ([b141142](https://github.com/MMFoundation/WallpaperMachine/commit/b141142fd319a9bb86d4d579a8c5af635c0b732d))
+- 可将一段视频或静态图片横跨多台显示器铺开，并把视频壁纸裁剪为只循环想要的片段 ([f0b8ccd](https://github.com/MMFoundation/WallpaperMachine/commit/f0b8ccd094e7f80ea38efa9b6d39b402e2fd162a))
+- 拔下电源、打开某个应用或连接显示器时，壁纸可自动切换；演示模式一键让桌面安静下来 ([a808bc8](https://github.com/MMFoundation/WallpaperMachine/commit/a808bc89d77851927f68b4fdf883b3b297aca83d), [3ddd8b8](https://github.com/MMFoundation/WallpaperMachine/commit/3ddd8b8722251b37a89548354913f997eac5c395))
+- 为壁纸评分、添加标签，再由智能播放列表按类型、标签、评分或收藏自动挑选播放内容 ([45b161c](https://github.com/MMFoundation/WallpaperMachine/commit/45b161c71dc7feb1c2b47e1bc94f53e3a25366cb))
+- 通过任意同步文件夹把壁纸列表、收藏、合集和布局带到另一台 Mac，或将整套配置打包为设置包分享 ([d971384](https://github.com/MMFoundation/WallpaperMachine/commit/d971384ba094de2a0a9b607b63b426f16f854d0e), [2aa8f61](https://github.com/MMFoundation/WallpaperMachine/commit/2aa8f61affebc525f2f4a355e30e4f526a5c10ec))
+
+#### 新功能
+
+- WallpaperMachine 现可在应用内检查已签名的更新，仅在你确认后安装；“关于”中可离线查看历史更新说明 ([b141142](https://github.com/MMFoundation/WallpaperMachine/commit/b141142fd319a9bb86d4d579a8c5af635c0b732d))
+- 单个视频或静态图片壁纸可无缝横跨两台或更多显示器，视频壁纸也可裁剪为只循环喜欢的片段 ([f0b8ccd](https://github.com/MMFoundation/WallpaperMachine/commit/f0b8ccd094e7f80ea38efa9b6d39b402e2fd162a))
+- 使用电池或某个应用运行时可自动切换到指定的壁纸或播放列表，各个桌面空间也能在定时计划之外保留自己的壁纸 ([a808bc8](https://github.com/MMFoundation/WallpaperMachine/commit/a808bc89d77851927f68b4fdf883b3b297aca83d))
+- 可为壁纸评分和添加标签，按类型、标签、评分或收藏创建智能播放列表，轮换时可跳过最近播放，或用睡眠定时器自动暂停 ([45b161c](https://github.com/MMFoundation/WallpaperMachine/commit/45b161c71dc7feb1c2b47e1bc94f53e3a25366cb))
+- 可通过 iCloud 云盘、Dropbox 或任意同步文件夹在多台 Mac 之间推送和拉取收藏、合集、评分、播放列表与布局，合并前可预览变更 ([d971384](https://github.com/MMFoundation/WallpaperMachine/commit/d971384ba094de2a0a9b607b63b426f16f854d0e))
+- 演示模式可一键暂停、静音并隐藏小组件；已存的显示器布局可在连接显示器时自动应用；新增快捷指令操作用于控制壁纸 ([3ddd8b8](https://github.com/MMFoundation/WallpaperMachine/commit/3ddd8b8722251b37a89548354913f997eac5c395))
+- 可选择壁纸切换方式，包括淡入淡出、滑动、缩放淡出、擦除或无过渡，并设置时长 ([7385939](https://github.com/MMFoundation/WallpaperMachine/commit/7385939263928bbb3b40ee857e6dfafdccc16dd8))
+- 在实验性锁定屏幕和屏幕保护程序上，每台显示器都可单独显示自己的壁纸或播放列表，与桌面互不影响 ([2aa8f61](https://github.com/MMFoundation/WallpaperMachine/commit/2aa8f61affebc525f2f4a355e30e4f526a5c10ec))
+- 可将选用的壁纸、预设、小组件和布局导出为设置包分享，导入时可预览并下载缺少的壁纸 ([2aa8f61](https://github.com/MMFoundation/WallpaperMachine/commit/2aa8f61affebc525f2f4a355e30e4f526a5c10ec))
+- 可按需查找重复和长期未用的壁纸，修复失效的引用并清理残留文件，删除的副本会移到废纸篓 ([147bde9](https://github.com/MMFoundation/WallpaperMachine/commit/147bde9972ccbcc0559d04987fa8bf8b9817995b))
+- 新增桌面小组件可显示正在播放的歌曲或你自己的贴纸图片，任何小组件都可只在指定壁纸或桌面空间上显示 ([6680b05](https://github.com/MMFoundation/WallpaperMachine/commit/6680b05a29b5cbafe0961e25884780235b992684))
+- 可通过链接或 ID 打开 pixiv 作品，在应用内浏览作者的作品，切换到收藏或关注动态，并自动将搜索翻译成日语 ([146f990](https://github.com/MMFoundation/WallpaperMachine/commit/146f990a9bbf6df1d50b600e57e28ea1b3c20099))
+- 可一次下载创意工坊合集或收藏中缺少的全部壁纸，并在“下载”中一并暂停、继续或取消队列 ([5b04411](https://github.com/MMFoundation/WallpaperMachine/commit/5b04411da0e28a7d85dd41181be2dd9450bba949))
+- 可为每张壁纸单独设置渲染比例和场景画质，并在“性能”设置中查看实时显存占用 ([605044e](https://github.com/MMFoundation/WallpaperMachine/commit/605044e6ead15e3b447b864128350eb9713ea705))
+- 可调整音频响应壁纸的灵敏度、噪声下限和平滑度，并让其只响应某个应用的声音而非全部声音 ([ec36637](https://github.com/MMFoundation/WallpaperMachine/commit/ec36637da8933cc5b05a34013ac97361b2a7c99b))
+- 带有自定义快捷方式设置的壁纸可打开你选择并批准的应用，或运行你指定的快捷指令 ([8864261](https://github.com/MMFoundation/WallpaperMachine/commit/88642617020f4a73fc24b0b8141231408c7e72c4))
+
+#### 改进
+
+- 壁纸检查器现可搜索属性、只显示已修改项、实时预览更改，并直接更新已存预设 ([abaec35](https://github.com/MMFoundation/WallpaperMachine/commit/abaec358ea919b8420ea6c7c310868e38a09a60a))
+- 点击标签即可筛选壁纸库、Steam 创意工坊或 pixiv 结果，生效的筛选条件会以可移除的标签显示在网格上方 ([b9b3c76](https://github.com/MMFoundation/WallpaperMachine/commit/b9b3c76afbb667df9bdf24d07ef6f1d8782d33ca))
+- “设置”中各处的壁纸选择统一为带缩略图、可搜索的选择器，自动规则也可停用或调整顺序 ([44e0cb1](https://github.com/MMFoundation/WallpaperMachine/commit/44e0cb1976c0902f49d5ec70819c3103d278b3d5))
+- 编辑桌面小组件更加方便，支持撤销与重做、样式拷贝与粘贴，并可预览每台已连接的显示器 ([cff4b97](https://github.com/MMFoundation/WallpaperMachine/commit/cff4b970d5ca37b6a41ad0c9df457066a63f6466), [43b57e2](https://github.com/MMFoundation/WallpaperMachine/commit/43b57e20a158dd89018fc3313fc1c9d74dc002ac))
+- 菜单栏面板在较小屏幕上可滚动，新增全部静音，并可一键在控制面板中打开当前壁纸 ([fb95c57](https://github.com/MMFoundation/WallpaperMachine/commit/fb95c5791725f8e2dc7c70d8dba95e98286a40bc))
+- 可在“设置”中一次安装全部创意工坊壁纸更新，并可打开各项目的更新说明链接、加载更多评论 ([067bc22](https://github.com/MMFoundation/WallpaperMachine/commit/067bc22bc3230bb03303c355797a8dd96bbddf4a))
+- 视差场景壁纸仅在指针移动时重绘，并会平稳停下，不再持续绘制 ([3adbc3c](https://github.com/MMFoundation/WallpaperMachine/commit/3adbc3ce42355b2061a502e3fa2a947f427e9f9e))
+- 网页壁纸发出的声音现在会遵循每台显示器的音量和静音设置 ([8864261](https://github.com/MMFoundation/WallpaperMachine/commit/88642617020f4a73fc24b0b8141231408c7e72c4))
+- 网页壁纸现在会使用应用的语言并接收鼠标中键和额外按键，实验性锁定屏幕也会遵循“性能”中的渲染比例 ([02f2f00](https://github.com/MMFoundation/WallpaperMachine/commit/02f2f00168356f73fc9f7419d75d84a789045bfb))
+- 即使视频流本身缺少相关信息，HDR MP4 视频也能保留亮度信息用于色调映射 ([25ec1ef](https://github.com/MMFoundation/WallpaperMachine/commit/25ec1ef32874b311448eec3f4b8e4c92cda5d7f0))
+- 下载或导入后，检查器会立即显示壁纸的兼容性检查结果，无需每次重新扫描 ([605044e](https://github.com/MMFoundation/WallpaperMachine/commit/605044e6ead15e3b447b864128350eb9713ea705))
+
+#### 问题修复
+
+- 当图像只占纹理一部分时，场景角色的动画细节（如眉毛）不再消失 (closes [#261](https://github.com/MMFoundation/WallpaperMachine/issues/261)) ([b6e540b](https://github.com/MMFoundation/WallpaperMachine/commit/b6e540b310aed17b55ddb30ff58ab9ff0f976887))
+- 实验性锁定屏幕跟随桌面时，你通过壁纸按钮选择的角色或图层现在会保持原样 (closes [#262](https://github.com/MMFoundation/WallpaperMachine/issues/262)) ([4a1a3eb](https://github.com/MMFoundation/WallpaperMachine/commit/4a1a3eb802a11479622435a31348bcfee439b72f))
+- 带环绕声 AAC 或 Vorbis 音轨的 WebM 视频现在会以立体声播放，不再无声 ([25ec1ef](https://github.com/MMFoundation/WallpaperMachine/commit/25ec1ef32874b311448eec3f4b8e4c92cda5d7f0))
+- 接近温度上限的 Mac 不再因降温措施反复开关而频繁重新加载场景和网页壁纸 ([411fc4a](https://github.com/MMFoundation/WallpaperMachine/commit/411fc4ad44f41cde30776b70c9b762ec6ec9b62e))
+- 拔下电源后，你在“性能”设置中设定的较低渲染比例不会再被调高 ([411fc4a](https://github.com/MMFoundation/WallpaperMachine/commit/411fc4ad44f41cde30776b70c9b762ec6ec9b62e))
+- 即使季节主题使用深色栏，“正在播放”栏和播放列表弹出窗口在浅色主题下也保持清晰可读 ([33ebf7f](https://github.com/MMFoundation/WallpaperMachine/commit/33ebf7f16fbe239be4b7b6cc0d5e3ec351c1c20c))
+- 重新打开控制面板时会恢复之前浏览的合集，筛选按钮的标记也不再把收藏或合集视图计算在内 ([33ebf7f](https://github.com/MMFoundation/WallpaperMachine/commit/33ebf7f16fbe239be4b7b6cc0d5e3ec351c1c20c))
+- VoiceOver 现可访问欢迎界面中的按钮，“选择”按钮会变为“完成”，一键清除所选内容 ([33ebf7f](https://github.com/MMFoundation/WallpaperMachine/commit/33ebf7f16fbe239be4b7b6cc0d5e3ec351c1c20c))
+- 当某个版本没有更新说明时，更新窗口不再显示空白的说明框 ([067bc22](https://github.com/MMFoundation/WallpaperMachine/commit/067bc22bc3230bb03303c355797a8dd96bbddf4a))
+
+### 한국어
+
+WallpaperMachine 1.16.0에서는 더 똑똑한 재생목록, 자동 전환, 앱 내 업데이트로 배경화면이 언제 어떻게 바뀔지 더 세밀하게 정하고, 설정을 다른 Mac으로 옮길 수 있습니다
+
+#### 주요 변경 사항
+
+- 이제 앱 안에서 바로 WallpaperMachine을 업데이트하고, 내 언어로 된 릴리스 노트를 보며 버전을 건너뛰거나 나중에 알림을 받을 수 있습니다 ([b141142](https://github.com/MMFoundation/WallpaperMachine/commit/b141142fd319a9bb86d4d579a8c5af635c0b732d))
+- 하나의 비디오나 정지 이미지를 여러 디스플레이에 걸쳐 펼치고, 비디오 배경화면을 원하는 구간만 반복되도록 자를 수 있습니다 ([f0b8ccd](https://github.com/MMFoundation/WallpaperMachine/commit/f0b8ccd094e7f80ea38efa9b6d39b402e2fd162a))
+- 전원을 뽑거나 앱을 열거나 디스플레이를 연결하면 배경화면이 자동으로 바뀌고, 프레젠테이션 모드로 한 번에 모든 것을 조용히 할 수 있습니다 ([a808bc8](https://github.com/MMFoundation/WallpaperMachine/commit/a808bc89d77851927f68b4fdf883b3b297aca83d), [3ddd8b8](https://github.com/MMFoundation/WallpaperMachine/commit/3ddd8b8722251b37a89548354913f997eac5c395))
+- 배경화면에 별점과 태그를 붙이면 스마트 재생목록이 유형, 태그, 별점, 즐겨찾기에 따라 재생할 항목을 골라 줍니다 ([45b161c](https://github.com/MMFoundation/WallpaperMachine/commit/45b161c71dc7feb1c2b47e1bc94f53e3a25366cb))
+- 동기화 폴더를 통해 배경화면 목록, 즐겨찾기, 컬렉션, 레이아웃을 다른 Mac으로 옮기거나 설정을 설정 팩으로 공유할 수 있습니다 ([d971384](https://github.com/MMFoundation/WallpaperMachine/commit/d971384ba094de2a0a9b607b63b426f16f854d0e), [2aa8f61](https://github.com/MMFoundation/WallpaperMachine/commit/2aa8f61affebc525f2f4a355e30e4f526a5c10ec))
+
+#### 새로운 기능
+
+- WallpaperMachine이 앱 안에서 서명된 업데이트를 확인하고 사용자가 선택할 때만 설치하며, 정보에서 지난 릴리스 노트를 오프라인으로 볼 수 있습니다 ([b141142](https://github.com/MMFoundation/WallpaperMachine/commit/b141142fd319a9bb86d4d579a8c5af635c0b732d))
+- 하나의 비디오 또는 정지 이미지 배경화면을 두 대 이상의 디스플레이에 끊김 없이 펼치고, 비디오 배경화면을 마음에 드는 구간만 반복되도록 자를 수 있습니다 ([f0b8ccd](https://github.com/MMFoundation/WallpaperMachine/commit/f0b8ccd094e7f80ea38efa9b6d39b402e2fd162a))
+- 배터리 사용 중이거나 특정 앱이 실행 중일 때 지정한 배경화면이나 재생목록으로 바꾸고, 일정과 함께 Spaces별 배경화면을 유지할 수 있습니다 ([a808bc8](https://github.com/MMFoundation/WallpaperMachine/commit/a808bc89d77851927f68b4fdf883b3b297aca83d))
+- 배경화면에 별점과 태그를 달고, 유형·태그·별점·즐겨찾기로 스마트 재생목록을 만들며, 최근 항목을 건너뛰거나 취침 타이머로 자동 일시 정지할 수 있습니다 ([45b161c](https://github.com/MMFoundation/WallpaperMachine/commit/45b161c71dc7feb1c2b47e1bc94f53e3a25366cb))
+- iCloud Drive, Dropbox 등 동기화 폴더를 통해 즐겨찾기, 컬렉션, 별점, 재생목록, 레이아웃을 여러 Mac 간에 보내고 받으며, 병합 전에 변경 사항을 미리 볼 수 있습니다 ([d971384](https://github.com/MMFoundation/WallpaperMachine/commit/d971384ba094de2a0a9b607b63b426f16f854d0e))
+- 프레젠테이션 모드로 한 번에 일시 정지, 음소거, 위젯 숨기기를 하고, 저장한 디스플레이 레이아웃이 연결 시 자동 적용되며, 새 단축어 동작으로 배경화면을 제어합니다 ([3ddd8b8](https://github.com/MMFoundation/WallpaperMachine/commit/3ddd8b8722251b37a89548354913f997eac5c395))
+- 배경화면이 바뀌는 방식을 페이드, 슬라이드, 줌 페이드, 와이프 또는 전환 없음 중에서 고르고 길이를 설정할 수 있습니다 ([7385939](https://github.com/MMFoundation/WallpaperMachine/commit/7385939263928bbb3b40ee857e6dfafdccc16dd8))
+- 실험적 잠금 화면과 화면 보호기에서 디스플레이마다 데스크탑과 별도로 자체 배경화면이나 재생목록을 표시할 수 있습니다 ([2aa8f61](https://github.com/MMFoundation/WallpaperMachine/commit/2aa8f61affebc525f2f4a355e30e4f526a5c10ec))
+- 선택한 배경화면, 프리셋, 위젯, 레이아웃을 설정 팩으로 내보내 공유하고, 가져올 때 미리 보며 없는 배경화면을 내려받을 수 있습니다 ([2aa8f61](https://github.com/MMFoundation/WallpaperMachine/commit/2aa8f61affebc525f2f4a355e30e4f526a5c10ec))
+- 필요할 때 중복되거나 오래 쓰지 않은 배경화면을 찾고, 끊어진 참조를 고치며 남은 파일을 정리하고, 삭제한 사본은 휴지통으로 이동합니다 ([147bde9](https://github.com/MMFoundation/WallpaperMachine/commit/147bde9972ccbcc0559d04987fa8bf8b9817995b))
+- 새 데스크탑 위젯으로 재생 중인 곡이나 직접 고른 스티커 이미지를 표시하고, 모든 위젯을 특정 배경화면이나 Spaces에서만 보이게 할 수 있습니다 ([6680b05](https://github.com/MMFoundation/WallpaperMachine/commit/6680b05a29b5cbafe0961e25884780235b992684))
+- URL이나 ID로 pixiv 작품을 열고, 앱에서 작가의 작품을 둘러보며, 북마크와 팔로우 피드로 전환하고, 검색어를 자동으로 일본어로 번역할 수 있습니다 ([146f990](https://github.com/MMFoundation/WallpaperMachine/commit/146f990a9bbf6df1d50b600e57e28ea1b3c20099))
+- 창작마당 컬렉션이나 즐겨찾기에서 없는 배경화면을 한 번에 내려받고, 다운로드에서 대기열 전체를 일시 정지, 재개, 취소할 수 있습니다 ([5b04411](https://github.com/MMFoundation/WallpaperMachine/commit/5b04411da0e28a7d85dd41181be2dd9450bba949))
+- 배경화면마다 렌더링 배율과 장면 품질을 따로 정하고, 성능 설정에서 실시간 그래픽 메모리 사용량을 볼 수 있습니다 ([605044e](https://github.com/MMFoundation/WallpaperMachine/commit/605044e6ead15e3b447b864128350eb9713ea705))
+- 오디오 반응 배경화면의 감도, 노이즈 하한, 부드러움을 조절하고, 전체 소리 대신 특정 앱의 소리에만 반응하게 할 수 있습니다 ([ec36637](https://github.com/MMFoundation/WallpaperMachine/commit/ec36637da8933cc5b05a34013ac97361b2a7c99b))
+- 사용자 지정 바로 가기 설정이 있는 배경화면에서 직접 고르고 승인한 앱을 열거나 단축어를 실행할 수 있습니다 ([8864261](https://github.com/MMFoundation/WallpaperMachine/commit/88642617020f4a73fc24b0b8141231408c7e72c4))
+
+#### 개선 사항
+
+- 배경화면 속성 패널에서 속성을 검색하고, 수정한 항목만 보며, 변경 사항을 실시간으로 미리 보고, 저장한 프리셋을 바로 갱신할 수 있습니다 ([abaec35](https://github.com/MMFoundation/WallpaperMachine/commit/abaec358ea919b8420ea6c7c310868e38a09a60a))
+- 태그를 클릭하면 보관함, Steam 창작마당, pixiv 결과가 필터링되고, 적용된 필터는 격자 위에 바로 지울 수 있는 칩으로 표시됩니다 ([b9b3c76](https://github.com/MMFoundation/WallpaperMachine/commit/b9b3c76afbb667df9bdf24d07ef6f1d8782d33ca))
+- 설정 곳곳의 배경화면 선택이 미리보기와 검색을 갖춘 하나의 선택기로 통합되고, 자동 규칙을 끄거나 순서를 바꿀 수 있습니다 ([44e0cb1](https://github.com/MMFoundation/WallpaperMachine/commit/44e0cb1976c0902f49d5ec70819c3103d278b3d5))
+- 실행 취소와 다시 실행, 스타일 복사와 붙여넣기, 연결된 디스플레이별 미리보기로 데스크탑 위젯 편집이 쉬워졌습니다 ([cff4b97](https://github.com/MMFoundation/WallpaperMachine/commit/cff4b970d5ca37b6a41ad0c9df457066a63f6466), [43b57e2](https://github.com/MMFoundation/WallpaperMachine/commit/43b57e20a158dd89018fc3313fc1c9d74dc002ac))
+- 메뉴 막대 패널이 작은 화면에서 스크롤되고, 모두 음소거를 제공하며, 클릭 한 번으로 현재 배경화면을 제어판에서 엽니다 ([fb95c57](https://github.com/MMFoundation/WallpaperMachine/commit/fb95c5791725f8e2dc7c70d8dba95e98286a40bc))
+- 설정에서 창작마당 배경화면 업데이트를 한 번에 설치하고, 항목별 변경 내역 링크를 열며 댓글을 더 불러올 수 있습니다 ([067bc22](https://github.com/MMFoundation/WallpaperMachine/commit/067bc22bc3230bb03303c355797a8dd96bbddf4a))
+- 시차 장면 배경화면이 포인터가 움직일 때만 다시 그려지고, 계속 그리는 대신 부드럽게 멈춥니다 ([3adbc3c](https://github.com/MMFoundation/WallpaperMachine/commit/3adbc3ce42355b2061a502e3fa2a947f427e9f9e))
+- 웹 배경화면에서 나오는 소리가 이제 디스플레이별 음량과 음소거 설정을 따릅니다 ([8864261](https://github.com/MMFoundation/WallpaperMachine/commit/88642617020f4a73fc24b0b8141231408c7e72c4))
+- 웹 배경화면이 앱의 언어를 따르고 마우스 가운데 및 추가 버튼을 받으며, 실험적 잠금 화면도 성능의 렌더링 배율을 따릅니다 ([02f2f00](https://github.com/MMFoundation/WallpaperMachine/commit/02f2f00168356f73fc9f7419d75d84a789045bfb))
+- HDR MP4 비디오는 비디오 스트림에 정보가 없어도 톤 매핑을 위한 밝기 정보를 유지합니다 ([25ec1ef](https://github.com/MMFoundation/WallpaperMachine/commit/25ec1ef32874b311448eec3f4b8e4c92cda5d7f0))
+- 내려받거나 가져온 뒤에는 속성 패널이 매번 다시 검사하지 않고 배경화면의 호환성 검사 결과를 바로 보여 줍니다 ([605044e](https://github.com/MMFoundation/WallpaperMachine/commit/605044e6ead15e3b447b864128350eb9713ea705))
+
+#### 버그 수정
+
+- 그림이 이미지 일부만 차지할 때 장면 캐릭터의 눈썹 같은 애니메이션 세부 요소가 더 이상 사라지지 않습니다 (closes [#261](https://github.com/MMFoundation/WallpaperMachine/issues/261)) ([b6e540b](https://github.com/MMFoundation/WallpaperMachine/commit/b6e540b310aed17b55ddb30ff58ab9ff0f976887))
+- 실험적 잠금 화면이 데스크탑을 따를 때, 배경화면 버튼으로 고른 캐릭터나 레이어가 이제 선택한 그대로 유지됩니다 (closes [#262](https://github.com/MMFoundation/WallpaperMachine/issues/262)) ([4a1a3eb](https://github.com/MMFoundation/WallpaperMachine/commit/4a1a3eb802a11479622435a31348bcfee439b72f))
+- 서라운드 AAC 또는 Vorbis 음성이 담긴 WebM 비디오가 이제 소리 없이 재생되지 않고 스테레오로 재생됩니다 ([25ec1ef](https://github.com/MMFoundation/WallpaperMachine/commit/25ec1ef32874b311448eec3f4b8e4c92cda5d7f0))
+- 발열 한계 근처의 Mac에서 발열 감소가 켜졌다 꺼졌다 하며 장면 및 웹 배경화면을 반복해서 다시 불러오는 문제가 더 이상 없습니다 ([411fc4a](https://github.com/MMFoundation/WallpaperMachine/commit/411fc4ad44f41cde30776b70c9b762ec6ec9b62e))
+- Mac의 전원을 뽑아도 성능 설정에서 낮게 지정한 렌더링 배율이 더 이상 올라가지 않습니다 ([411fc4a](https://github.com/MMFoundation/WallpaperMachine/commit/411fc4ad44f41cde30776b70c9b762ec6ec9b62e))
+- 계절 테마가 어두운 막대를 쓰더라도 지금 재생 중 막대와 재생목록 팝오버가 밝은 테마에서 잘 읽힙니다 ([33ebf7f](https://github.com/MMFoundation/WallpaperMachine/commit/33ebf7f16fbe239be4b7b6cc0d5e3ec351c1c20c))
+- 제어판을 다시 열면 보던 컬렉션이 복원되고, 필터 배지가 더 이상 즐겨찾기나 컬렉션 보기를 개수에 포함하지 않습니다 ([33ebf7f](https://github.com/MMFoundation/WallpaperMachine/commit/33ebf7f16fbe239be4b7b6cc0d5e3ec351c1c20c))
+- VoiceOver로 시작 화면의 버튼에 접근할 수 있고, 선택 버튼이 완료로 바뀌어 한 번에 선택을 해제합니다 ([33ebf7f](https://github.com/MMFoundation/WallpaperMachine/commit/33ebf7f16fbe239be4b7b6cc0d5e3ec351c1c20c))
+- 릴리스 노트가 없는 버전에서 업데이트 창에 빈 노트 상자가 더 이상 표시되지 않습니다 ([067bc22](https://github.com/MMFoundation/WallpaperMachine/commit/067bc22bc3230bb03303c355797a8dd96bbddf4a))
+
 ## [1.15.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.14.0...v1.15.0) (2026-11-24)
 
 ### English
