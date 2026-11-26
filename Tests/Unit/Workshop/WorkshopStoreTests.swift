@@ -566,20 +566,13 @@ final class WorkshopStoreTests: XCTestCase {
 
     store.search()
     let refresh = try await next("GetCollectionDetails")
-    store.loadPage(2)
-    // Keep the first response at Steam while page 2 loads. A second HTTP request is unexpected.
-    let inbox = fixture.inbox
-    let duplicate = XCTNSPredicateExpectation(
-      predicate: NSPredicate { _, _ in inbox.hasRequest }, object: nil)
-    duplicate.isInverted = true
-    await fulfillment(of: [duplicate], timeout: 0.5)
-
-    // Only the pending refresh receives this error. With no successful ID list to cache, page 2
-    // can report that error only if it shared the refresh. A later lookup would reach Steam again.
     let offline = URLError(.notConnectedToInternet)
+    // Both actions happen in the same turn. Page 2 must see the pending refresh's failure
+    // even if its page reader first runs after Steam has answered.
+    store.loadPage(2)
     refresh.fail(offline)
     try await waitUntil { !store.isLoading || fixture.inbox.hasRequest }
-    guard !inbox.hasRequest else {
+    guard !fixture.inbox.hasRequest else {
       return XCTFail("Page 2 sent another request while the refresh was in flight")
     }
     XCTAssertEqual(store.failedRequest?.page, 2)

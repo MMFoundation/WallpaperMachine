@@ -305,6 +305,8 @@ panel's `requestDownload` refuses it. Opening one asks Steam's public
 `ISteamRemoteStorage/GetCollectionDetails` for its items in the collection's own
 order. Discover keeps these IDs with the collection's cached pages. Paging and
 next-page prefetch share the same list and request item details 30 at a time.
+If Steam fails to return the list during a page change, the selected page shows
+that failure. Retry fetches the list again for that page.
 Back restores the list with its pages. Refresh reads the collection again so
 changes to its membership or order appear. Closing the panel releases the lists
 for both the current collection and those in Back history.

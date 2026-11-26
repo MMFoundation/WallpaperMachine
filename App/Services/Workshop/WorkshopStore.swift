@@ -1311,11 +1311,16 @@ final class WorkshopStore {
 
   /// One Steam page of `query`. When Steam refuses the held session on a public list, the ended
   /// session is forgotten and the page is read as anyone instead of failing.
-  private func readPage(_ number: Int, query: WorkshopQuery) async throws -> WorkshopPage {
+  private func readPage(
+    _ number: Int, query: WorkshopQuery, pendingMembership: Task<[String], Error>? = nil
+  ) async throws -> WorkshopPage {
     let account = try await readingSession(for: query)
     // Replaced while a saved sign-in or a renewal was awaited: Steam is not asked at all.
     try Task.checkCancellation()
-    let members: @Sendable (String) async throws -> [String] = { try await self.collectionIDs($0) }
+    let members: @Sendable (String) async throws -> [String] = { id in
+      if let pendingMembership { return try await pendingMembership.value }
+      return try await self.collectionIDs(id)
+    }
     do {
       let page = try await service.page(for: query, page: number, account: account, collectionIDs: members)
       if let account { rememberSteamWebPersonaName(page.accountName, for: account) }
@@ -1335,14 +1340,17 @@ final class WorkshopStore {
     guard cacheID == self.cacheID else { return Task { throw CancellationError() } }
     if let task = steamFetches[request] { return task }
     let (number, query) = (request.page, request.query)
-    let task = Task { [weak self] in
+    // A page requested during a membership read shares its outcome even if Steam answers
+    // before this page gets a turn to run. A retry requested after failure gets a fresh read.
+    let task = Task { [weak self, pendingMembership = collectionFetch] in
       defer { if let self, self.cacheID == cacheID { self.steamFetches[request] = nil } }
       guard let self else { throw CancellationError() }
+      try Task.checkCancellation()
       let result: WorkshopPage
       if Self.fillsPages(query) {
         result = try await self.filledPage(number, query: query, cacheID: cacheID)
       } else {
-        result = try await self.readPage(number, query: query)
+        result = try await self.readPage(number, query: query, pendingMembership: pendingMembership)
       }
       try Task.checkCancellation()
       // Only the cache that asked keeps the page; a superseded fetch is simply dropped.
@@ -1478,11 +1486,12 @@ final class WorkshopStore {
       return
     }
     isLoading = true
+    let fetch = fetchSteamPage(request, cacheID: cacheID)
     searchTask = Task { [weak self] in
       guard let self else { return }
       defer { if self.generation == token { self.isLoading = false } }
       do {
-        let result = try await self.fetchSteamPage(request, cacheID: cacheID).value
+        let result = try await fetch.value
         guard self.generation == token, !Task.isCancelled else { return }
         self.publish(result, for: request, cacheID: cacheID)
       } catch {
