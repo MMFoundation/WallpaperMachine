@@ -624,8 +624,9 @@ artifact.
    before anything is built: a missing secret, a certificate that does not import
    (1.9.0's failure, which then came after the whole build) or a key Apple refuses
    fails in about a minute. Xcode signs ad hoc, so the identity changes nothing there;
-4. runs `prepare-build` (below), restoring both caches and reusing the renderer build
-   for every source unchanged since it (`reuse-renderer-build`);
+4. runs `prepare-build` (below), restoring the C++ and renderer caches and reusing the
+   renderer build for every unchanged source (`reuse-renderer-build`). If the checkout
+   supports it, Build also restores a compatible Release compiler snapshot;
 5. runs `python3 scripts/build.py --configuration Release --no-app-icon`, which
    leaves `AppIcon.icon` out of the Xcode build. Sparkle releases also pass the
    **public** key as an explicit Xcode setting; the compiler never sees the private key;
@@ -728,6 +729,24 @@ past GitHub's 10 GB cache limit, which evicts the `main` entries releases need; 
 2026-11-04 CodeQL's per-push C++ object caches did the same (10.5 GB in 108 entries,
 most of them CodeQL's). A release only restores: [Warm caches](#warm-caches-warm-cachesyml)
 writes the entries it reads, once a day, so they are at most a day behind `main`.
+
+**Release compiler cache.** On macOS 15, Warm caches also builds the optimized app
+without the icon to populate Xcode's content-addressed compiler store. Its snapshot
+key includes the macOS major, CPU architecture, Xcode build, SDK build and a digest
+of the compiler inputs. An exact snapshot needs no new build or upload. Build can
+also restore the most recent snapshot for the same toolchain: Xcode checks the inputs
+of each job, so changing a Swift file can still require a full optimized module compile.
+Changing only the release version or notes doesn't require a new snapshot.
+
+The snapshot contains only the compiler store, never DerivedData, the app, signing
+credentials or a packaged release. The store has a 1 GB limit; Warm caches packs its
+sparse files with macOS tar and skips uploads over 320 MiB compressed. Only Warm caches
+on `main` writes these entries. Release and Rehearsal restore only; a missing or
+unreadable archive, a download segment stuck for two minutes, or an older checkout
+without the cache action takes the usual cold build path. Linking, bundle metadata,
+signing and notarization run as before.
+Compare Cargo and Xcode wall times and the compiler hit/miss counts in the build's
+Actions summary; runner queue time and Apple's notary round trips are separate.
 
 **Reusing the renderer build.** A checkout gives every file the current time, and cargo
 and CMake decide what to rebuild by comparing times, so a restored `Renderer/target`
@@ -835,8 +854,11 @@ upload), so its renderer build is at most a day behind `main` and it rebuilds on
 what changed since. Reading every entry also keeps GitHub from evicting one nobody
 read for seven days. Caches saved on `main` are readable from every ref, including
 the tags Release builds. It publishes nothing. After a change to the caches or to
-`scripts/source_times.py` reaches `main`, run it once by hand, so the next release
-does not rebuild the renderer from an entry without a record.
+`scripts/source_times.py` reaches `main`, run it once by hand. The macOS 15 job
+also checks the Release compiler snapshot: if absent it builds with `--swift-only`
+against the already-built renderer; if present it skips the app build. After changing
+the release path, follow the warm-up with a [Rehearsal](#rehearsal-rehearsalyml) to
+measure the build and verify the signed artifacts before tagging.
 
 ### Supporters (`supporters.yml`)
 

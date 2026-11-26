@@ -23,6 +23,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import time
 
 from lib.glyphs import markers
 from lib.homebrew import RENDERER_PACKAGES
@@ -46,7 +47,21 @@ APP_ICON_PLIST = "partial-info.plist"
 def run(args, cwd=ROOT, env=None, stage="build"):
     print(MARK.step, " ".join(map(str, args)), flush=True)
     log = BUILD_ARTIFACTS / f"{stage}-{STAMP}.log"
+    start = time.monotonic()
     completed, _ = run_quiet(args, log, cwd=cwd, env=env, verbose=VERBOSE)
+    if (summary := os.environ.get("GITHUB_STEP_SUMMARY")) and (stage == "cargo" or stage.startswith("xcodebuild-")):
+        line = f"{stage}: {time.monotonic() - start:.1f}s"
+        if stage.startswith("xcodebuild-"):
+            hits = misses = 0
+            with log.open(errors="replace") as lines:
+                for entry in lines:
+                    hits += entry.startswith("Cache hit")
+                    misses += entry.startswith("Cache miss")
+            if hits or misses:
+                line += f" (compiler cache hits: {hits}, misses: {misses})"
+        print(line, flush=True)
+        with open(summary, "a") as output:
+            output.write(f"- {line}\n")
     if completed.returncode != 0:
         print(f"{MARK.missing} {stage} failed (exit {completed.returncode}); full log: {log}", flush=True)
         raise subprocess.CalledProcessError(completed.returncode, list(map(str, args)))
@@ -153,6 +168,8 @@ def main():
     parser.add_argument("--xcode-setting", action="append", default=[], metavar="NAME=VALUE",
         help="Pass a build setting to xcodebuild; repeatable (CodeQL's traced Swift build uses it).")
     parser.add_argument("--verbose", action="store_true", help="Echo every tool line instead of only errors.")
+    parser.add_argument("--compiler-cache", type=Path, metavar="DIR",
+        help="Reuse Xcode compiler jobs in DIR without restoring derived data or finished products.")
     args = parser.parse_args()
     global VERBOSE
     VERBOSE = args.verbose
@@ -195,8 +212,15 @@ def main():
         # The asset catalog is still compiled; only the .icon is left out, and with it
         # the app-icon name actool would otherwise look for in the catalog.
         settings = [f"EXCLUDED_SOURCE_FILE_NAMES={APP_ICON.name}", "ASSETCATALOG_COMPILER_APPICON_NAME="]
+    options = []
+    if args.compiler_cache:
+        cache = args.compiler_cache.resolve()
+        cache.mkdir(parents=True, exist_ok=True)
+        options.append("-showBuildTimingSummary")
+        settings += ["COMPILATION_CACHE_ENABLE_CACHING=YES", f"COMPILATION_CACHE_CAS_PATH={cache}",
+                     "COMPILATION_CACHE_LIMIT_SIZE=1G"]
     settings += args.xcode_setting
-    run(["xcodebuild", "-project", XCODEPROJ.name, "-scheme", "WallpaperMachine", "-configuration", args.configuration, "-derivedDataPath", BUILD, "build", *settings], env=env, stage=f"xcodebuild-{args.configuration}")
+    run(["xcodebuild", "-project", XCODEPROJ.name, "-scheme", "WallpaperMachine", "-configuration", args.configuration, "-derivedDataPath", BUILD, *options, "build", *settings], env=env, stage=f"xcodebuild-{args.configuration}")
     if compiled_icon:
         install_app_icon(app_bundle(args.configuration), compiled_icon)
     print(f"{MARK.ok} Built {PRODUCTS / args.configuration / 'WallpaperMachine.app'}")

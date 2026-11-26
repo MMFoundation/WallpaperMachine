@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-25 — Lock-screen and screen-saver live media integration and audio response (#258)
+
+Forwarded Now Playing media state and 224-band system-audio spectra from the main app to the sandboxed lock-screen/screen-saver extension for Scene and Web wallpapers while keeping previews, unlocked desktop settle surfaces and plain videos excluded.
+
+- `python3 scripts/build.py --renderer-only` — exit 0; rebuilt workspace and regenerated `App/Bridge/Generated/`
+- `python3 scripts/check_rust.py` — exit 0; core 436 passed (5 desktop-window excluded), bridge 992 passed, core-integration 20 passed, shader all suites passed, 0 failed; desktop/media/network opt-ins disabled
+- `python3 scripts/check_renderer.py` — exit 0; all C++/Metal suites passed (audio_tests 80/80, SpectrumExport128Test 11/11), 12/12 generated scenes pixels_equal=True, reload cycles 0; 7 local-corpus asset checks skipped
+- `python3 scripts/test.py` — exit 0; 36/36 Python suites OK, Swift unit/integration 5172 passed, 0 failed, 70 skipped of 5242 (including LockScreenLiveFeedTests 6/6 and ScreenSaverWebSurfaceTests 17/17)
+- Unverified offscreen: live macOS 26+ lock-screen/screen-saver presentation, real MediaRemote/AppleScript players and live CoreAudio tap across lock/unlock/display sleep require an authorized manual check; Release app was not rebuilt
+
 ## 2026-11-24 — Ignore WallpaperAgent LastUse updates and isolate lock-screen transient retries (#259)
 
 Fix for #259: SystemWallpaperStore ignores WallpaperAgent LastUse timestamp advances when confirming or replaying Desktop/Idle/Linked choices, and LockScreenWallpaperService resets transient failure budgets on new targets while keeping unrelated refreshes from bypassing back-off.

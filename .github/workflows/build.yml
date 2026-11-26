@@ -214,14 +214,27 @@ jobs:
           save-object-cache: "false"
           reuse-renderer-build: "true"
 
+      - name: Restore the Release compiler cache
+        if: hashFiles('.github/actions/release-compiler-cache/action.yml') != ''
+        id: compiler
+        continue-on-error: true
+        uses: ./.github/actions/release-compiler-cache
+
       - name: Build
         env:
+          COMPILER_CACHE: ${{ steps.compiler.outputs.directory }}
           UPDATE_FORMAT: ${{ steps.format.outputs.name }}
           WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY: ${{ vars.WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           xcodebuild -version
           args=(--configuration Release --no-app-icon)
+          if [ -n "$COMPILER_CACHE" ]; then
+            args+=(--compiler-cache "$COMPILER_CACHE")
+            echo "Release compiler snapshot: restored." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Release compiler snapshot: cold build." >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ "$UPDATE_FORMAT" = sparkle ]; then
             args+=(--xcode-setting "WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY=$WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY")
           fi

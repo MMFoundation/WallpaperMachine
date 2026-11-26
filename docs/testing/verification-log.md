@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-26 — Prewarm the optimized Xcode compiler outside the release path
+
+- The five successful Version runs v1.11.1–v1.15.0 had a median elapsed time of 24m16s. For v1.15.0, Xcode took 11m19s; about five minutes waiting for the macOS runner and 1m41s for packaging/notarization are not addressed by a compiler cache.
+- Headless arm64 replay on Xcode 27.2 beta (27B5019j), using the workflow's warm and unpack commands, existing renderer archive and pinned Sparkle dependency, and fresh DerivedData each time: cold Release 221.1s (0/174 hits); a version, history and public-key change restored all 174 jobs in 9.6s. The 174.3 MiB snapshot unpacked in 1s locally; no GitHub transfer or runner queue was measured.
+- One Swift edit in a disposable copy of the extension caused one miss: 173 hits, 16.5s. Checked the linked extension for the new and not the old string; checked the new marketing/build versions in both plists, the current public key, feed URL, bundled changelog and fresh ad-hoc code signatures. Neither build used a cached app.
+- Ran the unpack step with a damaged archive: no compiler directory was handed to Build. Exercised legacy, cold Sparkle and warm Sparkle build arguments, identical keys across version bumps and separate prefixes across Xcode builds. Actionlint and shellcheck accepted the changed workflow paths with actionlint 1.7.12's known exception for the unchanged publish concurrency option (queue: max).
+- python3 scripts/test.py --serial (the hosted native CI mode): all 747 Python tests and 5,408 native tests passed; 70 native cases skipped. Two preceding parallel runs failed different pre-existing timer-order, GPU sampling and SteamCMD fixture PID assertions; the timer-order case also passed in isolation. No assertion, selector, signing or publication gate was changed to get a pass.
+- A hosted macOS 15/Xcode 26.3 warm-up, nonpublishing signing/notarization rehearsal, and end-to-end hosted timings still require the workflow changes on GitHub; no release or tag was created.
+
 ## 2026-11-26 — Signed Sparkle software updates
 
 - python3 scripts/test.py: all Python modules passed; 5,408 native tests passed, 0 failed, 70 skipped. The first run hit Git maintenance during temporary repository cleanup; the passing run disabled automatic Git maintenance for the test process only.
@@ -102,13 +111,3 @@ entry's recorded result is not allowed.
 - python3 scripts/test.py -> PASS (36/36 Python suites OK; 5207 passed, 0 failed, 70 skipped of 5277 native tests in 162s).
 - Localization: App/Resources/Localizable.xcstrings edited as text (+22 keys across en/ja/ko/pt-BR/zh-Hans/zh-Hant, -2 superseded keys); test_localization_catalogs and test_panel_localization passed.
 - Not run: Release .app build (not requested), desktop UI tests (--ui), live Steam network/media opt-ins, and live macOS visual inspection of Halloween Light popover/multi-display widgets/switch transitions.
-
-## 2026-11-25 — Lock-screen and screen-saver live media integration and audio response (#258)
-
-Forwarded Now Playing media state and 224-band system-audio spectra from the main app to the sandboxed lock-screen/screen-saver extension for Scene and Web wallpapers while keeping previews, unlocked desktop settle surfaces and plain videos excluded.
-
-- `python3 scripts/build.py --renderer-only` — exit 0; rebuilt workspace and regenerated `App/Bridge/Generated/`
-- `python3 scripts/check_rust.py` — exit 0; core 436 passed (5 desktop-window excluded), bridge 992 passed, core-integration 20 passed, shader all suites passed, 0 failed; desktop/media/network opt-ins disabled
-- `python3 scripts/check_renderer.py` — exit 0; all C++/Metal suites passed (audio_tests 80/80, SpectrumExport128Test 11/11), 12/12 generated scenes pixels_equal=True, reload cycles 0; 7 local-corpus asset checks skipped
-- `python3 scripts/test.py` — exit 0; 36/36 Python suites OK, Swift unit/integration 5172 passed, 0 failed, 70 skipped of 5242 (including LockScreenLiveFeedTests 6/6 and ScreenSaverWebSurfaceTests 17/17)
-- Unverified offscreen: live macOS 26+ lock-screen/screen-saver presentation, real MediaRemote/AppleScript players and live CoreAudio tap across lock/unlock/display sleep require an authorized manual check; Release app was not rebuilt

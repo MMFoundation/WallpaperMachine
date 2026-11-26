@@ -153,6 +153,11 @@ to see the raw stream as well, or open the log named in the failure line.
 
 `--renderer-only` prints a success verdict after the renderer and binding stages finish.
 
+For repeated Release builds on clean runners, `--compiler-cache DIR` lets Xcode reuse
+compiler jobs from a separate directory. It never restores an app or replaces `build/`.
+In Actions the job summary reports elapsed Cargo and Xcode time, plus any compiler cache
+hits and misses Xcode reported. See [release cache warming](release.md#warm-caches-warm-cachesyml).
+
 ## Packaging and installing
 
 ```sh

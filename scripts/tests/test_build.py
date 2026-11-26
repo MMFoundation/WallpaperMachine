@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
@@ -57,6 +58,33 @@ class XcodeSettingTests(unittest.TestCase):
     def test_rejects_a_setting_without_a_value(self):
         with mock.patch("sys.stderr"), self.assertRaises(SystemExit):
             self.xcodebuild_arguments("--xcode-setting", "SWIFT_USE_INTEGRATED_DRIVER")
+
+    def test_compiler_cache_is_opt_in_and_does_not_replace_derived_data(self):
+        cold = self.xcodebuild_arguments("--configuration", "Release")
+        self.assertFalse(any(str(arg).startswith("COMPILATION_CACHE_") for arg in cold))
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory).resolve() / "compiler"
+            warm = self.xcodebuild_arguments("--configuration", "Release", "--compiler-cache", str(cache))
+            self.assertTrue(cache.is_dir())
+            self.assertIn("COMPILATION_CACHE_ENABLE_CACHING=YES", warm)
+            self.assertIn(f"COMPILATION_CACHE_CAS_PATH={cache}", warm)
+            self.assertIn("COMPILATION_CACHE_LIMIT_SIZE=1G", warm)
+            self.assertEqual(warm[warm.index("-derivedDataPath") + 1], build.BUILD)
+
+
+class BuildTimingTests(unittest.TestCase):
+    def test_actions_summary_distinguishes_compiler_verdicts_from_other_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            summary = root / "summary.md"
+            with mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}), \
+                    mock.patch.object(build, "BUILD_ARTIFACTS", root), mock.patch("builtins.print"):
+                build.run([sys.executable, "-c", "print('finished')"], cwd=root, stage="cargo")
+                build.run([sys.executable, "-c", "print('Cache hit\\nCache miss\\nCache hit\\nnote: Cache miss')"],
+                          cwd=root, stage="xcodebuild-Release")
+            cargo, xcode = summary.read_text().splitlines()
+            self.assertRegex(cargo, r"^- cargo: [\d.]+s$")
+            self.assertRegex(xcode, r"^- xcodebuild-Release: [\d.]+s \(compiler cache hits: 2, misses: 1\)$")
 
 
 def compiled_icon(directory):

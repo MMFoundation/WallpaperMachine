@@ -5,7 +5,8 @@
 # object cache for each macOS. A release then rebuilds only the renderer sources that
 # changed since the last of these runs (scripts/source_times.py). GitHub also evicts an
 # entry nobody has read for seven days. Scheduled runs use main, whose caches every ref,
-# including release tags, can read. It publishes nothing.
+# including release tags, can read. On macOS 15 it also warms the Release compiler
+# when the matching main snapshot is missing. It publishes no release.
 name: Warm caches
 
 on:
@@ -41,6 +42,42 @@ jobs:
 
       - name: Build the renderer and bridge
         run: python3 scripts/build.py --renderer-only
+
+      - name: Check for a current Release compiler snapshot
+        if: matrix.runner == 'macos-15' && github.ref == 'refs/heads/main'
+        id: compiler
+        continue-on-error: true
+        uses: ./.github/actions/release-compiler-cache
+        with:
+          lookup-only: "true"
+
+      - name: Warm the Release compiler cache
+        id: warm-compiler
+        if: steps.compiler.outputs.key != '' && steps.compiler.outputs.hit != 'true'
+        continue-on-error: true
+        env:
+          SPARKLE_PUBLIC_KEY: ${{ vars.WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          cache="$RUNNER_TEMP/wm-release-cas"
+          python3 scripts/build.py --swift-only --configuration Release --no-app-icon \
+            --compiler-cache "$cache" --xcode-setting "WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY=$SPARKLE_PUBLIC_KEY"
+          archive="$RUNNER_TEMP/wm-release-cas.tar.zst"
+          /usr/bin/tar -cf - -C "$cache" . | zstd -q -1 -T2 -o "$archive"
+          size=$(stat -f %z "$archive")
+          if (( size <= 320 * 1024 * 1024 )); then
+            echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Release compiler snapshot is $size bytes; skipping the upload (320 MiB limit)."
+          fi
+
+      - name: Save the Release compiler snapshot
+        if: steps.warm-compiler.outputs.archive != ''
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ steps.warm-compiler.outputs.archive }}
+          key: ${{ steps.compiler.outputs.key }}
 
       - name: Report the C++ object cache
         if: always()

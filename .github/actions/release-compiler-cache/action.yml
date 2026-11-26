@@ -1,0 +1,61 @@
+name: Restore the Release compiler cache
+description: Find a compatible Xcode compiler snapshot without restoring build products.
+inputs:
+  lookup-only:
+    description: Check for a snapshot without downloading it.
+    default: "false"
+outputs:
+  key:
+    description: Snapshot key for this toolchain and source.
+    value: ${{ steps.keys.outputs.key }}
+  hit:
+    description: Whether the exact snapshot exists.
+    value: ${{ steps.snapshot.outputs.cache-hit }}
+  directory:
+    description: Restored compiler store, empty on a cold build.
+    value: ${{ steps.unpack.outputs.directory }}
+runs:
+  using: composite
+  steps:
+    - name: Identify the toolchain and compiler inputs
+      id: keys
+      shell: bash
+      run: |
+        set -euo pipefail
+        xcode=$(xcodebuild -version | awk '/^Build version / { print $3 }')
+        sdk=$(xcrun --sdk macosx --show-sdk-build-version)
+        [[ -n "$xcode" && -n "$sdk" ]]
+        prefix="release-cas-v1-macos$(sw_vers -productVersion | cut -d. -f1)-$(uname -m)-$xcode-$sdk-"
+        source=$({
+          git ls-tree HEAD -- App Extension Shared Renderer/Bridge Renderer/Media/Apple \
+            Renderer/Engine/src/Platform/Apple Renderer/Engine/src/Core/RendererCounters.h \
+            ThirdParty/mediaremote-adapter scripts/build.py \
+            WallpaperMachine.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          sed -E '/^[[:space:]]+(MARKETING_VERSION|CURRENT_PROJECT_VERSION):/d' project.yml
+        } | shasum -a 256 | cut -d' ' -f1)
+        printf 'prefix=%s\nkey=%s%s\n' "$prefix" "$prefix" "$source" >> "$GITHUB_OUTPUT"
+
+    - name: Find a Release compiler snapshot
+      id: snapshot
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
+      with:
+        path: ${{ runner.temp }}/wm-release-cas.tar.zst
+        key: ${{ steps.keys.outputs.key }}
+        restore-keys: ${{ steps.keys.outputs.prefix }}
+        lookup-only: ${{ inputs.lookup-only }}
+
+    - name: Unpack compiler data for this build
+      id: unpack
+      if: inputs.lookup-only != 'true' && steps.snapshot.outputs.cache-matched-key != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        cache="$RUNNER_TEMP/wm-release-cas"
+        mkdir -p "$cache"
+        if zstd -dc "$RUNNER_TEMP/wm-release-cas.tar.zst" | /usr/bin/tar -xf - -C "$cache"; then
+          echo "directory=$cache" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::Unusable Release compiler snapshot; building without it."
+        fi
