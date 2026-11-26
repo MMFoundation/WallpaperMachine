@@ -170,6 +170,10 @@ struct PanelSlider: NSViewRepresentable {
   func makeNSView(context: Context) -> PanelNSSlider {
     let slider = PanelNSSlider()
     slider.controlSize = .small
+    // Install the initial thumb position before the native control joins the view hierarchy.
+    slider.minValue = range.lowerBound
+    slider.maxValue = range.upperBound
+    slider.doubleValue = value
     return slider
   }
 
