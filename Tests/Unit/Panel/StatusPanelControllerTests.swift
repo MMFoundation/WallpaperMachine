@@ -20,6 +20,7 @@ final class StatusPanelControllerTests: PanelTestCase {
     @ObservationIgnored var reads = 0
     @ObservationIgnored var performed: [Command] = []
     @ObservationIgnored var volumes: [String: StatusPanelModel.Volume] = [:]
+    @ObservationIgnored var nextVolumeReadGate: AsyncGate?
     @ObservationIgnored var volumeReads: [String] = []
     @ObservationIgnored var failure: Error?
     @ObservationIgnored var log: [String] = []
@@ -42,6 +43,10 @@ final class StatusPanelControllerTests: PanelTestCase {
     func statusPanelVolume(of wallpaperID: String) async throws -> StatusPanelModel.Volume {
       volumeReads.append(wallpaperID)
       guard let volume = volumes[wallpaperID] else { throw CancellationError() }
+      if let gate = nextVolumeReadGate {
+        nextVolumeReadGate = nil
+        await gate.wait()
+      }
       return volume
     }
 
@@ -394,10 +399,24 @@ final class StatusPanelControllerTests: PanelTestCase {
     controller.start()
     await controller.settled()
 
-    try await controller.setVolume(0.25, for: "w1")
-    XCTAssertEqual(controller.volume?.volume, 0.25)
+    let staleRead = AsyncGate()
+    source.nextVolumeReadGate = staleRead
+    source.input = input(revision: 2)
+    await staleRead.waitUntilWaiting()
+
+    let save = Task { @MainActor in
+      defer { staleRead.open() }
+      // The new mute flag distinguishes the post-save read from the immediate slider update.
+      source.volumes["w1"]?.muted = true
+      try await controller.setVolume(0.25, for: "w1")
+      XCTAssertEqual(controller.volume?.volume, 0.25)
+      try await self.waitUntil("the post-save volume read has landed") { controller.volume?.muted == true }
+    }
+
+    // Join the outstanding read that sampled 80% before the save. It returns last.
     await controller.settled()
-    XCTAssertEqual(controller.volume?.volume, 0.25)
+    try await save.value
+    XCTAssertEqual(controller.volume, source.volumes["w1"])
   }
 
   func testMuteAllIsReportedSoTheSoundCanBeLocked() async throws {
