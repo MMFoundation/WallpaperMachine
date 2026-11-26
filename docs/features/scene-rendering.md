@@ -481,6 +481,12 @@ layer's own pass and again by the skinned pass its chain ends in, and both carry
 layer's colour and alpha, as an authored alpha always did and a script's write now
 does ([known limitations](../testing/renderer.md#known-limitations)).
 
+A directly drawn image puppet samples the picture, not the unused space around it
+in a padded texture. The renderer maps each mesh's primary texture coordinates
+when it loads the mesh; neither animation nor drawing needs an extra pass.
+Under effects, the flat input card already handles padding, so the closing mesh
+uses its original coordinates.
+
 When a puppet has clipping masks — drawn directly or through an effect chain —
 unclipped parts draw in authored part order, and each mask's clipped parts draw
 immediately after the highest source part across that mask's enclosing chain, in

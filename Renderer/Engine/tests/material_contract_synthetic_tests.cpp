@@ -274,7 +274,7 @@ protected:
         std::size_t i = 0;
         for (float v : expected) { EXPECT_NEAR(at->second[i], v, 0.00001f) << name << '[' << i << ']'; ++i; }
     }
-    void UVs(const SceneMesh& mesh, float u, float v) {
+    void UVs(const auto& mesh, float u, float v) {
         ASSERT_GT(mesh.VertexCount(), 0u);
         const auto& array = mesh.GetVertexArray(0);
         const auto offsets = array.GetAttrOffsetMap();
@@ -397,6 +397,37 @@ TEST_F(MaterialContracts, AuthoredStorageControlsCardAndFlatPuppetUVs) {
         ASSERT_EQ(chain->FinalMesh().Submeshes().size(),1u);
         UVs(chain->FinalMesh(),1,1);
     }
+}
+
+TEST_F(MaterialContracts, DirectPuppetSamplesThePictureWithinStoredTexturePadding) {
+    Material("materials/mesh.json", "contract_image", {"sheet", "aux"});
+    for (bool padded : {false, true}) for (bool nopadding : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << padded << ' ' << nopadding);
+        Put("materials/sheet.tex", Tex(8, 8, 6, 4, padded ? 8 : 6, padded ? 8 : 4));
+        auto image = Image();
+        Puppet(image, 1);
+        PutJson("models/puppet.json", {{"material", "materials/base.json"}, {"autosize", false},
+            {"puppet", "models/square.mdl"}, {"nopadding", nopadding}});
+        auto scene = Load(Json::array({image})); ASSERT_NE(scene, nullptr);
+        auto* node = Node(*scene, "owner"); ASSERT_NE(node, nullptr);
+        ASSERT_TRUE(node->Camera().empty());
+        ASSERT_NE(node->Mesh(), nullptr);
+        UVs(*node->Mesh(), padded ? 0.75f : 1.0f, padded ? 0.5f : 1.0f);
+    }
+}
+
+TEST_F(MaterialContracts, IndependentPuppetSlotsUseTheirOwnTextureExtents) {
+    Put("materials/sheet.tex", Tex(8, 8, 6, 4, 8, 8));
+    Material("materials/channels.json", "contract_image", {"sheet", "aux"});
+    auto image = Image();
+    Puppet(image, 1, true);
+    auto scene = Load(Json::array({image})); ASSERT_NE(scene, nullptr);
+    auto* node = Node(*scene, "owner"); ASSERT_NE(node, nullptr);
+    ASSERT_NE(node->Mesh(), nullptr);
+    const auto& pieces = node->Mesh()->Submeshes();
+    ASSERT_EQ(pieces.size(), 2u);
+    UVs(pieces[0], 1.0f, 1.0f);
+    UVs(pieces[1], 0.75f, 0.5f);
 }
 
 TEST_F(MaterialContracts, MipBudgetNeverChangesAuthoredPaddingFacts) {

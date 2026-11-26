@@ -1472,8 +1472,7 @@ const ImageHeader& TextureHeaderOf(ParseContext& context, const std::string& nam
 /// Cards and shader resolution constants must make the same decision.
 struct FileTextureGeometry {
     std::array<float, 4> resolution;
-    float u { 1.0f };
-    float v { 1.0f };
+    std::array<float, 2> uv { 1.0f, 1.0f };
 };
 
 FileTextureGeometry TextureGeometryOf(const ImageHeader& header) {
@@ -1484,8 +1483,7 @@ FileTextureGeometry TextureGeometryOf(const ImageHeader& header) {
         geometry.resolution[0] = static_cast<float>(header.width);
         geometry.resolution[1] = static_cast<float>(header.height);
         if (header.width > 0 && header.height > 0 && header.mapWidth > 0 && header.mapHeight > 0) {
-            geometry.u = iw / geometry.resolution[0];
-            geometry.v = ih / geometry.resolution[1];
+            geometry.uv = { iw / geometry.resolution[0], ih / geometry.resolution[1] };
         }
     }
     return geometry;
@@ -2483,8 +2481,6 @@ void RegisterEffectBuffer(ParseContext& context, const std::string& name,
 struct LayerGeometry {
     std::array<float, 2>   size { 2.0f, 2.0f };
     std::array<int32_t, 2> extent { 1, 1 };
-    float                  u { 1.0f };
-    float                  v { 1.0f };
 };
 
 /// A pass of an effect chain: its node, mesh and material, and the effect it belongs to.
@@ -4174,14 +4170,6 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     }
     const BlendMode authored_blend = own.blenmode;
 
-    // The mesh of the own pass: a card, with the padding of the picture left out (R21, R22).
-    if (! own.textures.empty() && ! own.textures[0].empty() && ! IsSpecTex(own.textures[0]) &&
-        ! image.nopadding) {
-        const auto texture_geometry = TextureGeometryOf(TextureHeaderOf(context, own.textures[0]));
-        geometry.u = texture_geometry.u;
-        geometry.v = texture_geometry.v;
-    }
-
     auto& layer = AddLayer(context, at, entry, plan, true, false);
     const auto node = layer.node;
     node->SetParentingPassthrough(image.config.model_passthrough);
@@ -4232,14 +4220,22 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     std::shared_ptr<SceneMesh> mesh;
     std::optional<PassthroughCardShape> passthrough_shape;
     std::vector<PuppetSlot>    puppet_slots;
+    const auto picture_uv = [&](const SceneMaterial& material) -> std::array<float, 2> {
+        if (material.textures.empty() || material.textures[0].empty() || IsSpecTex(material.textures[0]))
+            return { 1.0f, 1.0f };
+        return TextureGeometryOf(TextureHeaderOf(context, material.textures[0])).uv;
+    };
     if (puppet_direct) {
         mesh = std::make_shared<SceneMesh>();
-        WPMdlParser::GenPuppetMesh(*mesh, mdl);
-        if (! LoadPuppetSlots(context, image, mdl, puppet_bones, additive_blend, *mesh, puppet_slots)) {
-            // The whole slot set is abandoned: every submesh draws with the layer's material.
+        const bool has_slots = LoadPuppetSlots(context, image, mdl, puppet_bones, additive_blend, *mesh, puppet_slots);
+        if (! has_slots) {
             puppet_slots.clear();
-            mesh = std::make_shared<SceneMesh>();
-            WPMdlParser::GenPuppetMesh(*mesh, mdl, WPMdlParser::MaskDraw::Omit);
+            mesh->MaterialSlots().clear();
+        }
+        WPMdlParser::GenPuppetMesh(*mesh, mdl,
+            has_slots ? WPMdlParser::MaskDraw::Include : WPMdlParser::MaskDraw::Omit,
+            [&](uint32_t slot) { return picture_uv(has_slots ? *mesh->MaterialForSlot(slot) : own); });
+        if (! has_slots) {
             for (auto& submesh : mesh->Submeshes()) submesh.material_slot = 0;
         }
     } else if (passthrough_card) {
@@ -4262,7 +4258,8 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
                                                                            : MeshUpdate::Fixed);
         passthrough_shape = shape;
     } else {
-        mesh = MakeCardMesh(card_size[0], card_size[1], geometry.u, geometry.v);
+        const auto uv = image.nopadding ? std::array { 1.0f, 1.0f } : picture_uv(own);
+        mesh = MakeCardMesh(card_size[0], card_size[1], uv[0], uv[1]);
     }
     if (has_effects) own.blenmode = BlendMode::Normal;
     else if (additive_blend) own.blenmode = BlendMode::Additive;

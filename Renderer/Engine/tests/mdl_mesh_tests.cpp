@@ -871,6 +871,18 @@ TEST(MdlGeometry, LightmapUvReachesTexCoordVec4AndTexCoordStillReadsUv) {
     EXPECT_EQ(firstVertexAttr(va, "a_TexCoord", 2), (std::vector<float> { uv[0], uv[1] }));
 }
 
+TEST(MdlGeometry, PicturePaddingScalesOnlyThePrimaryPairOfAWideTextureCoordinate) {
+    MeshSpec m;
+    m.flag = kPosition | kUvPair;
+    const auto p = parse(mdlFile(21, { m }));
+    ASSERT_TRUE(p.ok);
+    wallpaper::SceneMesh::Submesh mesh;
+    wallpaper::WPMdlParser::GenMeshFromMdl(mesh, p.mesh(), { 0.75f, 0.5f });
+    const auto uv = stdUv(0), uv2 = stdUv2(0);
+    EXPECT_EQ(firstVertexAttr(mesh.GetVertexArray(0), "a_TexCoordVec4", 4),
+              (std::vector<float> { uv[0] * 0.75f, uv[1] * 0.5f, uv2[0], uv2[1] }));
+}
+
 // The morph layout stores only the four-wide position; a_Position reads its xyz.
 TEST(MdlGeometry, AFourWidePositionAloneIsAlsoThePosition) {
     MeshSpec m;

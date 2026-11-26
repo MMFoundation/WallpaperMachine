@@ -1415,7 +1415,8 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     return ok;
 }
 
-void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src) {
+void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
+                                 std::array<float, 2> picture_uv) {
     if (src.positions.empty()) return;
     const usize vertex_count = src.positions.size();
 
@@ -1469,6 +1470,12 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
             break;
         }
     }
+    std::optional<usize> uv_word;
+    if (picture_uv != std::array { 1.0f, 1.0f }) {
+        const auto attributes = vertices.GetAttrOffsetMap();
+        if (const auto uv = attributes.find(std::string(WE_IN_TEXCOORD)); uv != attributes.end())
+            uv_word = uv->second.offset / sizeof(float);
+    }
     std::vector<float> slice;
     slice.reserve(std::min(vertex_count, kSliceVertices) * stride);
     for (usize begin = 0; begin < vertex_count; begin += kSliceVertices) {
@@ -1498,6 +1505,10 @@ void WPMdlParser::GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
                 if (from + stream.width <= stream.values.size())
                     std::copy_n(stream.values.data() + from, stream.width, row + offsets[at]);
                 at++;
+            }
+            if (uv_word) {
+                row[*uv_word] *= picture_uv[0];
+                row[*uv_word + 1] *= picture_uv[1];
             }
         }
         vertices.SetVertexs(begin, slice);
@@ -1594,7 +1605,8 @@ void WPMdlParser::AddMeshIndices(SceneMesh::Submesh& submesh, const WPMdl::Mesh&
     }
 }
 
-void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, MaskDraw masks) {
+void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, MaskDraw masks,
+                                const std::function<std::array<float, 2>(uint32_t)>& uv_for_slot) {
     auto& submeshes = mesh.Submeshes();
     submeshes.clear();
     uint32_t slot = 0;
@@ -1602,7 +1614,7 @@ void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, MaskDraw mask
         if (src.positions.empty()) continue;
         const auto geometry = submeshes.size();
         auto& base = submeshes.emplace_back();
-        GenMeshFromMdl(base, src);
+        GenMeshFromMdl(base, src, uv_for_slot ? uv_for_slot(slot) : std::array { 1.0f, 1.0f });
         const auto base_slot = slot++;
         base.material_slot = base_slot;
         if (masks == MaskDraw::Omit || src.masks.empty()) continue;

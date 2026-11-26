@@ -3,6 +3,7 @@
 #include <string_view>
 #include <cstdint>
 #include <array>
+#include <functional>
 #include <vector>
 #include <memory>
 #include <span>
@@ -159,9 +160,11 @@ public:
     static void AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl);
     static void AddPuppetMatInfo(wpscene::WPMaterial& mat, const WPMdl& mdl, std::size_t mesh = 0);
 
-    static void GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src);
+    static void GenMeshFromMdl(SceneMesh::Submesh& submesh, const WPMdl::Mesh& src,
+                               std::array<float, 2> picture_uv = { 1.0f, 1.0f });
     enum class MaskDraw { Omit, Include };
-    static void GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, MaskDraw masks = MaskDraw::Include);
+    static void GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl, MaskDraw masks = MaskDraw::Include,
+                              const std::function<std::array<float, 2>(uint32_t)>& uv_for_slot = {});
     /// The masks that clip mask `mask`, nearest first: its parent, the parent's parent...
     static std::vector<uint32_t> MaskChain(const WPMdl::Mesh& src, std::size_t mask);
     /// A texture channel mesh as the `puppettexturechannels` shader reads it: the position, moved

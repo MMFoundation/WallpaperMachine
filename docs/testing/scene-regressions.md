@@ -3727,6 +3727,16 @@ texture entrances are not decoded-image or native-rendering evidence.
 
 ## Animation and puppets
 
+- **A directly drawn puppet on a padded image** — `MaterialContracts.DirectPuppetSamplesThePictureWithinStoredTexturePadding`
+  checks the bound picture on a single mesh, with and without stored padding and
+  with either setting of the model's `nopadding` flag. On issue #261's fixed closed-eye frame,
+  removing the brow layer changed the reference face but not one pixel of the old
+  Metal render: its mesh addressed the transparent padding. Separate material slots
+  keep their own extents (`MaterialContracts.IndependentPuppetSlotsUseTheirOwnTextureExtents`),
+  a four-lane UV keeps its second pair (`MdlGeometry.PicturePaddingScalesOnlyThePrimaryPairOfAWideTextureCoordinate`),
+  and an effect's closing mesh does not crop the picture again
+  (`MaterialContracts.AuthoredStorageControlsCardAndFlatPuppetUVs`).
+
 - **Bone opacity** — `PuppetBoneAlpha.CurvesAreSampledAndMixedWithTheOpaqueRestPose`
   (`puppet_pose_tests`: a curve sampled between frames, a half blend leaving half to the
   opaque rest pose, a hidden layer fading nothing; the combo itself follows the first mesh's
