@@ -31,7 +31,6 @@ enum ControlPanelWindow {
         // `sizingOptions = []` has not laid out yet.
         window.setContentSize(initialContentSize)
         window.contentMinSize = minimumContentSize
-        moveToActiveSpace(window)
         return window
     }
 
@@ -45,31 +44,58 @@ enum ControlPanelWindow {
         window.contentViewController = nil
     }
 
-    /// Makes an ordinary window appear on the Space that is active when it is shown, instead
-    /// of switching the person back to the Space it was last left on. For the control panel,
-    /// What's New, preview and sign-in windows; wallpaper, overlay and probe windows keep
-    /// their all-Spaces behavior.
+    /// Moves an already-open off-Space ordinary window onto the active managed Space and clears
+    /// `.moveToActiveSpace` / `.canJoinAllSpaces` so AppKit continues managing it as a normal Space
+    /// window.
     ///
-    /// Flags are inserted and removed, never assigned, so the full-screen capability and the
-    /// window-cycle flags a window already has survive. `.canJoinAllSpaces` leaves because AppKit
-    /// raises when it meets `.moveToActiveSpace`.
-    static func moveToActiveSpace(_ window: NSWindow) {
+    /// Keeping `.moveToActiveSpace` on an ordinary window — even transiently — causes macOS to
+    /// skip the window and activate a window behind it when returning to its Space. Only an
+    /// already-visible non-fullscreen window on another Space is moved via
+    /// `CGSMoveWindowsToManagedSpace`.
+    static func moveToActiveSpace(
+        _ window: NSWindow,
+        activeSpace: (() -> UInt64?)? = nil,
+        moveWindow: ((Int, UInt64) -> Void)? = nil
+    ) {
         var behavior = window.collectionBehavior
-        behavior.subtract([.managed, .canJoinAllSpaces])
-        behavior.insert(.moveToActiveSpace)
-        window.collectionBehavior = behavior
+        behavior.subtract([.moveToActiveSpace, .canJoinAllSpaces])
+        if behavior != window.collectionBehavior {
+            window.collectionBehavior = behavior
+        }
+        guard window.isVisible,
+              !window.isOnActiveSpace,
+              !window.styleMask.contains(.fullScreen),
+              window.windowNumber > 0 else { return }
+        let resolveSpace = activeSpace ?? {
+            WallpaperSpaceMonitor.currentManagedSpaceID(for: windowScreenDisplayID(window))
+        }
+        guard let spaceID = resolveSpace() else { return }
+        if let moveWindow {
+            moveWindow(window.windowNumber, spaceID)
+        } else {
+            _ = SystemSpaceWindowMover.shared?.move(windows: [window.windowNumber], toSpace: spaceID)
+        }
     }
 
-    /// Fronts a window, bringing it back from the Dock first when it is minimized, which
-    /// `makeKeyAndOrderFront` alone does not do.
+    private static func windowScreenDisplayID(_ window: NSWindow) -> UInt32? {
+        (window.screen ?? NSScreen.main).flatMap(SystemDisplays.id(of:))
+    }
+
+    /// Fronts a window, bringing it back from the Dock first when it is minimized and moving an
+    /// already-open off-Space window onto the active Space before ordering it front.
     ///
     /// `makeKeyAndOrderFront` only fronts the window among the app's own windows while the app
     /// is inactive, and macOS may decline the activation that follows: after an update the
     /// helper's `open` relaunches the app while another app is active, so What's New and the
     /// panel opened behind it, reachable only through Mission Control. `orderFrontRegardless`
     /// puts the window above the active app either way; it becomes key once the app activates.
-    static func bringForward(_ window: NSWindow) {
+    static func bringForward(
+        _ window: NSWindow,
+        activeSpace: (() -> UInt64?)? = nil,
+        moveWindow: ((Int, UInt64) -> Void)? = nil
+    ) {
         if window.isMiniaturized { window.deminiaturize(nil) }
+        moveToActiveSpace(window, activeSpace: activeSpace, moveWindow: moveWindow)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
     }

@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The menu bar's Wallpaper menu, filled from `StatusMenuModel` each time it opens.
     var wallpaperMenu: NSMenu?
     private(set) var controlPanelWindow: NSWindow?
+    private let activationGate = RegularActivationGate()
     private var previewWindow: WallpaperPreviewWindowController?
     /// The window that introduces a feature once after an update (`FeatureIntroductionStore`).
     private var featureIntroWindow: NSWindow?
@@ -276,7 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let support = ClientPaths.supportURL
         Task.detached(priority: .utility) { StorageMoveService.removeRetiredCopies(support: support) }
 
-        NSApp.setActivationPolicy(.accessory)
+        activationGate.dropToAccessory()
         AppLog.info("startup: activation policy set to accessory")
         WebSignInWindowController.onClosed = { [weak self] in self?.leaveDockUnlessAWindowIsOpen() }
         installStatusItem()
@@ -1411,8 +1412,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         presentUpdateReminderIfNeeded()
         guard !shutdownInProgress, !shutdownComplete, !updates.isPresentingUpdate,
               let window = controlPanelWindow, !window.isVisible || window.isMiniaturized else { return }
-        NSApp.setActivationPolicy(.regular)
-        ControlPanelWindow.bringForward(window)
+        activationGate.presentWhenRegular { [weak self] in
+            guard let self, !self.shutdownInProgress, !self.shutdownComplete, !self.updates.isPresentingUpdate,
+                  let window = self.controlPanelWindow, !window.isVisible || window.isMiniaturized else { return }
+            ControlPanelWindow.bringForward(window)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -1492,6 +1496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Keep this restorer through native-provider callbacks and reloads.
         let wallpaperRestorer = desktopWallpaperSync
         controlPanelWindow?.orderOut(nil)
+        activationGate.cancelPending()
         leaveDockUnlessAWindowIsOpen()
 
         Task {
@@ -1903,13 +1908,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// (`ActivationPolicyRule`). A window that is closing still reports itself visible, so
     /// callers forget it first; whatever opens a window raises the policy itself.
     func leaveDockUnlessAWindowIsOpen() {
+        guard !activationGate.hasPendingPresentations else { return }
         let windows = NSApp.windows.map { window in
             ActivationPolicyRule.Window(
                 role: activationPolicyRole(of: window),
                 isVisible: window.isVisible, isMiniaturized: window.isMiniaturized)
         }
         guard !ActivationPolicyRule.keepsRegular(windows, quitting: shutdownInProgress) else { return }
-        NSApp.setActivationPolicy(.accessory)
+        activationGate.dropToAccessory()
     }
 
     private func activationPolicyRole(of window: NSWindow) -> ActivationPolicyRule.Window.Role? {
@@ -2028,48 +2034,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// lead nowhere; the next launch offers it then.
     private func showFeatureIntroduction(_ introduction: FeatureIntroduction) {
         guard !shutdownInProgress, !shutdownComplete, featureIntroWindow == nil else { return }
-        let window = FeatureIntroWindow.make(actions: FeatureIntroWindow.Actions(
-            open: { [weak self] in
-                guard let self else { return }
-                // The panel first, so the Dock icon stays while the introduction closes.
-                self.controlPanelNavigation.revealSettingsSection(.widgets)
-                self.showControlPanel(selection: .settings)
-                self.featureIntroWindow?.performClose(nil)
-            },
-            close: { [weak self] in self?.featureIntroWindow?.performClose(nil) }))
-        window.delegate = self
-        window.center()
-        ControlPanelWindow.moveToActiveSpace(window)
-        featureIntroWindow = window
-        NSApp.setActivationPolicy(.regular)
-        ControlPanelWindow.bringForward(window)
-        NSApp.activate(ignoringOtherApps: true)
-        featureIntroductions.didPresent(introduction)
-        AppLog.info("startup: introduced \(introduction.id) after an update")
+        activationGate.presentWhenRegular { [weak self] in
+            guard let self, !self.shutdownInProgress, !self.shutdownComplete, self.featureIntroWindow == nil else { return }
+            let window = FeatureIntroWindow.make(actions: FeatureIntroWindow.Actions(
+                open: { [weak self] in
+                    guard let self else { return }
+                    // The panel first, so the Dock icon stays while the introduction closes.
+                    self.controlPanelNavigation.revealSettingsSection(.widgets)
+                    self.showControlPanel(selection: .settings)
+                    self.featureIntroWindow?.performClose(nil)
+                },
+                close: { [weak self] in self?.featureIntroWindow?.performClose(nil) }))
+            window.delegate = self
+            window.center()
+            self.featureIntroWindow = window
+            ControlPanelWindow.bringForward(window)
+            NSApp.activate(ignoringOtherApps: true)
+            self.featureIntroductions.didPresent(introduction)
+            AppLog.info("startup: introduced \(introduction.id) after an update")
+        }
     }
 
     func showControlPanel(selection: SidebarSelection) {
         controlPanelNavigation.selection = selection
-        NSApp.setActivationPolicy(.regular)
-        if let window = controlPanelWindow {
+        activationGate.presentWhenRegular { [weak self] in
+            guard let self, !self.shutdownInProgress, !self.shutdownComplete else { return }
+            if let window = self.controlPanelWindow {
+                ControlPanelWindow.constrainToScreen(window)
+                ControlPanelWindow.bringForward(window)
+                NSApp.activate(ignoringOtherApps: true)
+                return
+            }
+
+            let hosting = NSHostingController(rootView: self.controlPanelRoot())
+            // The window keeps its own size floor, and the hosted toolbar and title belong to it.
+            hosting.sizingOptions = []
+            hosting.sceneBridgingOptions = [.toolbars, .title]
+            let window = ControlPanelWindow.make(contentViewController: hosting, delegate: self)
+            if !window.setFrameUsingName(ControlPanelWindow.frameAutosaveName) { window.center() }
             ControlPanelWindow.constrainToScreen(window)
+            // After the saved frame is restored, so restoring does not overwrite it.
+            window.setFrameAutosaveName(ControlPanelWindow.frameAutosaveName)
+            self.controlPanelWindow = window
             ControlPanelWindow.bringForward(window)
             NSApp.activate(ignoringOtherApps: true)
-            return
         }
-
-        let hosting = NSHostingController(rootView: controlPanelRoot())
-        // The window keeps its own size floor, and the hosted toolbar and title belong to it.
-        hosting.sizingOptions = []
-        hosting.sceneBridgingOptions = [.toolbars, .title]
-        let window = ControlPanelWindow.make(contentViewController: hosting, delegate: self)
-        if !window.setFrameUsingName(ControlPanelWindow.frameAutosaveName) { window.center() }
-        ControlPanelWindow.constrainToScreen(window)
-        // After the saved frame is restored, so restoring does not overwrite it.
-        window.setFrameAutosaveName(ControlPanelWindow.frameAutosaveName)
-        controlPanelWindow = window
-        ControlPanelWindow.bringForward(window)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// The panel over the open library, or what says why there is none.
@@ -2125,8 +2134,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             previewWindow = controller
         }
-        NSApp.setActivationPolicy(.regular)
-        previewWindow?.present(selection)
+        activationGate.presentWhenRegular { [weak self] in
+            guard let self, !self.shutdownInProgress, !self.shutdownComplete else { return }
+            self.previewWindow?.present(selection)
+        }
     }
 
     /// Applies pending edits (if any) and activates the previewed wallpaper on its target display.

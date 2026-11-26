@@ -54,20 +54,27 @@ probes the signed update feed; Sparkle owns the download and installation window
 
 - **Activation policy.** `.regular` while one of the five ordinary windows (control panel,
   update window, wallpaper preview, web sign-in, feature introduction) is on screen or minimized to the Dock,
-  `.accessory` otherwise. Opening one raises the policy; every place that lowers it (a window
-  closing, the status-item re-assert at launch, a quit) asks `ActivationPolicyRule`
-  (`App/Services/Lifecycle/`) about `NSApp.windows`. Alerts, open and save panels and wallpaper
-  windows never count, sign-in windows are matched through `WebSignInWindowController`'s own
-  list, and the panel and Sparkle windows stop counting during a quit.
-- **Spaces and minimizing.** The four app-managed windows (control panel, wallpaper
-  preview, web sign-in, feature introduction) call `ControlPanelWindow.moveToActiveSpace`, which inserts
-  `.moveToActiveSpace` into their collection behavior, so opening one shows it on the Space the
-  person is on instead of switching back to the Space it was left on. It inserts and removes
-  flags and never assigns them, so full-screen capability and cycle flags survive, and it drops
-  `.canJoinAllSpaces`, which AppKit rejects beside it. Wallpaper, overlay and probe windows keep
-  their all-Spaces behavior. `ControlPanelWindow.bringForward` restores a minimized panel
-  before fronting it; `showControlPanel` (menu bar, Dock click, Command-comma) and
-  `applicationDidBecomeActive` use it.
+  `.accessory` otherwise. `RegularActivationGate` (`App/Services/Lifecycle/`) raises the policy
+  before presenting an ordinary window and waits for promotion to `.regular` to settle
+  before ordering the first window onto the screen, because creating or fronting an ordinary
+  window in the same run-loop turn makes macOS skip it when returning to its Space. Every place
+  that lowers the policy (a window closing while no presentations are pending, the status-item
+  re-assert at launch, a quit) asks `ActivationPolicyRule` (`App/Services/Lifecycle/`) about
+  `NSApp.windows`. Alerts, open and save panels and wallpaper windows never count, sign-in
+  windows are matched through `WebSignInWindowController`'s own list, and the panel and Sparkle
+  windows stop counting during a quit.
+- **Spaces and minimizing.** The four app-managed windows (control panel, wallpaper preview, web
+  sign-in, feature introduction) stay normal Space-managed windows without `.moveToActiveSpace`
+  or `.canJoinAllSpaces`, because keeping `.moveToActiveSpace` on an ordinary window — even
+  transiently — causes macOS to skip that window and activate the window behind it when
+  returning to its Space. When an already-open off-Space window is fronted,
+  `ControlPanelWindow.moveToActiveSpace` strips those flags and moves it onto the active Space
+  with `CGSMoveWindowsToManagedSpace` (`WallpaperSpaceMonitor.currentManagedSpaceID` +
+  `SystemSpaceWindowMover`). Wallpaper, overlay and probe windows keep their all-Spaces
+  behavior. `ControlPanelWindow.bringForward` restores a minimized panel and moves an open
+  off-Space window before fronting it; `showControlPanel` (menu bar, Dock click, Command-comma),
+  `applicationDidBecomeActive`, preview presentation, sign-in presentation and feature
+  introductions use it.
 - **Menus.** A left click on the status item opens the menu bar panel (`StatusPanelPopover`, an
   `NSPopover` built at each opening and torn down at its close, [control
   panel](features/control-panel.md#menu-bar-panel)) unless Settings › General chooses the menu;
@@ -183,7 +190,7 @@ It has no web view, and renderer content is never drawn into it. Coding rules fo
 | Piece | Responsibility |
 |---|---|
 | `ControlPanelView.swift` | The root `AppDelegate` builds (six store arguments; `defaults`, `appLanguage` and `searchTranslation` are test seams). Creates the window's `PanelController` in `@State`, starts it on appear and stops it on disappear, reports its window to `PanelPresentation`, and sets the image pipeline in the environment. Also declares `ControlPanelNavigation` (selection, target display, Settings section and reveal token, the last `PanelViewState`), shared with native menu commands, the status item and links |
-| `ControlPanelWindow.swift` | Builds the window, owns its 760×560 size floor, `moveToActiveSpace`, `bringForward` and `tearDown` (the toolbar off before the content when it closes) |
+| `ControlPanelWindow.swift` | Builds the window, owns its 760×560 size floor, `moveToActiveSpace` (strips conflicting flags and moves already-open off-Space windows via `CGSMoveWindowsToManagedSpace`), `bringForward` and `tearDown` (the toolbar off before the content when it closes) |
 | `BridgeUnavailableView.swift` | What the window shows instead of the panel when the bridge or the library could not start, with **Use This Mac Instead…** when the library's drive is missing |
 | `PanelViewState.swift` | Installed's filters and the grids' scroll offsets as a `Codable` value, kept in memory on `ControlPanelNavigation` for the next window; `normalized()` applies the limits |
 | `Model/` | `PanelController` and its `PanelController+<Group>.swift` extensions (typed actions and derived state), `PanelPresentation`, `PanelStoreRevisions`, `PanelErrorState`, `PanelActionCoordinator`, `PanelDialogs`, `ExternalLink`, `TransferFormat`, `DisplayOptionsLoader`, `DragStepPump`, and the typed values several areas read (`LibraryRow`, `UpdatePresentation`, `TileDownloadState`, ...) |
@@ -202,7 +209,7 @@ It has no web view, and renderer content is never drawn into it. Coding rules fo
   `.toolbar`, `.navigationTitle` and `.navigationSubtitle` become the window's toolbar, title
   and subtitle. `ControlPanelWindow.make` sets the style mask (with `.fullSizeContentView`: the
   page scrolls under the title bar's tabs), `isReleasedWhenClosed =
-  false`, a 1240×800 first size and the active-Space behavior; it adds no toolbar or backdrop of
+  false`, and a 1240×800 first size while leaving normal Space management intact; it adds no toolbar or backdrop of
   its own. The hosting controller resets `contentMinSize` once it attaches, so
   `windowWillResize` clamps every resize with `ControlPanelWindow.clampedFrameSize`. The app has
   no SwiftUI `Scene`.

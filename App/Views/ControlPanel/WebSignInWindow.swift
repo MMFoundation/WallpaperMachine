@@ -89,7 +89,7 @@ final class WebSignInWindowController: NSWindowController, NSWindowDelegate, WKN
     /// and answers nil at once, so a caller must not start a second sign-in.
     static func obtainCookies(for site: WebSignInSite) async -> WebSignInCookies? {
         if let open = current[site.cookieName] {
-            open.showWindow(nil)
+            open.presentWindow()
             return nil
         }
         let controller = WebSignInWindowController(site: site)
@@ -97,7 +97,7 @@ final class WebSignInWindowController: NSWindowController, NSWindowDelegate, WKN
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 controller.continuation = continuation
-                controller.showWindow(nil)
+                controller.presentWindow()
                 controller.webView.load(URLRequest(url: site.signInURL))
             }
         } onCancel: {
@@ -106,7 +106,7 @@ final class WebSignInWindowController: NSWindowController, NSWindowDelegate, WKN
     }
 
     /// Brings the site's open sign-in window forward; does nothing when none is open.
-    static func bringToFront(_ site: WebSignInSite) { current[site.cookieName]?.showWindow(nil) }
+    static func bringToFront(_ site: WebSignInSite) { current[site.cookieName]?.presentWindow() }
 
     private init(site: WebSignInSite) {
         self.site = site
@@ -129,7 +129,6 @@ final class WebSignInWindowController: NSWindowController, NSWindowDelegate, WKN
         }
         failureView.isHidden = true
         window.contentView = content
-        ControlPanelWindow.moveToActiveSpace(window)
         window.center()
         super.init(window: window)
         window.delegate = self
@@ -137,6 +136,17 @@ final class WebSignInWindowController: NSWindowController, NSWindowDelegate, WKN
         webView.uiDelegate = self
         failureView.retry = { [weak self] in self?.retry() }
         configuration.websiteDataStore.httpCookieStore.add(self)
+    }
+
+    /// Shows the window on the active Space without carrying `.moveToActiveSpace` into normal
+    /// window management.
+    private func presentWindow() {
+        if let window {
+            ControlPanelWindow.bringForward(window)
+        } else {
+            showWindow(nil)
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Starts the site's sign-in page again, from its first address.

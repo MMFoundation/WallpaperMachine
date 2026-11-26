@@ -82,47 +82,96 @@ final class ControlPanelWindowSizingTests: XCTestCase {
     XCTAssertFalse(window.isVisible, "No desktop focus or window ordering is needed")
   }
 
-  func testControlPanelWindowMovesToTheActiveSpaceAndKeepsFullScreen() {
+  func testControlPanelWindowStaysSpaceManagedAndKeepsFullScreen() {
     let window = ControlPanelWindow.make(contentViewController: NSViewController(), delegate: nil)
     defer { window.close() }
-    XCTAssertTrue(window.collectionBehavior.contains(.moveToActiveSpace),
-      "The panel must open on the Space the person is on")
-    XCTAssertFalse(window.collectionBehavior.contains(.managed))
+    XCTAssertFalse(window.collectionBehavior.contains(.moveToActiveSpace),
+      "The panel must not carry .moveToActiveSpace, which breaks Space-return focus")
     XCTAssertFalse(window.collectionBehavior.contains(.canJoinAllSpaces),
       "An ordinary window must not follow the person to every Space")
     XCTAssertTrue(window.styleMask.contains(.resizable))
     XCTAssertFalse(window.collectionBehavior.contains(.fullScreenNone),
       "The green button must still offer full screen")
 
-    // Flags a window already carries survive: the helper adds and removes, never assigns.
+    // Existing normal flags survive: the helper only strips conflicting Space behaviors.
     let carrying = Self.unorderedWindow()
     carrying.collectionBehavior = [.managed, .fullScreenPrimary, .ignoresCycle]
-    ControlPanelWindow.moveToActiveSpace(carrying)
-    XCTAssertEqual(carrying.collectionBehavior, [.moveToActiveSpace, .fullScreenPrimary, .ignoresCycle])
+    ControlPanelWindow.moveToActiveSpace(carrying, activeSpace: { 42 }, moveWindow: { _, _ in
+      XCTFail("Unordered windows must never call CGSMoveWindowsToManagedSpace")
+    })
+    XCTAssertEqual(carrying.collectionBehavior, [.managed, .fullScreenPrimary, .ignoresCycle])
 
-    // AppKit raises when both Space behaviors are present, so joining all Spaces gives way.
     let everywhere = Self.unorderedWindow()
     everywhere.collectionBehavior = [.canJoinAllSpaces, .fullScreenPrimary]
-    ControlPanelWindow.moveToActiveSpace(everywhere)
-    XCTAssertEqual(everywhere.collectionBehavior, [.moveToActiveSpace, .fullScreenPrimary])
+    ControlPanelWindow.moveToActiveSpace(everywhere, activeSpace: { 42 }, moveWindow: { _, _ in })
+    XCTAssertEqual(everywhere.collectionBehavior, [.fullScreenPrimary])
+
+    let transient = Self.unorderedWindow()
+    transient.collectionBehavior = [.moveToActiveSpace, .fullScreenPrimary]
+    ControlPanelWindow.moveToActiveSpace(transient, activeSpace: { 42 }, moveWindow: { _, _ in })
+    XCTAssertEqual(transient.collectionBehavior, [.fullScreenPrimary])
 
     // Applying it again changes nothing.
-    ControlPanelWindow.moveToActiveSpace(everywhere)
-    XCTAssertEqual(everywhere.collectionBehavior, [.moveToActiveSpace, .fullScreenPrimary])
+    ControlPanelWindow.moveToActiveSpace(transient, activeSpace: { 42 }, moveWindow: { _, _ in })
+    XCTAssertEqual(transient.collectionBehavior, [.fullScreenPrimary])
   }
 
-  func testBringForwardDeminiaturizesOnlyAMinimizedWindow() {
+  func testMoveToActiveSpaceOnlyMovesVisibleOffSpaceNonFullScreenWindows() {
+    let offSpace = RecordingWindow(simulatedWindowNumber: 101, visible: true, onActiveSpace: false)
+    offSpace.collectionBehavior = [.moveToActiveSpace, .fullScreenPrimary]
+    var moves: [(Int, UInt64)] = []
+    ControlPanelWindow.moveToActiveSpace(offSpace, activeSpace: { 275 }, moveWindow: { moves.append(($0, $1)) })
+    XCTAssertEqual(offSpace.collectionBehavior, [.fullScreenPrimary])
+    XCTAssertEqual(moves.count, 1)
+    XCTAssertEqual(moves.first?.0, 101)
+    XCTAssertEqual(moves.first?.1, 275)
+
+    // Already on active Space, hidden, full-screen, or without an active managed Space ID: never moves.
+    let sameSpace = RecordingWindow(simulatedWindowNumber: 102, visible: true, onActiveSpace: true)
+    let hidden = RecordingWindow(simulatedWindowNumber: 103, visible: false, onActiveSpace: false)
+    let fullScreen = RecordingWindow(
+      simulatedWindowNumber: 104, visible: true, onActiveSpace: false,
+      styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullScreen])
+    var skippedMoves: [(Int, UInt64)] = []
+    for candidate in [sameSpace, hidden, fullScreen] {
+      ControlPanelWindow.moveToActiveSpace(candidate, activeSpace: { 275 }, moveWindow: { skippedMoves.append(($0, $1)) })
+    }
+    ControlPanelWindow.moveToActiveSpace(offSpace, activeSpace: { nil }, moveWindow: { skippedMoves.append(($0, $1)) })
+    XCTAssertTrue(skippedMoves.isEmpty)
+  }
+
+  func testCurrentManagedSpaceIDSelectionForDisplay() {
+    let displays: [String: WallpaperDisplaySpaces] = [
+      "1": .init(displayUUID: "u1", spaces: [.init(id: "a", number: 1, managedID: 11)], current: "a", currentManagedID: 11),
+      "2": .init(displayUUID: "u2", spaces: [.init(id: "b", number: 1, managedID: 22)], current: nil, currentManagedID: nil),
+    ]
+    XCTAssertEqual(WallpaperSpaceMonitor.currentManagedSpaceID(for: 1, in: displays), 11)
+    XCTAssertNil(WallpaperSpaceMonitor.currentManagedSpaceID(for: 2, in: displays),
+      "A full-screen display must return nil instead of stealing another monitor's managed Space")
+    XCTAssertEqual(WallpaperSpaceMonitor.currentManagedSpaceID(for: 999, in: displays), 11)
+    XCTAssertEqual(WallpaperSpaceMonitor.currentManagedSpaceID(for: nil, in: displays), 11)
+    XCTAssertNil(WallpaperSpaceMonitor.currentManagedSpaceID(for: 1, in: nil))
+  }
+
+  func testBringForwardDeminiaturizesOnlyAMinimizedWindowAndMovesOffSpaceWindows() {
     let minimized = RecordingWindow()
     minimized.minimized = true
-    ControlPanelWindow.bringForward(minimized)
+    ControlPanelWindow.bringForward(minimized, activeSpace: { 42 }, moveWindow: { _, _ in })
     XCTAssertEqual(minimized.calls, ["deminiaturize", "makeKeyAndOrderFront", "orderFrontRegardless"],
       "A minimized panel must leave the Dock before it is fronted")
     XCTAssertFalse(minimized.isMiniaturized)
 
-    let open = RecordingWindow()
-    ControlPanelWindow.bringForward(open)
-    XCTAssertEqual(open.calls, ["makeKeyAndOrderFront", "orderFrontRegardless"],
-      "A window that is not minimized is only fronted, above the active app even when this one is not")
+    let open = RecordingWindow(simulatedWindowNumber: 77, visible: true, onActiveSpace: false)
+    open.collectionBehavior = [.moveToActiveSpace]
+    var recordedMoves: [(Int, UInt64)] = []
+    ControlPanelWindow.bringForward(open, activeSpace: { 275 }, moveWindow: {
+      recordedMoves.append(($0, $1))
+      open.record("moveToSpace:\($1)")
+    })
+    XCTAssertEqual(open.calls, ["moveToSpace:275", "makeKeyAndOrderFront", "orderFrontRegardless"],
+      "An already-open off-Space window moves to the active Space before ordering front")
+    XCTAssertEqual(recordedMoves.map(\.0), [77])
+    XCTAssertFalse(open.collectionBehavior.contains(.moveToActiveSpace))
   }
 
   /// A titled window that is never ordered onto the screen.
@@ -137,17 +186,32 @@ final class ControlPanelWindowSizingTests: XCTestCase {
 /// Records the calls that would change what is on screen instead of making them.
 private final class RecordingWindow: NSWindow {
   var minimized = false
+  var simulatedWindowNumber = 0
+  var simulatedVisible = false
+  var simulatedOnActiveSpace = true
   private(set) var calls: [String] = []
 
-  convenience init() {
+  convenience init(
+    simulatedWindowNumber: Int = 0,
+    visible: Bool = false,
+    onActiveSpace: Bool = true,
+    styleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
+  ) {
     self.init(
       contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
-      styleMask: [.titled, .closable, .miniaturizable, .resizable],
+      styleMask: styleMask,
       backing: .buffered, defer: true)
     isReleasedWhenClosed = false
+    self.simulatedWindowNumber = simulatedWindowNumber
+    self.simulatedVisible = visible
+    self.simulatedOnActiveSpace = onActiveSpace
   }
 
+  override var windowNumber: Int { simulatedWindowNumber }
+  override var isVisible: Bool { simulatedVisible }
+  override var isOnActiveSpace: Bool { simulatedOnActiveSpace }
   override var isMiniaturized: Bool { minimized }
+  func record(_ call: String) { calls.append(call) }
   override func deminiaturize(_ sender: Any?) {
     calls.append("deminiaturize")
     minimized = false

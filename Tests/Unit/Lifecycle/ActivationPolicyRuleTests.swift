@@ -63,4 +63,108 @@ final class ActivationPolicyRuleTests: XCTestCase {
         XCTAssertFalse(keepsRegular(others))
         XCTAssertFalse(keepsRegular(others, quitting: true))
     }
+
+    @MainActor
+    func testGateRunsImmediatelyWhenAlreadySettledAsRegular() {
+        var events: [String] = []
+        var scheduledCount = 0
+        final class Token {}
+
+        let gate = RegularActivationGate(
+            isRegular: { true },
+            applyRegular: { events.append("regular") },
+            applyAccessory: { events.append("accessory") },
+            schedule: { _, _ in
+                scheduledCount += 1
+                return Token()
+            })
+
+        gate.presentWhenRegular { events.append("present") }
+        XCTAssertEqual(events, ["present"])
+        XCTAssertEqual(scheduledCount, 0)
+        XCTAssertFalse(gate.hasPendingPresentations)
+    }
+
+    @MainActor
+    func testGateCoalescesPendingPresentationsInFIFOOrderAcrossPromotion() {
+        var policyIsRegular = false
+        var events: [String] = []
+        var flushWork: (@MainActor () -> Void)?
+        var scheduledDelays: [Duration] = []
+        final class Token {}
+
+        let gate = RegularActivationGate(
+            isRegular: { policyIsRegular },
+            applyRegular: {
+                policyIsRegular = true
+                events.append("regular")
+            },
+            applyAccessory: {
+                policyIsRegular = false
+                events.append("accessory")
+            },
+            schedule: { delay, work in
+                scheduledDelays.append(delay)
+                flushWork = work
+                return Token()
+            })
+
+        gate.presentWhenRegular { events.append("first") }
+        // Even though `isRegular` now reads true, the promotion settle window is still open.
+        gate.presentWhenRegular { events.append("second") }
+        XCTAssertEqual(events, ["regular"])
+        XCTAssertEqual(scheduledDelays, [RegularActivationGate.defaultSettleDelay])
+        XCTAssertTrue(gate.hasPendingPresentations)
+
+        flushWork?()
+        XCTAssertEqual(events, ["regular", "first", "second"])
+        XCTAssertFalse(gate.hasPendingPresentations)
+
+        // Subsequent calls run synchronously once the promotion has settled.
+        gate.presentWhenRegular { events.append("third") }
+        XCTAssertEqual(events, ["regular", "first", "second", "third"])
+    }
+
+    @MainActor
+    func testDropToAccessoryAndCancelPendingInvalidateStaleFlushes() {
+        var policyIsRegular = false
+        var events: [String] = []
+        var flushWorks: [@MainActor () -> Void] = []
+        final class Token {
+            let onDeinit: () -> Void
+            init(_ onDeinit: @escaping () -> Void) { self.onDeinit = onDeinit }
+            deinit { onDeinit() }
+        }
+        var activeTokens = 0
+
+        let gate = RegularActivationGate(
+            isRegular: { policyIsRegular },
+            applyRegular: {
+                policyIsRegular = true
+                events.append("regular")
+            },
+            applyAccessory: {
+                policyIsRegular = false
+                events.append("accessory")
+            },
+            schedule: { _, work in
+                activeTokens += 1
+                flushWorks.append(work)
+                return Token { activeTokens -= 1 }
+            })
+
+        gate.presentWhenRegular { events.append("stale-1") }
+        XCTAssertEqual(activeTokens, 1)
+        gate.dropToAccessory()
+        XCTAssertFalse(gate.hasPendingPresentations)
+        XCTAssertEqual(activeTokens, 0)
+        flushWorks[0]()
+        XCTAssertEqual(events, ["regular", "accessory"])
+
+        gate.presentWhenRegular { events.append("stale-2") }
+        gate.cancelPending()
+        XCTAssertFalse(gate.hasPendingPresentations)
+        flushWorks[1]()
+        XCTAssertEqual(events, ["regular", "accessory", "regular"])
+    }
 }

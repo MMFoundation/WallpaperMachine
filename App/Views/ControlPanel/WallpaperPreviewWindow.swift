@@ -58,8 +58,11 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
         if window == nil { makeWindow() }
         applyNotice = nil
         session.open(selection)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        if let window {
+            ControlPanelWindow.bringForward(window)
+        } else {
+            showWindow(nil)
+        }
         NSApp.activate(ignoringOtherApps: true)
         updateVisibility()
     }
@@ -184,7 +187,6 @@ final class WallpaperPreviewWindowController: NSWindowController, NSWindowDelega
         window.acceptsMouseMovedEvents = true
         window.title = String(localized: "Wallpaper Preview")
         window.contentMinSize = CGSize(width: min(480, size.width), height: min(320, size.height))
-        ControlPanelWindow.moveToActiveSpace(window)
         window.center()
         window.contentView = makeContentView(size: size)
         for name in [NSApplication.didHideNotification, NSApplication.didUnhideNotification] {

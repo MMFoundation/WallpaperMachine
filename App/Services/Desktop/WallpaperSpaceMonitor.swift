@@ -204,6 +204,24 @@ final class WallpaperSpaceMonitor {
         }
         return result.isEmpty ? nil : result
     }
+
+    /// The WindowServer managed Space identifier for `displayID` (or the main display when `nil`),
+    /// returning `nil` when that display is in a full-screen Space or Space information is unavailable.
+    static func currentManagedSpaceID(for displayID: UInt32? = nil) -> UInt64? {
+        let resolvedDisplayID = displayID ?? NSScreen.main.flatMap(SystemDisplays.id(of:))
+        return currentManagedSpaceID(for: resolvedDisplayID, in: SystemWallpaperSpaceSource.shared?.read())
+    }
+
+    nonisolated static func currentManagedSpaceID(
+        for displayID: UInt32?,
+        in displays: [String: WallpaperDisplaySpaces]?
+    ) -> UInt64? {
+        guard let displays, !displays.isEmpty else { return nil }
+        if let displayID, let display = displays[String(displayID)] {
+            return display.currentManagedID
+        }
+        return displays.values.compactMap(\.currentManagedID).first
+    }
 }
 
 /// Optional read-only CGS entry points, matching the existing desktop-poster integration.

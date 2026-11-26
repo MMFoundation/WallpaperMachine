@@ -411,6 +411,8 @@ struct SystemPinnableWindow: WallpaperPinnableWindow {
 /// or one that joins every Space and leaves again, returns to the Space it came from.
 @MainActor
 final class SystemSpaceWindowMover: WallpaperSpaceWindowMoving {
+    static let shared = SystemSpaceWindowMover()
+
     private typealias Connection = @convention(c) () -> Int32
     private typealias CopySpaces = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
     private typealias Move = @convention(c) (Int32, CFArray, UInt64) -> Void
