@@ -207,7 +207,7 @@ Its exact formula is not published; where this differs, it is an estimate.
 Scenes receive the values as analysed; web pages receive them clamped to 0.0–1.0 (see
 [Web wallpapers](web-wallpapers.md#audio-response)).
 
-On an active, unpaused [lock screen or screen saver](lock-screen.md#audio-media-and-the-enabled-state),
+On an active, unpaused [lock screen or screen saver](lock-screen.md#audio-media-cursor-and-the-enabled-state),
 Scene and Web wallpapers with audio response enabled that actually read audio
 (`owe_scene_wallpaper_set_audio_requirement_callback` or `wallpaperRegisterAudioListener`)
 receive the main app's single shared analysis rather than opening a second capture tap.

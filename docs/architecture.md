@@ -892,8 +892,8 @@ only on macOS 26 and later (`LockScreenConfiguration.isSupportedBySystem`).
 |---|---|
 | `WallpaperExtension.swift` | `@main AppExtension`; XPC handler for the whole system protocol (21 requests on macOS 27.0): `acquire`/`update`/`invalidate`/`snapshot`/`provideSettingsViewModels`/`isChoiceDownloaded`/`selectedChoicesDidChange`/`handleNotification` do the work, the rest reply "nothing to do"; connection acceptance |
 | `WallpaperRuntime.swift` | Loads and checks the private hosting ABI, verifies the caller's code signature via its audit token, resolves `CAContext`, compares the exported XPC protocol with the system's (`verifyXPCProtocol`), reads the published configuration and asset paths, logging |
-| `WallpaperController.swift` | Singleton surface registry; screen and system sleep/wake, `com.apple.screenIsLocked`/`Unlocked` and the wallpaper service's `hostDidWake` notice each start a bounded re-check burst of every surface (display power and lock state are read from the system, never remembered); reloads configuration on `app.wallpapermachine.lock-screen.changed`, reloads forwarded media on `app.wallpapermachine.lock-screen.media.changed`, publishes aggregate `live-demand.json`, and runs demand-gated 1 Hz timeline interpolation and 30 Hz shared-memory audio spectrum forwarding |
-| `WallpaperSurface.swift` | One `WallpaperID` to one `CAContext` with a scene/video `CAMetalLayer`, an AVFoundation `AVPlayerLayer` or the WebM player (`LockScreenWebMPlayer`) for a plain video (held with its reason when `LockScreenVideoPlanner` finds no player for it), otherwise the scene engine or live WebKit layer tree; bounded geometry, readiness, snapshots, and live media/audio capability sync |
+| `WallpaperController.swift` | Singleton surface registry; screen and system sleep/wake, `com.apple.screenIsLocked`/`Unlocked` and the wallpaper service's `hostDidWake` notice each start a bounded re-check burst of every surface (display power and lock state are read from the system, never remembered); reloads configuration on `app.wallpapermachine.lock-screen.changed`, reloads forwarded media on `app.wallpapermachine.lock-screen.media.changed`, publishes aggregate `live-demand.json`, and runs demand-gated 1 Hz timeline interpolation, 30 Hz shared-memory audio spectrum forwarding, and adaptive hover cursor tracking (`LockScreenPointerTracker`) for active lock-screen surfaces |
+| `WallpaperSurface.swift` | One `WallpaperID` to one `CAContext` with a scene/video `CAMetalLayer`, an AVFoundation `AVPlayerLayer` or the WebM player (`LockScreenWebMPlayer`) for a plain video (held with its reason when `LockScreenVideoPlanner` finds no player for it), otherwise the scene engine or live WebKit layer tree; bounded geometry, readiness, snapshots, live media/audio capability sync, and lock-screen hover cursor delivery |
 | `WallpaperSettingsProvider.swift` | Encodes the private wallpaper settings view-model payload |
 | `WallpaperExtensionBridge.h` | Objective-C bridging header declaring the private `CAContext`, `NSXPCConnection.auditToken` and the XPC protocol, selector for selector as the system declares it; also includes `SceneWallpaperBindings.h` |
 
@@ -936,7 +936,10 @@ contracts they must agree on:
   time-limited, per-surface runtime counters for power work, off by default (see
   [testing/power-benchmark.md](testing/power-benchmark.md)).
 - `ScreenSaverWebSurface` and `WebWallpaperProtocol` host and describe web wallpapers for the
-  lock screen and the screen saver (selected by `LockScreenScene.webEntryFile`); `LockScreenSurfaceRegistry`,
+  lock screen and the screen saver (selected by `LockScreenScene.webEntryFile`); `LockScreenPointerTracker`
+  maps global CoreGraphics cursor coordinates into per-display normalized hover updates with
+  deduplication and adaptive active/stationary polling cadence inside the extension (zero main-app
+  wakeups); `LockScreenSurfaceRegistry`,
   `LockScreenFrameBacking` and `LockScreenIdleExit` manage surface lifecycle, pixel backing and
   the extension process's exit once nothing uses it, so the next launch runs the registered copy.
 - `LockScreenVideoPlanner` decides, from a scene and the file, which of the extension's own players
@@ -1004,7 +1007,10 @@ Rules of the exchange:
   showing as a lock screen that never starts ([bundle contract](build.md#bundle-contract)).
 - Web wallpapers in the extension get a project-specific WebKit file grant, never the common
   revisions directory. Network-client access allows wallpaper resources, while sound output,
-  capture and author dialogs remain disabled; media integration and audio response follow the
+  capture, clicks, scrolling, keyboard input and author dialogs remain disabled; active, unpaused
+  lock-screen pages receive coalesced synthetic DOM hover events (`deliverPointer` / `deliverPointerExit`
+  through `WebWallpaperProtocol`, since `SchedulingWindow` is never ordered into WindowServer), and
+  media integration and audio response follow the
   wallpaper's saved settings on active lock-screen and screen-saver surfaces. The page's un-ordered scheduling window does not present on the
   desktop; the existing remote context owns the live layer tree, and suspension freezes it,
   accelerated content included. What goes into that context is the scheduling window's frame

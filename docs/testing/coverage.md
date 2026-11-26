@@ -911,6 +911,17 @@ or depend on a second physical monitor.
   can't take its place. `LockScreenSceneLayerHandoffTests` covers the receiving side and the
   bounded exchange; `LockScreenWallpaperServiceTests` distinguishes following the desktop
   from independently selecting the same item.
+- `LockScreenPointerTrackerTests` — lock-screen hover cursor tracking: primary and
+  negative-origin multi-display CoreGraphics normalization with half-open border ownership,
+  AppKit-to-CoreGraphics fallback conversion, per-surface enter/move/leave deduplication
+  without spurious secondary-display wakes or exit-snap, eligibility restricted to active
+  unpaused lock-screen scenes and web surfaces (excluding previews, desktop settle surfaces,
+  screen savers, paused/held surfaces and plain videos), and adaptive active-FPS vs
+  stationary-backoff polling cadence. `ScreenSaverWebSurfaceTests` exercises live WebKit
+  synthetic DOM hover (`pointermove`/`mousemove`/`mouseenter`/`mouseleave`) at 2× Retina
+  device-pixel coordinates, element transitions, explicit exit, pause refusal and resume.
+  Not covered: live WindowServer cursor updates inside the sandboxed extension while macOS
+  shows the lock screen shield.
 - `LockScreenVideoPlannerTests` — which player plays a plain video on the lock screen: the
   AVFoundation layer when admission accepts the clip (the frame rate it was given takes no
   part), the WebM player for a file AVFoundation cannot open that the project's reader takes,

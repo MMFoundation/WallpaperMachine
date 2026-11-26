@@ -546,4 +546,97 @@ final class ScreenSaverWebSurfaceTests: XCTestCase {
       "return window.devicePixelRatio", arguments: [:], in: nil, contentWorld: .page) as? Double
     XCTAssertEqual(try XCTUnwrap(updatedDPR), 0.75, accuracy: 1e-6)
   }
+
+  func testPointerHoverDeliversDevicePixelCoordinatesAndExitClearsHover() async throws {
+    try """
+      <!doctype html><html><head><style>
+      html,body { margin:0; width:100%; height:100%; display:flex; }
+      #left,#right { width:50%; height:100%; }
+      </style></head><body><div id="left"></div><div id="right"></div><script>
+      window.hoverState = { moves: [], pointerMoves: [], entered: [], left: [], exits: 0 };
+      window.addEventListener('mousemove', event => {
+        window.hoverState.moves.push({
+          x: event.clientX, y: event.clientY, mx: event.movementX, my: event.movementY,
+          target: event.target && event.target.id || ''
+        });
+      });
+      window.addEventListener('pointermove', event => {
+        window.hoverState.pointerMoves.push({ x: event.clientX, y: event.clientY, type: event.pointerType });
+      });
+      for (const id of ['left', 'right']) {
+        const el = document.getElementById(id);
+        el.addEventListener('mouseenter', () => window.hoverState.entered.push(id));
+        el.addEventListener('mouseleave', () => window.hoverState.left.push(id));
+      }
+      document.documentElement.addEventListener('mouseleave', () => {
+        window.hoverState.exits++;
+      });
+      </script></body></html>
+      """.write(to: project.appendingPathComponent("hover.html"), atomically: true, encoding: .utf8)
+
+    // 128 x 96 points at 2x scale -> 256 x 192 device-pixel layout via pageZoom = 0.5.
+    let surface = try make(entry: "hover.html", fps: 30, scale: 2)
+    try await start(surface)
+
+    func hoverState() async throws -> [String: Any] {
+      let raw = try await surface.webView.callAsyncJavaScript(
+        "return window.hoverState", arguments: [:], in: nil, contentWorld: .page)
+      return try XCTUnwrap(raw as? [String: Any])
+    }
+
+    // Move onto left half: (0.25 * 256 = 64, 0.75 * 192 = 144).
+    XCTAssertTrue(surface.deliverPointerMove(normalizedX: 0.25, normalizedY: 0.75))
+    try await poll {
+      let moves = try await hoverState()["moves"] as? [[String: Any]] ?? []
+      return !moves.isEmpty
+    }
+    let afterFirstMove = try await hoverState()
+    let firstMove = try XCTUnwrap((afterFirstMove["moves"] as? [[String: Any]])?.last)
+    XCTAssertEqual(try XCTUnwrap(firstMove["x"] as? Double), 64, accuracy: 1.0)
+    XCTAssertEqual(try XCTUnwrap(firstMove["y"] as? Double), 144, accuracy: 1.0)
+    XCTAssertEqual(firstMove["target"] as? String, "left")
+    let firstPointer = try XCTUnwrap((afterFirstMove["pointerMoves"] as? [[String: Any]])?.last)
+    XCTAssertEqual(firstPointer["type"] as? String, "mouse")
+    XCTAssertEqual(afterFirstMove["entered"] as? [String], ["left"])
+
+    // Move across onto right half: fires mouseleave on #left, mouseenter on #right, and movement deltas.
+    XCTAssertTrue(surface.deliverPointerMove(normalizedX: 0.75, normalizedY: 0.25))
+    try await poll {
+      let moves = try await hoverState()["moves"] as? [[String: Any]] ?? []
+      return moves.count >= 2
+    }
+    let afterSecondMove = try await hoverState()
+    let secondMove = try XCTUnwrap((afterSecondMove["moves"] as? [[String: Any]])?.last)
+    XCTAssertEqual(try XCTUnwrap(secondMove["x"] as? Double), 192, accuracy: 1.0)
+    XCTAssertEqual(try XCTUnwrap(secondMove["y"] as? Double), 48, accuracy: 1.0)
+    XCTAssertEqual(try XCTUnwrap(secondMove["mx"] as? Double), 128, accuracy: 1.0)
+    XCTAssertEqual(try XCTUnwrap(secondMove["my"] as? Double), -96, accuracy: 1.0)
+    XCTAssertEqual(secondMove["target"] as? String, "right")
+    XCTAssertEqual(afterSecondMove["left"] as? [String], ["left"])
+    XCTAssertEqual(afterSecondMove["entered"] as? [String], ["left", "right"])
+
+    // Explicit exit clears hover and fires mouseleave up through documentElement.
+    surface.deliverPointerExit()
+    try await poll {
+      let current = try await hoverState()
+      return (current["exits"] as? Int ?? 0) == 1 && (current["left"] as? [String]) == ["left", "right"]
+    }
+
+    // While paused/suspended, hover delivery is refused so WebKit is never woken.
+    surface.setPaused(true)
+    try await poll { surface.isPaused }
+    XCTAssertFalse(surface.deliverPointerMove(normalizedX: 0.5, normalizedY: 0.5))
+
+    // After resuming, hover works again cleanly with fresh coordinates.
+    surface.setPaused(false)
+    try await poll { surface.canDeliverPointer }
+    XCTAssertTrue(surface.deliverPointerMove(normalizedX: 0.5, normalizedY: 0.5))
+    try await poll {
+      let moves = try await hoverState()["moves"] as? [[String: Any]] ?? []
+      guard let last = moves.last, let x = last["x"] as? Double, let y = last["y"] as? Double else {
+        return false
+      }
+      return abs(x - 128) <= 1.0 && abs(y - 96) <= 1.0
+    }
+  }
 }

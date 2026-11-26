@@ -46,8 +46,9 @@ for them.
   not part of a backup. See [inspecting a web wallpaper](diagnostics.md#inspecting-a-web-wallpaper).
 - On macOS 26+, **Animate lock screen** and **Use wallpaper as screen saver** present
   web and still-image projects through the native extension, as live pages. They use
-  committed properties and isolated file copies, without audio, capture or
-  interaction. See [web and still wallpapers](lock-screen.md#web-and-still-wallpapers)
+  committed properties and isolated file copies, without sound output, capture, clicks or
+  keyboard input (active lock-screen pages receive hover cursor events, and live media and
+  audio response follow each wallpaper's saved settings). See [web and still wallpapers](lock-screen.md#web-and-still-wallpapers)
   and [Screen saver](lock-screen.md#use-wallpaper-as-screen-saver) for activation,
   independent selection and verification limits.
 

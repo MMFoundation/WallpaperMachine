@@ -47,6 +47,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   let pendingAcquires = LockScreenAcquireReplies()
   private var rendererPaused = false
   private(set) var sceneRequiresAudio = false
+  private(set) var sceneAcceptsPointerInput = true
+  private var pointerDelivery = LockScreenPointerDelivery()
   private var appliedMediaIntegrationEnabled = false
   private var appliedAudioResponseEnabled = false
   private var lastDeliveredMediaGeneration: UInt64 = 0
@@ -78,6 +80,37 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     if renderer != nil { return sceneRequiresAudio }
     if let web, contentError == nil { return web.isAudioSubscribed }
     return false
+  }
+  /// Display whose global bounds map cursor coordinates onto this surface.
+  var pointerDisplayID: UInt32 { displayID ?? scene.displayID }
+  /// Whether this surface is an active, unpaused lock-screen scene or web wallpaper that
+  /// should react to cursor movement (parallax and hover effects). Never true for previews,
+  /// unlocked desktop settle surfaces, screen savers, paused/held surfaces, or plain videos.
+  var isLivePointerEligible: Bool {
+    let kind: LockScreenPointerPolicy.SurfaceKind
+    if renderer != nil {
+      kind = .scene(acceptsPointerInput: sceneAcceptsPointerInput)
+    } else if let web {
+      kind = .web(ready: web.isReady, hasError: contentError != nil)
+    } else if video != nil {
+      kind = .video
+    } else {
+      kind = .none
+    }
+    return LockScreenPointerPolicy.isEligible(
+      preview: preview, stopped: stopped, paused: rendererPaused,
+      loading: firstFrameReply != nil, held: heldFailure != nil,
+      content: content, kind: kind)
+  }
+  /// True when hover input can be delivered right now without racing web page suspension.
+  var canDeliverPointerNow: Bool {
+    guard isLivePointerEligible else { return false }
+    if let web { return web.canDeliverPointer }
+    return renderer != nil
+  }
+  /// True when this surface has not yet received its initial cursor state since becoming active.
+  var needsInitialPointerSample: Bool {
+    canDeliverPointerNow && pointerDelivery.entered == nil
   }
   var isSceneSurface: Bool { renderer != nil && !stopped }
   var isWebSurface: Bool { web != nil && !stopped && contentError == nil }
@@ -192,9 +225,9 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       owe_scene_wallpaper_init_metal(
         renderer, Unmanaged.passUnretained(metal).toOpaque(), UInt32(metal.drawableSize.width),
         UInt32(metal.drawableSize.height), 0, 0, Double(scale)))
-    // The lock-screen process never plays sound or reads pointer input; media integration
-    // and audio response stay off until `syncLiveCapabilities()` confirms an unpaused
-    // lock-screen or screen-saver presentation.
+    // The lock-screen process never plays sound or forwards clicks/keyboard input; hover
+    // cursor tracking, media integration and audio response stay off until `syncLiveCapabilities()`
+    // confirms an active, unpaused lock-screen (or screen-saver, for media/audio) presentation.
     try check(
       owe_scene_wallpaper_set_property_bool(
         renderer, owe_property_audio_response_enabled(), false))
@@ -255,6 +288,11 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     init(_ fire: @escaping (Bool) -> Void) { self.fire = fire }
   }
 
+  private final class PointerInputBox {
+    let fire: (Bool) -> Void
+    init(_ fire: @escaping (Bool) -> Void) { self.fire = fire }
+  }
+
   private func installEngineSignals(_ renderer: OpaquePointer?) throws {
     func callback(_ signal: EngineSignal) -> UnsafeMutableRawPointer {
       Unmanaged.passRetained(
@@ -296,11 +334,35 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       renderer, audioFire, audioBox, audioDrop)
     if audioResult != 0 { audioDrop(audioBox) }
     try check(audioResult)
+
+    let pointerBox = Unmanaged.passRetained(
+      PointerInputBox { [weak self] accepts in
+        Task { @MainActor in self?.pointerInputCapabilityChanged(accepts) }
+      }
+    ).toOpaque()
+    let pointerFire: @convention(c) (UnsafeMutableRawPointer?, Bool) -> Void = { pointer, accepts in
+      guard let pointer else { return }
+      Unmanaged<PointerInputBox>.fromOpaque(pointer).takeUnretainedValue().fire(accepts)
+    }
+    let pointerDrop: @convention(c) (UnsafeMutableRawPointer?) -> Void = { pointer in
+      if let pointer { Unmanaged<PointerInputBox>.fromOpaque(pointer).release() }
+    }
+    let pointerResult = owe_scene_wallpaper_set_pointer_input_callback(
+      renderer, pointerFire, pointerBox, pointerDrop)
+    if pointerResult != 0 { pointerDrop(pointerBox) }
+    try check(pointerResult)
   }
 
   private func audioRequirementChanged(_ required: Bool) {
     guard !stopped, renderer != nil, sceneRequiresAudio != required else { return }
     sceneRequiresAudio = required
+    syncLiveCapabilities()
+  }
+
+  private func pointerInputCapabilityChanged(_ accepts: Bool) {
+    guard !stopped, renderer != nil, sceneAcceptsPointerInput != accepts else { return }
+    if !accepts { clearPointerState() }
+    sceneAcceptsPointerInput = accepts
     syncLiveCapabilities()
   }
 
@@ -600,8 +662,12 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       }
     }
     page.onBecameActive = { [weak self] in
-      guard let self, self.isLiveMediaEligible else { return }
-      WallpaperController.shared.replayMedia(to: self)
+      guard let self else { return }
+      if self.isLiveMediaEligible {
+        WallpaperController.shared.replayMedia(to: self)
+      }
+      WallpaperController.shared.reconcileLiveFeed()
+      WallpaperController.shared.refreshPointerIfNeeded()
     }
     page.onFrame = { [weak self] image in
       guard let self, !self.stopped else { throw CancellationError() }
@@ -747,6 +813,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     let shouldPause = !reasons.isEmpty
     schedulePreviewExpiry(for: request)
     guard shouldPause != rendererPaused else { return }
+    if shouldPause { clearPointerState() }
     do {
       if let web {
         web.setPaused(shouldPause)
@@ -823,7 +890,51 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       }
       appliedAudioResponseEnabled = wantWebAudio
     }
+    if !isLivePointerEligible {
+      clearPointerState()
+    }
     WallpaperController.shared.reconcileLiveFeed()
+  }
+
+  /// Delivers one global CoreGraphics cursor sample into this lock-screen surface, deduplicating
+  /// unchanged positions and enter/leave transitions. Never delivers clicks or keyboard input.
+  func deliverPointer(cursor: CGPoint, in bounds: CGRect?) {
+    guard canDeliverPointerNow else { return }
+    guard let bounds else {
+      clearPointerState()
+      return
+    }
+    let update = pointerDelivery.update(cursor: cursor, in: bounds)
+    guard !update.isEmpty else { return }
+    if let renderer {
+      if let entered = update.entered {
+        _ = owe_scene_wallpaper_mouse_enter(renderer, entered)
+      }
+      if let position = update.position {
+        _ = owe_scene_wallpaper_mouse_input(renderer, position.x, position.y)
+      }
+      counters.record(.pointerDelivered, for: surfaceKey)
+    } else if let web {
+      if let position = update.position {
+        if web.deliverPointerMove(normalizedX: position.x, normalizedY: position.y) {
+          counters.record(.pointerDelivered, for: surfaceKey)
+        }
+      } else if update.entered == false {
+        web.deliverPointerExit()
+        counters.record(.pointerDelivered, for: surfaceKey)
+      }
+    }
+  }
+
+  /// Leaves hover cleanly when this surface pauses, unlocks, sleeps, or switches away from
+  /// an active lock-screen presentation.
+  func clearPointerState() {
+    guard pointerDelivery.exit() else { return }
+    if let renderer {
+      _ = owe_scene_wallpaper_mouse_enter(renderer, false)
+    } else if let web {
+      web.deliverPointerExit()
+    }
   }
 
   func deliverMedia(
@@ -1096,6 +1207,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     }
     rendererPaused = true
     sceneRequiresAudio = false
+    sceneAcceptsPointerInput = true
+    pointerDelivery.reset()
     appliedMediaIntegrationEnabled = false
     appliedAudioResponseEnabled = false
     lastDeliveredMediaGeneration = 0

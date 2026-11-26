@@ -25,6 +25,13 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-26 — Lock-screen hover cursor reactivity (#266)
+
+- Added Shared/LockScreenPointerTracker.swift, DOM hover delivery in WebWallpaperProtocol/ScreenSaverWebSurface, and extension hover tracking in WallpaperSurface/WallpaperController for active lock-screen Scene and Web surfaces.
+- Targeted: python3 scripts/test.py --only LockScreenPointerTrackerTests (5/5 passed), ScreenSaverWebSurfaceTests (19/19 passed), WebWallpaperPageMessageTests (3/3 passed).
+- Gate: python3 scripts/test.py — all 37 Python test modules OK; native suite 5422 passed, 0 failed, 70 skipped of 5492 (182s).
+- Skips/gaps: 70 pre-existing skips in full suite; Release app not rebuilt; live macOS lock-screen cursor updates inside the sandboxed WallpaperMachineExtension were not exercised on a locked desktop.
+
 ## 2026-11-26 — Prewarm the optimized Xcode compiler outside the release path
 
 - The five successful Version runs v1.11.1–v1.15.0 had a median elapsed time of 24m16s. For v1.15.0, Xcode took 11m19s; about five minutes waiting for the macOS runner and 1m41s for packaging/notarization are not addressed by a compiler cache.
@@ -101,13 +108,3 @@ entry's recorded result is not allowed.
 - Localization: App/Resources/Localizable.xcstrings +37/-1 keys across all 6 shipped languages (en, ja, ko, pt-BR, zh-Hans, zh-Hant), verified by test_localization_catalogs.py and test_panel_localization.py.
 - Review: verifier-w2a read-only review PASS (0 blockers after fixing 3 must-fix and 3 nit findings with added unit tests).
 - Not run: Release build (not requested), --ui desktop tests, and live visual inspection.
-
-## 2026-11-25 — Wave 1 P0 fixes and quick wins (#1-#7)
-
-- Scope: NowPlaying theme/day-night, empty Favorites/narrowingFilterCount/collectionID, a11y/focus/cursor/SelectButton, thermal hysteresis/battery renderScale/Web middle-click+language, Workshop updates/comments/UpdateWindow, Widgets multi-display preview+Copy Style+Cmd-D, Switch Transitions, Lock Screen renderScale.
-- python3 scripts/build.py --renderer-only -> PASS (0 diff in App/Bridge/Generated/).
-- python3 scripts/check_rust.py -> PASS (core 436, bridge 992, core-integration 20, shader 1094; 0 failed; opt-in desktop/media/network disabled).
-- python3 scripts/check_renderer.py -> PASS (pixels_equal=True, diagnostics=0, reload cycles 0; 7 opt-in local asset/corpus tests skipped).
-- python3 scripts/test.py -> PASS (36/36 Python suites OK; 5207 passed, 0 failed, 70 skipped of 5277 native tests in 162s).
-- Localization: App/Resources/Localizable.xcstrings edited as text (+22 keys across en/ja/ko/pt-BR/zh-Hans/zh-Hant, -2 superseded keys); test_localization_catalogs and test_panel_localization passed.
-- Not run: Release .app build (not requested), desktop UI tests (--ui), live Steam network/media opt-ins, and live macOS visual inspection of Halloween Light popover/multi-display widgets/switch transitions.

@@ -9,6 +9,16 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-25 — Wave 1 P0 fixes and quick wins (#1-#7)
+
+- Scope: NowPlaying theme/day-night, empty Favorites/narrowingFilterCount/collectionID, a11y/focus/cursor/SelectButton, thermal hysteresis/battery renderScale/Web middle-click+language, Workshop updates/comments/UpdateWindow, Widgets multi-display preview+Copy Style+Cmd-D, Switch Transitions, Lock Screen renderScale.
+- python3 scripts/build.py --renderer-only -> PASS (0 diff in App/Bridge/Generated/).
+- python3 scripts/check_rust.py -> PASS (core 436, bridge 992, core-integration 20, shader 1094; 0 failed; opt-in desktop/media/network disabled).
+- python3 scripts/check_renderer.py -> PASS (pixels_equal=True, diagnostics=0, reload cycles 0; 7 opt-in local asset/corpus tests skipped).
+- python3 scripts/test.py -> PASS (36/36 Python suites OK; 5207 passed, 0 failed, 70 skipped of 5277 native tests in 162s).
+- Localization: App/Resources/Localizable.xcstrings edited as text (+22 keys across en/ja/ko/pt-BR/zh-Hans/zh-Hant, -2 superseded keys); test_localization_catalogs and test_panel_localization passed.
+- Not run: Release .app build (not requested), desktop UI tests (--ui), live Steam network/media opt-ins, and live macOS visual inspection of Halloween Light popover/multi-display widgets/switch transitions.
+
 ## 2026-11-25 — Lock-screen and screen-saver live media integration and audio response (#258)
 
 Forwarded Now Playing media state and 224-band system-audio spectra from the main app to the sandboxed lock-screen/screen-saver extension for Scene and Web wallpapers while keeping previews, unlocked desktop settle surfaces and plain videos excluded.

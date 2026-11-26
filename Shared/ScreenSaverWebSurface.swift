@@ -97,6 +97,17 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
   /// Fired whenever the page finishes loading or resuming into an active (unpaused) state,
   /// so the host can replay live media state after `_resumePage:` completes.
   var onBecameActive: (() -> Void)?
+  private enum PendingPointer {
+    case move(x: Double, y: Double)
+    case exit
+  }
+  private var isPointerInside = false
+  private var pointerDeliveryInFlight = false
+  private var pendingPointer: PendingPointer?
+  /// True when the page is live and not paused or pending pause, so hover can safely land.
+  var canDeliverPointer: Bool {
+    isReady && !isStopped && !isPaused && !desiredPaused
+  }
   /// Feeds a subscribed page silence while it plays without live audio; see `updateSilence()`.
   private var silence: Task<Void, Never>?
   /// How often silence reaches a subscribed page: the desktop's spacing for a quiet stretch.
@@ -270,6 +281,60 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     updateSilence()
   }
 
+  /// Delivers a display-normalized hover move (`0...1`, y down) into the page via the host
+  /// script. `SchedulingWindow` is never ordered into WindowServer, so WebKit's native
+  /// `_simulateMouseMove:` drops events there; synthetic DOM `pointermove` / `mousemove`
+  /// dispatch lands at the exact device-pixel layout (`innerWidth` / `innerHeight`) without
+  /// ordering any window or forwarding clicks or keyboard input. Latest-value coalesced so
+  /// a slow page never piles up JS calls.
+  @discardableResult
+  func deliverPointerMove(normalizedX: Double, normalizedY: Double) -> Bool {
+    guard canDeliverPointer, normalizedX.isFinite, normalizedY.isFinite else { return false }
+    let clampedX = min(max(normalizedX, 0), 1)
+    let clampedY = min(max(normalizedY, 0), 1)
+    isPointerInside = true
+    pendingPointer = .move(x: clampedX, y: clampedY)
+    drainPendingPointerIfNeeded()
+    return true
+  }
+
+  /// Dispatches synthetic `pointerout` / `mouseout` / `pointerleave` / `mouseleave` when the
+  /// cursor leaves the display or the surface pauses.
+  func deliverPointerExit() {
+    guard isPointerInside else { return }
+    isPointerInside = false
+    guard isReady, !isStopped, !isPaused else {
+      pendingPointer = nil
+      return
+    }
+    pendingPointer = .exit
+    drainPendingPointerIfNeeded()
+  }
+
+  private func drainPendingPointerIfNeeded() {
+    guard !pointerDeliveryInFlight, pendingPointer != nil else { return }
+    pointerDeliveryInFlight = true
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      defer { self.pointerDeliveryInFlight = false }
+      while let next = self.pendingPointer {
+        self.pendingPointer = nil
+        switch next {
+        case .move(let x, let y):
+          guard self.canDeliverPointer else { continue }
+          _ = try? await self.webView.callAsyncJavaScript(
+            WebWallpaperProtocol.deliverPointerScript,
+            arguments: ["x": x, "y": y], in: nil, contentWorld: .page)
+        case .exit:
+          guard self.isReady, !self.isStopped, !self.isPaused else { continue }
+          _ = try? await self.webView.callAsyncJavaScript(
+            WebWallpaperProtocol.deliverPointerExitScript,
+            arguments: [:], in: nil, contentWorld: .page)
+        }
+      }
+    }
+  }
+
   func deliverMediaEvents(_ events: [(slot: String, payload: [String: Any])]) {
     guard isReady, !isStopped, !isPaused, !desiredPaused, !events.isEmpty else { return }
     let encoded: [[String: Any]] = events.map { ["slot": $0.slot, "payload": $0.payload] }
@@ -347,6 +412,24 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
         _ = try await self.bounded(self.pageWait) { try await self.deliverCommitted(paused: pause) }
         guard !self.isStopped else { return }
         if pause {
+          if case .move = self.pendingPointer { self.pendingPointer = nil }
+          let needsExit: Bool
+          if self.isPointerInside {
+            needsExit = true
+          } else if case .exit = self.pendingPointer {
+            needsExit = true
+          } else {
+            needsExit = false
+          }
+          if needsExit {
+            self.isPointerInside = false
+            self.pendingPointer = nil
+            _ = try? await self.bounded(self.pageWait) {
+              _ = try? await self.webView.callAsyncJavaScript(
+                WebWallpaperProtocol.deliverPointerExitScript,
+                arguments: [:], in: nil, contentWorld: .page)
+            }
+          }
           _ = try await self.bounded(self.pageWait) {
             await self.webView.setAllMediaPlaybackSuspended(true)
           }
@@ -501,6 +584,9 @@ final class ScreenSaverWebSurface: NSObject, WKNavigationDelegate, WKUIDelegate 
     mediaDeliveryChain = nil
     liveAudioActive = false
     audioDeliveryInFlight = false
+    isPointerInside = false
+    pointerDeliveryInFlight = false
+    pendingPointer = nil
     let reply = firstReply
     firstReply = nil
     reply?(CancellationError())

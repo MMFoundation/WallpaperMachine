@@ -87,7 +87,7 @@ enum WebWallpaperProtocol {
     /// A function of `hostObject`, named as `hostScriptSource` defines it.
     enum HostFunction: String, CaseIterable {
         case applyUserProperties, applyGeneralProperties, setFrameLimit, setRenderScale, setScreenScale
-        case setPaused, deliverAudio, deliverMedia, deliverRandomFile
+        case setPaused, deliverAudio, deliverMedia, deliverPointer, deliverPointerExit, deliverRandomFile
         case userDirectoryFilesAddedOrChanged, userDirectoryFilesRemoved
     }
 
@@ -100,6 +100,10 @@ enum WebWallpaperProtocol {
     /// Hands the page one audio frame, the `callAsyncJavaScript` argument `bins`, and returns
     /// whether a listener took it. Built once: it runs for every audio frame.
     static let deliverAudioScript = "return " + hostCall(.deliverAudio, "bins")
+    /// Hands a lock-screen page one display-normalized hover position (`x`, `y` in `0...1`, y down).
+    static let deliverPointerScript = hostCall(.deliverPointer, "x", "y")
+    /// Clears synthetic lock-screen hover when the cursor leaves the display or the surface pauses.
+    static let deliverPointerExitScript = hostCall(.deliverPointerExit)
 
     /// What a page's document-start script needs to know before any page script
     /// runs. The frame-rate limit has to be known by the page's very first
@@ -396,6 +400,10 @@ enum WebWallpaperProtocol {
       const nativeRatio = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
       const nativeDispatch = EventTarget.prototype.dispatchEvent;
       const NativeEvent = Event;
+      const NativeMouseEvent = window.MouseEvent;
+      const NativePointerEvent = typeof window.PointerEvent === "function" ? window.PointerEvent : null;
+      const nativeElementFromPoint = Document.prototype.elementFromPoint;
+      const nativeContains = Node.prototype.contains;
       let renderScale = 1;
       let scaledRatio = null;
       let resizePending = false;
@@ -673,6 +681,100 @@ enum WebWallpaperProtocol {
         post({ type: "\(PageMessage.Kind.randomFileRequest.rawValue)", requestId, propertyId: property });
       };
 
+      let pointerTarget = null;
+      let lastPointerX = null;
+      let lastPointerY = null;
+      const pointerAncestors = node => {
+        const list = [];
+        for (let current = node; current; current = current.parentElement) list.push(current);
+        return list;
+      };
+      const firePointer = (target, type, init, isPointer) => {
+        if (!target) return;
+        try {
+          const Ctor = isPointer && NativePointerEvent ? NativePointerEvent : NativeMouseEvent;
+          if (!Ctor) return;
+          nativeDispatch.call(target, new Ctor(type, init));
+        } catch {}
+      };
+      const dispatchPointerHover = (nx, ny) => {
+        if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
+        const clampedX = Math.min(1, Math.max(0, nx));
+        const clampedY = Math.min(1, Math.max(0, ny));
+        const cx = clampedX * window.innerWidth;
+        const cy = clampedY * window.innerHeight;
+        const mx = lastPointerX === null ? 0 : cx - lastPointerX;
+        const my = lastPointerY === null ? 0 : cy - lastPointerY;
+        lastPointerX = cx;
+        lastPointerY = cy;
+        let hit = null;
+        try { hit = nativeElementFromPoint ? nativeElementFromPoint.call(document, cx, cy) : null; } catch {}
+        const target = hit || document.body || document.documentElement;
+        const base = {
+          clientX: cx, clientY: cy, screenX: cx, screenY: cy,
+          movementX: mx, movementY: my, button: 0, buttons: 0, view: window, composed: true,
+        };
+        const pointerBase = Object.assign({ pointerId: 1, pointerType: "mouse", isPrimary: true }, base);
+        if (target !== pointerTarget) {
+          const prev = pointerTarget;
+          if (prev) {
+            const outMouse = Object.assign({ bubbles: true, cancelable: true, relatedTarget: target }, base);
+            const outPointer = Object.assign({ bubbles: true, cancelable: true, relatedTarget: target }, pointerBase);
+            firePointer(prev, "pointerout", outPointer, true);
+            firePointer(prev, "mouseout", outMouse, false);
+            const leaveMouse = Object.assign({ bubbles: false, cancelable: false, relatedTarget: target }, base);
+            const leavePointer = Object.assign({ bubbles: false, cancelable: false, relatedTarget: target }, pointerBase);
+            for (const el of pointerAncestors(prev)) {
+              if (!target || !nativeContains.call(el, target)) {
+                firePointer(el, "pointerleave", leavePointer, true);
+                firePointer(el, "mouseleave", leaveMouse, false);
+              }
+            }
+          }
+          pointerTarget = target;
+          if (target) {
+            const overMouse = Object.assign({ bubbles: true, cancelable: true, relatedTarget: prev }, base);
+            const overPointer = Object.assign({ bubbles: true, cancelable: true, relatedTarget: prev }, pointerBase);
+            firePointer(target, "pointerover", overPointer, true);
+            firePointer(target, "mouseover", overMouse, false);
+            const enterMouse = Object.assign({ bubbles: false, cancelable: false, relatedTarget: prev }, base);
+            const enterPointer = Object.assign({ bubbles: false, cancelable: false, relatedTarget: prev }, pointerBase);
+            for (const el of pointerAncestors(target).reverse()) {
+              if (!prev || !nativeContains.call(el, prev)) {
+                firePointer(el, "pointerenter", enterPointer, true);
+                firePointer(el, "mouseenter", enterMouse, false);
+              }
+            }
+          }
+        }
+        if (target) {
+          firePointer(target, "pointermove", Object.assign({ bubbles: true, cancelable: true }, pointerBase), true);
+          firePointer(target, "mousemove", Object.assign({ bubbles: true, cancelable: true }, base), false);
+        }
+      };
+      const dispatchPointerExit = () => {
+        const prev = pointerTarget;
+        const cx = lastPointerX === null ? -1 : lastPointerX;
+        const cy = lastPointerY === null ? -1 : lastPointerY;
+        pointerTarget = null;
+        lastPointerX = null;
+        lastPointerY = null;
+        if (!prev) return;
+        const base = {
+          clientX: cx, clientY: cy, screenX: cx, screenY: cy,
+          button: 0, buttons: 0, relatedTarget: null, view: window, composed: true,
+        };
+        const pointerBase = Object.assign({ pointerId: 1, pointerType: "mouse", isPrimary: true }, base);
+        firePointer(prev, "pointerout", Object.assign({ bubbles: true, cancelable: true }, pointerBase), true);
+        firePointer(prev, "mouseout", Object.assign({ bubbles: true, cancelable: true }, base), false);
+        const leaveMouse = Object.assign({ bubbles: false, cancelable: false }, base);
+        const leavePointer = Object.assign({ bubbles: false, cancelable: false }, pointerBase);
+        for (const el of pointerAncestors(prev)) {
+          firePointer(el, "pointerleave", leavePointer, true);
+          firePointer(el, "mouseleave", leaveMouse, false);
+        }
+      };
+
       \(hostObject) = Object.freeze({
         applyUserProperties(properties, restaged) { deliverProperties("applyUserProperties", properties, restaged); },
         applyGeneralProperties(properties) { deliverProperties("applyGeneralProperties", properties); },
@@ -704,6 +806,8 @@ enum WebWallpaperProtocol {
           mediaValue[slot] = event;
           fireMedia(slot, event);
         },
+        deliverPointer(x, y) { dispatchPointerHover(x, y); },
+        deliverPointerExit() { dispatchPointerExit(); },
         deliverRandomFile(requestId, property, filePath) {
           const callback = randomFileCallbacks.get(requestId);
           if (!callback) return;

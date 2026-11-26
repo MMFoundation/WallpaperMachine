@@ -238,10 +238,29 @@ briefly stretch the old frame, and invalid dimensions are rejected before the
 existing renderer is touched. Whether macOS keeps a context after an acquire error is
 unverified.
 
-### Audio, media and the Enabled state
+### Audio, media, cursor and the Enabled state
 
-Wallpaper sound output and pointer/keyboard input remain disabled in the lock-screen
-extension. Live [media integration](media-integration.md#lock-screen-and-screen-saver)
+Wallpaper sound output, mouse clicks, scrolling and keyboard input remain disabled in the
+lock-screen extension. Active, unpaused **lock-screen** Scene and Web surfaces track hover cursor
+motion (`LockScreenPointerTracker`) so scenes react with camera parallax (following each
+wallpaper's saved **Mouse parallax** option), shader/light hover effects (`g_PointerPosition`),
+particle mouse control points and SceneScript hover events (`cursorMove`, `cursorEnter`,
+`cursorLeave`), and web wallpapers receive DOM `pointermove` / `mousemove` / `mouseenter` /
+`mouseleave` hover events. Previews, unlocked desktop settle surfaces, screen savers (which macOS
+dismisses on mouse movement), paused or held surfaces, sleeping displays and plain videos never
+poll the cursor.
+
+Cursor tracking stays entirely inside the extension process (no main-app wakeups, no Accessibility
+or Input Monitoring permissions): it reads `CGEvent(source: nil)?.location` (falling back to
+`NSEvent.mouseLocation`) and `CGDisplayBounds`, maps into each active lock-screen display in
+normalized coordinates, deduplicates stationary coordinates and secondary-display exits, polls at
+the active surface frame rate (clamped to 15–60 Hz) while moving, backs off to 80 ms (~12.5 Hz)
+after 500 ms without motion, and cancels its timer completely as soon as no lock-screen surface is
+eligible. Whether macOS WindowServer continues updating cursor coordinates inside the sandboxed
+`com.apple.wallpaper` extension while the lock screen shield is up has not been exercised on a
+live locked screen.
+
+Live [media integration](media-integration.md#lock-screen-and-screen-saver)
 and [audio response](audio-response.md#what-wallpapers-receive) follow each wallpaper's
 own saved settings on active, unpaused lock-screen and screen-saver Scene and Web
 surfaces; previews, unlocked desktop settle surfaces and plain videos always keep both
@@ -259,7 +278,7 @@ and/or CoreAudio tap running even while desktop presentation is suspended:
   artwork changes) is written only on track, playback, artwork or seek changes; the
   extension interpolates playback progress locally at 1 Hz while playing so ordinary
   ticks write nothing to disk. Transport buttons (`usershortcut`) do not trigger because
-  macOS delivers no pointer input to lock-screen or screen-saver extensions.
+  clicks and keyboard input remain disabled in lock-screen and screen-saver extensions.
 - **Audio spectrum:** all 224 unclamped bands (`64`/`32`/`16` left+right) are written at
   30 Hz into a 4096-byte `mmap` seqlock file (`audio-spectrum.shm`, never `msync`'d) and
   read by the extension into its scene `AudioResponseService` and clamped 128-bin web
@@ -363,10 +382,13 @@ restoration can roll back both selections.
 
 Web and still wallpapers use a live WebKit layer tree, not a recorded video or a
 periodic screenshot. Only their staged project and referenced imports are granted file
-access. Sound output, camera/microphone/display capture, interaction and author dialogs
-are disabled; live media integration and audio response follow the wallpaper's saved
-settings on active lock-screen and screen-saver surfaces (see
-[Audio, media and the Enabled state](#audio-media-and-the-enabled-state)). Pause freezes page execution and retains the compositor
+access. Sound output, camera/microphone/display capture, clicks, scrolling, keyboard input
+and author dialogs are disabled; active, unpaused lock-screen pages receive coalesced
+synthetic DOM hover events (`pointermove` / `mousemove` / `mouseover` / `mouseout` /
+`mouseenter` / `mouseleave` in device pixels, without browser-native CSS `:hover` since the
+scheduling window is never ordered into WindowServer), and live media integration and audio
+response follow the wallpaper's saved settings on active lock-screen and screen-saver
+surfaces (see [Audio, media, cursor and the Enabled state](#audio-media-cursor-and-the-enabled-state)). Pause freezes page execution and retains the compositor
 tree; it does not resume playback the user paused. **Animate lock screen** takes them like
 a scene: the page loads and draws its first frame live, settles as the desktop picture,
 then holds a frame and runs again while the Mac is locked. The page's paused state is the

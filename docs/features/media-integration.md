@@ -213,11 +213,11 @@ contract is in [Web wallpapers](web-wallpapers.md#host-protocol).
 
 ## Lock screen and screen saver
 
-Scene and Web wallpapers shown on an active, unpaused [lock screen or screen saver](lock-screen.md#audio-media-and-the-enabled-state)
+Scene and Web wallpapers shown on an active, unpaused [lock screen or screen saver](lock-screen.md#audio-media-cursor-and-the-enabled-state)
 follow each wallpaper's own media-integration setting. Previews, unlocked desktop
 settle surfaces and plain videos never receive media updates, and `usershortcut`
-transport buttons do not trigger there because macOS delivers no pointer input to
-lock-screen or screen-saver extensions.
+transport buttons do not trigger there because clicks and keyboard input remain
+disabled in lock-screen and screen-saver extensions.
 
 The sandboxed extension never touches MediaRemote or AppleScript directly: while an
 eligible surface is presenting, the extension publishes `live-demand.json` in

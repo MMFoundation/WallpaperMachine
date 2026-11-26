@@ -26,6 +26,9 @@ final class WallpaperController {
   private var layerRead = LayerRead.idle
   private var timelineTask: Task<Void, Never>?
   private var audioTask: Task<Void, Never>?
+  private var pointerTask: Task<Void, Never>?
+  private let pointerProbe = LockScreenPointerProbe.system
+  private var pointerCadence = LockScreenPointerCadence()
   private let spectrumReader = LockScreenAudioSpectrumReader(exchange: WallpaperRuntime.exchange)
   private var lastForwardedAudioGeneration: UInt64 = 0
   private var webReceivedLiveAudio = false
@@ -393,6 +396,7 @@ final class WallpaperController {
     let activeSurfaces = Array(surfaces.values)
     let needsMedia = activeSurfaces.contains { $0.isLiveMediaEligible }
     let needsAudio = activeSurfaces.contains { $0.isLiveAudioEligible }
+    let needsPointer = activeSurfaces.contains { $0.isLivePointerEligible }
     var requests = Set(activeSurfaces.compactMap(\.pendingLayerRequest))
     let limit = LockScreenSceneLayerExchange.maximumRequests
     if requests.count > limit {
@@ -403,6 +407,7 @@ final class WallpaperController {
       layerRequests: requests.isEmpty ? nil : requests))
     updateTimelineTimer()
     updateAudioTimer(active: needsAudio)
+    updatePointerTimer(active: needsPointer)
   }
 
   private func reloadSceneLayerStates() {
@@ -433,6 +438,9 @@ final class WallpaperController {
     timelineTask = nil
     audioTask?.cancel()
     audioTask = nil
+    pointerTask?.cancel()
+    pointerTask = nil
+    pointerCadence.reset()
     spectrumReader.close()
     pendingDemand = nil
     publishDemandIfChanged(LockScreenLiveDemand(processID: getpid(), needsMedia: false, needsAudio: false))
@@ -582,5 +590,61 @@ final class WallpaperController {
         surface.deliverWebAudio(bins: silence, liveActive: false)
       }
     }
+  }
+
+  // MARK: - Live Lock-Screen Cursor Tracking
+
+  func refreshPointerIfNeeded() {
+    guard pointerTask != nil else { return }
+    _ = pumpPointerOnce()
+  }
+
+  private func updatePointerTimer(active: Bool) {
+    guard active != (pointerTask != nil) else {
+      if active, surfaces.values.contains(where: \.needsInitialPointerSample) {
+        _ = pumpPointerOnce()
+      }
+      return
+    }
+    pointerTask?.cancel()
+    pointerTask = nil
+    pointerCadence.reset()
+    guard active else { return }
+    pointerTask = Task { @MainActor [weak self] in
+      while let self, !Task.isCancelled {
+        guard let delay = self.pumpPointerOnce() else { return }
+        do { try await Task.sleep(for: delay) } catch { return }
+      }
+    }
+  }
+
+  private func pumpPointerOnce() -> Duration? {
+    let eligible = Array(surfaces.values).filter { $0.isLivePointerEligible }
+    guard !eligible.isEmpty else {
+      updatePointerTimer(active: false)
+      return nil
+    }
+    let now = ContinuousClock.now
+    let maxFPS = eligible.map(\.scene.fps).max() ?? LockScreenPointerCadence.maxActiveFPS
+    guard let cursor = pointerProbe.cursorLocation() else {
+      return LockScreenPointerCadence.stationaryInterval
+    }
+    let moved = pointerCadence.recordSample(cursor, at: now)
+    if moved || eligible.contains(where: \.needsInitialPointerSample) {
+      var boundsByDisplay: [UInt32: CGRect?] = [:]
+      for surface in eligible where surface.canDeliverPointerNow {
+        let displayID = surface.pointerDisplayID
+        let bounds: CGRect?
+        if let cached = boundsByDisplay[displayID] {
+          bounds = cached
+        } else {
+          let fetched = displayID != 0 ? pointerProbe.displayBounds(displayID) : nil
+          boundsByDisplay[displayID] = fetched
+          bounds = fetched
+        }
+        surface.deliverPointer(cursor: cursor, in: bounds)
+      }
+    }
+    return pointerCadence.nextInterval(maxFPS: maxFPS, at: now)
   }
 }
