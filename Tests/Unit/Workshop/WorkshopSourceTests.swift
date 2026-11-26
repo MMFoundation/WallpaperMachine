@@ -318,12 +318,13 @@ final class WorkshopSourceTests: XCTestCase {
     let children = (1...35).map { (String(1000 + $0), $0) }
     fixture.collection = collectionJSON(children: children)
     fixture.details = Dictionary(uniqueKeysWithValues: children.map { ($0.0, detailsRow($0.0, tags: ["Scene", "Everyone"])) })
-    let first = try await fixture.service.collectionPage(id: "77", page: 1, tags: [], excludedTags: [])
+    let members = try await fixture.service.collectionItemIDs(id: "77")
+    let first = try await fixture.service.collectionPage(children: members, page: 1, tags: [], excludedTags: [])
     XCTAssertEqual(first.items.count, 30)
     XCTAssertEqual(first.items.first?.id, "1001")
     XCTAssertEqual(first.totalPages, 2)
     XCTAssertEqual(first.totalCount, 35)
-    let second = try await fixture.service.collectionPage(id: "77", page: 2, tags: [], excludedTags: [])
+    let second = try await fixture.service.collectionPage(children: members, page: 2, tags: [], excludedTags: [])
     XCTAssertEqual(second.items.map(\.id), ["1031", "1032", "1033", "1034", "1035"])
   }
 
@@ -332,7 +333,8 @@ final class WorkshopSourceTests: XCTestCase {
     fixture.details = ["1": detailsRow("1", tags: ["Scene", "Everyone"]), "2": detailsRow("2", tags: ["Scene", "Mature"])]
     var query = WorkshopQuery(text: "", kind: .all, sort: .topRated, excludedTags: ["Mature"])
     query.source = .creator(id: Self.author, name: "Old name")
-    let page = try await fixture.service.page(for: query, page: 1, account: nil)
+    let service = fixture.service
+    let page = try await service.page(for: query, page: 1, account: nil) { try await service.collectionItemIDs(id: $0) }
     XCTAssertEqual(page.items.map(\.id), ["1"])
     XCTAssertEqual(page.items.first?.creator, "Fixture Author")
     XCTAssertEqual(page.title, "Fixture Author")
@@ -409,6 +411,68 @@ final class WorkshopSourceTests: XCTestCase {
   }
 
   // MARK: Store
+
+  func testCollectionPagingAndPrefetchShareMembershipUntilRefresh() async throws {
+    let store = fixture.store
+    let original = (1...65).map(String.init)
+    let updated = (35...102).reversed().map(String.init)
+    let hidden = "50"
+    store.excludedTags = ["Mature"]
+    fixture.details = Dictionary(uniqueKeysWithValues: Set(original + updated).map { id in
+      (id, detailsRow(id, tags: id == hidden ? ["Mature"] : ["Scene"]))
+    })
+    store.prefetchesNextPage = true
+    for (visit, ids) in [original, updated].enumerated() {
+      fixture.collection = collectionJSON(children: ids.enumerated().reversed().map { ($0.element, $0.offset) })
+      let firstTwoPages = expectation(description: "Opening the collection also prefetches page two")
+      firstTwoPages.expectedFulfillmentCount = 2
+      store.onPreviewsAvailable = { _ in firstTwoPages.fulfill() }
+      if visit == 0 {
+        store.open(.collection(id: "77", title: "Landscapes"))
+      } else {
+        store.search() // Refresh submits the current query again.
+      }
+      await fulfillment(of: [firstTwoPages], timeout: 5)
+      store.onPreviewsAvailable = nil
+      for page in 1...3 {
+        if page > 1 { store.loadPage(page) }
+        try await finished(store)
+        let slice = ids.dropFirst((page - 1) * 30).prefix(30)
+        XCTAssertEqual(store.items.map(\.id), slice.filter { $0 != hidden })
+        XCTAssertEqual(store.totalCount, ids.count)
+      }
+      XCTAssertEqual(fixture.collectionRequests, visit + 1)
+      XCTAssertEqual(Array(fixture.detailBatches.suffix(3)), [
+        Array(ids.prefix(30)), Array(ids[30..<60]), Array(ids.dropFirst(60)),
+      ])
+      XCTAssertEqual(fixture.detailBatches.count, 3 * (visit + 1))
+    }
+  }
+
+  func testBackRestoresCollectionMembershipAndClosingDropsIt() async throws {
+    let store = fixture.store
+    let ids = (1...31).map(String.init)
+    fixture.details = Dictionary(uniqueKeysWithValues: ids.map { ($0, detailsRow($0, tags: ["Scene"])) })
+    fixture.collection = collectionJSON(children: ids.enumerated().map { ($0.element, $0.offset) })
+    store.open(.collection(id: "77", title: "Landscapes"))
+    try await finished(store)
+
+    fixture.collection = collectionJSON(children: [("7", 0)])
+    store.open(.collection(id: "88", title: "Night skies"))
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["7"])
+    store.back()
+    store.loadPage(2)
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["31"])
+    XCTAssertEqual(fixture.collectionRequests, 2)
+
+    store.unload()
+    store.loadIfNeeded()
+    try await finished(store)
+    XCTAssertEqual(store.items.map(\.id), ["7"])
+    XCTAssertEqual(fixture.collectionRequests, 3)
+  }
 
   func testOpeningAnAuthorFromACollectionComesBackTheWayItWent() async throws {
     let store = fixture.store
@@ -1773,7 +1837,9 @@ private final class SourceFixture {
   var favoriteProfilesRequested: [String] { answers.read { $0.favoriteProfilesRequested } }
   var browseSections: [String] { answers.read { $0.browseSections } }
   var browsePagesRequested: [Int] { answers.read { $0.browsePagesRequested } }
-  var detailsRequests: Int { answers.read { $0.detailsRequests } }
+  var collectionRequests: Int { answers.read { $0.collectionRequests } }
+  var detailBatches: [[String]] { answers.read { $0.detailBatches } }
+  var detailsRequests: Int { answers.read { $0.detailBatches.count } }
   var cookies: [String?] { answers.read { $0.cookies } }
   /// What Steam's renewal endpoint answers; false refuses it, as Steam does.
   var renewal: Data {
@@ -1868,7 +1934,8 @@ private final class SourceAnswers: @unchecked Sendable {
     var favoriteProfilesRequested: [String] = []
     var browseSections: [String] = []
     var browsePagesRequested: [Int] = []
-    var detailsRequests = 0
+    var collectionRequests = 0
+    var detailBatches: [[String]] = []
     var cookies: [String?] = []
     var renewal = Data(#"{"success":false,"error":15}"#.utf8)
     var renewalRequests: [(form: String, cookie: String?)] = []
@@ -1952,12 +2019,13 @@ private final class SourceAnswers: @unchecked Sendable {
         }
         return (200, headers, Data(#"{"result":\#(state.transferResult)}"#.utf8))
       case ("api.steampowered.com", "/ISteamRemoteStorage/GetCollectionDetails/v1"):
+        state.collectionRequests += 1
         return (200, [:], state.collection)
       case ("api.steampowered.com", "/ISteamRemoteStorage/GetPublishedFileDetails/v1"):
-        state.detailsRequests += 1
         let form = String(decoding: body, as: UTF8.self)
         let ids = form.split(separator: "&").filter { $0.hasPrefix("publishedfileids") }
           .compactMap { $0.split(separator: "=").last.map(String.init) }
+        state.detailBatches.append(ids)
         let rows: [[String: Any]] = ids.map { state.details[$0] ?? ["publishedfileid": $0, "result": 9] }
         let json = try? JSONSerialization.data(withJSONObject: ["response": ["publishedfiledetails": rows]])
         return (200, [:], json ?? Data())

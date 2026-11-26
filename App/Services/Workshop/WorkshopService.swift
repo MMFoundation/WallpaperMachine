@@ -534,7 +534,10 @@ actor WorkshopService {
     /// itself; the other sources are listed in their own order and filtered here with the same
     /// rules, so a page can hold fewer than `pageSize` tiles. `account` is required for the
     /// account's own lists, and read with on Steam Community pages when there is one.
-    func page(for query: WorkshopQuery, page: Int, account: SteamWebSession?) async throws -> WorkshopPage {
+    func page(
+        for query: WorkshopQuery, page: Int, account: SteamWebSession?,
+        collectionIDs: @Sendable (String) async throws -> [String]
+    ) async throws -> WorkshopPage {
         switch query.source {
         case .browse:
             // A pasted link or id is one item, whatever the filters and sort say.
@@ -547,7 +550,8 @@ actor WorkshopService {
                 search: query.text, sort: query.sort, page: page, tags: query.tags, excludedTags: query.excludedTags,
                 account: account)
         case .collection(let id, _):
-            return try await collectionPage(id: id, page: page, tags: query.tags, excludedTags: query.excludedTags)
+            let children = try await collectionIDs(id)
+            return try await collectionPage(children: children, page: page, tags: query.tags, excludedTags: query.excludedTags)
         case .creator(let id, let name):
             var listing = try await profilePage(steamID: id, list: .items, account: account, page: page)
             let author = listing.name ?? name
@@ -627,8 +631,7 @@ actor WorkshopService {
     /// The items of one collection, a page at a time, in the collection's own order. A
     /// collection inside it is shown as a collection unless an age rating is hidden, when there
     /// is nothing to vouch for what it holds.
-    func collectionPage(id: String, page: Int, tags: [String], excludedTags: [String]) async throws -> WorkshopPage {
-        let children = try await collectionItemIDs(id: id)
+    func collectionPage(children: [String], page: Int, tags: [String], excludedTags: [String]) async throws -> WorkshopPage {
         let totalPages = max(1, (children.count + Self.pageSize - 1) / Self.pageSize)
         let number = min(max(1, page), totalPages)
         let slice = Array(children.dropFirst((number - 1) * Self.pageSize).prefix(Self.pageSize))

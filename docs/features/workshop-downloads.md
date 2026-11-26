@@ -303,7 +303,15 @@ a list, not a download: its tile says Collection and has no download ring,
 double-clicking it or **Open collection** in its details opens it, and the
 panel's `requestDownload` refuses it. Opening one asks Steam's public
 `ISteamRemoteStorage/GetCollectionDetails` for its items in the collection's own
-order, then shows them 30 at a time through the details endpoint. While viewing an
+order. Discover keeps these IDs with the collection's cached pages. Paging and
+next-page prefetch share the same list and request item details 30 at a time.
+If Steam fails to return the list during a page change, the selected page shows
+that failure. Retry fetches the list again for that page.
+Back restores the list with its pages. Refresh reads the collection again so
+changes to its membership or order appear. Closing the panel releases the lists
+for both the current collection and those in Back history.
+
+While viewing an
 opened collection, the header bar offers **Download missing**
 (`WorkshopStore.missingCollectionItems`), which drops wallpapers already in the
 library, nested collections and Application items, and queues the rest through the

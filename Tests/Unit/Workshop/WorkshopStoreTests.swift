@@ -539,6 +539,66 @@ final class WorkshopStoreTests: XCTestCase {
     XCTAssertFalse(fixture.inbox.hasRequest, "The last page has nothing after it to prefetch")
   }
 
+  func testCollectionRefreshInFlightServesTwoPagesAndCannotPopulateAnotherCollection() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let store = fixture.store
+    let members = try JSONSerialization.data(withJSONObject: [
+      "response": ["collectiondetails": [["result": 1, "children": (1...35).map {
+        ["publishedfileid": String($0), "sortorder": $0] as [String: Any]
+      }]]]
+    ])
+    let empty = Data(#"{"response":{"collectiondetails":[{"result":1,"children":[]}]}}"#.utf8)
+    let details = Data(#"{"response":{"publishedfiledetails":[]}}"#.utf8)
+    func next(_ endpoint: String) async throws -> WorkshopFixtureProtocol {
+      try await waitUntil { fixture.inbox.hasRequest }
+      let pending = fixture.inbox.take()
+      let url = try XCTUnwrap(pending.request.url)
+      XCTAssertTrue(url.pathComponents.contains(endpoint), "Expected \(endpoint), received \(url.path)")
+      return pending
+    }
+
+    store.open(.collection(id: "77", title: "Landscapes"))
+    try await next("GetCollectionDetails").succeed(members)
+    try await next("GetPublishedFileDetails").succeed(details)
+    try await finished(store)
+    XCTAssertEqual(store.totalPages, 2)
+
+    store.search()
+    let refresh = try await next("GetCollectionDetails")
+    let offline = URLError(.notConnectedToInternet)
+    // Both actions happen in the same turn. Page 2 must see the pending refresh's failure
+    // even if its page reader first runs after Steam has answered.
+    store.loadPage(2)
+    refresh.fail(offline)
+    try await waitUntil { !store.isLoading || fixture.inbox.hasRequest }
+    guard !fixture.inbox.hasRequest else {
+      return XCTFail("Page 2 sent another request while the refresh was in flight")
+    }
+    XCTAssertEqual(store.failedRequest?.page, 2)
+    XCTAssertEqual(store.errorMessage, offline.localizedDescription)
+
+    store.retrySearch()
+    try await next("GetCollectionDetails").succeed(members)
+    try await next("GetPublishedFileDetails").succeed(details)
+    try await finished(store)
+    XCTAssertEqual(store.page, 2)
+    XCTAssertEqual(store.totalCount, 35)
+
+    store.search()
+    let superseded = try await next("GetCollectionDetails")
+    // The old response reaches URLSession in the same turn the user opens another collection.
+    superseded.succeed(members)
+    store.open(.collection(id: "88", title: "Night skies"))
+    try await next("GetCollectionDetails").succeed(empty)
+    try await finished(store)
+    await fixture.drain()
+    XCTAssertEqual(store.committedQuery?.source, .collection(id: "88", title: "Night skies"))
+    XCTAssertEqual(store.totalCount, 0)
+    XCTAssertNil(store.errorMessage)
+    XCTAssertFalse(fixture.inbox.hasRequest)
+  }
+
   private func assertPage(
     _ store: WorkshopStore, id: String, page: Int, pages: Int, count: Int,
     file: StaticString = #filePath, line: UInt = #line
