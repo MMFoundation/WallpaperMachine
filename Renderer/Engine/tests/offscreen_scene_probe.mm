@@ -36,6 +36,7 @@
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <span>
 #include <stdexcept>
 #include <vector>
 #include <thread>
@@ -64,10 +65,23 @@ uint16_t PackageVersion(const std::string& path) {
     return ec == std::errc{} && end == stamp.data() + stamp.size()
         ? version : SceneParseRequest::kUnknownPkgVersion;
 }
-void Ppm(const std::filesystem::path& path, const uint8_t* rgba, int w, int h) {
+void Ppm(const std::filesystem::path& path, std::span<const uint8_t> pixels, int w, int h,
+         TextureFormat format = TextureFormat::RGBA8, bool over_black = false) {
+    const size_t stride = format == TextureFormat::R8 ? 1 : format == TextureFormat::RGBA8 ? 4 : 0;
+    Check(stride && w > 0 && h > 0 && uint64_t(w) * h * stride == pixels.size(),
+          "pixel buffer does not match the PPM dimensions and format");
     std::ofstream file(path, std::ios::binary);
     file << "P6\n" << w << ' ' << h << "\n255\n";
-    for (int i = 0; i < w * h; ++i) file.write(reinterpret_cast<const char*>(rgba + i * 4), 3);
+    std::vector<uint8_t> row(size_t(w) * 3);
+    for (int y = 0; y < h; ++y) {
+        const uint8_t* p = pixels.data() + size_t(y) * w * stride;
+        for (int x = 0; x < w; ++x, p += stride) {
+            for (size_t c = 0; c < 3; ++c) {
+                row[size_t(x) * 3 + c] = stride == 1 ? p[0] : over_black ? p[c] * p[3] / 255 : p[c];
+            }
+        }
+        file.write(reinterpret_cast<const char*>(row.data()), row.size());
+    }
 }
 /// The alpha channel on its own, as grey.
 ///
@@ -434,13 +448,12 @@ int main() {
             std::cout << name << " font=" << state->resolved_font_path << " kind=" << state->resolved_font_kind
                       << " text=" << state->text << " size=" << layout->card.transpose() << std::endl;
             const auto image = scene->imageParser->Parse(TextAtlasName(name));
-            if (image && !image->slots.empty()) {
+            if (image && !image->slots.empty() && !image->slots[0].mipmaps.empty()) {
                 const auto& mip = image->slots[0].mipmaps[0];
-                std::vector<uint8_t> pixels(mip.data.get(), mip.data.get() + mip.size);
-                for (std::size_t i = 0; i < pixels.size(); i += 4)
-                    for (int c = 0; c < 3; ++c) pixels[i+c] = pixels[i+c] * pixels[i+3] / 255;
+                Check(mip.data && mip.size > 0, "text atlas has no pixels");
                 // Layer names are untrusted package data, not output paths.
-                Ppm(out / ("text-" + std::to_string(text_index++) + ".ppm"), pixels.data(), mip.width, mip.height);
+                Ppm(out / ("text-" + std::to_string(text_index++) + ".ppm"),
+                    { mip.data.get(), size_t(mip.size) }, mip.width, mip.height, image->header.format, true);
             }
         }
         // The isolated run: no static-result reuse and no sharing of images between targets
@@ -551,7 +564,7 @@ int main() {
                     std::vector<uint8_t> rgba;
                     Check(read_target(std::string(SpecTex_Default), width, height, rgba),
                           "read the scene's output target");
-                    Ppm(out / ("frame-" + std::to_string(frame) + ".ppm"), rgba.data(), width, height);
+                    Ppm(out / ("frame-" + std::to_string(frame) + ".ppm"), rgba, width, height);
                     if (std::getenv("WE_TEST_DUMP_ALPHA") != nullptr) {
                         PpmAlpha(out / ("frame-" + std::to_string(frame) + "-alpha.ppm"),
                                  rgba.data(), width, height);
@@ -575,7 +588,7 @@ int main() {
                             continue;
                         std::string safe = name;
                         std::replace(safe.begin(), safe.end(), '/', '_');
-                        Ppm(out / ("target-" + safe + ".ppm"), rgba.data(), width, height);
+                        Ppm(out / ("target-" + safe + ".ppm"), rgba, width, height);
                     }
                 }
                 if (frame == 0) milestone("first-frame");

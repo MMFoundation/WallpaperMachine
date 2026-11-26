@@ -244,6 +244,8 @@ perspective scenes by the ordinary final frame, not by a single dumped target.
 timings. Use a fresh `WE_TEST_OUTPUT` for a cold shader-cache run and repeat the
 same directory for a warm run. It resolves each project's entry/package version
 and render dimensions and discovers text nodes instead of using fixed layer IDs.
+Its `text-<n>.ppm` dumps show single-channel glyph coverage in grayscale and
+four-channel atlases composited over black.
 It tests scene rendering only — not video or web projects, and not AppKit
 presentation. Like production it builds the render graph again on every graph
 mutation (a layer a script creates or shows later).
