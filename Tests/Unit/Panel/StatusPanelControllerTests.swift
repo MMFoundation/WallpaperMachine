@@ -36,6 +36,7 @@ final class StatusPanelControllerTests: PanelTestCase {
       performed.append(command)
       log.append("perform")
       if let failure { throw failure }
+      if case .setVolume(let id, let fraction) = command { volumes[id]?.volume = fraction }
     }
 
     func statusPanelVolume(of wallpaperID: String) async throws -> StatusPanelModel.Volume {
@@ -135,7 +136,7 @@ final class StatusPanelControllerTests: PanelTestCase {
     controller.start()
 
     try await controller.toggleFavorite()
-    try await controller.setVolume(0.25)
+    try await controller.setVolume(0.25, for: "w1")
     try await controller.setMuted(true)
     try await controller.setWallpapersMuted(true)
     try await controller.setWallpapersMuted(false)
@@ -363,6 +364,40 @@ final class StatusPanelControllerTests: PanelTestCase {
     try await waitUntil("the new snapshot's volume is shown") { controller.volume?.volume == 0.7 }
     XCTAssertEqual(controller.volume?.muted, true)
     XCTAssertEqual(source.volumeReads, ["w1", "w1"], "Read once per snapshot, not on every refresh")
+  }
+
+  func testReturningToADisplayImmediatelyShowsItsOwnVolume() async {
+    let source = Source(input())
+    source.volumes["w1"] = .init(wallpaperID: "w1", volume: 0.3, muted: false)
+    source.volumes["w2"] = .init(wallpaperID: "w2", volume: 0.8, muted: true)
+    let controller = makeController(source)
+    controller.start()
+    await controller.settled()
+
+    controller.chooseDisplay("2")
+    XCTAssertNil(controller.volume)
+    await controller.settled()
+    controller.chooseDisplay("primary")
+    XCTAssertEqual(controller.volume, source.volumes["w1"])
+    let previous = source.volumes["w2"]
+    source.volumes["w2"]?.volume = 0.6
+    controller.chooseDisplay("2")
+    XCTAssertEqual(controller.volume, previous)
+    await controller.settled()
+    XCTAssertEqual(controller.volume, source.volumes["w2"])
+  }
+
+  func testVolumeSaveHandsTheSliderBackAtTheReleasedValue() async throws {
+    let source = Source(input())
+    source.volumes["w1"] = .init(wallpaperID: "w1", volume: 0.8, muted: false)
+    let controller = makeController(source)
+    controller.start()
+    await controller.settled()
+
+    try await controller.setVolume(0.25, for: "w1")
+    XCTAssertEqual(controller.volume?.volume, 0.25)
+    await controller.settled()
+    XCTAssertEqual(controller.volume?.volume, 0.25)
   }
 
   func testMuteAllIsReportedSoTheSoundCanBeLocked() async throws {

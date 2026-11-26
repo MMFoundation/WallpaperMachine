@@ -34,7 +34,11 @@ final class StatusPanelController {
   /// What the view draws.
   private(set) var panel = StatusPanelModel.Panel()
   /// The shown wallpaper's own volume and mute; nil until read, and with nothing shown.
-  private(set) var volume: StatusPanelModel.Volume?
+  var volume: StatusPanelModel.Volume? {
+    panel.wallpaper.flatMap { displayVolumes[$0.id] }
+  }
+  /// Last known sound settings for the wallpapers currently assigned to displays.
+  private var displayVolumes: [String: StatusPanelModel.Volume] = [:]
   /// Stamps of the covers on show, by wallpaper id: a cover is drawn once its stamp is known.
   private(set) var coverStamps: [String: UInt64] = [:]
   /// Why the last action failed; cleared by the next one that succeeds.
@@ -155,6 +159,9 @@ final class StatusPanelController {
         self.refresh()
       }
     }
+    for id in displayVolumes.keys where !input.menu.displays.contains(where: { $0.wallpaperID == id }) {
+      displayVolumes.removeValue(forKey: id)
+    }
     self.input = input
     let chosen = StatusPanelModel.display(displayID, in: input)?.id
     if chosen != displayID { displayID = chosen }
@@ -214,20 +221,18 @@ final class StatusPanelController {
     guard let id = panel.wallpaper?.id else {
       volumeRead?.task.cancel()
       volumeRead = nil
-      if volume != nil { volume = nil }
       return
     }
     let key = VolumeKey(wallpaperID: id, revision: revision)
     guard volumeRead?.key != key else { return }
     volumeRead?.task.cancel()
-    if volume?.wallpaperID != id { volume = nil }
     let task = Task { [weak self] in
       guard let source = self?.source else { return }
       let read = try? await source.statusPanelVolume(of: id)
       guard let self, !Task.isCancelled, self.isStarted, self.volumeRead?.key == key,
-        let read, read != self.volume
+        let read, read != self.displayVolumes[id]
       else { return }
-      self.volume = read
+      self.displayVolumes[id] = read
     }
     volumeRead = (key, task)
   }
@@ -290,8 +295,15 @@ final class StatusPanelController {
   }
 
   /// The shown wallpaper's own volume, from 0 to 1.
-  func setVolume(_ fraction: Double) async throws {
-    try await send(.setVolume(wallpaper: try shownWallpaper(), volume: fraction))
+  func setVolume(_ fraction: Double, for wallpaperID: String) async throws {
+    try await send(.setVolume(wallpaper: wallpaperID, volume: fraction))
+    // DraggableSlider hands control back to the model when this action returns.
+    displayVolumes[wallpaperID]?.volume = fraction
+    guard isStarted, panel.wallpaper?.id == wallpaperID, let input else { return }
+    // A read already in flight may have sampled the volume before the write.
+    volumeRead?.task.cancel()
+    volumeRead = nil
+    readVolume(revision: input.snapshotRevision)
   }
 
   func setMuted(_ muted: Bool) async throws {

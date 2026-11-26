@@ -401,7 +401,7 @@ private struct StatusPanelSound: View {
     let ownMute = volume?.muted ?? false
     let silent = panel.wallpapersMuted || ownMute
     VStack(alignment: .leading, spacing: 8) {
-      if panel.wallpaper != nil {
+      if let wallpaper = panel.wallpaper {
         HStack(alignment: .bottom, spacing: 8) {
           NowPlayingControl(
             systemImage: silent ? "speaker.slash.fill" : "speaker.wave.2.fill",
@@ -417,7 +417,8 @@ private struct StatusPanelSound: View {
           DraggableSlider(
             value: (volume?.volume ?? 0) * 100, range: 0...100, step: 1,
             format: { InspectorWording.percent($0 / 100) }, accessibilityLabel: L("Volume"),
-            onRelease: { setVolume($0 / 100) }, onStep: { setVolume($0 / 100) }
+            onRelease: { setVolume($0 / 100, for: wallpaper.id) },
+            onStep: { setVolume($0 / 100, for: wallpaper.id) }
           ) { output in
             HStack(spacing: 8) {
               Text("Volume")
@@ -430,6 +431,9 @@ private struct StatusPanelSound: View {
                 .accessibilityHidden(true)
             }
           }
+          .id(volume?.wallpaperID)
+          .opacity(volume == nil ? 0 : 1)
+          .accessibilityHidden(volume == nil)
           .disabled(volume == nil || silent)
         }
         .help(L("Default sound settings for this wallpaper. Settings → Displays can set volume and mute separately for each display."))
@@ -469,9 +473,9 @@ private struct StatusPanelSound: View {
 
   private func busy(_ action: String) -> Bool { controller.isBusy(controller.key(action)) }
 
-  private func setVolume(_ fraction: Double) -> Task<Void, Never> {
-    controller.launch(controller.key("volume"), policy: .latestWins) {
-      try await controller.setVolume(fraction)
+  private func setVolume(_ fraction: Double, for wallpaperID: String) -> Task<Void, Never> {
+    controller.launch(PanelActionCoordinator.key("statusPanel.volume", id: wallpaperID), policy: .latestWins) {
+      try await controller.setVolume(fraction, for: wallpaperID)
     }
   }
 }
