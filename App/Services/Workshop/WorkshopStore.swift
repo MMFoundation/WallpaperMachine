@@ -854,8 +854,6 @@ final class WorkshopStore {
   @ObservationIgnored private var resumeRequest: WorkshopRequest?
   @ObservationIgnored private var steamFetches: [WorkshopRequest: Task<WorkshopPage, Error>] = [:]
   @ObservationIgnored private var collectionFetch: Task<[String], Error>?
-  /// Called when a page needs the ordered IDs, before it starts or joins the membership fetch.
-  @ObservationIgnored var onCollectionMembershipRequested: (() -> Void)?
   @ObservationIgnored private var screenedFetches: [Int: Task<WorkshopPage, Error>] = [:]
   /// How many Steam pages a panel page may read before it is shown with what it found, so a
   /// search whose collections are nearly all screened out does not read Steam to its end.
@@ -1297,7 +1295,6 @@ final class WorkshopStore {
   private func collectionIDs(_ id: String) async throws -> [String] {
     try Task.checkCancellation()
     if let ids = cache.collectionIDs { return ids }
-    onCollectionMembershipRequested?()
     if let collectionFetch { return try await collectionFetch.value }
     let cacheID = cacheID
     let fetch = Task {

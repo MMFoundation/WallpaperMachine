@@ -566,13 +566,28 @@ final class WorkshopStoreTests: XCTestCase {
 
     store.search()
     let refresh = try await next("GetCollectionDetails")
-    let secondPage = expectation(description: "Page 2 requests membership while the refresh is pending")
-    store.onCollectionMembershipRequested = { secondPage.fulfill() }
     store.loadPage(2)
-    await fulfillment(of: [secondPage], timeout: 5)
-    store.onCollectionMembershipRequested = nil
-    refresh.succeed(members)
-    for _ in 1...2 { try await next("GetPublishedFileDetails").succeed(details) }
+    // Keep the first response at Steam while page 2 loads. A second HTTP request is unexpected.
+    let inbox = fixture.inbox
+    let duplicate = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in inbox.hasRequest }, object: nil)
+    duplicate.isInverted = true
+    await fulfillment(of: [duplicate], timeout: 0.5)
+
+    // Only the pending refresh receives this error. With no successful ID list to cache, page 2
+    // can report that error only if it shared the refresh. A later lookup would reach Steam again.
+    let offline = URLError(.notConnectedToInternet)
+    refresh.fail(offline)
+    try await waitUntil { !store.isLoading || fixture.inbox.hasRequest }
+    guard !inbox.hasRequest else {
+      return XCTFail("Page 2 sent another request while the refresh was in flight")
+    }
+    XCTAssertEqual(store.failedRequest?.page, 2)
+    XCTAssertEqual(store.errorMessage, offline.localizedDescription)
+
+    store.retrySearch()
+    try await next("GetCollectionDetails").succeed(members)
+    try await next("GetPublishedFileDetails").succeed(details)
     try await finished(store)
     XCTAssertEqual(store.page, 2)
     XCTAssertEqual(store.totalCount, 35)
