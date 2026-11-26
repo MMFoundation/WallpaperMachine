@@ -390,6 +390,12 @@ down. The preview window reads the same files and never writes; the lock screen 
 published with its revision, taken at publish time, and never writes either. Resetting
 properties keeps the storage; deleting the wallpaper deletes its folder; backups include it.
 
+A button script can also change a layer without calling `localStorage.set`. When the
+[lock screen or screen saver follows the desktop](lock-screen.md#scene-renderer), it
+can take the current visibility and alpha of the authored layers that script wrote,
+including the end of a fade completed in `update()`. This is a one-time visual
+handoff, not saved script storage.
+
 A layer's `origin`, `scale` and `angles`, and an image layer's `color`, can be keyed on
 a timeline (`animation`: curves `c0` to `c2` and `options`), and all four play the
 same way. Absolute keys are the value; `relative` keys offset the authored one (before

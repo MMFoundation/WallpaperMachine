@@ -45,6 +45,7 @@ final class LockScreenLiveFeedCoordinator {
   private let now: @MainActor () -> Date
   private let nowNanos: @MainActor () -> UInt64
   private let audioInterval: Duration
+  private let layerPublisher: LockScreenSceneLayerPublisher?
 
   private let listenerToken = ListenerKey()
   private var listenerKey: ObjectIdentifier { ObjectIdentifier(listenerToken) }
@@ -85,6 +86,7 @@ final class LockScreenLiveFeedCoordinator {
     bridge: WallpaperBridge,
     session: DesktopMediaSession,
     canDeliver: @escaping @MainActor () -> Bool,
+    layerPublisher: LockScreenSceneLayerPublisher? = nil,
     exchange: URL = LockScreenConfiguration.exchangeDirectory
   ) {
     self.init(
@@ -97,7 +99,8 @@ final class LockScreenLiveFeedCoordinator {
       },
       readAudioSpectrum: {
         try bridge.lockScreenAudioSpectrum()
-      }
+      },
+      layerPublisher: layerPublisher
     )
   }
 
@@ -118,7 +121,8 @@ final class LockScreenLiveFeedCoordinator {
       LockScreenLiveFeedCoordinator.defaultObserveWorkspaceSleep,
     now: @escaping @MainActor () -> Date = { Date() },
     nowNanos: @escaping @MainActor () -> UInt64 = { LockScreenAudioSpectrumChannel.nowNanoseconds() },
-    audioInterval: Duration = .milliseconds(33)
+    audioInterval: Duration = .milliseconds(33),
+    layerPublisher: LockScreenSceneLayerPublisher? = nil
   ) {
     self.exchange = exchange
     self.session = session
@@ -134,6 +138,7 @@ final class LockScreenLiveFeedCoordinator {
     self.now = now
     self.nowNanos = nowNanos
     self.audioInterval = audioInterval
+    self.layerPublisher = layerPublisher
     self.spectrumWriter = LockScreenAudioSpectrumWriter(exchange: exchange)
   }
 
@@ -157,7 +162,13 @@ final class LockScreenLiveFeedCoordinator {
   func refreshDemandFromDisk() {
     guard !stopped else { return }
     let url = exchange.appendingPathComponent(LockScreenLiveDemand.fileName)
-    guard let data = try? Data(contentsOf: url),
+    let fd = open(url.path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
+    let file = fd >= 0 ? FileHandle(fileDescriptor: fd) : nil
+    defer { try? file?.close() }
+    var info = stat()
+    guard let file, fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+      (1...16 * 1024).contains(info.st_size),
+      let data = try? file.read(upToCount: Int(info.st_size) + 1), data.count == info.st_size,
       let demand = try? JSONDecoder().decode(LockScreenLiveDemand.self, from: data),
       demand.processID > 0,
       isProcessAlive(demand.processID)
@@ -184,6 +195,7 @@ final class LockScreenLiveFeedCoordinator {
     let wantAudio = allowed && (currentDemand?.needsAudio ?? false)
     updateMediaActive(wantMedia)
     updateAudioActive(wantAudio)
+    layerPublisher?.update(allowed ? currentDemand?.layerRequests ?? [] : [])
   }
 
   /// Drives a single audio pump tick synchronously; exposed for deterministic unit tests.
@@ -216,6 +228,7 @@ final class LockScreenLiveFeedCoordinator {
     cancelSleepObserver?()
     cancelSleepObserver = nil
     clearDemand()
+    layerPublisher?.update([])
     updateMediaActive(false)
     updateAudioActive(false)
     session.relay.removeListener(listenerKey)

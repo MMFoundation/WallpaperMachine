@@ -40,6 +40,7 @@ namespace wallpaper
 class DynamicValue;
 class ScriptEngine;
 class SceneScriptProgram;
+struct SceneLayerState;
 struct SceneMaterial;
 struct SceneGeneralState;
 struct SceneForceState;
@@ -750,8 +751,10 @@ public:
     // Absent when the layer owns no material the runtime can tint, which the
     // script layer reports as its own remembered value instead of a false 1.
     std::optional<float> NodeAlpha(std::string_view name) const;
-    bool            SetNodeAlpha(std::string_view name, float value);
-    bool            SetNodeVisible(std::string_view name, bool visible);
+    bool            SetNodeAlpha(std::string_view name, float value, bool interactive = false);
+    bool            SetNodeVisible(std::string_view name, bool visible, bool interactive = false);
+    std::string     CaptureLayerState() const;
+    std::optional<bool> ApplyLayerState(const SceneLayerState& state);
     bool            SetNodeTranslate(std::string_view name, const linalg::Vector3f& value);
     bool            SetNodeScale(std::string_view name, const linalg::Vector3f& value);
     bool            SetNodeAlignment(std::string_view name, std::string alignment);
@@ -1326,7 +1329,17 @@ private:
     struct NodeAlphaBinding {
         std::vector<std::shared_ptr<SceneMaterial>> materials;
         float                                       value { 1.0f };
+        bool                                        interactive { false };
     };
+    bool                                                           m_has_interactive_layer_state { false };
+    template<typename T>
+    struct ImportedValue { T original; T applied; };
+    struct ImportedLayer {
+        int32_t id;
+        std::optional<ImportedValue<bool>> visible;
+        std::optional<ImportedValue<float>> alpha;
+    };
+    std::vector<ImportedLayer>                                     m_imported_layers;
     std::unordered_map<std::string, NodeAlphaBinding>              m_node_alpha;
     struct ScalarAnimationBinding {
         std::string layer_name;

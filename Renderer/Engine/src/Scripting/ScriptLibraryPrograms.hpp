@@ -98,7 +98,7 @@ function make(factory, kind, layerName, animIndex, effectRef, animRef) {
     writable: true, configurable: true, enumerable: false
   });
   var prog = { kind: kind, layerName: layerName, layerKey: layerKey, layer: layer, object: object,
-               h: null, sp: sp, started: false, caps: 0 };
+               h: null, sp: sp, started: false, caps: 0, handledButton: false };
   hooks.scope = Object.create(null);
   Object.defineProperties(hooks.scope, {
     thisLayer: { get: function () { return (activeProgram || prog).layer; } },
@@ -203,6 +203,9 @@ function cursorEvent(prog, index, button) {
   if (local[3] !== undefined) event.hitBox = local[3];
   shortcutBudget = 1;
   try {
+    if ((index === 0 || index === 1 || index === 5) && typeof prog.h[name] === 'function') {
+      prog.handledButton = true;
+    }
     guard(name, prog, event);
     if (prog.kind === 1) {
       try { runListeners(name, event); } catch (e) { reportError(name, e); }

@@ -932,7 +932,11 @@ or depend on a second physical monitor.
   `LockScreenScene` decoding and in-place renderer sharing; `LockScreenLiveFeedCoordinator`
   lifecycle, zero-disk-write suppression of ordinary 1 Hz timeline ticks vs real seeks,
   already-active desktop media replay, and immediate teardown on display sleep, pause or
-  extension exit.
+  extension exit. Layer-only demand copies desktop script choices without starting either
+  feed; repeated demand takes one snapshot, and stale replies or replies from another display
+  can't take its place. `LockScreenSceneLayerHandoffTests` covers the receiving side and the
+  bounded exchange; `LockScreenWallpaperServiceTests` distinguishes following the desktop
+  from independently selecting the same item.
 - `LockScreenVideoPlannerTests` — which player plays a plain video on the lock screen: the
   AVFoundation layer when admission accepts the clip (the frame rate it was given takes no
   part), the WebM player for a file AVFoundation cannot open that the project's reader takes,

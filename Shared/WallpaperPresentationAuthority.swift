@@ -122,18 +122,7 @@ enum WallpaperPresentationAuthority {
 
     switch request.role {
     case .lockScreen:
-      let showing: Bool
-      if !request.sessionOnConsole {
-        // Another session has the screens: neither this session's lock screen, nor its
-        // screen saver, nor its desktop picture is on any of them.
-        showing = false
-      } else if request.presentationMode == "idle" {
-        showing = request.screenSaverEnabled
-      } else {
-        showing = request.lockScreenEnabled
-          && (request.sessionLocked || request.presentationMode == "locked")
-      }
-      if !showing && !isSettlingAsDesktop(request) { reasons.insert(.noConsumer) }
+      if showingContent(for: request) == nil && !isSettlingAsDesktop(request) { reasons.insert(.noConsumer) }
     case .preview:
       // A preview is its own consumer while the user is looking at it, so it is
       // not gated on the session being locked. What bounds it is time.
@@ -144,6 +133,14 @@ enum WallpaperPresentationAuthority {
       }
     }
     return reasons
+  }
+
+  /// The lock screen or screen saver this session is actually showing, excluding desktop settling.
+  static func showingContent(for request: Request) -> LockScreenContent? {
+    guard request.role == .lockScreen, request.sessionOnConsole else { return nil }
+    if request.presentationMode == "idle" { return request.screenSaverEnabled ? .screenSaver : nil }
+    return request.lockScreenEnabled && (request.sessionLocked || request.presentationMode == "locked")
+      ? .lockScreen : nil
   }
 
   /// Whether this surface may render now. A surface that is still producing its

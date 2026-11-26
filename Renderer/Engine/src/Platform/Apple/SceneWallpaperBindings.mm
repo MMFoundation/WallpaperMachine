@@ -11,6 +11,7 @@
 #include "Scene/Parse/WPTexImageParser.hpp"
 #include "Scene/SceneCapabilityProbe.hpp"
 #include "Runtime/MediaArtwork.hpp"
+#include "Runtime/SceneLayerState.hpp"
 #include "SceneWallpaperSurface.hpp"
 #include "Utils/Logging.h"
 #include "MetalRender/MetalDisplayFraming.hpp"
@@ -173,6 +174,11 @@ constexpr auto        kPosterRetryWindow  = std::chrono::seconds(2);
 
 NSString* const kPosterRequestName = @"WallpaperMachine.requestDesktopPoster";
 NSString* const kPosterReadyName   = @"WallpaperMachine.desktopPosterReady";
+
+struct LayerStateObserver {
+    id token;
+    ~LayerStateObserver() { if (token != nil) [NSNotificationCenter.defaultCenter removeObserver:token]; }
+};
 
 using PosterTime = std::chrono::steady_clock::time_point;
 
@@ -407,6 +413,33 @@ wallpaper::RenderInitInfo make_surface_info(void* layer, uint32_t width, uint32_
                                   bool bgra) { mailbox->ready(pixels, w, h, bgra); };
     info.bind_poster_wake = [mailbox](std::function<void()> hook) {
         mailbox->bindWake(std::move(hook));
+    };
+    info.observe_layer_state = [layer](wallpaper::LayerStateRequest request) {
+        auto observer = std::make_shared<LayerStateObserver>();
+        observer->token = [NSNotificationCenter.defaultCenter
+            addObserverForName:@"WallpaperMachine.requestSceneLayerState" object:(__bridge CAMetalLayer*)layer
+            queue:nil usingBlock:^(NSNotification* note) {
+                NSString* value = note.userInfo[@"context"];
+                if (![value isKindOfClass:NSString.class] || value.length != 36 ||
+                    ![[NSUUID alloc] initWithUUIDString:value]) return;
+                NSString* context = [value copy];
+                __weak CAMetalLayer* weakLayer = note.object;
+                request([weakLayer, context](std::string json) {
+                    @autoreleasepool {
+                        NSString* state = [[NSString alloc] initWithBytes:json.data() length:json.size()
+                            encoding:NSUTF8StringEncoding] ?: @"";
+                        __weak CAMetalLayer* destination = weakLayer;
+                        NSString* nonce = context;
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            CAMetalLayer* target = destination;
+                            if (target) [NSNotificationCenter.defaultCenter
+                                postNotificationName:@"WallpaperMachine.sceneLayerStateReady" object:target
+                                userInfo:@{@"context": nonce, @"state": state}];
+                        });
+                    }
+                });
+            }];
+        return observer;
     };
     return info;
 }
@@ -750,6 +783,19 @@ extern "C" int owe_scene_wallpaper_set_paused(owe_scene_wallpaper* scene, bool p
     return guarded([&] {
         scene->scene.setPaused(paused);
         return 0;
+    });
+}
+
+extern "C" int owe_scene_wallpaper_apply_layer_state(owe_scene_wallpaper* scene, const char* json)
+{
+    clear_last_error();
+    if (scene == nullptr || json == nullptr) return fail("the scene host or layer state is NULL");
+    if (!scene->scene.inited()) return fail("the scene host is not initialised");
+    return guarded([&] {
+        const auto size = strnlen(json, wallpaper::SceneLayerState::MaxBytes + 1);
+        auto state = wallpaper::SceneLayerState::Parse(std::string_view(json, size));
+        if (!state) return fail("invalid scene layer state");
+        return scene->scene.applyLayerState(std::move(*state)) ? 0 : fail("no active scene for layer state");
     });
 }
 

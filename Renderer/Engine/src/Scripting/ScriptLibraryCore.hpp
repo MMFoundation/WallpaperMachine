@@ -159,7 +159,12 @@ function addListener(event, fn) {
   if (typeof event !== 'string' || typeof fn !== 'function') return;
   var list = listeners[event];
   if (list === undefined) listeners[event] = list = [];
-  list.push(captureCallback(fn));
+  var callback = captureCallback(fn);
+  if (callback.program && (event === 'cursorClick' || event === 'cursorDown' || event === 'cursorUp')) {
+    var owner = callback.program;
+    callback.fn = function (arg) { owner.handledButton = true; return fn(arg); };
+  }
+  list.push(callback);
 }
 // A listener added while the list runs is first called by the next run; a
 // throwing listener ends this run (the caller reports it once).

@@ -25,6 +25,16 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-26 — Lock screen and screen saver keep interactive scene layer choices (#262)
+
+- Two independent, offscreen Native Metal renderers loaded Workshop 3632513108 with null audio. Clicking its character switch showed Female Rover on the desktop; a fresh renderer showed Male Rover. Importing the 55-byte layer reply showed Female Rover without replaying the click.
+- The existing Wallpaper Engine 2.8.0.42 default frames at 30.06/45.86 seconds were compared with scripts/we_reference.py before and after. Mean absolute difference: 18.09 → 18.09 and 19.03 → 19.04; pixels off by >48: 15.93% and 17.49%, unchanged. Those captures contain no click and do not verify a lock transition.
+- python3 scripts/test.py: 731 Python tests; 5,489 native tests passed, 70 skipped, none failed. The focused lock-screen, handoff and authority selection passed 35/35.
+- python3 scripts/check_rust.py: core, bridge, integrations and shader suites exited 0. Five real-window cases were excluded; desktop/media/network opt-ins stayed off.
+- python3 scripts/build.py --renderer-only rebuilt the archive and bindings. The six interactive-layer tests cover delayed writes, switch-back, release of omitted values, and invalid input. A detached CAMetalLayer separately verified the native notification and restore while paused.
+- The first check_renderer.py --project run exposed a crash in the diagnostic PPM writer: mono glyph atlases have one byte per pixel, not four. After rebuilding the probe, WE_TEST_RANDOM_SEED=1 python3 scripts/check_renderer.py --skip-build --project <project.json> exited 0. All 12 generated scenes and the reported project matched between pooled and isolated rendering; the project still logs a pre-existing malformed particle bounds value. Optional corpus, local video and energy checks were skipped.
+- No desktop interaction, real macOS lock/saver transition, install or Release app build. Windows reference shots were reused, not recaptured.
+
 ## 2026-11-26 — Wave 4B: Pixiv deep browsing phase B (#28a) and cross-Mac manual sync folder (#28b)
 
 - test.py: PASS (36/36 Python suites / 731 tests; 5477 passed, 0 failed, 70 skipped of 5547 native tests in 210s)
@@ -104,14 +114,3 @@ Fix for #259: SystemWallpaperStore ignores WallpaperAgent LastUse timestamp adva
 - Targeted after fix (SystemWallpaperStoreTests, LockScreenWallpaperServiceTests, LockScreenWallpaperTests): 208 passed, 0 failed, 0 skipped.
 - Full gate (python3 scripts/test.py, macOS 27.3): all 36 Python test modules passed; native 5,165 passed, 0 failed, 70 skipped of 5,235 (1 runtime warning).
 - Not verified: live WallpaperAgent reload on the desktop, visual lock-screen check, or Release app build.
-
-## 2026-11-23 — Workshop queue pauses after Steam limits sign-ins (#256)
-
-Fix for #256: a rate-limited sign-in (SteamCMD .rateLimited, QR logOnRefused(84)) pauses the jobs still waiting instead of each spending another sign-in. Verified on a fork's Test workflow (hosted macOS 26) because the contributor's machine has no Xcode.
-
-- Test workflow, --only the two new tests, tests-only commit 76246585 — both failed as expected: SteamCMD launched ["1","2","3"] instead of ["1"]; QR path opened 2 logons instead of 1
-- Test workflow, full, fix commit 3790b0bb — native: 5153 passed, 2 failed, 74 skipped of 5229; both new tests pass
-- The 2 native failures are pre-existing on hosted runners, not this change: DesktopWidgetTests/testADateCanBeWrittenInAnotherCalendarInThatCalendarsOwnWords (九月30 vs 九月三十) and WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem; upstream Test run 43986617796 (2026-11-17) failed both the same way
-- Test workflow rust job — passed; renderer job — blocked: check_renderer.py's cmake build of the test targets timed out after 600 s on the fork's cold cache (no renderer or bridge change here)
-- `python3 scripts/test.py --python-only` (Python 3.13, local) — exit 0, 36 script test files OK
-- Not verified: a real Steam rate limit (scripted SteamCMD and fake Steam only), no desktop/UI run, nothing checked visually

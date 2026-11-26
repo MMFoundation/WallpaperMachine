@@ -476,6 +476,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 },
                 shortcutExecutor: UserShortcutExecutor(store: .shared))
             if let lockScreen {
+                let layerPublisher = LockScreenSceneLayerPublisher(exchange: LockScreenConfiguration.exchangeDirectory, layer: {
+                    [weak lockScreen, weak store] request in
+                    guard let store, let id = lockScreen?.desktopLayerStateWallpaperID(for: request),
+                          !store.isShowingPropertyEdits(onDisplay: String(request.displayID)),
+                          let scene = store.sceneWindows().first(where: {
+                              $0.displayId == request.displayID && $0.wallpaperId == id && !$0.parked && $0.ready
+                          }) else { return nil }
+                    return NSApp.window(withWindowNumber: Int(scene.windowNumber))?.contentView?.layer
+                })
                 let liveFeed = LockScreenLiveFeedCoordinator(
                     bridge: store.bridge,
                     session: mediaSession,
@@ -484,7 +493,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                             lockScreen.anyRequested || lockScreen.isEnabled || lockScreen.screenSaverEnabled
                         else { return false }
                         return store?.appSnapshot.playbackState != .paused
-                    }
+                    },
+                    layerPublisher: layerPublisher
                 )
                 lockScreenLiveFeed = liveFeed
                 lockScreen.onAvailabilityChanged = { [weak liveFeed] in

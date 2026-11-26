@@ -162,6 +162,8 @@ public:
     /// this one's visibility, since from then on the script decides.
     bool        VisibilitySettled() const { return m_visibility_settled; }
     void        SetVisibilitySettled(bool settled) { m_visibility_settled = settled; }
+    bool        HasInteractiveVisibility() const { return m_interactive_visibility; }
+    void        MarkInteractiveVisibility() { m_interactive_visibility = true; }
     void        SetRotation(linalg::Vector3f v) { Assign(m_rotation, v); }
     void        SetTranslate(linalg::Vector3f v) { Assign(m_translate, v); }
     void        SetScale(linalg::Vector3f v) { Assign(m_scale, v); }
@@ -311,6 +313,7 @@ private:
     bool        m_casts_shadow { false };
     bool        m_children_alpha_max { false };
     bool        m_visibility_settled { false };
+    bool        m_interactive_visibility { false };
     bool                  m_sheetDetached { false };
     bool                  m_sheetScriptPlaying { true };
     uint8_t               m_reflection { 0 }; // existing padding before SheetCommand

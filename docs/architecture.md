@@ -909,10 +909,13 @@ contracts they must agree on:
   `audioResponseEnabled` (applied live to running surfaces without replacing the renderer); a `sceneRenderer` key an older app wrote is read past), so the version stays and an extension
   copy that predates it ignores the key within that contract version; `LockScreenScene.sharesRenderer(with:)` names which
   differences make the extension replace a renderer rather than update it.
-- `LockScreenLiveDemand`, `LockScreenMediaExchange` and `LockScreenAudioSpectrumChannel`
-  define the demand-gated live media and audio forwarding contract between the app
+- `LockScreenLiveDemand`, `LockScreenMediaExchange`, `LockScreenAudioSpectrumChannel`
+  and `LockScreenSceneLayerExchange` define the on-demand handoff between the app
   (`LockScreenLiveFeedCoordinator`) and the extension: the extension writes `live-demand.json`
-  only when active unpaused lock-screen/screen-saver surfaces need media or read audio; the app
+  when active lock-screen/screen-saver surfaces need media, read audio, or request the
+  script-controlled layer choices of their desktop scene. Only a surface following that
+  desktop can consume the one-shot layer reply, scoped to its presentation, display and
+  configuration revision. No click is replayed and the scene's assets are not republished. The app
   writes `media-state.json` (plus `media-artwork.rgba` / `media-artwork.png` on artwork change)
   only on non-tick changes and streams 224 unclamped spectrum bands through a 4096-byte `mmap`
   seqlock (`audio-spectrum.shm`, no `msync`). Both feeds tear down and delete transient files on

@@ -2013,7 +2013,7 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         return text(rt_ != nullptr ? rt_->InitialLayerConfigJson(str(0)) : std::string());
     case kNative_visible: return boolean(node_known() && rt_->NodeVisible(str(0)));
     case kNative_setVisible:
-        if (rt_ != nullptr) rt_->SetNodeVisible(str(0), flag(1));
+        if (rt_ != nullptr) rt_->SetNodeVisible(str(0), flag(1), flag(2));
         return JS_UNDEFINED;
     case kNative_origin: {
         const auto v = node_known() ? rt_->NodeTranslate(str(0)) : linalg::Vector3f(0, 0, 0);
@@ -2053,7 +2053,7 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         return value.has_value() ? number(static_cast<double>(*value)) : JS_UNDEFINED;
     }
     case kNative_setAlpha:
-        if (rt_ != nullptr) rt_->SetNodeAlpha(str(0), static_cast<float>(num(1)));
+        if (rt_ != nullptr) rt_->SetNodeAlpha(str(0), static_cast<float>(num(1)), flag(2));
         return JS_UNDEFINED;
     case kNative_text: return text(rt_ != nullptr ? rt_->NodeText(str(0)) : std::string());
     case kNative_setText:

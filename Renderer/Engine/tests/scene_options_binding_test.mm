@@ -9,6 +9,7 @@
 // sound on the null backend.
 
 #include "Platform/Apple/SceneWallpaperBindings.h"
+#include "Runtime/SceneLayerState.hpp"
 #include "Scene/SceneWallpaper.hpp"
 #include "Scene/SceneWallpaperSurface.hpp"
 #include "mdl_fixtures.hpp"
@@ -191,6 +192,84 @@ protected:
 };
 
 } // namespace
+
+TEST_F(SceneQualityBinding, ADetachedPausedSurfaceAnswersLayerScopedRequestsAndAppliesOnce) {
+    if (MTLCreateSystemDefaultDevice() == nil) GTEST_SKIP() << "no Metal device";
+    const auto project = WriteCardScene(root_);
+    auto document = nlohmann::json::parse(std::ifstream(root_ / "layout.json"));
+    document["general"]["bloom"] = false;
+    document["objects"][0]["visible"] = {{"value", true}, {"script", R"JS(
+        export function init() { thisLayer.visible = true; thisLayer.alpha = 0.75; }
+        export function cursorClick() { thisLayer.visible = true; thisLayer.alpha = 0.5; }
+    )JS"}};
+    WriteText(root_ / "layout.json", document.dump());
+    CAMetalLayer* layer = [CAMetalLayer layer];
+    layer.device = MTLCreateSystemDefaultDevice();
+    layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    layer.drawableSize = CGSizeMake(128, 72);
+
+    const bool counting = owe_renderer_counters_enabled();
+    struct RestoreCounters { bool enabled; ~RestoreCounters() { owe_renderer_counters_set_enabled(enabled); } } restore { counting };
+    owe_renderer_counters_set_enabled(true);
+    owe_scene_wallpaper* handle = nullptr;
+    ASSERT_EQ(owe_scene_wallpaper_new(&handle), 0);
+    std::unique_ptr<owe_scene_wallpaper, decltype(&owe_scene_wallpaper_delete)> native(
+        handle, owe_scene_wallpaper_delete);
+    auto& wallpaper = SceneWallpaperInputTestAccess::FromNative(*native);
+    SceneWallpaperInputTestAccess::UseNullSoundOutput(wallpaper);
+    ASSERT_EQ(owe_scene_wallpaper_init(native.get()), 0);
+    ASSERT_EQ(owe_scene_wallpaper_init_metal(native.get(), (__bridge void*)layer, 128, 72, 128, 72, 1), 0);
+    ASSERT_EQ(owe_scene_wallpaper_apply_config(native.get(), project.c_str(), root_.c_str(),
+        (root_ / "cache").c_str(), 30, false, 0, true, false, nullptr), 0);
+    ASSERT_TRUE(WaitFor([&] { return wallpaper.surfaceHealth().frames_presented > 0; }));
+    const auto running_frames = wallpaper.surfaceHealth().frames_completed;
+    ASSERT_EQ(owe_scene_wallpaper_mouse_input(native.get(), 0.5, 0.5), 0);
+    ASSERT_EQ(owe_scene_wallpaper_mouse_enter(native.get(), true), 0);
+    ASSERT_EQ(owe_scene_wallpaper_mouse_button(native.get(), 0, true), 0);
+    ASSERT_EQ(owe_scene_wallpaper_mouse_button(native.get(), 0, false), 0);
+    ASSERT_TRUE(WaitFor([&] { return wallpaper.surfaceHealth().frames_completed > running_frames + 1; }));
+    ASSERT_EQ(owe_scene_wallpaper_set_paused(native.get(), true), 0);
+    ASSERT_TRUE(WaitFor([&] {
+        std::array<uint64_t, OWE_RC_COUNT> counters {};
+        wallpaper.counters(counters.data(), counters.size());
+        return (counters[OWE_RC_PAUSE_REASONS] & OWE_RC_PAUSE_CLOCK_STOPPED) != 0;
+    }));
+    const auto capture = [&]() -> std::optional<SceneLayerState> {
+        NSNotificationCenter* center = NSNotificationCenter.defaultCenter;
+        NSString* context = NSUUID.UUID.UUIDString;
+        __block NSString* state = nil;
+        id observer = [center addObserverForName:@"WallpaperMachine.sceneLayerStateReady" object:nil
+            queue:nil usingBlock:^(NSNotification* note) {
+                EXPECT_TRUE(NSThread.isMainThread);
+                EXPECT_EQ(note.object, layer);
+                EXPECT_TRUE([note.userInfo[@"context"] isEqual:context]);
+                state = note.userInfo[@"state"];
+            }];
+        [center postNotificationName:@"WallpaperMachine.requestSceneLayerState" object:[CAMetalLayer layer]
+            userInfo:@{@"context": NSUUID.UUID.UUIDString}];
+        [center postNotificationName:@"WallpaperMachine.requestSceneLayerState" object:layer
+            userInfo:@{@"context": context}];
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (state == nil && std::chrono::steady_clock::now() < deadline)
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, true);
+        [center removeObserver:observer];
+        return state ? SceneLayerState::Parse(state.UTF8String) : std::nullopt;
+    };
+    const auto before = capture();
+    ASSERT_TRUE(before);
+    ASSERT_EQ(before->layers().size(), 1u);
+    EXPECT_EQ(before->layers()[0].alpha, 0.5f);
+    const auto frames = wallpaper.surfaceHealth().frames_completed;
+    EXPECT_NE(owe_scene_wallpaper_apply_layer_state(native.get(), "{"), 0);
+    EXPECT_EQ(owe_scene_wallpaper_apply_layer_state(native.get(), R"({"version":1,"layers":[[1,false,0.25]]})"), 0);
+    const auto after = capture();
+    ASSERT_TRUE(after);
+    ASSERT_EQ(after->layers().size(), 1u);
+    EXPECT_EQ(after->layers()[0].id, 1);
+    EXPECT_EQ(after->layers()[0].visible, false);
+    EXPECT_EQ(after->layers()[0].alpha, 0.25f);
+    EXPECT_EQ(wallpaper.surfaceHealth().frames_completed, frames);
+}
 
 TEST_F(SceneQualityBinding, ANullSceneOrQualityIsRefused)
 {

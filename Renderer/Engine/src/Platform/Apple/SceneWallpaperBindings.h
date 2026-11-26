@@ -91,6 +91,9 @@ int owe_scene_wallpaper_apply_config(
     const char* project_property_override_json);
 int owe_scene_wallpaper_set_target_fps(owe_scene_wallpaper* scene, uint32_t fps);
 int owe_scene_wallpaper_set_paused(owe_scene_wallpaper* scene, bool paused);
+/* Queues a bounded snapshot on an initialized surface. Returns nonzero for a malformed
+   document or if no scene can accept the message. An incompatible scene changes nothing. */
+int owe_scene_wallpaper_apply_layer_state(owe_scene_wallpaper* scene, const char* json);
 
 int owe_scene_wallpaper_set_render_scale(owe_scene_wallpaper* scene, double scale);
 

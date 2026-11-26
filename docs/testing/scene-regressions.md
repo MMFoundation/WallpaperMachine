@@ -518,6 +518,13 @@ Playback, backend, host and startup areas are in
 
 ## Scene scripts and property bindings
 
+- **Interactive layer handoff** — `InteractiveLayerState.*` in `scenescript_behavior_test`
+  runs a click-driven fade to completion, then applies the resulting visibility and alpha
+  to a second scene by authored layer ID. It checks switching back, leaves unrelated animation
+  alone, and rejects invalid or oversized snapshots without partially changing the target.
+  The [lock screen and screen saver](../features/lock-screen.md#scene-renderer) use this
+  handoff without delivering pointer input to the extension.
+
 - **Shared helper caller context** —
   `TextScripts.SharedListenerConstructorsCaptureTheRegisteringTextLayer` in
   `text_object_behavior_test` keeps two timer-driven captions updating independently

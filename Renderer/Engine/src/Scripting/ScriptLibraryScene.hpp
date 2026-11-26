@@ -260,7 +260,7 @@ accessor('name',
   function (v) { n.renameLayer(this[KEY].key, String(v)); });
 accessor('visible',
   function () { return n.visible(this[KEY].key); },
-  function (v) { n.setVisible(this[KEY].key, !!v); });
+  function (v) { n.setVisible(this[KEY].key, !!v, activeProgram && activeProgram.handledButton); });
 accessor('origin',
   function () { return toVec3(n.origin(this[KEY].key)); },
   function (v) { var a = vec3Parts(v); n.setOrigin(this[KEY].key, a[0], a[1], a[2]); });
@@ -291,7 +291,7 @@ accessor('alpha',
     var value = Number(v);
     if (!isFinite(value)) value = 0;
     st.alpha = value;
-    n.setAlpha(st.key, value);
+    n.setAlpha(st.key, value, activeProgram && activeProgram.handledButton);
   });
 accessor('text',
   function () { return n.text(this[KEY].key); },

@@ -74,7 +74,7 @@ struct LockScreenConfiguration: Codable, Equatable {
   }
 }
 
-enum LockScreenContent: String, Codable, Sendable {
+enum LockScreenContent: String, Codable, Hashable, Sendable {
   case desktop, lockScreen, screenSaver
 }
 
@@ -148,6 +148,9 @@ struct LockScreenScene: Codable, Equatable {
   /// Lowercase BCP-47 interface language tag for web wallpapers (`applyGeneralProperties`),
   /// e.g. `"en-us"`, `"zh-cn"`, `"ja-jp"`. Absent from older apps and for scenes/videos.
   var language: String? = nil
+  /// The desktop assignment a following scene may copy layer choices from. Independent sources
+  /// and manifests from older apps have no such assignment.
+  var desktopLayerStateWallpaperID: String? = nil
 
   /// Matches `MIN_RENDER_SCALE...MAX_RENDER_SCALE` in `Renderer/Bridge/src/config/app.rs`.
   static let renderScaleRange: ClosedRange<Double> = 0.25...1.0
@@ -194,6 +197,8 @@ struct LockScreenScene: Codable, Equatable {
       && sceneStorageScreenKey == other.sceneStorageScreenKey
       && engineOptions == other.engineOptions && sceneQuality == other.sceneQuality
       && lutFile == other.lutFile && borderColor == other.borderColor
+      && desktopLayerStateWallpaperID == other.desktopLayerStateWallpaperID
+      && (desktopLayerStateWallpaperID == nil || displayID == other.displayID)
   }
 }
 
@@ -269,4 +274,5 @@ struct LockScreenLiveDemand: Codable, Equatable, Sendable {
   var processID: Int32
   var needsMedia: Bool
   var needsAudio: Bool
+  var layerRequests: Set<LockScreenSceneLayerRequest>? = nil
 }

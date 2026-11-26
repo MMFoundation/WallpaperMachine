@@ -98,6 +98,42 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   @MainActor
+  func testOnlyFollowingScenesRequestLayerChoicesFromTheirOwnDesktop() async throws {
+    try Data(#"{"type":"scene","file":"scene.json"}"#.utf8).write(to: project.appendingPathComponent("project.json"))
+    var first = scene()
+    first.displayId = 1
+    var second = first
+    second.displayId = 2
+    let records = [first, second]
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { records }, wallpaperScenes: { _ in records },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { $0 == 1 ? "one" : "two" }, onlineDisplayIDs: { [1, 2] })
+    service.setUsesPerDisplay(true, lockScreen: false)
+    service.setSource(.wallpaper(first.wallpaperId), lockScreen: false, displayUUID: "two")
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    service.setEnabled(true)
+    service.setScreenSaverEnabled(true)
+    await waitFor("desktop-following and independent scenes") { !service.isBusy }
+
+    let file = exchange.appendingPathComponent(LockScreenConfiguration.fileName)
+    let configuration = try JSONDecoder().decode(LockScreenConfiguration.self, from: Data(contentsOf: file))
+    func source(_ content: LockScreenContent, _ id: UInt32, revision: String? = nil) -> String? {
+      service.desktopLayerStateWallpaperID(for: .init(
+        token: UUID(), revision: revision ?? configuration.revision, displayID: id, content: content))
+    }
+    XCTAssertEqual(source(.lockScreen, 2), second.wallpaperId)
+    XCTAssertEqual(source(.screenSaver, 1), first.wallpaperId)
+    XCTAssertNil(source(.screenSaver, 2), "an independent choice of even the same wallpaper starts independently")
+    XCTAssertNil(source(.screenSaver, 3))
+    XCTAssertNil(source(.lockScreen, 1, revision: "superseded"))
+    XCTAssertNil(source(.desktop, 1))
+    try await service.shutdown()
+  }
+
+  @MainActor
   func testIndependentSaverWorksWithoutDesktopAssignmentAndPersistsItsChoice() async throws {
     let original = fixture()
     try write(original)

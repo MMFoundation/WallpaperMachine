@@ -20,6 +20,12 @@ final class LockScreenWallpaperService {
   private(set) var lockScreenSources = LockScreenModeSources()
   private(set) var screenSaverSources = LockScreenModeSources()
   var anyRequested: Bool { isRequested || screenSaverRequested }
+
+  func desktopLayerStateWallpaperID(for request: LockScreenSceneLayerRequest) -> String? {
+    guard (request.content == .lockScreen && isRequested) || (request.content == .screenSaver && screenSaverRequested),
+      let published, published.revision == request.revision else { return nil }
+    return published.scene(for: request.content, displayID: request.displayID)?.desktopLayerStateWallpaperID
+  }
   var canRefreshAutomatically: Bool {
     (isRequested && errorMessage == nil) || (screenSaverRequested && screenSaverError == nil)
   }
@@ -922,8 +928,15 @@ final class LockScreenWallpaperService {
           AppLog.debug("Native wallpaper topology pending: display \(record.displayId) is not online")
           return
         }
+        let followsDesktop: Bool
+        switch content {
+        case .desktop: followsDesktop = true
+        case .lockScreen: followsDesktop = lockScreenSources.effectiveChoice(for: uuid) == .sameAsDesktop
+        case .screenSaver: followsDesktop = screenSaverSources.effectiveChoice(for: uuid) == .sameAsDesktop
+        }
         inputs.append(LockScreenPublishInput(
           content: content,
+          followsDesktop: followsDesktop,
           displayID: record.displayId,
           displayUUID: uuid,
           wallpaperID: record.wallpaperId, title: record.title,
@@ -1568,6 +1581,7 @@ final class LockScreenWallpaperService {
 
 private struct LockScreenPublishInput: Equatable, Sendable {
   var content: LockScreenContent = .desktop
+  var followsDesktop: Bool
   var displayID: UInt32
   var displayUUID: String
   var wallpaperID: String
@@ -1695,7 +1709,7 @@ private enum LockScreenAssetPublisher {
           lutFile = try snapshot(source: folder, exchange: exchange, reused: &sources) + "/" + filter + ".tex"
         }
       }
-      let scene = LockScreenScene(
+      var scene = LockScreenScene(
           displayID: input.displayID, title: input.title,
           projectPath: projectRevision + "/project.json", assetsPath: assetsRevision,
           previewPath: nil,
@@ -1715,6 +1729,9 @@ private enum LockScreenAssetPublisher {
           audioResponseEnabled: isVideo ? false : input.audioResponseEnabled,
           renderScale: isVideo ? nil : LockScreenScene.clampedRenderScale(input.renderScale),
           language: isWeb ? input.language : nil)
+      if input.followsDesktop && type.lowercased() == "scene" {
+        scene.desktopLayerStateWallpaperID = input.wallpaperID
+      }
       switch input.content {
       case .desktop: configuration.scenes.append(scene)
       case .lockScreen: configuration.lockScreenScenes = (configuration.lockScreenScenes ?? []) + [scene]

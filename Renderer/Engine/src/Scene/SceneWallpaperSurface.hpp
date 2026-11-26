@@ -9,6 +9,8 @@
 namespace wallpaper
 {
 using ReDrawCB = std::function<void()>;
+using LayerStateReply = std::function<void(std::string)>;
+using LayerStateRequest = std::function<void(LayerStateReply)>;
 
 struct RenderInitInfo {
     bool offscreen { false };
@@ -44,6 +46,7 @@ struct RenderInitInfo {
     /// so a notification already in flight cannot poke a handler that is going
     /// away.
     std::function<void(std::function<void()>)> bind_poster_wake;
+    std::function<std::shared_ptr<void>(LayerStateRequest)> observe_layer_state;
 };
 
 } // namespace wallpaper

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import XCTest
 
@@ -173,6 +174,68 @@ final class LockScreenLiveFeedTests: XCTestCase {
   }
 
   // MARK: - LockScreenLiveFeedCoordinator
+
+  func testLayerOnlyDemandTakesOneSnapshotPerPresentationAndIgnoresLateReplies() throws {
+    let center = NotificationCenter()
+    let firstLayer = CALayer()
+    let secondLayer = CALayer()
+    let session = DesktopMediaSession(provider: FakeLiveMediaProvider())
+    var requested: [UUID] = []
+    let observer = center.addObserver(forName: LockScreenSceneLayerPublisher.request, object: nil, queue: .main) { note in
+      MainActor.assumeIsolated {
+        if let context = note.userInfo?["context"] as? String, let id = UUID(uuidString: context) {
+          requested.append(id)
+        }
+      }
+    }
+    defer { center.removeObserver(observer) }
+    let publisher = LockScreenSceneLayerPublisher(exchange: exchangeURL, center: center, layer: {
+      $0.displayID == 1 ? firstLayer : secondLayer
+    }, notifyChanged: {})
+    let coordinator = LockScreenLiveFeedCoordinator(
+      exchange: exchangeURL, session: session, canDeliver: { true }, setAudioDemand: { _ in },
+      readAudioSpectrum: { nil }, isProcessAlive: { _ in true }, watchProcessExit: { _, _ in {} },
+      observeDemandNotification: { _ in {} }, observeWorkspaceSleep: { _ in {} }, layerPublisher: publisher)
+    coordinator.start()
+    defer { coordinator.shutdown() }
+
+    let locked = LockScreenSceneLayerRequest(token: UUID(), revision: "one", displayID: 1, content: .lockScreen)
+    let idle = LockScreenSceneLayerRequest(token: UUID(), revision: "one", displayID: 2, content: .screenSaver)
+    let nextLock = LockScreenSceneLayerRequest(token: UUID(), revision: "one", displayID: 1, content: .lockScreen)
+    let demandURL = exchangeURL.appendingPathComponent(LockScreenLiveDemand.fileName)
+    func demand(_ requests: Set<LockScreenSceneLayerRequest>) throws {
+      try JSONEncoder().encode(LockScreenLiveDemand(
+        processID: 42, needsMedia: false, needsAudio: false, layerRequests: requests)
+      ).write(to: demandURL, options: .atomic)
+      coordinator.refreshDemandFromDisk()
+    }
+    func reply(_ layer: CALayer, _ request: LockScreenSceneLayerRequest, _ state: String) {
+      center.post(name: LockScreenSceneLayerPublisher.ready, object: layer,
+        userInfo: ["context": request.token.uuidString, "state": state])
+    }
+    let on = #"{"version":1,"layers":[[1,true,1]]}"#
+    let off = #"{"version":1,"layers":[[1,false,0]]}"#
+    try demand([locked, idle])
+    try demand([locked, idle])
+    XCTAssertEqual(Set(requested), [locked.token, idle.token])
+    XCTAssertEqual(requested.count, 2)
+    XCTAssertFalse(coordinator.audioActive)
+    XCTAssertFalse(coordinator.mediaActive)
+    reply(secondLayer, locked, off)
+    XCTAssertTrue(LockScreenSceneLayerExchange.read(from: exchangeURL).isEmpty)
+    reply(firstLayer, locked, on)
+    reply(secondLayer, idle, off)
+    XCTAssertEqual(LockScreenSceneLayerExchange.read(from: exchangeURL), [locked.token: on, idle.token: off])
+
+    try demand([nextLock, idle])
+    reply(firstLayer, locked, on)
+    reply(firstLayer, nextLock, off)
+    XCTAssertEqual(LockScreenSceneLayerExchange.read(from: exchangeURL), [nextLock.token: off, idle.token: off])
+    XCTAssertEqual(requested.count, 3)
+    try demand([])
+    reply(firstLayer, nextLock, on)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: exchangeURL.appendingPathComponent(LockScreenSceneLayerExchange.fileName).path))
+  }
 
   func testCoordinatorLifecycleSleepExitAndZeroDiskThrashTimeline() async throws {
     let provider = FakeLiveMediaProvider()

@@ -135,6 +135,15 @@ costs the desktop. There is nothing to configure: the app no longer publishes a 
 choice, and a `sceneRenderer` key in a configuration an older app wrote is read past, whatever
 it names. After the first frame the extension logs `Backend display=… drew=native Metal`.
 
+With **Same as desktop**, a scene can keep a choice made by clicking the wallpaper.
+When the lock screen or screen saver starts showing the scene, it asks the running
+desktop scene on that display for the visibility and opacity its scripts set on authored
+layers. It takes those values once; it doesn't replay clicks, run shortcuts, copy
+JavaScript variables, or write the choice into the wallpaper's saved properties.
+An independently selected wallpaper starts with its own settings, even if it's the
+same library item. If the desktop scene isn't available or is previewing unsaved
+edits, the extension continues on its own without waiting for a reply.
+
 A scene the native renderer cannot draw is held, as on the
 desktop ([scene rendering](scene-rendering.md#when-native-metal-cannot-draw-a-scene)):
 the engine puts no other renderer behind it, and the surface keeps what it shows,

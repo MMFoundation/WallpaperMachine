@@ -81,6 +81,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   }
   var isSceneSurface: Bool { renderer != nil && !stopped }
   var isWebSurface: Bool { web != nil && !stopped && contentError == nil }
+  private var layerHandoff = LockScreenSceneLayerHandoff()
+  var pendingLayerRequest: LockScreenSceneLayerRequest? { layerHandoff.pendingRequest }
   /// When this surface started presenting, set once its first frame arrived.
   /// Kept apart from readiness so rendering one frame for a snapshot or a
   /// readiness reply cannot become a permanent right to keep rendering.
@@ -346,6 +348,10 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       finishSnapshots(error: latestSnapshot == nil ? WallpaperRuntime.failure("Wallpaper frame is not ready.") : nil)
     case .renderFailed:
       // After the scene drew: nothing to replace. The note reaches the app with the next readiness.
+      if pendingLayerRequest != nil {
+        layerHandoff = LockScreenSceneLayerHandoff()
+        WallpaperController.shared.reconcileLiveFeed()
+      }
       WallpaperController.shared.acknowledge(surface: self)
     }
   }
@@ -733,6 +739,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     }
     defer { syncLiveCapabilities() }
     let request = authorityRequest
+    layerHandoff.update(scene: scene, content: content, configuration: WallpaperController.shared.configuration,
+      presentation: request, rendererReady: renderer != nil && presentingSince != nil && heldFailure == nil)
     // Keep the last drawable and scene state through unlock/sleep. Replacing
     // them with a poster forces a cold load after the display is already lit.
     let reasons = WallpaperPresentationAuthority.suspensionReasons(for: request)
@@ -757,6 +765,13 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
         "Playback display=\(scene.displayID) mode=\(presentation) activity=\(activity) locked=\(request.sessionLocked) console=\(request.sessionOnConsole) paused=\(shouldPause) reasons=\(reasons.rawValue)"
       )
     } catch { WallpaperRuntime.log(error.localizedDescription) }
+  }
+
+  func applyLayerState(from states: [UUID: String]) -> Bool {
+    guard let renderer, let state = layerHandoff.takeState(from: states) else { return false }
+    do { try check(owe_scene_wallpaper_apply_layer_state(renderer, state)) }
+    catch { WallpaperRuntime.log("Scene layer handoff failed: \(error.localizedDescription)") }
+    return true
   }
 
   /// Syncs live media-integration and audio-response switches on the running scene or
@@ -1050,6 +1065,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   }
 
   private func releaseRenderer(keepingFrame: Bool = false) {
+    layerHandoff = LockScreenSceneLayerHandoff()
     deadline?.cancel()
     deadline = nil
     previewExpiry?.cancel()

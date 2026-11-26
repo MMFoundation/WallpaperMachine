@@ -3586,16 +3586,20 @@ std::optional<float> SceneRuntimeContext::NodeAlpha(std::string_view name) const
     return iterator->second.value;
 }
 
-bool SceneRuntimeContext::SetNodeAlpha(std::string_view name, float value) {
+bool SceneRuntimeContext::SetNodeAlpha(std::string_view name, float value, bool interactive) {
     const auto iterator = m_node_alpha.find(std::string(name));
     if (iterator == m_node_alpha.end()) return false;
+    if (interactive) {
+        iterator->second.interactive = true;
+        m_has_interactive_layer_state = true;
+    }
     if (iterator->second.value == value) return true;
     iterator->second.value = value;
     for (const auto& material : iterator->second.materials) ApplyMaterialAlpha(*material, value);
     return true;
 }
 
-bool SceneRuntimeContext::SetNodeVisible(std::string_view name, bool visible) {
+bool SceneRuntimeContext::SetNodeVisible(std::string_view name, bool visible, bool interactive) {
     const std::string key(name);
     // The script's write is the bound flag's too, even where the node is missing.
     if (const auto bound = m_node_visibility.find(key);
@@ -3607,6 +3611,10 @@ bool SceneRuntimeContext::SetNodeVisible(std::string_view name, bool visible) {
     if (found == m_nodes.end() || found->second == nullptr) return false;
     SceneNode* node = found->second;
     const bool was  = node->Visible();
+    if (interactive) {
+        node->MarkInteractiveVisibility();
+        m_has_interactive_layer_state = true;
+    }
     node->SetVisible(visible);
     // From here on the script decides this layer's visibility, so later graphs include it
     // even while it is hidden.

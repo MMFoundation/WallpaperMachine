@@ -310,6 +310,7 @@ gtest_discover_tests(
 add_executable(scenescript_behavior_test
     scenescript_values_test.cpp
     scenescript_cursor_test.cpp
+    scenescript_layer_state_test.cpp
     scenescript_objects_test.cpp
     scenescript_scene_api_test.cpp
     scenescript_general_test.cpp

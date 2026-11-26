@@ -9,6 +9,17 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-23 — Workshop queue pauses after Steam limits sign-ins (#256)
+
+Fix for #256: a rate-limited sign-in (SteamCMD .rateLimited, QR logOnRefused(84)) pauses the jobs still waiting instead of each spending another sign-in. Verified on a fork's Test workflow (hosted macOS 26) because the contributor's machine has no Xcode.
+
+- Test workflow, --only the two new tests, tests-only commit 76246585 — both failed as expected: SteamCMD launched ["1","2","3"] instead of ["1"]; QR path opened 2 logons instead of 1
+- Test workflow, full, fix commit 3790b0bb — native: 5153 passed, 2 failed, 74 skipped of 5229; both new tests pass
+- The 2 native failures are pre-existing on hosted runners, not this change: DesktopWidgetTests/testADateCanBeWrittenInAnotherCalendarInThatCalendarsOwnWords (九月30 vs 九月三十) and WebWallpaperErrorStackTests/testStacksReadAsV8WritesThem; upstream Test run 43986617796 (2026-11-17) failed both the same way
+- Test workflow rust job — passed; renderer job — blocked: check_renderer.py's cmake build of the test targets timed out after 600 s on the fork's cold cache (no renderer or bridge change here)
+- `python3 scripts/test.py --python-only` (Python 3.13, local) — exit 0, 36 script test files OK
+- Not verified: a real Steam rate limit (scripted SteamCMD and fake Steam only), no desktop/UI run, nothing checked visually
+
 ## 2026-11-23 — Scale percentage slider for a display (#248)
 
 A slider from 10% to 100% that sets a display's scale factor, in the inspector's display card and in Settings › Displays.

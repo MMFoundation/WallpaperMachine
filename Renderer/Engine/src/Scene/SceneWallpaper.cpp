@@ -44,6 +44,7 @@
 #include "SpecTexs.hpp"
 #include "Presentation/WallpaperScaling.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
+#include "Runtime/SceneLayerState.hpp"
 #include "Runtime/RuntimeImageSource.hpp"
 #include "RenderCommon/SceneToRenderGraph.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
@@ -138,6 +139,17 @@ struct ArtworkPayload {
     uint32_t             width { 0 };
     uint32_t             height { 0 };
     std::vector<uint8_t> rgba;
+};
+
+struct LayerStateCapture {
+    std::weak_ptr<RenderInitInfo> surface;
+    uint64_t generation;
+    LayerStateReply reply;
+};
+
+struct LayerStateImport {
+    uint64_t generation;
+    SceneLayerState state;
 };
 
 /// Two normalised pointer axes in one 64-bit word, so a reader takes one sample of both.
@@ -343,6 +355,8 @@ public:
         CMD_MEDIA_EVENT_JSON,
         CMD_SYSTEM_MEDIA_ARTWORK,
         CMD_APPLY_PROJECT_PROPERTIES,
+        CMD_CAPTURE_LAYER_STATE,
+        CMD_APPLY_LAYER_STATE,
         CMD_SET_SPEED,
         CMD_SET_USER_OPTIONS,
         CMD_STOP,
@@ -407,6 +421,8 @@ public:
                 CASE_CMD(MEDIA_EVENT_JSON);
                 CASE_CMD(SYSTEM_MEDIA_ARTWORK);
                 CASE_CMD(APPLY_PROJECT_PROPERTIES);
+            case CMD::CMD_CAPTURE_LAYER_STATE: return handle_CAPTURE_LAYER_STATE(msg);
+            case CMD::CMD_APPLY_LAYER_STATE: return handle_APPLY_LAYER_STATE(msg);
                 CASE_CMD(SET_SCENE);
                 CASE_CMD(SET_SPEED);
                 CASE_CMD(SET_USER_OPTIONS);
@@ -449,7 +465,12 @@ public:
 
     /// Destroys the renderer, after the GPU work in flight has finished. For a handler whose
     /// thread has ended.
-    void releaseRenderer() { m_render->release(); }
+    void releaseRenderer() {
+        m_layer_state_observer.reset();
+        m_render->release();
+    }
+
+    uint64_t sceneGeneration() const { return m_scene_generation.load(std::memory_order_acquire); }
 
     /// Whether a surface has been handed over, whether or not a backend has
     /// been created on it yet.
@@ -904,6 +925,7 @@ private:
     /// in-flight notification from poking a handler that has unbound.
     void adoptRenderInitInfo(std::shared_ptr<RenderInitInfo> info) {
         unbindPosterWake();
+        m_layer_state_observer.reset();
         // A layer the display replaced carries nothing the old one drew, and
         // the preview picture went with the old one.
         if (m_render_init_info == nullptr || info == nullptr ||
@@ -920,6 +942,18 @@ private:
             if (const auto self = weak_self.lock())
                 CreateMsgWithCmd(self, CMD::CMD_DISPLAY_OUTPUT_CHANGED)->post();
         };
+        if (m_render_init_info->observe_layer_state) {
+            std::weak_ptr<RenderInitInfo> surface = m_render_init_info;
+            m_layer_state_observer = m_render_init_info->observe_layer_state(
+                [weak_self, surface](LayerStateReply reply) {
+                    const auto self = std::static_pointer_cast<RenderHandler>(weak_self.lock());
+                    if (!self) return;
+                    auto msg = CreateMsgWithCmd(self, CMD::CMD_CAPTURE_LAYER_STATE);
+                    msg->setObject("capture", std::make_shared<LayerStateCapture>(
+                        LayerStateCapture { surface, self->sceneGeneration(), std::move(reply) }));
+                    msg->post();
+                });
+        }
         if (! m_render_init_info->bind_poster_wake) return;
         m_render_init_info->bind_poster_wake([weak_self] {
             auto self = weak_self.lock();
@@ -1499,6 +1533,23 @@ private:
             break;
         }
     }
+    MHANDLER_CMD(CAPTURE_LAYER_STATE) {
+        std::shared_ptr<LayerStateCapture> capture;
+        if (!msg->findObject("capture", &capture) || !capture) return;
+        if (capture->surface.lock() != m_render_init_info || capture->generation != sceneGeneration() ||
+            m_render_blocked || !m_scene || !m_scene->first_frame_ok) {
+            capture->reply({});
+            return;
+        }
+        capture->reply(m_scene->runtime ? m_scene->runtime->CaptureLayerState()
+                                        : std::string(SceneLayerState::EmptyJson));
+    }
+    MHANDLER_CMD(APPLY_LAYER_STATE) {
+        std::shared_ptr<LayerStateImport> request;
+        if (!msg->findObject("import", &request) || !request || request->generation != sceneGeneration() ||
+            m_render_blocked || !m_scene || !m_scene->first_frame_ok || !m_scene->runtime) return;
+        if (m_scene->runtime->ApplyLayerState(request->state).value_or(false)) requestFrame();
+    }
 #ifdef WESCENE_BUILD_TESTS
     /// What a draw that fails after the scene has drawn does, without needing
     /// the GPU to fail.
@@ -1510,6 +1561,7 @@ private:
     /// A host-initiated stop: no stop reason, no failure counted, nobody called back.
     MHANDLER_CMD(BEGIN_SURFACE_RECONFIGURE) {
         TicketGuard ticket(msg);
+        m_layer_state_observer.reset();
         m_surface_released = true;
         suspendRendering();
         // Nothing the preview picture holds may refer to the layer that is about to go.
@@ -1667,7 +1719,7 @@ public:
     /// flag is read so a mark racing the commit is reported by one or both.
     /// Scenes without a runtime (plain video projects) never mark.
     void commitAudioRequirement() {
-        const uint64_t generation   = ++m_audio_requirement_generation;
+        const uint64_t generation   = ++m_scene_generation;
         bool           requires_now = false;
         if (m_scene != nullptr && m_scene->runtime != nullptr) {
             // Installed before the flag is read: a mark that races the commit is then reported
@@ -1683,7 +1735,7 @@ private:
     std::shared_ptr<Scene> m_scene { nullptr };
     /// Bumped on every scene commit; the main looper drops audio-requirement
     /// reports carrying an older one.
-    uint64_t               m_audio_requirement_generation { 0 };
+    std::atomic<uint64_t>  m_scene_generation { 0 };
 
     std::unique_ptr<SceneRendererHandle> m_render;
     /// Why this scene is held without a renderer drawing it, or `None`. Render
@@ -1701,6 +1753,7 @@ private:
     /// Retained from `INIT_SURFACE` so the renderer can be created, or
     /// re-created, on the same surface once the scene is known to be drawable.
     std::shared_ptr<RenderInitInfo>      m_render_init_info;
+    std::shared_ptr<void>                m_layer_state_observer;
     std::unique_ptr<rg::RenderGraph>      m_rg { nullptr };
     bool                                m_render_blocked { false };
     /// Between `BEGIN_SURFACE_RECONFIGURE` and the surface that follows it: the layer the
@@ -1885,6 +1938,17 @@ void SceneWallpaper::applyConfig(const SceneWallpaperConfig& config) {
     auto msg = CreateMsgWithCmd(m_main_handler, MainHandler::CMD::CMD_APPLY_CONFIG);
     msg->setObject("config", std::make_shared<SceneWallpaperConfig>(config));
     msg->post();
+}
+
+bool SceneWallpaper::applyLayerState(SceneLayerState state) {
+    if (!inited()) return false;
+    const auto handler = m_main_handler->renderHandler();
+    const auto generation = handler->sceneGeneration();
+    if (generation == 0 || !handler->renderSurfaceReady()) return false;
+    auto msg = CreateMsgWithCmd(handler, RenderHandler::CMD::CMD_APPLY_LAYER_STATE);
+    msg->setObject("import", std::make_shared<LayerStateImport>(
+        LayerStateImport { generation, std::move(state) }));
+    return msg->post() == looper::status_t::OK;
 }
 
 namespace

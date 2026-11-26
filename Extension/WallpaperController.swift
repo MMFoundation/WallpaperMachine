@@ -20,7 +20,10 @@ final class WallpaperController {
   private var latestArtworkRGBA: Data?
   private var latestArtworkPNGDataURL = ""
   private var cachedArtworkRevision: UInt64 = 0
-  private var lastPublishedDemand: (needsMedia: Bool, needsAudio: Bool)?
+  private var lastPublishedDemand: LockScreenLiveDemand?
+  private var pendingDemand: LockScreenLiveDemand?
+  private enum LayerRead { case idle, reading, changed }
+  private var layerRead = LayerRead.idle
   private var timelineTask: Task<Void, Never>?
   private var audioTask: Task<Void, Never>?
   private let spectrumReader = LockScreenAudioSpectrumReader(exchange: WallpaperRuntime.exchange)
@@ -81,6 +84,13 @@ final class WallpaperController {
         let controller = Unmanaged<WallpaperController>.fromOpaque(observer).takeUnretainedValue()
         DispatchQueue.main.async { controller.reloadMedia() }
       }, LockScreenMediaSnapshot.changedNotification as CFString, nil, .deliverImmediately)
+    CFNotificationCenterAddObserver(
+      CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque(),
+      { _, observer, _, _, _ in
+        guard let observer else { return }
+        let controller = Unmanaged<WallpaperController>.fromOpaque(observer).takeUnretainedValue()
+        DispatchQueue.main.async { controller.reloadSceneLayerStates() }
+      }, LockScreenSceneLayerExchange.changedNotification as CFString, nil, .deliverImmediately)
   }
 
   func reload() {
@@ -383,9 +393,39 @@ final class WallpaperController {
     let activeSurfaces = Array(surfaces.values)
     let needsMedia = activeSurfaces.contains { $0.isLiveMediaEligible }
     let needsAudio = activeSurfaces.contains { $0.isLiveAudioEligible }
-    publishDemandIfChanged(needsMedia: needsMedia, needsAudio: needsAudio)
+    var requests = Set(activeSurfaces.compactMap(\.pendingLayerRequest))
+    let limit = LockScreenSceneLayerExchange.maximumRequests
+    if requests.count > limit {
+      let continuing = requests.intersection((pendingDemand ?? lastPublishedDemand)?.layerRequests ?? [])
+      requests = continuing.union(requests.subtracting(continuing).prefix(limit - continuing.count))
+    }
+    scheduleDemand(LockScreenLiveDemand(processID: getpid(), needsMedia: needsMedia, needsAudio: needsAudio,
+      layerRequests: requests.isEmpty ? nil : requests))
     updateTimelineTimer()
     updateAudioTimer(active: needsAudio)
+  }
+
+  private func reloadSceneLayerStates() {
+    guard surfaces.values.contains(where: { $0.pendingLayerRequest != nil }) else { return }
+    guard layerRead == .idle else { layerRead = .changed; return }
+    layerRead = .reading
+    let exchange = WallpaperRuntime.exchange
+    Task {
+      repeat {
+        layerRead = .reading
+        let states = await Task.detached(priority: .utility) {
+          LockScreenSceneLayerExchange.read(from: exchange)
+        }.value
+        if !states.isEmpty {
+          var consumed = false
+          for surface in surfaces.values {
+            if surface.applyLayerState(from: states) { consumed = true }
+          }
+          if consumed { reconcileLiveFeed() }
+        }
+      } while layerRead == .changed && surfaces.values.contains(where: { $0.pendingLayerRequest != nil })
+      layerRead = .idle
+    }
   }
 
   private func clearLiveDemandOnExit() {
@@ -394,7 +434,8 @@ final class WallpaperController {
     audioTask?.cancel()
     audioTask = nil
     spectrumReader.close()
-    publishDemandIfChanged(needsMedia: false, needsAudio: false)
+    pendingDemand = nil
+    publishDemandIfChanged(LockScreenLiveDemand(processID: getpid(), needsMedia: false, needsAudio: false))
   }
 
   @discardableResult
@@ -423,26 +464,33 @@ final class WallpaperController {
     return true
   }
 
-  private func publishDemandIfChanged(needsMedia: Bool, needsAudio: Bool) {
-    if let last = lastPublishedDemand,
-      last.needsMedia == needsMedia, last.needsAudio == needsAudio
-    {
-      return
+  private func scheduleDemand(_ demand: LockScreenLiveDemand) {
+    guard demand != (pendingDemand ?? lastPublishedDemand) else { return }
+    let scheduled = pendingDemand != nil
+    pendingDemand = demand
+    guard !scheduled else { return }
+    DispatchQueue.main.async {
+      guard let demand = self.pendingDemand else { return }
+      self.pendingDemand = nil
+      self.publishDemandIfChanged(demand)
     }
-    lastPublishedDemand = (needsMedia, needsAudio)
+  }
+
+  private func publishDemandIfChanged(_ demand: LockScreenLiveDemand) {
+    guard demand != lastPublishedDemand else { return }
     let url = WallpaperRuntime.exchange.appendingPathComponent(LockScreenLiveDemand.fileName)
-    if needsMedia || needsAudio {
-      let demand = LockScreenLiveDemand(
-        processID: getpid(), needsMedia: needsMedia, needsAudio: needsAudio)
-      do {
+    do {
+      if demand.needsMedia || demand.needsAudio || demand.layerRequests?.isEmpty == false {
         let data = try JSONEncoder().encode(demand)
         try data.write(to: url, options: .atomic)
-      } catch {
-        WallpaperRuntime.log("Live demand write failed: \(error.localizedDescription)")
+      } else if unlink(url.path) != 0, errno != ENOENT {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
       }
-    } else {
-      try? FileManager.default.removeItem(at: url)
+    } catch {
+      WallpaperRuntime.log("Live demand write failed: \(error.localizedDescription)")
+      return
     }
+    lastPublishedDemand = demand
     CFNotificationCenterPostNotification(
       CFNotificationCenterGetDarwinNotifyCenter(),
       CFNotificationName(LockScreenLiveDemand.changedNotification as CFString),

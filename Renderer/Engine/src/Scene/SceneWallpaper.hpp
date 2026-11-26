@@ -125,6 +125,7 @@ struct SceneScriptStorageConfig {
 
 #include "Core/NoCopyMove.hpp"
 class MainHandler;
+struct SceneLayerState;
 struct RenderInitInfo;
 struct SceneWallpaperConfig {
     std::string source;
@@ -155,6 +156,7 @@ public:
 
     void initSurface(const RenderInitInfo&);
     void applyConfig(const SceneWallpaperConfig&);
+    bool applyLayerState(SceneLayerState state);
 
     bool beginSurfaceReconfigure();
 
