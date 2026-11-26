@@ -40,6 +40,7 @@ final class WelcomeRenderTests: PanelTestCase {
   /// (a page that is taller than its card scrolls), and the guide the host shows is the one asked for.
   func testEveryPageFitsTheSmallestAndTheDefaultWindowInEveryLanguage() async throws {
     try await withPanel(welcomeSeen: false) { panel in
+      panel.controller.updater.isAvailable = true
       for language in AppLanguage.supported.map(\.tag) {
         let harness = try WelcomeRenderHarness(panel: panel, language: language)
         for size in sizes {
@@ -55,6 +56,31 @@ final class WelcomeRenderTests: PanelTestCase {
         }
         harness.close()
       }
+    }
+  }
+
+  func testPreferencesOffersOnlyTheConfiguredUpdatersAutomaticCheckSwitch() async throws {
+    try await withPanel(welcomeSeen: false) { panel in
+      let updater = panel.controller.updater
+      let requests = SettingsCallCounter()
+      updater.checkNow = requests.bump
+      let harness = try WelcomeRenderHarness(panel: panel) { controller in
+        AnyView(WelcomePreferencesPage().environment(controller.welcome))
+      }
+      defer { harness.close() }
+      @MainActor func toggle() -> AccessibilityElement? {
+        AccessibilityElement.everything(in: harness.hosting.view).first { $0.identifier == "automatic-update-checks" }
+      }
+      try await harness.layout(at: sizes[1])
+      XCTAssertNil(toggle(), "first run does not offer updates in a build without a feed")
+      updater.isAvailable = true
+      updater.checksAutomatically = false
+      try await harness.layout(at: sizes[1])
+      let control = try XCTUnwrap(toggle())
+      XCTAssertEqual(control.role, NSAccessibility.Role.checkBox.rawValue)
+      _ = control.object.perform(NSSelectorFromString("accessibilityPerformPress"))
+      try await panel.waitUntil { updater.checksAutomatically }
+      XCTAssertEqual(requests.count, 0, "enabling checks doesn't start the manual update flow")
     }
   }
 

@@ -115,6 +115,7 @@ component, with its version, is listed in the bundled `THIRD-PARTY-NOTICES.txt`.
 | Application shell, extension, Workshop browser, control panel, scripts | `App/`, `Extension/`, `Shared/`, `scripts/` | GPL-3.0-only (this project) | Same license |
 | Phosphene ABI reference | notice in `Extension/Phosphene-LICENSE.txt` | MIT | Compatible |
 | ungive/mediaremote-adapter | `ThirdParty/mediaremote-adapter`, modified (see `provenance.json`) | BSD-3-Clause | Compatible; an embedded, unlinked framework |
+| [Sparkle](https://github.com/sparkle-project/Sparkle/tree/2.10.0) | SwiftPM binary distribution, embedded framework and updater helpers | MIT; its external notices include BSD-2-Clause and Zlib | Compatible; packaging includes the distribution's complete `LICENSE` in `THIRD-PARTY-NOTICES.txt` |
 | miniaudio | `ThirdParty/miniaudio` | Public domain or MIT-0 | Compatible |
 | stb_image, stb_vorbis | `ThirdParty/stb_image`, `ThirdParty/stb_vorbis`, patched (`PATCHES.md` in each) | Public domain or MIT | Compatible |
 | HarfBuzz | `ThirdParty/harfbuzz`, 15.0.0 (harfbuzz/harfbuzz tag `15.0.0`, commit `66946f52`), `src/` unchanged (build files and tests left out), linked statically (`harfbuzz`, from `src/harfbuzz.cc`) | Old MIT, SPDX MIT-Modern-Variant (`LICENSE` there, the release's `COPYING`) | Compatible |

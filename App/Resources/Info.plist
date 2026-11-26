@@ -69,6 +69,20 @@
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>SUFeedURL</key>
+	<string>$(WALLPAPER_MACHINE_UPDATE_FEED)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY)</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SUSignedFeedFailureExpirationInterval</key>
+	<integer>0</integer>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>WallpaperMachine asks Music and Spotify what is playing, only while you have turned media integration on for a wallpaper.</string>
 	<key>NSLocationUsageDescription</key>

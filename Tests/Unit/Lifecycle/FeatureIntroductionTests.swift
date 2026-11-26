@@ -60,6 +60,15 @@ final class FeatureIntroductionTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: FeatureIntroductionStore.lastLaunchedVersionKey), "1.12.0")
     }
 
+    func testInstalledNotesAreDueOnlyWhenTheLaunchedVersionAdvances() {
+        XCTAssertFalse(launch("1.15.0").isUpgrade)
+        run("1.15.0", existingUser: false)
+        XCTAssertTrue(launch("1.16.0").isUpgrade)
+        run("1.16.0")
+        XCTAssertFalse(launch("1.16.0").isUpgrade)
+        XCTAssertFalse(launch("1.15.0").isUpgrade)
+    }
+
     func testAnUnreadableVersionShowsNothingAndRecordsNothing() {
         XCTAssertNil(run("dev"))
         XCTAssertNil(defaults.string(forKey: FeatureIntroductionStore.lastLaunchedVersionKey))

@@ -583,40 +583,14 @@ Log line format, retention and the verbose setting are covered in Rust; see
 
 ## GitHub
 
-`AppUpdateTests` use fixture JSON, a fake client and isolated `URLSession`
-responses; they never contact GitHub, download a real release or replace the
-running app.
-
-- Checking: version comparison, disk-image asset selection, the manifest path
-  that spends no API request, host allowlisting, SHA-256 digest requirement,
-  rate limits, progress clamping, classified errors and install retry/timeout. A
-  missing latest release is normal only after the repository is confirmed
-  reachable; missing repositories, failed lookups and malformed metadata remain
-  errors, and rechecking clears stale notes and availability.
-- Old images: a download and each launch empty `Updates/`, keeping only an image
-  this launch downloaded that is ready to install.
-- Installing, against real disk images made with `hdiutil`: the app is copied out
-  without following the `Applications` link, a foreign bundle and an unsigned one
-  are refused, the image is detached either way, and an app that cannot install in
-  place opens the downloaded image. Signatures, against bundles signed ad hoc with
-  `codesign`: an unsigned or altered copy is refused, an installed copy that meets
-  the release requirement (a signed `Info.plist` value stands in for the release
-  certificate, which fixtures cannot carry) accepts only an update that meets it
-  too, and a build from source asks for no particular signer.
-- `UpdatePresentationTests` and `AboutSettingsTests` (Panel) walk the About card
-  from no release through the download to an install that needs a yes.
-- `UpdatePromptGateTests`: when the unattended update window is held (suspended
-  presentation, a covered display, quitting), that the control panel in front
-  overrides the presentation holds, and that a held prompt is offered exactly once
-  after the hold lifts. The window itself, and leaving a full-screen app, are on
-  [manual-smoke.md](manual-smoke.md).
-
-`AppReleaseHistoryTests` — the manifest's changelog: linked headings, translations
-and their fallbacks, reference links kept for the window and dropped for About, and
-which releases the update window shows. `UpdateWindowTests` — the notes-language
-switch above the notes and the translation the window opens on. Not covered: a live release
-check, the published disk image and replacing the app in Applications; these are
-on [manual-smoke.md](manual-smoke.md).
+`SoftwareUpdateControllerTests` exercise the Sparkle integration without downloading an
+update or replacing the test host: automatic discovery versus explicit checks, throttling,
+per-version reminders across launches, legacy preferences, first-party archive routing,
+bounded transport retries and refusal to retry verification failures. They also check the
+processed Debug bundle’s verification settings and that its localized release history parses.
+`AppReleaseHistoryTests` cover the release headings and translation fallback; the About and
+menu panel tests cover their update actions. Installing a published ZIP and bridging a
+pre-Sparkle installation with the DMG require the [manual smoke test](manual-smoke.md).
 
 ## Library
 

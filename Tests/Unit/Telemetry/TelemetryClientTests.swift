@@ -43,7 +43,7 @@ final class TelemetryClientTests: XCTestCase {
         configuration.protocolClasses = [Stub.self]
         return TelemetryClient(
             endpoint: URL(string: "https://telemetry-\(UUID().uuidString).invalid/api/telemetry")!,
-            session: GitHubReleaseClient.makeSession(configuration: configuration), version: "1.4.1")
+            configuration: configuration, version: "1.4.1")
     }
 
     override func setUp() {
@@ -62,6 +62,19 @@ final class TelemetryClientTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
         XCTAssertEqual(request.httpBody, Data(#"{"schema":1}"#.utf8))
         XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+    }
+
+    func testSessionKeepsNoCookiesCredentialsOrCacheAndLimitsNetworkWaits() {
+        let session = TelemetryClient().session
+        defer { session.finishTasksAndInvalidate() }
+        let configuration = session.configuration
+        XCTAssertNil(configuration.httpCookieStorage)
+        XCTAssertFalse(configuration.httpShouldSetCookies)
+        XCTAssertNil(configuration.urlCredentialStorage)
+        XCTAssertNil(configuration.urlCache)
+        XCTAssertEqual(configuration.requestCachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(configuration.timeoutIntervalForRequest, 30)
+        XCTAssertEqual(configuration.timeoutIntervalForResource, 30)
     }
 
     func testDeletionNamesOnlyTheInstall() async throws {
@@ -90,5 +103,6 @@ final class TelemetryClientTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? TelemetryUploadError, TelemetryUploadError(status: 429))
         }
+        XCTAssertEqual(Stub.lock.withLock { Stub.seen.count }, 1)
     }
 }

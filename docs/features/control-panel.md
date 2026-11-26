@@ -3,7 +3,7 @@
 The app window is a native SwiftUI interface in
 [`App/Views/ControlPanel/`](../../App/Views/ControlPanel), hosted in an AppKit window.
 Menus, the status item, file pickers, confirmation sheets and the sign-in and preview
-windows are AppKit (the update window is SwiftUI in its own window), and renderer content is never drawn into the panel. How it
+windows are AppKit; Sparkle manages software update windows. Renderer content is never drawn into the panel. How it
 runs (controller, typed actions, observation, window hosting) is in
 [architecture](../architecture.md#control-panel-swiftui).
 
@@ -326,15 +326,11 @@ canvas, the widgets' layers and an inspector with tabs, which do not scroll as o
 - **Keyboard shortcuts** holds the shortcut rows and the **Shortcuts app and
   links** disclosure (see [automation](automation.md)).
 - **About** opens with the app icon, name and version (`MARKETING_VERSION` in
-  `project.yml`) and the Git revision. **Check for Updates** reads the latest GitHub
-  Release. **Update mode** chooses notification only, automatic downloading with
-  manual restart, or full automatic installation while the Mac is locked/display
-  asleep. New installations default to full automatic; existing choices are preserved
-  (see [updates](updates.md)). The Updates card shows the status with the last
-  successful check and progress/cancel/retry; **Release notes** is a card of its own,
-  the newest version open and earlier ones folded. **Remind Me Later** defers this version
-  for 24 hours across launches, and **Skip This Version** prevents its automatic update.
-  The application menu item **Check for Updates…** opens this section. **Spread the word** has **Share WallpaperMachine…** and **Star on
+  `project.yml`) and the Git revision. **Check Now** opens Sparkle; **Show Update** brings
+  up a version already found. **Check for updates automatically** controls discovery
+  only. Sparkle asks before downloading and restarting (see [updates](updates.md)).
+  **Release notes** shows the installed build’s bundled history, including earlier versions.
+  **Spread the word** has **Share WallpaperMachine…** and **Star on
   GitHub** ([one-time prompts](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer)).
   On macOS 26 and later, **More from MMFoundation** shows OhMyShot, the capture app the same
   organization makes, and **Get OhMyShot** opens its website (https://www.ohmyshot.org/, the
@@ -386,7 +382,7 @@ fresh. Imports and Workshop downloads run in app-owned stores, so closing the wi
 never cancels them.
 
 The panel opens on the Space you are on rather than switching you to the Space it was
-last left on, and so do the update window, the wallpaper preview and the Steam and pixiv sign-in
+last left on, and so do the wallpaper preview and the Steam and pixiv sign-in
 windows. A minimized panel comes back from the Dock when it is opened from the status
 menu, the Dock icon or Command-comma, or when the app is activated; the green button still
 offers full screen. The app keeps its Dock icon while any of these windows is open, on screen
@@ -860,18 +856,13 @@ target display, else the main one. Below the picker:
   GPU and the caveat's note are in its tooltip and what VoiceOver reads; there is no before-and-after
   comparison. It reads **Measuring…** for the first few seconds unless the menu bar figure was
   already measuring, and **Unavailable on this Mac** where the kernel's counters cannot be read.
-- A passive **update row** when an update is available, downloading, verifying, ready,
-  deferred, needs attention or was just installed. It opens Settings → About after
-  dismissing the popover. It remains available even if no display can play a wallpaper;
-  progress follows the same update store as the main panel, with no additional polling.
+- An **update row** when a newer app version is waiting. It dismisses the popover and
+  opens Sparkle’s offer. It uses the same discovery state as About, without extra polling.
 - **Control Panel**, which opens the window with this display as its target, **Settings** and
   **Quit WallpaperMachine**.
 
-The main control panel also keeps a passive update banner above its pages, tinted with the
-panel's own accent colour ([appearance](appearance.md)) like the rest of the window. Opening
-updates is a user action; background checks and installation results never activate
-another window. Dismiss the installed-result banner or postpone an available update;
-the menu bar and About remain reachable.
+An active control panel can offer a once-a-day reminder. Postponing it keeps the menu
+entry available without following you across panel pages.
 
 Nothing of it runs while it is closed: it follows the stores, reads the stamps of the covers on
 show (from the Installed covers' cache, never a full-size preview or a live render) and reads

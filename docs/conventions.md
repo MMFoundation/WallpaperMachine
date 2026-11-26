@@ -57,12 +57,12 @@ Adding a new target, source directory, resource or build setting means editing
   `init(processRunner: any SteamCMDProcessRunning = SteamCMDProcessRunner())`,
   `init(currentAppURL: URL = Bundle.main.bundleURL, fileManager: FileManager = .default)`.
   Where the seam needs more than one implementation, declare a `Sendable`
-  protocol (`AppUpdateClient`, `SteamCMDProcessRunning`) and inject `any` of it.
+  protocol (`SteamCMDProcessRunning`) and inject `any` of it.
   Reaching for a singleton or `Bundle.main` in the middle of a method is what
   makes a type untestable; put it in the initializer default instead.
 - **Filesystem and process work belongs in an `actor`** (`WallpaperImportService`,
   `WorkshopDownloader`); observable UI state belongs in a `@MainActor` store
-  (`BridgeStore`, `WorkshopStore`, `AppUpdateStore`). Long operations honour
+  (`BridgeStore`, `WorkshopStore`, `SoftwareUpdateStatus`). Long operations honour
   cancellation with `try Task.checkCancellation()` and clean up staging in
   `defer`.
 - **Stateless namespaces are `enum` with `static` members**, not empty structs or
@@ -205,7 +205,7 @@ How the panel runs (controller, actions, observation, window hosting) is in
   length shows `ProgressRing(value: nil)` (or `LoadingRing`) or `ProgressBar(value: nil)`,
   never a `ProgressView` without a `value:`, which keeps turning;
   `scripts/tests/test_panel_progress_indicators.py` enforces this. A window outside the
-  panel that shows them sets `\.panelIsVisible` itself, as the update window does. No timer runs
+  panel that shows them sets `\.panelIsVisible` itself. No timer runs
   while the window is hidden; grids are lazy; nothing walks the library on a
   download tick. A grid tile builds only what it shows: a control hidden with
   `.opacity(0)` still costs its whole view tree in every tile, and scrolling builds

@@ -10,20 +10,23 @@ final class ClientPreferencesTests: XCTestCase {
         let second = ClientPreferences.resolve(environment: [ClientPreferences.suiteEnvironmentKey: secondName])
         first.set("en", forKey: AppLanguageStore.defaultsKey)
         first.set(true, forKey: PanelPreferences.welcomeSeenKey)
-        first.set(true, forKey: AppUpdateStore.automaticKey)
         second.set("ja", forKey: AppLanguageStore.defaultsKey)
+        func updater(_ defaults: UserDefaults) -> SoftwareUpdateController {
+            SoftwareUpdateController(defaults: defaults, installedBuild: 1, canRun: { false }, didChange: {})
+        }
+        let firstUpdater = updater(first)
+        firstUpdater.status.checksAutomatically = false
         let firstLanguage = AppLanguageStore(defaults: first, systemLanguages: ["zh-Hans"])
         let secondLanguage = AppLanguageStore(defaults: second, systemLanguages: ["zh-Hans"])
         XCTAssertEqual(firstLanguage.effective, .english)
         XCTAssertEqual(secondLanguage.effective.tag, "ja")
         XCTAssertTrue(first.bool(forKey: PanelPreferences.welcomeSeenKey))
         XCTAssertFalse(second.bool(forKey: PanelPreferences.welcomeSeenKey))
-        XCTAssertTrue(AppUpdateStore(currentVersion: "1.0.0", client: DisabledAppUpdateClient(), defaults: first)
-            .automaticallyInstallsUpdates)
-        XCTAssertFalse(AppUpdateStore(currentVersion: "1.0.0", client: DisabledAppUpdateClient(), defaults: second)
-            .automaticallyInstallsUpdates)
+        XCTAssertFalse(firstUpdater.status.checksAutomatically)
+        XCTAssertTrue(updater(second).status.checksAutomatically)
         let reopened = ClientPreferences.resolve(environment: [ClientPreferences.suiteEnvironmentKey: firstName])
         XCTAssertEqual(reopened.string(forKey: AppLanguageStore.defaultsKey), "en")
+        XCTAssertFalse(updater(reopened).status.checksAutomatically)
         XCTAssertEqual(ClientPreferences.domainName(environment: [ClientPreferences.suiteEnvironmentKey: firstName]), firstName)
     }
 

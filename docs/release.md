@@ -63,9 +63,9 @@ omitted nothing is written, which makes it safe to inspect a planned bump.
 ## Release notes and the changelog
 
 A version's notes are written once, when it is cut, into its
-[`CHANGELOG.md`](../CHANGELOG.md) section. The update manifest carries the newest
-sections, in every language, to the app's update window
-([below](#what-the-in-app-updater-expects)); the release page uses only the English
+[`CHANGELOG.md`](../CHANGELOG.md) section. Sparkle's signed feed carries the current
+section as localized plain text; the compatibility manifest carries the newest sections
+for older apps ([below](#what-the-in-app-updater-expects)). GitHub uses only the English
 notes from the current section. [`scripts/release_notes.py`](../scripts/release_notes.py)
 does both halves; GitHub's auto-generated notes are not used. Once a version's tag
 exists, its section is not extended: the tag's release already published it, so a
@@ -161,8 +161,8 @@ is written, the script opens each language block with its image line:
 - `CHANGELOG.md` on GitHub shows the images from their repository paths.
 - The release page shows the English one from the version's tag on
   `raw.githubusercontent.com`, at the top of the English notes.
-- The app bundles neither the folder nor `CHANGELOG.md`; what its update window shows
-  of a section is in [The update window](features/updates.md#the-update-window).
+- The app bundles `CHANGELOG.md` for About, not the banner images. Sparkle's signed
+  inline release notes omit banners; see [The update window](features/updates.md#the-update-window).
 
 Publishing refuses a banner line that names another version's file, and a banner
 line is not translated prose: a language block holding only a picture is missing its
@@ -351,10 +351,10 @@ hand-pushed tag with no section is written once, by the model when `--ai` is
 set, into the working-tree `CHANGELOG.md` before anything is built. English-only
 or malformed source history fails the run instead of being published.
 
-The marker is a contract: the updater shows everything above it and nothing
-below, and About skips the **Full changelog** line. The update window reads the
-manifest's `changelog` field, not that body, and falls back to the body only when the
-field is missing; see [The update window](features/updates.md#the-update-window).
+Keep the marker for older apps: their update window falls back to the body above
+it when the manifest has no localized changelog. Sparkle instead displays the signed
+inline notes; About can read the installed changelog without a network connection.
+See [The update window](features/updates.md#the-update-window).
 
 Writing a section is idempotent — rerunning replaces the section for that
 version instead of duplicating it. `--rebuild-changelog` writes a section for every
@@ -387,6 +387,13 @@ A hotfix branched from 1.8.2 or older builds with that tag's `build.yml` and
 `SIGNING_CERTIFICATE_P12` and `SIGNING_CERTIFICATE_PASSWORD` secrets and is not
 notarized ([build.md](build.md#release-signing)). Keep those two secrets until a
 Developer ID release has shipped.
+
+A hotfix branched before the Sparkle migration keeps its tagged three-asset
+publisher. If a newer Build workflow checks out that legacy source, it does not
+pass Sparkle-only build/package flags or ask for update-signing keys. A tag that
+declares Sparkle without the signing script fails instead of falling back. Once
+a Sparkle release is Latest, branch its hotfixes from that release so Latest
+continues to supply a signed feed.
 
 1. Branch from the newest release tag, named after it:
 
@@ -612,7 +619,7 @@ artifact.
    with the notes, so the update manifest carries every translation of the new
    section. Missing translations or malformed source history fail here, in seconds,
    rather than after the macOS build. A rehearsal writes no notes;
-3. imports the Developer ID certificate and the notary API key from the signing
+3. checks the tag, build number and dedicated Sparkle key pair, then imports the Developer ID certificate and the notary API key from the signing
    secrets into a temporary keychain ([build.md](build.md#release-signing)), also
    before anything is built: a missing secret, a certificate that does not import
    (1.9.0's failure, which then came after the whole build) or a key Apple refuses
@@ -620,7 +627,8 @@ artifact.
 4. runs `prepare-build` (below), restoring both caches and reusing the renderer build
    for every source unchanged since it (`reuse-renderer-build`);
 5. runs `python3 scripts/build.py --configuration Release --no-app-icon`, which
-   leaves `AppIcon.icon` out of the Xcode build;
+   leaves `AppIcon.icon` out of the Xcode build. Sparkle releases also pass the
+   **public** key as an explicit Xcode setting; the compiler never sees the private key;
 6. waits until `app-icon` has uploaded `app-icon-<tag>`, which it normally has, looking
    the artifact up by name so a re-run of only this job finds an earlier attempt's,
    and fails if that job ended without one; downloads it and runs
@@ -630,7 +638,7 @@ artifact.
 7. runs
    `python3 scripts/package.py --configuration Release --require-deployment-target
    --sign-identity "Developer ID Application" --notarize "WallpaperMachine Notary"
-   --notary-keychain <that keychain>`, which fails if a bundled library needs a newer
+   --notary-keychain <that keychain>` (plus `--sparkle-archive` on Sparkle tags), which fails if a bundled library needs a newer
    macOS than the deployment target, and signs with the hardened runtime, notarizes
    and staples the app and then the disk image; a submission Apple refuses fails the
    job with Apple's log. Each submission waits up to 50 minutes, and one Apple has not
@@ -649,11 +657,12 @@ artifact.
    layout, then writes the `.sha256` sidecar
    ([build.md](build.md#packaging-and-installing));
 8. matches the image to the tag: it must be named
-   `WallpaperMachine-<tag without v>-arm64.dmg`, and its checksum is echoed into the
-   job summary;
-9. hands the image, its sidecar, the notes and that `CHANGELOG.md` to `publish` as
-   the `release-<tag>` artifact (a rehearsal keeps its image three days as
-   `rehearsal-<tag>`, and skips `publish`).
+   `WallpaperMachine-<tag without v>-arm64.dmg`. For Sparkle, packaging has also
+   zipped the verified, stapled app **from inside that image**. The build checks
+   the archived Info.plist, signs the ZIP and appcast, then verifies both signatures;
+9. hands the artifacts, the notes and that `CHANGELOG.md` to `publish` as
+   `release-<tag>`. A rehearsal exercises both signatures without release notes
+   and never publishes its three-day `rehearsal-<tag>` artifact.
 
 Step 8 is the guard that the bump actually reached the build:
 `scripts/package.py` names the image from the bundle's
@@ -673,8 +682,9 @@ summary.
    notes, the image and the build job's `CHANGELOG.md` with
    `scripts/update_manifest.py --changelog` ([below](#what-the-in-app-updater-expects));
    `publish`'s own checkout of the tag lacks a section generated for a hand-pushed tag;
-4. publishes the image, its sidecar and the manifest with
-   `scripts/publish_release.py`.
+4. verifies the ZIP and signed appcast with only the public key, checks them
+   against the tagged build, DMG minimum macOS and localized changelog, and
+   publishes the five required assets with `scripts/publish_release.py`.
 
 **`nix-release`**
 
@@ -894,8 +904,9 @@ the `spec` input into the version a release of that branch would get, with
 runs its usual jobs, runners, caches and signing secrets: it applies the version to the
 checkout as the bump commit would, imports the certificate and the notary key, builds,
 adds the icon, signs, notarizes and staples the app and the image, and verifies the
-mounted image. It writes no notes and skips `publish`, and keeps the disk image for three
-days as the run's `rehearsal-<tag>` artifact, to try before releasing. A newer rehearsal
+mounted image. For a Sparkle target it also archives that app, signs the archive and the
+feed, and verifies them. It writes no notes and skips `publish`; it keeps the artifacts
+for three days as `rehearsal-<tag>`, to try before releasing. A newer rehearsal
 of the same branch cancels a running one.
 
 Rehearse before landing a change to the release path (the workflows, `prepare-build`,
@@ -914,87 +925,60 @@ the build; it is not rewritten.
 
 ## What the in-app updater expects
 
-**Settings → About** installs updates from the repository's latest GitHub Release.
-What the app does with one (when it checks, how it avoids the API quota, download,
-verification, replacing the running app, the update window) is in
-[updates](features/updates.md). This section is the publish-side contract: what a
-release has to carry for that to work.
+Every Sparkle release has **five** public assets. The stable `vx.y.z` tag, immutable
+live files and the draft-first, version-ordered promotion described [above](#build-buildyml)
+serve both generations of installed apps.
 
-The update manifest, `WallpaperMachine-update.json`, is an asset of every release.
-`scripts/update_manifest.py` writes it in Build's `publish` job from the tag, the
-notes file that becomes the release body, `CHANGELOG.md` and the image bytes, and
-`scripts/publish_release.py` attaches it. It is the release object in the REST
-API's shape: `tag_name`, `html_url`, `prerelease`, `body` and one asset with
-`name`, `browser_download_url`, `size` and a `sha256:` `digest`, plus one field the
-API does not have. `changelog` (written with `--changelog CHANGELOG.md`) is a string
-holding the newest 20 `## ` version sections of `CHANGELOG.md` verbatim, every
-language included, from the first `## ` heading on, without the file's preamble.
-The script refuses a changelog with no section for the tag. When an update is
-available, the app's update window shows from it each version newer than the
-installed one, in the app's language, and falls back to the release body when the
-field is missing, as in manifests from before it existed
-([The update window](features/updates.md#the-update-window)). The app no longer
-bundles `CHANGELOG.md` or `Resources/ReleaseBanners`. Updates and their results are
-passive entries in the control panel and menu bar; no window opens automatically. The app reads the manifest
-from `https://github.com/WallpaperMachine/WallpaperMachine/releases/latest/download/WallpaperMachine-update.json`,
-which github.com redirects to the file on the release marked Latest. A draft never
-resolves, and `publish_release.py` makes the release public only after the image,
-sidecar and manifest are uploaded. The name is
-`AppUpdateConfiguration.manifestName`; renaming it changes both sides at once. The
-script refuses a tag that is not `vx.y.z`, a repository that is not `owner/name`
-and an image not named as below.
+| Asset | Consumer |
+|---|---|
+| `WallpaperMachine-<x.y.z>-arm64.dmg` | Manual downloads, Homebrew, Nix and the legacy updater |
+| `WallpaperMachine-<x.y.z>-arm64.dmg.sha256` | Verifies the final, stapled DMG bytes |
+| `WallpaperMachine-update.json` | Installed releases that use the legacy GitHub manifest |
+| `WallpaperMachine-<x.y.z>-arm64.zip` | Sparkle installs the same signed, notarized, stapled app as the DMG |
+| `appcast.xml` | Signed Sparkle feed naming that immutable ZIP |
 
-New manifests additionally carry `bundle_identifier`, `minimum_system_version` and
-`architectures`. Packaging reads these from the verified signed app inside the DMG
-and writes `WallpaperMachine-<version>-arm64.dmg.metadata.json`, binding them to the
-image name, version, size and SHA-256. Build transfers this internal file to the
-publish job; `update_manifest.py --metadata <file>` verifies the binding before
-writing the manifest. The metadata sidecar is not a public release asset. CI requires
-it; the optional CLI flag remains available for testing legacy manifests. Older
-clients ignore these additive fields. New clients reject known incompatibility before
-downloading and also verify the actual signed application's target version, macOS
-minimum and architecture before installing, including when reading a legacy manifest.
+**Sparkle.** The Release app requests
+`https://www.wallpapermachine.app/updates/appcast`. Serve the *exact bytes* of
+`https://github.com/MMFoundation/WallpaperMachine/releases/latest/download/appcast.xml`:
+changing even whitespace invalidates the feed signature. The single enclosure is
+`https://github.com/MMFoundation/WallpaperMachine/releases/download/v<x.y.z>/WallpaperMachine-<x.y.z>-arm64.zip`.
+The app can request that same file through the website's
+`/updates/download/v<x.y.z>/WallpaperMachine-<x.y.z>-arm64.zip` route. Neither
+route re-signs or modifies the data. Deploy both website routes before the first
+Sparkle release; the client [transport and fallback](features/updates.md#what-a-check-reads)
+do not use the compatibility manifest.
 
-Before any GitHub mutation, `publish_release.py` verifies exactly the DMG, SHA-256
-sidecar and manifest, including the notes body and compatibility fields. After uploading,
-it checks the draft's asset names, lengths and any GitHub-supplied digests before
-promoting it. Missing or mismatched assets leave the release a draft. The existing
-publish lock, immutable live releases and final Latest comparison are unchanged.
+[`scripts/sparkle_release.py`](../scripts/sparkle_release.py) reads the ZIP's
+`CFBundleShortVersionString`, `CFBundleVersion` and `LSMinimumSystemVersion`
+rather than guessing the floor from the runner. It checks the tag and build
+against `project.yml`, and the bundle's feed, public key and security settings
+against the release policy. The item requires arm64. Its English, Simplified
+Chinese and Korean descriptions come from this tag's changelog; each is signed
+as inline plain text (`sparkle:format="plain-text"`, `xml:lang`). Banners and
+Markdown link destinations are not downloaded in the update window. The pinned
+Sparkle distribution's `sign_update` signs the finished ZIP and then the final XML.
+The publisher independently verifies both Ed25519 signatures using the configured
+**public** key and checks the ZIP length, download URL, versions, minimum OS and notes
+before the first GitHub mutation. It then verifies the uploaded draft's asset names,
+lengths and available GitHub digests before clearing its draft flag. A missing key,
+signature or asset never selects the legacy path.
 
-What a release must satisfy:
+**Older installations.** Keep the existing DMG name, checksum, and the manifest
+schema intact so users can update once through the path their app knows. The
+manifest still has `tag_name`, `html_url`, `prerelease: false`, the English release
+`body`, one DMG `assets` entry with the exact filename, size, GitHub download URL
+and `sha256:` digest, and the newest 20 localized changelog sections. Its
+`bundle_identifier`, `minimum_system_version` and `architectures` come from
+[`scripts/update_manifest.py`](../scripts/update_manifest.py)'s digest-bound
+`WallpaperMachine-<x.y.z>-arm64.dmg.metadata.json` input; that sidecar stays
+internal. The historical `WallpaperMachine/WallpaperMachine` and
+`bobbyhuang-dev/WallpaperMachine` repository names must keep redirecting to
+`MMFoundation/WallpaperMachine`. A copy older than 1.8.0 that refuses Developer
+ID signatures needs the manual DMG ([signing history](build.md#release-signing)).
 
-- the repository is `WallpaperMachine/WallpaperMachine`
-  (`AppUpdateConfiguration.repository`). Builds up to 1.0.0 still ask for
-  `bobbyhuang-dev/WallpaperMachine` and reach it only through GitHub's rename
-  redirect, so never create a repository at that old path;
-- the release is not a draft or prerelease, and its tag is `vx.y.z` (no
-  prerelease suffixes, no `nightly`);
-- the disk image is named exactly `WallpaperMachine-<x.y.z>-arm64.dmg` — what
-  `AppUpdateConfiguration.assetName(for:)` returns and what `scripts/package.py`
-  produces (`image_name` in `scripts/lib/dmg.py`). The app can fall back to another
-  product `.dmg`, but never downloads the `.sha256` sidecar, zips, feeds or
-  blockmaps;
-- the manifest's asset carries a `sha256:` digest of the image and a
-  `browser_download_url` on github.com, both derived by `update_manifest.py`; the
-  app refuses an image it cannot verify;
-- releases are signed with the project's Developer ID and notarized
-  ([build.md](build.md#release-signing)): the updater installs only a copy that meets
-  `AppUpdateConfiguration.signingRequirement` (the Developer ID, or the project
-  certificate that signed 1.0.2 through 1.8.2; copies older than 1.8.0 accept only the
-  latter), and keeping the designated requirement is what lets macOS keep the app's
-  privacy permissions;
-- the release body is the English notes above `<!-- release-notes-end -->`
-  ([Release notes and the changelog](#release-notes-and-the-changelog)); the app
-  uses it as a fallback when localized changelog sections are unavailable and
-  ignores the footer after the marker;
-- the manifest's `changelog` starts with the new version's section in the
-  [layout above](#release-notes-and-the-changelog), so an install several versions
-  behind sees every change it is about to receive.
-
-Renaming the image, publishing a prerelease, or attaching only a zip silently
-breaks automatic updates; `Tests/Unit/GitHub/AppUpdateTests.swift` pins this
-behavior, including the exact published image name and an install from a real disk
-image.
+A hotfix tag that predates Sparkle still publishes its original three assets.
+The choice is made from the *tagged source*, not from the signing environment
+or whatever files happened to reach the publisher.
 
 ## Homebrew
 
@@ -1064,14 +1048,17 @@ carries `CHANGELOG.md` as it is at the patch's tag, and that copy is not rewritt
    `CHANGELOG.md` section and pushed `vx.y.z`. Read the section: its heading is
    `## [x.y.z](<compare link>) (YYYY-MM-DD)`, then `### English`, `### 简体中文` and
    `### 한국어`, the model wrote all three, and each bullet links the commits it
-   describes and any issue they close. The update window shows all translations;
-   the GitHub release page shows only the English notes.
+   describes and any issue they close. Sparkle shows the matching localized
+   plain-text notes; GitHub shows only the English block.
 3. Confirm the called Build run verified the mounted
    image, and published `WallpaperMachine-x.y.z-arm64.dmg` with its `.sha256`
-   sidecar, `WallpaperMachine-update.json` and a provenance attestation. The
+   sidecar, `WallpaperMachine-update.json` and a provenance attestation.
+   For a Sparkle release, confirm `WallpaperMachine-x.y.z-arm64.zip` and
+   `appcast.xml` are public too, and that the website streams the same bytes as
+   GitHub rather than rewriting the feed. The
    manifest's `digest` must equal the sidecar's checksum, and its `changelog` must
    start with the new version's heading:
-   `curl -sL https://github.com/WallpaperMachine/WallpaperMachine/releases/latest/download/WallpaperMachine-update.json`.
+   `curl -sL https://github.com/MMFoundation/WallpaperMachine/releases/latest/download/WallpaperMachine-update.json`.
 4. Read the release body on the page: it should contain only the English notes
    from the current `CHANGELOG.md` section, followed by the install footer,
    with its issue and commit links, without Chinese or Korean sections or a raw

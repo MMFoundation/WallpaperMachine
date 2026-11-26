@@ -97,12 +97,8 @@ final class SettingsBHost {
   let hosting: NSHostingController<SettingsBRoot>
   let controller: PanelController
 
-  /// - Parameter controller: One the test built over the fixture's stores
-  ///   (`buildSettingsController`), instead of the fixture's own.
-  init(
-    panel: PanelFixture, controller: PanelController? = nil, language: String = "en", dark: Bool = false
-  ) {
-    let controller = controller ?? panel.controller
+  init(panel: PanelFixture, language: String = "en", dark: Bool = false) {
+    let controller = panel.controller
     self.controller = controller
     // Settings is the page from the first pass: the shell's toolbar changes between pages, and a
     // window that has to change it at the narrowest width is not what these tests are about.

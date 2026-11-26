@@ -64,7 +64,7 @@ struct ControlPanelView: View {
 
   init(
     store: BridgeStore, navigation: ControlPanelNavigation, workshop: WorkshopStore,
-    pixiv: PixivStore, updater: AppUpdateStore, imports: LibraryImportStore,
+    pixiv: PixivStore, updater: SoftwareUpdateStatus, imports: LibraryImportStore,
     defaults: UserDefaults = ClientPreferences.defaults, appLanguage: AppLanguageStore? = nil,
     searchTranslation: WorkshopSearchTranslator? = nil
   ) {

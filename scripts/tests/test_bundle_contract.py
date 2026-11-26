@@ -241,6 +241,24 @@ class SyntheticBundleTests(unittest.TestCase):
         self.signatures[self.framework] = AD_HOC
         self.assertOneError("MediaRemoteAdapter.framework is signed by an ad hoc signature")
 
+    def test_a_sparkle_helper_requires_the_hosts_team_runtime_and_no_unrelated_entitlements(self):
+        framework = self.app / "Contents/Frameworks/Sparkle.framework"
+        self.signatures[framework] = DEVELOPER_ID
+        helpers = [framework / name for name in bundle_contract.SPARKLE_HELPERS]
+        for helper in helpers:
+            helper.parent.mkdir(parents=True, exist_ok=True)
+            helper.touch()
+            self.signatures[helper] = DEVELOPER_ID
+        self.developer_id()
+        self.assertEqual(self.findings(), ([], []))
+        self.signatures[helpers[0]] = DEVELOPER_ID._replace(team="OTHER")
+        self.assertOneError("must be signed by the host's Developer ID")
+        self.signatures[helpers[0]] = DEVELOPER_ID._replace(runtime=False)
+        self.assertOneError("hardened runtime")
+        self.signatures[helpers[0]] = DEVELOPER_ID
+        self.entitlements[helpers[0]] = {SANDBOX: True}
+        self.assertOneError("must not carry entitlements")
+
     def test_a_library_signed_by_another_team_fails(self):
         self.developer_id()
         self.signatures[self.library] = DEVELOPER_ID._replace(team="ZZZZZ99999")

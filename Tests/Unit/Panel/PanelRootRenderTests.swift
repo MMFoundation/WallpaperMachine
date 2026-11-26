@@ -37,7 +37,7 @@ final class PanelRootRenderTests: PanelTestCase {
       hosting = NSHostingController(
         rootView: ControlPanelView(
           store: store, navigation: navigation, workshop: workshop, pixiv: PixivStore(),
-          updater: AppUpdateStore(currentVersion: "0.1.0", client: DisabledAppUpdateClient()),
+          updater: SoftwareUpdateStatus(),
           imports: LibraryImportStore(), defaults: defaults, appLanguage: languages,
           searchTranslation: .fake(defaults: defaults, language: languages)))
       hosting.sizingOptions = []

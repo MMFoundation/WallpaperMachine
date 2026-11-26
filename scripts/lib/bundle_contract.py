@@ -51,6 +51,8 @@ EXTENSION_ENTITLEMENTS = EXTENSION / "WallpaperExtension.entitlements"
 # packaging turns on, and debug builds and the test host run without it.
 HOST_ENTITLEMENTS = ROOT / "Packaging/WallpaperMachine.entitlements"
 DEVELOPER_ID = "Developer ID Application:"
+SPARKLE_HELPERS = ("Versions/B/XPCServices/Installer.xpc", "Versions/B/XPCServices/Downloader.xpc",
+                   "Versions/B/Autoupdate", "Versions/B/Updater.app")
 
 DEPLOYMENT_TARGET = re.compile(r"MACOSX_DEPLOYMENT_TARGET:\s*\"?([\d.]+)")
 NOT_SIGNED = "not signed at all"
@@ -232,6 +234,14 @@ def check_bundle(app, *, entitlements=read_entitlements, signature=read_signatur
                     signer = "nothing" if found is None else "an ad hoc signature" if found.adhoc else f"team {found.team or 'none'}"
                     errors.append(f"{label(code)} is signed by {signer}, not the Developer ID team {host_signature.team}: "
                                   "Apple will not notarize it and library validation would refuse to load it")
+                if code.name == "Sparkle.framework":
+                    for relative in SPARKLE_HELPERS:
+                        helper = code / relative
+                        identity = signature(helper) if helper.exists() else None
+                        if not identity or not identity.developer_id or not identity.runtime or identity.team != host_signature.team:
+                            errors.append(f"{label(helper)} must be signed by the host's Developer ID with the hardened runtime")
+                        elif entitlements(helper):
+                            errors.append(f"{label(helper)} must not carry entitlements in this unsandboxed app")
 
     extensions = sorted((app / "Contents/Extensions").glob("*.appex"))
     if not extensions:

@@ -1,7 +1,6 @@
 import Foundation
 
-/// The localized release history: the `CHANGELOG.md` sections the update manifest carries, so
-/// the update window can show every version between the running one and the latest.
+/// The localized releases in the installed app’s bundled `CHANGELOG.md`.
 struct AppReleaseHistory {
     enum Language: Int, CaseIterable, Hashable, Sendable {
         case english, chinese, korean

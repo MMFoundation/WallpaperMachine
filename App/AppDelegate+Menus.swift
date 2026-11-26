@@ -65,7 +65,9 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
         let settings = menuItem("Settings…", action: #selector(openSettings))
         settings.keyEquivalent = ","
         applicationMenu.addItem(settings)
-        applicationMenu.addItem(menuItem("Check for Updates…", action: #selector(checkForUpdates)))
+        if updates.status.isAvailable {
+            applicationMenu.addItem(menuItem("Check for Updates…", action: #selector(checkForUpdates)))
+        }
         applicationMenu.addItem(.separator())
         let servicesItem = NSMenuItem(title: String(localized: "Services"), action: nil, keyEquivalent: "")
         let servicesMenu = NSMenu(title: String(localized: "Services"))
@@ -250,10 +252,14 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
     func rebuildMenu(_ menu: NSMenu? = nil) {
         guard let menu = menu ?? statusMenu else { return }
         menu.removeAllItems()
-        statusMenuItems(for: StatusMenuModel.entries(for: statusMenuInput())).forEach(menu.addItem)
-        if let update = updates.menuItem() {
+        if updates.status.isAvailable, let waiting = updates.status.waitingVersion {
+            menu.addItem(menuItem("WallpaperMachine \(waiting) Available…", action: #selector(checkForUpdates)))
             menu.addItem(.separator())
-            menu.addItem(update)
+        }
+        statusMenuItems(for: StatusMenuModel.entries(for: statusMenuInput())).forEach(menu.addItem)
+        if updates.status.isAvailable, updates.status.waitingVersion == nil {
+            menu.addItem(.separator())
+            menu.addItem(menuItem("Check for Updates…", action: #selector(checkForUpdates)))
         }
         if let store, !store.heldWallpaperIDs.isEmpty {
             menu.addItem(.separator())
@@ -486,6 +492,14 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
     /// the open panel shows, enabled on a page that has the column while the guide is closed; and
     /// enables Zoom In, Zoom Out and Actual Size while a panel is open and has a step to go that way.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(checkForUpdates) {
+            if let version = updates.status.waitingVersion, updates.status.isAvailable {
+                item.title = String(localized: "WallpaperMachine \(version) Available…")
+            } else {
+                item.title = String(localized: "Check for Updates…")
+            }
+            return !shutdownInProgress && updates.status.canCheck
+        }
         if item.action == #selector(showPage(_:)) {
             let shown = controlPanelWindow?.isVisible == true
                 && controlPanelNavigation.selection?.rawValue == item.representedObject as? String
@@ -527,12 +541,6 @@ extension AppDelegate: NSMenuDelegate, NSMenuItemValidation {
     }
 
     @objc func checkForUpdates() {
-        // A check clears the release the open update window shows; that window is the answer.
-        if updates.window != nil {
-            updates.showWindow()
-            return
-        }
-        showAboutSettings()
         updates.checkNow()
     }
 

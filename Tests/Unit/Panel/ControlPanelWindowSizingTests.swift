@@ -16,7 +16,7 @@ final class ControlPanelWindowSizingTests: XCTestCase {
     let workshop = WorkshopStore(
       downloader: WorkshopDownloadManager(sessionDirectory: session),
       supportDirectory: session, defaults: defaults)
-    let updater = AppUpdateStore(currentVersion: "0.1.0", client: DisabledAppUpdateClient())
+    let updater = SoftwareUpdateStatus()
     let controller = NSHostingController(
       rootView: AnyView(
         ControlPanelView(

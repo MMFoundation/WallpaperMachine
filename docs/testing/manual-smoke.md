@@ -848,21 +848,15 @@ closed lid has not been seen on a desktop
 
 ## App update
 
-- [ ] Settings → About shows **Check for Updates**. The application menu item
-      **Check for Updates…** opens that same section.
-- [ ] A live GitHub release check, the published disk image mounting and the
-      replacement of the app in Applications. Update tests use fixture JSON, a
-      fake client and locally made images, so this path is manual only.
-- [ ] With an update available (a build older than the latest release) and
-      another app full-screen, no update window appears and the log has
-      `update prompt deferred`; leaving full screen shows the window once, and
-      opening the control panel while a display is covered shows it too. The window
-      lists the versions since the running one that the manifest carries (its 20
-      newest changelog sections), newest first, in the app's language, with linked
-      issue and commit references; **Install Update** downloads with a progress bar,
-      then quits and reopens; **Skip This Version** keeps the next launch quiet.
-- [ ] With a custom accent colour in Settings → Appearance, the control panel's update banner
-      takes that colour, not the system accent, and its text stays readable in light and dark.
+- [ ] From an older official build, check manually in About and from the menu bar. Each
+      opens the native update offer with release notes. Check a current build, then check
+      offline: the first reports no update; the second reports an error.
+- [ ] Leave a newer build pending across a relaunch. In the active panel, postpone it for
+      a day, then skip it; a manual check must still work. Disable automatic checks and
+      confirm they do not run. Locking the Mac must not start a download or restart.
+- [ ] On a disposable installed copy, confirm the download and restart. Verify the new
+      build, preserved wallpapers/preferences and localized installed notes. Repeat the
+      first migration from a pre-Sparkle copy using its published DMG and JSON manifest.
 - [ ] Opening the disk image shows one window without toolbar or sidebar: the
       app and Applications at their places over the background, labels readable,
       the volume icon. Dragging installs; a release (Developer ID signed and

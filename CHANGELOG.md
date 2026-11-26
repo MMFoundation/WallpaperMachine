@@ -8,8 +8,8 @@ with the previous one and gives the release date. Under it, the same notes in En
 Simplified Chinese and Korean (from 1.5.7; earlier sections keep their original
 translations) are grouped into Features, Bug Fixes and the other categories, and
 newer bullets end with the issues they close and the commits they describe. The
-app's update window shows the sections of every version newer than the installed
-one, in the app's language; the GitHub Release body repeats only the English notes.
+update offer shows the new version's localized notes. Settings → About shows installed
+release history offline; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
 ## [1.15.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.14.0...v1.15.0) (2026-11-24)

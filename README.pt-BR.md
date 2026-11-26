@@ -72,7 +72,7 @@ brew install --cask wallpapermachine
 Usa Nix? O [guia do Nix](docs/nix.md) explica o pacote flake e a configuração
 declarativa com Home Manager ou nix-darwin.
 
-A partir daí, um guia de boas-vindas assume, e o app passa a se atualizar sozinho.
+A partir daí, um guia de boas-vindas orienta a configuração. O app procura atualizações e pede confirmação antes de baixar.
 O [guia de instalação](https://www.wallpapermachine.app/guides/install/) (em inglês) mostra
 cada passo com imagens.
 
@@ -131,19 +131,16 @@ sem abrir a janela.
   gh attestation verify WallpaperMachine-*-arm64.dmg --repo WallpaperMachine/WallpaperMachine
   ```
 - **Sem rastreamento.** O app só se conecta à internet para o que você pede: a Steam para o
-  Workshop, o pixiv quando você o abre, o GitHub para verificar atualizações e, apenas se você
+  Workshop, o pixiv quando você o abre, nosso site (ou o GitHub) para verificar atualizações e, apenas se você
   ativar [Enviar dados de desempenho](docs/features/telemetry.md), um pequeno relatório por dia
   com tempos de carregamento, taxas de quadros e o modelo do seu Mac. Esse relatório não tem nomes,
   arquivos nem dados de conta, e desativá-lo apaga o que já foi enviado. Fora isso,
   o app envia uma [contagem diária](docs/features/telemetry.md#daily-active-count) de que
   foi usado naquele dia, com a versão e sem ID de instalação, para sabermos quantos Macs o
   usam. Suas sessões e senhas ficam no seu Mac.
-- **Atualizações verificáveis.** O atualizador integrado só instala uma imagem de disco cujo
-  SHA-256 corresponde ao da versão; uma que ele não consegue verificar é
-  [recusada, nunca instalada sem verificação](docs/features/updates.md#downloading).
-  Onde o GitHub não é acessível, como na China continental sem VPN, ele baixa os
-  mesmos arquivos por [proxies públicos de download do GitHub](docs/features/updates.md#what-a-check-reads),
-  que não podem mudar o que é instalado.
+- **Atualizações assinadas.** O Sparkle verifica a assinatura da lista de atualizações do
+  WallpaperMachine e do arquivo antes de extraí-lo. O download vem do nosso site, com o GitHub como
+  alternativa; [você escolhe quando baixar e reiniciar](docs/features/updates.md).
 - **Mantido ativamente.** Novas versões saem com frequência, e cada uma é descrita
   no [changelog](CHANGELOG.md), em inglês e 简体中文.
 - **Problemas têm um caminho de verdade.** **Não funciona? Relatar no GitHub**, nos detalhes de
@@ -237,8 +234,8 @@ direto; a 1.8.2 e as anteriores não são notarizadas, então o macOS bloqueia a
 até você clicar em Abrir Mesmo Assim em Ajustes do Sistema → Privacidade e Segurança. O
 [guia de instalação](https://www.wallpapermachine.app/guides/install/) (em inglês) acompanha
 tudo, do download até o guia de boas-vindas. A partir daí o app procura
-novas versões sozinho e, quando consegue substituir a própria cópia, oferece
-**Reiniciar para Atualizar**. Uma cópia instalada pelo Homebrew se atualiza do mesmo jeito.
+novas versões sozinho. Selecione a versão na barra de menus para ler as notas e instalar.
+Uma cópia instalada pelo Homebrew oferece a mesma atualização.
 
 </details>
 

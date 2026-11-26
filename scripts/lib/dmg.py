@@ -387,7 +387,7 @@ def build(app, image, name, icon=None, background=BACKGROUND):
     return image
 
 
-def verify(image, version, contract=bundle_contract.verify_bundle, metadata=None):
+def verify(image, version, contract=bundle_contract.verify_bundle, metadata=None, archive=None):
     """Mount `image` read-only and prove it installs `version` of this app.
 
     The checks are the ones a user relies on: the bundle is this app at that version,
@@ -433,6 +433,9 @@ def verify(image, version, contract=bundle_contract.verify_bundle, metadata=None
             absent = [name for name in (".DS_Store", ".background.tiff") if not (mount / name).is_file()]
             if absent:
                 raise DiskImageError(f"{image.name} lacks its window layout: {', '.join(absent)}")
+            if archive is not None:
+                _run(["/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", app, archive],
+                     "Could not archive the verified application from the disk image")
         finally:
             _detach(mount)
     return warnings

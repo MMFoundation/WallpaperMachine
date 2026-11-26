@@ -76,7 +76,7 @@ brew install --cask wallpapermachine
 Using Nix? The [Nix guide](docs/nix.md) covers the flake package and declarative
 configuration with Home Manager or nix-darwin.
 
-A first-run guide takes it from there, and the app updates itself from then on.
+A first-run guide takes it from there. The app checks for updates and asks before downloading.
 The [install guide](https://www.wallpapermachine.app/guides/install/) walks through
 every step with pictures.
 
@@ -135,19 +135,16 @@ without opening the window.
   gh attestation verify WallpaperMachine-*-arm64.dmg --repo WallpaperMachine/WallpaperMachine
   ```
 - **No tracking.** The app goes online for what you ask of it: Steam for the
-  Workshop, pixiv when you open it, GitHub for update checks, and, only if you turn
+  Workshop, pixiv when you open it, our website (or GitHub) for update checks, and, only if you turn
   on [Send performance data](docs/features/telemetry.md), one small report a day
   with load times, frame rates and your Mac's model. That report has no names, files
   or account details, and turning it off deletes what was sent. Apart from that,
   the app sends a [daily count](docs/features/telemetry.md#daily-active-count) that
   it ran that day, with its version and no install ID, so we know how many Macs use
   it. Sign-ins and passwords stay on your Mac.
-- **Updates it can check.** The built-in updater installs only a disk image whose
-  SHA-256 matches the release; one it can't verify is
-  [refused, never installed unchecked](docs/features/updates.md#downloading).
-  Where GitHub can't be reached, as in mainland China without a VPN, it fetches the
-  same files through [public GitHub download proxies](docs/features/updates.md#what-a-check-reads),
-  which can't change what installs.
+- **Signed updates.** Sparkle checks WallpaperMachine’s signed feed and verifies the
+  archive before extraction. Updates come through our website with GitHub as a backup;
+  [you choose when to download and restart](docs/features/updates.md).
 - **Actively maintained.** New versions ship often, and every one is written up
   in the [changelog](CHANGELOG.md), in English and 简体中文.
 - **Problems get a real path.** **Not working? Report on GitHub** in any
@@ -241,8 +238,8 @@ are signed with a Developer ID and notarized by Apple, so they open right away;
 click Open Anyway in System Settings → Privacy & Security. The
 [install guide](https://www.wallpapermachine.app/guides/install/) walks through
 it, from the download to the first-run guide. From then on the app checks for
-new versions itself and, where it can replace its own copy, offers
-**Restart to Update**. A copy installed with Homebrew updates itself the same way.
+new versions itself. Choose the version in the menu bar to read its notes and install it.
+A copy installed with Homebrew offers the same update.
 
 </details>
 

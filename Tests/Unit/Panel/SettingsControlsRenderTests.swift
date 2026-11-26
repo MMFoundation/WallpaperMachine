@@ -58,6 +58,37 @@ final class SettingsControlsRenderTests: PanelTestCase {
   /// The lead of a note: the part under the row's title, which is the control's hint.
   private func lead(_ note: String) -> String { SettingsNote.parts(note).lead }
 
+  func testAboutOffersCheckNowOrShowUpdateWithoutStartingEitherOnItsOwn() async throws {
+    try pinPanelLanguageToEnglish()
+    try await withPanel { panel in
+      let updater = panel.controller.updater
+      let requests = SettingsCallCounter()
+      updater.checkNow = requests.bump
+      updater.isAvailable = true
+      updater.canCheck = true
+      try await withPage(AboutSettingsSection(), panel.controller) { hosting, tree in
+        @MainActor func button() -> AccessibilityElement? {
+          tree.first(identifier: AboutSettingsSection.updateActions.id)?.first(role: "AXButton")
+        }
+        let now = try XCTUnwrap(button())
+        XCTAssertEqual(now.text, L("Check Now"))
+        XCTAssertEqual(requests.count, 0)
+        _ = now.object.perform(NSSelectorFromString("accessibilityPerformPress"))
+        try await panel.waitUntil { requests.count == 1 }
+
+        updater.waitingVersion = "2.0.0"
+        try await panel.waitUntil {
+          hosting.view.layoutSubtreeIfNeeded()
+          return button()?.text == L("Show Update…")
+        }
+        XCTAssertEqual(requests.count, 1, "finding an update doesn't open its window")
+        let show = try XCTUnwrap(button())
+        _ = show.object.perform(NSSelectorFromString("accessibilityPerformPress"))
+        try await panel.waitUntil { requests.count == 2 }
+      }
+    }
+  }
+
   func testNativeSourceRowsShowIndependentValuesAndKeepAMissingWallpaperVisible() async throws {
     try pinPanelLanguageToEnglish()
     try await withRecordingPanel { panel, _ in

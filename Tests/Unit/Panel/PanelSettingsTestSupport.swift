@@ -199,14 +199,11 @@ final class SettingsCallCounter: @unchecked Sendable {
 }
 
 extension PanelFixture {
-  /// A controller over this fixture's stores with a stand-in updater and/or energy monitor, which
-  /// the fixture's own `buildController()` has no seam for. Not started.
-  func buildSettingsController(
-    updater: AppUpdateStore? = nil, energyUsage: EnergyUsageMonitor? = nil
-  ) -> PanelController {
+  /// A controller over this fixture's stores with a stand-in energy monitor. Not started.
+  func buildSettingsController(energyUsage: EnergyUsageMonitor) -> PanelController {
     let language = AppLanguageStore.english()
     return PanelController(
-      store: store, navigation: navigation, workshop: workshop, pixiv: pixiv, updater: updater,
+      store: store, navigation: navigation, workshop: workshop, pixiv: pixiv,
       presentation: presentation, theme: theme, defaults: defaults, dialogs: dialogs,
       energyUsage: energyUsage, appLanguage: language,
       playback: PlaybackPreferences(defaults: defaults), playlists: playlists,

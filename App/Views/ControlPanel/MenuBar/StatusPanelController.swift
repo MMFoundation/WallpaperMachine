@@ -316,7 +316,10 @@ final class StatusPanelController {
   func openSettings() -> Task<Void, Never> { dismissThen(.openSettings) }
 
   @discardableResult
-  func openUpdates() -> Task<Void, Never> { dismissThen(.openUpdates) }
+  func openUpdates() -> Task<Void, Never>? {
+    guard panel.update?.canCheck == true else { return nil }
+    return dismissThen(.openUpdates)
+  }
 
   @discardableResult
   func quit() -> Task<Void, Never> { dismissThen(.quit) }

@@ -3,123 +3,42 @@ import XCTest
 
 @testable import WallpaperMachine
 
-/// Settings › About: which update buttons can be pressed, the page's rows and the release notes the
-/// card shows.
+/// The update controls and bundled release history available in Settings › About.
 @MainActor
 final class AboutSettingsTests: SettingsBTestCase {
-  private func controls(
-    _ state: AppUpdateState, storeBusy: Bool = false, pending: Set<UpdatePresentation.Action> = [],
-    openingReleases: Bool = false, revealing: Bool = false
-  ) -> AboutUpdateControls {
-    AboutUpdateControls.make(
-      presentation: UpdatePresentation(state: state), isStoreBusy: storeBusy,
-      isPending: { pending.contains($0) }, openingReleases: openingReleases, revealing: revealing)
-  }
-
-  func testAnIdleCardCanBePressedAndACheckInFlightDisablesEveryButton() {
-    let idle = controls(.idle(currentVersion: "1.0.0"))
-    XCTAssertFalse(idle.isBusy)
-    XCTAssertFalse(idle.primaryIsDisabled)
-    XCTAssertFalse(idle.releasesIsDisabled)
-    let checking = controls(.checking(currentVersion: "1.0.0"))
-    XCTAssertTrue(checking.isBusy)
-    XCTAssertTrue(checking.primaryIsDisabled, "Check for Updates waits for the check")
-    XCTAssertTrue(checking.releasesIsDisabled)
-    let pressed = controls(.idle(currentVersion: "1.0.0"), pending: [.checkForUpdates])
-    XCTAssertTrue(pressed.primaryIsDisabled, "a press is not repeated while it runs")
-    XCTAssertTrue(controls(.idle(currentVersion: "1.0.0"), openingReleases: true).primaryIsDisabled)
-    XCTAssertTrue(controls(.idle(currentVersion: "1.0.0"), revealing: true).revealIsDisabled)
-  }
-
-  func testDownloadingAllowsCancellation() {
-    let downloading = controls(
-      .downloading(currentVersion: "1.0.0", availableVersion: "1.1.0", percent: 40, transferred: 4, total: 10, bytesPerSecond: 1))
-    XCTAssertFalse(downloading.primaryIsDisabled)
-    XCTAssertTrue(downloading.isBusy)
-  }
-
-  func testCancelStaysPossibleWhilePreparingAndOnlyItsOwnPressDisablesIt() {
-    let preparing = controls(.preparing(currentVersion: "1.0.0", availableVersion: "1.1.0"), storeBusy: true)
-    XCTAssertTrue(preparing.isBusy)
-    XCTAssertFalse(preparing.primaryIsDisabled, "Cancel works even while a wallpaper switches")
-    XCTAssertTrue(
-      controls(.preparing(currentVersion: "1.0.0", availableVersion: "1.1.0"), pending: [.cancelUpdate]).primaryIsDisabled)
-  }
-
-  func testInstallAndDownloadWaitForWallpaperCommandsToo() {
-    let ready = controls(.ready(currentVersion: "1.0.0", availableVersion: "1.1.0"))
-    XCTAssertFalse(ready.primaryIsDisabled)
-    XCTAssertTrue(controls(.ready(currentVersion: "1.0.0", availableVersion: "1.1.0"), storeBusy: true).primaryIsDisabled)
-    XCTAssertTrue(
-      controls(.ready(currentVersion: "1.0.0", availableVersion: "1.1.0"), pending: [.installUpdate]).primaryIsDisabled)
-    XCTAssertFalse(ready.revealIsDisabled)
-  }
-
-  /// With no published release the card reads Check Again and offers nothing to open, with its button
-  /// pressable; a release found next brings its notes for the What's new disclosure. Download and
-  /// install are `UpdatePresentationTests`' walk.
-  func testWithNoReleaseTheCardOffersCheckAgainAndAFoundReleaseBringsItsNotes() async throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("about-card-\(UUID().uuidString)")
-    defer { try? FileManager.default.removeItem(at: root) }
-    let client = PanelUpdateClient()
-    let installer = PanelUpdateInstaller()
-    let scheduled = SettingsCallCounter()
-    let updater = AppUpdateStore(
-      currentVersion: "1.0.0", client: client, installer: installer,
-      workspace: AppUpdateWorkspace(
-        archiveURL: { _, _ in root.appendingPathComponent("update.dmg") }, reveal: { _ in }, open: { _ in }),
-      scheduleInstall: { _ in scheduled.bump() }, terminate: {})
-    let panel = try makeController()
-    do {
-      let controller = panel.buildSettingsController(updater: updater)
-      try await controller.checkForUpdates()
-      var card = controller.updatePresentation(locale: english)
-      XCTAssertEqual(card.status, .noRelease)
-      XCTAssertEqual(card.actionLabel, "Check Again")
-      XCTAssertFalse(card.showsReleases)
-      XCTAssertFalse(card.showsReveal)
-      XCTAssertFalse(
-        AboutUpdateControls.make(
-          presentation: card, isStoreBusy: false, isPending: { _ in false }, openingReleases: false, revealing: false
-        ).primaryIsDisabled)
-
-      client.release = PanelUpdateClient.release(version: "1.1.0", notes: PanelUpdateClient.notesBody)
-      try await controller.checkForUpdates()
-      card = controller.updatePresentation(locale: english)
-      XCTAssertEqual(card.action, .downloadUpdate)
-      XCTAssertEqual(card.actionLabel, "Download Update")
-      XCTAssertTrue(card.isActionProminent)
-      XCTAssertEqual(card.notesVersion, "1.1.0")
-      XCTAssertTrue(card.hasNotes)
-      XCTAssertEqual(card.notes.first?.title, "Fixed")
-      XCTAssertEqual(card.notes.first?.items.count, 1)
-      XCTAssertEqual(scheduled.count, 0)
-    } catch {
-      await panel.shutdown()
-      throw error
-    }
-    await panel.shutdown()
-  }
-
-  /// Three versions above the running one: the newest is in its own Release notes card, the two
-  /// before it fold behind Earlier versions, a search finds them, and the page fits the narrowest
-  /// window in every shipped language with them open. Set `WALLPAPER_MACHINE_ABOUT_SNAPSHOTS` to a
-  /// folder for PNGs to look at; a review only, never an assertion.
-  func testReleaseNotesHaveTheirOwnCardWithEarlierVersionsFoldedAndFitEveryLanguage() async throws {
-    let client = PanelUpdateClient()
-    client.release = GitHubRelease(
-      version: SemanticVersion("1.3.0")!,
-      htmlURL: URL(string: "https://github.com/o/r/releases/tag/v1.3.0")!, prerelease: false,
-      assets: PanelUpdateClient.release(version: "1.3.0").assets,
-      changelog: ["1.3.0", "1.2.0", "1.1.0"].map(Self.changelogEntry).joined(separator: "\n"))
-    let updater = AppUpdateStore(
-      currentVersion: "1.0.0", client: client, installer: PanelUpdateInstaller(),
-      defaults: try TemporaryDefaults.make(for: self).defaults)
+  func testSettingsSearchOffersOnlyConfiguredUpdatesButAlwaysFindsBundledNotes() async throws {
     try await withPanel { panel in
-      let controller = panel.buildSettingsController(updater: updater)
-      try await controller.checkForUpdates()
+      let updater = panel.controller.updater
+      let settings = panel.controller.settings
+      updater.notesReleases = try AppReleaseHistory(markdown: Self.changelogEntry("1.3.0")).entries
+      settings.query = "Release notes"
+      XCTAssertTrue(settings.search.shows(AboutSettingsSection.updateNotes))
+      XCTAssertFalse(settings.search.shows(AboutSettingsSection.earlierReleases))
+      for query in ["Show Update", "automatically"] {
+        settings.query = query
+        XCTAssertFalse(settings.search.shows(AboutSettingsSection.updateActions))
+        XCTAssertFalse(settings.search.shows(AboutSettingsSection.updateAutomatic))
+      }
+
+      updater.isAvailable = true
+      XCTAssertTrue(settings.search.shows(AboutSettingsSection.updateAutomatic))
+      settings.query = "Show Update"
+      XCTAssertTrue(settings.search.shows(AboutSettingsSection.updateActions))
+      updater.isAvailable = false
+      XCTAssertFalse(settings.search.shows(AboutSettingsSection.updateActions))
+    }
+  }
+
+  func testReleaseNotesHaveTheirOwnCardWithEarlierVersionsFoldedAndFitEveryLanguage() async throws {
+    try await withPanel { panel in
+      let controller = panel.controller
+      let updater = controller.updater
+      updater.isAvailable = true
+      updater.canCheck = true
+      updater.waitingVersion = "1.4.0"
+      updater.notesReleases = try AppReleaseHistory(
+        markdown: ["1.3.0", "1.2.0", "1.1.0"].map(Self.changelogEntry).joined(separator: "\n")).entries
       XCTAssertEqual(updater.notesReleases.map(\.version.display), ["1.3.0", "1.2.0", "1.1.0"])
-      XCTAssertEqual(controller.updatePresentation(locale: english).mark, .update)
 
       let settings = controller.settings
       XCTAssertFalse(settings.isOpen(AboutSettingsSection.earlierReleases), "earlier versions start folded")
@@ -128,7 +47,8 @@ final class AboutSettingsTests: SettingsBTestCase {
       XCTAssertFalse(settings.search.shows(AboutSettingsSection.updateAutomatic))
       settings.query = ""
 
-      let host = SettingsBHost(panel: panel, controller: controller)
+      let host = SettingsBHost(panel: panel)
+      defer { host.close() }
       let size = NSSize(width: 760, height: 560)
       let folder = ProcessInfo.processInfo.environment["WALLPAPER_MACHINE_ABOUT_SNAPSHOTS"].map {
         URL(fileURLWithPath: $0, isDirectory: true)
@@ -152,7 +72,6 @@ final class AboutSettingsTests: SettingsBTestCase {
         try await host.scroll(to: 300)
         try host.snapshot(to: folder.appendingPathComponent("about-zh-Hans-dark-wide.png"))
       }
-      host.close()
     }
   }
 
@@ -222,7 +141,9 @@ final class AboutSettingsTests: SettingsBTestCase {
     XCTAssertTrue(search("Eject").shows(DisplaysSettingsSection.wallpaper))
     XCTAssertTrue(search("Locate").shows(LibrarySettingsSection.steamActions))
     XCTAssertTrue(search("Diagnostics").shows(StorageSettingsSection.diagnostics))
-    XCTAssertTrue(search("Check Again").shows(AboutSettingsSection.updateActions))
+    XCTAssertTrue(search("Check Now").shows(AboutSettingsSection.updateActions))
+    XCTAssertTrue(search("Show Update").shows(AboutSettingsSection.updateActions))
+    XCTAssertFalse(search("Restart and Install").shows(AboutSettingsSection.updateActions))
     XCTAssertTrue(search("Record").shows(ShortcutsSettingsSection.togglePlayback))
     XCTAssertTrue(
       search("Keyboard shortcuts").shows(ShortcutsSettingsSection.nextWallpaper),

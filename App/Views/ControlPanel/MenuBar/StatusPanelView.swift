@@ -83,7 +83,7 @@ struct StatusPanelView: View {
       if let update = panel.update {
         Button { controller.openUpdates() } label: {
           Label {
-            Text(verbatim: update.title)
+            Text(verbatim: L("WallpaperMachine \(update.version) Available…"))
               .font(.system(size: 12, weight: .medium))
               .fixedSize(horizontal: false, vertical: true)
           } icon: { Image(systemName: "arrow.down.circle") }
@@ -91,6 +91,8 @@ struct StatusPanelView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(theme.accent.accent.color)
+        .disabled(!update.canCheck)
+        .panelDisabledOpacity(update.canCheck)
         .accessibilityIdentifier("status-panel-update")
       }
     }

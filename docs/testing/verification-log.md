@@ -25,6 +25,13 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-26 — Signed Sparkle software updates
+
+- python3 scripts/test.py: all Python modules passed; 5,408 native tests passed, 0 failed, 70 skipped. The first run hit Git maintenance during temporary repository cleanup; the passing run disabled automatic Git maintenance for the test process only.
+- An isolated Sparkle 2.10 host with disposable Ed25519 keys discovered the signed update without fetching the archive, retried a 502 once at the alternate endpoint, and rejected a modified feed without a retry.
+- Focused Release tooling checks include signed appcast/ZIP verification and rejecting tampering; the legacy DMG manifest still resolves from both GitHub repository names. Debug packaging preflight passed with existing local Homebrew macOS-floor and crc-catalog notice warnings.
+- Companion website: nine Worker route tests, typecheck and build passed. No desktop installation/restart, Release build, notarization, deployment or publication. Configure the dedicated Actions signing key pair and deploy the update routes before shipping.
+
 ## 2026-11-26 — Lock screen and screen saver keep interactive scene layer choices (#262)
 
 - Two independent, offscreen Native Metal renderers loaded Workshop 3632513108 with null audio. Clicking its character switch showed Female Rover on the desktop; a fresh renderer showed Male Rover. Importing the 55-byte layer reply showed Female Rover without replaying the click.
@@ -105,12 +112,3 @@ Forwarded Now Playing media state and 224-band system-audio spectra from the mai
 - `python3 scripts/check_renderer.py` — exit 0; all C++/Metal suites passed (audio_tests 80/80, SpectrumExport128Test 11/11), 12/12 generated scenes pixels_equal=True, reload cycles 0; 7 local-corpus asset checks skipped
 - `python3 scripts/test.py` — exit 0; 36/36 Python suites OK, Swift unit/integration 5172 passed, 0 failed, 70 skipped of 5242 (including LockScreenLiveFeedTests 6/6 and ScreenSaverWebSurfaceTests 17/17)
 - Unverified offscreen: live macOS 26+ lock-screen/screen-saver presentation, real MediaRemote/AppleScript players and live CoreAudio tap across lock/unlock/display sleep require an authorized manual check; Release app was not rebuilt
-
-## 2026-11-24 — Ignore WallpaperAgent LastUse updates and isolate lock-screen transient retries (#259)
-
-Fix for #259: SystemWallpaperStore ignores WallpaperAgent LastUse timestamp advances when confirming or replaying Desktop/Idle/Linked choices, and LockScreenWallpaperService resets transient failure budgets on new targets while keeping unrelated refreshes from bypassing back-off.
-
-- Red before fix (python3 scripts/test.py --only SystemWallpaperStoreTests --only LockScreenWallpaperServiceTests/...): 4 new regression tests failed (26 passed, 4 failed of 30) reproducing both LastUse reload conflicts and burned/shared retry budgets.
-- Targeted after fix (SystemWallpaperStoreTests, LockScreenWallpaperServiceTests, LockScreenWallpaperTests): 208 passed, 0 failed, 0 skipped.
-- Full gate (python3 scripts/test.py, macOS 27.3): all 36 Python test modules passed; native 5,165 passed, 0 failed, 70 skipped of 5,235 (1 runtime warning).
-- Not verified: live WallpaperAgent reload on the desktop, visual lock-screen check, or Release app build.

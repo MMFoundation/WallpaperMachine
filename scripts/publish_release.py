@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Attach a built disk image to its GitHub Release, draft first, never to a live one.
+"""Attach the verified update archives to their GitHub Release, draft first, never to a live one.
 
-The in-app updater reads the newest non-draft release (its update manifest, or the API
-for releases without one), so a release that is public before its image is uploaded
-is a release users cannot download. This creates the release as a draft, uploads,
+Both client generations read the newest non-draft release: Sparkle uses the signed
+appcast and ZIP; previous clients use the manifest or API and the DMG. This creates the release as a draft, uploads,
 and clears the draft flag last; a failure anywhere in between leaves a draft, which
 neither `releases/latest` nor `releases/latest/download/…` returns.
 Two things the naive `gh` sequence gets wrong, both covered by
@@ -21,7 +20,8 @@ Two things the naive `gh` sequence gets wrong, both covered by
   boundary rather than run alongside a workflow or another publisher.
 
     python3 scripts/publish_release.py --tag v0.6.0 --notes notes.md \\
-        WallpaperMachine-0.6.0-arm64.dmg WallpaperMachine-0.6.0-arm64.dmg.sha256 WallpaperMachine-update.json
+        WallpaperMachine-0.6.0-arm64.dmg WallpaperMachine-0.6.0-arm64.dmg.sha256 WallpaperMachine-update.json \\
+        WallpaperMachine-0.6.0-arm64.zip appcast.xml
 
 Add --dry-run to validate local artifacts and print the publish commands without mutation.
 
@@ -32,12 +32,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+from xml.etree.ElementTree import ParseError
+from xml.parsers.expat import ExpatError
+from zipfile import BadZipFile
 
+import bump_version
 from lib.glyphs import markers
+from lib.paths import PROJECT_YML
+import release_notes
+import sparkle_release
 
 MARK = markers()
 VERSION_TAG = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -118,14 +126,17 @@ def published_versions(run):
     return versions
 
 
-def validate_assets(tag, notes, assets):
-    """Fail closed before mutation: all three public assets describe exactly this image."""
+def validate_assets(tag, notes, assets, build, sparkle_public_key):
+    """A Sparkle release requires both signed assets in addition to the legacy three."""
     version = tag.removeprefix("v")
     image_name = f"WallpaperMachine-{version}-arm64.dmg"
     paths = {Path(path).name: Path(path) for path in assets}
     required = {image_name, image_name + ".sha256", "WallpaperMachine-update.json"}
+    archive_name = f"WallpaperMachine-{version}-arm64.zip"
+    if build is not None:
+        required.update({archive_name, "appcast.xml"})
     if set(paths) != required or len(paths) != len(assets):
-        raise PublishError("A release requires exactly its DMG, SHA-256 sidecar and update manifest.")
+        raise PublishError(f"A release of {tag} requires exactly: {', '.join(sorted(required))}.")
     try:
         for path in [Path(notes), *paths.values()]:
             if not path.is_file():
@@ -150,8 +161,15 @@ def validate_assets(tag, notes, assets):
                 or not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/"
                                     + re.escape(tag + "/" + image_name), url)):
             raise PublishError("The manifest asset does not match the image.")
+        if build is not None:
+            if url != f"{sparkle_release.REPOSITORY}/releases/download/{tag}/{image_name}":
+                raise PublishError("The update manifest must use the official release URL.")
+            sparkle_release.verify(paths[archive_name], paths["appcast.xml"], tag, build,
+                                   sparkle_public_key, manifest["minimum_system_version"],
+                                   sparkle_release.descriptions(manifest.get("changelog", ""), tag))
         return paths
-    except (OSError, ValueError, TypeError, AttributeError) as error:
+    except (OSError, ValueError, TypeError, AttributeError, ParseError, ExpatError, BadZipFile,
+            bump_version.VersionError, release_notes.NotesError) as error:
         raise PublishError(f"Cannot validate release assets: {error}") from error
 
 
@@ -178,9 +196,15 @@ def verify_uploaded(tag, paths, run):
         raise PublishError(f"Cannot verify uploaded assets: {error}") from error
 
 
-def publish(tag, notes, assets, run=runner, dry_run=False):
+def publish(tag, notes, assets, run=runner, dry_run=False, project=PROJECT_YML, sparkle_public_key=None):
     promotes_to_latest(tag, [])  # Refuse malformed versions before any mutation.
-    paths = validate_assets(tag, notes, assets)
+    try:
+        build = sparkle_release.project_build(tag, project)
+    except (OSError, ValueError, bump_version.VersionError) as error:
+        raise PublishError(f"Cannot verify the tagged project's release configuration: {error}") from error
+    if sparkle_public_key is None:
+        sparkle_public_key = os.getenv(sparkle_release.PUBLIC_KEY, "")
+    paths = validate_assets(tag, notes, assets, build, sparkle_public_key)
     action = plan(lookup(tag, run))
     if action == REFUSE:
         raise PublishError(

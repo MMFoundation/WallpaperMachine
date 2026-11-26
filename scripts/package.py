@@ -146,7 +146,7 @@ def report(warnings, reported):
 
 
 def dependencies(file):
-    return [line.strip().split(" (compatibility")[0] for line in output(["otool", "-L", file]).splitlines()[1:] if line.strip()]
+    return check_licenses.parse_otool(output(["otool", "-L", file]))
 
 
 def rpaths(file):
@@ -184,15 +184,14 @@ def keg_rpath_target(file, dependency, prefix):
     return None
 
 
-def resolve_libraries(roots, seeds, prefix):
+def resolve_libraries(roots, seeds, prefix, frameworks=None):
     """Every Homebrew dylib the roots load, directly or transitively, keyed by file name.
 
     Read-only: the walk runs over the Homebrew files themselves, so the bundle is
     known before anything is copied into it. A Homebrew dylib's `@rpath` dependency is
     followed through that dylib's own rpaths inside the prefix (`keg_rpath_target`).
-    Any other `@rpath` dependency that is not a Swift runtime library means the input
-    was already relocated by an earlier run, whose provenance this script does not
-    track, so it is refused rather than resolved against whatever the host has installed.
+    A framework Xcode already embedded can also be loaded by its bundle-relative
+    install name. Any other unresolved non-Swift `@rpath` is refused.
     """
     libraries = {}
     relocated = []
@@ -211,6 +210,10 @@ def resolve_libraries(roots, seeds, prefix):
             if dependency.startswith(str(prefix)):
                 add(Path(dependency))
             elif dependency.startswith("@rpath/") and Path(dependency).name not in libraries and "libswift" not in dependency:
+                relative = Path(dependency.removeprefix("@rpath/"))
+                if (frameworks is not None and relative.parts and relative.parts[0] == f"{relative.name}.framework"
+                        and ".." not in relative.parts and (frameworks / relative).is_file()):
+                    continue
                 target = keg_rpath_target(file, dependency, prefix)
                 if target is not None:
                     add(target)
@@ -232,8 +235,7 @@ def minimum_system_version(file):
 
 def strong_dependencies(file):
     """The libraries a Mach-O file loads unconditionally; `otool -L` marks the weak ones."""
-    return [line.strip().split(" (compatibility")[0] for line in output(["otool", "-L", file]).splitlines()[1:]
-            if line.strip() and not line.rstrip().endswith(", weak)")]
+    return check_licenses.parse_otool(output(["otool", "-L", file]), strong_only=True)
 
 
 def unavailable_system_libraries(compiled, libraries, prefix):
@@ -364,6 +366,13 @@ def relocate(file, prefix, rpath):
         run(["install_name_tool", "-add_rpath", rpath, file])
 
 
+def sign_framework(framework, signing):
+    if framework.name == "Sparkle.framework":
+        for relative in bundle_contract.SPARKLE_HELPERS:
+            sign(framework / relative, signing)
+    sign(framework, signing)
+
+
 def package(args):
     signing = signing_for(args.sign_identity)
     credentials = None
@@ -371,6 +380,8 @@ def package(args):
         if not signing.developer_id:
             raise PackagingError(f"Notarization needs a Developer ID Application identity, not {args.sign_identity!r} (docs/build.md#release-signing)")
         credentials = notary.Credentials(args.notarize, args.notary_keychain)
+    if args.sparkle_archive and not credentials:
+        raise PackagingError("--sparkle-archive requires a Developer ID signed and notarized release.")
     app = app_bundle(args.configuration)
     binary = app / "Contents/MacOS/WallpaperMachine"
     extensions = list((app / "Contents/Extensions").glob("*.appex"))
@@ -383,7 +394,14 @@ def package(args):
     bundled = sorted(frameworks.glob("*.dylib"))
     if bundled:
         raise PackagingError(f"{FRESH_BUILD}; Contents/Frameworks already holds: {', '.join(file.name for file in bundled)}")
-    libraries = resolve_libraries([binary, *extension_binaries], [], prefix)
+    libraries = resolve_libraries([binary, *extension_binaries], [], prefix, frameworks)
+    sparkle = frameworks / "Sparkle.framework"
+    if args.sparkle_archive and not sparkle.is_dir():
+        raise PackagingError("The release is missing its embedded Sparkle.framework.")
+    if sparkle.is_dir():
+        missing = [piece for piece in bundle_contract.SPARKLE_HELPERS if not (sparkle / piece).exists()]
+        if missing:
+            raise PackagingError(f"Sparkle.framework is missing: {', '.join(missing)}")
     # Notices Xcode already bundles from project.yml; packaging never rewrites them.
     notice_files = {resources / "LICENSE": THIRD_PARTY / "mediaremote-adapter/LICENSE"}
     for extension in extensions:
@@ -430,7 +448,7 @@ def package(args):
     for file in sorted(frameworks.glob("*.dylib")):
         sign(file, signing)
     for framework in sorted(frameworks.glob("*.framework")):
-        sign(framework, signing)
+        sign_framework(framework, signing)
     # Exactly the repository's entitlements: Xcode adds com.apple.security.get-task-allow
     # to the extension even in a Release build, and Apple will not notarize it.
     for extension in extensions:
@@ -445,7 +463,7 @@ def package(args):
         for dependency in dependencies(file):
             if dependency.startswith(str(prefix)):
                 raise PackagingError(f"Unbundled dependency: {file}: {dependency}")
-            if dependency.startswith("@rpath/") and not (frameworks / Path(dependency).name).exists() and "libswift" not in dependency:
+            if dependency.startswith("@rpath/") and not (frameworks / dependency.removeprefix("@rpath/")).is_file() and "libswift" not in dependency:
                 raise PackagingError(f"Missing bundled dependency: {dependency}")
     if credentials:
         # Stapled before the image is made, so the copy a user drags out opens offline too.
@@ -461,7 +479,8 @@ def package(args):
     # Prove the image, not the build tree: users and the in-app updater install
     # exactly this file, and a bundle that does not survive the round trip is not one.
     metadata = {}
-    report(dmg.verify(image, version, contract=image_contract(credentials is not None), metadata=metadata), reported)
+    archive = image.with_suffix(".zip") if args.sparkle_archive else None
+    report(dmg.verify(image, version, contract=image_contract(credentials is not None), metadata=metadata, archive=archive), reported)
     digest = sha256(image)
     metadata.update(image=image.name, size=image.stat().st_size, sha256=digest)
     image.with_name(image.name + ".metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
@@ -476,6 +495,8 @@ def package(args):
         print(f"{MARK.ok} Installed {destination}")
     print(f"{MARK.ok} Verified bundle: {app}")
     print(f"{MARK.ok} Verified disk image: {image}")
+    if archive:
+        print(f"{MARK.ok} Archived the verified notarized app from the disk image: {archive}")
     print(f"{MARK.ok} Checksum: {checksum}")
 
 
@@ -508,6 +529,7 @@ def main():
     parser.add_argument("--sign-identity", default="-", help="Code-signing identity for the dylibs, frameworks, extensions and app; `-` (the default) signs ad hoc. Release builds pass the Developer ID (docs/build.md#release-signing).")
     parser.add_argument("--notarize", metavar="PROFILE", help="Notarize and staple the app and the disk image with this `xcrun notarytool store-credentials` profile; needs a Developer ID --sign-identity.")
     parser.add_argument("--notary-keychain", type=Path, help="Keychain holding the --notarize profile, when it is not the login keychain.")
+    parser.add_argument("--sparkle-archive", action="store_true", help="ZIP the exact, stapled app verified inside the DMG for Sparkle. Requires --notarize.")
     args = parser.parse_args()
     try:
         package(args)

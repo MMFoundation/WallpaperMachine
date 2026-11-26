@@ -21,7 +21,7 @@ final class ControlPanelViewTests: PanelTestCase {
       rootView: ControlPanelView(
         store: BridgeStore(bridge: LayoutSnapshotBridge(noPointer: .init())), navigation: navigation,
         workshop: workshop, pixiv: PixivStore(),
-        updater: AppUpdateStore(currentVersion: "0.1.0", client: DisabledAppUpdateClient()),
+        updater: SoftwareUpdateStatus(),
         imports: LibraryImportStore(), defaults: defaults))
     controller.sizingOptions = []
     controller.sceneBridgingOptions = [.toolbars, .title]

@@ -1,9 +1,7 @@
 import XCTest
 @testable import WallpaperMachine
 
-/// The changelog sections the update manifest carries: how they parse, and which releases the update
-/// window shows for a given running version.
-@MainActor
+/// The bundled changelog supplies the installed release history in Settings.
 final class AppReleaseHistoryTests: XCTestCase {
     func testLinkedHeadingCarriesVersionDateAndComparison() throws {
         let history = try AppReleaseHistory(markdown: entry("1.6.2"))
@@ -23,41 +21,35 @@ final class AppReleaseHistoryTests: XCTestCase {
         XCTAssertNil(legacy.url)
     }
 
-    func testNotesKeepTheirReferenceLinksForTheWindowAndDropThemForAbout() throws {
-        let section = try XCTUnwrap(AppReleaseHistory(markdown: entry("1.6.2")).entries.first?.english.sections.first)
-        XCTAssertEqual(section.title, "Features")
-        XCTAssertEqual(section.items, ["Added a library filter"])
-        XCTAssertEqual(section.markdown, [
-            "Added a library filter (closes [#76](https://github.com/o/r/issues/76), closes [#77](https://github.com/o/r/issues/77)) ([abc1234](https://github.com/o/r/commit/abc1234def))",
-        ])
-        let link = UpdateWindow.inlineNotes(try XCTUnwrap(section.markdown.first))
-        XCTAssertTrue(
-            link.runs.contains { $0.link?.absoluteString == "https://github.com/o/r/issues/76" },
-            "issue references stay links in the window")
-        XCTAssertEqual(String(link.characters), "Added a library filter (closes #76, closes #77) (abc1234)")
-    }
-
-    func testWindowShowsEveryReleaseAboveTheRunningOneUpToTheLatest() throws {
-        let changelog = ["2.3.0", "2.2.0", "2.1.0", "2.0.0"].map { entry($0) }.joined()
-        let release = GitHubRelease(
-            version: try XCTUnwrap(SemanticVersion("2.2.0")), htmlURL: URL(string: "https://github.com/o/r")!,
-            prerelease: false, assets: [], notes: "#### Features\n- From the body", changelog: changelog)
-        let shown = AppUpdateStore.releases(in: release, after: try XCTUnwrap(SemanticVersion("2.0.0")))
-        XCTAssertEqual(shown.map(\.version.display), ["2.2.0", "2.1.0"], "newest first, nothing past the latest")
-        XCTAssertEqual(shown.first?.notes(language: .korean).sections.first?.items, ["보관함 필터가 추가되었습니다"])
-    }
-
-    func testWindowFallsBackToTheReleaseBodyWithoutAUsableChangelog() throws {
-        let latest = try XCTUnwrap(SemanticVersion("1.2.0"))
-        let current = try XCTUnwrap(SemanticVersion("1.0.0"))
-        for changelog in ["", "## Unreleased\n", entry("1.1.0")] {
-            let release = GitHubRelease(
-                version: latest, htmlURL: URL(string: "https://github.com/o/r/releases/tag/v1.2.0")!,
-                prerelease: false, assets: [], notes: "#### Bug Fixes\n- From the body", changelog: changelog)
-            let shown = AppUpdateStore.releases(in: release, after: current)
-            XCTAssertEqual(shown.map(\.version.display), ["1.2.0"], changelog)
-            XCTAssertEqual(shown.first?.notes(language: .chinese).sections.first?.items, ["From the body"])
+    func testAboutSelectsPlainReleaseNotesForTheAppsLanguage() throws {
+        let release = try XCTUnwrap(AppReleaseHistory(markdown: entry("1.6.2")).entries.first)
+        for (tag, heading, item) in [
+            ("en", "Features", "Added a library filter"),
+            ("ja", "Features", "Added a library filter"),
+            ("pt-BR", "Features", "Added a library filter"),
+            ("zh-Hans", "新功能", "新增媒体库筛选功能"),
+            ("zh-Hant", "新功能", "新增媒体库筛选功能"),
+            ("ko", "새로운 기능", "보관함 필터가 추가되었습니다"),
+        ] {
+            let language = try XCTUnwrap(AppLanguage.named(tag))
+            let section = try XCTUnwrap(release.notes(language: .init(appLanguage: language)).sections.first)
+            XCTAssertEqual(section.title, heading, tag)
+            XCTAssertEqual(section.items, [item], tag)
         }
+    }
+
+    func testInstalledHistoryOffersTheNewestTwentyLocalizedReleases() throws {
+        let versions = (1...21).reversed().map { "2.0.\($0)" }
+        let markdown = versions.map { entry($0) }.joined(separator: "\n")
+        let releases = try XCTUnwrap(SoftwareUpdateController.recentReleases(markdown))
+        XCTAssertEqual(releases.map(\.version.display), Array(versions.prefix(20)))
+        XCTAssertEqual(releases.first?.notes(language: .korean).sections.first?.items, ["보관함 필터가 추가되었습니다"])
+    }
+
+    func testMalformedBundledHistoryIsUnavailableAndAnEmptyChangelogHasNoEntries() {
+        XCTAssertNil(SoftwareUpdateController.recentReleases(entry("1.5.7", korean: false)))
+        XCTAssertNil(SoftwareUpdateController.recentReleases("## Unreleased\n"))
+        XCTAssertEqual(SoftwareUpdateController.recentReleases("# Changelog\n"), [])
     }
 
     func testHistoryRejectsMissingTranslationsAndDuplicateVersions() throws {
@@ -142,6 +134,79 @@ final class AppReleaseHistoryTests: XCTestCase {
             of: "#### Features\n",
             with: "#### Features\n## Also see\n"
         )))
+    }
+
+    func testSemanticVersionRejectsInvalidAndOrdersStableReleases() {
+        XCTAssertNil(SemanticVersion(""))
+        XCTAssertNil(SemanticVersion("1.2"))
+        XCTAssertNil(SemanticVersion("v1.2.3-beta"))
+        XCTAssertNil(SemanticVersion("01.2.3"))
+        XCTAssertEqual(SemanticVersion("v1.2.3")?.display, "1.2.3")
+        XCTAssertLessThan(SemanticVersion("0.1.0")!, SemanticVersion("0.1.1")!)
+        XCTAssertLessThan(SemanticVersion("0.9.9")!, SemanticVersion("1.0.0")!)
+        XCTAssertEqual(SemanticVersion("V2.0.0"), SemanticVersion("2.0.0"))
+    }
+
+    func testReleaseNotesReadTheSectionsAndStopAtTheInstallFooter() throws {
+        let body = """
+        ![WallpaperMachine 1.2.3](https://raw.githubusercontent.com/o/r/v1.2.3/Resources/ReleaseBanners/1.2.3.jpg)
+
+        ### New
+
+        - **panel** — Add a filter rail ([`aaa1111`](https://github.com/o/r/commit/aaa1111))
+
+        ### Fixed
+
+        - **scene** — Stop a crash ([`bbb2222`](https://github.com/o/r/commit/bbb2222))
+
+        Plus 3 documentation, test and tooling commits.
+
+        **Full changelog**: https://github.com/o/r/compare/v1.2.2...v1.2.3
+
+        \(ReleaseNotes.boundary)
+
+        ### Install
+
+        1. Open `WallpaperMachine-1.2.3-arm64.dmg` and drag WallpaperMachine to Applications.
+        """
+        let notes = try XCTUnwrap(ReleaseNotes(version: "1.2.3", body: body))
+        XCTAssertEqual(notes.sections.map(\.title), ["New", "Fixed", ""])
+        XCTAssertEqual(notes.sections[0].items, ["panel — Add a filter rail"])
+        XCTAssertEqual(notes.sections[1].items, ["scene — Stop a crash"])
+        XCTAssertEqual(notes.sections[2].items, ["Plus 3 documentation, test and tooling commits."])
+    }
+
+    func testReleaseNotesRecognizeTranslatedHighlightsWithoutHighlightingOtherSections() throws {
+        for (highlights, fixed) in [("Highlights", "Fixed"), ("亮点", "修复"), ("주요 변경 사항", "수정됨")] {
+            let notes = try XCTUnwrap(ReleaseNotes(version: "1.5.7", body: """
+            #### \(highlights)
+            - A highlighted change
+            #### \(fixed)
+            - An ordinary fix
+            """))
+            XCTAssertEqual(notes.sections.count, 2)
+            XCTAssertEqual(notes.sections.map(\.isHighlights), [true, false])
+            XCTAssertTrue(notes.sections.allSatisfy(\.isList))
+        }
+    }
+
+    func testReleaseNotesDropIssueAndCommitReferencesFromThePlainReading() throws {
+        let notes = try XCTUnwrap(ReleaseNotes(version: "1.6.2", body: """
+        #### Bug Fixes
+
+        - Names fit on narrow tiles (closes [#76](https://github.com/o/r/issues/76), closes [#77](https://github.com/o/r/issues/77)) ([bb75725](https://github.com/o/r/commit/bb75725aa))
+        - Stop a crash ([aaa1111](https://github.com/o/r/commit/aaa1111), [bbb2222](https://github.com/o/r/commit/bbb2222))
+        - Read the [guide](https://github.com/o/r/wiki) (see [notes](https://github.com/o/r/wiki/notes))
+        """))
+        XCTAssertEqual(notes.sections.first?.items, [
+            "Names fit on narrow tiles", "Stop a crash", "Read the guide (see notes)",
+        ])
+    }
+
+    func testAReleaseWithNothingToSayHasNoNotes() {
+        XCTAssertNil(ReleaseNotes(version: "1.2.3", body: ""))
+        XCTAssertNil(ReleaseNotes(version: "1.2.3",
+                                  body: "**Full changelog**: https://github.com/o/r/compare/v1.2.2...v1.2.3"))
     }
 
     private func entry(_ version: String, korean: Bool? = nil) -> String {

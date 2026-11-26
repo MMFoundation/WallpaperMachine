@@ -1,9 +1,8 @@
 import SwiftUI
 
 /// Settings › About › Release notes: its own card under Updates. The newest version's notes are
-/// open; the versions before it (those between this build and an available update, or the
-/// manifest's history) wait behind **Earlier versions**. The menu at the title picks the notes'
-/// translation for this page only, never the app's language.
+/// open; earlier releases bundled with this build wait behind **Earlier versions**. The menu at the
+/// title picks the notes' translation for this page only, never the app's language.
 struct AboutReleaseNotesGroup: View {
   @Environment(PanelController.self) private var controller
   /// The translation picked here; nil follows the app's language.

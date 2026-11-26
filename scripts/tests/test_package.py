@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -16,6 +18,7 @@ sys.path.insert(0, str(SCRIPTS))
 import check_licenses  # noqa: E402
 import notices  # noqa: E402
 import package  # noqa: E402
+from lib.paths import BUILD
 
 
 class RaisedMinimumTests(unittest.TestCase):
@@ -129,6 +132,17 @@ class ResolveLibrariesTests(unittest.TestCase):
         self.loads[self.app] = ["@rpath/libfreetype.6.dylib"]
         with self.assertRaisesRegex(package.PackagingError, "fresh, unrelocated"):
             self.resolve()
+
+    def test_a_present_xcode_embedded_framework_is_not_a_relocated_homebrew_dylib(self):
+        frameworks = self.app.parent.parent / "Frameworks"
+        name = "Sparkle.framework/Versions/B/Sparkle"
+        self.loads[self.app] = [f"@rpath/{name}"]
+        with mock.patch.object(package, "dependencies", lambda file: self.loads[file]):
+            with self.assertRaises(package.PackagingError):
+                package.resolve_libraries([self.app], [], self.prefix, frameworks)
+            (frameworks / name).parent.mkdir(parents=True)
+            (frameworks / name).touch()
+            self.assertEqual(package.resolve_libraries([self.app], [], self.prefix, frameworks), {})
 
     def test_an_rpath_that_leaves_the_homebrew_prefix_is_not_followed(self):
         outside = Path(self.scratch.name).resolve() / "elsewhere/lib"
@@ -260,6 +274,28 @@ class SigningTests(unittest.TestCase):
 
 
 class ImageContractTests(unittest.TestCase):
+    def test_sparkle_helpers_are_signed_before_the_framework_without_the_host_or_extension_entitlements(self):
+        framework = Path("Sparkle.framework")
+        identity = package.Signing("test", developer_id=True)
+        with mock.patch.object(package, "sign") as sign:
+            package.sign_framework(framework, identity)
+        pieces = [framework / relative for relative in package.bundle_contract.SPARKLE_HELPERS]
+        self.assertEqual(sign.call_args_list, [mock.call(piece, identity) for piece in [*pieces, framework]])
+
+    @unittest.skipUnless(sys.platform == "darwin", "requires macOS codesign")
+    def test_sparkle_distribution_helpers_keep_valid_signatures_and_lose_upstream_entitlements(self):
+        signer = Path(os.environ.get("SPARKLE_TEST_SIGN_UPDATE", BUILD / "SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"))
+        distribution = signer.parent.parent / "Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+        if not distribution.is_dir():
+            self.skipTest("needs the resolved Sparkle framework")
+        with tempfile.TemporaryDirectory() as directory:
+            framework = Path(directory) / "Sparkle.framework"
+            subprocess.run(["ditto", "--noextattr", "--norsrc", distribution, framework], check=True)
+            package.sign_framework(framework, package.Signing("-"))
+            subprocess.run(["codesign", "--verify", "--deep", "--strict", framework], check=True)
+            for helper in package.bundle_contract.SPARKLE_HELPERS:
+                self.assertEqual(package.bundle_contract.read_entitlements(framework / helper), {}, helper)
+
     def test_a_notarized_image_must_carry_the_ticket_on_its_app(self):
         with mock.patch.object(package.notary, "check_stapled") as stapled, \
                 mock.patch.object(package.bundle_contract, "verify_bundle", return_value=["warning"]) as contract:

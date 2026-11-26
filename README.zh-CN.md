@@ -68,7 +68,7 @@ brew install --cask wallpapermachine
 使用 Nix？[Nix 指南](docs/nix.md)介绍了 flake 软件包，以及通过 Home Manager 或
 nix-darwin 声明式配置应用的方法。
 
-接下来由首次使用引导带你完成设置，此后应用会自行更新。[安装指南](https://www.wallpapermachine.app/zh/guides/install/)配有图片，逐步介绍每一个步骤。
+接下来由首次使用引导带你完成设置。应用会自动检查更新，下载前会先询问你。[安装指南](https://www.wallpapermachine.app/zh/guides/install/)配有图片，逐步介绍每一个步骤。
 
 - **开箱即用：** 内置视频壁纸 Aurora Drift、pixiv 插画、你自己的视频和图片，以及无需登录即可浏览整个创意工坊。
 - **使用拥有 Wallpaper Engine 的 Steam 账户：** 从创意工坊下载，以及播放场景壁纸；场景壁纸需要用到你所拥有的 Wallpaper Engine 中的共享资源。
@@ -109,8 +109,8 @@ nix-darwin 声明式配置应用的方法。
   ```sh
   gh attestation verify WallpaperMachine-*-arm64.dmg --repo WallpaperMachine/WallpaperMachine
   ```
-- **没有追踪。** 应用只在你需要时联网：Steam 用于创意工坊，pixiv 在你打开它时使用，GitHub 用于检查更新；只有在你打开[发送性能数据](docs/features/telemetry.md)后，才会每天发送一份小报告，内容是加载耗时、帧率和你的 Mac 型号。报告不包含名称、文件或账户信息，关闭后会删除已发送的数据。除此之外，应用每天会发送一次[使用计数](docs/features/telemetry.md#daily-active-count)，只说明它当天运行过，带有版本号，不带安装 ID，用来统计有多少台 Mac 在用。登录信息和密码保存在你的 Mac 上。
-- **可校验的更新。** 内置更新程序只安装 SHA-256 与发布版本一致的磁盘映像；无法验证的会被[拒绝，绝不会未经校验就安装](docs/features/updates.md#downloading)。连不上 GitHub 时（例如在中国大陆不开 VPN），会通过[公共 GitHub 下载加速代理](docs/features/updates.md#what-a-check-reads)获取同样的文件，代理无法改变安装的内容。
+- **没有追踪。** 应用只在你需要时联网：Steam 用于创意工坊，pixiv 在你打开它时使用，官网（或 GitHub）用于检查更新；只有在你打开[发送性能数据](docs/features/telemetry.md)后，才会每天发送一份小报告，内容是加载耗时、帧率和你的 Mac 型号。报告不包含名称、文件或账户信息，关闭后会删除已发送的数据。除此之外，应用每天会发送一次[使用计数](docs/features/telemetry.md#daily-active-count)，只说明它当天运行过，带有版本号，不带安装 ID，用来统计有多少台 Mac 在用。登录信息和密码保存在你的 Mac 上。
+- **签名更新。** Sparkle 会验证 WallpaperMachine 的更新列表，并在解压前验证安装包的签名。更新优先从官网下载，GitHub 是备用源；[何时下载、何时重启由你决定](docs/features/updates.md)。
 - **持续维护。** 新版本发布频繁，每一版都以英文和简体中文写进[更新日志](CHANGELOG.md)。
 - **问题有处可报。** 任意壁纸详情中的**无法正常使用？在 GitHub 上反馈**会打开一个预先填好的 [issue](https://github.com/WallpaperMachine/WallpaperMachine/issues)；[诊断报告](docs/features/diagnostics.md)会在你分享之前移除你的个人文件夹路径、Mac 用户名和 Steam 账户名。
 
@@ -168,7 +168,7 @@ WallpaperMachine 支持场景、视频和网页渲染。兼容性因壁纸而异
 <details>
 <summary><b>如何获取？</b></summary>
 
-签名版可以从 [GitHub 最新发布](https://github.com/WallpaperMachine/WallpaperMachine/releases/latest)免费下载，也可以用 [Homebrew](https://formulae.brew.sh/cask/wallpapermachine) 安装同一个签名磁盘映像（`brew install --cask wallpapermachine`），你还可以[用源代码自行构建](#开源与自行构建)。1.8.2 之后的版本使用 Developer ID 签名并经过 Apple 公证，可以直接打开；1.8.2 及更早的版本未经公证，macOS 会拦下首次启动，直到你在“系统设置 → 隐私与安全性”中点按“仍要打开”。[安装指南](https://www.wallpapermachine.app/zh/guides/install/)会带你从下载一直走到首次使用引导。此后应用会自行检查新版本；在能替换自身副本的情况下，它会提供**重启并更新**。用 Homebrew 安装的副本也会这样自行更新。
+签名版可以从 [GitHub 最新发布](https://github.com/WallpaperMachine/WallpaperMachine/releases/latest)免费下载，也可以用 [Homebrew](https://formulae.brew.sh/cask/wallpapermachine) 安装同一个签名磁盘映像（`brew install --cask wallpapermachine`），你还可以[用源代码自行构建](#开源与自行构建)。1.8.2 之后的版本使用 Developer ID 签名并经过 Apple 公证，可以直接打开；1.8.2 及更早的版本未经公证，macOS 会拦下首次启动，直到你在“系统设置 → 隐私与安全性”中点按“仍要打开”。[安装指南](https://www.wallpapermachine.app/zh/guides/install/)会带你从下载一直走到首次使用引导。此后应用会自动检查新版本，你可以从菜单栏查看更新说明，再决定是否安装。用 Homebrew 安装的副本也可以这样更新。
 
 </details>
 

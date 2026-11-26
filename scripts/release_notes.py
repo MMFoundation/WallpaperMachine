@@ -20,9 +20,9 @@ script writes the links.
 
 A version's notes are written once, into its CHANGELOG.md section, when the version
 is cut. Sections carry all three languages from v1.5.7; older recorded English and
-Simplified Chinese sections remain valid. The update manifest carries the newest
-sections, which the app's update window shows (scripts/update_manifest.py
---changelog). `--release-body` publishes only the English part and the compare link
+Simplified Chinese sections remain valid. The signed Sparkle feed carries the current
+section; the compatibility manifest carries the newest sections for older apps.
+`--release-body` publishes only the English part and the compare link
 on GitHub, then adds the install footer. Each language block of a new section ends by
 thanking the outside contributors whose commits are in the range, by GitHub login;
 the script writes that line, not the model. A hand-pushed tag with no section is written
@@ -145,8 +145,8 @@ with the previous one and gives the release date. Under it, the same notes in En
 Simplified Chinese and Korean (from 1.5.7; earlier sections keep their original
 translations) are grouped into Features, Bug Fixes and the other categories, and
 newer bullets end with the issues they close and the commits they describe. The
-app's update window shows the sections of every version newer than the installed
-one, in the app's language; the GitHub Release body repeats only the English notes.
+update offer shows the new version's localized notes. Settings → About shows installed
+release history offline; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
 """

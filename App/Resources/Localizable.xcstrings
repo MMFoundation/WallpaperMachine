@@ -1,6 +1,13 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Check for updates automatically" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Check for updates automatically"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"自动检查更新"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"自動檢查更新"}},"ja":{"stringUnit":{"state":"translated","value":"アップデートを自動的に確認"}},"ko":{"stringUnit":{"state":"translated","value":"업데이트 자동 확인"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Verificar atualizações automaticamente"}}}},
+    "Show Update…" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Show Update…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"查看更新…"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"查看更新…"}},"ja":{"stringUnit":{"state":"translated","value":"アップデートを表示…"}},"ko":{"stringUnit":{"state":"translated","value":"업데이트 보기…"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Mostrar atualização…"}}}},
+    "Last checked %@" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Last checked %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"上次检查：%@"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"上次檢查：%@"}},"ja":{"stringUnit":{"state":"translated","value":"前回の確認：%@"}},"ko":{"stringUnit":{"state":"translated","value":"마지막 확인: %@"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Última verificação: %@"}}}},
+    "Update Now" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Update Now"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"立即更新"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"立即更新"}},"ja":{"stringUnit":{"state":"translated","value":"今すぐアップデート"}},"ko":{"stringUnit":{"state":"translated","value":"지금 업데이트"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Atualizar agora"}}}},
+    "Remind Me Tomorrow" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Remind Me Tomorrow"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"明天提醒我"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"明天提醒我"}},"ja":{"stringUnit":{"state":"translated","value":"明日通知する"}},"ko":{"stringUnit":{"state":"translated","value":"내일 다시 알림"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Lembrar amanhã"}}}},
+    "WallpaperMachine %@ Is Available" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"WallpaperMachine %@ Is Available"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"WallpaperMachine %@ 现已推出"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"WallpaperMachine %@ 現已推出"}},"ja":{"stringUnit":{"state":"translated","value":"WallpaperMachine %@ が利用可能です"}},"ko":{"stringUnit":{"state":"translated","value":"WallpaperMachine %@ 버전을 사용할 수 있습니다"}},"pt-BR":{"stringUnit":{"state":"translated","value":"O WallpaperMachine %@ está disponível"}}}},
+    "Your wallpapers and settings are kept when you update." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Your wallpapers and settings are kept when you update."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"更新时会保留你的壁纸和设置。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"更新時會保留你的桌布與設定。"}},"ja":{"stringUnit":{"state":"translated","value":"アップデート後も壁紙と設定はそのまま引き継がれます。"}},"ko":{"stringUnit":{"state":"translated","value":"업데이트해도 배경화면과 설정은 유지됩니다."}},"pt-BR":{"stringUnit":{"state":"translated","value":"Seus papéis de parede e ajustes serão mantidos após a atualização."}}}},
     "Sign in on Steam’s own page. This Mac remembers your Workshop session." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Sign in on Steam’s own page. This Mac remembers your Workshop session."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"在 Steam 官方页面登录。这台 Mac 会保存你的创意工坊登录状态。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"請在 Steam 官方頁面登入。這台 Mac 會記住你的工作坊登入狀態。"}},"ja":{"stringUnit":{"state":"translated","value":"Steam の公式ページでログインします。この Mac にワークショップのログイン状態が保存されます。"}},"ko":{"stringUnit":{"state":"translated","value":"Steam 공식 페이지에서 로그인하세요. 이 Mac에 창작마당 로그인 상태가 저장됩니다."}},"pt-BR":{"stringUnit":{"state":"translated","value":"Entre na página do próprio Steam. Este Mac lembra sua sessão da Oficina."}}}},
     "Steam Workshop account" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Steam Workshop account"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Steam 创意工坊账户"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"Steam 工作坊帳戶"}},"ja":{"stringUnit":{"state":"translated","value":"Steam ワークショップのアカウント"}},"ko":{"stringUnit":{"state":"translated","value":"Steam 창작마당 계정"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Conta da Oficina Steam"}}}},
     "Workshop browsing uses a separate sign-in from downloads." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Workshop browsing uses a separate sign-in from downloads."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"浏览创意工坊和下载壁纸需要分别登录。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"瀏覽工作坊和下載桌布需要分別登入。"}},"ja":{"stringUnit":{"state":"translated","value":"ワークショップの閲覧とダウンロードでは、ログインは別々です。"}},"ko":{"stringUnit":{"state":"translated","value":"창작마당 탐색과 다운로드는 각각 따로 로그인합니다."}},"pt-BR":{"stringUnit":{"state":"translated","value":"O login para navegar na Oficina é separado do login para downloads."}}}},
@@ -80,24 +87,10 @@
     "Choose a property preset file, not an alias of one, of at most %lld MB." : {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Choose a property preset file, not an alias of one, of at most %lld MB."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "请选择不超过 %lld MB 的属性预设文件，不能是替身。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "請選擇不超過 %lld MB 的屬性預設檔案，不能是替身。"}}, "ja": {"stringUnit": {"state": "translated", "value": "%lld MB以下のプロパティプリセットファイルを選択してください。エイリアスは選択できません。"}}, "ko": {"stringUnit": {"state": "translated", "value": "%lld MB 이하의 속성 프리셋 파일을 선택하세요. 가상본은 선택할 수 없습니다."}}, "pt-BR": {"stringUnit": {"state": "translated", "value": "Escolha um arquivo de predefinição de propriedades de até %lld MB, e não um atalho para ele."}}}},
     "Select wallpapers to add to a playlist or a collection, or to move to Trash. Holding a tile and dragging across others selects them too." : {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Select wallpapers to add to a playlist or a collection, or to move to Trash. Holding a tile and dragging across others selects them too."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "选择壁纸，以加入播放列表或合集，或移到废纸篓。按住一张卡片并拖过其他卡片，也能一次选中多张。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "選取桌布，以加入播放列表或收藏集，或丟到垃圾桶。按住一張縮圖並拖過其他縮圖，也能一併選取。"}}, "ja": {"stringUnit": {"state": "translated", "value": "プレイリストやコレクションに追加する壁紙、またはゴミ箱に入れる壁紙を選択します。タイルを押したまま他のタイルの上をドラッグしても選択できます。"}}, "ko": {"stringUnit": {"state": "translated", "value": "재생목록이나 컬렉션에 추가하거나 휴지통으로 이동할 배경화면을 선택하세요. 타일을 누른 채 다른 타일 위로 드래그해도 선택할 수 있습니다."}}, "pt-BR": {"stringUnit": {"state": "translated", "value": "Selecione papéis de parede para adicionar a uma playlist ou coleção, ou para mover para o Lixo. Manter um bloco pressionado e arrastar sobre outros também os seleciona."}}}},
     "Day and night need different start times." : {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Day and night need different start times."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "白天和夜晚的开始时间不能相同。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "白天和夜晚的開始時間不能相同。"}}, "ja": {"stringUnit": {"state": "translated", "value": "昼と夜の開始時刻は別々にしてください。"}}, "ko": {"stringUnit": {"state": "translated", "value": "낮과 밤의 시작 시간은 서로 달라야 합니다."}}, "pt-BR": {"stringUnit": {"state": "translated", "value": "O dia e a noite precisam começar em horários diferentes."}}}},
-    "Update mode" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Update mode"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"更新方式"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"更新方式"}},"ja":{"stringUnit":{"state":"translated","value":"更新方法"}},"ko":{"stringUnit":{"state":"translated","value":"업데이트 방식"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Modo de atualização"}}}},
-    "Check and notify" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Check and notify"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"检查并提醒"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"檢查並提醒"}},"ja":{"stringUnit":{"state":"translated","value":"確認して通知"}},"ko":{"stringUnit":{"state":"translated","value":"확인 후 알림"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Verificar e avisar"}}}},
-    "Download automatically" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Download automatically"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"自动下载"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"自動下載"}},"ja":{"stringUnit":{"state":"translated","value":"自動ダウンロード"}},"ko":{"stringUnit":{"state":"translated","value":"자동 다운로드"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Baixar automaticamente"}}}},
-    "Download and install automatically" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Download and install automatically"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"自动下载并安装"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"自動下載並安裝"}},"ja":{"stringUnit":{"state":"translated","value":"自動ダウンロードとインストール"}},"ko":{"stringUnit":{"state":"translated","value":"자동 다운로드 및 설치"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Baixar e instalar automaticamente"}}}},
     "Updates are checked in the background. You choose when to download and restart." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Updates are checked in the background. You choose when to download and restart."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"在后台检查更新，下载和重启时机由你决定。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"在背景檢查更新，由你決定下載和重新啟動的時機。"}},"ja":{"stringUnit":{"state":"translated","value":"バックグラウンドで更新を確認します。ダウンロードと再起動のタイミングは自分で選べます。"}},"ko":{"stringUnit":{"state":"translated","value":"백그라운드에서 업데이트를 확인합니다. 다운로드와 재시작 시점은 직접 선택합니다."}},"pt-BR":{"stringUnit":{"state":"translated","value":"As atualizações são verificadas em segundo plano. Você escolhe quando baixar e reiniciar."}}}},
-    "Updates download in the background. You choose when to restart and install." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Updates download in the background. You choose when to restart and install."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"在后台下载更新，重启安装时机由你决定。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"在背景下載更新，由你決定重新啟動並安裝的時機。"}},"ja":{"stringUnit":{"state":"translated","value":"バックグラウンドで更新をダウンロードします。再起動してインストールするタイミングは自分で選べます。"}},"ko":{"stringUnit":{"state":"translated","value":"백그라운드에서 업데이트를 다운로드합니다. 재시작 및 설치 시점은 직접 선택합니다."}},"pt-BR":{"stringUnit":{"state":"translated","value":"As atualizações são baixadas em segundo plano. Você escolhe quando reiniciar e instalar."}}}},
-    "View update" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"View update"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"查看更新"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"查看更新"}},"ja":{"stringUnit":{"state":"translated","value":"更新を表示"}},"ko":{"stringUnit":{"state":"translated","value":"업데이트 보기"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Ver atualização"}}}},
     "Dismiss" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Dismiss"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"收起"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"收起"}},"ja":{"stringUnit":{"state":"translated","value":"閉じる"}},"ko":{"stringUnit":{"state":"translated","value":"닫기"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Dispensar"}}}},
-    "Verifying update…" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Verifying update…"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"正在验证更新…"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"正在驗證更新…"}},"ja":{"stringUnit":{"state":"translated","value":"更新を検証中…"}},"ko":{"stringUnit":{"state":"translated","value":"업데이트 검증 중…"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Verificando atualização…"}}}},
     "Version %@ is available" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Version %@ is available"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"版本 %@ 可供更新"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"版本 %@ 可供更新"}},"ja":{"stringUnit":{"state":"translated","value":"バージョン %@ が利用可能です"}},"ko":{"stringUnit":{"state":"translated","value":"버전 %@ 업데이트 가능"}},"pt-BR":{"stringUnit":{"state":"translated","value":"A versão %@ está disponível"}}}},
-    "Version %@ will install when your Mac is locked or its display sleeps." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Version %@ will install when your Mac is locked or its display sleeps."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"Mac 锁定或显示器睡眠时将安装版本 %@。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"Mac 鎖定或顯示器睡眠時將安裝版本 %@。"}},"ja":{"stringUnit":{"state":"translated","value":"Mac のロック中またはディスプレイのスリープ中にバージョン %@ をインストールします。"}},"ko":{"stringUnit":{"state":"translated","value":"Mac이 잠기거나 디스플레이가 잠자기 상태일 때 버전 %@을(를) 설치합니다."}},"pt-BR":{"stringUnit":{"state":"translated","value":"A versão %@ será instalada quando o Mac estiver bloqueado ou a tela estiver em repouso."}}}},
-    "Version %@ is postponed for 24 hours." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Version %@ is postponed for 24 hours."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"版本 %@ 已推迟更新 24 小时。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"版本 %@ 已延後更新 24 小時。"}},"ja":{"stringUnit":{"state":"translated","value":"バージョン %@ の更新を24時間延期しました。"}},"ko":{"stringUnit":{"state":"translated","value":"버전 %@ 업데이트가 24시간 연기되었습니다."}},"pt-BR":{"stringUnit":{"state":"translated","value":"A atualização para a versão %@ foi adiada por 24 horas."}}}},
-    "Version %@ needs attention. Open Updates to retry." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Version %@ needs attention. Open Updates to retry."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"版本 %@ 更新未完成，请打开更新页面重试。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"版本 %@ 更新未完成，請開啟更新頁面重試。"}},"ja":{"stringUnit":{"state":"translated","value":"バージョン %@ の更新に対応が必要です。更新を開いて再試行してください。"}},"ko":{"stringUnit":{"state":"translated","value":"버전 %@ 업데이트를 확인해야 합니다. 업데이트를 열어 다시 시도하세요."}},"pt-BR":{"stringUnit":{"state":"translated","value":"A versão %@ precisa de atenção. Abra Atualizações para tentar novamente."}}}},
-    "Updated to version %@" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Updated to version %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"已更新至版本 %@"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"已更新至版本 %@"}},"ja":{"stringUnit":{"state":"translated","value":"バージョン %@ に更新しました"}},"ko":{"stringUnit":{"state":"translated","value":"버전 %@으로 업데이트됨"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Atualizado para a versão %@"}}}},
-    "Last successful check: %@" : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Last successful check: %@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"上次成功检查：%@"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"上次成功檢查：%@"}},"ja":{"stringUnit":{"state":"translated","value":"最後に確認できた日時：%@"}},"ko":{"stringUnit":{"state":"translated","value":"마지막 확인 성공: %@"}},"pt-BR":{"stringUnit":{"state":"translated","value":"Última verificação bem-sucedida: %@"}}}},
     "Release notes include up to 20 recent versions. Older changes are available on GitHub." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Release notes include up to 20 recent versions. Older changes are available on GitHub."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"更新说明最多包含最近 20 个版本，更早的变化可在 GitHub 查看。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"更新說明最多包含最近 20 個版本，更早的變更可在 GitHub 查看。"}},"ja":{"stringUnit":{"state":"translated","value":"リリースノートは直近最大20バージョン分です。それ以前の変更は GitHub で確認できます。"}},"ko":{"stringUnit":{"state":"translated","value":"릴리스 노트는 최근 최대 20개 버전을 포함합니다. 이전 변경 사항은 GitHub에서 확인할 수 있습니다."}},"pt-BR":{"stringUnit":{"state":"translated","value":"As notas incluem até 20 versões recentes. Alterações anteriores estão disponíveis no GitHub."}}}},
-    "No release notes are available for this version." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"No release notes are available for this version."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"此版本暂无更新说明。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"此版本暫無更新說明。"}},"ja":{"stringUnit":{"state":"translated","value":"このバージョンのリリースノートはありません。"}},"ko":{"stringUnit":{"state":"translated","value":"이 버전의 릴리스 노트가 없습니다."}},"pt-BR":{"stringUnit":{"state":"translated","value":"Não há notas de lançamento para esta versão."}}}},
-    "This update requires a newer version of macOS or a different Mac architecture." : {"localizations":{"en":{"stringUnit":{"state":"translated","value":"This update requires a newer version of macOS or a different Mac architecture."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"此更新需要更高版本的 macOS 或不同架构的 Mac。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"此更新需要較新版本的 macOS 或不同架構的 Mac。"}},"ja":{"stringUnit":{"state":"translated","value":"この更新には、新しい macOS または別のアーキテクチャの Mac が必要です。"}},"ko":{"stringUnit":{"state":"translated","value":"이 업데이트에는 더 최신 macOS 또는 다른 아키텍처의 Mac이 필요합니다."}},"pt-BR":{"stringUnit":{"state":"translated","value":"Esta atualização exige uma versão mais recente do macOS ou outra arquitetura de Mac."}}}},
     "While you edit a wallpaper’s properties, your displays follow each change before you press Apply changes, and Revert puts the saved look back. Pictures, options that switch an effect on or off, and a video’s Wallpaper Engine options still wait for Apply changes. The lock screen and the Mission Control picture keep the saved look until you apply." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Enquanto você edita as propriedades de um papel de parede, suas telas acompanham cada alteração antes de você clicar em Aplicar alterações, e Reverter restaura a aparência salva. Imagens, opções que ativam ou desativam um efeito e as opções do Wallpaper Engine de um vídeo ainda aguardam Aplicar alterações. A tela bloqueada e a imagem do Mission Control mantêm a aparência salva até você aplicar."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면 속성을 편집하는 동안 ‘변경 사항 적용’을 누르기 전에도 각 변경이 디스플레이에 반영되며, ‘되돌리기’를 누르면 저장된 모습으로 돌아갑니다. 이미지, 효과를 켜거나 끄는 옵션, 비디오의 Wallpaper Engine 옵션은 ‘변경 사항 적용’을 눌러야 반영됩니다. 잠금 화면과 Mission Control 이미지는 적용할 때까지 저장된 모습을 유지합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙のプロパティを編集している間、「変更を適用」を押す前でも、ディスプレイが変更に追従します。「元に戻す」を押すと保存済みの見た目に戻ります。画像、エフェクトのオン・オフを切り替えるオプション、ビデオの Wallpaper Engine のオプションは、「変更を適用」を押すまで反映されません。ロック画面とMission Controlの画像は、適用するまで保存済みの見た目のままです。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "编辑壁纸的属性时，显示器会在你按下“应用修改”之前跟随每一项更改，“还原”会恢复已保存的外观。图片、用来开关某个效果的选项，以及视频的 Wallpaper Engine 选项，仍要等到“应用修改”才会生效。锁定屏幕和调度中心的画面在你应用之前保持已保存的外观。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "編輯桌布的屬性時，顯示器會在你按下「套用變更」之前跟隨每一項變更，「還原」會恢復已儲存的外觀。圖片、用來開關某個效果的選項，以及影片的 Wallpaper Engine 選項，仍要等到「套用變更」才會生效。鎖定畫面和指揮中心的畫面在你套用之前會維持已儲存的外觀。"}}}
     },
@@ -633,8 +626,6 @@
     "Checking the system wallpaper renderer…" : {"localizations": {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Verificando o renderizador de papel de parede do sistema…"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "시스템 배경화면 렌더러 확인 중…"}}, "en": {"stringUnit": {"state": "translated", "value": "Checking the system wallpaper renderer…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "正在检查系统壁纸渲染器…"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "正在檢查系統桌布算繪器…"}}, "ja": {"stringUnit": {"state": "translated", "value": "システムの壁紙レンダラを確認中…"}}}},
     "This display’s playlist has no other wallpaper to change to." : {"localizations": {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "A playlist deste monitor não tem outro papel de parede para trocar."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 디스플레이의 재생목록에 전환할 다른 배경화면이 없습니다."}}, "en": {"stringUnit": {"state": "translated", "value": "This display’s playlist has no other wallpaper to change to."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "此显示器的播放列表里没有可以换上的其他壁纸。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "此顯示器的播放列表裡沒有可以換上的其他桌布。"}}, "ja": {"stringUnit": {"state": "translated", "value": "このディスプレイのプレイリストには、切り替えられる別の壁紙がありません。"}}}},
     "SteamCMD stopped receiving the download. Check your connection and available disk space, then try again." : {"localizations": {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O SteamCMD parou de receber o download. Verifique sua conexão e o espaço disponível em disco e tente novamente."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "SteamCMD가 다운로드 수신을 중단했습니다. 연결과 사용 가능한 디스크 공간을 확인한 후 다시 시도하세요."}}, "en": {"stringUnit": {"state": "translated", "value": "SteamCMD stopped receiving the download. Check your connection and available disk space, then try again."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "SteamCMD 已停止接收下载内容。请检查网络连接和磁盘空间后重试。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "SteamCMD 已停止接收下載內容。請檢查網路連線和可用磁碟空間後再試一次。"}}, "ja": {"stringUnit": {"state": "translated", "value": "SteamCMDがダウンロードの受信を停止しました。ネットワーク接続とディスクの空き容量を確認してから、もう一度お試しください。"}}}},
-    "Preparing update…" : {"localizations": {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Preparando atualização…"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 준비 중…"}}, "en": {"stringUnit": {"state": "translated", "value": "Preparing update…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "正在准备更新…"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "正在準備更新…"}}, "ja": {"stringUnit": {"state": "translated", "value": "アップデートを準備中…"}}}},
-    "Another update installation is still running." : {"localizations": {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Outra instalação de atualização ainda está em andamento."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다른 업데이트가 아직 설치 중입니다."}}, "en": {"stringUnit": {"state": "translated", "value": "Another update installation is still running."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "另一个更新安装仍在进行。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "另一個更新安裝仍在進行。"}}, "ja": {"stringUnit": {"state": "translated", "value": "別のアップデートのインストールがまだ実行中です。"}}}},
     "Download paused" : {"localizations": {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Download pausado"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다운로드 일시 정지됨"}}, "en": {"stringUnit": {"state": "translated", "value": "Download paused"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "下载已暂停"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "下載已暫停"}}, "ja": {"stringUnit": {"state": "translated", "value": "ダウンロードを一時停止中"}}}},
     "Pause download" : {"localizations": {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Pausar download"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다운로드 일시 정지"}}, "en": {"stringUnit": {"state": "translated", "value": "Pause download"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂停下载"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "暫停下載"}}, "ja": {"stringUnit": {"state": "translated", "value": "ダウンロードを一時停止"}}}},
     "Resume download" : {"localizations": {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Retomar download"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다운로드 재개"}}, "en": {"stringUnit": {"state": "translated", "value": "Resume download"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "继续下载"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "繼續下載"}}, "ja": {"stringUnit": {"state": "translated", "value": "ダウンロードを再開"}}}},
@@ -1579,37 +1570,6 @@
         }
       }
     },
-    "Checking for updates..." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Verificando atualizações..."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 확인 중..."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Checking for updates..."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アップデートを確認中…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在检查更新…"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在檢查更新…"
-          }
-        }
-      }
-    },
     "Control Panel" : {
       "localizations" : {
         "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Painel de Controle"}},
@@ -1666,130 +1626,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "結束"
-          }
-        }
-      }
-    },
-    "GitHub did not return a successful update response." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O GitHub não retornou uma resposta de atualização bem-sucedida."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "GitHub에서 정상적인 업데이트 응답을 받지 못했습니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub did not return a successful update response."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHubから正常なアップデート応答が返されませんでした。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub 没有返回有效的更新数据"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub 未傳回成功的更新回應。"
-          }
-        }
-      }
-    },
-    "GitHub's hourly limit for anonymous update checks is used up." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O limite por hora do GitHub para verificações anônimas de atualização foi atingido."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "GitHub의 시간당 익명 업데이트 확인 한도에 도달했습니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub's hourly limit for anonymous update checks is used up."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHubの匿名アップデート確認の1時間あたりの上限に達しました。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub 免登录检查更新的每小时额度已用完。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub 匿名檢查更新的每小時次數上限已用完。"
-          }
-        }
-      }
-    },
-    "GitHub's hourly limit for anonymous update checks is used up on this network (60 requests an hour, shared by every app and device on the same public IP). Try again after %@." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O limite por hora do GitHub para verificações anônimas de atualização foi atingido nesta rede (60 solicitações por hora, compartilhadas por todos os apps e dispositivos no mesmo IP público). Tente novamente após %@."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 네트워크에서 GitHub의 시간당 익명 업데이트 확인 한도에 도달했습니다(시간당 요청 60회, 같은 공인 IP를 사용하는 모든 앱과 기기가 공유). %@ 이후에 다시 시도하세요."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub's hourly limit for anonymous update checks is used up on this network (60 requests an hour, shared by every app and device on the same public IP). Try again after %@."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このネットワークで、GitHubの匿名アップデート確認の1時間あたりの上限に達しました（1時間あたり60リクエスト。同じパブリックIPを使用するすべてのAppとデバイスで共有）。%@以降にもう一度お試しください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前网络的 GitHub 免登录每小时访问额度已用完（同一公网 IP 下的所有设备和应用共享 60 次/小时）。请在 %@ 之后重试。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此網路的 GitHub 匿名檢查更新每小時次數上限已用完（每小時 60 次，由同一公用 IP 上的所有 App 與裝置共用）。請於 %@ 後再試一次。"
-          }
-        }
-      }
-    },
-    "GitHub's hourly limit for anonymous update checks is used up on this network (60 requests an hour, shared by every app and device on the same public IP). Try again later." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O limite por hora do GitHub para verificações anônimas de atualização foi atingido nesta rede (60 solicitações por hora, compartilhadas por todos os apps e dispositivos no mesmo IP público). Tente novamente mais tarde."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 네트워크에서 GitHub의 시간당 익명 업데이트 확인 한도에 도달했습니다(시간당 요청 60회, 같은 공인 IP를 사용하는 모든 앱과 기기가 공유). 나중에 다시 시도하세요."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub's hourly limit for anonymous update checks is used up on this network (60 requests an hour, shared by every app and device on the same public IP). Try again later."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このネットワークで、GitHubの匿名アップデート確認の1時間あたりの上限に達しました（1時間あたり60リクエスト。同じパブリックIPを使用するすべてのAppとデバイスで共有）。しばらくしてからもう一度お試しください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前网络的 GitHub 免登录每小时访问额度已用完（同一公网 IP 下的所有设备和应用共享 60 次/小时）。请稍后重试。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此網路的 GitHub 匿名檢查更新每小時次數上限已用完（每小時 60 次，由同一公用 IP 上的所有 App 與裝置共用）。請稍後再試。"
           }
         }
       }
@@ -1977,37 +1813,6 @@
         }
       }
     },
-    "Restart to Update to %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reiniciar para Atualizar para %@"}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "재시작하여 %@ 버전으로 업데이트"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Restart to Update to %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再起動して%@にアップデート"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重启并更新到 %@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新啟動以更新至 %@"
-          }
-        }
-      }
-    },
     "WallpaperMachine %@ Available…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2101,37 +1906,6 @@
         }
       }
     },
-    "Download Update" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Baixar Atualização"}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 다운로드"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Download Update"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アップデートをダウンロード"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下载更新"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下載更新"
-          }
-        }
-      }
-    },
     "Downloading %lld percent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2159,533 +1933,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在下載 %lld％"
-          }
-        }
-      }
-    },
-    "Restart and Install" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reiniciar e Instalar"}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "재시작 및 설치"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Restart and Install"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再起動してインストール"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重启并安装"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新啟動並安裝"
-          }
-        }
-      }
-    },
-    "Retry installation" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Tentar instalar novamente"}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "설치 다시 시도"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Retry installation"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "インストールを再試行"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重试安装"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重試安裝"
-          }
-        }
-      }
-    },
-    "Open GitHub Releases" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Abrir GitHub Releases"}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "GitHub 릴리스 열기"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open GitHub Releases"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub Releasesを開く"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开 GitHub Releases"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打開 GitHub Releases"
-          }
-        }
-      }
-    },
-    "Version %@ is available from GitHub Releases." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "A versão %@ está disponível no GitHub Releases."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "GitHub Releases에서 버전 %@을(를) 받을 수 있습니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Version %@ is available from GitHub Releases."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub Releasesでバージョン%@を入手できます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub Releases 上有新版本 %@。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可從 GitHub Releases 取得版本 %@。"
-          }
-        }
-      }
-    },
-    "Downloading version %@ — %lld percent" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Baixando a versão %@ — %lld por cento"}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "%@ 버전 다운로드 중 — %lld퍼센트"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Downloading version %@ — %lld percent"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "バージョン%@をダウンロード中 — %lldパーセント"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在下载 %@ — %lld%%"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在下載版本 %@ — %lld％"
-          }
-        }
-      }
-    },
-    "Version %@ is ready. Restart the app to install it." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "A versão %@ está pronta. Reinicie o app para instalá-la."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "버전 %@이(가) 준비되었습니다. 설치하려면 앱을 재시작하세요."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Version %@ is ready. Restart the app to install it."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "バージョン%@の準備ができました。Appを再起動するとインストールされます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "版本 %@ 已就绪。重启应用即可安装。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "版本 %@ 已準備就緒。重新啟動 App 即可安裝。"
-          }
-        }
-      }
-    },
-    "Updates are checked against the latest published GitHub Release. Download and restart-install happen only after you confirm." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "As atualizações são verificadas com base na última versão publicada no GitHub Releases. O download e a instalação com reinício só acontecem após a sua confirmação."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "공개된 최신 GitHub Release와 비교하여 업데이트를 확인합니다. 다운로드와 재시작을 통한 설치는 사용자가 확인한 후에만 진행됩니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Updates are checked against the latest published GitHub Release. Download and restart-install happen only after you confirm."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アップデートは、GitHubで公開されている最新のリリースと照合して確認されます。ダウンロードと再起動によるインストールは、確認後にのみ行われます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "从 GitHub 检查最新发布的版本。确认之后才会下载并重启安装。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "系統會以 GitHub 上最新發布的 Release 檢查更新。下載及重新啟動安裝只會在你確認後進行。"
-          }
-        }
-      }
-    },
-    "In-app updates are available only in installed builds." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "As atualizações pelo app só estão disponíveis em versões instaladas."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "앱 내 업데이트는 설치된 빌드에서만 사용할 수 있습니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "In-app updates are available only in installed builds."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "App内アップデートは、インストールされたビルドでのみ利用できます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只有已安装的版本才支持应用内更新。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只有已安裝的版本才支援 App 內更新。"
-          }
-        }
-      }
-    },
-    "No published update is available yet. You can keep using this version." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ainda não há nenhuma atualização publicada. Você pode continuar usando esta versão."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "아직 공개된 업데이트가 없습니다. 이 버전을 계속 사용할 수 있습니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No published update is available yet. You can keep using this version."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "公開されているアップデートはまだありません。このバージョンを引き続き使用できます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂无可用更新，可继续使用当前版本。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "目前尚無已發布的更新。你可以繼續使用此版本。"
-          }
-        }
-      }
-    },
-    "Couldn't reach GitHub Releases. Check your connection and try again." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Não foi possível acessar o GitHub Releases. Verifique sua conexão e tente novamente."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "GitHub Releases에 연결하지 못했습니다. 연결 상태를 확인한 후 다시 시도하세요."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't reach GitHub Releases. Check your connection and try again."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub Releasesに接続できませんでした。接続を確認してもう一度お試しください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法连接 GitHub Releases。请检查网络后重试。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "無法連線至 GitHub Releases。請檢查網路連線後再試一次。"
-          }
-        }
-      }
-    },
-    "The GitHub Release update metadata is unavailable." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Os metadados de atualização do GitHub Releases não estão disponíveis."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "GitHub Release 업데이트 메타데이터를 사용할 수 없습니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The GitHub Release update metadata is unavailable."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub Releaseのアップデートメタデータを利用できません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub Release 更新信息不可用。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "無法取得 GitHub Release 的更新資訊。"
-          }
-        }
-      }
-    },
-    "The update couldn't be verified, so it wasn't installed." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Não foi possível verificar a atualização, por isso ela não foi instalada."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트를 검증할 수 없어 설치하지 않았습니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The update couldn't be verified, so it wasn't installed."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アップデートを検証できなかったため、インストールされませんでした。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新未能通过校验，因此没有安装。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "無法驗證此更新，因此未進行安裝。"
-          }
-        }
-      }
-    },
-    "The updater doesn't have permission to install this update." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O atualizador não tem permissão para instalar esta atualização."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이터에 이 업데이트를 설치할 권한이 없습니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The updater doesn't have permission to install this update."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アップデータにはこのアップデートをインストールする権限がありません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新程序没有权限安装此更新。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新程式沒有安裝此更新的權限。"
-          }
-        }
-      }
-    },
-    "The update couldn't be completed. Try again or install it from GitHub Releases." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Não foi possível concluir a atualização. Tente novamente ou instale-a pelo GitHub Releases."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트를 완료할 수 없습니다. 다시 시도하거나 GitHub Releases에서 설치하세요."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The update couldn't be completed. Try again or install it from GitHub Releases."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アップデートを完了できませんでした。もう一度試すか、GitHub Releasesからインストールしてください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新未能完成。请重试，或从 GitHub Releases 安装。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "無法完成更新。請再試一次，或從 GitHub Releases 安裝。"
-          }
-        }
-      }
-    },
-    "Restart and install this update?" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reiniciar e instalar esta atualização?"}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "재시작하여 이 업데이트를 설치할까요?"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Restart and install this update?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再起動してこのアップデートをインストールしますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要重启并安装此更新吗？"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "要重新啟動並安裝此更新嗎？"
-          }
-        }
-      }
-    },
-    "The current app will quit and be replaced. Wallpapers and settings are kept." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O app atual será encerrado e substituído. Papéis de parede e ajustes são mantidos."}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "현재 앱을 종료하고 교체합니다. 배경화면과 설정은 유지됩니다."}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The current app will quit and be replaced. Wallpapers and settings are kept."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "現在のAppは終了して置き換えられます。壁紙と設定は保持されます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前应用将退出并被替换。壁纸和设置会保留。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "目前的 App 將會結束並被取代。桌布與設定都會保留。"
-          }
-        }
-      }
-    },
-    "Update download progress" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Progresso do download da atualização"}},
-        "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 다운로드 진행 상황"}},
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Update download progress"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アップデートのダウンロードの進行状況"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新下载进度"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新下載進度"
           }
         }
       }
@@ -2777,15 +2024,6 @@
     "Shared scene assets are still missing, so scene wallpapers cannot play yet: %@" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Os recursos de cena compartilhados ainda estão ausentes, então os papéis de parede de cena ainda não podem ser reproduzidos: %@"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "공유 장면 에셋이 아직 없어 장면 배경화면을 재생할 수 없습니다: %@"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Shared scene assets are still missing, so scene wallpapers cannot play yet: %@"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "共有シーンリソースがまだ不足しているため、シーン壁紙はまだ再生できません：%@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "仍缺少共享场景资源，场景壁纸暂时无法播放：%@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "仍缺少共用場景資源，因此暫時無法播放場景桌布：%@"}}}
     },
-    "No update is available to download." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Não há atualização disponível para baixar."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다운로드할 수 있는 업데이트가 없습니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "No update is available to download."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロードできるアップデートはありません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "没有可下载的更新。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "沒有可供下載的更新。"}}}
-    },
-    "No downloaded update is ready to install." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Nenhuma atualização baixada está pronta para instalar."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다운로드한 업데이트 중 설치할 준비가 된 항목이 없습니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "No downloaded update is ready to install."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "インストールできるダウンロード済みのアップデートはありません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "没有已下载、可安装的更新。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "沒有已下載且可供安裝的更新。"}}}
-    },
-    "Install timed out: the app did not quit and relaunch." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "A instalação expirou: o app não foi encerrado e reaberto."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "설치 시간이 초과되었습니다. 앱이 종료 후 다시 실행되지 않았습니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Install timed out: the app did not quit and relaunch."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "インストールがタイムアウトしました：Appが終了して再起動しませんでした。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "安装超时：应用没有退出并重新打开。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "安裝逾時：App 未結束並重新開啟。"}}}
-    },
     "macOS did not accept the desktop click preference. Change “Click wallpaper to reveal desktop” in System Settings › Desktop & Dock instead." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O macOS não aceitou a preferência de clique na mesa. Altere “Clicar no papel de parede para mostrar a mesa” em Ajustes do Sistema › Mesa e Dock."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "macOS에서 데스크탑 클릭 설정을 적용하지 않았습니다. 대신 시스템 설정 › 데스크탑 및 Dock에서 ‘배경화면을 클릭하여 데스크탑 표시’를 변경하세요."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "macOS did not accept the desktop click preference. Change “Click wallpaper to reveal desktop” in System Settings › Desktop & Dock instead."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "macOSがデスクトップのクリック設定を受け付けませんでした。代わりに「システム設定」›「デスクトップとDock」で「壁紙をクリックしてデスクトップを表示」を変更してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "macOS 没有接受这项设置。请在“系统设置 › 桌面与程序坞”中直接更改“点按墙纸以显示桌面”。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "macOS 未接受桌面點按偏好設定。請改在「系統設定 › 桌面與 Dock」中更改「按一下背景圖片來顯示桌面」。"}}}
     },
@@ -2803,15 +2041,6 @@
     },
     "The preview image is a single still frame." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "A imagem de pré-visualização é um único quadro estático."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "미리보기 이미지는 하나의 정지 프레임입니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "The preview image is a single still frame."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "プレビュー画像は1フレームだけの静止画です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "预览图只有一帧静止画面。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "預覽圖只有一個靜止影格。"}}}
-    },
-    "The update download redirected outside GitHub." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O download da atualização foi redirecionado para fora do GitHub."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 다운로드가 GitHub 외부로 리디렉션되었습니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "The update download redirected outside GitHub."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アップデートのダウンロードがGitHub以外の場所にリダイレクトされました。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "更新下载被重定向到了 GitHub 以外的地址。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "更新下載被重新導向至 GitHub 以外的位置。"}}}
-    },
-    "The update archive exceeds the allowed size." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O arquivo da atualização excede o tamanho permitido."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 아카이브가 허용 크기를 초과합니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "The update archive exceeds the allowed size."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アップデートのアーカイブが許容サイズを超えています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "更新包超过了允许的大小。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "更新封存檔超過允許的大小。"}}}
-    },
-    "The update download is empty or truncated." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O download da atualização está vazio ou incompleto."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "다운로드한 업데이트가 비어 있거나 불완전합니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "The update download is empty or truncated."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ダウンロードしたアップデートが空か、途中で切れています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "下载的更新为空或不完整。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "下載的更新是空的或不完整。"}}}
     },
     "Neither Music nor Spotify reported what is playing." : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Nem a Música nem o Spotify informaram o que está tocando."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "음악 앱과 Spotify 모두에서 재생 중인 항목 정보를 받지 못했습니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Neither Music nor Spotify reported what is playing."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "「ミュージック」とSpotifyのどちらからも再生中の情報を取得できませんでした。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "“音乐”和 Spotify 都没有提供正在播放的内容。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "「音樂」App 和 Spotify 都未回報正在播放的內容。"}}}
@@ -8099,24 +7328,6 @@
     "NSAudioCaptureUsageDescription" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O WallpaperMachine captura o áudio do sistema somente quando você ativa papéis de parede que reagem ao áudio."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine은 오디오 반응형 배경화면을 활성화할 때만 시스템 오디오를 캡처합니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine captures system audio only when you enable audio-reactive wallpapers."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineは、音声に反応する壁紙を有効にしたときだけシステムオーディオをキャプチャします。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 仅在你启用音频响应壁纸时捕获系统音频。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 只會在你啟用音訊反應桌布時擷取系統音訊。"}}}
     },
-    "A new version of WallpaperMachine is available!" : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Uma nova versão do WallpaperMachine está disponível!"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine의 새 버전을 사용할 수 있습니다!"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "A new version of WallpaperMachine is available!"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine の新しいバージョンがあります！"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 有新版本可用！"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 有新版本可用！"}}}
-    },
-    "A new version of WallpaperMachine is ready to install!" : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Uma nova versão do WallpaperMachine está pronta para instalar!"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine의 새 버전을 설치할 준비가 되었습니다!"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "A new version of WallpaperMachine is ready to install!"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine の新しいバージョンをインストールできます！"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 新版本已可安装！"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 新版本已可安裝！"}}}
-    },
-    "WallpaperMachine %@ is now available—you have %@. Would you like to download it now?" : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O WallpaperMachine %@ já está disponível — você tem a %@. Deseja baixá-lo agora?"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@을(를) 사용할 수 있습니다. 현재 버전은 %@입니다. 지금 다운로드하시겠습니까?"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ is now available—you have %@. Would you like to download it now?"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ が利用可能です（現在のバージョンは %@）。今すぐダウンロードしますか？"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 现已推出，你当前使用的是 %@。要立即下载吗？"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 現已推出，你目前使用的是 %@。要立即下載嗎？"}}}
-    },
-    "WallpaperMachine %@ is now available—you have %@. Download it from GitHub Releases." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O WallpaperMachine %@ já está disponível — você tem a %@. Baixe-o no GitHub Releases."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@을(를) 사용할 수 있습니다. 현재 버전은 %@입니다. GitHub Releases에서 다운로드하세요."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ is now available—you have %@. Download it from GitHub Releases."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ が利用可能です（現在のバージョンは %@）。GitHub Releases からダウンロードしてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 现已推出，你当前使用的是 %@。请从 GitHub Releases 下载。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 現已推出，你目前使用的是 %@。請從 GitHub Releases 下載。"}}}
-    },
-    "WallpaperMachine %@ has been downloaded—you have %@. WallpaperMachine quits and reopens to install it." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "O WallpaperMachine %@ foi baixado — você tem a %@. O WallpaperMachine será encerrado e reaberto para instalá-lo."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@을(를) 다운로드했습니다. 현재 버전은 %@입니다. 설치를 위해 WallpaperMachine이 종료된 후 다시 열립니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ has been downloaded—you have %@. WallpaperMachine quits and reopens to install it."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ をダウンロードしました（現在のバージョンは %@）。インストールのため WallpaperMachine を終了して再度開きます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 已下载，你当前使用的是 %@。WallpaperMachine 将退出并重新打开以完成安装。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine %@ 已下載，你目前使用的是 %@。WallpaperMachine 將結束並重新開啟以完成安裝。"}}}
-    },
-    "Automatically download and install updates in the future" : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Baixar e instalar atualizações automaticamente no futuro"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "앞으로 업데이트를 자동으로 다운로드하고 설치"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Automatically download and install updates in the future"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "今後はアップデートを自動的にダウンロードしてインストール"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "以后自动下载并安装更新"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "以後自動下載並安裝更新"}}}
-    },
     "Skip This Version" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ignorar Esta Versão"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 버전 건너뛰기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Skip This Version"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このバージョンをスキップ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "跳过此版本"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "略過此版本"}}}
     },
@@ -8126,17 +7337,8 @@
     "Install Update" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Instalar Atualização"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 설치"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Install Update"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アップデートをインストール"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "安装更新"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "安裝更新"}}}
     },
-    "Install and Relaunch" : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Instalar e Reabrir"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "설치 후 다시 열기"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Install and Relaunch"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "インストールして再度開く"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "安装并重新打开"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "安裝並重新開啟"}}}
-    },
     "Software Update" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Atualização de Software"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "소프트웨어 업데이트"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Software Update"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ソフトウェア・アップデート"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "软件更新"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "軟體更新"}}}
-    },
-    "Automatically download and install updates" : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Baixar e instalar atualizações automaticamente"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트 자동 다운로드 및 설치"}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Automatically download and install updates"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アップデートを自動的にダウンロードしてインストール"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "自动下载并安装更新"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "自動下載並安裝更新"}}}
-    },
-    "Updates download in the background and install while the display sleeps or the Mac is locked; WallpaperMachine quits and reopens to finish." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "As atualizações são baixadas em segundo plano e instaladas enquanto o monitor está em repouso ou o Mac está bloqueado; o WallpaperMachine é encerrado e reaberto para concluir."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "업데이트는 백그라운드에서 다운로드되고 디스플레이가 잠자기 상태이거나 Mac이 잠겨 있을 때 설치됩니다. 설치를 마치기 위해 WallpaperMachine이 종료된 후 다시 열립니다."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "Updates download in the background and install while the display sleeps or the Mac is locked; WallpaperMachine quits and reopens to finish."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "アップデートはバックグラウンドでダウンロードされ、ディスプレイがスリープ中または Mac がロック中にインストールされます。完了するため WallpaperMachine は終了して再度開きます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "更新会在后台下载，并在显示器睡眠或 Mac 锁定时安装；WallpaperMachine 会退出并重新打开以完成安装。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "更新會在背景下載，並在顯示器睡眠或 Mac 鎖定時安裝；WallpaperMachine 會結束並重新開啟以完成安裝。"}}}
     },
     "Features" : {
       "extractionState" : "manual",

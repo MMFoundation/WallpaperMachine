@@ -40,8 +40,8 @@ itself and offers **Restart to Update**; builds from source should follow `main`
   to a site it does not allow, an image from a host it does not allow), and the
   Steam and pixiv sign-in web views reaching beyond the sign-in page.
 - Steam and pixiv sign-ins leaving the Mac, or becoming readable by other apps.
-- The [updater](docs/features/updates.md#installing) installing
-  anything other than a release whose SHA-256 matches.
+- The [updater](docs/features/updates.md#installing) accepting an unsigned feed or installing
+  an archive whose WallpaperMachine release signature does not verify.
 - [Diagnostics reports](docs/features/diagnostics.md) that leak what they promise
   to replace: home folder paths, the Mac user name, Steam account names.
 - This repository's release workflows and the files they publish.

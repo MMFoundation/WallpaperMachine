@@ -17,6 +17,10 @@ settings:
     ARCHS: arm64
     ONLY_ACTIVE_ARCH: YES
     ENABLE_DEBUG_DYLIB: NO
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 targets:
   MediaRemoteAdapter:
     type: framework
@@ -56,6 +60,8 @@ targets:
         type: file
         buildPhase: resources
       - path: Shared
+      - path: CHANGELOG.md
+        buildPhase: resources
       - path: Resources/StarterWallpaper
         type: folder
         buildPhase: resources
@@ -64,6 +70,7 @@ targets:
       - path: ThirdParty/mediaremote-adapter/LICENSE
         buildPhase: resources
     dependencies:
+      - package: Sparkle
       - target: MediaRemoteAdapter
         embed: true
         link: false
@@ -121,6 +128,9 @@ targets:
           - -framework OpenGL
           - -framework QuartzCore
           - -framework VideoToolbox
+      configs:
+        Release:
+          WALLPAPER_MACHINE_UPDATE_FEED: https://www.wallpapermachine.app/updates/appcast
   WallpaperMachineExtension:
     type: extensionkit-extension
     platform: macOS

@@ -291,9 +291,20 @@ final class StatusPanelControllerTests: PanelTestCase {
     let source = Source(input())
     let controller = makeController(source, dismiss: { source.log.append("dismiss") })
     controller.start()
-    source.input.update = AppUpdateNotice(kind: .available, version: "2.0.0", automatic: false)
+    let updater = SoftwareUpdateStatus()
+    updater.isAvailable = true
+    XCTAssertNil(AppUpdateNotice(status: updater))
+    XCTAssertNil(controller.openUpdates(), "without a waiting update the popover stays open")
+    updater.waitingVersion = "2.0.0"
+    source.input.update = AppUpdateNotice(status: updater)
     try await waitUntil("update is visible") { controller.panel.update?.version == "2.0.0" }
-    await controller.openUpdates().value
+    XCTAssertNil(controller.openUpdates(), "the waiting version stays visible but cannot be shown while busy")
+    XCTAssertTrue(source.performed.isEmpty)
+    updater.canCheck = true
+    source.input.update = AppUpdateNotice(status: updater)
+    try await waitUntil("update can be shown") { controller.panel.update?.canCheck == true }
+    let action = try XCTUnwrap(controller.openUpdates())
+    await action.value
     XCTAssertEqual(source.performed.last, .openUpdates)
     XCTAssertEqual(source.log.suffix(2), ["dismiss", "perform"])
     controller.stop()

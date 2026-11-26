@@ -30,7 +30,7 @@ import check_licenses
 from check_licenses import PASSING, ToolError, evaluate, merge, parse_expression
 from lib.glyphs import markers
 from lib.homebrew import KEG_LICENSE_FILE
-from lib.paths import ARTIFACTS, ENGINE, ROOT, THIRD_PARTY, app_bundle
+from lib.paths import ARTIFACTS, BUILD, ENGINE, ROOT, THIRD_PARTY, app_bundle
 
 MARK = markers()
 DEFAULT_OUTPUT = ARTIFACTS / "licenses/THIRD-PARTY-NOTICES.txt"
@@ -38,6 +38,7 @@ NOT_FOUND = "LICENSE TEXT NOT FOUND"
 # License files this repository supplies for a component whose own distribution carries none
 # (`<name>/LICENSE*`, copied from the upstream project's repository, recorded in the commit).
 SUPPLEMENTS = ROOT / "Packaging/notices"
+SPARKLE_LICENSE = BUILD / "SourcePackages/artifacts/sparkle/Sparkle/LICENSE"
 
 # The option of a choice that the notice carries: the first allowed alternative in this order,
 # so a dual `MIT OR Apache-2.0` crate is noticed under the MIT terms the project uses.
@@ -257,6 +258,11 @@ def notice_for(component, prefix, runner, environment):
         directory = crate_directory(component.name, component.version, environment)
         origin = check_licenses.display_path(directory) if directory and directory.is_relative_to(ROOT) else "cargo registry"
         texts, missing_ids = select_texts(license_files(directory) + license_files(SUPPLEMENTS / component.name), chosen)
+    elif key == "sparkle":
+        origin = "Sparkle SwiftPM distribution"
+        texts, missing_ids = select_texts([SPARKLE_LICENSE], chosen)
+        if not texts or missing_ids:
+            raise ToolError(f"The Sparkle binary distribution is missing its complete LICENSE at {SPARKLE_LICENSE}")
     elif key in VENDORED_FILES or key in VENDORED_HEADERS:
         for file in VENDORED_FILES.get(key, []):
             text = read(file)

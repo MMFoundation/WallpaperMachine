@@ -199,8 +199,6 @@ TYPE_ALLOWLIST = {
         "backlog: Shell",
     "App/Views/ControlPanel/Shell/RecentlyUsedPopover.swift":
         "backlog: Shell",
-    "App/Views/ControlPanel/UpdateWindow.swift":
-        "backlog: the update window",
     "App/Views/ControlPanel/WallpaperPreviewWindow.swift":
         "an AppKit window's small system font",
     "App/Views/ControlPanel/WebSignInWindow.swift":

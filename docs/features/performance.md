@@ -755,9 +755,8 @@ post into the session too. Reading it needs no permission. **Pause** keeps the l
 the wallpapers and reloads them at the next input, as the other Stop choices do. Like
 the other conditions of the Mac it never changes your own Play/Pause, a playlist
 change that falls due meanwhile waits for the wallpapers to play again
-([Playlists](playlists.md#when-a-change-happens)), and an inactive Mac does not count
-as nobody being at it, so an automatic update still waits for the displays to sleep or
-the session to lock ([Updates](updates.md#automatic-updates)). The row adds `In effect
+([Playlists](playlists.md#when-a-change-happens)). Inactivity never triggers a software
+update ([Updates](updates.md#automatic-updates)). The row adds `In effect
 now. Wallpapers are paused.` (or stopped) while the rule holds, and Quick Settings' **On
 battery** module names it as it names the other conditions below.
 

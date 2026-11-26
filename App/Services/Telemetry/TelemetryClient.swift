@@ -24,11 +24,19 @@ struct TelemetryClient: TelemetryUploading, TelemetryActiveSending {
 
     init(
         endpoint: URL = Self.endpoint,
-        session: URLSession = GitHubReleaseClient.makeSession(),
+        configuration: URLSessionConfiguration = .ephemeral,
         version: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     ) {
         self.endpoint = endpoint
-        self.session = session
+        let configuration = configuration.copy() as! URLSessionConfiguration
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 30
+        session = URLSession(configuration: configuration)
         // Cloudflare refuses a request without a product user agent.
         userAgent = "WallpaperMachine/\(version)"
     }

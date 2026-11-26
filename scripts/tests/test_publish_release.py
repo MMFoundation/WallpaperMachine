@@ -19,6 +19,7 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(publish_release)
 
 def release_fixture(root, tag):
+    (root / "project.yml").write_text(f'MARKETING_VERSION: "{tag[1:]}"\nCURRENT_PROJECT_VERSION: "1"\n')
     image = root / f"WallpaperMachine-{tag[1:]}-arm64.dmg"
     image.write_bytes(b"signed image fixture")
     digest = hashlib.sha256(image.read_bytes()).hexdigest()
@@ -40,7 +41,7 @@ def release_fixture(root, tag):
 def publish_fixture(github, tag="v0.6.0"):
     with tempfile.TemporaryDirectory() as directory:
         notes, assets = release_fixture(Path(directory), tag)
-        return publish_release.publish(tag, notes, assets, run=github)
+        return publish_release.publish(tag, notes, assets, run=github, project=Path(directory) / "project.yml")
 
 
 def completed(stdout="", returncode=0):
@@ -138,10 +139,10 @@ class AssetContractTests(unittest.TestCase):
             notes, assets = release_fixture(Path(directory), "v0.6.0")
             github = FakeGitHub()
             with self.assertRaises(publish_release.PublishError):
-                publish_release.publish("v0.6.0", notes, assets[:2], run=github)
+                publish_release.publish("v0.6.0", notes, assets[:2], run=github, project=Path(directory) / "project.yml")
             Path(assets[0]).write_bytes(b"changed")
             with self.assertRaises(publish_release.PublishError):
-                publish_release.publish("v0.6.0", notes, assets, run=github)
+                publish_release.publish("v0.6.0", notes, assets, run=github, project=Path(directory) / "project.yml")
             self.assertEqual(github.mutations, [])
 
     def test_uploaded_mismatch_is_never_promoted(self):
@@ -159,7 +160,7 @@ class AssetContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             notes, assets = release_fixture(Path(directory), "v0.6.0")
             github = FakeGitHub()
-            publish_release.publish("v0.6.0", notes, assets, run=github, dry_run=True)
+            publish_release.publish("v0.6.0", notes, assets, run=github, dry_run=True, project=Path(directory) / "project.yml")
             self.assertEqual(github.mutations, [])
 
 

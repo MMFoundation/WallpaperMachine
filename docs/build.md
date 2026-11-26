@@ -161,8 +161,8 @@ python3 scripts/package.py --configuration Release --check    # preflight only; 
 python3 scripts/package.py --configuration Release --install  # also copy the app to ~/Applications
 ```
 
-CI adds `--require-deployment-target`, `--sign-identity` and `--notarize` (see the
-preflight and [Release signing](#release-signing)).
+CI adds `--require-deployment-target`, `--sign-identity`, `--notarize` and, for
+Sparkle releases, `--sparkle-archive` (see the preflight and [Release signing](#release-signing)).
 
 `scripts/package.py` takes the already-built bundle at
 `build/Build/Products/<configuration>/WallpaperMachine.app`, makes it
@@ -175,7 +175,8 @@ bundle is absent.
    and leaves the bundle unchanged):
    - The bundle must be fresh build output. A bundle that already carries
      `Contents/Frameworks/*.dylib`, or whose app/extension binaries already
-     load a non-Swift `@rpath` dependency, is refused (`Packaging requires
+     load a non-Swift `@rpath` dependency not resolved to a Homebrew library or
+     a framework Xcode actually embedded, is refused (`Packaging requires
      fresh, unrelocated build output`): packaging is one-way and never deletes
      anything from an existing bundle, and an incremental `scripts/build.py`
      run does not clear `Contents/Frameworks`. The fix is a clean build, but
@@ -183,6 +184,9 @@ bundle is absent.
      `build/Build/Products/Release/WallpaperMachine.app`, the locally delivered
      app.** Preview with `--dry-run`, keep a copy of any app you still need,
      and only then clean and rebuild; nothing cleans automatically.
+   - Sparkle releases need the embedded framework and its four pinned helper
+     components. Its complete license is collected from the same SwiftPM binary
+     distribution; packaging fails if that notice is missing.
    - The notice payload must exist: repository `LICENSE`, `LICENSING.md`,
      `ThirdParty/received-licenses/wallpaper-engine-for-macos.GPL-2.0.txt`, `ThirdParty/provenance.json`, the
      Xcode-bundled `Resources/LICENSE` (mediaremote-adapter, BSD-3-Clause) and
@@ -246,8 +250,9 @@ bundle is absent.
    in the closure, including each linked Rust crate; the disk image carries only
    the bundle, so the file travels inside the app). `Licenses/` is rebuilt on
    every run.
-3. **Signing.** Inside out: each bundled dylib, each framework in
-   `Contents/Frameworks` (the MediaRemote adapter), each extension with
+3. **Signing.** Inside out: each bundled dylib; Sparkle's Installer and Downloader
+   XPC services, Autoupdate executable and Updater app **before** their framework;
+   each framework in `Contents/Frameworks`; each extension with
    [`Extension/WallpaperExtension.entitlements`](../Extension/WallpaperExtension.entitlements),
    then the app with
    [`Packaging/WallpaperMachine.entitlements`](../Packaging/WallpaperMachine.entitlements)
@@ -258,7 +263,9 @@ bundle is absent.
    whose library validation would refuse libraries that carry no team. Each bundle gets
    exactly its repository entitlements, not what Xcode signed in: Xcode adds
    `com.apple.security.get-task-allow` to the extension even in a Release build, and
-   Apple does not notarize that. Release builds use the Developer ID; see
+   Apple does not notarize that. The Sparkle helpers, used by the unsandboxed app,
+   get neither the host's privacy entitlements nor the extension's sandbox entitlements.
+   Release builds use the Developer ID; see
    [Release signing](#release-signing).
    A valid signature does not say what it signs, so the bundle is then read back
    against its [contract](#bundle-contract).
@@ -298,7 +305,11 @@ bundle is absent.
    the final image name, size and SHA-256. This internal build artifact lets the Linux
    publish job generate compatibility fields without mounting a DMG or guessing from
    source settings. The metadata sidecar is transferred with the image, not published
-   as a release asset. The in-app updater depends on the image name; see
+   as a release asset. With `--sparkle-archive`, verification also zips
+   **this app inside the read-only DMG**, using `ditto --sequesterRsrc --keepParent`
+   so framework symlinks and the stapled ticket travel with it. The ZIP is
+   `WallpaperMachine-<version>-arm64.zip`; a local ad-hoc or unnotarized build
+   cannot request it. The legacy updater still depends on the image name; see
    [release.md](release.md). The notices the bundle carries are listed in
    [../LICENSING.md](../LICENSING.md#notice-payload).
 7. **`--install`.** Copies the bundle to `~/Applications/WallpaperMachine.app`.
@@ -350,7 +361,9 @@ finding:
   extension must carry the hardened runtime and no `com.apple.security.get-task-allow`,
   and every dylib and framework in `Contents/Frameworks` must be signed by the same
   team: Apple refuses to notarize anything else, and the runtime's library validation
-  would refuse to load a library signed ad hoc or by another team.
+  would refuse to load a library signed ad hoc or by another team. The contract
+  also checks that Sparkle's nested helpers are signed with the host's Developer ID
+  team and hardened runtime and carry no entitlements.
 
 Entitlements the signature adds beyond the repository files are only a
 `WARN`, because Xcode and signing profiles inject some; a debuggable build's
@@ -389,7 +402,7 @@ update between them macOS asked for the login keychain password before the new
 version could read a saved sign-in, at launch, even after **Always Allow**
 ([#163](https://github.com/MMFoundation/WallpaperMachine/issues/163)); Developer ID
 releases share one. Only copies from 1.8.0 on install a Developer ID release
-from the in-app updater: `AppUpdateConfiguration.signingRequirement` accepts both
+from the legacy in-app updater: that generation's signing requirement accepts both
 the project certificate and the Developer ID from 1.8.0 on, while older copies refuse
 it as unverifiable and have to be updated by downloading the image
 ([updates](features/updates.md#installing)). Every installed copy checks an update
@@ -400,7 +413,7 @@ certificate) needs a release whose requirement accepts both teams first.
 `AppUpdateConfiguration.developerIDRequirement`, or carries the project certificate as
 its leaf, as a release ([telemetry](features/telemetry.md#what-a-report-holds)).
 
-`.github/workflows/build.yml` imports the certificate and the notary credentials into
+`.github/workflows/build.yml` imports the Apple certificate and the notary credentials into
 a temporary keychain from five repository secrets before it compiles anything, and fails
 when any is missing or Apple refuses the key, rather than shipping a build Gatekeeper
 holds:
@@ -412,6 +425,27 @@ holds:
 | `NOTARY_API_KEY` | The text of an App Store Connect team API key (`AuthKey_<id>.p8`, Developer role) |
 | `NOTARY_API_KEY_ID` | That key's ID |
 | `NOTARY_API_ISSUER` | The issuer ID shown above the team keys in App Store Connect |
+
+Sparkle has a **separate WallpaperMachine Ed25519 key pair**, not the Apple
+certificate and not another app's update key. Before releasing, set
+`WALLPAPER_MACHINE_SPARKLE_PRIVATE_KEY` as a GitHub Actions repository **secret**
+(Sparkle 2.10's base64 export of its 32-byte private seed) and
+`WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY` as an Actions repository **variable**
+(the matching base64 public key). A maintainer can generate the pair once with
+Sparkle's `bin/generate_keys --account WallpaperMachine`, obtain only the public
+value with `--account WallpaperMachine -p`, and use `--account WallpaperMachine
+-x <private-file>` to export the secret into protected storage outside the
+checkout. Back the key up securely; do not commit it, print it, put it in an Xcode
+setting, or swap either half on its own. Deployed clients trust the public key
+in the app they installed, so changing that key requires a planned migration.
+
+CI checks that the keys match before building, passes only the public key via
+`build.py --xcode-setting WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY=…`, and feeds the
+private value to the resolved Sparkle `sign_update` tool over stdin. It signs both
+the final ZIP and `appcast.xml`. The Linux publish job has no private key and
+verifies the two signatures with OpenSSL 3. Legacy tags do not require either
+Sparkle value. For the five public filenames and website routes, see the
+[release contract](release.md#what-the-in-app-updater-expects).
 
 The API key becomes the `WallpaperMachine Notary` profile of
 `xcrun notarytool store-credentials` in that keychain (storing it checks it with Apple),

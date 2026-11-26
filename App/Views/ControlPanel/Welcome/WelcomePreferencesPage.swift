@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Page four: a few preferences. Launch at login, On battery, Keep windows in place and Send
-/// performance data are drafts that **Continue** commits; Animate lock screen applies at once, like
-/// Settings, and says so.
+/// performance data are drafts that **Continue** commits; checking for updates and Animate lock
+/// screen apply at once, like Settings.
 struct WelcomePreferencesPage: View {
   @Environment(FirstRunModel.self) private var model
   @Environment(PanelController.self) private var controller
@@ -23,9 +23,13 @@ struct WelcomePreferencesPage: View {
         batteryRow(shown: shown, locked: isCommitting)
         keepWindowsRow(shown: shown, locked: isCommitting)
         performanceDataRow(shown: shown)
-        WelcomePreferenceRow(symbol: "arrow.down.circle", color: .blue, title: Text("Update mode")) {
-          note(Text(verbatim: controller.updater.mode.explanation))
-        } control: { UpdateModePicker() }
+        if controller.updater.isAvailable {
+          WelcomePreferenceRow(
+            symbol: "arrow.down.circle", color: .blue, title: Text("Check for updates automatically")
+          ) {
+            note(Text("Updates are checked in the background. You choose when to download and restart."))
+          } control: { AutomaticUpdateChecksToggle() }
+        }
         lockScreenRow(lock: lock, row: lockRow)
       }
       .welcomeSurface()

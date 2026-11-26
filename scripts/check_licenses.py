@@ -246,6 +246,7 @@ COMPONENTS = {
     "libpng": Entry("libpng-2.0", "Homebrew dylib, a FreeType dependency"),
     "brotli": Entry("MIT", "Homebrew dylibs (libbrotlidec, libbrotlicommon), a FreeType dependency"),
     "mediaremote-adapter": Entry("BSD-3-Clause", "ThirdParty/mediaremote-adapter, embedded framework"),
+    "Sparkle": Entry("MIT AND BSD-2-Clause AND Zlib", "SwiftPM binary framework and its embedded components"),
     "(apple system)": Entry(None, "Apple system library or framework", "system"),
     "(build tool)": Entry(None, "build-time tool, not part of the product", "tool"),
 }
@@ -314,9 +315,10 @@ def run_command(command, cwd=None, env=None):
         return subprocess.CompletedProcess(command, 127, "", str(error))
 
 
-def parse_otool(text):
-    """The load commands `otool -L` lists, without the header line and the version suffixes."""
-    return [line.strip().split(" (compatibility")[0] for line in text.splitlines()[1:] if line.strip()]
+def parse_otool(text, *, strong_only=False):
+    """The unique load commands from every architecture in an `otool -L` listing."""
+    return list(dict.fromkeys(line.strip().split(" (compatibility version ", 1)[0] for line in text.splitlines()
+                              if " (compatibility version " in line and not (strong_only and line.rstrip().endswith(", weak)"))))
 
 
 # ---------------------------------------------------------------------------

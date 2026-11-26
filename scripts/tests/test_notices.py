@@ -40,6 +40,20 @@ def no_brew(command, cwd=None, env=None):
 
 
 class ChoiceTests(unittest.TestCase):
+    def test_sparkle_needs_its_distributions_complete_license_including_external_notices(self):
+        component = check_licenses.Component("Sparkle", "dylib", "dylibs", "2.10.0",
+                                             check_licenses.COMPONENTS["Sparkle"].license, "map")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "LICENSE"
+            with mock.patch.object(notices, "SPARKLE_LICENSE", path):
+                path.write_text(MIT)
+                with self.assertRaises(check_licenses.ToolError):
+                    notices.notice_for(component, None, no_brew, {})
+                path.write_text(MIT + BSD + "This software is provided 'as-is'.\n")
+                notice = notices.notice_for(component, None, no_brew, {})
+                self.assertTrue(notice.found)
+                self.assertEqual(notice.texts[0][1], path.read_text().strip())
+
     def test_a_dual_licensed_crate_is_noticed_under_mit(self):
         self.assertEqual(notices.chosen_ids("MIT OR Apache-2.0"), ("MIT",))
         self.assertEqual(notices.chosen_ids("Apache-2.0 OR MIT"), ("MIT",))

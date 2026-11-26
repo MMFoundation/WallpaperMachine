@@ -25,9 +25,9 @@ Add `inputs.wallpapermachine.homeManagerModules.default` to your Home Manager
     enable = true;
     # Start WallpaperMachine when you log in.
     launchd.enable = true;
+    # Let Nix manage updates on a writable Home Manager copy, too.
+    extraSettings."WallpaperMachine.updates.checksAutomatically" = false;
     settings = {
-      # Let Nix control app updates by default.
-      updates.mode = "notify";
       playback = {
         # Lower wallpaper quality while macOS is in Low Power Mode.
         lowPowerModeAction = "reduceQuality";
@@ -70,7 +70,7 @@ All options below are under `programs.wallpapermachine`.
 | `enable` | `false` | Install the app and apply preferences |
 | `package` | Package from this repository | Choose a different application package |
 | `launchd.enable` | `false` | Start at login without opening the panel after onboarding |
-| `settings.updates.mode` | `"notify"` | Choose `notify`, `download` or `automatic` updates |
+| `settings.updates.mode` | `"notify"` | Legacy updater only: choose `notify`, `download` or `automatic` for a pre-Sparkle release |
 | `settings.playback.*` | `null` | Configure playback actions, volume, battery thresholds, inactivity and mute |
 | `settings.desktopPicture.enable` | `null` | Write wallpaper snapshots as the macOS desktop picture |
 | `settings.desktopPicture.refreshPeriodically` | `null` | Refresh the macOS desktop picture periodically |
@@ -103,8 +103,12 @@ Removing a preference, or setting an optional preference to `null`, leaves its
 existing value in place. Your next Nix activation reapplies configured values
 that you changed in the app.
 
-The update mode defaults to `notify` so Nix controls application updates.
-To update WallpaperMachine, update its flake input and activate your
+Sparkle does not start for an app in the immutable Nix store. A writable Home
+Manager copy can check for new versions, but never downloads or restarts just
+because it found one. Set `extraSettings."WallpaperMachine.updates.checksAutomatically" = false;`
+to turn those checks off. The legacy `updates.mode` remains available for older pinned
+releases and does not enable unattended installation on new ones.
+To update WallpaperMachine through Nix, update its flake input and activate your
 configuration. After a release is published, CI advances `nix/release.json` on
 `main` with its version and the verified disk image's SHA-256. A release that
 finishes late cannot replace a newer pin. If publication succeeds but the pin

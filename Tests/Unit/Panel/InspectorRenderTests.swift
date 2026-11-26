@@ -191,7 +191,7 @@ final class InspectorRenderTests: InspectorTestCase {
         rootView: ControlPanelView(
           store: fixture.store, navigation: navigation, workshop: fixture.panel.workshop,
           pixiv: PixivStore(),
-          updater: AppUpdateStore(currentVersion: "0.1.0", client: DisabledAppUpdateClient()),
+          updater: SoftwareUpdateStatus(),
           imports: LibraryImportStore(), defaults: fixture.panel.defaults, appLanguage: languages))
       hosting.sizingOptions = []
       hosting.sceneBridgingOptions = [.toolbars, .title]

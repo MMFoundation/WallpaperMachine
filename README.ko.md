@@ -72,7 +72,7 @@ brew install --cask wallpapermachine
 Nix를 사용하시나요? [Nix 가이드](docs/nix.md)에서 flake 패키지와 Home Manager 또는
 nix-darwin을 통한 선언적 설정 방법을 확인할 수 있습니다.
 
-이후 과정은 시작 가이드에서 안내하고, 그다음부터는 앱이 스스로 업데이트합니다.
+이후 과정은 시작 가이드에서 안내합니다. 앱은 새 버전을 자동으로 확인하고 다운로드하기 전에 묻습니다.
 [설치 가이드](https://www.wallpapermachine.app/guides/install/)(영문)에서 모든 단계를
 그림과 함께 볼 수 있습니다.
 
@@ -126,19 +126,16 @@ nix-darwin을 통한 선언적 설정 방법을 확인할 수 있습니다.
   gh attestation verify WallpaperMachine-*-arm64.dmg --repo WallpaperMachine/WallpaperMachine
   ```
 - **개인정보 보호.** 앱은 사용자가 요청한 일에만 인터넷을 사용합니다. 창작마당을 열 때는 Steam,
-  pixiv를 열 때는 pixiv, 업데이트를 확인할 때는 GitHub에 연결합니다.
+  pixiv를 열 때는 pixiv, 업데이트를 확인할 때는 공식 웹사이트 또는 GitHub에 연결합니다.
   [성능 데이터 전송](docs/features/telemetry.md)을 켠 경우에만 로딩 시간, 프레임률,
   Mac 모델이 담긴 작은 보고서를 하루에 한 번 보냅니다. 이 보고서에는 이름, 파일,
   계정 정보가 없으며, 끄면 보낸 데이터도 삭제됩니다. 그 밖에는 그날 앱을 실행했다는
   [일일 실행 기록](docs/features/telemetry.md#daily-active-count)만 설치 ID 없이 버전 정보와 함께
   보냅니다. 몇 대의 Mac에서 쓰이는지 알기 위해서입니다.
   로그인 정보와 비밀번호는 Mac에만 남습니다.
-- **업데이트 검증.** 내장 업데이터는 SHA-256 해시가 릴리스와 일치하는 디스크 이미지만
-  설치합니다. 검증할 수 없는 파일은
-  [설치하지 않고 거부합니다](docs/features/updates.md#downloading).
-  중국 본토에서 VPN 없이 쓰는 경우처럼 GitHub에 연결할 수 없으면
-  [공개 GitHub 다운로드 프록시](docs/features/updates.md#what-a-check-reads)로 같은 파일을
-  받으며, 프록시는 설치되는 내용을 바꿀 수 없습니다.
+- **서명된 업데이트.** Sparkle은 WallpaperMachine의 업데이트 목록과 설치 파일의 서명을
+  확인한 뒤 압축을 풉니다. 공식 웹사이트를 먼저 사용하고 연결이 실패하면 GitHub에서
+  다시 시도합니다. [다운로드와 재시작 시점은 직접 선택합니다](docs/features/updates.md).
 - **유지 관리.** 새 버전이 자주 나오고, 모든 버전은 영어와 简体中文으로
   [변경 내역](CHANGELOG.md)에 정리됩니다.
 - **문제 보고.** 배경화면 세부 정보의 **작동하지 않나요? GitHub에 문제 보고**를 누르면
@@ -229,9 +226,8 @@ Mac 사용자 이름, Steam 계정 이름은 자동으로 가려집니다.
 1.8.2 이하 버전은 공증을 받지 않은 빌드라서 macOS는 시스템 설정 → 개인정보 보호 및 보안에서
 **그래도 열기**를 클릭할 때까지 첫 실행을 막습니다.
 [설치 가이드](https://www.wallpapermachine.app/guides/install/)(영문)가 다운로드부터
-시작 가이드까지 안내합니다. 그 후로는 앱이 새 버전을 직접 확인합니다. 앱이 응용 프로그램
-폴더에 있고 현재 계정에 수정 권한이 있으면, 메뉴에 **재시작하여 업데이트**가 나타납니다.
-Homebrew로 설치한 앱도 같은 방식으로 업데이트됩니다.
+시작 가이드까지 안내합니다. 그 후로는 앱이 새 버전을 직접 확인합니다. 메뉴 막대에서 새 버전을
+선택하면 변경 내용을 읽고 설치할 수 있습니다. Homebrew로 설치한 앱도 같은 방식으로 업데이트합니다.
 
 </details>
 

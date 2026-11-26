@@ -44,6 +44,12 @@ final class FeatureIntroductionStore {
         self.introductions = introductions
     }
 
+    var isUpgrade: Bool {
+        guard let currentVersion, let previous = defaults.string(forKey: Self.lastLaunchedVersionKey).flatMap(SemanticVersion.init)
+        else { return false }
+        return previous < currentVersion
+    }
+
     /// The introduction this launch shows, or nil.
     ///
     /// - Parameter existingUser: Whether this Mac used the app before (the first-run guide was

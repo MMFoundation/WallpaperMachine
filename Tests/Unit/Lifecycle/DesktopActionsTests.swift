@@ -36,13 +36,10 @@ final class DesktopActionsTests: XCTestCase {
     XCTAssertFalse(icons.areShown)
   }
 
-  /// The update store opens the releases page and reveals downloads through its live workspace
-  /// unless a test injects one; even then it must not reach the browser.
-  func testTheUpdaterWithItsLiveWorkspaceOpensNothingFromATest() {
+  func testTheReleaseNotesLinkOpensOnlyInTheStandInBrowser() {
     let log = DesktopActionLog.shared
     let opened = log.opened.count
-    let store = AppUpdateStore(currentVersion: "1.0.0", client: DisabledAppUpdateClient())
-    store.openReleases()
+    XCTAssertTrue(ExternalLink.open(AppUpdateConfiguration.releasesURL))
     XCTAssertEqual(log.opened.count, opened + 1)
     XCTAssertEqual(log.opened.last, AppUpdateConfiguration.releasesURL)
   }

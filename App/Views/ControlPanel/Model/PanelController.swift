@@ -26,7 +26,7 @@ final class PanelController {
   /// Puts a Workshop search typed in another language into English before Steam sees it.
   let searchTranslation: WorkshopSearchTranslator
   let pixiv: PixivStore
-  let updater: AppUpdateStore
+  let updater: SoftwareUpdateStatus
   /// Library imports, owned by the app so one outlives this panel.
   let imports: LibraryImportStore
   let importPicker = WallpaperImportPicker()
@@ -281,7 +281,7 @@ final class PanelController {
   init(
     store: BridgeStore, navigation: ControlPanelNavigation, workshop: WorkshopStore,
     pixiv: PixivStore? = nil,
-    updater: AppUpdateStore? = nil,
+    updater: SoftwareUpdateStatus? = nil,
     imports: LibraryImportStore? = nil,
     presentation: PanelPresentation? = nil,
     theme: AppThemeStore? = nil,
@@ -343,7 +343,7 @@ final class PanelController {
       searchTranslation
       ?? WorkshopSearchTranslator(defaults: defaults, appLanguage: { [appLanguage] in appLanguage.effective })
     self.pixiv = pixiv
-    self.updater = updater ?? AppUpdateStore(currentVersion: "0.0.0", client: DisabledAppUpdateClient())
+    self.updater = updater ?? SoftwareUpdateStatus()
     self.imports = imports
     self.theme = theme
     self.appLanguage = appLanguage

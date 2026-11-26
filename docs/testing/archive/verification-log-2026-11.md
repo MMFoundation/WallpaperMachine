@@ -9,6 +9,15 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-24 — Ignore WallpaperAgent LastUse updates and isolate lock-screen transient retries (#259)
+
+Fix for #259: SystemWallpaperStore ignores WallpaperAgent LastUse timestamp advances when confirming or replaying Desktop/Idle/Linked choices, and LockScreenWallpaperService resets transient failure budgets on new targets while keeping unrelated refreshes from bypassing back-off.
+
+- Red before fix (python3 scripts/test.py --only SystemWallpaperStoreTests --only LockScreenWallpaperServiceTests/...): 4 new regression tests failed (26 passed, 4 failed of 30) reproducing both LastUse reload conflicts and burned/shared retry budgets.
+- Targeted after fix (SystemWallpaperStoreTests, LockScreenWallpaperServiceTests, LockScreenWallpaperTests): 208 passed, 0 failed, 0 skipped.
+- Full gate (python3 scripts/test.py, macOS 27.3): all 36 Python test modules passed; native 5,165 passed, 0 failed, 70 skipped of 5,235 (1 runtime warning).
+- Not verified: live WallpaperAgent reload on the desktop, visual lock-screen check, or Release app build.
+
 ## 2026-11-23 — Workshop queue pauses after Steam limits sign-ins (#256)
 
 Fix for #256: a rate-limited sign-in (SteamCMD .rateLimited, QR logOnRefused(84)) pauses the jobs still waiting instead of each spending another sign-in. Verified on a fork's Test workflow (hosted macOS 26) because the contributor's machine has no Xcode.

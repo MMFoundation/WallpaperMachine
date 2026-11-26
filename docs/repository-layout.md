@@ -45,8 +45,8 @@ App/                               WallpaperMachine application target sources o
                                    and the clocks and dates on the desktop (DesktopWidget*)
     Diagnostics/                   runtime diagnostics session, diagnostics report, session ledger, counter sampling, energy readout,
                                    memory-pressure log and per-wallpaper energy ratings
-    GitHub/                        GitHub release client, update models, update store, installer, what's-new records,
-                                   and the update checks, prompt and window (AppUpdateCoordinator)
+    GitHub/                        signed Sparkle update checks, first-party transport, persistent reminders
+                                   and localized release history
     Library/                       ClientPaths (owns the app-support layout), import/deletion, still-image wallpapers,
                                    collections, presets, history, compatibility checks, the video black-bar check, backup and restore,
                                    the search's text folding (LibrarySearchText),

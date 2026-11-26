@@ -45,11 +45,16 @@ final class StatusPanelModelTests: XCTestCase {
 
     // MARK: What the panel shows
 
+    @MainActor
     func testAnUpdateRemainsVisibleWhenNoDisplayCanPlay() {
         var empty = input(displays: [], active: false)
-        empty.update = AppUpdateNotice(kind: .ready, version: "2.0.0", automatic: true)
+        let updater = SoftwareUpdateStatus()
+        updater.waitingVersion = "2.0.0"
+        XCTAssertNil(AppUpdateNotice(status: updater), "a build without an updater offers no saved version")
+        updater.isAvailable = true
+        empty.update = AppUpdateNotice(status: updater)
         let panel = Model.make(empty, display: nil, strip: [])
-        XCTAssertEqual(panel.update, empty.update)
+        XCTAssertEqual(panel.update?.version, "2.0.0")
         XCTAssertEqual(panel.state, .unavailable)
     }
 

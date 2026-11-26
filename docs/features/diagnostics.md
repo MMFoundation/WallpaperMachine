@@ -197,7 +197,7 @@ a quit another program sent.
 |---|---|
 | `signal` | SIGTERM or SIGHUP was turned into the quit by `TerminationSignalRelay` ([signals](crash-recovery.md#signals)); `signal=SIGTERM` in the line names it, and the session ledger keeps `terminated by SIGTERM` |
 | `logout`, `restart`, `shutdown` | the quit Apple event names that kind (`why?`: `rlgo`/`logo`, `rest`/`rrst`, `shut`/`rsdn`), or macOS announced a power-off (`NSWorkspace.willPowerOffNotification`) and the event named none. The announcement cannot say which kind it is, so that case reads `shutdown`; `appleEventReason=none` in the line tells it apart |
-| `update` | the updater has started its installer and is waiting for the app to quit (`AppUpdateStore.isInstallPending`). A Quit chosen while the update is still being prepared is the user's: it cancels the preparation |
+| `update` | Sparkle is requesting a relaunch after the user approved an update (`SoftwareUpdateController.isRelaunching`) |
 | `unknown` | the event carries a reason code this build does not know |
 | `user` | anything else: the menu, the Dock, another app's plain quit; `from` names which |
 

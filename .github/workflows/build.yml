@@ -1,5 +1,4 @@
-# Build the Release app on macOS, prove what was built, and attach its disk image to the
-# tag's GitHub Release.
+# Build the Release app on macOS and publish its verified DMG, ZIP and signed appcast.
 #
 # Called by Version right after it pushes a bump tag, and by Release for hand-pushed
 # tags. Version has to call it directly: a tag pushed with GITHUB_TOKEN never starts
@@ -81,6 +80,8 @@ jobs:
     # is the lowest release the published app can launch on (docs/build.md).
     runs-on: macos-15
     timeout-minutes: 150
+    outputs:
+      update-format: ${{ steps.format.outputs.name }}
     permissions:
       contents: read
       # Reads this run's jobs and artifacts while it waits for the app icon.
@@ -98,6 +99,29 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
         run: python3 scripts/bump_version.py --spec "${TAG#v}" --apply
+
+      - name: Select the tagged source's update format
+        id: format
+        run: |
+          set -euo pipefail
+          if [ -f scripts/sparkle_release.py ]; then
+            echo "name=sparkle" >> "$GITHUB_OUTPUT"
+          elif grep -Eq 'Sparkle|WALLPAPER_MACHINE_UPDATE_FEED|SUFeedURL|SUPublicEDKey' project.yml App/Resources/Info.plist; then
+            echo "::error::A Sparkle-configured tag is missing its release signing script."
+            exit 1
+          else
+            echo "name=legacy" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check the update signing keys and release version
+        if: steps.format.outputs.name == 'sparkle'
+        env:
+          TAG: ${{ inputs.tag }}
+          WALLPAPER_MACHINE_SPARKLE_PRIVATE_KEY: ${{ secrets.WALLPAPER_MACHINE_SPARKLE_PRIVATE_KEY }}
+          WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY: ${{ vars.WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY }}
+        run: |
+          export PATH="/opt/homebrew/opt/openssl@3/bin:$PATH"
+          python3 scripts/sparkle_release.py preflight --tag "$TAG"
 
       - name: Write the release notes
         if: ${{ !inputs.rehearsal }}
@@ -191,10 +215,17 @@ jobs:
           reuse-renderer-build: "true"
 
       - name: Build
+        env:
+          UPDATE_FORMAT: ${{ steps.format.outputs.name }}
+          WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY: ${{ vars.WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           xcodebuild -version
-          python3 scripts/build.py --configuration Release --no-app-icon
+          args=(--configuration Release --no-app-icon)
+          if [ "$UPDATE_FORMAT" = sparkle ]; then
+            args+=(--xcode-setting "WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY=$WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY")
+          fi
+          python3 scripts/build.py "${args[@]}"
 
       - name: Wait for the app icon
         # The icon job started with this one and needs about a minute against this job's
@@ -237,19 +268,23 @@ jobs:
         run: python3 scripts/build.py --configuration Release --install-app-icon "${RUNNER_TEMP}/app-icon"
 
       - name: Package
+        env:
+          UPDATE_FORMAT: ${{ steps.format.outputs.name }}
         # Relocates the bundle and signs it with the Developer ID and the hardened runtime,
         # has Apple notarize the app and staples the ticket to it, wraps it in the
         # drag-to-install disk image, signs, notarizes and staples the image, mounts it to
         # check the app's identifier, version, signature, ticket and the Applications link,
         # and only then writes the .sha256 sidecar (docs/build.md).
         run: |
-          python3 scripts/package.py --configuration Release --require-deployment-target \
-            --sign-identity "Developer ID Application" \
-            --notarize "WallpaperMachine Notary" --notary-keychain "${RUNNER_TEMP}/signing.keychain-db"
+          args=(--configuration Release --require-deployment-target --sign-identity "Developer ID Application"
+                --notarize "WallpaperMachine Notary" --notary-keychain "${RUNNER_TEMP}/signing.keychain-db")
+          if [ "$UPDATE_FORMAT" = sparkle ]; then args+=(--sparkle-archive); fi
+          python3 scripts/package.py "${args[@]}"
 
-      - name: Match the disk image to the tag
+      - name: Match the disk image and update ZIP to the tag
         env:
           TAG: ${{ inputs.tag }}
+          UPDATE_FORMAT: ${{ steps.format.outputs.name }}
         run: |
           set -euo pipefail
           directory="build/Build/Products/Release"
@@ -260,7 +295,9 @@ jobs:
             ls -1 "${directory}"/*.dmg 2>/dev/null || true
             exit 1
           fi
-          cp "${directory}/${name}" "${directory}/${name}.sha256" "${directory}/${name}.metadata.json" "${RUNNER_TEMP}/release/"
+          files=("${directory}/${name}" "${directory}/${name}.sha256" "${directory}/${name}.metadata.json")
+          if [ "$UPDATE_FORMAT" = sparkle ]; then files+=("${directory}/${name%.dmg}.zip"); fi
+          cp "${files[@]}" "${RUNNER_TEMP}/release/"
           {
             echo "### \`${name}\`"
             echo ""
@@ -268,6 +305,22 @@ jobs:
             cat "${directory}/${name}.sha256"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sign and verify the Sparkle archive and appcast
+        if: steps.format.outputs.name == 'sparkle'
+        env:
+          TAG: ${{ inputs.tag }}
+          REHEARSAL: ${{ inputs.rehearsal }}
+          WALLPAPER_MACHINE_SPARKLE_PRIVATE_KEY: ${{ secrets.WALLPAPER_MACHINE_SPARKLE_PRIVATE_KEY }}
+          WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY: ${{ vars.WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/opt/openssl@3/bin:$PATH"
+          assets="${RUNNER_TEMP}/release"
+          notes=(--changelog "${assets}/CHANGELOG.md")
+          if [ "$REHEARSAL" = true ]; then notes=(--rehearsal); fi
+          python3 scripts/sparkle_release.py sign --tag "$TAG" --archive "${assets}/WallpaperMachine-${TAG#v}-arm64.zip" \
+            --output "${assets}/appcast.xml" "${notes[@]}"
 
       - name: Report the C++ object cache
         if: always()
@@ -358,7 +411,7 @@ jobs:
         # holds a section generated for a hand-pushed tag; this job's checkout does not.
         env:
           TAG: ${{ inputs.tag }}
-          REPOSITORY: ${{ github.repository }}
+          REPOSITORY: MMFoundation/WallpaperMachine
           IMAGE: ${{ steps.image.outputs.image }}
         run: |
           set -euo pipefail
@@ -374,12 +427,20 @@ jobs:
           IMAGE: ${{ steps.image.outputs.image }}
           CHECKSUM: ${{ steps.image.outputs.checksum }}
           MANIFEST: ${{ steps.manifest.outputs.manifest }}
+          UPDATE_FORMAT: ${{ needs.build.outputs.update-format }}
+          WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY: ${{ vars.WALLPAPER_MACHINE_SPARKLE_PUBLIC_KEY }}
         # Drafts first, a live release is refused rather than clobbered, and Latest
         # is claimed only when no greater version is public: scripts/publish_release.py,
         # covered by scripts/tests/test_publish_release.py.
         run: |
-          python3 scripts/publish_release.py --tag "$TAG" --notes "${RUNNER_TEMP}/release/notes.md" \
-            "$IMAGE" "$CHECKSUM" "$MANIFEST"
+          set -euo pipefail
+          assets=("$IMAGE" "$CHECKSUM" "$MANIFEST")
+          case "$UPDATE_FORMAT" in
+            sparkle) assets+=("${IMAGE%.dmg}.zip" "${RUNNER_TEMP}/release/appcast.xml") ;;
+            legacy) ;;
+            *) echo "::error::No verified update format for this build."; exit 1 ;;
+          esac
+          python3 scripts/publish_release.py --tag "$TAG" --notes "${RUNNER_TEMP}/release/notes.md" "${assets[@]}"
 
   nix-release:
     name: Update the Nix release pin

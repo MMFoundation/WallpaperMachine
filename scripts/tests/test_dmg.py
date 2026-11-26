@@ -248,6 +248,17 @@ class DiskImageRoundTripTests(unittest.TestCase):
         self.assertEqual(metadata, {"version": VERSION, "bundle_identifier": dmg.BUNDLE_IDENTIFIER,
                                     "minimum_system_version": "15.0", "architectures": ["arm64"]})
 
+    def test_sparkle_archive_round_trips_the_verified_app_from_the_image(self):
+        root = Path(self.scratch.name)
+        archive = self.image.with_suffix(".zip")
+        dmg.verify(self.image, VERSION, contract=self.accept, archive=archive)
+        extracted = root / "extracted"
+        subprocess.run(["ditto", "-x", "-k", archive, extracted], check=True, capture_output=True)
+        app = extracted / dmg.APPLICATION
+        subprocess.run(["codesign", "--verify", "--deep", "--strict", app], check=True, capture_output=True)
+        self.assertEqual((app / "Contents/MacOS/WallpaperMachine").read_bytes(),
+                         (root / "input" / dmg.APPLICATION / "Contents/MacOS/WallpaperMachine").read_bytes())
+
     def test_the_contract_runs_on_the_app_inside_the_mounted_image(self):
         seen = []
 

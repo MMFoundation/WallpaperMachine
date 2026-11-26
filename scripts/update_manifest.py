@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write the update manifest the in-app updater reads instead of the GitHub API.
+"""Write the compatibility manifest read by releases that predate Sparkle.
 
 Anonymous GitHub API requests are limited to 60 an hour per public IP address, shared
 by every app and device behind it, so a busy network can leave the updater locked out.
@@ -11,8 +11,8 @@ The manifest is the release object in the REST API's shape (`tag_name`, `html_ur
 `prerelease`, `body`, `assets` with `browser_download_url`, `size` and a `sha256:`
 `digest`), so the app parses both with `GitHubReleaseParser`. Everything in it is
 derived from the tag, the notes file that becomes the release body, the changelog and
-the image bytes;
-the name is `AppUpdateConfiguration.manifestName` in the app.
+the image bytes. Its public name and schema must stay stable for those installed apps.
+Sparkle clients use the signed appcast instead; their updater never trusts this manifest.
 
 `--changelog` adds one field the API does not have: `changelog`, the newest 20
 (CHANGELOG_SECTIONS) `## ` version sections of CHANGELOG.md verbatim, in all their

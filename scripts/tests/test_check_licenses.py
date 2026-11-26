@@ -243,6 +243,19 @@ class CargoTreeTests(unittest.TestCase):
 
 
 class AppWalkTests(unittest.TestCase):
+    def test_otool_unions_load_commands_across_architectures_without_treating_headers_as_dependencies(self):
+        listing = """Example.framework/Example (architecture x86_64):
+	@rpath/Example.framework/Example (compatibility version 1.0.0, current version 2.0.0)
+	/usr/lib/libone.dylib (compatibility version 1.0.0, current version 2.0.0)
+Example.framework/Example (architecture arm64):
+	@rpath/Example.framework/Example (compatibility version 1.0.0, current version 2.0.0)
+	/usr/lib/libtwo.dylib (compatibility version 1.0.0, current version 2.0.0, weak)
+"""
+        self.assertEqual(check_licenses.parse_otool(listing), [
+            "@rpath/Example.framework/Example", "/usr/lib/libone.dylib", "/usr/lib/libtwo.dylib"])
+        self.assertEqual(check_licenses.parse_otool(listing, strong_only=True), [
+            "@rpath/Example.framework/Example", "/usr/lib/libone.dylib"])
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

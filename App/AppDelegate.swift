@@ -28,18 +28,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Files handed to the app before it finished launching, imported once it has.
     private var pendingOpenedFiles: [URL] = []
     private var finishedLaunching = false
-    private(set) lazy var updates = AppUpdateCoordinator(
-        updater: AppUpdateStore(),
-        isShuttingDown: { [weak self] in
-            guard let self else { return true }
-            return self.shutdownInProgress || self.shutdownComplete
-        },
-        isUnattended: { [weak self] in self?.presentationPolicy?.isUnattended == true },
-        menuChanged: { [weak self] in self?.rebuildMenu() },
-        showAbout: { [weak self] in self?.showAboutSettings() },
-        // The automatic update loop asks the Workshop too, since the app can run for weeks.
-        beforeAutomaticCheck: { [weak self] in self?.checkWorkshopUpdatesIfDue() },
-        windowClosed: { [weak self] in self?.leaveDockUnlessAWindowIsOpen() })
+    private(set) lazy var updates = SoftwareUpdateController(
+        canRun: { [weak self] in self?.shutdownInProgress == false && self?.shutdownComplete == false },
+        didChange: { [weak self] in
+            self?.rebuildMenu()
+            self?.presentUpdateReminderIfNeeded()
+            self?.leaveDockUnlessAWindowIsOpen()
+        })
+    private var updateActivity: NSBackgroundActivityScheduler?
     private var displayChangeObserver: NSObjectProtocol?
     private var powerOffObserver: NSObjectProtocol?
     /// Follows the drive of a library kept on another disk: stops its wallpapers when it goes, plays
@@ -197,6 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         AppLog.info("startup: didFinishLaunching start")
         openLibrary()
+        updates.start()
         startShell()
         startLibraryServices()
         finishLaunching(launchEvent: launchEvent)
@@ -717,10 +714,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                             // running for scenes that stopped presenting, until
                             // some unrelated UI change happens to apply one.
                             self.sceneMediaSink?.reconcile()
-                            // Wallpapers presenting again is the moment an update alert held
-                            // back by sleep, a lock or an app rule may appear, and sleep or a
-                            // lock is the moment an automatic update installs.
-                            self.updates.installIfUnattended()
                             completion(.success(()))
                         } catch {
                             // An unload that did not happen frees nothing: the kept wallpapers
@@ -867,6 +860,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             policy.onAttendanceChanged = { [weak self, weak policy] in
                 guard let self, let policy else { return }
                 self.menuBarEnergy.setUnattended(policy.isUnattended)
+                if !policy.isUnattended { self.presentUpdateReminderIfNeeded() }
             }
             // The policy started above, so a session locked at launch is already known.
             menuBarEnergy.setUnattended(policy.isUnattended)
@@ -1011,6 +1005,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         AppLog.info("startup: bootstrap dispatched")
         startDiagnosticsSessionIfRequested()
         finishedLaunching = true
+        startUpdateActivity()
         startTerminationSignalRelay()
         let opened = pendingOpenedFiles
         pendingOpenedFiles = []
@@ -1025,9 +1020,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             AppLog.info("startup: \(reason); control panel stays closed")
         }
         DispatchQueue.main.async { [weak self] in
-            if opensPanel { self?.showControlPanel(selection: .wallpaper) }
-            if !opened.isEmpty { self?.importOpenedFiles(opened) }
-            self?.showFeatureIntroductionIfDue()
+            guard let self else { return }
+            let onboarded = PanelPreferences.welcomeSeen()
+            let showNotes = opened.isEmpty && store != nil && updates.status.isAvailable
+                && onboarded && featureIntroductions.isUpgrade
+            let introduction = store == nil ? nil : featureIntroductions.due(existingUser: onboarded)
+            if showNotes && introduction == nil { showAboutSettings() }
+            else if opensPanel { showControlPanel(selection: .wallpaper) }
+            if !opened.isEmpty { importOpenedFiles(opened) }
+            if let introduction { showFeatureIntroduction(introduction) }
         }
     }
 
@@ -1407,7 +1408,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        guard !shutdownInProgress, !shutdownComplete,
+        presentUpdateReminderIfNeeded()
+        guard !shutdownInProgress, !shutdownComplete, !updates.isPresentingUpdate,
               let window = controlPanelWindow, !window.isVisible || window.isMiniaturized else { return }
         NSApp.setActivationPolicy(.regular)
         ControlPanelWindow.bringForward(window)
@@ -1480,7 +1482,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // A copy opened while this one quits waits for the library instead of handing over to it.
         InstanceLock.current?.setPhase(.quitting)
         let panelWasVisible = controlPanelWindow?.isVisible == true
-        let updateWindowWasVisible = updates.window?.isVisible == true
         previewWindow?.session.close()
         previewWindow?.close()
         previewWindow = nil
@@ -1491,7 +1492,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Keep this restorer through native-provider callbacks and reloads.
         let wallpaperRestorer = desktopWallpaperSync
         controlPanelWindow?.orderOut(nil)
-        updates.window?.orderOut(nil)
         leaveDockUnlessAWindowIsOpen()
 
         Task {
@@ -1512,13 +1512,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 // the reply is out, by a new one. The reply never lands on a quit that has begun.
                 cancelQuit(
                     cancellation, restorationBudget: supervisor.budgets.restoration,
-                    restoringPanel: panelWasVisible, updateWindow: updateWindowWasVisible)
+                    restoringPanel: panelWasVisible)
                 sender.reply(toApplicationShouldTerminate: false)
-                if !updates.updater.isAutomaticInstallation { presentQuitFailure(cancellation) }
-                // An installer waiting for this app to quit would replace it whenever it did. The
-                // helper takes up to two seconds to answer, which is why this comes last.
-                await updates.updater.cancelPendingInstall()
-                await updates.resumeAfterCancelledQuit()
+                updates.quitWasCancelled()
+                presentQuitFailure(cancellation)
                 rebuildMenu()
             case .proceed(let stalled):
                 completeQuit(sender, reason: reason, signal: signal, desktopUnrestored: false, stalled: stalled)
@@ -1662,17 +1659,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         stillImageSpanHost = nil
         nativeVideoHost?.shutdown()
         nativeVideoHost = nil
-        updates.cancel()
+        updateActivity?.invalidate()
+        updateActivity = nil
     }
 
     /// The desktop could not be restored in time or at all, so the app keeps running:
     /// everything the quit stopped starts again and the panel comes back. Synchronous on
     /// purpose: the caller replies to the system right after it, and the app must not count
     /// as running again before that reply is on its way (see `applicationShouldTerminate`).
-    /// A pending update install is called off by the caller afterwards.
     private func cancelQuit(
         _ cancellation: QuitSupervisor.Cancellation, restorationBudget: Duration,
-        restoringPanel: Bool, updateWindow restoringUpdateWindow: Bool
+        restoringPanel: Bool
     ) {
         let failure = QuitFailure(cancellation)
         switch cancellation {
@@ -1702,10 +1699,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if restoringPanel {
             showControlPanel(selection: controlPanelNavigation.selection ?? .wallpaper)
         }
-        if restoringUpdateWindow, let updateWindow = updates.window {
-            NSApp.setActivationPolicy(.regular)
-            ControlPanelWindow.bringForward(updateWindow)
-        }
         rebuildMenu()
     }
 
@@ -1727,7 +1720,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let signal = terminationSignal
         terminationSignal = nil
         let powerOffNotified = powerOffNotice.isCurrent()
-        let updateInstallPending = updates.updater.isInstallPending
+        let updateInstallPending = updates.isRelaunching
         let reason = QuitReason.classify(
             appleEventReason: appleEventReason,
             powerOffNotified: powerOffNotified,
@@ -1921,7 +1914,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func activationPolicyRole(of window: NSWindow) -> ActivationPolicyRule.Window.Role? {
         if window === controlPanelWindow { return .controlPanel }
-        if window === updates.window { return .update }
+        if SoftwareUpdateController.owns(window) { return .update }
         if window === previewWindow?.window { return .preview }
         if window === featureIntroWindow { return .introduction }
         if WebSignInWindowController.isOpen(window) { return .signIn }
@@ -1967,11 +1960,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             installed: store.librarySnapshot.wallpapers.map(\.id), library: ClientPaths.libraryURL)
     }
 
+    private func startUpdateActivity() {
+        guard updateActivity == nil else { return }
+        let activity = NSBackgroundActivityScheduler(identifier: "app.wallpapermachine.update-check")
+        activity.repeats = true
+        activity.interval = SoftwareUpdateController.interval
+        activity.tolerance = activity.interval / 6
+        activity.qualityOfService = .utility
+        activity.schedule { [weak self] completion in
+            Task { @MainActor in
+                self?.checkWorkshopUpdatesIfDue()
+                self?.updates.checkInBackgroundIfDue()
+                self?.presentUpdateReminderIfNeeded()
+                completion(.finished)
+            }
+        }
+        updateActivity = activity
+        updates.checkInBackgroundIfDue()
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        if notification.object as? NSWindow === controlPanelWindow { presentUpdateReminderIfNeeded() }
+    }
+
+    private func presentUpdateReminderIfNeeded() {
+        guard finishedLaunching, !shutdownInProgress, PanelPreferences.welcomeSeen(), NSApp.isActive,
+              presentationPolicy?.isUnattended != true, featureIntroWindow == nil,
+              let window = controlPanelWindow, window.isKeyWindow, window.attachedSheet == nil,
+              NSApp.modalWindow == nil, let version = updates.takeReminder() else { return }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "WallpaperMachine \(version) Is Available")
+        alert.informativeText = String(localized: "Your wallpapers and settings are kept when you update.")
+        alert.addButton(withTitle: String(localized: "Update Now"))
+        alert.addButton(withTitle: String(localized: "Remind Me Tomorrow"))
+        alert.addButton(withTitle: String(localized: "Skip This Version"))
+        alert.beginSheetModal(for: window) { [weak self] answer in
+            switch answer {
+            case .alertFirstButtonReturn: self?.updates.checkNow()
+            case .alertThirdButtonReturn: self?.updates.skip(version)
+            default: self?.updates.postpone(version)
+            }
+        }
+    }
+
     /// An error alert, shown from the main run loop: a modal run inside a main-actor task would
     /// stall every other main-actor task until the alert closes. The callers run inside
     /// main-actor tasks and main-queue jobs.
     private func presentErrorAlert(_ error: Error, bringForward: Bool = false) {
-        AppUpdateStore.performOnMainRunLoop { [weak self] in
+        RunLoop.main.perform { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.shutdownInProgress, !self.shutdownComplete else { return }
                 // An accessory app's alert opens behind the active app unless it is brought forward.
@@ -1990,10 +2026,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The feature introduction this launch owes, once: after an update into the feature, over the
     /// panel when the launch opens it. Not while the library failed to open, where its button would
     /// lead nowhere; the next launch offers it then.
-    private func showFeatureIntroductionIfDue() {
-        guard store != nil, !shutdownInProgress, !shutdownComplete, featureIntroWindow == nil,
-              let introduction = featureIntroductions.due(existingUser: PanelPreferences.welcomeSeen())
-        else { return }
+    private func showFeatureIntroduction(_ introduction: FeatureIntroduction) {
+        guard !shutdownInProgress, !shutdownComplete, featureIntroWindow == nil else { return }
         let window = FeatureIntroWindow.make(actions: FeatureIntroWindow.Actions(
             open: { [weak self] in
                 guard let self else { return }
@@ -2043,7 +2077,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let store {
             return AnyView(ControlPanelView(
                 store: store, navigation: controlPanelNavigation, workshop: workshopStore,
-                pixiv: pixivStore, updater: updates.updater, imports: libraryImports))
+                pixiv: pixivStore, updater: updates.status, imports: libraryImports))
         }
         let error = startupError ?? lastError
         return AnyView(BridgeUnavailableView(
@@ -2506,8 +2540,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
             }
             rebuildMenu()
-            // Also after a failed start: the update may be the fix.
-            updates.startAutomaticChecks()
         }
     }
 
