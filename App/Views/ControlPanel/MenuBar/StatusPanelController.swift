@@ -227,7 +227,7 @@ final class StatusPanelController {
     guard volumeRead?.key != key else { return }
     volumeRead?.task.cancel()
     let task = Task { [weak self] in
-      guard let source = self?.source else { return }
+      guard !Task.isCancelled, let source = self?.source else { return }
       let read = try? await source.statusPanelVolume(of: id)
       guard let self, !Task.isCancelled, self.isStarted, self.volumeRead?.key == key,
         let read, read != self.displayVolumes[id]
