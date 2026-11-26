@@ -553,7 +553,8 @@ final class WorkshopStoreTests: XCTestCase {
     func next(_ endpoint: String) async throws -> WorkshopFixtureProtocol {
       try await waitUntil { fixture.inbox.hasRequest }
       let pending = fixture.inbox.take()
-      XCTAssertTrue(pending.request.url!.pathComponents.contains(endpoint))
+      let url = try XCTUnwrap(pending.request.url)
+      XCTAssertTrue(url.pathComponents.contains(endpoint), "Expected \(endpoint), received \(url.path)")
       return pending
     }
 
@@ -565,7 +566,11 @@ final class WorkshopStoreTests: XCTestCase {
 
     store.search()
     let refresh = try await next("GetCollectionDetails")
+    let secondPage = expectation(description: "Page 2 requests membership while the refresh is pending")
+    store.onCollectionMembershipRequested = { secondPage.fulfill() }
     store.loadPage(2)
+    await fulfillment(of: [secondPage], timeout: 5)
+    store.onCollectionMembershipRequested = nil
     refresh.succeed(members)
     for _ in 1...2 { try await next("GetPublishedFileDetails").succeed(details) }
     try await finished(store)
