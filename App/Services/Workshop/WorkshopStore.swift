@@ -853,6 +853,7 @@ final class WorkshopStore {
   /// What `unload()` left: the page the list was on, read again by `loadIfNeeded()`.
   @ObservationIgnored private var resumeRequest: WorkshopRequest?
   @ObservationIgnored private var steamFetches: [WorkshopRequest: Task<WorkshopPage, Error>] = [:]
+  @ObservationIgnored private var collectionFetch: Task<[String], Error>?
   @ObservationIgnored private var screenedFetches: [Int: Task<WorkshopPage, Error>] = [:]
   /// How many Steam pages a panel page may read before it is shown with what it found, so a
   /// search whose collections are nearly all screened out does not read Steam to its end.
@@ -1282,10 +1283,30 @@ final class WorkshopStore {
   private func resetCache(for query: WorkshopQuery?) {
     for task in steamFetches.values { task.cancel() }
     for task in screenedFetches.values { task.cancel() }
+    collectionFetch?.cancel()
+    collectionFetch = nil
     steamFetches = [:]
     screenedFetches = [:]
     cacheID = UUID()
     if let query { cache = PageCache(query: query) }
+  }
+
+  /// Pages of the same collection share the ordered IDs, including while Steam is answering.
+  private func collectionIDs(_ id: String) async throws -> [String] {
+    try Task.checkCancellation()
+    if let ids = cache.collectionIDs { return ids }
+    if let collectionFetch { return try await collectionFetch.value }
+    let cacheID = cacheID
+    let fetch = Task {
+      defer { if self.cacheID == cacheID { collectionFetch = nil } }
+      try Task.checkCancellation()
+      let ids = try await service.collectionItemIDs(id: id)
+      try Task.checkCancellation()
+      cache.collectionIDs = ids
+      return ids
+    }
+    collectionFetch = fetch
+    return try await fetch.value
   }
 
   /// One Steam page of `query`. When Steam refuses the held session on a public list, the ended
@@ -1294,14 +1315,15 @@ final class WorkshopStore {
     let account = try await readingSession(for: query)
     // Replaced while a saved sign-in or a renewal was awaited: Steam is not asked at all.
     try Task.checkCancellation()
+    let members: @Sendable (String) async throws -> [String] = { try await self.collectionIDs($0) }
     do {
-      let page = try await service.page(for: query, page: number, account: account)
+      let page = try await service.page(for: query, page: number, account: account, collectionIDs: members)
       if let account { rememberSteamWebPersonaName(page.accountName, for: account) }
       return page
     } catch is SteamSignInRequired where !query.source.isPersonal && account != nil {
       forgetSteamWebSession(endedWith: account)
       try Task.checkCancellation()
-      return try await service.page(for: query, page: number, account: nil)
+      return try await service.page(for: query, page: number, account: nil, collectionIDs: members)
     }
   }
 
@@ -1530,6 +1552,7 @@ private struct SteamPosition: Equatable {
 private struct PageCache {
   /// The query the pages were read for; nil before the first search.
   var query: WorkshopQuery?
+  var collectionIDs: [String]?
   /// Panel pages, keyed by page number.
   var steamPages: [Int: WorkshopPage] = [:]
   /// For panel pages filled from several Steam pages: the screened Steam pages, keyed by
@@ -1541,6 +1564,7 @@ private struct PageCache {
 
   /// Lets go of the pages read, keeping the query and where each panel page starts.
   mutating func dropPages() {
+    collectionIDs = nil
     steamPages = [:]
     screenedPages = [:]
   }
