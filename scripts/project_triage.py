@@ -16,6 +16,8 @@ from lib.glyphs import markers
 
 MARK = markers()
 DCO_CONTEXT = "Project triage / DCO"
+TRIAGE_WORKFLOW = "Project triage"
+TRIAGE_CHECK = "triage"
 PR_STATES = {"status: blocked", "status: in-review", "status: ready"}
 ISSUE_STATES = {"status: has-pr", "status: needs-triage"}
 AREA_CHOICES = {
@@ -189,6 +191,8 @@ def pr_change(pr, paths, commits, threads, checks, runs, statuses):
     if not approved:
         waiting.append("Current-head approval pending")
     for check in checks:
+        if check["name"] == TRIAGE_CHECK and (check.get("app") or {}).get("slug") in {None, "github-actions"}:
+            continue
         if check["status"] != "completed":
             waiting.append(f"Check pending: {check['name']}")
         elif check["conclusion"] not in {"success", "neutral", "skipped"}:
@@ -198,7 +202,7 @@ def pr_change(pr, paths, commits, threads, checks, runs, statuses):
         waiting.append("Passing Python script tests not reported on this head")
     latest_runs = {}
     for run in runs:
-        if run["name"] == "Project triage":
+        if run["name"] == TRIAGE_WORKFLOW:
             continue
         key = (run.get("workflow_id", run["name"]), run.get("event"), run.get("head_branch"))
         if key not in latest_runs or (run.get("id", 0), run.get("run_attempt", 0)) > (

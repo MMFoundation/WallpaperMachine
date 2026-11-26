@@ -193,7 +193,15 @@ class ReadinessTests(unittest.TestCase):
         runs = [{"id": 2, "workflow_id": 10, "name": "Checks", "status": "completed", "conclusion": "success"},
                 {"id": 1, "workflow_id": 10, "name": "Checks", "status": "completed", "conclusion": "cancelled"},
                 {"name": "Project triage", "status": "in_progress", "conclusion": None}]
-        self.assertIn("status: ready", ready_change(runs=runs).desired)
+        checks = [{"name": "Python script tests", "status": "completed", "conclusion": "success"},
+                  {"name": "triage", "status": "completed", "conclusion": "cancelled", "app": {"slug": "github-actions"}},
+                  {"name": "triage", "status": "in_progress", "conclusion": None}]
+        self.assertIn("status: ready", ready_change(checks=checks, runs=runs).desired)
+
+    def test_triage_check_from_another_app_still_blocks(self):
+        checks = [{"name": "Python script tests", "status": "completed", "conclusion": "success"},
+                  {"name": "triage", "status": "completed", "conclusion": "cancelled", "app": {"slug": "other-app"}}]
+        self.assertIn("status: blocked", ready_change(checks=checks).desired)
 
     def test_own_old_dco_failure_does_not_block_after_signoff_fix(self):
         self.assertIn("status: ready", ready_change(statuses=[{"context": triage.DCO_CONTEXT, "state": "failure"}]).desired)
