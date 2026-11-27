@@ -12,6 +12,95 @@ update offer shows the new version's localized notes. Settings → About shows i
 release history offline; the GitHub Release body repeats only the English notes.
 See [docs/release.md](docs/release.md) for how a version is cut.
 
+## [1.17.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.16.0...v1.17.0) (2026-11-27)
+
+### English
+
+This release gives the control panel fresh seasonal and translucent styles and helps wallpapers fit and respond more naturally on your screens
+
+#### Highlights
+
+- A festive Christmas look brings winter colours, snowy scenery and a Christmas tree Dock icon to the control panel (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- The control panel can now use a translucent Liquid Glass window style with adjustable transparency (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- Wallpapers shrunk below full size can now sit on a soft, darkened blurred backdrop instead of empty space (closes [#268](https://github.com/MMFoundation/WallpaperMachine/issues/268)) ([96ac942](https://github.com/MMFoundation/WallpaperMachine/commit/96ac942bde3ac1661bd51b263fd16699f0d82cbd))
+- Scene and web wallpapers on the experimental lock screen now respond to your cursor with parallax and hover effects (closes [#266](https://github.com/MMFoundation/WallpaperMachine/issues/266)) ([db93abd](https://github.com/MMFoundation/WallpaperMachine/commit/db93abd2b684e192525e71e87b24cfd2199f7c43))
+
+#### Features
+
+- Turn on a Christmas look in Appearance settings with winter palettes and a tree Dock icon, active automatically from December 18 to 26, or set Always or Off (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- Pick a Solid or translucent Liquid Glass window style in Appearance settings and tune transparency with a live-preview slider that keeps text readable (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- Choose the new Fill with blurred backdrop scaling to surround a scaled-down wallpaper with a soft blurred copy of itself, while plain videos keep black bars (closes [#268](https://github.com/MMFoundation/WallpaperMachine/issues/268)) ([96ac942](https://github.com/MMFoundation/WallpaperMachine/commit/96ac942bde3ac1661bd51b263fd16699f0d82cbd))
+- On the experimental lock screen, scene and web wallpapers follow your cursor for parallax and hover effects, while clicks and typing never reach the wallpaper (closes [#266](https://github.com/MMFoundation/WallpaperMachine/issues/266)) ([db93abd](https://github.com/MMFoundation/WallpaperMachine/commit/db93abd2b684e192525e71e87b24cfd2199f7c43))
+
+#### Improvements
+
+- Paging through Steam Workshop collections is quicker because the app no longer reloads the collection's item list for every page ([cb739df](https://github.com/MMFoundation/WallpaperMachine/commit/cb739dffe17b7b08bff9322ca8d93f74ea811c76))
+
+#### Bug Fixes
+
+- The menu bar volume slider shows the right level straight away when switching displays and no longer jumps back after you drag it ([69f6b35](https://github.com/MMFoundation/WallpaperMachine/commit/69f6b35825e46b00ec6992208a23672c7bf8b4b4), [296418f](https://github.com/MMFoundation/WallpaperMachine/commit/296418fab73da18fa5769d3e27abfa2892a0e23b))
+- App windows left open on another Space now move to your current Space and keep focus when brought forward (closes [#263](https://github.com/MMFoundation/WallpaperMachine/issues/263)) ([b827512](https://github.com/MMFoundation/WallpaperMachine/commit/b8275122ad575673df13f07f41ee14a2e45f95c0))
+
+Thanks to [@jmalinkiewicz](https://github.com/jmalinkiewicz) for contributing to this release.
+
+### 简体中文
+
+本次更新为控制面板带来全新的节日与半透明样式，并让壁纸在屏幕上的显示与互动更加自然
+
+#### 亮点
+
+- 全新圣诞外观为控制面板带来冬日配色、雪景插画和圣诞树程序坞图标 (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- 控制面板现可使用半透明的 Liquid Glass 窗口样式，并可自由调节透明度 (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- 缩小显示的壁纸现可衬上一层柔和、偏暗的模糊背景，不再留出空白 (closes [#268](https://github.com/MMFoundation/WallpaperMachine/issues/268)) ([96ac942](https://github.com/MMFoundation/WallpaperMachine/commit/96ac942bde3ac1661bd51b263fd16699f0d82cbd))
+- 实验性锁定屏幕上的场景和网页壁纸现会随指针呈现视差和悬停效果 (closes [#266](https://github.com/MMFoundation/WallpaperMachine/issues/266)) ([db93abd](https://github.com/MMFoundation/WallpaperMachine/commit/db93abd2b684e192525e71e87b24cfd2199f7c43))
+
+#### 新功能
+
+- 可在“外观”设置中启用圣诞外观，带来冬日配色和圣诞树程序坞图标，12 月 18 日至 26 日自动生效，也可设为始终开启或关闭 (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- 可在“外观”设置中选择实色或半透明的 Liquid Glass 窗口样式，并用实时预览的滑块调节透明度，文字依然清晰可读 (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- 新增“填充并模糊背景”缩放方式，缩小后的壁纸四周会以柔和的模糊画面填满，普通视频仍显示黑边 (closes [#268](https://github.com/MMFoundation/WallpaperMachine/issues/268)) ([96ac942](https://github.com/MMFoundation/WallpaperMachine/commit/96ac942bde3ac1661bd51b263fd16699f0d82cbd))
+- 在实验性锁定屏幕上，场景和网页壁纸会跟随指针呈现视差和悬停效果，点击和键盘输入不会作用于壁纸 (closes [#266](https://github.com/MMFoundation/WallpaperMachine/issues/266)) ([db93abd](https://github.com/MMFoundation/WallpaperMachine/commit/db93abd2b684e192525e71e87b24cfd2199f7c43))
+
+#### 改进
+
+- 浏览 Steam 创意工坊合集时翻页更快，不再为每一页重新加载合集的内容列表 ([cb739df](https://github.com/MMFoundation/WallpaperMachine/commit/cb739dffe17b7b08bff9322ca8d93f74ea811c76))
+
+#### 问题修复
+
+- 菜单栏音量滑块在切换显示器时会立即显示正确音量，拖动后也不再跳回原处 ([69f6b35](https://github.com/MMFoundation/WallpaperMachine/commit/69f6b35825e46b00ec6992208a23672c7bf8b4b4), [296418f](https://github.com/MMFoundation/WallpaperMachine/commit/296418fab73da18fa5769d3e27abfa2892a0e23b))
+- 留在其他空间中的应用窗口在被调出时会移到当前空间，并保持焦点 (closes [#263](https://github.com/MMFoundation/WallpaperMachine/issues/263)) ([b827512](https://github.com/MMFoundation/WallpaperMachine/commit/b8275122ad575673df13f07f41ee14a2e45f95c0))
+
+感谢 [@jmalinkiewicz](https://github.com/jmalinkiewicz) 为本版本做出的贡献。
+
+### 한국어
+
+이번 업데이트는 제어판에 새로운 시즌 테마와 반투명 스타일을 더하고, 배경화면이 화면에 더 자연스럽게 맞춰지고 반응하도록 합니다
+
+#### 주요 변경 사항
+
+- 새로운 크리스마스 테마가 제어판에 겨울 색감, 눈 덮인 풍경, 크리스마스 트리 Dock 아이콘을 더합니다 (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- 이제 제어판에 투명도를 조절할 수 있는 반투명 Liquid Glass 창 스타일을 적용할 수 있습니다 (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- 원래 크기보다 작게 줄인 배경화면 뒤를 이제 빈 공간 대신 부드럽고 어둡게 흐린 배경으로 채울 수 있습니다 (closes [#268](https://github.com/MMFoundation/WallpaperMachine/issues/268)) ([96ac942](https://github.com/MMFoundation/WallpaperMachine/commit/96ac942bde3ac1661bd51b263fd16699f0d82cbd))
+- 실험적 잠금 화면의 장면 및 웹 배경화면이 이제 커서에 반응해 시차와 호버 효과를 보여 줍니다 (closes [#266](https://github.com/MMFoundation/WallpaperMachine/issues/266)) ([db93abd](https://github.com/MMFoundation/WallpaperMachine/commit/db93abd2b684e192525e71e87b24cfd2199f7c43))
+
+#### 새로운 기능
+
+- 화면 모드 설정에서 겨울 색감과 트리 Dock 아이콘을 갖춘 크리스마스 테마를 켤 수 있으며, 12월 18일부터 26일까지 자동 적용하거나 항상 또는 끔으로 설정할 수 있습니다 (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- 화면 모드 설정에서 불투명 또는 반투명 Liquid Glass 창 스타일을 고르고, 실시간 미리 보기 슬라이더로 투명도를 조절해도 글자가 또렷하게 유지됩니다 (closes [#267](https://github.com/MMFoundation/WallpaperMachine/issues/267)) ([5ac106c](https://github.com/MMFoundation/WallpaperMachine/commit/5ac106c4618367fddc033e5eaafde768e2d68047))
+- 새 배율 옵션인 흐린 배경으로 채우기를 고르면 축소된 배경화면 주변이 부드럽게 흐린 화면으로 채워지며, 일반 동영상은 계속 검은 여백으로 표시됩니다 (closes [#268](https://github.com/MMFoundation/WallpaperMachine/issues/268)) ([96ac942](https://github.com/MMFoundation/WallpaperMachine/commit/96ac942bde3ac1661bd51b263fd16699f0d82cbd))
+- 실험적 잠금 화면에서 장면 및 웹 배경화면이 커서를 따라 시차와 호버 효과를 보여 주며, 클릭과 키 입력은 배경화면에 전달되지 않습니다 (closes [#266](https://github.com/MMFoundation/WallpaperMachine/issues/266)) ([db93abd](https://github.com/MMFoundation/WallpaperMachine/commit/db93abd2b684e192525e71e87b24cfd2199f7c43))
+
+#### 개선 사항
+
+- Steam 창작마당 컬렉션을 넘겨 볼 때 페이지마다 항목 목록을 다시 불러오지 않아 더 빨라졌습니다 ([cb739df](https://github.com/MMFoundation/WallpaperMachine/commit/cb739dffe17b7b08bff9322ca8d93f74ea811c76))
+
+#### 버그 수정
+
+- 메뉴 막대의 음량 슬라이더가 디스플레이를 전환할 때 바로 올바른 값을 보여 주며, 드래그한 뒤에도 더 이상 되돌아가지 않습니다 ([69f6b35](https://github.com/MMFoundation/WallpaperMachine/commit/69f6b35825e46b00ec6992208a23672c7bf8b4b4), [296418f](https://github.com/MMFoundation/WallpaperMachine/commit/296418fab73da18fa5769d3e27abfa2892a0e23b))
+- 다른 Space에 열려 있던 앱 창을 불러오면 이제 현재 Space로 옮겨지고 포커스도 유지됩니다 (closes [#263](https://github.com/MMFoundation/WallpaperMachine/issues/263)) ([b827512](https://github.com/MMFoundation/WallpaperMachine/commit/b8275122ad575673df13f07f41ee14a2e45f95c0))
+
+이번 릴리스에 기여해 주신 [@jmalinkiewicz](https://github.com/jmalinkiewicz) 님께 감사드립니다.
+
 ## [1.16.0](https://github.com/MMFoundation/WallpaperMachine/compare/v1.15.0...v1.16.0) (2026-11-26)
 
 ### English
